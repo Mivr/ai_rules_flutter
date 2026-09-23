@@ -396,44 +396,68 @@ void main() {
       expect(tracker.sourcesAreStale, isTrue);
     });
 
-    test(
-      'an asset that cannot be read is a change, not a crash',
-      () {
-        // Reading the bytes brings a failure mode statting them does not:
-        // `statSync` answers a vanished file with a `notFound` sentinel, while
-        // `readAsBytesSync` throws. The scan runs on the watcher's callback,
-        // where an escaping exception is an unhandled async error and ends the
-        // run — and deleting an asset is something users do.
-        //
-        // Omission is the right answer, not a swallow: a file that cannot be
-        // read is not one the app can be shown, and leaving it out is what the
-        // map diff already reports a change by.
-        fixture.put(p.join('assets', 'logo.png'), 'v1');
-        fixture.put(p.join('assets', 'icon.png'), 'v1');
-        final tracker = AssetTracker(
-          fixture.bundle,
-          builtBefore: afterFixtureWrites(),
-        );
-        final unreadable = File(
-          p.join(fixture.workspace, 'assets', 'icon.png'),
-        );
+    test('an asset that cannot be read is a change, not a crash', () async {
+      // Reading the bytes brings a failure mode statting them does not:
+      // `statSync` answers a vanished file with a `notFound` sentinel, while
+      // `readAsBytesSync` throws. The scan runs on the watcher's callback,
+      // where an escaping exception is an unhandled async error and ends the
+      // run — and deleting an asset is something users do.
+      //
+      // Omission is the right answer, not a swallow: a file that cannot be
+      // read is not one the app can be shown, and leaving it out is what the
+      // map diff already reports a change by.
+      fixture.put(p.join('assets', 'logo.png'), 'v1');
+      fixture.put(p.join('assets', 'icon.png'), 'v1');
+      final tracker = AssetTracker(
+        fixture.bundle,
+        builtBefore: afterFixtureWrites(),
+      );
+      final unreadable = File(p.join(fixture.workspace, 'assets', 'icon.png'))
+        ..deleteSync();
 
-        Process.runSync('chmod', ['000', unreadable.path]);
-        addTearDown(() => Process.runSync('chmod', ['644', unreadable.path]));
-
-        expect(() => tracker.sourcesAreStale, returnsNormally);
-        expect(
-          tracker.sourcesAreStale,
-          isTrue,
-          reason:
-              'the app cannot be shown a file this scan cannot read; '
-              'reporting it unchanged would leave the old bytes on screen',
+      // A Unix domain socket in its place: the listing reports it as a file,
+      // so the scan reaches `readAsBytesSync`, and a socket cannot be opened
+      // for reading by any user. `chmod 000` would be the obvious fixture,
+      // but root reads through mode bits and the scan would succeed.
+      //
+      // Bound by a relative name from inside the directory: a socket path is
+      // capped at ~104 bytes, and Bazel's test temp directory alone comes
+      // close to that on Linux.
+      final cwd = Directory.current;
+      final ServerSocket socket;
+      Directory.current = p.dirname(unreadable.path);
+      try {
+        socket = await ServerSocket.bind(
+          InternetAddress(
+            p.basename(unreadable.path),
+            type: InternetAddressType.unix,
+          ),
+          0,
         );
-      },
-      skip: Platform.isWindows
-          ? 'chmod 000 does not deny reads on Windows'
-          : null,
-    );
+      } finally {
+        Directory.current = cwd;
+      }
+      addTearDown(socket.close);
+      expect(
+        Directory(
+          p.dirname(unreadable.path),
+        ).listSync().whereType<File>().map((f) => p.basename(f.path)),
+        contains('icon.png'),
+        reason:
+            'the socket has to reach the read, not be skipped as a '
+            'non-file by the listing',
+      );
+      expect(unreadable.readAsBytesSync, throwsA(isA<FileSystemException>()));
+
+      expect(() => tracker.sourcesAreStale, returnsNormally);
+      expect(
+        tracker.sourcesAreStale,
+        isTrue,
+        reason:
+            'the app cannot be shown a file this scan cannot read; '
+            'reporting it unchanged would leave the old bytes on screen',
+      );
+    }, skip: Platform.isWindows ? 'no Unix domain sockets on Windows' : null);
 
     test('a dotfile appearing next to an asset does not', () {
       // The Finder rewrites .DS_Store often enough that counting it would make
