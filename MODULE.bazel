@@ -67,7 +67,7 @@ register_toolchains("@local_config_apple_cc_toolchains//:all")
 
 flutter = use_extension("//flutter:extensions.bzl", "flutter")
 flutter.toolchain(flutter_version = "3.47.5")
-use_repo(flutter, "flutter_dev_root", "flutter_gen_l10n", "flutter_macos_engine", "flutter_sky_engine", "flutter_toolchains", "flutter_web_sdk")
+use_repo(flutter, "flutter_dev_root", "flutter_gen_l10n", "flutter_ios_engine", "flutter_macos_engine", "flutter_sky_engine", "flutter_toolchains", "flutter_web_sdk")
 
 register_toolchains("@flutter_toolchains//:all")
 

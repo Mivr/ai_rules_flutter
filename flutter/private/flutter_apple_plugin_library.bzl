@@ -126,7 +126,7 @@ def flutter_apple_plugin_library(
     if platform == "macos":
         apple_dynamic_framework_import(
             name = framework_target,
-            framework_imports = ["@flutter_macos_engine//:engine_library"],
+            framework_imports = [Label("@flutter_macos_engine//:engine_library")],
             tags = tags,
             target_compatible_with = target_compatible_with,
             visibility = ["//visibility:private"],
@@ -134,7 +134,7 @@ def flutter_apple_plugin_library(
     else:
         apple_dynamic_xcframework_import(
             name = framework_target,
-            xcframework_imports = ["@flutter_ios_engine//:Flutter_xcframework"],
+            xcframework_imports = [Label("@flutter_ios_engine//:Flutter_xcframework")],
             tags = tags,
             target_compatible_with = target_compatible_with,
             visibility = ["//visibility:private"],

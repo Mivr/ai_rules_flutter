@@ -158,8 +158,8 @@ def flutter_macos_engine(name, **kwargs):
     apple_dynamic_framework_import(
         name = name,
         framework_imports = select({
-            "@rules_flutter//flutter/private:dbg": ["@flutter_macos_engine//:engine_debug_library"],
-            "//conditions:default": ["@flutter_macos_engine//:engine_library"],
+            Label("@rules_flutter//flutter/private:dbg"): [Label("@flutter_macos_engine//:engine_debug_library")],
+            "//conditions:default": [Label("@flutter_macos_engine//:engine_library")],
         }),
         tags = tags,
         **kwargs
@@ -375,7 +375,7 @@ def flutter_macos_app(
         )
         if debug_present and release_present:
             entitlements = select({
-                "@rules_flutter//flutter/private:dbg": "macos/Runner/DebugProfile.entitlements",
+                Label("@rules_flutter//flutter/private:dbg"): "macos/Runner/DebugProfile.entitlements",
                 "//conditions:default": "macos/Runner/Release.entitlements",
             })
         elif debug_present or release_present:
@@ -443,8 +443,8 @@ def flutter_macos_app(
     apple_dynamic_framework_import(
         name = "__%s_engine" % name,
         framework_imports = select({
-            "@rules_flutter//flutter/private:dbg": ["@flutter_macos_engine//:engine_debug_library"],
-            "//conditions:default": ["@flutter_macos_engine//:engine_library"],
+            Label("@rules_flutter//flutter/private:dbg"): [Label("@flutter_macos_engine//:engine_debug_library")],
+            "//conditions:default": [Label("@flutter_macos_engine//:engine_library")],
         }),
         tags = tags,
     )

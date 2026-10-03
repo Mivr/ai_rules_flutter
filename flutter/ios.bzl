@@ -97,8 +97,8 @@ def _engine_xcframework_select():
     consumer only needs that one repo in `use_repo`.
     """
     return select({
-        "@rules_flutter//flutter/private:dbg": ["@flutter_ios_engine//:Flutter_xcframework_debug"],
-        "//conditions:default": ["@flutter_ios_engine//:Flutter_xcframework"],
+        Label("@rules_flutter//flutter/private:dbg"): [Label("@flutter_ios_engine//:Flutter_xcframework_debug")],
+        "//conditions:default": [Label("@flutter_ios_engine//:Flutter_xcframework")],
     })
 
 # -- Composable rules (Tier 2) ------------------------------------------------
@@ -188,7 +188,7 @@ def flutter_ios_framework_gen(name, application, minimum_os_version = IOS_MINIMU
         name = name,
         framework_imports = ["__%s_framework" % name],
         bundle_only = select({
-            "@rules_flutter//flutter/private:dbg": True,
+            Label("@rules_flutter//flutter/private:dbg"): True,
             "//conditions:default": False,
         }),
         tags = tags,
@@ -514,7 +514,7 @@ def flutter_ios_app(
         name = "__%s_app_bundle" % name,
         framework_imports = ["__%s_app_framework" % name],
         bundle_only = select({
-            "@rules_flutter//flutter/private:dbg": True,
+            Label("@rules_flutter//flutter/private:dbg"): True,
             "//conditions:default": False,
         }),
         tags = tags,
