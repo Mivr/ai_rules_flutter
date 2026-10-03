@@ -143,8 +143,6 @@ def _flutter_application_impl(ctx):
         # Collect gen_snapshot extra flags from user attrs.
         extra_flags = list(ctx.attr.extra_gen_snapshot_options)
         extra_outputs = []
-        if is_profile:
-            extra_flags.append("--no-causal-async-stacks")
         if ctx.attr.obfuscate:
             extra_flags.append("--obfuscate")
         if ctx.attr.split_debug_info:
