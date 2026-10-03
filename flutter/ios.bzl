@@ -360,7 +360,7 @@ def flutter_ios_app(
             is derived from it, so it must be a bare Swift identifier.
         application: A flutter_application target (required).
         bundle_id: CFBundleIdentifier (required — rules_apple constraint).
-        families: Device families (default ["iphone"]).
+        families: Device families (default ["iphone"]; `flutter create` targets iPhone and iPad. An iPhone-only app runs in a small window on iPadOS. Adding "ipad" makes actool reject the 76x76@1x icon in `flutter create`'s icon set, so drop that entry first).
         app_name: User-facing display name. Defaults to name.
         minimum_os_version: Minimum iOS version.
         info_plist: Override conventional ios/Runner/Info.plist. The macro

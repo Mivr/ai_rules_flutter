@@ -384,7 +384,7 @@ flutter_ios_app(
 |---|---|
 | `application` | A `flutter_application` target. Required. |
 | `bundle_id` | The iOS bundle identifier. Required. |
-| `families` | Device families. Defaults to `["iphone"]`. |
+| `families` | Device families. Defaults to `["iphone"]`, unlike `flutter create` (iPhone and iPad). An iPhone-only app runs in a small window on iPadOS. Adding `"ipad"` needs an icon set without the 76x76@1x iPad icon `flutter create` generates, which `actool` rejects. |
 | `app_name` | Display name. Defaults to the target name. |
 | `minimum_os_version` | Defaults to `"15.0"`, which is what the prebuilt engine is built for. A lower value is refused rather than warned about. |
 | `info_plist` | Replaces the discovered `ios/Runner/Info.plist`. |
