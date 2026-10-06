@@ -1030,6 +1030,7 @@ flutter_application(
 | `shader_includes` | Files the `shaders` may `#include`. |
 | `require_sksl_shaders` | Fail the build when a shader cannot be compiled for Skia (SkSL). By default such a shader, say one that indexes a uniform array in a loop, is compiled for Impeller alone with a warning, as `flutter build` does, and fails to load only where the app renders with Skia. Web builds always need SkSL. Default `False`. |
 | `tree_shake_icons` | Keep only the icon glyphs the app uses. Default `True`. |
+| `link_hook_assets` | The data assets packages' link hooks emit, each `package:<package>/<name>`. See [Link hooks](#link-hooks). |
 | `license_files` | License and NOTICE files to include in `NOTICES.Z`. |
 | `min_os_version` | Minimum Apple deployment target, passed to `gen_snapshot` as `--macho-min-os-version`. |
 
@@ -1117,10 +1118,36 @@ flutter_plugin(
 | `assets`, `resources` | Asset and resource files. |
 | `pkg_shaders`, `shader_includes` | The package's fragment shaders and what they `#include`, as on `flutter_library`. |
 | `package_name`, `language_version`, `version` | The package's name, language version, and version. |
+| `link_hook` | The package's `hook/link.dart`. See [Link hooks](#link-hooks). `flutter_library` takes it too. |
 
 A plugin's native code is its own target. Swift goes in a `flutter_apple_plugin_library` per platform, passed as `apple_libs`. Kotlin or Java goes in a `flutter_android_plugin_library` listed in the app's `flutter_android_app(deps = ...)`, which packages it, registers its plugin class and merges its `manifest` (receivers, services, permissions) into the app's. `e2e/plugin_example/glass_plugin` shows both, with shaders.
 
 `e2e/ffi_example` shows a plugin built on Native Assets, `e2e/ffi_plugin_example` one with a Dart plugin class and `native_deps`, and `e2e/plugin_example` one with a Dart plugin class only.
+
+### Link hooks
+
+A package can decide what it ships from how the app uses it. Mark a `final class` with `@RecordUse()` from `package:meta` (1.19 or later), and write a `hook/link.dart` that reads the recorded uses with `package:record_use` and emits data assets with `package:data_assets`. The hook may import pure Dart from its own package's `lib/`, not Flutter.
+
+```starlark
+flutter_plugin(
+    name = "symbols",
+    srcs = glob(["lib/**/*.dart"]),
+    link_hook = "hook/link.dart",
+    platforms = [],
+    deps = ["@deps//:data_assets", "@deps//:hooks", "@deps//:meta", "@deps//:record_use"],
+)
+
+flutter_application(
+    name = "app",
+    link_hook_assets = ["package:symbols/index.json"],
+    deps = [":symbols", "@deps//:flutter"],
+    # ...
+)
+```
+
+Keep the hook file out of `srcs`. Bazel names every output before anything runs, so the application lists each asset its packages' hooks emit. A hook that emits an asset not listed, skips one that is, or reports an error fails the build with its own message. An application that sets `link_hook_assets` runs the hook of every package in its `deps` that has one.
+
+In a release or profile build the kernel compile records the uses (`--recorded-uses`), each hook runs over them, and the assets are bundled at `flutter_assets/packages/<package>/<name>`, listed in `AssetManifest`, and loaded with `rootBundle.load('packages/<package>/<name>')`. Debug builds are JIT compiles, which record nothing: no hook runs and no asset is bundled, so load what the hook would have indexed on demand there. `e2e/_overlay_tests/link_hooks` is a working example, including the failing case.
 
 ### Lower-level rules
 
@@ -1132,7 +1159,7 @@ These are what `flutter_application` is made of. Most apps never need them.
 | `flutter_aot_target` | Compiles Dart to an AOT shared library (`.so` on Linux and Android, `.dylib` on macOS) with `gen_snapshot`. |
 | `flutter_asset_bundle` | Builds the `flutter_assets/` tree: `AssetManifest.bin`, `FontManifest.json`, `NOTICES.Z`, and the asset files. |
 | `flutter_native_library` | Pairs a native library with its binding contract. See [Hot reload across a native rebuild](#hot-reload-across-a-native-rebuild). |
-| `flutter_native_asset`, `flutter_data_asset` | Declare Dart Native Assets, from `@rules_flutter//flutter:native_assets.bzl`. |
+| `flutter_native_asset`, `flutter_data_asset` | Declare Dart Native Assets, from `@rules_flutter//flutter:native_assets.bzl`. A data asset is bundled at `flutter_assets/packages/<package>/<name>`. |
 
 ### Code generation
 
