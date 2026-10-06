@@ -310,7 +310,7 @@ flutter_plugin = rule(
             providers = [FlutterNativeAssetInfo],
         ),
         "data_assets": attr.label_list(
-            doc = "Native Assets `DataAsset` declarations (each a `flutter_data_asset` target). Propagated through `FlutterInfo.data_assets` and bundled at `flutter_assets/data/<pkg>/<name>` by `flutter_application`.",
+            doc = "Native Assets `DataAsset` declarations (each a `flutter_data_asset` target). Propagated through `FlutterInfo.data_assets` and bundled at `flutter_assets/packages/<pkg>/<name>` by `flutter_application`.",
             providers = [FlutterDataAssetInfo],
         ),
         "apple_privacy_files": attr.label_list(

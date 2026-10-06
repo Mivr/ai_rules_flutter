@@ -94,7 +94,7 @@ FlutterDataAssetInfo = provider(
         "asset_id": "str: The Dart asset id (e.g. `package:my_pkg/blob.bin`).",
         "package": "str: The pub package name (parsed from `asset_id`).",
         "name": "str: The within-package asset name (everything after the package).",
-        "file": "File: The on-disk asset file. Bundled at `flutter_assets/data/<package>/<name>`.",
+        "file": "File: The on-disk asset file. Bundled at `flutter_assets/packages/<package>/<name>`.",
     },
 )
 
@@ -110,7 +110,7 @@ FlutterApplicationInfo = provider(
         "package_config": "File: The package_config.json for the frontend server.",
         "native_assets_manifest": "File or None: The `native_assets.json` manifest passed to the frontend_server via `--native-assets`. Always emitted (empty manifest when there are no Native Assets).",
         "bundled_code_assets": "depset[File]: Native-Assets `CodeAsset` library files (.dylib/.so/.dll) to embed in the platform bundle. Each platform application rule reads this and threads the files into the platform's existing embedding mechanism.",
-        "bundled_data_assets": "depset[FlutterDataAssetInfo]: Native-Assets `DataAsset` declarations to bundle under `flutter_assets/data/<pkg>/<name>`.",
+        "bundled_data_assets": "depset[FlutterDataAssetInfo]: Native-Assets `DataAsset` declarations to bundle under `flutter_assets/packages/<pkg>/<name>`.",
         "apple_privacy_manifests": "depset[File]: Aggregated Apple `PrivacyInfo.xcprivacy` files from transitive plugins. The macOS / iOS application rules thread these into `additional_contents` of the bundle so Apple's App Store submission validator sees the merged privacy declaration.",
         "plugins": "list[struct]: Deduplicated plugin metadata aggregated from the application's whole dependency graph. Each struct has: name (str), platforms (dict of platform -> {pluginClass, dartPluginClass, package}). The per-platform registrant generators read this to emit `GeneratedPluginRegistrant`.",
         "apple_plugin_libraries": "depset[struct]: Aggregated Apple plugin swift_libraries, same shape as `FlutterInfo.apple_plugin_libraries`. Read by the runner aggregator to merge per-platform link/compile inputs.",

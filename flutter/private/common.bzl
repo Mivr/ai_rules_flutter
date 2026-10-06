@@ -229,7 +229,7 @@ def collect_assets(deps, direct_assets):
         return list(direct_assets) + depset(transitive = transitive_depsets).to_list()
     return list(direct_assets)
 
-def flutter_compile_kernel(ctx, flutter_sdk_info, aot = None, platform_dill = None, target_platform = None, frontend_server_target = "flutter", native_assets_manifest = None, profile = False, track_widget_creation = False, assets_dir = None, platform_build_args = []):
+def flutter_compile_kernel(ctx, flutter_sdk_info, aot = None, platform_dill = None, target_platform = None, frontend_server_target = "flutter", native_assets_manifest = None, profile = False, track_widget_creation = False, assets_dir = None, platform_build_args = [], recorded_uses = None):
     """Run the shared kernel compilation step.
 
     Collects sources, generates package_config.json, and invokes
@@ -269,6 +269,9 @@ def flutter_compile_kernel(ctx, flutter_sdk_info, aot = None, platform_dill = No
         platform_build_args: Flags from `launch_build_args`, recorded in
             `build_info` so an attaching dev tool can reproduce this
             configuration. Only meaningful alongside `assets_dir`.
+        recorded_uses: Optional declared File for the compiler's recorded
+            `@RecordUse` uses, the input of package link hooks. Pass it for
+            AOT compiles only.
 
     Returns:
         struct with kernel_dill (File) and package_config (File).
@@ -482,6 +485,7 @@ def flutter_compile_kernel(ctx, flutter_sdk_info, aot = None, platform_dill = No
             with_root([], registrant_location.root if registrant_location else None),
             entrypoint_info.root,
         ),
+        recorded_uses = recorded_uses,
     )
     return struct(
         kernel_dill = kernel_dill,
@@ -665,8 +669,9 @@ def flutter_build_assets(ctx, flutter_sdk_info, output_dir, compiled_shaders = {
         kernel_dill: The compiled kernel .dill File (needed for icon tree shaking).
         is_debug: Whether this is a debug build (icon tree shaking is skipped in debug).
         data_assets: Optional depset[FlutterDataAssetInfo]. Each entry is
-            placed at `flutter_assets/data/<package>/<name>` (matching
-            `InstallDataAssets` in flutter_tools).
+            placed at `flutter_assets/packages/<package>/<name>` and listed in
+            the asset manifest under that key, as flutter_tools bundles a
+            hook's data asset.
 
     Returns:
         The flutter_assets/ tree artifact File.
@@ -680,13 +685,15 @@ def flutter_build_assets(ctx, flutter_sdk_info, output_dir, compiled_shaders = {
     extra_asset_copies = dict(compiled_shaders)
     extra_asset_copies.update(pub_extra_asset_copies)
 
-    # Drop each Native Assets DataAsset at flutter_assets/data/<pkg>/<name>.
-    # The bundle action keys extra_asset_copies on a destination path
-    # relative to the assets/ root; the data/<pkg>/<name> prefix matches
-    # the convention `InstallDataAssets` uses in flutter_tools.
+    # Drop each DataAsset at flutter_assets/packages/<pkg>/<name>, the key
+    # flutter_tools gives a hook's data asset and the one `rootBundle` loads
+    # it by. The bundle action keys extra_asset_copies on a destination path
+    # relative to the assets/ root.
     if data_assets != None:
         for entry in data_assets.to_list():
-            dst = "data/{pkg}/{name}".format(pkg = entry.package, name = entry.name)
+            dst = "packages/{pkg}/{name}".format(pkg = entry.package, name = entry.name)
+            if dst in extra_asset_copies:
+                fail("%s: data asset %s collides with another asset bundled at %s." % (ctx.label, entry.file.short_path, dst))
             extra_asset_copies[dst] = entry.file
 
     license_files = ctx.files.license_files
@@ -1151,6 +1158,19 @@ FLUTTER_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {
     "_shader_compile_tool": attr.label(
         default = Label("//flutter/private/tools:compile_shader.dart"),
         allow_single_file = True,
+    ),
+    "link_hook_assets": attr.string_list(
+        doc = "Data assets the packages' link hooks emit, each " +
+              "`package:<package>/<name>`. In a release or profile build " +
+              "the compiler records the uses of `@RecordUse` classes " +
+              "(`--recorded-uses`), each listed package's `hook/link.dart` " +
+              "runs over them, and the assets it emits are bundled at " +
+              "`packages/<package>/<name>`, loadable with `rootBundle`. " +
+              "A hook that emits an asset not listed, skips one that is, or " +
+              "reports an error fails the build with its own message. Every " +
+              "package with a link hook in `deps` runs, so list the assets " +
+              "of each. Debug builds run no hook and bundle none: load what " +
+              "the hook would index on demand there. Empty runs no hook.",
     ),
     "tree_shake_icons": attr.bool(
         doc = "If True, tree-shake icon fonts to only include used glyphs. " +

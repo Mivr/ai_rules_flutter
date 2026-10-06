@@ -26,7 +26,8 @@ def flutter_kernel_compile_action(
         target = "flutter",
         native_assets_manifest = None,
         dart_plugin_registrant_uri = None,
-        filesystem_roots = []):
+        filesystem_roots = [],
+        recorded_uses = None):
     """Creates a Flutter kernel compilation action.
 
     Invokes the frontend_server via dartaotruntime to compile Dart sources
@@ -82,6 +83,10 @@ def flutter_kernel_compile_action(
             root) mounted under `APP_SCHEME`, for every `APP_SCHEME` URI
             above — the registrant's and, for a `main` with no `package:`
             URI, [entrypoint_uri]'s.
+        recorded_uses: Optional declared File the compiler writes the
+            `@RecordUse` uses that survive tree-shaking to (`--recorded-uses`),
+            the input of package link hooks. Only an AOT compile records; a
+            JIT compile writes an empty file.
     """
     args = ctx.actions.args()
     args.add(kernel_filter_tool)
@@ -136,6 +141,9 @@ def flutter_kernel_compile_action(
     if native_assets_manifest != None:
         args.add("--native-assets", native_assets_manifest.path)
 
+    if recorded_uses != None:
+        args.add("--recorded-uses", recorded_uses)
+
     if entrypoint_uri:
         args.add(entrypoint_uri)
     else:
@@ -153,6 +161,9 @@ def flutter_kernel_compile_action(
     direct_inputs = [main, package_config, frontend_server, platform_dill] + srcs
     if native_assets_manifest != None:
         direct_inputs.append(native_assets_manifest)
+    outputs = [output]
+    if recorded_uses != None:
+        outputs.append(recorded_uses)
 
     ctx.actions.run(
         executable = dart,
@@ -161,7 +172,7 @@ def flutter_kernel_compile_action(
             direct = direct_inputs + [kernel_filter_tool, dartaotruntime],
             transitive = [flutter_sdk_files],
         ),
-        outputs = [output],
+        outputs = outputs,
         mnemonic = "FlutterKernelCompile",
         progress_message = "Compiling Flutter kernel %s" % ctx.label,
         env = env,

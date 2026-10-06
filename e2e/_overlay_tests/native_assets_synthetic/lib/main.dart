@@ -10,7 +10,7 @@
 //      the bundle's Frameworks slot.
 //   2. Loads "package:native_assets_synthetic/blob.txt", a
 //      `flutter_data_asset` bundled at
-//      `flutter_assets/data/native_assets_synthetic/blob.txt`.
+//      `flutter_assets/packages/native_assets_synthetic/blob.txt`.
 //   3. Renders both values in the UI. If either pipeline regresses,
 //      the FFI call throws or the asset fails to load — the screen
 //      blanks and the dev_tool screenshot e2e fails.
@@ -67,7 +67,7 @@ class _HomeState extends State<_Home> {
     String blob;
     try {
       final ByteData data = await rootBundle.load(
-        'data/native_assets_synthetic/blob.txt',
+        'packages/native_assets_synthetic/blob.txt',
       );
       blob = String.fromCharCodes(
         Uint8List.view(data.buffer, data.offsetInBytes, data.lengthInBytes),

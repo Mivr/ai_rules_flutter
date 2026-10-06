@@ -13,7 +13,7 @@ This rule produces outputs that platform-specific wrappers consume:
 
 load("@apple_support//lib:apple_support.bzl", "apple_support")
 load("@bazel_skylib//lib:dicts.bzl", "dicts")
-load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS")
+load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "dart_link_hook_actions", "link_hook_runner_attr")
 load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterInfo")
 load("//flutter/private:common.bzl", "FLUTTER_APPLICATION_ATTRS", "PLATFORM_CONSTRAINT_ATTRS", "check_unreplaced_hooks", "collect_binding_contracts", "collect_native_libs", "declare_flutter_assets_dir", "detect_target_platform", "flutter_build_assets", "flutter_compile_kernel", "flutter_compile_shaders", "host_target_arch", "launch_build_args", "shader_sources")
 load("//flutter/private:flutter_aot_compile.bzl", "flutter_aot_elf_action", "flutter_aot_macho_action")
@@ -114,6 +114,12 @@ def _flutter_application_impl(ctx):
     # action that fills it, so the ordering costs nothing.
     flutter_assets = declare_flutter_assets_dir(ctx)
 
+    # Link hooks run over the uses the AOT compile records, so only a
+    # release or profile build has any: a JIT compile tree-shakes nothing and
+    # records nothing, and a debug build runs no hook and bundles no asset.
+    run_link_hooks = bool(ctx.attr.link_hook_assets) and not is_debug
+    recorded_uses = ctx.actions.declare_file(ctx.label.name + ".recorded_uses.json") if run_link_hooks else None
+
     # Step 1: Kernel compilation (mode-aware: debug uses debug dill, no AOT).
     compilation = flutter_compile_kernel(
         ctx,
@@ -123,6 +129,7 @@ def _flutter_application_impl(ctx):
         profile = is_profile,
         track_widget_creation = ctx.attr.track_widget_creation,
         assets_dir = flutter_assets,
+        recorded_uses = recorded_uses,
         platform_build_args = launch_build_args(
             target_platform,
             is_simulator = is_ios and apple_support.target_environment_from_rule_ctx(ctx) == "simulator",
@@ -187,8 +194,25 @@ def _flutter_application_impl(ctx):
     if transitive_native_depsets:
         native_libs.extend(depset(transitive = transitive_native_depsets).to_list())
 
+    # Step 2b: package link hooks over the recorded uses. Each emits the data
+    # assets declared in `link_hook_assets`, bundled below beside the native
+    # assets' data assets.
+    link_hook_validation = []
+    if run_link_hooks:
+        link = dart_link_hook_actions(
+            ctx,
+            runner = ctx.executable._link_hook_runner,
+            sdk = ctx.toolchains["@rules_dart//dart:exec_tools_toolchain_type"].dart_sdk_info,
+            recorded_uses = recorded_uses,
+            deps = ctx.attr.deps,
+            data_asset_ids = ctx.attr.link_hook_assets,
+            name = ctx.label.name + "_link_hooks",
+        )
+        transitive_data_assets = depset(link.assets, transitive = [transitive_data_assets])
+        link_hook_validation = link.validation_outputs
+
     # Step 3: Shader compilation + asset bundle. Pass data assets so the
-    # bundler places them under flutter_assets/data/<pkg>/<name>.
+    # bundler places them under flutter_assets/packages/<pkg>/<name>.
     compiled_shaders = flutter_compile_shaders(ctx, flutter_sdk_info, target_platform)
     flutter_build_assets(
         ctx,
@@ -400,6 +424,10 @@ def _flutter_application_impl(ctx):
     }
     if debug_info_output:
         output_groups["debug_info"] = depset([debug_info_output])
+    if link_hook_validation:
+        # Every hook runs whenever the app builds, even one that emits no
+        # asset, so its verdict on the program is never skipped.
+        output_groups["_validation"] = depset(link_hook_validation)
 
     providers = [
         DefaultInfo(files = depset(default_files)),
@@ -429,6 +457,7 @@ flutter_application = rule(
     attrs = dicts.add(
         FLUTTER_APPLICATION_ATTRS,
         PLATFORM_CONSTRAINT_ATTRS,
+        link_hook_runner_attr(),
         # Simulator-vs-device is an Apple *environment* constraint, not an OS
         # one, so it needs apple_support's own attrs on top of the OS set.
         # `launch_build_args` turns it into `--ios_multi_cpus=sim_arm64` or
@@ -438,6 +467,7 @@ flutter_application = rule(
     ),
     toolchains = [
         "@rules_flutter//flutter:toolchain_type",
+        "@rules_dart//dart:exec_tools_toolchain_type",
     ] + COPY_TO_DIRECTORY_TOOLCHAINS,
     doc = "Compiles a Flutter application to AOT native code + asset bundle (release) or kernel .dill + assets (debug).",
 )

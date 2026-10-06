@@ -4,8 +4,8 @@ Each declaration carries a single file, an `asset_id` of the form
 `package:<pkg>/<within-package-name>` (matching the Dart Native
 Assets spec), and propagates a `FlutterDataAssetInfo` that
 `flutter_application` reads to bundle the file at
-`flutter_assets/data/<pkg>/<name>` (matching `InstallDataAssets` in
-flutter_tools).
+`flutter_assets/packages/<pkg>/<name>`, the key flutter_tools gives a
+hook's data asset and `rootBundle` loads it by.
 """
 
 load("//flutter:providers.bzl", "FlutterDataAssetInfo", "FlutterInfo")
@@ -52,7 +52,7 @@ flutter_data_asset = rule(
         "asset_id": attr.string(
             doc = "Native Assets `DataAsset` id of the form " +
                   "`package:<pkg>/<within-package-name>`. Bundled at " +
-                  "`flutter_assets/data/<pkg>/<within-package-name>`.",
+                  "`flutter_assets/packages/<pkg>/<within-package-name>`.",
             mandatory = True,
         ),
         "file": attr.label(
