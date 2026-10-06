@@ -336,6 +336,8 @@ def _flutter_test_impl(ctx):
     flutter_kernel_compile_action(
         ctx = ctx,
         dartaotruntime = flutter_sdk_info.dartaotruntime,
+        dart = flutter_sdk_info.dart,
+        kernel_filter_tool = ctx.file._kernel_filter_tool,
         flutter_sdk_files = flutter_sdk_info.tool_files,
         frontend_server = flutter_sdk_info.frontend_server,
         platform_dill = flutter_sdk_info.platform_kernel_dill,
@@ -514,6 +516,7 @@ _TEST_ATTRS = {
         "shader_includes",
         "require_sksl_shaders",
         "_shader_compile_tool",
+        "_kernel_filter_tool",
         "license_files",
         "tree_shake_icons",
         "_asset_bundle_tool",

@@ -462,6 +462,8 @@ def flutter_compile_kernel(ctx, flutter_sdk_info, aot = None, platform_dill = No
     flutter_kernel_compile_action(
         ctx = ctx,
         dartaotruntime = flutter_sdk_info.dartaotruntime,
+        dart = flutter_sdk_info.dart,
+        kernel_filter_tool = ctx.file._kernel_filter_tool,
         flutter_sdk_files = flutter_sdk_info.tool_files,
         frontend_server = flutter_sdk_info.frontend_server,
         platform_dill = platform_dill,
@@ -1039,6 +1041,10 @@ def merge_dart_defines(ctx):
 # — and `_agent_extensions_src` is declared by the rules that inject the agent,
 # not by every kernel compile.
 KERNEL_COMPILE_ATTRS = {
+    "_kernel_filter_tool": attr.label(
+        default = Label("//flutter/private/tools:kernel_filter.dart"),
+        allow_single_file = True,
+    ),
     "main": attr.label(
         doc = "The main .dart entry point.",
         mandatory = True,

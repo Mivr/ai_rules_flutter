@@ -10,6 +10,8 @@ load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME")
 def flutter_kernel_compile_action(
         ctx,
         dartaotruntime,
+        dart,
+        kernel_filter_tool,
         flutter_sdk_files,
         frontend_server,
         platform_dill,
@@ -33,6 +35,10 @@ def flutter_kernel_compile_action(
     Args:
         ctx: The rule context.
         dartaotruntime: The dartaotruntime executable File (from FlutterSdkInfo).
+        dart: The Dart executable File that runs [kernel_filter_tool].
+        kernel_filter_tool: `kernel_filter.dart`, which runs the
+            frontend_server and drops its batch-protocol lines from the
+            output so a successful compile prints nothing.
         flutter_sdk_files: All Flutter SDK files needed (for action inputs).
         frontend_server: The frontend_server_aot.dart.snapshot File.
         platform_dill: The platform_strong.dill File (debug or product).
@@ -78,6 +84,9 @@ def flutter_kernel_compile_action(
             URI, [entrypoint_uri]'s.
     """
     args = ctx.actions.args()
+    args.add(kernel_filter_tool)
+    args.add("--")
+    args.add(dartaotruntime)
     args.add(frontend_server)
 
     # --sdk-root points to the directory containing the platform dill.
@@ -91,10 +100,11 @@ def flutter_kernel_compile_action(
     args.add("--packages", package_config)
     args.add("--output-dill", output)
 
-    # Suppress frontend_server's interactive-protocol chatter (boundary-key
-    # framing, `+file://...` lines) and info-level messages. Bazel surfaces
-    # all action stdout on success; without these, a successful compile
-    # produces dozens of `INFO: From Compiling Flutter kernel` lines.
+    # Suppress frontend_server's `+file://...` dependency lines and info-level
+    # messages. Bazel surfaces all action stdout on success; without these, a
+    # successful compile produces dozens of `INFO: From Compiling Flutter
+    # kernel` lines. The boundary-key framing has no flag; kernel_filter.dart
+    # drops it.
     args.add("--no-print-incremental-dependencies")
     args.add("--verbosity=error")
 
@@ -145,10 +155,10 @@ def flutter_kernel_compile_action(
         direct_inputs.append(native_assets_manifest)
 
     ctx.actions.run(
-        executable = dartaotruntime,
+        executable = dart,
         arguments = [args],
         inputs = depset(
-            direct = direct_inputs,
+            direct = direct_inputs + [kernel_filter_tool, dartaotruntime],
             transitive = [flutter_sdk_files],
         ),
         outputs = [output],
