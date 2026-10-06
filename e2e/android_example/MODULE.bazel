@@ -17,10 +17,10 @@ module(name = "rules_flutter_android_example")
 
 bazel_dep(name = "rules_flutter", version = "0.0.0")
 bazel_dep(name = "rules_dart", version = "0.7.1")
-bazel_dep(name = "rules_android", version = "0.7.3")
+bazel_dep(name = "rules_android", version = "0.8.0")
 bazel_dep(name = "rules_android_ndk", version = "0.1.5")
-bazel_dep(name = "rules_cc", version = "0.2.22")
-bazel_dep(name = "rules_kotlin", version = "2.4.10")
+bazel_dep(name = "rules_cc", version = "0.2.26")
+bazel_dep(name = "rules_kotlin", version = "2.4.20")
 bazel_dep(name = "bazel_skylib", version = "1.9.2")
 bazel_dep(name = "rules_java", version = "9.9.0")
 

@@ -77,7 +77,7 @@ const String _publishWindowsKey = String.fromEnvironment(
 /// A bump means the three vendored `tools/publish/requirements_*.txt` copies
 /// must be refreshed, and the facts schema re-checked — see
 /// [_expectedFactVersion].
-const String _expectedRulesPythonVersion = '2.3.2';
+const String _expectedRulesPythonVersion = '2.4.0';
 
 /// The facts schema the derivation below is written against.
 ///
