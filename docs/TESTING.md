@@ -473,6 +473,7 @@ When re-running to reproduce, use `--nocache_test_results` and read the
 |-----------|----------|-------------------|
 | `macos_e2e_test.dart` | macOS | Both HTTP control-channel screenshot endpoints: `screenshot/flutter` — asserted as a **refusal**, since Flutter 3.47's macOS Impeller default means the VM service's `_flutter.screenshot` can no longer encode, so the endpoint must answer `501` naming the native one — and `screenshot/native` (the bundled ScreenCaptureKit helper, which is why it runs from the built binary rather than `dart run`). The refusal is asserted through `httpFlutterScreenshotReply`, not `httpScreenshot`, which follows a `501` through to `native` and would quietly duplicate the second case |
 | `web_e2e_test.dart` | Any (needs Chrome) | WASM + JS `--screenshot` (CDP), `--machine` screenshot — the JS one over `:app_js`, whose `base_href = "/web_example_js/"` the dev server has to serve under, so it asserts the launch URL's path and a rendered page — and what a `--wasm` run tells a client: `app.webLaunchUrl` carries the served address and the browser's DevTools endpoint (`cdpPort`, the page's `webSocketDebuggerUrl`), and the VM-service half of the `app.*` agent surface is absent from `/commands` rather than present and refusing |
+| `web_viewport_e2e_test.dart` | Any (needs Chrome) | `--web-viewport` captures at the size asked for, measured on the PNG from `screenshot/native`: `390x844@3` is 1170x2532 and survives a hot restart and an `app.setViewport` to 900x1500, and `390x844` is 390x844. Chrome 154 drops the CDP override when the connection that set it closes, so a tool that applied it and hung up launched cleanly and captured at the window's own 2400x1713 — a run that only checked the launch, or a fake that models the old browser, passes. `cdp_viewport_test` covers the connection handling against a fake that models the new one |
 | `web_define_e2e_test.dart` | Any (needs Chrome) | A `web_defines` value in a `bootstrap_js` template reaches the running page — read off `window` over CDP, with a rendered `screenshot/native` and no service worker beside it. The dev loop must serve the build's bootstrap rather than generate one of its own, or the define works on `bazel build` and does nothing under `-d chrome` |
 | `ios_simulator_e2e_test.dart` | macOS | `--screenshot` (simctl), `--machine` screenshot |
 | `machine_protocol_e2e_test.dart` | macOS | Protocol lifecycle events, unknown-method error (reload/restart correctness is manual — see "Hot reload / hot restart (manual)") |
@@ -560,7 +561,14 @@ is accepted and then clamped by new-headless Chrome to about 500 CSS px wide,
 with the simulated window chrome coming off the height.
 
 The size is applied over CDP (`Emulation.setDeviceMetricsOverride`) once the
-page is up, and the run fails if the page does not come back reporting it.
+page is up, and the run fails if the page does not come back reporting it. The
+connection that applied it stays open for the whole run: Chrome 154 ties the
+override to the CDP session that set it and puts the page back at the window's
+own size when that socket closes, so a tool that applied it and hung up still
+launched cleanly and then captured at 2400x1713. If the connection is lost
+mid-run the tool logs `web_viewport_lost`; `app.setViewport` sets it again. The
+override is not a mobile emulation, so the page is laid out at exactly the
+size asked for before its own code has run.
 
 `app.setViewport` changes it again mid-session — `{"method":"app.setViewport",
 "params":{"appId":"…","width":393,"height":660}}` — so a sweep across form

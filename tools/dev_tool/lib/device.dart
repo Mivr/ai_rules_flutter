@@ -3616,10 +3616,11 @@ class ChromeSession {
   /// Lay the app out at [viewport], and prove that it did.
   ///
   /// `Emulation.setDeviceMetricsOverride` is sent once, right after the page
-  /// is first resolved. Once applied it stays applied — it survives both
-  /// closing the CDP socket that set it and the `Page.reload` a web hot
-  /// restart performs — so there is no connection to hold open and no
-  /// re-application to schedule.
+  /// is first resolved, on a connection that then stays open in
+  /// [viewportHold] for as long as the browser runs: Chrome 154 scopes the
+  /// override to the CDP session that set it and clears it the moment that
+  /// socket closes. It does survive the `Page.reload` a web hot restart
+  /// performs, so nothing has to be re-applied while the connection lives.
   ///
   /// **Read the result back on a *fresh* connection.** While the setting
   /// client is still attached the page reports metrics it has not settled at,
@@ -3629,12 +3630,21 @@ class ChromeSession {
   /// Verified rather than assumed because the failure it guards is invisible:
   /// an override that did not take leaves every later screenshot and layout
   /// measurement quietly describing the wrong viewport.
-  Future<void> applyViewport(WebViewport viewport) => applyViewportOverCdp(
-    cdpPort: cdpPort,
-    appUrl: appUrl,
-    viewport: viewport,
-    asked: '--web-viewport',
-  );
+  Future<void> applyViewport(WebViewport viewport) async {
+    viewportHold = await applyViewportOverCdp(
+      cdpPort: cdpPort,
+      appUrl: appUrl,
+      viewport: viewport,
+      asked: '--web-viewport',
+      hold: viewportHold,
+    );
+  }
+
+  /// The CDP connection that set this launch's viewport, kept open for as long
+  /// as the browser runs, or null when no viewport was asked for. The caller
+  /// that takes over the session owns closing it. See [applyViewportOverCdp]
+  /// for why it cannot be closed early.
+  CdpPageConnection? viewportHold;
 }
 
 /// Web device — serves build output via HTTP and launches Chrome.
@@ -3650,6 +3660,33 @@ class WebDevice extends Device {
   /// The app page's CDP WebSocket URL as listed at launch. See
   /// [ChromeSession.pageWebSocketDebuggerUrl].
   String? _pageWebSocketDebuggerUrl;
+
+  /// The CDP connection holding this run's viewport override open — see
+  /// [applyViewportOverCdp]. Null until a viewport is set, and again after
+  /// [stop], which closes it.
+  CdpPageConnection? _viewportHold;
+
+  /// Takes over [hold], watching it so that losing the viewport is loud: the
+  /// override goes with the connection, and nothing else would say so.
+  void _holdViewport(CdpPageConnection? hold) {
+    // The same connection again, as `app.setViewport` reuses it: already
+    // watched.
+    if (identical(_viewportHold, hold)) return;
+    _viewportHold = hold;
+    if (hold == null) return;
+    hold.done.then((_) {
+      if (_viewportHold != hold) return;
+      _viewportHold = null;
+      _logger.severe({
+        'message': 'web_viewport_lost',
+        'text':
+            'The browser closed the CDP connection that held the viewport, '
+            'and the viewport went with it: screenshots from here on show the '
+            'browser window\'s own size. Call app.setViewport to set it '
+            'again, or relaunch.',
+      });
+    });
+  }
 
   /// Module server for DDC dev mode. Set by RunCommand before launch.
   WebModuleServer? _moduleServer;
@@ -3782,6 +3819,7 @@ class WebDevice extends Device {
       options: options.browser,
     );
     _cdpPort = session.cdpPort;
+    _holdViewport(session.viewportHold);
     _pageWebSocketDebuggerUrl = session.pageWebSocketDebuggerUrl;
 
     // No CDP console client here: DDC mode gets the app's output from the DWDS
@@ -3824,6 +3862,7 @@ class WebDevice extends Device {
       rethrow;
     }
     _cdpPort = session.cdpPort;
+    _holdViewport(session.viewportHold);
     _pageWebSocketDebuggerUrl = session.pageWebSocketDebuggerUrl;
     final logs = _newAppLogs(onLog);
 
@@ -3877,6 +3916,10 @@ class WebDevice extends Device {
     // expires if the client ever grows chatty outbound traffic.
     await _consoleClient?.close();
     _consoleClient = null;
+    // Taken off first, so closing it is not reported as the viewport lost.
+    final viewportHold = _viewportHold;
+    _viewportHold = null;
+    await viewportHold?.close();
     final moduleServer = _moduleServer;
     if (moduleServer != null) {
       // dwds is third-party and its `stop()` reaches peer-dependent awaits —
@@ -3950,11 +3993,14 @@ class WebDevice extends Device {
         'discovered, so the page cannot be reached.',
       );
     }
-    await applyViewportOverCdp(
-      cdpPort: port,
-      appUrl: url,
-      viewport: viewport,
-      asked: 'app.setViewport',
+    _holdViewport(
+      await applyViewportOverCdp(
+        cdpPort: port,
+        appUrl: url,
+        viewport: viewport,
+        asked: 'app.setViewport',
+        hold: _viewportHold,
+      ),
     );
   }
 }
@@ -4065,51 +4111,92 @@ String _browserLastWords(AppLogStream browserDiagnostics, {int lines = 20}) {
 /// mid-session ([WebDevice.setViewport]). [asked] names whichever one it was,
 /// so the failure says which input was not honoured.
 ///
-/// `Emulation.setDeviceMetricsOverride` is sent once and stays applied: the
-/// override survives both closing the CDP socket that set it and the
-/// `Page.reload` a web hot restart performs, so there is no connection to hold
-/// open and nothing to re-apply.
+/// `Emulation.setDeviceMetricsOverride` is sent on one connection and **that
+/// connection is returned, still open, for the caller to keep for as long as
+/// the viewport should hold.** Chrome 154 ties the override to the CDP session
+/// that set it: when the socket closes the page goes back to the window's own
+/// size, and every screenshot and layout read after that describes a viewport
+/// nobody asked for. (Earlier Chromes kept it after the socket closed, which is
+/// what this used to rely on.) The override does survive the `Page.reload` a
+/// web hot restart performs.
+///
+/// Pass the connection back as [hold] to change the viewport on it, so a
+/// sweep across form factors replaces the override rather than stacking
+/// sessions; a [hold] that has closed is replaced by a fresh one. On failure a
+/// connection this call opened is closed again, and the caller's own is left
+/// as it was.
 ///
 /// **The read-back needs its own connection.** While the setting client is
 /// still attached the page reports metrics it has not settled at, so folding
 /// the check into that socket to save a round trip would fail against a
-/// browser behaving correctly — each `_sendCdpToPage` below deliberately opens
-/// its own.
+/// browser behaving correctly — the read below deliberately opens its own,
+/// and it sees the override because the held one is still open. It is
+/// repeated until the page reports the size or [settleTimeout] runs out.
 ///
 /// Verified rather than assumed because the failure it guards is invisible: an
 /// override that did not take leaves every later screenshot and layout
 /// measurement quietly describing the wrong viewport.
-Future<void> applyViewportOverCdp({
+Future<CdpPageConnection> applyViewportOverCdp({
   required int cdpPort,
   required String appUrl,
   required WebViewport viewport,
   required String asked,
+  CdpPageConnection? hold,
+  Duration settleTimeout = const Duration(seconds: 15),
+  Duration pollInterval = const Duration(milliseconds: 200),
 }) async {
-  await _sendCdpToPage(cdpPort, appUrl, 'Emulation.setDeviceMetricsOverride', {
-    'width': viewport.width,
-    'height': viewport.height,
-    // 0 means "keep the browser's own ratio" — see WebViewport.
-    'deviceScaleFactor': viewport.deviceScaleFactor ?? 0,
-    'mobile': true,
-  });
-  final got = await _sendCdpToPage(cdpPort, appUrl, 'Runtime.evaluate', {
-    'expression':
-        '({w: window.innerWidth, h: window.innerHeight, '
-        'r: window.devicePixelRatio})',
-    'returnByValue': true,
-  });
-  final value = got['result']?['result']?['value'];
-  final width = value is Map ? value['w'] : null;
-  final height = value is Map ? value['h'] : null;
-  if (width != viewport.width || height != viewport.height) {
-    throw StateError(
-      'The browser did not take the viewport $asked asked for. Wanted '
-      '${viewport.width}x${viewport.height}, and the page reports '
-      '${width}x$height (devicePixelRatio ${value is Map ? value['r'] : '?'}).\n'
-      'Every screenshot and every layout measurement taken from here on would '
-      'describe a viewport nobody asked for.',
-    );
+  final reuse = hold != null && !hold.isClosed;
+  final connection = reuse
+      ? hold
+      : await CdpPageConnection.open(cdpPort, appUrl: appUrl);
+  try {
+    await connection.send('Emulation.setDeviceMetricsOverride', {
+      'width': viewport.width,
+      'height': viewport.height,
+      // 0 means "keep the browser's own ratio" — see WebViewport.
+      'deviceScaleFactor': viewport.deviceScaleFactor ?? 0,
+      // Not a mobile emulation: Chrome lays a mobile page out at its 980px
+      // default until the page declares a viewport, and a Flutter app does
+      // that only once its engine has started — after the launch that
+      // verifies this. Without it the layout viewport is the size asked for
+      // from the first read, whatever the page has or has not run.
+      'mobile': false,
+    });
+    // Polled, because a read straight after the override can still describe
+    // the page as it was laid out a moment ago.
+    final stopwatch = Stopwatch()..start();
+    Object? width;
+    Object? height;
+    Object? ratio;
+    while (true) {
+      final got = await _sendCdpToPage(cdpPort, appUrl, 'Runtime.evaluate', {
+        'expression':
+            '({w: window.innerWidth, h: window.innerHeight, '
+            'r: window.devicePixelRatio})',
+        'returnByValue': true,
+      });
+      final value = got['result']?['result']?['value'];
+      width = value is Map ? value['w'] : null;
+      height = value is Map ? value['h'] : null;
+      ratio = value is Map ? value['r'] : '?';
+      if (width == viewport.width && height == viewport.height) break;
+      if (stopwatch.elapsed >= settleTimeout) {
+        throw StateError(
+          'The browser did not take the viewport $asked asked for. Wanted '
+          '${viewport.width}x${viewport.height}, and after '
+          '${settleTimeout.inSeconds}s the page still reports '
+          '${width}x$height (devicePixelRatio $ratio).\n'
+          'Every screenshot and every layout measurement taken from here on '
+          'would describe a viewport nobody asked for.',
+        );
+      }
+      await Future<void>.delayed(pollInterval);
+    }
+  } catch (_) {
+    if (!reuse) await connection.close();
+    rethrow;
   }
+  return connection;
 }
 
 /// Send one CDP command to the page serving [appUrl] and return its reply.
@@ -4141,6 +4228,14 @@ class CdpPageConnection {
   final _pending = <int, Completer<Map<String, dynamic>>>{};
   var _nextId = 1;
   Object? _closedBy;
+  final _done = Completer<void>();
+
+  /// Whether the socket has closed, from either end.
+  bool get isClosed => _closedBy != null;
+
+  /// Completes when the socket closes, from either end — what a holder of a
+  /// long-lived connection waits on to learn it lost the session.
+  Future<void> get done => _done.future;
 
   CdpPageConnection._(this._ws) {
     _ws.listen(
@@ -4163,6 +4258,7 @@ class CdpPageConnection {
       c.completeError(error);
     }
     _pending.clear();
+    if (!_done.isCompleted) _done.complete();
   }
 
   /// Connect to the page serving [appUrl] on [cdpPort].
@@ -4203,7 +4299,10 @@ class CdpPageConnection {
     return response;
   }
 
-  Future<void> close() => _ws.close();
+  Future<void> close() {
+    _fail(StateError('the page\'s CDP connection was closed here'));
+    return _ws.close();
+  }
 }
 
 /// What pressing a key chord in the browser did: the events it sent, and the
