@@ -40,6 +40,12 @@ void registerRulesFlutterAgentExtensions() {
   registerExtension('ext.rules_flutter.longPress', _guard(_handleLongPress));
   registerExtension('ext.rules_flutter.doubleTap', _guard(_handleDoubleTap));
   registerExtension('ext.rules_flutter.drag', _guard(_handleDrag));
+  registerExtension('ext.rules_flutter.hover', _guard(_handleHover));
+  registerExtension('ext.rules_flutter.hoverExit', _guard(_handleHoverExit));
+  registerExtension(
+    'ext.rules_flutter.setWindowActive',
+    _guard(_handleSetWindowActive),
+  );
   registerExtension(
     'ext.rules_flutter.scrollIntoView',
     _guard(_handleScrollIntoView),
@@ -234,93 +240,216 @@ int _nextPointer = 0x70000;
 Duration _now() =>
     Duration(microseconds: DateTime.now().microsecondsSinceEpoch);
 
-void _dispatchTapAt(Offset position) {
+/// The one synthetic mouse the agent drives, as a real mouse is: it is added
+/// once, stays where it last was, and is removed by `app.hoverExit`.
+///
+/// `app.hover` and the presses `pointer=mouse` asks for share it, so a press
+/// made while hovering comes from the device the hover added — which is what
+/// makes a widget see hover and press together, as it does under a real
+/// pointer. Its id is clear of the touch device's (0) and of real devices'.
+const int _mouseDevice = 0x70001;
+Offset? _mousePosition;
+
+/// How a press is delivered: as a finger or as the synthetic mouse.
+enum _PointerKind { touch, mouse }
+
+_PointerKind _pointerKind(Map<String, String> params) {
+  switch (params['pointer']) {
+    case null:
+    case 'touch':
+      return _PointerKind.touch;
+    case 'mouse':
+      return _PointerKind.mouse;
+    default:
+      throw FormatException(
+        'pointer must be "touch" or "mouse", got "${params['pointer']}".',
+      );
+  }
+}
+
+/// Moves the synthetic mouse to [position], adding it first if it is not there.
+void _moveMouse(Offset position) {
+  final ts = _now();
+  final previous = _mousePosition;
+  if (previous == null) {
+    GestureBinding.instance.handlePointerEvent(
+      PointerAddedEvent(
+        timeStamp: ts,
+        device: _mouseDevice,
+        kind: PointerDeviceKind.mouse,
+        position: position,
+      ),
+    );
+  }
+  GestureBinding.instance.handlePointerEvent(
+    PointerHoverEvent(
+      timeStamp: ts,
+      device: _mouseDevice,
+      kind: PointerDeviceKind.mouse,
+      position: position,
+      delta: previous == null ? Offset.zero : position - previous,
+    ),
+  );
+  _mousePosition = position;
+}
+
+/// Removes the synthetic mouse. False when it was not there.
+bool _removeMouse() {
+  final position = _mousePosition;
+  if (position == null) return false;
+  GestureBinding.instance.handlePointerEvent(
+    PointerRemovedEvent(
+      timeStamp: _now(),
+      device: _mouseDevice,
+      kind: PointerDeviceKind.mouse,
+      position: position,
+    ),
+  );
+  _mousePosition = null;
+  return true;
+}
+
+PointerDownEvent _down(
+  _PointerKind kind,
+  int pointer,
+  Duration ts,
+  Offset position,
+) => switch (kind) {
+  _PointerKind.touch => PointerDownEvent(
+    timeStamp: ts,
+    pointer: pointer,
+    position: position,
+    kind: PointerDeviceKind.touch,
+  ),
+  _PointerKind.mouse => PointerDownEvent(
+    timeStamp: ts,
+    pointer: pointer,
+    device: _mouseDevice,
+    position: position,
+    kind: PointerDeviceKind.mouse,
+    buttons: kPrimaryMouseButton,
+  ),
+};
+
+PointerMoveEvent _move(
+  _PointerKind kind,
+  int pointer,
+  Duration ts,
+  Offset position,
+  Offset delta,
+) => switch (kind) {
+  _PointerKind.touch => PointerMoveEvent(
+    timeStamp: ts,
+    pointer: pointer,
+    position: position,
+    delta: delta,
+    kind: PointerDeviceKind.touch,
+  ),
+  _PointerKind.mouse => PointerMoveEvent(
+    timeStamp: ts,
+    pointer: pointer,
+    device: _mouseDevice,
+    position: position,
+    delta: delta,
+    kind: PointerDeviceKind.mouse,
+    buttons: kPrimaryMouseButton,
+  ),
+};
+
+PointerUpEvent _up(
+  _PointerKind kind,
+  int pointer,
+  Duration ts,
+  Offset position,
+) => switch (kind) {
+  _PointerKind.touch => PointerUpEvent(
+    timeStamp: ts,
+    pointer: pointer,
+    position: position,
+    kind: PointerDeviceKind.touch,
+  ),
+  _PointerKind.mouse => PointerUpEvent(
+    timeStamp: ts,
+    pointer: pointer,
+    device: _mouseDevice,
+    position: position,
+    kind: PointerDeviceKind.mouse,
+  ),
+};
+
+/// Puts a mouse press where a press should be: the mouse is at [position]
+/// before the button goes down, as a real one is.
+void _beforePress(_PointerKind kind, Offset position) {
+  if (kind == _PointerKind.mouse && _mousePosition != position) {
+    _moveMouse(position);
+  }
+}
+
+void _dispatchTapAt(Offset position, [_PointerKind kind = _PointerKind.touch]) {
+  _beforePress(kind, position);
   final pointer = ++_nextPointer;
   final ts = _now();
   GestureBinding.instance.handlePointerEvent(
-    PointerDownEvent(
-      timeStamp: ts,
-      pointer: pointer,
-      position: position,
-      kind: PointerDeviceKind.touch,
-    ),
+    _down(kind, pointer, ts, position),
   );
-  GestureBinding.instance.handlePointerEvent(
-    PointerUpEvent(
-      timeStamp: ts,
-      pointer: pointer,
-      position: position,
-      kind: PointerDeviceKind.touch,
-    ),
-  );
+  GestureBinding.instance.handlePointerEvent(_up(kind, pointer, ts, position));
 }
 
-Future<void> _dispatchLongPressAt(Offset position, Duration hold) async {
+Future<void> _dispatchLongPressAt(
+  Offset position,
+  Duration hold, [
+  _PointerKind kind = _PointerKind.touch,
+]) async {
+  _beforePress(kind, position);
   final pointer = ++_nextPointer;
   final start = _now();
   GestureBinding.instance.handlePointerEvent(
-    PointerDownEvent(
-      timeStamp: start,
-      pointer: pointer,
-      position: position,
-      kind: PointerDeviceKind.touch,
-    ),
+    _down(kind, pointer, start, position),
   );
   await Future<void>.delayed(hold);
   GestureBinding.instance.handlePointerEvent(
-    PointerUpEvent(
-      timeStamp: start + hold,
-      pointer: pointer,
-      position: position,
-      kind: PointerDeviceKind.touch,
-    ),
+    _up(kind, pointer, start + hold, position),
   );
 }
 
-Future<void> _dispatchDoubleTapAt(Offset position) async {
-  _dispatchTapAt(position);
+Future<void> _dispatchDoubleTapAt(
+  Offset position, [
+  _PointerKind kind = _PointerKind.touch,
+]) async {
+  _dispatchTapAt(position, kind);
   // DoubleTapGestureRecognizer accepts taps within kDoubleTapTimeout (300ms).
   await Future<void>.delayed(const Duration(milliseconds: 100));
-  _dispatchTapAt(position);
+  _dispatchTapAt(position, kind);
 }
 
-Future<void> _dispatchDrag(Offset start, Offset end, Duration duration) async {
+Future<void> _dispatchDrag(
+  Offset start,
+  Offset end,
+  Duration duration, [
+  _PointerKind kind = _PointerKind.touch,
+]) async {
+  _beforePress(kind, start);
   final pointer = ++_nextPointer;
   const steps = 10;
   final stepDur = Duration(microseconds: duration.inMicroseconds ~/ steps);
   final baseTs = _now();
 
   GestureBinding.instance.handlePointerEvent(
-    PointerDownEvent(
-      timeStamp: baseTs,
-      pointer: pointer,
-      position: start,
-      kind: PointerDeviceKind.touch,
-    ),
+    _down(kind, pointer, baseTs, start),
   );
   Offset previous = start;
   for (var i = 1; i <= steps; i++) {
     final t = i / steps;
     final next = Offset.lerp(start, end, t)!;
     GestureBinding.instance.handlePointerEvent(
-      PointerMoveEvent(
-        timeStamp: baseTs + stepDur * i,
-        pointer: pointer,
-        position: next,
-        delta: next - previous,
-        kind: PointerDeviceKind.touch,
-      ),
+      _move(kind, pointer, baseTs + stepDur * i, next, next - previous),
     );
     previous = next;
   }
   GestureBinding.instance.handlePointerEvent(
-    PointerUpEvent(
-      timeStamp: baseTs + duration,
-      pointer: pointer,
-      position: end,
-      kind: PointerDeviceKind.touch,
-    ),
+    _up(kind, pointer, baseTs + duration, end),
   );
+  if (kind == _PointerKind.mouse) _mousePosition = end;
 }
 
 /// Settle after input that has already been delivered, and say how the wait
@@ -465,7 +594,7 @@ Future<ServiceExtensionResponse> _handleTap(
   String method,
   Map<String, String> params,
 ) => _withRect(dispatchesPointer: true, params, (rect) async {
-  _dispatchTapAt(rect.center);
+  _dispatchTapAt(rect.center, _pointerKind(params));
   return {
     'tappedAt': {'x': rect.center.dx, 'y': rect.center.dy},
     ...await _settleAfterInput(params),
@@ -479,7 +608,7 @@ Future<ServiceExtensionResponse> _handleLongPress(
   final hold = Duration(
     milliseconds: int.tryParse(params['durationMs'] ?? '500') ?? 500,
   );
-  await _dispatchLongPressAt(rect.center, hold);
+  await _dispatchLongPressAt(rect.center, hold, _pointerKind(params));
   return {
     'pressedAt': {'x': rect.center.dx, 'y': rect.center.dy},
     'heldMs': hold.inMilliseconds,
@@ -491,7 +620,7 @@ Future<ServiceExtensionResponse> _handleDoubleTap(
   String method,
   Map<String, String> params,
 ) => _withRect(dispatchesPointer: true, params, (rect) async {
-  await _dispatchDoubleTapAt(rect.center);
+  await _dispatchDoubleTapAt(rect.center, _pointerKind(params));
   return {
     'tappedAt': {'x': rect.center.dx, 'y': rect.center.dy},
     ...await _settleAfterInput(params),
@@ -513,13 +642,82 @@ Future<ServiceExtensionResponse> _handleDrag(
   return _withRect(dispatchesPointer: true, params, (rect) async {
     final start = rect.center;
     final end = start + Offset(dx, dy);
-    await _dispatchDrag(start, end, duration);
+    await _dispatchDrag(start, end, duration, _pointerKind(params));
     return {
       'from': {'x': start.dx, 'y': start.dy},
       'to': {'x': end.dx, 'y': end.dy},
       'durationMs': duration.inMilliseconds,
       ...await _settleAfterInput(params),
     };
+  });
+}
+
+/// Moves the synthetic mouse over a widget or to a point, without moving the
+/// system cursor, so hover states can be read while the real mouse is free.
+///
+/// Targets either the selector's widget (its centre) or `x` and `y` in logical
+/// pixels. The mouse stays where it is left, as a real one does: a later
+/// `pointer=mouse` press comes from it, and `app.hoverExit` removes it.
+Future<ServiceExtensionResponse> _handleHover(
+  String method,
+  Map<String, String> params,
+) async {
+  final x = double.tryParse(params['x'] ?? '');
+  final y = double.tryParse(params['y'] ?? '');
+  if (params.containsKey('x') != params.containsKey('y') ||
+      (params.containsKey('x') && (x == null || y == null))) {
+    return _err('hover takes numeric x and y together, or a selector');
+  }
+  if (x != null && y != null) {
+    _moveMouse(Offset(x, y));
+    return _ok({
+      'hoveredAt': {'x': x, 'y': y},
+      ...await _settleAfterInput(params),
+    });
+  }
+  return _withRect(dispatchesPointer: true, params, (rect) async {
+    _moveMouse(rect.center);
+    return {
+      'hoveredAt': {'x': rect.center.dx, 'y': rect.center.dy},
+      ...await _settleAfterInput(params),
+    };
+  });
+}
+
+/// Takes the synthetic mouse off the app, so what it was over stops hovering
+/// and the cursor query goes back to the default.
+Future<ServiceExtensionResponse> _handleHoverExit(
+  String method,
+  Map<String, String> params,
+) async {
+  final removed = _removeMouse();
+  return _ok({'exited': removed, ...await _settleAfterInput(params)});
+}
+
+/// Tells the framework the window is focused or not, as it would learn from
+/// the platform, without changing which app is frontmost.
+///
+/// This is the framework's view only: `AppLifecycleState.resumed` for active,
+/// `inactive` for not. The native window's key state is untouched, and the
+/// engine overwrites this the next time the real one changes — a real click or
+/// key in the window is such a change. A window with no title bar never becomes
+/// key on macOS, so there this is the only way to see the active state.
+Future<ServiceExtensionResponse> _handleSetWindowActive(
+  String method,
+  Map<String, String> params,
+) async {
+  final active = params['active'];
+  if (active != 'true' && active != 'false') {
+    return _err('setWindowActive requires "active": "true" or "false"');
+  }
+  final binding = WidgetsBinding.instance;
+  binding.handleAppLifecycleStateChanged(
+    active == 'true' ? AppLifecycleState.resumed : AppLifecycleState.inactive,
+  );
+  return _ok({
+    'active': active == 'true',
+    'lifecycleState': binding.lifecycleState?.name,
+    ...await _settleAfterInput(params),
   });
 }
 

@@ -1489,10 +1489,12 @@ A `--machine` client does not need the endpoint. It receives the list in `daemon
 
 The commands, once the app is up:
 
-- **Widget driving:** `app.dumpWidgetTree`, `app.tap`, `app.longPress`, `app.doubleTap`, `app.drag`, `app.scrollIntoView`, `app.enterText`, `app.getText`, `app.getRect`, `app.waitFor`, `app.waitForAbsent`, `app.pageBack`, `app.settle`. These are served by extensions the app registers before `main()` on every launch, so they survive hot restart.
+- **Widget driving:** `app.dumpWidgetTree`, `app.tap`, `app.longPress`, `app.doubleTap`, `app.drag`, `app.hover`, `app.hoverExit`, `app.setWindowActive`, `app.scrollIntoView`, `app.enterText`, `app.getText`, `app.getRect`, `app.waitFor`, `app.waitForAbsent`, `app.pageBack`, `app.settle`. These are served by extensions the app registers before `main()` on every launch, so they survive hot restart.
 - **Keys:** `app.pressKey`, on every run, including `--wasm` and `--profile` web runs. See [Pressing keys](#pressing-keys).
 - **Lifecycle:** `app.hotReload`, `app.restart`, `app.stop`, `daemon.shutdown`.
 - **Run-specific:** `app.buildInfo` on native debug runs, `app.setViewport` on web runs.
+
+**Hover, mouse presses and window focus.** `app.hover` moves a synthetic mouse over the widget a selector names (its centre) or to `x` and `y` in logical pixels, and `app.hoverExit` takes it off the app. Neither moves the system cursor, so the real mouse stays free. The mouse stays where it was left, as a real one does. `app.tap`, `app.longPress`, `app.doubleTap` and `app.drag` take `"pointer": "mouse"` to press from that mouse, with the primary button, instead of from a finger; a widget then sees hover and press together. A hover has no timer of its own: pass `"settle": "false"` and wait as long as the state you are reading needs, a tooltip's delay for one. `app.setWindowActive` with `"active": "true"` or `"false"` tells the framework the window is focused or not (`AppLifecycleState.resumed` or `inactive`) without changing the frontmost app. That is the framework's view only: the native window's key state is untouched, a real click or key in the window flips it back, and AppKit-drawn chrome such as the traffic lights does not follow. A macOS window with no title bar can never become key, so there it is the only way to see the active state.
 
 `app.stop` stops the one app its `appId` names, as upstream's does. A run driving two devices carries on with the other. A bare `app.stop` with no `appId` is refused rather than read as "all of them". `daemon.shutdown` ends the run: every app, the browser, the compiler, and the tool itself.
 

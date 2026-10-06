@@ -349,6 +349,93 @@ void main() {
             reason: 'doubleTap should increment dt',
           );
 
+          // The synthetic mouse: hover, a press from the same device, exit,
+          // and the framework's window-focus state. The probe's label reads
+          // what the widget saw.
+          Future<String?> probe() async {
+            final r = await dt.httpCommand('app.getText', {
+              'appId': appId,
+              'key': 'agent_pointer_label',
+            });
+            return r['result']?['text'] as String?;
+          }
+
+          // The window a dev run launches is not frontmost, so the framework
+          // starts inactive; say which state each step is in.
+          await dt.httpCommand('app.setWindowActive', {
+            'appId': appId,
+            'active': 'true',
+          });
+          expect(await probe(), 'hover=off press=none active=yes');
+
+          final hover = await dt.httpCommand('app.hover', {
+            'appId': appId,
+            'key': 'agent_pointer_probe',
+          });
+          expect(hover['error'], isNull, reason: 'hover: ${hover['error']}');
+          expect(await probe(), 'hover=on press=none active=yes');
+
+          await dt.httpCommand('app.tap', {
+            'appId': appId,
+            'key': 'agent_pointer_probe',
+            'pointer': 'mouse',
+          });
+          expect(
+            await probe(),
+            'hover=on press=mouse active=yes',
+            reason: 'a mouse press comes from the hovering mouse',
+          );
+
+          final exit = await dt.httpCommand('app.hoverExit', {
+            'appId': appId,
+          });
+          expect(exit['result']?['exited'], isTrue);
+          expect(await probe(), 'hover=off press=mouse active=yes');
+          final exitAgain = await dt.httpCommand('app.hoverExit', {
+            'appId': appId,
+          });
+          expect(
+            exitAgain['result']?['exited'],
+            isFalse,
+            reason: 'there was no mouse left to remove',
+          );
+
+          // By coordinates: the centre of the probe's rect.
+          final probeRect = await dt.httpCommand('app.getRect', {
+            'appId': appId,
+            'key': 'agent_pointer_probe',
+          });
+          final pr = probeRect['result']! as Map<String, Object?>;
+          final cx = (pr['x']! as num) + (pr['width']! as num) / 2;
+          final cy = (pr['y']! as num) + (pr['height']! as num) / 2;
+          await dt.httpCommand('app.hover', {
+            'appId': appId,
+            'x': '$cx',
+            'y': '$cy',
+          });
+          expect(await probe(), 'hover=on press=mouse active=yes');
+          await dt.httpCommand('app.hoverExit', {'appId': appId});
+
+          await dt.httpCommand('app.setWindowActive', {
+            'appId': appId,
+            'active': 'false',
+          });
+          expect(await probe(), 'hover=off press=mouse active=no');
+          await dt.httpCommand('app.setWindowActive', {
+            'appId': appId,
+            'active': 'true',
+          });
+          expect(await probe(), 'hover=off press=mouse active=yes');
+          final bad = await dt.httpCommand('app.setWindowActive', {
+            'appId': appId,
+            'active': 'maybe',
+          });
+          expect(
+            bad['error'],
+            isNotNull,
+            reason: 'a typo must not pick a side',
+          );
+
           // Pre-state: ListView shows items 0..3; item 30 is offscreen.
           // After scrollIntoView, item 30's rect must lie within the list's
           // visible bounds.

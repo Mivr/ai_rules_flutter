@@ -76,10 +76,7 @@ class _MyHomePageState extends State<MyHomePage> {
             // font via flutter.fonts) — verifies that pub-package fonts
             // make it into the bundle and render correctly.
             const Icon(CupertinoIcons.heart, size: 48),
-            Text(
-              'count: $_counter',
-              key: const ValueKey('agent_test_label'),
-            ),
+            Text('count: $_counter', key: const ValueKey('agent_test_label')),
             ElevatedButton(
               key: const ValueKey('agent_test_button'),
               onPressed: _incrementCounter,
@@ -203,20 +200,26 @@ class _MyHomePageState extends State<MyHomePage> {
                   ),
                 ),
               ),
-            GestureDetector(
-              key: const ValueKey('agent_gesture_box'),
-              onLongPress: () => setState(() => _longPressCount++),
-              onDoubleTap: () => setState(() => _doubleTapCount++),
-              child: Container(
-                width: 200,
-                height: 40,
-                color: Colors.amber,
-                alignment: Alignment.center,
-                child: Text(
-                  'gestures: lp=$_longPressCount dt=$_doubleTapCount',
-                  key: const ValueKey('agent_gesture_label'),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                GestureDetector(
+                  key: const ValueKey('agent_gesture_box'),
+                  onLongPress: () => setState(() => _longPressCount++),
+                  onDoubleTap: () => setState(() => _doubleTapCount++),
+                  child: Container(
+                    width: 200,
+                    height: 40,
+                    color: Colors.amber,
+                    alignment: Alignment.center,
+                    child: Text(
+                      'gestures: lp=$_longPressCount dt=$_doubleTapCount',
+                      key: const ValueKey('agent_gesture_label'),
+                    ),
+                  ),
                 ),
-              ),
+                const _PointerProbe(),
+              ],
             ),
             SizedBox(
               height: 80,
@@ -225,10 +228,8 @@ class _MyHomePageState extends State<MyHomePage> {
                 key: const ValueKey('agent_test_list'),
                 itemCount: 50,
                 itemExtent: 24,
-                itemBuilder: (ctx, i) => Text(
-                  'item $i',
-                  key: ValueKey('agent_test_list_item_$i'),
-                ),
+                itemBuilder: (ctx, i) =>
+                    Text('item $i', key: ValueKey('agent_test_list_item_$i')),
               ),
             ),
             ElevatedButton(
@@ -254,6 +255,67 @@ class _MyHomePageState extends State<MyHomePage> {
         onPressed: _incrementCounter,
         tooltip: 'Increment',
         child: const Icon(Icons.add),
+      ),
+    );
+  }
+}
+
+/// What the agent's pointer and window-focus commands do to a widget: whether a
+/// pointer is over it, which kinds of device pressed it, and whether the
+/// framework thinks the window is active. The fixture `app.hover`,
+/// `pointer=mouse` and `app.setWindowActive` are tested against.
+class _PointerProbe extends StatefulWidget {
+  const _PointerProbe();
+
+  @override
+  State<_PointerProbe> createState() => _PointerProbeState();
+}
+
+class _PointerProbeState extends State<_PointerProbe>
+    with WidgetsBindingObserver {
+  bool _hovering = false;
+  String _pressed = 'none';
+  AppLifecycleState? _lifecycle = WidgetsBinding.instance.lifecycleState;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    setState(() => _lifecycle = state);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final active =
+        _lifecycle == null || _lifecycle == AppLifecycleState.resumed;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovering = true),
+      onExit: (_) => setState(() => _hovering = false),
+      child: Listener(
+        onPointerDown: (e) => setState(() => _pressed = e.kind.name),
+        child: Container(
+          key: const ValueKey('agent_pointer_probe'),
+          width: 220,
+          height: 40,
+          color: _hovering ? Colors.lightBlue : Colors.grey,
+          alignment: Alignment.center,
+          child: Text(
+            'hover=${_hovering ? 'on' : 'off'} '
+            'press=$_pressed '
+            'active=${active ? 'yes' : 'no'}',
+            key: const ValueKey('agent_pointer_label'),
+          ),
+        ),
       ),
     );
   }
