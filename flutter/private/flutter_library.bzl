@@ -3,7 +3,7 @@
 load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo")
 load("@rules_dart//dart:utils.bzl", "dart_analyzable_info_with_package", "dart_info", "derive_lib_root", "derive_package_name")
 load("//flutter:providers.bzl", "FlutterInfo")
-load("//flutter/private:flutter_info.bzl", "flutter_info")
+load("//flutter/private:flutter_info.bzl", "LINK_HOOK_ATTR", "flutter_info")
 
 def build_pub_contributions(package_name, fonts_json, font_files_dict, pkg_assets_dict, pkg_shaders_dict, shader_includes = []):
     """Build pub_fonts/pub_assets/pub_shaders contribution structs from rule attrs.
@@ -252,6 +252,7 @@ def _flutter_library_impl(ctx):
             language_version = ctx.attr.language_version,
             version = ctx.attr.version,
             has_unreplaced_hook = ctx.attr.has_unreplaced_hook,
+            link_hook = ctx.file.link_hook,
         ),
         flutter_analyzable_info(ctx, package_name, lib_root),
         flutter_info(
@@ -313,6 +314,7 @@ flutter_library = rule(
                   "silently standing in for the second. An empty version never " +
                   "conflicts.",
         ),
+        "link_hook": LINK_HOOK_ATTR,
         "language_version": attr.string(
             doc = "Dart language version (`<major>.<minor>`) for this package's `package_config.json` entry. Mirrors `dart_library`'s attribute. Empty string means defer to the toolchain default.",
         ),

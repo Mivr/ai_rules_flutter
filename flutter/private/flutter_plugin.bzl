@@ -24,7 +24,7 @@ load("@rules_swift//swift:swift.bzl", "SwiftInfo")
 load("//flutter:providers.bzl", "FlutterDataAssetInfo", "FlutterInfo", "FlutterNativeAssetInfo")
 load("//flutter/private:common.bzl", "collect_binding_contracts", "collect_native_libs")
 load("//flutter/private:flutter_desktop_plugin_info.bzl", "FlutterLinuxPluginInfo", "FlutterWindowsPluginInfo")
-load("//flutter/private:flutter_info.bzl", "flutter_info")
+load("//flutter/private:flutter_info.bzl", "LINK_HOOK_ATTR", "flutter_info")
 load("//flutter/private:flutter_library.bzl", "SKY_ENGINE_ATTR", "build_pub_contributions", "flutter_analyzable_info")
 load("//flutter/private:native_sources.bzl", "collect_native_source_pairs", "native_sources_aspect")
 
@@ -200,6 +200,7 @@ def _flutter_plugin_impl(ctx):
             language_version = ctx.attr.language_version,
             version = ctx.attr.version,
             has_unreplaced_hook = ctx.attr.has_unreplaced_hook,
+            link_hook = ctx.file.link_hook,
         ),
         flutter_analyzable_info(ctx, package_name, lib_root),
         flutter_info(
@@ -290,6 +291,7 @@ flutter_plugin = rule(
                   "silently standing in for the second. An empty version never " +
                   "conflicts.",
         ),
+        "link_hook": LINK_HOOK_ATTR,
         "language_version": attr.string(
             doc = "Dart language version (`<major>.<minor>`) for this package's `package_config.json` entry. Mirrors `dart_library`'s attribute. Empty string means defer to the toolchain default.",
         ),

@@ -169,3 +169,15 @@ def flutter_info(
             transitive = [info.pub_shaders for info in dep_infos],
         ),
     )
+
+# The attribute `flutter_library` and `flutter_plugin` share for a package's
+# link hook, which `flutter_application` runs for the assets it lists in
+# `link_hook_assets`. Mirrors `dart_library.link_hook`.
+LINK_HOOK_ATTR = attr.label(
+    doc = "The package's `hook/link.dart`, if it has one. An application " +
+          "that lists the package's assets in `link_hook_assets` runs it " +
+          "over the compiler's recorded uses in a release or profile build. " +
+          "Keep it out of `srcs`; its imports (`hooks`, `data_assets`, " +
+          "`record_use`) are ordinary `deps`.",
+    allow_single_file = [".dart"],
+)
