@@ -208,6 +208,30 @@ flutter_macos_app(
     target_compatible_with = ["@platforms//os:macos"],
 )
 
+# An app that ships App Intents. The library goes to `runner_deps` so the runner
+# links it, and to rules_apple's `app_intents`, which only extracts metadata.
+# :verify_macos_app_intents_test finds the intent in the bundle's metadata.
+swift_library(
+    name = "ping_intents",
+    srcs = ["intents/PingIntent.swift"],
+    # rules_apple's `app_intents` aspect refuses a library that does not name
+    # the AppIntents SDK framework.
+    linkopts = ["-Wl,-framework,AppIntents"],
+    module_name = "PingIntents",
+    tags = ["manual"],
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
+flutter_macos_app(
+    name = "app_intents",
+    app_intents = [":ping_intents"],
+    app_name = "Intents App",
+    application = ":app_flutter",
+    bundle_id = "com.example.flutterapp.intents",
+    runner_deps = [":ping_intents"],
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
 # =============================================================================
 # Approach 2: Bazel-generated runner (flutter_macos_runner_lib_gen)
 #
@@ -329,6 +353,13 @@ dart_test(
 # default fastbuild is not `-c dbg`, so this bundle carries the *release*
 # entitlements — finding the network keys proves additional_entitlements
 # survived into the arm where flutter create grants nothing.
+dart_test(
+    name = "verify_macos_app_intents_test",
+    data = [":app_intents"],
+    main = "test/verify_macos_app_intents_test.dart",
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
 dart_test(
     name = "verify_macos_entitlements_test",
     data = [":app"],

@@ -267,6 +267,7 @@ def flutter_macos_app(
         additional_entitlements = [],
         app_icons = None,
         resources = [],
+        runner_deps = [],
         **kwargs):
     """Builds a Flutter macOS .app bundle from a flutter_application target.
 
@@ -342,6 +343,13 @@ def flutter_macos_app(
             against the app target's name instead, which is not a module any
             target produces — so a XIB listed here cannot reference the
             runner's Swift classes (an `@objc` class name works regardless).
+        runner_deps: Extra `swift_library` labels to link into the runner, so
+            the runner's sources can `import` them and the binary carries
+            their code. Added to the generated `__<name>_runner` library's
+            `deps`; `deps` itself is the macro's and cannot be passed through
+            **kwargs. For App Intents, pass the library here *and* to
+            rules_apple's `app_intents` (which passes through **kwargs):
+            `app_intents` only extracts the metadata, it does not link.
         **kwargs: Passed through to macos_application. The macro sets
             `app_icons` itself, so pass the named parameter instead.
     """
@@ -508,7 +516,7 @@ def flutter_macos_app(
         deps = [
             "__%s_engine" % name,
             "__%s_apple_plugins" % name,
-        ],
+        ] + runner_deps,
     )
 
     # 6b. App icon — the conventional catalog `flutter create` writes, unless

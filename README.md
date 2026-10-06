@@ -312,6 +312,7 @@ flutter_macos_app(
 | `entitlements` | Replaces the entitlements wiring. By default the macro finds `macos/Runner/DebugProfile.entitlements` and `Release.entitlements` and picks one by compilation mode. |
 | `additional_entitlements` | Entitlement plist files merged into the selected base in every compilation mode. See [Release builds and permissions](#release-builds-and-permissions). |
 | `app_icons` | Defaults to the `AppIcon.appiconset` in `macos/Runner/Assets.xcassets`. See [App icons](#app-icons). |
+| `runner_deps` | `swift_library` targets linked into the runner. See [App Intents](#app-intents). |
 
 The output is a `.app` bundle containing `FlutterMacOS.framework`, `App.framework`, and `flutter_assets/`.
 
@@ -394,6 +395,7 @@ flutter_ios_app(
 | `additional_entitlements` | Entitlement plist files merged into the base in every compilation mode. Works even when the app has no entitlements file. See [Release builds and permissions](#release-builds-and-permissions). |
 | `provisioning_profile` | A `.mobileprovision` file, usually a `local_provisioning_profile` target. Required for device builds, unused by simulator builds. See [Running on an iOS device](#running-on-an-ios-device). |
 | `app_icons` | Defaults to the `AppIcon.appiconset` in `ios/Runner/Assets.xcassets`. See [App icons](#app-icons). |
+| `runner_deps` | `swift_library` targets linked into the runner. See [App Intents](#app-intents). |
 
 `rules_apple`'s `ios_application` handles the transition to iOS arm64.
 
@@ -543,6 +545,29 @@ Discovery is per platform, and a missing catalog is not an error. A tree made wi
 macOS icons use the platform's own grid rather than a full-bleed square: the rounded shape sits inset to roughly 824 of the 1024-point canvas, which is what makes it line up with other Dock icons. The rules pass the catalog through untouched.
 
 One `flutter create` quirk is handled for you on macOS. Its `Info.plist` declares `CFBundleIconFile` as an empty string for Xcode to fill in, while `macos_application` generates its own value from the catalog, and Apple's plisttool refuses two different values for one key. The macro drops the empty placeholder. A plist that names a real icon file is left alone, and will still conflict if you also pass `app_icons`.
+
+### App Intents
+
+To ship App Intents, give the Swift library to two attributes. `runner_deps` links it into the runner, so its code is in the binary. rules_apple's `app_intents` (which passes through `**kwargs`) extracts the metadata into the bundle: `Contents/Resources/Metadata.appintents` on macOS, `Metadata.appintents` at the bundle root on iOS. `app_intents` does not link the library, and `runner_deps` does not extract anything, so an app that gives it to only one ships either metadata with no code or code that the system never learns about.
+
+```starlark
+swift_library(
+    name = "intents",
+    srcs = ["Intents/PingIntent.swift"],
+    # rules_apple's aspect refuses a library that does not name the framework.
+    linkopts = ["-Wl,-framework,AppIntents"],
+    module_name = "Intents",
+)
+
+flutter_macos_app(
+    name = "app",
+    app_intents = [":intents"],
+    runner_deps = [":intents"],
+    # ...
+)
+```
+
+`e2e/macos_example` and `e2e/ios_example` each build such an app and check the bundle names the intent and the binary links it. When `appintentsmetadataprocessor` fails on a schema validation error, rules_apple's wrapper reports `version.json.sorted: No such file or directory` and hides the processor's own message. Run the processor by hand to read the real error.
 
 ### Android
 

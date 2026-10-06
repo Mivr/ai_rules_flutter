@@ -133,6 +133,27 @@ flutter_ios_app(
     provisioning_profile = "//device:profile",
 )
 
+# An app that ships App Intents. The library goes to `runner_deps` so the runner
+# links it, and to rules_apple's `app_intents`, which only extracts metadata.
+# :verify_ios_app_intents_test finds the intent in the bundle's metadata.
+swift_library(
+    name = "ping_intents",
+    srcs = ["intents/PingIntent.swift"],
+    # rules_apple's `app_intents` aspect refuses a library that does not name
+    # the AppIntents SDK framework.
+    linkopts = ["-Wl,-framework,AppIntents"],
+    module_name = "PingIntents",
+    tags = ["manual"],
+)
+
+flutter_ios_app(
+    name = "app_intents",
+    app_intents = [":ping_intents"],
+    application = ":app_flutter",
+    bundle_id = "com.rulesflutter.ios.example.intents",
+    runner_deps = [":ping_intents"],
+)
+
 # =============================================================================
 # Approach 2: Bazel-generated runner (flutter_ios_runner_lib_gen)
 #
@@ -263,6 +284,21 @@ dart_test(
     name = "verify_ios_info_plist_test",
     data = [":app_simulator"],
     main = "test/verify_ios_info_plist_test.dart",
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
+flutter_ios_simulator_build(
+    name = "app_intents_simulator",
+    testonly = True,
+    targets = [":app_intents"],
+)
+
+# The extracted App Intents metadata is in the bundle and names the intent, and
+# the runner links the library that declares it.
+dart_test(
+    name = "verify_ios_app_intents_test",
+    data = [":app_intents_simulator"],
+    main = "test/verify_ios_app_intents_test.dart",
     target_compatible_with = ["@platforms//os:macos"],
 )
 
