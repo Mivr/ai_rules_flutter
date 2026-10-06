@@ -1,9 +1,9 @@
 // Writes the index of glyphs the application uses, and fails the build on any
 // glyph constructed at run time.
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:data_assets/data_assets.dart';
+import 'package:glyphs/src/index.dart';
 import 'package:hooks/hooks.dart';
 import 'package:record_use/record_use.dart';
 
@@ -33,7 +33,7 @@ Future<void> main(List<String> args) async {
       }
     }
     final index = input.outputDirectory.resolve('index.json');
-    File.fromUri(index).writeAsStringSync(jsonEncode(names.toList()..sort()));
+    File.fromUri(index).writeAsStringSync(glyphIndex(names));
     output.assets.data.add(
       DataAsset(
         package: input.packageName,
