@@ -849,6 +849,13 @@ mkdir -p /tmp/macos_app && unzip -oq bazel-bin/app.zip -d /tmp/macos_app
 dart run ../../e2e/_macos_test/verify_macos_app.dart /tmp/macos_app/app.app "Flutter App"
 ```
 
+**Over ssh, launch with `open`.** Running the app binary directly in an ssh
+session, with no window-server session of its own, gives a 134x129 window off
+the left edge of the screen, and `lifecycleState` stays null: the main window
+never appears. `open -n /tmp/macos_app/app.app --args ...` gives a proper one.
+(Found on a MacBook Air by the amorphous_ui session; not reproduced on a
+machine with a logged-in desktop.)
+
 ### Hot reload / hot restart (manual)
 
 **MANDATORY** (CLAUDE.md verification policy item 6) for any change to the
