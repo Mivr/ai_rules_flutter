@@ -2139,38 +2139,136 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       ]);
     });
 
-    test('a failed activation does not fail the launch, and says why in '
-        'fields a JSON log keeps', () async {
-      final records = <LogRecord>[];
-      final sub = Logger.root.onRecord.listen(records.add);
-      addTearDown(sub.cancel);
-      final fakeAppProcess = FakeProcess();
+    // A MacOSDevice whose `open` and `osascript` are scripted, with the app's
+    // own VM service announced so the launch completes. Returns what the
+    // activation did.
+    ({
+      MacOSDevice device,
+      List<String> osascriptArgs,
+      FakeProcess osascript,
+      FakeProcess app,
+    })
+    activationRig({
+      required ProcessResult open,
+      void Function(FakeProcess osascript)? script,
+    }) {
+      final app = FakeProcess();
+      final osascript = FakeProcess();
+      final osascriptArgs = <String>[];
       final device = MacOSDevice(
-        runProcess: (exe, args) async => exe == 'open'
-            ? ProcessResult(0, 1, '', 'no window server session')
-            : ProcessResult(0, 0, '', ''),
-        startProcess: (exe, args) async => fakeAppProcess,
+        runProcess: (exe, args) async =>
+            exe == 'open' ? open : ProcessResult(0, 0, '', ''),
+        startProcess: (exe, args) async => app,
+        startActivationProcess: (exe, args) async {
+          expect(exe, 'osascript');
+          osascriptArgs.addAll(args);
+          script?.call(osascript);
+          return osascript;
+        },
       );
       unawaited(
-        fakeAppProcess.outputAttached.then(
-          (_) => fakeAppProcess.emitStdout(
+        app.outputAttached.then(
+          (_) => app.emitStdout(
             'The Dart VM service is listening on '
             'http://127.0.0.1:12345/test=/',
           ),
         ),
       );
+      return (
+        device: device,
+        osascriptArgs: osascriptArgs,
+        osascript: osascript,
+        app: app,
+      );
+    }
 
-      final instance = await device.launch('/path/to/MyApp.app');
+    // `open` needs LaunchServices to know the process: over ssh it answers
+    // -600 and the app stays where it started. System Events does not need it.
+    test('falls back to System Events by pid when open cannot find the '
+        'app', () async {
+      final rig = activationRig(
+        open: ProcessResult(
+          0,
+          1,
+          '',
+          '_LSOpenURLsWithCompletionHandler() failed with error -600.',
+        ),
+        script: (p) => unawaited(p.outputAttached.then((_) => p.complete(0))),
+      );
+
+      await rig.device.launch('/path/to/MyApp.app');
+
+      expect(rig.osascriptArgs.last, contains('unix id is ${rig.app.pid}'));
+      expect(rig.osascriptArgs.last, contains('System Events'));
+      expect(rig.osascriptArgs.last, contains('frontmost'));
+    });
+
+    test('does not touch System Events when open worked', () async {
+      final rig = activationRig(open: ProcessResult(0, 0, '', ''));
+
+      await rig.device.launch('/path/to/MyApp.app');
+
+      expect(rig.osascriptArgs, isEmpty);
+    });
+
+    test('a failure of both does not fail the launch, and says why in '
+        'fields a JSON log keeps', () async {
+      final records = <LogRecord>[];
+      final sub = Logger.root.onRecord.listen(records.add);
+      addTearDown(sub.cancel);
+      final rig = activationRig(
+        open: ProcessResult(
+          0,
+          1,
+          '',
+          '_LSOpenURLsWithCompletionHandler() failed with error -600.',
+        ),
+        script: (p) => unawaited(
+          p.outputAttached.then((_) {
+            p.emitStderr('not allowed assistive access');
+            p.complete(1);
+          }),
+        ),
+      );
+
+      final instance = await rig.device.launch('/path/to/MyApp.app');
 
       expect(instance.vmServiceUri, isNotNull);
       final warning = records
           .map((r) => r.object)
           .whereType<Map<Object?, Object?>>()
           .singleWhere((o) => o['message'] == 'macos_app_not_activated');
-      // `text` is dropped from JSON output, so the reason has to be a field.
-      expect(warning['exitCode'], 1);
-      expect(warning['stderr'], 'no window server session');
+      // `text` is dropped from JSON output, so the reasons are fields.
       expect(warning['bundle'], '/path/to/MyApp.app');
+      expect(warning['pid'], rig.app.pid);
+      expect(warning['openExitCode'], 1);
+      expect(warning['openStderr'], contains('-600'));
+      expect(warning['systemEventsExitCode'], 1);
+      expect(warning['systemEventsStderr'], contains('assistive access'));
+    });
+
+    // With the Automation permission undecided the AppleEvent blocks rather
+    // than fails, so an unbounded wait would hang every launch.
+    test('a System Events that never answers is killed after the bound, and '
+        'the launch carries on', () async {
+      final records = <LogRecord>[];
+      final sub = Logger.root.onRecord.listen(records.add);
+      addTearDown(sub.cancel);
+      final rig = activationRig(
+        open: ProcessResult(0, 1, '', 'error -600'),
+        // Never completes.
+      );
+      rig.device.activationBound = const Duration(milliseconds: 100);
+
+      final instance = await rig.device.launch('/path/to/MyApp.app');
+
+      expect(instance.vmServiceUri, isNotNull);
+      expect(rig.osascript.killed, isTrue);
+      final warning = records
+          .map((r) => r.object)
+          .whereType<Map<Object?, Object?>>()
+          .singleWhere((o) => o['message'] == 'macos_app_not_activated');
+      expect(warning['systemEventsError'], contains('did not answer'));
     });
   });
 

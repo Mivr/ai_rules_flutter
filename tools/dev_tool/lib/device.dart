@@ -423,13 +423,25 @@ class MacOSDevice extends Device {
   /// capture too.
   final ProcessStarter? _injectedScreenshotStart;
 
+  /// Starts `osascript` for [_bringToFront], when a test supplies one.
+  final ProcessStarter? _injectedActivationStart;
+
   MacOSDevice({
     ProcessRunSync? runProcess,
     ProcessStarter? startProcess,
     ProcessStarter? startScreenshotProcess,
+    ProcessStarter? startActivationProcess,
   }) : _runProcess = runProcess ?? Process.run,
        _injectedStart = startProcess,
-       _injectedScreenshotStart = startScreenshotProcess;
+       _injectedScreenshotStart = startScreenshotProcess,
+       _injectedActivationStart = startActivationProcess;
+
+  /// How long activation through System Events gets before it is killed.
+  ///
+  /// With the Automation permission undecided the AppleEvent does not fail, it
+  /// blocks, so without a bound every launch on a machine that has not granted
+  /// it would hang there. Settable so a test can drive the expiry.
+  Duration activationBound = const Duration(seconds: 10);
 
   Future<Process> _startProcess(String exe, List<String> args) =>
       (_injectedStart ?? _defaultStart)(exe, args);
@@ -481,7 +493,9 @@ class MacOSDevice extends Device {
 
     final logs = _startProcessLogs(process, onLog);
     final vmServiceUri = await discoverVmServiceUri(logs);
-    if (resolvedPath.endsWith('.app')) await _bringToFront(resolvedPath);
+    if (resolvedPath.endsWith('.app')) {
+      await _bringToFront(resolvedPath, process.pid);
+    }
 
     return AppInstance(
       process: process,
@@ -499,38 +513,64 @@ class MacOSDevice extends Device {
   /// a process started that way is not made frontmost. On a Mac with Stage
   /// Manager its window then sits in the strip as a thumbnail, about 113x138 pt
   /// and not on screen at the size the app asked for, and a screenshot of it is
-  /// of that. `open` on the running bundle activates that same process — it
-  /// does not start a second one, and needs no Automation permission, which
-  /// activating by process id through System Events does.
+  /// of that — or black, once another app has come forward.
   ///
-  /// A failure is reported and the launch carries on: a session with no window
-  /// server to activate in (a bare ssh login) has nothing to bring forward, and
-  /// the app is still running and drivable.
-  Future<void> _bringToFront(String bundlePath) async {
-    // The reason is in fields, not in `text`: a JSON-mode consumer sees the
-    // fields and none of the prose.
+  /// Two ways, in this order, because neither works everywhere:
+  ///
+  /// 1. `open` on the running bundle activates that same process, starts no
+  ///    second one and needs no permission. It needs LaunchServices to know
+  ///    the process, which it does in a desktop session and does not over ssh:
+  ///    there it fails with error -600 (procNotFound).
+  /// 2. System Events sets the process frontmost by its pid, which does not
+  ///    depend on LaunchServices. It needs the Automation permission, and with
+  ///    that undecided it blocks, so it is the second resort and is bounded
+  ///    ([activationBound]).
+  ///
+  /// A failure of both is reported and the launch carries on: the app is
+  /// running and drivable, only its window may not be on screen at full size.
+  /// Everything each step said goes on the record as fields, because a JSON log
+  /// keeps fields and drops the prose.
+  Future<void> _bringToFront(String bundlePath, int pid) async {
+    final failure = <String, Object?>{'bundle': bundlePath, 'pid': pid};
     try {
-      final result = await _runProcess('open', [bundlePath]);
-      if (result.exitCode == 0) return;
-      _logger.warning({
-        'message': 'macos_app_not_activated',
-        'bundle': bundlePath,
-        'exitCode': result.exitCode,
-        'stderr': '${result.stderr}'.trim(),
-        'stdout': '${result.stdout}'.trim(),
-        'text':
-            'Could not bring the app to the front (open exited '
-            '${result.exitCode}: ${'${result.stderr}'.trim()}). It is running, '
-            'but its window may not be on screen at full size.',
-      });
+      final opened = await _runProcess('open', [bundlePath]);
+      if (opened.exitCode == 0) return;
+      failure['openExitCode'] = opened.exitCode;
+      failure['openStderr'] = '${opened.stderr}'.trim();
     } on ProcessException catch (e) {
-      _logger.warning({
-        'message': 'macos_app_not_activated',
-        'bundle': bundlePath,
-        'error': '$e',
-        'text': 'Could not run open to bring the app to the front: $e',
-      });
+      failure['openError'] = '$e';
     }
+    try {
+      final result = await runProcessBounded(
+        (exe, args, _) =>
+            (_injectedActivationStart ?? Process.start)(exe, args),
+        'osascript',
+        [
+          '-e',
+          'tell application "System Events" to set frontmost of '
+              '(first process whose unix id is $pid) to true',
+        ],
+        environment: const {},
+        bound: activationBound,
+        what: 'Activating the app through System Events',
+      );
+      if (result.exitCode == 0) return;
+      failure['systemEventsExitCode'] = result.exitCode;
+      failure['systemEventsStderr'] = '${result.stderr}'.trim();
+    } on ProcessException catch (e) {
+      failure['systemEventsError'] = '$e';
+    } on StateError catch (e) {
+      failure['systemEventsError'] = e.message;
+    }
+    _logger.warning({
+      'message': 'macos_app_not_activated',
+      ...failure,
+      'text':
+          'Could not bring the app to the front: $failure. It is running, but '
+          'its window may not be on screen at full size. Activation through '
+          'System Events needs the Automation permission for the terminal '
+          'that runs this tool.',
+    });
   }
 
   @override

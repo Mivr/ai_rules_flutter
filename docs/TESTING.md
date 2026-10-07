@@ -850,13 +850,20 @@ dart run ../../e2e/_macos_test/verify_macos_app.dart /tmp/macos_app/app.app "Flu
 ```
 
 **The dev tool brings the app to the front itself.** After a macOS run's app is
-up it runs `open` on the bundle, which activates the process it started as a
-bare executable, because such a process is not made frontmost and on a Mac with
-Stage Manager its window sits in the strip as a thumbnail (about 113x138 pt)
-rather than at the size the app asked for. A failure to activate is logged as
-`macos_app_not_activated` and the run carries on. Found by the amorphous_ui
-session; not reproduced on a machine without Stage Manager, where the app comes
-to the front anyway.
+up it is activated, because a process started as a bare executable is not made
+frontmost, and on a Mac with Stage Manager its window sits in the strip as a
+thumbnail (about 113x138 pt) rather than at the size the app asked for — or
+comes out black in a capture once another app has come forward. Two ways, in
+order, because neither works everywhere: `open` on the bundle, which needs no
+permission but needs LaunchServices to know the process (over ssh it fails with
+`-600`, procNotFound); then System Events setting the process frontmost by pid,
+which needs the **Automation** permission above and, with that undecided,
+blocks, so it is killed after ten seconds. If both fail the run carries on and
+logs `macos_app_not_activated` with `openExitCode`, `openStderr`,
+`systemEventsExitCode` and `systemEventsStderr` (or `systemEventsError`) as
+fields. Found by the amorphous_ui session on a MacBook Air over ssh; on a
+machine with a desktop session and no Stage Manager the app comes to the front
+by itself and neither step is needed.
 
 **Over ssh, launch with `open`.** Running the app binary directly in an ssh
 session, with no window-server session of its own, gives a 134x129 window off
