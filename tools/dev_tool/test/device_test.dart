@@ -2139,7 +2139,11 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       ]);
     });
 
-    test('a failed activation does not fail the launch', () async {
+    test('a failed activation does not fail the launch, and says why in '
+        'fields a JSON log keeps', () async {
+      final records = <LogRecord>[];
+      final sub = Logger.root.onRecord.listen(records.add);
+      addTearDown(sub.cancel);
       final fakeAppProcess = FakeProcess();
       final device = MacOSDevice(
         runProcess: (exe, args) async => exe == 'open'
@@ -2159,6 +2163,14 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       final instance = await device.launch('/path/to/MyApp.app');
 
       expect(instance.vmServiceUri, isNotNull);
+      final warning = records
+          .map((r) => r.object)
+          .whereType<Map<Object?, Object?>>()
+          .singleWhere((o) => o['message'] == 'macos_app_not_activated');
+      // `text` is dropped from JSON output, so the reason has to be a field.
+      expect(warning['exitCode'], 1);
+      expect(warning['stderr'], 'no window server session');
+      expect(warning['bundle'], '/path/to/MyApp.app');
     });
   });
 

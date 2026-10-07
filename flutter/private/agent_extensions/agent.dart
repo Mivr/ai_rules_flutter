@@ -291,6 +291,31 @@ void _moveMouse(Offset position) {
     ),
   );
   _mousePosition = position;
+  // The framework has now told the engine which cursor the widget under the
+  // mouse asked for, and the engine applies it to the host. Nobody at the host
+  // asked for that, so put the arrow straight back; the cursor the framework
+  // chose is still on `MouseTracker`, which is where `app.hover` reads it. The
+  // message goes after the framework's, so the arrow is what is left.
+  unawaited(_activateArrowCursor());
+}
+
+/// Puts the host's cursor back to the arrow, by asking the engine for the
+/// `basic` system cursor as the framework would. False on a platform with no
+/// mouse cursor channel, which has no cursor to put back.
+///
+/// The arrow is the default, not a record of what the real pointer is over,
+/// which the app cannot know: the next real pointer movement over the window
+/// sets that right.
+Future<bool> _activateArrowCursor() async {
+  try {
+    await SystemChannels.mouseCursor.invokeMethod<void>(
+      'activateSystemCursor',
+      {'device': _mouseDevice, 'kind': 'basic'},
+    );
+    return true;
+  } on MissingPluginException {
+    return false;
+  }
 }
 
 /// Removes the synthetic mouse. False when it was not there.
@@ -664,7 +689,9 @@ Future<ServiceExtensionResponse> _handleDrag(
 }
 
 /// Moves the synthetic mouse over a widget or to a point, without moving the
-/// system cursor, so hover states can be read while the real mouse is free.
+/// system cursor's position, so hover states can be read while the real mouse
+/// is free. The host's cursor *shape* is changed by the engine for as long as the
+/// hover decides it, and put back to the arrow straight after.
 ///
 /// Targets either the selector's widget (its centre) or `x` and `y` in logical
 /// pixels. The mouse stays where it is left, as a real one does: a later
@@ -698,27 +725,15 @@ String? _activeMouseCursor() {
 ///
 /// Removing the mouse does not do the second part by itself: the framework
 /// forgets the device when it is removed and leaves the engine on whatever
-/// cursor the last hover chose, so a hover over a text field left the host's
-/// real cursor an I-beam. The arrow is put back explicitly. It is the default,
-/// not a record of what the real pointer is over, which the app cannot know:
-/// the next real pointer movement over the window sets that right.
+/// cursor the last hover chose. A hover puts the arrow back as soon as it has
+/// moved the mouse (see [_moveMouse]), so this is the backstop for a mouse
+/// that was moved some other way.
 Future<ServiceExtensionResponse> _handleHoverExit(
   String method,
   Map<String, String> params,
 ) async {
   final removed = _removeMouse();
-  var restored = false;
-  if (removed) {
-    try {
-      await SystemChannels.mouseCursor.invokeMethod<void>(
-        'activateSystemCursor',
-        {'device': _mouseDevice, 'kind': 'basic'},
-      );
-      restored = true;
-    } on MissingPluginException {
-      // A platform with no mouse cursor channel has no cursor to restore.
-    }
-  }
+  final restored = removed && await _activateArrowCursor();
   return _ok({
     'exited': removed,
     'cursorRestored': restored,

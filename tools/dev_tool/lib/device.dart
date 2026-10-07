@@ -507,11 +507,17 @@ class MacOSDevice extends Device {
   /// server to activate in (a bare ssh login) has nothing to bring forward, and
   /// the app is still running and drivable.
   Future<void> _bringToFront(String bundlePath) async {
+    // The reason is in fields, not in `text`: a JSON-mode consumer sees the
+    // fields and none of the prose.
     try {
       final result = await _runProcess('open', [bundlePath]);
       if (result.exitCode == 0) return;
       _logger.warning({
         'message': 'macos_app_not_activated',
+        'bundle': bundlePath,
+        'exitCode': result.exitCode,
+        'stderr': '${result.stderr}'.trim(),
+        'stdout': '${result.stdout}'.trim(),
         'text':
             'Could not bring the app to the front (open exited '
             '${result.exitCode}: ${'${result.stderr}'.trim()}). It is running, '
@@ -520,6 +526,8 @@ class MacOSDevice extends Device {
     } on ProcessException catch (e) {
       _logger.warning({
         'message': 'macos_app_not_activated',
+        'bundle': bundlePath,
+        'error': '$e',
         'text': 'Could not run open to bring the app to the front: $e',
       });
     }
