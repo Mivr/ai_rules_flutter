@@ -436,6 +436,80 @@ void main() {
             reason: 'a typo must not pick a side',
           );
 
+          // The cursor the widget under the mouse asked for comes back on the
+          // reply, so it can be read without looking at the real screen; and
+          // taking the mouse off puts the host's cursor back to the arrow.
+          final withCursor = await dt.httpCommand('app.hover', {
+            'appId': appId,
+            'key': 'agent_pointer_probe',
+            'settle': 'false',
+          });
+          expect(withCursor['result']?['cursor'], 'click');
+
+          // A tooltip is up after its delay. It keeps a transient callback
+          // registered with no frame behind it, which used to make every wait
+          // for idle run out its whole timeout.
+          final tip = await dt.httpCommand('app.waitFor', {
+            'appId': appId,
+            'text': 'probe tip',
+            'timeoutMs': '5000',
+          });
+          expect(
+            tip['error'],
+            isNull,
+            reason: 'the tooltip never showed: $tip',
+          );
+          final settledUnderTooltip = await dt.httpCommand('app.settle', {
+            'appId': appId,
+            'timeoutMs': '3000',
+          });
+          expect(
+            settledUnderTooltip['error'],
+            isNull,
+            reason: 'settle must not wait on a tooltip: $settledUnderTooltip',
+          );
+          expect(settledUnderTooltip['result']?['settled'], 'yes');
+
+          final leave = await dt.httpCommand('app.hoverExit', {
+            'appId': appId,
+          });
+          expect(leave['result']?['exited'], isTrue);
+          expect(
+            leave['result']?['cursorRestored'],
+            isTrue,
+            reason: 'the host cursor is put back to the arrow: $leave',
+          );
+
+          // Presses by point, and from where the mouse already is.
+          await dt.httpCommand('app.tap', {
+            'appId': appId,
+            'x': '$cx',
+            'y': '$cy',
+          });
+          expect(
+            await probe(),
+            'hover=off press=touch active=yes',
+            reason: 'a touch press by point, with the mouse not over anything',
+          );
+          await dt.httpCommand('app.hover', {
+            'appId': appId,
+            'x': '$cx',
+            'y': '$cy',
+          });
+          await dt.httpCommand('app.tap', {'appId': appId, 'pointer': 'mouse'});
+          expect(
+            await probe(),
+            'hover=on press=mouse active=yes',
+            reason: 'with no selector, a mouse press lands where the mouse is',
+          );
+          await dt.httpCommand('app.hoverExit', {'appId': appId});
+          final noTarget = await dt.httpCommand('app.tap', {'appId': appId});
+          expect(
+            noTarget['error'],
+            contains('missing selector'),
+            reason: 'a touch press with no target still names the problem',
+          );
+
           // Pre-state: ListView shows items 0..3; item 30 is offscreen.
           // After scrollIntoView, item 30's rect must lie within the list's
           // visible bounds.
@@ -1122,7 +1196,7 @@ void main() {
           final settleCmd = await dt.httpCommand('app.settle', {
             'appId': appId,
           });
-          expect(settleCmd['result']?['settled'], isTrue);
+          expect(settleCmd['result']?['settled'], 'yes');
 
           // Polled rather than taken once: ScreenCaptureKit cannot enumerate
           // the window until it is on screen, and nothing announces that.

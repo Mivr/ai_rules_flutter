@@ -296,9 +296,9 @@ Future<(String, String?)> _settleAfterKeys(
 ) async {
   try {
     final json = await settle();
-    return json['settled'] == true
+    return json['settled'] == 'yes'
         ? ('yes', null)
-        : ('no', json['reason']?.toString());
+        : ('no', json['settleDetail']?.toString());
   } on CommandFailure catch (e) {
     return ('no', e.message);
   }

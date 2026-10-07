@@ -849,6 +849,15 @@ mkdir -p /tmp/macos_app && unzip -oq bazel-bin/app.zip -d /tmp/macos_app
 dart run ../../e2e/_macos_test/verify_macos_app.dart /tmp/macos_app/app.app "Flutter App"
 ```
 
+**The dev tool brings the app to the front itself.** After a macOS run's app is
+up it runs `open` on the bundle, which activates the process it started as a
+bare executable, because such a process is not made frontmost and on a Mac with
+Stage Manager its window sits in the strip as a thumbnail (about 113x138 pt)
+rather than at the size the app asked for. A failure to activate is logged as
+`macos_app_not_activated` and the run carries on. Found by the amorphous_ui
+session; not reproduced on a machine without Stage Manager, where the app comes
+to the front anyway.
+
 **Over ssh, launch with `open`.** Running the app binary directly in an ssh
 session, with no window-server session of its own, gives a 134x129 window off
 the left edge of the screen, and `lifecycleState` stays null: the main window

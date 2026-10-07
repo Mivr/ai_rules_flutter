@@ -411,8 +411,17 @@ class HttpControlChannel {
       final json = await _commandRunner.run('app.settle', {
         'appId': session.appId,
       });
-      if (json['settled'] == true) return (state: 'yes', detail: null);
-      return (state: 'no', detail: json['reason']?.toString());
+      // `app.settle` answers in the vocabulary of every other command —
+      // `yes`, `no` or `skipped`, and why when it is not `yes` — which is the
+      // header's own.
+      final state = json['settled'];
+      if (state == 'yes' || state == 'skipped') {
+        return (
+          state: state as String,
+          detail: json['settleDetail']?.toString(),
+        );
+      }
+      return (state: 'no', detail: json['settleDetail']?.toString());
     } on CommandFailure catch (e) {
       return (state: 'no', detail: e.message);
     }

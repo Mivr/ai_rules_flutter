@@ -481,6 +481,7 @@ class MacOSDevice extends Device {
 
     final logs = _startProcessLogs(process, onLog);
     final vmServiceUri = await discoverVmServiceUri(logs);
+    if (resolvedPath.endsWith('.app')) await _bringToFront(resolvedPath);
 
     return AppInstance(
       process: process,
@@ -490,6 +491,38 @@ class MacOSDevice extends Device {
       // has exited — which `stop` awaits before disposing it.
       scratchDirs: [if (extracted != null) extracted],
     );
+  }
+
+  /// Bring the launched app's window to the front.
+  ///
+  /// The app is started as a bare executable, not through LaunchServices, and
+  /// a process started that way is not made frontmost. On a Mac with Stage
+  /// Manager its window then sits in the strip as a thumbnail, about 113x138 pt
+  /// and not on screen at the size the app asked for, and a screenshot of it is
+  /// of that. `open` on the running bundle activates that same process — it
+  /// does not start a second one, and needs no Automation permission, which
+  /// activating by process id through System Events does.
+  ///
+  /// A failure is reported and the launch carries on: a session with no window
+  /// server to activate in (a bare ssh login) has nothing to bring forward, and
+  /// the app is still running and drivable.
+  Future<void> _bringToFront(String bundlePath) async {
+    try {
+      final result = await _runProcess('open', [bundlePath]);
+      if (result.exitCode == 0) return;
+      _logger.warning({
+        'message': 'macos_app_not_activated',
+        'text':
+            'Could not bring the app to the front (open exited '
+            '${result.exitCode}: ${'${result.stderr}'.trim()}). It is running, '
+            'but its window may not be on screen at full size.',
+      });
+    } on ProcessException catch (e) {
+      _logger.warning({
+        'message': 'macos_app_not_activated',
+        'text': 'Could not run open to bring the app to the front: $e',
+      });
+    }
   }
 
   @override

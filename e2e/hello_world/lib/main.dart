@@ -298,22 +298,30 @@ class _PointerProbeState extends State<_PointerProbe>
   Widget build(BuildContext context) {
     final active =
         _lifecycle == null || _lifecycle == AppLifecycleState.resumed;
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hovering = true),
-      onExit: (_) => setState(() => _hovering = false),
-      child: Listener(
-        onPointerDown: (e) => setState(() => _pressed = e.kind.name),
-        child: Container(
-          key: const ValueKey('agent_pointer_probe'),
-          width: 220,
-          height: 40,
-          color: _hovering ? Colors.lightBlue : Colors.grey,
-          alignment: Alignment.center,
-          child: Text(
-            'hover=${_hovering ? 'on' : 'off'} '
-            'press=$_pressed '
-            'active=${active ? 'yes' : 'no'}',
-            key: const ValueKey('agent_pointer_label'),
+    // The cursor and the tooltip are what the agent's hover reports and what
+    // `app.settle` must get past: a visible tooltip keeps a transient callback
+    // registered that no frame is waiting on.
+    return Tooltip(
+      message: 'probe tip',
+      waitDuration: const Duration(milliseconds: 300),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hovering = true),
+        onExit: (_) => setState(() => _hovering = false),
+        child: Listener(
+          onPointerDown: (e) => setState(() => _pressed = e.kind.name),
+          child: Container(
+            key: const ValueKey('agent_pointer_probe'),
+            width: 220,
+            height: 40,
+            color: _hovering ? Colors.lightBlue : Colors.grey,
+            alignment: Alignment.center,
+            child: Text(
+              'hover=${_hovering ? 'on' : 'off'} '
+              'press=$_pressed '
+              'active=${active ? 'yes' : 'no'}',
+              key: const ValueKey('agent_pointer_label'),
+            ),
           ),
         ),
       ),

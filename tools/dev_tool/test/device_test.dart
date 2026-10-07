@@ -2076,7 +2076,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
 
       // Should have started the extracted executable.
       final startCalls = calls
-          .where((c) => c.$1 != 'unzip' && c.$1 != 'xcrun')
+          .where((c) => c.$1 != 'unzip' && c.$1 != 'xcrun' && c.$1 != 'open')
           .toList();
       expect(startCalls, isNotEmpty);
       expect(startCalls.last.$1, contains('MyApp'));
@@ -2087,6 +2087,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       final fakeAppProcess = FakeProcess();
 
       final device = MacOSDevice(
+        runProcess: (exe, args) async => ProcessResult(0, 0, '', ''),
         startProcess: (exe, args) async {
           calls.add((exe, args));
           return fakeAppProcess;
@@ -2107,6 +2108,57 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
 
       expect(calls, hasLength(1));
       expect(calls[0].$1, '/path/to/MyApp.app/Contents/MacOS/MyApp');
+    });
+
+    // A process started as a bare executable is not made frontmost, and with
+    // Stage Manager its window sits in the strip as a thumbnail. `open` on the
+    // running bundle activates it.
+    test('brings the app to the front once it is up', () async {
+      final opened = <List<String>>[];
+      final fakeAppProcess = FakeProcess();
+      final device = MacOSDevice(
+        runProcess: (exe, args) async {
+          if (exe == 'open') opened.add(args);
+          return ProcessResult(0, 0, '', '');
+        },
+        startProcess: (exe, args) async => fakeAppProcess,
+      );
+      unawaited(
+        fakeAppProcess.outputAttached.then(
+          (_) => fakeAppProcess.emitStdout(
+            'The Dart VM service is listening on '
+            'http://127.0.0.1:12345/test=/',
+          ),
+        ),
+      );
+
+      await device.launch('/path/to/MyApp.app');
+
+      expect(opened, [
+        ['/path/to/MyApp.app'],
+      ]);
+    });
+
+    test('a failed activation does not fail the launch', () async {
+      final fakeAppProcess = FakeProcess();
+      final device = MacOSDevice(
+        runProcess: (exe, args) async => exe == 'open'
+            ? ProcessResult(0, 1, '', 'no window server session')
+            : ProcessResult(0, 0, '', ''),
+        startProcess: (exe, args) async => fakeAppProcess,
+      );
+      unawaited(
+        fakeAppProcess.outputAttached.then(
+          (_) => fakeAppProcess.emitStdout(
+            'The Dart VM service is listening on '
+            'http://127.0.0.1:12345/test=/',
+          ),
+        ),
+      );
+
+      final instance = await device.launch('/path/to/MyApp.app');
+
+      expect(instance.vmServiceUri, isNotNull);
     });
   });
 

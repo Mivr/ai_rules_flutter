@@ -322,6 +322,59 @@ void main() {
         await response.drain<void>();
       });
 
+      // What an app that does answer `app.settle` says reaches the header in
+      // the same words: `yes`, `no` or `skipped`, and why when it is not `yes`.
+      // The endpoint once read a boolean, so a reply in these words read as
+      // "no" every time.
+      group('an app that answers app.settle', () {
+        const png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+
+        Future<HttpClientResponse> captureAfter(
+          Map<String, dynamic> settleReply,
+        ) async {
+          commandRunner.register('app.settle', (_) async => settleReply);
+          sessions['app1'] = DeviceSession(
+            device: _CapturingDevice(png),
+            appInstance: AppInstance(process: _StubProcess()),
+            vmClient: VmServiceClient(),
+            appId: 'app1',
+          );
+          final response = await _get('/sessions/app1/screenshot/native');
+          await response.drain<void>();
+          return response;
+        }
+
+        test('yes is yes, with no detail', () async {
+          final response = await captureAfter({'settled': 'yes'});
+          expect(response.headers.value('x-settled'), 'yes');
+          expect(response.headers.value('x-settle-detail'), isNull);
+        });
+
+        test('skipped keeps its reason', () async {
+          final response = await captureAfter({
+            'settled': 'skipped',
+            'settleDetail': 'the app is backgrounded',
+          });
+          expect(response.headers.value('x-settled'), 'skipped');
+          expect(
+            Uri.decodeComponent(response.headers.value('x-settle-detail')!),
+            'the app is backgrounded',
+          );
+        });
+
+        test('no keeps its reason', () async {
+          final response = await captureAfter({
+            'settled': 'no',
+            'settleDetail': 'timed out',
+          });
+          expect(response.headers.value('x-settled'), 'no');
+          expect(
+            Uri.decodeComponent(response.headers.value('x-settle-detail')!),
+            'timed out',
+          );
+        });
+      });
+
       group('an app that never settles', () {
         const png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
 

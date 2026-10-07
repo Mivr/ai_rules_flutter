@@ -567,7 +567,8 @@ bool _boolParam(
 /// action is observable) and then for the app to go idle — no animations in
 /// flight — bounded by [timeout].
 ///
-/// Mirrors flutter_driver's frame-sync (`transientCallbackCount == 0`), but
+/// Mirrors flutter_driver's frame-sync (`transientCallbackCount == 0`) and
+/// `pumpAndSettle`'s (no frame scheduled), but
 /// also guarantees at least one rendered frame so non-animating state changes
 /// are visible on return (flutter_driver leans on inter-command timing for
 /// that). Throws [TimeoutException] if the app never settles within [timeout]
@@ -577,7 +578,15 @@ bool _boolParam(
 Future<void> _waitUntilSettled(Duration timeout) {
   final completer = Completer<void>();
   void checkIdle(Duration _) {
-    if (SchedulerBinding.instance.transientCallbackCount == 0) {
+    // Idle is no animation in flight *or* no frame coming, as
+    // `pumpAndSettle` decides it. A transient callback registered with
+    // `scheduleNewFrame: false` — the layout callback an `OverlayPortal`
+    // child, so a visible tooltip, keeps — waits for a frame that nothing
+    // schedules, and counting it alone made an app with a tooltip up never
+    // settle. An animation that is really running has asked for its next frame
+    // by the time this runs, so `hasScheduledFrame` is true for it.
+    final scheduler = SchedulerBinding.instance;
+    if (scheduler.transientCallbackCount == 0 || !scheduler.hasScheduledFrame) {
       if (!completer.isCompleted) completer.complete();
     } else {
       SchedulerBinding.instance.addPostFrameCallback(checkIdle);
@@ -593,7 +602,7 @@ Future<void> _waitUntilSettled(Duration timeout) {
 Future<ServiceExtensionResponse> _handleTap(
   String method,
   Map<String, String> params,
-) => _withRect(dispatchesPointer: true, params, (rect) async {
+) => _withRect(dispatchesPointer: true, allowPoint: true, params, (rect) async {
   _dispatchTapAt(rect.center, _pointerKind(params));
   return {
     'tappedAt': {'x': rect.center.dx, 'y': rect.center.dy},
@@ -604,7 +613,7 @@ Future<ServiceExtensionResponse> _handleTap(
 Future<ServiceExtensionResponse> _handleLongPress(
   String method,
   Map<String, String> params,
-) => _withRect(dispatchesPointer: true, params, (rect) async {
+) => _withRect(dispatchesPointer: true, allowPoint: true, params, (rect) async {
   final hold = Duration(
     milliseconds: int.tryParse(params['durationMs'] ?? '500') ?? 500,
   );
@@ -619,7 +628,7 @@ Future<ServiceExtensionResponse> _handleLongPress(
 Future<ServiceExtensionResponse> _handleDoubleTap(
   String method,
   Map<String, String> params,
-) => _withRect(dispatchesPointer: true, params, (rect) async {
+) => _withRect(dispatchesPointer: true, allowPoint: true, params, (rect) async {
   await _dispatchDoubleTapAt(rect.center, _pointerKind(params));
   return {
     'tappedAt': {'x': rect.center.dx, 'y': rect.center.dy},
@@ -639,7 +648,9 @@ Future<ServiceExtensionResponse> _handleDrag(
   final duration = Duration(
     milliseconds: int.tryParse(params['durationMs'] ?? '200') ?? 200,
   );
-  return _withRect(dispatchesPointer: true, params, (rect) async {
+  return _withRect(dispatchesPointer: true, allowPoint: true, params, (
+    rect,
+  ) async {
     final start = rect.center;
     final end = start + Offset(dx, dy);
     await _dispatchDrag(start, end, duration, _pointerKind(params));
@@ -661,37 +672,58 @@ Future<ServiceExtensionResponse> _handleDrag(
 Future<ServiceExtensionResponse> _handleHover(
   String method,
   Map<String, String> params,
-) async {
-  final x = double.tryParse(params['x'] ?? '');
-  final y = double.tryParse(params['y'] ?? '');
-  if (params.containsKey('x') != params.containsKey('y') ||
-      (params.containsKey('x') && (x == null || y == null))) {
-    return _err('hover takes numeric x and y together, or a selector');
-  }
-  if (x != null && y != null) {
-    _moveMouse(Offset(x, y));
-    return _ok({
-      'hoveredAt': {'x': x, 'y': y},
-      ...await _settleAfterInput(params),
-    });
-  }
-  return _withRect(dispatchesPointer: true, params, (rect) async {
-    _moveMouse(rect.center);
-    return {
-      'hoveredAt': {'x': rect.center.dx, 'y': rect.center.dy},
-      ...await _settleAfterInput(params),
-    };
-  });
+) => _withRect(dispatchesPointer: true, params, (rect) async {
+  _moveMouse(rect.center);
+  return {
+    'hoveredAt': {'x': rect.center.dx, 'y': rect.center.dy},
+    // What the framework made of the mouse's position: the cursor the widget
+    // under it asked for, readable without looking at the real screen.
+    'cursor': _activeMouseCursor(),
+    ...await _settleAfterInput(params),
+  };
+}, allowPoint: true);
+
+/// The cursor the framework has chosen for the synthetic mouse, by name, or
+/// null when it is not over anything that asked for one.
+String? _activeMouseCursor() {
+  final cursor = WidgetsBinding.instance.mouseTracker.debugDeviceActiveCursor(
+    _mouseDevice,
+  );
+  if (cursor is SystemMouseCursor) return cursor.kind;
+  return cursor?.debugDescription;
 }
 
 /// Takes the synthetic mouse off the app, so what it was over stops hovering
-/// and the cursor query goes back to the default.
+/// and the cursor goes back to the arrow.
+///
+/// Removing the mouse does not do the second part by itself: the framework
+/// forgets the device when it is removed and leaves the engine on whatever
+/// cursor the last hover chose, so a hover over a text field left the host's
+/// real cursor an I-beam. The arrow is put back explicitly. It is the default,
+/// not a record of what the real pointer is over, which the app cannot know:
+/// the next real pointer movement over the window sets that right.
 Future<ServiceExtensionResponse> _handleHoverExit(
   String method,
   Map<String, String> params,
 ) async {
   final removed = _removeMouse();
-  return _ok({'exited': removed, ...await _settleAfterInput(params)});
+  var restored = false;
+  if (removed) {
+    try {
+      await SystemChannels.mouseCursor.invokeMethod<void>(
+        'activateSystemCursor',
+        {'device': _mouseDevice, 'kind': 'basic'},
+      );
+      restored = true;
+    } on MissingPluginException {
+      // A platform with no mouse cursor channel has no cursor to restore.
+    }
+  }
+  return _ok({
+    'exited': removed,
+    'cursorRestored': restored,
+    ...await _settleAfterInput(params),
+  });
 }
 
 /// Tells the framework the window is focused or not, as it would learn from
@@ -946,7 +978,7 @@ Future<ServiceExtensionResponse> _handleGetRect(
 ///
 /// Reports rather than assumes when there is nothing to wait for: a
 /// backgrounded app has no frame coming (see [_settleAfterInput]), and answering
-/// `settled: true` there would be a claim about a frame that was never
+/// `settled: yes` there would be a claim about a frame that was never
 /// scheduled. A wait that runs out throws, and [_guard] renders it with the
 /// number of animations still in flight.
 Future<ServiceExtensionResponse> _handleSettle(
@@ -958,14 +990,14 @@ Future<ServiceExtensionResponse> _handleSettle(
   );
   if (!SchedulerBinding.instance.framesEnabled) {
     return _ok({
-      'settled': false,
-      'reason':
+      'settled': 'skipped',
+      'settleDetail':
           'the app is backgrounded, so no frame is coming and there is '
           'nothing to wait for',
     });
   }
   await _waitUntilSettled(timeout);
-  return _ok({'settled': true});
+  return _ok({'settled': 'yes'});
 }
 
 Future<ServiceExtensionResponse> _handleWaitFor(
@@ -1886,6 +1918,35 @@ final List<(SingleActivator, List<String>)> _macSelectors = [
   ),
 ];
 
+/// Where a pointer command lands when it names a point instead of a widget, or
+/// null when it names a widget.
+///
+/// A point is `x` and `y` together, in logical pixels. A press made from the
+/// mouse (`pointer=mouse`) with neither a point nor a selector lands where the
+/// mouse already is, so "press here" is a command: hover, then press. Anything
+/// else with no selector falls through to the selector's own error.
+Offset? _pointTarget(Map<String, String> params) {
+  final hasX = params.containsKey('x');
+  final hasY = params.containsKey('y');
+  if (hasX != hasY) {
+    throw const FormatException('x and y must be given together');
+  }
+  if (hasX) {
+    final x = double.tryParse(params['x']!);
+    final y = double.tryParse(params['y']!);
+    if (x == null || y == null) {
+      throw const FormatException('x and y must be numbers');
+    }
+    return Offset(x, y);
+  }
+  if (params['pointer'] == 'mouse' &&
+      !_selectorNames.any(params.containsKey) &&
+      !params.containsKey('text')) {
+    return _mousePosition;
+  }
+  return null;
+}
+
 /// Resolve the target element via the selector params, fetch its RenderBox
 /// rect, run [body] with it, and wrap the result in `_ok`. Shared by tap,
 /// longPress, doubleTap, drag, and getRect.
@@ -1899,7 +1960,19 @@ Future<ServiceExtensionResponse> _withRect(
   Map<String, String> params,
   Future<Map<String, Object?>> Function(Rect rect) body, {
   bool dispatchesPointer = false,
+  bool allowPoint = false,
 }) async {
+  if (allowPoint) {
+    final point = _pointTarget(params);
+    if (point != null) {
+      // A point, not a widget: nothing to hit-test it against, and the caller
+      // chose where it lands.
+      final answer = await body(Rect.fromLTWH(point.dx, point.dy, 0, 0));
+      final asleep = _notRendering();
+      if (asleep != null) answer['notRendering'] = asleep;
+      return _ok(answer);
+    }
+  }
   final _Selector sel;
   try {
     sel = _selector(params);
