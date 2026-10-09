@@ -101,6 +101,24 @@ done
 days. When the bazel build fails with *"no provisioning profile was found
 named …"*, mint a fresh one the same way.
 
+## App extensions
+
+`//:app_extensions` embeds two Swift extensions from `extensions/`: a widget
+extension holding a WidgetKit widget and a Control Center control, and a share
+extension. The app and both extensions share the App Group
+`group.com.rulesflutter.ios.example`.
+
+`//:app_extensions_device` is the same app for a device, signed with
+`//device:profile`. The extensions are built twice, by `extensions/defs.bzl`,
+because each needs its own `provisioning_profile`. The team wildcard profile
+cannot grant an App Group, so the device variant leaves the group out of the app
+and both extensions. To keep it, register an App ID with the group for the app
+and each extension, make a profile for each, and pass each its own.
+
+```sh
+bazel build //:app_extensions_device -c opt --ios_multi_cpus=arm64
+```
+
 ## Build modes
 
 | Compilation mode | Target | Result |

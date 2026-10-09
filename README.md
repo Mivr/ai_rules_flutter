@@ -569,6 +569,66 @@ flutter_macos_app(
 
 `e2e/macos_example` and `e2e/ios_example` each build such an app and check the bundle names the intent and the binary links it. When `appintentsmetadataprocessor` fails on a schema validation error, rules_apple's wrapper reports `version.json.sorted: No such file or directory` and hides the processor's own message. Run the processor by hand to read the real error.
 
+### App extensions
+
+Widgets, Control Center controls, share extensions and other app extensions are written in Swift and built with rules_apple's `ios_extension` or `macos_extension`. `flutter_ios_app` and `flutter_macos_app` pass `extensions` through to `ios_application` and `macos_application`, which embed each `.appex` in `PlugIns/` (iOS) or `Contents/PlugIns/` (macOS). Flutter does not run inside an extension: an extension cannot link the Flutter engine or Dart code from these rules. Share data with the app through an App Group instead.
+
+```starlark
+load("@rules_apple//apple:ios.bzl", "ios_extension")
+load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
+load("@rules_swift//swift:swift.bzl", "swift_library")
+
+apple_bundle_version(
+    name = "version",
+    build_version = "1.0",
+    short_version_string = "1.0",
+)
+
+swift_library(
+    name = "widgets_lib",
+    srcs = ["extensions/Widgets.swift"],
+    linkopts = ["-Wl,-framework,AppIntents"],
+    module_name = "Widgets",
+)
+
+ios_extension(
+    name = "widgets",
+    app_intents = [":widgets_lib"],
+    bundle_id = "com.example.myapp.widgets",
+    entitlements = "extensions/AppGroup.entitlements",
+    families = ["iphone"],
+    infoplists = ["extensions/Widgets-Info.plist"],
+    minimum_os_version = "17.0",
+    version = ":version",
+    deps = [":widgets_lib"],
+)
+
+flutter_ios_app(
+    name = "my_app_ios",
+    additional_entitlements = ["extensions/AppGroup.entitlements"],
+    application = ":my_app",
+    bundle_id = "com.example.myapp",
+    extensions = [":widgets"],
+)
+```
+
+What the extension needs:
+
+- **A version equal to the app's.** rules_apple gives an extension no version unless you pass one, and the system expects an extension's version to match its app's. `flutter_ios_app` and `flutter_macos_app` default to 1.0, so pass an `apple_bundle_version` of 1.0, or the same one you give the app.
+- **A bundle id under the app's**, such as `com.example.myapp.widgets`.
+- **An Info.plist with the bundle keys.** Besides `NSExtension` and its `NSExtensionPointIdentifier`, give `CFBundleName` (`$(PRODUCT_NAME)`), `CFBundleExecutable` (`$(EXECUTABLE_NAME)`), `CFBundleIdentifier` (`$(PRODUCT_BUNDLE_IDENTIFIER)`) and `CFBundlePackageType` `XPC!`. Without them the simulator refuses to install the app.
+- **Its App Intents.** A control's button, an interactive widget or a configurable widget runs an App Intent in the extension, so give the library to the extension's `app_intents` as well as its `deps`. rules_apple 5.2.0's `macos_extension` has no `app_intents` attribute. `e2e/macos_example/patches/` has a patch that adds it; apply it with `single_version_override(module_name = "rules_apple", version = "5.2.0", patch_strip = 1, patches = [...])`. Overrides only apply in the root module, so an app needs the override in its own `MODULE.bazel`; it does not come with rules_flutter.
+- **On macOS, a sandbox.** macOS loads a widget or share extension only if its entitlements include `com.apple.security.app-sandbox`.
+- **Visibility** to the package of the app target, if it lives elsewhere. `flutter_ios_app` and `flutter_macos_app` must sit in the package that holds `ios/Runner/` or `macos/Runner/`.
+
+An extension can have a higher `minimum_os_version` than the app. rules_apple accepts that without comment and each bundle records its own minimum, so the system skips the extension on an older OS. Control Center controls need iOS 18 or macOS 26; either raise the extension's minimum or include the control in the `WidgetBundle` behind `if #available`, as the examples do.
+
+**App Groups.** Give each extension an `entitlements` file with `com.apple.security.application-groups`, and merge the same file into the app with `additional_entitlements`. A simulator build is not checked against anything, so the group works there. On macOS, the `group.` form needs a provisioning profile that lists the group, and the team-prefixed form (`<TEAM ID>.name`) needs a signature from that team. An app signed ad hoc gets neither: it builds, and its extensions register, but writes into the group container are refused.
+
+**Signing.** rules_apple signs each extension in its own target, so the app's `provisioning_profile` does not reach its extensions. Give each extension its own `provisioning_profile`. On macOS, an extension without one is signed with the build's `--@rules_apple//apple/build_settings:signing_certificate_name`, and with none set, ad hoc, so it has no team and loses its App Group even inside a team-signed app. A profile can only grant an App Group if it is made for an explicit App ID that has the group, so a device build with groups needs an App ID and a profile for the app and for each extension, registered in the developer portal. The team wildcard profile (`iOS Team Provisioning Profile: *`) covers any bundle id but grants no App Group, and a device build that asks for an entitlement its profile lacks fails. `e2e/ios_example` has a device variant, `:app_extensions_device`, signed with the wildcard; it leaves the App Group out of the app and its extensions for that reason.
+
+`e2e/ios_example` and `e2e/macos_example` each build an app with a widget extension holding a widget and a control, and a share extension, and check where each lands, what each declares, and that all share one App Group.
+
 ### Android
 
 Run `flutter create --platforms=android .` first so `android/app/src/main/` exists with its manifest, resources, and Kotlin sources.
