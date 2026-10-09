@@ -566,36 +566,27 @@ void main() {
       expect(result, isNull);
     });
 
-    test(
-      'skips a dangling candidate and picks the one that resolves on disk',
-      () {
-        // A cross-platform app's `flutter_application` dev config is listed by
-        // cquery in BOTH the platform-transitioned config and the default host
-        // config, but only the host one is built (the transitioned path is a
-        // dangling symlink). findDevConfig must skip the dangling path and return
-        // the resolvable one — otherwise iOS/Android hot reload fails with
-        // "Cannot resolve symbolic links" at frontend-server startup.
-        final tmpDir = Directory.systemTemp.createTempSync('find_dev_config_');
-        addTearDown(() => tmpDir.deleteSync(recursive: true));
-        final real = File('${tmpDir.path}/app_dev_config.json')
-          ..writeAsStringSync('{}');
-        final dangling =
-            '${tmpDir.path}/ios_sim-ST-deadbeef/app_dev_config.json';
-
-        // Dangling candidate listed FIRST, as cquery often orders it.
-        final result = findDevConfig([dangling, real.path]);
-        expect(result, real.path);
-      },
-    );
-
-    test('falls back to the first candidate when none resolve', () {
-      // Preserves behavior for pure in-memory path lists (no disk): callers
-      // still get a path to surface a clear downstream error.
-      final result = findDevConfig([
-        '/bazel-out/ios_sim-ST-x/bin/a_dev_config.json',
-        '/bazel-out/darwin_arm64-dbg/bin/a_dev_config.json',
-      ]);
-      expect(result, '/bazel-out/ios_sim-ST-x/bin/a_dev_config.json');
+    test('refuses a listing with more than one, rather than picking', () {
+      // Two configurations of one application: the launch build's transitioned
+      // copy and the dev build's own. Either answer by position or by which is
+      // on disk can be the launch build's, whose generated files the dev build
+      // never rewrites.
+      expect(
+        () => findDevConfig([
+          '/bazel-out/darwin_arm64-dbg-macos-arm64-min12.0-ST-x/bin/a_dev_config.json',
+          '/bazel-out/darwin_arm64-dbg/bin/a_dev_config.json',
+        ]),
+        throwsA(
+          isA<DevToolException>().having(
+            (e) => e.message,
+            'message',
+            allOf(
+              contains('-ST-x/bin/a_dev_config.json'),
+              contains('darwin_arm64-dbg/bin/a_dev_config.json'),
+            ),
+          ),
+        ),
+      );
     });
   });
 

@@ -505,7 +505,7 @@ void main() {
         expect(fake.spawned.first.args.first, 'build');
         expect(fake.spawned.last.args, [
           'cquery',
-          '//:app',
+          'config(//:app, target)',
           '--output=files',
           '-c',
           'dbg',

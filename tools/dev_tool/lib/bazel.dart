@@ -459,8 +459,13 @@ class Bazel {
   /// rejects with *"bazel should not be called from a bazel output
   /// directory"*.
   ///
-  /// Output files come from `bazel cquery <target> --output=files` — the exact
-  /// outputs declared by the target rule. No guessing or heuristics.
+  /// Output files come from `bazel cquery 'config(<target>, target)'
+  /// --output=files` — the outputs the target rule declares, in the one
+  /// configuration this build put it in. A cquery of the bare label lists the
+  /// target in every configuration the server has analysed: once a launch
+  /// build has reached a `flutter_application` through its platform
+  /// transition, that is the transitioned instance as well, listed first and
+  /// on disk, and its files are ones this build never rewrites.
   ///
   /// Throws [BazelCancelled] if [close] stopped it.
   Future<BazelBuildResult> build(
@@ -496,7 +501,7 @@ class Bazel {
     }
 
     // Query for output files with the same flags used for build.
-    final cqueryArgs = ['cquery', target, '--output=files'];
+    final cqueryArgs = ['cquery', 'config($target, target)', '--output=files'];
     if (compilationMode != null) {
       cqueryArgs.addAll(['-c', compilationMode]);
     }
@@ -662,12 +667,10 @@ class Bazel {
   /// [target]'s own configuration, as workspace-relative bazel paths.
   ///
   /// The difference from `build(<the flutter_application>).outputFiles`: that
-  /// call also ends in a cquery, and a cquery of a bare label lists the target
-  /// in *every* configuration the Bazel server happens to have analysed —
-  /// sometimes the top-level one alone, sometimes that plus the
-  /// split-transition one, in an order nothing guarantees. Asking through the
-  /// launch target instead makes the transitioned configuration the question
-  /// rather than a coincidence.
+  /// call lists the application in the top-level configuration only, which is
+  /// the one the dev tool builds it in and never the one a platform rule's
+  /// transition launched. Asking through the launch target makes the
+  /// transitioned configuration the question.
   ///
   /// Returns a candidate *set*, not one path: an Android wrapper reaches the
   /// application in several configurations at once, so which of them the

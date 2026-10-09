@@ -546,30 +546,24 @@ class DevConfig {
 
 /// Find `_dev_config.json` in build output files.
 ///
-/// `bazel cquery <label> --output=files` can list the dev config in MORE THAN
-/// ONE configuration for a cross-platform app: the `flutter_application` is
-/// reached through the platform app's apple/android transition, so it appears
-/// both in the transitioned config (e.g. `ios_sim_arm64-dbg-…-ST-<hash>`) AND
-/// in the default host config (`darwin_arm64-dbg`). The dev tool builds the
-/// BARE `flutter_application` label, which materializes only the host-config
-/// instance — the transitioned path is a dangling symlink. Prefer a candidate
-/// that actually resolves on disk; fall back to the first when none do (so the
-/// caller surfaces a clear downstream error rather than silently finding none).
+/// [files] are one target's outputs in one configuration (see
+/// `Bazel.build`), so they hold at most one dev config. More than one is a
+/// listing that spans configurations, and picking among them is how a run
+/// came to read the launch build's copy: its generated sources and native
+/// libraries are paths the dev build never rewrites, so every hot reload
+/// compiled the codegen output the app launched with.
 String? findDevConfig(List<String> files) {
   final candidates = [
     for (final f in files)
       if (f.endsWith('_dev_config.json')) f,
   ];
-  if (candidates.isEmpty) return null;
-  for (final f in candidates) {
-    try {
-      File(f).resolveSymbolicLinksSync();
-      return f;
-    } catch (_) {
-      // Dangling symlink / nonexistent (an unbuilt transitioned config) — skip.
-    }
+  if (candidates.length > 1) {
+    throw DevToolException(
+      'The build listed more than one _dev_config.json, so which one '
+      'describes this build is unknown:\n  ${candidates.join('\n  ')}',
+    );
   }
-  return candidates.first;
+  return candidates.firstOrNull;
 }
 
 /// Parse dev config JSON from a file path, resolving symlinks.

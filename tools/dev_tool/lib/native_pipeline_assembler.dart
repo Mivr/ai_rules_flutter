@@ -697,16 +697,11 @@ class NativePipelineAssembler {
   /// can name, while the bare dev build this pipeline also does lands in the
   /// top-level one.
   ///
-  /// Picking it off the dev build's own output list — the first entry ending
-  /// in `flutter_assets` — works only by accident: `bazelBuild` derives its
-  /// outputs from `cquery <label> --output=files`, which lists the target in
-  /// *every* configuration the Bazel server has analysed, and because a session
-  /// builds the wrapper first the transitioned tree usually comes back first.
-  /// On a server that has only ever analysed the bare target — attach against a
-  /// cold server — the list holds the top-level tree alone, and the pipeline
-  /// then rebuilds through the launch target while diffing a directory that
-  /// never changes. Nothing reports an error; the edit simply does not arrive.
-  /// Skyframe's analysis order is not a contract.
+  /// Not off the dev build's own output list: that lists the bare target in
+  /// the top-level configuration only, which for a wrapper is a tree the app
+  /// never reads. The pipeline would rebuild through the launch target while
+  /// diffing a directory that never changes, and nothing would report an
+  /// error; the edit would simply not arrive.
   ///
   /// The cquery through the launch target is the cross-check, not the source.
   /// It answers "is the tree the app claims reachable from the target the user
