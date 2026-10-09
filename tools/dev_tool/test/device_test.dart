@@ -324,7 +324,8 @@ void main() {
 
       unawaited(fakeLog.outputAttached.then((_) => fakeLog.complete(0)));
 
-      await device.launch('/path/to/app.ipa');
+      final app = await device.launch('/path/to/app.ipa');
+      addTearDown(app.disposeScratchDirs);
 
       // Should have called unzip.
       final unzipCall = calls.firstWhere((c) => c.$1 == 'unzip');
@@ -374,7 +375,8 @@ void main() {
 
         unawaited(fakeLog.outputAttached.then((_) => fakeLog.complete(0)));
         final before = DateTime.now().subtract(const Duration(seconds: 5));
-        await device.launch('/path/to/app.ipa');
+        final app = await device.launch('/path/to/app.ipa');
+        addTearDown(app.disposeScratchDirs);
 
         expect(mtimeAtInstall, isNotNull);
         expect(mtimeAtInstall!.isAfter(before), isTrue);
@@ -3380,6 +3382,8 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       bool Function(FakeProcess lldb, String line)? lldbResponder,
       List<List<String>>? runsLog,
       void Function(IOSDevice device)? onDevice,
+      String appPath = '/path/to/MyApp.app',
+      void Function(String exe, List<String> args)? onRun,
     }) async {
       final devicectl = devicectlProcess ?? FakeProcess();
       final lldb = lldbProcess ?? FakeProcess();
@@ -3428,6 +3432,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         mdns: mdns,
         runProcess: (exe, args) async {
           runs.add([exe, ...args.cast<String>()]);
+          onRun?.call(exe, args.cast<String>());
           final out = args.contains('--json-output')
               ? args[args.indexOf('--json-output') + 1]
               : null;
@@ -3477,7 +3482,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         }
       });
 
-      final pending = device.launch('/path/to/MyApp.app', onLog: null);
+      final pending = device.launch(appPath, onLog: null);
       // A launch that fails at the install step never starts devicectl at all,
       // so waiting on its output alone would hang out the test timeout on
       // exactly the failures these tests assert. Whichever settles first wins,
@@ -3512,6 +3517,40 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       expect(r.instance.vmServiceUri!.host, '127.0.0.1');
       expect(r.instance.vmServiceUri!.path, '/test=/');
     });
+
+    // Bazel writes every file into the .ipa with the same fixed 1980 mtime,
+    // and `devicectl device install app` keeps an installed file whose size
+    // and mtime both match the new one. An AOT App.framework/App that kept its
+    // size across a Dart edit installed as the old code.
+    test(
+      'installs the extracted bundle with fresh modification times',
+      () async {
+        late String extractedApp;
+        DateTime? mtimeAtInstall;
+        final before = DateTime.now().subtract(const Duration(seconds: 5));
+
+        final r = await launchFaked(
+          appPath: '/path/to/app.ipa',
+          onRun: (exe, args) {
+            if (exe == 'unzip') {
+              extractedApp =
+                  '${args.last}/Payload/app.app/Frameworks/App.framework/App';
+              File(extractedApp)
+                ..createSync(recursive: true)
+                ..writeAsBytesSync([1, 2, 3])
+                ..setLastModifiedSync(DateTime.utc(1980));
+            }
+            if (exe == 'xcrun' && args.contains('install')) {
+              mtimeAtInstall = File(extractedApp).lastModifiedSync();
+            }
+          },
+        );
+        addTearDown(r.instance.disposeScratchDirs);
+
+        expect(mtimeAtInstall, isNotNull);
+        expect(mtimeAtInstall!.isAfter(before), isTrue);
+      },
+    );
 
     // The installationURL is what names the launched process, so a launch
     // that loses it has no way to recognise the app's pid and must fail at

@@ -1930,6 +1930,74 @@ Device detectDevice() {
   );
 }
 
+/// Reads the bundle identifier out of an extracted .app's Info.plist.
+Future<String> _extractBundleId(
+  String appPath,
+  ProcessRunSync runProcess,
+) async {
+  final result = await runProcess('defaults', [
+    'read',
+    '$appPath/Info.plist',
+    'CFBundleIdentifier',
+  ]);
+  if (result.exitCode == 0) {
+    return (result.stdout as String).trim();
+  }
+  throw StateError('Could not extract bundle ID from $appPath');
+}
+
+/// Extracts the .app directory from an .ipa archive, ready to install on an
+/// iOS simulator or device.
+///
+/// Returns the directory alongside the bundle so the caller can hold it for
+/// exactly as long as the launch needs it — see [AppInstance.scratchDirs].
+Future<({String appPath, Directory dir})> _extractAppFromIpa(
+  String ipaPath,
+  ProcessRunSync runProcess,
+) async {
+  final tempDir = await createTempDir('flutter_ipa_');
+  try {
+    final result = await runProcess('unzip', [
+      '-oq',
+      ipaPath,
+      '-d',
+      tempDir.path,
+    ]);
+    if (result.exitCode != 0) {
+      throw StateError('Failed to extract IPA: ${result.stderr}');
+    }
+    final payloadDir = Directory(p.join(tempDir.path, 'Payload'));
+    if (!payloadDir.existsSync()) {
+      throw StateError('No Payload directory found in IPA');
+    }
+    final apps = payloadDir
+        .listSync()
+        .where((e) => e.path.endsWith('.app'))
+        .toList();
+    if (apps.isEmpty) {
+      throw StateError('No .app found in IPA Payload directory');
+    }
+    // Bazel writes every archived file with the same fixed 1980 mtime, and
+    // both `simctl install` and `devicectl device install app` keep an
+    // installed file whose size and mtime both match the new one. A rebuilt
+    // native library or AOT App.framework that kept its size would install as
+    // the old machine code, so stamp everything now.
+    final now = DateTime.now();
+    await for (final entity in tempDir.list(
+      recursive: true,
+      followLinks: false,
+    )) {
+      if (entity is File) await entity.setLastModified(now);
+    }
+    return (appPath: apps.first.path, dir: tempDir);
+  } catch (_) {
+    // Nothing usable came out of the archive; the half-unpacked copy is only
+    // going to sit there.
+    await deleteTempDir(tempDir);
+    rethrow;
+  }
+}
+
 /// iOS Simulator device (via xcrun simctl).
 class IOSSimulatorDevice extends Device {
   /// The simulator every `simctl` command of this device addresses.
@@ -1986,7 +2054,7 @@ class IOSSimulatorDevice extends Device {
     String installPath = appPath;
     Directory? unpacked;
     if (appPath.endsWith('.ipa')) {
-      final extracted = await _extractAppFromIpa(appPath);
+      final extracted = await _extractAppFromIpa(appPath, _runProcess);
       installPath = extracted.appPath;
       unpacked = extracted.dir;
     }
@@ -2048,7 +2116,7 @@ class IOSSimulatorDevice extends Device {
 
     // Launch app.
     final bundleId = _launchedBundleId =
-        _bundleId ?? await _extractBundleId(installPath);
+        _bundleId ?? await _extractBundleId(installPath, _runProcess);
     await _runProcess('xcrun', [
       'simctl', 'launch', udid, bundleId,
       // Anything after the bundle id is passed to the app as argv, which is
@@ -2105,67 +2173,6 @@ class IOSSimulatorDevice extends Device {
     ]);
     if (result.exitCode != 0) {
       throw StateError('simctl screenshot failed: ${result.stderr}');
-    }
-  }
-
-  Future<String> _extractBundleId(String appPath) async {
-    final result = await _runProcess('defaults', [
-      'read',
-      '$appPath/Info.plist',
-      'CFBundleIdentifier',
-    ]);
-    if (result.exitCode == 0) {
-      return (result.stdout as String).trim();
-    }
-    throw StateError('Could not extract bundle ID from $appPath');
-  }
-
-  /// Extract the .app directory from an .ipa archive.
-  ///
-  /// Returns the directory alongside the bundle so the caller can hold it for
-  /// exactly as long as the launch needs it — see [AppInstance.scratchDirs].
-  Future<({String appPath, Directory dir})> _extractAppFromIpa(
-    String ipaPath,
-  ) async {
-    final tempDir = await createTempDir('flutter_ipa_');
-    try {
-      final result = await _runProcess('unzip', [
-        '-oq',
-        ipaPath,
-        '-d',
-        tempDir.path,
-      ]);
-      if (result.exitCode != 0) {
-        throw StateError('Failed to extract IPA: ${result.stderr}');
-      }
-      final payloadDir = Directory(p.join(tempDir.path, 'Payload'));
-      if (!payloadDir.existsSync()) {
-        throw StateError('No Payload directory found in IPA');
-      }
-      final apps = payloadDir
-          .listSync()
-          .where((e) => e.path.endsWith('.app'))
-          .toList();
-      if (apps.isEmpty) {
-        throw StateError('No .app found in IPA Payload directory');
-      }
-      // Bazel writes every archived file with the same fixed 1980 mtime, and
-      // the simulator's installer keeps an installed file whose size and mtime
-      // both match the new one. A rebuilt native library that kept its size
-      // would install as the old machine code, so stamp everything now.
-      final now = DateTime.now();
-      await for (final entity in tempDir.list(
-        recursive: true,
-        followLinks: false,
-      )) {
-        if (entity is File) await entity.setLastModified(now);
-      }
-      return (appPath: apps.first.path, dir: tempDir);
-    } catch (_) {
-      // Nothing usable came out of the archive; the half-unpacked copy is only
-      // going to sit there.
-      await deleteTempDir(tempDir);
-      rethrow;
     }
   }
 }
@@ -2609,7 +2616,7 @@ class IOSDevice extends Device {
     String installPath = appPath;
     Directory? unpacked;
     if (appPath.endsWith('.ipa')) {
-      final extracted = await _extractAppFromIpa(appPath);
+      final extracted = await _extractAppFromIpa(appPath, _runProcess);
       installPath = extracted.appPath;
       unpacked = extracted.dir;
     }
@@ -2640,7 +2647,8 @@ class IOSDevice extends Device {
     });
 
     // Extract bundle ID from .app/Info.plist if not provided.
-    final bundleId = _bundleId ?? await _extractBundleId(installPath);
+    final bundleId =
+        _bundleId ?? await _extractBundleId(installPath, _runProcess);
     _launchedBundleId = bundleId;
     _launchedAppPath = installPath;
 
@@ -3367,56 +3375,6 @@ if not error.Success():
         );
       }
       throw StateError('iOS screenshot failed: $err');
-    }
-  }
-
-  Future<String> _extractBundleId(String appPath) async {
-    final result = await _runProcess('defaults', [
-      'read',
-      '$appPath/Info.plist',
-      'CFBundleIdentifier',
-    ]);
-    if (result.exitCode == 0) {
-      return (result.stdout as String).trim();
-    }
-    throw StateError('Could not extract bundle ID from $appPath');
-  }
-
-  /// Extract the .app directory from an .ipa archive.
-  ///
-  /// Returns the directory alongside the bundle so the caller can hold it for
-  /// exactly as long as the launch needs it — see [AppInstance.scratchDirs].
-  Future<({String appPath, Directory dir})> _extractAppFromIpa(
-    String ipaPath,
-  ) async {
-    final tempDir = await createTempDir('flutter_ipa_');
-    try {
-      final result = await _runProcess('unzip', [
-        '-oq',
-        ipaPath,
-        '-d',
-        tempDir.path,
-      ]);
-      if (result.exitCode != 0) {
-        throw StateError('Failed to extract IPA: ${result.stderr}');
-      }
-      final payloadDir = Directory(p.join(tempDir.path, 'Payload'));
-      if (!payloadDir.existsSync()) {
-        throw StateError('No Payload directory found in IPA');
-      }
-      final apps = payloadDir
-          .listSync()
-          .where((e) => e.path.endsWith('.app'))
-          .toList();
-      if (apps.isEmpty) {
-        throw StateError('No .app found in IPA Payload directory');
-      }
-      return (appPath: apps.first.path, dir: tempDir);
-    } catch (_) {
-      // Nothing usable came out of the archive; the half-unpacked copy is only
-      // going to sit there.
-      await deleteTempDir(tempDir);
-      rethrow;
     }
   }
 }
