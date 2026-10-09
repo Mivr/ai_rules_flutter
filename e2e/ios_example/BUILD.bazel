@@ -70,6 +70,7 @@ apple_bundle_version(
     build_version = "1.0",
     short_version_string = "1.0",
     tags = ["manual"],
+    visibility = ["//extensions:__pkg__"],
 )
 
 # =============================================================================
@@ -152,6 +153,36 @@ flutter_ios_app(
     application = ":app_flutter",
     bundle_id = "com.rulesflutter.ios.example.intents",
     runner_deps = [":ping_intents"],
+)
+
+# An app with extensions, built in //extensions: a widget extension holding a
+# WidgetKit widget and a Control Center control, and a share extension. Each
+# extension's bundle id starts with the app's, and the app joins the App Group
+# the extensions declare by merging the same entitlements file into its own.
+# :verify_ios_extensions_test checks where each lands and what each declares.
+flutter_ios_app(
+    name = "app_extensions",
+    additional_entitlements = ["//extensions:AppGroup.entitlements"],
+    application = ":app_flutter",
+    bundle_id = "com.rulesflutter.ios.example.extensions",
+    extensions = [
+        "//extensions:share",
+        "//extensions:widgets",
+    ],
+)
+
+# The same app for a device, signed with //device's team wildcard profile. A
+# wildcard profile cannot grant an App Group, so the app and its extensions
+# leave the group out here; see README.md "App extensions".
+flutter_ios_app(
+    name = "app_extensions_device",
+    application = ":app_flutter",
+    bundle_id = "com.rulesflutter.ios.example.extensions",
+    extensions = [
+        "//extensions:share_device",
+        "//extensions:widgets_device",
+    ],
+    provisioning_profile = "//device:profile",
 )
 
 # =============================================================================
@@ -299,6 +330,21 @@ dart_test(
     name = "verify_ios_app_intents_test",
     data = [":app_intents_simulator"],
     main = "test/verify_ios_app_intents_test.dart",
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
+flutter_ios_simulator_build(
+    name = "app_extensions_simulator",
+    testonly = True,
+    targets = [":app_extensions"],
+)
+
+# Each extension is embedded in PlugIns/, names its extension point, and shares
+# the app's App Group.
+dart_test(
+    name = "verify_ios_extensions_test",
+    data = [":app_extensions_simulator"],
+    main = "test/verify_ios_extensions_test.dart",
     target_compatible_with = ["@platforms//os:macos"],
 )
 
