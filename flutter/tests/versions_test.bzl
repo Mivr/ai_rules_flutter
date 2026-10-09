@@ -1,6 +1,15 @@
 """Unit tests for versions.bzl."""
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
+load(
+    "//flutter/private:artifact_urls.bzl",
+    "android_engine_artifact_path",
+    "dart_sdk_artifact_path",
+    "desktop_engine_artifact_path",
+    "gen_snapshot_cross_artifact_path",
+    "host_artifacts_path",
+    "ios_engine_artifact_path",
+)
 load("//flutter/private:versions.bzl", "ARTIFACT_CHECKSUMS", "FLUTTER_VERSIONS")
 
 def _latest_version_first_test_impl(ctx):
@@ -65,6 +74,58 @@ def _checksums_have_key_artifacts_test_impl(ctx):
             )
     return unittest.end(env)
 
+def _downloaded_artifact_paths():
+    """Every engine artifact path the repository rules download.
+
+    Written out per platform rather than derived from the rules, so adding a
+    download means adding it here, and a path without a checksum fails the test
+    below instead of downloading unverified.
+    """
+    hosts = ["darwin-arm64", "darwin-x64", "linux-x64", "linux-arm64", "windows-x64"]
+    modes = ["debug", "profile", "release"]
+    paths = [
+        "flutter_patched_sdk.zip",
+        "flutter_patched_sdk_product.zip",
+        "sky_engine.zip",
+        "flutter-web-sdk.zip",
+        "material_fonts.zip",
+        "windows-x64/flutter-cpp-client-wrapper.zip",
+    ]
+    for host in hosts:
+        paths.append(dart_sdk_artifact_path(host))
+        paths.append(host_artifacts_path(host))
+        paths.append("{}/font-subset.zip".format(host))
+
+    # Only macOS publishes separate release and profile host tools.
+    for host in ["darwin-arm64", "darwin-x64"]:
+        paths.append(host_artifacts_path(host, "release"))
+        paths.append(host_artifacts_path(host, "profile"))
+
+    # macOS engines are x64 on every host; Linux has both architectures.
+    for os, arch in [("macos", "x64"), ("linux", "x64"), ("linux", "arm64"), ("windows", "x64")]:
+        for mode in modes:
+            paths.append(desktop_engine_artifact_path(os, arch, mode))
+    for mode in modes:
+        paths.append(ios_engine_artifact_path(mode))
+    for android_arch in ["arm64", "x64"]:
+        for mode in modes:
+            paths.append(android_engine_artifact_path(android_arch, mode))
+        for mode in ["profile", "release"]:
+            for cross_host in ["darwin-x64", "linux-x64", "windows-x64"]:
+                paths.append(gen_snapshot_cross_artifact_path("android-" + android_arch, mode, cross_host))
+    return paths
+
+def _every_download_is_checksummed_test_impl(ctx):
+    env = unittest.begin(ctx)
+    for version, checksums in ARTIFACT_CHECKSUMS.items():
+        for path in _downloaded_artifact_paths():
+            asserts.true(
+                env,
+                path in checksums,
+                "ARTIFACT_CHECKSUMS[{}] has no checksum for {}; run `bazel run //tools/update_flutter_version -- {}`".format(version, path, version),
+            )
+    return unittest.end(env)
+
 def _source_sha256_recorded_for_all_versions_test_impl(ctx):
     # Every fetch of the framework source tarball is pinned against this
     # field, so an entry without one cannot be built at all —
@@ -99,6 +160,7 @@ _t2_test = unittest.make(_checksums_exist_for_all_versions_test_impl)
 _t3_test = unittest.make(_checksums_have_key_artifacts_test_impl)
 _t4_test = unittest.make(_checksums_are_sha256_test_impl)
 _t5_test = unittest.make(_source_sha256_recorded_for_all_versions_test_impl)
+_t6_test = unittest.make(_every_download_is_checksummed_test_impl)
 
 def versions_test_suite(name):
-    unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test)
+    unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test, _t6_test)
