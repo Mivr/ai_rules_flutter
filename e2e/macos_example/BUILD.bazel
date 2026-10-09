@@ -252,6 +252,25 @@ flutter_macos_app(
     target_compatible_with = ["@platforms//os:macos"],
 )
 
+# The same app signed by a team: the app and each extension get the profile
+# from the git-ignored //device package (see device.example/), and the App
+# Group takes the team-prefixed form, which macOS grants to bundles that team
+# signed. Each extension needs a profile of its own; one without is signed ad
+# hoc and loses the group. :verify_macos_team_signing_test checks the result.
+flutter_macos_app(
+    name = "app_extensions_team",
+    additional_entitlements = ["//device:AppGroup.entitlements"],
+    app_name = "Extensions App",
+    application = ":app_flutter",
+    bundle_id = "com.example.flutterapp.extensions",
+    extensions = [
+        "//extensions:share_team",
+        "//extensions:widgets_team",
+    ],
+    provisioning_profile = "//device:profile",
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
 # =============================================================================
 # Approach 2: Bazel-generated runner (flutter_macos_runner_lib_gen)
 #
@@ -387,6 +406,19 @@ dart_test(
     name = "verify_macos_extensions_test",
     data = [":app_extensions"],
     main = "test/verify_macos_extensions_test.dart",
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
+# Every bundle in the team-signed app has one TeamIdentifier, not an ad hoc
+# signature, every App Group is prefixed with it, and the signature verifies.
+# `manual`, like the app: it needs the per-developer //device package, so it
+# has no dart_analysis_test either, which would load that package in a plain
+# `bazel test //...`. Running it applies the analysis aspect.
+dart_test(
+    name = "verify_macos_team_signing_test",
+    data = [":app_extensions_team"],
+    main = "test/verify_macos_team_signing_test.dart",
+    tags = ["manual"],
     target_compatible_with = ["@platforms//os:macos"],
 )
 

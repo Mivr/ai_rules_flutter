@@ -1,10 +1,17 @@
 import AppIntents
+import Security
 import SwiftUI
 import WidgetKit
 
 /// The App Group the app and its extensions share. Each writes and reads the
-/// same `UserDefaults` suite through it.
-let appGroup = "group.com.example.flutterapp"
+/// same `UserDefaults` suite through it. The ad hoc and team-signed builds use
+/// different ids, so it is read from this bundle's signed entitlements.
+let appGroup: String = {
+    let task = SecTaskCreateFromSelf(nil)
+    let key = "com.apple.security.application-groups" as CFString
+    let groups = task.flatMap { SecTaskCopyValueForEntitlement($0, key, nil) }
+    return (groups as? [String])?.first ?? ""
+}()
 
 struct NoteEntry: TimelineEntry {
     let date: Date
