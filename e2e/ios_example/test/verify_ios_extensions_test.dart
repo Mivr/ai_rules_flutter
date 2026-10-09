@@ -1,6 +1,7 @@
 /// Verifies the extensions `flutter_ios_app(extensions = [...])` embeds: each
 /// `.appex` sits in the app's `PlugIns/`, declares the extension point it is
-/// for, and the app and every extension carry the same App Group.
+/// for, and the app and every extension carry the same App Group. The widget
+/// extension also carries the App Intents metadata its control runs.
 ///
 /// A simulator build is ad-hoc signed, so the entitlements are not in the
 /// code signature. rules_apple links them into each binary's
@@ -75,6 +76,18 @@ void main() {
         failed = true;
       }
       failed |= !_hasGroup('$bundle/${info['CFBundleExecutable']}', tmpDir);
+    }
+    final actions = File(
+      '$app/PlugIns/widgets.appex/Metadata.appintents/extract.actionsdata',
+    );
+    if (actions.existsSync() &&
+        actions.readAsStringSync().contains('PingIntent')) {
+      print('OK: widgets.appex carries App Intents metadata naming PingIntent');
+    } else {
+      stderr.writeln(
+        'FAIL: widgets.appex has no App Intents metadata naming PingIntent',
+      );
+      failed = true;
     }
     final appInfo = _plist('$app/Info.plist', tmpDir);
     failed |= !_hasGroup('$app/${appInfo['CFBundleExecutable']}', tmpDir);

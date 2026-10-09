@@ -165,6 +165,7 @@ apple_bundle_version(
     build_version = "1.0",
     short_version_string = "1.0",
     tags = ["manual"],
+    visibility = ["//extensions:__pkg__"],
 )
 
 flutter_macos_info_plist_gen(
@@ -229,6 +230,25 @@ flutter_macos_app(
     application = ":app_flutter",
     bundle_id = "com.example.flutterapp.intents",
     runner_deps = [":ping_intents"],
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
+# An app with extensions, built in //extensions: a widget extension holding a
+# WidgetKit widget and a Control Center control, and a share extension. Each
+# extension's bundle id starts with the app's, and the app joins the App Group
+# the extensions declare by merging the same entitlements file into its own.
+# :verify_macos_extensions_test checks where each lands, what each declares,
+# and that the whole bundle's signature is valid.
+flutter_macos_app(
+    name = "app_extensions",
+    additional_entitlements = ["//extensions:AppGroup.entitlements"],
+    app_name = "Extensions App",
+    application = ":app_flutter",
+    bundle_id = "com.example.flutterapp.extensions",
+    extensions = [
+        "//extensions:share",
+        "//extensions:widgets",
+    ],
     target_compatible_with = ["@platforms//os:macos"],
 )
 
@@ -357,6 +377,16 @@ dart_test(
     name = "verify_macos_app_intents_test",
     data = [":app_intents"],
     main = "test/verify_macos_app_intents_test.dart",
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
+# Each extension is embedded in Contents/PlugIns/, names its extension point,
+# is sandboxed and shares the app's App Group, and the bundle's signature
+# verifies.
+dart_test(
+    name = "verify_macos_extensions_test",
+    data = [":app_extensions"],
+    main = "test/verify_macos_extensions_test.dart",
     target_compatible_with = ["@platforms//os:macos"],
 )
 

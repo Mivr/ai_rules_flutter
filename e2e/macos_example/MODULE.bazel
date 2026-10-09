@@ -11,6 +11,18 @@ bazel_dep(name = "rules_cc", version = "0.2.26")
 bazel_dep(name = "rules_swift", version = "4.1.2")
 bazel_dep(name = "platforms", version = "1.1.0")
 
+# rules_apple's macos_extension has no `app_intents` attribute, so a macOS
+# widget extension cannot carry the App Intents metadata its Control Center
+# control runs. The patch adds it, as ios_extension has it. An override only
+# applies in the root module: an app that needs this adds it to its own
+# MODULE.bazel.
+single_version_override(
+    module_name = "rules_apple",
+    patch_strip = 1,
+    patches = ["//patches:rules_apple_macos_extension_app_intents.patch"],
+    version = "5.2.0",
+)
+
 local_path_override(
     module_name = "rules_flutter",
     path = "../..",
