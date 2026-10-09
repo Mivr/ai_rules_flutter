@@ -204,6 +204,35 @@ void main() {
     });
   });
 
+  // A launch that knows only "AOT or not" cannot tell a profile app, which
+  // may serve a VM service, from a release one, which never does. Only `dbg`
+  // compiles a JIT kernel, so every other mode is AOT.
+  group('buildModeFor', () {
+    test('--profile is profile', () {
+      expect(
+        buildModeFor(profileMode: true, compilationMode: 'opt'),
+        BuildMode.profile,
+      );
+    });
+
+    test('dbg is debug', () {
+      expect(
+        buildModeFor(profileMode: false, compilationMode: 'dbg'),
+        BuildMode.debug,
+      );
+    });
+
+    test('opt, fastbuild and no -c are release', () {
+      for (final mode in ['opt', 'fastbuild', null]) {
+        expect(
+          buildModeFor(profileMode: false, compilationMode: mode),
+          BuildMode.release,
+          reason: '-c $mode',
+        );
+      }
+    });
+  });
+
   // The command list is a statement about this run. `flutter_compile_kernel`
   // bakes the record in as a dart define on `-c dbg` native builds only, so a
   // web run advertising `app.buildInfo` could answer nothing but "this app

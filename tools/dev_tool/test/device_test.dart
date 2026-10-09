@@ -238,6 +238,62 @@ void main() {
       expect(() => device.launch('/path/to/MyApp.app'), throwsStateError);
     });
 
+    // An .ipa is unpacked into a temp folder before anything else happens, and
+    // only a launch that succeeds hands that folder to the AppInstance whose
+    // stop deletes it. Every failure past the unpack has to delete it itself,
+    // or each failed launch leaves an app's worth of files in TMPDIR.
+    group('a failed launch leaves no unpacked app behind', () {
+      /// Runs a simulator launch of an .ipa whose step [failAt] fails, and
+      /// returns the folder the .ipa was unpacked into.
+      Future<({String unpacked, List<FakeProcess> started})> failLaunch(
+        String failAt,
+      ) async {
+        late String unpacked;
+        final started = <FakeProcess>[];
+        final device = IOSSimulatorDevice(
+          udid: 'TEST-UDID',
+          runProcess: (exe, args) async {
+            if (exe == 'unzip') {
+              unpacked = args.last;
+              Directory(
+                '$unpacked/Payload/Runner.app',
+              ).createSync(recursive: true);
+            }
+            if (args.contains(failAt)) {
+              return ProcessResult(0, 1, '', '$failAt failed');
+            }
+            return ProcessResult(0, 0, '', '');
+          },
+          startProcess: (exe, args) async {
+            final process = FakeProcess();
+            started.add(process);
+            return process;
+          },
+        );
+        await expectLater(
+          device.launch('/path/to/app.ipa'),
+          throwsA(isA<StateError>()),
+        );
+        return (unpacked: unpacked, started: started);
+      }
+
+      test('when the install fails', () async {
+        final r = await failLaunch('install');
+        expect(Directory(r.unpacked).existsSync(), isFalse);
+      });
+
+      // Past the install the two `log stream` helpers are running too, and a
+      // launch that gives up must not leave them tailing the simulator's log.
+      test('when the bundle id cannot be read', () async {
+        final r = await failLaunch('read');
+        expect(Directory(r.unpacked).existsSync(), isFalse);
+        expect(r.started, hasLength(2));
+        for (final process in r.started) {
+          expect(process.killed, isTrue);
+        }
+      });
+    });
+
     test('stop calls simctl terminate when bundleId is set', () async {
       final calls = <(String, List<String>)>[];
       final fakeLog = FakeProcess();
@@ -1701,6 +1757,18 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       expect(await namesFor(deviceOn('localNetwork')), ['lldb']);
     });
 
+    // Only a JIT app needs the debugger; an AOT one is launched running.
+    test('a profile build needs no debugger', () async {
+      final device = deviceOn('wired')..buildMode = BuildMode.profile;
+      expect(await namesFor(device), ['iproxy']);
+    });
+
+    // A release app has no VM service to forward to.
+    test('a release build needs neither', () async {
+      final device = deviceOn('wired')..buildMode = BuildMode.release;
+      expect(await namesFor(device), isEmpty);
+    });
+
     // Resolving the device is part of the preflight, so "no phone attached" is
     // also reported before a build rather than after one.
     test('reports an unattached device', () async {
@@ -2083,6 +2151,34 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       expect(startCalls, isNotEmpty);
       expect(startCalls.last.$1, contains('MyApp'));
     });
+
+    // The extracted .app is handed to the AppInstance only by a launch that
+    // succeeds; a launch that throws after the unzip must delete it itself.
+    test(
+      'a launch that fails after the unzip deletes the extracted app',
+      () async {
+        late String extracted;
+        final device = MacOSDevice(
+          runProcess: (exe, args) async {
+            if (exe == 'unzip') {
+              extracted = args.last;
+              Directory(
+                '$extracted/MyApp.app/Contents/MacOS',
+              ).createSync(recursive: true);
+            }
+            return ProcessResult(0, 0, '', '');
+          },
+          startProcess: (exe, args) async =>
+              throw const ProcessException('MyApp', [], 'Exec format error'),
+        );
+
+        await expectLater(
+          device.launch('/path/to/app.zip'),
+          throwsA(isA<ProcessException>()),
+        );
+        expect(Directory(extracted).existsSync(), isFalse);
+      },
+    );
 
     test('launches .app bundle directly', () async {
       final calls = <(String, List<String>)>[];
@@ -3384,6 +3480,8 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       void Function(IOSDevice device)? onDevice,
       String appPath = '/path/to/MyApp.app',
       void Function(String exe, List<String> args)? onRun,
+      BuildMode buildMode = BuildMode.debug,
+      List<String>? bonjourServices,
     }) async {
       final devicectl = devicectlProcess ?? FakeProcess();
       final lldb = lldbProcess ?? FakeProcess();
@@ -3436,6 +3534,13 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
           final out = args.contains('--json-output')
               ? args[args.indexOf('--json-output') + 1]
               : null;
+          // What the app's Info.plist declares under NSBonjourServices; a key
+          // that is not there is plutil's exit 1.
+          if (exe == 'plutil') {
+            return bonjourServices == null
+                ? ProcessResult(0, 1, '', 'No value at that key path.')
+                : ProcessResult(0, 0, json.encode(bonjourServices), '');
+          }
           // `list devices`, `install app` and `info processes` all write their
           // answer to the file named by --json-output.
           if (args.contains('devices') && out != null) {
@@ -3466,6 +3571,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         },
       );
 
+      device.buildMode = buildMode;
       onDevice?.call(device);
 
       // Script the lldb side: each command the launch issues gets the reply
@@ -4133,6 +4239,156 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
           containsAllInOrder(['process', 'terminate', '--pid', '4242']),
         ),
       );
+    });
+
+    // An AOT app needs no debugger to run, and attaching one cost half of all
+    // launches: lldb answered `process continue` with "N_SO not found for
+    // N_OSO symbol" and never printed the resume line. flutter_tools attaches
+    // lldb only in debug (`shouldAttachLLDBDebugger`).
+    group('an AOT build', () {
+      for (final mode in [BuildMode.profile, BuildMode.release]) {
+        test('in ${mode.name} launches running, with no debugger', () async {
+          final r = await launchFaked(buildMode: mode);
+          expect(r.starts.map((a) => a.first), isNot(contains('lldb')));
+          final launch = r.starts.singleWhere((a) => a.contains('launch'));
+          expect(launch, isNot(contains('--start-stopped')));
+          expect(launch, contains('--console'));
+          expect(r.instance.process, same(r.devicectl));
+        });
+      }
+
+      test('in release passes no debugging flags', () async {
+        final r = await launchFaked(buildMode: BuildMode.release);
+        final launch = r.starts.singleWhere((a) => a.contains('launch'));
+        expect(launch, isNot(contains('--enable-checked-mode')));
+      });
+
+      test('in profile attaches to a VM service the app declares', () async {
+        final r = await launchFaked(
+          buildMode: BuildMode.profile,
+          bonjourServices: ['_rulesflutterexample._tcp', '_dartVmService._tcp'],
+        );
+        expect(r.instance.vmServiceUri, isNotNull);
+        expect(r.instance.vmServiceUri!.host, '127.0.0.1');
+        expect(r.instance.vmServiceUri!.path, '/test=/');
+        expect(r.starts.where((a) => a.first == 'iproxy'), hasLength(1));
+      });
+
+      // A `-c opt` build ships the release engine and leaves the VM service
+      // keys out of its Info.plist, so there is nothing to wait five minutes
+      // for: iOS will not let an app advertise a service it does not declare.
+      test('in profile does not wait for a VM service the app does not '
+          'declare', () async {
+        final r = await launchFaked(
+          buildMode: BuildMode.profile,
+          bonjourServices: ['_rulesflutterexample._tcp'],
+        );
+        expect(r.instance.vmServiceUri, isNull);
+        expect(r.starts.where((a) => a.first == 'iproxy'), isEmpty);
+      });
+
+      test('in profile reads an app with no Bonjour services as having no '
+          'VM service', () async {
+        final r = await launchFaked(buildMode: BuildMode.profile);
+        expect(r.instance.vmServiceUri, isNull);
+      });
+
+      // flutter_tools does not look for one in release at all.
+      test('in release never looks for a VM service', () async {
+        final r = await launchFaked(
+          buildMode: BuildMode.release,
+          bonjourServices: ['_dartVmService._tcp'],
+        );
+        expect(r.instance.vmServiceUri, isNull);
+        expect(r.starts.where((a) => a.first == 'iproxy'), isEmpty);
+      });
+
+      test('stop terminates the app and its console launcher', () async {
+        final r = await launchFaked(buildMode: BuildMode.release);
+        await r.device.stop(r.instance);
+        expect(r.devicectl.killed, isTrue);
+        expect(
+          r.runs,
+          contains(
+            containsAllInOrder(['process', 'terminate', '--pid', '4242']),
+          ),
+        );
+      });
+    });
+
+    // The .ipa is unpacked into a temp folder before the install, and only a
+    // launch that returns hands it to the AppInstance whose stop deletes it.
+    group('a failed launch leaves no unpacked app behind', () {
+      /// Creates the bundle `unzip` would, and records where.
+      void Function(String exe, List<String> args) unpackInto(
+        void Function(String dir) record,
+      ) => (exe, args) {
+        if (exe != 'unzip') return;
+        record(args.last);
+        Directory('${args.last}/Payload/app.app').createSync(recursive: true);
+      };
+
+      test('when the install fails', () async {
+        late String unpacked;
+        await expectLater(
+          launchFaked(
+            appPath: '/path/to/app.ipa',
+            installJson: null,
+            onRun: unpackInto((dir) => unpacked = dir),
+          ),
+          throwsA(isA<StateError>()),
+        );
+        expect(Directory(unpacked).existsSync(), isFalse);
+      });
+
+      test('when the VM service is not found', () async {
+        late String unpacked;
+        await expectLater(
+          launchFaked(
+            appPath: '/path/to/app.ipa',
+            mdnsStartError: const SocketException('No route to host'),
+            onRun: unpackInto((dir) => unpacked = dir),
+          ),
+          throwsA(isA<StateError>()),
+        );
+        expect(Directory(unpacked).existsSync(), isFalse);
+      });
+
+      // A teardown in the middle of a launch reaches the device only through
+      // abandonLaunch, and the tool may exit before the launch unwinds.
+      test('when the launch is abandoned', () async {
+        late String unpacked;
+        late IOSDevice device;
+        Future<void>? abandoned;
+        await expectLater(
+          launchFaked(
+            appPath: '/path/to/app.ipa',
+            onRun: unpackInto((dir) => unpacked = dir),
+            onDevice: (d) =>
+                device = d..teardownBound = const Duration(milliseconds: 20),
+            lldbResponder: (lldb, line) {
+              if (!line.startsWith('device process attach')) return false;
+              abandoned = device.abandonLaunch();
+              emitLldbStop(lldb, 'signal SIGSTOP');
+              return true;
+            },
+          ),
+          throwsA(isA<StateError>()),
+        );
+        await abandoned;
+        expect(Directory(unpacked).existsSync(), isFalse);
+      });
+
+      test('but a launch that returns keeps it until stop', () async {
+        late String unpacked;
+        final r = await launchFaked(
+          appPath: '/path/to/app.ipa',
+          onRun: unpackInto((dir) => unpacked = dir),
+        );
+        await r.device.abandonLaunch();
+        expect(Directory(unpacked).existsSync(), isTrue);
+        await r.instance.disposeScratchDirs();
+      });
     });
 
     // Every other launch failure is a StateError the launcher turns into a

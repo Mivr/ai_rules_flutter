@@ -182,15 +182,13 @@ class RunPlan {
   /// The same run, in the vocabulary upstream's daemon protocol uses for
   /// `app.start`'s `mode` field.
   ///
-  /// Everything that is not `dbg` is `release`, because that is what the rules
-  /// actually do: every engine select reads `//flutter/private:dbg` -> debug
-  /// and `//conditions:default` -> release, so a `fastbuild` run is running
-  /// the release engine however its bazel mode reads. Derived rather than
-  /// passed through so the field cannot say `fastbuild` at a client that only
-  /// knows the three upstream names.
-  String get daemonMode => profileMode
-      ? 'profile'
-      : (compilationMode == 'dbg' ? 'debug' : 'release');
+  /// Derived from [buildMode] rather than passed through so the field cannot
+  /// say `fastbuild` at a client that only knows the three upstream names.
+  String get daemonMode => buildMode.name;
+
+  /// The build mode this run's app is built in. See [buildModeFor].
+  BuildMode get buildMode =>
+      buildModeFor(profileMode: profileMode, compilationMode: compilationMode);
 
   /// The compilation mode a set of flags implies.
   ///
@@ -380,6 +378,17 @@ class RunPlan {
       );
     }
 
+    // Before the preflight: the mode decides which host tools a launch needs
+    // (an iOS device attaches lldb to a debug app only), as well as how it
+    // launches.
+    final buildMode = buildModeFor(
+      profileMode: profileMode,
+      compilationMode: compilationMode,
+    );
+    for (final device in devices) {
+      device.buildMode = buildMode;
+    }
+
     // Fail on a misconfigured host before spending a build on it. Each device
     // names the external programs its launch drives, so a missing `aapt2` or an
     // unattached phone is reported here, by name, instead of surfacing later as
@@ -499,6 +508,20 @@ class RunPlan {
     });
     return (appFile: appFile, outputFiles: result.outputFiles);
   }
+}
+
+/// The build mode a run's flags build its app in.
+///
+/// `--profile` is profile. Otherwise the engine decides, and every engine select
+/// in the rules reads `//flutter/private:dbg` -> debug and
+/// `//conditions:default` -> release: `dbg` is debug and every other `-c`,
+/// `fastbuild` and none included, is release.
+BuildMode buildModeFor({
+  required bool profileMode,
+  required String? compilationMode,
+}) {
+  if (profileMode) return BuildMode.profile;
+  return compilationMode == 'dbg' ? BuildMode.debug : BuildMode.release;
 }
 
 /// Whether a run with these properties carries the `rules_flutter.build_info`

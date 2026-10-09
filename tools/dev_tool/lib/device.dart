@@ -47,6 +47,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import 'app_log.dart';
+import 'build_mode.dart';
 import 'cdp_console.dart';
 import 'compiler_config.dart';
 import 'host_tools.dart';
@@ -64,6 +65,7 @@ import 'web_module_server.dart';
 import 'web_options.dart';
 
 export 'app_log.dart' show AppLogLine, AppLogStream, LogPage;
+export 'build_mode.dart' show BuildMode;
 export 'host_tools.dart' show HostTool, MissingHostToolException;
 
 final _logger = Logger('dev_tool.device');
@@ -226,6 +228,34 @@ class AppInstance {
   }
 }
 
+/// A temp folder that a launch in flight owns: the unpacked app it installs
+/// or runs.
+///
+/// A launch that returns hands the folder to its [AppInstance], whose `stop`
+/// deletes it. Until then the launch must delete it on every way out: a throw,
+/// and an abandon from a teardown that may end the tool before the launch
+/// unwinds. Otherwise each failed launch leaves a copy of the app in TMPDIR.
+class _LaunchScratch {
+  Directory? _dir;
+
+  void hold(Directory dir) => _dir = dir;
+
+  /// Gives the folder to the [AppInstance] being returned, which deletes it
+  /// from then on.
+  List<Directory> handOver() {
+    final dir = _dir;
+    _dir = null;
+    return [?dir];
+  }
+
+  /// Deletes the folder, unless it was handed over.
+  Future<void> release() async {
+    final dir = _dir;
+    _dir = null;
+    if (dir != null) await deleteTempDir(dir);
+  }
+}
+
 /// Abstract device that can launch and manage a Flutter app.
 abstract class Device {
   /// How long [stop] waits on any one thing it is stopping before giving up on
@@ -342,6 +372,13 @@ abstract class Device {
   /// why nothing that needs a running framework (a first frame, a service
   /// extension, an `app.*` command) will answer until it does.
   bool startPaused = false;
+
+  /// The build mode of the app this device will launch.
+  ///
+  /// Set before [preflight], because it changes which host tools a launch
+  /// needs as well as how it launches. Debug until told otherwise, which is
+  /// what every launch did before any device needed to know.
+  BuildMode buildMode = BuildMode.debug;
 
   /// Whether filesystem paths on this device are Windows-shaped.
   ///
@@ -465,15 +502,42 @@ class MacOSDevice extends Device {
   @override
   String get name => 'macOS';
 
+  final _scratch = _LaunchScratch();
+
+  /// The app a launch in flight has started, until the launch returns it.
+  Process? _launching;
+
   @override
   Future<AppInstance> launch(String appPath, {AppLogListener? onLog}) async {
+    try {
+      return await _launch(appPath, onLog: onLog);
+    } catch (_) {
+      await _releaseLaunch();
+      rethrow;
+    }
+  }
+
+  @override
+  Future<void> abandonLaunch() => _releaseLaunch();
+
+  /// Undo a launch that did not return: the app it started, which runs out of
+  /// the extracted copy, and then that copy.
+  Future<void> _releaseLaunch() async {
+    final process = _launching;
+    _launching = null;
+    if (process != null) {
+      await _stopProcess('macOS app', process, teardownBound);
+    }
+    await _scratch.release();
+  }
+
+  Future<AppInstance> _launch(String appPath, {AppLogListener? onLog}) async {
     // Extract .app from .zip if needed (Bazel macOS bundles are zipped).
     String resolvedPath = appPath;
-    Directory? extracted;
     if (appPath.endsWith('.zip')) {
       final unpacked = await _extractAppFromZip(appPath);
       resolvedPath = unpacked.appPath;
-      extracted = unpacked.dir;
+      _scratch.hold(unpacked.dir);
     }
 
     // For .app bundles, find the executable inside.
@@ -486,7 +550,7 @@ class MacOSDevice extends Device {
       executable = resolvedPath;
     }
 
-    final process = await _startProcess(
+    final process = _launching = await _startProcess(
       executable,
       [],
     );
@@ -497,13 +561,14 @@ class MacOSDevice extends Device {
       await _bringToFront(resolvedPath, process.pid);
     }
 
+    _launching = null;
     return AppInstance(
       process: process,
       vmServiceUri: vmServiceUri,
       logs: logs,
       // The app runs out of this directory, so it goes only once the process
       // has exited — which `stop` awaits before disposing it.
-      scratchDirs: [if (extracted != null) extracted],
+      scratchDirs: _scratch.handOver(),
     );
   }
 
@@ -2048,15 +2113,49 @@ class IOSSimulatorDevice extends Device {
   @override
   List<String> get buildArgs => const ['--ios_multi_cpus=sim_arm64'];
 
+  final _scratch = _LaunchScratch();
+
+  /// The `log stream` helpers a launch in flight has started, until the launch
+  /// hands them to its [AppInstance].
+  final _launchHelpers = <Process>[];
+
   @override
   Future<AppInstance> launch(String appPath, {AppLogListener? onLog}) async {
+    try {
+      return await _launch(appPath, onLog: onLog);
+    } catch (_) {
+      await _releaseLaunch();
+      rethrow;
+    }
+  }
+
+  @override
+  Future<void> abandonLaunch() => _releaseLaunch();
+
+  /// Undo a launch that did not return: its log helpers and its unpacked app.
+  /// `simctl install` copies the app, so nothing runs out of the unpacked one.
+  Future<void> _releaseLaunch() async {
+    final helpers = [..._launchHelpers];
+    _launchHelpers.clear();
+    await Future.wait(
+      helpers.map((h) => _stopProcess('iOS Simulator log', h, teardownBound)),
+    );
+    await _scratch.release();
+  }
+
+  Future<Process> _startHelper(String executable, List<String> args) async {
+    final process = await _startProcess(executable, args);
+    _launchHelpers.add(process);
+    return process;
+  }
+
+  Future<AppInstance> _launch(String appPath, {AppLogListener? onLog}) async {
     // Extract .app from .ipa if needed — simctl install requires .app.
     String installPath = appPath;
-    Directory? unpacked;
     if (appPath.endsWith('.ipa')) {
       final extracted = await _extractAppFromIpa(appPath, _runProcess);
       installPath = extracted.appPath;
-      unpacked = extracted.dir;
+      _scratch.hold(extracted.dir);
     }
 
     // Boot sim (idempotent — no-op if already booted).
@@ -2082,7 +2181,7 @@ class IOSSimulatorDevice extends Device {
     // all depend on — contingent on those exclusion clauses continuing to
     // spare the announcement. Two narrow streams fail independently and
     // visibly; one broad stream fails silently.
-    final discoveryLog = await _startProcess('xcrun', [
+    final discoveryLog = await _startHelper('xcrun', [
       'simctl',
       'spawn',
       udid,
@@ -2093,7 +2192,7 @@ class IOSSimulatorDevice extends Device {
     ]);
 
     final appName = p.basename(installPath).replaceAll('.app', '');
-    final outputLog = await _startProcess('xcrun', [
+    final outputLog = await _startHelper('xcrun', [
       'simctl',
       'spawn',
       udid,
@@ -2127,12 +2226,13 @@ class IOSSimulatorDevice extends Device {
     // Discover VM service URI from the dedicated discovery stream.
     final uri = await discoverVmServiceUriFromProcess(discoveryLog);
 
+    _launchHelpers.clear();
     return AppInstance(
       process: discoveryLog,
       vmServiceUri: uri,
       logs: logs,
       auxiliaryProcesses: [outputLog],
-      scratchDirs: [if (unpacked != null) unpacked],
+      scratchDirs: _scratch.handOver(),
     );
   }
 
@@ -2442,13 +2542,17 @@ class IOSDevice extends Device {
   Future<List<HostTool>> requiredHostTools() async {
     final info = await _resolveInfo();
     return [
-      lldbTool(),
+      // Only a debug app is run under the debugger.
+      if (buildMode == BuildMode.debug) lldbTool(),
       // Only a cabled device is reached through a port forward; a wireless one
       // is dialed at its own address, so demanding iproxy there would refuse a
-      // run that works. `xcrun` is not listed: it is part of macOS, and a
-      // missing or misconfigured Xcode is already reported by [_resolveInfo],
-      // with devicectl's own explanation attached.
-      if (info.transport == IOSDeviceTransport.wired) iproxyTool(),
+      // run that works. A release app has no VM service to forward to. `xcrun`
+      // is not listed: it is part of macOS, and a missing or misconfigured
+      // Xcode is already reported by [_resolveInfo], with devicectl's own
+      // explanation attached.
+      if (info.transport == IOSDeviceTransport.wired &&
+          buildMode != BuildMode.release)
+        iproxyTool(),
     ];
   }
 
@@ -2603,7 +2707,11 @@ class IOSDevice extends Device {
     // Helpers first: see [_terminateApp] for why the debugger must be gone.
     await _reapLaunchHelpers();
     await _terminateApp();
+    // `devicectl install` copies the app, so nothing runs out of this.
+    await _scratch.release();
   }
+
+  final _scratch = _LaunchScratch();
 
   Future<AppInstance> _launchAndAttach(
     String appPath, {
@@ -2614,11 +2722,10 @@ class IOSDevice extends Device {
 
     // Extract .app from .ipa if needed — devicectl install requires .app.
     String installPath = appPath;
-    Directory? unpacked;
     if (appPath.endsWith('.ipa')) {
       final extracted = await _extractAppFromIpa(appPath, _runProcess);
       installPath = extracted.appPath;
-      unpacked = extracted.dir;
+      _scratch.hold(extracted.dir);
     }
 
     // Install with JSON output to capture installationURL — the only handle on
@@ -2652,18 +2759,20 @@ class IOSDevice extends Device {
     _launchedBundleId = bundleId;
     _launchedAppPath = installPath;
 
-    // iOS debug apps require a debugger (ptrace) to be attached before the
-    // Flutter engine will start. This matches what `flutter run` does:
-    //   1. Launch paused via devicectl --console --start-stopped
+    // An iOS debug app needs a debugger (ptrace) attached before the Flutter
+    // engine will start, because its JIT has to be given executable pages.
+    // An AOT app needs none, and flutter_tools attaches one only in debug
+    // (`shouldAttachLLDBDebugger` in `ios/devices.dart`). So:
+    //   1. Launch via devicectl --console; stopped, in debug
     //   2. Get PID from process list
-    //   3. Attach lldb (which starts debugserver / ptrace)
-    //   4. Set JIT page notification breakpoint
-    //   5. Resume
-    //   6. Discover the VM service by its mDNS advertisement
+    //   3. In debug only: attach lldb (which starts debugserver / ptrace), set
+    //      the JIT page notification breakpoint, and resume
+    //   4. Discover the VM service by its mDNS advertisement, if there is one
+    final debug = buildMode == BuildMode.debug;
 
     final logs = _newAppLogs(onLog);
 
-    // Step 1: Launch paused with --console to capture the app's output.
+    // Step 1: Launch with --console to capture the app's output.
     //
     // flutter_tools wraps this in `script -t 0 /dev/null` "to convince
     // devicectl it has a terminal attached in order to redirect stdout"
@@ -2676,13 +2785,15 @@ class IOSDevice extends Device {
       'launch',
       '--device',
       info.udid,
-      '--start-stopped',
+      if (debug) '--start-stopped',
       '--console',
       '--environment-variables',
       '{"OS_ACTIVITY_DT_MODE": "enable"}',
       bundleId,
       '--enable-dart-profiling',
-      '--enable-checked-mode',
+      // flutter_tools passes this whenever debugging is enabled, which is
+      // debug and profile (`getIOSLaunchArguments`).
+      if (buildMode != BuildMode.release) '--enable-checked-mode',
       if (startPaused) '--start-paused',
       // A wireless device is dialed at its own address, so the VM service must
       // not bind to the device's loopback the way it does by default. Matches
@@ -2735,13 +2846,52 @@ class IOSDevice extends Device {
     launchTimeout.cancel();
     await bannerSub.cancel();
 
-    // Step 2: Get PID from running process list.
+    // Step 2: Get PID from running process list. [stop] terminates the app by
+    // it, debugger or not.
     final processId = await _findAppProcessId(installationUrl);
     _appPid = processId;
 
-    // Step 3-5: Attach lldb debugger, set breakpoint, resume.
-    // Matches flutter_tools LLDB._selectDevice, _setBreakpoint,
-    // _attachToAppProcess, _resumeProcess.
+    // Step 3: In debug, attach lldb. Otherwise devicectl, which runs until the
+    // app exits, is both the log source and the process the run watches.
+    final Process process;
+    if (debug) {
+      process = await _attachDebugger(
+        info: info,
+        processId: processId,
+        logs: logs,
+        consoleDone: consolePump.done,
+      );
+    } else {
+      logs.closeWhen([consolePump.done]);
+      process = _consoleLauncherProcess!;
+    }
+
+    // Step 4: Find the VM service by its mDNS advertisement.
+    final vmServiceUri = await _findVmService(
+      info: info,
+      bundleId: bundleId,
+      installPath: installPath,
+      logs: logs,
+    );
+
+    return AppInstance(
+      process: process,
+      vmServiceUri: vmServiceUri,
+      logs: logs,
+      scratchDirs: _scratch.handOver(),
+    );
+  }
+
+  /// Attach lldb to the stopped app, set the JIT page breakpoint, and resume.
+  ///
+  /// Matches flutter_tools LLDB._selectDevice, _setBreakpoint,
+  /// _attachToAppProcess, _resumeProcess.
+  Future<Process> _attachDebugger({
+    required IOSDeviceInfo info,
+    required int processId,
+    required AppLogStream logs,
+    required Future<void> consoleDone,
+  }) async {
     final lldb = await _startHelper('lldb', []);
     _lldbProcess = lldb;
     // lldb is a log source, not just a control channel — see [_startLldbOutput].
@@ -2751,7 +2901,7 @@ class IOSDevice extends Device {
     // place. They are not ordered — devicectl exits when the app terminates,
     // which is exactly when lldb starts reporting why — so the stream outlives
     // whichever ends first.
-    logs.closeWhen([consolePump.done, lldbDone]);
+    logs.closeWhen([consoleDone, lldbDone]);
     await _lldbCommand(lldb, 'device select ${info.udid}');
     final bpOutput = await _lldbCommand(
       lldb,
@@ -2801,9 +2951,42 @@ class IOSDevice extends Device {
       'process continue',
       waitFor: RegExp(r'location added to breakpoint|Process \d+ resuming'),
     );
+    return lldb;
+  }
 
-    // Step 6: Find the VM service by its mDNS advertisement.
-    //
+  /// The app's VM service, found by its mDNS advertisement and made reachable
+  /// from here; or null for an AOT app that has none.
+  ///
+  /// A release app never has one, and flutter_tools does not look. A profile
+  /// app has one only if it was built on the profile engine, and then its
+  /// Info.plist declares `_dartVmService._tcp`: iOS lets an app advertise only
+  /// the Bonjour services it declares, so an app that does not declare it has
+  /// nothing this could find. A `-c opt` build is on the release engine and
+  /// leaves the declaration out (`flutter_ios_info_plist`), so without this
+  /// check a `--profile` run would wait out the whole discovery budget.
+  Future<Uri?> _findVmService({
+    required IOSDeviceInfo info,
+    required String bundleId,
+    required String installPath,
+    required AppLogStream logs,
+  }) async {
+    switch (buildMode) {
+      case BuildMode.debug:
+        break;
+      case BuildMode.release:
+        return null;
+      case BuildMode.profile:
+        if (!await _declaresVmService(installPath)) {
+          logs.add(
+            'This build declares no Dart VM service (its Info.plist has no '
+            '$_vmServiceBonjourType in NSBonjourServices), so the run has '
+            'nothing to attach to. A -c opt build runs the release engine, '
+            'which serves none.',
+          );
+          return null;
+        }
+    }
+
     // Not by reading the log stream, the way every other platform does. A
     // wirelessly attached device has no console channel at all, and the one a
     // wired device has is `devicectl --console`, which dies with the launch it
@@ -2836,13 +3019,7 @@ class IOSDevice extends Device {
       onSlow: (elapsed) => logs.add(
         'Still waiting (${elapsed.inSeconds}s) for the app to advertise its '
         'Dart VM service over mDNS — the only channel an iOS device has for '
-        'it. Until then the JIT is still trapping to the debugger for every '
-        'executable page it allocates, which is the bulk of an iOS debug '
-        'start. If this is taking far longer than your other launches on '
-        'this host, check that Xcode has finished copying symbols for this '
-        'device: a copy stranded part-way leaves lldb without the on-disk '
-        'shared cache, and every one of those traps then costs a read off '
-        'the device.\n'
+        'it.${buildMode == BuildMode.debug ? _slowJitStart : ''}\n'
         'If this is the first launch of $bundleId on this device, look at '
         'the phone instead. iOS asks once, per app, before it lets one onto '
         'the local network, and the prompt appears over the app: until it is '
@@ -2852,7 +3029,6 @@ class IOSDevice extends Device {
       ),
     );
 
-    final Uri vmServiceUri;
     switch (info.transport) {
       case IOSDeviceTransport.wired:
         // The advertised port is a device-side port on the device's loopback.
@@ -2889,22 +3065,55 @@ class IOSDevice extends Device {
             'iproxy said: ${said.isEmpty ? '(nothing)' : said.join('; ')}',
           );
         }
-        vmServiceUri = record.uriFor(host: '127.0.0.1', port: record.port);
+        return record.uriFor(host: '127.0.0.1', port: record.port);
       case IOSDeviceTransport.wireless:
         // No cable to forward through. `discover(resolveAddress: true)` throws
         // rather than returning a record without an address, so this is set.
-        vmServiceUri = record.uriFor(
+        return record.uriFor(
           host: record.address!.address,
           port: record.port,
         );
     }
+  }
 
-    return AppInstance(
-      process: lldb,
-      vmServiceUri: vmServiceUri,
-      logs: logs,
-      scratchDirs: [if (unpacked != null) unpacked],
-    );
+  /// Why a debug launch can be slow to advertise, for the "still waiting"
+  /// note. An AOT app has no JIT trapping to the debugger.
+  static const _slowJitStart =
+      ' Until then the JIT is still trapping to the debugger for every '
+      'executable page it allocates, which is the bulk of an iOS debug '
+      'start. If this is taking far longer than your other launches on '
+      'this host, check that Xcode has finished copying symbols for this '
+      'device: a copy stranded part-way leaves lldb without the on-disk '
+      'shared cache, and every one of those traps then costs a read off '
+      'the device.';
+
+  /// The Bonjour service type the engine advertises its VM service as.
+  static const _vmServiceBonjourType = '_dartVmService._tcp';
+
+  /// Whether the app at [appPath] declares [_vmServiceBonjourType] in its
+  /// Info.plist's NSBonjourServices.
+  Future<bool> _declaresVmService(String appPath) async {
+    final result = await _runProcess('plutil', [
+      '-extract',
+      'NSBonjourServices',
+      'json',
+      '-o',
+      '-',
+      p.join(appPath, 'Info.plist'),
+    ]);
+    // plutil exits 1 when the key is not there: an app with no Bonjour
+    // services at all.
+    if (result.exitCode != 0) return false;
+    final Object? services;
+    try {
+      services = json.decode('${result.stdout}');
+    } on FormatException catch (e) {
+      throw StateError(
+        'plutil printed NSBonjourServices from $appPath/Info.plist as JSON '
+        'this could not read ($e): ${result.stdout}',
+      );
+    }
+    return services is List && services.contains(_vmServiceBonjourType);
   }
 
   /// Python script for the JIT page notification breakpoint.
@@ -3204,8 +3413,9 @@ if not error.Success():
 
       throw StateError(
         'None of the ${processes.length} process(es) running on $name is the '
-        'app installed at $installationUrl. It was launched stopped, so it '
-        'should be among them; an app that crashed on launch will not be.',
+        'app installed at $installationUrl. devicectl reported launching it, '
+        'so it should be among them; an app that crashed on launch will not '
+        'be.',
       );
     });
   }
