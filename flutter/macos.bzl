@@ -80,6 +80,14 @@ MACOS_MINIMUM_OS_VERSION = _MACOS_MINIMUM_OS_VERSION
 # Tier 2 users assembling a macos_application themselves.
 flutter_entitlements_merge = _flutter_entitlements_merge
 
+def _engine_framework_select():
+    """Selects FlutterMacOS.framework for the build mode: debug, profile or release."""
+    return select({
+        Label("@rules_flutter//flutter/private:dbg"): [Label("@flutter_macos_engine//:engine_debug_library")],
+        Label("@rules_flutter//flutter/private:profile"): [Label("@flutter_macos_engine//:engine_profile_library")],
+        "//conditions:default": [Label("@flutter_macos_engine//:engine_library")],
+    })
+
 # -- Composable rules (Tier 2) ------------------------------------------------
 #
 # Like every other *_gen macro in this file, these default to
@@ -144,9 +152,11 @@ flutter_apple_plugin_library = _flutter_apple_plugin_library_macro
 flutter_apple_plugins_aggregator = _flutter_apple_plugins_aggregator
 
 def flutter_macos_engine(name, **kwargs):
-    """Imports the FlutterMacOS.framework engine, auto-selecting debug or release.
+    """Imports the FlutterMacOS.framework engine for the build mode.
 
     Debug mode (-c dbg): JIT engine for iterative development.
+    Profile mode (-c opt with `//flutter:profile`): AOT engine with the VM
+    service, for DevTools.
     Release mode (-c opt / default): AOT engine for production.
 
     Args:
@@ -157,10 +167,7 @@ def flutter_macos_engine(name, **kwargs):
 
     apple_dynamic_framework_import(
         name = name,
-        framework_imports = select({
-            Label("@rules_flutter//flutter/private:dbg"): [Label("@flutter_macos_engine//:engine_debug_library")],
-            "//conditions:default": [Label("@flutter_macos_engine//:engine_library")],
-        }),
+        framework_imports = _engine_framework_select(),
         tags = tags,
         **kwargs
     )
@@ -384,6 +391,9 @@ def flutter_macos_app(
         if debug_present and release_present:
             entitlements = select({
                 Label("@rules_flutter//flutter/private:dbg"): "macos/Runner/DebugProfile.entitlements",
+                # The Xcode project `flutter create` writes signs Profile with
+                # these too: the VM service needs `network.server`.
+                Label("@rules_flutter//flutter/private:profile"): "macos/Runner/DebugProfile.entitlements",
                 "//conditions:default": "macos/Runner/Release.entitlements",
             })
         elif debug_present or release_present:
@@ -450,10 +460,7 @@ def flutter_macos_app(
     # 4. Import FlutterMacOS.framework engine — auto-select debug/release.
     apple_dynamic_framework_import(
         name = "__%s_engine" % name,
-        framework_imports = select({
-            Label("@rules_flutter//flutter/private:dbg"): [Label("@flutter_macos_engine//:engine_debug_library")],
-            "//conditions:default": [Label("@flutter_macos_engine//:engine_library")],
-        }),
+        framework_imports = _engine_framework_select(),
         tags = tags,
     )
 

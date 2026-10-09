@@ -92,12 +92,14 @@ _DART_VM_SERVICE_PLIST = "@rules_flutter//flutter/private/runners/ios:DartVmServ
 def _engine_xcframework_select():
     """Selects the Flutter.xcframework engine for the active compilation mode.
 
-    Debug (-c dbg): JIT engine (simulator). Release (-c opt / default): AOT
-    engine (device). Both live in the single `@flutter_ios_engine` repo, so a
-    consumer only needs that one repo in `use_repo`.
+    Debug (-c dbg): JIT engine (simulator). Profile (-c opt with
+    `//flutter:profile`): the profile AOT engine (device). Release (-c opt /
+    default): AOT engine (device). The labels resolve through rules_flutter's
+    own repo mapping, so a consumer needs none of these repos in `use_repo`.
     """
     return select({
         Label("@rules_flutter//flutter/private:dbg"): [Label("@flutter_ios_engine//:Flutter_xcframework_debug")],
+        Label("@rules_flutter//flutter/private:profile"): [Label("@flutter_ios_engine_profile//:Flutter_xcframework")],
         "//conditions:default": [Label("@flutter_ios_engine//:Flutter_xcframework")],
     })
 

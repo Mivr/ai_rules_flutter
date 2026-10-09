@@ -11,7 +11,8 @@ enum BuildMode {
   /// A `-c dbg` build: a JIT kernel on the debug engine.
   debug,
 
-  /// A `--profile` run: AOT, built `-c opt`.
+  /// A `--profile` run: AOT on the profile engine, built `-c opt` with
+  /// `--@rules_flutter//flutter:profile`.
   profile,
 
   /// Any other build: AOT, on the release engine.
@@ -19,4 +20,8 @@ enum BuildMode {
 
   /// Whether the app runs Dart compiled ahead of time.
   bool get isAot => this != debug;
+
+  /// Whether the app serves a Dart VM service, so a launch waits for one.
+  /// Release is the only mode that never does.
+  bool get servesVmService => this != release;
 }

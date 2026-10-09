@@ -4,6 +4,7 @@
 /// that cannot share one build. Each of those failures is silent if it gets
 /// past here, which is why they are checked before a build is spent on them.
 import 'package:args/args.dart';
+import 'package:flutter_bazel_dev_tool/bazel.dart' show bazelBuildArgs;
 import 'package:flutter_bazel_dev_tool/dev_tool_exception.dart';
 import 'package:flutter_bazel_dev_tool/device.dart';
 import 'package:flutter_bazel_dev_tool/run_command.dart' show RunCommand;
@@ -199,6 +200,64 @@ void main() {
       );
       expect(
         RunPlan.watchEnabledFor(parse(['--no-watch']), isMachine: false),
+        isFalse,
+      );
+    });
+  });
+
+  // Profile is `-c opt` plus a flag, and the flag only helps if every bazel
+  // invocation that carries the run's `-c` also carries it: they travel in
+  // `RunPlan.extraArgs`, so the build, its cquery and the toolchain fetch agree.
+  group('modeBuildFlags', () {
+    test('a profile run carries the profile flag', () {
+      expect(modeBuildFlags(profileMode: true), [
+        '--@rules_flutter//flutter:profile=true',
+      ]);
+    });
+
+    test('every other run carries nothing', () {
+      expect(modeBuildFlags(profileMode: false), isEmpty);
+    });
+
+    test('the flag reaches the build argv next to -c opt', () {
+      final args = bazelBuildArgs(
+        '//app',
+        compilationMode: 'opt',
+        extraArgs: modeBuildFlags(profileMode: true),
+      );
+      expect(
+        args,
+        containsAllInOrder(['-c', 'opt', profileBuildFlag + '=true']),
+      );
+    });
+
+    test('a non-profile build argv does not mention it', () {
+      final args = bazelBuildArgs(
+        '//app',
+        compilationMode: 'opt',
+        extraArgs: modeBuildFlags(profileMode: false),
+      );
+      expect(args.any((a) => a.contains('flutter:profile')), isFalse);
+    });
+  });
+
+  group('BuildMode.servesVmService', () {
+    test('debug and profile serve one, release never does', () {
+      expect(BuildMode.debug.servesVmService, isTrue);
+      expect(BuildMode.profile.servesVmService, isTrue);
+      expect(BuildMode.release.servesVmService, isFalse);
+    });
+
+    test('a --profile run expects one, as buildModeFor derives it', () {
+      expect(
+        buildModeFor(profileMode: true, compilationMode: 'opt').servesVmService,
+        isTrue,
+      );
+      expect(
+        buildModeFor(
+          profileMode: false,
+          compilationMode: 'opt',
+        ).servesVmService,
         isFalse,
       );
     });

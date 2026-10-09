@@ -32,6 +32,13 @@ def _flutter_cross_compilation_repo_impl(repository_ctx):
         )
         gen_snapshot_label = ":gen_snapshot"
 
+    gen_snapshot_attr = '"{}"'.format(gen_snapshot_label)
+    if repository_ctx.attr.profile_gen_snapshot_label:
+        gen_snapshot_attr = """select({{
+        "@rules_flutter//flutter/private:profile": "{profile}",
+        "//conditions:default": "{default}",
+    }})""".format(profile = repository_ctx.attr.profile_gen_snapshot_label, default = gen_snapshot_label)
+
     # Generate BUILD.bazel referencing host repo for shared artifacts.
     exe_suffix = ".exe" if host_platform.startswith("windows") else ""
     build_content = _BUILD_TEMPLATE.format(
@@ -42,7 +49,7 @@ def _flutter_cross_compilation_repo_impl(repository_ctx):
         dartaotruntime_bin = dartaotruntime_binary_name(host_platform),
         target_os = platform_to_os(target_platform),
         target_arch = platform_to_arch(target_platform),
-        gen_snapshot_label = gen_snapshot_label,
+        gen_snapshot_attr = gen_snapshot_attr,
         exe_suffix = exe_suffix,
     )
 
@@ -61,7 +68,7 @@ flutter_toolchain(
     dartaotruntime = "@{host_repo_name}//:dart-sdk/bin/{dartaotruntime_bin}",
     engine_revision = "{engine_revision}",
     frontend_server = "@{host_repo_name}//:host-tools/frontend_server_aot.dart.snapshot",
-    gen_snapshot = "{gen_snapshot_label}",
+    gen_snapshot = {gen_snapshot_attr},
     icu_data = "@{host_repo_name}//:host-tools/icudtl.dat",
     const_finder = "@{host_repo_name}//:font-subset-tools/const_finder.dart.snapshot",
     font_subset = "@{host_repo_name}//:font-subset-tools/font-subset{exe_suffix}",
@@ -89,6 +96,10 @@ flutter_cross_compilation_repo = repository_rule(
         "target_platform": attr.string(mandatory = True),
         "host_repo_name": attr.string(mandatory = True, doc = "Name of the host platform's engine artifacts repo."),
         "gen_snapshot_sha256": attr.string(doc = "SHA-256 of the gen_snapshot archive."),
+        "profile_gen_snapshot_label": attr.string(
+            doc = "Label of the profile-mode gen_snapshot, selected under " +
+                  "`//flutter/private:profile`. Its repo is fetched only then.",
+        ),
         "gen_snapshot_label": attr.string(
             doc = "Explicit label for gen_snapshot binary from another repo (e.g. iOS engine repo). " +
                   "When set, no gen_snapshot is downloaded.",

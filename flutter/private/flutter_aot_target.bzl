@@ -8,22 +8,20 @@ platforms (ELF .so).
 """
 
 load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS")
-load("//flutter/private:common.bzl", "FLUTTER_APPLICATION_ATTRS", "KERNEL_COMPILE_ATTRS", "PLATFORM_CONSTRAINT_ATTRS", "flutter_compile_kernel")
+load("//flutter/private:common.bzl", "FLUTTER_APPLICATION_ATTRS", "KERNEL_COMPILE_ATTRS", "PLATFORM_CONSTRAINT_ATTRS", "flutter_build_mode", "flutter_compile_kernel")
 load("//flutter/private:flutter_aot_compile.bzl", "flutter_aot_elf_action", "flutter_aot_macho_action")
 
 def _flutter_aot_target_impl(ctx):
     flutter_toolchain = ctx.toolchains["@rules_flutter//flutter:toolchain_type"]
     flutter_sdk_info = flutter_toolchain.flutter_sdk_info
 
-    bazel_mode = ctx.var["COMPILATION_MODE"]
-    is_debug = bazel_mode == "dbg"
+    is_debug = flutter_build_mode(ctx) == "debug"
 
     # Step 1: Kernel compilation.
     kernel_dill = flutter_compile_kernel(
         ctx,
         flutter_sdk_info,
         aot = not is_debug,
-        profile = ctx.attr.profile,
     ).kernel_dill
 
     # In debug mode, return the kernel .dill directly (JIT, no gen_snapshot).
@@ -38,7 +36,7 @@ def _flutter_aot_target_impl(ctx):
         ctx.attr._macos_constraint[platform_common.ConstraintValueInfo],
     )
 
-    strip = bazel_mode == "opt"
+    strip = ctx.var["COMPILATION_MODE"] == "opt"
 
     if is_ios or is_macos:
         output = ctx.actions.declare_file(ctx.label.name + ".dylib")
@@ -70,7 +68,6 @@ def _flutter_aot_target_impl(ctx):
 # from missing one `flutter_compile_kernel` reads — an attr reaching `ctx.attr`
 # on a rule that never declared it fails at analysis.
 _AOT_ATTRS = KERNEL_COMPILE_ATTRS | {k: v for k, v in FLUTTER_APPLICATION_ATTRS.items() if k in (
-    "profile",
     "obfuscate",
     "split_debug_info",
     "extra_gen_snapshot_options",

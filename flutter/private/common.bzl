@@ -229,7 +229,7 @@ def collect_assets(deps, direct_assets):
         return list(direct_assets) + depset(transitive = transitive_depsets).to_list()
     return list(direct_assets)
 
-def flutter_compile_kernel(ctx, flutter_sdk_info, aot = None, platform_dill = None, target_platform = None, frontend_server_target = "flutter", native_assets_manifest = None, profile = False, track_widget_creation = False, assets_dir = None, platform_build_args = [], recorded_uses = None):
+def flutter_compile_kernel(ctx, flutter_sdk_info, aot = None, platform_dill = None, target_platform = None, frontend_server_target = "flutter", native_assets_manifest = None, track_widget_creation = False, assets_dir = None, platform_build_args = [], recorded_uses = None):
     """Run the shared kernel compilation step.
 
     Collects sources, generates package_config.json, and invokes
@@ -238,8 +238,9 @@ def flutter_compile_kernel(ctx, flutter_sdk_info, aot = None, platform_dill = No
     registrant library the engine invokes before main() on every
     root-isolate launch — including hot restart.
 
-    If aot and platform_dill are not specified, they are determined by the
-    Bazel compilation mode: opt → product dill + AOT, dbg → debug dill + JIT.
+    If aot and platform_dill are not specified, they follow the build mode
+    (`flutter_build_mode`): debug → debug dill + JIT, profile → debug
+    (non-product) dill + AOT, release → product dill + AOT.
 
     Args:
         ctx: Rule context (must have main, srcs, deps, defines attrs).
@@ -253,13 +254,11 @@ def flutter_compile_kernel(ctx, flutter_sdk_info, aot = None, platform_dill = No
             `native_assets.json` manifest (the JSON shape the
             frontend_server reads via `--native-assets`). Always passed
             through when set; the manifest's contents may be empty.
-        profile: Whether this is a profile-mode build. Passed rather than
-            read off `ctx.attr`, because the rules calling this do not share
-            one attribute set — `flutter_kernel_target` has no `profile`
-            attr at all — and a rule that has no opinion should say `False`
-            rather than be probed for one.
         track_widget_creation: Whether to pass `--track-widget-creation` to
-            the frontend server. Same reason.
+            the frontend server. Passed rather than read off `ctx.attr`,
+            because the rules calling this do not share one attribute set —
+            `flutter_kernel_target` has no such attr — and a rule that has no
+            opinion should say `False` rather than be probed for one.
         assets_dir: The declared `flutter_assets/` tree artifact, from
             `declare_flutter_assets_dir`. Supplying it is what makes a debug
             build carry `rules_flutter.build_info`; the rules with no asset
@@ -312,7 +311,8 @@ def flutter_compile_kernel(ctx, flutter_sdk_info, aot = None, platform_dill = No
     # Computed from the PRE-colocation `packages`/`colocate_inputs` so `lib_root`
     # and `File.is_source` are still intact. See rules_dart
     # `generate_dev_package_config`.
-    emit_dev_config = ctx.var["COMPILATION_MODE"] == "dbg" and not profile
+    mode = flutter_build_mode(ctx)
+    emit_dev_config = mode == "debug"
     dev_package_config = None
     dev_filesystem_roots = []
     dev_filesystem_scheme = ""
@@ -351,15 +351,15 @@ def flutter_compile_kernel(ctx, flutter_sdk_info, aot = None, platform_dill = No
     all_srcs = pc.srcs
     packages = pc.packages
 
-    # Determine compilation mode from Bazel config.
-    bazel_mode = ctx.var["COMPILATION_MODE"]
+    # Profile compiles against the non-product platform, as debug does: the
+    # product one has the VM service and the profiling hooks compiled out.
     if platform_dill == None:
-        if bazel_mode == "dbg":
-            platform_dill = flutter_sdk_info.platform_kernel_dill
-        else:
+        if mode == "release":
             platform_dill = flutter_sdk_info.platform_kernel_dill_product
+        else:
+            platform_dill = flutter_sdk_info.platform_kernel_dill
     if aot == None:
-        aot = bazel_mode != "dbg"
+        aot = mode != "debug"
 
     # AI-agent service-extension injection: in debug builds (non-AOT), if the
     # rule carries an `_agent_extensions_src` attr, stage the agent source next
@@ -369,7 +369,7 @@ def flutter_compile_kernel(ctx, flutter_sdk_info, aot = None, platform_dill = No
     # instrumentation distorts measurements, so it must look the same as
     # release on the agent surface.
     agent_src_attr = getattr(ctx.attr, "_agent_extensions_src", None)
-    inject_agent = (not aot) and bazel_mode == "dbg" and not profile and agent_src_attr != None
+    inject_agent = (not aot) and mode == "debug" and agent_src_attr != None
     staged_agent = None
     staged_native_agent = None
     if inject_agent:
@@ -431,7 +431,7 @@ def flutter_compile_kernel(ctx, flutter_sdk_info, aot = None, platform_dill = No
     # so dev-config writers can replay it on the dev tool's frontend_server.
     user_defines = merge_dart_defines(ctx)
     all_defines = list(user_defines)
-    if profile:
+    if mode == "profile":
         all_defines.append("dart.vm.profile=true")
     elif aot:
         all_defines.append("dart.vm.product=true")
@@ -448,10 +448,10 @@ def flutter_compile_kernel(ctx, flutter_sdk_info, aot = None, platform_dill = No
     # build. Replaying this one would have the app start reporting the dev
     # pipeline's configuration as its launch truth. The dev tool re-injects the
     # value it read from the running app instead.
-    if assets_dir != None and not aot and not profile and bazel_mode == "dbg":
+    if assets_dir != None and not aot and mode == "debug":
         all_defines.append("rules_flutter.build_info=" + json.encode({
             "label": str(ctx.label),
-            "compilationMode": bazel_mode,
+            "compilationMode": ctx.var["COMPILATION_MODE"],
             "platformBuildArgs": platform_build_args,
             "dartDefines": user_defines,
             "assetsDir": assets_dir.path,
@@ -1009,6 +1009,38 @@ AGENT_EXTENSIONS_ATTR = {
     ),
 }
 
+BUILD_MODE_ATTR = {
+    "_profile_flag": attr.label(
+        doc = "The //flutter:profile build setting. Read through `flutter_build_mode`.",
+        default = Label("//flutter:profile"),
+    ),
+}
+
+def flutter_build_mode(ctx):
+    """Flutter's build mode for this configuration: "debug", "profile" or "release".
+
+    `-c dbg` is debug and any other `-c` is release, unless
+    `--@rules_flutter//flutter:profile` asks for profile, which needs `-c opt`:
+    the engine and gen_snapshot selects match profile only there, and a
+    profile Dart snapshot on any other engine does not start.
+
+    Args:
+        ctx: Rule context carrying `BUILD_MODE_ATTR`.
+
+    Returns:
+        "debug", "profile" or "release".
+    """
+    compilation_mode = ctx.var["COMPILATION_MODE"]
+    if ctx.attr._profile_flag[BuildSettingInfo].value:
+        if compilation_mode != "opt":
+            fail(
+                "--@rules_flutter//flutter:profile builds Flutter's profile mode, " +
+                "which is optimized AOT code and needs -c opt (this build is -c " +
+                compilation_mode + "). Add -c opt, or drop the flag.",
+            )
+        return "profile"
+    return "debug" if compilation_mode == "dbg" else "release"
+
 EXTRA_DART_DEFINES_ATTR = {
     "_extra_dart_defines": attr.label(
         doc = "The //flutter:extra_dart_defines build setting, appended after the target's own `defines`.",
@@ -1042,7 +1074,7 @@ def merge_dart_defines(ctx):
 # One failed at analysis, the other silently; a caller that spreads the bundle
 # can omit nothing.
 #
-# Per-rule inputs stay out. `profile`, `track_widget_creation` and `assets_dir`
+# Per-rule inputs stay out. `track_widget_creation` and `assets_dir`
 # are function parameters of `flutter_compile_kernel` for the reason its
 # docstring gives — the callers genuinely disagree about whether they have one
 # — and `_agent_extensions_src` is declared by the rules that inject the agent,
@@ -1106,7 +1138,7 @@ KERNEL_COMPILE_ATTRS = {
     "defines": attr.string_list(
         doc = "Dart environment defines (-D flags).",
     ),
-} | EXTRA_DART_DEFINES_ATTR
+} | EXTRA_DART_DEFINES_ATTR | BUILD_MODE_ATTR
 
 # Shared attrs for all flutter application rules.
 FLUTTER_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {
@@ -1117,10 +1149,6 @@ FLUTTER_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {
     "native_deps": attr.label_list(
         doc = "cc_library targets providing shared libraries for dart:ffi.",
         aspects = [native_sources_aspect],
-    ),
-    "profile": attr.bool(
-        doc = "If True, compile in profile mode (AOT like release, but unstripped and with service extensions for profiling). Overrides the default compilation mode mapping.",
-        default = False,
     ),
     "obfuscate": attr.bool(
         doc = "If True, obfuscate Dart symbols in the AOT output. Pair with split_debug_info to produce a symbol map for deobfuscation.",

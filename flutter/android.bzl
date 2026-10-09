@@ -183,6 +183,9 @@ def flutter_android_engine(name, android_abi = "arm64", **kwargs):
         name = "_%s_jar" % name,
         jars = select({
             "@rules_flutter//flutter/private:dbg": ["@%s//:debug/flutter.jar" % repo],
+            # Named through rules_flutter's own repo mapping, so a consumer
+            # needs no use_repo entry for a repo only profile builds fetch.
+            "@rules_flutter//flutter/private:profile": [Label("@%s_profile//:flutter.jar" % repo)],
             "//conditions:default": ["@%s//:flutter.jar" % repo],
         }),
         tags = tags,
@@ -284,6 +287,8 @@ def flutter_android_manifest_gen(
         name = name,
         actual = select({
             "@rules_flutter//flutter/private:dbg": "__%s_dbg" % name,
+            # Profile serves the VM service too, so it needs the socket.
+            "@rules_flutter//flutter/private:profile": "__%s_dbg" % name,
             "//conditions:default": "__%s_opt" % name,
         }),
         tags = tags,
@@ -360,6 +365,38 @@ def flutter_android_runner_lib_gen(
         **kwargs
     )
 
+def _variant_overlay(name, variant, manifest, base_manifest):
+    """Resolves a `flutter create` variant manifest (`debug` or `profile`).
+
+    Args:
+        name: The flutter_android_app name, for error messages.
+        variant: The build variant directory under android/app/src/.
+        manifest: The macro argument: False, None (discover) or a label.
+        base_manifest: The main manifest the variant merges into, or None.
+
+    Returns:
+        The overlay manifest, or None.
+    """
+    if manifest == False:
+        return None
+    if manifest == None:
+        discovered = native.glob(
+            ["android/app/src/%s/AndroidManifest.xml" % variant],
+            allow_empty = True,
+        )
+        overlay = discovered[0] if discovered else None
+    else:
+        overlay = manifest
+    if overlay != None and base_manifest == None:
+        fail(
+            ("flutter_android_app(name = %r): %s variant manifest %r has no main " +
+             "manifest to merge into. Add android/app/src/main/AndroidManifest.xml " +
+             "(flutter create output), pass `manifest`, or pass " +
+             "`%s_manifest = False` to ignore the variant manifest.") %
+            (name, variant, overlay, variant),
+        )
+    return overlay
+
 # -- Convenience macro (Tier 1) -----------------------------------------------
 
 def flutter_android_app(
@@ -372,6 +409,7 @@ def flutter_android_app(
         target_sdk_version = ANDROID_TARGET_SDK_VERSION,
         manifest = None,
         debug_manifest = None,
+        profile_manifest = None,
         permissions = [],
         resources = [],
         deps = [],
@@ -420,9 +458,10 @@ def flutter_android_app(
     `EACCES`, with no build error and no diagnostic. The dbg-only grant is a
     *debugging* requirement, not the app's network grant. An app that
     networks must declare it for itself, via `permissions`.
-    `android/app/src/profile/AndroidManifest.xml` is ignored:
-    rules_flutter has no profile compilation mode (no profile engine
-    artifact exists; the dev tool maps profile to opt).
+    `profile_manifest` does the same for profile builds (`-c opt` with
+    `--@rules_flutter//flutter:profile`), from
+    android/app/src/profile/AndroidManifest.xml, which `flutter create`
+    writes with the `INTERNET` permission the VM service needs.
 
     When Kotlin sources are found in android/app/src/main/kotlin/, they are
     compiled via kt_android_library with the Flutter engine and AndroidX deps.
@@ -457,6 +496,9 @@ def flutter_android_app(
             from android/app/src/main/ or generated from template.
         debug_manifest: Debug variant manifest merged into `-c dbg` APKs.
             None (default) discovers android/app/src/debug/AndroidManifest.xml;
+            a label overrides discovery; False disables variant handling.
+        profile_manifest: Profile variant manifest merged into profile APKs.
+            None (default) discovers android/app/src/profile/AndroidManifest.xml;
             a label overrides discovery; False disables variant handling.
         permissions: Permission names — e.g.
             `["android.permission.INTERNET"]` — added to the effective
@@ -616,34 +658,17 @@ def flutter_android_app(
                 )
                 binary_deps.append("__%s_runner" % name)
 
-    # Resolve the debug variant overlay — every state explicit:
+    # Resolve the variant overlays — every state explicit:
     #   False → no variant handling, even if the file exists.
-    #   None  → discover flutter create's debug variant manifest.
+    #   None  → discover flutter create's variant manifest.
     #   label → use it, overriding discovery.
-    if debug_manifest == False:
-        debug_overlay = None
-    elif debug_manifest == None:
-        discovered_debug = native.glob(
-            ["android/app/src/debug/AndroidManifest.xml"],
-            allow_empty = True,
-        )
-        debug_overlay = discovered_debug[0] if discovered_debug else None
-    else:
-        debug_overlay = debug_manifest
-
-    if debug_overlay != None and base_manifest == None:
-        fail(
-            ("flutter_android_app(name = %r): debug variant manifest %r has no main " +
-             "manifest to merge into. Add android/app/src/main/AndroidManifest.xml " +
-             "(flutter create output), pass `manifest`, or pass " +
-             "`debug_manifest = False` to ignore the variant manifest.") %
-            (name, debug_overlay),
-        )
+    debug_overlay = _variant_overlay(name, "debug", debug_manifest, base_manifest)
+    profile_overlay = _variant_overlay(name, "profile", profile_manifest, base_manifest)
 
     if base_manifest == None:
         # No flutter create output — generate manifest from template. The
-        # generated manifest handles the debug INTERNET permission itself
-        # (see flutter_android_manifest_gen).
+        # generated manifest handles the debug and profile INTERNET
+        # permission itself (see flutter_android_manifest_gen).
         flutter_android_manifest_gen(
             name = "__%s_manifest" % name,
             package_name = package_name,
@@ -653,20 +678,22 @@ def flutter_android_app(
             tags = tags,
         )
         actual_manifest = "__%s_manifest" % name
-    elif debug_overlay != None:
-        # Fold the debug variant's permissions into -c dbg APKs, the merge
-        # Gradle performs for debug builds. Release APKs keep the main
-        # manifest, byte-identical to a build without the variant.
-        flutter_android_manifest_merge(
-            name = "__%s_manifest_merged" % name,
-            base = base_manifest,
-            overlay = debug_overlay,
-            tags = tags,
-        )
-        actual_manifest = select({
-            "@rules_flutter//flutter/private:dbg": "__%s_manifest_merged" % name,
-            "//conditions:default": base_manifest,
-        })
+    elif debug_overlay != None or profile_overlay != None:
+        # Fold each variant's permissions into its own mode's APKs, the merge
+        # Gradle performs per build type. Release APKs keep the main
+        # manifest, byte-identical to a build without the variants.
+        variants = {}
+        for mode, overlay in [("dbg", debug_overlay), ("profile", profile_overlay)]:
+            if overlay == None:
+                continue
+            flutter_android_manifest_merge(
+                name = "__%s_manifest_merged_%s" % (name, mode),
+                base = base_manifest,
+                overlay = overlay,
+                tags = tags,
+            )
+            variants["@rules_flutter//flutter/private:" + mode] = "__%s_manifest_merged_%s" % (name, mode)
+        actual_manifest = select(variants | {"//conditions:default": base_manifest})
     else:
         actual_manifest = base_manifest
 

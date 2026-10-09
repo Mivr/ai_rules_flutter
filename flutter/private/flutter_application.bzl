@@ -4,6 +4,8 @@ Chains: sources → kernel .dill → AOT native code → asset bundle.
 
 In debug mode (-c dbg): produces kernel .dill + assets (JIT, no gen_snapshot).
 In fastbuild/opt mode: produces AOT native code + assets (release).
+With -c opt and `--@rules_flutter//flutter:profile`: AOT for profile mode,
+compiled by the profile gen_snapshot the toolchain selects.
 
 This rule produces outputs that platform-specific wrappers consume:
 1. AOT compiled native code (.so/.dylib) or kernel .dill (debug)
@@ -15,7 +17,7 @@ load("@apple_support//lib:apple_support.bzl", "apple_support")
 load("@bazel_skylib//lib:dicts.bzl", "dicts")
 load("@rules_dart//dart:utils.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "dart_link_hook_actions", "link_hook_runner_attr")
 load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterInfo")
-load("//flutter/private:common.bzl", "FLUTTER_APPLICATION_ATTRS", "PLATFORM_CONSTRAINT_ATTRS", "check_unreplaced_hooks", "collect_binding_contracts", "collect_native_libs", "declare_flutter_assets_dir", "detect_target_platform", "flutter_build_assets", "flutter_compile_kernel", "flutter_compile_shaders", "host_target_arch", "launch_build_args", "shader_sources")
+load("//flutter/private:common.bzl", "FLUTTER_APPLICATION_ATTRS", "PLATFORM_CONSTRAINT_ATTRS", "check_unreplaced_hooks", "collect_binding_contracts", "collect_native_libs", "declare_flutter_assets_dir", "detect_target_platform", "flutter_build_assets", "flutter_build_mode", "flutter_compile_kernel", "flutter_compile_shaders", "host_target_arch", "launch_build_args", "shader_sources")
 load("//flutter/private:flutter_aot_compile.bzl", "flutter_aot_elf_action", "flutter_aot_macho_action")
 load("//flutter/private:flutter_info.bzl", "dedup_plugins")
 load("//flutter/private:flutter_native_assets.bzl", "bridge_dart_code_assets", "collect_bundled_code_asset_files", "write_native_assets_manifest")
@@ -25,10 +27,12 @@ def _flutter_application_impl(ctx):
     flutter_toolchain = ctx.toolchains["@rules_flutter//flutter:toolchain_type"]
     flutter_sdk_info = flutter_toolchain.flutter_sdk_info
 
-    bazel_mode = ctx.var["COMPILATION_MODE"]
-    is_profile = ctx.attr.profile
-    is_debug = bazel_mode == "dbg" and not is_profile
-    strip = bazel_mode == "opt" and not is_profile
+    mode = flutter_build_mode(ctx)
+    is_debug = mode == "debug"
+
+    # Profile strips like release, as `flutter build --profile` does: the
+    # profiler names Dart code from the snapshot, not from native symbols.
+    strip = ctx.var["COMPILATION_MODE"] == "opt"
 
     # Guard: AOT cross-compilation between desktop OSes is not supported.
     # gen_snapshot can only produce native code for the host OS.
@@ -126,7 +130,6 @@ def _flutter_application_impl(ctx):
         flutter_sdk_info,
         target_platform = target_platform,
         native_assets_manifest = native_assets_manifest_file,
-        profile = is_profile,
         track_widget_creation = ctx.attr.track_widget_creation,
         assets_dir = flutter_assets,
         recorded_uses = recorded_uses,

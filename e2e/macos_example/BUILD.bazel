@@ -19,6 +19,7 @@ load(
     "flutter_macos_runner_lib_gen",
 )
 load("@rules_swift//swift:swift.bzl", "swift_library")
+load(":profile_build.bzl", "profile_build")
 
 exports_files(["pubspec.lock"])
 
@@ -446,4 +447,32 @@ dart_analysis_test(
     name = "verify_macos_app_test_analysis",
     target_compatible_with = ["@platforms//os:macos"],
     targets = [":verify_macos_app_test"],
+)
+
+# :app built in Flutter profile mode regardless of the command line, so the
+# profile test below does not depend on how it is invoked.
+profile_build(
+    name = "app_profile",
+    tags = ["manual"],
+    targets = [":app"],
+)
+
+# Launches the profile build and checks it serves a Dart VM service whose
+# isolate carries the profiling extensions and none of the debug-only ones,
+# and whose timeline records frames. A release build serves no VM service.
+dart_test(
+    name = "verify_macos_profile_app_test",
+    data = [":app_profile"],
+    main = "test/verify_macos_profile_app_test.dart",
+    tags = [
+        "exclusive",
+        "manual",
+    ],
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
+dart_analysis_test(
+    name = "verify_macos_profile_app_test_analysis",
+    target_compatible_with = ["@platforms//os:macos"],
+    targets = [":verify_macos_profile_app_test"],
 )

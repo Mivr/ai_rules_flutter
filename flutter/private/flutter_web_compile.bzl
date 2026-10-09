@@ -5,12 +5,15 @@ Both `dart compile wasm` and `dart compile js` take .dart source directly,
 not a kernel .dill.
 """
 
+load("//flutter/private:common.bzl", "flutter_build_mode")
+
 def web_build_mode(ctx):
     """The web build mode for the current Bazel compilation mode.
 
-    Mirrors the native path (`flutter_application`): the `profile` attr
-    overrides the compilation-mode mapping in either direction, and without it
-    `-c dbg` is a debug build and everything else is release.
+    The build-wide mode (`flutter_build_mode`), unless the `profile` attr
+    asks for profile, which it does under any compilation mode. Web keeps a
+    per-target attr where native builds do not because a web profile build
+    needs no engine of its own: nothing outside this rule has to agree.
 
     Args:
         ctx: Rule context.
@@ -20,7 +23,7 @@ def web_build_mode(ctx):
     """
     if ctx.attr.profile:
         return "profile"
-    return "debug" if ctx.var["COMPILATION_MODE"] == "dbg" else "release"
+    return flutter_build_mode(ctx)
 
 def web_mode_defines(mode):
     """The Dart mode defines a web compile carries for a build mode.

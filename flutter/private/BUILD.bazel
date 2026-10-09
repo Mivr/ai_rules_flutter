@@ -8,6 +8,16 @@ config_setting(
     visibility = ["//visibility:public"],
 )
 
+# Profile mode: `-c opt` with `--@rules_flutter//flutter:profile`. Selects the
+# profile engine and gen_snapshot. The flag under any other `-c` matches
+# neither this nor `//flutter:release`; `flutter_application` refuses it.
+config_setting(
+    name = "profile",
+    flag_values = {"//flutter:profile": "true"},
+    values = {"compilation_mode": "opt"},
+    visibility = ["//visibility:public"],
+)
+
 bzl_library(
     name = "common",
     srcs = ["common.bzl"],
@@ -248,6 +258,7 @@ bzl_library(
     name = "flutter_web_compile",
     srcs = ["flutter_web_compile.bzl"],
     visibility = ["//flutter:__subpackages__"],
+    deps = [":common"],
 )
 
 bzl_library(
@@ -351,6 +362,16 @@ bzl_library(
     srcs = ["flutter_ios_engine_repo.bzl"],
     visibility = ["//flutter:__subpackages__"],
     deps = [":artifact_urls"],
+)
+
+bzl_library(
+    name = "flutter_profile_repo",
+    srcs = ["flutter_profile_repo.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+    deps = [
+        ":artifact_urls",
+        ":engine_helpers",
+    ],
 )
 
 bzl_library(

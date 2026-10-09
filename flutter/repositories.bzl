@@ -14,6 +14,7 @@ load("//flutter/private:flutter_dev_root_repo.bzl", "flutter_dev_root_repo")
 load("//flutter/private:flutter_ios_engine_repo.bzl", "flutter_ios_engine_repo")
 load("//flutter/private:flutter_linux_sysroot_repo.bzl", "flutter_linux_sysroot_repo")
 load("//flutter/private:flutter_macos_engine_repo.bzl", "flutter_macos_engine_repo")
+load("//flutter/private:flutter_profile_repo.bzl", "flutter_profile_repo")
 load("//flutter/private:flutter_sky_engine_repo.bzl", "flutter_sky_engine_repo")
 load("//flutter/private:flutter_web_sdk_repo.bzl", "flutter_web_sdk_repo")
 load("//flutter/private:toolchains_repo.bzl", "CROSS_COMPILATION_PAIRS", "DESKTOP_CROSS_PAIRS", "HOST_PLATFORMS", "flutter_toolchains_repo")
@@ -169,6 +170,27 @@ def _flutter_engine_artifacts_impl(repository_ctx):
         # Fallback: use the debug gen_snapshot from host tools.
         gen_snapshot_path = "host-tools/gen_snapshot"
 
+    # Profile mode compiles with the profile gen_snapshot and runs on the
+    # profile engine, both from the lazily fetched profile repo that
+    # `_host_profile_repo` declares.
+    profile_repo = repository_ctx.attr.profile_repo_name
+    gen_snapshot_attr = '    gen_snapshot = "{}",'.format(gen_snapshot_path)
+    if profile_repo:
+        gen_snapshot_attr = """    gen_snapshot = select({{
+        "@rules_flutter//flutter/private:profile": "@{profile_repo}//:{profile_gen_snapshot}",
+        "//conditions:default": "{gen_snapshot}",
+    }}),""".format(
+            profile_repo = profile_repo,
+            profile_gen_snapshot = _profile_gen_snapshot_path(os_name),
+            gen_snapshot = gen_snapshot_path,
+        )
+        if has_engine_debug:
+            engine_library_attr = """    engine_library = select({{
+        "@rules_flutter//flutter/private:dbg": ":engine_debug_library",
+        "@rules_flutter//flutter/private:profile": "@{profile_repo}//:engine_library",
+        "//conditions:default": ":engine_library",
+    }}),""".format(profile_repo = profile_repo)
+
     # Linux sysroot: point to the sysroot repo for hermetic GTK3 builds.
     linux_sysroot_attr = ""
     sysroot_repo_name = repository_ctx.attr.sysroot_repo_name
@@ -183,7 +205,7 @@ def _flutter_engine_artifacts_impl(repository_ctx):
         engine_library_attr = engine_library_attr,
         engine_filegroup = engine_filegroup,
         engine_debug_filegroup = engine_debug_filegroup,
-        gen_snapshot = gen_snapshot_path,
+        gen_snapshot_attr = gen_snapshot_attr,
         exe_suffix = exe_suffix,
         linux_sysroot_attr = linux_sysroot_attr,
     )
@@ -228,7 +250,7 @@ flutter_toolchain(
 {engine_library_attr}
     flutter_tester = "host-tools/flutter_tester{exe_suffix}",
     frontend_server = "host-tools/frontend_server_aot.dart.snapshot",
-    gen_snapshot = "{gen_snapshot}",
+{gen_snapshot_attr}
     icu_data = "host-tools/icudtl.dat",
     const_finder = "font-subset-tools/const_finder.dart.snapshot",
     font_subset = "font-subset-tools/font-subset{exe_suffix}",
@@ -262,8 +284,39 @@ flutter_engine_artifacts = repository_rule(
         "sysroot_repo_name": attr.string(
             doc = "Name of the Linux sysroot repo for hermetic GTK3 builds. Required for Linux platforms.",
         ),
+        "profile_repo_name": attr.string(
+            doc = "Name of the repo holding this host's profile gen_snapshot and profile engine.",
+        ),
     },
 )
+
+def _profile_gen_snapshot_path(os_name):
+    """Where the profile gen_snapshot sits inside a host profile repo.
+
+    macOS publishes it in a host tools archive; Linux and Windows bundle it
+    with the desktop engine, as they do the release one.
+    """
+    if os_name == "macos":
+        return "host-tools/gen_snapshot"
+    return "engine/gen_snapshot" + (".exe" if os_name == "windows" else "")
+
+def _host_profile_repo(name, platform, engine_revision, checksums):
+    """Declares the profile gen_snapshot and desktop engine for a host platform."""
+    os_name = PLATFORM_PREFIX_TO_OS[platform.split("-")[0]]
+    engine_path = desktop_engine_artifact_path(os_name, engine_arch_for_os(os_name, platform.split("-")[1]), "profile")
+    downloads = {engine_path: "engine"}
+    if os_name == "macos":
+        downloads[host_artifacts_path(platform, mode = "profile")] = "host-tools"
+    flutter_profile_repo(
+        name = name,
+        engine_revision = engine_revision,
+        downloads = downloads,
+        sha256s = {path: checksums.get(path, "") for path in downloads},
+        macos_framework_dirs = ["engine"] if os_name == "macos" else [],
+        build_file_content = engine_filegroup_for_os(os_name) + """
+exports_files(["{gen_snapshot}"], visibility = ["//visibility:public"])
+""".format(gen_snapshot = _profile_gen_snapshot_path(os_name)),
+    )
 
 def flutter_register_toolchains(name, **kwargs):
     """Convenience macro for setting up Flutter SDK repositories.
@@ -297,7 +350,14 @@ def flutter_register_toolchains(name, **kwargs):
             name = name + "_" + platform,
             platform = platform,
             sysroot_repo_name = sysroot_repo_name,
+            profile_repo_name = name + "_" + platform + "_profile",
             **kwargs
+        )
+        _host_profile_repo(
+            name = name + "_" + platform + "_profile",
+            platform = platform,
+            engine_revision = meta.engine_revision,
+            checksums = checksums,
         )
 
     # Cross-compilation repos.
@@ -311,10 +371,21 @@ def flutter_register_toolchains(name, **kwargs):
                 gen_snapshot_label = "@{ios_engine}//:gen_snapshot_arm64".format(
                     ios_engine = name + "_ios_engine",
                 )
+                profile_gen_snapshot_label = "@{}_ios_engine_profile//:gen_snapshot_arm64".format(name)
             else:
                 artifact_host = gen_snapshot_host_platform(host_platform)
                 gen_snapshot_path = gen_snapshot_cross_artifact_path(target_platform, "release", artifact_host)
                 gen_snapshot_sha256 = checksums.get(gen_snapshot_path, "")
+                profile_repo = name + "_cross_" + host_platform + "_" + target_platform + "_profile"
+                profile_gen_snapshot_path = gen_snapshot_cross_artifact_path(target_platform, "profile", artifact_host)
+                flutter_profile_repo(
+                    name = profile_repo,
+                    engine_revision = meta.engine_revision,
+                    downloads = {profile_gen_snapshot_path: ""},
+                    sha256s = {profile_gen_snapshot_path: checksums.get(profile_gen_snapshot_path, "")},
+                    build_file_content = 'exports_files(["gen_snapshot"], visibility = ["//visibility:public"])\n',
+                )
+                profile_gen_snapshot_label = "@{}//:gen_snapshot".format(profile_repo)
 
             flutter_cross_compilation_repo(
                 name = name + "_cross_" + host_platform + "_" + target_platform,
@@ -325,6 +396,7 @@ def flutter_register_toolchains(name, **kwargs):
                 host_repo_name = name + "_" + host_platform,
                 gen_snapshot_sha256 = gen_snapshot_sha256,
                 gen_snapshot_label = gen_snapshot_label,
+                profile_gen_snapshot_label = profile_gen_snapshot_label,
             )
 
     # Linux sysroot repos (one per architecture, shared across hosts).
@@ -451,6 +523,18 @@ def flutter_register_toolchains(name, **kwargs):
                 debug_sha256 = checksums.get(android_engine_artifact_path(android_arch, "debug"), ""),
             )
 
+            # The profile engine, apart so only a profile build fetches it.
+            # flutter_android_engine names it through rules_flutter's own
+            # repo mapping, so consumers need no use_repo entry for it.
+            profile_engine_path = android_engine_artifact_path(android_arch, "profile")
+            flutter_profile_repo(
+                name = name + "_android_engine_" + android_arch + "_profile",
+                engine_revision = meta.engine_revision,
+                downloads = {profile_engine_path: ""},
+                sha256s = {profile_engine_path: checksums.get(profile_engine_path, "")},
+                build_file_content = 'exports_files(["flutter.jar"], visibility = ["//visibility:public"])\n',
+            )
+
     # iOS engine repo (lazy — only downloaded when iOS targets are built).
     # One repo carries both the release engine (device, AOT) and the debug
     # engine (simulator, JIT); the iOS macros select() between its two targets,
@@ -461,6 +545,25 @@ def flutter_register_toolchains(name, **kwargs):
         engine_revision = meta.engine_revision,
         release_sha256 = checksums.get(ios_engine_artifact_path("release"), ""),
         debug_sha256 = checksums.get(ios_engine_artifact_path("debug"), ""),
+    )
+
+    # The iOS profile engine and its gen_snapshot, apart so only a profile
+    # build fetches them. Device only: Flutter publishes no profile engine for
+    # the simulator (the archive's simulator slice is the debug build).
+    ios_profile_path = ios_engine_artifact_path("profile")
+    flutter_profile_repo(
+        name = name + "_ios_engine_profile",
+        engine_revision = meta.engine_revision,
+        downloads = {ios_profile_path: ""},
+        sha256s = {ios_profile_path: checksums.get(ios_profile_path, "")},
+        build_file_content = """filegroup(
+    name = "Flutter_xcframework",
+    srcs = glob(["Flutter.xcframework/**"]),
+    visibility = ["//visibility:public"],
+)
+
+exports_files(["gen_snapshot_arm64"], visibility = ["//visibility:public"])
+""",
     )
 
     # macOS engine alias repo — stable name that delegates to the host

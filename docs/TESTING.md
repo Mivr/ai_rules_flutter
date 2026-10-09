@@ -498,7 +498,7 @@ When re-running to reproduce, use `--nocache_test_results` and read the
 
 ### Dev tool screenshot mechanisms
 
-| Device | Debug mode (VM service) | Profile/release (no VM service) |
+| Device | Debug mode | Profile and release |
 |--------|------------------------|---------------------------------|
 | macOS | bundled ScreenCaptureKit helper (always) | same |
 | Linux | `scrot` (always) | same |

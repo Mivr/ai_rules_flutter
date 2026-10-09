@@ -1,4 +1,5 @@
 load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("//flutter/private:build_settings.bzl", "dart_defines_flag")
 load("//flutter/private:flutter_material_icons.bzl", "flutter_material_icons")
 load("//flutter/private:flutter_pub.bzl", "flutter_pub")
@@ -11,9 +12,22 @@ toolchain_type(
     visibility = ["//visibility:public"],
 )
 
-# Compilation mode config_settings used by select() in macros.
+# Flutter's profile mode: AOT like release, with the Dart VM service kept so
+# DevTools can attach. Applies with `-c opt` only:
+#
+#   bazel build -c opt --@rules_flutter//flutter:profile //app
+#
+# `flutter_bazel run --profile` sets both.
+bool_flag(
+    name = "profile",
+    build_setting_default = False,
+    visibility = ["//visibility:public"],
+)
+
+# Release mode: `-c opt` without the profile flag. Used by select() in macros.
 config_setting(
     name = "release",
+    flag_values = {":profile": "false"},
     values = {"compilation_mode": "opt"},
     visibility = ["//visibility:public"],
 )
@@ -156,6 +170,7 @@ bzl_library(
         "//flutter/private:flutter_desktop_engine_repo",
         "//flutter/private:flutter_dev_root_repo",
         "//flutter/private:flutter_ios_engine_repo",
+        "//flutter/private:flutter_profile_repo",
         "//flutter/private:flutter_sky_engine_repo",
         "//flutter/private:flutter_web_sdk_repo",
         "//flutter/private:toolchains_repo",

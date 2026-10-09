@@ -329,11 +329,13 @@ class RunPlan {
     // including web, which otherwise never resolves a toolchain at all.
     //
     // With the flags the run will build with, because the fetch analyses the
-    // target: see [resolveToolchainPaths].
+    // target: see [resolveToolchainPaths]. The profile flag is among them, so
+    // the toolchain is resolved in the configuration the build will use.
     final extraArgs = [
       ...(results['build-arg'] as List<String>),
       ...defineFlags,
       ...devices.first.buildArgs,
+      ...modeBuildFlags(profileMode: profileMode),
     ];
     final toolchain = await resolveToolchainPaths(
       target,
@@ -403,13 +405,13 @@ class RunPlan {
 
     assertModeCanRun(compilationMode, devices);
 
-    // Debug (JIT) launches await the app's Dart VM service. On Android that
+    // Debug and profile launches await the app's Dart VM service. On Android that
     // service can only bind if the APK holds android.permission.INTERNET —
     // enforcement is kernel-level (AID_INET group) and applies even to
     // 127.0.0.1 — so tell Android devices to preflight the installed package.
     // --allow-no-vm-service opts out of requiring a VM service, so it also skips
     // the preflight (mirroring the post-launch no-VM-service abort).
-    if (compilationMode == 'dbg' && !allowNoVmService) {
+    if (buildMode.servesVmService && !allowNoVmService) {
       for (final device in devices.whereType<AndroidDevice>()) {
         device.expectsVmService = true;
       }
@@ -510,12 +512,30 @@ class RunPlan {
   }
 }
 
+/// The bazel flag that turns an `opt` build into a profile build.
+///
+/// Profile is not a compilation mode: the rules select the profile gen_snapshot
+/// and engine on `-c opt` together with this flag, and refuse the flag under any
+/// other `-c`.
+const profileBuildFlag = '--@rules_flutter//flutter:profile';
+
+/// The bazel flags a run's mode adds beyond `-c`.
+///
+/// Every bazel invocation that carries a run's compilation mode must also carry
+/// these, or it analyses a different configuration than the build does:
+/// [RunPlan.extraArgs] is where they travel, so the build, the cquery that
+/// reads its outputs and the toolchain fetch all get them.
+List<String> modeBuildFlags({required bool profileMode}) => [
+  if (profileMode) '$profileBuildFlag=true',
+];
+
 /// The build mode a run's flags build its app in.
 ///
 /// `--profile` is profile. Otherwise the engine decides, and every engine select
-/// in the rules reads `//flutter/private:dbg` -> debug and
-/// `//conditions:default` -> release: `dbg` is debug and every other `-c`,
-/// `fastbuild` and none included, is release.
+/// in the rules reads `//flutter/private:dbg` -> debug,
+/// `//flutter/private:profile` -> profile and `//conditions:default` ->
+/// release: `dbg` is debug and every other `-c`, `fastbuild` and none included,
+/// is release.
 BuildMode buildModeFor({
   required bool profileMode,
   required String? compilationMode,

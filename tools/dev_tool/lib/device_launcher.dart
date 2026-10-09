@@ -227,13 +227,12 @@ class DeviceLauncher {
 
     // A native session without a vmClient has no hot reload, no DevTools,
     // and no agent control — it is broken, not merely degraded. Abort by
-    // default; --allow-no-vm-service opts into continuing anyway. Release
-    // and profile builds where no VM service URI was ever discovered are
-    // exempt (there may legitimately be none to connect to); a debug build
-    // must always produce one.
+    // default; --allow-no-vm-service opts into continuing anyway. A release
+    // build where no VM service URI was ever discovered is exempt (it
+    // serves none); a debug or profile build must always produce one.
     if (vmClient == null &&
         !plan.isWebDevice &&
-        (appInstance.vmServiceUri != null || plan.compilationMode == 'dbg')) {
+        (appInstance.vmServiceUri != null || plan.buildMode.servesVmService)) {
       if (plan.allowNoVmService) {
         plan.logger.warning({
           'message': 'no_vm_service_continuing',

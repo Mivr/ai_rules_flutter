@@ -2961,9 +2961,10 @@ class IOSDevice extends Device {
   /// app has one only if it was built on the profile engine, and then its
   /// Info.plist declares `_dartVmService._tcp`: iOS lets an app advertise only
   /// the Bonjour services it declares, so an app that does not declare it has
-  /// nothing this could find. A `-c opt` build is on the release engine and
-  /// leaves the declaration out (`flutter_ios_info_plist`), so without this
-  /// check a `--profile` run would wait out the whole discovery budget.
+  /// nothing this could find. A `-c opt` build without the profile flag is on
+  /// the release engine and leaves the declaration out
+  /// (`flutter_ios_info_plist`), so without this check a run built that way
+  /// would wait out the whole discovery budget.
   Future<Uri?> _findVmService({
     required IOSDeviceInfo info,
     required String bundleId,
@@ -2980,8 +2981,9 @@ class IOSDevice extends Device {
           logs.add(
             'This build declares no Dart VM service (its Info.plist has no '
             '$_vmServiceBonjourType in NSBonjourServices), so the run has '
-            'nothing to attach to. A -c opt build runs the release engine, '
-            'which serves none.',
+            'nothing to attach to. A -c opt build without '
+            '--@rules_flutter//flutter:profile runs the release engine, which '
+            'serves none.',
           );
           return null;
         }

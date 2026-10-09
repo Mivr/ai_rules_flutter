@@ -23,6 +23,7 @@ load(":native_sources_test.bzl", "native_sources_test_suite")
 load(":platform_bundle_test.bzl", "platform_bundle_test_suite")
 load(":plist_merge_test.bzl", "plist_merge_test_suite")
 load(":plugin_registrant_test.bzl", "plugin_registrant_test_suite")
+load(":profile_mode_test.bzl", "profile_mode_test_suite")
 load(":pub_lock_sdks_test.bzl", "pub_lock_sdks_test_suite")
 load(":shader_compile_test.bzl", "shader_compile_test_suite")
 load(":toolchain_test.bzl", "toolchain_test_suite")
@@ -74,6 +75,8 @@ linux_runner_defines_test_suite(name = "linux_runner_defines_test")
 linux_sysroot_link_test_suite(name = "linux_sysroot_link_test")
 
 language_version_test_suite(name = "language_version_test")
+
+profile_mode_test_suite(name = "profile_mode_test")
 
 app_entrypoint_test_suite(name = "app_entrypoint_test")
 

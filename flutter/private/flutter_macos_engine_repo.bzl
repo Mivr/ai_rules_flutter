@@ -1,8 +1,9 @@
 """Repository rule for macOS Flutter engine alias.
 
 Creates a lightweight repo that aliases to the host platform's engine_library
-(FlutterMacOS.framework) from the host artifacts repo. Exposes both release
-and debug engines so that flutter_macos_engine() can select() between them.
+(FlutterMacOS.framework) from the host artifacts repo. Exposes the release,
+debug and profile engines so that flutter_macos_engine() can select() between
+them; the profile one lives in the host's lazily fetched profile repo.
 Detects host arch at repo-rule time so users can reference a stable
 `@flutter_macos_engine` name instead of the host-specific `@flutter_darwin-{arch}`.
 """
@@ -34,6 +35,12 @@ alias(
 alias(
     name = "engine_debug_library",
     actual = "@{host_repo}//:engine_debug_library",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "engine_profile_library",
+    actual = "@{host_repo}_profile//:engine_library",
     visibility = ["//visibility:public"],
 )
 """

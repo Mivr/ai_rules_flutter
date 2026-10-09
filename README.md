@@ -135,8 +135,15 @@ Bazel's compilation mode flag selects how the Dart is compiled:
 | `-c dbg` | Debug | Kernel `.dill`, run by the JIT | Development, hot reload |
 | none (fastbuild) | Release | AOT native code | CI, tests |
 | `-c opt` | Release | AOT native code, stripped | Production |
+| `-c opt --@rules_flutter//flutter:profile` | Profile | AOT native code, stripped, with the Dart VM service | Measuring performance with DevTools |
 
 Note that a plain `bazel build` is a release build, not a debug one. That matters for [permissions](#release-builds-and-permissions).
+
+Profile mode is `flutter run --profile`: release-speed code that still serves the Dart VM service, so DevTools can record timelines and CPU profiles. It has no hot reload. Profile uses its own engine and gen_snapshot on every platform, downloaded the first time a profile build needs them, because the engine refuses a snapshot compiled for a different mode. The flag needs `-c opt`, and the build fails if it is set with any other `-c`. Like upstream Flutter, there is no profile mode for the iOS simulator: build profile for a physical device. A `.bazelrc` config saves typing:
+
+```
+build:profile -c opt --@rules_flutter//flutter:profile
+```
 
 ## Dependencies
 
@@ -705,6 +712,7 @@ bazel build //:my_app_android
 | `target_sdk_version` | Target Android SDK version. |
 | `manifest` | A manifest you wrote yourself, used verbatim. Placeholders like `${applicationName}` are not substituted, so do not pass `flutter create`'s own manifest here; let the macro discover that one. |
 | `debug_manifest` | A variant manifest whose permissions merge into `-c dbg` builds only. `None` (default) discovers `android/app/src/debug/AndroidManifest.xml`. A label overrides discovery. `False` disables variant handling. |
+| `profile_manifest` | The same for profile builds. `None` (default) discovers `android/app/src/profile/AndroidManifest.xml`. |
 | `permissions` | Permission names added to the manifest in every compilation mode, for example `["android.permission.INTERNET"]`. See [Release builds and permissions](#release-builds-and-permissions). |
 | `multidex` | Defaults to `"native"`. |
 
@@ -977,12 +985,12 @@ The gap is desktop to desktop: there is no release cross-compile from macOS to L
 
 ### Release builds and permissions
 
-`flutter create`'s scaffold grants network access in debug builds only, and these rules reproduce that. An app that reaches the network under `-c dbg` can be offline under `-c opt` with no build error, no exception, and nothing in its log. The same shape exists on every platform, because in every case the debug-only grant is for the Dart VM service, not for the app:
+`flutter create`'s scaffold grants network access in debug and profile builds only, and these rules reproduce that. An app that reaches the network under `-c dbg` can be offline under `-c opt` with no build error, no exception, and nothing in its log. The same shape exists on every platform, because in every case the debug-only grant is for the Dart VM service, not for the app:
 
 | Platform | What debug has that release does not | Why |
 |---|---|---|
-| macOS | `com.apple.security.network.server` and `com.apple.security.cs.allow-jit` in `DebugProfile.entitlements`. `Release.entitlements` has only `app-sandbox`. | The sandbox must let the VM service bind and the JIT map executable pages. |
-| Android | `android.permission.INTERNET`, from `android/app/src/debug/AndroidManifest.xml`. | Android enforces `INTERNET` at the kernel level. Without it the VM service cannot bind even a loopback socket. |
+| macOS | `com.apple.security.network.server` and `com.apple.security.cs.allow-jit` in `DebugProfile.entitlements`, which profile builds use too. `Release.entitlements` has only `app-sandbox`. | The sandbox must let the VM service bind and the JIT map executable pages. |
+| Android | `android.permission.INTERNET`, from `android/app/src/debug/AndroidManifest.xml` (and `src/profile/` in profile builds). | Android enforces `INTERNET` at the kernel level. Without it the VM service cannot bind even a loopback socket. |
 | iOS | `NSBonjourServices` and `NSLocalNetworkUsageDescription`, merged in by these rules for non-release builds. | The engine advertises the VM service over mDNS. |
 
 An app that uses the network for itself has to say so once, in a way that applies to every compilation mode:
@@ -1106,7 +1114,6 @@ flutter_application(
 | `native_deps` | Shared libraries to bundle for `dart:ffi`. |
 | `defines` | Dart environment defines, the `-D` flags. |
 | `language_version` | The Dart language version, matching `pubspec.yaml`. |
-| `profile` | Compile in profile mode: AOT, unstripped, with service extensions. Default `False`. |
 | `obfuscate` | Obfuscate Dart symbols in the AOT output. Pair with `split_debug_info`. Default `False`. |
 | `split_debug_info` | Write debug info to a separate `.symbols` file. Default `False`. |
 | `extra_gen_snapshot_options` | Extra flags for `gen_snapshot`. |
@@ -1394,7 +1401,7 @@ bazel run @rules_flutter//tools/dev_tool:flutter_bazel -- run -t //:my_app_macos
 | `--build-arg` | An extra argument for `bazel build`. Repeatable. |
 | `--dart-define KEY=VALUE` | A Dart define, forwarded to the build and replayed on reload and restart. Repeatable. |
 | `--no-hot` | Run without hot reload. |
-| `--profile` | Profile mode: AOT, unstripped, with profiling enabled. |
+| `--profile` | Profile mode: AOT with the Dart VM service, for DevTools. Builds `-c opt --@rules_flutter//flutter:profile`. Not on the iOS simulator. |
 | `--start-paused` | Hold the app at the start of `main()` until a debugger resumes it. |
 | `--route` | The initial route. |
 | `--no-watch` | Do not reload on save. Watching is on in terminal mode and off in `--machine` mode. |
@@ -1505,7 +1512,7 @@ The pause is reported only once the tool has observed it from the main isolate's
 
 On every platform except iOS hardware, the VM service URI arrives in the app's log: the engine prints it, and the tool reads it off the same stream that carries app output.
 
-An iPhone is different. A wirelessly attached device has no console channel at all, and a wired device's console belongs to the `devicectl` call that launched the app. So the tool finds the URI through the app's mDNS advertisement instead. Every Flutter app built in debug or profile mode advertises `_dartVmService._tcp` with its port and auth code, and the generated debug `Info.plist` declares the matching `NSBonjourServices` entry, so this works for any app built with these rules and no configuration.
+An iPhone is different. A wirelessly attached device has no console channel at all, and a wired device's console belongs to the `devicectl` call that launched the app. So the tool finds the URI through the app's mDNS advertisement instead. Every Flutter app built in debug or profile mode advertises `_dartVmService._tcp` with its port and auth code, and the generated debug and profile `Info.plist` declares the matching `NSBonjourServices` entry, so this works for any app built with these rules and no configuration.
 
 | Connection | VM service host | Port |
 |---|---|---|
