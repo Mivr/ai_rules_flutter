@@ -1163,6 +1163,7 @@ Future<ServiceExtensionResponse> _handlePressKey(
   }
   final mainKey = keys.removeLast();
 
+  final activated = _activateForKeys();
   final presser = _KeyPresser(keymap);
   final bool handled;
   final Map<String, Object?> textInput;
@@ -1193,9 +1194,49 @@ Future<ServiceExtensionResponse> _handlePressKey(
     'sent': presser.sent,
     'handled': handled,
     'textInput': textInput,
+    if (activated != null) 'activated': activated,
     ...settled,
     if (asleep != null) 'notRendering': asleep,
   });
+}
+
+/// Make the app active, as a key press finds it, when its desktop window is
+/// open but not focused; say so, or return null when it already was.
+///
+/// A hardware key only reaches the window that has keyboard focus, so a key
+/// the engine delivers implies an active app. On desktop the framework acts on
+/// the difference: when its window stops being the focused one (lifecycle
+/// `inactive`), [FocusManager] parks the focused node and focuses nothing until
+/// the window is active again. A key simulated into that state reaches no
+/// field — typed text goes nowhere and a shortcut finds no handler — whenever
+/// another app has come to the front. Resuming gives the parked node its focus
+/// back, as the window becoming the key window would, and applying the focus
+/// change now means the key sees it.
+///
+/// Only `inactive`: a hidden or minimised window draws nothing, and a key
+/// cannot reach one, so that state is left to [_notRendering] to report. Only
+/// desktop, because only there does the framework move focus with the
+/// lifecycle; on a phone `inactive` is a passing system overlay that a key
+/// press does not end. The native window is untouched, as with
+/// `app.setWindowActive`, and the engine's next real change overrides this.
+String? _activateForKeys() {
+  final binding = WidgetsBinding.instance;
+  final desktop = switch (defaultTargetPlatform) {
+    TargetPlatform.macOS ||
+    TargetPlatform.windows ||
+    TargetPlatform.linux => true,
+    _ => false,
+  };
+  if (!desktop || binding.lifecycleState != AppLifecycleState.inactive) {
+    return null;
+  }
+  binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+  FocusManager.instance.applyFocusChangesIfNeeded();
+  return 'the window was not the focused one (lifecycle state "inactive"), '
+      'so the framework had parked its focus and a key would have reached no '
+      'field. The app now counts as active, as a key press finds it: '
+      'lifecycle state "resumed", focus back where it was. The real window is '
+      'untouched and still behind whatever is in front of it.';
 }
 
 /// Whether [text] is something a key types, as opposed to a control

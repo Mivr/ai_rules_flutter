@@ -138,7 +138,8 @@ void main() {
         });
         final selectAll = await press(dt, appId, 'Meta+A', route: 'framework');
         expect(selectAll['handled'], isTrue);
-        await press(dt, appId, 'z', route: 'framework');
+        final z = await press(dt, appId, 'z', route: 'framework');
+        expect(z['textInput'], {'inserted': 'z'}, reason: '$z');
         expect(
           await textOf(dt, appId, 'agent_test_echo'),
           'echo: z | submitted: aXbcY',
@@ -148,8 +149,20 @@ void main() {
         // The apostrophe, the one key whose physical and logical debug names
         // disagree: pairing them by name pressed ⌘" instead, and the app's
         // ⌘' shortcut (bound by `LogicalKeyboardKey.quoteSingle`) never fired.
+        //
+        // Pressed with the window counted as not focused, as when another app
+        // comes to the front: the framework then parks the field's focus, and
+        // a key would reach neither the field nor the shortcut above it. A key
+        // press only ever reaches the focused window, so the key makes the app
+        // active again and says so.
+        final away = await dt.httpCommand('app.setWindowActive', {
+          'appId': appId,
+          'active': 'false',
+        });
+        expect(away['error'], isNull, reason: '$away');
         final quote = await press(dt, appId, 'Meta+Quote', route: 'framework');
         expect(quote['handled'], isTrue, reason: '$quote');
+        expect(quote['activated'], contains('"inactive"'), reason: '$quote');
         expect(
           await textOf(dt, appId, 'agent_test_echo'),
           "echo: z | submitted: aXbcY | shortcut: ⌘'",
