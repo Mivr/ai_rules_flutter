@@ -18,6 +18,7 @@ exports_files(
         "kernel_filter.dart",
         "merge_android_manifests.dart",
         "merge_plists.dart",
+        "strip_native_libs.dart",
         "web_template.dart",
         # Exported for its unit test's `srcs`, not for a build action: unlike
         # its neighbours this one is a `dart_binary` main (below), and rules
@@ -67,6 +68,7 @@ _UNIT_TESTS = {
     "generate_asset_manifest_test": ("generate_asset_manifest.dart", []),
     "merge_android_manifests_test": ("merge_android_manifests.dart", []),
     "merge_plists_test": ("merge_plists.dart", []),
+    "strip_native_libs_test": ("strip_native_libs.dart", []),
     "web_template_test": ("web_template.dart", []),
     "flutter_test_runner_test": (
         "flutter_test_runner.dart",

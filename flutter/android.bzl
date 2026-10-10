@@ -53,7 +53,7 @@ load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_android//android:rules.bzl", _android_binary = "android_binary", _android_library = "android_library")
 load("@rules_java//java:java_import.bzl", _java_import = "java_import")
 load("@rules_kotlin//kotlin:android.bzl", _kt_android_library = "kt_android_library")
-load("//flutter/private:constants.bzl", _ANDROID_MIN_SDK_VERSION = "ANDROID_MIN_SDK_VERSION", _ANDROID_TARGET_SDK_VERSION = "ANDROID_TARGET_SDK_VERSION")
+load("//flutter/private:constants.bzl", _ANDROID_ABI_FOR_ARCH = "ANDROID_ABI_FOR_ARCH", _ANDROID_MIN_SDK_VERSION = "ANDROID_MIN_SDK_VERSION", _ANDROID_TARGET_SDK_VERSION = "ANDROID_TARGET_SDK_VERSION")
 load("//flutter/private:flutter_android_application.bzl", _flutter_android_bundle = "flutter_android_bundle")
 load("//flutter/private:flutter_android_manifest_merge.bzl", _flutter_android_manifest_merge = "flutter_android_manifest_merge")
 load("//flutter/private:flutter_android_plugin_library.bzl", _flutter_android_plugin_library = "flutter_android_plugin_library")
@@ -159,6 +159,10 @@ def flutter_android_engine(name, android_abi = "arm64", **kwargs):
     - Debug (-c dbg): JIT engine for emulator/iterative development.
     - Release (-c opt / default): AOT engine for production.
 
+    The engine's native libraries are stripped with the NDK's `llvm-strip
+    --strip-unneeded`, as a Gradle build strips them, so the Android NDK
+    C++ toolchain must be registered (see the README's Android section).
+
     Args:
         name: Target name. Add to android_binary deps.
         android_abi: Engine ABI — "arm64" (default) or "x64".
@@ -181,12 +185,14 @@ def flutter_android_engine(name, android_abi = "arm64", **kwargs):
     # classpath fails the deploy jar's desugar-dependency check.
     _java_import(
         name = "_%s_jar" % name,
+        # The engine with its native libraries stripped, as Gradle packages
+        # it (flutter_android_engine_jar.bzl).
         jars = select({
-            "@rules_flutter//flutter/private:dbg": ["@%s//:debug/flutter.jar" % repo],
+            "@rules_flutter//flutter/private:dbg": ["@%s//:debug_stripped" % repo],
             # Named through rules_flutter's own repo mapping, so a consumer
             # needs no use_repo entry for a repo only profile builds fetch.
-            "@rules_flutter//flutter/private:profile": [Label("@%s_profile//:flutter.jar" % repo)],
-            "//conditions:default": ["@%s//:flutter.jar" % repo],
+            "@rules_flutter//flutter/private:profile": [Label("@%s_profile//:stripped" % repo)],
+            "//conditions:default": ["@%s//:stripped" % repo],
         }),
         tags = tags,
         deps = _ANDROIDX_EMBEDDING_DEPS,
@@ -747,10 +753,6 @@ def flutter_android_app(
 
 def _short_abi_to_full(abi):
     """Convert short ABI name to full ABI string for flutter_android_bundle."""
-    mapping = {
-        "arm64": "arm64-v8a",
-        "x64": "x86_64",
-    }
-    if abi not in mapping:
+    if abi not in _ANDROID_ABI_FOR_ARCH:
         fail("Unsupported android_abi '%s'. Use arm64 or x64." % abi)
-    return mapping[abi]
+    return _ANDROID_ABI_FOR_ARCH[abi]

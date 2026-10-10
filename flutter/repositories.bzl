@@ -5,6 +5,7 @@ See https://docs.bazel.build/versions/main/skylark/deploying.html#dependencies
 """
 
 load("//flutter/private:artifact_urls.bzl", "android_engine_artifact_path", "dart_sdk_artifact_path", "desktop_engine_artifact_path", "engine_artifact_url", "gen_snapshot_cross_artifact_path", "host_artifacts_path", "ios_engine_artifact_path")
+load("//flutter/private:constants.bzl", "ANDROID_ABI_FOR_ARCH")
 load("//flutter/private:engine_helpers.bzl", "PLATFORM_PREFIX_TO_OS", "dart_binary_name", "dartaotruntime_binary_name", "engine_arch_for_os", "engine_debug_filegroup_for_os", "engine_filegroup_for_os", "extract_macos_inner_framework", "gen_snapshot_host_platform")
 load("//flutter/private:flutter_android_engine_repo.bzl", "flutter_android_engine_repo")
 load("//flutter/private:flutter_cross_repo.bzl", "flutter_cross_compilation_repo")
@@ -19,6 +20,21 @@ load("//flutter/private:flutter_sky_engine_repo.bzl", "flutter_sky_engine_repo")
 load("//flutter/private:flutter_web_sdk_repo.bzl", "flutter_web_sdk_repo")
 load("//flutter/private:toolchains_repo.bzl", "CROSS_COMPILATION_PAIRS", "DESKTOP_CROSS_PAIRS", "HOST_PLATFORMS", "flutter_toolchains_repo")
 load("//flutter/private:versions.bzl", "ARTIFACT_CHECKSUMS", "FLUTTER_VERSIONS", "LINUX_SYSROOT_CHECKSUMS", "flutter_source_sha256")
+
+# The profile engine's repository: its flutter.jar, and the stripped copy
+# flutter_android_engine imports (see flutter_android_engine_repo.bzl).
+_ANDROID_PROFILE_ENGINE_BUILD = """\
+load("@rules_flutter//flutter/private:flutter_android_engine_jar.bzl", "flutter_android_engine_jar")
+
+exports_files(["flutter.jar"], visibility = ["//visibility:public"])
+
+flutter_android_engine_jar(
+    name = "stripped",
+    jar = "flutter.jar",
+    android_abi = "{abi}",
+    visibility = ["//visibility:public"],
+)
+"""
 
 def _flutter_engine_artifacts_impl(repository_ctx):
     """Downloads the Flutter engine host artifacts and patched SDK for a given platform."""
@@ -532,7 +548,9 @@ def flutter_register_toolchains(name, **kwargs):
                 engine_revision = meta.engine_revision,
                 downloads = {profile_engine_path: ""},
                 sha256s = {profile_engine_path: checksums.get(profile_engine_path, "")},
-                build_file_content = 'exports_files(["flutter.jar"], visibility = ["//visibility:public"])\n',
+                build_file_content = _ANDROID_PROFILE_ENGINE_BUILD.format(
+                    abi = ANDROID_ABI_FOR_ARCH[android_arch],
+                ),
             )
 
     # iOS engine repo (lazy — only downloaded when iOS targets are built).

@@ -102,9 +102,8 @@ bool _verifyApk(String apkPath, bool? mustBeDebug) {
     final hasKernelBlob = File(
       '${tmpDir.path}/assets/flutter_assets/kernel_blob.bin',
     ).existsSync();
-    final hasLibApp = File(
-      '${tmpDir.path}/lib/arm64-v8a/libapp.so',
-    ).existsSync();
+    final hasLibApp = File('${tmpDir.path}/lib/arm64-v8a/libapp.so')
+        .existsSync();
     if (hasKernelBlob == hasLibApp) {
       stderr.writeln(
         'FAIL: expected exactly one of kernel_blob.bin (debug) '
@@ -216,6 +215,31 @@ bool _verifyApk(String apkPath, bool? mustBeDebug) {
       failed = true;
     }
 
+    // --- Engine stripping ---
+    // Google ships the engine's libraries with full debug info; a Gradle
+    // build strips them (llvm-strip --strip-unneeded) before packaging, in
+    // every build type. Unstripped, the debug APK carries ~600 MB of symbols
+    // the device never reads.
+    for (final engineLib in _engineLibs) {
+      final file = File('${tmpDir.path}/$engineLib');
+      if (!file.existsSync()) continue;
+      final sections = _elfSectionNames(file.readAsBytesSync());
+      final debugInfo = sections.where(
+        (s) => s == '.symtab' || s.startsWith('.debug_'),
+      );
+      if (sections.isEmpty) {
+        stderr.writeln('FAIL: $engineLib has no section headers to read');
+        failed = true;
+      } else if (debugInfo.isNotEmpty) {
+        stderr.writeln(
+          'FAIL: $engineLib is not stripped: has ${debugInfo.join(', ')}',
+        );
+        failed = true;
+      } else {
+        print('OK: $engineLib is stripped (no .symtab or .debug_* sections)');
+      }
+    }
+
     // --- Plugin runtime class checks ---
     final definedClasses = <String>{};
     for (final dex in Directory(tmpDir.path).listSync().whereType<File>().where(
@@ -283,6 +307,40 @@ bool _verifyApk(String apkPath, bool? mustBeDebug) {
   } finally {
     tmpDir.deleteSync(recursive: true);
   }
+}
+
+/// The engine's libraries, as flutter.jar ships them: the Vulkan validation
+/// layer is in the arm64 debug engine only.
+const _engineLibs = [
+  'lib/arm64-v8a/libflutter.so',
+  'lib/arm64-v8a/libVkLayer_khronos_validation.so',
+];
+
+/// The section names of a little-endian ELF64 file, or none if it has no
+/// section headers.
+List<String> _elfSectionNames(Uint8List bytes) {
+  final data = ByteData.sublistView(bytes);
+  final shoff = data.getUint64(0x28, Endian.little);
+  final shentsize = data.getUint16(0x3a, Endian.little);
+  final shnum = data.getUint16(0x3c, Endian.little);
+  final shstrndx = data.getUint16(0x3e, Endian.little);
+  if (shoff == 0 || shnum == 0) return const [];
+  final names = data.getUint64(
+    shoff + shstrndx * shentsize + 0x18,
+    Endian.little,
+  );
+  String nameAt(int start) {
+    var end = start;
+    while (bytes[end] != 0) {
+      end++;
+    }
+    return String.fromCharCodes(bytes, start, end);
+  }
+
+  return [
+    for (var i = 0; i < shnum; i++)
+      nameAt(names + data.getUint32(shoff + i * shentsize, Endian.little)),
+  ];
 }
 
 /// ELF e_machine values by Android ABI directory name.

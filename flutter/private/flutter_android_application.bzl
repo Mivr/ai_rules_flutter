@@ -159,7 +159,7 @@ def _create_native_libs_jar(ctx, aot_output, native_libs, abi):
             src = lib.path,
         ))
 
-    # cC = create, no compression (native libs don't benefit).
+    # cC = create, compressed.
     commands.append('exec "{zipper}" cC "{jar}" "$@"'.format(
         zipper = ctx.executable._zipper.path,
         jar = jar.path,

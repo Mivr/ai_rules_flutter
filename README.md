@@ -657,7 +657,8 @@ bazel_dep(name = "rules_android_ndk", version = "0.1.5")
 
 use_repo(flutter, "deps", "flutter_toolchains", "flutter_android_engine_arm64")
 
-# The NDK CC toolchain, used for native and FFI deps built for Android.
+# The NDK CC toolchain, used for native and FFI deps built for Android and
+# to strip the engine's native libraries, as a Gradle build does.
 android_ndk_repository_extension = use_extension(
     "@rules_android_ndk//:extension.bzl",
     "android_ndk_repository_extension",

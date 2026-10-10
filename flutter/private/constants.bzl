@@ -20,3 +20,9 @@ MACOS_MINIMUM_OS_VERSION = "12.0"
 # Default Android SDK version targets.
 ANDROID_MIN_SDK_VERSION = "21"
 ANDROID_TARGET_SDK_VERSION = "35"
+
+# Android ABI directory name for each engine architecture this ruleset builds.
+ANDROID_ABI_FOR_ARCH = {
+    "arm64": "arm64-v8a",
+    "x64": "x86_64",
+}

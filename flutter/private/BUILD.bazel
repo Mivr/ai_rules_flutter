@@ -112,6 +112,13 @@ bzl_library(
 )
 
 bzl_library(
+    name = "flutter_android_engine_jar",
+    srcs = ["flutter_android_engine_jar.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+    deps = [":common"],
+)
+
+bzl_library(
     name = "flutter_android_manifest_merge",
     srcs = ["flutter_android_manifest_merge.bzl"],
     visibility = ["//flutter:__subpackages__"],
