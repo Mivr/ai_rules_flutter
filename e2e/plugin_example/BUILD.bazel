@@ -262,6 +262,17 @@ flutter_android_app(
     proguard_specs = ["app_proguard.pro"],
 )
 
+# The same app for x86_64. Its APK must carry the x86_64 engine and no other:
+# a plugin that packaged its own (always arm64) engine would make Android
+# install this APK on an arm64 device and crash at launch.
+flutter_android_app(
+    name = "plugin_android_x64",
+    package_name = "com.example.plugin_example",
+    android_abi = "x64",
+    application = ":plugin_app",
+    proguard_specs = ["app_proguard.pro"],
+)
+
 # =============================================================================
 # Tests
 # =============================================================================
@@ -316,13 +327,15 @@ debug_apk(
 # APK content verifier: asserts every plugin's native pieces are packaged —
 # including package:jni's libdartjni.so (jnigen plugins load it via
 # System.loadLibrary), its shared Java support classes, and that every
-# packaged .so is ELF for the declared ABI. Verifies both the ambient APK
-# (release) and the -c dbg APK, asserting INTERNET is present iff debug.
+# packaged .so is ELF for the declared ABI. Verifies the ambient APK
+# (release), the -c dbg APK, asserting INTERNET is present iff debug, and the
+# x64 APK, asserting it carries no ABI but x86_64.
 dart_test(
     name = "verify_android_apk_test",
     data = [
         ":plugin_android",
         ":plugin_android_dbg",
+        ":plugin_android_x64",
     ],
     main = "test/verify_android_apk_test.dart",
     tags = ["android"],

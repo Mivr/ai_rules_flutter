@@ -47,8 +47,10 @@ flutter_apple_plugin_library(
     platform = "ios",
 )
 
+# Compile-only: the app packages its own engine, of its own ABI.
 flutter_android_engine(
     name = "android_engine",
+    neverlink = True,
     tags = ["manual"],
 )
 

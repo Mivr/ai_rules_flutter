@@ -1025,11 +1025,13 @@ def make_android_subpackage_build_content(
     don't pay the `@rules_android` / `@rules_kotlin` cost.
 
     The `_engine` target gives the plugin's Kotlin/Java source access to
-    the FlutterPlugin SPI on the compile classpath. We always pin the
-    engine to arm64 here: Java bytecode is ABI-independent, so the
-    consumer's `flutter_android_app(android_abi = ...)` continues to
-    decide the runtime engine ABI without affecting the plugin's
-    compile-time classpath. The engine also exports the embedding's
+    the FlutterPlugin SPI on the compile classpath. It is `neverlink`, as
+    Gradle gives a plugin the embedding with `compileOnly`: the app
+    packages its own engine, of the ABI its
+    `flutter_android_app(android_abi = ...)` names. The plugin's is the
+    arm64 one whatever the app's ABI, since Java bytecode is
+    ABI-independent, and packaged it would put an arm64 engine in an x64
+    APK. The engine also exports the embedding's
     androidx dependencies (see `_ANDROIDX_EMBEDDING_DEPS` in
     `flutter/android.bzl`), so a plugin whose `build.gradle` declares no
     dependencies still compiles against `NotificationCompat` & co. —
@@ -1199,11 +1201,12 @@ load("@rules_kotlin//kotlin:android.bzl", "kt_android_library")
 
 # Private engine target — gives the plugin's Kotlin/Java the FlutterPlugin
 # SPI plus the embedding's androidx dependencies (via the engine's
-# exports) on the compile classpath. Always arm64 here; Java bytecode is
-# ABI-independent. The consumer's flutter_android_app(android_abi=...)
-# decides the runtime ABI.
+# exports) on the compile classpath. Always arm64; Java bytecode is
+# ABI-independent. neverlink, so the APK carries only the app's engine, of
+# the ABI flutter_android_app(android_abi=...) names.
 flutter_android_engine(
     name = "_engine",
+    neverlink = True,
     visibility = ["//visibility:private"],
 )
 

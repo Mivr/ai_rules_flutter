@@ -152,7 +152,7 @@ flutter_android_plugin_library = _flutter_android_plugin_library
 # flutter_android_app; expose for Tier-2 control.
 flutter_android_registrant = _flutter_android_registrant
 
-def flutter_android_engine(name, android_abi = "arm64", **kwargs):
+def flutter_android_engine(name, android_abi = "arm64", neverlink = False, **kwargs):
     """Imports the Flutter engine (flutter.jar) as a java_import target.
 
     Auto-selects debug or release engine based on Bazel compilation mode:
@@ -163,9 +163,19 @@ def flutter_android_engine(name, android_abi = "arm64", **kwargs):
     --strip-unneeded`, as a Gradle build strips them, so the Android NDK
     C++ toolchain must be registered (see the README's Android section).
 
+    A plugin library compiles against the engine but must not package it:
+    the app's own engine, of the app's ABI, is the one that ships. Give a
+    plugin a `neverlink = True` engine, as Gradle gives a plugin the
+    embedding with `compileOnly`. A linked one puts a second engine in the
+    APK, which for an x64 app is an arm64 `libflutter.so` that makes Android
+    install the app as arm64 and crash at launch.
+
     Args:
         name: Target name. Add to android_binary deps.
         android_abi: Engine ABI — "arm64" (default) or "x64".
+        neverlink: Compile against the engine without packaging it. For
+            `flutter_android_plugin_library(flutter_engine = ...)`; the
+            engine in the app's `android_binary` deps leaves it False.
         **kwargs: Additional arguments (e.g. visibility, tags).
     """
     tags = kwargs.pop("tags", ["manual"])
@@ -195,6 +205,7 @@ def flutter_android_engine(name, android_abi = "arm64", **kwargs):
             "//conditions:default": ["@%s//:stripped" % repo],
         }),
         tags = tags,
+        neverlink = neverlink,
         deps = _ANDROIDX_EMBEDDING_DEPS,
     )
 
@@ -210,6 +221,7 @@ def flutter_android_engine(name, android_abi = "arm64", **kwargs):
         name = name,
         exports = ["_%s_jar" % name] + _ANDROIDX_EMBEDDING_DEPS,
         proguard_specs = ["@rules_flutter//flutter/private/runners/android:flutter_engine_proguard.pro"],
+        neverlink = neverlink,
         tags = tags,
         **kwargs
     )

@@ -38,12 +38,12 @@ const _requiredDexClasses = <String, String>{
       'Lcom/github/dart_lang/jni_flutter/JniFlutterPlugin;',
 };
 
-/// Native libraries every plugin_example APK must carry for arm64-v8a,
+/// Native libraries every plugin_example APK must carry for its ABI,
 /// regardless of compilation mode.
 const _requiredNativeLibs = <String, String>{
-  'Flutter engine': 'lib/arm64-v8a/libflutter.so',
+  'Flutter engine': 'libflutter.so',
   'package:jni C support library (System.loadLibrary("dartjni"))':
-      'lib/arm64-v8a/libdartjni.so',
+      'libdartjni.so',
 };
 
 void main() {
@@ -55,36 +55,38 @@ void main() {
   }
   final base = '$testSrcDir/$testWorkspace';
 
-  // Verify both the ambient-configuration APK (release under a default
+  // Verify the ambient-configuration APK (release under a default
   // `bazel test`) and a copy force-built under `-c dbg` by the debug_apk
   // transition. Checking both in one default `bazel test //...` run exercises
   // the debug variant-manifest merge in both directions — INTERNET must be
   // absent from the release APK and present in the debug APK — without
-  // building this test itself under `-c dbg`.
+  // building this test itself under `-c dbg`. The x64 APK must carry the
+  // x86_64 engine and no other: the plugins compile against an arm64 one.
   final cases = [
-    ('ambient', '$base/plugin_android.apk', null),
-    ('-c dbg', '$base/plugin_android_dbg.apk', true),
+    ('ambient', '$base/plugin_android.apk', null, 'arm64-v8a'),
+    ('-c dbg', '$base/plugin_android_dbg.apk', true, 'arm64-v8a'),
+    ('x64', '$base/plugin_android_x64.apk', null, 'x86_64'),
   ];
 
   var failed = false;
-  for (final (label, apkPath, mustBeDebug) in cases) {
+  for (final (label, apkPath, mustBeDebug, abi) in cases) {
     print('\n=== Verifying $label APK (${apkPath.split('/').last}) ===');
     if (!File(apkPath).existsSync()) {
       stderr.writeln('APK not found at $apkPath');
       exit(1);
     }
-    if (_verifyApk(apkPath, mustBeDebug)) failed = true;
+    if (_verifyApk(apkPath, mustBeDebug, abi)) failed = true;
   }
 
   if (failed) exit(1);
   print('\nAll plugin_example APK verification checks passed.');
 }
 
-/// Verifies a single APK. [mustBeDebug] asserts the detected compilation mode
-/// when non-null (the `-c dbg` transition must yield a debug build); null
-/// accepts whatever the ambient configuration produced. Returns true on any
-/// failure.
-bool _verifyApk(String apkPath, bool? mustBeDebug) {
+/// Verifies a single APK built for [abi], an ABI directory name. [mustBeDebug]
+/// asserts the detected compilation mode when non-null (the `-c dbg`
+/// transition must yield a debug build); null accepts whatever the ambient
+/// configuration produced. Returns true on any failure.
+bool _verifyApk(String apkPath, bool? mustBeDebug, String abi) {
   final tmpDir = Directory.systemTemp.createTempSync('plugin_apk_test');
   try {
     final result = Process.runSync('unzip', ['-q', apkPath, '-d', tmpDir.path]);
@@ -102,8 +104,7 @@ bool _verifyApk(String apkPath, bool? mustBeDebug) {
     final hasKernelBlob = File(
       '${tmpDir.path}/assets/flutter_assets/kernel_blob.bin',
     ).existsSync();
-    final hasLibApp = File('${tmpDir.path}/lib/arm64-v8a/libapp.so')
-        .existsSync();
+    final hasLibApp = File('${tmpDir.path}/lib/$abi/libapp.so').existsSync();
     if (hasKernelBlob == hasLibApp) {
       stderr.writeln(
         'FAIL: expected exactly one of kernel_blob.bin (debug) '
@@ -151,7 +152,8 @@ bool _verifyApk(String apkPath, bool? mustBeDebug) {
     }
 
     // --- Native library presence ---
-    _requiredNativeLibs.forEach((description, path) {
+    _requiredNativeLibs.forEach((description, basename) {
+      final path = 'lib/$abi/$basename';
       if (File('${tmpDir.path}/$path').existsSync()) {
         print('OK: $path ($description)');
       } else {
@@ -167,17 +169,32 @@ bool _verifyApk(String apkPath, bool? mustBeDebug) {
     final libDir = Directory('${tmpDir.path}/lib');
     var checkedLibs = 0;
     if (libDir.existsSync()) {
+      // A library under another ABI's directory makes Android choose that
+      // ABI when the device supports it, and then the app's own code
+      // (libapp.so) is missing and the engine crashes at launch.
+      final abis = [
+        for (final dir in libDir.listSync().whereType<Directory>())
+          dir.path.split('/').last,
+      ]..sort();
+      if (abis.length == 1 && abis.single == abi) {
+        print('OK: lib/ holds $abi only');
+      } else {
+        stderr.writeln(
+          'FAIL: expected lib/$abi only; found lib/{${abis.join(',')}}',
+        );
+        failed = true;
+      }
       for (final abiDir in libDir.listSync().whereType<Directory>()) {
-        final abi = abiDir.path.split('/').last;
-        final expectedMachine = _elfMachineForAbi[abi];
+        final dirAbi = abiDir.path.split('/').last;
+        final expectedMachine = _elfMachineForAbi[dirAbi];
         if (expectedMachine == null) {
-          stderr.writeln('FAIL: unexpected ABI directory lib/$abi');
+          stderr.writeln('FAIL: unexpected ABI directory lib/$dirAbi');
           failed = true;
           continue;
         }
         for (final lib in abiDir.listSync().whereType<File>()) {
           checkedLibs++;
-          final name = 'lib/$abi/${lib.path.split('/').last}';
+          final name = 'lib/$dirAbi/${lib.path.split('/').last}';
           final error = _validateElf(lib, expectedMachine);
           if (error != null) {
             stderr.writeln('FAIL: $name — $error');
@@ -204,7 +221,7 @@ bool _verifyApk(String apkPath, bool? mustBeDebug) {
           }
           print(
             'OK: $name is ELF (machine 0x'
-            '${expectedMachine.toRadixString(16)}, correct for $abi) '
+            '${expectedMachine.toRadixString(16)}, correct for $dirAbi) '
             'aligned 0x${align.toRadixString(16)}',
           );
         }
@@ -220,7 +237,7 @@ bool _verifyApk(String apkPath, bool? mustBeDebug) {
     // build strips them (llvm-strip --strip-unneeded) before packaging, in
     // every build type. Unstripped, the debug APK carries ~600 MB of symbols
     // the device never reads.
-    for (final engineLib in _engineLibs) {
+    for (final engineLib in _engineLibs.map((name) => 'lib/$abi/$name')) {
       final file = File('${tmpDir.path}/$engineLib');
       if (!file.existsSync()) continue;
       final sections = _elfSectionNames(file.readAsBytesSync());
@@ -311,10 +328,7 @@ bool _verifyApk(String apkPath, bool? mustBeDebug) {
 
 /// The engine's libraries, as flutter.jar ships them: the Vulkan validation
 /// layer is in the arm64 debug engine only.
-const _engineLibs = [
-  'lib/arm64-v8a/libflutter.so',
-  'lib/arm64-v8a/libVkLayer_khronos_validation.so',
-];
+const _engineLibs = ['libflutter.so', 'libVkLayer_khronos_validation.so'];
 
 /// The section names of a little-endian ELF64 file, or none if it has no
 /// section headers.

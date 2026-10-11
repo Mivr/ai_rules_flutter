@@ -43,9 +43,10 @@ def flutter_android_plugin_library(
             minimal manifest when none is provided. Defaults to
             `dev.flutter.plugins.<name>` to match the convention the
             registrant uses for fully-qualified class names.
-        flutter_engine: A `flutter_android_engine` target (the Flutter
-            Android engine AAR). Required for the plugin's Kotlin/Java
-            to compile against the FlutterPlugin SPI.
+        flutter_engine: A `flutter_android_engine` target declared with
+            `neverlink = True`. Required for the plugin's Kotlin/Java to
+            compile against the FlutterPlugin SPI; the app packages its own
+            engine, of its own ABI.
         manifest: Optional AndroidManifest.xml fragment shipped with the
             plugin. Its components and permissions (`<receiver>`,
             `<service>`, `<uses-permission>`, ...) are merged into the app's
