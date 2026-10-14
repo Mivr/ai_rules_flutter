@@ -10,7 +10,7 @@ load(
     "host_artifacts_path",
     "ios_engine_artifact_path",
 )
-load("//flutter/private:versions.bzl", "ARTIFACT_CHECKSUMS", "FLUTTER_VERSIONS")
+load("//flutter/private:versions.bzl", "ARTIFACT_CHECKSUMS", "FLUTTER_VERSIONS", "flutter_artifact_sha256")
 
 def _latest_version_first_test_impl(ctx):
     env = unittest.begin(ctx)
@@ -124,6 +124,7 @@ def _every_download_is_checksummed_test_impl(ctx):
                 path in checksums,
                 "ARTIFACT_CHECKSUMS[{}] has no checksum for {}; run `bazel run //tools/update_flutter_version -- {}`".format(version, path, version),
             )
+            flutter_artifact_sha256(version, path)
     return unittest.end(env)
 
 def _source_sha256_recorded_for_all_versions_test_impl(ctx):
@@ -154,6 +155,15 @@ def _checksums_are_sha256_test_impl(ctx):
             )
     return unittest.end(env)
 
+def _artifact_sha256_returns_recorded_value_test_impl(ctx):
+    env = unittest.begin(ctx)
+    asserts.equals(
+        env,
+        ARTIFACT_CHECKSUMS["3.47.5"]["linux-x64/artifacts.zip"],
+        flutter_artifact_sha256("3.47.5", "linux-x64/artifacts.zip"),
+    )
+    return unittest.end(env)
+
 _t0_test = unittest.make(_latest_version_first_test_impl)
 _t1_test = unittest.make(_engine_revision_format_test_impl)
 _t2_test = unittest.make(_checksums_exist_for_all_versions_test_impl)
@@ -161,6 +171,7 @@ _t3_test = unittest.make(_checksums_have_key_artifacts_test_impl)
 _t4_test = unittest.make(_checksums_are_sha256_test_impl)
 _t5_test = unittest.make(_source_sha256_recorded_for_all_versions_test_impl)
 _t6_test = unittest.make(_every_download_is_checksummed_test_impl)
+_t7_test = unittest.make(_artifact_sha256_returns_recorded_value_test_impl)
 
 def versions_test_suite(name):
-    unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test, _t6_test)
+    unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test, _t6_test, _t7_test)

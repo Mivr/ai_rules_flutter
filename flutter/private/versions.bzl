@@ -109,6 +109,37 @@ def flutter_source_sha256(flutter_version):
         ))
     return sha256
 
+def flutter_artifact_sha256(flutter_version, artifact_path):
+    """Returns the recorded sha256 of one engine artifact.
+
+    Every download of an engine artifact goes through this function, so a
+    missing entry fails the fetch with a message naming the artifact, instead
+    of letting Bazel accept whatever bytes the server returns.
+
+    Args:
+        flutter_version: Flutter release tag (e.g. "3.47.5"). Must be a key of
+            FLUTTER_VERSIONS.
+        artifact_path: Path relative to the engine revision directory, as
+            built by a helper in //flutter/private:artifact_urls.bzl
+            (e.g. "android-arm64-release/artifacts.zip").
+
+    Returns:
+        The 64-character hex sha256 string.
+    """
+    sha256 = ARTIFACT_CHECKSUMS.get(flutter_version, {}).get(artifact_path, "")
+    if not sha256:
+        fail((
+            "No sha256 recorded for {path} in Flutter {v}, so the download " +
+            "cannot be verified and will not be fetched.\n" +
+            "Add it to ARTIFACT_CHECKSUMS in flutter/private/versions.bzl " +
+            "under \"{v}\". `bazel run //tools/update_flutter_version -- {v}` " +
+            "downloads each artifact and prints its sha256."
+        ).format(
+            path = artifact_path,
+            v = flutter_version,
+        ))
+    return sha256
+
 # Checksums for engine artifacts, keyed by version then artifact path.
 # Artifact paths are relative to:
 #   https://storage.googleapis.com/flutter_infra_release/flutter/{engine_revision}/
