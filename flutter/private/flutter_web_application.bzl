@@ -299,6 +299,11 @@ def _flutter_web_bundle_impl(ctx):
     )
     validate_base_href(ctx.attr.base_href, ctx.label)
     validate_static_assets_url(ctx.attr.static_assets_url, ctx.label)
+    web_dir = ctx.attr.web_dir
+    if "\\" in web_dir or [p for p in web_dir.split("/") if p in ("", ".", "..")]:
+        fail("%s: web_dir must be a directory relative to the package, with no leading " % ctx.label +
+             "or trailing '/' and no '.' or '..' parts (e.g. \"web\" or \"web_apps/reminders\"); " +
+             "got %r" % web_dir)
 
     flutter_toolchain = ctx.toolchains["@rules_flutter//flutter:toolchain_type"]
     flutter_sdk_info = flutter_toolchain.flutter_sdk_info
@@ -815,7 +820,8 @@ def _flutter_web_bundle_impl(ctx):
             engine_inputs.append(f)
 
     # Copy user-provided web assets (favicon.png, icons/, etc.) to output root.
-    # Strip the leading "web/" prefix if present (matching `flutter build web` behavior).
+    # Strip the leading `web_dir` prefix if present (by default `web/`, matching
+    # `flutter build web` behavior).
     #
     # Declared native modules ride the same list, so the served path of a module
     # is derived by the one piece of code that owns that mapping rather than
@@ -836,9 +842,9 @@ def _flutter_web_bundle_impl(ctx):
         if rel.startswith(ctx.label.package + "/"):
             rel = rel[len(ctx.label.package) + 1:]
 
-        # Strip leading "web/" directory (convention: files live in web/).
-        if rel.startswith("web/"):
-            rel = rel[4:]
+        # Strip the leading web directory (convention: files live in web/).
+        if rel.startswith(web_dir + "/"):
+            rel = rel[len(web_dir) + 1:]
         _check_web_asset_dst(ctx, reserved, rel, f.short_path)
         copies.append({"src": f.path, "dst": rel})
         web_asset_files.append(f)
@@ -1384,9 +1390,18 @@ build knows which served file is a native module.
         ),
         "web_assets": attr.label_list(
             doc = "Static web files (favicon.png, icons/, etc.) copied to the output root. " +
-                  "Paths are preserved relative to the package (e.g. web/favicon.png → favicon.png, web/icons/icon-192.png → icons/icon-192.png). " +
+                  "Paths are preserved relative to the package, with a leading `web_dir` " +
+                  "stripped (e.g. web/favicon.png → favicon.png, web/icons/icon-192.png → icons/icon-192.png). " +
                   "Typically: glob([\"web/**\"]).",
             allow_files = True,
+        ),
+        "web_dir": attr.string(
+            doc = "The package directory whose contents are served at the bundle root: a " +
+                  "`web_assets` entry under it loses this prefix, and any other keeps its " +
+                  "package-relative path. Defaults to `web`, as `flutter build web` uses. Set " +
+                  "it to build several web apps from one package, each with its own page, " +
+                  "manifest and icons (e.g. `web_apps/reminders`).",
+            default = "web",
         ),
         "index_html": attr.label(
             doc = "User-provided index.html *template*. Substituted the way " +

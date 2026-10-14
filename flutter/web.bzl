@@ -101,6 +101,7 @@ def flutter_web_app(
         base_href = "/",
         static_assets_url = "/",
         web_sdk = None,
+        web_dir = "web",
         **kwargs):
     """Builds a Flutter web application, auto-discovering runner files.
 
@@ -118,6 +119,11 @@ def flutter_web_app(
         web/version.json          (generated from the app attrs if absent)
 
     Everything else under `web/` is copied into the bundle root verbatim.
+
+    `web_dir` names a different directory to discover from, so one package
+    can hold several web apps, each with its own page, manifest and icons:
+
+        flutter_web_app(name = "reminders_web", web_dir = "web_apps/reminders", ...)
 
     This macro always uses dart2wasm + skwasm (modern defaults). For dart2js
     or canvaskit, use flutter_web_bundle directly.
@@ -151,6 +157,10 @@ def flutter_web_app(
             in web/index.html (default "/", as `flutter build web` defaults it).
             Must end with "/".
         web_sdk: Optional web SDK repo name (e.g. "@my_flutter_web_sdk").
+        web_dir: The package directory the runner files are discovered in and
+            whose contents are served at the bundle root (default "web").
+            An `index_html`, `bootstrap_js`, `manifest_json` or `version_json`
+            passed explicitly wins over the discovered file.
         **kwargs: Additional arguments forwarded to flutter_web_bundle
             (e.g. assets, shaders, defines, pwa, web_defines,
             keep_placeholders, tags, visibility).
@@ -177,41 +187,35 @@ def flutter_web_app(
     # Nothing is generated here: a target of our own would only pre-substitute
     # what the bundle substitutes anyway, and would have to be told the
     # `{{...}}` variables twice to avoid failing on them.
-    if native.glob(["web/index.html"], allow_empty = True):
-        kwargs["index_html"] = "web/index.html"
-    if native.glob(["web/flutter_bootstrap.js"], allow_empty = True):
-        kwargs["bootstrap_js"] = "web/flutter_bootstrap.js"
+    templates = {
+        "index_html": "index.html",
+        "bootstrap_js": "flutter_bootstrap.js",
+        "manifest_json": "manifest.json",
+        # Routed to the attr rather than left in the asset glob: the bundle
+        # generates a version.json of its own, and two files claiming that
+        # name is refused there.
+        "version_json": "version.json",
+    }
+    for attr, basename in templates.items():
+        path = "%s/%s" % (web_dir, basename)
+        if attr not in kwargs and native.glob([path], allow_empty = True):
+            kwargs[attr] = path
 
-    # Discover user-provided manifest.json or generate from template.
-    user_manifest = native.glob(["web/manifest.json"], allow_empty = True)
-    if user_manifest:
-        manifest_json = "web/manifest.json"
-    else:
+    # No manifest.json given or found: generate one from the template.
+    if "manifest_json" not in kwargs:
         flutter_web_manifest_gen(
             name = "__%s_manifest" % name,
             app_name = effective_app_name,
             tags = tags,
         )
-        manifest_json = "__%s_manifest" % name
-
-    # Discover a user-provided version.json. Routed to the attr rather than
-    # left in the asset glob: the bundle generates a version.json of its own,
-    # and two files claiming that name is refused there.
-    user_version = native.glob(["web/version.json"], allow_empty = True)
-    if user_version:
-        kwargs["version_json"] = "web/version.json"
+        kwargs["manifest_json"] = "__%s_manifest" % name
 
     # Discover web assets. The files the bundle generates for itself are
     # excluded — they reach it through their own attrs, and bundling them here
     # as well is refused rather than silently resolved.
     web_assets = native.glob(
-        ["web/**"],
-        exclude = [
-            "web/index.html",
-            "web/flutter_bootstrap.js",
-            "web/manifest.json",
-            "web/version.json",
-        ],
+        [web_dir + "/**"],
+        exclude = ["%s/%s" % (web_dir, b) for b in templates.values()],
         allow_empty = True,
     ) + extra_web_assets
 
@@ -223,8 +227,8 @@ def flutter_web_app(
         title = effective_app_name,
         base_href = base_href,
         static_assets_url = static_assets_url,
-        manifest_json = manifest_json,
         web_assets = web_assets,
+        web_dir = web_dir,
         web_sdk = web_sdk,
         pwa = pwa,
         tags = tags,
