@@ -178,9 +178,18 @@ bug to fix before tagging.
      (see rules_dart's release skill, Phase 6). Keep `.bcr/metadata.template.json`'s
      maintainer keys in the order upstream stores them.
 3. **`gh pr ready <n> --repo bazelbuild/bazel-central-registry`.** Existing modules
-   auto-approve on a clean diff (the bot has been running every 3–5 hours). The **first**
-   version of a module has no maintainers yet, so it waits for a human BCR reviewer, who
-   may also have to start `bcr-presubmit`.
+   auto-approve on a clean diff. The **first** version of a module has no maintainers yet,
+   so it waits for a human BCR reviewer, who may also have to start `bcr-presubmit`.
+
+   Once `buildkite/bcr-presubmit` is green, ask the bot to review now instead of waiting
+   for the scheduled `review_prs` job, which runs only every 3–5 hours in practice. The
+   body must be exactly this, with nothing else:
+   ```sh
+   gh pr comment <n> --repo bazelbuild/bazel-central-registry --body "@bazel-io review"
+   ```
+   The bot reacts 👀, then 🚀 if it merged; otherwise it replies with the reason (draft,
+   missing maintainer approval, a sensitive `metadata.json` change, failing checks). It is
+   safe to repeat. Source: bazelbuild/continuous-integration#2901.
 4. **Poll until merged:** `gh pr view <n> --repo bazelbuild/bazel-central-registry --json state,mergedAt`.
    Report presubmit failures and review comments to the user as they arrive.
 5. **Served means a clean module resolves it.** Nothing else counts:
