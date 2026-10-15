@@ -200,6 +200,17 @@ bug to fix before tagging.
    bazel mod show_repo rules_flutter   # must print an http_archive with an integrity hash
    ```
 
+   One resolution is not enough: CDN edges answer independently, and an edge that cached
+   a 404 keeps serving it while others serve the file. Measured 2026-10-15 on rules_dart
+   0.7.3: a clean module resolved, then 4 of 12 requests for its `MODULE.bazel` came back
+   404 with `age: 468`, and 11 of 16 rules_flutter workspaces failed resolution. Count it
+   served only after many requests in a row all return 200:
+   ```sh
+   for i in $(seq 1 20); do curl -s -o /dev/null -w '%{http_code} ' \
+     "https://bcr.bazel.build/modules/rules_flutter/${VERSION#v}/MODULE.bazel"; done
+   ```
+   The same holds for the rules_dart version this release pins; check it before Phase 1.
+
    The registry repo, `metadata.json`, and even the storage bucket all show the version
    before `bcr.bazel.build` serves it. **Do not probe `bcr.bazel.build` for the module's
    files before the merge:** the CDN caches the 404 for an hour (`max-age=3600`), and
