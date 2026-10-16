@@ -146,6 +146,7 @@ bzl_library(
         "//flutter/private:flutter_ios_application",
         "//flutter/private:flutter_ios_registrant",
         "//flutter/private:flutter_plist_merge",
+        "//flutter/private:flutter_xtool_bundle",
         "//flutter/private:runner_module",
     ],
 )
@@ -158,6 +159,7 @@ bzl_library(
         "//flutter/private:flutter_macos_application",
         "//flutter/private:flutter_macos_registrant",
         "//flutter/private:flutter_plist_merge",
+        "//flutter/private:flutter_xtool_bundle",
         "//flutter/private:runner_module",
     ],
 )
@@ -207,6 +209,7 @@ bzl_library(
         "//flutter/private:flutter_web_sdk_repo",
         "//flutter/private:toolchains_repo",
         "//flutter/private:versions",
+        "//flutter/private:xtool_darwin_sdk_repo",
     ],
 )
 

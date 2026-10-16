@@ -3,8 +3,9 @@
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("//flutter/private:flutter_ios_application.bzl", "flutter_ios_framework", "flutter_ios_native_frameworks")
+load("//flutter/private:flutter_xtool_bundle.bzl", "flutter_darwin_xcframework_import", "flutter_xtool_ios_bundle")
 load("//flutter/private:ios_entitlements.bzl", "resolve_ios_entitlements")
-load(":apple_bundling.bzl", "fake_application", "outputs_under_target_dir_test")
+load(":apple_bundling.bzl", "fake_application", "fake_macho_binary", "outputs_under_target_dir_test")
 
 def _ios_device_transition_impl(_settings, _attr):
     return {"//command_line_option:platforms": str(Label("//flutter/platforms:ios_arm64"))}
@@ -140,11 +141,35 @@ def _bundling_tests(name):
         application = name + "_fake_release_app",
         tags = ["manual"],
     )
+    fake_macho_binary(
+        name = name + "_fake_ios_runner_bin",
+        platform = "ios",
+        tags = ["manual"],
+    )
+    flutter_darwin_xcframework_import(
+        name = name + "_fake_xcframework_import",
+        xcframework_imports = [name + "_fake_ios_runner_bin"],
+        framework_name = "Flutter",
+        tags = ["manual"],
+    )
+    flutter_xtool_ios_bundle(
+        name = name + "_fake_xtool_ios_bundle",
+        app_name = "Runner",
+        bundle_id = "com.example.runner",
+        executable = name + "_fake_ios_runner_bin",
+        frameworks = [
+            name + "_fake_release_app_framework",
+            name + "_fake_release_app_native_frameworks",
+        ],
+        tags = ["manual"],
+    )
     _ios_device_targets(
         name = name + "_release_device_targets",
         targets = [
             name + "_fake_release_app_framework",
             name + "_fake_release_app_native_frameworks",
+            name + "_fake_xcframework_import",
+            name + "_fake_xtool_ios_bundle",
         ],
         tags = ["manual"],
     )

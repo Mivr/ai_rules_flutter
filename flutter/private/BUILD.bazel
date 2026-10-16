@@ -479,3 +479,20 @@ bzl_library(
     visibility = ["//flutter:__subpackages__"],
     deps = [":artifact_urls"],
 )
+
+bzl_library(
+    name = "flutter_xtool_bundle",
+    srcs = ["flutter_xtool_bundle.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+    deps = [
+        "//flutter:providers",
+        "@bazel_skylib//lib:dicts",
+    ],
+)
+
+bzl_library(
+    name = "xtool_darwin_sdk_repo",
+    srcs = ["xtool_darwin_sdk_repo.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+    deps = [":artifact_urls"],
+)

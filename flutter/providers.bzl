@@ -271,3 +271,15 @@ FlutterCompiledShadersInfo = provider(
         "compiled_shaders": "depset[struct]: Structs with `bundle_path` (str), `file` (File), and `target_platform` (str) of compiled shaders.",
     },
 )
+
+FlutterDarwinFrameworkInfo = provider(
+    doc = "Metadata and files for an Apple .framework or .xcframework slice consumed by the xtool backend.",
+    fields = {
+        "framework_name": "str: Framework module/binary name (e.g. 'Flutter', 'FlutterMacOS', 'App').",
+        "framework_files": "depset[File]: All files belonging to the .framework bundle.",
+        "framework_dir": "str or None: Path to the .framework directory (or parent -F search dir).",
+        "headers": "depset[File]: Public header files exposed by the framework.",
+        "is_dynamic": "bool: True if this is a dynamic framework that must be embedded in Frameworks/.",
+    },
+)
+

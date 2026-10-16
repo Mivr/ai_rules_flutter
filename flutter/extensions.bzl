@@ -90,10 +90,42 @@ _flutter_plugin_overlays = tag_class(attrs = {
     ),
 })
 
+_flutter_darwin_sdk = tag_class(attrs = {
+    "path": attr.string(
+        doc = "Optional local filesystem path to `darwin.artifactbundle` for the xtool backend.",
+        default = "",
+    ),
+    "url": attr.string(
+        doc = "Optional URL to download `darwin.artifactbundle` archive for the xtool backend.",
+        default = "",
+    ),
+    "sha256": attr.string(
+        doc = "SHA-256 checksum when `url` is specified.",
+        default = "",
+    ),
+    "swift_toolchain_path": attr.string(
+        doc = "Optional path to the Linux Swift toolchain root directory.",
+        default = "",
+    ),
+})
+
 def _toolchain_extension(module_ctx):
     registrations = {}
     selected_versions = {}
+    darwin_sdk_path = ""
+    darwin_sdk_url = ""
+    darwin_sdk_sha256 = ""
+    darwin_sdk_swift_toolchain_path = ""
     for mod in module_ctx.modules:
+        for sdk_tag in mod.tags.darwin_sdk:
+            if sdk_tag.path:
+                darwin_sdk_path = sdk_tag.path
+            if sdk_tag.url:
+                darwin_sdk_url = sdk_tag.url
+            if sdk_tag.sha256:
+                darwin_sdk_sha256 = sdk_tag.sha256
+            if sdk_tag.swift_toolchain_path:
+                darwin_sdk_swift_toolchain_path = sdk_tag.swift_toolchain_path
         for toolchain in mod.tags.toolchain:
             if toolchain.name != _DEFAULT_NAME and not mod.is_root:
                 fail("""\
@@ -119,6 +151,10 @@ def _toolchain_extension(module_ctx):
         flutter_register_toolchains(
             name = name,
             flutter_version = selected,
+            darwin_sdk_path = darwin_sdk_path,
+            darwin_sdk_url = darwin_sdk_url,
+            darwin_sdk_sha256 = darwin_sdk_sha256,
+            darwin_sdk_swift_toolchain_path = darwin_sdk_swift_toolchain_path,
         )
 
         # The gen-l10n generator, carved out of the same release's
@@ -288,6 +324,7 @@ flutter = module_extension(
         "toolchain": flutter_toolchain,
         "pub": _flutter_pub,
         "plugin_overlays": _flutter_plugin_overlays,
+        "darwin_sdk": _flutter_darwin_sdk,
     },
     os_dependent = False,
     arch_dependent = False,

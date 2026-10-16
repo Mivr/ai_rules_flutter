@@ -152,3 +152,48 @@ def _outputs_under_target_dir_test_impl(ctx):
 outputs_under_target_dir_test = analysistest.make(
     _outputs_under_target_dir_test_impl,
 )
+
+def _fake_macho_binary_impl(ctx):
+    dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx)
+    out = ctx.actions.declare_file(ctx.label.name)
+    ctx.actions.run(
+        executable = dart_exe,
+        arguments = [
+            ctx.executable._macho_edit.path,
+            "stub",
+            "--output",
+            out.path,
+            "--arch",
+            ctx.attr.arch,
+            "--platform",
+            ctx.attr.platform,
+            "--min-os",
+            "14.0",
+            "--install-name",
+            "@rpath/%s" % ctx.label.name,
+        ],
+        inputs = depset(
+            direct = [ctx.executable._macho_edit],
+            transitive = [dart_vm_files],
+        ),
+        outputs = [out],
+    )
+    return [DefaultInfo(files = depset([out]), executable = out)]
+
+fake_macho_binary = rule(
+    implementation = _fake_macho_binary_impl,
+    attrs = {
+        "arch": attr.string(default = "arm64"),
+        "platform": attr.string(default = "ios"),
+        "_macho_edit": attr.label(
+            default = Label("//flutter/private/tools:macho_edit"),
+            executable = True,
+            cfg = "exec",
+        ),
+    },
+    toolchains = [
+        "@rules_flutter//flutter:toolchain_type",
+        config_common.toolchain_type("@rules_dart//dart:exec_tools_toolchain_type", mandatory = False),
+    ],
+    executable = True,
+)

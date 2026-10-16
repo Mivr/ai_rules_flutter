@@ -1,7 +1,9 @@
 """Unit tests for toolchains_repo.bzl — DESKTOP_CROSS_PAIRS and CROSS_COMPILATION_PAIRS validation."""
 
-load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
+load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
+load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("//flutter/private:toolchains_repo.bzl", "CROSS_COMPILATION_PAIRS", "DESKTOP_CROSS_PAIRS", "HOST_PLATFORMS", "TARGET_PLATFORMS")
+load("//flutter/private:xtool_darwin_sdk_repo.bzl", "XTOOL_DARWIN_TARGETS", "generate_xtool_darwin_sdk_build")
 
 def _desktop_cross_pairs_keys_are_host_platforms_test_impl(ctx):
     """Every key in DESKTOP_CROSS_PAIRS must be a valid HOST_PLATFORMS key."""
@@ -100,12 +102,131 @@ def _cross_compilation_pairs_valid_test_impl(ctx):
         )
     return unittest.end(env)
 
+def _xtool_darwin_sdk_build_test_impl(ctx):
+    """generate_xtool_darwin_sdk_build emits all 5 Darwin targets in both configured and stub modes."""
+    env = unittest.begin(ctx)
+    expected_triples = {
+        "ios_arm64": "arm64-apple-ios14.0",
+        "ios_sim_arm64": "arm64-apple-ios14.0-simulator",
+        "ios_x64": "x86_64-apple-ios14.0-simulator",
+        "macos_arm64": "arm64-apple-macosx11.0",
+        "macos_x64": "x86_64-apple-macosx11.0",
+    }
+    for key, triple in expected_triples.items():
+        asserts.true(env, key in XTOOL_DARWIN_TARGETS, "Missing target key %s" % key)
+        asserts.equals(env, triple, XTOOL_DARWIN_TARGETS[key].triple)
+
+    stub_build = generate_xtool_darwin_sdk_build(sdk_available = False)
+    asserts.true(env, "SDK_AVAILABLE = False" in stub_build, "Expected SDK_AVAILABLE = False in stub build")
+    for key in expected_triples.keys():
+        asserts.true(
+            env,
+            'name = "%s_cc_toolchain"' % key in stub_build,
+            "Expected %s_cc_toolchain in stub build" % key,
+        )
+
+    configured_build = generate_xtool_darwin_sdk_build(
+        sdk_available = True,
+        sdk_paths = {
+            "iPhoneOS": "/xtool/iPhoneOS.sdk",
+            "iPhoneSimulator": "/xtool/iPhoneSimulator.sdk",
+            "MacOSX": "/xtool/MacOSX.sdk",
+        },
+        swift_bin_dir = "/opt/swift/usr/bin",
+    )
+    asserts.true(env, "SDK_AVAILABLE = True" in configured_build, "Expected SDK_AVAILABLE = True")
+    asserts.true(env, "/xtool/iPhoneOS.sdk" in configured_build, "Expected iPhoneOS.sdk path")
+    asserts.true(env, "/xtool/MacOSX.sdk" in configured_build, "Expected MacOSX.sdk path")
+    return unittest.end(env)
+
+_BackendProbeInfo = provider(fields = ["backend"])
+
+def _backend_probe_impl(ctx):
+    return [_BackendProbeInfo(backend = ctx.attr.selected_backend)]
+
+_backend_probe = rule(
+    implementation = _backend_probe_impl,
+    attrs = {
+        "selected_backend": attr.string(mandatory = True),
+    },
+)
+
+def _apple_backend_xtool_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    tut = analysistest.target_under_test(env)
+    asserts.equals(env, "xtool", tut[_BackendProbeInfo].backend)
+    return analysistest.end(env)
+
+_apple_backend_xtool_test = analysistest.make(
+    _apple_backend_xtool_test_impl,
+    config_settings = {
+        str(Label("//flutter/settings:apple_backend")): "xtool",
+    },
+)
+
+def _apple_backend_rules_apple_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    tut = analysistest.target_under_test(env)
+    asserts.equals(env, "rules_apple", tut[_BackendProbeInfo].backend)
+    return analysistest.end(env)
+
+_apple_backend_rules_apple_test = analysistest.make(
+    _apple_backend_rules_apple_test_impl,
+    config_settings = {
+        str(Label("//flutter/settings:apple_backend")): "rules_apple",
+    },
+)
+
 _t0_test = unittest.make(_desktop_cross_pairs_keys_are_host_platforms_test_impl)
 _t1_test = unittest.make(_desktop_cross_pairs_targets_are_host_platforms_test_impl)
 _t2_test = unittest.make(_desktop_cross_pairs_no_self_pairs_test_impl)
 _t3_test = unittest.make(_desktop_cross_pairs_no_same_os_test_impl)
 _t4_test = unittest.make(_desktop_cross_pairs_all_hosts_covered_test_impl)
 _t5_test = unittest.make(_cross_compilation_pairs_valid_test_impl)
+_t6_test = unittest.make(_xtool_darwin_sdk_build_test_impl)
 
 def toolchains_repo_test_suite(name):
-    unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test)
+    _backend_probe(
+        name = name + "_backend_probe",
+        selected_backend = select({
+            "//flutter/settings:use_xtool_backend": "xtool",
+            "//conditions:default": "rules_apple",
+        }),
+        tags = ["manual"],
+    )
+    _apple_backend_xtool_test(
+        name = name + "_apple_backend_xtool",
+        target_under_test = ":" + name + "_backend_probe",
+    )
+    _apple_backend_rules_apple_test(
+        name = name + "_apple_backend_rules_apple",
+        target_under_test = ":" + name + "_backend_probe",
+    )
+    build_test(
+        name = name + "_xtool_sdk_status_build",
+        targets = [
+            "@flutter_xtool_darwin_sdk//:sdk_status",
+            "@flutter_xtool_darwin_sdk//:sdk_files",
+            "@flutter_xtool_darwin_sdk//:ios_arm64_cc_toolchain_config",
+            "@flutter_xtool_darwin_sdk//:macos_arm64_cc_toolchain_config",
+        ],
+    )
+    unittest.suite(
+        name + "_unit",
+        _t0_test,
+        _t1_test,
+        _t2_test,
+        _t3_test,
+        _t4_test,
+        _t5_test,
+        _t6_test,
+    )
+    native.test_suite(
+        name = name,
+        tests = [
+            ":" + name + "_unit",
+            ":" + name + "_apple_backend_xtool",
+            ":" + name + "_apple_backend_rules_apple",
+            ":" + name + "_xtool_sdk_status_build",
+        ],
+    )

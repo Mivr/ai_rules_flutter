@@ -2,9 +2,33 @@
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
+load("//flutter:providers.bzl", "FlutterDarwinFrameworkInfo")
 load("//flutter/private:flutter_macos_application.bzl", "flutter_macos_framework", "flutter_macos_native_libs")
+load("//flutter/private:flutter_xtool_bundle.bzl", "flutter_xtool_macos_bundle")
 load("//flutter/private:validation.bzl", "is_valid_bundle_id", "minimum_os_version_is_below")
-load(":apple_bundling.bzl", "fake_application", "outputs_under_target_dir_test")
+load(":apple_bundling.bzl", "fake_application", "fake_macho_binary", "outputs_under_target_dir_test")
+
+def _macos_arm64_transition_impl(_settings, _attr):
+    return {"//command_line_option:platforms": str(Label("//flutter/platforms:macos_arm64"))}
+
+_macos_arm64_transition = transition(
+    implementation = _macos_arm64_transition_impl,
+    inputs = [],
+    outputs = ["//command_line_option:platforms"],
+)
+
+def _platform_target_impl(ctx):
+    files = []
+    for t in ctx.attr.targets:
+        files.append(t[DefaultInfo].files)
+    return [DefaultInfo(files = depset(transitive = files))]
+
+_macos_arm64_targets = rule(
+    implementation = _platform_target_impl,
+    attrs = {
+        "targets": attr.label_list(cfg = _macos_arm64_transition, mandatory = True),
+    },
+)
 
 def _valid_bundle_id_test_impl(ctx):
     env = unittest.begin(ctx)
@@ -262,6 +286,54 @@ def _bundling_tests(name):
         application = name + "_fake_app_other",
         tags = ["manual"],
     )
+
+    # Debug and release (real synthetic Mach-O AOT dylib) framework fixtures,
+    # plus xtool macOS bundle assembly on any host (Linux or macOS).
+    fake_application(
+        name = name + "_fake_debug_app",
+        debug = True,
+        tags = ["manual"],
+    )
+    flutter_macos_framework(
+        name = name + "_fake_debug_app_framework",
+        application = name + "_fake_debug_app",
+        tags = ["manual"],
+    )
+    fake_application(
+        name = name + "_fake_release_macho_app",
+        debug = False,
+        macho_aot = True,
+        tags = ["manual"],
+    )
+    flutter_macos_framework(
+        name = name + "_fake_release_macho_app_framework",
+        application = name + "_fake_release_macho_app",
+        tags = ["manual"],
+    )
+    fake_macho_binary(
+        name = name + "_fake_macos_runner_bin",
+        platform = "macos",
+        tags = ["manual"],
+    )
+    flutter_xtool_macos_bundle(
+        name = name + "_fake_xtool_macos_bundle",
+        app_name = "Runner",
+        bundle_id = "com.example.runner",
+        executable = name + "_fake_macos_runner_bin",
+        frameworks = [name + "_fake_release_macho_app_framework"],
+        native_libs = [name + "_native_libs"],
+        tags = ["manual"],
+    )
+    _macos_arm64_targets(
+        name = name + "_macos_arm64_release_targets",
+        targets = [
+            name + "_fake_debug_app_framework",
+            name + "_fake_release_macho_app_framework",
+            name + "_fake_xtool_macos_bundle",
+        ],
+        tags = ["manual"],
+    )
+
     build_test(
         name = name + "_two_apps_one_package",
         targets = [
@@ -269,6 +341,7 @@ def _bundling_tests(name):
             name + "_fake_app_other_framework",
             name + "_native_libs",
             name + "_native_libs_other",
+            name + "_macos_arm64_release_targets",
         ],
     )
 

@@ -20,6 +20,7 @@ load("//flutter/private:flutter_sky_engine_repo.bzl", "flutter_sky_engine_repo")
 load("//flutter/private:flutter_web_sdk_repo.bzl", "flutter_web_sdk_repo")
 load("//flutter/private:toolchains_repo.bzl", "CROSS_COMPILATION_PAIRS", "DESKTOP_CROSS_PAIRS", "HOST_PLATFORMS", "flutter_toolchains_repo")
 load("//flutter/private:versions.bzl", "FLUTTER_VERSIONS", "LINUX_SYSROOT_CHECKSUMS", "flutter_artifact_sha256", "flutter_source_sha256")
+load("//flutter/private:xtool_darwin_sdk_repo.bzl", "xtool_darwin_sdk_repo")
 
 def _flutter_patched_sdk_product_repo_impl(repository_ctx):
     url = engine_artifact_url(repository_ctx.attr.engine_revision, "flutter_patched_sdk_product.zip")
@@ -548,7 +549,13 @@ exports_files(["{gen_snapshot}"], visibility = ["//visibility:public"])
 """.format(gen_snapshot = _profile_gen_snapshot_path(os_name)),
     )
 
-def flutter_register_toolchains(name, **kwargs):
+def flutter_register_toolchains(
+        name,
+        darwin_sdk_path = "",
+        darwin_sdk_url = "",
+        darwin_sdk_sha256 = "",
+        darwin_sdk_swift_toolchain_path = "",
+        **kwargs):
     """Convenience macro for setting up Flutter SDK repositories.
 
     Creates a repository for each host platform, lazy artifact repos,
@@ -556,6 +563,10 @@ def flutter_register_toolchains(name, **kwargs):
 
     Args:
         name: base name for all created repos, like "flutter"
+        darwin_sdk_path: optional local path to xtool darwin.artifactbundle
+        darwin_sdk_url: optional URL for xtool darwin.artifactbundle archive
+        darwin_sdk_sha256: optional SHA-256 for darwin_sdk_url
+        darwin_sdk_swift_toolchain_path: optional path to Linux Swift toolchain root
         **kwargs: passed to each flutter_engine_artifacts call (must include flutter_version)
     """
     flutter_version = kwargs["flutter_version"]
@@ -859,6 +870,7 @@ def flutter_register_toolchains(name, **kwargs):
         engine_revision = meta.engine_revision,
         release_sha256 = flutter_artifact_sha256(flutter_version, ios_engine_artifact_path("release")),
         debug_sha256 = flutter_artifact_sha256(flutter_version, ios_engine_artifact_path("debug")),
+        profile_repo_name = name + "_ios_engine_profile",
     )
 
     # The iOS profile engine and its gen_snapshot, apart so only a profile
@@ -885,6 +897,15 @@ exports_files(["gen_snapshot_arm64"], visibility = ["//visibility:public"])
     flutter_macos_engine_repo(
         name = name + "_macos_engine",
         user_repository_name = name,
+    )
+
+    # xtool Darwin SDK and Linux -> Darwin C++/Swift cross-toolchains repo.
+    xtool_darwin_sdk_repo(
+        name = name + "_xtool_darwin_sdk",
+        path = darwin_sdk_path,
+        url = darwin_sdk_url,
+        sha256 = darwin_sdk_sha256,
+        swift_toolchain_path = darwin_sdk_swift_toolchain_path,
     )
 
     flutter_toolchains_repo(

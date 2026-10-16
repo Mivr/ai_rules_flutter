@@ -14,7 +14,13 @@ These are exported as `flutter_macos_framework_gen` and `flutter_macos_native_li
 from flutter/macos.bzl.
 """
 
-load("//flutter:providers.bzl", "FlutterApplicationInfo")
+load("@apple_support//lib:apple_support.bzl", "apple_support")
+load("@bazel_skylib//lib:dicts.bzl", "dicts")
+
+# buildifier: disable=bzl-visibility
+load("@rules_apple//apple/internal:framework_import_support.bzl", "framework_import_support")
+load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterDarwinFrameworkInfo", "resolve_exec_dart_vm")
+load("//flutter/private:constants.bzl", "MACOS_MINIMUM_OS_VERSION")
 
 # -- flutter_macos_framework (App.framework assembly) -------------------------
 
@@ -68,6 +74,10 @@ def _flutter_macos_framework_impl(ctx):
     flutter_sdk_info = ctx.toolchains["@rules_flutter//flutter:toolchain_type"].flutter_sdk_info
     is_debug = app_info.is_debug
     flutter_assets = app_info.flutter_assets
+    minimum_os_version = ctx.attr.minimum_os_version
+    target_arch = apple_support.target_arch_from_rule_ctx(ctx)
+    stub_arch = "arm64" if target_arch == "arm64" else "x86_64"
+    dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx, flutter_sdk_info)
 
     # Use a wrapper directory so that additional_contents preserves the
     # App.framework/ level. Tree artifacts placed via additional_contents have
@@ -81,15 +91,74 @@ def _flutter_macos_framework_impl(ctx):
     # package built from different applications would both declare it, which
     # fails analysis with conflicting actions.
     wrapper_dir = ctx.actions.declare_directory(ctx.label.name)
+    prepared_binary = ctx.actions.declare_file("%s_macho/App" % ctx.label.name)
 
-    inputs = [flutter_assets]
+    if is_debug:
+        ctx.actions.run(
+            executable = dart_exe,
+            arguments = [
+                ctx.executable._macho_edit.path,
+                "stub",
+                "--output",
+                prepared_binary.path,
+                "--arch",
+                stub_arch,
+                "--platform",
+                "macos",
+                "--min-os",
+                minimum_os_version,
+                "--sdk-version",
+                minimum_os_version,
+                "--install-name",
+                "@rpath/App.framework/Versions/A/App",
+            ],
+            inputs = depset(
+                direct = [ctx.executable._macho_edit],
+                transitive = [dart_vm_files],
+            ),
+            outputs = [prepared_binary],
+            mnemonic = "FlutterMacOSStubDylib",
+            progress_message = "Creating stub macOS App.framework binary for debug mode",
+        )
+    else:
+        if not app_info.aot_output:
+            fail("flutter_macos_framework requires an AOT build (not debug mode) or a kernel_dill in debug mode.")
+        ctx.actions.run(
+            executable = dart_exe,
+            arguments = [
+                ctx.executable._macho_edit.path,
+                "patch",
+                "--input",
+                app_info.aot_output.path,
+                "--output",
+                prepared_binary.path,
+                "--platform",
+                "macos",
+                "--min-os",
+                minimum_os_version,
+                "--sdk-version",
+                minimum_os_version,
+                "--install-name",
+                "@rpath/App.framework/Versions/A/App",
+                "--allow-non-macho",
+            ],
+            inputs = depset(
+                direct = [app_info.aot_output, ctx.executable._macho_edit],
+                transitive = [dart_vm_files],
+            ),
+            outputs = [prepared_binary],
+            mnemonic = "FlutterMacOSRetagDylib",
+            progress_message = "Retagging App dylib for macos (min %s)" % minimum_os_version,
+        )
+
+    inputs = [flutter_assets, prepared_binary]
     shell_parts = [
         "set -e",
         'FW="$1/App.framework"',
         'mkdir -p "$FW/Resources"',
     ]
 
-    # $1 = wrapper dir, $2 = AOT/dill source, $3 = flutter_assets dir
+    # $1 = wrapper dir, $2 = AOT/dill source, $3 = flutter_assets dir, $4 = prepared_binary
     args = ctx.actions.args()
     args.add(wrapper_dir.path)
 
@@ -104,16 +173,15 @@ def _flutter_macos_framework_impl(ctx):
         else:
             args.add("")  # placeholder
     else:
-        if not app_info.aot_output:
-            fail("flutter_macos_framework requires an AOT build (not debug mode) or a kernel_dill in debug mode.")
-        inputs.append(app_info.aot_output)
-        args.add(app_info.aot_output.path)
-        shell_parts.append('cp "$2" "$FW/App"')
+        args.add(prepared_binary.path)
 
     args.add(flutter_assets.path)
+    args.add(prepared_binary.path)
 
-    # Copy flutter_assets and write Info.plist inside Resources/.
+    # Copy the App binary (retagged AOT dylib or debug stub), flutter_assets,
+    # and write Info.plist inside Resources/.
     shell_parts.extend([
+        'cp "$4" "$FW/App"',
         'cp -RL "$3"/. "$FW/Resources/flutter_assets"',
         'cat > "$FW/Resources/Info.plist" << \'PLISTEOF\'\n' + _APP_FRAMEWORK_INFO_PLIST + "PLISTEOF",
     ])
@@ -141,18 +209,47 @@ def _flutter_macos_framework_impl(ctx):
         progress_message = "Assembling App.framework for %s" % ctx.label,
     )
 
-    return [DefaultInfo(files = depset([wrapper_dir]))]
+    return [
+        DefaultInfo(files = depset([wrapper_dir])),
+        framework_import_support.framework_import_info_with_dependencies(
+            build_archs = [target_arch],
+            deps = [],
+            framework_imports = [wrapper_dir],
+        ),
+        FlutterDarwinFrameworkInfo(
+            framework_name = "App",
+            framework_files = depset([wrapper_dir]),
+            framework_dir = wrapper_dir.path + "/App.framework",
+            headers = depset(),
+            is_dynamic = True,
+        ),
+    ]
 
 flutter_macos_framework = rule(
     implementation = _flutter_macos_framework_impl,
-    attrs = {
-        "application": attr.label(
-            doc = "A flutter_application target providing FlutterApplicationInfo.",
-            mandatory = True,
-            providers = [FlutterApplicationInfo],
-        ),
-    },
-    toolchains = ["@rules_flutter//flutter:toolchain_type"],
+    attrs = dicts.add(
+        apple_support.platform_constraint_attrs(),
+        {
+            "application": attr.label(
+                doc = "A flutter_application target providing FlutterApplicationInfo.",
+                mandatory = True,
+                providers = [FlutterApplicationInfo],
+            ),
+            "minimum_os_version": attr.string(
+                doc = "Minimum macOS deployment target version.",
+                default = MACOS_MINIMUM_OS_VERSION,
+            ),
+            "_macho_edit": attr.label(
+                default = Label("//flutter/private/tools:macho_edit"),
+                executable = True,
+                cfg = "exec",
+            ),
+        },
+    ),
+    toolchains = [
+        "@rules_flutter//flutter:toolchain_type",
+        config_common.toolchain_type("@rules_dart//dart:exec_tools_toolchain_type", mandatory = False),
+    ],
     doc = "Assembles the Flutter AOT dylib and assets into App.framework for macOS.",
 )
 

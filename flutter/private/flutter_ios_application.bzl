@@ -21,7 +21,7 @@ load("@bazel_skylib//lib:dicts.bzl", "dicts")
 # (it accepts a single .framework). This is the same helper that rule uses.
 # buildifier: disable=bzl-visibility
 load("@rules_apple//apple/internal:framework_import_support.bzl", "framework_import_support")
-load("//flutter:providers.bzl", "FlutterApplicationInfo", "resolve_exec_dart_vm")
+load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterDarwinFrameworkInfo", "resolve_exec_dart_vm")
 load("//flutter/private:constants.bzl", "IOS_MINIMUM_OS_VERSION")
 load("//flutter/private:flutter_native_assets.bzl", "native_asset_framework_name")
 
@@ -197,6 +197,13 @@ def _flutter_ios_framework_impl(ctx):
                 deps = [],
                 framework_imports = framework_files,
             ),
+            FlutterDarwinFrameworkInfo(
+                framework_name = "App",
+                framework_files = depset(framework_files),
+                framework_dir = framework_binary.dirname,
+                headers = depset(),
+                is_dynamic = True,
+            ),
         ]
     else:
         # Debug mode: stub binary + flutter_assets with kernel_blob.bin.
@@ -270,6 +277,13 @@ def _flutter_ios_framework_impl(ctx):
                 build_archs = [apple_support.target_arch_from_rule_ctx(ctx)],
                 deps = [],
                 framework_imports = framework_files,
+            ),
+            FlutterDarwinFrameworkInfo(
+                framework_name = "App",
+                framework_files = depset(framework_files),
+                framework_dir = framework_binary.dirname,
+                headers = depset(),
+                is_dynamic = True,
             ),
         ]
 
@@ -403,6 +417,13 @@ def _flutter_ios_native_frameworks_impl(ctx):
             build_archs = [apple_support.target_arch_from_rule_ctx(ctx)],
             deps = [],
             framework_imports = framework_files,
+        ),
+        FlutterDarwinFrameworkInfo(
+            framework_name = "native_assets",
+            framework_files = depset(framework_files),
+            framework_dir = None,
+            headers = depset(),
+            is_dynamic = True,
         ),
     ]
 
