@@ -33,10 +33,10 @@ def _flutter_application_impl(ctx):
     # profiler names Dart code from the snapshot, not from native symbols.
     strip = ctx.var["COMPILATION_MODE"] == "opt"
 
-    # Guard: AOT cross-compilation between desktop OSes is not supported.
-    # gen_snapshot can only produce native code for the host OS.
+    # Guard: AOT cross-compilation to Linux/Windows desktop OSes is not supported.
+    # Linux -> macOS AOT is supported via --snapshot_kind=app-aot-macho-dylib.
     # target_os is non-empty only for cross-compilation toolchains.
-    if not is_debug and flutter_sdk_info.target_os in ("linux", "macos", "windows"):
+    if not is_debug and flutter_sdk_info.target_os in ("linux", "windows"):
         fail(
             "AOT cross-compilation between desktop platforms is not supported. " +
             "Flutter's gen_snapshot can only produce native code for the host OS. " +
@@ -170,7 +170,6 @@ def _flutter_application_impl(ctx):
                 strip = strip,
                 extra_flags = extra_flags,
                 extra_outputs = extra_outputs,
-                min_os_version = ctx.attr.min_os_version if ctx.attr.min_os_version else None,
             )
         else:
             aot_output = ctx.actions.declare_file(ctx.label.name + ".so")
