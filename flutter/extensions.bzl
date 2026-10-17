@@ -18,7 +18,7 @@ load("//flutter/private:flutter_gen_l10n_repo.bzl", "flutter_gen_l10n_repo")
 load("//flutter/private:flutter_pub_lock_hub.bzl", "flutter_pub_lock_hub")
 load("//flutter/private:flutter_pub_package.bzl", "flutter_pub_package")
 load("//flutter/private:flutter_sdk_package.bzl", "flutter_sdk_package")
-load("//flutter/private:pub_lock_sdks.bzl", "parse_lock_sdk_constraints", "version_below_lower_bound")
+load("//flutter/private:pub_lock_sdks.bzl", "hosted_package_sha256", "parse_lock_sdk_constraints", "version_below_lower_bound")
 load("//flutter/private:versions.bzl", "flutter_source_sha256")
 load("//flutter/private:xtool_darwin_sdk_repo.bzl", "resolve_darwin_sdk_from_modules")
 load(":repositories.bzl", "flutter_register_toolchains")
@@ -238,19 +238,7 @@ def _toolchain_extension(module_ctx):
                 # Hosted packages are fetched by checksum only. An entry with
                 # no sha256 is a lock that predates the field, or was edited
                 # by hand; refuse it rather than download unverified bytes.
-                sha256 = desc.get("sha256", "") if type(desc) == "dict" else ""
-                if not sha256:
-                    # Same wording as rules_dart's pub.from_lock(), with
-                    # flutter.pub's command.
-                    fail((
-                        "pub package \"{name}\" {version} in {lock} has no sha256. " +
-                        "Run `bazel run @rules_flutter//flutter:pub -- get` " +
-                        "(Dart 2.19 or newer records one) and commit the lock."
-                    ).format(
-                        lock = str(pub_tag.lock),
-                        name = name,
-                        version = version,
-                    ))
+                sha256 = hosted_package_sha256(name, info, pub_tag.lock)
 
                 flutter_pub_package(
                     name = hub_name + "__" + name,
