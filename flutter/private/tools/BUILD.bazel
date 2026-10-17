@@ -1,4 +1,5 @@
 load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_test")
+load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
 
 # The sources of tools built into standalone executables. Exported so their unit
 # tests below can import them via `srcs`. Build actions reach them through their
@@ -27,6 +28,7 @@ dart_binary(
     compile_mode = "kernel",
     main = "android_bundle.dart",
     modular_kernel = False,
+    target_compatible_with = HOST_COMPATIBLE,
     visibility = ["//flutter:__subpackages__"],
 )
 
@@ -34,6 +36,7 @@ dart_binary(
     name = "pub_runner",
     compile_mode = "exe",
     main = "pub.dart",
+    target_compatible_with = HOST_COMPATIBLE,
     visibility = ["//flutter:__subpackages__"],
     deps = ["@rules_dart//dart/runfiles"],
 )
@@ -43,6 +46,7 @@ dart_binary(
     srcs = ["bazel_test_protocol.dart"],
     compile_mode = "exe",
     main = "flutter_test_runner.dart",
+    target_compatible_with = HOST_COMPATIBLE,
     visibility = ["//flutter:__subpackages__"],
     deps = ["@rules_dart//dart/runfiles"],
 )
@@ -52,6 +56,7 @@ dart_binary(
     compile_mode = "kernel",
     main = "bundle_app.dart",
     modular_kernel = False,
+    target_compatible_with = HOST_COMPATIBLE,
     visibility = ["//flutter:__subpackages__"],
 )
 
@@ -60,6 +65,7 @@ dart_binary(
     compile_mode = "kernel",
     main = "compile_shader.dart",
     modular_kernel = False,
+    target_compatible_with = HOST_COMPATIBLE,
     visibility = ["//flutter:__subpackages__"],
 )
 
@@ -67,6 +73,7 @@ dart_binary(
     name = "generate_asset_manifest",
     compile_mode = "exe",
     main = "generate_asset_manifest.dart",
+    target_compatible_with = HOST_COMPATIBLE,
     visibility = ["//flutter:__subpackages__"],
 )
 
@@ -75,6 +82,7 @@ dart_binary(
     compile_mode = "kernel",
     main = "kernel_filter.dart",
     modular_kernel = False,
+    target_compatible_with = HOST_COMPATIBLE,
     visibility = ["//flutter:__subpackages__"],
 )
 
@@ -83,6 +91,7 @@ dart_binary(
     compile_mode = "kernel",
     main = "macho_edit.dart",
     modular_kernel = False,
+    target_compatible_with = HOST_COMPATIBLE,
     visibility = ["//flutter:__subpackages__"],
 )
 
@@ -90,6 +99,7 @@ dart_binary(
     name = "merge_android_manifests",
     compile_mode = "exe",
     main = "merge_android_manifests.dart",
+    target_compatible_with = HOST_COMPATIBLE,
     visibility = ["//flutter:__subpackages__"],
 )
 
@@ -97,6 +107,7 @@ dart_binary(
     name = "merge_plists",
     compile_mode = "exe",
     main = "merge_plists.dart",
+    target_compatible_with = HOST_COMPATIBLE,
     visibility = ["//flutter:__subpackages__"],
 )
 
@@ -105,6 +116,7 @@ dart_binary(
     compile_mode = "kernel",
     main = "strip_native_libs.dart",
     modular_kernel = False,
+    target_compatible_with = HOST_COMPATIBLE,
     visibility = ["//flutter:__subpackages__"],
 )
 
@@ -113,6 +125,7 @@ dart_binary(
     compile_mode = "kernel",
     main = "web_template.dart",
     modular_kernel = False,
+    target_compatible_with = HOST_COMPATIBLE,
     visibility = ["//flutter:__subpackages__"],
 )
 
@@ -120,6 +133,7 @@ dart_binary(
     name = "xtool_pack",
     compile_mode = "exe",
     main = "xtool_pack.dart",
+    target_compatible_with = HOST_COMPATIBLE,
     visibility = ["//flutter:__subpackages__"],
 )
 
@@ -167,5 +181,6 @@ _TOOL_SRCS = {
     name = name,
     srcs = [tool] + _TOOL_SRCS.get(tool, []),
     main = "test/%s.dart" % name,
+    target_compatible_with = HOST_COMPATIBLE,
     deps = ["@dev_tool_deps//:test"] + extra_deps,
 ) for name, (tool, extra_deps) in _UNIT_TESTS.items()]

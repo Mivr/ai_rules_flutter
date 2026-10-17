@@ -1017,6 +1017,16 @@ PLATFORM_CONSTRAINT_ATTRS = {
     ),
 }
 
+# Target compatibility constraint for targets that only run on a host OS
+# (Linux, macOS, Windows) and must be skipped when `--platforms` targets a
+# mobile/device OS such as Android or iOS.
+HOST_COMPATIBLE = select({
+    Label("@platforms//os:linux"): [],
+    Label("@platforms//os:macos"): [],
+    Label("@platforms//os:windows"): [],
+    "//conditions:default": [Label("@platforms//:incompatible")],
+})
+
 def launch_build_args(target_platform, is_simulator, is_arm64, is_x86_64):
     """The bazel flags the *launch target's* build needs to produce this app.
 

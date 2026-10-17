@@ -393,6 +393,12 @@ dart_test(
     name = "verify_pub_assets_test",
     data = [":hello_world_app"],
     main = "test/verify_pub_assets_test.dart",
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:macos": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     deps = [
         "@deps//:test",
         "@rules_dart//dart/runfiles",

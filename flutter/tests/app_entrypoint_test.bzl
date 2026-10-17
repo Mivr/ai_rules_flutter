@@ -13,6 +13,7 @@ mounts one scheme at a time.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
+load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
 load("//flutter/private:flutter_application.bzl", "flutter_application")
 load(":action_content.bzl", "package_entry", "written_json")
 
@@ -207,6 +208,7 @@ def app_entrypoint_test_suite(name):
     _opt_in_lib_test(
         name = name + "_opt_in_lib",
         target_under_test = ":_ae_in_lib",
+        target_compatible_with = HOST_COMPATIBLE,
     )
     native.test_suite(
         name = name,

@@ -8,6 +8,7 @@ load(
 )
 load(
     "//flutter/private:common.bzl",
+    "HOST_COMPATIBLE",
     "flutter_app_shader_aspect",
     "flutter_tester_shader_aspect",
 )
@@ -236,10 +237,12 @@ def shader_compile_test_suite(name):
     )
     _consumer_no_local_shader_compiles_test(
         name = name + "_test_consumer_1_no_shader_actions",
+        target_compatible_with = HOST_COMPATIBLE,
         target_under_test = ":_test_consumer_1",
     )
     _consumer_no_local_shader_compiles_test(
         name = name + "_test_consumer_2_no_shader_actions",
+        target_compatible_with = HOST_COMPATIBLE,
         target_under_test = ":_test_consumer_2",
     )
     _aspect_compiles_on_library_test(

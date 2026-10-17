@@ -9,6 +9,7 @@ bundled `dart-sdk/` and `patched-sdk/` trees.
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("@rules_dart//dart:analyze.bzl", "dart_analyze")
 load("@rules_dart//dart:defs.bzl", "dart_binary")
+load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
 load("//flutter/private:flutter_aot_target.bzl", "flutter_aot_target")
 load("//flutter/private:flutter_application.bzl", "flutter_application")
 load("//flutter/private:flutter_asset_bundle.bzl", "flutter_asset_bundle")
@@ -590,6 +591,7 @@ def _setup_fixtures():
         package_name = _PACKAGE,
         main = _MAIN,
         tags = ["manual"],
+        target_compatible_with = HOST_COMPATIBLE,
     )
 
 def action_inputs_test_suite(name):
@@ -603,18 +605,22 @@ def action_inputs_test_suite(name):
     _flutter_test_runfiles_test(
         name = name + "_flutter_test_runfiles",
         target_under_test = ":_inputs_flutter_test",
+        target_compatible_with = HOST_COMPATIBLE,
     )
     _flutter_test_defines_fallback_test(
         name = name + "_flutter_test_defines_fallback",
         target_under_test = ":_inputs_flutter_test_defines",
+        target_compatible_with = HOST_COMPATIBLE,
     )
     _flutter_comma_defines_fallback_test(
         name = name + "_flutter_test_comma_defines_fallback",
         target_under_test = ":_inputs_flutter_test",
+        target_compatible_with = HOST_COMPATIBLE,
     )
     _dart_comma_defines_fallback_test(
         name = name + "_flutter_test_dart_comma_defines_fallback",
         target_under_test = ":_inputs_flutter_test",
+        target_compatible_with = HOST_COMPATIBLE,
     )
     _flutter_comma_defines_fallback_test(
         name = name + "_kernel_target_comma_defines_fallback",
@@ -627,10 +633,12 @@ def action_inputs_test_suite(name):
     _application_opt_inputs_test(
         name = name + "_application_opt",
         target_under_test = ":_inputs_application",
+        target_compatible_with = HOST_COMPATIBLE,
     )
     _application_opt_fonts_inputs_test(
         name = name + "_application_opt_fonts",
         target_under_test = ":_inputs_application_with_fonts",
+        target_compatible_with = HOST_COMPATIBLE,
     )
     _application_dbg_inputs_test(
         name = name + "_application_dbg",
@@ -643,6 +651,7 @@ def action_inputs_test_suite(name):
     _aot_target_inputs_test(
         name = name + "_aot_target",
         target_under_test = ":_inputs_aot_target",
+        target_compatible_with = HOST_COMPATIBLE,
     )
     _aot_target_dbg_inputs_test(
         name = name + "_aot_target_dbg",
@@ -671,6 +680,7 @@ def action_inputs_test_suite(name):
     _dart_toolchain_inputs_test(
         name = name + "_dart_toolchain",
         target_under_test = ":_inputs_dart_binary",
+        target_compatible_with = HOST_COMPATIBLE,
     )
 
     native.test_suite(
