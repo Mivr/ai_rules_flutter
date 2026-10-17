@@ -981,7 +981,7 @@ So a policy strict enough to be useful cannot live in `web/index.html` today, be
 
 `gen_snapshot`, the AOT compiler, runs on the host and produces code for the target. Flutter publishes a different binary per host and target pair, and not every pair exists.
 
-| Host | Target | AOT (release) | JIT (debug) | Notes |
+| Host | Target | AOT (release / profile) | JIT (debug) | Notes |
 |---|---|:---:|:---:|---|
 | macOS | macOS | Yes | Yes | Native build |
 | macOS | iOS | Yes | Yes | `rules_apple` handles the transition |
@@ -991,13 +991,19 @@ So a policy strict enough to be useful cannot live in `web/index.html` today, be
 | macOS | Web | Yes | n/a | Web uses dart2wasm or dart2js, not gen_snapshot |
 | Linux | Linux | Yes | Yes | Native build |
 | Linux | Android | Yes | Yes | The Android rules handle the transition |
-| Linux | iOS | No | No | Needs Xcode |
+| Linux | iOS | No | Yes | Debug/JIT kernel only; AOT requires a Darwin-target `gen_snapshot` (macOS host) |
+| Linux | macOS | No | Yes | Debug/JIT kernel only; AOT requires a Darwin-target `gen_snapshot` (macOS host) |
+| Linux | Windows | No | Yes | Needs a Windows cross-toolchain |
 | Linux | Web | Yes | n/a | |
 | Windows | Windows | Yes | Yes | Native build |
 | Windows | Android | Yes | Yes | The Android rules handle the transition |
+| Windows | macOS | No | Yes | Debug/JIT kernel only; AOT requires a Darwin-target `gen_snapshot` (macOS host) |
+| Windows | Linux | No | Yes | Needs a Linux cross-toolchain |
 | Windows | Web | Yes | n/a | |
 
-The gap is desktop to desktop: there is no release cross-compile from macOS to Linux or Windows, because Flutter does not publish those `gen_snapshot` binaries. Build debug bundles across, or build release natively on the target.
+The gap is desktop-to-desktop and non-macOS-to-Apple AOT:
+- **Apple release and profile AOT (`ios_*`, `macos_*`) requires a macOS host (or a Darwin-target `gen_snapshot`).** Each `gen_snapshot` binary has its target OS and ABI compiled in at build time (`DART_TARGET_OS_*` in the Dart VM); `--snapshot_kind=app-aot-macho-dylib` only selects the Mach-O container format and does not change the generated machine code's target ABI. In particular, Apple arm64 reserves register `x18` for the platform and uses a different FFI argument ABI from Linux/Android arm64, and `dart:ui` calls the Flutter engine through `@Native` FFI. Because Flutter only publishes Darwin-targeted `gen_snapshot` binaries for macOS hosts, release and profile AOT builds for iOS and macOS are only registered on macOS hosts and fail at analysis on Linux and Windows. Debug/JIT (`-c dbg`) compiles platform-independent kernel `.dill` with `frontend_server` and works from Linux and Windows.
+- **Desktop to desktop:** there is no release or profile AOT cross-compile between desktop OSes (macOS, Linux, Windows), because Flutter does not publish cross-OS desktop `gen_snapshot` binaries. Build debug bundles across with `-c dbg`, or build release/profile natively on the target OS.
 
 ### Release builds and permissions
 

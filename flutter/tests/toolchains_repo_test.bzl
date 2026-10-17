@@ -1,9 +1,24 @@
-"""Unit tests for toolchains_repo.bzl — DESKTOP_CROSS_PAIRS and CROSS_COMPILATION_PAIRS validation."""
+"""Unit and analysis tests for toolchains_repo.bzl and Apple AOT gen_snapshot wiring."""
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
-load("//flutter/private:toolchains_repo.bzl", "CROSS_COMPILATION_PAIRS", "DESKTOP_CROSS_PAIRS", "HOST_PLATFORMS", "TARGET_PLATFORMS")
-load("//flutter/private:xtool_darwin_sdk_repo.bzl", "FlutterXtoolSdkInfo", "XTOOL_DARWIN_TARGETS", "generate_xtool_darwin_sdk_build", "resolve_darwin_artifactbundle_sdk_paths")
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
+load("//flutter/private:flutter_aot_compile.bzl", "flutter_aot_macho_action")
+load("//flutter/private:flutter_aot_target.bzl", "flutter_aot_target")
+load("//flutter/private:flutter_application.bzl", "flutter_application")
+load("//flutter/private:flutter_cross_repo.bzl", "generate_cross_repo_build")
+load(
+    "//flutter/private:toolchains_repo.bzl",
+    "AOT_CROSS_COMPILATION_PAIRS",
+    "CROSS_COMPILATION_PAIRS",
+    "DESKTOP_CROSS_PAIRS",
+    "HOST_PLATFORMS",
+    "TARGET_PLATFORMS",
+    "generate_toolchains_build",
+    "supports_aot_cross_compilation",
+)
+load("//flutter/private:xtool_darwin_sdk_repo.bzl", "XTOOL_DARWIN_TARGETS", "generate_xtool_darwin_sdk_build", "resolve_darwin_artifactbundle_sdk_paths")
+load("//flutter:repositories.bzl", "resolve_aot_gen_snapshot")
 
 def _desktop_cross_pairs_keys_are_host_platforms_test_impl(ctx):
     """Every key in DESKTOP_CROSS_PAIRS must be a valid HOST_PLATFORMS key."""
@@ -65,7 +80,7 @@ def _desktop_cross_pairs_all_hosts_covered_test_impl(ctx):
     return unittest.end(env)
 
 def _cross_compilation_pairs_valid_test_impl(ctx):
-    """Every (host, target) in CROSS_COMPILATION_PAIRS must reference valid platforms, and Linux hosts target iOS and macOS."""
+    """Every (host, target) in CROSS_COMPILATION_PAIRS must reference valid platforms and wire the right gen_snapshot."""
     env = unittest.begin(ctx)
     for host, targets in CROSS_COMPILATION_PAIRS.items():
         asserts.true(
@@ -79,27 +94,233 @@ def _cross_compilation_pairs_valid_test_impl(ctx):
                 target in TARGET_PLATFORMS,
                 "CROSS_COMPILATION_PAIRS[{}] target '{}' is not in TARGET_PLATFORMS".format(host, target),
             )
+            aot = resolve_aot_gen_snapshot("flutter", host, target)
+            if target.startswith("android-"):
+                asserts.true(
+                    env,
+                    supports_aot_cross_compilation(host, target),
+                    "{} -> {} must support AOT cross-compilation".format(host, target),
+                )
+                asserts.equals(
+                    env,
+                    "@flutter_cross_{}_{}//:gen_snapshot".format(host, target),
+                    aot.release,
+                )
+                asserts.equals(
+                    env,
+                    "@flutter_cross_{}_{}_profile//:gen_snapshot".format(host, target),
+                    aot.profile,
+                )
+            elif target == "ios-arm64" and host.startswith("darwin-"):
+                asserts.true(env, supports_aot_cross_compilation(host, target))
+                asserts.equals(env, "@flutter_ios_engine//:gen_snapshot_arm64", aot.release)
+                asserts.equals(env, "@flutter_ios_engine_profile//:gen_snapshot_arm64", aot.profile)
+            elif target == "ios-x64" and host.startswith("darwin-"):
+                asserts.true(env, supports_aot_cross_compilation(host, target))
+                asserts.equals(
+                    env,
+                    "@flutter_host_tools_release_darwin-x64//:host-tools-release/gen_snapshot",
+                    aot.release,
+                )
+                asserts.equals(
+                    env,
+                    "@flutter_darwin-x64_profile//:host-tools/gen_snapshot",
+                    aot.profile,
+                )
+            else:
+                asserts.false(
+                    env,
+                    supports_aot_cross_compilation(host, target),
+                    "{} -> {} must NOT register an AOT cross toolchain".format(host, target),
+                )
+                asserts.equals(
+                    env,
+                    None,
+                    aot,
+                    "{} -> {} must have no AOT gen_snapshot wired".format(host, target),
+                )
+
     for linux_host in ("linux-x64", "linux-arm64"):
         asserts.true(
             env,
             "ios-arm64" in CROSS_COMPILATION_PAIRS[linux_host],
-            "{} must support ios-arm64 in CROSS_COMPILATION_PAIRS".format(linux_host),
+            "{} must support ios-arm64 debug/JIT in CROSS_COMPILATION_PAIRS".format(linux_host),
         )
         asserts.true(
             env,
             "ios-x64" in CROSS_COMPILATION_PAIRS[linux_host],
-            "{} must support ios-x64 in CROSS_COMPILATION_PAIRS".format(linux_host),
+            "{} must support ios-x64 debug/JIT in CROSS_COMPILATION_PAIRS".format(linux_host),
+        )
+        asserts.false(
+            env,
+            "ios-arm64" in AOT_CROSS_COMPILATION_PAIRS[linux_host],
+            "{} must NOT support ios-arm64 AOT in AOT_CROSS_COMPILATION_PAIRS".format(linux_host),
+        )
+        asserts.false(
+            env,
+            "ios-x64" in AOT_CROSS_COMPILATION_PAIRS[linux_host],
+            "{} must NOT support ios-x64 AOT in AOT_CROSS_COMPILATION_PAIRS".format(linux_host),
         )
         asserts.true(
             env,
             "darwin-arm64" in DESKTOP_CROSS_PAIRS[linux_host],
-            "{} must support darwin-arm64 in DESKTOP_CROSS_PAIRS".format(linux_host),
+            "{} must support darwin-arm64 debug/JIT in DESKTOP_CROSS_PAIRS".format(linux_host),
         )
         asserts.true(
             env,
             "darwin-x64" in DESKTOP_CROSS_PAIRS[linux_host],
-            "{} must support darwin-x64 in DESKTOP_CROSS_PAIRS".format(linux_host),
+            "{} must support darwin-x64 debug/JIT in DESKTOP_CROSS_PAIRS".format(linux_host),
         )
+    return unittest.end(env)
+
+def _apple_aot_matrix_by_host_target_mode_test_impl(ctx):
+    """Per (host OS, Apple target, mode), asserts which Darwin gen_snapshot repo is wired or that the pair is unavailable."""
+    env = unittest.begin(ctx)
+
+    apple_targets = ["ios-arm64", "ios-x64", "darwin-arm64", "darwin-x64"]
+
+    expected_apple_aot = {
+        ("darwin-arm64", "darwin-arm64"): struct(
+            release = "@flutter_host_tools_release_darwin-arm64//:host-tools-release/gen_snapshot",
+            profile = "@flutter_darwin-arm64_profile//:host-tools/gen_snapshot",
+        ),
+        ("darwin-x64", "darwin-x64"): struct(
+            release = "@flutter_host_tools_release_darwin-x64//:host-tools-release/gen_snapshot",
+            profile = "@flutter_darwin-x64_profile//:host-tools/gen_snapshot",
+        ),
+        ("darwin-arm64", "ios-arm64"): struct(
+            release = "@flutter_ios_engine//:gen_snapshot_arm64",
+            profile = "@flutter_ios_engine_profile//:gen_snapshot_arm64",
+        ),
+        ("darwin-x64", "ios-arm64"): struct(
+            release = "@flutter_ios_engine//:gen_snapshot_arm64",
+            profile = "@flutter_ios_engine_profile//:gen_snapshot_arm64",
+        ),
+        ("darwin-arm64", "ios-x64"): struct(
+            release = "@flutter_host_tools_release_darwin-x64//:host-tools-release/gen_snapshot",
+            profile = "@flutter_darwin-x64_profile//:host-tools/gen_snapshot",
+        ),
+        ("darwin-x64", "ios-x64"): struct(
+            release = "@flutter_host_tools_release_darwin-x64//:host-tools-release/gen_snapshot",
+            profile = "@flutter_darwin-x64_profile//:host-tools/gen_snapshot",
+        ),
+    }
+
+    for host in HOST_PLATFORMS.keys():
+        for target in apple_targets:
+            actual = resolve_aot_gen_snapshot("flutter", host, target)
+            expected = expected_apple_aot.get((host, target), None)
+            if expected == None:
+                asserts.equals(
+                    env,
+                    None,
+                    actual,
+                    "Expected ({}, {}) Apple AOT to be unavailable, got {}".format(host, target, actual),
+                )
+            else:
+                asserts.true(
+                    env,
+                    actual != None,
+                    "Expected ({}, {}) Apple AOT to be available".format(host, target),
+                )
+                if actual != None:
+                    asserts.equals(
+                        env,
+                        expected.release,
+                        actual.release,
+                        "Wrong release gen_snapshot for ({}, {})".format(host, target),
+                    )
+                    asserts.equals(
+                        env,
+                        expected.profile,
+                        actual.profile,
+                        "Wrong profile gen_snapshot for ({}, {})".format(host, target),
+                    )
+                    for mode_label in (actual.release, actual.profile):
+                        asserts.false(
+                            env,
+                            "android" in mode_label,
+                            "Apple AOT ({}, {}) must never wire an Android gen_snapshot: {}".format(host, target, mode_label),
+                        )
+                        asserts.false(
+                            env,
+                            "linux" in mode_label,
+                            "Apple AOT ({}, {}) must never wire a Linux gen_snapshot: {}".format(host, target, mode_label),
+                        )
+                        asserts.false(
+                            env,
+                            "windows" in mode_label,
+                            "Apple AOT ({}, {}) must never wire a Windows gen_snapshot: {}".format(host, target, mode_label),
+                        )
+
+    # Verify generated BUILD.bazel in @flutter_toolchains only registers AOT toolchains
+    # for supported AOT pairs and never for Linux->iOS or desktop cross-compilation.
+    toolchains_build = generate_toolchains_build("flutter")
+    for darwin_host in ("darwin-arm64", "darwin-x64"):
+        for ios_target in ("ios-arm64", "ios-x64"):
+            asserts.true(
+                env,
+                'name = "{}_to_{}_aot_toolchain"'.format(darwin_host, ios_target) in toolchains_build,
+                "Expected {}_to_{}_aot_toolchain in toolchains BUILD".format(darwin_host, ios_target),
+            )
+    for linux_host in ("linux-x64", "linux-arm64"):
+        for ios_target in ("ios-arm64", "ios-x64"):
+            asserts.true(
+                env,
+                'name = "{}_to_{}_toolchain"'.format(linux_host, ios_target) in toolchains_build,
+                "Expected debug/JIT {}_to_{}_toolchain in toolchains BUILD".format(linux_host, ios_target),
+            )
+            asserts.false(
+                env,
+                'name = "{}_to_{}_aot_toolchain"'.format(linux_host, ios_target) in toolchains_build,
+                "Must not register {}_to_{}_aot_toolchain in toolchains BUILD".format(linux_host, ios_target),
+            )
+    asserts.false(
+        env,
+        "_desktop_aot_toolchain" in toolchains_build,
+        "Must not register any _desktop_aot_toolchain in toolchains BUILD",
+    )
+
+    # Verify generate_cross_repo_build omits flutter_aot_toolchain when no AOT gen_snapshot is available,
+    # and wires both release and profile when available.
+    linux_ios_build = generate_cross_repo_build(
+        flutter_version = "3.47.7",
+        engine_revision = "deadbeef",
+        host_platform = "linux-x64",
+        target_platform = "ios-arm64",
+        host_repo_name = "flutter_linux-x64",
+    )
+    asserts.false(
+        env,
+        "flutter_aot_toolchain" in linux_ios_build,
+        "linux-x64 -> ios-arm64 cross repo must not declare flutter_aot_toolchain",
+    )
+
+    darwin_sim_aot = resolve_aot_gen_snapshot("flutter", "darwin-arm64", "ios-x64")
+    darwin_ios_x64_build = generate_cross_repo_build(
+        flutter_version = "3.47.7",
+        engine_revision = "deadbeef",
+        host_platform = "darwin-arm64",
+        target_platform = "ios-x64",
+        host_repo_name = "flutter_darwin-arm64",
+        gen_snapshot_label = darwin_sim_aot.release,
+        profile_gen_snapshot_label = darwin_sim_aot.profile,
+    )
+    asserts.true(
+        env,
+        "@flutter_host_tools_release_darwin-x64//:host-tools-release/gen_snapshot" in darwin_ios_x64_build,
+        "darwin-arm64 -> ios-x64 release must wire darwin-x64 release gen_snapshot",
+    )
+    asserts.true(
+        env,
+        "@flutter_darwin-x64_profile//:host-tools/gen_snapshot" in darwin_ios_x64_build,
+        "darwin-arm64 -> ios-x64 profile must wire darwin-x64 profile gen_snapshot",
+    )
+    asserts.false(
+        env,
+        "@flutter_darwin-arm64//:host-tools/gen_snapshot" in darwin_ios_x64_build,
+        "darwin-arm64 -> ios-x64 must not wire darwin-arm64 host debug gen_snapshot",
+    )
     return unittest.end(env)
 
 def _xtool_darwin_sdk_build_test_impl(ctx):
@@ -200,6 +421,127 @@ _apple_backend_rules_apple_test = analysistest.make(
     },
 )
 
+def _macho_aot_probe_impl(ctx):
+    out = ctx.actions.declare_file(ctx.label.name + ".dylib")
+    flutter_aot_macho_action(
+        ctx = ctx,
+        gen_snapshot = ctx.file.gen_snapshot,
+        kernel_dill = ctx.file.kernel_dill,
+        output = out,
+        strip = True,
+        min_os_version = ctx.attr.min_os_version if ctx.attr.min_os_version else None,
+    )
+    return [DefaultInfo(files = depset([out]))]
+
+_macho_aot_probe = rule(
+    implementation = _macho_aot_probe_impl,
+    attrs = {
+        "gen_snapshot": attr.label(allow_single_file = True, mandatory = True),
+        "kernel_dill": attr.label(allow_single_file = True, mandatory = True),
+        "min_os_version": attr.string(default = "14.0"),
+    },
+)
+
+def _macho_aot_flags_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    actions = [a for a in analysistest.target_actions(env) if a.mnemonic == "FlutterAotMacho"]
+    asserts.equals(env, 1, len(actions), "Expected one FlutterAotMacho action")
+    if actions:
+        argv = actions[0].argv
+        asserts.true(
+            env,
+            "--macho-install-name=@rpath/App.framework/App" in argv,
+            "Expected --macho-install-name in argv, got: %s" % argv,
+        )
+        asserts.true(
+            env,
+            "--macho-min-os-version=14.0" in argv,
+            "Expected --macho-min-os-version=14.0 in argv, got: %s" % argv,
+        )
+        asserts.true(
+            env,
+            "--macho-rpath=@executable_path/Frameworks,@loader_path/Frameworks" in argv,
+            "Expected --macho-rpath in argv, got: %s" % argv,
+        )
+    return analysistest.end(env)
+
+_macho_aot_flags_test = analysistest.make(_macho_aot_flags_test_impl)
+
+def _apple_debug_cross_succeeds_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    actions = analysistest.target_actions(env)
+    mnemonics = [a.mnemonic for a in actions]
+    asserts.true(
+        env,
+        "FlutterKernelCompile" in mnemonics,
+        "Expected FlutterKernelCompile in debug mode, got: %s" % mnemonics,
+    )
+    asserts.false(
+        env,
+        "FlutterAotMacho" in mnemonics or "FlutterAotElf" in mnemonics,
+        "Expected no AOT action in debug mode, got: %s" % mnemonics,
+    )
+    return analysistest.end(env)
+
+def _make_apple_debug_test(platform_label):
+    return analysistest.make(
+        _apple_debug_cross_succeeds_test_impl,
+        config_settings = {
+            "//command_line_option:compilation_mode": "dbg",
+            "//command_line_option:platforms": str(Label(platform_label)),
+        },
+    )
+
+_ios_arm64_dbg_test = _make_apple_debug_test("//flutter/platforms:ios_arm64")
+_ios_x64_dbg_test = _make_apple_debug_test("//flutter/platforms:ios_x64")
+_macos_arm64_dbg_test = _make_apple_debug_test("//flutter/platforms:macos_arm64")
+_macos_x64_dbg_test = _make_apple_debug_test("//flutter/platforms:macos_x64")
+
+def _ios_aot_unavailable_on_non_macos_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    asserts.expect_failure(env, "No target-compatible AOT gen_snapshot toolchain is registered")
+    return analysistest.end(env)
+
+def _macos_aot_cross_unavailable_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    asserts.expect_failure(env, "AOT cross-compilation between desktop platforms is not supported")
+    return analysistest.end(env)
+
+def _make_ios_aot_unavailable_test(platform_label, profile = False):
+    settings = {
+        "//command_line_option:compilation_mode": "opt",
+        "//command_line_option:platforms": str(Label(platform_label)),
+    }
+    if profile:
+        settings[str(Label("//flutter:profile"))] = True
+    return analysistest.make(
+        _ios_aot_unavailable_on_non_macos_test_impl,
+        expect_failure = True,
+        config_settings = settings,
+    )
+
+def _make_macos_aot_cross_unavailable_test(platform_label, profile = False):
+    settings = {
+        "//command_line_option:compilation_mode": "opt",
+        "//command_line_option:platforms": str(Label(platform_label)),
+    }
+    if profile:
+        settings[str(Label("//flutter:profile"))] = True
+    return analysistest.make(
+        _macos_aot_cross_unavailable_test_impl,
+        expect_failure = True,
+        config_settings = settings,
+    )
+
+_ios_arm64_release_unavailable_test = _make_ios_aot_unavailable_test("//flutter/platforms:ios_arm64", profile = False)
+_ios_arm64_profile_unavailable_test = _make_ios_aot_unavailable_test("//flutter/platforms:ios_arm64", profile = True)
+_ios_x64_release_unavailable_test = _make_ios_aot_unavailable_test("//flutter/platforms:ios_x64", profile = False)
+_ios_x64_profile_unavailable_test = _make_ios_aot_unavailable_test("//flutter/platforms:ios_x64", profile = True)
+_macos_arm64_release_unavailable_test = _make_macos_aot_cross_unavailable_test("//flutter/platforms:macos_arm64", profile = False)
+_macos_arm64_profile_unavailable_test = _make_macos_aot_cross_unavailable_test("//flutter/platforms:macos_arm64", profile = True)
+_macos_x64_release_unavailable_test = _make_macos_aot_cross_unavailable_test("//flutter/platforms:macos_x64", profile = False)
+_macos_x64_profile_unavailable_test = _make_macos_aot_cross_unavailable_test("//flutter/platforms:macos_x64", profile = True)
+
 _t0_test = unittest.make(_desktop_cross_pairs_keys_are_host_platforms_test_impl)
 _t1_test = unittest.make(_desktop_cross_pairs_targets_are_host_platforms_test_impl)
 _t2_test = unittest.make(_desktop_cross_pairs_no_self_pairs_test_impl)
@@ -207,6 +549,7 @@ _t3_test = unittest.make(_desktop_cross_pairs_no_same_os_test_impl)
 _t4_test = unittest.make(_desktop_cross_pairs_all_hosts_covered_test_impl)
 _t5_test = unittest.make(_cross_compilation_pairs_valid_test_impl)
 _t6_test = unittest.make(_xtool_darwin_sdk_build_test_impl)
+_t7_test = unittest.make(_apple_aot_matrix_by_host_target_mode_test_impl)
 
 def toolchains_repo_test_suite(name):
     _backend_probe(
@@ -225,6 +568,88 @@ def toolchains_repo_test_suite(name):
         name = name + "_apple_backend_rules_apple",
         target_under_test = ":" + name + "_backend_probe",
     )
+
+    write_file(
+        name = name + "_fake_gen_snapshot",
+        out = name + "_fake_gen_snapshot.bin",
+        content = [""],
+        tags = ["manual"],
+    )
+    write_file(
+        name = name + "_fake_dill",
+        out = name + "_fake.dill",
+        content = [""],
+        tags = ["manual"],
+    )
+    _macho_aot_probe(
+        name = name + "_macho_aot_probe",
+        gen_snapshot = ":" + name + "_fake_gen_snapshot",
+        kernel_dill = ":" + name + "_fake_dill",
+        min_os_version = "14.0",
+        tags = ["manual"],
+    )
+    _macho_aot_flags_test(
+        name = name + "_macho_aot_flags",
+        target_under_test = ":" + name + "_macho_aot_probe",
+    )
+
+    flutter_application(
+        name = name + "_apple_cross_app",
+        package_name = "apple_cross_fixture",
+        main = "lib/language_version_main.dart",
+        min_os_version = "14.0",
+        tags = ["manual"],
+    )
+    flutter_aot_target(
+        name = name + "_apple_cross_aot",
+        package_name = "apple_cross_fixture",
+        main = "lib/language_version_main.dart",
+        defines = ["TEST=1"],
+        min_os_version = "14.0",
+        tags = ["manual"],
+    )
+
+    analysis_tests = []
+    for suffix, dbg_rule in [
+        ("ios_arm64_dbg", _ios_arm64_dbg_test),
+        ("ios_x64_dbg", _ios_x64_dbg_test),
+        ("macos_arm64_dbg", _macos_arm64_dbg_test),
+        ("macos_x64_dbg", _macos_x64_dbg_test),
+    ]:
+        t_app = "%s_app_%s" % (name, suffix)
+        dbg_rule(name = t_app, target_under_test = ":" + name + "_apple_cross_app")
+        analysis_tests.append(":" + t_app)
+
+        t_aot = "%s_aot_%s" % (name, suffix)
+        dbg_rule(name = t_aot, target_under_test = ":" + name + "_apple_cross_aot")
+        analysis_tests.append(":" + t_aot)
+
+    for suffix, fail_rule in [
+        ("ios_arm64_release_unavailable", _ios_arm64_release_unavailable_test),
+        ("ios_arm64_profile_unavailable", _ios_arm64_profile_unavailable_test),
+        ("ios_x64_release_unavailable", _ios_x64_release_unavailable_test),
+        ("ios_x64_profile_unavailable", _ios_x64_profile_unavailable_test),
+        ("macos_arm64_release_unavailable", _macos_arm64_release_unavailable_test),
+        ("macos_arm64_profile_unavailable", _macos_arm64_profile_unavailable_test),
+        ("macos_x64_release_unavailable", _macos_x64_release_unavailable_test),
+        ("macos_x64_profile_unavailable", _macos_x64_profile_unavailable_test),
+    ]:
+        t_app = "%s_app_%s" % (name, suffix)
+        fail_rule(
+            name = t_app,
+            target_under_test = ":" + name + "_apple_cross_app",
+            target_compatible_with = ["@platforms//os:linux"],
+        )
+        analysis_tests.append(":" + t_app)
+
+        t_aot = "%s_aot_%s" % (name, suffix)
+        fail_rule(
+            name = t_aot,
+            target_under_test = ":" + name + "_apple_cross_aot",
+            target_compatible_with = ["@platforms//os:linux"],
+        )
+        analysis_tests.append(":" + t_aot)
+
     build_test(
         name = name + "_xtool_sdk_status_build",
         targets = [
@@ -243,6 +668,7 @@ def toolchains_repo_test_suite(name):
         _t4_test,
         _t5_test,
         _t6_test,
+        _t7_test,
     )
     native.test_suite(
         name = name,
@@ -250,6 +676,7 @@ def toolchains_repo_test_suite(name):
             ":" + name + "_unit",
             ":" + name + "_apple_backend_xtool",
             ":" + name + "_apple_backend_rules_apple",
+            ":" + name + "_macho_aot_flags",
             ":" + name + "_xtool_sdk_status_build",
-        ],
+        ] + analysis_tests,
     )

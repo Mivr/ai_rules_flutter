@@ -549,6 +549,57 @@ exports_files(["{gen_snapshot}"], visibility = ["//visibility:public"])
 """.format(gen_snapshot = _profile_gen_snapshot_path(os_name)),
     )
 
+def resolve_aot_gen_snapshot(name, host_platform, target_platform):
+    """Returns struct(release, profile) with the target-compatible gen_snapshot labels for (host, target), or None.
+
+    An Apple AOT snapshot (`ios-*`, `darwin-*`) may only be produced by a
+    `gen_snapshot` built for the Darwin target from the pinned engine artifacts.
+    Where no such binary exists for a host (Linux and Windows), returns `None`.
+    Cross-OS desktop pairs also have no cross-OS AOT `gen_snapshot` and return `None`.
+    """
+    if host_platform == target_platform and host_platform in HOST_PLATFORMS:
+        os_part = host_platform.split("-")[0]
+        arch_part = host_platform.split("-")[1]
+        os_name = PLATFORM_PREFIX_TO_OS[os_part]
+        if os_part == "darwin":
+            return struct(
+                release = "@{}_host_tools_release_{}//:host-tools-release/gen_snapshot".format(name, host_platform),
+                profile = "@{}_{}_profile//:host-tools/gen_snapshot".format(name, host_platform),
+            )
+        exe_suffix = ".exe" if os_part == "windows" else ""
+        engine_arch = engine_arch_for_os(os_name, arch_part)
+        engine_target_platform = "{}-{}".format(os_part, engine_arch)
+        return struct(
+            release = "@{}_desktop_engine_{}//:engine/gen_snapshot{}".format(name, engine_target_platform, exe_suffix),
+            profile = "@{}_{}_profile//:engine/gen_snapshot{}".format(name, host_platform, exe_suffix),
+        )
+
+    if target_platform not in CROSS_COMPILATION_PAIRS.get(host_platform, []):
+        return None
+
+    if target_platform.startswith("ios"):
+        if not host_platform.startswith("darwin"):
+            return None
+        if target_platform == "ios-arm64":
+            return struct(
+                release = "@{}_ios_engine//:gen_snapshot_arm64".format(name),
+                profile = "@{}_ios_engine_profile//:gen_snapshot_arm64".format(name),
+            )
+        if target_platform == "ios-x64":
+            return struct(
+                release = "@{}_host_tools_release_darwin-x64//:host-tools-release/gen_snapshot".format(name),
+                profile = "@{}_darwin-x64_profile//:host-tools/gen_snapshot".format(name),
+            )
+        return None
+
+    if target_platform.startswith("android"):
+        return struct(
+            release = "@{}_cross_{}_{}//:gen_snapshot".format(name, host_platform, target_platform),
+            profile = "@{}_cross_{}_{}_profile//:gen_snapshot".format(name, host_platform, target_platform),
+        )
+
+    return None
+
 def flutter_register_toolchains(
         name,
         darwin_sdk_path = "",
@@ -637,36 +688,13 @@ def flutter_register_toolchains(
         for target_platform in targets:
             gen_snapshot_sha256 = ""
             gen_snapshot_label = ""
+            profile_gen_snapshot_label = ""
+            aot_labels = resolve_aot_gen_snapshot(name, host_platform, target_platform)
 
             if target_platform.startswith("ios"):
-                if host_platform.startswith("darwin"):
-                    if target_platform == "ios-arm64":
-                        # iOS arm64 gen_snapshot is bundled in the iOS engine artifact.
-                        gen_snapshot_label = "@{ios_engine}//:gen_snapshot_arm64".format(
-                            ios_engine = name + "_ios_engine",
-                        )
-                        profile_gen_snapshot_label = "@{}_ios_engine_profile//:gen_snapshot_arm64".format(name)
-                    else:
-                        # Simulator x64 uses the host x64 gen_snapshot.
-                        gen_snapshot_label = "@{host_repo}//:host-tools/gen_snapshot".format(
-                            host_repo = name + "_" + host_platform,
-                        )
-                        profile_gen_snapshot_label = ""
-                else:
-                    # On Linux hosts, the Android cross gen_snapshot for the same target
-                    # architecture is a Linux ELF binary compiled for that target CPU and
-                    # natively supports --snapshot_kind=app-aot-macho-dylib.
-                    target_arch = target_platform.split("-")[1]
-                    gen_snapshot_label = "@{name}_cross_{host_platform}_android-{arch}//:gen_snapshot".format(
-                        name = name,
-                        host_platform = host_platform,
-                        arch = target_arch,
-                    )
-                    profile_gen_snapshot_label = "@{name}_cross_{host_platform}_android-{arch}_profile//:gen_snapshot".format(
-                        name = name,
-                        host_platform = host_platform,
-                        arch = target_arch,
-                    )
+                if aot_labels != None:
+                    gen_snapshot_label = aot_labels.release
+                    profile_gen_snapshot_label = aot_labels.profile
             else:
                 artifact_host = gen_snapshot_host_platform(host_platform)
                 gen_snapshot_path = gen_snapshot_cross_artifact_path(target_platform, "release", artifact_host)
@@ -680,7 +708,7 @@ def flutter_register_toolchains(
                     sha256s = {profile_gen_snapshot_path: flutter_artifact_sha256(flutter_version, profile_gen_snapshot_path)},
                     build_file_content = 'exports_files(["gen_snapshot"], visibility = ["//visibility:public"])\n',
                 )
-                profile_gen_snapshot_label = "@{}//:gen_snapshot".format(profile_repo)
+                profile_gen_snapshot_label = aot_labels.profile
 
             flutter_cross_compilation_repo(
                 name = name + "_cross_" + host_platform + "_" + target_platform,
@@ -784,14 +812,6 @@ def flutter_register_toolchains(
 
             engine_debug_repo_name = name + "_desktop_engine_" + engine_target_key + "_debug"
 
-            gen_snapshot_label = ""
-            if host_platform.startswith("linux") and target_platform.startswith("darwin-"):
-                gen_snapshot_label = "@{name}_cross_{host_platform}_android-{arch}//:gen_snapshot".format(
-                    name = name,
-                    host_platform = host_platform,
-                    arch = target_arch,
-                )
-
             flutter_desktop_cross_repo(
                 name = name + "_desktop_cross_" + host_platform + "_" + target_platform,
                 flutter_version = flutter_version,
@@ -802,7 +822,6 @@ def flutter_register_toolchains(
                 engine_repo_name = name + "_desktop_engine_" + engine_target_key,
                 engine_debug_repo_name = engine_debug_repo_name,
                 sysroot_repo_name = sysroot_repo_name,
-                gen_snapshot_label = gen_snapshot_label,
             )
 
     # Web SDK repo (lazy — only downloaded when web targets are built).
