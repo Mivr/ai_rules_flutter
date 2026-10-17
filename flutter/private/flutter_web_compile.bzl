@@ -199,7 +199,9 @@ def flutter_dart2wasm_action(
         minify = "auto",
         enable_experiments = [],
         defines = [],
-        renderer = "skwasm"):
+        renderer = "skwasm",
+        web_compile_tool = None,
+        web_compile_inputs = []):
     """Compiles Dart source to WebAssembly using dart2wasm.
 
     Args:
@@ -235,6 +237,8 @@ def flutter_dart2wasm_action(
              (output_source_map.path, output_wasm.path))
 
     args = ctx.actions.args()
+    if web_compile_tool != None:
+        args.add(web_compile_tool)
     args.add("compile")
     args.add("wasm")
 
@@ -287,11 +291,14 @@ def flutter_dart2wasm_action(
     args.add("-o", output_wasm)
     args.add(main_dart)
 
+    direct_inputs = [main_dart, package_config, dart2wasm_platform_dill] + srcs + web_compile_inputs
+    if web_compile_tool != None:
+        direct_inputs.append(web_compile_tool)
     ctx.actions.run(
         executable = dart,
         arguments = [args],
         inputs = depset(
-            direct = [main_dart, package_config, dart2wasm_platform_dill] + srcs,
+            direct = direct_inputs,
             transitive = [flutter_sdk_files],
         ),
         outputs = [output_wasm, output_mjs] + ([output_source_map] if output_source_map != None else []),
@@ -319,7 +326,9 @@ def flutter_dart2js_action(
         dump_info = False,
         source_maps = False,
         defines = [],
-        renderer = "canvaskit"):
+        renderer = "canvaskit",
+        web_compile_tool = None,
+        web_compile_inputs = []):
     """Compiles Dart source to JavaScript using dart2js.
 
     Output is a tree artifact (directory) because dart2js may produce
@@ -359,6 +368,8 @@ def flutter_dart2js_action(
         renderer: Web renderer ("canvaskit" or "skwasm").
     """
     args = ctx.actions.args()
+    if web_compile_tool != None:
+        args.add(web_compile_tool)
     args.add("compile")
     args.add("js")
 
@@ -404,11 +415,14 @@ def flutter_dart2js_action(
     args.add("-o", output_dir.path + "/main.dart.js")
     args.add(main_dart)
 
+    direct_inputs = [main_dart, package_config, dart2js_platform_dill] + srcs + web_compile_inputs
+    if web_compile_tool != None:
+        direct_inputs.append(web_compile_tool)
     ctx.actions.run(
         executable = dart,
         arguments = [args],
         inputs = depset(
-            direct = [main_dart, package_config, dart2js_platform_dill] + srcs,
+            direct = direct_inputs,
             transitive = [flutter_sdk_files, depset(web_sdk_files)],
         ),
         outputs = [output_dir],

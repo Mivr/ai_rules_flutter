@@ -449,7 +449,12 @@ def _flutter_web_bundle_impl(ctx):
     # flutter.js does the registering: it waits for the new worker to activate
     # (with a timeout) before booting the app, and — given only a version — it
     # registers nothing unless the visitor already has a worker to replace.
-    exec_dart = resolve_exec_dart(ctx, flutter_sdk_info)
+    exec_dart, dart_vm_files = resolve_exec_dart_vm(ctx, flutter_sdk_info)
+    web_compile_inputs = [
+        f
+        for f in dart_vm_files.to_list()
+        if f.basename in ("dartvm", "dartvm.exe")
+    ]
     load_args = service_worker_load_args(ctx.attr.pwa)
     if ctx.attr.compiler == "dart2wasm":
         # Primary: dart2wasm. Outputs are declared under a subdirectory with
@@ -479,6 +484,8 @@ def _flutter_web_bundle_impl(ctx):
             enable_experiments = ctx.attr.enable_experiments,
             defines = user_defines,
             renderer = renderer,
+            web_compile_tool = ctx.executable._web_template_tool,
+            web_compile_inputs = web_compile_inputs,
         )
 
         # Fallback: dart2js (always canvaskit renderer) — tree artifact for deferred loading
@@ -503,6 +510,8 @@ def _flutter_web_bundle_impl(ctx):
             source_maps = ctx.attr.source_maps,
             defines = user_defines,
             renderer = "canvaskit",
+            web_compile_tool = ctx.executable._web_template_tool,
+            web_compile_inputs = web_compile_inputs,
         )
         compile_outputs = [output_wasm, output_mjs]
         compile_copies = [
@@ -537,6 +546,8 @@ def _flutter_web_bundle_impl(ctx):
             source_maps = ctx.attr.source_maps,
             defines = user_defines,
             renderer = renderer,
+            web_compile_tool = ctx.executable._web_template_tool,
+            web_compile_inputs = web_compile_inputs,
         )
         dart2js_dirs = [output_js_dir]
         builds = [_JS_BUILD]
@@ -820,7 +831,7 @@ def _flutter_web_bundle_impl(ctx):
     template_config_file = ctx.actions.declare_file(ctx.label.name + "_web_template_config.json")
     ctx.actions.write(template_config_file, json.encode(template_config))
 
-    dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx, flutter_sdk_info)
+    dart_exe = exec_dart
     ctx.actions.run(
         executable = dart_exe,
         arguments = [
