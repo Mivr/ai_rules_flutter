@@ -5,6 +5,7 @@ load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_test")
 # compiled `dart_binary` targets rather than by file label.
 exports_files(
     [
+        "android_bundle.dart",
         "generate_asset_manifest.dart",
         "bundle_app.dart",
         "compile_shader.dart",
@@ -18,6 +19,14 @@ exports_files(
         "flutter_test_runner.dart",
         "bazel_test_protocol.dart",
     ],
+    visibility = ["//flutter:__subpackages__"],
+)
+
+dart_binary(
+    name = "android_bundle",
+    compile_mode = "kernel",
+    main = "android_bundle.dart",
+    modular_kernel = False,
     visibility = ["//flutter:__subpackages__"],
 )
 
@@ -130,6 +139,7 @@ dart_binary(
 #
 # The value is the tool plus whatever that tool imports beyond `package:test`.
 _UNIT_TESTS = {
+    "android_bundle_test": ("android_bundle.dart", []),
     "bundle_app_test": ("bundle_app.dart", []),
     "compile_shader_test": ("compile_shader.dart", []),
     "kernel_filter_test": ("kernel_filter.dart", []),

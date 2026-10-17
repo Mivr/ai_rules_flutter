@@ -6,6 +6,7 @@ Tests the pure helper functions used by linux, android, and windows bundle rules
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
 load("//flutter/private:common.bzl", "ANDROID_ABIS", "android_elf_machine_for_abi", "android_platform_for_abi", "compute_android_jni_path", "compute_desktop_bundle_copies")
+load("//flutter/private:flutter_android_application.bzl", "flutter_android_bundle")
 load("//flutter/private:flutter_android_registrant.bzl", "flutter_android_registrant")
 
 # -- compute_desktop_bundle_copies tests --
@@ -291,6 +292,83 @@ _android_single_config_across_dynamic_mode_test = analysistest.make(
     _android_single_config_across_dynamic_mode_test_impl,
 )
 
+def _fake_android_bundle_app_impl(ctx):
+    assets = ctx.actions.declare_directory(ctx.label.name + "_assets")
+    ctx.actions.run(
+        executable = ctx.executable._bundle_tool,
+        arguments = [],
+        outputs = [assets],
+    )
+    kernel = None
+    if ctx.attr.with_kernel:
+        kernel = ctx.actions.declare_file(ctx.label.name + ".dill")
+        ctx.actions.write(kernel, "")
+    aot = None
+    if ctx.attr.with_aot:
+        aot = ctx.actions.declare_file(ctx.label.name + "_libapp.so")
+        ctx.actions.write(aot, "")
+    return [
+        FlutterApplicationInfo(
+            kernel_dill = kernel,
+            aot_output = aot,
+            flutter_assets = assets,
+            native_libs = [],
+            plugins = [],
+            bundled_code_assets = depset(),
+        ),
+    ]
+
+_fake_android_bundle_app = rule(
+    implementation = _fake_android_bundle_app_impl,
+    attrs = {
+        "with_kernel": attr.bool(default = False),
+        "with_aot": attr.bool(default = False),
+        "_bundle_tool": attr.label(
+            default = Label("//flutter/private/tools:android_bundle"),
+            executable = True,
+            cfg = "exec",
+        ),
+    },
+)
+
+def _android_bundle_debug_actions_test_impl(ctx):
+    """Debug flutter_android_bundle registers Dart tool actions for debug assets and empty jar."""
+    env = analysistest.begin(ctx)
+    actions = analysistest.target_actions(env)
+    by_mnemonic = {a.mnemonic: a for a in actions}
+    asserts.true(env, "FlutterAndroidDebugAssets" in by_mnemonic)
+    asserts.true(env, "FlutterEmptyNativeLibsJar" in by_mnemonic)
+
+    debug_action = by_mnemonic["FlutterAndroidDebugAssets"]
+    asserts.true(env, "debug-assets" in debug_action.argv)
+    asserts.true(env, "--assets-dir" in debug_action.argv)
+    asserts.true(env, "--output-dir" in debug_action.argv)
+    asserts.true(env, "--kernel" in debug_action.argv)
+
+    empty_jar_action = by_mnemonic["FlutterEmptyNativeLibsJar"]
+    asserts.true(env, "empty-jar" in empty_jar_action.argv)
+    asserts.true(env, "--output" in empty_jar_action.argv)
+    return analysistest.end(env)
+
+_android_bundle_debug_actions_test = analysistest.make(_android_bundle_debug_actions_test_impl)
+
+def _android_bundle_release_actions_test_impl(ctx):
+    """Release flutter_android_bundle registers Dart tool action for FlutterNativeLibsJar."""
+    env = analysistest.begin(ctx)
+    actions = analysistest.target_actions(env)
+    by_mnemonic = {a.mnemonic: a for a in actions}
+    asserts.true(env, "FlutterNativeLibsJar" in by_mnemonic)
+
+    jar_action = by_mnemonic["FlutterNativeLibsJar"]
+    asserts.true(env, "native-libs-jar" in jar_action.argv)
+    asserts.true(env, "--abi" in jar_action.argv)
+    asserts.true(env, "arm64-v8a" in jar_action.argv)
+    asserts.true(env, "--machine" in jar_action.argv)
+    asserts.true(env, "183" in jar_action.argv)
+    return analysistest.end(env)
+
+_android_bundle_release_actions_test = analysistest.make(_android_bundle_release_actions_test_impl)
+
 _t0_test = unittest.make(_linux_debug_copies_test_impl)
 _t1_test = unittest.make(_linux_release_copies_test_impl)
 _t2_test = unittest.make(_windows_release_copies_test_impl)
@@ -370,6 +448,42 @@ def platform_bundle_test_suite(name):
         target_under_test = ":_registrant_x64_under_test",
     )
 
+    _fake_android_bundle_app(
+        name = "_fake_bundle_debug_app",
+        with_kernel = True,
+        tags = ["manual"],
+    )
+
+    flutter_android_bundle(
+        name = "_bundle_debug_under_test",
+        application = ":_fake_bundle_debug_app",
+        android_abi = "arm64-v8a",
+        tags = ["manual"],
+    )
+
+    _android_bundle_debug_actions_test(
+        name = name + "_android_bundle_debug_actions",
+        target_under_test = ":_bundle_debug_under_test",
+    )
+
+    _fake_android_bundle_app(
+        name = "_fake_bundle_release_app",
+        with_aot = True,
+        tags = ["manual"],
+    )
+
+    flutter_android_bundle(
+        name = "_bundle_release_under_test",
+        application = ":_fake_bundle_release_app",
+        android_abi = "arm64-v8a",
+        tags = ["manual"],
+    )
+
+    _android_bundle_release_actions_test(
+        name = name + "_android_bundle_release_actions",
+        target_under_test = ":_bundle_release_under_test",
+    )
+
     unittest.suite(
         name + "_unit",
         _t0_test,
@@ -393,5 +507,7 @@ def platform_bundle_test_suite(name):
             ":" + name + "_registrant_arm64_transition",
             ":" + name + "_registrant_x64_transition",
             ":" + name + "_single_config_across_dynamic_mode",
+            ":" + name + "_android_bundle_debug_actions",
+            ":" + name + "_android_bundle_release_actions",
         ],
     )
