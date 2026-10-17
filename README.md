@@ -69,6 +69,20 @@ Some platforms need one more repository from the same extension. Add it to `use_
 
 Static analysis needs nothing extra. rules_dart's analysis resolves `dart:ui` in a `flutter_library`, `flutter_plugin` or `flutter_test` through the `sky_engine` package, which those rules add to the analyzer's closure themselves. Their compiled output does not change.
 
+#### Overriding `rules_dart`
+
+`rules_flutter` uses APIs from the [`Mivr/rules_dart`](https://github.com/Mivr/rules_dart) fork (`@rules_dart//dart:hooks.bzl`, `@rules_dart//dart/private:record_use.bzl`, and `dart_codegen(package_name = ...)`) that are not in the `rules_dart` `0.7.3` release on the Bazel Central Registry. Because Bzlmod ignores module overrides in non-root modules, add `git_override` for `rules_dart` in your root `MODULE.bazel`:
+
+```starlark
+bazel_dep(name = "rules_dart", version = "0.7.3")
+
+git_override(
+    module_name = "rules_dart",
+    commit = "e2e2c0c1cff95df3054113e3b8aea47f0185d4d1",
+    remote = "https://github.com/Mivr/rules_dart.git",
+)
+```
+
 ### .bazelrc
 
 Two settings are required. Paste them into your project's `.bazelrc`:
