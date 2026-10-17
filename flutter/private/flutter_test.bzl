@@ -70,7 +70,6 @@ load(
     "COPY_TO_DIRECTORY_TOOLCHAINS",
     "FLUTTER_APPLICATION_ATTRS",
     "FLUTTER_DEPS_DOC",
-    "HOST_COMPATIBLE",
     "PLATFORM_CONSTRAINT_ATTRS",
     "check_unreplaced_hooks",
     "declare_flutter_assets_dir",
@@ -647,7 +646,7 @@ _TEST_ATTRS["_sky_engine"] = attr.label(
     providers = [DartInfo],
 )
 
-_flutter_test = rule(
+flutter_test = rule(
     implementation = _flutter_test_impl,
     attrs = _TEST_ATTRS,
     test = True,
@@ -657,18 +656,3 @@ _flutter_test = rule(
     doc = "Compiles a Flutter widget test, then runs it under flutter_tester " +
           "via the package:test_api RemoteListener protocol.",
 )
-
-def flutter_test(name, **kwargs):
-    """Compiles a Flutter widget test and runs it on the host under `flutter_tester`.
-
-    Args:
-        name: Target name.
-        **kwargs: Forwarded to the underlying `_flutter_test` rule. Defaults
-            `target_compatible_with` to host platforms (`linux`, `macos`,
-            `windows`) because `flutter_tester` only runs on the host.
-    """
-    kwargs.setdefault("target_compatible_with", HOST_COMPATIBLE)
-    _flutter_test(
-        name = name,
-        **kwargs
-    )
