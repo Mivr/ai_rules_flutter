@@ -260,6 +260,32 @@ def _kernel_target_modular_test_impl(ctx):
     asserts.equals(env, [], whole_program, "non-AOT flutter_kernel_target must not run FlutterKernelCompile")
     return analysistest.end(env)
 
+def _kernel_target_dbg_test_impl(ctx):
+    """In `-c dbg`, non-AOT `flutter_kernel_target` stages agent extensions and compiles via `FlutterKernelCompile`."""
+    env = analysistest.begin(ctx)
+    compile_action = _find_action(env, ["FlutterKernelCompile"])
+    asserts.true(env, "--aot" not in compile_action.argv, "debug non-AOT flutter_kernel_target must not pass --aot")
+    _assert_some_path_contains(
+        env,
+        _input_paths(compile_action),
+        [
+            "_inputs_kernel_target.agent_extensions.dart",
+            "_inputs_kernel_target.native_agent_extensions.dart",
+            "_inputs_kernel_target_plugin_registrant.dart",
+            "flutter_patched_sdk/platform_strong.dill",
+        ],
+        "debug non-AOT flutter_kernel_target",
+    )
+    _assert_no_path_contains(
+        env,
+        _input_paths(compile_action),
+        ["flutter_patched_sdk_product/"],
+        "debug non-AOT flutter_kernel_target",
+    )
+    modular_links = [a for a in analysistest.target_actions(env) if a.mnemonic == "DartKernelLink"]
+    asserts.equals(env, [], modular_links, "debug non-AOT flutter_kernel_target with staged agent extensions must not run DartKernelLink")
+    return analysistest.end(env)
+
 def _kernel_target_aot_test_impl(ctx):
     """`flutter_kernel_target(aot = True)` runs whole-program `FlutterKernelCompile`."""
     env = analysistest.begin(ctx)
@@ -536,6 +562,14 @@ _aot_target_dbg_inputs_test = analysistest.make(
 _kernel_target_modular_test = analysistest.make(
     _kernel_target_modular_test_impl,
     config_settings = {
+        "//command_line_option:compilation_mode": "fastbuild",
+        str(Label("//flutter:profile")): False,
+    },
+)
+_kernel_target_dbg_test = analysistest.make(
+    _kernel_target_dbg_test_impl,
+    config_settings = {
+        "//command_line_option:compilation_mode": "dbg",
         str(Label("//flutter:profile")): False,
     },
 )
@@ -705,6 +739,10 @@ def action_inputs_test_suite(name):
         name = name + "_kernel_target_modular",
         target_under_test = ":_inputs_kernel_target",
     )
+    _kernel_target_dbg_test(
+        name = name + "_kernel_target_dbg",
+        target_under_test = ":_inputs_kernel_target",
+    )
     _kernel_target_aot_test(
         name = name + "_kernel_target_aot",
         target_under_test = ":_inputs_kernel_target_aot",
@@ -744,6 +782,7 @@ def action_inputs_test_suite(name):
             ":" + name + "_aot_target",
             ":" + name + "_aot_target_dbg",
             ":" + name + "_kernel_target_modular",
+            ":" + name + "_kernel_target_dbg",
             ":" + name + "_kernel_target_aot",
             ":" + name + "_kernel_target_aot_dbg",
             ":" + name + "_web",
