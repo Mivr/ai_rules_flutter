@@ -8,7 +8,7 @@ per fixture would cost minutes and need a device SDK.
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_swift//swift:swift.bzl", "SwiftInfo")
-load("//flutter:providers.bzl", "FlutterApplicationInfo", "resolve_exec_dart_vm")
+load("//flutter:providers.bzl", "FlutterApplePluginInfo", "FlutterApplicationInfo", "resolve_exec_dart_vm")
 
 def _fake_application_impl(ctx):
     """Placeholder outputs, every one declared under this target's name.
@@ -119,7 +119,9 @@ def _fake_application_impl(ctx):
             },
         ))
     for lib in ctx.attr.apple_libs:
-        platform_name = "macos" if "macos" in lib.label.name else "ios"
+        if FlutterApplePluginInfo not in lib:
+            fail("fake_application: apple_libs entry %s must provide FlutterApplePluginInfo" % lib.label)
+        platform_name = lib[FlutterApplePluginInfo].platform
         apple_plugin_libs.append(struct(
             platform = platform_name,
             label = lib.label,

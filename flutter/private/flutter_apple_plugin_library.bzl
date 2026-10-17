@@ -27,21 +27,10 @@ load("@rules_cc//cc:objc_library.bzl", "objc_library")
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_swift//swift:swift.bzl", "SwiftInfo", "swift_library")
+load("//flutter:providers.bzl", _FlutterApplePluginInfo = "FlutterApplePluginInfo")
 load(":flutter_xtool_bundle.bzl", "flutter_darwin_xcframework_import")
 
-FlutterApplePluginInfo = provider(
-    doc = "Carries Apple plugin Swift/ObjC sources, headers, and modulemap for the xtool backend.",
-    fields = {
-        "module_name": "string: Swift/Clang module name of the plugin.",
-        "platform": "string: Target platform ('ios' or 'macos').",
-        "swift_srcs": "depset of Swift source Files.",
-        "objc_srcs": "depset of Objective-C/C++ source Files.",
-        "headers": "depset of header Files.",
-        "modulemap": "File: Generated Clang modulemap file.",
-        "sdk_frameworks": "list[string]: Linked Apple SDK frameworks.",
-        "sdk_dylibs": "list[string]: Linked Apple SDK dylibs.",
-    },
-)
+FlutterApplePluginInfo = _FlutterApplePluginInfo
 
 def _split_srcs(srcs):
     """Split srcs into (swift_files, objc_files, headers).
@@ -168,6 +157,71 @@ flutter_xtool_apple_plugin_library = rule(
         FlutterApplePluginInfo,
     ],
     doc = "Host-agnostic Apple plugin library rule for the xtool backend.",
+)
+
+def _flutter_apple_plugin_library_target_impl(ctx):
+    dep = ctx.attr.dep
+    providers = [
+        DefaultInfo(
+            files = dep[DefaultInfo].files,
+            runfiles = dep[DefaultInfo].default_runfiles,
+        ),
+    ]
+    if CcInfo in dep:
+        providers.append(dep[CcInfo])
+    if SwiftInfo in dep:
+        providers.append(dep[SwiftInfo])
+    if OutputGroupInfo in dep:
+        providers.append(dep[OutputGroupInfo])
+    if FlutterApplePluginInfo in dep:
+        providers.append(dep[FlutterApplePluginInfo])
+    else:
+        providers.append(
+            FlutterApplePluginInfo(
+                module_name = ctx.attr.module_name,
+                platform = ctx.attr.platform,
+                swift_srcs = depset(),
+                objc_srcs = depset(),
+                headers = depset(),
+                modulemap = None,
+                sdk_frameworks = ctx.attr.sdk_frameworks,
+                sdk_dylibs = ctx.attr.sdk_dylibs,
+            ),
+        )
+    return providers
+
+_flutter_apple_plugin_library_target = rule(
+    implementation = _flutter_apple_plugin_library_target_impl,
+    attrs = {
+        "dep": attr.label(
+            mandatory = True,
+            doc = "Backend-specific Apple plugin library target.",
+        ),
+        "module_name": attr.string(
+            mandatory = True,
+            doc = "Swift/Clang module name of the plugin.",
+        ),
+        "platform": attr.string(
+            mandatory = True,
+            values = ["macos", "ios"],
+            doc = "Target Apple platform ('ios' or 'macos').",
+        ),
+        "sdk_frameworks": attr.string_list(
+            default = [],
+            doc = "Apple SDK frameworks linked by this plugin.",
+        ),
+        "sdk_dylibs": attr.string_list(
+            default = [],
+            doc = "Apple SDK dylibs linked by this plugin.",
+        ),
+    },
+    provides = [
+        DefaultInfo,
+        CcInfo,
+        SwiftInfo,
+        FlutterApplePluginInfo,
+    ],
+    doc = "Forwards backend providers and attaches FlutterApplePluginInfo.",
 )
 
 def flutter_apple_plugin_library(
@@ -352,12 +406,17 @@ def flutter_apple_plugin_library(
         visibility = ["//visibility:private"],
     )
 
-    native.alias(
+    _flutter_apple_plugin_library_target(
         name = name,
-        actual = select({
+        dep = select({
             Label("@rules_flutter//flutter/settings:use_xtool_backend"): ":" + xtool_target,
             "//conditions:default": ":" + apple_target,
         }),
+        module_name = module_name,
+        platform = platform,
+        sdk_frameworks = sdk_frameworks,
+        sdk_dylibs = sdk_dylibs,
         tags = tags,
+        target_compatible_with = target_compatible_with,
         visibility = visibility,
     )

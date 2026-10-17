@@ -276,10 +276,23 @@ FlutterDarwinFrameworkInfo = provider(
     doc = "Metadata and files for an Apple .framework or .xcframework slice consumed by the xtool backend.",
     fields = {
         "framework_name": "str: Framework module/binary name (e.g. 'Flutter', 'FlutterMacOS', 'App').",
-        "framework_files": "depset[File]: All files belonging to the .framework bundle.",
         "framework_dir": "str or None: Path to the .framework directory (or parent -F search dir).",
+        "framework_files": "depset[File]: All files belonging to the .framework bundle.",
         "headers": "depset[File]: Public header files exposed by the framework.",
         "is_dynamic": "bool: True if this is a dynamic framework that must be embedded in Frameworks/.",
     },
 )
 
+FlutterApplePluginInfo = provider(
+    doc = "Carries Apple plugin Swift/ObjC sources, headers, modulemap, and target platform ('ios' or 'macos').",
+    fields = {
+        "module_name": "str: Swift/Clang module name of the plugin.",
+        "platform": "str: Target platform ('ios' or 'macos').",
+        "swift_srcs": "depset[File]: Swift source Files.",
+        "objc_srcs": "depset[File]: Objective-C/C++ source Files.",
+        "headers": "depset[File]: Header Files.",
+        "modulemap": "File or None: Generated Clang modulemap file.",
+        "sdk_frameworks": "list[str]: Linked Apple SDK frameworks.",
+        "sdk_dylibs": "list[str]: Linked Apple SDK dylibs.",
+    },
+)
