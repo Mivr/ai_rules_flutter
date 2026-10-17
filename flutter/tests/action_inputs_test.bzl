@@ -217,6 +217,20 @@ def _aot_target_inputs_test_impl(ctx):
     )
     return analysistest.end(env)
 
+def _aot_target_dbg_inputs_test_impl(ctx):
+    """In `-c dbg`, `flutter_aot_target` skips `gen_snapshot` and returns the kernel `.dill`."""
+    env = analysistest.begin(ctx)
+    _find_action(env, ["FlutterKernelCompile"])
+    aot_actions = [
+        a
+        for a in analysistest.target_actions(env)
+        if a.mnemonic in ("FlutterAotElf", "FlutterAotMacho")
+    ]
+    asserts.equals(env, [], aot_actions, "debug flutter_aot_target must not run gen_snapshot")
+    outputs = [f.basename for f in analysistest.target_under_test(env)[DefaultInfo].files.to_list()]
+    asserts.equals(env, ["_inputs_aot_target.dill"], outputs)
+    return analysistest.end(env)
+
 def _kernel_target_modular_test_impl(ctx):
     """Default `flutter_kernel_target` (`aot = False`) compiles modularly without `FlutterKernelCompile`."""
     env = analysistest.begin(ctx)
@@ -251,6 +265,25 @@ def _kernel_target_aot_test_impl(ctx):
     _find_action(env, ["FlutterKernelCompile"])
     modular_links = [a for a in analysistest.target_actions(env) if a.mnemonic == "DartKernelLink"]
     asserts.equals(env, [], modular_links, "AOT flutter_kernel_target must not run DartKernelLink")
+    return analysistest.end(env)
+
+def _kernel_target_aot_dbg_test_impl(ctx):
+    """In `-c dbg`, `flutter_kernel_target(aot = True)` compiles against the non-product platform `.dill`."""
+    env = analysistest.begin(ctx)
+    compile_action = _find_action(env, ["FlutterKernelCompile"])
+    asserts.true(env, "--aot" in compile_action.argv, "expected --aot in FlutterKernelCompile argv")
+    _assert_some_path_contains(
+        env,
+        _input_paths(compile_action),
+        ["flutter_patched_sdk/platform_strong.dill"],
+        "debug AOT flutter_kernel_target",
+    )
+    _assert_no_path_contains(
+        env,
+        _input_paths(compile_action),
+        ["flutter_patched_sdk_product/"],
+        "debug AOT flutter_kernel_target",
+    )
     return analysistest.end(env)
 
 def _web_inputs_test_impl(ctx):
@@ -446,8 +479,22 @@ _aot_target_inputs_test = analysistest.make(
     _aot_target_inputs_test_impl,
     config_settings = {"//command_line_option:compilation_mode": "opt"},
 )
+_aot_target_dbg_inputs_test = analysistest.make(
+    _aot_target_dbg_inputs_test_impl,
+    config_settings = {
+        "//command_line_option:compilation_mode": "dbg",
+        str(Label("//flutter:profile")): False,
+    },
+)
 _kernel_target_modular_test = analysistest.make(_kernel_target_modular_test_impl)
 _kernel_target_aot_test = analysistest.make(_kernel_target_aot_test_impl)
+_kernel_target_aot_dbg_test = analysistest.make(
+    _kernel_target_aot_dbg_test_impl,
+    config_settings = {
+        "//command_line_option:compilation_mode": "dbg",
+        str(Label("//flutter:profile")): False,
+    },
+)
 _web_inputs_test = analysistest.make(
     _web_inputs_test_impl,
     config_settings = {"//command_line_option:compilation_mode": "opt"},
@@ -577,12 +624,20 @@ def action_inputs_test_suite(name):
         name = name + "_aot_target",
         target_under_test = ":_inputs_aot_target",
     )
+    _aot_target_dbg_inputs_test(
+        name = name + "_aot_target_dbg",
+        target_under_test = ":_inputs_aot_target",
+    )
     _kernel_target_modular_test(
         name = name + "_kernel_target_modular",
         target_under_test = ":_inputs_kernel_target",
     )
     _kernel_target_aot_test(
         name = name + "_kernel_target_aot",
+        target_under_test = ":_inputs_kernel_target_aot",
+    )
+    _kernel_target_aot_dbg_test(
+        name = name + "_kernel_target_aot_dbg",
         target_under_test = ":_inputs_kernel_target_aot",
     )
     _web_inputs_test(
@@ -612,10 +667,13 @@ def action_inputs_test_suite(name):
             ":" + name + "_application_dbg",
             ":" + name + "_asset_bundle",
             ":" + name + "_aot_target",
+            ":" + name + "_aot_target_dbg",
             ":" + name + "_kernel_target_modular",
             ":" + name + "_kernel_target_aot",
+            ":" + name + "_kernel_target_aot_dbg",
             ":" + name + "_web",
             ":" + name + "_pub",
             ":" + name + "_dart_toolchain",
         ],
     )
+

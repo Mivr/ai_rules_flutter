@@ -369,10 +369,11 @@ def flutter_compile_kernel(ctx, flutter_sdk_info, aot = None, platform_dill = No
     if aot == None:
         aot = mode != "debug"
 
-    # Profile compiles against the non-product platform, as debug/JIT does: the
-    # product one has the VM service and the profiling hooks compiled out.
+    # Profile and debug compile against the non-product platform: the product
+    # one has the VM service and the profiling hooks compiled out, and is not
+    # fetched in `-c dbg`.
     if platform_dill == None:
-        if aot and mode != "profile":
+        if aot and mode == "release":
             platform_dill = flutter_sdk_info.platform_kernel_dill_product
         else:
             platform_dill = flutter_sdk_info.platform_kernel_dill

@@ -97,6 +97,7 @@ flutter_aot_target = rule(
         "@rules_flutter//flutter:toolchain_type",
         config_common.toolchain_type("@rules_flutter//flutter/private:product_tools_toolchain_type", mandatory = False),
         config_common.toolchain_type("@rules_flutter//flutter/private:aot_toolchain_type", mandatory = False),
+        config_common.toolchain_type("@rules_dart//dart:exec_tools_toolchain_type", mandatory = False),
     ] + COPY_TO_DIRECTORY_TOOLCHAINS,
     doc = "Compiles Flutter sources to an AOT artifact (.so or .dylib depending on target platform).",
 )

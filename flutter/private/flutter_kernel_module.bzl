@@ -286,7 +286,7 @@ def flutter_modular_test_tools(ctx, flutter_sdk_info, own_files, packages, nativ
       The kernel tools struct from `kernel_tools_for`, or `None` when the test
       must fall back to whole-program `FlutterKernelCompile`.
     """
-    enabled = ctx.attr._modular_kernel[BuildSettingInfo].value if hasattr(ctx.attr, "_modular_kernel") else True
+    enabled = ctx.attr._modular_kernel[BuildSettingInfo].value if hasattr(ctx.attr, "_modular_kernel") else False
     if not enabled or _has_comma_defines(ctx) or flutter_sdk_info == None or flutter_sdk_info.platform_kernel_dill == None:
         return None
     tools = kernel_tools_for(ctx)
