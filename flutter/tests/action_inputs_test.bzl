@@ -464,20 +464,32 @@ _dart_comma_defines_fallback_test = analysistest.make(
 )
 _application_opt_inputs_test = analysistest.make(
     _application_opt_inputs_test_impl,
-    config_settings = {"//command_line_option:compilation_mode": "opt"},
+    config_settings = {
+        "//command_line_option:compilation_mode": "opt",
+        str(Label("//flutter:profile")): False,
+    },
 )
 _application_opt_fonts_inputs_test = analysistest.make(
     _application_opt_fonts_inputs_test_impl,
-    config_settings = {"//command_line_option:compilation_mode": "opt"},
+    config_settings = {
+        "//command_line_option:compilation_mode": "opt",
+        str(Label("//flutter:profile")): False,
+    },
 )
 _application_dbg_inputs_test = analysistest.make(
     _application_dbg_inputs_test_impl,
-    config_settings = {"//command_line_option:compilation_mode": "dbg"},
+    config_settings = {
+        "//command_line_option:compilation_mode": "dbg",
+        str(Label("//flutter:profile")): False,
+    },
 )
 _asset_bundle_inputs_test = analysistest.make(_asset_bundle_inputs_test_impl)
 _aot_target_inputs_test = analysistest.make(
     _aot_target_inputs_test_impl,
-    config_settings = {"//command_line_option:compilation_mode": "opt"},
+    config_settings = {
+        "//command_line_option:compilation_mode": "opt",
+        str(Label("//flutter:profile")): False,
+    },
 )
 _aot_target_dbg_inputs_test = analysistest.make(
     _aot_target_dbg_inputs_test_impl,
@@ -486,7 +498,12 @@ _aot_target_dbg_inputs_test = analysistest.make(
         str(Label("//flutter:profile")): False,
     },
 )
-_kernel_target_modular_test = analysistest.make(_kernel_target_modular_test_impl)
+_kernel_target_modular_test = analysistest.make(
+    _kernel_target_modular_test_impl,
+    config_settings = {
+        str(Label("//flutter:profile")): False,
+    },
+)
 _kernel_target_aot_test = analysistest.make(_kernel_target_aot_test_impl)
 _kernel_target_aot_dbg_test = analysistest.make(
     _kernel_target_aot_dbg_test_impl,
@@ -497,7 +514,10 @@ _kernel_target_aot_dbg_test = analysistest.make(
 )
 _web_inputs_test = analysistest.make(
     _web_inputs_test_impl,
-    config_settings = {"//command_line_option:compilation_mode": "opt"},
+    config_settings = {
+        "//command_line_option:compilation_mode": "opt",
+        str(Label("//flutter:profile")): False,
+    },
 )
 _pub_runfiles_test = analysistest.make(_pub_runfiles_test_impl)
 _dart_toolchain_inputs_test = analysistest.make(

@@ -51,6 +51,7 @@ _simulator_fastbuild_refused_test = analysistest.make(
     config_settings = {
         "//command_line_option:compilation_mode": "fastbuild",
         "//command_line_option:platforms": str(Label("//flutter/platforms:ios_x64")),
+        str(Label("//flutter:profile")): False,
     },
 )
 

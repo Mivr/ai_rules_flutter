@@ -143,7 +143,10 @@ def _aspect_compiles_on_library_impl(ctx):
         )
     return analysistest.end(env)
 
-_DBG = {"//command_line_option:compilation_mode": "dbg"}
+_DBG = {
+    "//command_line_option:compilation_mode": "dbg",
+    str(Label("//flutter:profile")): False,
+}
 
 _consumer_no_local_shader_compiles_test = analysistest.make(_consumer_no_local_shader_compiles_impl, config_settings = _DBG)
 _consumer_with_own_shader_test = analysistest.make(_consumer_with_own_shader_compiles_own_impl, config_settings = _DBG)

@@ -160,8 +160,14 @@ def _opt_in_lib_test_impl(ctx):
     _assert_multi_root_and_package_config(env, argv)
     return analysistest.end(env)
 
-_DBG = {"//command_line_option:compilation_mode": "dbg"}
-_OPT = {"//command_line_option:compilation_mode": "opt"}
+_DBG = {
+    "//command_line_option:compilation_mode": "dbg",
+    str(Label("//flutter:profile")): False,
+}
+_OPT = {
+    "//command_line_option:compilation_mode": "opt",
+    str(Label("//flutter:profile")): False,
+}
 
 _outside_lib_test = analysistest.make(_outside_lib_test_impl, config_settings = _DBG)
 _in_lib_test = analysistest.make(_in_lib_test_impl, config_settings = _DBG)

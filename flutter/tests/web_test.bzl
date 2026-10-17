@@ -325,7 +325,10 @@ def _dbg_web_defines_test_impl(ctx):
 
 _dbg_web_defines_test = analysistest.make(
     _dbg_web_defines_test_impl,
-    config_settings = {"//command_line_option:compilation_mode": "dbg"},
+    config_settings = {
+        "//command_line_option:compilation_mode": "dbg",
+        str(Label("//flutter:profile")): False,
+    },
 )
 
 def _profile_web_defines_test_impl(ctx):
@@ -381,7 +384,10 @@ def _profile_web_defines_test_impl(ctx):
 
 _profile_web_defines_test = analysistest.make(
     _profile_web_defines_test_impl,
-    config_settings = {"//command_line_option:compilation_mode": "dbg"},
+    config_settings = {
+        "//command_line_option:compilation_mode": "dbg",
+        str(Label("//flutter:profile")): False,
+    },
 )
 
 def _opt_web_defines_test_impl(ctx):
@@ -443,7 +449,10 @@ def _opt_web_defines_test_impl(ctx):
 
 _opt_web_defines_test = analysistest.make(
     _opt_web_defines_test_impl,
-    config_settings = {"//command_line_option:compilation_mode": "opt"},
+    config_settings = {
+        "//command_line_option:compilation_mode": "opt",
+        str(Label("//flutter:profile")): False,
+    },
 )
 
 def _fastbuild_web_defines_test_impl(ctx):
@@ -480,7 +489,10 @@ def _fastbuild_web_defines_test_impl(ctx):
 
 _fastbuild_web_defines_test = analysistest.make(
     _fastbuild_web_defines_test_impl,
-    config_settings = {"//command_line_option:compilation_mode": "fastbuild"},
+    config_settings = {
+        "//command_line_option:compilation_mode": "fastbuild",
+        str(Label("//flutter:profile")): False,
+    },
 )
 
 def _dev_config_test_impl(ctx):
@@ -581,7 +593,10 @@ def _dev_config_test_impl(ctx):
 
 _dev_config_test = analysistest.make(
     _dev_config_test_impl,
-    config_settings = {"//command_line_option:compilation_mode": "dbg"},
+    config_settings = {
+        "//command_line_option:compilation_mode": "dbg",
+        str(Label("//flutter:profile")): False,
+    },
     attrs = {"expect_entrypoint": attr.string(mandatory = True)},
 )
 
@@ -622,7 +637,10 @@ def _main_outside_lib_test_impl(ctx):
 
 _main_outside_lib_test = analysistest.make(
     _main_outside_lib_test_impl,
-    config_settings = {"//command_line_option:compilation_mode": "dbg"},
+    config_settings = {
+        "//command_line_option:compilation_mode": "dbg",
+        str(Label("//flutter:profile")): False,
+    },
 )
 
 def _dev_config_overrides_test_impl(ctx):
@@ -644,7 +662,10 @@ def _dev_config_overrides_test_impl(ctx):
 
 _dev_config_overrides_test = analysistest.make(
     _dev_config_overrides_test_impl,
-    config_settings = {"//command_line_option:compilation_mode": "dbg"},
+    config_settings = {
+        "//command_line_option:compilation_mode": "dbg",
+        str(Label("//flutter:profile")): False,
+    },
 )
 
 def _wasm_source_map_test_impl(ctx):
@@ -719,7 +740,10 @@ def _minify_override_test_impl(ctx):
 
 _minify_override_test = analysistest.make(
     _minify_override_test_impl,
-    config_settings = {"//command_line_option:compilation_mode": "dbg"},
+    config_settings = {
+        "//command_line_option:compilation_mode": "dbg",
+        str(Label("//flutter:profile")): False,
+    },
 )
 
 def _optimization_override_test_impl(ctx):
@@ -738,7 +762,10 @@ def _optimization_override_test_impl(ctx):
 
 _optimization_override_test = analysistest.make(
     _optimization_override_test_impl,
-    config_settings = {"//command_line_option:compilation_mode": "dbg"},
+    config_settings = {
+        "//command_line_option:compilation_mode": "dbg",
+        str(Label("//flutter:profile")): False,
+    },
 )
 
 def _optimization_zero_test_impl(ctx):
@@ -756,7 +783,10 @@ def _optimization_zero_test_impl(ctx):
 
 _optimization_zero_test = analysistest.make(
     _optimization_zero_test_impl,
-    config_settings = {"//command_line_option:compilation_mode": "opt"},
+    config_settings = {
+        "//command_line_option:compilation_mode": "opt",
+        str(Label("//flutter:profile")): False,
+    },
 )
 
 def _js_only_settings_test_impl(ctx):
@@ -791,7 +821,10 @@ def _js_only_settings_test_impl(ctx):
 
 _js_only_settings_test = analysistest.make(
     _js_only_settings_test_impl,
-    config_settings = {"//command_line_option:compilation_mode": "opt"},
+    config_settings = {
+        "//command_line_option:compilation_mode": "opt",
+        str(Label("//flutter:profile")): False,
+    },
 )
 
 def _optimization_wasm_on_js_refused_test_impl(ctx):
@@ -864,7 +897,10 @@ def _experiments_test_impl(ctx):
 
 _experiments_test = analysistest.make(
     _experiments_test_impl,
-    config_settings = {"//command_line_option:compilation_mode": "opt"},
+    config_settings = {
+        "//command_line_option:compilation_mode": "opt",
+        str(Label("//flutter:profile")): False,
+    },
 )
 
 def _font_icon_tree_shake_test_impl(ctx):
@@ -883,7 +919,10 @@ def _font_icon_tree_shake_test_impl(ctx):
 
 _font_icon_tree_shake_test = analysistest.make(
     _font_icon_tree_shake_test_impl,
-    config_settings = {"//command_line_option:compilation_mode": "fastbuild"},
+    config_settings = {
+        "//command_line_option:compilation_mode": "fastbuild",
+        str(Label("//flutter:profile")): False,
+    },
 )
 
 def _font_icon_tree_shake_opt_test_impl(ctx):
@@ -906,7 +945,10 @@ def _font_icon_tree_shake_opt_test_impl(ctx):
 
 _font_icon_tree_shake_opt_test = analysistest.make(
     _font_icon_tree_shake_opt_test_impl,
-    config_settings = {"//command_line_option:compilation_mode": "opt"},
+    config_settings = {
+        "//command_line_option:compilation_mode": "opt",
+        str(Label("//flutter:profile")): False,
+    },
 )
 
 def _dump_info_test_impl(ctx):
@@ -1000,7 +1042,10 @@ def _no_strip_release_test_impl(ctx):
 
 _no_strip_release_test = analysistest.make(
     _no_strip_release_test_impl,
-    config_settings = {"//command_line_option:compilation_mode": "opt"},
+    config_settings = {
+        "//command_line_option:compilation_mode": "opt",
+        str(Label("//flutter:profile")): False,
+    },
 )
 
 def _strip_wasm_on_js_refused_test_impl(ctx):

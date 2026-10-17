@@ -624,6 +624,7 @@ def _make_apple_debug_test(platform_label):
         config_settings = {
             "//command_line_option:compilation_mode": "dbg",
             "//command_line_option:platforms": str(Label(platform_label)),
+            str(Label("//flutter:profile")): False,
         },
     )
 
@@ -646,9 +647,8 @@ def _make_ios_aot_unavailable_test(platform_label, profile = False):
     settings = {
         "//command_line_option:compilation_mode": "opt",
         "//command_line_option:platforms": str(Label(platform_label)),
+        str(Label("//flutter:profile")): profile,
     }
-    if profile:
-        settings[str(Label("//flutter:profile"))] = True
     return analysistest.make(
         _ios_aot_unavailable_on_non_macos_test_impl,
         expect_failure = True,
@@ -659,9 +659,8 @@ def _make_macos_aot_cross_unavailable_test(platform_label, profile = False):
     settings = {
         "//command_line_option:compilation_mode": "opt",
         "//command_line_option:platforms": str(Label(platform_label)),
+        str(Label("//flutter:profile")): profile,
     }
-    if profile:
-        settings[str(Label("//flutter:profile"))] = True
     return analysistest.make(
         _macos_aot_cross_unavailable_test_impl,
         expect_failure = True,
