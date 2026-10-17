@@ -187,7 +187,8 @@ def manifest_merge_test_suite(name):
         ],
     )
 
-    # 2. Regression test: tools:node="remove" in base, overlay, and library manifests
+    # 2. Regression test: chained merges (variant overlay -> permissions overlay -> library)
+    #    and AGP priority for tools:node="remove" in base, overlay, and library manifests.
     write_file(
         name = "_remove_base_manifest",
         out = "_remove_base/AndroidManifest.xml",
@@ -205,12 +206,24 @@ def manifest_merge_test_suite(name):
     )
 
     write_file(
-        name = "_remove_overlay_manifest",
-        out = "_remove_overlay/AndroidManifest.xml",
+        name = "_remove_variant_overlay_manifest",
+        out = "_remove_variant_overlay/AndroidManifest.xml",
         content = [
             '<manifest xmlns:android="http://schemas.android.com/apk/res/android"',
             '    xmlns:tools="http://schemas.android.com/tools">',
             '    <uses-permission android:name="android.permission.CAMERA" tools:node="remove"/>',
+            '    <uses-permission android:name="android.permission.VIBRATE"/>',
+            "</manifest>",
+            "",
+        ],
+        tags = ["manual"],
+    )
+
+    write_file(
+        name = "_remove_permissions_overlay_manifest",
+        out = "_remove_permissions_overlay/AndroidManifest.xml",
+        content = [
+            '<manifest xmlns:android="http://schemas.android.com/apk/res/android">',
             '    <uses-permission android:name="android.permission.INTERNET"/>',
             "</manifest>",
             "",
@@ -237,8 +250,10 @@ def manifest_merge_test_suite(name):
         name = "_remove_lib2_manifest",
         out = "_remove_lib2/AndroidManifest.xml",
         content = [
-            '<manifest xmlns:android="http://schemas.android.com/apk/res/android">',
+            '<manifest xmlns:android="http://schemas.android.com/apk/res/android"',
+            '    xmlns:tools="http://schemas.android.com/tools">',
             '    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>',
+            '    <uses-permission android:name="android.permission.RECORD_AUDIO" tools:node="remove"/>',
             "</manifest>",
             "",
         ],
@@ -258,9 +273,22 @@ def manifest_merge_test_suite(name):
     )
 
     flutter_android_manifest_merge(
-        name = "_remove_merged",
+        name = "_remove_variant_merged",
         base = ":_remove_base_manifest",
-        overlay = ":_remove_overlay_manifest",
+        overlay = ":_remove_variant_overlay_manifest",
+        tags = ["manual"],
+    )
+
+    flutter_android_manifest_merge(
+        name = "_remove_permissions_merged",
+        base = ":_remove_variant_merged",
+        overlay = ":_remove_permissions_overlay_manifest",
+        tags = ["manual"],
+    )
+
+    flutter_android_manifest_merge(
+        name = "_remove_merged",
+        base = ":_remove_permissions_merged",
         libraries = [":_remove_lib1", ":_remove_lib2"],
         tags = ["manual"],
     )
@@ -270,6 +298,7 @@ def manifest_merge_test_suite(name):
         manifest = ":_remove_merged",
         expected_substrings = [
             '<uses-permission android:name="android.permission.INTERNET"/>',
+            '<uses-permission android:name="android.permission.VIBRATE"/>',
             '<uses-permission android:name="android.permission.RECORD_AUDIO"/>',
         ],
         forbidden_substrings = [
@@ -287,7 +316,7 @@ def manifest_merge_test_suite(name):
         content = [
             '<?xml version="1.0" encoding="utf-8"?>',
             '<manifest xmlns:android="http://schemas.android.com/apk/res/android">',
-            '    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28"/>',
+            '    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" android:usesPermissionFlags="neverForLocation"/>',
             '    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30"/>',
             '    <application android:label="example"/>',
             "</manifest>",
@@ -345,17 +374,77 @@ def manifest_merge_test_suite(name):
         name = name + "_max_sdk_version_upgrade",
         manifest = ":_maxsdk_merged",
         expected_substrings = [
-            '<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>',
+            '<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" android:usesPermissionFlags="neverForLocation"/>',
             '<uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30"/>',
             '<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>',
         ],
         forbidden_substrings = [
-            'android:maxSdkVersion="28"',
+            '<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>',
+            '<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="28"/>',
         ],
         expected_once = [
             "android.permission.WRITE_EXTERNAL_STORAGE",
             "android.permission.BLUETOOTH",
             "android.permission.READ_EXTERNAL_STORAGE",
+        ],
+    )
+
+    # 4. Regression test: uses-permission-sdk-23 remove does not suppress plain uses-permission and vice versa
+    write_file(
+        name = "_sdk23_base_manifest",
+        out = "_sdk23_base/AndroidManifest.xml",
+        content = [
+            '<?xml version="1.0" encoding="utf-8"?>',
+            '<manifest xmlns:android="http://schemas.android.com/apk/res/android"',
+            '    xmlns:tools="http://schemas.android.com/tools">',
+            '    <uses-permission-sdk-23 android:name="android.permission.CAMERA" tools:node="remove"/>',
+            '    <uses-permission android:name="android.permission.VIBRATE" tools:node="remove"/>',
+            '    <application android:label="example"/>',
+            "</manifest>",
+            "",
+        ],
+        tags = ["manual"],
+    )
+
+    write_file(
+        name = "_sdk23_lib_manifest",
+        out = "_sdk23_lib/AndroidManifest.xml",
+        content = [
+            '<manifest xmlns:android="http://schemas.android.com/apk/res/android">',
+            '    <uses-permission android:name="android.permission.CAMERA"/>',
+            '    <uses-permission-sdk-23 android:name="android.permission.CAMERA"/>',
+            '    <uses-permission-sdk-23 android:name="android.permission.VIBRATE"/>',
+            '    <uses-permission android:name="android.permission.VIBRATE"/>',
+            "</manifest>",
+            "",
+        ],
+        tags = ["manual"],
+    )
+
+    _mock_android_lib(
+        name = "_sdk23_lib",
+        manifest = ":_sdk23_lib_manifest",
+        tags = ["manual"],
+    )
+
+    flutter_android_manifest_merge(
+        name = "_sdk23_merged",
+        base = ":_sdk23_base_manifest",
+        libraries = [":_sdk23_lib"],
+        tags = ["manual"],
+    )
+
+    _manifest_content_test(
+        name = name + "_sdk23_remove_scoping",
+        manifest = ":_sdk23_merged",
+        expected_substrings = [
+            '<uses-permission android:name="android.permission.CAMERA"/>',
+            '<uses-permission-sdk-23 android:name="android.permission.VIBRATE"/>',
+        ],
+        forbidden_substrings = [
+            '<uses-permission-sdk-23 android:name="android.permission.CAMERA"/>',
+            '<uses-permission android:name="android.permission.VIBRATE"/>',
+            "tools:node",
         ],
     )
 
@@ -366,5 +455,6 @@ def manifest_merge_test_suite(name):
             ":" + name + "_prologue_before_xml_decl",
             ":" + name + "_tools_node_remove",
             ":" + name + "_max_sdk_version_upgrade",
+            ":" + name + "_sdk23_remove_scoping",
         ],
     )
