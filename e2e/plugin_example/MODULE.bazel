@@ -14,9 +14,29 @@ bazel_dep(name = "rules_swift", version = "4.1.2")
 bazel_dep(name = "rules_java", version = "9.9.0")
 bazel_dep(name = "platforms", version = "1.1.0")
 
+bazel_dep(name = "llvm", version = "0.8.19", dev_dependency = True)
+
 local_path_override(
     module_name = "rules_flutter",
     path = "../..",
+)
+
+git_override(
+    module_name = "rules_dart",
+    commit = "e2e2c0c1cff95df3054113e3b8aea47f0185d4d1",
+    remote = "https://github.com/Mivr/rules_dart.git",
+)
+
+register_toolchains(
+    "@llvm//toolchain:linux_aarch64_to_linux_aarch64",
+    "@llvm//toolchain:linux_aarch64_to_linux_x86_64",
+    "@llvm//toolchain:linux_x86_64_to_linux_aarch64",
+    "@llvm//toolchain:linux_x86_64_to_linux_x86_64",
+    "@llvm//toolchain:macos_aarch64_to_linux_aarch64",
+    "@llvm//toolchain:macos_aarch64_to_linux_x86_64",
+    "@llvm//toolchain:macos_x86_64_to_linux_aarch64",
+    "@llvm//toolchain:macos_x86_64_to_linux_x86_64",
+    dev_dependency = True,
 )
 
 # Pinned past the 0.1.5 release for 16KB page alignment. 0.1.5 links every

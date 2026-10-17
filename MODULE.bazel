@@ -43,6 +43,25 @@ bazel_dep(name = "yaml.bzl", version = "0.1.2")
 bazel_dep(name = "rules_multitool", version = "1.11.1", dev_dependency = True)
 bazel_dep(name = "buildifier_prebuilt", version = "10.1.0", dev_dependency = True)
 bazel_dep(name = "bazelrc-preset.bzl", version = "1.9.2", dev_dependency = True)
+bazel_dep(name = "llvm", version = "0.8.19", dev_dependency = True)
+
+git_override(
+    module_name = "rules_dart",
+    commit = "e2e2c0c1cff95df3054113e3b8aea47f0185d4d1",
+    remote = "https://github.com/Mivr/rules_dart.git",
+)
+
+register_toolchains(
+    "@llvm//toolchain:linux_aarch64_to_linux_aarch64",
+    "@llvm//toolchain:linux_aarch64_to_linux_x86_64",
+    "@llvm//toolchain:linux_x86_64_to_linux_aarch64",
+    "@llvm//toolchain:linux_x86_64_to_linux_x86_64",
+    "@llvm//toolchain:macos_aarch64_to_linux_aarch64",
+    "@llvm//toolchain:macos_aarch64_to_linux_x86_64",
+    "@llvm//toolchain:macos_x86_64_to_linux_aarch64",
+    "@llvm//toolchain:macos_x86_64_to_linux_x86_64",
+    dev_dependency = True,
+)
 
 # Register the apple_cc CC toolchain explicitly so rules_swift's
 # xcode_swift_toolchain resolves to a CC toolchain with a valid apple target
