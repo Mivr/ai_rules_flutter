@@ -1,17 +1,17 @@
 """Build settings and helpers for selecting the Apple build backend.
 
-`rules_flutter` supports two interchangeable backends for iOS and macOS builds:
-- `rules_apple`: Uses `@rules_apple` (`ios_application`, `macos_application`,
-  `apple_dynamic_framework_import`, etc.) with a local Xcode installation on
-  macOS.
-- `xtool`: Uses `@flutter_xtool_darwin_sdk` (`darwin.artifactbundle` +
-  `ld64.lld` + `llvm-lib` + `OpenAppleMacrosServer`) and the hermetic pure-Dart
-  `xtool_pack` bundler to build and package `.app` / `.ipa` bundles on Linux
-  (or macOS without Xcode).
+`rules_flutter` supports two backends for iOS and macOS builds:
+- `rules_apple` (default): Uses `@rules_apple` (`ios_application`,
+  `macos_application`, `apple_dynamic_framework_import`, etc.) with a local
+  Xcode installation on macOS.
+- `xtool` (explicit opt-in): Uses `@flutter_xtool_darwin_sdk`
+  (`darwin.artifactbundle` + `ld64.lld` + `llvm-lib` + `OpenAppleMacrosServer`)
+  and the hermetic pure-Dart `xtool_pack` bundler to build and package
+  unsigned `.app` / `.ipa` bundles on Linux (or signed when `zsign` is
+  configured).
 """
 
 APPLE_BACKEND_VALUES = [
-    "auto",
     "rules_apple",
     "xtool",
 ]

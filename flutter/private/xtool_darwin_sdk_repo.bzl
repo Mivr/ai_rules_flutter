@@ -1,18 +1,21 @@
 """Repository rule and C++/Swift cross-toolchain definitions for xtool Darwin SDKs on Linux.
 
-Discovers or downloads an `xtool` `darwin.artifactbundle` (containing
-`iPhoneOS.sdk`, `iPhoneSimulator.sdk`, and `MacOSX.sdk`) and emits Bazel
-`cc_toolchain`, Swift wrapper targets, and `toolchain` definitions for:
+Downloads a checksummed `xtool` `darwin.artifactbundle` archive (`url` +
+`sha256`, hermetic) or symlinks an explicitly configured local bundle (`path`,
+non-hermetic), containing `iPhoneOS.sdk`, `iPhoneSimulator.sdk`, and
+`MacOSX.sdk`, and emits Bazel `cc_toolchain`, Swift wrapper targets, and
+`toolchain` definitions for:
   - `ios_arm64` (`arm64-apple-ios14.0`)
   - `ios_sim_arm64` (`arm64-apple-ios14.0-simulator`)
   - `ios_x64` (`x86_64-apple-ios14.0-simulator`)
   - `macos_arm64` (`arm64-apple-macosx11.0`)
   - `macos_x64` (`x86_64-apple-macosx11.0`)
 
-When no `darwin.artifactbundle` is installed on the host, the repository rule
-still succeeds and emits stub targets with `SDK_AVAILABLE = False` so that
-workspace queries and host-agnostic tests do not fail unless a Darwin C++/Swift
-compilation action is actually executed without an SDK.
+No host environment variables, `HOME`, `PATH`, `which`, or well-known host
+directories are probed. When neither `url` nor `path` is configured, the
+repository rule still instantiates with `SDK_AVAILABLE = False` so that
+`bazel test //...` works, but any target that requires the SDK fails at
+analysis with instructions on how to configure `flutter.darwin_sdk`.
 """
 
 load("@rules_cc//cc:action_names.bzl", "ACTION_NAMES")
@@ -70,6 +73,18 @@ XTOOL_DARWIN_TARGETS = {
     ),
 }
 
+_UNCONFIGURED_SDK_ERROR = (
+    "The xtool Darwin SDK (@flutter_xtool_darwin_sdk) is not configured. " +
+    "Configure it in your root MODULE.bazel with a checksummed archive:\n" +
+    "    flutter = use_extension(\"@rules_flutter//flutter:extensions.bzl\", \"flutter\")\n" +
+    "    flutter.darwin_sdk(\n" +
+    "        url = \"https://.../darwin.artifactbundle.tar.gz\",\n" +
+    "        sha256 = \"<sha256>\",\n" +
+    "    )\n" +
+    "or, for a local non-hermetic SDK:\n" +
+    "    flutter.darwin_sdk(path = \"<path-to-darwin.artifactbundle>\")"
+)
+
 _COMPILE_ACTIONS = [
     ACTION_NAMES.c_compile,
     ACTION_NAMES.cpp_compile,
@@ -87,18 +102,22 @@ _LINK_ACTIONS = [
 ]
 
 def _xtool_darwin_cc_toolchain_config_impl(ctx):
+    if not ctx.attr.sdk_available or not ctx.attr.sdk_path:
+        fail(_UNCONFIGURED_SDK_ERROR)
+
     compile_flags = [
         "-target",
         ctx.attr.triple,
+        "-isysroot",
+        ctx.attr.sdk_path,
     ]
     link_flags = [
         "-target",
         ctx.attr.triple,
         "-fuse-ld=lld",
+        "-isysroot",
+        ctx.attr.sdk_path,
     ]
-    if ctx.attr.sdk_path:
-        compile_flags.extend(["-isysroot", ctx.attr.sdk_path])
-        link_flags.extend(["-isysroot", ctx.attr.sdk_path])
 
     default_flags_feature = feature(
         name = "xtool_darwin_default_flags",
@@ -143,6 +162,7 @@ def _xtool_darwin_cc_toolchain_config_impl(ctx):
 xtool_darwin_cc_toolchain_config = rule(
     implementation = _xtool_darwin_cc_toolchain_config_impl,
     attrs = {
+        "sdk_available": attr.bool(default = True),
         "target_key": attr.string(mandatory = True),
         "triple": attr.string(mandatory = True),
         "target_cpu": attr.string(mandatory = True),
@@ -151,12 +171,26 @@ xtool_darwin_cc_toolchain_config = rule(
     provides = [CcToolchainConfigInfo],
 )
 
+def _xtool_darwin_sdk_target_impl(ctx):
+    if not ctx.attr.sdk_available:
+        fail(_UNCONFIGURED_SDK_ERROR)
+    return [DefaultInfo(files = depset(ctx.files.srcs))]
+
+xtool_darwin_sdk_target = rule(
+    implementation = _xtool_darwin_sdk_target_impl,
+    attrs = {
+        "sdk_available": attr.bool(mandatory = True),
+        "srcs": attr.label_list(allow_files = True, default = []),
+    },
+    doc = "Exposes files from @flutter_xtool_darwin_sdk or fails at analysis when the SDK is not configured.",
+)
+
 FlutterXtoolSdkInfo = provider(
     doc = "Metadata and status for the configured xtool Darwin SDK (`darwin.artifactbundle`).",
     fields = {
-        "sdk_available": "bool: Whether a darwin.artifactbundle was discovered or downloaded.",
+        "sdk_available": "bool: Whether a darwin.artifactbundle was explicitly configured.",
         "sdk_paths": "dict: Mapping from SDK name (iPhoneOS, iPhoneSimulator, MacOSX) to path.",
-        "swift_bin_dir": "string: Path to the Swift/Clang toolchain bin directory.",
+        "swift_bin_dir": "string: Relative path to the Swift/Clang toolchain bin directory.",
         "sdk_files": "depset: Files in the SDK repository.",
     },
 )
@@ -183,6 +217,91 @@ xtool_darwin_sdk_status = rule(
     },
     provides = [FlutterXtoolSdkInfo],
 )
+
+def validate_darwin_sdk_config(
+        *,
+        url = "",
+        sha256 = "",
+        path = "",
+        swift_toolchain_path = "",
+        require_configured = False,
+        context = "flutter.darwin_sdk"):
+    """Validates xtool Darwin SDK configuration attributes.
+
+    Args:
+        url: Archive download URL (hermetic when paired with `sha256`).
+        sha256: Expected SHA-256 hex digest for `url`.
+        path: Local filesystem path to `darwin.artifactbundle` (non-hermetic).
+        swift_toolchain_path: Optional local path to the Linux Swift toolchain.
+        require_configured: When True (e.g. an explicit `flutter.darwin_sdk()`
+            tag), requires either `url` or `path` to be non-empty.
+        context: Prefix used in failure messages.
+
+    Returns:
+        struct(url, sha256, path, swift_toolchain_path, configured)
+    """
+    if url and path:
+        fail("%s: specify either 'url' (with 'sha256') or 'path', not both." % context)
+    if sha256 and not url:
+        fail("%s: 'sha256' requires 'url' to be set." % context)
+    if url:
+        if not sha256:
+            fail("%s: 'sha256' is required when 'url' is set (%s)." % (context, url))
+        require_sha256(sha256, url)
+    if require_configured and not url and not path:
+        fail("%s: must specify either 'url' (with 'sha256') or 'path'." % context)
+    return struct(
+        url = url,
+        sha256 = sha256,
+        path = path,
+        swift_toolchain_path = swift_toolchain_path,
+        configured = bool(url or path),
+    )
+
+def resolve_darwin_sdk_from_modules(modules):
+    """Extracts and validates `flutter.darwin_sdk` tags across Bzlmod modules.
+
+    Only the root module (`mod.is_root`) may set `flutter.darwin_sdk`, and at
+    most once.
+
+    Args:
+        modules: Iterable of Bzlmod module objects (`module_ctx.modules`).
+
+    Returns:
+        struct(url, sha256, path, swift_toolchain_path, configured)
+    """
+    found = None
+    for mod in modules:
+        tags = getattr(mod.tags, "darwin_sdk", [])
+        if not tags:
+            continue
+        if not mod.is_root:
+            mod_name = getattr(mod, "name", "") or "<non-root>"
+            fail(
+                "Only the root module may set the flutter.darwin_sdk tag " +
+                "(found in non-root module '%s')." % mod_name,
+            )
+        if len(tags) > 1 or found != None:
+            fail("flutter.darwin_sdk may be specified at most once in the root module.")
+        sdk_tag = tags[0]
+        found = validate_darwin_sdk_config(
+            url = getattr(sdk_tag, "url", ""),
+            sha256 = getattr(sdk_tag, "sha256", ""),
+            path = getattr(sdk_tag, "path", ""),
+            swift_toolchain_path = getattr(sdk_tag, "swift_toolchain_path", ""),
+            require_configured = True,
+            context = "flutter.darwin_sdk",
+        )
+
+    if found != None:
+        return found
+    return struct(
+        url = "",
+        sha256 = "",
+        path = "",
+        swift_toolchain_path = "",
+        configured = False,
+    )
 
 def resolve_darwin_artifactbundle_sdk_paths(info_json_text, bundle_root):
     """Parses `darwin.artifactbundle/info.json` and returns a dict of SDK paths.
@@ -240,10 +359,10 @@ def generate_xtool_darwin_sdk_build(
     (`sdk_available = True`) and unconfigured (`sdk_available = False`) states.
 
     Args:
-        sdk_available: bool indicating whether `darwin.artifactbundle` was found.
+        sdk_available: bool indicating whether `darwin.artifactbundle` was configured.
         sdk_paths: optional dict mapping SDK name (`iPhoneOS`, `iPhoneSimulator`,
-            `MacOSX`) to its path inside the repository or host.
-        swift_bin_dir: optional path to the Swift toolchain `bin` directory.
+            `MacOSX`) to its relative path inside the repository.
+        swift_bin_dir: optional relative path to the Swift toolchain `bin` directory.
 
     Returns:
         String containing the complete `BUILD.bazel` file.
@@ -255,19 +374,22 @@ def generate_xtool_darwin_sdk_build(
             "sdk/%s.sdk" % sdk_name if sdk_available else "",
         )
 
+    status_sdk_files = '[":sdk_files"]' if sdk_available else "[]"
+
     lines = [
         "# Generated by flutter/private/xtool_darwin_sdk_repo.bzl",
         'load("@rules_cc//cc:defs.bzl", "cc_toolchain")',
-        'load("@rules_flutter//flutter/private:xtool_darwin_sdk_repo.bzl", "xtool_darwin_cc_toolchain_config", "xtool_darwin_sdk_status")',
+        'load("@rules_flutter//flutter/private:xtool_darwin_sdk_repo.bzl", "xtool_darwin_cc_toolchain_config", "xtool_darwin_sdk_status", "xtool_darwin_sdk_target")',
         "",
         "package(default_visibility = [\"//visibility:public\"])",
         "",
         "SDK_AVAILABLE = %s" % ("True" if sdk_available else "False"),
         "SWIFT_BIN_DIR = %r" % swift_bin_dir,
         "",
-        "filegroup(",
+        "xtool_darwin_sdk_target(",
         '    name = "sdk_files",',
-        '    srcs = glob(["sdk/**", "bin/**"], allow_empty = True),',
+        "    sdk_available = SDK_AVAILABLE,",
+        '    srcs = glob(["sdk/**", "bin/**", "swift_bin/**"], allow_empty = True),',
         ")",
         "",
         "filegroup(",
@@ -280,7 +402,7 @@ def generate_xtool_darwin_sdk_build(
         "    sdk_available = SDK_AVAILABLE,",
         "    sdk_paths = %r," % resolved_sdk_paths,
         "    swift_bin_dir = SWIFT_BIN_DIR,",
-        '    sdk_files = [":sdk_files"],',
+        "    sdk_files = %s," % status_sdk_files,
         ")",
         "",
         'exports_files(glob(["bin/**"], allow_empty = True))',
@@ -293,6 +415,7 @@ def generate_xtool_darwin_sdk_build(
             "",
             "xtool_darwin_cc_toolchain_config(",
             '    name = "%s_cc_toolchain_config",' % target_key,
+            "    sdk_available = SDK_AVAILABLE,",
             '    target_key = "%s",' % target_key,
             '    triple = "%s",' % meta.triple,
             '    target_cpu = "%s",' % meta.target_cpu,
@@ -326,57 +449,24 @@ def generate_xtool_darwin_sdk_build(
             '    toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",',
             ")",
             "",
-            "filegroup(",
+            "xtool_darwin_sdk_target(",
             '    name = "%s_swift_wrapper",' % target_key,
+            "    sdk_available = SDK_AVAILABLE,",
             '    srcs = ["bin/swiftc_%s"],' % target_key,
             ")",
         ])
 
     return "\n".join(lines) + "\n"
 
-def _find_darwin_artifactbundle(repository_ctx):
-    if repository_ctx.attr.path:
-        return repository_ctx.attr.path
-    env_path = repository_ctx.os.environ.get("XTOOL_DARWIN_SDK_PATH", "")
-    if env_path:
-        return env_path
-
-    home = repository_ctx.os.environ.get("HOME", "")
-    candidates = []
-    if home:
-        candidates.extend([
-            "%s/.xtool/sdk/darwin.artifactbundle" % home,
-            "%s/.swiftpm/swift-sdks/darwin.artifactbundle" % home,
-        ])
-    candidates.append("/opt/xtool/darwin.artifactbundle")
-
-    for candidate in candidates:
-        if repository_ctx.path(candidate).exists:
-            return candidate
-    return ""
-
-def _find_swift_bin_dir(repository_ctx):
-    if repository_ctx.attr.swift_toolchain_path:
-        return repository_ctx.attr.swift_toolchain_path + "/usr/bin"
-    env_swift = repository_ctx.os.environ.get("XTOOL_SWIFT_TOOLCHAIN_PATH", "")
-    if env_swift:
-        return env_swift + "/usr/bin"
-    swiftc = repository_ctx.which("swiftc")
-    if swiftc:
-        return str(swiftc.dirname)
-    clang = repository_ctx.which("clang")
-    if clang:
-        return str(clang.dirname)
-    return "/usr/bin"
-
 def _write_wrapper_scripts(repository_ctx, sdk_available, sdk_paths, swift_bin_dir):
+    bin_prefix = (swift_bin_dir.rstrip("/") + "/") if swift_bin_dir else ""
     for tool in ("llvm-ar", "llvm-cov", "llvm-nm", "llvm-objdump", "llvm-strip"):
         repository_ctx.file(
             "bin/%s" % tool,
             """#!/usr/bin/env bash
 set -euo pipefail
-exec "{bin_dir}/{tool}" "$@"
-""".format(bin_dir = swift_bin_dir, tool = tool),
+exec "{bin_prefix}{tool}" "$@"
+""".format(bin_prefix = bin_prefix, tool = tool),
             executable = True,
         )
 
@@ -385,24 +475,24 @@ exec "{bin_dir}/{tool}" "$@"
         if sdk_available and sdk_path:
             clang_body = """#!/usr/bin/env bash
 set -euo pipefail
-exec "{bin_dir}/clang" -target "{triple}" -isysroot "{sdk_path}" "$@"
-""".format(bin_dir = swift_bin_dir, triple = meta.triple, sdk_path = sdk_path)
+exec "{bin_prefix}clang" -target "{triple}" -isysroot "{sdk_path}" "$@"
+""".format(bin_prefix = bin_prefix, triple = meta.triple, sdk_path = sdk_path)
             cpp_body = """#!/usr/bin/env bash
 set -euo pipefail
-exec "{bin_dir}/clang++" -target "{triple}" -isysroot "{sdk_path}" "$@"
-""".format(bin_dir = swift_bin_dir, triple = meta.triple, sdk_path = sdk_path)
+exec "{bin_prefix}clang++" -target "{triple}" -isysroot "{sdk_path}" "$@"
+""".format(bin_prefix = bin_prefix, triple = meta.triple, sdk_path = sdk_path)
             ld_body = """#!/usr/bin/env bash
 set -euo pipefail
-exec "{bin_dir}/ld64.lld" "$@"
-""".format(bin_dir = swift_bin_dir)
+exec "{bin_prefix}ld64.lld" "$@"
+""".format(bin_prefix = bin_prefix)
             swiftc_body = """#!/usr/bin/env bash
 set -euo pipefail
-exec "{bin_dir}/swiftc" -target "{triple}" -sdk "{sdk_path}" -Xcc -isysroot -Xcc "{sdk_path}" -use-ld=lld "$@"
-""".format(bin_dir = swift_bin_dir, triple = meta.triple, sdk_path = sdk_path)
+exec "{bin_prefix}swiftc" -target "{triple}" -sdk "{sdk_path}" -Xcc -isysroot -Xcc "{sdk_path}" -use-ld=lld "$@"
+""".format(bin_prefix = bin_prefix, triple = meta.triple, sdk_path = sdk_path)
         else:
             stub_err = """#!/usr/bin/env bash
-echo "ERROR: xtool Darwin SDK (darwin.artifactbundle) is not installed or configured for {target_key} ({triple})." >&2
-echo "Install the Darwin SDK via 'xtool setup' or set XTOOL_DARWIN_SDK_PATH / flutter.darwin_sdk(path = ...)." >&2
+echo "ERROR: xtool Darwin SDK (@flutter_xtool_darwin_sdk) is not configured for {target_key} ({triple})." >&2
+echo "Configure flutter.darwin_sdk(url = ..., sha256 = ...) or flutter.darwin_sdk(path = ...) in your root MODULE.bazel." >&2
 exit 1
 """.format(target_key = target_key, triple = meta.triple)
             clang_body = stub_err
@@ -415,29 +505,64 @@ exit 1
         repository_ctx.file("bin/ld64.lld_%s" % target_key, ld_body, executable = True)
         repository_ctx.file("bin/swiftc_%s" % target_key, swiftc_body, executable = True)
 
+def _resolve_bundle_sdk_paths(repository_ctx):
+    direct_info = repository_ctx.path("sdk/info.json")
+    nested_info = repository_ctx.path("sdk/darwin.artifactbundle/info.json")
+    if direct_info.exists:
+        return resolve_darwin_artifactbundle_sdk_paths(repository_ctx.read(direct_info), "sdk")
+    if nested_info.exists:
+        return resolve_darwin_artifactbundle_sdk_paths(
+            repository_ctx.read(nested_info),
+            "sdk/darwin.artifactbundle",
+        )
+    if repository_ctx.path("sdk/darwin.artifactbundle").exists:
+        return resolve_darwin_artifactbundle_sdk_paths("", "sdk/darwin.artifactbundle")
+    return resolve_darwin_artifactbundle_sdk_paths("", "sdk")
+
 def _xtool_darwin_sdk_repo_impl(repository_ctx):
+    cfg = validate_darwin_sdk_config(
+        url = repository_ctx.attr.url,
+        sha256 = repository_ctx.attr.sha256,
+        path = repository_ctx.attr.path,
+        swift_toolchain_path = repository_ctx.attr.swift_toolchain_path,
+        require_configured = False,
+        context = "xtool_darwin_sdk_repo",
+    )
+
     sdk_available = False
     sdk_paths = {}
+    swift_bin_dir = ""
 
-    if repository_ctx.attr.url:
+    if cfg.url:
         repository_ctx.download_and_extract(
-            url = repository_ctx.attr.url,
-            sha256 = require_sha256(repository_ctx.attr.sha256, repository_ctx.attr.url),
+            url = cfg.url,
+            sha256 = require_sha256(cfg.sha256, cfg.url),
             output = "sdk",
         )
         sdk_available = True
-        for sdk_name in ("iPhoneOS", "iPhoneSimulator", "MacOSX"):
-            sdk_paths[sdk_name] = str(repository_ctx.path("sdk/%s.sdk" % sdk_name))
-    else:
-        bundle_path = _find_darwin_artifactbundle(repository_ctx)
-        if bundle_path and repository_ctx.path(bundle_path).exists:
-            sdk_available = True
-            repository_ctx.symlink(bundle_path, "sdk")
-            info_json_path = repository_ctx.path("%s/info.json" % bundle_path)
-            info_text = repository_ctx.read(info_json_path) if info_json_path.exists else ""
-            sdk_paths = resolve_darwin_artifactbundle_sdk_paths(info_text, str(repository_ctx.path("sdk")))
+        sdk_paths = _resolve_bundle_sdk_paths(repository_ctx)
+    elif cfg.path:
+        bundle_path = repository_ctx.path(cfg.path)
+        if not bundle_path.exists:
+            fail(
+                "xtool_darwin_sdk_repo: configured darwin.artifactbundle path '%s' does not exist." % cfg.path,
+            )
+        repository_ctx.symlink(bundle_path, "sdk")
+        sdk_available = True
+        sdk_paths = _resolve_bundle_sdk_paths(repository_ctx)
 
-    swift_bin_dir = _find_swift_bin_dir(repository_ctx)
+    if cfg.swift_toolchain_path:
+        tc_path = repository_ctx.path(cfg.swift_toolchain_path)
+        if not tc_path.exists:
+            fail(
+                "xtool_darwin_sdk_repo: configured swift_toolchain_path '%s' does not exist." % cfg.swift_toolchain_path,
+            )
+        usr_bin = tc_path.get_child("usr").get_child("bin")
+        bin_dir = tc_path.get_child("bin")
+        bin_target = usr_bin if usr_bin.exists else (bin_dir if bin_dir.exists else tc_path)
+        repository_ctx.symlink(bin_target, "swift_bin")
+        swift_bin_dir = "swift_bin"
+
     _write_wrapper_scripts(repository_ctx, sdk_available, sdk_paths, swift_bin_dir)
     repository_ctx.file(
         "BUILD.bazel",
@@ -450,27 +575,21 @@ def _xtool_darwin_sdk_repo_impl(repository_ctx):
 
 xtool_darwin_sdk_repo = repository_rule(
     implementation = _xtool_darwin_sdk_repo_impl,
-    environ = [
-        "HOME",
-        "PATH",
-        "XTOOL_DARWIN_SDK_PATH",
-        "XTOOL_SWIFT_TOOLCHAIN_PATH",
-    ],
     attrs = {
         "path": attr.string(
-            doc = "Optional local filesystem path to `darwin.artifactbundle`.",
+            doc = "Optional local filesystem path to `darwin.artifactbundle` (local, non-hermetic).",
             default = "",
         ),
         "url": attr.string(
-            doc = "Optional URL to download `darwin.artifactbundle` archive.",
+            doc = "Optional URL to download `darwin.artifactbundle` archive (hermetic; requires `sha256`).",
             default = "",
         ),
         "sha256": attr.string(
-            doc = "SHA-256 checksum when `url` is specified.",
+            doc = "Required SHA-256 checksum when `url` is specified.",
             default = "",
         ),
         "swift_toolchain_path": attr.string(
-            doc = "Optional path to the Linux Swift toolchain root directory.",
+            doc = "Optional local path to the Linux Swift toolchain root directory (non-hermetic).",
             default = "",
         ),
     },

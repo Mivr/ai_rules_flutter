@@ -83,7 +83,10 @@ flutter = use_extension("//flutter:extensions.bzl", "flutter")
 flutter.toolchain(flutter_version = "3.47.7")
 use_repo(flutter, "flutter_android_engine_arm64_profile", "flutter_android_engine_x64_profile", "flutter_dev_root", "flutter_gen_l10n", "flutter_ios_engine", "flutter_ios_engine_profile", "flutter_macos_engine", "flutter_sky_engine", "flutter_toolchains", "flutter_web_sdk", "flutter_xtool_darwin_sdk")
 
-register_toolchains("@flutter_toolchains//:all")
+register_toolchains(
+    "@flutter_toolchains//:all",
+    "@flutter_xtool_darwin_sdk//:all",
+)
 
 # AndroidX dependencies the Flutter Android embedding (flutter.jar) requires
 # at runtime, mirroring the dependency list of Flutter's official

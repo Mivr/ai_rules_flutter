@@ -213,6 +213,7 @@ def flutter_apple_plugin_library(
 
     if tags == None:
         tags = ["manual"]
+    internal_tags = tags if "manual" in tags else tags + ["manual"]
 
     if module_name == None:
         module_name = name
@@ -232,7 +233,7 @@ def flutter_apple_plugin_library(
         apple_dynamic_framework_import(
             name = framework_apple_target,
             framework_imports = engine_imports,
-            tags = tags,
+            tags = internal_tags,
             target_compatible_with = target_compatible_with,
             visibility = ["//visibility:private"],
         )
@@ -240,7 +241,7 @@ def flutter_apple_plugin_library(
             name = framework_xtool_target,
             framework_name = "FlutterMacOS",
             xcframework_imports = engine_imports,
-            tags = tags,
+            tags = internal_tags,
             target_compatible_with = target_compatible_with,
             visibility = ["//visibility:private"],
         )
@@ -249,7 +250,7 @@ def flutter_apple_plugin_library(
         apple_dynamic_xcframework_import(
             name = framework_apple_target,
             xcframework_imports = engine_imports,
-            tags = tags,
+            tags = internal_tags,
             target_compatible_with = target_compatible_with,
             visibility = ["//visibility:private"],
         )
@@ -257,7 +258,7 @@ def flutter_apple_plugin_library(
             name = framework_xtool_target,
             framework_name = "Flutter",
             xcframework_imports = engine_imports,
-            tags = tags,
+            tags = internal_tags,
             target_compatible_with = target_compatible_with,
             visibility = ["//visibility:private"],
         )
@@ -268,7 +269,7 @@ def flutter_apple_plugin_library(
             Label("@rules_flutter//flutter/settings:use_xtool_backend"): ":" + framework_xtool_target,
             "//conditions:default": ":" + framework_apple_target,
         }),
-        tags = tags,
+        tags = internal_tags,
         visibility = ["//visibility:private"],
     )
 
@@ -289,7 +290,7 @@ def flutter_apple_plugin_library(
             enable_modules = True,
             copts = copts,
             deps = [":" + framework_target],
-            tags = tags,
+            tags = internal_tags,
             target_compatible_with = target_compatible_with,
             visibility = ["//visibility:private"],
         )
@@ -316,7 +317,7 @@ def flutter_apple_plugin_library(
             name = placeholder_target,
             out = placeholder_file,
             content = placeholder_content,
-            tags = tags,
+            tags = internal_tags,
             target_compatible_with = target_compatible_with,
         )
         swift_files = [":" + placeholder_target]
@@ -331,7 +332,7 @@ def flutter_apple_plugin_library(
         copts = extra_copts,
         deps = swift_deps,
         swiftc_inputs = [bridging_header] if bridging_header else [],
-        tags = tags,
+        tags = internal_tags,
         target_compatible_with = target_compatible_with,
         visibility = ["//visibility:private"],
         **kwargs
@@ -346,7 +347,7 @@ def flutter_apple_plugin_library(
         sdk_frameworks = sdk_frameworks,
         sdk_dylibs = sdk_dylibs,
         deps = [":" + framework_xtool_target] + list(deps),
-        tags = tags,
+        tags = internal_tags,
         target_compatible_with = target_compatible_with,
         visibility = ["//visibility:private"],
     )

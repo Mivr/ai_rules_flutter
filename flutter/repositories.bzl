@@ -20,7 +20,7 @@ load("//flutter/private:flutter_sky_engine_repo.bzl", "flutter_sky_engine_repo")
 load("//flutter/private:flutter_web_sdk_repo.bzl", "flutter_web_sdk_repo")
 load("//flutter/private:toolchains_repo.bzl", "CROSS_COMPILATION_PAIRS", "DESKTOP_CROSS_PAIRS", "HOST_PLATFORMS", "flutter_toolchains_repo")
 load("//flutter/private:versions.bzl", "FLUTTER_VERSIONS", "LINUX_SYSROOT_CHECKSUMS", "flutter_artifact_sha256", "flutter_source_sha256")
-load("//flutter/private:xtool_darwin_sdk_repo.bzl", "xtool_darwin_sdk_repo")
+load("//flutter/private:xtool_darwin_sdk_repo.bzl", "validate_darwin_sdk_config", "xtool_darwin_sdk_repo")
 
 def _flutter_patched_sdk_product_repo_impl(repository_ctx):
     url = engine_artifact_url(repository_ctx.attr.engine_revision, "flutter_patched_sdk_product.zip")
@@ -614,12 +614,18 @@ def flutter_register_toolchains(
 
     Args:
         name: base name for all created repos, like "flutter"
-        darwin_sdk_path: optional local path to xtool darwin.artifactbundle
-        darwin_sdk_url: optional URL for xtool darwin.artifactbundle archive
-        darwin_sdk_sha256: optional SHA-256 for darwin_sdk_url
-        darwin_sdk_swift_toolchain_path: optional path to Linux Swift toolchain root
+        darwin_sdk_path: optional local path to xtool darwin.artifactbundle (local, non-hermetic)
+        darwin_sdk_url: optional URL for xtool darwin.artifactbundle archive (hermetic; requires darwin_sdk_sha256)
+        darwin_sdk_sha256: required SHA-256 checksum when darwin_sdk_url is set
+        darwin_sdk_swift_toolchain_path: optional local path to Linux Swift toolchain root (local, non-hermetic)
         **kwargs: passed to each flutter_engine_artifacts call (must include flutter_version)
     """
+    validate_darwin_sdk_config(
+        path = darwin_sdk_path,
+        url = darwin_sdk_url,
+        sha256 = darwin_sdk_sha256,
+        swift_toolchain_path = darwin_sdk_swift_toolchain_path,
+    )
     flutter_version = kwargs["flutter_version"]
     meta = FLUTTER_VERSIONS[flutter_version]
 

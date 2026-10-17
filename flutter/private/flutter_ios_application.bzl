@@ -365,7 +365,7 @@ _NATIVE_ASSET_FRAMEWORK_INFO_PLIST = """<?xml version="1.0" encoding="UTF-8"?>
 """
 
 def _flutter_ios_native_frameworks_impl(ctx):
-    """Wraps each native dylib in a signed `.framework` for iOS bundling.
+    """Wraps each native dylib in an unsigned `.framework` for iOS bundling.
 
     iOS forbids loose embedded dylibs, so every native dependency — the legacy
     `native_libs` set (FFI `native_deps`) and the `bundled_code_assets` set
@@ -471,7 +471,7 @@ flutter_ios_native_frameworks = rule(
         "@rules_flutter//flutter:toolchain_type",
         config_common.toolchain_type("@rules_dart//dart:exec_tools_toolchain_type", mandatory = False),
     ],
-    doc = "Wraps native plugin/native-asset dylibs in signed .frameworks for iOS bundling.",
+    doc = "Wraps native plugin/native-asset dylibs in .frameworks for iOS bundling.",
 )
 
 # -- flutter_ios_privacy_manifests (xcprivacy bundling) -----------------------

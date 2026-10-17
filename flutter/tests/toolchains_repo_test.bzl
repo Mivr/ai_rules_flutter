@@ -17,8 +17,17 @@ load(
     "generate_toolchains_build",
     "supports_aot_cross_compilation",
 )
-load("//flutter/private:xtool_darwin_sdk_repo.bzl", "XTOOL_DARWIN_TARGETS", "generate_xtool_darwin_sdk_build", "resolve_darwin_artifactbundle_sdk_paths")
+load(
+    "//flutter/private:xtool_darwin_sdk_repo.bzl",
+    "FlutterXtoolSdkInfo",
+    "XTOOL_DARWIN_TARGETS",
+    "generate_xtool_darwin_sdk_build",
+    "resolve_darwin_artifactbundle_sdk_paths",
+    "resolve_darwin_sdk_from_modules",
+    "validate_darwin_sdk_config",
+)
 load("//flutter:repositories.bzl", "resolve_aot_gen_snapshot")
+load("//flutter/settings:apple_backend.bzl", "APPLE_BACKEND_VALUES")
 
 def _desktop_cross_pairs_keys_are_host_platforms_test_impl(ctx):
     """Every key in DESKTOP_CROSS_PAIRS must be a valid HOST_PLATFORMS key."""
@@ -326,6 +335,7 @@ def _apple_aot_matrix_by_host_target_mode_test_impl(ctx):
 def _xtool_darwin_sdk_build_test_impl(ctx):
     """generate_xtool_darwin_sdk_build emits all 5 Darwin targets in both configured and stub modes."""
     env = unittest.begin(ctx)
+    asserts.equals(env, ["rules_apple", "xtool"], APPLE_BACKEND_VALUES)
     expected_triples = {
         "ios_arm64": "arm64-apple-ios14.0",
         "ios_sim_arm64": "arm64-apple-ios14.0-simulator",
@@ -349,15 +359,15 @@ def _xtool_darwin_sdk_build_test_impl(ctx):
     configured_build = generate_xtool_darwin_sdk_build(
         sdk_available = True,
         sdk_paths = {
-            "iPhoneOS": "/xtool/iPhoneOS.sdk",
-            "iPhoneSimulator": "/xtool/iPhoneSimulator.sdk",
-            "MacOSX": "/xtool/MacOSX.sdk",
+            "iPhoneOS": "sdk/iPhoneOS.sdk",
+            "iPhoneSimulator": "sdk/iPhoneSimulator.sdk",
+            "MacOSX": "sdk/MacOSX.sdk",
         },
-        swift_bin_dir = "/opt/swift/usr/bin",
+        swift_bin_dir = "swift_bin",
     )
     asserts.true(env, "SDK_AVAILABLE = True" in configured_build, "Expected SDK_AVAILABLE = True")
-    asserts.true(env, "/xtool/iPhoneOS.sdk" in configured_build, "Expected iPhoneOS.sdk path")
-    asserts.true(env, "/xtool/MacOSX.sdk" in configured_build, "Expected MacOSX.sdk path")
+    asserts.true(env, "sdk/iPhoneOS.sdk" in configured_build, "Expected iPhoneOS.sdk path")
+    asserts.true(env, "sdk/MacOSX.sdk" in configured_build, "Expected MacOSX.sdk path")
     asserts.true(env, "xtool_darwin_sdk_status(" in configured_build, "Expected xtool_darwin_sdk_status target")
 
     info_json = json.encode({
@@ -377,11 +387,134 @@ def _xtool_darwin_sdk_build_test_impl(ctx):
             },
         },
     })
-    resolved_paths = resolve_darwin_artifactbundle_sdk_paths(info_json, "/opt/darwin.artifactbundle")
-    asserts.equals(env, "/opt/darwin.artifactbundle/iPhoneOS17.4.sdk", resolved_paths["iPhoneOS"])
-    asserts.equals(env, "/opt/darwin.artifactbundle/iPhoneSimulator17.4.sdk", resolved_paths["iPhoneSimulator"])
-    asserts.equals(env, "/opt/darwin.artifactbundle/MacOSX14.4.sdk", resolved_paths["MacOSX"])
+    resolved_paths = resolve_darwin_artifactbundle_sdk_paths(info_json, "sdk")
+    asserts.equals(env, "sdk/iPhoneOS17.4.sdk", resolved_paths["iPhoneOS"])
+    asserts.equals(env, "sdk/iPhoneSimulator17.4.sdk", resolved_paths["iPhoneSimulator"])
+    asserts.equals(env, "sdk/MacOSX14.4.sdk", resolved_paths["MacOSX"])
     return unittest.end(env)
+
+def _darwin_sdk_module_resolution_test_impl(ctx):
+    """Validates root-module darwin_sdk resolution for url+sha256, local path, and unconfigured defaults."""
+    env = unittest.begin(ctx)
+
+    unconfigured = resolve_darwin_sdk_from_modules([
+        struct(name = "my_app", is_root = True, tags = struct(darwin_sdk = [])),
+        struct(name = "dep_mod", is_root = False, tags = struct(darwin_sdk = [])),
+    ])
+    asserts.equals(env, "", unconfigured.path)
+    asserts.equals(env, "", unconfigured.url)
+    asserts.equals(env, "", unconfigured.sha256)
+
+    hermetic = resolve_darwin_sdk_from_modules([
+        struct(
+            name = "my_app",
+            is_root = True,
+            tags = struct(darwin_sdk = [
+                struct(
+                    path = "",
+                    url = "https://example.com/darwin.artifactbundle.tar.gz",
+                    sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                    swift_toolchain_path = "",
+                ),
+            ]),
+        ),
+    ])
+    asserts.equals(env, "https://example.com/darwin.artifactbundle.tar.gz", hermetic.url)
+    asserts.equals(
+        env,
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        hermetic.sha256,
+    )
+
+    local_path = validate_darwin_sdk_config(
+        path = "/some/local/darwin.artifactbundle",
+        url = "",
+        sha256 = "",
+        swift_toolchain_path = "/some/local/swift",
+    )
+    asserts.equals(env, "/some/local/darwin.artifactbundle", local_path.path)
+    asserts.equals(env, "/some/local/swift", local_path.swift_toolchain_path)
+    return unittest.end(env)
+
+def _darwin_sdk_validation_probe_impl(ctx):
+    if ctx.attr.scenario == "non_root":
+        resolve_darwin_sdk_from_modules([
+            struct(name = "root_mod", is_root = True, tags = struct(darwin_sdk = [])),
+            struct(
+                name = "rogue_dep",
+                is_root = False,
+                tags = struct(darwin_sdk = [
+                    struct(
+                        path = "/rogue/sdk",
+                        url = "",
+                        sha256 = "",
+                        swift_toolchain_path = "",
+                    ),
+                ]),
+            ),
+        ])
+    elif ctx.attr.scenario == "url_without_sha256":
+        resolve_darwin_sdk_from_modules([
+            struct(
+                name = "root_mod",
+                is_root = True,
+                tags = struct(darwin_sdk = [
+                    struct(
+                        path = "",
+                        url = "https://example.com/darwin.artifactbundle.zip",
+                        sha256 = "",
+                        swift_toolchain_path = "",
+                    ),
+                ]),
+            ),
+        ])
+    elif ctx.attr.scenario == "url_and_path":
+        resolve_darwin_sdk_from_modules([
+            struct(
+                name = "root_mod",
+                is_root = True,
+                tags = struct(darwin_sdk = [
+                    struct(
+                        path = "/local/darwin.artifactbundle",
+                        url = "https://example.com/darwin.artifactbundle.zip",
+                        sha256 = "abc123",
+                        swift_toolchain_path = "",
+                    ),
+                ]),
+            ),
+        ])
+    elif ctx.attr.scenario == "multiple_tags":
+        resolve_darwin_sdk_from_modules([
+            struct(
+                name = "root_mod",
+                is_root = True,
+                tags = struct(darwin_sdk = [
+                    struct(path = "/sdk1", url = "", sha256 = "", swift_toolchain_path = ""),
+                    struct(path = "/sdk2", url = "", sha256 = "", swift_toolchain_path = ""),
+                ]),
+            ),
+        ])
+    return [DefaultInfo()]
+
+_darwin_sdk_validation_probe = rule(
+    implementation = _darwin_sdk_validation_probe_impl,
+    attrs = {
+        "scenario": attr.string(mandatory = True),
+    },
+)
+
+def _expect_analysis_failure_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    asserts.expect_failure(env, ctx.attr.expected_error)
+    return analysistest.end(env)
+
+_expect_analysis_failure_test = analysistest.make(
+    _expect_analysis_failure_test_impl,
+    expect_failure = True,
+    attrs = {
+        "expected_error": attr.string(mandatory = True),
+    },
+)
 
 _BackendProbeInfo = provider(fields = ["backend"])
 
@@ -420,6 +553,8 @@ _apple_backend_rules_apple_test = analysistest.make(
         str(Label("//flutter/settings:apple_backend")): "rules_apple",
     },
 )
+
+_apple_backend_default_test = analysistest.make(_apple_backend_rules_apple_test_impl)
 
 def _macho_aot_probe_impl(ctx):
     out = ctx.actions.declare_file(ctx.label.name + ".dylib")
@@ -550,6 +685,7 @@ _t4_test = unittest.make(_desktop_cross_pairs_all_hosts_covered_test_impl)
 _t5_test = unittest.make(_cross_compilation_pairs_valid_test_impl)
 _t6_test = unittest.make(_xtool_darwin_sdk_build_test_impl)
 _t7_test = unittest.make(_apple_aot_matrix_by_host_target_mode_test_impl)
+_t8_test = unittest.make(_darwin_sdk_module_resolution_test_impl)
 
 def toolchains_repo_test_suite(name):
     _backend_probe(
@@ -559,6 +695,10 @@ def toolchains_repo_test_suite(name):
             "//conditions:default": "rules_apple",
         }),
         tags = ["manual"],
+    )
+    _apple_backend_default_test(
+        name = name + "_apple_backend_default",
+        target_under_test = ":" + name + "_backend_probe",
     )
     _apple_backend_xtool_test(
         name = name + "_apple_backend_xtool",
@@ -654,11 +794,73 @@ def toolchains_repo_test_suite(name):
         name = name + "_xtool_sdk_status_build",
         targets = [
             "@flutter_xtool_darwin_sdk//:sdk_status",
-            "@flutter_xtool_darwin_sdk//:sdk_files",
-            "@flutter_xtool_darwin_sdk//:ios_arm64_cc_toolchain_config",
-            "@flutter_xtool_darwin_sdk//:macos_arm64_cc_toolchain_config",
         ],
     )
+    _expect_analysis_failure_test(
+        name = name + "_unconfigured_sdk_files_fails",
+        target_under_test = "@flutter_xtool_darwin_sdk//:sdk_files",
+        expected_error = "xtool Darwin SDK (@flutter_xtool_darwin_sdk) is not configured",
+    )
+    _expect_analysis_failure_test(
+        name = name + "_unconfigured_ios_cc_toolchain_fails",
+        target_under_test = "@flutter_xtool_darwin_sdk//:ios_arm64_cc_toolchain_config",
+        expected_error = "flutter.darwin_sdk",
+    )
+    _expect_analysis_failure_test(
+        name = name + "_unconfigured_macos_cc_toolchain_fails",
+        target_under_test = "@flutter_xtool_darwin_sdk//:macos_arm64_cc_toolchain_config",
+        expected_error = "flutter.darwin_sdk",
+    )
+    _expect_analysis_failure_test(
+        name = name + "_unconfigured_swift_wrapper_fails",
+        target_under_test = "@flutter_xtool_darwin_sdk//:ios_arm64_swift_wrapper",
+        expected_error = "flutter.darwin_sdk",
+    )
+
+    _darwin_sdk_validation_probe(
+        name = name + "_probe_non_root",
+        scenario = "non_root",
+        tags = ["manual"],
+    )
+    _expect_analysis_failure_test(
+        name = name + "_darwin_sdk_non_root_rejected",
+        target_under_test = ":" + name + "_probe_non_root",
+        expected_error = "Only the root module may set the flutter.darwin_sdk tag",
+    )
+
+    _darwin_sdk_validation_probe(
+        name = name + "_probe_url_without_sha256",
+        scenario = "url_without_sha256",
+        tags = ["manual"],
+    )
+    _expect_analysis_failure_test(
+        name = name + "_darwin_sdk_url_without_sha256_rejected",
+        target_under_test = ":" + name + "_probe_url_without_sha256",
+        expected_error = "'sha256' is required when 'url' is set",
+    )
+
+    _darwin_sdk_validation_probe(
+        name = name + "_probe_url_and_path",
+        scenario = "url_and_path",
+        tags = ["manual"],
+    )
+    _expect_analysis_failure_test(
+        name = name + "_darwin_sdk_url_and_path_rejected",
+        target_under_test = ":" + name + "_probe_url_and_path",
+        expected_error = "specify either 'url' (with 'sha256') or 'path', not both",
+    )
+
+    _darwin_sdk_validation_probe(
+        name = name + "_probe_multiple_tags",
+        scenario = "multiple_tags",
+        tags = ["manual"],
+    )
+    _expect_analysis_failure_test(
+        name = name + "_darwin_sdk_multiple_tags_rejected",
+        target_under_test = ":" + name + "_probe_multiple_tags",
+        expected_error = "flutter.darwin_sdk may be specified at most once in the root module",
+    )
+
     unittest.suite(
         name + "_unit",
         _t0_test,
@@ -669,14 +871,24 @@ def toolchains_repo_test_suite(name):
         _t5_test,
         _t6_test,
         _t7_test,
+        _t8_test,
     )
     native.test_suite(
         name = name,
         tests = [
             ":" + name + "_unit",
+            ":" + name + "_apple_backend_default",
             ":" + name + "_apple_backend_xtool",
             ":" + name + "_apple_backend_rules_apple",
             ":" + name + "_macho_aot_flags",
             ":" + name + "_xtool_sdk_status_build",
+            ":" + name + "_unconfigured_sdk_files_fails",
+            ":" + name + "_unconfigured_ios_cc_toolchain_fails",
+            ":" + name + "_unconfigured_macos_cc_toolchain_fails",
+            ":" + name + "_unconfigured_swift_wrapper_fails",
+            ":" + name + "_darwin_sdk_non_root_rejected",
+            ":" + name + "_darwin_sdk_url_without_sha256_rejected",
+            ":" + name + "_darwin_sdk_url_and_path_rejected",
+            ":" + name + "_darwin_sdk_multiple_tags_rejected",
         ] + analysis_tests,
     )

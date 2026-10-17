@@ -129,7 +129,7 @@ def flutter_ios_registrant_gen(name, **kwargs):
     _flutter_ios_registrant_rule(name = name, tags = tags, **kwargs)
 
 def flutter_ios_native_frameworks_gen(name, **kwargs):
-    """Wraps native dylibs in signed .frameworks. See `flutter_ios_native_frameworks`.
+    """Wraps native dylibs in .frameworks for iOS bundling. See `flutter_ios_native_frameworks`.
 
     Args:
         name: Target name.
@@ -177,11 +177,12 @@ def flutter_ios_framework_gen(name, application, minimum_os_version = IOS_MINIMU
         **kwargs: Additional arguments (e.g. visibility, tags).
     """
     tags = kwargs.pop("tags", ["manual"])
+    internal_tags = tags if "manual" in tags else tags + ["manual"]
 
     _flutter_ios_application(
         name = "__%s_intermediates" % name,
         application = application,
-        tags = tags,
+        tags = internal_tags,
     )
 
     _flutter_ios_framework_rule(
@@ -206,12 +207,13 @@ def flutter_ios_engine(name, **kwargs):
         **kwargs: Additional arguments (e.g. visibility, tags).
     """
     tags = kwargs.pop("tags", ["manual"])
+    internal_tags = tags if "manual" in tags else tags + ["manual"]
     visibility = kwargs.pop("visibility", None)
 
     apple_dynamic_xcframework_import(
         name = "__%s_apple" % name,
         xcframework_imports = _engine_xcframework_select(),
-        tags = tags,
+        tags = internal_tags,
         **kwargs
     )
 
@@ -219,7 +221,7 @@ def flutter_ios_engine(name, **kwargs):
         name = "__%s_xtool" % name,
         framework_name = "Flutter",
         xcframework_imports = _engine_xcframework_select(),
-        tags = tags,
+        tags = internal_tags,
         **kwargs
     )
 
@@ -300,6 +302,7 @@ def flutter_ios_runner_lib_gen(name, registrant, engine, application = None, mod
         **kwargs: Additional arguments passed to swift_library.
     """
     tags = kwargs.pop("tags", ["manual"])
+    internal_tags = tags if "manual" in tags else tags + ["manual"]
 
     deps = [engine]
     if application:
@@ -308,7 +311,7 @@ def flutter_ios_runner_lib_gen(name, registrant, engine, application = None, mod
             name = aggregator_name,
             application = application,
             platform = "ios",
-            tags = tags,
+            tags = internal_tags,
             visibility = ["//visibility:private"],
         )
         deps.append(":" + aggregator_name)
@@ -326,7 +329,7 @@ def flutter_ios_runner_lib_gen(name, registrant, engine, application = None, mod
             "@rules_flutter//flutter/private/runners/ios:Base.lproj/Main.storyboard",
         ],
         module_name = module_name,
-        tags = tags,
+        tags = internal_tags,
         deps = deps,
         visibility = ["//visibility:private"],
         **kwargs
@@ -337,7 +340,7 @@ def flutter_ios_runner_lib_gen(name, registrant, engine, application = None, mod
         module_name = module_name,
         platform = "ios",
         deps = deps,
-        tags = tags,
+        tags = internal_tags,
         visibility = ["//visibility:private"],
     )
     native.alias(
@@ -370,7 +373,7 @@ def flutter_ios_app(
         runner_deps = [],
         srcs = None,
         engine = None,
-        backend = "auto",
+        backend = "rules_apple",
         **kwargs):
     """Builds a Flutter iOS .app bundle from a flutter_application target.
 
@@ -469,9 +472,8 @@ def flutter_ios_app(
             **kwargs. For App Intents, pass the library here *and* to
             rules_apple's `app_intents` (which passes through **kwargs):
             `app_intents` only extracts the metadata, it does not link.
-        backend: Apple bundling backend: `"auto"` (default: selects `xtool`
-            on Linux or when `--@rules_flutter//flutter/settings:apple_backend=xtool`,
-            and `rules_apple` on macOS), `"rules_apple"`, or `"xtool"`.
+        backend: Apple bundling backend: `"rules_apple"` (default) or
+            `"xtool"` (explicit opt-in).
         **kwargs: Passed through to ios_application. The macro sets
             `bundle_id`, `bundle_name`, `entitlements`, `families`,
             `minimum_os_version`, `infoplists`, `version`,
@@ -480,11 +482,12 @@ def flutter_ios_app(
             here is a duplicate-keyword error — use the named parameter
             instead.
     """
-    if backend not in ("auto", "rules_apple", "xtool"):
-        fail("flutter_ios_app: backend must be 'auto', 'rules_apple', or 'xtool', got %r" % backend)
+    if backend not in ("rules_apple", "xtool"):
+        fail("flutter_ios_app: backend must be 'rules_apple' or 'xtool', got %r" % backend)
 
     display_name = app_name or name
     tags = kwargs.pop("tags", ["manual"])
+    internal_tags = tags if "manual" in tags else tags + ["manual"]
     visibility = kwargs.pop("visibility", None)
     validate_minimum_os_version(
         "flutter_ios_app",
@@ -523,7 +526,7 @@ def flutter_ios_app(
             name = "__%s_entitlements" % name,
             base = entitlements,
             additions = additional_entitlements,
-            tags = tags,
+            tags = internal_tags,
         )
         entitlements = "__%s_entitlements" % name
 
@@ -548,14 +551,14 @@ def flutter_ios_app(
     _flutter_ios_registrant_rule(
         name = "__%s_registrant" % name,
         application = application,
-        tags = tags,
+        tags = internal_tags,
     )
 
     # 2. Extract intermediates (AOT dylib + flutter_assets + native_libs).
     _flutter_ios_application(
         name = "__%s_intermediates" % name,
         application = application,
-        tags = tags,
+        tags = internal_tags,
     )
 
     # 3. Assemble App.framework from the AOT dylib (or debug stub + kernel).
@@ -563,7 +566,7 @@ def flutter_ios_app(
         name = "__%s_app_framework" % name,
         application = "__%s_intermediates" % name,
         minimum_os_version = minimum_os_version,
-        tags = tags,
+        tags = internal_tags,
     )
 
     # 5. Import Flutter.xcframework engine — auto-selects debug/release and backend.
@@ -572,23 +575,23 @@ def flutter_ios_app(
     else:
         flutter_ios_engine(
             name = "__%s_engine" % name,
-            tags = tags,
+            tags = internal_tags,
         )
         engine_target = ":__%s_engine" % name
 
-    # 6. Wrap native plugin/native-asset dylibs in signed .frameworks for bundling.
+    # 6. Wrap native plugin/native-asset dylibs in .frameworks for bundling.
     _flutter_ios_native_frameworks_rule(
         name = "__%s_native_frameworks" % name,
         application = application,
         minimum_os_version = minimum_os_version,
-        tags = tags,
+        tags = internal_tags,
     )
 
     # 6b. Expose plugin PrivacyInfo.xcprivacy files for bundling.
     _flutter_ios_privacy_manifests_rule(
         name = "__%s_privacy_manifests" % name,
         application = application,
-        tags = tags,
+        tags = internal_tags,
     )
 
     # 7. Discover runner Swift sources and build swift_library.
@@ -604,16 +607,16 @@ def flutter_ios_app(
         name = "__%s_apple_plugins" % name,
         application = application,
         platform = "ios",
-        tags = tags,
+        tags = internal_tags,
     )
 
-    if backend in ("auto", "rules_apple"):
+    if backend == "rules_apple":
         swift_library(
             name = "__%s_runner" % name,
             srcs = runner_srcs + ["__%s_registrant" % name],
             data = native.glob(["ios/Runner/Base.lproj/Main.storyboard"], allow_empty = True),
             module_name = module_name,
-            tags = tags,
+            tags = internal_tags,
             deps = [
                 engine_target,
                 "__%s_apple_plugins" % name,
@@ -636,7 +639,7 @@ def flutter_ios_app(
                 "$(FLUTTER_BUILD_NAME)": "1.0",
                 "$(FLUTTER_BUILD_NUMBER)": "1",
             },
-            tags = tags,
+            tags = internal_tags,
         )
         actual_info_plist = "__%s_info_plist" % name
     else:
@@ -648,7 +651,7 @@ def flutter_ios_app(
             name = "__%s_version" % name,
             build_version = "1.0",
             short_version_string = "1.0",
-            tags = tags,
+            tags = internal_tags,
         )
         version = ":%s" % ("__%s_version" % name)
 
@@ -680,7 +683,7 @@ def flutter_ios_app(
         additions = [_DART_VM_SERVICE_PLIST],
         mode = "supplement",
         output_basename = "Info.plist",
-        tags = tags,
+        tags = internal_tags,
     )
 
     selected_infoplists = select({
@@ -688,11 +691,10 @@ def flutter_ios_app(
         "//conditions:default": ["__%s_info_plist_dev" % name],
     })
 
-    # 11. Final bundle target(s) — rules_apple, xtool, or interchangeable auto.
-    if backend in ("auto", "rules_apple"):
-        apple_target_name = name if backend == "rules_apple" else "__%s_apple" % name
+    # 11. Final bundle target — rules_apple (default) or explicit opt-in xtool.
+    if backend == "rules_apple":
         ios_application(
-            name = apple_target_name,
+            name = name,
             bundle_id = bundle_id,
             bundle_name = display_name,
             entitlements = entitlements,
@@ -710,14 +712,12 @@ def flutter_ios_app(
                 "__%s_native_frameworks" % name,
             ],
             tags = tags,
-            visibility = visibility if backend == "rules_apple" else ["//visibility:private"],
+            visibility = visibility,
             **kwargs
         )
-
-    if backend in ("auto", "xtool"):
-        xtool_target_name = name if backend == "xtool" else "__%s_xtool" % name
+    else:
         _flutter_xtool_ios_bundle(
-            name = xtool_target_name,
+            name = name,
             app_name = display_name,
             bundle_id = bundle_id,
             minimum_os_version = minimum_os_version,
@@ -734,17 +734,6 @@ def flutter_ios_app(
             resources = resources + ["__%s_privacy_manifests" % name],
             provisioning_profile = provisioning_profile,
             entitlements = entitlements,
-            tags = tags,
-            visibility = visibility if backend == "xtool" else ["//visibility:private"],
-        )
-
-    if backend == "auto":
-        native.alias(
-            name = name,
-            actual = select({
-                Label("@rules_flutter//flutter/settings:use_xtool_backend"): ":__%s_xtool" % name,
-                "//conditions:default": ":__%s_apple" % name,
-            }),
             tags = tags,
             visibility = visibility,
         )

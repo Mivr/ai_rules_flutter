@@ -172,12 +172,13 @@ def flutter_macos_engine(name, **kwargs):
         **kwargs: Additional arguments (e.g. visibility, tags).
     """
     tags = kwargs.pop("tags", ["manual"])
+    internal_tags = tags if "manual" in tags else tags + ["manual"]
     visibility = kwargs.pop("visibility", None)
 
     apple_dynamic_framework_import(
         name = "__%s_apple" % name,
         framework_imports = _engine_framework_select(),
-        tags = tags,
+        tags = internal_tags,
         **kwargs
     )
 
@@ -185,7 +186,7 @@ def flutter_macos_engine(name, **kwargs):
         name = "__%s_xtool" % name,
         framework_name = "FlutterMacOS",
         xcframework_imports = _engine_framework_select(),
-        tags = tags,
+        tags = internal_tags,
         **kwargs
     )
 
@@ -260,6 +261,7 @@ def flutter_macos_runner_lib_gen(name, registrant, engine, application = None, m
         **kwargs: Additional arguments passed to swift_library.
     """
     tags = kwargs.pop("tags", ["manual"])
+    internal_tags = tags if "manual" in tags else tags + ["manual"]
 
     deps = [engine]
     if application:
@@ -268,7 +270,7 @@ def flutter_macos_runner_lib_gen(name, registrant, engine, application = None, m
             name = aggregator_name,
             application = application,
             platform = "macos",
-            tags = tags,
+            tags = internal_tags,
             visibility = ["//visibility:private"],
         )
         deps.append(":" + aggregator_name)
@@ -283,7 +285,7 @@ def flutter_macos_runner_lib_gen(name, registrant, engine, application = None, m
         name = "__%s_apple" % name,
         srcs = runner_srcs,
         module_name = module_name,
-        tags = tags,
+        tags = internal_tags,
         deps = deps,
         visibility = ["//visibility:private"],
         **kwargs
@@ -294,7 +296,7 @@ def flutter_macos_runner_lib_gen(name, registrant, engine, application = None, m
         module_name = module_name,
         platform = "macos",
         deps = deps,
-        tags = tags,
+        tags = internal_tags,
         visibility = ["//visibility:private"],
     )
     native.alias(
@@ -326,7 +328,7 @@ def flutter_macos_app(
         srcs = None,
         engine = None,
         menu_xib = None,
-        backend = "auto",
+        backend = "rules_apple",
         **kwargs):
     """Builds a Flutter macOS .app bundle from a flutter_application target.
 
@@ -409,17 +411,17 @@ def flutter_macos_app(
             **kwargs. For App Intents, pass the library here *and* to
             rules_apple's `app_intents` (which passes through **kwargs):
             `app_intents` only extracts the metadata, it does not link.
-        backend: Apple bundling backend: `"auto"` (default: selects `xtool`
-            on Linux or when `--@rules_flutter//flutter/settings:apple_backend=xtool`,
-            and `rules_apple` on macOS), `"rules_apple"`, or `"xtool"`.
+        backend: Apple bundling backend: `"rules_apple"` (default) or
+            `"xtool"` (explicit opt-in).
         **kwargs: Passed through to macos_application. The macro sets
             `app_icons` itself, so pass the named parameter instead.
     """
-    if backend not in ("auto", "rules_apple", "xtool"):
-        fail("flutter_macos_app: backend must be 'auto', 'rules_apple', or 'xtool', got %r" % backend)
+    if backend not in ("rules_apple", "xtool"):
+        fail("flutter_macos_app: backend must be 'rules_apple' or 'xtool', got %r" % backend)
 
     display_name = app_name or name
     tags = kwargs.pop("tags", ["manual"])
+    internal_tags = tags if "manual" in tags else tags + ["manual"]
     visibility = kwargs.pop("visibility", None)
     validate_minimum_os_version(
         "flutter_macos_app",
@@ -482,7 +484,7 @@ def flutter_macos_app(
             name = "__%s_entitlements" % name,
             base = entitlements,
             additions = additional_entitlements,
-            tags = tags,
+            tags = internal_tags,
         )
         entitlements = "__%s_entitlements" % name
 
@@ -492,28 +494,28 @@ def flutter_macos_app(
     _flutter_macos_registrant_rule(
         name = "__%s_registrant" % name,
         application = application,
-        tags = tags,
+        tags = internal_tags,
     )
 
     # 2. Assemble App.framework (versioned layout with AOT dylib + flutter_assets).
     _flutter_macos_framework_rule(
         name = "__%s_app_framework" % name,
         application = application,
-        tags = tags,
+        tags = internal_tags,
     )
 
     # 3. Expose native plugin .dylib files for bundling.
     _flutter_macos_native_libs_rule(
         name = "__%s_native_libs" % name,
         application = application,
-        tags = tags,
+        tags = internal_tags,
     )
 
     # 3b. Expose plugin PrivacyInfo.xcprivacy files for bundling.
     _flutter_macos_privacy_manifests_rule(
         name = "__%s_privacy_manifests" % name,
         application = application,
-        tags = tags,
+        tags = internal_tags,
     )
 
     # 4. Import FlutterMacOS.framework engine — auto-select debug/release and backend.
@@ -522,7 +524,7 @@ def flutter_macos_app(
     else:
         flutter_macos_engine(
             name = "__%s_engine" % name,
-            tags = tags,
+            tags = internal_tags,
         )
         engine_target = ":__%s_engine" % name
 
@@ -539,7 +541,7 @@ def flutter_macos_app(
         name = "__%s_apple_plugins" % name,
         application = application,
         platform = "macos",
-        tags = tags,
+        tags = internal_tags,
     )
 
     menu_xib_template = menu_xib if menu_xib != None else "macos/Runner/Base.lproj/MainMenu.xib"
@@ -551,16 +553,16 @@ def flutter_macos_app(
             "APP_NAME": display_name,
             "customModule=\"Runner\"": "customModule=\"%s\"" % module_name,
         },
-        tags = tags,
+        tags = internal_tags,
     )
 
-    if backend in ("auto", "rules_apple"):
+    if backend == "rules_apple":
         swift_library(
             name = "__%s_runner" % name,
             srcs = runner_srcs + ["__%s_registrant" % name],
             data = ["__%s_menu_xib" % name],
             module_name = module_name,
-            tags = tags,
+            tags = internal_tags,
             deps = [
                 engine_target,
                 "__%s_apple_plugins" % name,
@@ -594,7 +596,7 @@ def flutter_macos_app(
                 "$(DEVELOPMENT_LANGUAGE)": "en",
                 "$(PRODUCT_COPYRIGHT)": "",
             },
-            tags = tags,
+            tags = internal_tags,
         )
         actual_info_plist = "__%s_info_plist" % name
     else:
@@ -620,7 +622,7 @@ def flutter_macos_app(
             drop_empty_keys = ["CFBundleIconFile"],
             mode = "supplement",
             output_basename = "Info.plist",
-            tags = tags,
+            tags = internal_tags,
         )
         actual_info_plist = "__%s_info_plist_icon" % name
 
@@ -630,7 +632,7 @@ def flutter_macos_app(
             name = "__%s_version" % name,
             build_version = "1.0",
             short_version_string = "1.0",
-            tags = tags,
+            tags = internal_tags,
         )
         version = ":%s" % ("__%s_version" % name)
 
@@ -642,11 +644,10 @@ def flutter_macos_app(
     }
     flutter_contents.update(additional_contents)
 
-    # 10. Final bundle target(s) — rules_apple, xtool, or interchangeable auto.
-    if backend in ("auto", "rules_apple"):
-        apple_target_name = name if backend == "rules_apple" else "__%s_apple" % name
+    # 10. Final bundle target — rules_apple (default) or explicit opt-in xtool.
+    if backend == "rules_apple":
         macos_application(
-            name = apple_target_name,
+            name = name,
             bundle_id = bundle_id,
             bundle_name = display_name,
             minimum_os_version = minimum_os_version,
@@ -658,14 +659,12 @@ def flutter_macos_app(
             entitlements = entitlements,
             deps = ["__%s_runner" % name],
             tags = tags,
-            visibility = visibility if backend == "rules_apple" else ["//visibility:private"],
+            visibility = visibility,
             **kwargs
         )
-
-    if backend in ("auto", "xtool"):
-        xtool_target_name = name if backend == "xtool" else "__%s_xtool" % name
+    else:
         _flutter_xtool_macos_bundle(
-            name = xtool_target_name,
+            name = name,
             app_name = display_name,
             bundle_id = bundle_id,
             minimum_os_version = minimum_os_version,
@@ -684,17 +683,6 @@ def flutter_macos_app(
                 ":__%s_menu_xib" % name,
             ],
             entitlements = entitlements,
-            tags = tags,
-            visibility = visibility if backend == "xtool" else ["//visibility:private"],
-        )
-
-    if backend == "auto":
-        native.alias(
-            name = name,
-            actual = select({
-                Label("@rules_flutter//flutter/settings:use_xtool_backend"): ":__%s_xtool" % name,
-                "//conditions:default": ":__%s_apple" % name,
-            }),
             tags = tags,
             visibility = visibility,
         )

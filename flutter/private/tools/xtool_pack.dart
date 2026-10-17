@@ -1,10 +1,10 @@
 /// Hermetic Apple application bundle and archive packager for the `xtool`
 /// cross-compilation backend.
 ///
-/// Assembles iOS `.ipa` (`Payload/<AppName>.app/...`) and macOS `.app.zip`
-/// (`<AppName>.app/Contents/...`) archives on any host OS (Linux or macOS)
-/// without requiring Xcode, `actool`, `ibtool`, `codesign`, or external system
-/// zip utilities.
+/// Assembles unsigned iOS `.ipa` (`Payload/<AppName>.app/...`) and macOS
+/// `.app.zip` (`<AppName>.app/Contents/...`) archives on any host OS (Linux or
+/// macOS) without requiring Xcode, `actool`, `ibtool`, `codesign`, or external
+/// system zip utilities, or signs them when `zsign` is provided.
 ///
 /// Capabilities:
 ///   1. XML `Info.plist` merging, variable substitution (`$(EXECUTABLE_NAME)`,
@@ -14,9 +14,10 @@
 ///      artifacts containing `*.framework`, or `.xcframework` bundles (selecting
 ///      the appropriate slice for `ios`, `ios_sim`, or `macos`).
 ///   3. Pure-Dart SHA-1 (RFC 3174) and SHA-256 (FIPS 180-4) digest computation
-///      and Apple `_CodeSignature/CodeResources` XML property list generation.
-///   4. Optional `zsign` invocation when a signing identity / provisioning
-///      profile and `zsign` binary are provided.
+///      and Apple `_CodeSignature/CodeResources` XML property list generation
+///      when signing with `zsign`.
+///   4. Optional `zsign` invocation when a `zsign` binary is provided; unsigned
+///      bundles omit `_CodeSignature/`.
 ///   5. Pure-Dart deterministic ZIP archive writer with Unix permission bits
 ///      (`0755` for executables and framework dylibs, `0644` for resources,
 ///      `0120777` for symbolic links) and fixed DOS epoch timestamps.
@@ -1275,6 +1276,20 @@ void assembleBundle(BundleConfig config) {
       profileFile.copySync('${appDir.path}/embedded.mobileprovision');
     }
 
+    final shouldSign = config.zsignPath != null && config.zsignPath!.isNotEmpty;
+
+    void stripCodeSignatures(Directory dir) {
+      if (!dir.existsSync()) return;
+      for (final entity in dir.listSync(followLinks: false)) {
+        final name = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
+        if (name == '_CodeSignature') {
+          entity.deleteSync(recursive: true);
+        } else if (entity is Directory) {
+          stripCodeSignatures(entity);
+        }
+      }
+    }
+
     // 5. Resolve and embed frameworks.
     for (final fwInput in config.frameworkPaths) {
       final fwDirs = resolveFrameworkDirectories(fwInput, config.platform);
@@ -1290,8 +1305,7 @@ void assembleBundle(BundleConfig config) {
         final destFwDir = Directory('${frameworksDir.path}/$fwFileName');
         _copyDirectorySync(fwDir, destFwDir, dereferenceSymlinks: false);
 
-        // Mark framework binary executable in ZIP metadata and sign framework
-        // resources with _CodeSignature/CodeResources.
+        // Mark framework binary executable in ZIP metadata.
         final fwRelPrefix = isMacOS
             ? '$appRelPath/Contents/Frameworks/$fwFileName'
             : '$appRelPath/Frameworks/$fwFileName';
@@ -1304,27 +1318,30 @@ void assembleBundle(BundleConfig config) {
           executablePaths.add('$fwRelPrefix/Versions/A/$fwName');
         }
 
-        writeCodeResources(
-          destFwDir,
-          excludedRelativePaths: {
-            fwName,
-            'Versions/A/$fwName',
-            'Versions/Current/$fwName',
-          },
-        );
+        if (shouldSign) {
+          writeCodeResources(
+            destFwDir,
+            excludedRelativePaths: {
+              fwName,
+              'Versions/A/$fwName',
+              'Versions/Current/$fwName',
+            },
+          );
+        } else {
+          stripCodeSignatures(destFwDir);
+        }
       }
     }
 
-    // 6. Generate bundle _CodeSignature/CodeResources.
-    writeCodeResources(
-      contentsDir,
-      excludedRelativePaths: {
-        if (isMacOS) 'MacOS/${config.appName}' else config.appName,
-      },
-    );
-
-    // 7. Invoke zsign if configured.
-    if (config.zsignPath != null && config.zsignPath!.isNotEmpty) {
+    // 6. Sign bundle with _CodeSignature/CodeResources + zsign when configured,
+    //    or ensure unsigned bundles contain no _CodeSignature/ artifacts.
+    if (shouldSign) {
+      writeCodeResources(
+        contentsDir,
+        excludedRelativePaths: {
+          if (isMacOS) 'MacOS/${config.appName}' else config.appName,
+        },
+      );
       final zsignArgs = <String>[];
       if (config.certificatePath != null &&
           config.certificatePath!.isNotEmpty) {
@@ -1352,6 +1369,8 @@ void assembleBundle(BundleConfig config) {
           result.exitCode,
         );
       }
+    } else {
+      stripCodeSignatures(appDir);
     }
 
     // 8. Emit --output-app-dir if requested.

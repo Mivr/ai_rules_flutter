@@ -4,11 +4,12 @@ Provides:
   - `flutter_darwin_xcframework_import`: Host-agnostic `.xcframework` /
     `.framework` import rule returning `DefaultInfo`, `CcInfo`,
     `AppleFrameworkImportInfo`, and `FlutterDarwinFrameworkInfo`.
-  - `flutter_xtool_ios_bundle`: Assembles a signed `.ipa` (`Payload/<App>.app`)
-    using `//flutter/private/tools:xtool_pack` without Xcode.
-  - `flutter_xtool_macos_bundle`: Assembles a signed `.app.zip`
+  - `flutter_xtool_ios_bundle`: Assembles an unsigned `.ipa`
+    (`Payload/<App>.app`) using `//flutter/private/tools:xtool_pack` without
+    Xcode, or signs it when `zsign` is provided.
+  - `flutter_xtool_macos_bundle`: Assembles an unsigned `.app.zip`
     (`<App>.app/Contents/...`) using `//flutter/private/tools:xtool_pack`
-    without Xcode.
+    without Xcode, or signs it when `zsign` is provided.
 """
 
 load("@apple_support//lib:apple_support.bzl", "apple_support")
@@ -513,7 +514,7 @@ flutter_xtool_ios_bundle = rule(
             ),
         },
     ),
-    doc = "Packages an iOS application into a `.ipa` (`Payload/<App>.app`) using the host-agnostic `xtool_pack` bundler.",
+    doc = "Packages an iOS application into an unsigned `.ipa` (`Payload/<App>.app`) using the host-agnostic `xtool_pack` bundler, or signs it when `zsign` is provided.",
 )
 
 # -- flutter_xtool_macos_bundle ------------------------------------------------
@@ -545,5 +546,5 @@ flutter_xtool_macos_bundle = rule(
             ),
         },
     ),
-    doc = "Packages a macOS application into a `.app.zip` (`<App>.app/Contents/...`) using the host-agnostic `xtool_pack` bundler.",
+    doc = "Packages a macOS application into an unsigned `.app.zip` (`<App>.app/Contents/...`) using the host-agnostic `xtool_pack` bundler, or signs it when `zsign` is provided.",
 )

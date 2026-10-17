@@ -20,6 +20,7 @@ load("//flutter/private:flutter_pub_package.bzl", "flutter_pub_package")
 load("//flutter/private:flutter_sdk_package.bzl", "flutter_sdk_package")
 load("//flutter/private:pub_lock_sdks.bzl", "parse_lock_sdk_constraints", "version_below_lower_bound")
 load("//flutter/private:versions.bzl", "flutter_source_sha256")
+load("//flutter/private:xtool_darwin_sdk_repo.bzl", "resolve_darwin_sdk_from_modules")
 load(":repositories.bzl", "flutter_register_toolchains")
 
 _DEFAULT_NAME = "flutter"
@@ -90,42 +91,33 @@ _flutter_plugin_overlays = tag_class(attrs = {
     ),
 })
 
-_flutter_darwin_sdk = tag_class(attrs = {
-    "path": attr.string(
-        doc = "Optional local filesystem path to `darwin.artifactbundle` for the xtool backend.",
-        default = "",
-    ),
-    "url": attr.string(
-        doc = "Optional URL to download `darwin.artifactbundle` archive for the xtool backend.",
-        default = "",
-    ),
-    "sha256": attr.string(
-        doc = "SHA-256 checksum when `url` is specified.",
-        default = "",
-    ),
-    "swift_toolchain_path": attr.string(
-        doc = "Optional path to the Linux Swift toolchain root directory.",
-        default = "",
-    ),
-})
+_flutter_darwin_sdk = tag_class(
+    doc = "Root-module-only configuration for the opt-in xtool Darwin SDK (`@flutter_xtool_darwin_sdk`). Specify either `url` + `sha256` (hermetic) or `path` (local, non-hermetic).",
+    attrs = {
+        "path": attr.string(
+            doc = "Optional local filesystem path to `darwin.artifactbundle` for the xtool backend (local, non-hermetic; mutually exclusive with `url`).",
+            default = "",
+        ),
+        "url": attr.string(
+            doc = "Optional URL to download `darwin.artifactbundle` archive for the xtool backend (hermetic; requires `sha256` and is mutually exclusive with `path`).",
+            default = "",
+        ),
+        "sha256": attr.string(
+            doc = "Required SHA-256 checksum when `url` is specified.",
+            default = "",
+        ),
+        "swift_toolchain_path": attr.string(
+            doc = "Optional local path to the Linux Swift toolchain root directory (local, non-hermetic).",
+            default = "",
+        ),
+    },
+)
 
 def _toolchain_extension(module_ctx):
     registrations = {}
     selected_versions = {}
-    darwin_sdk_path = ""
-    darwin_sdk_url = ""
-    darwin_sdk_sha256 = ""
-    darwin_sdk_swift_toolchain_path = ""
+    darwin_sdk = resolve_darwin_sdk_from_modules(module_ctx.modules)
     for mod in module_ctx.modules:
-        for sdk_tag in mod.tags.darwin_sdk:
-            if sdk_tag.path:
-                darwin_sdk_path = sdk_tag.path
-            if sdk_tag.url:
-                darwin_sdk_url = sdk_tag.url
-            if sdk_tag.sha256:
-                darwin_sdk_sha256 = sdk_tag.sha256
-            if sdk_tag.swift_toolchain_path:
-                darwin_sdk_swift_toolchain_path = sdk_tag.swift_toolchain_path
         for toolchain in mod.tags.toolchain:
             if toolchain.name != _DEFAULT_NAME and not mod.is_root:
                 fail("""\
@@ -151,10 +143,10 @@ def _toolchain_extension(module_ctx):
         flutter_register_toolchains(
             name = name,
             flutter_version = selected,
-            darwin_sdk_path = darwin_sdk_path,
-            darwin_sdk_url = darwin_sdk_url,
-            darwin_sdk_sha256 = darwin_sdk_sha256,
-            darwin_sdk_swift_toolchain_path = darwin_sdk_swift_toolchain_path,
+            darwin_sdk_path = darwin_sdk.path,
+            darwin_sdk_url = darwin_sdk.url,
+            darwin_sdk_sha256 = darwin_sdk.sha256,
+            darwin_sdk_swift_toolchain_path = darwin_sdk.swift_toolchain_path,
         )
 
         # The gen-l10n generator, carved out of the same release's

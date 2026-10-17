@@ -200,12 +200,14 @@ void main() {
       }
     });
 
-    test('assembles deterministic iOS .ipa with App.framework and Flutter.xcframework', () {
-      final execFile = File('${tempDir.path}/Runner_bin')
-        ..writeAsBytesSync([0xCF, 0xFA, 0xED, 0xFE, 1, 2, 3, 4]);
+    test(
+      'assembles deterministic unsigned iOS .ipa without _CodeSignature',
+      () {
+        final execFile = File('${tempDir.path}/Runner_bin')
+          ..writeAsBytesSync([0xCF, 0xFA, 0xED, 0xFE, 1, 2, 3, 4]);
 
-      final plistFile = File('${tempDir.path}/Info.plist')
-        ..writeAsStringSync('''
+        final plistFile = File('${tempDir.path}/Info.plist')
+          ..writeAsStringSync('''
 <?xml version="1.0" encoding="UTF-8"?>
 <plist version="1.0">
 <dict>
@@ -217,142 +219,194 @@ void main() {
 </plist>
 ''');
 
-      // Create a wrapper dir containing App.framework (matching flutter_ios_framework output).
-      final appFwWrapper = Directory(
-        '${tempDir.path}/App_framework/App.framework',
-      )..createSync(recursive: true);
-      File('${appFwWrapper.path}/App').writeAsBytesSync([1, 2, 3, 4]);
-      Directory('${appFwWrapper.path}/flutter_assets').createSync();
-      File('${appFwWrapper.path}/flutter_assets/FontManifest.json')
-          .writeAsStringSync('[]');
+        // Create a wrapper dir containing App.framework (matching flutter_ios_framework output).
+        final appFwWrapper = Directory(
+          '${tempDir.path}/App_framework/App.framework',
+        )..createSync(recursive: true);
+        File('${appFwWrapper.path}/App').writeAsBytesSync([1, 2, 3, 4]);
+        Directory('${appFwWrapper.path}/flutter_assets').createSync();
+        File('${appFwWrapper.path}/flutter_assets/FontManifest.json')
+            .writeAsStringSync('[]');
 
-      // Create a Flutter.xcframework with ios-arm64 and ios-arm64_x86_64-simulator slices.
-      final xcframeworkDir = Directory('${tempDir.path}/Flutter.xcframework');
-      final deviceSlice = Directory(
-        '${xcframeworkDir.path}/ios-arm64/Flutter.framework',
-      )..createSync(recursive: true);
-      File('${deviceSlice.path}/Flutter').writeAsBytesSync([9, 8, 7, 6]);
-      final simSlice = Directory(
-        '${xcframeworkDir.path}/ios-arm64_x86_64-simulator/Flutter.framework',
-      )..createSync(recursive: true);
-      File('${simSlice.path}/Flutter').writeAsBytesSync([5, 5, 5, 5]);
+        // Create a Flutter.xcframework with ios-arm64 and ios-arm64_x86_64-simulator slices,
+        // including a pre-existing _CodeSignature directory to verify unsigned stripping.
+        final xcframeworkDir = Directory('${tempDir.path}/Flutter.xcframework');
+        final deviceSlice = Directory(
+          '${xcframeworkDir.path}/ios-arm64/Flutter.framework',
+        )..createSync(recursive: true);
+        File('${deviceSlice.path}/Flutter').writeAsBytesSync([9, 8, 7, 6]);
+        Directory('${deviceSlice.path}/_CodeSignature').createSync();
+        File('${deviceSlice.path}/_CodeSignature/CodeResources')
+            .writeAsStringSync('stale');
+        final simSlice = Directory(
+          '${xcframeworkDir.path}/ios-arm64_x86_64-simulator/Flutter.framework',
+        )..createSync(recursive: true);
+        File('${simSlice.path}/Flutter').writeAsBytesSync([5, 5, 5, 5]);
 
-      final profileFile = File('${tempDir.path}/profile.mobileprovision')
-        ..writeAsStringSync('mock-profile');
+        final profileFile = File('${tempDir.path}/profile.mobileprovision')
+          ..writeAsStringSync('mock-profile');
 
-      final ipaPath = '${tempDir.path}/out/Runner.ipa';
-      final appOutPath = '${tempDir.path}/out/Runner.app';
+        final ipaPath = '${tempDir.path}/out/Runner.ipa';
+        final appOutPath = '${tempDir.path}/out/Runner.app';
+
+        assembleBundle(
+          BundleConfig(
+            platform: 'ios',
+            appName: 'Runner',
+            bundleId: 'com.example.iosapp',
+            executablePath: execFile.path,
+            minimumOsVersion: '14.0',
+            infoPlistPaths: [plistFile.path],
+            frameworkPaths: [
+              '${tempDir.path}/App_framework',
+              xcframeworkDir.path,
+            ],
+            provisioningProfilePath: profileFile.path,
+            outputArchivePath: ipaPath,
+            outputAppDirPath: appOutPath,
+          ),
+        );
+
+        final ipaBytes = File(ipaPath).readAsBytesSync();
+        final entries = {for (final e in readZipEntries(ipaBytes)) e.path: e};
+
+        expect(entries.keys, contains('Payload/Runner.app/Runner'));
+        expect(entries['Payload/Runner.app/Runner']!.isExecutable, isTrue);
+        expect(entries.keys, contains('Payload/Runner.app/Info.plist'));
+        expect(entries.keys, contains('Payload/Runner.app/PkgInfo'));
+        expect(
+          entries.keys,
+          contains('Payload/Runner.app/embedded.mobileprovision'),
+        );
+        expect(
+          entries.keys,
+          contains('Payload/Runner.app/Frameworks/App.framework/App'),
+        );
+        expect(
+          entries['Payload/Runner.app/Frameworks/App.framework/App']!
+              .isExecutable,
+          isTrue,
+        );
+        expect(
+          entries.keys,
+          contains('Payload/Runner.app/Frameworks/Flutter.framework/Flutter'),
+        );
+        expect(
+          entries['Payload/Runner.app/Frameworks/Flutter.framework/Flutter']!
+              .data,
+          equals([9, 8, 7, 6]),
+        );
+        expect(
+          entries.keys.where((k) => k.contains('_CodeSignature')),
+          isEmpty,
+        );
+        expect(Directory(appOutPath).existsSync(), isTrue);
+        expect(
+          Directory('$appOutPath/_CodeSignature').existsSync(),
+          isFalse,
+        );
+      },
+    );
+
+    test('writes _CodeSignature/CodeResources when zsign is configured', () {
+      final execFile = File('${tempDir.path}/SignedRunner_bin')
+        ..writeAsBytesSync([0xCF, 0xFA, 0xED, 0xFE, 1, 2, 3, 4]);
+      final appFwDir = Directory('${tempDir.path}/SignedApp.framework')
+        ..createSync(recursive: true);
+      File('${appFwDir.path}/SignedApp').writeAsBytesSync([1, 2, 3, 4]);
+      File('${appFwDir.path}/Info.plist')
+          .writeAsStringSync('<plist version="1.0"><dict/></plist>');
+
+      final ipaPath = '${tempDir.path}/out/SignedRunner.ipa';
+      final zsignStub = File('/bin/echo').existsSync()
+          ? '/bin/echo'
+          : '/usr/bin/true';
 
       assembleBundle(
         BundleConfig(
           platform: 'ios',
-          appName: 'Runner',
-          bundleId: 'com.example.iosapp',
+          appName: 'SignedRunner',
+          bundleId: 'com.example.signed',
           executablePath: execFile.path,
           minimumOsVersion: '14.0',
-          infoPlistPaths: [plistFile.path],
-          frameworkPaths: [
-            '${tempDir.path}/App_framework',
-            xcframeworkDir.path,
-          ],
-          provisioningProfilePath: profileFile.path,
+          frameworkPaths: [appFwDir.path],
+          zsignPath: zsignStub,
           outputArchivePath: ipaPath,
-          outputAppDirPath: appOutPath,
         ),
       );
 
-      final ipaBytes = File(ipaPath).readAsBytesSync();
-      final entries = {for (final e in readZipEntries(ipaBytes)) e.path: e};
-
-      expect(entries.keys, contains('Payload/Runner.app/Runner'));
-      expect(entries['Payload/Runner.app/Runner']!.isExecutable, isTrue);
-      expect(entries.keys, contains('Payload/Runner.app/Info.plist'));
-      expect(entries.keys, contains('Payload/Runner.app/PkgInfo'));
+      final entries = {
+        for (final e in readZipEntries(File(ipaPath).readAsBytesSync()))
+          e.path: e,
+      };
       expect(
         entries.keys,
-        contains('Payload/Runner.app/embedded.mobileprovision'),
-      );
-      expect(
-        entries.keys,
-        contains('Payload/Runner.app/Frameworks/App.framework/App'),
-      );
-      expect(
-        entries['Payload/Runner.app/Frameworks/App.framework/App']!
-            .isExecutable,
-        isTrue,
-      );
-      expect(
-        entries.keys,
-        contains('Payload/Runner.app/Frameworks/Flutter.framework/Flutter'),
-      );
-      expect(
-        entries['Payload/Runner.app/Frameworks/Flutter.framework/Flutter']!
-            .data,
-        equals([9, 8, 7, 6]),
-      );
-      expect(
-        entries.keys,
-        contains('Payload/Runner.app/_CodeSignature/CodeResources'),
+        contains('Payload/SignedRunner.app/_CodeSignature/CodeResources'),
       );
       expect(
         entries.keys,
         contains(
-          'Payload/Runner.app/Frameworks/App.framework/_CodeSignature/CodeResources',
+          'Payload/SignedRunner.app/Frameworks/SignedApp.framework/_CodeSignature/CodeResources',
         ),
       );
-      expect(Directory(appOutPath).existsSync(), isTrue);
     });
 
-    test('assembles deterministic macOS .app.zip with Contents layout', () {
-      final execFile = File('${tempDir.path}/MacRunner_bin')
-        ..writeAsBytesSync([0xCF, 0xFA, 0xED, 0xFE, 10, 20]);
+    test(
+      'assembles deterministic unsigned macOS .app.zip with Contents layout',
+      () {
+        final execFile = File('${tempDir.path}/MacRunner_bin')
+          ..writeAsBytesSync([0xCF, 0xFA, 0xED, 0xFE, 10, 20]);
 
-      final appFwDir = Directory('${tempDir.path}/App.framework')
-        ..createSync(recursive: true);
-      File('${appFwDir.path}/App').writeAsBytesSync([11, 22, 33]);
-      Directory('${appFwDir.path}/Resources/flutter_assets')
-          .createSync(recursive: true);
-      File('${appFwDir.path}/Resources/flutter_assets/AssetManifest.bin')
-          .writeAsBytesSync([42]);
+        final appFwDir = Directory('${tempDir.path}/App.framework')
+          ..createSync(recursive: true);
+        File('${appFwDir.path}/App').writeAsBytesSync([11, 22, 33]);
+        Directory('${appFwDir.path}/Resources/flutter_assets')
+            .createSync(recursive: true);
+        File('${appFwDir.path}/Resources/flutter_assets/AssetManifest.bin')
+            .writeAsBytesSync([42]);
 
-      final zipPath = '${tempDir.path}/out/MacRunner.app.zip';
+        final zipPath = '${tempDir.path}/out/MacRunner.app.zip';
 
-      assembleBundle(
-        BundleConfig(
-          platform: 'macos',
-          appName: 'MacRunner',
-          bundleId: 'com.example.macrunner',
-          executablePath: execFile.path,
-          minimumOsVersion: '10.15',
-          frameworkPaths: [appFwDir.path],
-          outputArchivePath: zipPath,
-        ),
-      );
+        assembleBundle(
+          BundleConfig(
+            platform: 'macos',
+            appName: 'MacRunner',
+            bundleId: 'com.example.macrunner',
+            executablePath: execFile.path,
+            minimumOsVersion: '10.15',
+            frameworkPaths: [appFwDir.path],
+            outputArchivePath: zipPath,
+          ),
+        );
 
-      final zipBytes = File(zipPath).readAsBytesSync();
-      final entries = {for (final e in readZipEntries(zipBytes)) e.path: e};
+        final zipBytes = File(zipPath).readAsBytesSync();
+        final entries = {for (final e in readZipEntries(zipBytes)) e.path: e};
 
-      expect(entries.keys, contains('MacRunner.app/Contents/MacOS/MacRunner'));
-      expect(
-        entries['MacRunner.app/Contents/MacOS/MacRunner']!.isExecutable,
-        isTrue,
-      );
-      expect(entries.keys, contains('MacRunner.app/Contents/Info.plist'));
-      expect(entries.keys, contains('MacRunner.app/Contents/PkgInfo'));
-      expect(
-        entries.keys,
-        contains('MacRunner.app/Contents/Frameworks/App.framework/App'),
-      );
-      expect(
-        entries['MacRunner.app/Contents/Frameworks/App.framework/App']!
-            .isExecutable,
-        isTrue,
-      );
-      expect(
-        entries.keys,
-        contains('MacRunner.app/Contents/_CodeSignature/CodeResources'),
-      );
-    });
+        expect(
+          entries.keys,
+          contains('MacRunner.app/Contents/MacOS/MacRunner'),
+        );
+        expect(
+          entries['MacRunner.app/Contents/MacOS/MacRunner']!.isExecutable,
+          isTrue,
+        );
+        expect(entries.keys, contains('MacRunner.app/Contents/Info.plist'));
+        expect(entries.keys, contains('MacRunner.app/Contents/PkgInfo'));
+        expect(
+          entries.keys,
+          contains('MacRunner.app/Contents/Frameworks/App.framework/App'),
+        );
+        expect(
+          entries['MacRunner.app/Contents/Frameworks/App.framework/App']!
+              .isExecutable,
+          isTrue,
+        );
+        expect(
+          entries.keys.where((k) => k.contains('_CodeSignature')),
+          isEmpty,
+        );
+      },
+    );
 
     test('compileRunner synthesizes valid MH_EXECUTE Mach-O binary and records sources/frameworks', () {
       final srcFile = File('${tempDir.path}/AppDelegate.swift')
@@ -453,7 +507,7 @@ void main() {
       expect(text, contains('sdk=iPhoneOS17.0.sdk'));
     });
 
-    test('end-to-end compileRunner + assembleBundle produces complete iOS .ipa and macOS .app.zip with Mach-O MH_EXECUTE, LC_BUILD_VERSION, CodeResources SHA-256, and plugin registrant', () {
+    test('end-to-end compileRunner + assembleBundle produces complete unsigned iOS .ipa and macOS .app.zip with Mach-O MH_EXECUTE, LC_BUILD_VERSION, and plugin registrant', () {
       final iosRunnerSrc = File('${tempDir.path}/ios_AppDelegate.swift')
         ..writeAsStringSync('import Flutter\nimport UIKit\n');
       final iosRegistrantSrc = File(
@@ -532,8 +586,8 @@ void main() {
       expect(ipaEntries.keys, contains('Payload/E2eIosRunner.app/Info.plist'));
       expect(ipaEntries.keys, contains('Payload/E2eIosRunner.app/PkgInfo'));
       expect(
-        ipaEntries.keys,
-        contains('Payload/E2eIosRunner.app/_CodeSignature/CodeResources'),
+        ipaEntries.keys.where((k) => k.contains('_CodeSignature')),
+        isEmpty,
       );
 
       final iosExecBytes =
@@ -650,8 +704,8 @@ void main() {
       expect(macEntries.keys, contains('E2eMacRunner.app/Contents/Info.plist'));
       expect(macEntries.keys, contains('E2eMacRunner.app/Contents/PkgInfo'));
       expect(
-        macEntries.keys,
-        contains('E2eMacRunner.app/Contents/_CodeSignature/CodeResources'),
+        macEntries.keys.where((k) => k.contains('_CodeSignature')),
+        isEmpty,
       );
 
       final macExecBytes =
