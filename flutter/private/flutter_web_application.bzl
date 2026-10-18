@@ -439,7 +439,9 @@ def _flutter_web_bundle_impl(ctx):
     dart2js_web_sdk_files = [
         f
         for f in web_sdk_file_list
-        if f.path.endswith("/libraries.json")
+        if f.path.endswith("/libraries.json") or (
+            "/web-sdk/libraries." in f.path and f.path.endswith(".json")
+        )
     ]
     compile_outputs = []  # Files (wasm, mjs, wasm.map)
     compile_copies = []  # Bundle copy entries for compile_outputs
@@ -1565,33 +1567,41 @@ build knows which served file is a native module.
         "_dart2wasm_platform_dill": attr.label(
             default = Label("@flutter_web_sdk//:web-sdk/kernel/dart2wasm_platform.dill"),
             allow_single_file = True,
+            cfg = "exec",
         ),
         "_dart2js_platform_dill": attr.label(
             default = Label("@flutter_web_sdk//:web-sdk/kernel/dart2js_platform.dill"),
             allow_single_file = True,
+            cfg = "exec",
         ),
         "_ddc_outline_dill": attr.label(
             default = Label("@flutter_web_sdk//:web-sdk/kernel/ddc_outline.dill"),
             allow_single_file = True,
+            cfg = "exec",
         ),
         "_ddc_libraries_spec": attr.label(
-            default = Label("@flutter_web_sdk//:web-sdk/libraries.json"),
+            default = Label("@flutter_web_sdk//:libraries_json"),
             allow_single_file = True,
+            cfg = "exec",
         ),
         "_ddc_dart_sdk_js": attr.label(
             default = Label("@flutter_web_sdk//:web-sdk/kernel/ddcLibraryBundle-canvaskit/dart_sdk.js"),
             allow_single_file = True,
+            cfg = "exec",
         ),
         "_ddc_module_loader_js": attr.label(
             default = Label("@flutter_web_sdk//:dart-sdk/lib/dev_compiler/ddc/ddc_module_loader.js"),
             allow_single_file = True,
+            cfg = "exec",
         ),
         "_ddc_stack_trace_mapper_js": attr.label(
             default = Label("@flutter_web_sdk//:dart-sdk/lib/dev_compiler/web/dart_stack_trace_mapper.js"),
             allow_single_file = True,
+            cfg = "exec",
         ),
         "_web_sdk": attr.label(
             default = Label("@flutter_web_sdk//:web_sdk"),
+            cfg = "exec",
         ),
         "_bundle_tool": attr.label(
             default = Label("//flutter/private/tools:bundle_app"),

@@ -80,7 +80,6 @@ load(
     "package_lib_prefix",
     "resolve_wrapper_main_import",
     "synthesize_app_package",
-    "with_root",
 )
 load(
     "//flutter/private:common.bzl",
@@ -1151,7 +1150,9 @@ def _flutter_integration_test_impl(ctx):
     dart2js_web_sdk_files = [
         f
         for f in web_sdk_file_list
-        if f.path.endswith("/libraries.json")
+        if f.path.endswith("/libraries.json") or (
+            "/web-sdk/libraries." in f.path and f.path.endswith(".json")
+        )
     ]
     compile_outputs = []
     compile_copies = []
@@ -1609,13 +1610,6 @@ def _flutter_linux_integration_test_impl(ctx):
         extra_flags = extra_frontend_flags,
         native_assets_manifest = native_assets_manifest,
         dart_plugin_registrant_uri = registrant_location.uri if registrant_location else None,
-        filesystem_roots = with_root(
-            with_root(
-                with_root([], registrant_location.root if registrant_location else None),
-                bootstrap_location.root,
-            ),
-            main_location.root,
-        ),
     )
 
     # Step 2: AOT compile when not in debug mode.
@@ -1948,13 +1942,6 @@ def _flutter_android_integration_app_impl(ctx):
         extra_flags = extra_frontend_flags,
         native_assets_manifest = native_assets_manifest,
         dart_plugin_registrant_uri = registrant_location.uri if registrant_location else None,
-        filesystem_roots = with_root(
-            with_root(
-                with_root([], registrant_location.root if registrant_location else None),
-                bootstrap_location.root,
-            ),
-            main_location.root,
-        ),
     )
 
     aot_output = None
@@ -2256,13 +2243,16 @@ _INTEGRATION_TEST_ATTRS["_roboto_font"] = attr.label(
 _INTEGRATION_TEST_ATTRS["_dart2wasm_platform_dill"] = attr.label(
     default = Label("@flutter_web_sdk//:web-sdk/kernel/dart2wasm_platform.dill"),
     allow_single_file = True,
+    cfg = "exec",
 )
 _INTEGRATION_TEST_ATTRS["_dart2js_platform_dill"] = attr.label(
     default = Label("@flutter_web_sdk//:web-sdk/kernel/dart2js_platform.dill"),
     allow_single_file = True,
+    cfg = "exec",
 )
 _INTEGRATION_TEST_ATTRS["_web_sdk"] = attr.label(
     default = Label("@flutter_web_sdk//:web_sdk"),
+    cfg = "exec",
 )
 _INTEGRATION_TEST_ATTRS["_web_template_tool"] = attr.label(
     default = Label("//flutter/private/tools:web_template"),

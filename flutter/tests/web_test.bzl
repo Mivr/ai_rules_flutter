@@ -3,6 +3,21 @@
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("//flutter/private:flutter_web_application.bzl", "flutter_web_bundle")
+load(
+    "//flutter/private:flutter_web_compile.bzl",
+    "default_dart2js_optimization_level",
+    "default_dart2wasm_optimization_level",
+    "resolve_web_minify",
+    "resolve_web_optimization_level",
+    "web_mode_defines",
+)
+load(
+    "//flutter/private:flutter_web_sdk_repo.bzl",
+    "flutter_web_sdk_repo_impl",
+    "generate_web_sdk_build",
+    "resolve_web_sdk_host_repos",
+    "rewrite_web_sdk_libraries_json",
+)
 load("//flutter/private:validation.bzl", "escape_html", "is_valid_web_compiler_renderer", "web_renderer")
 load(
     "//flutter/private:web_service_worker.bzl",
@@ -456,12 +471,12 @@ _opt_web_defines_test = analysistest.make(
 )
 
 def _fastbuild_web_defines_test_impl(ctx):
-    """A `fastbuild` web build is release-shaped, with dart2wasm at `-O0`.
+    """A `fastbuild` web build is a release build: product define, no asserts, and `-O2` on dart2wasm.
 
-    `fastbuild` keeps release defines (`-Ddart.vm.product=true`), minification,
-    WASM symbol stripping, and `toString()` body dropping, while defaulting
-    `FlutterDart2Wasm` to `-O0` so inner-loop builds keep full dart2wasm TFA
-    tree-shaking without paying the multi-pass `wasm-opt` binaryen penalty.
+    `fastbuild` maps to `"release"` in `flutter_build_mode`, so both `fastbuild`
+    and `opt` web builds use `dart2wasm`'s release optimization level (`-O2`)
+    and `dart2js`'s release optimization level (`-O4`), matching upstream's
+    `flutter build web --wasm` release configuration.
     """
     env = analysistest.begin(ctx)
     _assert_argv(
@@ -474,16 +489,16 @@ def _fastbuild_web_defines_test_impl(ctx):
             "--extra-compiler-option=--delete-tostring-package-uri=dart:ui",
             "--extra-compiler-option=--delete-tostring-package-uri=package:flutter",
         ],
-        absent_substrings = ["enable-asserts", "dart.vm.profile"],
+        absent_substrings = ["enable-asserts", "dart.vm.profile", "--no-minify", "--no-strip-wasm"],
     )
     _assert_argv(
         env,
         _action(env, "FlutterDart2JS"),
         present = ["-Ddart.vm.product=true", "--minify", "--native-null-assertions"],
-        absent_substrings = ["enable-asserts", "dart.vm.profile"],
+        absent_substrings = ["enable-asserts", "dart.vm.profile", "--no-minify"],
     )
     _assert_dart2js_platform_binaries(env, _action(env, "FlutterDart2JS"))
-    _assert_optimization_level(env, _action(env, "FlutterDart2Wasm"), 0)
+    _assert_optimization_level(env, _action(env, "FlutterDart2Wasm"), 2)
     _assert_optimization_level(env, _action(env, "FlutterDart2JS"), 4)
     return analysistest.end(env)
 
@@ -492,6 +507,14 @@ _fastbuild_web_defines_test = analysistest.make(
     config_settings = {
         "//command_line_option:compilation_mode": "fastbuild",
         str(Label("//flutter:profile")): False,
+    },
+)
+
+_profile_flag_web_defines_test = analysistest.make(
+    _profile_web_defines_test_impl,
+    config_settings = {
+        "//command_line_option:compilation_mode": "opt",
+        str(Label("//flutter:profile")): True,
     },
 )
 
@@ -1626,6 +1649,296 @@ def _setup_web_fixtures():
         tags = ["manual"],
     )
 
+    _web_sdk_libraries_json_probe(
+        name = "_web_sdk_missing_include_probe",
+        libraries_json = "fixtures/broken_libraries.json",
+        tags = ["manual"],
+    )
+    _web_sdk_libraries_json_probe(
+        name = "_web_sdk_missing_target_probe",
+        libraries_json = "fixtures/missing_target_libraries.json",
+        tags = ["manual"],
+    )
+    _web_sdk_libraries_json_probe(
+        name = "_web_sdk_missing_file_probe",
+        scenario = "missing_file",
+        tags = ["manual"],
+    )
+    _web_sdk_libraries_json_probe(
+        name = "_web_sdk_missing_libraries_entry_probe",
+        scenario = "missing_libraries_entry",
+        tags = ["manual"],
+    )
+
+_VALID_WEB_SDK_LIBRARIES_JSON = """{
+  "comment:0": "NOTE: THIS FILE IS GENERATED. DO NOT EDIT.",
+  "dartdevc": {
+    "include": [
+      {
+        "path": "../dart-sdk/lib/libraries.json",
+        "target": "dartdevc"
+      }
+    ],
+    "libraries": {
+      "ui": {
+        "uri": "lib/ui/ui.dart"
+      },
+      "ui_web": {
+        "uri": "lib/ui_web/ui_web.dart"
+      }
+    }
+  },
+  "dart2js": {
+    "include": [
+      {
+        "path": "../dart-sdk/lib/libraries.json",
+        "target": "dart2js"
+      }
+    ],
+    "libraries": {
+      "ui": {
+        "uri": "lib/ui/ui.dart"
+      },
+      "ui_web": {
+        "uri": "lib/ui_web/ui_web.dart"
+      }
+    }
+  },
+  "wasm": {
+    "include": [
+      {
+        "path": "../dart-sdk/lib/libraries.json",
+        "target": "wasm"
+      }
+    ],
+    "libraries": {
+      "ui": {
+        "uri": "lib/ui/ui.dart"
+      },
+      "ui_web": {
+        "uri": "lib/ui_web/ui_web.dart"
+      }
+    }
+  }
+}
+"""
+
+_BROKEN_INCLUDE_LIBRARIES_JSON = """{
+  "dartdevc": {
+    "include": [{"path": "../dart-sdk/lib/libraries.json", "target": "dartdevc"}],
+    "libraries": {"ui": {"uri": "lib/ui/ui.dart"}, "ui_web": {"uri": "lib/ui_web/ui_web.dart"}}
+  },
+  "dart2js": {
+    "include": [{"path": "../unexpected-sdk/lib/libraries.json", "target": "dart2js"}],
+    "libraries": {"ui": {"uri": "lib/ui/ui.dart"}, "ui_web": {"uri": "lib/ui_web/ui_web.dart"}}
+  },
+  "wasm": {
+    "include": [{"path": "../dart-sdk/lib/libraries.json", "target": "wasm"}],
+    "libraries": {"ui": {"uri": "lib/ui/ui.dart"}, "ui_web": {"uri": "lib/ui_web/ui_web.dart"}}
+  }
+}
+"""
+
+_MISSING_TARGET_LIBRARIES_JSON = """{
+  "dartdevc": {
+    "include": [{"path": "../dart-sdk/lib/libraries.json", "target": "dartdevc"}],
+    "libraries": {"ui": {"uri": "lib/ui/ui.dart"}, "ui_web": {"uri": "lib/ui_web/ui_web.dart"}}
+  },
+  "dart2js": {
+    "include": [{"path": "../dart-sdk/lib/libraries.json", "target": "dart2js"}],
+    "libraries": {"ui": {"uri": "lib/ui/ui.dart"}, "ui_web": {"uri": "lib/ui_web/ui_web.dart"}}
+  }
+}
+"""
+
+_MISSING_LIBRARIES_ENTRY_JSON = """{
+  "dartdevc": {
+    "include": [{"path": "../dart-sdk/lib/libraries.json", "target": "dartdevc"}],
+    "libraries": {}
+  },
+  "dart2js": {
+    "include": [{"path": "../dart-sdk/lib/libraries.json", "target": "dart2js"}],
+    "libraries": {"ui": {"uri": "lib/ui/ui.dart"}, "ui_web": {"uri": "lib/ui_web/ui_web.dart"}}
+  },
+  "wasm": {
+    "include": [{"path": "../dart-sdk/lib/libraries.json", "target": "wasm"}],
+    "libraries": {"ui": {"uri": "lib/ui/ui.dart"}, "ui_web": {"uri": "lib/ui_web/ui_web.dart"}}
+  }
+}
+"""
+
+def _web_optimization_level_defaults_test_impl(ctx):
+    """Both `fastbuild` and `opt` release builds default dart2wasm to `-O2`; `dbg` uses `-O0`."""
+    env = unittest.begin(ctx)
+
+    asserts.equals(env, 0, default_dart2wasm_optimization_level("debug"))
+    asserts.equals(env, 0, default_dart2wasm_optimization_level("debug", "dbg"))
+    asserts.equals(env, 2, default_dart2wasm_optimization_level("profile"))
+    asserts.equals(env, 2, default_dart2wasm_optimization_level("profile", "opt"))
+    asserts.equals(env, 2, default_dart2wasm_optimization_level("release"))
+    asserts.equals(env, 2, default_dart2wasm_optimization_level("release", "fastbuild"))
+    asserts.equals(env, 2, default_dart2wasm_optimization_level("release", "opt"))
+
+    asserts.equals(env, 1, default_dart2js_optimization_level("debug"))
+    asserts.equals(env, 4, default_dart2js_optimization_level("profile"))
+    asserts.equals(env, 4, default_dart2js_optimization_level("release"))
+
+    asserts.equals(env, 2, resolve_web_optimization_level("auto", default_dart2wasm_optimization_level("release", "fastbuild")))
+    asserts.equals(env, 0, resolve_web_optimization_level("auto", default_dart2wasm_optimization_level("debug", "dbg")))
+    asserts.equals(env, 3, resolve_web_optimization_level("3", default_dart2wasm_optimization_level("release")))
+
+    asserts.equals(env, False, resolve_web_minify("auto", "debug"))
+    asserts.equals(env, False, resolve_web_minify("auto", "profile"))
+    asserts.equals(env, True, resolve_web_minify("auto", "release"))
+    asserts.equals(env, ["dart.vm.product=true"], web_mode_defines("release"))
+    asserts.equals(env, ["dart.vm.profile=true"], web_mode_defines("profile"))
+    asserts.equals(env, [], web_mode_defines("debug"))
+
+    return unittest.end(env)
+
+def _web_sdk_repo_rewrite_and_build_test_impl(ctx):
+    """`flutter_web_sdk_repo` locates SDKs by declared `Label`s and rewrites `libraries.json` per exec platform."""
+    env = unittest.begin(ctx)
+
+    rewritten = rewrite_web_sdk_libraries_json(
+        _VALID_WEB_SDK_LIBRARIES_JSON,
+        "custom_sdk_linux_x64",
+    )
+    decoded = json.decode(rewritten)
+    for target in ("dartdevc", "dart2js", "wasm"):
+        asserts.equals(
+            env,
+            "../../custom_sdk_linux_x64/dart-sdk/lib/libraries.json",
+            decoded[target]["include"][0]["path"],
+        )
+        asserts.equals(env, target, decoded[target]["include"][0]["target"])
+        asserts.equals(env, "lib/ui/ui.dart", decoded[target]["libraries"]["ui"]["uri"])
+
+    host_sdks = {
+        Label("@@custom_darwin_arm64_sdk//:dart-sdk/lib/libraries.json"): "darwin-arm64",
+        Label("@@custom_linux_x64_sdk//:dart-sdk/lib/libraries.json"): "linux-x64",
+    }
+    resolved = resolve_web_sdk_host_repos(host_sdks)
+    asserts.equals(env, "custom_darwin_arm64_sdk", resolved["darwin-arm64"].repo_name)
+    asserts.equals(env, "custom_linux_x64_sdk", resolved["linux-x64"].repo_name)
+
+    build_content = generate_web_sdk_build(host_sdks)
+    asserts.true(env, '":darwin-arm64": ["web-sdk/libraries.darwin-arm64.json"]' in build_content)
+    asserts.true(env, '":linux-x64": ["web-sdk/libraries.linux-x64.json"]' in build_content)
+    asserts.true(env, "custom_darwin_arm64_sdk//:dart-sdk/lib/libraries.json" in build_content)
+    asserts.true(env, "custom_linux_x64_sdk//:dart-sdk/lib/libraries.json" in build_content)
+    asserts.true(env, "custom_darwin_arm64_sdk//:dart-sdk/lib/dev_compiler/ddc/ddc_module_loader.js" in build_content)
+    asserts.true(env, "custom_linux_x64_sdk//:dart-sdk/lib/dev_compiler/ddc/ddc_module_loader.js" in build_content)
+
+    # Also exercise `flutter_web_sdk_repo_impl` directly with a fake repository_ctx
+    # whose `.path(".")` has a completely arbitrary repository name (not ending in
+    # `_web_sdk` and containing no `+`), proving repo resolution uses declared labels.
+    written_files = {}
+    fake_rctx = struct(
+        name = "arbitrary_web_repo_name",
+        attr = struct(
+            engine_revision = "",
+            sha256 = "",
+            user_repository_name = "unused_base",
+            host_sdks = host_sdks,
+            libraries_json = None,
+        ),
+        path = lambda p: struct(exists = (p == "web-sdk/libraries.json"), basename = "arbitrary_web_repo_name"),
+        read = lambda _p: _VALID_WEB_SDK_LIBRARIES_JSON,
+        file = lambda path, content: written_files.update({path: content}),
+    )
+    flutter_web_sdk_repo_impl(fake_rctx)
+    asserts.true(env, "web-sdk/libraries.darwin-arm64.json" in written_files)
+    asserts.true(env, "web-sdk/libraries.linux-x64.json" in written_files)
+    asserts.true(env, "../../custom_darwin_arm64_sdk/dart-sdk/lib/libraries.json" in written_files["web-sdk/libraries.darwin-arm64.json"])
+    asserts.true(env, "../../custom_linux_x64_sdk/dart-sdk/lib/libraries.json" in written_files["web-sdk/libraries.linux-x64.json"])
+
+    return unittest.end(env)
+
+_t6_test = unittest.make(_web_optimization_level_defaults_test_impl)
+_t7_test = unittest.make(_web_sdk_repo_rewrite_and_build_test_impl)
+
+def _web_sdk_libraries_json_probe_impl(ctx):
+    scenario = ctx.attr.scenario
+    fixture_file = ctx.file.libraries_json
+    source_name = fixture_file.short_path if fixture_file != None else "web-sdk/libraries.json"
+
+    file_exists = True
+    content = _VALID_WEB_SDK_LIBRARIES_JSON
+    if scenario == "missing_file":
+        file_exists = False
+    elif scenario == "missing_libraries_entry":
+        content = _MISSING_LIBRARIES_ENTRY_JSON
+    elif fixture_file != None and fixture_file.basename == "broken_libraries.json":
+        content = _BROKEN_INCLUDE_LIBRARIES_JSON
+    elif fixture_file != None and fixture_file.basename == "missing_target_libraries.json":
+        content = _MISSING_TARGET_LIBRARIES_JSON
+
+    fake_rctx = struct(
+        name = "flutter_web_sdk",
+        attr = struct(
+            engine_revision = "",
+            sha256 = "",
+            user_repository_name = "flutter",
+            host_sdks = {
+                Label("@@flutter_linux-x64//:dart-sdk/lib/libraries.json"): "linux-x64",
+            },
+            libraries_json = ctx.attr.libraries_json.label if ctx.attr.libraries_json != None else None,
+        ),
+        path = lambda _p: struct(exists = file_exists, basename = source_name),
+        read = lambda _p: content,
+        file = lambda _path, _content: None,
+    )
+    flutter_web_sdk_repo_impl(fake_rctx)
+    return [DefaultInfo()]
+
+_web_sdk_libraries_json_probe = rule(
+    implementation = _web_sdk_libraries_json_probe_impl,
+    attrs = {
+        "libraries_json": attr.label(allow_single_file = [".json"]),
+        "scenario": attr.string(default = ""),
+    },
+)
+
+def _web_sdk_libraries_json_failure_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    asserts.expect_failure(env, ctx.attr.expected_error)
+    return analysistest.end(env)
+
+_web_sdk_libraries_json_failure_test = analysistest.make(
+    _web_sdk_libraries_json_failure_test_impl,
+    expect_failure = True,
+    attrs = {
+        "expected_error": attr.string(mandatory = True),
+    },
+)
+
+def _web_sdk_exec_platform_selection_test_impl(ctx):
+    """`@flutter_web_sdk//:libraries_json` selects `web-sdk/libraries.<platform>.json`."""
+    env = analysistest.begin(ctx)
+    tut = analysistest.target_under_test(env)
+    files = tut[DefaultInfo].files.to_list()
+    asserts.equals(env, 1, len(files))
+    if files:
+        asserts.equals(env, ctx.attr.expected_basename, files[0].basename)
+    return analysistest.end(env)
+
+def _make_web_sdk_platform_selection_test(platform_label):
+    return analysistest.make(
+        _web_sdk_exec_platform_selection_test_impl,
+        config_settings = {
+            "//command_line_option:platforms": str(Label(platform_label)),
+        },
+        attrs = {
+            "expected_basename": attr.string(mandatory = True),
+        },
+    )
+
+_web_sdk_select_linux_x64_test = _make_web_sdk_platform_selection_test("//flutter/platforms:linux_x64")
+_web_sdk_select_linux_arm64_test = _make_web_sdk_platform_selection_test("//flutter/platforms:linux_arm64")
+_web_sdk_select_macos_arm64_test = _make_web_sdk_platform_selection_test("//flutter/platforms:macos_arm64")
+_web_sdk_select_windows_x64_test = _make_web_sdk_platform_selection_test("//flutter/platforms:windows_x64")
+
 def web_test_suite(name):
     """Instantiate the web-bundle fixtures and the analysis tests over them.
 
@@ -1649,6 +1962,52 @@ def web_test_suite(name):
     _profile_web_defines_test(
         name = name + "_profile_defines",
         target_under_test = ":_web_profile_fixture",
+    )
+    _profile_flag_web_defines_test(
+        name = name + "_profile_flag_defines",
+        target_under_test = ":_web_fixture",
+    )
+
+    _web_sdk_libraries_json_failure_test(
+        name = name + "_web_sdk_missing_include_fails",
+        target_under_test = ":_web_sdk_missing_include_probe",
+        expected_error = "missing_dart_sdk_include",
+    )
+    _web_sdk_libraries_json_failure_test(
+        name = name + "_web_sdk_missing_target_fails",
+        target_under_test = ":_web_sdk_missing_target_probe",
+        expected_error = "missing_target_entry",
+    )
+    _web_sdk_libraries_json_failure_test(
+        name = name + "_web_sdk_missing_file_fails",
+        target_under_test = ":_web_sdk_missing_file_probe",
+        expected_error = "missing_libraries_json",
+    )
+    _web_sdk_libraries_json_failure_test(
+        name = name + "_web_sdk_missing_libraries_entry_fails",
+        target_under_test = ":_web_sdk_missing_libraries_entry_probe",
+        expected_error = "missing_libraries_entry",
+    )
+
+    _web_sdk_select_linux_x64_test(
+        name = name + "_web_sdk_select_linux_x64",
+        target_under_test = "@flutter_web_sdk//:libraries_json",
+        expected_basename = "libraries.linux-x64.json",
+    )
+    _web_sdk_select_linux_arm64_test(
+        name = name + "_web_sdk_select_linux_arm64",
+        target_under_test = "@flutter_web_sdk//:libraries_json",
+        expected_basename = "libraries.linux-arm64.json",
+    )
+    _web_sdk_select_macos_arm64_test(
+        name = name + "_web_sdk_select_macos_arm64",
+        target_under_test = "@flutter_web_sdk//:libraries_json",
+        expected_basename = "libraries.darwin-arm64.json",
+    )
+    _web_sdk_select_windows_x64_test(
+        name = name + "_web_sdk_select_windows_x64",
+        target_under_test = "@flutter_web_sdk//:libraries_json",
+        expected_basename = "libraries.windows-x64.json",
     )
 
     # The entrypoint names the file this target actually compiles. It used to
@@ -1786,4 +2145,4 @@ def web_test_suite(name):
         targets = [":_web_profile_fixture"],
     )
 
-    unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test)
+    unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test, _t6_test, _t7_test)
