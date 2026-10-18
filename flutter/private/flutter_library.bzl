@@ -274,7 +274,13 @@ def _flutter_library_impl(ctx):
         flutter_info(
             deps = ctx.attr.deps,
             asset_dirs = ctx.files.assets,
-            shader_srcs = ctx.files.shaders,
+            shader_srcs = [
+                struct(
+                    file = shader,
+                    includes = tuple(ctx.files.shader_includes),
+                )
+                for shader in ctx.files.shaders
+            ],
             pub_fonts = extra_pub_fonts,
             pub_assets = extra_pub_assets,
             pub_shaders = extra_pub_shaders,
@@ -348,7 +354,7 @@ flutter_library = rule(
         ),
         "_sky_engine": SKY_ENGINE_ATTR,
         "shader_includes": attr.label_list(
-            doc = "Files this package's `pkg_shaders` may `#include` (e.g. " +
+            doc = "Files this package's `shaders` and `pkg_shaders` may `#include` (e.g. " +
                   "`glob([\"shaders/**/*.glsl\"])`). A shader compiles in a " +
                   "sandbox holding only its declared inputs, so an include " +
                   "not listed here is not found.",

@@ -110,7 +110,10 @@ def flutter_info(
             transitive = [info.asset_dirs for info in dep_infos],
         ),
         shader_srcs = depset(
-            direct = shader_srcs,
+            direct = [
+                s if hasattr(s, "file") else struct(file = s, includes = ())
+                for s in shader_srcs
+            ],
             transitive = [info.shader_srcs for info in dep_infos],
         ),
         # A list, not a depset: the structs carry a `platforms` dict, which is

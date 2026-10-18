@@ -24,3 +24,12 @@ flutter_library(
     shaders = ["shaders/test_shader.frag"],
     tags = ["manual"],
 )
+
+flutter_library(
+    name = "shader_with_includes_lib",
+    package_name = "shader_with_includes",
+    srcs = ["lib/shared.dart"],
+    shader_includes = ["shaders/common.glsl"],
+    shaders = ["shaders/with_include.frag"],
+    tags = ["manual"],
+)

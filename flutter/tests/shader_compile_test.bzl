@@ -1,6 +1,7 @@
 """Unit and analysis tests for flutter_shader_compile.bzl and shader aspect sharing."""
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
+load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("//flutter:defs.bzl", "flutter_application", "flutter_test")
 load(
     "//flutter:providers.bzl",
@@ -10,13 +11,46 @@ load(
     "//flutter/private:common.bzl",
     "HOST_COMPATIBLE",
     "flutter_app_shader_aspect",
+    "flutter_tester_shader_aspect",
+    "flutter_web_shader_aspect",
 )
 load(
     "//flutter/private:flutter_shader_compile.bzl",
     "SHADER_PLATFORM_FLAGS",
     "get_shader_platform_flags",
 )
+load("//flutter/private:flutter_web_application.bzl", "flutter_web_bundle")
 load(":action_content.bzl", "written_json")
+
+def _compiled_shaders_bundle_impl(ctx):
+    files = [
+        entry.file
+        for dep in ctx.attr.deps
+        if FlutterCompiledShadersInfo in dep
+        for entry in dep[FlutterCompiledShadersInfo].compiled_shaders.to_list()
+    ]
+    return [DefaultInfo(files = depset(files))]
+
+_compiled_app_shaders = rule(
+    implementation = _compiled_shaders_bundle_impl,
+    attrs = {
+        "deps": attr.label_list(aspects = [flutter_app_shader_aspect]),
+    },
+)
+
+_compiled_web_shaders = rule(
+    implementation = _compiled_shaders_bundle_impl,
+    attrs = {
+        "deps": attr.label_list(aspects = [flutter_web_shader_aspect]),
+    },
+)
+
+_compiled_tester_shaders = rule(
+    implementation = _compiled_shaders_bundle_impl,
+    attrs = {
+        "deps": attr.label_list(aspects = [flutter_tester_shader_aspect]),
+    },
+)
 
 def _ios_flags_test_impl(ctx):
     """iOS shaders use Metal only."""
@@ -102,6 +136,15 @@ def _consumer_no_local_shader_compiles_impl(ctx):
         asserts.true(env, config["copies"]["shaders/test_shader.frag"].endswith(".iplr"), "shader output should be .iplr")
     return analysistest.end(env)
 
+def _assert_no_workspace_include(env, action):
+    include_flags = [arg for arg in action.argv if arg.startswith("--include=")]
+    asserts.equals(
+        env,
+        [],
+        [f for f in include_flags if f == "--include=flutter/tests/shared_shader_fixture/shaders"],
+        "shader compile without shader_includes must not pass workspace --include directory: %s" % include_flags,
+    )
+
 def _consumer_with_own_shader_compiles_own_impl(ctx):
     env = analysistest.begin(ctx)
     shader_compiles = [
@@ -110,6 +153,8 @@ def _consumer_with_own_shader_compiles_own_impl(ctx):
         if a.mnemonic == "FlutterShaderCompile"
     ]
     asserts.equals(env, 1, len(shader_compiles), "consumer should compile only its own shader")
+    for action in shader_compiles:
+        _assert_no_workspace_include(env, action)
     config = written_json(env, ".asset_bundle_config.json")
     if config != None:
         asserts.true(env, "shaders/test_shader.frag" in config["copies"])
@@ -125,6 +170,8 @@ def _consumer_sksl_required_compiles_locally_impl(ctx):
         if a.mnemonic == "FlutterShaderCompile"
     ]
     asserts.equals(env, 2, len(shader_compiles), "require_sksl_shaders should compile all shaders locally")
+    for action in shader_compiles:
+        _assert_no_workspace_include(env, action)
     return analysistest.end(env)
 
 def _aspect_compiles_on_library_impl(ctx):
@@ -143,6 +190,79 @@ def _aspect_compiles_on_library_impl(ctx):
         )
     return analysistest.end(env)
 
+def _assert_shader_with_includes_action(env, action):
+    input_short_paths = [f.short_path for f in action.inputs.to_list()]
+    input_paths = [f.path for f in action.inputs.to_list()]
+    asserts.true(
+        env,
+        "flutter/tests/shared_shader_fixture/shaders/with_include.frag" in input_short_paths,
+        "shader source missing from FlutterShaderCompile inputs: %s" % input_short_paths,
+    )
+    asserts.true(
+        env,
+        "flutter/tests/shared_shader_fixture/shaders/common.glsl" in input_short_paths,
+        "declared shader_includes missing from FlutterShaderCompile inputs: %s" % input_short_paths,
+    )
+    asserts.true(
+        env,
+        any([p.endswith(".iplr.includes/flutter/tests/shared_shader_fixture/shaders/common.glsl") for p in input_paths]),
+        "staged shader_includes symlink missing from FlutterShaderCompile inputs: %s" % input_paths,
+    )
+    include_flags = [arg[len("--include="):] for arg in action.argv if arg.startswith("--include=")]
+    user_include_dirs = [d for d in include_flags if not d.endswith("/shader_lib")]
+    asserts.true(
+        env,
+        len(user_include_dirs) > 0,
+        "expected staged --include directory for declared shader_includes, got %s" % include_flags,
+    )
+    for d in user_include_dirs:
+        asserts.true(
+            env,
+            ".iplr.includes/" in d,
+            "--include must point at staged include directory, never workspace directory: %s" % d,
+        )
+        asserts.false(
+            env,
+            d == "flutter/tests/shared_shader_fixture/shaders",
+            "--include must never point at workspace directory: %s" % d,
+        )
+
+def _library_shader_includes_aspect_impl(ctx):
+    env = analysistest.begin(ctx)
+    target = analysistest.target_under_test(env)
+    asserts.true(env, FlutterCompiledShadersInfo in target, "FlutterCompiledShadersInfo missing from aspect target")
+    if FlutterCompiledShadersInfo in target:
+        shaders = target[FlutterCompiledShadersInfo].compiled_shaders.to_list()
+        asserts.equals(env, 1, len(shaders), "shader_with_includes_lib should provide 1 compiled shader via aspect")
+        if shaders:
+            asserts.equals(env, "shaders/with_include.frag", shaders[0].bundle_path)
+            asserts.true(env, shaders[0].file.basename.endswith(".iplr"))
+    return analysistest.end(env)
+
+def _consumer_forwards_library_shader_includes_impl(ctx):
+    env = analysistest.begin(ctx)
+    shader_compiles = [
+        a
+        for a in analysistest.target_actions(env)
+        if a.mnemonic == "FlutterShaderCompile"
+    ]
+    asserts.equals(env, 1, len(shader_compiles), "expected 1 local FlutterShaderCompile action when require_sksl_shaders is True")
+    if shader_compiles:
+        _assert_shader_with_includes_action(env, shader_compiles[0])
+    dev_config = written_json(env, "_dev_config.json")
+    if dev_config != None:
+        shader_map = dev_config.get("shaders", {})
+        asserts.equals(
+            env,
+            [
+                "flutter/tests/shared_shader_fixture/shaders/with_include.frag",
+                "flutter/tests/shared_shader_fixture/shaders/common.glsl",
+            ],
+            shader_map.get("shaders/with_include.frag"),
+            "dev_config.json shaders entry must include library shader_includes: %s" % shader_map,
+        )
+    return analysistest.end(env)
+
 _DBG = {
     "//command_line_option:compilation_mode": "dbg",
     str(Label("//flutter:profile")): False,
@@ -155,6 +275,25 @@ _aspect_compiles_on_library_test = analysistest.make(
     _aspect_compiles_on_library_impl,
     config_settings = _DBG,
     extra_target_under_test_aspects = [flutter_app_shader_aspect],
+)
+_library_shader_includes_app_aspect_test = analysistest.make(
+    _library_shader_includes_aspect_impl,
+    config_settings = _DBG,
+    extra_target_under_test_aspects = [flutter_app_shader_aspect],
+)
+_library_shader_includes_web_aspect_test = analysistest.make(
+    _library_shader_includes_aspect_impl,
+    config_settings = _DBG,
+    extra_target_under_test_aspects = [flutter_web_shader_aspect],
+)
+_library_shader_includes_tester_aspect_test = analysistest.make(
+    _library_shader_includes_aspect_impl,
+    config_settings = _DBG,
+    extra_target_under_test_aspects = [flutter_tester_shader_aspect],
+)
+_consumer_forwards_library_shader_includes_test = analysistest.make(
+    _consumer_forwards_library_shader_includes_impl,
+    config_settings = _DBG,
 )
 
 def shader_compile_test_suite(name):
@@ -231,6 +370,52 @@ def shader_compile_test_suite(name):
         tags = ["manual"],
     )
 
+    flutter_application(
+        name = "_app_consumer_with_includes_sksl_required",
+        package_name = "app_consumer_with_includes_sksl_required",
+        main = "lib/web_fixture_main.dart",
+        deps = ["//flutter/tests/shared_shader_fixture:shader_with_includes_lib"],
+        require_sksl_shaders = True,
+        tags = ["manual"],
+    )
+
+    flutter_web_bundle(
+        name = "_web_consumer_with_includes",
+        package_name = "web_consumer_with_includes",
+        main = "lib/web_fixture_main.dart",
+        deps = ["//flutter/tests/shared_shader_fixture:shader_with_includes_lib"],
+        tags = ["manual"],
+    )
+
+    _compiled_app_shaders(
+        name = "_compiled_app_shaders_with_includes",
+        deps = ["//flutter/tests/shared_shader_fixture:shader_with_includes_lib"],
+        tags = ["manual"],
+    )
+
+    _compiled_web_shaders(
+        name = "_compiled_web_shaders_with_includes",
+        deps = ["//flutter/tests/shared_shader_fixture:shader_with_includes_lib"],
+        tags = ["manual"],
+    )
+
+    _compiled_tester_shaders(
+        name = "_compiled_tester_shaders_with_includes",
+        deps = ["//flutter/tests/shared_shader_fixture:shader_with_includes_lib"],
+        tags = ["manual"],
+    )
+
+    build_test(
+        name = name + "_shader_with_includes_build_test",
+        target_compatible_with = HOST_COMPATIBLE,
+        targets = [
+            ":_compiled_app_shaders_with_includes",
+            ":_compiled_web_shaders_with_includes",
+            ":_compiled_tester_shaders_with_includes",
+            ":_web_consumer_with_includes",
+        ],
+    )
+
     _consumer_no_local_shader_compiles_test(
         name = name + "_app_consumer_1_no_shader_actions",
         target_under_test = ":_app_consumer_1",
@@ -257,6 +442,18 @@ def shader_compile_test_suite(name):
         name = name + "_aspect_compiles_on_library_2",
         target_under_test = "//flutter/tests/shared_shader_fixture:shared_shader_lib_2",
     )
+    _library_shader_includes_app_aspect_test(
+        name = name + "_library_shader_includes_app_aspect",
+        target_under_test = "//flutter/tests/shared_shader_fixture:shader_with_includes_lib",
+    )
+    _library_shader_includes_web_aspect_test(
+        name = name + "_library_shader_includes_web_aspect",
+        target_under_test = "//flutter/tests/shared_shader_fixture:shader_with_includes_lib",
+    )
+    _library_shader_includes_tester_aspect_test(
+        name = name + "_library_shader_includes_tester_aspect",
+        target_under_test = "//flutter/tests/shared_shader_fixture:shader_with_includes_lib",
+    )
     _consumer_with_own_shader_test(
         name = name + "_app_consumer_own_shader",
         target_under_test = ":_app_consumer_own_shader",
@@ -264,6 +461,10 @@ def shader_compile_test_suite(name):
     _consumer_sksl_required_test(
         name = name + "_app_consumer_sksl_required",
         target_under_test = ":_app_consumer_sksl_required",
+    )
+    _consumer_forwards_library_shader_includes_test(
+        name = name + "_app_consumer_forwards_library_shader_includes",
+        target_under_test = ":_app_consumer_with_includes_sksl_required",
     )
 
     native.test_suite(
@@ -276,7 +477,12 @@ def shader_compile_test_suite(name):
             ":" + name + "_test_consumer_2_no_shader_actions",
             ":" + name + "_aspect_compiles_on_library",
             ":" + name + "_aspect_compiles_on_library_2",
+            ":" + name + "_library_shader_includes_app_aspect",
+            ":" + name + "_library_shader_includes_web_aspect",
+            ":" + name + "_library_shader_includes_tester_aspect",
             ":" + name + "_app_consumer_own_shader",
             ":" + name + "_app_consumer_sksl_required",
+            ":" + name + "_app_consumer_forwards_library_shader_includes",
+            ":" + name + "_shader_with_includes_build_test",
         ],
     )

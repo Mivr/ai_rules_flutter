@@ -594,11 +594,13 @@ def _shader_jobs(ctx):
     otherwise overwrite the other.
     """
     jobs = []
-    user_includes = getattr(ctx.files, "shader_includes", [])
+    user_includes = tuple(getattr(ctx.files, "shader_includes", []))
     for shader in ctx.files.shaders:
         jobs.append(struct(bundle_path = shader.short_path, file = shader, includes = user_includes))
-    for shader in collect_sdk_shader_srcs(ctx.attr.deps):
-        jobs.append(struct(bundle_path = "shaders/" + shader.basename, file = shader, includes = []))
+    for entry in collect_sdk_shader_srcs(ctx.attr.deps):
+        shader = entry.file if hasattr(entry, "file") else entry
+        includes = entry.includes if hasattr(entry, "includes") else ()
+        jobs.append(struct(bundle_path = "shaders/" + shader.basename, file = shader, includes = includes))
     for dep in ctx.attr.deps:
         if FlutterInfo in dep:
             for entry in dep[FlutterInfo].pub_shaders.to_list():
@@ -623,6 +625,12 @@ def _shader_jobs(ctx):
                 seen.file.short_path,
                 job.file.short_path,
             ))
+        elif job.includes and tuple(job.includes) != tuple(seen.includes):
+            by_path[job.bundle_path] = struct(
+                bundle_path = seen.bundle_path,
+                file = seen.file,
+                includes = tuple(depset(list(seen.includes) + list(job.includes)).to_list()),
+            )
     return by_path.values()
 
 def shader_sources(ctx):
@@ -1264,6 +1272,7 @@ def _shader_aspect_impl(ctx, fixed_platform):
         target_platform = detect_target_platform(is_ios, is_macos, is_linux, is_windows, is_android)
 
     direct_jobs = []
+    shader_includes = tuple(getattr(ctx.rule.files, "shader_includes", [])) if hasattr(ctx.rule.files, "shader_includes") else ()
 
     # 1. Direct shaders from `shaders` attribute (e.g. on @flutter_sdk//:flutter or a flutter_library)
     if hasattr(ctx.rule.files, "shaders"):
@@ -1271,13 +1280,12 @@ def _shader_aspect_impl(ctx, fixed_platform):
             direct_jobs.append(struct(
                 bundle_path = "shaders/" + shader.basename,
                 file = shader,
-                includes = [],
+                includes = shader_includes,
             ))
 
     # 2. Direct shaders from `pkg_shaders` attribute (e.g. on flutter_library / flutter_plugin)
     if hasattr(ctx.rule.attr, "pkg_shaders") and ctx.rule.attr.pkg_shaders:
         pkg_name = getattr(ctx.rule.attr, "package_name", "") if hasattr(ctx.rule.attr, "package_name") else ""
-        shader_includes = getattr(ctx.rule.files, "shader_includes", []) if hasattr(ctx.rule.files, "shader_includes") else []
         _, _, pub_shaders = build_pub_contributions(
             package_name = pkg_name,
             fonts_json = "",
@@ -1311,6 +1319,12 @@ def _shader_aspect_impl(ctx, fixed_platform):
                     seen.file.short_path,
                     job.file.short_path,
                 ))
+            elif job.includes and tuple(job.includes) != tuple(seen.includes):
+                by_path[job.bundle_path] = struct(
+                    bundle_path = seen.bundle_path,
+                    file = seen.file,
+                    includes = tuple(depset(list(seen.includes) + list(job.includes)).to_list()),
+                )
 
         for job in by_path.values():
             out_path = job.bundle_path.replace("../", "_external/")

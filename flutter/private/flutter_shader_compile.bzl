@@ -38,6 +38,12 @@ def get_shader_platform_flags(target_platform):
              "Supported platforms: %s" % ", ".join(SHADER_PLATFORM_FLAGS.keys()))
     return SHADER_PLATFORM_FLAGS[target_platform]
 
+def _shader_rel_path(file):
+    rel = file.short_path
+    if rel.startswith("../"):
+        return "external/" + rel[len("../"):]
+    return rel
+
 def flutter_shader_compile_action(
         ctx,
         impellerc,
@@ -60,7 +66,8 @@ def flutter_shader_compile_action(
         target_platform: Target platform string ("ios", "macos", "android", "linux", "windows", "web").
         is_web: If True, emit JSON format (for web targets).
         includes: Files the shader may `#include` — inputs the sandbox
-            needs, found relative to the shader's own directory.
+            needs, staged into a per-action include tree so workspace
+            directories are never searched directly.
         compile_tool: The compiled `compile_shader` executable File, which
             retries a shader whose SkSL stage fails without it, as `flutter build`
             does. Used only where the flags include SkSL beside other stages.
@@ -80,6 +87,54 @@ def flutter_shader_compile_action(
     # using runtime stages (not platform flags). Declare it as a secondary output.
     spirv_output = ctx.actions.declare_file(output.basename + ".spirv", sibling = output)
 
+    # Stage declared include files into a per-action directory under bazel-out
+    # so `--include` points only at the declared files' staged locations and
+    # never at a workspace directory (which in local execution is a directory
+    # symlink containing undeclared sibling files).
+    staged_files = []
+    include_dirs = []
+    stage_prefix = output.basename + ".includes"
+    seen_rels = {}
+    stage_root = None
+    for inc in includes:
+        if inc == None or inc == shader:
+            continue
+        rel = _shader_rel_path(inc)
+        prev = seen_rels.get(rel)
+        if prev != None:
+            if prev != inc:
+                fail("%s: conflicting shader_includes at %s: %s and %s" % (
+                    ctx.label,
+                    rel,
+                    prev.path,
+                    inc.path,
+                ))
+            continue
+        seen_rels[rel] = inc
+        link = ctx.actions.declare_file(stage_prefix + "/" + rel, sibling = output)
+        ctx.actions.symlink(output = link, target_file = inc)
+        staged_files.append(link)
+        if stage_root == None:
+            stage_root = link.path[:len(link.path) - len(rel) - 1]
+
+    if stage_root != None:
+        shader_rel = _shader_rel_path(shader)
+        shader_rel_dir = shader_rel.rsplit("/", 1)[0] if "/" in shader_rel else ""
+        staged_shader_dir = (stage_root + "/" + shader_rel_dir) if shader_rel_dir else stage_root
+        has_shader_dir = False
+        for link in staged_files:
+            if link.dirname == staged_shader_dir or link.dirname.startswith(staged_shader_dir + "/"):
+                has_shader_dir = True
+                break
+        if not has_shader_dir:
+            shader_link = ctx.actions.declare_file(stage_prefix + "/" + shader_rel, sibling = output)
+            ctx.actions.symlink(output = shader_link, target_file = shader)
+            staged_files.append(shader_link)
+        include_dirs.append(staged_shader_dir)
+        for link in staged_files:
+            if link.dirname not in include_dirs:
+                include_dirs.append(link.dirname)
+
     args = ctx.actions.args()
     for flag in platform_flags:
         args.add(flag)
@@ -90,11 +145,12 @@ def flutter_shader_compile_action(
     args.add("--spirv=" + spirv_output.path)
     args.add("--input=" + shader.path)
     args.add("--input-type=frag")
-    args.add("--include=" + shader.dirname)
+    for inc_dir in include_dirs:
+        args.add("--include=" + inc_dir)
     if shader_lib_dir:
         args.add("--include=" + shader_lib_dir)
 
-    inputs = [shader] + shader_lib + list(includes)
+    inputs = [shader] + shader_lib + list(includes) + staged_files
     retry_possible = "--sksl" in platform_flags and len(platform_flags) > 1
     if retry_possible:
         dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx)
