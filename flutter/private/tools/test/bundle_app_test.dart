@@ -232,7 +232,7 @@ void main() {
       final file = File('$outputDir/MacOS/Runner');
       expect(file.existsSync(), isTrue);
       final mode = file.statSync().mode;
-      expect(mode & 0x49, isNonZero);
+      expect(mode & 0x1ff, equals(0x1ed));
     }, testOn: '!windows');
 
     test('fails on a missing config file', () async {

@@ -8,6 +8,7 @@ load("//flutter:providers.bzl", "FlutterApplicationInfo")
 load("//flutter/private:common.bzl", "ANDROID_ABIS", "android_elf_machine_for_abi", "android_platform_for_abi", "compute_android_jni_path", "compute_desktop_bundle_copies")
 load("//flutter/private:flutter_android_application.bzl", "flutter_android_bundle")
 load("//flutter/private:flutter_android_registrant.bzl", "flutter_android_registrant")
+load("//flutter/private:flutter_linux_application.bzl", "flutter_linux_bundle_rule")
 
 # -- compute_desktop_bundle_copies tests --
 
@@ -284,6 +285,20 @@ _android_registrant_direct_cpu_x64_test = analysistest.make(
     },
 )
 
+def _assert_no_host_bin_paths(env, action):
+    for arg in (action.argv or []):
+        asserts.false(
+            env,
+            arg.startswith("/bin/") or arg.startswith("/usr/bin/") or arg == "chmod",
+            "Expected no /bin host tool in %s argv, got %r" % (action.mnemonic, arg),
+        )
+    for f in action.inputs.to_list():
+        asserts.false(
+            env,
+            f.path.startswith("/bin/") or f.path.startswith("/usr/bin/"),
+            "Expected no /bin host tool in %s inputs, got %r" % (action.mnemonic, f.path),
+        )
+
 def _fake_android_bundle_app_impl(ctx):
     assets = ctx.actions.declare_directory(ctx.label.name + "_assets")
     ctx.actions.run(
@@ -327,6 +342,29 @@ _fake_android_bundle_app = rule(
     },
 )
 
+def _fake_runner_impl(ctx):
+    out = ctx.actions.declare_file(ctx.label.name + "_runner")
+    ctx.actions.write(out, "", is_executable = True)
+    return [DefaultInfo(files = depset([out]))]
+
+_fake_runner = rule(
+    implementation = _fake_runner_impl,
+)
+
+def _linux_bundle_no_host_bin_test_impl(ctx):
+    """FlutterLinuxBundle action uses bundle_app without any /bin host path on argv or inputs."""
+    env = analysistest.begin(ctx)
+    actions = analysistest.target_actions(env)
+    by_mnemonic = {a.mnemonic: a for a in actions}
+    asserts.true(env, "FlutterLinuxBundle" in by_mnemonic)
+    bundle_action = by_mnemonic["FlutterLinuxBundle"]
+    asserts.true(env, "--config" in bundle_action.argv)
+    for action in actions:
+        _assert_no_host_bin_paths(env, action)
+    return analysistest.end(env)
+
+_linux_bundle_no_host_bin_test = analysistest.make(_linux_bundle_no_host_bin_test_impl)
+
 def _android_bundle_debug_actions_test_impl(ctx):
     """Debug flutter_android_bundle registers Dart tool actions for debug assets and empty jar."""
     env = analysistest.begin(ctx)
@@ -344,6 +382,8 @@ def _android_bundle_debug_actions_test_impl(ctx):
     empty_jar_action = by_mnemonic["FlutterEmptyNativeLibsJar"]
     asserts.true(env, "empty-jar" in empty_jar_action.argv)
     asserts.true(env, "--output" in empty_jar_action.argv)
+    for action in actions:
+        _assert_no_host_bin_paths(env, action)
     return analysistest.end(env)
 
 _android_bundle_debug_actions_test = analysistest.make(_android_bundle_debug_actions_test_impl)
@@ -361,6 +401,8 @@ def _android_bundle_release_actions_test_impl(ctx):
     asserts.true(env, "arm64-v8a" in jar_action.argv)
     asserts.true(env, "--machine" in jar_action.argv)
     asserts.true(env, "183" in jar_action.argv)
+    for action in actions:
+        _assert_no_host_bin_paths(env, action)
     return analysistest.end(env)
 
 _android_bundle_release_actions_test = analysistest.make(_android_bundle_release_actions_test_impl)
@@ -571,6 +613,25 @@ def platform_bundle_test_suite(name):
         target_under_test = ":_bundle_release_under_test",
     )
 
+    _fake_runner(
+        name = "_fake_linux_runner",
+        tags = ["manual"],
+    )
+
+    flutter_linux_bundle_rule(
+        name = "_linux_bundle_under_test",
+        application = ":_fake_bundle_debug_app",
+        runner = ":_fake_linux_runner",
+        target_compatible_with = ["@platforms//os:linux"],
+        tags = ["manual"],
+    )
+
+    _linux_bundle_no_host_bin_test(
+        name = name + "_linux_bundle_no_host_bin",
+        target_under_test = ":_linux_bundle_under_test",
+        target_compatible_with = ["@platforms//os:linux"],
+    )
+
     unittest.suite(
         name + "_unit",
         _t0_test,
@@ -599,5 +660,6 @@ def platform_bundle_test_suite(name):
             ":" + name + "_registrant_direct_arm64_default",
             ":" + name + "_android_bundle_debug_actions",
             ":" + name + "_android_bundle_release_actions",
+            ":" + name + "_linux_bundle_no_host_bin",
         ],
     )
