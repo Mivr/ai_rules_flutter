@@ -359,6 +359,108 @@ flutter_android_engine_jar(
 )
 """
 
+_PATCH_DARTDEV_DART = """\
+import 'dart:io';
+import 'dart:typed_data';
+
+void main(List<String> args) {
+  final snapFile = File(args[0]);
+  if (!snapFile.existsSync()) return;
+  final bytes = snapFile.readAsBytesSync();
+  if (bytes.length < 64 ||
+      bytes[0] != 0x7f ||
+      bytes[1] != 0x45 ||
+      bytes[2] != 0x4c ||
+      bytes[3] != 0x46 ||
+      bytes[4] != 2) {
+    return;
+  }
+  final bd = ByteData.sublistView(bytes);
+  if (bd.getUint16(18, Endian.little) != 62) return;
+
+  final phoff = bd.getUint64(32, Endian.little);
+  final phentsize = bd.getUint16(54, Endian.little);
+  final phnum = bd.getUint16(56, Endian.little);
+  final shoff = bd.getUint64(40, Endian.little);
+  final shentsize = bd.getUint16(58, Endian.little);
+  final shnum = bd.getUint16(60, Endian.little);
+
+  int? vaddrToOffset(int vaddr) {
+    for (var i = 0; i < phnum; i++) {
+      final off = phoff + i * phentsize;
+      if (bd.getUint32(off, Endian.little) == 1) {
+        final pOffset = bd.getUint64(off + 8, Endian.little);
+        final pVaddr = bd.getUint64(off + 16, Endian.little);
+        final pFilesz = bd.getUint64(off + 32, Endian.little);
+        if (vaddr >= pVaddr && vaddr < pVaddr + pFilesz) {
+          return pOffset + (vaddr - pVaddr);
+        }
+      }
+    }
+    return null;
+  }
+
+  for (var i = 0; i < shnum; i++) {
+    final sh = shoff + i * shentsize;
+    final shType = bd.getUint32(sh + 4, Endian.little);
+    if (shType == 2 || shType == 11) {
+      final dynsymOff = bd.getUint64(sh + 24, Endian.little);
+      final dynsymSize = bd.getUint64(sh + 32, Endian.little);
+      final strLink = bd.getUint32(sh + 40, Endian.little);
+      final strSh = shoff + strLink * shentsize;
+      final dynstrOff = bd.getUint64(strSh + 24, Endian.little);
+
+      String readStr(int nameOff) {
+        var end = dynstrOff + nameOff;
+        while (bytes[end] != 0) end++;
+        return String.fromCharCodes(bytes.sublist(dynstrOff + nameOff, end));
+      }
+
+      for (var symOff = dynsymOff; symOff < dynsymOff + dynsymSize; symOff += 24) {
+        final stName = bd.getUint32(symOff, Endian.little);
+        if (readStr(stName) == 'DartNativeAssetsBuilder.findPubspec') {
+          final stValue = bd.getUint64(symOff + 8, Endian.little);
+          final stSize = bd.getUint64(symOff + 16, Endian.little);
+          final fnOff = vaddrToOffset(stValue);
+          if (fnOff == null) return;
+
+          int? patchAt;
+          for (var j = 0; j < 80 && j + 8 < stSize; j++) {
+            if (bytes[fnOff + j] == 0xe8 &&
+                bytes[fnOff + j + 5] == 0x48 &&
+                bytes[fnOff + j + 6] == 0x8b &&
+                bytes[fnOff + j + 7] == 0x45) {
+              patchAt = fnOff + j + 5;
+              break;
+            }
+          }
+          int? retNullAt;
+          for (var j = stSize - 80; j < stSize - 12; j++) {
+            if (j >= 0 &&
+                bytes[fnOff + j] == 0x49 &&
+                bytes[fnOff + j + 1] == 0x8b &&
+                bytes[fnOff + j + 2] == 0x86 &&
+                bytes[fnOff + j + 5] == 0x00 &&
+                bytes[fnOff + j + 6] == 0x00 &&
+                bytes[fnOff + j + 7] == 0xe9) {
+              retNullAt = fnOff + j;
+              break;
+            }
+          }
+          if (patchAt != null && retNullAt != null) {
+            final rel32 = retNullAt - (patchAt + 5);
+            bytes[patchAt] = 0xe9;
+            bd.setInt32(patchAt + 1, rel32, Endian.little);
+            snapFile.writeAsBytesSync(bytes);
+            return;
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
 def _flutter_engine_artifacts_impl(repository_ctx):
     """Downloads the core Flutter engine host artifacts and debug patched SDK for a given platform."""
     flutter_version = repository_ctx.attr.flutter_version
@@ -407,6 +509,33 @@ def _flutter_engine_artifacts_impl(repository_ctx):
     dart_bin = dart_binary_name(platform)
     dartaotruntime_bin = dartaotruntime_binary_name(platform)
     exe_suffix = ".exe" if os_part == "windows" else ""
+
+    # Neutralize `DartNativeAssetsBuilder.findPubspec` in `dartdev_aot.dart.snapshot`
+    # so `dart compile exe` (invoked by `@rules_dart` for `compile_mode = "exe"` tools)
+    # does not walk parent directories into `execroot/_main/pubspec.yaml` on Windows
+    # (where Bazel uses a SymlinkForest without sandboxing) and run `pub get` without
+    # `FLUTTER_ROOT`.
+    host_os_name = repository_ctx.os.name.lower()
+    host_arch = repository_ctx.os.arch.lower()
+    host_arch_part = "arm64" if host_arch in ("aarch64", "arm64") else "x64"
+    host_is_this_platform = (
+        arch_part == host_arch_part and (
+            (os_part == "linux" and "linux" in host_os_name) or
+            (os_part == "darwin" and ("mac" in host_os_name or "darwin" in host_os_name)) or
+            (os_part == "windows" and "windows" in host_os_name)
+        )
+    )
+    if host_is_this_platform:
+        repository_ctx.file("_empty_packages.json", '{"configVersion": 2, "packages": []}\n')
+        repository_ctx.file("_patch_dartdev.dart", _PATCH_DARTDEV_DART)
+        repository_ctx.execute([
+            repository_ctx.path("dart-sdk/bin/dartvm" + exe_suffix),
+            "--packages=" + str(repository_ctx.path("_empty_packages.json")),
+            str(repository_ctx.path("_patch_dartdev.dart")),
+            str(repository_ctx.path("dart-sdk/bin/snapshots/dartdev_aot.dart.snapshot")),
+        ])
+        repository_ctx.delete("_empty_packages.json")
+        repository_ctx.delete("_patch_dartdev.dart")
 
     engine_release_repo = "{}_desktop_engine_{}".format(user_repo_name, engine_target_platform)
     engine_debug_repo = "{}_desktop_engine_{}_debug".format(user_repo_name, engine_target_platform)
