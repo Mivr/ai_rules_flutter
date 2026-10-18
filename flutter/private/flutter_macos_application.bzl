@@ -19,6 +19,9 @@ load("@bazel_skylib//lib:dicts.bzl", "dicts")
 
 # buildifier: disable=bzl-visibility
 load("@rules_apple//apple/internal:framework_import_support.bzl", "framework_import_support")
+
+# buildifier: disable=bzl-visibility
+load("@rules_apple//apple/internal:providers.bzl", "new_applebundleinfo")
 load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterDarwinFrameworkInfo", "resolve_exec_dart_vm")
 load("//flutter/private:constants.bzl", "MACOS_MINIMUM_OS_VERSION")
 
@@ -50,25 +53,32 @@ _APP_FRAMEWORK_INFO_PLIST = """\
 """
 
 def _flutter_macos_framework_impl(ctx):
-    """Assembles App.framework as a versioned macOS framework (tree artifact).
+    """Assembles App.framework as a versioned macOS framework (tree artifact + bundle zip).
 
-    Uses the standard macOS versioned framework layout required by NSBundle:
+    Uses the standard macOS versioned framework layout required by NSBundle
+    and `/usr/bin/codesign`:
         App.framework/
             App -> Versions/Current/App
             Resources -> Versions/Current/Resources
             Versions/
                 A/
-                    App                          (AOT dylib, release only)
+                    App                          (AOT dylib or debug stub)
                     Resources/
                         Info.plist
                         flutter_assets/          (asset bundle)
-                        app.dill                 (kernel snapshot, debug only)
                 Current -> A
 
     The framework is NOT linked against the runner binary. Instead it is placed
     into the .app bundle via additional_contents, matching how `flutter build
     macos` works. The Flutter engine discovers and loads it at runtime via
     NSBundle.
+
+    Returning `AppleBundleInfo(archive = framework_zip)` causes rules_apple's
+    `macos_additional_contents_partial` to merge `App.framework.zip` via
+    `bundle_merge_zips` (which preserves `S_IFLNK` symlinks) rather than
+    `bundle_merge_files` (`os.walk` + `open()`, which drops directory symlinks
+    `Versions/Current` and `Resources` and dereferences `App.framework/App`
+    into a duplicate regular file that `codesign` rejects as ambiguous).
     """
     app_info = ctx.attr.application[FlutterApplicationInfo]
     flutter_sdk_info = ctx.toolchains["@rules_flutter//flutter:toolchain_type"].flutter_sdk_info
@@ -79,18 +89,12 @@ def _flutter_macos_framework_impl(ctx):
     stub_arch = "arm64" if target_arch == "arm64" else "x86_64"
     dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx, flutter_sdk_info)
 
-    # Use a wrapper directory so that additional_contents preserves the
-    # App.framework/ level. Tree artifacts placed via additional_contents have
-    # their contents expanded into the destination, so the internal structure
-    # must include the App.framework/ directory name.
-    #
-    # Named after this target, at the package root. Not in a subdirectory:
-    # rules_apple puts the contents under the directory holding the wrapper,
-    # relative to its package, so `<name>/app_framework` would bundle as
-    # `Frameworks/<name>/App.framework`. And not a fixed name: two apps in one
-    # package built from different applications would both declare it, which
-    # fails analysis with conflicting actions.
+    # Use a wrapper directory so that direct tree-artifact consumers preserve
+    # the App.framework/ level, and emit a deterministic `App.framework.zip`
+    # for `AppleBundleInfo.archive` so `rules_apple`'s `bundletool` preserves
+    # the `Versions/Current`, `App`, and `Resources` symlinks.
     wrapper_dir = ctx.actions.declare_directory(ctx.label.name)
+    framework_zip = ctx.actions.declare_file("%s_macho/App.framework.zip" % ctx.label.name)
     prepared_binary = ctx.actions.declare_file("%s_macho/App" % ctx.label.name)
 
     if is_debug:
@@ -168,6 +172,8 @@ def _flutter_macos_framework_impl(ctx):
         flutter_assets.path,
         "--output-dir",
         wrapper_dir.path,
+        "--output-zip",
+        framework_zip.path,
     ]
 
     # In debug mode, place the kernel dill and VM snapshots into flutter_assets/.
@@ -192,13 +198,26 @@ def _flutter_macos_framework_impl(ctx):
             direct = inputs,
             transitive = [dart_vm_files],
         ),
-        outputs = [wrapper_dir],
+        outputs = [wrapper_dir, framework_zip],
         mnemonic = "FlutterMacOSFramework",
         progress_message = "Assembling App.framework for %s" % ctx.label,
     )
 
     return [
         DefaultInfo(files = depset([wrapper_dir])),
+        new_applebundleinfo(
+            archive = framework_zip,
+            binary = prepared_binary,
+            bundle_extension = ".framework",
+            bundle_id = "io.flutter.flutter.app",
+            bundle_name = "App",
+            executable_name = "App",
+            infoplist = prepared_plist,
+            minimum_os_version = minimum_os_version,
+            platform_type = "macos",
+            product_type = "com.apple.product-type.framework",
+            uses_swift = False,
+        ),
         framework_import_support.framework_import_info_with_dependencies(
             build_archs = [target_arch],
             deps = [],

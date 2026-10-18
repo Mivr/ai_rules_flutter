@@ -2,8 +2,9 @@
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
-load("//flutter:providers.bzl", "FlutterDarwinFrameworkInfo")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
+load("@rules_apple//apple:providers.bzl", "AppleBundleInfo")
+load("@rules_dart//dart:defs.bzl", "dart_test")
 load(
     "//flutter:macos.bzl",
     "flutter_apple_plugin_library",
@@ -13,6 +14,8 @@ load(
     "flutter_macos_registrant_gen",
     "flutter_macos_runner_lib_gen",
 )
+load("//flutter:providers.bzl", "FlutterDarwinFrameworkInfo")
+load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
 load("//flutter/private:flutter_macos_application.bzl", "flutter_macos_framework", "flutter_macos_native_libs")
 load("//flutter/private:flutter_xtool_bundle.bzl", "flutter_xtool_macos_bundle")
 load("//flutter/private:validation.bzl", "is_valid_bundle_id", "minimum_os_version_is_below")
@@ -34,10 +37,13 @@ _macos_arm64_transition = transition(
 )
 
 def _platform_target_impl(ctx):
+    direct = []
     files = []
     for t in ctx.attr.targets:
         files.append(t[DefaultInfo].files)
-    return [DefaultInfo(files = depset(transitive = files))]
+        if AppleBundleInfo in t and t[AppleBundleInfo].archive != None:
+            direct.append(t[AppleBundleInfo].archive)
+    return [DefaultInfo(files = depset(direct, transitive = files))]
 
 _macos_arm64_targets = rule(
     implementation = _platform_target_impl,
@@ -210,7 +216,6 @@ _expect_failure_test = analysistest.make(
         "expected_substrings": attr.string_list(mandatory = True),
     },
 )
-
 
 def _xtool_macos_app_actions_test_impl(ctx):
     env = analysistest.begin(ctx)
@@ -537,20 +542,65 @@ def _bundling_tests(name):
         allow_non_macho = ["libnonmacho.dylib"],
         tags = ["manual"],
     )
+    surface_tests = _apple_surface_tests(name)
+
+    macho_verify_probe(
+        name = name + "_verify_release_macho_app_framework",
+        target = ":" + name + "_fake_release_macho_app_framework",
+        binary_relpath = "App.framework/Versions/A/App",
+        expected_substrings = [
+            "platform macos",
+            "minos 12.0",
+            "sdk 12.0",
+            "@rpath/App.framework/Versions/A/App",
+        ],
+        tags = ["manual"],
+    )
+    macho_verify_probe(
+        name = name + "_verify_default_macos_app_framework",
+        target = ":__" + name + "_default_macos_app_app_framework",
+        binary_relpath = "App.framework/Versions/A/App",
+        expected_substrings = [
+            "platform macos",
+            "minos 12.0",
+            "sdk 12.0",
+            "@rpath/App.framework/Versions/A/App",
+        ],
+        tags = ["manual"],
+    )
+    macho_verify_probe(
+        name = name + "_verify_default_fg_framework",
+        target = ":" + name + "_default_fg",
+        binary_relpath = "App.framework/Versions/A/App",
+        expected_substrings = [
+            "platform macos",
+            "minos 12.0",
+            "sdk 12.0",
+            "@rpath/App.framework/Versions/A/App",
+        ],
+        tags = ["manual"],
+    )
     _macos_arm64_targets(
         name = name + "_macos_arm64_release_targets",
         targets = [
             name + "_fake_debug_app_framework",
             name + "_verify_debug_stub_framework",
             name + "_fake_release_macho_app_framework",
+            name + "_verify_release_macho_app_framework",
+            name + "_fake_fat_macos_app_framework",
             name + "_verify_fat_macos_framework",
             name + "_verify_fat_macos_native_libs",
             name + "_fake_non_macho_native_libs",
             name + "_fake_xtool_macos_bundle",
             name + "_sample_macos_plugin_lib",
             name + "_e2e_macos_app",
+            "__" + name + "_e2e_macos_app_app_framework",
             name + "_verify_e2e_macos_app_framework",
             name + "_verify_e2e_macos_native_libs",
+            "__" + name + "_default_macos_app_app_framework",
+            name + "_verify_default_macos_app_framework",
+            name + "_default_fg",
+            name + "_verify_default_fg_framework",
         ],
         tags = ["manual"],
     )
@@ -566,6 +616,14 @@ def _bundling_tests(name):
         ],
     )
 
+    dart_test(
+        name = name + "_macos_framework_layout_test",
+        main = "macos_framework_layout_test.dart",
+        data = [":" + name + "_macos_arm64_release_targets"],
+        deps = ["@dev_tool_deps//:test"],
+        target_compatible_with = HOST_COMPATIBLE,
+    )
+
     _xtool_macos_app_actions_test(
         name = name + "_xtool_macos_app_actions",
         target_under_test = name + "_e2e_macos_app",
@@ -578,7 +636,38 @@ def _bundling_tests(name):
         name + "_native_libs_duplicate_basename_fails",
         name + "_xtool_macos_app_actions",
         name + "_two_apps_one_package",
-    ] + _apple_surface_tests(name)
+        name + "_macos_framework_layout_test",
+    ] + surface_tests
+
+def _macos_framework_bundle_info_test_impl(ctx):
+    """flutter_macos_framework must provide AppleBundleInfo so rules_apple merges it as a zip."""
+    env = analysistest.begin(ctx)
+    tut = analysistest.target_under_test(env)
+    asserts.true(
+        env,
+        AppleBundleInfo in tut,
+        "Expected AppleBundleInfo on flutter_macos_framework so rules_apple preserves symlinks",
+    )
+    bundle_info = tut[AppleBundleInfo]
+    asserts.equals(env, "App", bundle_info.bundle_name)
+    asserts.equals(env, ".framework", bundle_info.bundle_extension)
+    asserts.equals(env, "App", bundle_info.executable_name)
+    asserts.equals(env, "io.flutter.flutter.app", bundle_info.bundle_id)
+    asserts.equals(env, "macos", bundle_info.platform_type)
+    asserts.equals(env, "com.apple.product-type.framework", bundle_info.product_type)
+    asserts.true(
+        env,
+        bundle_info.archive != None and bundle_info.archive.short_path.endswith("/App.framework.zip"),
+        "Expected AppleBundleInfo.archive ending with /App.framework.zip, got: %s" % bundle_info.archive,
+    )
+    asserts.true(
+        env,
+        FlutterDarwinFrameworkInfo in tut,
+        "Expected FlutterDarwinFrameworkInfo on flutter_macos_framework for xtool bundling",
+    )
+    return analysistest.end(env)
+
+_macos_framework_bundle_info_test = analysistest.make(_macos_framework_bundle_info_test_impl)
 
 def _macos_macro_surface_test_impl(ctx):
     env = unittest.begin(ctx)
@@ -704,7 +793,23 @@ def _apple_surface_tests(name):
         observed_app_deps = observed_app_deps,
     )
 
-    return [surface_test_name]
+    fg_bundle_info_test_name = name + "_default_fg_bundle_info_test"
+    _macos_framework_bundle_info_test(
+        name = fg_bundle_info_test_name,
+        target_under_test = ":" + fg_name,
+    )
+
+    app_fw_bundle_info_test_name = name + "_default_app_framework_bundle_info_test"
+    _macos_framework_bundle_info_test(
+        name = app_fw_bundle_info_test_name,
+        target_under_test = ":__" + app_name + "_app_framework",
+    )
+
+    return [
+        surface_test_name,
+        fg_bundle_info_test_name,
+        app_fw_bundle_info_test_name,
+    ]
 
 def macos_test_suite(name):
     unittest.suite(name + "_bundle_id", _t0_test, _t1_test, _t2_test)
@@ -717,4 +822,3 @@ def macos_test_suite(name):
                      _bundling_tests(name)
         ],
     )
-

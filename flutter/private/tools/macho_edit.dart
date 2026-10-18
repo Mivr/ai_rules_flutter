@@ -443,11 +443,264 @@ void _createSymlinkReplacingSync(String linkPath, String target) {
   link.createSync(target);
 }
 
+final Uint32List _crc32Table = () {
+  final table = Uint32List(256);
+  for (var i = 0; i < 256; i++) {
+    var c = i;
+    for (var k = 0; k < 8; k++) {
+      if ((c & 1) != 0) {
+        c = 0xEDB88320 ^ (c >>> 1);
+      } else {
+        c = c >>> 1;
+      }
+    }
+    table[i] = c;
+  }
+  return table;
+}();
+
+int _crc32(List<int> bytes) {
+  var c = 0xFFFFFFFF;
+  for (var i = 0; i < bytes.length; i++) {
+    c = _crc32Table[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+  }
+  return (c ^ 0xFFFFFFFF) & 0xFFFFFFFF;
+}
+
+/// An entry in a deterministic framework ZIP archive.
+class FrameworkZipEntry {
+  final String path;
+  final Uint8List data;
+  final bool isExecutable;
+  final bool isSymlink;
+
+  const FrameworkZipEntry({
+    required this.path,
+    required this.data,
+    this.isExecutable = false,
+    this.isSymlink = false,
+  });
+}
+
+/// Builds a deterministic ZIP archive for [frameworkDir] (e.g. `App.framework`)
+/// suitable for `rules_apple`'s `AppleBundleInfo.archive` (`bundle_merge_zips`).
+///
+/// Only file and symlink entries are emitted (no directory entries), matching
+/// `rules_apple`'s `imported_dynamic_framework_processor.py` and `bundletool.py`.
+/// Symbolic links are stored with Unix mode `0120777` (`S_IFLNK`) and
+/// uncompressed target bytes; [executableRelPaths] receive `0100755`.
+Uint8List createFrameworkZipBytes(
+  Directory frameworkDir, {
+  required String archiveRootName,
+  Set<String> executableRelPaths = const {},
+}) {
+  final entries = <FrameworkZipEntry>[];
+
+  void walk(Directory dir, String relPrefix) {
+    final children = dir.listSync(followLinks: false)
+      ..sort((a, b) => a.path.compareTo(b.path));
+    for (final entity in children) {
+      final name = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
+      final relPath = '$relPrefix/$name';
+      if (entity is Link) {
+        final target = entity.targetSync();
+        entries.add(
+          FrameworkZipEntry(
+            path: relPath,
+            data: Uint8List.fromList(utf8.encode(target)),
+            isSymlink: true,
+          ),
+        );
+      } else if (entity is Directory) {
+        walk(entity, relPath);
+      } else if (entity is File) {
+        final stat = entity.statSync();
+        final isExec =
+            executableRelPaths.contains(relPath) || ((stat.mode & 0x49) != 0);
+        entries.add(
+          FrameworkZipEntry(
+            path: relPath,
+            data: entity.readAsBytesSync(),
+            isExecutable: isExec,
+          ),
+        );
+      }
+    }
+  }
+
+  walk(frameworkDir, archiveRootName);
+  entries.sort((a, b) => a.path.compareTo(b.path));
+
+  final localParts = BytesBuilder(copy: false);
+  final centralParts = BytesBuilder(copy: false);
+  final rawDeflate = ZLibCodec(raw: true);
+
+  const dosTime = 0x0000;
+  const dosDate = 0x0021;
+  const versionMadeBy = (3 << 8) | 20;
+  const versionNeeded = 20;
+
+  var offset = 0;
+  for (final entry in entries) {
+    final nameBytes = utf8.encode(entry.path);
+    final uncompressed = entry.data;
+    final crc = _crc32(uncompressed);
+
+    var compressionMethod = 0;
+    var payload = uncompressed;
+    if (!entry.isSymlink && uncompressed.isNotEmpty) {
+      final deflated = Uint8List.fromList(rawDeflate.encode(uncompressed));
+      if (deflated.length < uncompressed.length) {
+        compressionMethod = 8;
+        payload = deflated;
+      }
+    }
+
+    final int externalAttrs;
+    if (entry.isSymlink) {
+      externalAttrs = 0xA1FF << 16; // lrwxrwxrwx (0120777)
+    } else if (entry.isExecutable) {
+      externalAttrs = 0x81ED << 16; // -rwxr-xr-x (0100755)
+    } else {
+      externalAttrs = 0x81A4 << 16; // -rw-r--r-- (0100644)
+    }
+
+    final localHeader = ByteData(30 + nameBytes.length);
+    localHeader.setUint32(0, 0x04034b50, Endian.little);
+    localHeader.setUint16(4, versionNeeded, Endian.little);
+    localHeader.setUint16(6, 0x0800, Endian.little);
+    localHeader.setUint16(8, compressionMethod, Endian.little);
+    localHeader.setUint16(10, dosTime, Endian.little);
+    localHeader.setUint16(12, dosDate, Endian.little);
+    localHeader.setUint32(14, crc, Endian.little);
+    localHeader.setUint32(18, payload.length, Endian.little);
+    localHeader.setUint32(22, uncompressed.length, Endian.little);
+    localHeader.setUint16(26, nameBytes.length, Endian.little);
+    localHeader.setUint16(28, 0, Endian.little);
+    localHeader.buffer.asUint8List().setRange(
+      30,
+      30 + nameBytes.length,
+      nameBytes,
+    );
+
+    localParts.add(localHeader.buffer.asUint8List());
+    localParts.add(payload);
+
+    final centralHeader = ByteData(46 + nameBytes.length);
+    centralHeader.setUint32(0, 0x02014b50, Endian.little);
+    centralHeader.setUint16(4, versionMadeBy, Endian.little);
+    centralHeader.setUint16(6, versionNeeded, Endian.little);
+    centralHeader.setUint16(8, 0x0800, Endian.little);
+    centralHeader.setUint16(10, compressionMethod, Endian.little);
+    centralHeader.setUint16(12, dosTime, Endian.little);
+    centralHeader.setUint16(14, dosDate, Endian.little);
+    centralHeader.setUint32(16, crc, Endian.little);
+    centralHeader.setUint32(20, payload.length, Endian.little);
+    centralHeader.setUint32(24, uncompressed.length, Endian.little);
+    centralHeader.setUint16(28, nameBytes.length, Endian.little);
+    centralHeader.setUint16(30, 0, Endian.little);
+    centralHeader.setUint16(32, 0, Endian.little);
+    centralHeader.setUint16(34, 0, Endian.little);
+    centralHeader.setUint16(36, 0, Endian.little);
+    centralHeader.setUint32(38, externalAttrs, Endian.little);
+    centralHeader.setUint32(42, offset, Endian.little);
+    centralHeader.buffer.asUint8List().setRange(
+      46,
+      46 + nameBytes.length,
+      nameBytes,
+    );
+
+    centralParts.add(centralHeader.buffer.asUint8List());
+    offset += 30 + nameBytes.length + payload.length;
+  }
+
+  final centralBytes = centralParts.takeBytes();
+  final eocd = ByteData(22);
+  eocd.setUint32(0, 0x06054b50, Endian.little);
+  eocd.setUint16(4, 0, Endian.little);
+  eocd.setUint16(6, 0, Endian.little);
+  eocd.setUint16(8, entries.length, Endian.little);
+  eocd.setUint16(10, entries.length, Endian.little);
+  eocd.setUint32(12, centralBytes.length, Endian.little);
+  eocd.setUint32(16, offset, Endian.little);
+  eocd.setUint16(20, 0, Endian.little);
+
+  localParts.add(centralBytes);
+  localParts.add(eocd.buffer.asUint8List());
+  return localParts.takeBytes();
+}
+
+/// Decodes a ZIP archive into [FrameworkZipEntry] items for inspection/testing.
+List<FrameworkZipEntry> readFrameworkZipEntries(Uint8List zipBytes) {
+  final bd = ByteData.sublistView(zipBytes);
+  var eocdOffset = -1;
+  for (var i = zipBytes.length - 22; i >= 0; i--) {
+    if (bd.getUint32(i, Endian.little) == 0x06054b50) {
+      eocdOffset = i;
+      break;
+    }
+  }
+  if (eocdOffset == -1) {
+    throw const FormatException('Invalid ZIP archive: EOCD not found.');
+  }
+  final entryCount = bd.getUint16(eocdOffset + 10, Endian.little);
+  final cdOffset = bd.getUint32(eocdOffset + 16, Endian.little);
+  final rawInflate = ZLibCodec(raw: true);
+
+  final entries = <FrameworkZipEntry>[];
+  var pos = cdOffset;
+  for (var i = 0; i < entryCount; i++) {
+    if (bd.getUint32(pos, Endian.little) != 0x02014b50) {
+      throw FormatException('Invalid central directory header at $pos.');
+    }
+    final method = bd.getUint16(pos + 10, Endian.little);
+    final compressedSize = bd.getUint32(pos + 20, Endian.little);
+    final nameLen = bd.getUint16(pos + 28, Endian.little);
+    final extraLen = bd.getUint16(pos + 30, Endian.little);
+    final commentLen = bd.getUint16(pos + 32, Endian.little);
+    final externalAttrs = bd.getUint32(pos + 38, Endian.little);
+    final localOffset = bd.getUint32(pos + 42, Endian.little);
+
+    final path = utf8.decode(zipBytes.sublist(pos + 46, pos + 46 + nameLen));
+    pos += 46 + nameLen + extraLen + commentLen;
+
+    final localNameLen = bd.getUint16(localOffset + 26, Endian.little);
+    final localExtraLen = bd.getUint16(localOffset + 28, Endian.little);
+    final dataStart = localOffset + 30 + localNameLen + localExtraLen;
+    final rawPayload = zipBytes.sublist(dataStart, dataStart + compressedSize);
+
+    final Uint8List data;
+    if (method == 0) {
+      data = Uint8List.fromList(rawPayload);
+    } else if (method == 8) {
+      data = Uint8List.fromList(rawInflate.decode(rawPayload));
+    } else {
+      throw UnsupportedError('Unsupported ZIP compression method: $method');
+    }
+
+    final unixMode = (externalAttrs >>> 16) & 0xFFFF;
+    final fileType = unixMode & 0xF000;
+    final isSymlink = fileType == 0xA000;
+    final isExec = !isSymlink && ((unixMode & 0x49) != 0);
+
+    entries.add(
+      FrameworkZipEntry(
+        path: path,
+        data: data,
+        isExecutable: isExec,
+        isSymlink: isSymlink,
+      ),
+    );
+  }
+  return entries;
+}
+
 void _runAssembleMacosFramework(List<String> args) {
   String? binaryPath;
   String? infoPlistPath;
   String? assetsPath;
   String? outputDirPath;
+  String? outputZipPath;
   String? kernelBlobPath;
   String? vmSnapshotPath;
   String? isolateSnapshotPath;
@@ -467,6 +720,9 @@ void _runAssembleMacosFramework(List<String> args) {
       case '--output-dir':
         if (++i >= args.length) _usageError('--output-dir requires a value');
         outputDirPath = args[i];
+      case '--output-zip':
+        if (++i >= args.length) _usageError('--output-zip requires a value');
+        outputZipPath = args[i];
       case '--kernel-blob':
         if (++i >= args.length) _usageError('--kernel-blob requires a value');
         kernelBlobPath = args[i];
@@ -498,12 +754,14 @@ void _runAssembleMacosFramework(List<String> args) {
   final fwDir = outputDirPath.endsWith('.framework')
       ? Directory(outputDirPath)
       : Directory('$outputDirPath/App.framework');
+  final fwDirName = fwDir.uri.pathSegments.where((s) => s.isNotEmpty).last;
+  final fwName = fwDirName.substring(0, fwDirName.length - '.framework'.length);
   final versionADir = Directory('${fwDir.path}/Versions/A');
   final resourcesDir = Directory('${versionADir.path}/Resources');
   final assetsDestDir = Directory('${resourcesDir.path}/flutter_assets');
   assetsDestDir.createSync(recursive: true);
 
-  File(binaryPath).copySync('${versionADir.path}/App');
+  File(binaryPath).copySync('${versionADir.path}/$fwName');
   File(infoPlistPath).copySync('${resourcesDir.path}/Info.plist');
   _copyDirDereferencingSync(Directory(assetsPath), assetsDestDir);
 
@@ -520,11 +778,25 @@ void _runAssembleMacosFramework(List<String> args) {
   }
 
   _createSymlinkReplacingSync('${fwDir.path}/Versions/Current', 'A');
-  _createSymlinkReplacingSync('${fwDir.path}/App', 'Versions/Current/App');
+  _createSymlinkReplacingSync(
+    '${fwDir.path}/$fwName',
+    'Versions/Current/$fwName',
+  );
   _createSymlinkReplacingSync(
     '${fwDir.path}/Resources',
     'Versions/Current/Resources',
   );
+
+  if (outputZipPath != null && outputZipPath.isNotEmpty) {
+    final zipBytes = createFrameworkZipBytes(
+      fwDir,
+      archiveRootName: fwDirName,
+      executableRelPaths: {'$fwDirName/Versions/A/$fwName'},
+    );
+    final zipFile = File(outputZipPath);
+    zipFile.parent.createSync(recursive: true);
+    zipFile.writeAsBytesSync(zipBytes);
+  }
 }
 
 void _runCopyFiles(List<String> args) {
@@ -699,9 +971,275 @@ void _runFat(List<String> args) {
   outFile.writeAsBytesSync(out);
 }
 
+void _verifyMachODylibBytes(Uint8List bytes, String description) {
+  if (!isMachO64(bytes) && !isFatMachO(bytes)) {
+    throw FormatException(
+      '$description is not a 64-bit or universal Mach-O binary.',
+    );
+  }
+  final slices = isFatMachO(bytes)
+      ? extractFatSlices(bytes).map((s) => s.bytes).toList()
+      : <Uint8List>[bytes];
+  for (final slice in slices) {
+    final bd = ByteData.sublistView(slice);
+    final filetype = bd.getUint32(12, Endian.little);
+    if (filetype != mhDylib) {
+      throw FormatException(
+        '$description has Mach-O filetype 0x${filetype.toRadixString(16)}, '
+        'expected MH_DYLIB (0x6).',
+      );
+    }
+    parseLoadCommands(slice);
+  }
+}
+
+void _verifyFrameworkInfoPlistXml(
+  String plistXml,
+  String frameworkName,
+  String sourceDesc,
+) {
+  final pkgTypeMatch = RegExp(
+    r'<key>\s*CFBundlePackageType\s*</key>\s*<string>\s*([^<\s]+)\s*</string>',
+  ).firstMatch(plistXml);
+  if (pkgTypeMatch == null || pkgTypeMatch.group(1) != 'FMWK') {
+    throw FormatException(
+      '$sourceDesc must declare CFBundlePackageType = FMWK, got: '
+      '${pkgTypeMatch?.group(1)}',
+    );
+  }
+  final execMatch = RegExp(
+    r'<key>\s*CFBundleExecutable\s*</key>\s*<string>\s*([^<\s]+)\s*</string>',
+  ).firstMatch(plistXml);
+  if (execMatch == null || execMatch.group(1) != frameworkName) {
+    throw FormatException(
+      '$sourceDesc must declare CFBundleExecutable = $frameworkName, got: '
+      '${execMatch?.group(1)}',
+    );
+  }
+}
+
+/// Verifies that a macOS `.framework` directory (and optional `AppleBundleInfo`
+/// `.framework.zip` archive) has the canonical versioned layout required by
+/// macOS `codesign`:
+///   - `Versions/A/<binary>` (Mach-O `MH_DYLIB`),
+///   - `Versions/A/Resources/Info.plist` (`CFBundlePackageType = FMWK`),
+///   - `Versions/Current -> A` symlink,
+///   - top-level symlinks `<binary> -> Versions/Current/<binary>` and
+///     `Resources -> Versions/Current/Resources`,
+///   - no unversioned regular files or directories at the framework root.
+void verifyMacosFramework(
+  String frameworkOrWrapperPath, {
+  String frameworkName = 'App',
+  String? frameworkZipPath,
+}) {
+  var fwDir = frameworkOrWrapperPath.endsWith('.framework')
+      ? Directory(frameworkOrWrapperPath)
+      : Directory('$frameworkOrWrapperPath/$frameworkName.framework');
+  if (!fwDir.existsSync()) {
+    throw StateError('macOS framework directory not found: ${fwDir.path}');
+  }
+
+  // When Bazel's sandbox or runfiles tree materializes a tree artifact by
+  // symlinking its leaf files into the execroot, unwrap to the underlying
+  // tree artifact directory in the execroot so we inspect the real entries.
+  final probeBinary = '${fwDir.path}/Versions/A/$frameworkName';
+  if (FileSystemEntity.typeSync(probeBinary, followLinks: false) ==
+      FileSystemEntityType.link) {
+    final target = Link(probeBinary).targetSync().replaceAll('\\', '/');
+    final suffix = '/$frameworkName.framework/Versions/A/$frameworkName';
+    if (target.startsWith('/') && target.endsWith(suffix)) {
+      fwDir = Directory(
+        target.substring(
+          0,
+          target.length - '/Versions/A/$frameworkName'.length,
+        ),
+      );
+    }
+  }
+
+  final versionABinary = File('${fwDir.path}/Versions/A/$frameworkName');
+  final versionAPlist = File('${fwDir.path}/Versions/A/Resources/Info.plist');
+  if (FileSystemEntity.typeSync(versionABinary.path, followLinks: false) !=
+      FileSystemEntityType.file) {
+    throw StateError(
+      'Expected regular file at ${versionABinary.path}, found '
+      '${FileSystemEntity.typeSync(versionABinary.path, followLinks: false)}',
+    );
+  }
+  if (FileSystemEntity.typeSync(versionAPlist.path, followLinks: false) !=
+      FileSystemEntityType.file) {
+    throw StateError(
+      'Expected regular file at ${versionAPlist.path}, found '
+      '${FileSystemEntity.typeSync(versionAPlist.path, followLinks: false)}',
+    );
+  }
+
+  final currentLinkPath = '${fwDir.path}/Versions/Current';
+  if (FileSystemEntity.typeSync(currentLinkPath, followLinks: false) !=
+      FileSystemEntityType.link) {
+    throw StateError(
+      'Expected symlink at $currentLinkPath, found '
+      '${FileSystemEntity.typeSync(currentLinkPath, followLinks: false)}',
+    );
+  }
+  final currentTarget = Link(currentLinkPath).targetSync();
+  if (currentTarget != 'A') {
+    throw StateError(
+      'Expected $currentLinkPath -> "A", got "$currentTarget"',
+    );
+  }
+
+  final topBinaryLinkPath = '${fwDir.path}/$frameworkName';
+  if (FileSystemEntity.typeSync(topBinaryLinkPath, followLinks: false) !=
+      FileSystemEntityType.link) {
+    throw StateError(
+      'Expected top-level symlink at $topBinaryLinkPath, found '
+      '${FileSystemEntity.typeSync(topBinaryLinkPath, followLinks: false)}',
+    );
+  }
+  final topBinaryTarget = Link(topBinaryLinkPath).targetSync();
+  if (topBinaryTarget != 'Versions/Current/$frameworkName') {
+    throw StateError(
+      'Expected $topBinaryLinkPath -> "Versions/Current/$frameworkName", '
+      'got "$topBinaryTarget"',
+    );
+  }
+
+  final topResourcesLinkPath = '${fwDir.path}/Resources';
+  if (FileSystemEntity.typeSync(topResourcesLinkPath, followLinks: false) !=
+      FileSystemEntityType.link) {
+    throw StateError(
+      'Expected top-level symlink at $topResourcesLinkPath, found '
+      '${FileSystemEntity.typeSync(topResourcesLinkPath, followLinks: false)}',
+    );
+  }
+  final topResourcesTarget = Link(topResourcesLinkPath).targetSync();
+  if (topResourcesTarget != 'Versions/Current/Resources') {
+    throw StateError(
+      'Expected $topResourcesLinkPath -> "Versions/Current/Resources", '
+      'got "$topResourcesTarget"',
+    );
+  }
+
+  // Ensure no unsealed files or non-Versions directories exist at framework root.
+  final allowedTopSymlinks = <String>{
+    frameworkName,
+    'Resources',
+    'Headers',
+    'Modules',
+  };
+  for (final entity in fwDir.listSync(followLinks: false)) {
+    final name = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
+    if (name == 'Versions') {
+      if (entity is! Directory || entity is Link) {
+        throw StateError('Expected Versions to be a real directory.');
+      }
+      continue;
+    }
+    if (entity is! Link || !allowedTopSymlinks.contains(name)) {
+      throw StateError(
+        'Ambiguous unsealed entry "$name" (${entity.runtimeType}) at root of '
+        '${fwDir.path}; macOS codesign requires only Versions/ and top-level '
+        'symlinks into Versions/Current/.',
+      );
+    }
+  }
+
+  for (final entity in Directory('${fwDir.path}/Versions').listSync(
+    followLinks: false,
+  )) {
+    final name = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
+    if (name != 'A' && name != 'Current') {
+      throw StateError(
+        'Unexpected entry "$name" inside ${fwDir.path}/Versions.',
+      );
+    }
+  }
+
+  if (File(topBinaryLinkPath).resolveSymbolicLinksSync() !=
+      versionABinary.resolveSymbolicLinksSync()) {
+    throw StateError(
+      '$topBinaryLinkPath does not resolve to ${versionABinary.path}.',
+    );
+  }
+  if (File('$topResourcesLinkPath/Info.plist').resolveSymbolicLinksSync() !=
+      versionAPlist.resolveSymbolicLinksSync()) {
+    throw StateError(
+      '$topResourcesLinkPath/Info.plist does not resolve to ${versionAPlist.path}.',
+    );
+  }
+
+  final binaryBytes = versionABinary.readAsBytesSync();
+  _verifyMachODylibBytes(binaryBytes, versionABinary.path);
+  _verifyFrameworkInfoPlistXml(
+    versionAPlist.readAsStringSync(),
+    frameworkName,
+    versionAPlist.path,
+  );
+
+  if (frameworkZipPath != null && frameworkZipPath.isNotEmpty) {
+    final zipFile = File(frameworkZipPath);
+    if (!zipFile.existsSync()) {
+      throw StateError('Framework zip archive not found: $frameworkZipPath');
+    }
+    final entries = {
+      for (final e in readFrameworkZipEntries(zipFile.readAsBytesSync()))
+        e.path: e,
+    };
+    final prefix = '$frameworkName.framework';
+    final binEntry = entries['$prefix/Versions/A/$frameworkName'];
+    if (binEntry == null || binEntry.isSymlink || !binEntry.isExecutable) {
+      throw StateError(
+        'Expected executable Mach-O entry "$prefix/Versions/A/$frameworkName" '
+        'in $frameworkZipPath, got: $binEntry',
+      );
+    }
+    _verifyMachODylibBytes(
+      binEntry.data,
+      '$frameworkZipPath:$prefix/Versions/A/$frameworkName',
+    );
+
+    final plistEntry = entries['$prefix/Versions/A/Resources/Info.plist'];
+    if (plistEntry == null || plistEntry.isSymlink) {
+      throw StateError(
+        'Expected regular file entry "$prefix/Versions/A/Resources/Info.plist" '
+        'in $frameworkZipPath',
+      );
+    }
+    _verifyFrameworkInfoPlistXml(
+      utf8.decode(plistEntry.data),
+      frameworkName,
+      '$frameworkZipPath:$prefix/Versions/A/Resources/Info.plist',
+    );
+
+    final expectedLinks = <String, String>{
+      '$prefix/Versions/Current': 'A',
+      '$prefix/$frameworkName': 'Versions/Current/$frameworkName',
+      '$prefix/Resources': 'Versions/Current/Resources',
+    };
+    for (final expected in expectedLinks.entries) {
+      final entry = entries[expected.key];
+      if (entry == null || !entry.isSymlink) {
+        throw StateError(
+          'Expected symlink entry "${expected.key}" in $frameworkZipPath, '
+          'found: ${entry == null ? "missing" : "regular file"}',
+        );
+      }
+      final target = utf8.decode(entry.data);
+      if (target != expected.value) {
+        throw StateError(
+          'Expected symlink "${expected.key}" -> "${expected.value}" in '
+          '$frameworkZipPath, got "$target"',
+        );
+      }
+    }
+  }
+}
+
 void _runVerify(List<String> args) {
   String? inputPath;
   String? binaryRelpath;
+  String? frameworkZipPath;
   String? objdumpPath;
   String? outputPath;
   final expectedSubstrings = <String>[];
@@ -717,6 +1255,11 @@ void _runVerify(List<String> args) {
           _usageError('--binary-relpath requires a value');
         }
         binaryRelpath = args[i];
+      case '--framework-zip':
+        if (++i >= args.length) {
+          _usageError('--framework-zip requires a value');
+        }
+        frameworkZipPath = args[i];
       case '--objdump':
         if (++i >= args.length) _usageError('--objdump requires a value');
         objdumpPath = args[i];
@@ -733,6 +1276,23 @@ void _runVerify(List<String> args) {
 
   if (inputPath == null || outputPath == null) {
     _usageError('verify requires --input and --output');
+  }
+
+  if ((binaryRelpath != null &&
+          binaryRelpath.contains('.framework/Versions/')) ||
+      (frameworkZipPath != null && frameworkZipPath.isNotEmpty)) {
+    var fwName = 'App';
+    if (binaryRelpath != null && binaryRelpath.contains('.framework/')) {
+      final seg = binaryRelpath
+          .split('/')
+          .firstWhere((s) => s.endsWith('.framework'));
+      fwName = seg.substring(0, seg.length - '.framework'.length);
+    }
+    verifyMacosFramework(
+      inputPath,
+      frameworkName: fwName,
+      frameworkZipPath: frameworkZipPath,
+    );
   }
 
   final targetPath = binaryRelpath != null && binaryRelpath.isNotEmpty

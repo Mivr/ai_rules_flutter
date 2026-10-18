@@ -79,26 +79,66 @@ void main() {
 
     // --- Structural checks ---
 
+    void checkSymlink(String description, String path, String expectedTarget) {
+      final type = FileSystemEntity.typeSync(path, followLinks: false);
+      if (type != FileSystemEntityType.link) {
+        stderr.writeln(
+          'FAIL: $description — expected symlink at $path, got $type',
+        );
+        failed = true;
+        return;
+      }
+      final actualTarget = Link(path).targetSync();
+      if (actualTarget != expectedTarget) {
+        stderr.writeln(
+          'FAIL: $description — expected symlink $path -> $expectedTarget, got $actualTarget',
+        );
+        failed = true;
+      } else {
+        print('OK: $description');
+      }
+    }
+
+    final appFw = '$bundlePath/Contents/Frameworks/App.framework';
+    check('App.framework exists', appFw);
+    check('App.framework/Versions/A/App exists', '$appFw/Versions/A/App');
     check(
-      'App.framework exists',
-      '$bundlePath/Contents/Frameworks/App.framework',
+      'App.framework/Versions/A/Resources/Info.plist exists',
+      '$appFw/Versions/A/Resources/Info.plist',
+    );
+    checkSymlink(
+      'App.framework/Versions/Current symlink',
+      '$appFw/Versions/Current',
+      'A',
+    );
+    checkSymlink(
+      'App.framework/App symlink',
+      '$appFw/App',
+      'Versions/Current/App',
+    );
+    checkSymlink(
+      'App.framework/Resources symlink',
+      '$appFw/Resources',
+      'Versions/Current/Resources',
+    );
+    checkCommand(
+      'App.framework Info.plist CFBundlePackageType is FMWK',
+      'plutil',
+      [
+        '-extract',
+        'CFBundlePackageType',
+        'raw',
+        '$appFw/Versions/A/Resources/Info.plist',
+      ],
+      (stdout) => stdout == 'FMWK',
     );
     check(
       'FlutterMacOS.framework exists',
       '$bundlePath/Contents/Frameworks/FlutterMacOS.framework',
     );
-    check(
-      'Runner binary exists',
-      runnerBinary,
-    );
-    check(
-      'Info.plist exists',
-      '$bundlePath/Contents/Info.plist',
-    );
-    check(
-      'MainMenu.nib exists',
-      '$bundlePath/Contents/Resources/MainMenu.nib',
-    );
+    check('Runner binary exists', runnerBinary);
+    check('Info.plist exists', '$bundlePath/Contents/Info.plist');
+    check('MainMenu.nib exists', '$bundlePath/Contents/Resources/MainMenu.nib');
     check(
       'flutter_assets in App.framework',
       '$bundlePath/Contents/Frameworks/App.framework/Resources/flutter_assets',
@@ -106,19 +146,19 @@ void main() {
 
     // --- Info.plist validation ---
 
-    checkCommand(
-      'Info.plist NSMainNibFile is MainMenu',
-      'plutil',
-      ['-extract', 'NSMainNibFile', 'raw', '$bundlePath/Contents/Info.plist'],
-      (stdout) => stdout == 'MainMenu',
-    );
+    checkCommand('Info.plist NSMainNibFile is MainMenu', 'plutil', [
+      '-extract',
+      'NSMainNibFile',
+      'raw',
+      '$bundlePath/Contents/Info.plist',
+    ], (stdout) => stdout == 'MainMenu');
 
-    checkCommand(
-      'Info.plist CFBundleName is Planner',
-      'plutil',
-      ['-extract', 'CFBundleName', 'raw', '$bundlePath/Contents/Info.plist'],
-      (stdout) => stdout == 'Planner',
-    );
+    checkCommand('Info.plist CFBundleName is Planner', 'plutil', [
+      '-extract',
+      'CFBundleName',
+      'raw',
+      '$bundlePath/Contents/Info.plist',
+    ], (stdout) => stdout == 'Planner');
 
     // --- ObjC class symbols in runner binary (single nm invocation) ---
 
@@ -142,12 +182,10 @@ void main() {
 
     // --- Framework linkage ---
 
-    checkCommand(
-      'Runner binary links FlutterMacOS.framework',
-      'otool',
-      ['-L', runnerBinary],
-      (stdout) => stdout.contains('FlutterMacOS.framework'),
-    );
+    checkCommand('Runner binary links FlutterMacOS.framework', 'otool', [
+      '-L',
+      runnerBinary,
+    ], (stdout) => stdout.contains('FlutterMacOS.framework'));
 
     // --- AOT dylib (App.framework/App) is valid Mach-O ---
 
@@ -155,12 +193,9 @@ void main() {
         '$bundlePath/Contents/Frameworks/App.framework/App';
     check('App.framework/App binary exists', appFrameworkBinary);
 
-    checkCommand(
-      'App.framework/App is valid Mach-O',
-      'file',
-      [appFrameworkBinary],
-      (stdout) => stdout.contains('Mach-O'),
-    );
+    checkCommand('App.framework/App is valid Mach-O', 'file', [
+      appFrameworkBinary,
+    ], (stdout) => stdout.contains('Mach-O'));
 
     // --- flutter_assets completeness ---
 

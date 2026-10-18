@@ -1290,6 +1290,39 @@ void assembleBundle(BundleConfig config) {
       }
     }
 
+    void replaceWithSymlinkSync(String linkPath, String target) {
+      final type = FileSystemEntity.typeSync(linkPath, followLinks: false);
+      if (type == FileSystemEntityType.directory) {
+        Directory(linkPath).deleteSync(recursive: true);
+      } else if (type == FileSystemEntityType.link) {
+        Link(linkPath).deleteSync();
+      } else if (type != FileSystemEntityType.notFound) {
+        File(linkPath).deleteSync();
+      }
+      Link(linkPath).createSync(target);
+    }
+
+    void normalizeMacosVersionedFramework(Directory fwDir, String fwName) {
+      final versionADir = Directory('${fwDir.path}/Versions/A');
+      if (!versionADir.existsSync()) return;
+
+      replaceWithSymlinkSync('${fwDir.path}/Versions/Current', 'A');
+      if (File('${versionADir.path}/$fwName').existsSync()) {
+        replaceWithSymlinkSync(
+          '${fwDir.path}/$fwName',
+          'Versions/Current/$fwName',
+        );
+      }
+      for (final sub in const ['Resources', 'Headers', 'Modules']) {
+        if (Directory('${versionADir.path}/$sub').existsSync()) {
+          replaceWithSymlinkSync(
+            '${fwDir.path}/$sub',
+            'Versions/Current/$sub',
+          );
+        }
+      }
+    }
+
     // 5. Resolve and embed frameworks.
     for (final fwInput in config.frameworkPaths) {
       final fwDirs = resolveFrameworkDirectories(fwInput, config.platform);
@@ -1304,6 +1337,9 @@ void assembleBundle(BundleConfig config) {
         );
         final destFwDir = Directory('${frameworksDir.path}/$fwFileName');
         _copyDirectorySync(fwDir, destFwDir, dereferenceSymlinks: false);
+        if (isMacOS) {
+          normalizeMacosVersionedFramework(destFwDir, fwName);
+        }
 
         // Mark framework binary executable in ZIP metadata.
         final fwRelPrefix = isMacOS

@@ -851,16 +851,31 @@ void main() {
     });
 
     test(
-      'assemble-macos-framework builds versioned macOS App.framework layout',
+      'assemble-macos-framework builds versioned macOS App.framework layout and zip',
       () {
+        final dylibBytes = macho.generateStubMachO(
+          arch: 'arm64',
+          platform: macho.platformMacos,
+          minOs: macho.parsePackedVersion('15.0'),
+          sdkVersion: macho.parsePackedVersion('15.0'),
+          installName: '@rpath/App.framework/Versions/A/App',
+        );
         final binFile = File('${tempDir.path}/App_bin')
-          ..writeAsBytesSync([1, 2, 3, 4]);
+          ..writeAsBytesSync(dylibBytes);
+        const plistXml =
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<plist version="1.0"><dict>\n'
+            '  <key>CFBundleExecutable</key><string>App</string>\n'
+            '  <key>CFBundleIdentifier</key><string>io.flutter.flutter.app</string>\n'
+            '  <key>CFBundlePackageType</key><string>FMWK</string>\n'
+            '</dict></plist>\n';
         final plistFile = File('${tempDir.path}/Info.plist')
-          ..writeAsStringSync('<plist/>');
+          ..writeAsStringSync(plistXml);
         final assetsDir = Directory('${tempDir.path}/flutter_assets')
           ..createSync(recursive: true);
         File('${assetsDir.path}/AssetManifest.bin').writeAsBytesSync([9, 9]);
         final wrapperDir = '${tempDir.path}/wrapper';
+        final outputZip = '${tempDir.path}/App.framework.zip';
 
         macho.main([
           'assemble-macos-framework',
@@ -872,13 +887,18 @@ void main() {
           assetsDir.path,
           '--output-dir',
           wrapperDir,
+          '--output-zip',
+          outputZip,
         ]);
 
         final fwPath = '$wrapperDir/App.framework';
-        expect(File('$fwPath/Versions/A/App').readAsBytesSync(), [1, 2, 3, 4]);
+        expect(
+          File('$fwPath/Versions/A/App').readAsBytesSync(),
+          equals(dylibBytes),
+        );
         expect(
           File('$fwPath/Versions/A/Resources/Info.plist').readAsStringSync(),
-          '<plist/>',
+          plistXml,
         );
         expect(
           File(
@@ -891,6 +911,28 @@ void main() {
         expect(
           Link('$fwPath/Resources').targetSync(),
           'Versions/Current/Resources',
+        );
+
+        // Verify the framework directory and zip pass verifyMacosFramework.
+        macho.verifyMacosFramework(
+          fwPath,
+          frameworkName: 'App',
+          frameworkZipPath: outputZip,
+        );
+
+        // Corrupting a symlink into a regular file (as rules_apple's _add_files does
+        // when AppleBundleInfo is absent) must fail verifyMacosFramework.
+        Link('$fwPath/App').deleteSync();
+        File('$fwPath/App').writeAsBytesSync(dylibBytes);
+        expect(
+          () => macho.verifyMacosFramework(fwPath, frameworkName: 'App'),
+          throwsA(
+            isA<StateError>().having(
+              (e) => e.message,
+              'message',
+              contains('Expected top-level symlink at'),
+            ),
+          ),
         );
       },
     );

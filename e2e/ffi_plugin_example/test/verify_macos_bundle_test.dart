@@ -48,14 +48,61 @@ void main() {
       }
     }
 
+    void checkSymlink(String description, String path, String expectedTarget) {
+      final type = FileSystemEntity.typeSync(path, followLinks: false);
+      if (type != FileSystemEntityType.link) {
+        stderr.writeln(
+          'FAIL: $description — expected symlink at $path, got $type',
+        );
+        failed = true;
+        return;
+      }
+      final actualTarget = Link(path).targetSync();
+      if (actualTarget != expectedTarget) {
+        stderr.writeln(
+          'FAIL: $description — expected symlink $path -> $expectedTarget, got $actualTarget',
+        );
+        failed = true;
+      } else {
+        print('OK: $description');
+      }
+    }
+
     check(
       'Native dylib libmultiply.dylib exists',
       '$bundlePath/Contents/Frameworks/libmultiply.dylib',
     );
+    final appFw = '$bundlePath/Contents/Frameworks/App.framework';
+    check('App.framework exists', appFw);
+    check('App.framework/Versions/A/App exists', '$appFw/Versions/A/App');
     check(
-      'App.framework exists',
-      '$bundlePath/Contents/Frameworks/App.framework',
+      'App.framework/Versions/A/Resources/Info.plist exists',
+      '$appFw/Versions/A/Resources/Info.plist',
     );
+    checkSymlink(
+      'App.framework/Versions/Current symlink',
+      '$appFw/Versions/Current',
+      'A',
+    );
+    checkSymlink(
+      'App.framework/App symlink',
+      '$appFw/App',
+      'Versions/Current/App',
+    );
+    checkSymlink(
+      'App.framework/Resources symlink',
+      '$appFw/Resources',
+      'Versions/Current/Resources',
+    );
+    final appFwPlist = File('$appFw/Versions/A/Resources/Info.plist');
+    if (appFwPlist.existsSync() &&
+        !RegExp(r'<key>CFBundlePackageType</key>\s*<string>FMWK</string>')
+            .hasMatch(appFwPlist.readAsStringSync())) {
+      stderr.writeln(
+        'FAIL: App.framework Info.plist missing CFBundlePackageType = FMWK',
+      );
+      failed = true;
+    }
     check(
       'FlutterMacOS.framework exists',
       '$bundlePath/Contents/Frameworks/FlutterMacOS.framework',
@@ -64,10 +111,7 @@ void main() {
       'Runner binary exists',
       '$bundlePath/Contents/MacOS/ffi_plugin_macos',
     );
-    check(
-      'Info.plist exists',
-      '$bundlePath/Contents/Info.plist',
-    );
+    check('Info.plist exists', '$bundlePath/Contents/Info.plist');
 
     if (failed) {
       final fwDir = Directory('$bundlePath/Contents/Frameworks');

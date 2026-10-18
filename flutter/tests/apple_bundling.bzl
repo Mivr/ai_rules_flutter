@@ -6,6 +6,9 @@ per fixture would cost minutes and need a device SDK.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
+
+# buildifier: disable=bzl-visibility
+load("@rules_apple//apple/internal:providers.bzl", "AppleBundleInfo")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_swift//swift:swift.bzl", "SwiftInfo")
 load("//flutter:providers.bzl", "FlutterApplePluginInfo", "FlutterApplicationInfo", "resolve_exec_dart_vm")
@@ -300,9 +303,16 @@ def _fake_xcframework_impl(ctx):
     fw_name = ctx.attr.framework_name
     slice_name = "macos-arm64_x86_64" if ctx.attr.platform == "macos" else "ios-arm64"
     prefix = "%s/%s.xcframework/%s/%s.framework" % (ctx.label.name, fw_name, slice_name, fw_name)
-    binary = ctx.actions.declare_file("%s/%s" % (prefix, fw_name))
-    plist = ctx.actions.declare_file("%s/Info.plist" % prefix)
-    header = ctx.actions.declare_file("%s/Headers/%s.h" % (prefix, fw_name))
+    if ctx.attr.platform == "macos":
+        binary = ctx.actions.declare_file("%s/Versions/A/%s" % (prefix, fw_name))
+        plist = ctx.actions.declare_file("%s/Versions/A/Resources/Info.plist" % prefix)
+        header = ctx.actions.declare_file("%s/Versions/A/Headers/%s.h" % (prefix, fw_name))
+        install_name = "@rpath/%s.framework/Versions/A/%s" % (fw_name, fw_name)
+    else:
+        binary = ctx.actions.declare_file("%s/%s" % (prefix, fw_name))
+        plist = ctx.actions.declare_file("%s/Info.plist" % prefix)
+        header = ctx.actions.declare_file("%s/Headers/%s.h" % (prefix, fw_name))
+        install_name = "@rpath/%s.framework/%s" % (fw_name, fw_name)
 
     ctx.actions.run(
         executable = dart_exe,
@@ -318,7 +328,7 @@ def _fake_xcframework_impl(ctx):
             "--min-os",
             "14.0",
             "--install-name",
-            "@rpath/%s.framework/%s" % (fw_name, fw_name),
+            install_name,
         ],
         inputs = depset(
             direct = [ctx.executable._macho_edit],
@@ -383,6 +393,11 @@ def _macho_verify_probe_impl(ctx):
     ]
     if use_relpath:
         args.extend(["--binary-relpath", relpath])
+    direct_inputs = [input_file, ctx.executable._macho_edit, ctx.executable._objdump]
+    if AppleBundleInfo in ctx.attr.target and ctx.attr.target[AppleBundleInfo].archive:
+        fw_zip = ctx.attr.target[AppleBundleInfo].archive
+        args.extend(["--framework-zip", fw_zip.path])
+        direct_inputs.append(fw_zip)
     for substr in ctx.attr.expected_substrings:
         args.extend(["--expect", substr])
 
@@ -390,7 +405,7 @@ def _macho_verify_probe_impl(ctx):
         executable = dart_exe,
         arguments = args,
         inputs = depset(
-            direct = [input_file, ctx.executable._macho_edit, ctx.executable._objdump],
+            direct = direct_inputs,
             transitive = [dart_vm_files],
         ),
         outputs = [stamp],
@@ -423,4 +438,3 @@ macho_verify_probe = rule(
     ],
     doc = "Verifies a built Mach-O binary or framework using @llvm//tools:llvm-objdump.",
 )
-
