@@ -58,7 +58,7 @@ Two tiers of API:
 
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
-load("@rules_apple//apple:apple.bzl", "apple_dynamic_xcframework_import")
+load("@rules_apple//apple:apple.bzl", "apple_dynamic_framework_import", "apple_dynamic_xcframework_import")
 load("@rules_apple//apple:ios.bzl", "ios_application")
 load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
 load("@rules_swift//swift:swift.bzl", "swift_library")
@@ -192,54 +192,54 @@ def flutter_ios_framework_gen(name, application, minimum_os_version = IOS_MINIMU
     )
 
     _flutter_ios_framework_rule(
-        name = name,
+        name = "__%s_framework" % name,
         application = "__%s_intermediates" % name,
         minimum_os_version = minimum_os_version,
+        tags = internal_tags,
+    )
+
+    apple_dynamic_framework_import(
+        name = name,
+        framework_imports = ["__%s_framework" % name],
+        bundle_only = select({
+            Label("@rules_flutter//flutter/private:dbg"): True,
+            "//conditions:default": False,
+        }),
         tags = tags,
         **kwargs
     )
 
-def flutter_ios_engine(name, **kwargs):
+def flutter_ios_engine(name, backend = "rules_apple", **kwargs):
     """Imports the Flutter.xcframework engine, auto-selecting debug or release.
 
     Debug mode (-c dbg): JIT engine for simulator.
     Release mode (-c opt / default): AOT engine for device.
-    Selects between `apple_dynamic_xcframework_import` (`rules_apple`) and
-    `flutter_darwin_xcframework_import` (`xtool`) via
-    `@rules_flutter//flutter/settings:use_xtool_backend`.
 
     Args:
         name: Target name. Add to swift_library deps for runner.
+        backend: Apple bundling backend: `"rules_apple"` (default) or
+            `"xtool"` (explicit opt-in).
         **kwargs: Additional arguments (e.g. visibility, tags).
     """
+    if backend not in ("rules_apple", "xtool"):
+        fail("flutter_ios_engine: backend must be 'rules_apple' or 'xtool', got %r" % backend)
     tags = kwargs.pop("tags", ["manual"])
-    internal_tags = tags if "manual" in tags else tags + ["manual"]
-    visibility = kwargs.pop("visibility", None)
 
-    apple_dynamic_xcframework_import(
-        name = "__%s_apple" % name,
-        xcframework_imports = _engine_xcframework_select(),
-        tags = internal_tags,
-        **kwargs
-    )
-
-    _flutter_darwin_xcframework_import(
-        name = "__%s_xtool" % name,
-        framework_name = "Flutter",
-        xcframework_imports = _engine_xcframework_select(),
-        tags = internal_tags,
-        **kwargs
-    )
-
-    native.alias(
-        name = name,
-        actual = select({
-            Label("@rules_flutter//flutter/settings:use_xtool_backend"): ":__%s_xtool" % name,
-            "//conditions:default": ":__%s_apple" % name,
-        }),
-        tags = tags,
-        visibility = visibility,
-    )
+    if backend == "rules_apple":
+        apple_dynamic_xcframework_import(
+            name = name,
+            xcframework_imports = _engine_xcframework_select(),
+            tags = tags,
+            **kwargs
+        )
+    else:
+        _flutter_darwin_xcframework_import(
+            name = name,
+            framework_name = "Flutter",
+            xcframework_imports = _engine_xcframework_select(),
+            tags = tags,
+            **kwargs
+        )
 
 def flutter_ios_info_plist_gen(name, app_name, module_name = "Runner", **kwargs):
     """Generates an iOS Info.plist from the default Bazel template.
@@ -285,7 +285,7 @@ def flutter_ios_info_plist_gen(name, app_name, module_name = "Runner", **kwargs)
         visibility = visibility,
     )
 
-def flutter_ios_runner_lib_gen(name, registrant, engine, application = None, module_name = "Runner", **kwargs):
+def flutter_ios_runner_lib_gen(name, registrant, engine, application = None, module_name = "Runner", backend = "rules_apple", **kwargs):
     """Generates a swift_library for the default iOS runner.
 
     Uses template AppDelegate.swift and SceneDelegate.swift from rules_flutter.
@@ -305,8 +305,12 @@ def flutter_ios_runner_lib_gen(name, registrant, engine, application = None, mod
             plugins' iOS Swift modules + link inputs into the runner;
             optional only for legacy Tier-2 setups with no native plugins.
         module_name: Swift module name (default "Runner").
+        backend: Apple bundling backend: `"rules_apple"` (default) or
+            `"xtool"` (explicit opt-in).
         **kwargs: Additional arguments passed to swift_library.
     """
+    if backend not in ("rules_apple", "xtool"):
+        fail("flutter_ios_runner_lib_gen: backend must be 'rules_apple' or 'xtool', got %r" % backend)
     tags = kwargs.pop("tags", ["manual"])
     internal_tags = tags if "manual" in tags else tags + ["manual"]
 
@@ -322,42 +326,33 @@ def flutter_ios_runner_lib_gen(name, registrant, engine, application = None, mod
         )
         deps.append(":" + aggregator_name)
 
-    visibility = kwargs.pop("visibility", None)
     runner_srcs = [
         registrant,
         "@rules_flutter//flutter/private/runners/ios:AppDelegate.swift",
         "@rules_flutter//flutter/private/runners/ios:SceneDelegate.swift",
     ]
-    swift_library(
-        name = "__%s_apple" % name,
-        srcs = runner_srcs,
-        data = [
-            "@rules_flutter//flutter/private/runners/ios:Base.lproj/Main.storyboard",
-        ],
-        module_name = module_name,
-        tags = internal_tags,
-        deps = deps,
-        visibility = ["//visibility:private"],
-        **kwargs
-    )
-    _flutter_xtool_apple_plugin_library(
-        name = "__%s_xtool" % name,
-        srcs = runner_srcs,
-        module_name = module_name,
-        platform = "ios",
-        deps = deps,
-        tags = internal_tags,
-        visibility = ["//visibility:private"],
-    )
-    native.alias(
-        name = name,
-        actual = select({
-            Label("@rules_flutter//flutter/settings:use_xtool_backend"): ":__%s_xtool" % name,
-            "//conditions:default": ":__%s_apple" % name,
-        }),
-        tags = tags,
-        visibility = visibility,
-    )
+    if backend == "rules_apple":
+        swift_library(
+            name = name,
+            srcs = runner_srcs,
+            data = [
+                "@rules_flutter//flutter/private/runners/ios:Base.lproj/Main.storyboard",
+            ],
+            module_name = module_name,
+            tags = tags,
+            deps = deps,
+            **kwargs
+        )
+    else:
+        _flutter_xtool_apple_plugin_library(
+            name = name,
+            srcs = runner_srcs,
+            module_name = module_name,
+            platform = "ios",
+            deps = deps,
+            tags = tags,
+            **kwargs
+        )
 
 # -- Convenience macro (Tier 1) -----------------------------------------------
 
@@ -579,15 +574,31 @@ def flutter_ios_app(
         tags = internal_tags,
     )
 
+    # 4. Wrap App.framework for rules_apple.
+    #    In debug mode, bundle_only=True embeds the framework without linking
+    #    (the stub binary only exists for rules_apple compatibility and isn't
+    #    loaded at runtime — Flutter uses the JIT kernel blob instead).
+    if backend == "rules_apple":
+        apple_dynamic_framework_import(
+            name = "__%s_app_bundle" % name,
+            framework_imports = ["__%s_app_framework" % name],
+            bundle_only = select({
+                Label("@rules_flutter//flutter/private:dbg"): True,
+                "//conditions:default": False,
+            }),
+            tags = internal_tags,
+        )
+
     # 5. Import Flutter.xcframework engine — auto-selects debug/release and backend.
     if engine:
         engine_target = engine
     else:
         flutter_ios_engine(
             name = "__%s_engine" % name,
+            backend = backend,
             tags = internal_tags,
         )
-        engine_target = ":__%s_engine" % name
+        engine_target = "__%s_engine" % name
 
     # 6. Wrap native plugin/native-asset dylibs in .frameworks for bundling.
     _flutter_ios_native_frameworks_rule(
@@ -719,7 +730,7 @@ def flutter_ios_app(
             resources = resources + ["__%s_privacy_manifests" % name],
             deps = [
                 "__%s_runner" % name,
-                "__%s_app_framework" % name,
+                "__%s_app_bundle" % name,
                 "__%s_native_frameworks" % name,
             ],
             tags = tags,

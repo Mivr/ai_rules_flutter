@@ -42,6 +42,44 @@ def build_plugin_struct(name, plugin_platforms):
     """
     return struct(name = name, platforms = plugin_platforms)
 
+def _apple_plugin_aspect_impl(target, ctx):
+    if FlutterApplePluginInfo in target:
+        return []
+    if ctx.rule.kind != "swift_library":
+        return []
+    macos_label = ctx.attr._macos_constraint.label
+    ios_label = ctx.attr._ios_constraint.label
+    platform = None
+    for constraint in getattr(ctx.rule.attr, "target_compatible_with", []):
+        if constraint.label == macos_label:
+            platform = "macos"
+            break
+        elif constraint.label == ios_label:
+            platform = "ios"
+            break
+    if not platform:
+        return []
+    return [
+        FlutterApplePluginInfo(
+            module_name = getattr(ctx.rule.attr, "module_name", ""),
+            platform = platform,
+            swift_srcs = depset(getattr(ctx.rule.files, "srcs", [])),
+            objc_srcs = depset(),
+            headers = depset(),
+            modulemap = None,
+            sdk_frameworks = [],
+            sdk_dylibs = [],
+        ),
+    ]
+
+_apple_plugin_aspect = aspect(
+    implementation = _apple_plugin_aspect_impl,
+    attrs = {
+        "_ios_constraint": attr.label(default = "@platforms//os:ios"),
+        "_macos_constraint": attr.label(default = "@platforms//os:macos"),
+    },
+)
+
 def _flutter_plugin_impl(ctx):
     package_name = derive_package_name(
         ctx.attr.package_name,
@@ -351,6 +389,7 @@ flutter_plugin = rule(
         ),
         "apple_libs": attr.label_list(
             doc = "Per-platform Apple plugin libraries (`flutter_apple_plugin_library`) carrying the plugin's macOS / iOS native code and `FlutterApplePluginInfo` provider. Set this via `select()` on the target platform so only one platform's library analyzes per build — both with the same module name in the same configuration would conflict on the produced `<module>.swiftmodule` output.",
+            aspects = [_apple_plugin_aspect],
             providers = [CcInfo],
         ),
         "macos_libs": attr.label_list(

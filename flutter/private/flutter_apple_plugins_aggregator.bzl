@@ -21,10 +21,9 @@ def _flutter_apple_plugins_aggregator_impl(ctx):
         if entry.swift_info:
             swift_infos.append(entry.swift_info)
 
-    merged_cc_info = cc_common.merge_cc_infos(cc_infos = cc_infos)
     return [
-        DefaultInfo(files = merged_cc_info.compilation_context.headers),
-        merged_cc_info,
+        DefaultInfo(),
+        cc_common.merge_cc_infos(cc_infos = cc_infos),
         SwiftInfo(swift_infos = swift_infos),
     ]
 

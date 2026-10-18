@@ -4,7 +4,15 @@ load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("//flutter:providers.bzl", "FlutterDarwinFrameworkInfo")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
-load("//flutter:macos.bzl", "flutter_apple_plugin_library", "flutter_macos_app")
+load(
+    "//flutter:macos.bzl",
+    "flutter_apple_plugin_library",
+    "flutter_macos_app",
+    "flutter_macos_engine",
+    "flutter_macos_framework_gen",
+    "flutter_macos_registrant_gen",
+    "flutter_macos_runner_lib_gen",
+)
 load("//flutter/private:flutter_macos_application.bzl", "flutter_macos_framework", "flutter_macos_native_libs")
 load("//flutter/private:flutter_xtool_bundle.bzl", "flutter_xtool_macos_bundle")
 load("//flutter/private:validation.bzl", "is_valid_bundle_id", "minimum_os_version_is_below")
@@ -464,6 +472,7 @@ def _bundling_tests(name):
         module_name = "sample_macos_plugin",
         platform = "macos",
         engine = ":" + name + "_fake_macos_xcframework",
+        backend = "xtool",
         tags = ["manual"],
     )
     write_file(
@@ -569,7 +578,133 @@ def _bundling_tests(name):
         name + "_native_libs_duplicate_basename_fails",
         name + "_xtool_macos_app_actions",
         name + "_two_apps_one_package",
+    ] + _apple_surface_tests(name)
+
+def _macos_macro_surface_test_impl(ctx):
+    env = unittest.begin(ctx)
+    asserts.equals(env, ctx.attr.expected_rules, ctx.attr.observed_rules)
+    asserts.equals(env, [], ctx.attr.unexpected_xtool_targets)
+    asserts.equals(env, ctx.attr.expected_app_deps, ctx.attr.observed_app_deps)
+    return unittest.end(env)
+
+_macos_macro_surface_test = unittest.make(
+    _macos_macro_surface_test_impl,
+    attrs = {
+        "expected_app_deps": attr.string_list(mandatory = True),
+        "expected_rules": attr.string_dict(mandatory = True),
+        "observed_app_deps": attr.string_list(mandatory = True),
+        "observed_rules": attr.string_dict(mandatory = True),
+        "unexpected_xtool_targets": attr.string_list(mandatory = True),
+    },
+)
+
+def _apple_surface_tests(name):
+    """Verify default rules_apple target names and kinds for macOS macros."""
+    before = native.existing_rules().keys()
+
+    fg_name = name + "_default_fg"
+    flutter_macos_framework_gen(
+        name = fg_name,
+        application = ":" + name + "_fake_release_macho_app",
+        tags = ["manual"],
+    )
+
+    eng_name = name + "_default_engine"
+    flutter_macos_engine(
+        name = eng_name,
+        tags = ["manual"],
+    )
+
+    reg_name = name + "_default_registrant"
+    flutter_macos_registrant_gen(
+        name = reg_name,
+        application = ":" + name + "_fake_release_macho_app",
+        tags = ["manual"],
+    )
+
+    runner_name = name + "_default_runner_lib"
+    flutter_macos_runner_lib_gen(
+        name = runner_name,
+        registrant = ":" + reg_name,
+        engine = ":" + eng_name,
+        application = ":" + name + "_fake_release_macho_app",
+        tags = ["manual"],
+    )
+
+    plugin_name = name + "_default_plugin_lib"
+    flutter_apple_plugin_library(
+        name = plugin_name,
+        srcs = [
+            ":" + name + "_SampleMacosPlugin.swift",
+            ":" + name + "_SampleMacosPlugin.h",
+        ],
+        module_name = "default_macos_plugin",
+        platform = "macos",
+        tags = ["manual"],
+    )
+
+    app_name = name + "_default_macos_app"
+    flutter_macos_app(
+        name = app_name,
+        application = ":" + name + "_fake_release_macho_app",
+        bundle_id = "com.example.default.macos",
+        srcs = [
+            "@rules_flutter//flutter/private/runners/macos:AppDelegate.swift",
+            "@rules_flutter//flutter/private/runners/macos:MainFlutterWindow.swift",
+        ],
+        info_plist = "@rules_flutter//flutter/private/runners/macos:Info.plist",
+        menu_xib = "@rules_flutter//flutter/private/runners/macos:MainMenu.xib",
+        entitlements = ":" + name + "_sample_macos_entitlements",
+        tags = ["manual"],
+    )
+
+    all_rules = native.existing_rules()
+    new_names = sorted([k for k in all_rules.keys() if k not in before])
+    observed_rules = {k: all_rules[k]["kind"] for k in new_names}
+
+    expected_rules = {
+        fg_name: "flutter_macos_framework",
+        eng_name: "apple_dynamic_framework_import",
+        reg_name: "flutter_macos_registrant",
+        "_" + runner_name + "__apple_plugins_aggregator": "flutter_apple_plugins_aggregator",
+        runner_name: "swift_library",
+        "_" + plugin_name + "__flutter_framework": "apple_dynamic_framework_import",
+        plugin_name: "swift_library",
+        "__" + app_name + "_registrant": "flutter_macos_registrant",
+        "__" + app_name + "_app_framework": "flutter_macos_framework",
+        "__" + app_name + "_native_libs": "flutter_macos_native_libs",
+        "__" + app_name + "_privacy_manifests": "flutter_macos_privacy_manifests",
+        "__" + app_name + "_engine": "apple_dynamic_framework_import",
+        "__" + app_name + "_apple_plugins": "flutter_apple_plugins_aggregator",
+        "__" + app_name + "_menu_xib": "expand_template",
+        "__" + app_name + "_runner": "swift_library",
+        "__" + app_name + "_version": "apple_bundle_version",
+        app_name: "macos_application",
+    }
+
+    unexpected_xtool = [
+        k
+        for k in new_names
+        if "xtool" in k or "xtool" in all_rules[k]["kind"] or "darwin_xcframework" in all_rules[k]["kind"]
     ]
+
+    app_rule = all_rules[app_name]
+    observed_app_deps = sorted([str(d) for d in app_rule.get("deps", [])])
+    expected_app_deps = sorted([
+        ":__" + app_name + "_runner",
+    ])
+
+    surface_test_name = name + "_macos_macro_surface_test"
+    _macos_macro_surface_test(
+        name = surface_test_name,
+        expected_rules = expected_rules,
+        observed_rules = observed_rules,
+        unexpected_xtool_targets = unexpected_xtool,
+        expected_app_deps = expected_app_deps,
+        observed_app_deps = observed_app_deps,
+    )
+
+    return [surface_test_name]
 
 def macos_test_suite(name):
     unittest.suite(name + "_bundle_id", _t0_test, _t1_test, _t2_test)
@@ -582,3 +717,4 @@ def macos_test_suite(name):
                      _bundling_tests(name)
         ],
     )
+

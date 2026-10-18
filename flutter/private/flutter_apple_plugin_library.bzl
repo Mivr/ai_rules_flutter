@@ -159,71 +159,6 @@ flutter_xtool_apple_plugin_library = rule(
     doc = "Host-agnostic Apple plugin library rule for the xtool backend.",
 )
 
-def _flutter_apple_plugin_library_target_impl(ctx):
-    dep = ctx.attr.dep
-    providers = [
-        DefaultInfo(
-            files = dep[DefaultInfo].files,
-            runfiles = dep[DefaultInfo].default_runfiles,
-        ),
-    ]
-    if CcInfo in dep:
-        providers.append(dep[CcInfo])
-    if SwiftInfo in dep:
-        providers.append(dep[SwiftInfo])
-    if OutputGroupInfo in dep:
-        providers.append(dep[OutputGroupInfo])
-    if FlutterApplePluginInfo in dep:
-        providers.append(dep[FlutterApplePluginInfo])
-    else:
-        providers.append(
-            FlutterApplePluginInfo(
-                module_name = ctx.attr.module_name,
-                platform = ctx.attr.platform,
-                swift_srcs = depset(),
-                objc_srcs = depset(),
-                headers = depset(),
-                modulemap = None,
-                sdk_frameworks = ctx.attr.sdk_frameworks,
-                sdk_dylibs = ctx.attr.sdk_dylibs,
-            ),
-        )
-    return providers
-
-_flutter_apple_plugin_library_target = rule(
-    implementation = _flutter_apple_plugin_library_target_impl,
-    attrs = {
-        "dep": attr.label(
-            mandatory = True,
-            doc = "Backend-specific Apple plugin library target.",
-        ),
-        "module_name": attr.string(
-            mandatory = True,
-            doc = "Swift/Clang module name of the plugin.",
-        ),
-        "platform": attr.string(
-            mandatory = True,
-            values = ["macos", "ios"],
-            doc = "Target Apple platform ('ios' or 'macos').",
-        ),
-        "sdk_frameworks": attr.string_list(
-            default = [],
-            doc = "Apple SDK frameworks linked by this plugin.",
-        ),
-        "sdk_dylibs": attr.string_list(
-            default = [],
-            doc = "Apple SDK dylibs linked by this plugin.",
-        ),
-    },
-    provides = [
-        DefaultInfo,
-        CcInfo,
-        SwiftInfo,
-        FlutterApplePluginInfo,
-    ],
-    doc = "Forwards backend providers and attaches FlutterApplePluginInfo.",
-)
-
 def flutter_apple_plugin_library(
         name,
         srcs = [],
@@ -235,14 +170,14 @@ def flutter_apple_plugin_library(
         sdk_frameworks = [],
         sdk_dylibs = [],
         engine = None,
+        backend = "rules_apple",
         visibility = None,
         tags = None,
         **kwargs):
-    """Build a Flutter plugin's Apple sources into a swift_library or xtool plugin target.
+    """Build a Flutter plugin's Apple sources into a swift_library.
 
     Auto-routes `.m`/`.mm` files through an internal `objc_library` and
-    feeds it into the `swift_library` as a dep on `rules_apple`, while
-    selecting `flutter_xtool_apple_plugin_library` under the `xtool` backend.
+    feeds it into the `swift_library` as a dep.
 
     Args:
         name: Target name. Pass to runner deps (or via the aspect-based
@@ -257,6 +192,8 @@ def flutter_apple_plugin_library(
         sdk_dylibs: Apple SDK dynamic libraries to link (e.g. `["c++"]`,
             `["sqlite3"]`).
         engine: Optional override for the Flutter engine framework label.
+        backend: Apple bundling backend: `"rules_apple"` (default) or
+            `"xtool"` (explicit opt-in).
         visibility: Target visibility.
         tags: Bazel tags. Defaults to `["manual"]` so the spoke target
             is only built when something depends on it.
@@ -264,6 +201,8 @@ def flutter_apple_plugin_library(
     """
     if platform not in ("macos", "ios"):
         fail("flutter_apple_plugin_library: platform must be 'macos' or 'ios', got '%s'" % platform)
+    if backend not in ("rules_apple", "xtool"):
+        fail("flutter_apple_plugin_library: backend must be 'rules_apple' or 'xtool', got %r" % backend)
 
     if tags == None:
         tags = ["manual"]
@@ -277,55 +216,54 @@ def flutter_apple_plugin_library(
         ["@platforms//os:%s" % platform],
     )
 
-    swift_files, objc_files, headers = _split_srcs(srcs)
-
     framework_target = "_%s__flutter_framework" % name
-    framework_apple_target = "_%s__flutter_framework_apple" % name
-    framework_xtool_target = "_%s__flutter_framework_xtool" % name
     if platform == "macos":
         engine_imports = [engine] if engine else [Label("@flutter_macos_engine//:engine_library")]
+    else:
+        engine_imports = [engine] if engine else [Label("@flutter_ios_engine//:Flutter_xcframework")]
+
+    if backend == "xtool":
+        flutter_darwin_xcframework_import(
+            name = framework_target,
+            framework_name = "FlutterMacOS" if platform == "macos" else "Flutter",
+            xcframework_imports = engine_imports,
+            tags = internal_tags,
+            target_compatible_with = target_compatible_with,
+            visibility = ["//visibility:private"],
+        )
+        flutter_xtool_apple_plugin_library(
+            name = name,
+            srcs = srcs,
+            module_name = module_name,
+            platform = platform,
+            includes = includes,
+            sdk_frameworks = sdk_frameworks,
+            sdk_dylibs = sdk_dylibs,
+            deps = [":" + framework_target] + list(deps),
+            tags = tags,
+            target_compatible_with = target_compatible_with,
+            visibility = visibility,
+        )
+        return
+
+    swift_files, objc_files, headers = _split_srcs(srcs)
+
+    if platform == "macos":
         apple_dynamic_framework_import(
-            name = framework_apple_target,
+            name = framework_target,
             framework_imports = engine_imports,
             tags = internal_tags,
             target_compatible_with = target_compatible_with,
             visibility = ["//visibility:private"],
         )
-        flutter_darwin_xcframework_import(
-            name = framework_xtool_target,
-            framework_name = "FlutterMacOS",
-            xcframework_imports = engine_imports,
-            tags = internal_tags,
-            target_compatible_with = target_compatible_with,
-            visibility = ["//visibility:private"],
-        )
     else:
-        engine_imports = [engine] if engine else [Label("@flutter_ios_engine//:Flutter_xcframework")]
         apple_dynamic_xcframework_import(
-            name = framework_apple_target,
+            name = framework_target,
             xcframework_imports = engine_imports,
             tags = internal_tags,
             target_compatible_with = target_compatible_with,
             visibility = ["//visibility:private"],
         )
-        flutter_darwin_xcframework_import(
-            name = framework_xtool_target,
-            framework_name = "Flutter",
-            xcframework_imports = engine_imports,
-            tags = internal_tags,
-            target_compatible_with = target_compatible_with,
-            visibility = ["//visibility:private"],
-        )
-
-    native.alias(
-        name = framework_target,
-        actual = select({
-            Label("@rules_flutter//flutter/settings:use_xtool_backend"): ":" + framework_xtool_target,
-            "//conditions:default": ":" + framework_apple_target,
-        }),
-        tags = internal_tags,
-        visibility = ["//visibility:private"],
-    )
 
     swift_deps = [":" + framework_target] + list(deps)
 
@@ -376,47 +314,15 @@ def flutter_apple_plugin_library(
         )
         swift_files = [":" + placeholder_target]
 
-    apple_target = "_%s__apple" % name
-    xtool_target = "_%s__xtool" % name
-
     swift_library(
-        name = apple_target,
+        name = name,
         srcs = swift_files,
         module_name = module_name,
         copts = extra_copts,
         deps = swift_deps,
         swiftc_inputs = [bridging_header] if bridging_header else [],
-        tags = internal_tags,
-        target_compatible_with = target_compatible_with,
-        visibility = ["//visibility:private"],
-        **kwargs
-    )
-
-    flutter_xtool_apple_plugin_library(
-        name = xtool_target,
-        srcs = srcs,
-        module_name = module_name,
-        platform = platform,
-        includes = includes,
-        sdk_frameworks = sdk_frameworks,
-        sdk_dylibs = sdk_dylibs,
-        deps = [":" + framework_xtool_target] + list(deps),
-        tags = internal_tags,
-        target_compatible_with = target_compatible_with,
-        visibility = ["//visibility:private"],
-    )
-
-    _flutter_apple_plugin_library_target(
-        name = name,
-        dep = select({
-            Label("@rules_flutter//flutter/settings:use_xtool_backend"): ":" + xtool_target,
-            "//conditions:default": ":" + apple_target,
-        }),
-        module_name = module_name,
-        platform = platform,
-        sdk_frameworks = sdk_frameworks,
-        sdk_dylibs = sdk_dylibs,
         tags = tags,
         target_compatible_with = target_compatible_with,
         visibility = visibility,
+        **kwargs
     )

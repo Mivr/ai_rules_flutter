@@ -3,7 +3,17 @@
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
-load("//flutter:ios.bzl", "flutter_apple_plugin_library", "flutter_ios_app")
+load("@rules_apple//apple:providers.bzl", "AppleFrameworkImportInfo")
+load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
+load(
+    "//flutter:ios.bzl",
+    "flutter_apple_plugin_library",
+    "flutter_ios_app",
+    "flutter_ios_engine",
+    "flutter_ios_framework_gen",
+    "flutter_ios_registrant_gen",
+    "flutter_ios_runner_lib_gen",
+)
 load("//flutter/private:flutter_ios_application.bzl", "flutter_ios_framework", "flutter_ios_native_frameworks")
 load("//flutter/private:flutter_xtool_bundle.bzl", "flutter_darwin_xcframework_import", "flutter_xtool_ios_bundle")
 load("//flutter/private:ios_entitlements.bzl", "resolve_ios_entitlements")
@@ -104,6 +114,128 @@ def _resolve_test_impl(ctx):
 
 _resolve_test = unittest.make(_resolve_test_impl)
 
+def _ios_framework_import_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    tut = analysistest.target_under_test(env)
+
+    asserts.true(
+        env,
+        AppleFrameworkImportInfo in tut,
+        "Expected AppleFrameworkImportInfo on %s" % tut.label,
+    )
+    asserts.true(
+        env,
+        CcInfo in tut,
+        "Expected CcInfo on %s" % tut.label,
+    )
+
+    fw_imports = [
+        f.short_path
+        for f in tut[AppleFrameworkImportInfo].framework_imports.to_list()
+    ]
+    expected_prefix = ctx.attr.expected_framework_dir + "/App.framework/"
+    asserts.true(
+        env,
+        any([p.endswith(expected_prefix + "App") for p in fw_imports]),
+        "Expected %sApp in AppleFrameworkImportInfo.framework_imports, got: %s" % (expected_prefix, fw_imports),
+    )
+    asserts.true(
+        env,
+        any([p.endswith(expected_prefix + "Info.plist") for p in fw_imports]),
+        "Expected %sInfo.plist in AppleFrameworkImportInfo.framework_imports, got: %s" % (expected_prefix, fw_imports),
+    )
+
+    linked_dylibs = [
+        (lib.resolved_symlink_dynamic_library or lib.dynamic_library).short_path
+        for li in tut[CcInfo].linking_context.linker_inputs.to_list()
+        for lib in li.libraries
+        if lib.dynamic_library != None
+    ]
+    if ctx.attr.expect_linked:
+        asserts.true(
+            env,
+            any([p.endswith(expected_prefix + "App") for p in linked_dylibs]),
+            "Expected release %sApp to be linked via CcInfo, got: %s" % (expected_prefix, linked_dylibs),
+        )
+    else:
+        asserts.equals(
+            env,
+            [],
+            linked_dylibs,
+            "Expected debug App.framework to be bundle_only (not linked), got: %s" % linked_dylibs,
+        )
+
+    return analysistest.end(env)
+
+def _fake_xcode_config_impl(_ctx):
+    return [
+        apple_common.XcodeVersionConfig(
+            ios_sdk_version = "18.0",
+            ios_minimum_os_version = "15.0",
+            visionos_sdk_version = "2.0",
+            visionos_minimum_os_version = "1.0",
+            watchos_sdk_version = "11.0",
+            watchos_minimum_os_version = "9.0",
+            tvos_sdk_version = "18.0",
+            tvos_minimum_os_version = "15.0",
+            macos_sdk_version = "15.0",
+            macos_minimum_os_version = "13.0",
+            xcode_version = "16.0",
+            availability = "UNKNOWN",
+            xcode_version_flag = "16.0",
+            include_xcode_execution_info = False,
+        ),
+    ]
+
+_fake_xcode_config = rule(implementation = _fake_xcode_config_impl)
+
+_ios_framework_import_release_test = analysistest.make(
+    _ios_framework_import_test_impl,
+    attrs = {
+        "expect_linked": attr.bool(default = True),
+        "expected_framework_dir": attr.string(mandatory = True),
+    },
+    config_settings = {
+        "//command_line_option:compilation_mode": "opt",
+        "//command_line_option:extra_execution_platforms": [str(Label("//flutter/platforms:macos_arm64"))],
+        "//command_line_option:platforms": str(Label("//flutter/platforms:ios_arm64")),
+        "//command_line_option:xcode_version_config": str(Label("//flutter/tests:ios_test_fake_xcode_config")),
+        str(Label("//flutter:profile")): False,
+    },
+)
+
+_ios_framework_import_debug_test = analysistest.make(
+    _ios_framework_import_test_impl,
+    attrs = {
+        "expect_linked": attr.bool(default = False),
+        "expected_framework_dir": attr.string(mandatory = True),
+    },
+    config_settings = {
+        "//command_line_option:compilation_mode": "dbg",
+        "//command_line_option:extra_execution_platforms": [str(Label("//flutter/platforms:macos_arm64"))],
+        "//command_line_option:platforms": str(Label("//flutter/platforms:ios_arm64")),
+        "//command_line_option:xcode_version_config": str(Label("//flutter/tests:ios_test_fake_xcode_config")),
+        str(Label("//flutter:profile")): False,
+    },
+)
+
+def _ios_macro_surface_test_impl(ctx):
+    env = unittest.begin(ctx)
+    asserts.equals(env, ctx.attr.expected_kinds, ctx.attr.actual_kinds)
+    asserts.equals(env, [], ctx.attr.unexpected_xtool_targets)
+    asserts.equals(env, ctx.attr.expected_app_deps, ctx.attr.actual_app_deps)
+    return unittest.end(env)
+
+_ios_macro_surface_test = unittest.make(
+    _ios_macro_surface_test_impl,
+    attrs = {
+        "actual_app_deps": attr.string_list(mandatory = True),
+        "actual_kinds": attr.string_dict(mandatory = True),
+        "expected_app_deps": attr.string_list(mandatory = True),
+        "expected_kinds": attr.string_dict(mandatory = True),
+        "unexpected_xtool_targets": attr.string_list(mandatory = True),
+    },
+)
 
 def _xtool_ios_app_actions_test_impl(ctx):
     env = analysistest.begin(ctx)
@@ -239,6 +371,7 @@ def _bundling_tests(name):
         module_name = "sample_ios_plugin",
         platform = "ios",
         engine = ":" + name + "_fake_ios_xcframework",
+        backend = "xtool",
         tags = ["manual"],
     )
     flutter_ios_app(
@@ -255,6 +388,132 @@ def _bundling_tests(name):
         runner_deps = [":" + name + "_sample_ios_plugin_lib"],
         backend = "xtool",
         tags = ["manual"],
+    )
+
+    _fake_xcode_config(
+        name = name + "_fake_xcode_config",
+        tags = ["manual"],
+    )
+
+    # Default backend (`rules_apple`) macro surface fixtures: verify target
+    # names, rule kinds, absence of xtool targets, and release App.framework
+    # linking.
+    before_default = native.existing_rules().keys()
+    fg_name = name + "_default_framework_gen"
+    eng_name = name + "_default_engine"
+    reg_name = name + "_default_registrant"
+    rl_name = name + "_default_runner_lib"
+    pl_name = name + "_default_ios_plugin_lib"
+    app_name = name + "_default_ios_app"
+
+    flutter_ios_framework_gen(
+        name = fg_name,
+        application = ":" + name + "_fake_release_app",
+        tags = ["manual"],
+    )
+    flutter_ios_engine(
+        name = eng_name,
+        tags = ["manual"],
+    )
+    flutter_ios_registrant_gen(
+        name = reg_name,
+        application = ":" + name + "_fake_release_app",
+        tags = ["manual"],
+    )
+    flutter_ios_runner_lib_gen(
+        name = rl_name,
+        registrant = ":" + reg_name,
+        engine = ":" + eng_name,
+        application = ":" + name + "_fake_release_app",
+        tags = ["manual"],
+    )
+    flutter_apple_plugin_library(
+        name = pl_name,
+        srcs = [":" + name + "_SampleIosPlugin.swift"],
+        module_name = "default_ios_plugin",
+        platform = "ios",
+        tags = ["manual"],
+    )
+    flutter_ios_app(
+        name = app_name,
+        application = ":" + name + "_fake_release_app",
+        bundle_id = "com.example.default.ios",
+        srcs = [
+            "@rules_flutter//flutter/private/runners/ios:AppDelegate.swift",
+            "@rules_flutter//flutter/private/runners/ios:SceneDelegate.swift",
+        ],
+        info_plist = "@rules_flutter//flutter/private/runners/ios:Info.plist",
+        launch_storyboard = "@rules_flutter//flutter/private/runners/ios:Base.lproj/LaunchScreen.storyboard",
+        app_icons = [],
+        entitlements = False,
+        tags = ["manual"],
+    )
+    after_default = native.existing_rules()
+    created_default = {
+        k: after_default[k]["kind"]
+        for k in after_default
+        if k not in before_default
+    }
+    unexpected_xtool = [
+        k
+        for k, kind in created_default.items()
+        if "xtool" in k or "xtool" in kind or kind == "flutter_darwin_xcframework_import"
+    ]
+    expected_default_kinds = {
+        "__%s_intermediates" % fg_name: "flutter_ios_application",
+        "__%s_framework" % fg_name: "flutter_ios_framework",
+        fg_name: "apple_dynamic_framework_import",
+        eng_name: "apple_dynamic_xcframework_import",
+        reg_name: "flutter_ios_registrant",
+        "_%s__apple_plugins_aggregator" % rl_name: "flutter_apple_plugins_aggregator",
+        rl_name: "swift_library",
+        "_%s__flutter_framework" % pl_name: "apple_dynamic_xcframework_import",
+        pl_name: "swift_library",
+        "__%s_registrant" % app_name: "flutter_ios_registrant",
+        "__%s_intermediates" % app_name: "flutter_ios_application",
+        "__%s_app_framework" % app_name: "flutter_ios_framework",
+        "__%s_app_bundle" % app_name: "apple_dynamic_framework_import",
+        "__%s_engine" % app_name: "apple_dynamic_xcframework_import",
+        "__%s_native_frameworks" % app_name: "flutter_ios_native_frameworks",
+        "__%s_privacy_manifests" % app_name: "flutter_ios_privacy_manifests",
+        "__%s_apple_plugins" % app_name: "flutter_apple_plugins_aggregator",
+        "__%s_runner" % app_name: "swift_library",
+        "__%s_version" % app_name: "apple_bundle_version",
+        "__%s_info_plist_dev" % app_name: "flutter_plist_merge",
+        app_name: "ios_application",
+    }
+    _ios_macro_surface_test(
+        name = name + "_default_macro_surface",
+        actual_kinds = created_default,
+        expected_kinds = expected_default_kinds,
+        unexpected_xtool_targets = unexpected_xtool,
+        actual_app_deps = [str(d) for d in after_default[app_name]["deps"]],
+        expected_app_deps = [
+            ":__%s_runner" % app_name,
+            ":__%s_app_bundle" % app_name,
+            ":__%s_native_frameworks" % app_name,
+        ],
+    )
+
+    _ios_framework_import_release_test(
+        name = name + "_framework_gen_links_release",
+        target_under_test = ":" + fg_name,
+        expected_framework_dir = "__%s_framework" % fg_name,
+    )
+    _ios_framework_import_debug_test(
+        name = name + "_framework_gen_bundle_only_debug",
+        target_under_test = ":" + fg_name,
+        expected_framework_dir = "__%s_framework" % fg_name,
+    )
+    _ios_framework_import_release_test(
+        name = name + "_app_bundle_links_release",
+        target_under_test = ":__%s_app_bundle" % app_name,
+        expected_framework_dir = "__%s_app_framework" % app_name,
+    )
+    _ios_framework_import_debug_test(
+        name = name + "_app_bundle_bundle_only_debug",
+        target_under_test = ":__%s_app_bundle" % app_name,
+        expected_framework_dir = "__%s_app_framework" % app_name,
     )
 
     macho_verify_probe(
@@ -398,6 +657,11 @@ def _bundling_tests(name):
     )
 
     return [
+        name + "_default_macro_surface",
+        name + "_framework_gen_links_release",
+        name + "_framework_gen_bundle_only_debug",
+        name + "_app_bundle_links_release",
+        name + "_app_bundle_bundle_only_debug",
         name + "_framework_outputs_under_target_dir",
         name + "_simulator_fastbuild_refused",
         name + "_xtool_ios_app_actions",

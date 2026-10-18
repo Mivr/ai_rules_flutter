@@ -168,49 +168,39 @@ flutter_apple_plugin_library = _flutter_apple_plugin_library_macro
 # Swift modules + link inputs into the runner.
 flutter_apple_plugins_aggregator = _flutter_apple_plugins_aggregator
 
-def flutter_macos_engine(name, **kwargs):
+def flutter_macos_engine(name, backend = "rules_apple", **kwargs):
     """Imports the FlutterMacOS.framework engine for the build mode.
 
     Debug mode (-c dbg): JIT engine for iterative development.
     Profile mode (-c opt with `//flutter:profile`): AOT engine with the VM
     service, for DevTools.
     Release mode (-c opt / default): AOT engine for production.
-    Selects between `apple_dynamic_framework_import` (`rules_apple`) and
-    `flutter_darwin_xcframework_import` (`xtool`) via
-    `@rules_flutter//flutter/settings:use_xtool_backend`.
 
     Args:
         name: Target name. Add to swift_library deps for runner.
+        backend: Apple bundling backend: `"rules_apple"` (default) or
+            `"xtool"` (explicit opt-in).
         **kwargs: Additional arguments (e.g. visibility, tags).
     """
+    if backend not in ("rules_apple", "xtool"):
+        fail("flutter_macos_engine: backend must be 'rules_apple' or 'xtool', got %r" % backend)
     tags = kwargs.pop("tags", ["manual"])
-    internal_tags = tags if "manual" in tags else tags + ["manual"]
-    visibility = kwargs.pop("visibility", None)
 
-    apple_dynamic_framework_import(
-        name = "__%s_apple" % name,
-        framework_imports = _engine_framework_select(),
-        tags = internal_tags,
-        **kwargs
-    )
-
-    _flutter_darwin_xcframework_import(
-        name = "__%s_xtool" % name,
-        framework_name = "FlutterMacOS",
-        xcframework_imports = _engine_framework_select(),
-        tags = internal_tags,
-        **kwargs
-    )
-
-    native.alias(
-        name = name,
-        actual = select({
-            Label("@rules_flutter//flutter/settings:use_xtool_backend"): ":__%s_xtool" % name,
-            "//conditions:default": ":__%s_apple" % name,
-        }),
-        tags = tags,
-        visibility = visibility,
-    )
+    if backend == "rules_apple":
+        apple_dynamic_framework_import(
+            name = name,
+            framework_imports = _engine_framework_select(),
+            tags = tags,
+            **kwargs
+        )
+    else:
+        _flutter_darwin_xcframework_import(
+            name = name,
+            framework_name = "FlutterMacOS",
+            xcframework_imports = _engine_framework_select(),
+            tags = tags,
+            **kwargs
+        )
 
 def flutter_macos_info_plist_gen(name, app_name, **kwargs):
     """Generates a macOS Info.plist from the default Bazel template.
@@ -250,7 +240,7 @@ def flutter_macos_menu_xib_gen(name, app_name, **kwargs):
         **kwargs
     )
 
-def flutter_macos_runner_lib_gen(name, registrant, engine, application = None, module_name = "Runner", **kwargs):
+def flutter_macos_runner_lib_gen(name, registrant, engine, application = None, module_name = "Runner", backend = "rules_apple", **kwargs):
     """Generates a swift_library for the default macOS runner.
 
     Uses template AppDelegate.swift and MainFlutterWindow.swift from
@@ -270,8 +260,12 @@ def flutter_macos_runner_lib_gen(name, registrant, engine, application = None, m
             plugins' macOS Swift modules + link inputs into the runner;
             optional only for legacy Tier-2 setups with no native plugins.
         module_name: Swift module name (default "Runner").
+        backend: Apple bundling backend: `"rules_apple"` (default) or
+            `"xtool"` (explicit opt-in).
         **kwargs: Additional arguments passed to swift_library.
     """
+    if backend not in ("rules_apple", "xtool"):
+        fail("flutter_macos_runner_lib_gen: backend must be 'rules_apple' or 'xtool', got %r" % backend)
     tags = kwargs.pop("tags", ["manual"])
     internal_tags = tags if "manual" in tags else tags + ["manual"]
 
@@ -287,39 +281,30 @@ def flutter_macos_runner_lib_gen(name, registrant, engine, application = None, m
         )
         deps.append(":" + aggregator_name)
 
-    visibility = kwargs.pop("visibility", None)
     runner_srcs = [
         registrant,
         "@rules_flutter//flutter/private/runners/macos:AppDelegate.swift",
         "@rules_flutter//flutter/private/runners/macos:MainFlutterWindow.swift",
     ]
-    swift_library(
-        name = "__%s_apple" % name,
-        srcs = runner_srcs,
-        module_name = module_name,
-        tags = internal_tags,
-        deps = deps,
-        visibility = ["//visibility:private"],
-        **kwargs
-    )
-    _flutter_xtool_apple_plugin_library(
-        name = "__%s_xtool" % name,
-        srcs = runner_srcs,
-        module_name = module_name,
-        platform = "macos",
-        deps = deps,
-        tags = internal_tags,
-        visibility = ["//visibility:private"],
-    )
-    native.alias(
-        name = name,
-        actual = select({
-            Label("@rules_flutter//flutter/settings:use_xtool_backend"): ":__%s_xtool" % name,
-            "//conditions:default": ":__%s_apple" % name,
-        }),
-        tags = tags,
-        visibility = visibility,
-    )
+    if backend == "rules_apple":
+        swift_library(
+            name = name,
+            srcs = runner_srcs,
+            module_name = module_name,
+            tags = tags,
+            deps = deps,
+            **kwargs
+        )
+    else:
+        _flutter_xtool_apple_plugin_library(
+            name = name,
+            srcs = runner_srcs,
+            module_name = module_name,
+            platform = "macos",
+            deps = deps,
+            tags = tags,
+            **kwargs
+        )
 
 # -- Convenience macro (Tier 1) -----------------------------------------------
 
@@ -543,9 +528,10 @@ def flutter_macos_app(
     else:
         flutter_macos_engine(
             name = "__%s_engine" % name,
+            backend = backend,
             tags = internal_tags,
         )
-        engine_target = ":__%s_engine" % name
+        engine_target = "__%s_engine" % name
 
     # 5. Discover runner Swift sources and build swift_library.
     runner_srcs = srcs if srcs != None else native.glob(["macos/Runner/*.swift"])
