@@ -10,7 +10,7 @@ load("//flutter/private:flutter_kernel_module.bzl", "flutter_kernel_module_aspec
 
 def _flutter_kernel_target_impl(ctx):
     flutter_sdk_info = resolve_flutter_sdk_info(ctx)
-    kernel_dill = flutter_compile_kernel(ctx, flutter_sdk_info, aot = ctx.attr.aot).kernel_dill
+    kernel_dill = flutter_compile_kernel(ctx, flutter_sdk_info, aot = True if ctx.attr.aot else None).kernel_dill
 
     return [
         DefaultInfo(files = depset([kernel_dill])),
@@ -27,7 +27,7 @@ flutter_kernel_target = rule(
             aspects = [flutter_kernel_module_aspect],
         ),
         "aot": attr.bool(
-            doc = "If True, compile for AOT (--aot --tfa).",
+            doc = "If True, compile for AOT (--aot --tfa). Automatically True in opt/fastbuild mode.",
             default = False,
         ),
     } | AGENT_EXTENSIONS_ATTR | MODULAR_KERNEL_ATTRS,

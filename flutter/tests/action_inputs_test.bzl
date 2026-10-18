@@ -232,32 +232,31 @@ def _aot_target_dbg_inputs_test_impl(ctx):
     asserts.equals(env, ["_inputs_aot_target.dill"], outputs)
     return analysistest.end(env)
 
-def _kernel_target_modular_test_impl(ctx):
-    """Default `flutter_kernel_target` (`aot = False`) compiles modularly without `FlutterKernelCompile`."""
+def _kernel_target_release_aot_test_impl(ctx):
+    """In `opt` and `fastbuild`, default `flutter_kernel_target` runs AOT product `FlutterKernelCompile`."""
     env = analysistest.begin(ctx)
-    kernel_action = _find_action(env, ["DartKernel"])
-    kernel_inputs = _input_paths(kernel_action)
+    compile_action = _find_action(env, ["FlutterKernelCompile"])
+    asserts.true(env, "--aot" in compile_action.argv, "expected --aot in FlutterKernelCompile argv")
+    asserts.true(env, "--tfa" in compile_action.argv, "expected --tfa in FlutterKernelCompile argv")
+    asserts.true(
+        env,
+        "-Ddart.vm.product=true" in compile_action.argv,
+        "expected -Ddart.vm.product=true in FlutterKernelCompile argv",
+    )
     _assert_some_path_contains(
         env,
-        kernel_inputs,
-        ["fake_test_api.flutter.koutline", "platform_strong.dill"],
-        "flutter_kernel_target DartKernel inputs",
+        _input_paths(compile_action),
+        ["flutter_patched_sdk_product/platform_strong.dill"],
+        "release AOT flutter_kernel_target",
     )
     _assert_no_path_contains(
         env,
-        kernel_inputs,
-        ["fake_test_api.flutter.kmod/", "fake_test_api/lib/backend.dart"],
-        "flutter_kernel_target DartKernel inputs",
+        _input_paths(compile_action),
+        ["flutter_patched_sdk/platform_strong.dill"],
+        "release AOT flutter_kernel_target",
     )
-    link_action = _find_action(env, ["DartKernelLink"])
-    _assert_some_path_contains(
-        env,
-        _input_paths(link_action),
-        ["fake_test_api.flutter.kmod", "platform_strong.dill"],
-        "flutter_kernel_target DartKernelLink inputs",
-    )
-    whole_program = [a for a in analysistest.target_actions(env) if a.mnemonic == "FlutterKernelCompile"]
-    asserts.equals(env, [], whole_program, "non-AOT flutter_kernel_target must not run FlutterKernelCompile")
+    modular_links = [a for a in analysistest.target_actions(env) if a.mnemonic == "DartKernelLink"]
+    asserts.equals(env, [], modular_links, "AOT flutter_kernel_target must not run DartKernelLink")
     return analysistest.end(env)
 
 def _kernel_target_dbg_test_impl(ctx):
@@ -265,6 +264,12 @@ def _kernel_target_dbg_test_impl(ctx):
     env = analysistest.begin(ctx)
     compile_action = _find_action(env, ["FlutterKernelCompile"])
     asserts.true(env, "--aot" not in compile_action.argv, "debug non-AOT flutter_kernel_target must not pass --aot")
+    asserts.true(env, "--tfa" not in compile_action.argv, "debug non-AOT flutter_kernel_target must not pass --tfa")
+    asserts.true(
+        env,
+        "-Ddart.vm.product=true" not in compile_action.argv,
+        "debug non-AOT flutter_kernel_target must not pass -Ddart.vm.product=true",
+    )
     _assert_some_path_contains(
         env,
         _input_paths(compile_action),
@@ -559,8 +564,15 @@ _aot_target_dbg_inputs_test = analysistest.make(
         str(Label("//flutter:profile")): False,
     },
 )
-_kernel_target_modular_test = analysistest.make(
-    _kernel_target_modular_test_impl,
+_kernel_target_opt_test = analysistest.make(
+    _kernel_target_release_aot_test_impl,
+    config_settings = {
+        "//command_line_option:compilation_mode": "opt",
+        str(Label("//flutter:profile")): False,
+    },
+)
+_kernel_target_fastbuild_test = analysistest.make(
+    _kernel_target_release_aot_test_impl,
     config_settings = {
         "//command_line_option:compilation_mode": "fastbuild",
         str(Label("//flutter:profile")): False,
@@ -735,8 +747,12 @@ def action_inputs_test_suite(name):
         name = name + "_aot_target_dbg",
         target_under_test = ":_inputs_aot_target",
     )
-    _kernel_target_modular_test(
-        name = name + "_kernel_target_modular",
+    _kernel_target_opt_test(
+        name = name + "_kernel_target_opt",
+        target_under_test = ":_inputs_kernel_target",
+    )
+    _kernel_target_fastbuild_test(
+        name = name + "_kernel_target_fastbuild",
         target_under_test = ":_inputs_kernel_target",
     )
     _kernel_target_dbg_test(
@@ -781,7 +797,8 @@ def action_inputs_test_suite(name):
             ":" + name + "_asset_bundle",
             ":" + name + "_aot_target",
             ":" + name + "_aot_target_dbg",
-            ":" + name + "_kernel_target_modular",
+            ":" + name + "_kernel_target_opt",
+            ":" + name + "_kernel_target_fastbuild",
             ":" + name + "_kernel_target_dbg",
             ":" + name + "_kernel_target_aot",
             ":" + name + "_kernel_target_aot_dbg",
