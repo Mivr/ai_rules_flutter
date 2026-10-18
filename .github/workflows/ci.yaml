@@ -11,11 +11,12 @@
 name: CI
 on:
   push:
-    branches: [main]
+    branches: [main, "ci/**"]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 # One repository cache per OS, set up by bazel-contrib/setup-bazel and shared
 # by every Bazel job: downloads are content-addressed, so a workspace never
