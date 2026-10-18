@@ -1578,8 +1578,25 @@ def _flutter_linux_integration_test_impl(ctx):
 
     if aot and mode == "release":
         platform_dill = flutter_sdk_info.platform_kernel_dill_product
+        if platform_dill == None:
+            fail(
+                "Unresolved @rules_flutter//flutter:product_tools_toolchain_type " +
+                "(@rules_flutter//flutter/private:product_tools_toolchain_type): " +
+                "Flutter toolchain does not provide platform_kernel_dill_product, " +
+                "which is required for release AOT kernel compilation. Register " +
+                "the Flutter toolchains (e.g. `flutter.toolchain()` in MODULE.bazel " +
+                "or `register_toolchains(\"@flutter_toolchains//:all\")`) or set " +
+                "`platform_kernel_dill_product` on `flutter_toolchain`.",
+            )
     else:
         platform_dill = flutter_sdk_info.platform_kernel_dill
+        if platform_dill == None:
+            fail(
+                "Unresolved @rules_flutter//flutter:toolchain_type: " +
+                "Flutter toolchain does not provide platform_kernel_dill. " +
+                "Register a Flutter toolchain (e.g. `flutter.toolchain()` in " +
+                "MODULE.bazel) or set `platform_kernel_dill` on `flutter_toolchain`.",
+            )
 
     user_defines = merge_dart_defines(ctx)
     all_defines = list(user_defines)
@@ -1910,8 +1927,25 @@ def _flutter_android_integration_app_impl(ctx):
 
     if aot and mode == "release":
         platform_dill = flutter_sdk_info.platform_kernel_dill_product
+        if platform_dill == None:
+            fail(
+                "Unresolved @rules_flutter//flutter:product_tools_toolchain_type " +
+                "(@rules_flutter//flutter/private:product_tools_toolchain_type): " +
+                "Flutter toolchain does not provide platform_kernel_dill_product, " +
+                "which is required for release AOT kernel compilation. Register " +
+                "the Flutter toolchains (e.g. `flutter.toolchain()` in MODULE.bazel " +
+                "or `register_toolchains(\"@flutter_toolchains//:all\")`) or set " +
+                "`platform_kernel_dill_product` on `flutter_toolchain`.",
+            )
     else:
         platform_dill = flutter_sdk_info.platform_kernel_dill
+        if platform_dill == None:
+            fail(
+                "Unresolved @rules_flutter//flutter:toolchain_type: " +
+                "Flutter toolchain does not provide platform_kernel_dill. " +
+                "Register a Flutter toolchain (e.g. `flutter.toolchain()` in " +
+                "MODULE.bazel) or set `platform_kernel_dill` on `flutter_toolchain`.",
+            )
 
     user_defines = merge_dart_defines(ctx)
     all_defines = list(user_defines)

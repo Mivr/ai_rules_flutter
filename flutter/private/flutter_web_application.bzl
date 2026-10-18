@@ -579,13 +579,21 @@ def _flutter_web_bundle_impl(ctx):
         )
     has_font_tree_shake = bool(fonts) and const_finder != None and font_subset != None
     icon_platform_dill = (
-        flutter_sdk_info.platform_kernel_dill
-        if is_profile and flutter_sdk_info.platform_kernel_dill != None
-        else flutter_sdk_info.platform_kernel_dill_product
+        flutter_sdk_info.platform_kernel_dill if is_profile and flutter_sdk_info.platform_kernel_dill != None else flutter_sdk_info.platform_kernel_dill_product
     )
     has_experiment_kernel = bool(ctx.attr.enable_experiments) and icon_platform_dill != None
     kernel_dill = None
     if ctx.attr.tree_shake_icons and not is_debug and (has_font_tree_shake or has_experiment_kernel):
+        if icon_platform_dill == None:
+            fail(
+                "Unresolved @rules_flutter//flutter:product_tools_toolchain_type " +
+                "(@rules_flutter//flutter/private:product_tools_toolchain_type): " +
+                "Flutter toolchain does not provide platform_kernel_dill_product, " +
+                "which is required for release icon tree-shaking kernel compilation. " +
+                "Register the Flutter toolchains (e.g. `flutter.toolchain()` in " +
+                "MODULE.bazel or `register_toolchains(\"@flutter_toolchains//:all\")`) " +
+                "or set `platform_kernel_dill_product` on `flutter_toolchain`.",
+            )
         kernel_dill = ctx.actions.declare_file(ctx.label.name + "_icon_tree_shaking.dill")
         entrypoint_uri = app_main_package_uri(
             ctx.attr.package_name,

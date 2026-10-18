@@ -8,7 +8,7 @@ flutter_application, flutter_android_bundle, and flutter_ios_application.
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_dart//dart:providers.bzl", "DartInfo")
 load("@rules_dart//dart:utils.bzl", "collect_packages", "collect_transitive_srcs", "derive_lib_root", "generate_dev_package_config", _DART_COPY_TO_DIRECTORY_TOOLCHAINS = "COPY_TO_DIRECTORY_TOOLCHAINS")
-load("//flutter:providers.bzl", "FlutterCompiledShadersInfo", "FlutterInfo", "FlutterNativeLibraryInfo", "FlutterSdkInfo", _resolve_exec_dart = "resolve_exec_dart", _resolve_exec_dart_vm = "resolve_exec_dart_vm", _resolve_flutter_sdk_info = "resolve_flutter_sdk_info")
+load("//flutter:providers.bzl", "FlutterCompiledShadersInfo", "FlutterInfo", "FlutterNativeLibraryInfo", _resolve_exec_dart = "resolve_exec_dart", _resolve_exec_dart_vm = "resolve_exec_dart_vm", _resolve_flutter_sdk_info = "resolve_flutter_sdk_info")
 load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "app_main_location", "app_scheme_location", "app_scheme_sources", "compile_kernel_package_config", "resolve_kernel_entrypoint", "synthesize_app_package", "with_root")
 load("//flutter/private:flutter_asset_bundle.bzl", "flutter_asset_bundle_action")
 load("//flutter/private:flutter_compile.bzl", "flutter_kernel_compile_action")
@@ -375,8 +375,25 @@ def flutter_compile_kernel(ctx, flutter_sdk_info, aot = None, platform_dill = No
     if platform_dill == None:
         if aot and mode == "release":
             platform_dill = flutter_sdk_info.platform_kernel_dill_product
+            if platform_dill == None:
+                fail(
+                    "Unresolved @rules_flutter//flutter:product_tools_toolchain_type " +
+                    "(@rules_flutter//flutter/private:product_tools_toolchain_type): " +
+                    "Flutter toolchain does not provide platform_kernel_dill_product, " +
+                    "which is required for release AOT kernel compilation. Register " +
+                    "the Flutter toolchains (e.g. `flutter.toolchain()` in MODULE.bazel " +
+                    "or `register_toolchains(\"@flutter_toolchains//:all\")`) or set " +
+                    "`platform_kernel_dill_product` on `flutter_toolchain`.",
+                )
         else:
             platform_dill = flutter_sdk_info.platform_kernel_dill
+            if platform_dill == None:
+                fail(
+                    "Unresolved @rules_flutter//flutter:toolchain_type: " +
+                    "Flutter toolchain does not provide platform_kernel_dill. " +
+                    "Register a Flutter toolchain (e.g. `flutter.toolchain()` in " +
+                    "MODULE.bazel) or set `platform_kernel_dill` on `flutter_toolchain`.",
+                )
 
     # AI-agent service-extension injection: in debug builds (non-AOT), if the
     # rule carries an `_agent_extensions_src` attr, stage the agent source next
@@ -1236,7 +1253,7 @@ KERNEL_COMPILE_ATTRS = {
     ),
 } | EXTRA_DART_DEFINES_ATTR | BUILD_MODE_ATTR
 
-def _shader_aspect_impl(target, ctx, fixed_platform):
+def _shader_aspect_impl(_target, ctx, fixed_platform):
     if fixed_platform != None:
         target_platform = fixed_platform
     else:

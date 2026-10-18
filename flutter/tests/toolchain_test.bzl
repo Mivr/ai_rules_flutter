@@ -2,6 +2,7 @@
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("//flutter:providers.bzl", "FlutterSdkInfo", "resolve_exec_dart", "resolve_exec_dart_vm", "resolve_flutter_sdk_info")
+load("//flutter/private:common.bzl", "KERNEL_COMPILE_ATTRS", "flutter_compile_kernel")
 load("//flutter/private:engine_helpers.bzl", "dart_binary_name", "dartaotruntime_binary_name", "engine_arch_for_os", "platform_to_arch", "platform_to_os")
 load("//flutter/private:flutter_kernel_module.bzl", "find_flutter_kernel_module_tools", "is_same_sdk")
 
@@ -312,6 +313,63 @@ _unresolved_exec_dart_failure_test = analysistest.make(
     expect_failure = True,
 )
 
+def _missing_product_dill_rule_impl(ctx):
+    info = resolve_flutter_sdk_info(ctx)
+    no_product_dill = FlutterSdkInfo(
+        version = info.version,
+        engine_revision = info.engine_revision,
+        dart = info.dart,
+        dartaotruntime = info.dartaotruntime,
+        gen_snapshot = info.gen_snapshot,
+        flutter_tester = info.flutter_tester,
+        frontend_server = info.frontend_server,
+        platform_kernel_dill = info.platform_kernel_dill,
+        platform_kernel_dill_product = None,
+        patched_sdk = info.patched_sdk,
+        icu_data = info.icu_data,
+        tool_files = info.tool_files,
+        dart_vm_files = info.dart_vm_files,
+        dart_pub_files = info.dart_pub_files,
+        dart2wasm_files = info.dart2wasm_files,
+        dart2js_files = info.dart2js_files,
+        engine_library = info.engine_library,
+        const_finder = info.const_finder,
+        font_subset = info.font_subset,
+        impellerc = info.impellerc,
+        shader_lib = info.shader_lib,
+        material_icons_font = info.material_icons_font,
+        vm_isolate_snapshot = info.vm_isolate_snapshot,
+        isolate_snapshot = info.isolate_snapshot,
+        target_os = info.target_os,
+        target_arch = info.target_arch,
+        linux_sysroot = info.linux_sysroot,
+    )
+    kernel_dill = flutter_compile_kernel(ctx, no_product_dill, aot = True).kernel_dill
+    return [DefaultInfo(files = depset([kernel_dill]))]
+
+_missing_product_dill_rule = rule(
+    implementation = _missing_product_dill_rule_impl,
+    attrs = KERNEL_COMPILE_ATTRS,
+    toolchains = [
+        "@rules_flutter//flutter:toolchain_type",
+        config_common.toolchain_type("@rules_flutter//flutter/private:product_tools_toolchain_type", mandatory = False),
+    ],
+)
+
+def _unresolved_product_dill_failure_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    asserts.expect_failure(env, "Unresolved @rules_flutter//flutter:product_tools_toolchain_type")
+    return analysistest.end(env)
+
+_unresolved_product_dill_failure_test = analysistest.make(
+    _unresolved_product_dill_failure_test_impl,
+    expect_failure = True,
+    config_settings = {
+        "//command_line_option:compilation_mode": "opt",
+        str(Label("//flutter:profile")): False,
+    },
+)
+
 def _dart_binary_name_test_impl(ctx):
     env = unittest.begin(ctx)
     asserts.equals(env, "dart", dart_binary_name("darwin-arm64"))
@@ -345,6 +403,7 @@ def _engine_arch_for_os_test_impl(ctx):
     return unittest.end(env)
 
 _PrimaryToolchainProbeInfo = provider(
+    doc = "Probe provider for primary toolchain analysis tests.",
     fields = ["sdk_info", "gen_snapshot_var", "is_linux"],
 )
 
@@ -420,6 +479,11 @@ _t5_test = unittest.make(_resolve_exec_dart_test_impl)
 _t6_test = unittest.make(_is_same_sdk_and_find_tools_test_impl)
 
 def toolchain_test_suite(name):
+    """Test suite for Flutter toolchain resolution and helper functions.
+
+    Args:
+      name: Base name for the test suite targets.
+    """
     _primary_toolchain_probe(
         name = name + "_primary_probe",
         tags = ["manual"],
@@ -448,6 +512,16 @@ def toolchain_test_suite(name):
         name = name + "_unresolved_exec_dart_vm_test",
         target_under_test = ":" + name + "_missing_exec_dart_vm_fixture",
     )
+    _missing_product_dill_rule(
+        name = name + "_missing_product_dill_fixture",
+        package_name = "toolchain_fixture",
+        main = "lib/language_version_main.dart",
+        tags = ["manual"],
+    )
+    _unresolved_product_dill_failure_test(
+        name = name + "_unresolved_product_dill_test",
+        target_under_test = ":" + name + "_missing_product_dill_fixture",
+    )
     unittest.suite(
         name + "_unit",
         _t0_test,
@@ -466,5 +540,6 @@ def toolchain_test_suite(name):
             ":" + name + "_primary_android_test",
             ":" + name + "_unresolved_exec_dart_test",
             ":" + name + "_unresolved_exec_dart_vm_test",
+            ":" + name + "_unresolved_product_dill_test",
         ],
     )
