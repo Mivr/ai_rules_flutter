@@ -4,6 +4,7 @@ load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_apple//apple:providers.bzl", "AppleBundleInfo")
+load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
 load("@rules_dart//dart:defs.bzl", "dart_test")
 load(
     "//flutter:macos.bzl",
@@ -234,6 +235,7 @@ def _xtool_macos_app_actions_test_impl(ctx):
     )
     runner_actions = [a for a in actions if a.mnemonic == "FlutterXtoolRunner"]
     runner_inputs = [f.short_path for f in runner_actions[0].inputs.to_list()]
+    runner_argv = runner_actions[0].argv
     asserts.true(
         env,
         any([p.endswith("AppDelegate.swift") for p in runner_inputs]),
@@ -248,6 +250,16 @@ def _xtool_macos_app_actions_test_impl(ctx):
         env,
         any([p.endswith(".modulemap") for p in runner_inputs]),
         "Expected plugin .modulemap in FlutterXtoolRunner inputs, got: %s" % runner_inputs,
+    )
+    asserts.true(
+        env,
+        "--sdk-framework" in runner_argv and "AVFoundation" in runner_argv,
+        "Expected --sdk-framework AVFoundation in FlutterXtoolRunner argv, got: %s" % runner_argv,
+    )
+    asserts.true(
+        env,
+        "--sdk-dylib" in runner_argv and "sqlite3" in runner_argv,
+        "Expected --sdk-dylib sqlite3 in FlutterXtoolRunner argv, got: %s" % runner_argv,
     )
     files = tut[DefaultInfo].files.to_list()
     asserts.equals(env, 1, len(files))
@@ -490,7 +502,17 @@ def _bundling_tests(name):
         platform = "macos",
         engine = ":" + name + "_fake_macos_xcframework",
         deps = [":" + name + "_fake_macos_plugin_kit_import"],
+        sdk_frameworks = ["AVFoundation"],
+        sdk_dylibs = ["sqlite3"],
         backend = "xtool",
+        tags = ["manual"],
+    )
+    fake_application(
+        name = name + "_fake_e2e_macos_app",
+        debug = False,
+        macho_aot = True,
+        native_libs = ["libplugin.dylib"],
+        apple_plugin_libraries = [":" + name + "_sample_macos_plugin_lib"],
         tags = ["manual"],
     )
     write_file(
@@ -504,7 +526,7 @@ def _bundling_tests(name):
     )
     flutter_macos_app(
         name = name + "_e2e_macos_app",
-        application = ":" + name + "_fake_release_macho_app",
+        application = ":" + name + "_fake_e2e_macos_app",
         bundle_id = "com.example.e2e.macos",
         minimum_os_version = "13.4",
         srcs = [
@@ -512,10 +534,42 @@ def _bundling_tests(name):
             "@rules_flutter//flutter/private/runners/macos:MainFlutterWindow.swift",
         ],
         info_plist = "@rules_flutter//flutter/private/runners/macos:Info.plist",
+        menu_xib = "@rules_flutter//flutter/private/runners/macos:MainMenu.xib",
         entitlements = ":" + name + "_sample_macos_entitlements",
         engine = ":" + name + "_fake_macos_xcframework",
         runner_deps = [":" + name + "_sample_macos_plugin_lib"],
         backend = "xtool",
+        tags = ["manual"],
+    )
+    flutter_macos_app(
+        name = name + "_minimal_xtool_macos_app",
+        application = ":" + name + "_fake_release_macho_app",
+        bundle_id = "com.example.minimal.macos",
+        srcs = [
+            "@rules_flutter//flutter/private/runners/macos:AppDelegate.swift",
+            "@rules_flutter//flutter/private/runners/macos:MainFlutterWindow.swift",
+        ],
+        info_plist = "@rules_flutter//flutter/private/runners/macos:Info.plist",
+        entitlements = ":" + name + "_sample_macos_entitlements",
+        engine = ":" + name + "_fake_macos_xcframework",
+        backend = "xtool",
+        tags = ["manual"],
+    )
+    macho_verify_probe(
+        name = name + "_verify_minimal_xtool_macos_app_bundle",
+        target = ":" + name + "_minimal_xtool_macos_app",
+        binary_relpath = name + "_minimal_xtool_macos_app.app/Contents/MacOS/" + name + "_minimal_xtool_macos_app",
+        expected_entries = [
+            name + "_minimal_xtool_macos_app.app/Contents/MacOS/" + name + "_minimal_xtool_macos_app",
+            name + "_minimal_xtool_macos_app.app/Contents/Frameworks/App.framework/Versions/A/App",
+            name + "_minimal_xtool_macos_app.app/Contents/Frameworks/FlutterMacOS.framework/FlutterMacOS",
+        ],
+        expected_substrings = [
+            "cmd LC_RPATH",
+            "@executable_path/../Frameworks",
+            "cmd LC_BUILD_VERSION",
+            "platform macos",
+        ],
         tags = ["manual"],
     )
     macho_verify_probe(
@@ -559,6 +613,8 @@ def _bundling_tests(name):
             "cmd LC_RPATH",
             "@executable_path/Frameworks",
             "@executable_path/../Frameworks",
+            "/System/Library/Frameworks/AVFoundation.framework/Versions/A/AVFoundation",
+            "/usr/lib/libsqlite3.dylib",
             "cmd LC_BUILD_VERSION",
             "platform macos",
             "minos 13.4",
@@ -631,6 +687,8 @@ def _bundling_tests(name):
             name + "_sample_macos_plugin_lib",
             name + "_e2e_macos_app",
             "__" + name + "_e2e_macos_app_app_framework",
+            name + "_minimal_xtool_macos_app",
+            name + "_verify_minimal_xtool_macos_app_bundle",
             name + "_verify_e2e_macos_app_framework",
             name + "_verify_e2e_macos_native_libs",
             name + "_verify_e2e_macos_app_bundle",
@@ -714,6 +772,11 @@ def _xtool_macos_attrs_and_secrets_test_impl(ctx):
     argv = bundle_actions[0].argv
     asserts.true(
         env,
+        "--version-file" in argv,
+        "Expected --version-file in argv when apple_bundle_version is passed to version: %s" % argv,
+    )
+    asserts.true(
+        env,
         "--additional-content" in argv and any([arg.startswith("Helpers=") for arg in argv]),
         "Expected --additional-content Helpers=... in argv: %s" % argv,
     )
@@ -751,6 +814,18 @@ def _xtool_macos_validation_tests(name):
         content = ["macos-secret-p12-pass"],
         tags = ["manual"],
     )
+    write_file(
+        name = name + "_custom_menu_xib",
+        out = name + "_CustomMenu.xib",
+        content = ["<document/>"],
+        tags = ["manual"],
+    )
+    apple_bundle_version(
+        name = name + "_xtool_custom_macos_version",
+        build_version = "99",
+        short_version_string = "3.1.0",
+        tags = ["manual"],
+    )
 
     before_xtool = native.existing_rules().keys()
     xtool_attrs_app = name + "_xtool_attrs_macos_app"
@@ -758,6 +833,7 @@ def _xtool_macos_validation_tests(name):
         name = xtool_attrs_app,
         application = ":" + name + "_fake_release_macho_app",
         bundle_id = "com.example.xtool.macos.attrs",
+        version = ":" + name + "_xtool_custom_macos_version",
         srcs = [
             "@rules_flutter//flutter/private/runners/macos:AppDelegate.swift",
             "@rules_flutter//flutter/private/runners/macos:MainFlutterWindow.swift",
@@ -815,13 +891,26 @@ def _xtool_macos_validation_tests(name):
         target_under_test = ":" + xtool_attrs_app,
     )
 
-    # User-supplied menu_xib on xtool
-    write_file(
-        name = name + "_custom_menu_xib",
-        out = name + "/CustomMainMenu.xib",
-        content = ["<document/>"],
+    # Invalid version target on xtool
+    flutter_macos_app(
+        name = name + "_xtool_bad_version_macos_app",
+        application = ":" + name + "_fake_release_macho_app",
+        bundle_id = "com.example.macos.badversion",
+        version = ":" + name + "_xtool_macos_helper",
+        srcs = ["@rules_flutter//flutter/private/runners/macos:AppDelegate.swift"],
+        info_plist = "@rules_flutter//flutter/private/runners/macos:Info.plist",
+        entitlements = ":" + name + "_sample_macos_entitlements",
+        engine = ":" + name + "_fake_macos_xcframework",
+        backend = "xtool",
         tags = ["manual"],
     )
+    _expect_failure_test(
+        name = name + "_xtool_macos_bad_version_fails",
+        target_under_test = ":" + name + "_xtool_bad_version_macos_app",
+        expected_substrings = ["'version'", "apple_bundle_version"],
+    )
+
+    # User-supplied menu_xib on xtool
     flutter_macos_app(
         name = name + "_xtool_menu_xib_macos_app",
         application = ":" + name + "_fake_release_macho_app",
@@ -919,6 +1008,7 @@ def _xtool_macos_validation_tests(name):
     return [
         name + "_xtool_macos_no_rules_apple_surface",
         name + "_xtool_macos_attrs_and_secrets",
+        name + "_xtool_macos_bad_version_fails",
         name + "_xtool_menu_xib_fails",
         name + "_xtool_macos_app_icons_fails",
         name + "_xtool_macos_plaintext_pw_fails",

@@ -16,9 +16,211 @@ load("@apple_support//lib:apple_support.bzl", "apple_support")
 load("@bazel_skylib//lib:dicts.bzl", "dicts")
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
-load("//flutter:providers.bzl", "FlutterDarwinFrameworkInfo")
+load("//flutter:providers.bzl", "FlutterApplePluginInfo", "FlutterDarwinFrameworkInfo")
 load(":constants.bzl", "IOS_MINIMUM_OS_VERSION", "MACOS_MINIMUM_OS_VERSION")
 load(":xtool_darwin_sdk_repo.bzl", "FlutterXtoolSdkInfo", "UNCONFIGURED_SDK_ERROR")
+
+FlutterXtoolVersionInfo = provider(
+    doc = "Carries host-agnostic bundle version metadata for the xtool backend.",
+    fields = {
+        "build_version": "Resolved or pattern string for CFBundleVersion.",
+        "short_version_string": "Resolved or pattern string for CFBundleShortVersionString.",
+        "version_file": "JSON File containing `build_version` and `short_version_string`.",
+    },
+)
+
+def _collect_version_group_names(s):
+    names = []
+    length = len(s)
+    end_index = 0
+    for i in range(length):
+        if i < end_index:
+            continue
+        if s[i] == "{":
+            end_index = s.find("}", i + 1)
+            if end_index != -1:
+                names.append(s[i + 1:end_index])
+    return names
+
+def _flutter_xtool_bundle_version_impl(ctx):
+    build_label_pattern = ctx.attr.build_label_pattern
+    capture_groups = ctx.attr.capture_groups
+    fallback_build_label = ctx.attr.fallback_build_label
+
+    if (build_label_pattern and not capture_groups) or (not build_label_pattern and capture_groups):
+        fail(
+            "%s: in 'version' target, if either build_label_pattern or capture_groups is provided, then both must be provided." % ctx.label,
+        )
+    if fallback_build_label and not build_label_pattern:
+        fail(
+            "%s: in 'version' target, if fallback_build_label is provided, then build_label_pattern and capture_groups must be provided." % ctx.label,
+        )
+
+    short_version_string = ctx.attr.short_version_string or ctx.attr.build_version
+    patterns = {
+        "build_version": ctx.attr.build_version,
+        "short_version_string": short_version_string,
+    }
+    if build_label_pattern:
+        patterns["build_label_pattern"] = build_label_pattern
+
+    group_keys = (capture_groups or {}).keys()
+    for attr_name, pattern in patterns.items():
+        missing = [g for g in _collect_version_group_names(pattern) if g not in group_keys]
+        if missing:
+            fail(
+                "%s: in 'version' target attribute %r, placeholder group(s) [%s] were not defined in capture_groups." % (
+                    ctx.label,
+                    attr_name,
+                    ", ".join(sorted(missing)),
+                ),
+            )
+
+    bundle_version_file = ctx.actions.declare_file(ctx.label.name + ".bundle_version")
+    if build_label_pattern:
+        control_file = ctx.actions.declare_file(ctx.label.name + ".versiontool-control")
+        control = {
+            "build_info_path": ctx.info_file.path,
+            "build_label_pattern": build_label_pattern,
+            "build_version_pattern": ctx.attr.build_version,
+            "capture_groups": capture_groups,
+            "short_version_string_pattern": short_version_string,
+        }
+        if fallback_build_label:
+            control["fallback_build_label"] = fallback_build_label
+        ctx.actions.write(
+            output = control_file,
+            content = json.encode(control),
+        )
+        ctx.actions.run(
+            executable = ctx.executable._xtool_pack,
+            arguments = [
+                "resolve-version",
+                "--control",
+                control_file.path,
+                "--output",
+                bundle_version_file.path,
+            ],
+            inputs = [control_file, ctx.info_file],
+            outputs = [bundle_version_file],
+            mnemonic = "FlutterXtoolBundleVersion",
+        )
+    else:
+        ctx.actions.write(
+            output = bundle_version_file,
+            content = json.encode({
+                "build_version": ctx.attr.build_version,
+                "short_version_string": short_version_string,
+            }) + "\n",
+        )
+
+    return [
+        FlutterXtoolVersionInfo(
+            version_file = bundle_version_file,
+            build_version = ctx.attr.build_version if not build_label_pattern else "",
+            short_version_string = short_version_string if not build_label_pattern else "",
+        ),
+        DefaultInfo(files = depset([bundle_version_file])),
+    ]
+
+flutter_xtool_bundle_version = rule(
+    implementation = _flutter_xtool_bundle_version_impl,
+    attrs = {
+        "build_label_pattern": attr.string(default = ""),
+        "build_version": attr.string(mandatory = True),
+        "capture_groups": attr.string_dict(default = {}),
+        "fallback_build_label": attr.string(default = ""),
+        "short_version_string": attr.string(default = ""),
+        "_xtool_pack": attr.label(
+            default = Label("//flutter/private/tools:xtool_pack"),
+            executable = True,
+            cfg = "exec",
+        ),
+    },
+    provides = [FlutterXtoolVersionInfo, DefaultInfo],
+    doc = "Host-agnostic replacement for `apple_bundle_version` on the `xtool` backend.",
+)
+
+def resolve_xtool_version(name, macro_name, version, internal_tags):
+    """Resolves a `version` attribute for `backend = 'xtool'` without triggering Apple toolchains.
+
+    Inspects same-package `apple_bundle_version` targets via `native.existing_rule`
+    and mirrors their attributes into a host-agnostic `flutter_xtool_bundle_version`
+    target so Bazel never resolves `@rules_apple` macOS toolchains on Linux.
+
+    Args:
+        name: Application target name.
+        macro_name: Calling macro name (`"flutter_ios_app"` or `"flutter_macos_app"`).
+        version: The `version` argument passed to the macro.
+        internal_tags: Tags to apply to any synthesized helper target.
+
+    Returns:
+        A 4-tuple `(version_label, build_version, short_version, invalid_version_error)`.
+    """
+    if version == None:
+        return None, "", "", ""
+    if type(version) != "string":
+        return None, "", "", "%s(name = %r): 'version' (%r) is not supported on the xtool backend; expected an 'apple_bundle_version' target or JSON version file label." % (
+            macro_name,
+            name,
+            version,
+        )
+
+    pkg = native.package_name()
+    ver_name = None
+    if version.startswith(":"):
+        ver_name = version[1:]
+    elif "/" not in version and ":" not in version:
+        ver_name = version
+    elif version.startswith("//" + pkg + ":"):
+        ver_name = version.split(":", 1)[1]
+
+    if ver_name != None:
+        existing = native.existing_rule(ver_name)
+        if existing != None:
+            kind = existing.get("kind", "")
+            if kind == "apple_bundle_version" or "build_version" in existing or "short_version_string" in existing:
+                bv = existing.get("build_version") or ""
+                sv = existing.get("short_version_string") or ""
+                blp = existing.get("build_label_pattern") or ""
+                cg = existing.get("capture_groups") or {}
+                fbl = existing.get("fallback_build_label") or ""
+                helper_name = "__%s_xtool_version" % name
+                flutter_xtool_bundle_version(
+                    name = helper_name,
+                    build_version = bv,
+                    short_version_string = sv,
+                    build_label_pattern = blp,
+                    capture_groups = cg,
+                    fallback_build_label = fbl,
+                    tags = internal_tags,
+                    visibility = ["//visibility:private"],
+                )
+                return ":" + helper_name, (bv if not blp else ""), ((sv or bv) if not blp else ""), ""
+            if kind in ("flutter_xtool_bundle_version", "write_file", "_write_file", "genrule", "filegroup"):
+                return version, "", "", ""
+            return None, "", "", "%s(name = %r): 'version' target %r (rule kind %r) is not supported on the xtool backend; pass an 'apple_bundle_version' target, 'flutter_xtool_bundle_version', or a JSON version file." % (
+                macro_name,
+                name,
+                version,
+                kind,
+            )
+
+        if native.glob([ver_name], allow_empty = True):
+            return version, "", "", ""
+        return None, "", "", "%s(name = %r): 'version' target %r does not exist in package '//%s'; pass an 'apple_bundle_version' target or a JSON version file." % (
+            macro_name,
+            name,
+            version,
+            pkg,
+        )
+
+    return None, "", "", "%s(name = %r): cross-package 'version' target %r is not supported on the xtool backend because 'apple_bundle_version' requires a macOS toolchain unless declared in the same package; declare 'apple_bundle_version' in '//%s' or pass `build_version` / `short_version`." % (
+        macro_name,
+        name,
+        version,
+        pkg,
+    )
 
 # -- Transitions & Architecture Helpers ----------------------------------------
 
@@ -75,7 +277,14 @@ _xtool_macos_transition = transition(
 )
 
 def _target_arch(ctx):
-    return apple_support.target_arch_from_rule_ctx(ctx)
+    if ctx.target_platform_has_constraint(
+        ctx.attr._x86_64_constraint[platform_common.ConstraintValueInfo],
+    ):
+        return "x86_64"
+    cpu = ctx.var.get("TARGET_CPU", "")
+    if "x86_64" in cpu or "k8" in cpu:
+        return "x86_64"
+    return "arm64"
 
 # -- flutter_darwin_xcframework_import -----------------------------------------
 
@@ -281,7 +490,11 @@ def _collect_runner_compile_inputs(ctx):
     sources = []
     headers = []
     modulemaps = []
+    sdk_frameworks = []
+    sdk_dylibs = []
     seen = {}
+    seen_sdk_fw = {}
+    seen_sdk_dylib = {}
     transitive_sets = []
 
     def _add_file(f):
@@ -295,6 +508,16 @@ def _collect_runner_compile_inputs(ctx):
         elif f.path.endswith(".modulemap"):
             modulemaps.append(f)
 
+    def _add_sdk_framework(fw):
+        if fw and fw not in seen_sdk_fw:
+            seen_sdk_fw[fw] = True
+            sdk_frameworks.append(fw)
+
+    def _add_sdk_dylib(dylib):
+        if dylib and dylib not in seen_sdk_dylib:
+            seen_sdk_dylib[dylib] = True
+            sdk_dylibs.append(dylib)
+
     for f in ctx.files.srcs:
         _add_file(f)
     for f in ctx.files.registrant:
@@ -303,34 +526,43 @@ def _collect_runner_compile_inputs(ctx):
     for target in ctx.attr.plugins + ctx.attr.deps:
         for f in target[DefaultInfo].files.to_list():
             _add_file(f)
+        if FlutterApplePluginInfo in target:
+            for fw in target[FlutterApplePluginInfo].sdk_frameworks:
+                _add_sdk_framework(fw)
+            for dylib in target[FlutterApplePluginInfo].sdk_dylibs:
+                _add_sdk_dylib(dylib)
         if CcInfo in target:
             cc_hdrs = target[CcInfo].compilation_context.headers
             transitive_sets.append(cc_hdrs)
             for f in cc_hdrs.to_list():
                 _add_file(f)
+            for li in target[CcInfo].linking_context.linker_inputs.to_list():
+                flags = li.user_link_flags
+                for idx in range(len(flags)):
+                    if flags[idx] == "-framework" and idx + 1 < len(flags):
+                        _add_sdk_framework(flags[idx + 1])
+                    elif flags[idx].startswith("-l") and len(flags[idx]) > 2:
+                        _add_sdk_dylib(flags[idx][2:])
 
-    return sources, headers, modulemaps, transitive_sets
+    return sources, headers, modulemaps, sdk_frameworks, sdk_dylibs, transitive_sets
 
-def _validate_resource_file_for_xtool(ctx, file_obj, attr_name):
+def _check_resource_file_for_xtool(ctx, file_obj, attr_name):
     lower = file_obj.short_path.lower()
     segments = lower.split("/")
     for seg in segments:
         if seg.endswith(".storyboard") or seg.endswith(".xib"):
-            fail(
-                "%s: '%s' contains Interface Builder source %r which requires Xcode 'ibtool' to compile into a runtime .storyboardc/.nib bundle, and has no hermetic implementation on the xtool backend." % (
-                    ctx.label,
-                    attr_name,
-                    file_obj.short_path,
-                ),
+            return "%s: '%s' contains Interface Builder source %r which requires Xcode 'ibtool' to compile into a runtime .storyboardc/.nib bundle, and has no hermetic implementation on the xtool backend." % (
+                ctx.label,
+                attr_name,
+                file_obj.short_path,
             )
         if seg.endswith(".xcassets") or seg.endswith(".appiconset") or seg.endswith(".icon"):
-            fail(
-                "%s: '%s' contains uncompiled asset catalog %r which requires Xcode 'actool' to compile into Assets.car/.icns, and has no hermetic implementation on the xtool backend." % (
-                    ctx.label,
-                    attr_name,
-                    file_obj.short_path,
-                ),
+            return "%s: '%s' contains uncompiled asset catalog %r which requires Xcode 'actool' to compile into Assets.car/.icns, and has no hermetic implementation on the xtool backend." % (
+                ctx.label,
+                attr_name,
+                file_obj.short_path,
             )
+    return None
 
 def _run_xtool_pack_bundle(
         ctx,
@@ -348,13 +580,17 @@ def _run_xtool_pack_bundle(
             ),
         )
 
+    if ctx.attr.invalid_version_error:
+        fail(ctx.attr.invalid_version_error)
+
     if ctx.attr.certificate_password:
         fail(
             "%s: plain-text 'certificate_password' is not supported because signing secrets must never appear on action command lines. Use 'certificate_password_file' (a File label) or 'certificate_password_env' (an environment variable name) instead." % ctx.label,
         )
 
+    ib_errors = []
     if hasattr(ctx.file, "launch_storyboard") and ctx.file.launch_storyboard:
-        fail(
+        ib_errors.append(
             "%s: 'launch_storyboard' (%s) is not supported on the xtool backend because compiling .storyboard files requires Xcode 'ibtool', which has no hermetic cross-platform implementation." % (
                 ctx.label,
                 ctx.file.launch_storyboard.short_path,
@@ -362,12 +598,13 @@ def _run_xtool_pack_bundle(
         )
 
     if hasattr(ctx.file, "menu_xib") and ctx.file.menu_xib:
-        fail(
-            "%s: 'menu_xib' (%s) is not supported on the xtool backend because compiling .xib files requires Xcode 'ibtool', which has no hermetic cross-platform implementation." % (
-                ctx.label,
-                ctx.file.menu_xib.short_path,
-            ),
-        )
+        if not ctx.file.menu_xib.short_path.endswith("flutter/private/runners/macos/MainMenu.xib"):
+            ib_errors.append(
+                "%s: 'menu_xib' (%s) is not supported on the xtool backend because compiling .xib files requires Xcode 'ibtool', which has no hermetic cross-platform implementation." % (
+                    ctx.label,
+                    ctx.file.menu_xib.short_path,
+                ),
+            )
 
     if ctx.files.app_icons:
         fail(
@@ -378,7 +615,9 @@ def _run_xtool_pack_bundle(
         )
 
     for res_file in ctx.files.resources:
-        _validate_resource_file_for_xtool(ctx, res_file, "resources")
+        err = _check_resource_file_for_xtool(ctx, res_file, "resources")
+        if err:
+            ib_errors.append(err)
 
     additional_content_pairs = []
     additional_content_files = []
@@ -392,9 +631,14 @@ def _run_xtool_pack_bundle(
                 ),
             )
         for f in target[DefaultInfo].files.to_list():
-            _validate_resource_file_for_xtool(ctx, f, "additional_contents")
+            err = _check_resource_file_for_xtool(ctx, f, "additional_contents")
+            if err:
+                ib_errors.append(err)
             additional_content_pairs.append("%s=%s" % (subdir, f.path))
             additional_content_files.append(f)
+
+    if ib_errors:
+        fail("\n".join(ib_errors))
 
     sdk_available = False
     sdk_transitive = []
@@ -423,7 +667,7 @@ def _run_xtool_pack_bundle(
     executable_file = ctx.file.executable
     if not executable_file:
         executable_file = ctx.actions.declare_file("%s_runner_bin" % ctx.label.name)
-        sources, headers, modulemaps, plugin_transitive_sets = _collect_runner_compile_inputs(ctx)
+        sources, headers, modulemaps, sdk_frameworks, sdk_dylibs, plugin_transitive_sets = _collect_runner_compile_inputs(ctx)
 
         runner_args = ctx.actions.args()
         runner_args.add("compile-runner")
@@ -442,6 +686,10 @@ def _run_xtool_pack_bundle(
             runner_args.add("--modulemap", mm.path)
         for fw_dir in fw_dirs:
             runner_args.add("--framework", fw_dir)
+        for sdk_fw in sdk_frameworks:
+            runner_args.add("--sdk-framework", sdk_fw)
+        for sdk_dylib in sdk_dylibs:
+            runner_args.add("--sdk-dylib", sdk_dylib)
 
         ctx.actions.run(
             executable = ctx.executable._xtool_pack,
@@ -481,9 +729,23 @@ def _run_xtool_pack_bundle(
     if ctx.attr.version:
         version_files = ctx.files.version
         if not version_files:
-            fail("%s: 'version' target %s did not produce a version file." % (ctx.label, ctx.attr.version.label))
-        args.add("--version-file", version_files[0].path)
-        direct_inputs.append(version_files[0])
+            fail(
+                "%s: 'version' target %s did not produce a version file; expected an 'apple_bundle_version' target, 'flutter_xtool_bundle_version', or a JSON file with 'build_version' and 'short_version_string'." % (
+                    ctx.label,
+                    ctx.attr.version.label,
+                ),
+            )
+        vf = version_files[0]
+        if FlutterXtoolVersionInfo not in ctx.attr.version and not (vf.basename.endswith(".json") or vf.basename.endswith(".bundle_version")):
+            fail(
+                "%s: 'version' target %s (%s) is not supported on the xtool backend; expected an 'apple_bundle_version' target, 'flutter_xtool_bundle_version', or a JSON file with 'build_version' and 'short_version_string'." % (
+                    ctx.label,
+                    ctx.attr.version.label,
+                    vf.short_path,
+                ),
+            )
+        args.add("--version-file", vf.path)
+        direct_inputs.append(vf)
 
     if ctx.attr.build_version:
         args.add("--define", "FLUTTER_BUILD_NUMBER=%s" % ctx.attr.build_version)
@@ -592,7 +854,11 @@ _COMMON_BUNDLE_ATTRS = {
     ),
     "version": attr.label(
         allow_files = True,
-        doc = "Optional version target (such as `apple_bundle_version` or a JSON file with `build_version` and `short_version_string`).",
+        doc = "Optional version target (such as `apple_bundle_version`, `flutter_xtool_bundle_version`, or a JSON file with `build_version` and `short_version_string`).",
+    ),
+    "invalid_version_error": attr.string(
+        default = "",
+        doc = "Internal validation error message when `version` references an unsupported target.",
     ),
     "build_version": attr.string(
         default = "",

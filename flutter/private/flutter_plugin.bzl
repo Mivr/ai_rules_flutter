@@ -59,6 +59,20 @@ def _apple_plugin_aspect_impl(target, ctx):
             break
     if not platform:
         return []
+    sdk_frameworks = []
+    sdk_dylibs = []
+    if CcInfo in target:
+        for li in target[CcInfo].linking_context.linker_inputs.to_list():
+            flags = li.user_link_flags
+            for idx in range(len(flags)):
+                if flags[idx] == "-framework" and idx + 1 < len(flags):
+                    fw = flags[idx + 1]
+                    if fw not in sdk_frameworks:
+                        sdk_frameworks.append(fw)
+                elif flags[idx].startswith("-l") and len(flags[idx]) > 2:
+                    dylib = flags[idx][2:]
+                    if dylib not in sdk_dylibs:
+                        sdk_dylibs.append(dylib)
     return [
         FlutterApplePluginInfo(
             module_name = getattr(ctx.rule.attr, "module_name", ""),
@@ -67,8 +81,8 @@ def _apple_plugin_aspect_impl(target, ctx):
             objc_srcs = depset(),
             headers = depset(),
             modulemap = None,
-            sdk_frameworks = [],
-            sdk_dylibs = [],
+            sdk_frameworks = tuple(sdk_frameworks),
+            sdk_dylibs = tuple(sdk_dylibs),
         ),
     ]
 
@@ -156,6 +170,8 @@ def _flutter_plugin_impl(ctx):
             cc_info = lib[CcInfo] if CcInfo in lib else None,
             swift_info = lib[SwiftInfo] if SwiftInfo in lib else None,
             files = lib[DefaultInfo].files,
+            sdk_frameworks = tuple(lib[FlutterApplePluginInfo].sdk_frameworks),
+            sdk_dylibs = tuple(lib[FlutterApplePluginInfo].sdk_dylibs),
             package = package_name,
         ))
     for lib in ctx.attr.macos_libs:
@@ -172,6 +188,8 @@ def _flutter_plugin_impl(ctx):
             cc_info = lib[CcInfo] if CcInfo in lib else None,
             swift_info = lib[SwiftInfo] if SwiftInfo in lib else None,
             files = lib[DefaultInfo].files,
+            sdk_frameworks = tuple(lib[FlutterApplePluginInfo].sdk_frameworks) if FlutterApplePluginInfo in lib else (),
+            sdk_dylibs = tuple(lib[FlutterApplePluginInfo].sdk_dylibs) if FlutterApplePluginInfo in lib else (),
             package = package_name,
         ))
     for lib in ctx.attr.ios_libs:
@@ -188,6 +206,8 @@ def _flutter_plugin_impl(ctx):
             cc_info = lib[CcInfo] if CcInfo in lib else None,
             swift_info = lib[SwiftInfo] if SwiftInfo in lib else None,
             files = lib[DefaultInfo].files,
+            sdk_frameworks = tuple(lib[FlutterApplePluginInfo].sdk_frameworks) if FlutterApplePluginInfo in lib else (),
+            sdk_dylibs = tuple(lib[FlutterApplePluginInfo].sdk_dylibs) if FlutterApplePluginInfo in lib else (),
             package = package_name,
         ))
 

@@ -2388,6 +2388,8 @@ Uint8List generateStubExecutableMachO({
   String arch = 'arm64',
   required String minimumOsVersion,
   List<String> linkedFrameworkNames = const [],
+  List<String> sdkFrameworks = const [],
+  List<String> sdkDylibs = const [],
   List<String> metadataEntries = const [],
 }) {
   final int cpuType;
@@ -2444,6 +2446,16 @@ Uint8List generateStubExecutableMachO({
       _encodeMachORpathCommand('@executable_path/../Frameworks'),
     for (final fw in linkedFrameworkNames)
       _encodeMachOLoadDylibCommand('@rpath/$fw.framework/$fw'),
+    for (final sdkFw in sdkFrameworks)
+      _encodeMachOLoadDylibCommand(
+        platform == 'macos'
+            ? '/System/Library/Frameworks/$sdkFw.framework/Versions/A/$sdkFw'
+            : '/System/Library/Frameworks/$sdkFw.framework/$sdkFw',
+      ),
+    for (final dylib in sdkDylibs)
+      _encodeMachOLoadDylibCommand(
+        '/usr/lib/${dylib.startsWith('lib') ? dylib : 'lib$dylib'}.dylib',
+      ),
   ];
 
   final sizeofcmds = loadCommands.fold<int>(0, (s, c) => s + c.length);
@@ -2580,6 +2592,8 @@ class RunnerCompileConfig {
   final List<String> headerPaths;
   final List<String> modulemapPaths;
   final List<String> frameworkPaths;
+  final List<String> sdkFrameworks;
+  final List<String> sdkDylibs;
   final String outputPath;
 
   const RunnerCompileConfig({
@@ -2595,6 +2609,8 @@ class RunnerCompileConfig {
     this.headerPaths = const [],
     this.modulemapPaths = const [],
     this.frameworkPaths = const [],
+    this.sdkFrameworks = const [],
+    this.sdkDylibs = const [],
     required this.outputPath,
   });
 }
@@ -2639,6 +2655,19 @@ void compileRunner(RunnerCompileConfig config) {
       if (!linkedFrameworkNames.contains(fwName)) {
         linkedFrameworkNames.add(fwName);
       }
+    }
+  }
+
+  final sdkFrameworks = <String>[];
+  for (final sdkFw in config.sdkFrameworks) {
+    if (sdkFw.isNotEmpty && !sdkFrameworks.contains(sdkFw)) {
+      sdkFrameworks.add(sdkFw);
+    }
+  }
+  final sdkDylibs = <String>[];
+  for (final dylib in config.sdkDylibs) {
+    if (dylib.isNotEmpty && !sdkDylibs.contains(dylib)) {
+      sdkDylibs.add(dylib);
     }
   }
 
@@ -2694,6 +2723,13 @@ void compileRunner(RunnerCompileConfig config) {
     for (final fwName in linkedFrameworkNames) {
       swiftcArgs.addAll(['-framework', fwName]);
     }
+    for (final sdkFw in sdkFrameworks) {
+      swiftcArgs.addAll(['-framework', sdkFw]);
+    }
+    for (final dylib in sdkDylibs) {
+      final libArg = dylib.startsWith('lib') ? dylib.substring(3) : dylib;
+      swiftcArgs.add('-l$libArg');
+    }
 
     final seenHeaderDirs = <String>{};
     for (final hdr in config.headerPaths) {
@@ -2740,6 +2776,8 @@ void compileRunner(RunnerCompileConfig config) {
     for (final mm in config.modulemapPaths)
       'modulemap=${Uri.file(mm).pathSegments.where((s) => s.isNotEmpty).last}',
     for (final fw in linkedFrameworkNames) 'framework=$fw',
+    for (final sdkFw in sdkFrameworks) 'sdk_framework=$sdkFw',
+    for (final dylib in sdkDylibs) 'sdk_dylib=$dylib',
   ];
 
   final machoBytes = generateStubExecutableMachO(
@@ -2747,11 +2785,93 @@ void compileRunner(RunnerCompileConfig config) {
     arch: config.arch,
     minimumOsVersion: config.minimumOsVersion,
     linkedFrameworkNames: linkedFrameworkNames,
+    sdkFrameworks: sdkFrameworks,
+    sdkDylibs: sdkDylibs,
     metadataEntries: metadataEntries,
   );
   final outFile = File(config.outputPath);
   outFile.parent.createSync(recursive: true);
   outFile.writeAsBytesSync(machoBytes);
+}
+
+/// Resolves `build_version` and `short_version_string` from a Bazel
+/// `stable-status.txt` `BUILD_EMBED_LABEL` (or [fallbackBuildLabel]) and
+/// [buildLabelPattern] / [captureGroups], writing JSON to [outputPath].
+void resolveBundleVersion({
+  required String buildVersion,
+  String shortVersionString = '',
+  String buildLabelPattern = '',
+  String fallbackBuildLabel = '',
+  Map<String, String> captureGroups = const {},
+  String? stableStatusPath,
+  required String outputPath,
+}) {
+  var resolvedShort = shortVersionString.isNotEmpty
+      ? shortVersionString
+      : buildVersion;
+  var resolvedBuild = buildVersion;
+
+  if (buildLabelPattern.isNotEmpty) {
+    String? embedLabel;
+    if (stableStatusPath != null &&
+        stableStatusPath.isNotEmpty &&
+        File(stableStatusPath).existsSync()) {
+      for (final line in File(stableStatusPath).readAsLinesSync()) {
+        if (line.startsWith('BUILD_EMBED_LABEL ')) {
+          final val = line.substring('BUILD_EMBED_LABEL '.length).trim();
+          if (val.isNotEmpty) {
+            embedLabel = val;
+          }
+          break;
+        }
+      }
+    }
+    if ((embedLabel == null || embedLabel.isEmpty) &&
+        fallbackBuildLabel.isNotEmpty) {
+      embedLabel = fallbackBuildLabel;
+    }
+
+    if (embedLabel != null && embedLabel.isNotEmpty) {
+      final groupNames = <String>[];
+      final regexPattern = buildLabelPattern.replaceAllMapped(
+        RegExp(r'\{([A-Za-z0-9_]+)\}'),
+        (m) {
+          final name = m.group(1)!;
+          final groupRegex = captureGroups[name];
+          if (groupRegex == null) {
+            throw ArgumentError(
+              'Placeholder "{$name}" in build_label_pattern is not present in capture_groups.',
+            );
+          }
+          groupNames.add(name);
+          return '($groupRegex)';
+        },
+      );
+      final match = RegExp('^$regexPattern\$').firstMatch(embedLabel);
+      if (match == null) {
+        throw ArgumentError(
+          'Build label "$embedLabel" did not match build_label_pattern "$buildLabelPattern".',
+        );
+      }
+      final values = <String, String>{};
+      for (var i = 0; i < groupNames.length; i++) {
+        values[groupNames[i]] = match.group(i + 1) ?? '';
+      }
+      String substituteGroups(String template) =>
+          template.replaceAllMapped(RegExp(r'\{([A-Za-z0-9_]+)\}'), (m) {
+            final name = m.group(1)!;
+            return values[name] ?? m.group(0)!;
+          });
+      resolvedBuild = substituteGroups(resolvedBuild);
+      resolvedShort = substituteGroups(resolvedShort);
+    }
+  }
+
+  final outFile = File(outputPath);
+  outFile.parent.createSync(recursive: true);
+  outFile.writeAsStringSync(
+    '${jsonEncode({'build_version': resolvedBuild, 'short_version_string': resolvedShort})}\n',
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -2789,6 +2909,92 @@ Never _usageError(String message) {
   exit(1);
 }
 
+void _runResolveVersionCli(List<String> args) {
+  String buildVersion = '1.0';
+  String shortVersionString = '';
+  String buildLabelPattern = '';
+  String fallbackBuildLabel = '';
+  final captureGroups = <String, String>{};
+  String? stableStatusPath;
+  String? outputPath;
+
+  for (var i = 0; i < args.length; i++) {
+    final arg = args[i];
+    String nextVal() {
+      if (i + 1 >= args.length) {
+        _usageError('Missing value for $arg.');
+      }
+      return args[++i];
+    }
+
+    switch (arg) {
+      case '--control':
+        final controlPath = nextVal();
+        final decoded = jsonDecode(File(controlPath).readAsStringSync());
+        if (decoded is! Map) {
+          _usageError('Control file $controlPath must contain a JSON object.');
+        }
+        buildVersion =
+            (decoded['build_version_pattern'] as String?) ?? buildVersion;
+        shortVersionString =
+            (decoded['short_version_string_pattern'] as String?) ??
+            shortVersionString;
+        buildLabelPattern =
+            (decoded['build_label_pattern'] as String?) ?? buildLabelPattern;
+        fallbackBuildLabel =
+            (decoded['fallback_build_label'] as String?) ?? fallbackBuildLabel;
+        stableStatusPath =
+            (decoded['build_info_path'] as String?) ?? stableStatusPath;
+        final cg = decoded['capture_groups'];
+        if (cg is Map) {
+          for (final entry in cg.entries) {
+            captureGroups[entry.key.toString()] = entry.value.toString();
+          }
+        }
+      case '--build-version':
+        buildVersion = nextVal();
+      case '--short-version-string':
+        shortVersionString = nextVal();
+      case '--build-label-pattern':
+        buildLabelPattern = nextVal();
+      case '--fallback-build-label':
+        fallbackBuildLabel = nextVal();
+      case '--capture-group':
+        final kv = nextVal();
+        final eq = kv.indexOf('=');
+        if (eq == -1) {
+          _usageError('Expected KEY=REGEX for --capture-group, got "$kv".');
+        }
+        captureGroups[kv.substring(0, eq)] = kv.substring(eq + 1);
+      case '--stable-status':
+        stableStatusPath = nextVal();
+      case '--output':
+        outputPath = nextVal();
+      default:
+        _usageError('Unrecognized argument for resolve-version: $arg');
+    }
+  }
+
+  if (outputPath == null) {
+    _usageError('Required flag for resolve-version: --output.');
+  }
+
+  try {
+    resolveBundleVersion(
+      buildVersion: buildVersion,
+      shortVersionString: shortVersionString,
+      buildLabelPattern: buildLabelPattern,
+      fallbackBuildLabel: fallbackBuildLabel,
+      captureGroups: captureGroups,
+      stableStatusPath: stableStatusPath,
+      outputPath: outputPath,
+    );
+  } on Object catch (e) {
+    stderr.writeln('xtool_pack resolve-version failed: $e');
+    exit(1);
+  }
+}
+
 void _runCompileRunnerCli(List<String> args) {
   String? platform;
   String arch = 'arm64';
@@ -2802,6 +3008,8 @@ void _runCompileRunnerCli(List<String> args) {
   final headerPaths = <String>[];
   final modulemapPaths = <String>[];
   final frameworkPaths = <String>[];
+  final sdkFrameworks = <String>[];
+  final sdkDylibs = <String>[];
   String? outputPath;
 
   for (var i = 0; i < args.length; i++) {
@@ -2838,6 +3046,10 @@ void _runCompileRunnerCli(List<String> args) {
         modulemapPaths.add(nextVal());
       case '--framework':
         frameworkPaths.add(nextVal());
+      case '--sdk-framework':
+        sdkFrameworks.add(nextVal());
+      case '--sdk-dylib':
+        sdkDylibs.add(nextVal());
       case '--output':
         outputPath = nextVal();
       default:
@@ -2866,6 +3078,8 @@ void _runCompileRunnerCli(List<String> args) {
         headerPaths: headerPaths,
         modulemapPaths: modulemapPaths,
         frameworkPaths: frameworkPaths,
+        sdkFrameworks: sdkFrameworks,
+        sdkDylibs: sdkDylibs,
         outputPath: outputPath,
       ),
     );
@@ -3014,7 +3228,9 @@ BundleConfig parseBundleCliArgs(List<String> args) {
 
 void main(List<String> args) {
   if (args.isEmpty) {
-    _usageError('Missing subcommand (expected "bundle" or "compile-runner").');
+    _usageError(
+      'Missing subcommand (expected "bundle", "compile-runner", or "resolve-version").',
+    );
   }
 
   final subcommand = args.first;
@@ -3022,9 +3238,13 @@ void main(List<String> args) {
     _runCompileRunnerCli(args.sublist(1));
     return;
   }
+  if (subcommand == 'resolve-version') {
+    _runResolveVersionCli(args.sublist(1));
+    return;
+  }
   if (subcommand != 'bundle') {
     _usageError(
-      'Unknown subcommand "$subcommand" (expected "bundle" or "compile-runner").',
+      'Unknown subcommand "$subcommand" (expected "bundle", "compile-runner", or "resolve-version").',
     );
   }
 

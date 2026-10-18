@@ -68,7 +68,7 @@ load("//flutter/private:flutter_apple_plugins_aggregator.bzl", _flutter_apple_pl
 load("//flutter/private:flutter_macos_application.bzl", _flutter_macos_framework_rule = "flutter_macos_framework", _flutter_macos_native_libs_rule = "flutter_macos_native_libs", _flutter_macos_privacy_manifests_rule = "flutter_macos_privacy_manifests")
 load("//flutter/private:flutter_macos_registrant.bzl", _flutter_macos_registrant_rule = "flutter_macos_registrant")
 load("//flutter/private:flutter_plist_merge.bzl", _flutter_entitlements_merge = "flutter_entitlements_merge", _flutter_plist_merge = "flutter_plist_merge")
-load("//flutter/private:flutter_xtool_bundle.bzl", _flutter_darwin_xcframework_import = "flutter_darwin_xcframework_import", _flutter_xtool_macos_bundle = "flutter_xtool_macos_bundle")
+load("//flutter/private:flutter_xtool_bundle.bzl", _flutter_darwin_xcframework_import = "flutter_darwin_xcframework_import", _flutter_xtool_bundle_version = "flutter_xtool_bundle_version", _flutter_xtool_macos_bundle = "flutter_xtool_macos_bundle", _resolve_xtool_version = "resolve_xtool_version")
 load("//flutter/private:runner_module.bzl", "runner_module_name")
 load("//flutter/private:validation.bzl", "validate_minimum_os_version")
 
@@ -81,8 +81,9 @@ MACOS_MINIMUM_OS_VERSION = _MACOS_MINIMUM_OS_VERSION
 # Tier 2 users assembling a macos_application themselves.
 flutter_entitlements_merge = _flutter_entitlements_merge
 
-# Host-agnostic xtool framework import and macOS bundle rules.
+# Host-agnostic xtool framework import, versioning, and macOS bundle rules.
 flutter_darwin_xcframework_import = _flutter_darwin_xcframework_import
+flutter_xtool_bundle_version = _flutter_xtool_bundle_version
 flutter_xtool_macos_bundle = _flutter_xtool_macos_bundle
 
 def _engine_framework_select():
@@ -646,15 +647,29 @@ def flutter_macos_app(
         )
         actual_info_plist = "__%s_info_plist_icon" % name
 
-    # 8. Version — create default apple_bundle_version if not provided (rules_apple only).
-    if backend == "rules_apple" and not version:
-        apple_bundle_version(
-            name = "__%s_version" % name,
-            build_version = "1.0",
-            short_version_string = "1.0",
-            tags = internal_tags,
+    # 8. Version — create default apple_bundle_version if not provided (rules_apple),
+    #    or resolve/convert apple_bundle_version on xtool without Apple toolchains.
+    invalid_version_error = ""
+    if backend == "rules_apple":
+        if not version:
+            apple_bundle_version(
+                name = "__%s_version" % name,
+                build_version = "1.0",
+                short_version_string = "1.0",
+                tags = internal_tags,
+            )
+            version = ":%s" % ("__%s_version" % name)
+    else:
+        version, version_bv, version_sv, invalid_version_error = _resolve_xtool_version(
+            name,
+            "flutter_macos_app",
+            version,
+            internal_tags,
         )
-        version = ":%s" % ("__%s_version" % name)
+        if version_bv and "build_version" not in kwargs:
+            kwargs["build_version"] = version_bv
+        if version_sv and "short_version" not in kwargs:
+            kwargs["short_version"] = version_sv
 
     # 9. Assemble Flutter additional_contents.
     flutter_contents = {
@@ -716,6 +731,7 @@ def flutter_macos_app(
             bundle_id = bundle_id,
             minimum_os_version = minimum_os_version,
             version = version,
+            invalid_version_error = invalid_version_error,
             additional_contents = additional_contents,
             menu_xib = xtool_menu_xib,
             app_icons = app_icons if app_icons != None else [],

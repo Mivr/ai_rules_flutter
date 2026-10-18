@@ -104,6 +104,16 @@ def _flutter_xtool_apple_plugin_library_impl(ctx):
         for dep in ctx.attr.deps
         if FlutterDarwinFrameworkInfo in dep and not dep.label.name.endswith("__flutter_framework")
     ]
+    sdk_frameworks = list(ctx.attr.sdk_frameworks)
+    sdk_dylibs = list(ctx.attr.sdk_dylibs)
+    for dep in ctx.attr.deps:
+        if FlutterApplePluginInfo in dep:
+            for fw in dep[FlutterApplePluginInfo].sdk_frameworks:
+                if fw not in sdk_frameworks:
+                    sdk_frameworks.append(fw)
+            for dylib in dep[FlutterApplePluginInfo].sdk_dylibs:
+                if dylib not in sdk_dylibs:
+                    sdk_dylibs.append(dylib)
 
     return [
         DefaultInfo(files = depset(all_plugin_files, transitive = dep_framework_files)),
@@ -116,8 +126,8 @@ def _flutter_xtool_apple_plugin_library_impl(ctx):
             objc_srcs = depset(objc_files),
             headers = depset(headers),
             modulemap = modulemap_file,
-            sdk_frameworks = ctx.attr.sdk_frameworks,
-            sdk_dylibs = ctx.attr.sdk_dylibs,
+            sdk_frameworks = tuple(sdk_frameworks),
+            sdk_dylibs = tuple(sdk_dylibs),
         ),
     ]
 

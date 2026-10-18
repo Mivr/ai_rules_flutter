@@ -1016,6 +1016,77 @@ void main() {
         }
       },
     );
+
+    test(
+      'resolves apple_bundle_version placeholders and embeds sdkFrameworks/sdkDylibs in stub executable',
+      () {
+        final buildInfo = File('${tempDir.path}/volatile-status.txt')
+          ..writeAsStringSync(
+            'BUILD_EMBED_LABEL release_2.5.1_b99\nSTABLE_OTHER foo\n',
+          );
+        final outVer1 = '${tempDir.path}/out/ver1.json';
+        resolveBundleVersion(
+          buildVersion: '1.0.{build_number}',
+          shortVersionString: '{major}.{minor}',
+          buildLabelPattern: 'release_{major}.{minor}.{patch}_b{build_number}',
+          captureGroups: {
+            'major': r'\d+',
+            'minor': r'\d+',
+            'patch': r'\d+',
+            'build_number': r'\d+',
+          },
+          stableStatusPath: buildInfo.path,
+          outputPath: outVer1,
+        );
+        final resolved = jsonDecode(
+          File(outVer1).readAsStringSync(),
+        ) as Map<String, dynamic>;
+        expect(resolved['build_version'], equals('1.0.99'));
+        expect(resolved['short_version_string'], equals('2.5'));
+
+        final outVer2 = '${tempDir.path}/out/ver2.json';
+        resolveBundleVersion(
+          buildVersion: '1.0.{build_number}',
+          shortVersionString: '1.0',
+          buildLabelPattern: 'release_{build_number}',
+          captureGroups: {'build_number': r'\d+'},
+          fallbackBuildLabel: 'release_77',
+          outputPath: outVer2,
+        );
+        final fallbackResolved = jsonDecode(
+          File(outVer2).readAsStringSync(),
+        ) as Map<String, dynamic>;
+        expect(fallbackResolved['build_version'], equals('1.0.77'));
+        expect(fallbackResolved['short_version_string'], equals('1.0'));
+
+        final runnerOut = '${tempDir.path}/out/SdkFwRunner';
+        compileRunner(
+          RunnerCompileConfig(
+            platform: 'ios',
+            arch: 'arm64',
+            appName: 'SdkFwRunner',
+            minimumOsVersion: '14.0',
+            sdkAvailable: false,
+            sourcePaths: const [],
+            modulemapPaths: const [],
+            frameworkPaths: const [],
+            sdkFrameworks: const ['AVFoundation', 'CoreBluetooth'],
+            sdkDylibs: const ['sqlite3', 'libz'],
+            outputPath: runnerOut,
+          ),
+        );
+        final runnerText = utf8.decode(
+          File(runnerOut).readAsBytesSync(),
+          allowMalformed: true,
+        );
+        expect(runnerText, contains('sdk_framework=AVFoundation'));
+        expect(runnerText, contains('sdk_framework=CoreBluetooth'));
+        expect(runnerText, contains('sdk_dylib=sqlite3'));
+        expect(runnerText, contains('sdk_dylib=libz'));
+        expect(runnerText, contains('/usr/lib/libsqlite3.dylib'));
+        expect(runnerText, contains('/usr/lib/libz.dylib'));
+      },
+    );
   });
 
   group('ZIP64 support', () {

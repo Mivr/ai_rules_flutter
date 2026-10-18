@@ -158,7 +158,7 @@ def _fake_application_impl(ctx):
                 "macos": {"pluginClass": ctx.attr.plugin_class},
             },
         ))
-    for lib in ctx.attr.apple_libs:
+    for lib in ctx.attr.apple_libs + ctx.attr.apple_plugin_libraries:
         if FlutterApplePluginInfo not in lib:
             fail("fake_application: apple_libs entry %s must provide FlutterApplePluginInfo" % lib.label)
         platform_name = lib[FlutterApplePluginInfo].platform
@@ -168,6 +168,8 @@ def _fake_application_impl(ctx):
             cc_info = lib[CcInfo] if CcInfo in lib else None,
             swift_info = lib[SwiftInfo] if SwiftInfo in lib else None,
             files = lib[DefaultInfo].files,
+            sdk_frameworks = tuple(lib[FlutterApplePluginInfo].sdk_frameworks),
+            sdk_dylibs = tuple(lib[FlutterApplePluginInfo].sdk_dylibs),
             package = ctx.attr.plugin_name or lib.label.name,
         ))
 
@@ -187,6 +189,7 @@ fake_application = rule(
     implementation = _fake_application_impl,
     attrs = {
         "apple_libs": attr.label_list(),
+        "apple_plugin_libraries": attr.label_list(),
         "code_assets": attr.string_list(),
         "debug": attr.bool(default = False),
         "fat_macho": attr.bool(default = False),

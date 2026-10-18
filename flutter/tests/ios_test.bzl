@@ -4,6 +4,7 @@ load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_apple//apple:providers.bzl", "AppleFrameworkImportInfo")
+load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load(
     "//flutter:ios.bzl",
@@ -254,6 +255,7 @@ def _xtool_ios_app_actions_test_impl(ctx):
     )
     runner_actions = [a for a in actions if a.mnemonic == "FlutterXtoolRunner"]
     runner_inputs = [f.short_path for f in runner_actions[0].inputs.to_list()]
+    runner_argv = runner_actions[0].argv
     asserts.true(
         env,
         any([p.endswith("AppDelegate.swift") for p in runner_inputs]),
@@ -268,6 +270,16 @@ def _xtool_ios_app_actions_test_impl(ctx):
         env,
         any([p.endswith(".modulemap") for p in runner_inputs]),
         "Expected plugin .modulemap in FlutterXtoolRunner inputs, got: %s" % runner_inputs,
+    )
+    asserts.true(
+        env,
+        "--sdk-framework" in runner_argv and "AVFoundation" in runner_argv,
+        "Expected --sdk-framework AVFoundation in FlutterXtoolRunner argv, got: %s" % runner_argv,
+    )
+    asserts.true(
+        env,
+        "--sdk-dylib" in runner_argv and "sqlite3" in runner_argv,
+        "Expected --sdk-dylib sqlite3 in FlutterXtoolRunner argv, got: %s" % runner_argv,
     )
     files = tut[DefaultInfo].files.to_list()
     asserts.equals(env, 1, len(files))
@@ -384,12 +396,23 @@ def _bundling_tests(name):
         platform = "ios",
         engine = ":" + name + "_fake_ios_xcframework",
         deps = [":" + name + "_fake_ios_plugin_kit_import"],
+        sdk_frameworks = ["AVFoundation"],
+        sdk_dylibs = ["sqlite3"],
         backend = "xtool",
+        tags = ["manual"],
+    )
+    fake_application(
+        name = name + "_fake_e2e_ios_app",
+        debug = False,
+        macho_aot = True,
+        native_libs = ["libfoo.dylib"],
+        code_assets = ["libbar.dylib"],
+        apple_plugin_libraries = [":" + name + "_sample_ios_plugin_lib"],
         tags = ["manual"],
     )
     flutter_ios_app(
         name = name + "_e2e_ios_app",
-        application = ":" + name + "_fake_release_app",
+        application = ":" + name + "_fake_e2e_ios_app",
         bundle_id = "com.example.e2e.ios",
         minimum_os_version = "15.4",
         srcs = [
@@ -584,6 +607,8 @@ def _bundling_tests(name):
         expected_substrings = [
             "cmd LC_RPATH",
             "@executable_path/Frameworks",
+            "/System/Library/Frameworks/AVFoundation.framework/AVFoundation",
+            "/usr/lib/libsqlite3.dylib",
             "cmd LC_BUILD_VERSION",
             "minos 15.4",
         ],
@@ -730,6 +755,11 @@ def _xtool_ios_attrs_and_secrets_test_impl(ctx):
     )
     asserts.true(
         env,
+        "--version-file" in argv,
+        "Expected --version-file in argv when apple_bundle_version is passed to version: %s" % argv,
+    )
+    asserts.true(
+        env,
         "--additional-content" in argv and any([arg.startswith("PlugIns=") for arg in argv]),
         "Expected --additional-content PlugIns=... in argv: %s" % argv,
     )
@@ -767,6 +797,12 @@ def _xtool_ios_validation_tests(name):
         content = ["super-secret-p12-pass"],
         tags = ["manual"],
     )
+    apple_bundle_version(
+        name = name + "_xtool_custom_ios_version",
+        build_version = "42",
+        short_version_string = "2.5.0",
+        tags = ["manual"],
+    )
 
     before_xtool = native.existing_rules().keys()
     xtool_surface_app = name + "_xtool_attrs_ios_app"
@@ -775,6 +811,7 @@ def _xtool_ios_validation_tests(name):
         application = ":" + name + "_fake_release_app",
         bundle_id = "com.example.xtool.attrs",
         families = ["ipad"],
+        version = ":" + name + "_xtool_custom_ios_version",
         srcs = [
             "@rules_flutter//flutter/private/runners/ios:AppDelegate.swift",
             "@rules_flutter//flutter/private/runners/ios:SceneDelegate.swift",
@@ -832,6 +869,25 @@ def _xtool_ios_validation_tests(name):
         target_under_test = ":" + xtool_surface_app,
     )
 
+    # Invalid version target on xtool
+    flutter_ios_app(
+        name = name + "_xtool_bad_version_ios_app",
+        application = ":" + name + "_fake_release_app",
+        bundle_id = "com.example.badversion",
+        version = ":" + name + "_xtool_extra_plugin",
+        srcs = ["@rules_flutter//flutter/private/runners/ios:AppDelegate.swift"],
+        info_plist = "@rules_flutter//flutter/private/runners/ios:Info.plist",
+        engine = ":" + name + "_fake_ios_xcframework",
+        entitlements = False,
+        backend = "xtool",
+        tags = ["manual"],
+    )
+    _ios_expect_failure_test(
+        name = name + "_xtool_bad_version_fails",
+        target_under_test = ":" + name + "_xtool_bad_version_ios_app",
+        expected_substrings = ["'version'", "apple_bundle_version"],
+    )
+
     # Invalid family
     flutter_ios_app(
         name = name + "_xtool_bad_family_ios_app",
@@ -868,6 +924,25 @@ def _xtool_ios_validation_tests(name):
         name = name + "_xtool_launch_storyboard_fails",
         target_under_test = ":" + name + "_xtool_storyboard_ios_app",
         expected_substrings = ["'launch_storyboard'", "ibtool"],
+    )
+
+    # Main.storyboard in resources on xtool
+    flutter_ios_app(
+        name = name + "_xtool_main_storyboard_ios_app",
+        application = ":" + name + "_fake_release_app",
+        bundle_id = "com.example.mainstoryboard",
+        resources = ["@rules_flutter//flutter/private/runners/ios:Base.lproj/Main.storyboard"],
+        srcs = ["@rules_flutter//flutter/private/runners/ios:AppDelegate.swift"],
+        info_plist = "@rules_flutter//flutter/private/runners/ios:Info.plist",
+        engine = ":" + name + "_fake_ios_xcframework",
+        entitlements = False,
+        backend = "xtool",
+        tags = ["manual"],
+    )
+    _ios_expect_failure_test(
+        name = name + "_xtool_main_storyboard_fails",
+        target_under_test = ":" + name + "_xtool_main_storyboard_ios_app",
+        expected_substrings = ["'resources'", "Main.storyboard", "ibtool"],
     )
 
     # app_icons on xtool
@@ -949,8 +1024,10 @@ def _xtool_ios_validation_tests(name):
     return [
         name + "_xtool_no_rules_apple_surface",
         name + "_xtool_ios_attrs_and_secrets",
+        name + "_xtool_bad_version_fails",
         name + "_xtool_bad_family_fails",
         name + "_xtool_launch_storyboard_fails",
+        name + "_xtool_main_storyboard_fails",
         name + "_xtool_app_icons_fails",
         name + "_xtool_plaintext_pw_fails",
         name + "_xtool_require_sdk_fails",
