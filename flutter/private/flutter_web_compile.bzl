@@ -216,7 +216,8 @@ def flutter_dart2wasm_action(
         defines = [],
         renderer = "skwasm",
         web_compile_tool = None,
-        web_compile_inputs = []):
+        web_compile_inputs = [],
+        stage_salt = ""):
     """Compiles Dart source to WebAssembly using dart2wasm.
 
     Args:
@@ -249,6 +250,7 @@ def flutter_dart2wasm_action(
             `compile wasm` when staging multi-root sources.
         web_compile_inputs: Additional input `File`s required by `web_compile_tool`
             (such as staged generated files or multi-root package configs).
+        stage_salt: Optional salt mixed into the staging directory hash.
     """
     if output_source_map != None and output_source_map.path != output_wasm.path + ".map":
         fail("output_source_map must be declared at <output_wasm>.map " +
@@ -258,7 +260,7 @@ def flutter_dart2wasm_action(
     stage = struct(root = None, files = [])
     if web_compile_tool != None:
         stage_scope = output_wasm.dirname.split("/")[-1] + "." + output_wasm.basename
-        stage = stage_generated_inputs(ctx, [main_dart] + srcs, stage_scope, include_sources = True)
+        stage = stage_generated_inputs(ctx, [main_dart] + srcs, stage_scope, include_sources = True, salt = stage_salt)
 
     args = ctx.actions.args()
     if web_compile_tool != None:
@@ -350,7 +352,8 @@ def flutter_dart2js_action(
         defines = [],
         renderer = "canvaskit",
         web_compile_tool = None,
-        web_compile_inputs = []):
+        web_compile_inputs = [],
+        stage_salt = ""):
     """Compiles Dart source to JavaScript using dart2js.
 
     Output is a tree artifact (directory) because dart2js may produce
@@ -392,10 +395,11 @@ def flutter_dart2js_action(
             `compile js` when staging multi-root sources.
         web_compile_inputs: Additional input `File`s required by `web_compile_tool`
             (such as staged generated files or multi-root package configs).
+        stage_salt: Optional salt mixed into the staging directory hash.
     """
     stage = struct(root = None, files = [])
     if web_compile_tool != None:
-        stage = stage_generated_inputs(ctx, [main_dart] + srcs, output_dir.basename + ".dart2js", include_sources = True)
+        stage = stage_generated_inputs(ctx, [main_dart] + srcs, output_dir.basename + ".dart2js", include_sources = True, salt = stage_salt)
 
     args = ctx.actions.args()
     if web_compile_tool != None:

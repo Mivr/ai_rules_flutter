@@ -170,6 +170,40 @@ Map<String, Set<String>> buildFontFamilyToAssets(List<dynamic> fonts) {
   return result;
 }
 
+/// Merges `const_finder` JSON outputs across one or more compiled kernels into
+/// a map from font family key (`family` or `packages/<pkg>/<family>`) to the
+/// union of used code points, or returns `null` if any kernel reports
+/// non-constant `IconData` locations (disabling icon tree shaking).
+Map<String, Set<int>>? mergeConstFinderCodePoints(
+  Iterable<Map<String, dynamic>> constFinderOutputs,
+) {
+  final merged = <String, Set<int>>{};
+  for (final output in constFinderOutputs) {
+    final nonConst = output['nonConstantLocations'] as List<dynamic>? ?? [];
+    if (nonConst.isNotEmpty) {
+      stderr.writeln(
+        'Warning: ${nonConst.length} non-const IconData instance(s) found. '
+        'Icon tree shaking disabled.',
+      );
+      return null;
+    }
+    for (final instance
+        in output['constantInstances'] as List<dynamic>? ?? []) {
+      final m = instance as Map<String, dynamic>;
+      final family = m['fontFamily'] as String?;
+      final pkg = m['fontPackage'] as String?;
+      final codePoint = m['codePoint'] as int?;
+      if (family != null && codePoint != null) {
+        final key = (pkg == null || pkg.isEmpty)
+            ? family
+            : 'packages/$pkg/$family';
+        merged.putIfAbsent(key, () => <int>{}).add(codePoint);
+      }
+    }
+  }
+  return merged;
+}
+
 /// Run font-subset, piping code points via stdin. Returns true on success.
 Future<bool> _runFontSubset(
   String fontSubsetBin,
@@ -261,61 +295,51 @@ Future<void> main(List<String> args) async {
   if (iconTreeShaking != null && fonts.isNotEmpty) {
     final dart = iconTreeShaking['dart'] as String;
     final constFinder = iconTreeShaking['const_finder'] as String;
-    final kernelDill = iconTreeShaking['kernel_dill'] as String;
+    final rawKernelDills = iconTreeShaking['kernel_dills'] as List<dynamic>?;
+    final kernelDills = rawKernelDills != null
+        ? rawKernelDills.cast<String>()
+        : <String>[
+            if (iconTreeShaking['kernel_dill'] != null)
+              iconTreeShaking['kernel_dill'] as String,
+          ];
 
-    // Step 1: Run const_finder to discover used icon code points.
-    final constFinderResult = Process.runSync(dart, [
-      constFinder,
-      '--kernel-file',
-      kernelDill,
-      '--class-library-uri',
-      'package:flutter/src/widgets/icon_data.dart',
-      '--class-name',
-      'IconData',
-      '--annotation-class-name',
-      '_StaticIconProvider',
-      '--annotation-class-library-uri',
-      'package:flutter/src/widgets/icon_data.dart',
-    ]);
+    if (kernelDills.isNotEmpty) {
+      // Step 1: Run const_finder on each kernel to discover used icon code points.
+      final outputs = <Map<String, dynamic>>[];
+      for (final kernelDill in kernelDills) {
+        final constFinderResult = Process.runSync(dart, [
+          constFinder,
+          '--kernel-file',
+          kernelDill,
+          '--class-library-uri',
+          'package:flutter/src/widgets/icon_data.dart',
+          '--class-name',
+          'IconData',
+          '--annotation-class-name',
+          '_StaticIconProvider',
+          '--annotation-class-library-uri',
+          'package:flutter/src/widgets/icon_data.dart',
+        ]);
 
-    if (constFinderResult.exitCode != 0) {
-      stderr.writeln(
-        'const_finder failed (exit ${constFinderResult.exitCode}):',
-      );
-      stderr.writeln(constFinderResult.stderr);
-      exit(1);
-    }
-
-    final output = json.decode(
-      constFinderResult.stdout as String,
-    ) as Map<String, dynamic>;
-
-    // Check for non-const IconData usage.
-    final nonConst = output['nonConstantLocations'] as List<dynamic>? ?? [];
-    if (nonConst.isNotEmpty) {
-      stderr.writeln(
-        'Warning: ${nonConst.length} non-const IconData instance(s) found. '
-        'Icon tree shaking disabled.',
-      );
-    } else {
-      // Build fontFamily → Set<codePoint> map.
-      usedCodePoints = <String, Set<int>>{};
-      for (final instance
-          in output['constantInstances'] as List<dynamic>? ?? []) {
-        final m = instance as Map<String, dynamic>;
-        final family = m['fontFamily'] as String?;
-        final pkg = m['fontPackage'] as String?;
-        final codePoint = m['codePoint'] as int?;
-        if (family != null && codePoint != null) {
-          final key = (pkg == null || pkg.isEmpty)
-              ? family
-              : 'packages/$pkg/$family';
-          usedCodePoints.putIfAbsent(key, () => <int>{}).add(codePoint);
+        if (constFinderResult.exitCode != 0) {
+          stderr.writeln(
+            'const_finder failed (exit ${constFinderResult.exitCode}):',
+          );
+          stderr.writeln(constFinderResult.stderr);
+          exit(1);
         }
+
+        outputs.add(
+          json.decode(constFinderResult.stdout as String)
+              as Map<String, dynamic>,
+        );
       }
 
-      // Build fontFamily → Set<asset> map from FontManifest.
-      fontFamilyToAssets = buildFontFamilyToAssets(fonts);
+      usedCodePoints = mergeConstFinderCodePoints(outputs);
+      if (usedCodePoints != null) {
+        // Build fontFamily → Set<asset> map from FontManifest.
+        fontFamilyToAssets = buildFontFamilyToAssets(fonts);
+      }
     }
   }
 
@@ -344,7 +368,10 @@ Future<void> main(List<String> args) async {
         final codePoints = usedCodePoints[matchedFamily];
         if (codePoints != null && codePoints.isNotEmpty) {
           // Run font-subset: code points are piped via stdin.
-          final codePointStr = codePoints.map((cp) => cp.toString()).join(' ');
+          final sortedCodePoints = codePoints.toList()..sort();
+          final codePointStr = sortedCodePoints
+              .map((cp) => cp.toString())
+              .join(' ');
           final success = await _runFontSubset(
             fontSubsetBin,
             dest,

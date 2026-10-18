@@ -75,7 +75,7 @@ load(
     "web_mode_defines",
     "web_renderer_defines",
 )
-load("//flutter/private:plugin_registrant.bzl", "generate_dart_plugin_registrant")
+load("//flutter/private:plugin_registrant.bzl", "generate_dart_plugin_registrant", "make_registrant_content")
 load(
     "//flutter/private:validation.bzl",
     "escape_html",
@@ -470,6 +470,8 @@ def _flutter_web_bundle_impl(ctx):
     if registrant:
         extra_wrapper_srcs.append(registrant)
     all_srcs = all_srcs + extra_wrapper_srcs
+    registrant_key = make_registrant_content(plugins, target_platform = "web")
+    entrypoint_salt = wrapper_content + "\n" + registrant_key
 
     # Step 2: Compile to WASM (with JS fallback) or JS only.
     # dart2js outputs to a tree artifact (directory) to support deferred loading:
@@ -536,6 +538,7 @@ def _flutter_web_bundle_impl(ctx):
             renderer = renderer,
             web_compile_tool = ctx.executable._web_template_tool,
             web_compile_inputs = web_compile_inputs,
+            stage_salt = entrypoint_salt,
         )
 
         # Fallback: dart2js (always canvaskit renderer) — tree artifact for deferred loading
@@ -562,6 +565,7 @@ def _flutter_web_bundle_impl(ctx):
             renderer = "canvaskit",
             web_compile_tool = ctx.executable._web_template_tool,
             web_compile_inputs = web_compile_inputs,
+            stage_salt = entrypoint_salt,
         )
         compile_outputs = [output_wasm, output_mjs]
         compile_copies = [
@@ -598,6 +602,7 @@ def _flutter_web_bundle_impl(ctx):
             renderer = renderer,
             web_compile_tool = ctx.executable._web_template_tool,
             web_compile_inputs = web_compile_inputs,
+            stage_salt = entrypoint_salt,
         )
         dart2js_dirs = [output_js_dir]
         builds = [_JS_BUILD]
@@ -621,7 +626,14 @@ def _flutter_web_bundle_impl(ctx):
         flutter_sdk_info.platform_kernel_dill if is_profile and flutter_sdk_info.platform_kernel_dill != None else flutter_sdk_info.platform_kernel_dill_product
     )
     has_experiment_kernel = bool(ctx.attr.enable_experiments) and icon_platform_dill != None
-    kernel_dill = None
+
+    shipped_renderers = []
+    for b in builds:
+        if b["renderer"] not in shipped_renderers:
+            shipped_renderers.append(b["renderer"])
+
+    kernel_dills = []
+    tree_shake_key_parts = []
     if ctx.attr.tree_shake_icons and not is_debug and (has_font_tree_shake or has_experiment_kernel):
         if icon_platform_dill == None:
             fail(
@@ -633,51 +645,12 @@ def _flutter_web_bundle_impl(ctx):
                 "MODULE.bazel or `register_toolchains(\"@flutter_toolchains//:all\")`) " +
                 "or set `platform_kernel_dill_product` on `flutter_toolchain`.",
             )
-        kernel_dill = ctx.actions.declare_file(ctx.label.name + "_icon_tree_shaking.dill")
         main_pkg_uri = app_main_package_uri(
             ctx.attr.package_name,
             lib_root,
             ctx.file.main.short_path,
         )
         entrypoint_uri = app_scheme_location(entrypoint).uri
-        renderer_defines = web_renderer_defines(renderer)
-        from_dill = None
-
-        # `fastbuild` web builds pre-link modular `.flutter_product.kmod` modules
-        # compiled with `-Ddart.vm.product=true` and default skwasm renderer
-        # defines against the product platform dill so `kReleaseMode` and
-        # renderer defines fold identically in both dependency modules and the
-        # entry module, matching the release web bundle that ships.
-        if (not is_opt and
-            not is_profile and
-            not ctx.attr.enable_experiments and
-            not user_defines and
-            registrant == None and
-            renderer == "skwasm" and
-            main_pkg_uri != None and
-            flutter_sdk_info.platform_kernel_dill_product != None):
-            own_files = [ctx.file.main] + [f for f in ctx.files.srcs if f != ctx.file.main]
-            modular_tools = flutter_modular_test_tools(
-                ctx,
-                flutter_sdk_info,
-                own_files,
-                packages,
-                [],
-                product = True,
-            )
-            if modular_tools != None:
-                from_dill = ctx.actions.declare_file(ctx.label.name + "_icon_tree_shaking.modular.dill")
-                compile_flutter_modular_web_kernel(
-                    ctx,
-                    flutter_sdk_info,
-                    modular_tools,
-                    lib_root,
-                    packages,
-                    from_dill,
-                    entrypoint = entrypoint,
-                    ui_web_stub = ui_web_stub,
-                    renderer_defines = renderer_defines,
-                )
 
         icon_config_file = config_file
         icon_srcs = all_srcs
@@ -704,33 +677,90 @@ def _flutter_web_bundle_impl(ctx):
                 ),
             )
 
-        flutter_kernel_compile_action(
-            ctx = ctx,
-            dartaotruntime = flutter_sdk_info.dartaotruntime,
-            kernel_filter_tool = ctx.executable._kernel_filter_tool,
-            frontend_server = flutter_sdk_info.frontend_server,
-            platform_dill = icon_platform_dill,
-            main = entrypoint,
-            entrypoint_uri = entrypoint_uri,
-            srcs = icon_srcs,
-            package_config = icon_config_file,
-            output = kernel_dill,
-            aot = True,
-            # Mode-derived and renderer-derived so icon tree-shaking compiles
-            # the same entrypoint, plugin registrant, and defines as the shipped
-            # web program.
-            defines = list(user_defines) + web_mode_defines(mode) + renderer_defines,
-            # The experiments have to reach this compile too: they change how
-            # the source *parses*, so a release build of experiment-using code
-            # would die here — in an icon-shaking step the user never asked
-            # for — while both real compilers accepted it.
-            extra_flags = web_experiment_flags(ctx.attr.enable_experiments),
-            from_dill = from_dill,
-            stage_all = True,
-        )
+        icon_renderers = shipped_renderers if has_font_tree_shake else [renderer]
+        for idx, r in enumerate(icon_renderers):
+            dill_suffix = "_icon_tree_shaking.dill" if idx == 0 else ("_icon_tree_shaking_%s.dill" % r)
+            dill_out = ctx.actions.declare_file(ctx.label.name + dill_suffix)
+            renderer_defines = web_renderer_defines(r)
+            from_dill = None
+
+            # `fastbuild` web builds pre-link modular `.flutter_product.kmod` modules
+            # compiled with `-Ddart.vm.product=true` and default skwasm renderer
+            # defines against the product platform dill so `kReleaseMode` and
+            # renderer defines fold identically in both dependency modules and the
+            # entry module, matching the release web bundle that ships.
+            if (not is_opt and
+                not is_profile and
+                not ctx.attr.enable_experiments and
+                not user_defines and
+                registrant == None and
+                r == "skwasm" and
+                main_pkg_uri != None and
+                flutter_sdk_info.platform_kernel_dill_product != None):
+                own_files = [ctx.file.main] + [f for f in ctx.files.srcs if f != ctx.file.main]
+                modular_tools = flutter_modular_test_tools(
+                    ctx,
+                    flutter_sdk_info,
+                    own_files,
+                    packages,
+                    [],
+                    product = True,
+                )
+                if modular_tools != None:
+                    from_dill = ctx.actions.declare_file(ctx.label.name + "_icon_tree_shaking.modular.dill")
+                    compile_flutter_modular_web_kernel(
+                        ctx,
+                        flutter_sdk_info,
+                        modular_tools,
+                        lib_root,
+                        packages,
+                        from_dill,
+                        entrypoint = entrypoint,
+                        ui_web_stub = ui_web_stub,
+                        renderer_defines = renderer_defines,
+                    )
+
+            r_defines = list(user_defines) + web_mode_defines(mode) + renderer_defines
+            r_salt = entrypoint_salt + "\n" + "\n".join(r_defines) + "\n" + "\n".join(ctx.attr.enable_experiments)
+            flutter_kernel_compile_action(
+                ctx = ctx,
+                dartaotruntime = flutter_sdk_info.dartaotruntime,
+                kernel_filter_tool = ctx.executable._kernel_filter_tool,
+                frontend_server = flutter_sdk_info.frontend_server,
+                platform_dill = icon_platform_dill,
+                main = entrypoint,
+                entrypoint_uri = entrypoint_uri,
+                srcs = icon_srcs,
+                package_config = icon_config_file,
+                output = dill_out,
+                aot = True,
+                # Mode-derived and renderer-derived so icon tree-shaking compiles
+                # the same entrypoint, plugin registrant, and defines as each
+                # shipped web program.
+                defines = r_defines,
+                # The experiments have to reach this compile too: they change how
+                # the source *parses*, so a release build of experiment-using code
+                # would die here — in an icon-shaking step the user never asked
+                # for — while both real compilers accepted it.
+                extra_flags = web_experiment_flags(ctx.attr.enable_experiments),
+                from_dill = from_dill,
+                stage_all = True,
+                stage_salt = r_salt,
+            )
+            kernel_dills.append(dill_out)
+            tree_shake_key_parts.append(r + ":" + r_salt)
 
     flutter_assets = declare_flutter_assets_dir(ctx)
-    flutter_build_assets(ctx, flutter_sdk_info, flutter_assets, compiled_shaders, kernel_dill = kernel_dill, is_debug = is_debug)
+    flutter_build_assets(
+        ctx,
+        flutter_sdk_info,
+        flutter_assets,
+        compiled_shaders,
+        kernel_dill = kernel_dills[0] if kernel_dills else None,
+        kernel_dills = kernel_dills,
+        tree_shake_key = "\n---\n".join(tree_shake_key_parts),
+        is_debug = is_debug,
+    )
 
     # Step 4: Pick the index.html and flutter_bootstrap.js *templates*.
     #

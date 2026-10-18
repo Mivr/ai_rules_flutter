@@ -957,7 +957,7 @@ _experiments_test = analysistest.make(
 )
 
 def _font_icon_tree_shake_test_impl(ctx):
-    """A fastbuild web build links product modular `.flutter_product.kmod` modules for icon tree-shaking."""
+    """A fastbuild web build links product modular `.flutter_product.kmod` modules for skwasm and compiles canvaskit fallback for icon tree-shaking."""
     env = analysistest.begin(ctx)
     entry_kernel = _action(env, "DartKernel")
     _assert_argv(
@@ -1007,20 +1007,50 @@ def _font_icon_tree_shake_test_impl(ctx):
         "fastbuild web icon DartKernelLink must link .flutter_product.kmod modules: %s" % link_inputs,
     )
 
-    kernel_action = _action(env, "FlutterKernelCompile")
-    _assert_argv(
-        env,
-        kernel_action,
-        present = [
-            "-Ddart.vm.product=true",
-            "-DFLUTTER_WEB_USE_SKIA=false",
-            "-DFLUTTER_WEB_USE_SKWASM=true",
-            "--from-dill",
-            "--no-embed-source-text",
-            "org-dartlang-app:///flutter/tests/_web_font_fixture_wrapper_main.dart",
-        ],
-        absent_substrings = ["/flutter_patched_sdk/platform_strong.dill"],
-    )
+    kernels = [
+        a
+        for a in analysistest.target_actions(env)
+        if a.mnemonic == "FlutterKernelCompile"
+    ]
+    asserts.equals(env, 2, len(kernels), "expected skwasm and canvaskit fallback icon tree-shake kernel compiles")
+    if len(kernels) == 2:
+        _assert_argv(
+            env,
+            kernels[0],
+            present = [
+                "-Ddart.vm.product=true",
+                "-DFLUTTER_WEB_USE_SKIA=false",
+                "-DFLUTTER_WEB_USE_SKWASM=true",
+                "--from-dill",
+                "--no-embed-source-text",
+                "org-dartlang-app:///flutter/tests/_web_font_fixture_wrapper_main.dart",
+            ],
+            absent_substrings = ["/flutter_patched_sdk/platform_strong.dill"],
+        )
+        _assert_argv(
+            env,
+            kernels[1],
+            present = [
+                "-Ddart.vm.product=true",
+                "-DFLUTTER_WEB_USE_SKIA=true",
+                "-DFLUTTER_WEB_USE_SKWASM=false",
+                "--no-embed-source-text",
+                "org-dartlang-app:///flutter/tests/_web_font_fixture_wrapper_main.dart",
+            ],
+            absent_substrings = [
+                "--from-dill",
+                "/flutter_patched_sdk/platform_strong.dill",
+            ],
+        )
+
+    asset_cfg = written_json(env, ".asset_bundle_config.json")
+    if asset_cfg != None:
+        asserts.equals(
+            env,
+            2,
+            len(asset_cfg["icon_tree_shaking"]["kernel_dills"]),
+            "expected both skwasm and canvaskit dills in icon_tree_shaking.kernel_dills",
+        )
     return analysistest.end(env)
 
 _font_icon_tree_shake_test = analysistest.make(
@@ -1032,7 +1062,7 @@ _font_icon_tree_shake_test = analysistest.make(
 )
 
 def _font_icon_tree_shake_opt_test_impl(ctx):
-    """An `-c opt` web build compiles the icon tree-shaking dill from source so `kReleaseMode` folds to `true`."""
+    """An `-c opt` web build compiles both shipped renderers' icon tree-shaking dills from source so `kReleaseMode` folds to `true`."""
     env = analysistest.begin(ctx)
     asserts.equals(
         env,
@@ -1040,19 +1070,37 @@ def _font_icon_tree_shake_opt_test_impl(ctx):
         [a for a in analysistest.target_actions(env) if a.mnemonic == "DartKernelLink"],
         "an -c opt web build must not link a debug modular dill for icon tree-shaking",
     )
-    kernel_action = _action(env, "FlutterKernelCompile")
-    _assert_argv(
-        env,
-        kernel_action,
-        present = [
-            "-Ddart.vm.product=true",
-            "-DFLUTTER_WEB_USE_SKIA=false",
-            "-DFLUTTER_WEB_USE_SKWASM=true",
-            "--no-embed-source-text",
-            "org-dartlang-app:///flutter/tests/_web_font_fixture_wrapper_main.dart",
-        ],
-        absent_substrings = ["--from-dill"],
-    )
+    kernels = [
+        a
+        for a in analysistest.target_actions(env)
+        if a.mnemonic == "FlutterKernelCompile"
+    ]
+    asserts.equals(env, 2, len(kernels), "expected skwasm and canvaskit fallback icon tree-shake kernel compiles")
+    if len(kernels) == 2:
+        _assert_argv(
+            env,
+            kernels[0],
+            present = [
+                "-Ddart.vm.product=true",
+                "-DFLUTTER_WEB_USE_SKIA=false",
+                "-DFLUTTER_WEB_USE_SKWASM=true",
+                "--no-embed-source-text",
+                "org-dartlang-app:///flutter/tests/_web_font_fixture_wrapper_main.dart",
+            ],
+            absent_substrings = ["--from-dill"],
+        )
+        _assert_argv(
+            env,
+            kernels[1],
+            present = [
+                "-Ddart.vm.product=true",
+                "-DFLUTTER_WEB_USE_SKIA=true",
+                "-DFLUTTER_WEB_USE_SKWASM=false",
+                "--no-embed-source-text",
+                "org-dartlang-app:///flutter/tests/_web_font_fixture_wrapper_main.dart",
+            ],
+            absent_substrings = ["--from-dill"],
+        )
     return analysistest.end(env)
 
 _font_icon_tree_shake_opt_test = analysistest.make(

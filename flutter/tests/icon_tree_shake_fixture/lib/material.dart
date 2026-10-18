@@ -17,4 +17,5 @@ abstract final class Icons {
   static const IconData b = IconData(0xe567, fontFamily: 'MaterialIcons');
   static const IconData c = IconData(0xe145, fontFamily: 'MaterialIcons');
   static const IconData d = IconData(0xe88a, fontFamily: 'MaterialIcons');
+  static const IconData e = IconData(0xe5cd, fontFamily: 'MaterialIcons');
 }

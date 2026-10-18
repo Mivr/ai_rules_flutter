@@ -65,7 +65,7 @@ def app_scheme_location(file):
     root = file.path[:len(file.path) - len(rel)].rstrip("/")
     return struct(uri = "%s:///%s" % (APP_SCHEME, rel), root = root)
 
-def stage_generated_inputs(ctx, files, scope, include_sources = False):
+def stage_generated_inputs(ctx, files, scope, include_sources = False, salt = ""):
     """Stages declared `files` into a per-action multi-root directory.
 
     Instead of mounting `ctx.bin_dir.path` (which leaks stale generated outputs
@@ -85,6 +85,9 @@ def stage_generated_inputs(ctx, files, scope, include_sources = False):
         scope: Action-unique prefix (e.g. `output.basename`) for the staging
             directory under the current package.
         include_sources: If True, stage source files as well as generated files.
+        salt: Optional string mixed into the staging directory hash when
+            `include_sources = True` so changes to generated wrapper/registrant
+            contents or compilation defines produce a distinct staging root.
 
     Returns:
         `struct(root, files)` where `root` is the exec-root-relative staging
@@ -116,7 +119,10 @@ def stage_generated_inputs(ctx, files, scope, include_sources = False):
             seen[rel] = f
         if not seen:
             return struct(root = None, files = [])
-        manifest_hash = hash("\n".join(sorted(seen.keys()))) & 0xffffffff
+        manifest_items = sorted(seen.keys())
+        if salt:
+            manifest_items = manifest_items + [salt]
+        manifest_hash = hash("\n".join(manifest_items)) & 0xffffffff
         stage_prefix = "%s.%x.stage" % (scope, manifest_hash)
         for rel, f in seen.items():
             link = ctx.actions.declare_file(stage_prefix + "/" + rel)

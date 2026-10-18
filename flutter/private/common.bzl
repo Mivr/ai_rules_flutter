@@ -775,7 +775,7 @@ def declare_flutter_assets_dir(ctx):
     """
     return ctx.actions.declare_directory(ctx.label.name + "_flutter_assets")
 
-def flutter_build_assets(ctx, flutter_sdk_info, output_dir, compiled_shaders = {}, kernel_dill = None, is_debug = False, data_assets = None):
+def flutter_build_assets(ctx, flutter_sdk_info, output_dir, compiled_shaders = {}, kernel_dill = None, kernel_dills = [], tree_shake_key = "", is_debug = False, data_assets = None):
     """Run the shared asset bundling step.
 
     Walks `FlutterInfo.pub_fonts` / `pub_assets` from deps to bundle
@@ -791,6 +791,10 @@ def flutter_build_assets(ctx, flutter_sdk_info, output_dir, compiled_shaders = {
             the kernel compile that this action depends on.
         compiled_shaders: Dict mapping bundle dest path → compiled shader File.
         kernel_dill: The compiled kernel .dill File (needed for icon tree shaking).
+        kernel_dills: Optional list of compiled kernel .dill Files when a bundle
+            ships multiple programs with distinct defines (e.g. WASM + JS fallback).
+        tree_shake_key: Optional configuration fingerprint for the shipped
+            programs whose icons are tree-shaken.
         is_debug: Whether this is a debug build (icon tree shaking is skipped in debug).
         data_assets: Optional depset[FlutterDataAssetInfo]. Each entry is
             placed at `flutter_assets/packages/<package>/<name>` and listed in
@@ -823,8 +827,9 @@ def flutter_build_assets(ctx, flutter_sdk_info, output_dir, compiled_shaders = {
     license_files = ctx.files.license_files
 
     const_finder, font_subset = resolve_font_subset_tools(flutter_sdk_info) if fonts else (None, None)
+    all_kernel_dills = list(kernel_dills) if kernel_dills else ([kernel_dill] if kernel_dill != None else [])
 
-    if ctx.attr.tree_shake_icons and bool(fonts) and not is_debug and kernel_dill != None and (const_finder == None or font_subset == None):
+    if ctx.attr.tree_shake_icons and bool(fonts) and not is_debug and bool(all_kernel_dills) and (const_finder == None or font_subset == None):
         fail(
             "%s: icon tree shaking is enabled (`tree_shake_icons = True`) and the target bundles fonts, " % ctx.label +
             "but `const_finder` or `font_subset` (`font-subset`) is not available in the Flutter toolchain " +
@@ -837,7 +842,7 @@ def flutter_build_assets(ctx, flutter_sdk_info, output_dir, compiled_shaders = {
         ctx.attr.tree_shake_icons and
         bool(fonts) and
         not is_debug and
-        kernel_dill != None and
+        bool(all_kernel_dills) and
         const_finder != None and
         font_subset != None
     )
@@ -856,7 +861,9 @@ def flutter_build_assets(ctx, flutter_sdk_info, output_dir, compiled_shaders = {
         output_dir = output_dir,
         const_finder = const_finder if tree_shake_icons else None,
         font_subset = font_subset if tree_shake_icons else None,
-        kernel_dill = kernel_dill if tree_shake_icons else None,
+        kernel_dill = all_kernel_dills[0] if tree_shake_icons else None,
+        kernel_dills = all_kernel_dills if tree_shake_icons else [],
+        tree_shake_key = tree_shake_key if tree_shake_icons else "",
         extra_asset_copies = extra_asset_copies,
     )
 

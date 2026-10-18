@@ -325,5 +325,110 @@ cat > "\$out"
         );
       },
     );
+
+    test(
+      'merges code points across multiple kernel_dills for multi-renderer web bundles',
+      () async {
+        final materialFont = File('${tempDir.path}/MaterialIcons-Regular.otf')
+          ..writeAsBytesSync(List<int>.filled(1024, 0x4d));
+
+        final fakeConstFinder = File('${tempDir.path}/fake_const_finder.dart')
+          ..writeAsStringSync('''
+import 'dart:convert';
+void main(List<String> args) {
+  final idx = args.indexOf('--kernel-file');
+  final dill = idx >= 0 && idx + 1 < args.length ? args[idx + 1] : '';
+  if (dill.endsWith('skwasm.dill')) {
+    print(json.encode({
+      'constantInstances': [
+        {'fontFamily': 'MaterialIcons', 'fontPackage': null, 'codePoint': 0xe047},
+        {'fontFamily': 'MaterialIcons', 'fontPackage': null, 'codePoint': 0xe567},
+      ],
+      'nonConstantLocations': [],
+    }));
+  } else {
+    print(json.encode({
+      'constantInstances': [
+        {'fontFamily': 'MaterialIcons', 'fontPackage': null, 'codePoint': 0xe047},
+        {'fontFamily': 'MaterialIcons', 'fontPackage': null, 'codePoint': 0xe145},
+      ],
+      'nonConstantLocations': [],
+    }));
+  }
+}
+''');
+
+        final fakeFontSubset = File('${tempDir.path}/fake_font_subset.sh')
+          ..writeAsStringSync('''#!/bin/sh
+out="\$1"
+cat > "\$out"
+''');
+        Process.runSync('chmod', ['+x', fakeFontSubset.path]);
+
+        final configFile = File('${tempDir.path}/config.json')
+          ..writeAsStringSync(
+            json.encode({
+              'assets': <String, Object>{},
+              'fonts': [
+                {
+                  'family': 'MaterialIcons',
+                  'fonts': [
+                    {'asset': 'fonts/MaterialIcons-Regular.otf'},
+                  ],
+                },
+              ],
+              'copies': {'fonts/MaterialIcons-Regular.otf': materialFont.path},
+              'icon_tree_shaking': {
+                'dart': Platform.resolvedExecutable,
+                'const_finder': fakeConstFinder.path,
+                'font_subset': fakeFontSubset.path,
+                'kernel_dill': '${tempDir.path}/skwasm.dill',
+                'kernel_dills': [
+                  '${tempDir.path}/skwasm.dill',
+                  '${tempDir.path}/canvaskit.dill',
+                ],
+              },
+            }),
+          );
+
+        final outDir = '${tempDir.path}/out';
+        await manifest.main([
+          '--config',
+          configFile.path,
+          '--output-dir',
+          outDir,
+        ]);
+
+        expect(
+          File('$outDir/fonts/MaterialIcons-Regular.otf')
+              .readAsStringSync()
+              .trim(),
+          equals('${0xe047} ${0xe145} ${0xe567}'),
+        );
+
+        // If any kernel reports nonConstantLocations, tree shaking is disabled.
+        expect(
+          manifest.mergeConstFinderCodePoints([
+            {
+              'constantInstances': [
+                {
+                  'fontFamily': 'MaterialIcons',
+                  'fontPackage': null,
+                  'codePoint': 0xe047,
+                },
+              ],
+              'nonConstantLocations': <Object>[],
+            },
+            {
+              'constantInstances': <Object>[],
+              'nonConstantLocations': [
+                {'file': 'main.dart', 'line': 10},
+              ],
+            },
+          ]),
+          isNull,
+        );
+      },
+    );
   });
 }

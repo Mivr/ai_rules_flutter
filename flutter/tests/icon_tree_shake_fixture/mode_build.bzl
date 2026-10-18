@@ -5,34 +5,39 @@ load("//flutter/private:flutter_info.bzl", "flutter_info")
 load("//flutter/private:flutter_library.bzl", "build_pub_contributions")
 
 _PROFILE_FLAG = str(Label("//flutter:profile"))
+_EXTRA_DART_DEFINES_FLAG = str(Label("//flutter:extra_dart_defines"))
 
-def _fastbuild_transition_impl(_settings, _attr):
+def _fastbuild_transition_impl(settings, attr):
     return {
         "//command_line_option:compilation_mode": "fastbuild",
         _PROFILE_FLAG: False,
+        _EXTRA_DART_DEFINES_FLAG: attr.extra_dart_defines if attr.extra_dart_defines else settings[_EXTRA_DART_DEFINES_FLAG],
     }
 
 _fastbuild_transition = transition(
     implementation = _fastbuild_transition_impl,
-    inputs = [],
+    inputs = [_EXTRA_DART_DEFINES_FLAG],
     outputs = [
         "//command_line_option:compilation_mode",
         _PROFILE_FLAG,
+        _EXTRA_DART_DEFINES_FLAG,
     ],
 )
 
-def _opt_transition_impl(_settings, _attr):
+def _opt_transition_impl(settings, attr):
     return {
         "//command_line_option:compilation_mode": "opt",
         _PROFILE_FLAG: False,
+        _EXTRA_DART_DEFINES_FLAG: attr.extra_dart_defines if attr.extra_dart_defines else settings[_EXTRA_DART_DEFINES_FLAG],
     }
 
 _opt_transition = transition(
     implementation = _opt_transition_impl,
-    inputs = [],
+    inputs = [_EXTRA_DART_DEFINES_FLAG],
     outputs = [
         "//command_line_option:compilation_mode",
         _PROFILE_FLAG,
+        _EXTRA_DART_DEFINES_FLAG,
     ],
 )
 
@@ -46,6 +51,7 @@ fastbuild_build = rule(
     implementation = _forward_files_impl,
     doc = "Forwards the files of `targets`, built with `-c fastbuild`.",
     attrs = {
+        "extra_dart_defines": attr.string_list(default = []),
         "targets": attr.label_list(
             cfg = _fastbuild_transition,
             mandatory = True,
@@ -57,6 +63,7 @@ opt_build = rule(
     implementation = _forward_files_impl,
     doc = "Forwards the files of `targets`, built with `-c opt`.",
     attrs = {
+        "extra_dart_defines": attr.string_list(default = []),
         "targets": attr.label_list(
             cfg = _opt_transition,
             mandatory = True,

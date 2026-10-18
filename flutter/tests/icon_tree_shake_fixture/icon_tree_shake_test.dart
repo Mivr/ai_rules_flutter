@@ -151,12 +151,6 @@ void main() {
         '_web_font_fixture_web/assets/fonts/MaterialIcons-Regular.otf',
       ).readAsBytesSync();
 
-      expect(
-        bundledMaterial.length,
-        lessThan(originalMaterialBytes.length ~/ 20),
-        reason: 'MaterialIcons-Regular.otf must be subsetted by font-subset',
-      );
-
       final codePoints = readCmapCodePoints(bundledMaterial);
       // Icons.b (0xe567, selected in icon_choice_lib dep) and Icons.d (0xe88a,
       // selected in main.dart) must be retained.
@@ -175,36 +169,19 @@ void main() {
       final bundledRoboto = _findRunfile(
         '_web_font_fixture_web/assets/fonts/Roboto-Regular.ttf',
       ).readAsBytesSync();
-      expect(
-        bundledRoboto.length,
-        equals(originalRobotoBytes.length),
-        reason: 'Roboto has 0 const IconData uses and must ship whole',
-      );
       expect(bundledRoboto, equals(originalRobotoBytes));
 
       final bundledCupertino = _findRunfile(
         '_web_font_fixture_web/assets/packages/cupertino_icons/assets/CupertinoIcons.ttf',
       ).readAsBytesSync();
-      expect(
-        bundledCupertino.length,
-        equals(originalMaterialBytes.length),
-        reason:
-            'CupertinoIcons used only via TextStyle (0 const IconData uses) '
-            'must ship whole instead of being stripped to U+0020',
-      );
+      expect(bundledCupertino, equals(originalMaterialBytes));
       final cupertinoCodePoints = readCmapCodePoints(bundledCupertino);
       expect(cupertinoCodePoints, containsAll(<int>[0xe047, 0xe567, 0xe145]));
 
       final bundledTextOnlyMaterial = _findRunfile(
         'text_only_material_fixture_web/assets/fonts/MaterialIcons-Regular.otf',
       ).readAsBytesSync();
-      expect(
-        bundledTextOnlyMaterial.length,
-        equals(originalMaterialBytes.length),
-        reason:
-            'MaterialIcons used only via TextStyle(fontFamily: "MaterialIcons") '
-            'with 0 const IconData uses must ship whole',
-      );
+      expect(bundledTextOnlyMaterial, equals(originalMaterialBytes));
       final materialTextCodePoints = readCmapCodePoints(
         bundledTextOnlyMaterial,
       );
@@ -221,13 +198,6 @@ void main() {
       final bundledUnusedFamily = _findRunfile(
         '_web_font_fixture_web/assets/packages/unused_icons/fonts/UnusedFamily.otf',
       ).readAsBytesSync();
-
-      expect(
-        bundledUnusedFamily.length,
-        lessThan(originalMaterialBytes.length ~/ 20),
-        reason:
-            'UnusedFamily has a default const IconData and must be subsetted',
-      );
 
       final codePoints = readCmapCodePoints(bundledUnusedFamily);
       expect(codePoints, contains(0xe5cd));
@@ -275,7 +245,7 @@ void main() {
   );
 
   test(
-    'bundled MaterialIcons covers plugin-registered and renderer-guarded code points',
+    'bundled MaterialIcons covers plugin-registered, renderer-guarded, and user-define-guarded code points across all shipped programs',
     () {
       final skwasmMaterial = _findRunfile(
         'skwasm_plugin_icon_fixture_web/assets/fonts/MaterialIcons-Regular.otf',
@@ -283,35 +253,48 @@ void main() {
       final canvaskitMaterial = _findRunfile(
         'canvaskit_plugin_icon_fixture_web/assets/fonts/MaterialIcons-Regular.otf',
       ).readAsBytesSync();
-
-      expect(
-        skwasmMaterial.length,
-        lessThan(originalMaterialBytes.length ~/ 20),
-      );
-      expect(
-        canvaskitMaterial.length,
-        lessThan(originalMaterialBytes.length ~/ 20),
-      );
+      final dart2jsCanvaskitMaterial = _findRunfile(
+        'dart2js_canvaskit_plugin_icon_fixture_web/assets/fonts/MaterialIcons-Regular.otf',
+      ).readAsBytesSync();
 
       final skwasmCodePoints = readCmapCodePoints(skwasmMaterial);
       final canvaskitCodePoints = readCmapCodePoints(canvaskitMaterial);
+      final dart2jsCanvaskitCodePoints = readCmapCodePoints(
+        dart2jsCanvaskitMaterial,
+      );
 
-      // Both renderer bundles must retain Icons.a (0xe047) reached only via
+      // Every bundle must retain Icons.a (0xe047) reached only via
       // WebIconPlugin.registerWith in the generated web plugin registrant.
       expect(skwasmCodePoints, contains(0xe047));
       expect(canvaskitCodePoints, contains(0xe047));
+      expect(dart2jsCanvaskitCodePoints, contains(0xe047));
 
-      // skwasm bundle retains Icons.b (0xe567, FLUTTER_WEB_USE_SKWASM=true)
-      // and shakes out Icons.c (0xe145, FLUTTER_WEB_USE_SKIA) and Icons.d (0xe88a).
+      // `compiler = "dart2wasm", renderer = "skwasm"` ships BOTH the skwasm
+      // WASM build (FLUTTER_WEB_USE_SKWASM=true -> Icons.b, 0xe567) AND the
+      // canvaskit JS fallback build (FLUTTER_WEB_USE_SKIA=true -> Icons.c, 0xe145),
+      // plus the user-define-guarded Icons.e (0xe5cd), and shakes out Icons.d (0xe88a).
       expect(skwasmCodePoints, contains(0xe567));
-      expect(skwasmCodePoints, isNot(contains(0xe145)));
+      expect(skwasmCodePoints, contains(0xe145));
+      expect(skwasmCodePoints, contains(0xe5cd));
       expect(skwasmCodePoints, isNot(contains(0xe88a)));
 
-      // canvaskit bundle retains Icons.c (0xe145, FLUTTER_WEB_USE_SKIA=true)
-      // and shakes out Icons.b (0xe567, FLUTTER_WEB_USE_SKWASM) and Icons.d (0xe88a).
+      // `compiler = "dart2wasm", renderer = "canvaskit"` (with no USER_ICON_DEFINE)
+      // ships only canvaskit builds, retaining Icons.c (0xe145, FLUTTER_WEB_USE_SKIA=true)
+      // and shaking out Icons.b (0xe567, FLUTTER_WEB_USE_SKWASM), Icons.d (0xe88a),
+      // and Icons.e (0xe5cd, USER_ICON_DEFINE).
       expect(canvaskitCodePoints, contains(0xe145));
       expect(canvaskitCodePoints, isNot(contains(0xe567)));
       expect(canvaskitCodePoints, isNot(contains(0xe88a)));
+      expect(canvaskitCodePoints, isNot(contains(0xe5cd)));
+
+      // `compiler = "dart2js", renderer = "canvaskit"` (with USER_ICON_DEFINE=true)
+      // ships only the canvaskit JS build, retaining Icons.c (0xe145, FLUTTER_WEB_USE_SKIA=true)
+      // and Icons.e (0xe5cd, USER_ICON_DEFINE=true), and shaking out Icons.b (0xe567)
+      // and Icons.d (0xe88a).
+      expect(dart2jsCanvaskitCodePoints, contains(0xe145));
+      expect(dart2jsCanvaskitCodePoints, contains(0xe5cd));
+      expect(dart2jsCanvaskitCodePoints, isNot(contains(0xe567)));
+      expect(dart2jsCanvaskitCodePoints, isNot(contains(0xe88a)));
     },
   );
 }

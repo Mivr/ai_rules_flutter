@@ -88,6 +88,8 @@ def flutter_asset_bundle_action(
         const_finder = None,
         font_subset = None,
         kernel_dill = None,
+        kernel_dills = [],
+        tree_shake_key = "",
         extra_asset_copies = {}):
     """Create an action that generates the flutter_assets/ tree artifact.
 
@@ -111,6 +113,10 @@ def flutter_asset_bundle_action(
         const_finder: File for const_finder.dart.snapshot (enables icon tree shaking).
         font_subset: File for font-subset binary (enables icon tree shaking).
         kernel_dill: File for the compiled kernel .dill (needed for icon tree shaking).
+        kernel_dills: Optional list of compiled kernel .dill Files when icon tree
+            shaking unions code points across multiple shipped builds.
+        tree_shake_key: Optional configuration fingerprint for the shipped
+            programs whose icons are tree-shaken.
         extra_asset_copies: dict mapping custom dest path → File for assets that
             need a specific destination path (e.g. "fonts/MaterialIcons-Regular.otf").
 
@@ -149,21 +155,29 @@ def flutter_asset_bundle_action(
     }
 
     # Icon tree shaking config.
+    all_kernel_dills = list(kernel_dills) if kernel_dills else ([kernel_dill] if kernel_dill != None else [])
     extra_inputs = []
     transitive_inputs = []
-    if const_finder and font_subset and kernel_dill:
-        config["icon_tree_shaking"] = {
+    if const_finder and font_subset and all_kernel_dills:
+        icon_cfg = {
             "dart": dart.path,
             "const_finder": const_finder.path,
             "font_subset": font_subset.path,
-            "kernel_dill": kernel_dill.path,
+            "kernel_dill": all_kernel_dills[0].path,
+            "kernel_dills": [d.path for d in all_kernel_dills],
         }
-        extra_inputs.extend([dart, const_finder, font_subset, kernel_dill])
+        if tree_shake_key:
+            icon_cfg["key"] = "%x" % (hash(tree_shake_key) & 0xffffffff)
+        config["icon_tree_shaking"] = icon_cfg
+        extra_inputs.extend([dart, const_finder, font_subset] + all_kernel_dills)
         if flutter_sdk_files:
             transitive_inputs.append(flutter_sdk_files)
 
     config_content = json.encode(config)
-    config_file = ctx.actions.declare_file(ctx.label.name + ".asset_bundle_config.json")
+    config_name = (
+        "%s.%x.asset_bundle_config.json" % (ctx.label.name, hash(config_content) & 0xffffffff) if tree_shake_key else ctx.label.name + ".asset_bundle_config.json"
+    )
+    config_file = ctx.actions.declare_file(config_name)
     ctx.actions.write(config_file, config_content)
 
     ctx.actions.run(

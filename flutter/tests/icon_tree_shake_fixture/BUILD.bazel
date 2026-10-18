@@ -76,6 +76,7 @@ flutter_web_bundle(
     name = "skwasm_plugin_icon_fixture",
     package_name = "flutter",
     compiler = "dart2wasm",
+    defines = ["USER_ICON_DEFINE=true"],
     main = "lib/renderer_plugin_icon_main.dart",
     renderer = "skwasm",
     tags = ["manual"],
@@ -100,6 +101,20 @@ flutter_web_bundle(
     ],
 )
 
+flutter_web_bundle(
+    name = "dart2js_canvaskit_plugin_icon_fixture",
+    package_name = "flutter",
+    compiler = "dart2js",
+    main = "lib/renderer_plugin_icon_main.dart",
+    renderer = "canvaskit",
+    tags = ["manual"],
+    deps = [
+        ":flutter_stub",
+        "//flutter:material_icons",
+        "//flutter/tests/icon_tree_shake_fixture/web_icon_plugin",
+    ],
+)
+
 fastbuild_build(
     name = "fastbuild_web_font_fixture",
     tags = ["manual"],
@@ -108,6 +123,15 @@ fastbuild_build(
         ":skwasm_plugin_icon_fixture",
         ":text_only_material_fixture",
         "//flutter/tests:_web_font_fixture",
+    ],
+)
+
+fastbuild_build(
+    name = "fastbuild_cli_define_web_font_fixture",
+    extra_dart_defines = ["USER_ICON_DEFINE=true"],
+    tags = ["manual"],
+    targets = [
+        ":dart2js_canvaskit_plugin_icon_fixture",
     ],
 )
 
@@ -122,10 +146,20 @@ opt_build(
     ],
 )
 
+opt_build(
+    name = "opt_cli_define_web_font_fixture",
+    extra_dart_defines = ["USER_ICON_DEFINE=true"],
+    tags = ["manual"],
+    targets = [
+        ":dart2js_canvaskit_plugin_icon_fixture",
+    ],
+)
+
 dart_test(
     name = "icon_tree_shake_fastbuild_test",
     size = "small",
     data = [
+        ":fastbuild_cli_define_web_font_fixture",
         ":fastbuild_web_font_fixture",
         "@flutter_material_fonts//:material-fonts/MaterialIcons-Regular.otf",
         "@flutter_material_fonts//:material-fonts/Roboto-Regular.ttf",
@@ -139,6 +173,7 @@ dart_test(
     name = "icon_tree_shake_opt_test",
     size = "small",
     data = [
+        ":opt_cli_define_web_font_fixture",
         ":opt_web_font_fixture",
         "@flutter_material_fonts//:material-fonts/MaterialIcons-Regular.otf",
         "@flutter_material_fonts//:material-fonts/Roboto-Regular.ttf",
