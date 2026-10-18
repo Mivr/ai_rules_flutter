@@ -474,10 +474,15 @@ def flutter_ios_app(
             **kwargs. For App Intents, pass the library here *and* to
             rules_apple's `app_intents` (which passes through **kwargs):
             `app_intents` only extracts the metadata, it does not link.
+        srcs: Override conventional `ios/Runner/*.swift` runner sources.
+        engine: Override default `@flutter_ios_engine//:engine` target.
         allow_non_macho: Explicit allow-list of binary or framework names
             permitted to bypass Mach-O validation.
         backend: Apple bundling backend: `"rules_apple"` (default) or
-            `"xtool"` (explicit opt-in).
+            `"xtool"` (explicit opt-in). Note: `"xtool"` requires a
+            user-supplied `darwin.artifactbundle` configured via
+            `flutter.darwin_sdk` in compliance with Apple's SDK licensing
+            terms; no Apple SDK is downloaded by default.
         **kwargs: Passed through to ios_application. The macro sets
             `bundle_id`, `bundle_name`, `entitlements`, `families`,
             `minimum_os_version`, `infoplists`, `version`,

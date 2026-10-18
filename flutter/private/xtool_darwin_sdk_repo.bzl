@@ -16,6 +16,12 @@ directories are probed. When neither `url` nor `path` is configured, the
 repository rule still instantiates with `SDK_AVAILABLE = False` so that
 `bazel test //...` works, but any target that requires the SDK fails at
 analysis with instructions on how to configure `flutter.darwin_sdk`.
+
+IMPORTANT (Apple SDK licensing): `rules_flutter` never bundles or downloads an
+Apple SDK by default (`url` and `path` both default to `""`). Users must obtain
+and supply their own `darwin.artifactbundle` (`iPhoneOS.sdk`,
+`iPhoneSimulator.sdk`, `MacOSX.sdk`) in compliance with the Apple Xcode and
+Apple SDKs Agreement.
 """
 
 load("@rules_cc//cc:action_names.bzl", "ACTION_NAMES")
@@ -75,6 +81,8 @@ XTOOL_DARWIN_TARGETS = {
 
 _UNCONFIGURED_SDK_ERROR = (
     "The xtool Darwin SDK (@flutter_xtool_darwin_sdk) is not configured. " +
+    "rules_flutter does not download an Apple SDK by default; you must supply your own " +
+    "darwin.artifactbundle under Apple's Xcode and Apple SDKs Agreement.\n" +
     "Configure it in your root MODULE.bazel with a checksummed archive:\n" +
     "    flutter = use_extension(\"@rules_flutter//flutter:extensions.bzl\", \"flutter\")\n" +
     "    flutter.darwin_sdk(\n" +
@@ -308,6 +316,13 @@ def resolve_darwin_artifactbundle_sdk_paths(info_json_text, bundle_root):
 
     Maps `"iPhoneOS"`, `"iPhoneSimulator"`, and `"MacOSX"` to their resolved
     directory paths under `bundle_root`.
+
+    Args:
+      info_json_text: Raw JSON string from `darwin.artifactbundle/info.json`.
+      bundle_root: Root directory path of the extracted or symlinked bundle.
+
+    Returns:
+      Dict mapping `"iPhoneOS"`, `"iPhoneSimulator"`, and `"MacOSX"` to SDK paths.
     """
     prefix = bundle_root.rstrip("/")
     resolved = {

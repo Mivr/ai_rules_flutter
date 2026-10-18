@@ -92,14 +92,20 @@ _flutter_plugin_overlays = tag_class(attrs = {
 })
 
 _flutter_darwin_sdk = tag_class(
-    doc = "Root-module-only configuration for the opt-in xtool Darwin SDK (`@flutter_xtool_darwin_sdk`). Specify either `url` + `sha256` (hermetic) or `path` (local, non-hermetic).",
+    doc = (
+        "Root-module-only configuration for the opt-in xtool Darwin SDK (`@flutter_xtool_darwin_sdk`). " +
+        "Specify either `url` + `sha256` (hermetic) or `path` (local, non-hermetic). " +
+        "IMPORTANT (Apple SDK licensing): `rules_flutter` never downloads or bundles an Apple SDK by default " +
+        "(`url` and `path` both default to `\"\"`). Users must obtain and supply their own `darwin.artifactbundle` " +
+        "(`iPhoneOS.sdk`, `iPhoneSimulator.sdk`, `MacOSX.sdk`) in compliance with the Apple Xcode and Apple SDKs Agreement."
+    ),
     attrs = {
         "path": attr.string(
-            doc = "Optional local filesystem path to `darwin.artifactbundle` for the xtool backend (local, non-hermetic; mutually exclusive with `url`).",
+            doc = "Optional local filesystem path to a user-supplied `darwin.artifactbundle` for the xtool backend (local, non-hermetic; mutually exclusive with `url`). Subject to Apple's SDK licensing terms.",
             default = "",
         ),
         "url": attr.string(
-            doc = "Optional URL to download `darwin.artifactbundle` archive for the xtool backend (hermetic; requires `sha256` and is mutually exclusive with `path`).",
+            doc = "Optional URL to download a user-supplied `darwin.artifactbundle` archive for the xtool backend (hermetic; requires `sha256` and is mutually exclusive with `path`). No default URL is provided; users must supply their own SDK under Apple's terms.",
             default = "",
         ),
         "sha256": attr.string(
