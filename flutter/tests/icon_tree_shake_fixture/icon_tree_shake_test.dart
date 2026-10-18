@@ -88,6 +88,7 @@ Set<int> readCmapCodePoints(Uint8List fontBytes) {
 }
 
 File _findRunfile(String suffix) {
+  final matchSuffix = suffix.startsWith('/') ? suffix : '/$suffix';
   final runfilesPath =
       Platform.environment['RUNFILES_DIR'] ??
       Platform.environment['TEST_SRCDIR'];
@@ -95,7 +96,7 @@ File _findRunfile(String suffix) {
     final dir = Directory(runfilesPath);
     for (final entity in dir.listSync(recursive: true, followLinks: true)) {
       if (entity is File &&
-          entity.path.replaceAll('\\', '/').endsWith(suffix)) {
+          entity.path.replaceAll('\\', '/').endsWith(matchSuffix)) {
         return entity;
       }
     }
@@ -106,7 +107,7 @@ File _findRunfile(String suffix) {
       final space = line.indexOf(' ');
       if (space <= 0) continue;
       final target = line.substring(space + 1).trim();
-      if (target.replaceAll('\\', '/').endsWith(suffix) &&
+      if (target.replaceAll('\\', '/').endsWith(matchSuffix) &&
           File(target).existsSync()) {
         return File(target);
       }
@@ -115,7 +116,7 @@ File _findRunfile(String suffix) {
           target,
         ).listSync(recursive: true, followLinks: true)) {
           if (entity is File &&
-              entity.path.replaceAll('\\', '/').endsWith(suffix)) {
+              entity.path.replaceAll('\\', '/').endsWith(matchSuffix)) {
             return entity;
           }
         }
@@ -124,7 +125,8 @@ File _findRunfile(String suffix) {
   }
   final fallback = Directory.current.parent;
   for (final entity in fallback.listSync(recursive: true, followLinks: true)) {
-    if (entity is File && entity.path.replaceAll('\\', '/').endsWith(suffix)) {
+    if (entity is File &&
+        entity.path.replaceAll('\\', '/').endsWith(matchSuffix)) {
       return entity;
     }
   }

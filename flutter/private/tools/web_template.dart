@@ -378,7 +378,10 @@ void _runWebCompile(List<String> args) {
 
 String _toAppSchemeRelPath(String path) {
   final norm = path.replaceAll(r'\', '/');
-  return norm.replaceFirst(RegExp(r'^(?:\./)?bazel-out/[^/]+/(?:bin|genfiles)/'), '');
+  return norm.replaceFirst(
+    RegExp(r'^(?:\./)?bazel-out/[^/]+/(?:bin|genfiles)/'),
+    '',
+  );
 }
 
 void _rewritePackageConfig(
@@ -661,7 +664,10 @@ void _runDart2Js(List<String> args) {
           var content = entity.readAsStringSync();
           var changed = false;
           if (stageUriPrefix != null && content.contains(stageUriPrefix)) {
-            content = content.replaceAll(stageUriPrefix, 'org-dartlang-app:///');
+            content = content.replaceAll(
+              stageUriPrefix,
+              'org-dartlang-app:///',
+            );
             changed = true;
           }
           if (content.contains(cwdUriPrefix)) {

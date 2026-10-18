@@ -105,7 +105,10 @@ Future<ProcessResult?> _retryWithoutUnavailableWebPlugins(
   }
 
   final originalContent = stagedRegistrant.readAsStringSync();
-  final filteredContent = _stripUnavailablePlugins(originalContent, badPackages);
+  final filteredContent = _stripUnavailablePlugins(
+    originalContent,
+    badPackages,
+  );
   if (filteredContent == originalContent) {
     return null;
   }
