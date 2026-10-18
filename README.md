@@ -1230,17 +1230,21 @@ flutter_integration_test(
 
 For `platform = "web"`, add `flutter_web_sdk` and `flutter_chrome_headless_shell` to `use_repo(flutter, ...)` in `MODULE.bazel`, and add `integration_test: {sdk: flutter}` under `dev_dependencies` in `pubspec.yaml`. The test runner serves the compiled web bundle from `127.0.0.1` on an ephemeral port, launches the hermetic pinned `chrome-headless-shell` binary with its pinned shared-library closure (`--no-sandbox`, `--disable-dev-shm-usage`), drives the in-app `WidgetTester` suite over a WebSocket channel, and fails the test on any assertion failure, uncaught error, browser crash, or timeout.
 
+For `platform = "linux"`, the rule compiles the Linux desktop GTK runner, Dart kernel (or AOT `libapp.so`), bundled `flutter_assets/`, and any transitive native Linux plugins (`flutter_linux_plugin_library`) into a Linux application bundle. At test time, the runner starts a hermetic `Xvfb` virtual display (`@flutter_linux_headless_runtime`, choosing a free display via `-displayfd`) and runs the app against sha256-pinned GTK3, GLib, fontconfig, and Mesa `llvmpipe` software-rasterizer shared libraries — requiring no host X server, `Xvfb`, or GTK installation.
+
 | Attribute | Description |
 |---|---|
 | `platform` | Target platform (`"web"`, `"linux"`, or `"android"`). Defaults to `"web"`. |
 | `main` | Integration test Dart entrypoint. Required if `srcs` does not contain a single file. |
 | `srcs` | Integration test Dart source files. If `main` is omitted and `srcs` has one file, that file is used as `main`. |
 | `app_srcs` | Application Dart source files compiled alongside the integration test. |
-| `deps` | `dart_library` or `flutter_library` targets (`@deps//:flutter`, `@deps//:flutter_test`, `@deps//:integration_test`, or an application `flutter_library`). |
+| `deps` | `dart_library`, `flutter_library`, or `flutter_plugin` targets (`@deps//:flutter`, `@deps//:flutter_test`, `@deps//:integration_test`, or application libraries and plugins). |
 | `assets` | Asset files bundled into `flutter_assets/`. |
 | `package_name` | Dart package name matching `pubspec.yaml`. |
 | `compiler` | Web compiler (`"dart2js"` or `"dart2wasm"`). Defaults to `"dart2js"`. |
 | `renderer` | Web renderer (`"canvaskit"` or `"skwasm"`). Defaults to matching `compiler`. |
+| `gtk_app_id` | Linux GTK application identifier (`platform = "linux"`). Defaults to `"com.example.flutter_integration_test"`. |
+| `window_title` | Linux GTK window title (`platform = "linux"`). Defaults to the target name. |
 
 ### flutter_plugin
 
@@ -1887,6 +1891,7 @@ The `e2e/` directory holds working workspaces, each with its own tests:
 | `e2e/windows_example` | A Windows app built three ways, with bundle checks. |
 | `e2e/web_example` | WASM and JavaScript web builds with `web_assets`. |
 | `e2e/integration_web` | End-to-end web `flutter_integration_test` running in hermetic `chrome-headless-shell`. |
+| `e2e/integration_linux` | End-to-end Linux desktop `flutter_integration_test` with a native C++ plugin running under hermetic `Xvfb` and Mesa `llvmpipe`. |
 | `e2e/cross_compile_example` | A Linux bundle cross-compiled from macOS. |
 | `e2e/multi_window_example` | Multi-window macOS and multi-scene iOS with `FlutterEngineGroup`. |
 | `e2e/dual_hub` | Two pub hubs in one workspace that disagree on a package version. |

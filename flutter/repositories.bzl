@@ -19,6 +19,7 @@ load("//flutter/private:flutter_macos_engine_repo.bzl", "flutter_macos_engine_re
 load("//flutter/private:flutter_profile_repo.bzl", "flutter_profile_repo")
 load("//flutter/private:flutter_sky_engine_repo.bzl", "flutter_sky_engine_repo")
 load("//flutter/private:flutter_web_sdk_repo.bzl", "flutter_web_sdk_repo")
+load("//flutter/private:linux_headless_runtime_repo.bzl", "linux_headless_runtime_repo")
 load("//flutter/private:toolchains_repo.bzl", "CROSS_COMPILATION_PAIRS", "DESKTOP_CROSS_PAIRS", "HOST_PLATFORMS", "flutter_toolchains_repo")
 load("//flutter/private:versions.bzl", "FLUTTER_VERSIONS", "LINUX_SYSROOT_CHECKSUMS", "flutter_artifact_sha256", "flutter_source_sha256")
 load("//flutter/private:xtool_darwin_sdk_repo.bzl", "validate_darwin_sdk_config", "xtool_darwin_sdk_repo")
@@ -1143,6 +1144,12 @@ exports_files(["gen_snapshot_arm64"], visibility = ["//visibility:public"])
     # only fetched when a web flutter_integration_test is built).
     chrome_headless_shell_repo(
         name = name + "_chrome_headless_shell",
+    )
+
+    # Hermetic Linux virtual display (Xvfb) and GTK/Mesa runtime libraries
+    # (lazy — only fetched when a linux flutter_integration_test is built).
+    linux_headless_runtime_repo(
+        name = name + "_linux_headless_runtime",
     )
 
     flutter_toolchains_repo(

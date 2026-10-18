@@ -177,7 +177,7 @@ def _flutter_linux_runner_lib_impl(ctx):
             plugin_hdrs.extend(entry.hdrs.to_list())
             plugin_include_dirs.extend(entry.include_dirs.to_list())
 
-    runner_binary = _compile_linux_runner(
+    runner_binary = compile_linux_runner(
         ctx,
         runner_srcs = runner_srcs,
         runner_hdrs = runner_hdrs,
@@ -197,7 +197,7 @@ def _flutter_linux_runner_lib_impl(ctx):
         executable = runner_binary,
     )]
 
-def _compile_linux_runner(ctx, runner_srcs, engine_files, defines, linux_sysroot, registrant_srcs = [], registrant_hdrs = [], runner_hdrs = [], target_arch = "", plugin_srcs = [], plugin_hdrs = [], plugin_include_dirs = []):
+def compile_linux_runner(ctx, runner_srcs, engine_files, defines, linux_sysroot, registrant_srcs = [], registrant_hdrs = [], runner_hdrs = [], target_arch = "", plugin_srcs = [], plugin_hdrs = [], plugin_include_dirs = []):
     """Compile the C++ GTK Linux runner binary.
 
     Uses cc_common.compile() + cc_common.link() with Bazel's hermetic CC

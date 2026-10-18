@@ -18,6 +18,20 @@ For `platform = "web"`:
      over `http://127.0.0.1:<ephemeral>`, launches the hermetic pinned
      `chrome-headless-shell` binary with its pinned shared-library closure, and
      collects test results and any uncaught errors.
+
+For `platform = "linux"`:
+  1. Generates `<name>_linux_bootstrap.dart` which initializes the live
+     integration test binding, connects back to the host runner over the
+     WebSocket URL in `FLUTTER_INTEGRATION_TEST_HARNESS_URL`, and drives the
+     suite via `RemoteListener`.
+  2. Compiles the app + test to a kernel `.dill` (and in non-debug modes AOT
+     `libapp.so`), compiles the C++ GTK runner + native C++ plugin registrant +
+     Linux plugin C++ sources against the hermetic Chromium sysroot, and
+     assembles the `<name>_linux` desktop bundle directory.
+  3. Runs `flutter_integration_test_runner`, which starts the hermetic pinned
+     `Xvfb` virtual display (`-displayfd`), launches the compiled Linux desktop
+     application against that display and the pinned GTK3/Mesa/EGL/GLib runtime
+     shared-library closure, and collects test results and any uncaught errors.
 """
 
 load("@rules_dart//dart:providers.bzl", "DartInfo")
@@ -33,10 +47,14 @@ load(
 load("//flutter:providers.bzl", "FlutterInfo")
 load(
     "//flutter/private:app_entrypoint.bzl",
+    "app_main_location",
+    "app_scheme_location",
+    "compile_kernel_package_config",
     "compile_package_config",
     "package_lib_prefix",
     "resolve_wrapper_main_import",
     "synthesize_app_package",
+    "with_root",
 )
 load(
     "//flutter/private:common.bzl",
@@ -45,15 +63,23 @@ load(
     "FLUTTER_DEPS_DOC",
     "KERNEL_COMPILE_ATTRS",
     "PLATFORM_CONSTRAINT_ATTRS",
+    "check_unreplaced_hooks",
+    "collect_native_libs",
+    "compute_desktop_bundle_copies",
     "declare_flutter_assets_dir",
+    "flutter_app_shader_aspect",
     "flutter_build_assets",
+    "flutter_build_mode",
     "flutter_compile_shaders",
     "flutter_web_shader_aspect",
+    "host_target_arch",
     "make_web_wrapper_main_content",
     "merge_dart_defines",
     "resolve_exec_dart_vm",
     "resolve_flutter_sdk_info",
 )
+load("//flutter/private:flutter_aot_compile.bzl", "flutter_aot_elf_action")
+load("//flutter/private:flutter_compile.bzl", "flutter_kernel_compile_action")
 load("//flutter/private:flutter_info.bzl", "dedup_plugins")
 load(
     "//flutter/private:flutter_kernel_module.bzl",
@@ -61,12 +87,29 @@ load(
     "flutter_kernel_module_aspect",
 )
 load(
+    "//flutter/private:flutter_linux_application.bzl",
+    "compile_linux_runner",
+    "linux_runner_defines",
+)
+load(
+    "//flutter/private:flutter_native_assets.bzl",
+    "bridge_dart_code_assets",
+    "collect_bundled_code_asset_files",
+    "write_native_assets_manifest",
+)
+load(
     "//flutter/private:flutter_web_compile.bzl",
     "flutter_dart2js_action",
     "flutter_dart2wasm_action",
     "web_build_mode",
 )
-load("//flutter/private:plugin_registrant.bzl", "generate_dart_plugin_registrant")
+load("//flutter/private:native_sources.bzl", "native_sources_aspect")
+load(
+    "//flutter/private:plugin_registrant.bzl",
+    "generate_dart_plugin_registrant",
+    "generate_native_plugin_registrant",
+    "generate_native_plugin_registrant_header",
+)
 load(
     "//flutter/private:validation.bzl",
     "escape_html",
@@ -435,6 +478,239 @@ Future<void> main() async {{
         binding_init = binding_init,
     )
 
+def make_linux_integration_bootstrap_content(test_import, has_integration_test = False):
+    """Generate the per-target Linux desktop integration test bootstrap Dart source.
+
+    Initializes the live integration test binding (`IntegrationTestWidgetsFlutterBinding`
+    when `package:integration_test` is in `deps`, or a built-in
+    `LiveTestWidgetsFlutterBinding` subclass otherwise), connects to the host
+    runner over the WebSocket URL in `FLUTTER_INTEGRATION_TEST_HARNESS_URL`,
+    forwards uncaught errors, and drives the suite via `RemoteListener`.
+
+    Args:
+        test_import: Import URI for the user's integration test entrypoint.
+        has_integration_test: Whether `deps` exposes `package:integration_test`.
+
+    Returns:
+        Dart source string.
+    """
+    if has_integration_test:
+        binding_import = "import 'package:integration_test/integration_test.dart';\n"
+        binding_decl = ""
+        binding_init = "IntegrationTestWidgetsFlutterBinding.ensureInitialized();"
+    else:
+        binding_import = ""
+        binding_decl = """
+class _IntegrationTestBinding extends LiveTestWidgetsFlutterBinding {
+  static _IntegrationTestBinding? _instance;
+
+  @override
+  void initInstances() {
+    super.initInstances();
+    _instance = this;
+  }
+
+  static _IntegrationTestBinding ensureInitialized() {
+    if (_instance == null) {
+      _IntegrationTestBinding();
+    }
+    return _instance!;
+  }
+
+  @override
+  bool get overrideHttpClient => false;
+
+  @override
+  bool get registerTestTextInput => false;
+
+  Size? _surfaceSize;
+
+  @override
+  Future<void> setSurfaceSize(Size? size) {
+    return TestAsyncUtils.guard<void>(() async {
+      assert(inTest);
+      if (_surfaceSize == size) {
+        return;
+      }
+      _surfaceSize = size;
+      handleMetricsChanged();
+    });
+  }
+
+  @override
+  ViewConfiguration createViewConfigurationFor(RenderView renderView) {
+    final FlutterView view = renderView.flutterView;
+    final Size? surfaceSize =
+        view == platformDispatcher.implicitView ? _surfaceSize : null;
+    return TestViewConfiguration.fromView(
+      size: surfaceSize ?? view.physicalSize / view.devicePixelRatio,
+      view: view,
+    );
+  }
+
+  @override
+  void setLabel(String value) {}
+
+  @override
+  void reportExceptionNoticed(FlutterErrorDetails exception) {}
+}
+"""
+        binding_init = "_IntegrationTestBinding.ensureInitialized();"
+
+    return """// GENERATED by flutter_integration_test — do not edit.
+// ignore_for_file: type=lint
+
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:isolate';
+import 'dart:ui';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/widgets.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:test_api/backend.dart';
+{binding_import}import '{test_import}' as test_entrypoint;
+{binding_decl}
+bool _bindingInitialized = false;
+
+bool _isBindingInTest() {{
+  return _bindingInitialized && TestWidgetsFlutterBinding.instance.inTest;
+}}
+
+void _catchIsolateErrors(void Function(Object error, StackTrace? stack) onError) {{
+  final errorPort = ReceivePort();
+  Isolate.current.setErrorsFatal(false);
+  Isolate.current.addErrorListener(errorPort.sendPort);
+  errorPort.listen((dynamic message) {{
+    final list = message as List;
+    final error = IsolateSpawnException(list[0] as String);
+    final stack = list[1] == null
+        ? StackTrace.empty
+        : StackTrace.fromString(list[1] as String);
+    onError(error, stack);
+    Zone.current.handleUncaughtError(error, stack);
+  }});
+}}
+
+Future<void> _runTestMain() async {{
+  debugPrint = debugPrintSynchronously;
+  {binding_init}
+  final PointerDataPacketCallback? prevOnPointerDataPacket =
+      PlatformDispatcher.instance.onPointerDataPacket;
+  if (prevOnPointerDataPacket != null) {{
+    PlatformDispatcher.instance.onPointerDataPacket =
+        (PointerDataPacket packet) {{
+          final Iterable<RenderView> views =
+              WidgetsBinding.instance.renderViews;
+          if (views.isEmpty ||
+              packet.data.any(
+                (PointerData datum) => !views.any(
+                  (RenderView r) => r.flutterView.viewId == datum.viewId,
+                ),
+              )) {{
+            return;
+          }}
+          prevOnPointerDataPacket(packet);
+        }};
+  }}
+  debugPrint = debugPrintSynchronously;
+  reportTestException = (FlutterErrorDetails details, String testDescription) {{
+    debugPrint = debugPrintSynchronously;
+    FlutterError.dumpErrorToConsole(details, forceReport: true);
+    final String additional = testDescription.isNotEmpty
+        ? '\\nThe test description was: $testDescription'
+        : '';
+    registerException(
+      TestFailure('${{details.exceptionAsString()}}$additional'),
+      details.stack ?? StackTrace.current,
+    );
+  }};
+  _bindingInitialized = true;
+  await Future(test_entrypoint.main);
+}}
+
+Future<void> main() async {{
+  final wsUrl = Platform.environment['FLUTTER_INTEGRATION_TEST_HARNESS_URL'];
+  if (wsUrl == null || wsUrl.isEmpty) {{
+    stderr.writeln(
+      'flutter_integration_test bootstrap: '
+      'FLUTTER_INTEGRATION_TEST_HARNESS_URL not set',
+    );
+    exit(64);
+  }}
+
+  final ws = await WebSocket.connect(wsUrl);
+
+  void sendToHarness(Object? payload) {{
+    if (ws.readyState == WebSocket.open) {{
+      ws.add(json.encode(payload));
+    }}
+  }}
+
+  void reportUncaughtError(Object error, StackTrace? stack) {{
+    final effectiveStack = stack ?? StackTrace.current;
+    sendToHarness(<String, Object?>{{
+      'type': 'uncaughtError',
+      'message': error.toString(),
+      'stack': effectiveStack.toString(),
+    }});
+    if (_isBindingInTest()) {{
+      FlutterError.reportError(
+        FlutterErrorDetails(
+          exception: error,
+          stack: effectiveStack,
+          library: 'flutter_integration_test',
+          context: ErrorDescription('while running integration test'),
+        ),
+      );
+    }}
+  }}
+
+  PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {{
+    reportUncaughtError(error, stack);
+    return true;
+  }};
+
+  final FlutterExceptionHandler? prevOnError = FlutterError.onError;
+  FlutterError.onError = (FlutterErrorDetails details) {{
+    prevOnError?.call(details);
+    if (!_isBindingInTest()) {{
+      sendToHarness(<String, Object?>{{
+        'type': 'uncaughtError',
+        'message': details.exceptionAsString(),
+        'stack': (details.stack ?? StackTrace.current).toString(),
+      }});
+    }}
+  }};
+
+  final testChannel = RemoteListener.start(() {{
+    _catchIsolateErrors(reportUncaughtError);
+    return _runTestMain;
+  }});
+
+  unawaited(
+    ws
+        .map<dynamic>((dynamic m) => json.decode(m as String))
+        .pipe(testChannel.sink),
+  );
+
+  await for (final dynamic message in testChannel.stream) {{
+    sendToHarness(message);
+  }}
+  try {{
+    await ws.close();
+  }} catch (_) {{}}
+  exit(0);
+}}
+""".format(
+        binding_import = binding_import,
+        test_import = test_import,
+        binding_decl = binding_decl,
+        binding_init = binding_init,
+    )
+
 def _resolve_main_and_srcs(ctx):
     """Resolve the integration test entrypoint File and additional source Files."""
     if ctx.file.main != None:
@@ -469,13 +745,40 @@ def _resolve_main_and_srcs(ctx):
         "%s: specify `main` (or pass a single test file in `srcs`)." % ctx.label,
     )
 
+def _build_analyzable_and_coverage_infos(ctx, package_name, lib_root, main_file, extra_srcs):
+    instrumented_files_info = coverage_common.instrumented_files_info(
+        ctx,
+        source_attributes = ["srcs", "app_srcs", "main"],
+        dependency_attributes = ["deps"],
+    )
+
+    prefix = package_lib_prefix(lib_root)
+    in_pkg_srcs = []
+    non_pkg_srcs = []
+    for f in [main_file] + extra_srcs:
+        if f.short_path.startswith(prefix):
+            in_pkg_srcs.append(f)
+        else:
+            non_pkg_srcs.append(f)
+
+    analyzable_info = dart_analyzable_info_with_package(
+        label = ctx.label,
+        package_name = package_name,
+        lib_root = lib_root,
+        deps = ctx.attr.deps + [ctx.attr._sky_engine],
+        srcs = non_pkg_srcs,
+        package_srcs = in_pkg_srcs,
+        language_version = ctx.attr.language_version,
+    )
+    return instrumented_files_info, analyzable_info
+
 def _flutter_integration_test_impl(ctx):
     if ctx.attr.platform != "web":
         fail(
             "%s: flutter_integration_test does not yet support platform = %r " % (
                 ctx.label,
                 ctx.attr.platform,
-            ) + "(supported: \"web\").",
+            ) + "(supported: \"web\", \"linux\").",
         )
 
     if not _exposes_package(ctx.attr.deps, ["flutter_test"]):
@@ -835,29 +1138,359 @@ def _flutter_integration_test_impl(ctx):
     for data_target in ctx.attr.data:
         runfiles = runfiles.merge(data_target[DefaultInfo].default_runfiles)
 
-    instrumented_files_info = coverage_common.instrumented_files_info(
+    instrumented_files_info, analyzable_info = _build_analyzable_and_coverage_infos(
         ctx,
-        source_attributes = ["srcs", "app_srcs", "main"],
-        dependency_attributes = ["deps"],
+        package_name,
+        lib_root,
+        main_file,
+        extra_srcs,
     )
 
-    prefix = package_lib_prefix(lib_root)
-    in_pkg_srcs = []
-    non_pkg_srcs = []
-    for f in [main_file] + extra_srcs:
-        if f.short_path.startswith(prefix):
-            in_pkg_srcs.append(f)
-        else:
-            non_pkg_srcs.append(f)
+    return [
+        DefaultInfo(
+            executable = executable,
+            runfiles = runfiles,
+        ),
+        env_info,
+        instrumented_files_info,
+        analyzable_info,
+    ]
 
-    analyzable_info = dart_analyzable_info_with_package(
-        label = ctx.label,
-        package_name = package_name,
-        lib_root = lib_root,
-        deps = ctx.attr.deps + [ctx.attr._sky_engine],
-        srcs = non_pkg_srcs,
-        package_srcs = in_pkg_srcs,
-        language_version = ctx.attr.language_version,
+def _flutter_linux_integration_test_impl(ctx):
+    if ctx.attr.platform != "linux":
+        fail(
+            "%s: _flutter_linux_integration_test requires platform = 'linux', got %r." % (
+                ctx.label,
+                ctx.attr.platform,
+            ),
+        )
+
+    if not _exposes_package(ctx.attr.deps, ["flutter_test"]):
+        fail((
+            "flutter_integration_test target {name} must depend on " +
+            "package:flutter_test. Add `@<hub>//:flutter_test` to deps."
+        ).format(name = ctx.label.name))
+
+    hook_err = check_unreplaced_hooks(ctx.label, ctx.attr.deps)
+    if hook_err != None:
+        fail(hook_err)
+
+    main_file, extra_srcs = _resolve_main_and_srcs(ctx)
+    flutter_sdk_info = resolve_flutter_sdk_info(ctx)
+
+    mode = "profile" if ctx.attr.profile else flutter_build_mode(ctx)
+    is_debug = mode == "debug"
+    aot = not is_debug
+    strip = ctx.var["COMPILATION_MODE"] == "opt"
+
+    if not is_debug and flutter_sdk_info.target_os in ("linux", "macos", "windows"):
+        fail(
+            "AOT cross-compilation between desktop platforms is not supported. " +
+            "Build on a Linux host, or use debug mode (-c dbg).",
+        )
+    if not is_debug and not flutter_sdk_info.gen_snapshot:
+        fail(
+            "No target-compatible AOT gen_snapshot toolchain is registered for " +
+            "this host and target platform.",
+        )
+    if flutter_sdk_info.engine_library == None:
+        fail(
+            "No Linux engine library available in the Flutter toolchain. " +
+            "Run Linux integration tests on a Linux host.",
+        )
+
+    package_name = ctx.attr.package_name or ctx.label.name
+    lib_root = derive_lib_root(ctx.label.workspace_root, ctx.label.package)
+
+    # Aggregate Native Assets and Data Assets from transitive deps.
+    transitive_native_asset_depsets = []
+    transitive_data_asset_depsets = []
+    for dep in ctx.attr.deps:
+        if FlutterInfo not in dep:
+            continue
+        info = dep[FlutterInfo]
+        transitive_native_asset_depsets.append(info.native_assets)
+        transitive_data_asset_depsets.append(info.data_assets)
+    transitive_native_assets = depset(transitive = transitive_native_asset_depsets)
+    transitive_data_assets = depset(transitive = transitive_data_asset_depsets)
+
+    native_assets_list = transitive_native_assets.to_list()
+    declared_ids = {asset.asset_id: True for asset in native_assets_list}
+    native_assets_list = native_assets_list + [
+        asset
+        for asset in bridge_dart_code_assets(ctx, ctx.attr.deps)
+        if asset.asset_id not in declared_ids
+    ]
+
+    target_arch = host_target_arch(ctx, flutter_sdk_info)
+    native_assets_manifest = ctx.actions.declare_file(ctx.label.name + ".native_assets.json")
+    write_native_assets_manifest(
+        ctx = ctx,
+        output_file = native_assets_manifest,
+        native_assets = native_assets_list,
+        target_os = "linux",
+        target_arch = target_arch,
+    )
+    bundled_code_assets = collect_bundled_code_asset_files(native_assets_list)
+
+    # Step 1: Generate `<name>_linux_bootstrap.dart` and compile kernel `.dill`.
+    packages = collect_packages(ctx.attr.deps)
+    packages = synthesize_app_package(
+        ctx.label,
+        packages,
+        package_name,
+        lib_root,
+        ctx.attr.language_version,
+    )
+
+    bootstrap = ctx.actions.declare_file(ctx.label.name + "_linux_bootstrap.dart")
+    main_location = app_main_location(package_name, lib_root, main_file)
+    has_integration_test = _exposes_package(ctx.attr.deps, ["integration_test"])
+    ctx.actions.write(
+        bootstrap,
+        make_linux_integration_bootstrap_content(
+            test_import = main_location.uri,
+            has_integration_test = has_integration_test,
+        ),
+    )
+
+    all_dep_plugins = []
+    linux_plugin_lib_depsets = []
+    for dep in ctx.attr.deps:
+        if FlutterInfo in dep:
+            all_dep_plugins.extend(dep[FlutterInfo].plugins)
+            linux_plugin_lib_depsets.append(dep[FlutterInfo].linux_plugin_libraries)
+    plugins = dedup_plugins(all_dep_plugins)
+    linux_plugin_libraries = depset(transitive = linux_plugin_lib_depsets)
+
+    registrant = generate_dart_plugin_registrant(
+        ctx,
+        plugins,
+        target_platform = "linux",
+    )
+    registrant_location = app_scheme_location(registrant) if registrant else None
+    bootstrap_location = app_scheme_location(bootstrap)
+
+    all_srcs = (
+        list(extra_srcs) +
+        collect_transitive_srcs(ctx.attr.deps).to_list() +
+        [main_file, bootstrap] +
+        ([registrant] if registrant else [])
+    )
+    pc = compile_kernel_package_config(
+        ctx,
+        packages,
+        all_srcs,
+        roots = {package_name: True} if package_name else None,
+    )
+
+    if aot and mode == "release":
+        platform_dill = flutter_sdk_info.platform_kernel_dill_product
+    else:
+        platform_dill = flutter_sdk_info.platform_kernel_dill
+
+    user_defines = merge_dart_defines(ctx)
+    all_defines = list(user_defines)
+    if mode == "profile":
+        all_defines.append("dart.vm.profile=true")
+    elif aot:
+        all_defines.append("dart.vm.product=true")
+
+    extra_frontend_flags = []
+    if ctx.attr.track_widget_creation:
+        extra_frontend_flags.append("--track-widget-creation")
+
+    kernel_dill = ctx.actions.declare_file(ctx.label.name + ".dill")
+    flutter_kernel_compile_action(
+        ctx = ctx,
+        dartaotruntime = flutter_sdk_info.dartaotruntime,
+        kernel_filter_tool = ctx.executable._kernel_filter_tool,
+        frontend_server = flutter_sdk_info.frontend_server,
+        platform_dill = platform_dill,
+        main = bootstrap,
+        entrypoint_uri = bootstrap_location.uri,
+        srcs = pc.srcs,
+        package_config = pc.config_file,
+        output = kernel_dill,
+        aot = aot,
+        defines = all_defines,
+        target = "flutter",
+        extra_flags = extra_frontend_flags,
+        native_assets_manifest = native_assets_manifest,
+        dart_plugin_registrant_uri = registrant_location.uri if registrant_location else None,
+        filesystem_roots = with_root(
+            with_root(
+                with_root([], registrant_location.root if registrant_location else None),
+                bootstrap_location.root,
+            ),
+            main_location.root,
+        ),
+    )
+
+    # Step 2: AOT compile when not in debug mode.
+    aot_output = None
+    if not is_debug:
+        aot_output = ctx.actions.declare_file(ctx.label.name + ".so")
+        flutter_aot_elf_action(
+            ctx = ctx,
+            gen_snapshot = flutter_sdk_info.gen_snapshot,
+            kernel_dill = kernel_dill,
+            output = aot_output,
+            strip = strip,
+        )
+
+    # Step 3: Compile shaders + bundle assets.
+    compiled_shaders = flutter_compile_shaders(ctx, flutter_sdk_info, "linux")
+    flutter_assets = declare_flutter_assets_dir(ctx)
+    flutter_build_assets(
+        ctx,
+        flutter_sdk_info,
+        flutter_assets,
+        compiled_shaders,
+        kernel_dill = kernel_dill,
+        is_debug = is_debug,
+        data_assets = transitive_data_assets,
+    )
+
+    # Step 4: Generate native C++ plugin registrant and compile GTK runner binary.
+    native_registrant_cc = generate_native_plugin_registrant(ctx, plugins, "linux")
+    native_registrant_h = generate_native_plugin_registrant_header(ctx, "linux")
+
+    plugin_srcs = []
+    plugin_hdrs = []
+    plugin_include_dirs = []
+    for entry in linux_plugin_libraries.to_list():
+        plugin_srcs.extend(entry.srcs.to_list())
+        plugin_hdrs.extend(entry.hdrs.to_list())
+        plugin_include_dirs.extend(entry.include_dirs.to_list())
+
+    engine_files = flutter_sdk_info.engine_library.files.to_list()
+    runner_binary = compile_linux_runner(
+        ctx,
+        runner_srcs = [ctx.file._linux_runner_source],
+        runner_hdrs = [],
+        engine_files = engine_files,
+        defines = linux_runner_defines(ctx.attr.gtk_app_id, ctx.attr.window_title),
+        registrant_srcs = [native_registrant_cc],
+        registrant_hdrs = [native_registrant_h],
+        linux_sysroot = flutter_sdk_info.linux_sysroot,
+        target_arch = flutter_sdk_info.target_arch,
+        plugin_srcs = plugin_srcs,
+        plugin_hdrs = plugin_hdrs,
+        plugin_include_dirs = plugin_include_dirs,
+    )
+
+    # Step 5: Assemble Linux desktop bundle directory.
+    native_libs = collect_native_libs(ctx.attr.native_deps)
+    transitive_native_depsets = [
+        dep[FlutterInfo].transitive_native_libs
+        for dep in ctx.attr.deps
+        if FlutterInfo in dep
+    ]
+    if transitive_native_depsets:
+        native_libs.extend(depset(transitive = transitive_native_depsets).to_list())
+    native_libs.extend(bundled_code_assets.to_list())
+
+    bundle_dir = ctx.actions.declare_directory(ctx.label.name + "_linux")
+    binary_name = ctx.label.name
+    copies = compute_desktop_bundle_copies(
+        is_debug = is_debug,
+        kernel_dill_path = kernel_dill.path if is_debug else None,
+        aot_output_path = aot_output.path if aot_output else None,
+        aot_dst = "lib/libapp.so",
+        icu_data_path = flutter_sdk_info.icu_data.path,
+        engine_basenames = [(f.path, f.basename) for f in engine_files],
+        native_basenames = [(lib.path, lib.basename) for lib in native_libs],
+    )
+    copies.append({"src": runner_binary.path, "dst": binary_name})
+
+    bundle_config = {
+        "output_dir": bundle_dir.path,
+        "copies": copies,
+        "copy_dirs": [
+            {"src": flutter_assets.path, "dst": "data/flutter_assets"},
+        ],
+    }
+    bundle_config_file = ctx.actions.declare_file(ctx.label.name + "_linux_bundle_config.json")
+    ctx.actions.write(bundle_config_file, json.encode(bundle_config))
+
+    extra_bundle_inputs = [kernel_dill] if is_debug else [aot_output]
+    all_bundle_inputs = (
+        [bundle_config_file, flutter_assets, flutter_sdk_info.icu_data, runner_binary] +
+        extra_bundle_inputs +
+        native_libs +
+        engine_files
+    )
+    exec_dart, dart_vm_files = resolve_exec_dart_vm(ctx, flutter_sdk_info)
+    ctx.actions.run(
+        executable = exec_dart,
+        arguments = [
+            ctx.executable._bundle_tool.path,
+            "--config",
+            bundle_config_file.path,
+        ],
+        inputs = depset(
+            direct = all_bundle_inputs + [ctx.executable._bundle_tool],
+            transitive = [dart_vm_files],
+        ),
+        outputs = [bundle_dir],
+        mnemonic = "FlutterLinuxBundle",
+        progress_message = "Bundling Flutter Linux integration test %s" % ctx.label,
+    )
+
+    # Step 6: Symlink the runner executable and wire test environment + runfiles.
+    tool = ctx.attr._tool
+    is_windows = ctx.target_platform_has_constraint(
+        ctx.attr._windows_constraint[platform_common.ConstraintValueInfo],
+    )
+    ext = ".exe" if is_windows else ""
+    executable = ctx.actions.declare_file(ctx.label.name + ext)
+    ctx.actions.symlink(
+        output = executable,
+        target_file = tool[DefaultInfo].files_to_run.executable,
+        is_executable = True,
+    )
+
+    workspace_name = ctx.workspace_name
+    env = {
+        "FLUTTER_INTEGRATION_TEST_PLATFORM": "linux",
+        "FLUTTER_INTEGRATION_TEST_LINUX_BUNDLE": runfiles_path(bundle_dir, workspace_name),
+        "FLUTTER_INTEGRATION_TEST_LINUX_BINARY": binary_name,
+        "FLUTTER_INTEGRATION_TEST_XVFB": runfiles_path(ctx.file._linux_xvfb, workspace_name),
+        "FLUTTER_INTEGRATION_TEST_XKBCOMP": runfiles_path(ctx.file._linux_xkbcomp, workspace_name),
+        "FLUTTER_INTEGRATION_TEST_FONTCONFIG": runfiles_path(ctx.file._linux_fontconfig, workspace_name),
+        "FLUTTER_INTEGRATION_TEST_PATH": main_file.short_path,
+    }
+    for key, value in ctx.attr.env.items():
+        if key in env:
+            fail((
+                "flutter_integration_test {name}: env key {key} is set by the " +
+                "rule itself and cannot be overridden."
+            ).format(name = ctx.label.name, key = key))
+        env[key] = value
+
+    env_info = testing.TestEnvironment(env)
+
+    runtime_files = [
+        bundle_dir,
+        ctx.file._linux_xvfb,
+        ctx.file._linux_xkbcomp,
+        ctx.file._linux_fontconfig,
+    ] + ctx.attr._linux_runtime_all_files.files.to_list()
+    tool_runfiles = tool[DefaultInfo].default_runfiles
+    runfiles = ctx.runfiles(
+        files = runtime_files + ctx.files.data,
+    )
+    runfiles = runfiles.merge(tool_runfiles)
+    for data_target in ctx.attr.data:
+        runfiles = runfiles.merge(data_target[DefaultInfo].default_runfiles)
+
+    instrumented_files_info, analyzable_info = _build_analyzable_and_coverage_infos(
+        ctx,
+        package_name,
+        lib_root,
+        main_file,
+        extra_srcs,
     )
 
     return [
@@ -882,36 +1515,65 @@ _WEB_RELEVANT_KEYS = (
     "_asset_bundle_tool",
 )
 
-_INTEGRATION_TEST_ATTRS = KERNEL_COMPILE_ATTRS | {
+_COMMON_INTEGRATION_TEST_ATTRS = KERNEL_COMPILE_ATTRS | {
     k: v
     for k, v in FLUTTER_APPLICATION_ATTRS.items()
     if k in _WEB_RELEVANT_KEYS
 }
-_INTEGRATION_TEST_ATTRS["main"] = attr.label(
+_COMMON_INTEGRATION_TEST_ATTRS["main"] = attr.label(
     doc = "The integration test .dart entry point. Optional when `srcs` " +
           "contains a single `.dart` file.",
     allow_single_file = [".dart"],
 )
-_INTEGRATION_TEST_ATTRS["package_name"] = attr.string(
+_COMMON_INTEGRATION_TEST_ATTRS["package_name"] = attr.string(
     doc = "Dart package name (from pubspec.yaml). Defaults to target name.",
 )
-_INTEGRATION_TEST_ATTRS["app_srcs"] = attr.label_list(
+_COMMON_INTEGRATION_TEST_ATTRS["app_srcs"] = attr.label_list(
     doc = "Dart source files for the application under test (e.g. `[\"lib/main.dart\"]`).",
     allow_files = [".dart"],
 )
+_COMMON_INTEGRATION_TEST_ATTRS["tree_shake_icons"] = attr.bool(
+    doc = "Whether to tree-shake icon fonts in non-debug builds.",
+    default = False,
+)
+_COMMON_INTEGRATION_TEST_ATTRS["platform"] = attr.string(
+    doc = "Target platform to run the integration test on ('web', 'linux', or 'android').",
+    default = "web",
+    values = ["web", "linux", "android"],
+)
+_COMMON_INTEGRATION_TEST_ATTRS["profile"] = attr.bool(
+    doc = "Whether to compile in profile mode.",
+    default = False,
+)
+_COMMON_INTEGRATION_TEST_ATTRS["data"] = attr.label_list(
+    allow_files = True,
+    doc = "Runtime data files made available in test runfiles.",
+)
+_COMMON_INTEGRATION_TEST_ATTRS["env"] = attr.string_dict(
+    doc = "Extra environment variables for the test runner process.",
+)
+_COMMON_INTEGRATION_TEST_ATTRS.update(PLATFORM_CONSTRAINT_ATTRS)
+_COMMON_INTEGRATION_TEST_ATTRS.update(MODULAR_KERNEL_ATTRS)
+_COMMON_INTEGRATION_TEST_ATTRS["_tool"] = attr.label(
+    default = Label("//flutter/private/tools:flutter_integration_test_runner"),
+    executable = True,
+    cfg = "exec",
+)
+_COMMON_INTEGRATION_TEST_ATTRS["_bundle_tool"] = attr.label(
+    default = Label("//flutter/private/tools:bundle_app"),
+    executable = True,
+    cfg = "exec",
+)
+_COMMON_INTEGRATION_TEST_ATTRS["_sky_engine"] = attr.label(
+    default = Label("@flutter_sky_engine//:sky_engine"),
+    providers = [DartInfo],
+)
+
+_INTEGRATION_TEST_ATTRS = dict(_COMMON_INTEGRATION_TEST_ATTRS)
 _INTEGRATION_TEST_ATTRS["deps"] = attr.label_list(
     doc = FLUTTER_DEPS_DOC,
     providers = [DartInfo],
     aspects = [flutter_web_shader_aspect, flutter_kernel_module_aspect],
-)
-_INTEGRATION_TEST_ATTRS["tree_shake_icons"] = attr.bool(
-    doc = "Whether to tree-shake icon fonts in non-debug builds.",
-    default = False,
-)
-_INTEGRATION_TEST_ATTRS["platform"] = attr.string(
-    doc = "Target platform to run the integration test on ('web', 'linux', or 'android').",
-    default = "web",
-    values = ["web", "linux", "android"],
 )
 _INTEGRATION_TEST_ATTRS["compiler"] = attr.string(
     doc = "Web compiler: 'dart2js' (default) or 'dart2wasm'.",
@@ -962,24 +1624,6 @@ _INTEGRATION_TEST_ATTRS["source_maps"] = attr.bool(
     doc = "Whether to generate source maps.",
     default = False,
 )
-_INTEGRATION_TEST_ATTRS["profile"] = attr.bool(
-    doc = "Whether to compile in profile mode.",
-    default = False,
-)
-_INTEGRATION_TEST_ATTRS["data"] = attr.label_list(
-    allow_files = True,
-    doc = "Runtime data files made available in test runfiles.",
-)
-_INTEGRATION_TEST_ATTRS["env"] = attr.string_dict(
-    doc = "Extra environment variables for the test runner process.",
-)
-_INTEGRATION_TEST_ATTRS.update(PLATFORM_CONSTRAINT_ATTRS)
-_INTEGRATION_TEST_ATTRS.update(MODULAR_KERNEL_ATTRS)
-_INTEGRATION_TEST_ATTRS["_tool"] = attr.label(
-    default = Label("//flutter/private/tools:flutter_integration_test_runner"),
-    executable = True,
-    cfg = "exec",
-)
 _INTEGRATION_TEST_ATTRS["_chrome_headless_shell"] = attr.label(
     default = Label("@flutter_chrome_headless_shell//:browser/chrome-headless-shell"),
     allow_single_file = True,
@@ -1006,19 +1650,51 @@ _INTEGRATION_TEST_ATTRS["_dart2js_platform_dill"] = attr.label(
 _INTEGRATION_TEST_ATTRS["_web_sdk"] = attr.label(
     default = Label("@flutter_web_sdk//:web_sdk"),
 )
-_INTEGRATION_TEST_ATTRS["_bundle_tool"] = attr.label(
-    default = Label("//flutter/private/tools:bundle_app"),
-    executable = True,
-    cfg = "exec",
-)
 _INTEGRATION_TEST_ATTRS["_web_template_tool"] = attr.label(
     default = Label("//flutter/private/tools:web_template"),
     executable = True,
     cfg = "exec",
 )
-_INTEGRATION_TEST_ATTRS["_sky_engine"] = attr.label(
-    default = Label("@flutter_sky_engine//:sky_engine"),
+
+_LINUX_INTEGRATION_TEST_ATTRS = dict(_COMMON_INTEGRATION_TEST_ATTRS)
+_LINUX_INTEGRATION_TEST_ATTRS["deps"] = attr.label_list(
+    doc = FLUTTER_DEPS_DOC,
     providers = [DartInfo],
+    aspects = [flutter_app_shader_aspect, flutter_kernel_module_aspect],
+)
+_LINUX_INTEGRATION_TEST_ATTRS["native_deps"] = attr.label_list(
+    doc = "Native shared library targets (cc_library) for dart:ffi bundled into lib/.",
+    aspects = [native_sources_aspect],
+)
+_LINUX_INTEGRATION_TEST_ATTRS["gtk_app_id"] = attr.string(
+    doc = "GTK application identifier for the Linux test runner.",
+    default = "com.example.flutter_integration_test",
+)
+_LINUX_INTEGRATION_TEST_ATTRS["window_title"] = attr.string(
+    doc = "Window title for the Linux test runner.",
+    default = "Flutter Integration Test",
+)
+_LINUX_INTEGRATION_TEST_ATTRS["_linux_runner_source"] = attr.label(
+    default = Label("//flutter/private/runners:linux_runner.cc"),
+    allow_single_file = True,
+)
+_LINUX_INTEGRATION_TEST_ATTRS["_cc_toolchain"] = attr.label(
+    default = "@bazel_tools//tools/cpp:current_cc_toolchain",
+)
+_LINUX_INTEGRATION_TEST_ATTRS["_linux_xvfb"] = attr.label(
+    default = Label("@flutter_linux_headless_runtime//:sysroot/usr/bin/Xvfb"),
+    allow_single_file = True,
+)
+_LINUX_INTEGRATION_TEST_ATTRS["_linux_xkbcomp"] = attr.label(
+    default = Label("@flutter_linux_headless_runtime//:sysroot/usr/bin/xkbcomp"),
+    allow_single_file = True,
+)
+_LINUX_INTEGRATION_TEST_ATTRS["_linux_fontconfig"] = attr.label(
+    default = Label("@flutter_linux_headless_runtime//:fonts/fonts.conf"),
+    allow_single_file = True,
+)
+_LINUX_INTEGRATION_TEST_ATTRS["_linux_runtime_all_files"] = attr.label(
+    default = Label("@flutter_linux_headless_runtime//:all_files"),
 )
 
 _flutter_integration_test = rule(
@@ -1032,7 +1708,39 @@ _flutter_integration_test = rule(
             mandatory = False,
         ),
     ] + COPY_TO_DIRECTORY_TOOLCHAINS + MODULAR_KERNEL_TOOLCHAINS,
-    doc = "Compiles a Flutter app with an in-app integration test and runs it on the target platform.",
+    doc = "Compiles a Flutter app with an in-app integration test and runs it on the web platform.",
+)
+
+_flutter_linux_integration_test = rule(
+    implementation = _flutter_linux_integration_test_impl,
+    attrs = _LINUX_INTEGRATION_TEST_ATTRS,
+    fragments = ["cpp"],
+    test = True,
+    toolchains = [
+        "@bazel_tools//tools/cpp:toolchain_type",
+        "@rules_flutter//flutter:toolchain_type",
+        config_common.toolchain_type(
+            "@rules_flutter//flutter/private:product_tools_toolchain_type",
+            mandatory = False,
+        ),
+        config_common.toolchain_type(
+            "@rules_flutter//flutter/private:aot_toolchain_type",
+            mandatory = False,
+        ),
+        config_common.toolchain_type(
+            "@rules_flutter//flutter/private:desktop_engine_toolchain_type",
+            mandatory = False,
+        ),
+        config_common.toolchain_type(
+            "@rules_flutter//flutter/private:font_subset_toolchain_type",
+            mandatory = False,
+        ),
+        config_common.toolchain_type(
+            "@rules_dart//dart:exec_tools_toolchain_type",
+            mandatory = False,
+        ),
+    ] + COPY_TO_DIRECTORY_TOOLCHAINS + MODULAR_KERNEL_TOOLCHAINS,
+    doc = "Compiles a Flutter Linux desktop app with an in-app integration test and runs it headlessly under Xvfb.",
 )
 
 def flutter_integration_test(
@@ -1041,13 +1749,16 @@ def flutter_integration_test(
         deps = [],
         app_deps = [],
         app = None,
+        platform = "web",
         **kwargs):
     """Builds and runs an end-to-end Flutter integration test on a real platform.
 
     Compiles the application and the integration test (`WidgetTester` code) into
     a real platform bundle and drives it via the platform runner. On `web`, the
     built web bundle is served from `127.0.0.1` and executed inside a hermetic,
-    pinned `chrome-headless-shell` browser.
+    pinned `chrome-headless-shell` browser. On `linux`, the built GTK desktop
+    bundle is executed inside a hermetic, pinned `Xvfb` virtual display with
+    pinned GTK3 and Mesa software OpenGL/EGL libraries.
 
     Args:
         name: Target name.
@@ -1055,18 +1766,29 @@ def flutter_integration_test(
         deps: Dependencies (`dart_library` / `flutter_library`) for the test and app.
         app_deps: Optional additional dependencies for the app, merged with `deps`.
         app: Optional library target for the app under test, merged with `deps`.
+        platform: Target platform (`"web"` or `"linux"`, defaults to `"web"`).
         **kwargs: Additional attributes forwarded to the rule (`main`, `srcs`,
-            `app_srcs`, `platform`, `assets`, `shaders`, `compiler`, `renderer`,
-            `defines`, `data`, `env`, etc.).
+            `app_srcs`, `assets`, `shaders`, `compiler`, `renderer`,
+            `native_deps`, `defines`, `data`, `env`, etc.).
     """
     merged_deps = list(deps)
     for extra in list(app_deps) + ([app] if app != None else []):
         if extra not in merged_deps:
             merged_deps.append(extra)
 
-    _flutter_integration_test(
-        name = name,
-        package_name = package_name or name,
-        deps = merged_deps,
-        **kwargs
-    )
+    if platform == "linux":
+        _flutter_linux_integration_test(
+            name = name,
+            package_name = package_name or name,
+            deps = merged_deps,
+            platform = platform,
+            **kwargs
+        )
+    else:
+        _flutter_integration_test(
+            name = name,
+            package_name = package_name or name,
+            deps = merged_deps,
+            platform = platform,
+            **kwargs
+        )

@@ -106,10 +106,50 @@ PlatformLauncher createPlatformLauncher(
         robotoFontFile: robotoFont,
         baseTempDir: env['TEST_TMPDIR'] ?? Directory.systemTemp.path,
       );
+    case 'linux':
+      final bundleDirKey = env['FLUTTER_INTEGRATION_TEST_LINUX_BUNDLE'];
+      final binaryName = env['FLUTTER_INTEGRATION_TEST_LINUX_BINARY'];
+      final xvfbKey = env['FLUTTER_INTEGRATION_TEST_XVFB'];
+      final xkbcompKey = env['FLUTTER_INTEGRATION_TEST_XKBCOMP'];
+      final fontconfigKey = env['FLUTTER_INTEGRATION_TEST_FONTCONFIG'];
+      if (bundleDirKey == null || bundleDirKey.isEmpty) {
+        throw const FormatException(
+          'FLUTTER_INTEGRATION_TEST_LINUX_BUNDLE must be set for platform="linux".',
+        );
+      }
+      if (binaryName == null || binaryName.isEmpty) {
+        throw const FormatException(
+          'FLUTTER_INTEGRATION_TEST_LINUX_BINARY must be set for platform="linux".',
+        );
+      }
+      if (xvfbKey == null || xvfbKey.isEmpty) {
+        throw const FormatException(
+          'FLUTTER_INTEGRATION_TEST_XVFB must be set for platform="linux".',
+        );
+      }
+      if (xkbcompKey == null || xkbcompKey.isEmpty) {
+        throw const FormatException(
+          'FLUTTER_INTEGRATION_TEST_XKBCOMP must be set for platform="linux".',
+        );
+      }
+      final bundleDir = r.rlocation(bundleDirKey);
+      final xvfbBinary = r.rlocation(xvfbKey);
+      final xkbcompBinary = r.rlocation(xkbcompKey);
+      final fontconfigFile = (fontconfigKey == null || fontconfigKey.isEmpty)
+          ? null
+          : r.rlocation(fontconfigKey);
+      return LinuxPlatformLauncher(
+        bundleDir: bundleDir,
+        binaryName: binaryName,
+        xvfbBinary: xvfbBinary,
+        xkbcompBinary: xkbcompBinary,
+        fontconfigFile: fontconfigFile,
+        baseTempDir: env['TEST_TMPDIR'] ?? Directory.systemTemp.path,
+      );
     default:
       throw FormatException(
         'Unsupported integration test platform "$platform". '
-        'Supported platforms: web.',
+        'Supported platforms: web, linux.',
       );
   }
 }
@@ -187,6 +227,154 @@ Map<String, String> buildChromeEnvironment({
       'FONTCONFIG_PATH': File(fontconfigFile).parent.path,
     },
   };
+}
+
+/// Builds the command-line arguments passed to the hermetic `Xvfb` binary.
+///
+/// Uses `-displayfd 1` so `Xvfb` picks a free display number and writes
+/// `<display>\n` to stdout once the X server is listening for connections.
+List<String> buildXvfbArguments({required String xkbDir}) {
+  return <String>[
+    '-displayfd',
+    '1',
+    '-screen',
+    '0',
+    '1024x768x24',
+    '-nolisten',
+    'tcp',
+    '-noreset',
+    '-xkbdir',
+    xkbDir,
+  ];
+}
+
+/// Builds the hermetic environment for `Xvfb`.
+///
+/// Restricts `PATH` to the pinned sysroot `usr/bin` (so `xkbcomp` resolves
+/// exclusively from the pinned package archive) and `LD_LIBRARY_PATH` to the
+/// pinned sysroot library directories.
+Map<String, String> buildXvfbEnvironment({
+  required String sysrootDir,
+  required String scratchDir,
+}) {
+  final libDirs = <String>[
+    '$sysrootDir/usr/lib/x86_64-linux-gnu',
+    '$sysrootDir/lib/x86_64-linux-gnu',
+  ];
+  return <String, String>{
+    'PATH': '$sysrootDir/usr/bin',
+    'LD_LIBRARY_PATH': libDirs.join(':'),
+    'HOME': scratchDir,
+    'TMPDIR': scratchDir,
+    'XKB_BINDIR': '$sysrootDir/usr/bin',
+  };
+}
+
+/// Builds the hermetic environment for the compiled Flutter Linux desktop app.
+///
+/// Directs GTK3, GDK, GLib, Fontconfig, libglvnd, and Mesa (`llvmpipe`
+/// `swrast_dri.so`) to the pinned sysroot in runfiles and the `Xvfb` display.
+Map<String, String> buildLinuxAppEnvironment({
+  required String bundleDir,
+  required String sysrootDir,
+  required String scratchDir,
+  required String display,
+  required String harnessUrl,
+  String? fontconfigFile,
+}) {
+  final libDirs = <String>[
+    '$bundleDir/lib',
+    '$sysrootDir/usr/lib/x86_64-linux-gnu',
+    '$sysrootDir/lib/x86_64-linux-gnu',
+  ];
+  final driDir = '$sysrootDir/usr/lib/x86_64-linux-gnu/dri';
+  return <String, String>{
+    'PATH': '$sysrootDir/usr/bin',
+    'LD_LIBRARY_PATH': libDirs.join(':'),
+    'DISPLAY': display,
+    'GDK_BACKEND': 'x11',
+    'LIBGL_ALWAYS_SOFTWARE': '1',
+    'GALLIUM_DRIVER': 'llvmpipe',
+    'LIBGL_DRIVERS_PATH': driDir,
+    'GBM_DRIVERS_PATH': driDir,
+    '__EGL_VENDOR_LIBRARY_DIRS': '$sysrootDir/usr/share/glvnd/egl_vendor.d',
+    'XLOCALEDIR': '$sysrootDir/usr/share/X11/locale',
+    'XKB_CONFIG_ROOT': '$sysrootDir/usr/share/X11/xkb',
+    'GIO_MODULE_DIR': '$scratchDir/empty-gio-modules',
+    'GTK_PATH': '$scratchDir/empty-gtk-path',
+    'NO_AT_BRIDGE': '1',
+    'GSETTINGS_BACKEND': 'memory',
+    'HOME': scratchDir,
+    'TMPDIR': scratchDir,
+    'XDG_CONFIG_HOME': '$scratchDir/.config',
+    'XDG_CACHE_HOME': '$scratchDir/.cache',
+    'XDG_RUNTIME_DIR': '$scratchDir/xdg-runtime',
+    'FLUTTER_INTEGRATION_TEST_HARNESS_URL': harnessUrl,
+    if (fontconfigFile != null) ...{
+      'FONTCONFIG_FILE': fontconfigFile,
+      'FONTCONFIG_PATH': File(fontconfigFile).parent.path,
+    },
+  };
+}
+
+/// Copies the pinned `Xvfb` binary into [scratchDir] and clears its compiled-in
+/// `XkbBinDirectory` (`"/usr/bin"`) so `Xvfb` invokes `xkbcomp` via `PATH`
+/// (`<sysroot>/usr/bin/xkbcomp`) instead of `/usr/bin/xkbcomp`.
+String prepareHermeticXvfbBinary({
+  required String sourceXvfbBinary,
+  required String scratchDir,
+}) {
+  final binDir = Directory('$scratchDir/bin')..createSync(recursive: true);
+  final destPath = '${binDir.path}/Xvfb';
+  File(sourceXvfbBinary).copySync(destPath);
+
+  final bytes = File(destPath).readAsBytesSync();
+  // In Xorg's xkbInit.c, XkbBinDirectory is initialized to "/usr/bin"
+  // immediately adjacent to XkbBaseDirectory ("/usr/share/X11/xkb"). Clearing
+  // "/usr/bin" to an empty C string causes XkbDDXCompileKeymapByNames to omit
+  // the directory prefix and resolve `xkbcomp` from PATH.
+  const usrBin = <int>[0x2f, 0x75, 0x73, 0x72, 0x2f, 0x62, 0x69, 0x6e, 0x00];
+  const xkbShare = <int>[
+    0x2f, 0x75, 0x73, 0x72, 0x2f, 0x73, 0x68, 0x61, 0x72, 0x65, // /usr/share
+    0x2f, 0x58, 0x31, 0x31, 0x2f, 0x78, 0x6b, 0x62, 0x00, // /X11/xkb\0
+  ];
+  final xkbIdx = _indexOfBytes(bytes, xkbShare);
+  if (xkbIdx >= usrBin.length) {
+    final searchStart = xkbIdx - 32 < 0 ? 0 : xkbIdx - 32;
+    final usrBinIdx = _indexOfBytes(
+      bytes,
+      usrBin,
+      start: searchStart,
+      end: xkbIdx,
+    );
+    if (usrBinIdx >= 0) {
+      final raf = File(destPath).openSync(mode: FileMode.writeOnlyAppend);
+      try {
+        raf.setPositionSync(usrBinIdx);
+        raf.writeFromSync(const <int>[0, 0, 0, 0, 0, 0, 0, 0]);
+      } finally {
+        raf.closeSync();
+      }
+    }
+  }
+  return destPath;
+}
+
+int _indexOfBytes(
+  List<int> haystack,
+  List<int> needle, {
+  int start = 0,
+  int? end,
+}) {
+  final limit = (end ?? haystack.length) - needle.length;
+  outer:
+  for (var i = start; i <= limit; i++) {
+    for (var j = 0; j < needle.length; j++) {
+      if (haystack[i + j] != needle[j]) continue outer;
+    }
+    return i;
+  }
+  return -1;
 }
 
 /// Abstraction over how a target platform starts the compiled app and serves
@@ -290,6 +478,215 @@ class WebPlatformLauncher implements PlatformLauncher {
 
   @override
   Future<void> dispose() async {
+    final dir = _scratchDir;
+    _scratchDir = null;
+    if (dir != null && dir.existsSync()) {
+      try {
+        dir.deleteSync(recursive: true);
+      } catch (_) {}
+    }
+  }
+}
+
+/// Launches the built Flutter Linux desktop bundle inside a hermetic, pinned
+/// `Xvfb` virtual display using the pinned GTK3 and Mesa software OpenGL/EGL
+/// runtime libraries.
+class LinuxPlatformLauncher implements PlatformLauncher {
+  LinuxPlatformLauncher({
+    required this.bundleDir,
+    required this.binaryName,
+    required this.xvfbBinary,
+    required this.xkbcompBinary,
+    required this.baseTempDir,
+    this.fontconfigFile,
+  });
+
+  final String bundleDir;
+  final String binaryName;
+  final String xvfbBinary;
+  final String xkbcompBinary;
+  final String baseTempDir;
+  final String? fontconfigFile;
+
+  Directory? _scratchDir;
+  Process? _xvfbProcess;
+  String? _displayNumber;
+
+  @override
+  String get platformName => 'linux';
+
+  @override
+  String get suiteRuntime => 'vm';
+
+  @override
+  String get suiteCompiler => 'kernel';
+
+  @override
+  Future<Process> startTarget(int harnessPort) async {
+    if (!File(xvfbBinary).existsSync()) {
+      throw StateError('Pinned Xvfb binary not found at "$xvfbBinary".');
+    }
+    if (!File(xkbcompBinary).existsSync()) {
+      throw StateError('Pinned xkbcomp binary not found at "$xkbcompBinary".');
+    }
+    if (!Directory(bundleDir).existsSync()) {
+      throw StateError(
+        'Built Linux bundle directory not found at "$bundleDir".',
+      );
+    }
+    final appBinary = '$bundleDir/$binaryName';
+    if (!File(appBinary).existsSync()) {
+      throw StateError(
+        'Built Linux application binary not found at "$appBinary".',
+      );
+    }
+
+    // xvfbBinary is at <repoRoot>/sysroot/usr/bin/Xvfb.
+    final sysrootDir = File(xvfbBinary).parent.parent.parent.path;
+
+    final scratch = Directory(
+      '$baseTempDir/linux_integration_${pid}_${DateTime.now().microsecondsSinceEpoch}',
+    )..createSync(recursive: true);
+    _scratchDir = scratch;
+    Directory('${scratch.path}/.config').createSync(recursive: true);
+    Directory('${scratch.path}/.cache').createSync(recursive: true);
+    Directory('${scratch.path}/xdg-runtime').createSync(recursive: true);
+    Directory('${scratch.path}/fontconfig-cache').createSync(recursive: true);
+    Directory('${scratch.path}/empty-gio-modules').createSync(recursive: true);
+    Directory('${scratch.path}/empty-gtk-path').createSync(recursive: true);
+
+    String? effectiveFontconfig = fontconfigFile;
+    final sysrootFontsDir = Directory('$sysrootDir/usr/share/fonts');
+    if (sysrootFontsDir.existsSync()) {
+      final localFontsConf = File('${scratch.path}/fonts.conf');
+      localFontsConf.writeAsStringSync('''<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
+<fontconfig>
+  <dir>${sysrootFontsDir.path}</dir>
+  <cachedir>${scratch.path}/fontconfig-cache</cachedir>
+</fontconfig>
+''');
+      effectiveFontconfig = localFontsConf.path;
+    }
+
+    final patchedXvfb = prepareHermeticXvfbBinary(
+      sourceXvfbBinary: xvfbBinary,
+      scratchDir: scratch.path,
+    );
+    final xvfbArgs = buildXvfbArguments(
+      xkbDir: '$sysrootDir/usr/share/X11/xkb',
+    );
+    final xvfbEnv = buildXvfbEnvironment(
+      sysrootDir: sysrootDir,
+      scratchDir: scratch.path,
+    );
+
+    final xvfb = await Process.start(
+      patchedXvfb,
+      xvfbArgs,
+      environment: xvfbEnv,
+      includeParentEnvironment: false,
+    );
+    _xvfbProcess = xvfb;
+
+    final xvfbStderr = <String>[];
+    xvfb.stderr.transform(utf8.decoder).transform(const LineSplitter()).listen((
+      line,
+    ) {
+      if (xvfbStderr.length < 50) {
+        xvfbStderr.add(line);
+      }
+    });
+
+    final displayCompleter = Completer<String>();
+    final stdoutSub = xvfb.stdout
+        .transform(utf8.decoder)
+        .transform(const LineSplitter())
+        .listen(
+          (line) {
+            final trimmed = line.trim();
+            if (trimmed.isNotEmpty && !displayCompleter.isCompleted) {
+              displayCompleter.complete(trimmed);
+            }
+          },
+          onDone: () {
+            if (!displayCompleter.isCompleted) {
+              displayCompleter.completeError(
+                StateError(
+                  'Xvfb exited before reporting a display number on -displayfd:\n'
+                  '${xvfbStderr.join("\n")}',
+                ),
+              );
+            }
+          },
+        );
+
+    final String displayNumber;
+    try {
+      displayNumber = await displayCompleter.future.timeout(
+        const Duration(seconds: 15),
+        onTimeout: () => throw TimeoutException(
+          'Timed out waiting for Xvfb to report a display number:\n'
+          '${xvfbStderr.join("\n")}',
+        ),
+      );
+    } finally {
+      await stdoutSub.cancel();
+    }
+    _displayNumber = displayNumber;
+
+    final harnessUrl = 'ws://127.0.0.1:$harnessPort$integrationWebSocketPath';
+    final appEnv = buildLinuxAppEnvironment(
+      bundleDir: bundleDir,
+      sysrootDir: sysrootDir,
+      scratchDir: scratch.path,
+      display: ':$displayNumber',
+      harnessUrl: harnessUrl,
+      fontconfigFile: effectiveFontconfig,
+    );
+
+    return Process.start(
+      appBinary,
+      const <String>[],
+      workingDirectory: bundleDir,
+      environment: appEnv,
+      includeParentEnvironment: false,
+    );
+  }
+
+  @override
+  Future<void> handleHttpRequest(HttpRequest request) async {
+    request.response.statusCode = HttpStatus.notFound;
+    await request.response.close();
+  }
+
+  @override
+  Future<void> dispose() async {
+    final xvfb = _xvfbProcess;
+    _xvfbProcess = null;
+    if (xvfb != null) {
+      xvfb.kill(ProcessSignal.sigkill);
+      try {
+        await xvfb.exitCode.timeout(
+          const Duration(seconds: 2),
+          onTimeout: () => 0,
+        );
+      } catch (_) {}
+    }
+
+    final display = _displayNumber;
+    _displayNumber = null;
+    if (display != null) {
+      try {
+        final lockFile = File('/tmp/.X$display-lock');
+        if (lockFile.existsSync()) lockFile.deleteSync();
+      } catch (_) {}
+      try {
+        final sockFile = File('/tmp/.X11-unix/X$display');
+        if (sockFile.existsSync()) sockFile.deleteSync();
+      } catch (_) {}
+    }
+
     final dir = _scratchDir;
     _scratchDir = null;
     if (dir != null && dir.existsSync()) {

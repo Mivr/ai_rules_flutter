@@ -171,6 +171,9 @@ jobs:
           # Run integration_web on Linux (hermetic chrome-headless-shell).
           - workspace: integration_web
             os: ubuntu-latest
+          # Run integration_linux on Linux (hermetic Xvfb + GTK3/Mesa runtime).
+          - workspace: integration_linux
+            os: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       # See the note above `env` for why only hello_world saves. The output base
@@ -234,4 +237,17 @@ jobs:
       - name: bazel test //... (e2e/integration_web)
         working-directory: e2e/integration_web
         run: bazel test //... --test_output=errors
+  integration-linux:
+    name: E2E (integration_linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+        with:
+          repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
+          cache-save: false
+      - name: bazel test //... (e2e/integration_linux)
+        working-directory: e2e/integration_linux
+        run: bazel test //... --test_output=errors
+
 

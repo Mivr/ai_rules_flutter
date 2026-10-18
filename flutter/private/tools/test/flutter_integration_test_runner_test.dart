@@ -72,6 +72,102 @@ void main() {
     });
   });
 
+  group('Linux Xvfb & app environment helpers', () {
+    test('builds hermetic Xvfb and Linux app environments', () {
+      final xvfbArgs = runner.buildXvfbArguments(
+        xkbDir: '/runfiles/flutter_linux_headless_runtime/sysroot/usr/share/X11/xkb',
+      );
+      expect(xvfbArgs, containsAllInOrder(['-displayfd', '1']));
+      expect(xvfbArgs, contains('-nolisten'));
+      expect(
+        xvfbArgs,
+        contains(
+          '/runfiles/flutter_linux_headless_runtime/sysroot/usr/share/X11/xkb',
+        ),
+      );
+
+      final xvfbEnv = runner.buildXvfbEnvironment(
+        sysrootDir: '/runfiles/flutter_linux_headless_runtime/sysroot',
+        scratchDir: '/tmp/scratch',
+      );
+      expect(
+        xvfbEnv['PATH'],
+        '/runfiles/flutter_linux_headless_runtime/sysroot/usr/bin',
+      );
+      expect(
+        xvfbEnv['LD_LIBRARY_PATH'],
+        '/runfiles/flutter_linux_headless_runtime/sysroot/usr/lib/x86_64-linux-gnu:'
+        '/runfiles/flutter_linux_headless_runtime/sysroot/lib/x86_64-linux-gnu',
+      );
+
+      final appEnv = runner.buildLinuxAppEnvironment(
+        bundleDir: '/runfiles/ws/app_linux',
+        sysrootDir: '/runfiles/flutter_linux_headless_runtime/sysroot',
+        scratchDir: '/tmp/scratch',
+        display: ':0',
+        harnessUrl: 'ws://127.0.0.1:43210/__flutter_integration_ws__',
+        fontconfigFile: '/tmp/scratch/fonts.conf',
+      );
+      expect(appEnv['DISPLAY'], ':0');
+      expect(appEnv['GDK_BACKEND'], 'x11');
+      expect(appEnv['LIBGL_ALWAYS_SOFTWARE'], '1');
+      expect(appEnv['GALLIUM_DRIVER'], 'llvmpipe');
+      expect(
+        appEnv['LIBGL_DRIVERS_PATH'],
+        '/runfiles/flutter_linux_headless_runtime/sysroot/usr/lib/x86_64-linux-gnu/dri',
+      );
+      expect(
+        appEnv['LD_LIBRARY_PATH'],
+        '/runfiles/ws/app_linux/lib:'
+        '/runfiles/flutter_linux_headless_runtime/sysroot/usr/lib/x86_64-linux-gnu:'
+        '/runfiles/flutter_linux_headless_runtime/sysroot/lib/x86_64-linux-gnu',
+      );
+      expect(
+        appEnv['FLUTTER_INTEGRATION_TEST_HARNESS_URL'],
+        'ws://127.0.0.1:43210/__flutter_integration_ws__',
+      );
+      expect(appEnv['FONTCONFIG_FILE'], '/tmp/scratch/fonts.conf');
+    });
+
+    test(
+      'prepareHermeticXvfbBinary zeroes out XkbBinDirectory /usr/bin literal',
+      () {
+        final tmpDir = Directory.systemTemp.createTempSync('xvfb_patch_test_');
+        try {
+          final fakeXvfb = File('${tmpDir.path}/Xvfb');
+          final payload = <int>[
+            ...utf8.encode('HEADER'),
+            ...utf8.encode('/usr/bin'),
+            0,
+            0,
+            0,
+            ...utf8.encode('/usr/share/X11/xkb'),
+            0,
+            ...utf8.encode('TRAILER'),
+          ];
+          fakeXvfb.writeAsBytesSync(payload);
+          final patchedPath = runner.prepareHermeticXvfbBinary(
+            sourceXvfbBinary: fakeXvfb.path,
+            scratchDir: tmpDir.path,
+          );
+          final patchedBytes = File(patchedPath).readAsBytesSync();
+          expect(patchedBytes.length, payload.length);
+          // "/usr/bin" (8 bytes after "HEADER") is replaced by 8 zero bytes.
+          expect(patchedBytes.sublist(6, 14), List<int>.filled(8, 0));
+          // "/usr/share/X11/xkb" remains intact.
+          expect(
+            utf8.decode(patchedBytes.sublist(17, 17 + 18)),
+            '/usr/share/X11/xkb',
+          );
+        } finally {
+          if (tmpDir.existsSync()) {
+            tmpDir.deleteSync(recursive: true);
+          }
+        }
+      },
+    );
+  });
+
   group('serveWebBundleRequest', () {
     late Directory tmpDir;
     late HttpServer server;

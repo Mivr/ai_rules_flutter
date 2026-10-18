@@ -202,10 +202,27 @@ def make_linux_registrant_content(plugins):
         "",
     ]
 
-    # Forward declarations (snake_case function names from plugin class).
+    # Include each plugin's header when present so its linkage declaration
+    # (standard Flutter Linux plugins wrap `<plugin>_register_with_registrar`
+    # in `G_BEGIN_DECLS` / `extern "C"`) matches the definition; fall back to
+    # a forward declaration for headerless plugins.
     for p in plugins:
         fn_name = _to_snake_case(p.plugin_class)
-        lines.append("extern void %s_register_with_registrar(FlPluginRegistrar* registrar);" % fn_name)
+        pkg_name = getattr(p, "name", "")
+        if pkg_name:
+            lines.append("#if __has_include(<%s/%s.h>)" % (pkg_name, fn_name))
+            lines.append("#include <%s/%s.h>" % (pkg_name, fn_name))
+            lines.append('#elif __has_include("%s.h")' % fn_name)
+            lines.append('#include "%s.h"' % fn_name)
+            lines.append("#else")
+            lines.append("extern void %s_register_with_registrar(FlPluginRegistrar* registrar);" % fn_name)
+            lines.append("#endif")
+        else:
+            lines.append('#if __has_include("%s.h")' % fn_name)
+            lines.append('#include "%s.h"' % fn_name)
+            lines.append("#else")
+            lines.append("extern void %s_register_with_registrar(FlPluginRegistrar* registrar);" % fn_name)
+            lines.append("#endif")
 
     lines.append("")
     lines.append("void fl_register_plugins(FlPluginRegistry* registry) {")

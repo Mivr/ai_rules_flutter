@@ -1778,6 +1778,15 @@ def _flutter_pub_package_impl(ctx):
             has_unreplaced_hook = unreplaced_hook,
             version = ctx.attr.version,
         )
+        if ctx.attr.package_name == "test":
+            ctx.file("flutter_test_package.bzl", _FLUTTER_TEST_PACKAGE_BZL_CONTENT)
+            build_content = build_content.replace(
+                '    "dart_test_package",\n',
+                "",
+            ).replace(
+                "dart_test_package(",
+                'load(":flutter_test_package.bzl", "flutter_test_package")\n\nflutter_test_package(',
+            )
         android_src_dir = ""
         android_java_package = ""
         android_extra_maven_labels = []
@@ -1809,6 +1818,51 @@ def _flutter_pub_package_impl(ctx):
             has_resources = android_has_resources,
         )
     ctx.file("android/BUILD.bazel", android_build_content)
+
+_FLUTTER_TEST_PACKAGE_BZL_CONTENT = """\
+load("@rules_dart//dart:providers.bzl", "DartInfo")
+load(
+    "@rules_dart//dart/private:dart_test_runner.bzl",
+    "DartTestRunnerInfo",
+    "DartTestRunnerSnapshotInfo",
+)
+
+def _flutter_test_package_impl(ctx):
+    library = ctx.attr.library
+    dills = [f for f in ctx.attr.runner[DefaultInfo].files.to_list() if f.extension == "dill"]
+    if len(dills) != 1:
+        fail("%s: `runner` must produce exactly one `.dill`, got %s" % (ctx.label, dills))
+    runner = dills[0]
+    if ctx.attr.snapshot != None:
+        snapshot = ctx.attr.snapshot[DartTestRunnerSnapshotInfo].snapshot
+        if snapshot != None:
+            runner = snapshot
+    return [
+        library[DefaultInfo],
+        library[DartInfo],
+        DartTestRunnerInfo(runner = runner),
+    ]
+
+flutter_test_package = rule(
+    implementation = _flutter_test_package_impl,
+    attrs = {
+        "library": attr.label(
+            doc = "The `package:test` `dart_library`.",
+            mandatory = True,
+            providers = [DartInfo],
+        ),
+        "runner": attr.label(
+            doc = "A kernel-mode `dart_binary` built from `library`.",
+            mandatory = True,
+        ),
+        "snapshot": attr.label(
+            doc = "A `dart_test_runner_snapshot` of `runner`. Its snapshot runs in place of the kernel when one was built.",
+            providers = [DartTestRunnerSnapshotInfo],
+        ),
+    },
+    doc = "`package:test` as a dependency, carrying the runner built from it.",
+)
+"""
 
 flutter_pub_package = repository_rule(
     implementation = _flutter_pub_package_impl,

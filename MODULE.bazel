@@ -44,7 +44,8 @@ bazel_dep(name = "yaml.bzl", version = "0.1.2")
 bazel_dep(name = "rules_multitool", version = "1.11.1", dev_dependency = True)
 bazel_dep(name = "buildifier_prebuilt", version = "10.1.0", dev_dependency = True)
 bazel_dep(name = "bazelrc-preset.bzl", version = "1.9.2", dev_dependency = True)
-bazel_dep(name = "llvm", version = "0.8.19", dev_dependency = True)
+
+bazel_dep(name = "llvm", version = "0.8.19")
 
 git_override(
     module_name = "rules_dart",
@@ -74,7 +75,6 @@ register_toolchains(
     "@llvm//toolchain:macos_aarch64_to_linux_x86_64",
     "@llvm//toolchain:macos_x86_64_to_linux_aarch64",
     "@llvm//toolchain:macos_x86_64_to_linux_x86_64",
-    dev_dependency = True,
 )
 
 # Register the apple_cc CC toolchain explicitly so rules_swift's
@@ -95,7 +95,7 @@ register_toolchains("@local_config_apple_cc_toolchains//:all")
 
 flutter = use_extension("//flutter:extensions.bzl", "flutter")
 flutter.toolchain(flutter_version = "3.47.7")
-use_repo(flutter, "flutter_android_engine_arm64_profile", "flutter_android_engine_x64_profile", "flutter_chrome_headless_shell", "flutter_dev_root", "flutter_gen_l10n", "flutter_ios_engine", "flutter_ios_engine_profile", "flutter_macos_engine", "flutter_material_fonts", "flutter_sky_engine", "flutter_toolchains", "flutter_web_sdk", "flutter_xtool_darwin_sdk")
+use_repo(flutter, "flutter_android_engine_arm64_profile", "flutter_android_engine_x64_profile", "flutter_chrome_headless_shell", "flutter_dev_root", "flutter_gen_l10n", "flutter_ios_engine", "flutter_ios_engine_profile", "flutter_linux_headless_runtime", "flutter_macos_engine", "flutter_material_fonts", "flutter_sky_engine", "flutter_toolchains", "flutter_web_sdk", "flutter_xtool_darwin_sdk")
 
 register_toolchains(
     "@flutter_toolchains//:all",
