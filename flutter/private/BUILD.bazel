@@ -1,4 +1,5 @@
 load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
+load("//flutter/private:flutter_library.bzl", "flutter_font_subset_tools")
 
 # Compilation mode config_settings for select() in macros.
 # compilation_mode is preserved across platform transitions (e.g. iOS).
@@ -43,6 +44,11 @@ toolchain_type(
 
 toolchain_type(
     name = "font_subset_toolchain_type",
+    visibility = ["//visibility:public"],
+)
+
+flutter_font_subset_tools(
+    name = "font_subset_tools",
     visibility = ["//visibility:public"],
 )
 

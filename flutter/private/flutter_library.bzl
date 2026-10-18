@@ -177,6 +177,42 @@ SKY_ENGINE_ATTR = attr.label(
     providers = [DartInfo],
 )
 
+FlutterFontSubsetToolsInfo = provider(
+    doc = "Carries lazily resolved `const_finder` and `font_subset` tools for targets with `fonts_json`.",
+    fields = {
+        "const_finder": "File or None — const_finder.dart.snapshot.",
+        "font_subset": "File or None — font-subset executable.",
+    },
+)
+
+def _flutter_font_subset_tools_impl(ctx):
+    tc = ctx.toolchains["@rules_flutter//flutter/private:font_subset_toolchain_type"]
+    return [
+        FlutterFontSubsetToolsInfo(
+            const_finder = tc.const_finder if tc else None,
+            font_subset = tc.font_subset if tc else None,
+        ),
+    ]
+
+flutter_font_subset_tools = rule(
+    implementation = _flutter_font_subset_tools_impl,
+    toolchains = [
+        config_common.toolchain_type("@rules_flutter//flutter/private:font_subset_toolchain_type", mandatory = False),
+    ],
+    doc = "Resolves `@rules_flutter//flutter/private:font_subset_toolchain_type` on demand for `flutter_library` and `flutter_plugin` targets with non-empty `fonts_json`.",
+)
+
+def _font_subset_tools_default(fonts_json):
+    if fonts_json:
+        return Label("//flutter/private:font_subset_tools")
+    return None
+
+FONT_SUBSET_TOOLS_ATTR = attr.label(
+    doc = "Resolves `font_subset_toolchain_type` only when `fonts_json` is non-empty.",
+    default = _font_subset_tools_default,
+    providers = [FlutterFontSubsetToolsInfo],
+)
+
 def flutter_analyzable_info(ctx, package_name, lib_root):
     """The package a Flutter library rule declares, as the analyzer sees it.
 
@@ -221,7 +257,7 @@ def _flutter_library_impl(ctx):
     # value via derive_package_name. Users opting out of asset prefixing leave
     # `package_name` unset.
     asset_pkg = ctx.attr.package_name
-    font_subset_tc = ctx.toolchains["@rules_flutter//flutter/private:font_subset_toolchain_type"] if "@rules_flutter//flutter/private:font_subset_toolchain_type" in ctx.toolchains else None
+    font_subset_tools = ctx.attr._font_subset_tools[FlutterFontSubsetToolsInfo] if ctx.attr._font_subset_tools else None
     extra_pub_fonts, extra_pub_assets, extra_pub_shaders = build_pub_contributions(
         asset_pkg,
         ctx.attr.fonts_json,
@@ -229,8 +265,8 @@ def _flutter_library_impl(ctx):
         ctx.attr.pkg_assets,
         ctx.attr.pkg_shaders,
         ctx.files.shader_includes,
-        const_finder = font_subset_tc.const_finder if font_subset_tc else None,
-        font_subset = font_subset_tc.font_subset if font_subset_tc else None,
+        const_finder = font_subset_tools.const_finder if font_subset_tools else None,
+        font_subset = font_subset_tools.font_subset if font_subset_tools else None,
     )
 
     # `resources` names the non-Dart remainder of `lib/`; a Dart source there
@@ -293,7 +329,9 @@ def _flutter_library_impl(ctx):
         ),
     ]
 
-_FLUTTER_LIBRARY_ATTRS = {
+flutter_library = rule(
+    implementation = _flutter_library_impl,
+    attrs = {
         "srcs": attr.label_list(
             doc = "Dart source files for this library.",
             allow_files = [".dart"],
@@ -357,6 +395,7 @@ _FLUTTER_LIBRARY_ATTRS = {
             allow_files = True,
         ),
         "_sky_engine": SKY_ENGINE_ATTR,
+        "_font_subset_tools": FONT_SUBSET_TOOLS_ATTR,
         "shader_includes": attr.label_list(
             doc = "Files this package's `pkg_shaders` may `#include` (e.g. " +
                   "`glob([\"shaders/**/*.glsl\"])`). A shader compiles in a " +
@@ -368,26 +407,6 @@ _FLUTTER_LIBRARY_ATTRS = {
             doc = "Map of shader File label -> package-relative path (mirrors `flutter.shaders` in pubspec.yaml). Routed through the impellerc compile and bundled at `packages/<package_name>/<path>` (or bare `<path>` when `package_name` is empty).",
             allow_files = True,
         ),
-}
-
-flutter_library_rule = rule(
-    implementation = _flutter_library_impl,
-    attrs = _FLUTTER_LIBRARY_ATTRS,
+    },
     doc = "Collects Flutter sources and assets, propagates DartInfo and FlutterInfo. Does not compile.",
 )
-
-flutter_library_with_fonts_rule = rule(
-    implementation = _flutter_library_impl,
-    attrs = _FLUTTER_LIBRARY_ATTRS,
-    toolchains = [
-        config_common.toolchain_type("@rules_flutter//flutter/private:font_subset_toolchain_type", mandatory = False),
-    ],
-    doc = "Collects Flutter sources, assets, and font families, resolving font-subset tools lazily.",
-)
-
-def flutter_library(**kwargs):
-    """Collects Flutter sources and assets, propagates DartInfo and FlutterInfo. Does not compile."""
-    if kwargs.get("fonts_json"):
-        flutter_library_with_fonts_rule(**kwargs)
-    else:
-        flutter_library_rule(**kwargs)

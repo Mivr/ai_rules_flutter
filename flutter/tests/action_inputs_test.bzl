@@ -9,7 +9,7 @@ bundled `dart-sdk/` and `patched-sdk/` trees.
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("@rules_dart//dart:analyze.bzl", "dart_analyze")
 load("@rules_dart//dart:defs.bzl", "dart_binary")
-load("//flutter:defs.bzl", "flutter_test")
+load("//flutter:defs.bzl", "flutter_library", "flutter_plugin", "flutter_test")
 load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
 load("//flutter/private:flutter_aot_target.bzl", "flutter_aot_target")
 load("//flutter/private:flutter_application.bzl", "flutter_application")
@@ -531,8 +531,52 @@ def _flutter_test_rule_kind_test_impl(ctx):
     )
     return analysistest.end(env)
 
+def _flutter_library_rule_kind_test_impl(ctx):
+    """`flutter_library` is a first-class rule (`flutter_library rule`), not a wrapper macro."""
+    env = analysistest.begin(ctx)
+    target = analysistest.target_under_test(env)
+    asserts.equals(
+        env,
+        "rule",
+        type(flutter_library),
+        "flutter_library exported by //flutter:defs.bzl must be a rule",
+    )
+    asserts.equals(
+        env,
+        "flutter_library",
+        target[_RuleKindInfo].kind,
+        "flutter_library target must have rule kind 'flutter_library'",
+    )
+    return analysistest.end(env)
+
+def _flutter_plugin_rule_kind_test_impl(ctx):
+    """`flutter_plugin` is a first-class rule (`flutter_plugin rule`), not a wrapper macro."""
+    env = analysistest.begin(ctx)
+    target = analysistest.target_under_test(env)
+    asserts.equals(
+        env,
+        "rule",
+        type(flutter_plugin),
+        "flutter_plugin exported by //flutter:defs.bzl must be a rule",
+    )
+    asserts.equals(
+        env,
+        "flutter_plugin",
+        target[_RuleKindInfo].kind,
+        "flutter_plugin target must have rule kind 'flutter_plugin'",
+    )
+    return analysistest.end(env)
+
 _flutter_test_rule_kind_test = analysistest.make(
     _flutter_test_rule_kind_test_impl,
+    extra_target_under_test_aspects = [_inspect_rule_kind_aspect],
+)
+_flutter_library_rule_kind_test = analysistest.make(
+    _flutter_library_rule_kind_test_impl,
+    extra_target_under_test_aspects = [_inspect_rule_kind_aspect],
+)
+_flutter_plugin_rule_kind_test = analysistest.make(
+    _flutter_plugin_rule_kind_test_impl,
     extra_target_under_test_aspects = [_inspect_rule_kind_aspect],
 )
 _flutter_test_runfiles_test = analysistest.make(_flutter_test_runfiles_test_impl)
@@ -640,6 +684,48 @@ def _setup_fixtures():
         fail("expected native.existing_rule('_inputs_flutter_test')['kind'] == 'flutter_test', got %r" % (
             existing_flutter_test.get("kind") if existing_flutter_test else None,
         ))
+    flutter_library(
+        name = "_inputs_flutter_library",
+        srcs = [_MAIN],
+        tags = ["manual"],
+    )
+    existing_flutter_library = native.existing_rule("_inputs_flutter_library")
+    if existing_flutter_library == None or existing_flutter_library.get("kind") != "flutter_library":
+        fail("expected native.existing_rule('_inputs_flutter_library')['kind'] == 'flutter_library', got %r" % (
+            existing_flutter_library.get("kind") if existing_flutter_library else None,
+        ))
+    flutter_library(
+        name = "_inputs_flutter_library_fonts",
+        srcs = [_MAIN],
+        fonts_json = '[{"family": "TestFont", "fonts": []}]',
+        tags = ["manual"],
+    )
+    existing_flutter_library_fonts = native.existing_rule("_inputs_flutter_library_fonts")
+    if existing_flutter_library_fonts == None or existing_flutter_library_fonts.get("kind") != "flutter_library":
+        fail("expected native.existing_rule('_inputs_flutter_library_fonts')['kind'] == 'flutter_library', got %r" % (
+            existing_flutter_library_fonts.get("kind") if existing_flutter_library_fonts else None,
+        ))
+    flutter_plugin(
+        name = "_inputs_flutter_plugin",
+        srcs = [_MAIN],
+        tags = ["manual"],
+    )
+    existing_flutter_plugin = native.existing_rule("_inputs_flutter_plugin")
+    if existing_flutter_plugin == None or existing_flutter_plugin.get("kind") != "flutter_plugin":
+        fail("expected native.existing_rule('_inputs_flutter_plugin')['kind'] == 'flutter_plugin', got %r" % (
+            existing_flutter_plugin.get("kind") if existing_flutter_plugin else None,
+        ))
+    flutter_plugin(
+        name = "_inputs_flutter_plugin_fonts",
+        srcs = [_MAIN],
+        fonts_json = '[{"family": "TestFont", "fonts": []}]',
+        tags = ["manual"],
+    )
+    existing_flutter_plugin_fonts = native.existing_rule("_inputs_flutter_plugin_fonts")
+    if existing_flutter_plugin_fonts == None or existing_flutter_plugin_fonts.get("kind") != "flutter_plugin":
+        fail("expected native.existing_rule('_inputs_flutter_plugin_fonts')['kind'] == 'flutter_plugin', got %r" % (
+            existing_flutter_plugin_fonts.get("kind") if existing_flutter_plugin_fonts else None,
+        ))
     flutter_test(
         name = "_inputs_flutter_test_defines",
         package_name = _PACKAGE,
@@ -712,6 +798,22 @@ def action_inputs_test_suite(name):
         name = name + "_flutter_test_rule_kind",
         target_under_test = ":_inputs_flutter_test",
         target_compatible_with = HOST_COMPATIBLE,
+    )
+    _flutter_library_rule_kind_test(
+        name = name + "_flutter_library_rule_kind",
+        target_under_test = ":_inputs_flutter_library",
+    )
+    _flutter_library_rule_kind_test(
+        name = name + "_flutter_library_fonts_rule_kind",
+        target_under_test = ":_inputs_flutter_library_fonts",
+    )
+    _flutter_plugin_rule_kind_test(
+        name = name + "_flutter_plugin_rule_kind",
+        target_under_test = ":_inputs_flutter_plugin",
+    )
+    _flutter_plugin_rule_kind_test(
+        name = name + "_flutter_plugin_fonts_rule_kind",
+        target_under_test = ":_inputs_flutter_plugin_fonts",
     )
     _flutter_test_runfiles_test(
         name = name + "_flutter_test_runfiles",
@@ -806,6 +908,10 @@ def action_inputs_test_suite(name):
         name = name,
         tests = [
             ":" + name + "_flutter_test_rule_kind",
+            ":" + name + "_flutter_library_rule_kind",
+            ":" + name + "_flutter_library_fonts_rule_kind",
+            ":" + name + "_flutter_plugin_rule_kind",
+            ":" + name + "_flutter_plugin_fonts_rule_kind",
             ":" + name + "_flutter_test_runfiles",
             ":" + name + "_flutter_test_defines_fallback",
             ":" + name + "_flutter_test_comma_defines_fallback",
