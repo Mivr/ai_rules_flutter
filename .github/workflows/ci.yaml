@@ -184,9 +184,6 @@ jobs:
         with:
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
           cache-save: ${{ github.event_name == 'push' && matrix.workspace == 'hello_world' }}
-      - name: Install GTK3 (Linux)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev
       # GitHub's windows-latest image exports ANDROID_NDK_HOME with backslashes
       # (C:\Android\...), but rules_android_ndk's _create_symlinks() strips the
       # NDK prefix with a forward-slash string match against ctx.path() output,
