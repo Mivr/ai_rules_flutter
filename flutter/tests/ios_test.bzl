@@ -362,6 +362,18 @@ def _bundling_tests(name):
         content = ["#pragma once"],
         tags = ["manual"],
     )
+    fake_xcframework(
+        name = name + "_fake_ios_plugin_kit_xcframework",
+        framework_name = "PluginKit",
+        platform = "ios",
+        tags = ["manual"],
+    )
+    flutter_darwin_xcframework_import(
+        name = name + "_fake_ios_plugin_kit_import",
+        framework_name = "PluginKit",
+        xcframework_imports = [":" + name + "_fake_ios_plugin_kit_xcframework"],
+        tags = ["manual"],
+    )
     flutter_apple_plugin_library(
         name = name + "_sample_ios_plugin_lib",
         srcs = [
@@ -371,6 +383,7 @@ def _bundling_tests(name):
         module_name = "sample_ios_plugin",
         platform = "ios",
         engine = ":" + name + "_fake_ios_xcframework",
+        deps = [":" + name + "_fake_ios_plugin_kit_import"],
         backend = "xtool",
         tags = ["manual"],
     )
@@ -556,6 +569,27 @@ def _bundling_tests(name):
         tags = ["manual"],
     )
 
+    macho_verify_probe(
+        name = name + "_e2e_ios_app_bundle_verify",
+        target = ":" + name + "_e2e_ios_app",
+        binary_relpath = "Payload/" + name + "_e2e_ios_app.app/" + name + "_e2e_ios_app",
+        expected_entries = [
+            "Payload/" + name + "_e2e_ios_app.app/" + name + "_e2e_ios_app",
+            "Payload/" + name + "_e2e_ios_app.app/Frameworks/App.framework/App",
+            "Payload/" + name + "_e2e_ios_app.app/Frameworks/Flutter.framework/Flutter",
+            "Payload/" + name + "_e2e_ios_app.app/Frameworks/PluginKit.framework/PluginKit",
+            "Payload/" + name + "_e2e_ios_app.app/Frameworks/foo.framework/foo",
+            "Payload/" + name + "_e2e_ios_app.app/Frameworks/bar.framework/bar",
+        ],
+        expected_substrings = [
+            "cmd LC_RPATH",
+            "@executable_path/Frameworks",
+            "cmd LC_BUILD_VERSION",
+            "minos 15.4",
+        ],
+        tags = ["manual"],
+    )
+
     fake_application(
         name = name + "_fake_fat_ios_app",
         debug = False,
@@ -621,6 +655,7 @@ def _bundling_tests(name):
             name + "_e2e_ios_app",
             name + "_e2e_ios_app_framework_verify",
             name + "_e2e_ios_app_native_framework_verify",
+            name + "_e2e_ios_app_bundle_verify",
             name + "_fake_fat_ios_app_framework_verify",
             name + "_fake_fat_ios_app_native_framework_verify",
             name + "_fake_non_macho_ios_native_frameworks",
@@ -666,6 +701,260 @@ def _bundling_tests(name):
         name + "_simulator_fastbuild_refused",
         name + "_xtool_ios_app_actions",
         name + "_two_apps_one_package",
+    ] + _xtool_ios_validation_tests(name)
+
+def _ios_expect_failure_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    for expected in ctx.attr.expected_substrings:
+        asserts.expect_failure(env, expected)
+    return analysistest.end(env)
+
+_ios_expect_failure_test = analysistest.make(
+    _ios_expect_failure_test_impl,
+    expect_failure = True,
+    attrs = {
+        "expected_substrings": attr.string_list(mandatory = True),
+    },
+)
+
+def _xtool_ios_attrs_and_secrets_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    actions = analysistest.target_actions(env)
+    bundle_actions = [a for a in actions if a.mnemonic == "FlutterXtoolIosBundle"]
+    asserts.equals(env, 1, len(bundle_actions))
+    argv = bundle_actions[0].argv
+    asserts.true(
+        env,
+        "--family" in argv and "ipad" in argv,
+        "Expected --family ipad in argv: %s" % argv,
+    )
+    asserts.true(
+        env,
+        "--additional-content" in argv and any([arg.startswith("PlugIns=") for arg in argv]),
+        "Expected --additional-content PlugIns=... in argv: %s" % argv,
+    )
+    asserts.true(
+        env,
+        "--certificate-password-file" in argv,
+        "Expected --certificate-password-file in argv: %s" % argv,
+    )
+    asserts.true(
+        env,
+        "--certificate-password-env" in argv and "IOS_CERT_PW_ENV" in argv,
+        "Expected --certificate-password-env IOS_CERT_PW_ENV in argv: %s" % argv,
+    )
+    for a in actions:
+        for arg in a.argv:
+            asserts.false(
+                env,
+                "super-secret-p12-pass" in arg,
+                "Signing secret leaked onto command line of %s: %s" % (a.mnemonic, a.argv),
+            )
+    return analysistest.end(env)
+
+_xtool_ios_attrs_and_secrets_test = analysistest.make(_xtool_ios_attrs_and_secrets_test_impl)
+
+def _xtool_ios_validation_tests(name):
+    write_file(
+        name = name + "_xtool_extra_plugin",
+        out = name + "_extra_plugin.txt",
+        content = ["plugin"],
+        tags = ["manual"],
+    )
+    write_file(
+        name = name + "_xtool_cert_pw_file",
+        out = name + "_cert_pw.txt",
+        content = ["super-secret-p12-pass"],
+        tags = ["manual"],
+    )
+
+    before_xtool = native.existing_rules().keys()
+    xtool_surface_app = name + "_xtool_attrs_ios_app"
+    flutter_ios_app(
+        name = xtool_surface_app,
+        application = ":" + name + "_fake_release_app",
+        bundle_id = "com.example.xtool.attrs",
+        families = ["ipad"],
+        srcs = [
+            "@rules_flutter//flutter/private/runners/ios:AppDelegate.swift",
+            "@rules_flutter//flutter/private/runners/ios:SceneDelegate.swift",
+        ],
+        info_plist = "@rules_flutter//flutter/private/runners/ios:Info.plist",
+        engine = ":" + name + "_fake_ios_xcframework",
+        entitlements = False,
+        additional_contents = {
+            ":" + name + "_xtool_extra_plugin": "PlugIns",
+        },
+        certificate_password_file = ":" + name + "_xtool_cert_pw_file",
+        certificate_password_env = "IOS_CERT_PW_ENV",
+        backend = "xtool",
+        tags = ["manual"],
+    )
+    flutter_ios_app(
+        name = name + "_xtool_default_engine_ios_app",
+        application = ":" + name + "_fake_release_app",
+        bundle_id = "com.example.xtool.defaultengine",
+        srcs = [
+            "@rules_flutter//flutter/private/runners/ios:AppDelegate.swift",
+            "@rules_flutter//flutter/private/runners/ios:SceneDelegate.swift",
+        ],
+        info_plist = "@rules_flutter//flutter/private/runners/ios:Info.plist",
+        entitlements = False,
+        backend = "xtool",
+        tags = ["manual"],
+    )
+    after_xtool = native.existing_rules()
+    created_xtool = {
+        k: after_xtool[k]["kind"]
+        for k in after_xtool
+        if k not in before_xtool
+    }
+    unexpected_rules_apple = [
+        k
+        for k, kind in created_xtool.items()
+        if kind in (
+            "ios_application",
+            "apple_dynamic_framework_import",
+            "apple_dynamic_xcframework_import",
+            "apple_bundle_version",
+        )
+    ]
+    _ios_macro_surface_test(
+        name = name + "_xtool_no_rules_apple_surface",
+        actual_kinds = created_xtool,
+        expected_kinds = created_xtool,
+        unexpected_xtool_targets = unexpected_rules_apple,
+        actual_app_deps = [],
+        expected_app_deps = [],
+    )
+    _xtool_ios_attrs_and_secrets_test(
+        name = name + "_xtool_ios_attrs_and_secrets",
+        target_under_test = ":" + xtool_surface_app,
+    )
+
+    # Invalid family
+    flutter_ios_app(
+        name = name + "_xtool_bad_family_ios_app",
+        application = ":" + name + "_fake_release_app",
+        bundle_id = "com.example.badfamily",
+        families = ["tv"],
+        srcs = ["@rules_flutter//flutter/private/runners/ios:AppDelegate.swift"],
+        info_plist = "@rules_flutter//flutter/private/runners/ios:Info.plist",
+        engine = ":" + name + "_fake_ios_xcframework",
+        entitlements = False,
+        backend = "xtool",
+        tags = ["manual"],
+    )
+    _ios_expect_failure_test(
+        name = name + "_xtool_bad_family_fails",
+        target_under_test = ":" + name + "_xtool_bad_family_ios_app",
+        expected_substrings = ["invalid device family \"tv\" in 'families'; expected 'iphone' or 'ipad'"],
+    )
+
+    # launch_storyboard on xtool
+    flutter_ios_app(
+        name = name + "_xtool_storyboard_ios_app",
+        application = ":" + name + "_fake_release_app",
+        bundle_id = "com.example.storyboard",
+        launch_storyboard = "@rules_flutter//flutter/private/runners/ios:Base.lproj/LaunchScreen.storyboard",
+        srcs = ["@rules_flutter//flutter/private/runners/ios:AppDelegate.swift"],
+        info_plist = "@rules_flutter//flutter/private/runners/ios:Info.plist",
+        engine = ":" + name + "_fake_ios_xcframework",
+        entitlements = False,
+        backend = "xtool",
+        tags = ["manual"],
+    )
+    _ios_expect_failure_test(
+        name = name + "_xtool_launch_storyboard_fails",
+        target_under_test = ":" + name + "_xtool_storyboard_ios_app",
+        expected_substrings = ["'launch_storyboard'", "ibtool"],
+    )
+
+    # app_icons on xtool
+    flutter_ios_app(
+        name = name + "_xtool_app_icons_ios_app",
+        application = ":" + name + "_fake_release_app",
+        bundle_id = "com.example.appicons",
+        app_icons = [":" + name + "_xtool_extra_plugin"],
+        srcs = ["@rules_flutter//flutter/private/runners/ios:AppDelegate.swift"],
+        info_plist = "@rules_flutter//flutter/private/runners/ios:Info.plist",
+        engine = ":" + name + "_fake_ios_xcframework",
+        entitlements = False,
+        backend = "xtool",
+        tags = ["manual"],
+    )
+    _ios_expect_failure_test(
+        name = name + "_xtool_app_icons_fails",
+        target_under_test = ":" + name + "_xtool_app_icons_ios_app",
+        expected_substrings = ["'app_icons'", "actool"],
+    )
+
+    # Plain-text certificate_password on xtool
+    flutter_ios_app(
+        name = name + "_xtool_plaintext_pw_ios_app",
+        application = ":" + name + "_fake_release_app",
+        bundle_id = "com.example.plaintextpw",
+        certificate_password = "leaked-password",
+        srcs = ["@rules_flutter//flutter/private/runners/ios:AppDelegate.swift"],
+        info_plist = "@rules_flutter//flutter/private/runners/ios:Info.plist",
+        engine = ":" + name + "_fake_ios_xcframework",
+        entitlements = False,
+        backend = "xtool",
+        tags = ["manual"],
+    )
+    _ios_expect_failure_test(
+        name = name + "_xtool_plaintext_pw_fails",
+        target_under_test = ":" + name + "_xtool_plaintext_pw_ios_app",
+        expected_substrings = ["plain-text 'certificate_password' is not supported"],
+    )
+
+    # require_sdk = True when SDK is unconfigured
+    flutter_ios_app(
+        name = name + "_xtool_require_sdk_ios_app",
+        application = ":" + name + "_fake_release_app",
+        bundle_id = "com.example.requiresdk",
+        require_sdk = True,
+        srcs = ["@rules_flutter//flutter/private/runners/ios:AppDelegate.swift"],
+        info_plist = "@rules_flutter//flutter/private/runners/ios:Info.plist",
+        engine = ":" + name + "_fake_ios_xcframework",
+        entitlements = False,
+        backend = "xtool",
+        tags = ["manual"],
+    )
+    _ios_expect_failure_test(
+        name = name + "_xtool_require_sdk_fails",
+        target_under_test = ":" + name + "_xtool_require_sdk_ios_app",
+        expected_substrings = ["The xtool Darwin SDK (@flutter_xtool_darwin_sdk) is not configured"],
+    )
+
+    # Unsupported kwargs on xtool
+    flutter_ios_app(
+        name = name + "_xtool_unsupported_kwarg_ios_app",
+        application = ":" + name + "_fake_release_app",
+        bundle_id = "com.example.badkwarg",
+        ipa_post_processor = "foo",
+        srcs = ["@rules_flutter//flutter/private/runners/ios:AppDelegate.swift"],
+        info_plist = "@rules_flutter//flutter/private/runners/ios:Info.plist",
+        engine = ":" + name + "_fake_ios_xcframework",
+        entitlements = False,
+        backend = "xtool",
+        tags = ["manual"],
+    )
+    _ios_expect_failure_test(
+        name = name + "_xtool_unsupported_kwarg_fails",
+        target_under_test = ":" + name + "_xtool_unsupported_kwarg_ios_app",
+        expected_substrings = ["unsupported attribute(s) 'ipa_post_processor' are not supported on the xtool backend"],
+    )
+
+    return [
+        name + "_xtool_no_rules_apple_surface",
+        name + "_xtool_ios_attrs_and_secrets",
+        name + "_xtool_bad_family_fails",
+        name + "_xtool_launch_storyboard_fails",
+        name + "_xtool_app_icons_fails",
+        name + "_xtool_plaintext_pw_fails",
+        name + "_xtool_require_sdk_fails",
+        name + "_xtool_unsupported_kwarg_fails",
     ]
 
 def ios_test_suite(name):

@@ -816,6 +816,35 @@ void main() {
       expect(cmds.where((c) => c.cmd == macho.lcSymtab).length, 1);
       expect(cmds.where((c) => c.cmd == macho.lcDysymtab).length, 1);
       expect(cmds.where((c) => c.cmd == macho.lcRpath).length, 1);
+
+      final macExecPath = '${tempDir.path}/MacRunner';
+      macho.main([
+        'stub',
+        '--type',
+        'execute',
+        '--output',
+        macExecPath,
+        '--arch',
+        'arm64',
+        '--platform',
+        'macos',
+        '--min-os',
+        '11.0',
+      ]);
+      final macCmds = macho.parseLoadCommands(
+        File(macExecPath).readAsBytesSync(),
+      );
+      final macRpaths = macCmds
+          .where((c) => c.cmd == macho.lcRpath)
+          .map((c) => _readCString(c.bytes, 12))
+          .toList();
+      expect(
+        macRpaths,
+        containsAll([
+          '@executable_path/../Frameworks',
+          '@executable_path/Frameworks',
+        ]),
+      );
     });
 
     test('copy-assets copies directory tree and optional debug snapshots', () {

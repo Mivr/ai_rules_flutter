@@ -483,7 +483,13 @@ def flutter_ios_app(
             user-supplied `darwin.artifactbundle` configured via
             `flutter.darwin_sdk` in compliance with Apple's SDK licensing
             terms; no Apple SDK is downloaded by default.
-        **kwargs: Passed through to ios_application. The macro sets
+        **kwargs: Passed through to `ios_application` (or `_flutter_xtool_ios_bundle`
+            when `backend = "xtool"`). For `backend = "xtool"` signing with
+            `certificate` (`.p12`), pass the password via
+            `certificate_password_file` (a file label read at execution time)
+            or `certificate_password_env` (an environment variable name read at
+            execution time); plain-text `certificate_password` is rejected so
+            signing secrets never appear on action command lines. The macro sets
             `bundle_id`, `bundle_name`, `entitlements`, `families`,
             `minimum_os_version`, `infoplists`, `version`,
             `launch_storyboard`, `resources`, `provisioning_profile`,
@@ -548,7 +554,7 @@ def flutter_ios_app(
     #
     # `None` means discover, `[]` means ship none: both states are sayable, and
     # an app with no catalog at all is the second without having to write it.
-    if app_icons == None:
+    if app_icons == None and backend == "rules_apple":
         app_icons = native.glob(
             ["ios/Runner/Assets.xcassets/AppIcon.appiconset/**"],
             allow_empty = True,
@@ -672,8 +678,8 @@ def flutter_ios_app(
     else:
         actual_info_plist = info_plist
 
-    # 9. Version — create default apple_bundle_version if not provided.
-    if not version:
+    # 9. Version — create default apple_bundle_version if not provided (rules_apple only).
+    if backend == "rules_apple" and not version:
         apple_bundle_version(
             name = "__%s_version" % name,
             build_version = "1.0",
@@ -682,9 +688,9 @@ def flutter_ios_app(
         )
         version = ":%s" % ("__%s_version" % name)
 
-    # 10. Resolve launch storyboard.
+    # 10. Resolve launch storyboard (rules_apple only; on xtool, storyboards require ibtool).
     actual_launch_storyboard = launch_storyboard
-    if not actual_launch_storyboard:
+    if backend == "rules_apple" and not actual_launch_storyboard:
         launch_candidates = native.glob(["ios/Runner/Base.lproj/LaunchScreen.storyboard"], allow_empty = True)
         if launch_candidates:
             actual_launch_storyboard = launch_candidates[0]
@@ -743,12 +749,37 @@ def flutter_ios_app(
             **kwargs
         )
     else:
+        valid_xtool_kwargs = (
+            "additional_contents",
+            "build_version",
+            "certificate",
+            "certificate_password",
+            "certificate_password_env",
+            "certificate_password_file",
+            "compatible_with",
+            "defines",
+            "exec_compatible_with",
+            "executable",
+            "features",
+            "require_sdk",
+            "restricted_to",
+            "short_version",
+            "target_compatible_with",
+            "testonly",
+            "zsign",
+        )
+        forwarded_kwargs = {k: v for k, v in kwargs.items() if k in valid_xtool_kwargs}
+        unsupported_kwargs = [k for k in kwargs if k not in valid_xtool_kwargs]
         _flutter_xtool_ios_bundle(
             name = name,
             app_name = display_name,
             bundle_id = bundle_id,
+            families = families,
             minimum_os_version = minimum_os_version,
+            version = version,
             infoplists = selected_infoplists,
+            launch_storyboard = launch_storyboard,
+            app_icons = app_icons if app_icons != None else [],
             srcs = runner_srcs,
             registrant = ":__%s_registrant" % name,
             plugins = [":__%s_apple_plugins" % name],
@@ -760,9 +791,11 @@ def flutter_ios_app(
             ],
             resources = resources + ["__%s_privacy_manifests" % name],
             provisioning_profile = provisioning_profile,
-            entitlements = entitlements,
+            entitlements = entitlements if entitlements != False else None,
             tags = tags,
             visibility = visibility,
+            unsupported_kwargs = unsupported_kwargs,
+            **forwarded_kwargs
         )
 
 def flutter_ios_simulator_build(name, targets, **kwargs):

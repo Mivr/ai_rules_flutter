@@ -17,7 +17,7 @@ load(
 load("//flutter:providers.bzl", "FlutterDarwinFrameworkInfo")
 load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
 load("//flutter/private:flutter_macos_application.bzl", "flutter_macos_framework", "flutter_macos_native_libs")
-load("//flutter/private:flutter_xtool_bundle.bzl", "flutter_xtool_macos_bundle")
+load("//flutter/private:flutter_xtool_bundle.bzl", "flutter_darwin_xcframework_import", "flutter_xtool_macos_bundle")
 load("//flutter/private:validation.bzl", "is_valid_bundle_id", "minimum_os_version_is_below")
 load(":apple_bundling.bzl", "fake_application", "fake_macho_binary", "fake_xcframework", "macho_verify_probe", "outputs_under_target_dir_test")
 
@@ -468,6 +468,18 @@ def _bundling_tests(name):
         content = ["#pragma once"],
         tags = ["manual"],
     )
+    fake_xcframework(
+        name = name + "_fake_macos_plugin_kit_xcframework",
+        framework_name = "PluginKit",
+        platform = "macos",
+        tags = ["manual"],
+    )
+    flutter_darwin_xcframework_import(
+        name = name + "_fake_macos_plugin_kit_import",
+        framework_name = "PluginKit",
+        xcframework_imports = [":" + name + "_fake_macos_plugin_kit_xcframework"],
+        tags = ["manual"],
+    )
     flutter_apple_plugin_library(
         name = name + "_sample_macos_plugin_lib",
         srcs = [
@@ -477,6 +489,7 @@ def _bundling_tests(name):
         module_name = "sample_macos_plugin",
         platform = "macos",
         engine = ":" + name + "_fake_macos_xcframework",
+        deps = [":" + name + "_fake_macos_plugin_kit_import"],
         backend = "xtool",
         tags = ["manual"],
     )
@@ -499,7 +512,6 @@ def _bundling_tests(name):
             "@rules_flutter//flutter/private/runners/macos:MainFlutterWindow.swift",
         ],
         info_plist = "@rules_flutter//flutter/private/runners/macos:Info.plist",
-        menu_xib = "@rules_flutter//flutter/private/runners/macos:MainMenu.xib",
         entitlements = ":" + name + "_sample_macos_entitlements",
         engine = ":" + name + "_fake_macos_xcframework",
         runner_deps = [":" + name + "_sample_macos_plugin_lib"],
@@ -526,6 +538,30 @@ def _bundling_tests(name):
             "platform macos",
             "minos 13.4",
             "sdk 13.4",
+        ],
+        tags = ["manual"],
+    )
+    macho_verify_probe(
+        name = name + "_verify_e2e_macos_app_bundle",
+        target = ":" + name + "_e2e_macos_app",
+        binary_relpath = name + "_e2e_macos_app.app/Contents/MacOS/" + name + "_e2e_macos_app",
+        expected_entries = [
+            name + "_e2e_macos_app.app/Contents/MacOS/" + name + "_e2e_macos_app",
+            name + "_e2e_macos_app.app/Contents/Frameworks/App.framework/Versions/A/App",
+            name + "_e2e_macos_app.app/Contents/Frameworks/FlutterMacOS.framework/FlutterMacOS",
+            name + "_e2e_macos_app.app/Contents/Frameworks/PluginKit.framework/PluginKit",
+            name + "_e2e_macos_app.app/Contents/Frameworks/libplugin.dylib",
+        ],
+        forbidden_entries = [
+            name + "_e2e_macos_app.app/Contents/Resources/libplugin.dylib",
+        ],
+        expected_substrings = [
+            "cmd LC_RPATH",
+            "@executable_path/Frameworks",
+            "@executable_path/../Frameworks",
+            "cmd LC_BUILD_VERSION",
+            "platform macos",
+            "minos 13.4",
         ],
         tags = ["manual"],
     )
@@ -597,6 +633,7 @@ def _bundling_tests(name):
             "__" + name + "_e2e_macos_app_app_framework",
             name + "_verify_e2e_macos_app_framework",
             name + "_verify_e2e_macos_native_libs",
+            name + "_verify_e2e_macos_app_bundle",
             "__" + name + "_default_macos_app_app_framework",
             name + "_verify_default_macos_app_framework",
             name + "_default_fg",
@@ -637,7 +674,7 @@ def _bundling_tests(name):
         name + "_xtool_macos_app_actions",
         name + "_two_apps_one_package",
         name + "_macos_framework_layout_test",
-    ] + surface_tests
+    ] + surface_tests + _xtool_macos_validation_tests(name)
 
 def _macos_framework_bundle_info_test_impl(ctx):
     """flutter_macos_framework must provide AppleBundleInfo so rules_apple merges it as a zip."""
@@ -668,6 +705,226 @@ def _macos_framework_bundle_info_test_impl(ctx):
     return analysistest.end(env)
 
 _macos_framework_bundle_info_test = analysistest.make(_macos_framework_bundle_info_test_impl)
+
+def _xtool_macos_attrs_and_secrets_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    actions = analysistest.target_actions(env)
+    bundle_actions = [a for a in actions if a.mnemonic == "FlutterXtoolMacosBundle"]
+    asserts.equals(env, 1, len(bundle_actions))
+    argv = bundle_actions[0].argv
+    asserts.true(
+        env,
+        "--additional-content" in argv and any([arg.startswith("Helpers=") for arg in argv]),
+        "Expected --additional-content Helpers=... in argv: %s" % argv,
+    )
+    asserts.true(
+        env,
+        "--certificate-password-file" in argv,
+        "Expected --certificate-password-file in argv: %s" % argv,
+    )
+    asserts.true(
+        env,
+        "--certificate-password-env" in argv and "MACOS_CERT_PW_ENV" in argv,
+        "Expected --certificate-password-env MACOS_CERT_PW_ENV in argv: %s" % argv,
+    )
+    for a in actions:
+        for arg in a.argv:
+            asserts.false(
+                env,
+                "macos-secret-p12-pass" in arg,
+                "Signing secret leaked onto command line of %s: %s" % (a.mnemonic, a.argv),
+            )
+    return analysistest.end(env)
+
+_xtool_macos_attrs_and_secrets_test = analysistest.make(_xtool_macos_attrs_and_secrets_test_impl)
+
+def _xtool_macos_validation_tests(name):
+    write_file(
+        name = name + "_xtool_macos_helper",
+        out = name + "_macos_helper.txt",
+        content = ["helper"],
+        tags = ["manual"],
+    )
+    write_file(
+        name = name + "_xtool_macos_cert_pw_file",
+        out = name + "_macos_cert_pw.txt",
+        content = ["macos-secret-p12-pass"],
+        tags = ["manual"],
+    )
+
+    before_xtool = native.existing_rules().keys()
+    xtool_attrs_app = name + "_xtool_attrs_macos_app"
+    flutter_macos_app(
+        name = xtool_attrs_app,
+        application = ":" + name + "_fake_release_macho_app",
+        bundle_id = "com.example.xtool.macos.attrs",
+        srcs = [
+            "@rules_flutter//flutter/private/runners/macos:AppDelegate.swift",
+            "@rules_flutter//flutter/private/runners/macos:MainFlutterWindow.swift",
+        ],
+        info_plist = "@rules_flutter//flutter/private/runners/macos:Info.plist",
+        entitlements = ":" + name + "_sample_macos_entitlements",
+        engine = ":" + name + "_fake_macos_xcframework",
+        additional_contents = {
+            ":" + name + "_xtool_macos_helper": "Helpers",
+        },
+        certificate_password_file = ":" + name + "_xtool_macos_cert_pw_file",
+        certificate_password_env = "MACOS_CERT_PW_ENV",
+        backend = "xtool",
+        tags = ["manual"],
+    )
+    flutter_macos_app(
+        name = name + "_xtool_default_engine_macos_app",
+        application = ":" + name + "_fake_release_macho_app",
+        bundle_id = "com.example.xtool.macos.defaultengine",
+        srcs = [
+            "@rules_flutter//flutter/private/runners/macos:AppDelegate.swift",
+            "@rules_flutter//flutter/private/runners/macos:MainFlutterWindow.swift",
+        ],
+        info_plist = "@rules_flutter//flutter/private/runners/macos:Info.plist",
+        entitlements = ":" + name + "_sample_macos_entitlements",
+        backend = "xtool",
+        tags = ["manual"],
+    )
+    after_xtool = native.existing_rules()
+    created_xtool = {
+        k: after_xtool[k]["kind"]
+        for k in after_xtool
+        if k not in before_xtool
+    }
+    unexpected_rules_apple = [
+        k
+        for k, kind in created_xtool.items()
+        if kind in (
+            "macos_application",
+            "apple_dynamic_framework_import",
+            "apple_dynamic_xcframework_import",
+            "apple_bundle_version",
+        )
+    ]
+    _macos_macro_surface_test(
+        name = name + "_xtool_macos_no_rules_apple_surface",
+        expected_rules = created_xtool,
+        observed_rules = created_xtool,
+        unexpected_xtool_targets = unexpected_rules_apple,
+        expected_app_deps = [],
+        observed_app_deps = [],
+    )
+    _xtool_macos_attrs_and_secrets_test(
+        name = name + "_xtool_macos_attrs_and_secrets",
+        target_under_test = ":" + xtool_attrs_app,
+    )
+
+    # User-supplied menu_xib on xtool
+    write_file(
+        name = name + "_custom_menu_xib",
+        out = name + "/CustomMainMenu.xib",
+        content = ["<document/>"],
+        tags = ["manual"],
+    )
+    flutter_macos_app(
+        name = name + "_xtool_menu_xib_macos_app",
+        application = ":" + name + "_fake_release_macho_app",
+        bundle_id = "com.example.menuxib",
+        menu_xib = ":" + name + "_custom_menu_xib",
+        srcs = ["@rules_flutter//flutter/private/runners/macos:AppDelegate.swift"],
+        info_plist = "@rules_flutter//flutter/private/runners/macos:Info.plist",
+        entitlements = ":" + name + "_sample_macos_entitlements",
+        engine = ":" + name + "_fake_macos_xcframework",
+        backend = "xtool",
+        tags = ["manual"],
+    )
+    _expect_failure_test(
+        name = name + "_xtool_menu_xib_fails",
+        target_under_test = ":" + name + "_xtool_menu_xib_macos_app",
+        expected_substrings = ["'menu_xib'", "ibtool"],
+    )
+
+    # app_icons on xtool
+    flutter_macos_app(
+        name = name + "_xtool_app_icons_macos_app",
+        application = ":" + name + "_fake_release_macho_app",
+        bundle_id = "com.example.macos.appicons",
+        app_icons = [":" + name + "_xtool_macos_helper"],
+        srcs = ["@rules_flutter//flutter/private/runners/macos:AppDelegate.swift"],
+        info_plist = "@rules_flutter//flutter/private/runners/macos:Info.plist",
+        entitlements = ":" + name + "_sample_macos_entitlements",
+        engine = ":" + name + "_fake_macos_xcframework",
+        backend = "xtool",
+        tags = ["manual"],
+    )
+    _expect_failure_test(
+        name = name + "_xtool_macos_app_icons_fails",
+        target_under_test = ":" + name + "_xtool_app_icons_macos_app",
+        expected_substrings = ["'app_icons'", "actool"],
+    )
+
+    # Plain-text certificate_password on xtool
+    flutter_macos_app(
+        name = name + "_xtool_plaintext_pw_macos_app",
+        application = ":" + name + "_fake_release_macho_app",
+        bundle_id = "com.example.macos.plaintextpw",
+        certificate_password = "leaked-macos-password",
+        srcs = ["@rules_flutter//flutter/private/runners/macos:AppDelegate.swift"],
+        info_plist = "@rules_flutter//flutter/private/runners/macos:Info.plist",
+        entitlements = ":" + name + "_sample_macos_entitlements",
+        engine = ":" + name + "_fake_macos_xcframework",
+        backend = "xtool",
+        tags = ["manual"],
+    )
+    _expect_failure_test(
+        name = name + "_xtool_macos_plaintext_pw_fails",
+        target_under_test = ":" + name + "_xtool_plaintext_pw_macos_app",
+        expected_substrings = ["plain-text 'certificate_password' is not supported"],
+    )
+
+    # require_sdk = True when SDK is unconfigured
+    flutter_macos_app(
+        name = name + "_xtool_require_sdk_macos_app",
+        application = ":" + name + "_fake_release_macho_app",
+        bundle_id = "com.example.macos.requiresdk",
+        require_sdk = True,
+        srcs = ["@rules_flutter//flutter/private/runners/macos:AppDelegate.swift"],
+        info_plist = "@rules_flutter//flutter/private/runners/macos:Info.plist",
+        entitlements = ":" + name + "_sample_macos_entitlements",
+        engine = ":" + name + "_fake_macos_xcframework",
+        backend = "xtool",
+        tags = ["manual"],
+    )
+    _expect_failure_test(
+        name = name + "_xtool_macos_require_sdk_fails",
+        target_under_test = ":" + name + "_xtool_require_sdk_macos_app",
+        expected_substrings = ["The xtool Darwin SDK (@flutter_xtool_darwin_sdk) is not configured"],
+    )
+
+    # Unsupported kwargs on xtool
+    flutter_macos_app(
+        name = name + "_xtool_unsupported_kwarg_macos_app",
+        application = ":" + name + "_fake_release_macho_app",
+        bundle_id = "com.example.macos.badkwarg",
+        ipa_post_processor = "foo",
+        srcs = ["@rules_flutter//flutter/private/runners/macos:AppDelegate.swift"],
+        info_plist = "@rules_flutter//flutter/private/runners/macos:Info.plist",
+        entitlements = ":" + name + "_sample_macos_entitlements",
+        engine = ":" + name + "_fake_macos_xcframework",
+        backend = "xtool",
+        tags = ["manual"],
+    )
+    _expect_failure_test(
+        name = name + "_xtool_macos_unsupported_kwarg_fails",
+        target_under_test = ":" + name + "_xtool_unsupported_kwarg_macos_app",
+        expected_substrings = ["unsupported attribute(s) 'ipa_post_processor' are not supported on the xtool backend"],
+    )
+
+    return [
+        name + "_xtool_macos_no_rules_apple_surface",
+        name + "_xtool_macos_attrs_and_secrets",
+        name + "_xtool_menu_xib_fails",
+        name + "_xtool_macos_app_icons_fails",
+        name + "_xtool_macos_plaintext_pw_fails",
+        name + "_xtool_macos_require_sdk_fails",
+        name + "_xtool_macos_unsupported_kwarg_fails",
+    ]
 
 def _macos_macro_surface_test_impl(ctx):
     env = unittest.begin(ctx)

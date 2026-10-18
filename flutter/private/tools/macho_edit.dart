@@ -1236,6 +1236,55 @@ void verifyMacosFramework(
   }
 }
 
+Map<String, Uint8List> _readZipArchiveEntries(Uint8List zipBytes) {
+  final bd = ByteData.sublistView(zipBytes);
+  var eocdOffset = -1;
+  for (var i = zipBytes.length - 22; i >= 0; i--) {
+    if (bd.getUint32(i, Endian.little) == 0x06054b50) {
+      eocdOffset = i;
+      break;
+    }
+  }
+  if (eocdOffset == -1) {
+    throw const FormatException(
+      'Invalid ZIP archive: EOCD signature not found.',
+    );
+  }
+  final entryCount = bd.getUint16(eocdOffset + 10, Endian.little);
+  final cdOffset = bd.getUint32(eocdOffset + 16, Endian.little);
+  final rawInflate = ZLibCodec(raw: true);
+  final result = <String, Uint8List>{};
+  var pos = cdOffset;
+  for (var i = 0; i < entryCount; i++) {
+    if (bd.getUint32(pos, Endian.little) != 0x02014b50) {
+      throw FormatException('Invalid central directory header at $pos.');
+    }
+    final method = bd.getUint16(pos + 10, Endian.little);
+    final compressedSize = bd.getUint32(pos + 20, Endian.little);
+    final nameLen = bd.getUint16(pos + 28, Endian.little);
+    final extraLen = bd.getUint16(pos + 30, Endian.little);
+    final commentLen = bd.getUint16(pos + 32, Endian.little);
+    final localOffset = bd.getUint32(pos + 42, Endian.little);
+    final path = utf8.decode(zipBytes.sublist(pos + 46, pos + 46 + nameLen));
+    pos += 46 + nameLen + extraLen + commentLen;
+
+    final localNameLen = bd.getUint16(localOffset + 26, Endian.little);
+    final localExtraLen = bd.getUint16(localOffset + 28, Endian.little);
+    final dataStart = localOffset + 30 + localNameLen + localExtraLen;
+    final rawPayload = zipBytes.sublist(dataStart, dataStart + compressedSize);
+    final Uint8List data;
+    if (method == 0) {
+      data = Uint8List.fromList(rawPayload);
+    } else if (method == 8) {
+      data = Uint8List.fromList(rawInflate.decode(rawPayload));
+    } else {
+      throw UnsupportedError('Unsupported ZIP compression method: $method');
+    }
+    result[path] = data;
+  }
+  return result;
+}
+
 void _runVerify(List<String> args) {
   String? inputPath;
   String? binaryRelpath;
@@ -1243,6 +1292,8 @@ void _runVerify(List<String> args) {
   String? objdumpPath;
   String? outputPath;
   final expectedSubstrings = <String>[];
+  final expectedEntries = <String>[];
+  final forbiddenEntries = <String>[];
 
   for (var i = 0; i < args.length; i++) {
     final arg = args[i];
@@ -1266,6 +1317,12 @@ void _runVerify(List<String> args) {
       case '--expect':
         if (++i >= args.length) _usageError('--expect requires a value');
         expectedSubstrings.add(args[i]);
+      case '--expect-entry':
+        if (++i >= args.length) _usageError('--expect-entry requires a value');
+        expectedEntries.add(args[i]);
+      case '--forbid-entry':
+        if (++i >= args.length) _usageError('--forbid-entry requires a value');
+        forbiddenEntries.add(args[i]);
       case '--output':
         if (++i >= args.length) _usageError('--output requires a value');
         outputPath = args[i];
@@ -1278,9 +1335,14 @@ void _runVerify(List<String> args) {
     _usageError('verify requires --input and --output');
   }
 
-  if ((binaryRelpath != null &&
-          binaryRelpath.contains('.framework/Versions/')) ||
-      (frameworkZipPath != null && frameworkZipPath.isNotEmpty)) {
+  final isZipArchive =
+      FileSystemEntity.isFileSync(inputPath) &&
+      (inputPath.endsWith('.ipa') || inputPath.endsWith('.zip'));
+
+  if (!isZipArchive &&
+      ((binaryRelpath != null &&
+              binaryRelpath.contains('.framework/Versions/')) ||
+          (frameworkZipPath != null && frameworkZipPath.isNotEmpty))) {
     var fwName = 'App';
     if (binaryRelpath != null && binaryRelpath.contains('.framework/')) {
       final seg = binaryRelpath
@@ -1295,51 +1357,130 @@ void _runVerify(List<String> args) {
     );
   }
 
-  final targetPath = binaryRelpath != null && binaryRelpath.isNotEmpty
-      ? '$inputPath/$binaryRelpath'
-      : inputPath;
-  final bytes = File(targetPath).readAsBytesSync();
-  if (!isMachO64(bytes) && !isFatMachO(bytes)) {
-    throw FormatException(
-      'File "$targetPath" is not a 64-bit or universal Mach-O binary.',
-    );
-  }
-  if (isFatMachO(bytes)) {
-    for (final s in extractFatSlices(bytes)) {
-      parseLoadCommands(s.bytes);
-    }
-  } else {
-    parseLoadCommands(bytes);
-  }
+  String? tempExtractedBinaryPath;
+  try {
+    late final String targetPath;
+    late final Uint8List bytes;
 
-  if (objdumpPath != null && objdumpPath.isNotEmpty) {
-    final res = Process.runSync(objdumpPath, [
-      '--macho',
-      '--private-headers',
-      '--dylib-id',
-      '--arch=all',
-      targetPath,
-    ]);
-    if (res.exitCode != 0) {
-      throw StateError(
-        'llvm-objdump failed on "$targetPath" (exit ${res.exitCode}):\n'
-        '${res.stderr}',
+    if (isZipArchive) {
+      final zipEntries = _readZipArchiveEntries(
+        File(inputPath).readAsBytesSync(),
+      );
+      for (final expectedEntry in expectedEntries) {
+        if (!zipEntries.containsKey(expectedEntry) &&
+            !zipEntries.containsKey('$expectedEntry/')) {
+          throw StateError(
+            'Expected archive entry "$expectedEntry" not found in "$inputPath". '
+            'Entries: ${zipEntries.keys.toList()}',
+          );
+        }
+      }
+      for (final forbiddenEntry in forbiddenEntries) {
+        final matching = zipEntries.keys.where(
+          (k) =>
+              k == forbiddenEntry ||
+              k.startsWith('$forbiddenEntry/') ||
+              k.contains(forbiddenEntry),
+        );
+        if (matching.isNotEmpty) {
+          throw StateError(
+            'Forbidden archive entry "$forbiddenEntry" found in "$inputPath": '
+            '${matching.toList()}',
+          );
+        }
+      }
+      if (binaryRelpath == null || binaryRelpath.isEmpty) {
+        throw ArgumentError(
+          '--binary-relpath is required when verifying a ZIP/IPA archive.',
+        );
+      }
+      final entryBytes = zipEntries[binaryRelpath];
+      if (entryBytes == null) {
+        throw StateError(
+          'Binary "$binaryRelpath" not found in archive "$inputPath". '
+          'Entries: ${zipEntries.keys.toList()}',
+        );
+      }
+      bytes = entryBytes;
+      tempExtractedBinaryPath = '$outputPath.extracted_macho';
+      final tempFile = File(tempExtractedBinaryPath);
+      tempFile.parent.createSync(recursive: true);
+      tempFile.writeAsBytesSync(bytes);
+      targetPath = tempExtractedBinaryPath;
+    } else {
+      for (final expectedEntry in expectedEntries) {
+        final candidate = '$inputPath/$expectedEntry';
+        if (FileSystemEntity.typeSync(candidate, followLinks: false) ==
+            FileSystemEntityType.notFound) {
+          throw StateError(
+            'Expected bundle entry "$expectedEntry" not found under "$inputPath".',
+          );
+        }
+      }
+      for (final forbiddenEntry in forbiddenEntries) {
+        final candidate = '$inputPath/$forbiddenEntry';
+        if (FileSystemEntity.typeSync(candidate, followLinks: false) !=
+            FileSystemEntityType.notFound) {
+          throw StateError(
+            'Forbidden bundle entry "$forbiddenEntry" found under "$inputPath".',
+          );
+        }
+      }
+      targetPath = binaryRelpath != null && binaryRelpath.isNotEmpty
+          ? '$inputPath/$binaryRelpath'
+          : inputPath;
+      bytes = File(targetPath).readAsBytesSync();
+    }
+
+    if (!isMachO64(bytes) && !isFatMachO(bytes)) {
+      throw FormatException(
+        'File "$targetPath" is not a 64-bit or universal Mach-O binary.',
       );
     }
-    final stdoutStr = res.stdout as String;
-    for (final expected in expectedSubstrings) {
-      if (!stdoutStr.contains(expected)) {
+    if (isFatMachO(bytes)) {
+      for (final s in extractFatSlices(bytes)) {
+        parseLoadCommands(s.bytes);
+      }
+    } else {
+      parseLoadCommands(bytes);
+    }
+
+    if (objdumpPath != null && objdumpPath.isNotEmpty) {
+      final res = Process.runSync(objdumpPath, [
+        '--macho',
+        '--private-headers',
+        '--dylib-id',
+        '--arch=all',
+        targetPath,
+      ]);
+      if (res.exitCode != 0) {
         throw StateError(
-          'Expected substring "$expected" not found in llvm-objdump output for '
-          '"$targetPath":\n$stdoutStr',
+          'llvm-objdump failed on "$targetPath" (exit ${res.exitCode}):\n'
+          '${res.stderr}',
         );
+      }
+      final stdoutStr = res.stdout as String;
+      for (final expected in expectedSubstrings) {
+        if (!stdoutStr.contains(expected)) {
+          throw StateError(
+            'Expected substring "$expected" not found in llvm-objdump output for '
+            '"$targetPath":\n$stdoutStr',
+          );
+        }
+      }
+    }
+
+    final outFile = File(outputPath);
+    outFile.parent.createSync(recursive: true);
+    outFile.writeAsStringSync('verified\n');
+  } finally {
+    if (tempExtractedBinaryPath != null) {
+      final f = File(tempExtractedBinaryPath);
+      if (f.existsSync()) {
+        f.deleteSync();
       }
     }
   }
-
-  final outFile = File(outputPath);
-  outFile.parent.createSync(recursive: true);
-  outFile.writeAsStringSync('verified\n');
 }
 
 /// Returns true if [bytes] begins with a 64-bit little-endian Mach-O header.
@@ -2246,12 +2387,11 @@ Uint8List generateStubMachO({
     dysymtab,
     placeholderUuid,
     buildVersion,
-    if (fileType == mhExecute)
-      buildLcRpath(
-        platform == platformMacos
-            ? '@executable_path/../Frameworks'
-            : '@executable_path/Frameworks',
-      ),
+    if (fileType == mhExecute) ...[
+      buildLcRpath('@executable_path/Frameworks'),
+      if (platform == platformMacos)
+        buildLcRpath('@executable_path/../Frameworks'),
+    ],
   ];
 
   var sizeofcmds = 0;

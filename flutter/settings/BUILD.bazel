@@ -38,6 +38,24 @@ selects.config_setting_group(
     visibility = ["//visibility:public"],
 )
 
+selects.config_setting_group(
+    name = "macos_xtool_backend",
+    match_all = [
+        "@platforms//os:macos",
+        ":is_xtool_explicit",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+selects.config_setting_group(
+    name = "ios_xtool_backend",
+    match_all = [
+        "@platforms//os:ios",
+        ":is_xtool_explicit",
+    ],
+    visibility = ["//visibility:public"],
+)
+
 bzl_library(
     name = "apple_backend_bzl",
     srcs = ["apple_backend.bzl"],

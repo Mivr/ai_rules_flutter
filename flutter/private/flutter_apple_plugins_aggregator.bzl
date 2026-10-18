@@ -13,6 +13,7 @@ def _flutter_apple_plugins_aggregator_impl(ctx):
 
     cc_infos = []
     swift_infos = []
+    files = []
     for entry in flutter_info.apple_plugin_libraries.to_list():
         if entry.platform != target_platform:
             continue
@@ -20,9 +21,11 @@ def _flutter_apple_plugins_aggregator_impl(ctx):
             cc_infos.append(entry.cc_info)
         if entry.swift_info:
             swift_infos.append(entry.swift_info)
+        if hasattr(entry, "files") and entry.files:
+            files.append(entry.files)
 
     return [
-        DefaultInfo(),
+        DefaultInfo(files = depset(transitive = files)),
         cc_common.merge_cc_infos(cc_infos = cc_infos),
         SwiftInfo(swift_infos = swift_infos),
     ]

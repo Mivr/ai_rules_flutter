@@ -719,11 +719,403 @@ void main() {
       ); // LC_BUILD_VERSION
       expect(macBd.getUint32(40, Endian.little), equals(1)); // PLATFORM_MACOS
       final macExecText = utf8.decode(macExecBytes, allowMalformed: true);
+      expect(macExecText, contains('@executable_path/Frameworks'));
+      expect(macExecText, contains('@executable_path/../Frameworks'));
       expect(
         macExecText,
         contains('source=macos_native_plugin_registrant.swift'),
       );
       expect(macExecText, contains('modulemap=sample_macos_plugin.modulemap'));
     });
+
+    test(
+      'sets archive entry file modes explicitly from role and produces byte-identical output across runs',
+      () {
+        final run1Dir = Directory('${tempDir.path}/run1')
+          ..createSync(recursive: true);
+        final run2Dir = Directory('${tempDir.path}/run2')
+          ..createSync(recursive: true);
+
+        for (final dir in [run1Dir, run2Dir]) {
+          final execFile =
+              File(
+                '${dir.path}/Runner',
+              )..writeAsBytesSync(
+                generateStubExecutableMachO(
+                  platform: 'ios',
+                  arch: 'arm64',
+                  minimumOsVersion: '14.0',
+                ),
+              );
+          final plistFile = File('${dir.path}/Info.plist')
+            ..writeAsStringSync(
+              '<plist version="1.0"><dict><key>CFBundleName</key><string>Runner</string></dict></plist>',
+            );
+          final resFile = File('${dir.path}/config.json')
+            ..writeAsStringSync('{"hello":"world"}');
+          final fwDir = Directory('${dir.path}/Plugin.framework')
+            ..createSync(recursive: true);
+          final fwBin = File('${fwDir.path}/Plugin')
+            ..writeAsBytesSync([0xCF, 0xFA, 0xED, 0xFE]);
+          final fwPlist = File('${fwDir.path}/Info.plist')
+            ..writeAsStringSync('<plist version="1.0"><dict/></plist>');
+
+          // Perturb host filesystem permissions in opposite directions between run1 and run2
+          // to prove archive modes come from role rather than host stat.mode.
+          if (!Platform.isWindows) {
+            if (dir == run1Dir) {
+              Process.runSync('chmod', ['0644', execFile.path, fwBin.path]);
+              Process.runSync('chmod', [
+                '0755',
+                plistFile.path,
+                resFile.path,
+                fwPlist.path,
+              ]);
+            } else {
+              Process.runSync('chmod', ['0755', execFile.path, fwBin.path]);
+              Process.runSync('chmod', [
+                '0600',
+                plistFile.path,
+                resFile.path,
+                fwPlist.path,
+              ]);
+            }
+          }
+
+          assembleBundle(
+            BundleConfig(
+              platform: 'ios',
+              appName: 'Runner',
+              bundleId: 'com.example.deterministic',
+              executablePath: execFile.path,
+              minimumOsVersion: '14.0',
+              infoPlistPaths: [plistFile.path],
+              frameworkPaths: [fwDir.path],
+              resourceSpecs: [resFile.path],
+              outputArchivePath: '${dir.path}/Runner.ipa',
+              tempDirPath: '${dir.path}/tmp',
+            ),
+          );
+        }
+
+        final ipa1 = File('${run1Dir.path}/Runner.ipa').readAsBytesSync();
+        final ipa2 = File('${run2Dir.path}/Runner.ipa').readAsBytesSync();
+        expect(ipa1, equals(ipa2));
+
+        final entries = {for (final e in readZipEntries(ipa1)) e.path: e};
+        expect(entries['Payload/Runner.app/Runner']!.isExecutable, isTrue);
+        expect(
+          entries['Payload/Runner.app/Frameworks/Plugin.framework/Plugin']!
+              .isExecutable,
+          isTrue,
+        );
+        expect(entries['Payload/Runner.app/Info.plist']!.isExecutable, isFalse);
+        expect(entries['Payload/Runner.app/PkgInfo']!.isExecutable, isFalse);
+        expect(
+          entries['Payload/Runner.app/config.json']!.isExecutable,
+          isFalse,
+        );
+        expect(
+          entries['Payload/Runner.app/Frameworks/Plugin.framework/Info.plist']!
+              .isExecutable,
+          isFalse,
+        );
+      },
+    );
+
+    test(
+      'honours families, versionFilePath, nativeLibPaths, and additionalContentSpecs',
+      () {
+        final execFile = File('${tempDir.path}/MacApp_bin')
+          ..writeAsBytesSync(
+            generateStubExecutableMachO(
+              platform: 'macos',
+              arch: 'arm64',
+              minimumOsVersion: '11.0',
+            ),
+          );
+        final versionJson = File('${tempDir.path}/version.json')
+          ..writeAsStringSync(
+            jsonEncode({
+              'build_version': '42',
+              'short_version_string': '2.3.4',
+            }),
+          );
+        final nativeDylib = File('${tempDir.path}/libnative_asset.dylib')
+          ..writeAsBytesSync([0xCF, 0xFA, 0xED, 0xFE, 1, 2, 3, 4]);
+        final extraHelper = File('${tempDir.path}/helper.txt')
+          ..writeAsStringSync('extra-content');
+        final zipOut = '${tempDir.path}/out/MacApp.app.zip';
+
+        assembleBundle(
+          BundleConfig(
+            platform: 'macos',
+            appName: 'MacApp',
+            bundleId: 'com.example.macapp',
+            executablePath: execFile.path,
+            minimumOsVersion: '11.0',
+            versionFilePath: versionJson.path,
+            nativeLibPaths: [nativeDylib.path],
+            additionalContentSpecs: ['Helpers=${extraHelper.path}'],
+            outputArchivePath: zipOut,
+            tempDirPath: '${tempDir.path}/tmp_mac',
+          ),
+        );
+
+        final macEntries = {
+          for (final e in readZipEntries(File(zipOut).readAsBytesSync()))
+            e.path: e,
+        };
+        expect(
+          macEntries.keys,
+          contains('MacApp.app/Contents/Frameworks/libnative_asset.dylib'),
+        );
+        expect(
+          macEntries['MacApp.app/Contents/Frameworks/libnative_asset.dylib']!
+              .isExecutable,
+          isTrue,
+        );
+        expect(
+          macEntries.keys,
+          isNot(
+            contains('MacApp.app/Contents/Resources/libnative_asset.dylib'),
+          ),
+        );
+        expect(
+          macEntries.keys,
+          contains('MacApp.app/Contents/Helpers/helper.txt'),
+        );
+        final macPlist = utf8.decode(
+          macEntries['MacApp.app/Contents/Info.plist']!.data,
+        );
+        expect(
+          macPlist,
+          contains('<key>CFBundleVersion</key>\n\t<string>42</string>'),
+        );
+        expect(
+          macPlist,
+          contains(
+            '<key>CFBundleShortVersionString</key>\n\t<string>2.3.4</string>',
+          ),
+        );
+
+        // Verify iOS families (ipad only -> UIDeviceFamily = [2])
+        final iosPlist = buildInfoPlist(
+          plistXmls: const [],
+          platform: 'ios',
+          appName: 'PadApp',
+          bundleId: 'com.example.padapp',
+          minimumOsVersion: '14.0',
+          families: const ['ipad'],
+        );
+        expect(
+          iosPlist,
+          contains(
+            '<key>UIDeviceFamily</key>\n\t<array>\n\t\t<integer>2</integer>\n\t</array>',
+          ),
+        );
+        expect(
+          () => buildInfoPlist(
+            plistXmls: const [],
+            platform: 'ios',
+            appName: 'BadApp',
+            bundleId: 'com.example.badapp',
+            minimumOsVersion: '14.0',
+            families: const ['tv'],
+          ),
+          throwsA(isA<ArgumentError>()),
+        );
+      },
+    );
+
+    test(
+      'reads signing password from file or env and rejects plain-text --certificate-password or uncompiled .storyboard/.xib/.xcassets resources',
+      () {
+        final execFile = File('${tempDir.path}/Runner_sec')
+          ..writeAsBytesSync([0xCF, 0xFA, 0xED, 0xFE, 1, 2, 3, 4]);
+        final pwFile = File('${tempDir.path}/cert_pw.txt')
+          ..writeAsStringSync('file-secret-pw\n');
+        final certFile = File('${tempDir.path}/cert.p12')
+          ..writeAsStringSync('mock-p12');
+        final argsLog = File('${tempDir.path}/zsign_args.txt');
+        final fakeZsign = File('${tempDir.path}/fake_zsign.sh')
+          ..writeAsStringSync(
+            '#!/bin/sh\nprintf "%s\\n" "\$@" > "${argsLog.path}"\n',
+          );
+        if (!Platform.isWindows) {
+          Process.runSync('chmod', ['0755', fakeZsign.path]);
+          assembleBundle(
+            BundleConfig(
+              platform: 'ios',
+              appName: 'Runner',
+              bundleId: 'com.example.sec',
+              executablePath: execFile.path,
+              minimumOsVersion: '14.0',
+              zsignPath: fakeZsign.path,
+              certificatePath: certFile.path,
+              certificatePasswordFilePath: pwFile.path,
+              outputArchivePath: '${tempDir.path}/out/Sec.ipa',
+              tempDirPath: '${tempDir.path}/tmp_sec',
+            ),
+          );
+          final logged = argsLog.readAsLinesSync();
+          expect(logged, contains('-p'));
+          expect(logged, contains('file-secret-pw'));
+        }
+
+        // Plain-text --certificate-password on CLI must be rejected.
+        expect(
+          () => parseBundleCliArgs([
+            '--platform',
+            'ios',
+            '--app-name',
+            'Runner',
+            '--bundle-id',
+            'com.example.sec',
+            '--executable',
+            execFile.path,
+            '--minimum-os-version',
+            '14.0',
+            '--certificate-password',
+            'leaked',
+            '--output-archive',
+            '${tempDir.path}/out/Fail.ipa',
+          ]),
+          throwsA(
+            isA<ArgumentError>().having(
+              (e) => e.message,
+              'message',
+              contains('--certificate-password is not permitted'),
+            ),
+          ),
+        );
+
+        // Uncompiled .storyboard / .xib / .xcassets resources must be rejected.
+        for (final ext in [
+          'Main.storyboard',
+          'MainMenu.xib',
+          'Assets.xcassets',
+        ]) {
+          final badRes = File('${tempDir.path}/$ext')
+            ..writeAsStringSync('uncompiled');
+          expect(
+            () => assembleBundle(
+              BundleConfig(
+                platform: 'ios',
+                appName: 'Runner',
+                bundleId: 'com.example.badres',
+                executablePath: execFile.path,
+                minimumOsVersion: '14.0',
+                resourceSpecs: [badRes.path],
+                outputArchivePath: '${tempDir.path}/out/Bad.ipa',
+                tempDirPath: '${tempDir.path}/tmp_bad',
+              ),
+            ),
+            throwsA(isA<ArgumentError>()),
+          );
+        }
+      },
+    );
+  });
+
+  group('ZIP64 support', () {
+    test('writes and reads ZIP64 archive when entry count exceeds 65,535', () {
+      const entryCount = 65537;
+      final entries = List<ZipEntry>.generate(
+        entryCount,
+        (i) => ZipEntry(
+          path: 'Payload/Runner.app/f_${i.toString().padLeft(5, '0')}.txt',
+          data: Uint8List(0),
+        ),
+      );
+
+      final zipBytes = encodeDeterministicZip(entries);
+      final bd = ByteData.sublistView(zipBytes);
+
+      // Verify standard EOCD has 0xFFFF total entries sentinel, preceded by
+      // ZIP64 EOCD locator (0x07064b50) and ZIP64 EOCD record (0x06064b50).
+      final eocdOffset = zipBytes.length - 22;
+      expect(bd.getUint32(eocdOffset, Endian.little), equals(0x06054b50));
+      expect(bd.getUint16(eocdOffset + 10, Endian.little), equals(0xFFFF));
+
+      final locatorOffset = eocdOffset - 20;
+      expect(
+        bd.getUint32(locatorOffset, Endian.little),
+        equals(0x07064b50),
+      );
+      final zip64EocdOffset = bd.getUint64(locatorOffset + 8, Endian.little);
+      expect(
+        bd.getUint32(zip64EocdOffset, Endian.little),
+        equals(0x06064b50),
+      );
+      expect(
+        bd.getUint64(zip64EocdOffset + 24, Endian.little),
+        equals(entryCount),
+      );
+      expect(
+        bd.getUint64(zip64EocdOffset + 32, Endian.little),
+        equals(entryCount),
+      );
+
+      final parsed = readZipEntries(zipBytes);
+      expect(parsed.length, equals(entryCount));
+      expect(parsed.first.path, equals('Payload/Runner.app/f_00000.txt'));
+      expect(
+        parsed.last.path,
+        equals(
+          'Payload/Runner.app/f_${(entryCount - 1).toString().padLeft(5, '0')}.txt',
+        ),
+      );
+    });
+
+    test(
+      'writes and reads ZIP64 extended information (0x0001) when entry size exceeds 4 GiB',
+      () {
+        const over4GiB = 0x100000005; // 4 GiB + 5 bytes
+        final entry = ZipEntry(
+          path: 'Payload/Runner.app/huge.bin',
+          data: Uint8List.fromList([1, 2, 3, 4, 5]),
+          uncompressedSizeOverride: over4GiB,
+        );
+
+        final zipBytes = encodeDeterministicZip([entry]);
+        final bd = ByteData.sublistView(zipBytes);
+
+        // Local file header must have 0xFFFFFFFF size sentinels and 0x0001 extra field.
+        expect(bd.getUint32(0, Endian.little), equals(0x04034b50));
+        expect(bd.getUint16(4, Endian.little), equals(45)); // version 4.5
+        expect(bd.getUint32(18, Endian.little), equals(0xFFFFFFFF));
+        expect(bd.getUint32(22, Endian.little), equals(0xFFFFFFFF));
+        final nameLen = bd.getUint16(26, Endian.little);
+        final extraLen = bd.getUint16(28, Endian.little);
+        expect(extraLen, equals(20)); // header(4) + usize(8) + csize(8)
+        expect(
+          bd.getUint16(30 + nameLen, Endian.little),
+          equals(0x0001),
+        );
+        expect(
+          bd.getUint64(30 + nameLen + 4, Endian.little),
+          equals(over4GiB),
+        );
+
+        // Verify ZIP64 EOCD locator and record are emitted.
+        final eocdOffset = zipBytes.length - 22;
+        final locatorOffset = eocdOffset - 20;
+        expect(
+          bd.getUint32(locatorOffset, Endian.little),
+          equals(0x07064b50),
+        );
+        final zip64EocdOffset = bd.getUint64(locatorOffset + 8, Endian.little);
+        expect(
+          bd.getUint32(zip64EocdOffset, Endian.little),
+          equals(0x06064b50),
+        );
+
+        final parsed = readZipEntries(zipBytes);
+        expect(parsed.length, equals(1));
+        expect(parsed.single.path, equals('Payload/Runner.app/huge.bin'));
+        expect(parsed.single.uncompressedSize, equals(over4GiB));
+      },
+    );
   });
 }

@@ -367,7 +367,7 @@ def _macho_verify_probe_impl(ctx):
     relpath = ctx.attr.binary_relpath
     input_file = None
     use_relpath = False
-    if len(files) == 1 and files[0].is_directory:
+    if len(files) == 1 and (files[0].is_directory or files[0].extension in ["ipa", "zip"]):
         input_file = files[0]
         use_relpath = bool(relpath)
     elif relpath:
@@ -400,6 +400,10 @@ def _macho_verify_probe_impl(ctx):
         direct_inputs.append(fw_zip)
     for substr in ctx.attr.expected_substrings:
         args.extend(["--expect", substr])
+    for entry in ctx.attr.expected_entries:
+        args.extend(["--expect-entry", entry])
+    for entry in ctx.attr.forbidden_entries:
+        args.extend(["--forbid-entry", entry])
 
     ctx.actions.run(
         executable = dart_exe,
@@ -418,7 +422,9 @@ macho_verify_probe = rule(
     implementation = _macho_verify_probe_impl,
     attrs = {
         "binary_relpath": attr.string(default = ""),
+        "expected_entries": attr.string_list(default = []),
         "expected_substrings": attr.string_list(default = []),
+        "forbidden_entries": attr.string_list(default = []),
         "target": attr.label(mandatory = True),
         "_macho_edit": attr.label(
             default = Label("//flutter/private/tools:macho_edit"),
@@ -436,5 +442,5 @@ macho_verify_probe = rule(
         "@rules_flutter//flutter:toolchain_type",
         config_common.toolchain_type("@rules_dart//dart:exec_tools_toolchain_type", mandatory = False),
     ],
-    doc = "Verifies a built Mach-O binary or framework using @llvm//tools:llvm-objdump.",
+    doc = "Verifies a built Mach-O binary, framework, or archive using @llvm//tools:llvm-objdump.",
 )

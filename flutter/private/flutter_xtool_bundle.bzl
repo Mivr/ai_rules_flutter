@@ -2,8 +2,8 @@
 
 Provides:
   - `flutter_darwin_xcframework_import`: Host-agnostic `.xcframework` /
-    `.framework` import rule returning `DefaultInfo`, `CcInfo`,
-    `AppleFrameworkImportInfo`, and `FlutterDarwinFrameworkInfo`.
+    `.framework` import rule returning `DefaultInfo`, `CcInfo`, and
+    `FlutterDarwinFrameworkInfo` without depending on `@rules_apple`.
   - `flutter_xtool_ios_bundle`: Assembles an unsigned `.ipa`
     (`Payload/<App>.app`) using `//flutter/private/tools:xtool_pack` without
     Xcode, or signs it when `zsign` is provided.
@@ -14,15 +14,13 @@ Provides:
 
 load("@apple_support//lib:apple_support.bzl", "apple_support")
 load("@bazel_skylib//lib:dicts.bzl", "dicts")
-# buildifier: disable=bzl-visibility
-load("@rules_apple//apple/internal:framework_import_support.bzl", "framework_import_support")
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("//flutter:providers.bzl", "FlutterDarwinFrameworkInfo")
 load(":constants.bzl", "IOS_MINIMUM_OS_VERSION", "MACOS_MINIMUM_OS_VERSION")
-load(":xtool_darwin_sdk_repo.bzl", "FlutterXtoolSdkInfo")
+load(":xtool_darwin_sdk_repo.bzl", "FlutterXtoolSdkInfo", "UNCONFIGURED_SDK_ERROR")
 
-# -- Transitions ---------------------------------------------------------------
+# -- Transitions & Architecture Helpers ----------------------------------------
 
 def _xtool_ios_transition_impl(settings, _attr):
     comp_mode = settings["//command_line_option:compilation_mode"]
@@ -75,6 +73,9 @@ _xtool_macos_transition = transition(
         "//flutter/settings:apple_backend",
     ],
 )
+
+def _target_arch(ctx):
+    return apple_support.target_arch_from_rule_ctx(ctx)
 
 # -- flutter_darwin_xcframework_import -----------------------------------------
 
@@ -144,7 +145,7 @@ def _select_framework_dir_and_headers(files, target_arch, is_simulator):
 
 def _flutter_darwin_xcframework_import_impl(ctx):
     all_files = ctx.files.xcframework_imports
-    target_arch = apple_support.target_arch_from_rule_ctx(ctx)
+    target_arch = _target_arch(ctx)
     is_simulator = (target_arch == "x86_64") and ("ios" in ctx.bin_dir.path)
 
     framework_name = _infer_framework_name(
@@ -169,11 +170,6 @@ def _flutter_darwin_xcframework_import_impl(ctx):
     return [
         DefaultInfo(files = depset(all_files)),
         cc_info,
-        framework_import_support.framework_import_info_with_dependencies(
-            build_archs = [target_arch] if target_arch else ["arm64"],
-            deps = [],
-            framework_imports = all_files,
-        ),
         FlutterDarwinFrameworkInfo(
             framework_name = framework_name,
             framework_files = depset(all_files),
@@ -213,7 +209,23 @@ flutter_darwin_xcframework_import = rule(
 
 # -- Shared bundle helpers -----------------------------------------------------
 
-def _collect_framework_args_and_inputs(framework_targets):
+def _extract_framework_dirs_from_files(files, seen_dirs, framework_dirs):
+    for f in files:
+        if f.is_directory:
+            if f.path not in seen_dirs:
+                seen_dirs[f.path] = True
+                framework_dirs.append(f.path)
+        else:
+            parts = f.path.split("/")
+            for idx, part in enumerate(parts):
+                if part.endswith(".xcframework") or part.endswith(".framework"):
+                    candidate = "/".join(parts[:idx + 1])
+                    if candidate not in seen_dirs:
+                        seen_dirs[candidate] = True
+                        framework_dirs.append(candidate)
+                    break
+
+def _collect_framework_args_and_inputs(framework_targets, plugin_and_dep_targets = []):
     framework_dirs = []
     seen_dirs = {}
     direct_inputs = []
@@ -223,26 +235,45 @@ def _collect_framework_args_and_inputs(framework_targets):
         if FlutterDarwinFrameworkInfo in target:
             fw_info = target[FlutterDarwinFrameworkInfo]
             transitive_inputs.append(fw_info.framework_files)
-            if fw_info.framework_dir and fw_info.framework_dir not in seen_dirs:
-                seen_dirs[fw_info.framework_dir] = True
-                framework_dirs.append(fw_info.framework_dir)
+            if fw_info.framework_dir:
+                if fw_info.framework_dir not in seen_dirs:
+                    seen_dirs[fw_info.framework_dir] = True
+                    framework_dirs.append(fw_info.framework_dir)
+            else:
+                _extract_framework_dirs_from_files(
+                    fw_info.framework_files.to_list(),
+                    seen_dirs,
+                    framework_dirs,
+                )
         else:
             files = target[DefaultInfo].files.to_list()
             direct_inputs.extend(files)
-            for f in files:
-                if f.is_directory:
-                    if f.path not in seen_dirs:
-                        seen_dirs[f.path] = True
-                        framework_dirs.append(f.path)
-                else:
-                    parts = f.path.split("/")
-                    for idx, part in enumerate(parts):
-                        if part.endswith(".xcframework") or part.endswith(".framework"):
-                            candidate = "/".join(parts[:idx + 1])
-                            if candidate not in seen_dirs:
-                                seen_dirs[candidate] = True
-                                framework_dirs.append(candidate)
-                            break
+            _extract_framework_dirs_from_files(files, seen_dirs, framework_dirs)
+
+    for target in plugin_and_dep_targets:
+        if FlutterDarwinFrameworkInfo in target:
+            fw_info = target[FlutterDarwinFrameworkInfo]
+            transitive_inputs.append(fw_info.framework_files)
+            if fw_info.framework_dir:
+                if fw_info.framework_dir not in seen_dirs:
+                    seen_dirs[fw_info.framework_dir] = True
+                    framework_dirs.append(fw_info.framework_dir)
+            else:
+                _extract_framework_dirs_from_files(
+                    fw_info.framework_files.to_list(),
+                    seen_dirs,
+                    framework_dirs,
+                )
+        else:
+            files = target[DefaultInfo].files.to_list()
+            fw_files = [
+                f
+                for f in files
+                if f.is_directory or ".framework/" in f.path or ".xcframework/" in f.path or f.path.endswith(".framework") or f.path.endswith(".xcframework")
+            ]
+            if fw_files:
+                direct_inputs.extend(fw_files)
+                _extract_framework_dirs_from_files(fw_files, seen_dirs, framework_dirs)
 
     return framework_dirs, direct_inputs, transitive_inputs
 
@@ -280,38 +311,119 @@ def _collect_runner_compile_inputs(ctx):
 
     return sources, headers, modulemaps, transitive_sets
 
+def _validate_resource_file_for_xtool(ctx, file_obj, attr_name):
+    lower = file_obj.short_path.lower()
+    segments = lower.split("/")
+    for seg in segments:
+        if seg.endswith(".storyboard") or seg.endswith(".xib"):
+            fail(
+                "%s: '%s' contains Interface Builder source %r which requires Xcode 'ibtool' to compile into a runtime .storyboardc/.nib bundle, and has no hermetic implementation on the xtool backend." % (
+                    ctx.label,
+                    attr_name,
+                    file_obj.short_path,
+                ),
+            )
+        if seg.endswith(".xcassets") or seg.endswith(".appiconset") or seg.endswith(".icon"):
+            fail(
+                "%s: '%s' contains uncompiled asset catalog %r which requires Xcode 'actool' to compile into Assets.car/.icns, and has no hermetic implementation on the xtool backend." % (
+                    ctx.label,
+                    attr_name,
+                    file_obj.short_path,
+                ),
+            )
+
 def _run_xtool_pack_bundle(
         ctx,
         *,
         platform,
         archive_ext,
         mnemonic,
-        extra_resources = []):
+        families = [],
+        native_libs = []):
+    if ctx.attr.unsupported_kwargs:
+        fail(
+            "%s (backend = 'xtool'): unsupported attribute(s) %s are not supported on the xtool backend." % (
+                ctx.label,
+                ", ".join(["'%s'" % k for k in sorted(ctx.attr.unsupported_kwargs)]),
+            ),
+        )
+
+    if ctx.attr.certificate_password:
+        fail(
+            "%s: plain-text 'certificate_password' is not supported because signing secrets must never appear on action command lines. Use 'certificate_password_file' (a File label) or 'certificate_password_env' (an environment variable name) instead." % ctx.label,
+        )
+
+    if hasattr(ctx.file, "launch_storyboard") and ctx.file.launch_storyboard:
+        fail(
+            "%s: 'launch_storyboard' (%s) is not supported on the xtool backend because compiling .storyboard files requires Xcode 'ibtool', which has no hermetic cross-platform implementation." % (
+                ctx.label,
+                ctx.file.launch_storyboard.short_path,
+            ),
+        )
+
+    if hasattr(ctx.file, "menu_xib") and ctx.file.menu_xib:
+        fail(
+            "%s: 'menu_xib' (%s) is not supported on the xtool backend because compiling .xib files requires Xcode 'ibtool', which has no hermetic cross-platform implementation." % (
+                ctx.label,
+                ctx.file.menu_xib.short_path,
+            ),
+        )
+
+    if ctx.files.app_icons:
+        fail(
+            "%s: 'app_icons' (%s) is not supported on the xtool backend because compiling asset catalogs (.xcassets / .appiconset / .icon) requires Xcode 'actool', which has no hermetic cross-platform implementation." % (
+                ctx.label,
+                ctx.files.app_icons[0].short_path,
+            ),
+        )
+
+    for res_file in ctx.files.resources:
+        _validate_resource_file_for_xtool(ctx, res_file, "resources")
+
+    additional_content_pairs = []
+    additional_content_files = []
+    for target, subdir in ctx.attr.additional_contents.items():
+        if not subdir or subdir.startswith("/") or ".." in subdir.split("/"):
+            fail(
+                "%s: invalid 'additional_contents' subdirectory %r for %s; must be a relative bundle subdirectory without '..'." % (
+                    ctx.label,
+                    subdir,
+                    target.label,
+                ),
+            )
+        for f in target[DefaultInfo].files.to_list():
+            _validate_resource_file_for_xtool(ctx, f, "additional_contents")
+            additional_content_pairs.append("%s=%s" % (subdir, f.path))
+            additional_content_files.append(f)
+
+    sdk_available = False
+    sdk_transitive = []
+    if ctx.attr._xtool_sdk_status and FlutterXtoolSdkInfo in ctx.attr._xtool_sdk_status:
+        sdk_info = ctx.attr._xtool_sdk_status[FlutterXtoolSdkInfo]
+        sdk_available = sdk_info.sdk_available
+        sdk_transitive.append(sdk_info.sdk_files)
+
+    if ctx.attr.require_sdk and not sdk_available:
+        fail(UNCONFIGURED_SDK_ERROR)
+
     app_name = ctx.attr.app_name if ctx.attr.app_name else ctx.label.name
     archive_file = ctx.actions.declare_file("%s%s" % (ctx.label.name, archive_ext))
     app_dir = ctx.actions.declare_directory("%s_bundle/%s.app" % (ctx.label.name, app_name))
 
     infoplists = ctx.files.infoplists
-    resources = ctx.files.resources + extra_resources
+    resources = ctx.files.resources
 
     fw_dirs, fw_direct_inputs, fw_transitive_inputs = _collect_framework_args_and_inputs(
         ctx.attr.frameworks,
+        ctx.attr.plugins + ctx.attr.deps,
     )
 
-    target_arch = apple_support.target_arch_from_rule_ctx(ctx)
-    arch = target_arch if target_arch in ("arm64", "x86_64") else "arm64"
+    arch = _target_arch(ctx)
 
     executable_file = ctx.file.executable
     if not executable_file:
         executable_file = ctx.actions.declare_file("%s_runner_bin" % ctx.label.name)
         sources, headers, modulemaps, plugin_transitive_sets = _collect_runner_compile_inputs(ctx)
-
-        sdk_available = False
-        sdk_transitive = []
-        if ctx.attr._xtool_sdk_status and FlutterXtoolSdkInfo in ctx.attr._xtool_sdk_status:
-            sdk_info = ctx.attr._xtool_sdk_status[FlutterXtoolSdkInfo]
-            sdk_available = sdk_info.sdk_available
-            sdk_transitive.append(sdk_info.sdk_files)
 
         runner_args = ctx.actions.args()
         runner_args.add("compile-runner")
@@ -350,8 +462,35 @@ def _run_xtool_pack_bundle(
     args.add("--bundle-id", ctx.attr.bundle_id)
     args.add("--executable", executable_file.path)
     args.add("--minimum-os-version", ctx.attr.minimum_os_version)
+    args.add("--temp-dir", archive_file.path + ".tmp")
     args.add("--output-archive", archive_file.path)
     args.add("--output-app-dir", app_dir.path)
+
+    for fam in families:
+        args.add("--family", fam)
+
+    direct_inputs = (
+        [executable_file] +
+        infoplists +
+        resources +
+        native_libs +
+        additional_content_files +
+        fw_direct_inputs
+    )
+
+    if ctx.attr.version:
+        version_files = ctx.files.version
+        if not version_files:
+            fail("%s: 'version' target %s did not produce a version file." % (ctx.label, ctx.attr.version.label))
+        args.add("--version-file", version_files[0].path)
+        direct_inputs.append(version_files[0])
+
+    if ctx.attr.build_version:
+        args.add("--define", "FLUTTER_BUILD_NUMBER=%s" % ctx.attr.build_version)
+    if ctx.attr.short_version:
+        args.add("--define", "FLUTTER_BUILD_NAME=%s" % ctx.attr.short_version)
+    for k, v in ctx.attr.defines.items():
+        args.add("--define", "%s=%s" % (k, v))
 
     for plist in infoplists:
         args.add("--info-plist", plist.path)
@@ -359,10 +498,14 @@ def _run_xtool_pack_bundle(
     for fw_dir in fw_dirs:
         args.add("--framework", fw_dir)
 
+    for dylib in native_libs:
+        args.add("--native-lib", dylib.path)
+
     for res in resources:
         args.add("--resource", res.path)
 
-    direct_inputs = [executable_file] + infoplists + resources + fw_direct_inputs
+    for pair in additional_content_pairs:
+        args.add("--additional-content", pair)
 
     if ctx.file.provisioning_profile:
         args.add("--provisioning-profile", ctx.file.provisioning_profile.path)
@@ -380,8 +523,12 @@ def _run_xtool_pack_bundle(
         args.add("--certificate", ctx.file.certificate.path)
         direct_inputs.append(ctx.file.certificate)
 
-    if ctx.attr.certificate_password:
-        args.add("--certificate-password", ctx.attr.certificate_password)
+    if ctx.file.certificate_password_file:
+        args.add("--certificate-password-file", ctx.file.certificate_password_file.path)
+        direct_inputs.append(ctx.file.certificate_password_file)
+
+    if ctx.attr.certificate_password_env:
+        args.add("--certificate-password-env", ctx.attr.certificate_password_env)
 
     ctx.actions.run(
         executable = ctx.executable._xtool_pack,
@@ -410,7 +557,20 @@ def _run_xtool_pack_bundle(
 # -- flutter_xtool_ios_bundle --------------------------------------------------
 
 def _flutter_xtool_ios_bundle_impl(ctx):
-    target_arch = apple_support.target_arch_from_rule_ctx(ctx)
+    if not ctx.attr.families:
+        fail(
+            "%s: 'families' must not be empty; expected one or more of 'iphone', 'ipad'." % ctx.label,
+        )
+    for fam in ctx.attr.families:
+        if fam not in ("iphone", "ipad"):
+            fail(
+                "%s: invalid device family %r in 'families'; expected 'iphone' or 'ipad'." % (
+                    ctx.label,
+                    fam,
+                ),
+            )
+
+    target_arch = _target_arch(ctx)
     is_sim = (target_arch == "x86_64") or (ctx.var.get("COMPILATION_MODE", "") == "dbg")
     platform = "ios_sim" if is_sim else "ios"
     return _run_xtool_pack_bundle(
@@ -418,6 +578,7 @@ def _flutter_xtool_ios_bundle_impl(ctx):
         platform = platform,
         archive_ext = ".ipa",
         mnemonic = "FlutterXtoolIosBundle",
+        families = ctx.attr.families,
     )
 
 _COMMON_BUNDLE_ATTRS = {
@@ -428,6 +589,22 @@ _COMMON_BUNDLE_ATTRS = {
     "bundle_id": attr.string(
         mandatory = True,
         doc = "Bundle identifier (e.g. `com.example.app`).",
+    ),
+    "version": attr.label(
+        allow_files = True,
+        doc = "Optional version target (such as `apple_bundle_version` or a JSON file with `build_version` and `short_version_string`).",
+    ),
+    "build_version": attr.string(
+        default = "",
+        doc = "Optional explicit `CFBundleVersion` (`FLUTTER_BUILD_NUMBER`) override.",
+    ),
+    "short_version": attr.string(
+        default = "",
+        doc = "Optional explicit `CFBundleShortVersionString` (`FLUTTER_BUILD_NAME`) override.",
+    ),
+    "defines": attr.string_dict(
+        default = {},
+        doc = "Optional variable substitutions (`KEY: VALUE`) applied when merging `Info.plist` files.",
     ),
     "infoplists": attr.label_list(
         allow_files = [".plist"],
@@ -457,6 +634,10 @@ _COMMON_BUNDLE_ATTRS = {
         default = [],
         doc = "Additional runner library targets.",
     ),
+    "require_sdk": attr.bool(
+        default = False,
+        doc = "When True, fails at analysis with a named error if `@flutter_xtool_darwin_sdk` is not configured.",
+    ),
     "_xtool_sdk_status": attr.label(
         default = Label("@flutter_xtool_darwin_sdk//:sdk_status"),
     ),
@@ -468,7 +649,17 @@ _COMMON_BUNDLE_ATTRS = {
     "resources": attr.label_list(
         allow_files = True,
         default = [],
-        doc = "Additional resource files or directories to copy into the bundle.",
+        doc = "Additional pre-compiled resource files or directories to copy into the bundle (`ibtool`/`actool` sources like `.storyboard`, `.xib`, and `.xcassets` are rejected at analysis).",
+    ),
+    "additional_contents": attr.label_keyed_string_dict(
+        allow_files = True,
+        default = {},
+        doc = "Mapping of file/directory targets to relative bundle subdirectories (e.g. `{\":helper\": \"PlugIns\"}`).",
+    ),
+    "app_icons": attr.label_list(
+        allow_files = True,
+        default = [],
+        doc = "Asset catalog icon files. Rejected at analysis on the `xtool` backend because `actool` is not hermetically available.",
     ),
     "provisioning_profile": attr.label(
         allow_single_file = True,
@@ -487,9 +678,21 @@ _COMMON_BUNDLE_ATTRS = {
         allow_single_file = True,
         doc = "Optional signing certificate (`.p12` or `.pem`) for `zsign`.",
     ),
+    "certificate_password_file": attr.label(
+        allow_single_file = True,
+        doc = "Optional file containing the password for `certificate`. Read at execution time by `xtool_pack` so the secret never appears on action command lines.",
+    ),
+    "certificate_password_env": attr.string(
+        default = "",
+        doc = "Optional environment variable name holding the password for `certificate`, read at execution time by `xtool_pack`.",
+    ),
     "certificate_password": attr.string(
         default = "",
-        doc = "Optional password for `certificate`.",
+        doc = "Deprecated/rejected plain-text password attribute. Setting this fails at analysis to prevent leaking secrets on command lines; use `certificate_password_file` or `certificate_password_env`.",
+    ),
+    "unsupported_kwargs": attr.string_list(
+        default = [],
+        doc = "Internal list of unsupported attribute names forwarded from macros so they fail at analysis with a named error.",
     ),
     "_xtool_pack": attr.label(
         default = Label("//flutter/private/tools:xtool_pack"),
@@ -512,6 +715,14 @@ flutter_xtool_ios_bundle = rule(
                 default = IOS_MINIMUM_OS_VERSION,
                 doc = "Minimum iOS deployment target version.",
             ),
+            "families": attr.string_list(
+                default = ["iphone", "ipad"],
+                doc = "Supported iOS device families (`'iphone'`, `'ipad'`). Populates `UIDeviceFamily` in `Info.plist`.",
+            ),
+            "launch_storyboard": attr.label(
+                allow_single_file = True,
+                doc = "Launch storyboard file. Rejected at analysis on the `xtool` backend because `ibtool` is not hermetically available.",
+            ),
         },
     ),
     doc = "Packages an iOS application into an unsigned `.ipa` (`Payload/<App>.app`) using the host-agnostic `xtool_pack` bundler, or signs it when `zsign` is provided.",
@@ -525,7 +736,7 @@ def _flutter_xtool_macos_bundle_impl(ctx):
         platform = "macos",
         archive_ext = ".app.zip",
         mnemonic = "FlutterXtoolMacosBundle",
-        extra_resources = ctx.files.native_libs,
+        native_libs = ctx.files.native_libs,
     )
 
 flutter_xtool_macos_bundle = rule(
@@ -542,7 +753,11 @@ flutter_xtool_macos_bundle = rule(
             "native_libs": attr.label_list(
                 allow_files = True,
                 default = [],
-                doc = "Optional staged native dynamic libraries (`flutter_macos_native_libs`).",
+                doc = "Optional staged native dynamic libraries (`flutter_macos_native_libs`) embedded under `Contents/Frameworks/`.",
+            ),
+            "menu_xib": attr.label(
+                allow_single_file = True,
+                doc = "Main menu `.xib` file. Rejected at analysis on the `xtool` backend because `ibtool` is not hermetically available.",
             ),
         },
     ),

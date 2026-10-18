@@ -155,6 +155,7 @@ def _flutter_plugin_impl(ctx):
             label = lib.label,
             cc_info = lib[CcInfo] if CcInfo in lib else None,
             swift_info = lib[SwiftInfo] if SwiftInfo in lib else None,
+            files = lib[DefaultInfo].files,
             package = package_name,
         ))
     for lib in ctx.attr.macos_libs:
@@ -170,6 +171,7 @@ def _flutter_plugin_impl(ctx):
             label = lib.label,
             cc_info = lib[CcInfo] if CcInfo in lib else None,
             swift_info = lib[SwiftInfo] if SwiftInfo in lib else None,
+            files = lib[DefaultInfo].files,
             package = package_name,
         ))
     for lib in ctx.attr.ios_libs:
@@ -185,6 +187,7 @@ def _flutter_plugin_impl(ctx):
             label = lib.label,
             cc_info = lib[CcInfo] if CcInfo in lib else None,
             swift_info = lib[SwiftInfo] if SwiftInfo in lib else None,
+            files = lib[DefaultInfo].files,
             package = package_name,
         ))
 

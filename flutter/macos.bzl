@@ -412,6 +412,10 @@ def flutter_macos_app(
         srcs: Override conventional `macos/Runner/*.swift` runner sources.
         engine: Override default macOS engine target.
         menu_xib: Override conventional `macos/Runner/Base.lproj/MainMenu.xib`.
+            On the `xtool` backend, the default runner creates its menu
+            programmatically without Interface Builder compilation; user-supplied
+            `.xib` files are rejected at analysis because compiling them requires
+            Xcode `ibtool`.
         allow_non_macho: Explicit allow-list of binary or framework names
             permitted to bypass Mach-O validation.
         backend: Apple bundling backend: `"rules_apple"` (default) or
@@ -419,7 +423,13 @@ def flutter_macos_app(
             user-supplied `darwin.artifactbundle` configured via
             `flutter.darwin_sdk` in compliance with Apple's SDK licensing
             terms; no Apple SDK is downloaded by default.
-        **kwargs: Passed through to macos_application. The macro sets
+        **kwargs: Passed through to `macos_application` (or `_flutter_xtool_macos_bundle`
+            when `backend = "xtool"`). For `backend = "xtool"` signing with
+            `certificate` (`.p12`), pass the password via
+            `certificate_password_file` (a file label read at execution time)
+            or `certificate_password_env` (an environment variable name read at
+            execution time); plain-text `certificate_password` is rejected so
+            signing secrets never appear on action command lines. The macro sets
             `app_icons` itself, so pass the named parameter instead.
     """
     if backend not in ("rules_apple", "xtool"):
@@ -555,19 +565,18 @@ def flutter_macos_app(
         tags = internal_tags,
     )
 
-    menu_xib_template = menu_xib if menu_xib != None else "macos/Runner/Base.lproj/MainMenu.xib"
-    expand_template(
-        name = "__%s_menu_xib" % name,
-        template = menu_xib_template,
-        out = "__%s/Base.lproj/MainMenu.xib" % name,
-        substitutions = {
-            "APP_NAME": display_name,
-            "customModule=\"Runner\"": "customModule=\"%s\"" % module_name,
-        },
-        tags = internal_tags,
-    )
-
     if backend == "rules_apple":
+        menu_xib_template = menu_xib if menu_xib != None else "macos/Runner/Base.lproj/MainMenu.xib"
+        expand_template(
+            name = "__%s_menu_xib" % name,
+            template = menu_xib_template,
+            out = "__%s/Base.lproj/MainMenu.xib" % name,
+            substitutions = {
+                "APP_NAME": display_name,
+                "customModule=\"Runner\"": "customModule=\"%s\"" % module_name,
+            },
+            tags = internal_tags,
+        )
         swift_library(
             name = "__%s_runner" % name,
             srcs = runner_srcs + ["__%s_registrant" % name],
@@ -590,7 +599,7 @@ def flutter_macos_app(
     #     `None` means discover, `[]` means ship none: both states are sayable,
     #     and an app with no catalog at all is the second without having to
     #     write it.
-    if app_icons == None:
+    if app_icons == None and backend == "rules_apple":
         app_icons = native.glob(
             ["macos/Runner/Assets.xcassets/AppIcon.appiconset/**"],
             allow_empty = True,
@@ -637,8 +646,8 @@ def flutter_macos_app(
         )
         actual_info_plist = "__%s_info_plist_icon" % name
 
-    # 8. Version — create default apple_bundle_version if not provided.
-    if not version:
+    # 8. Version — create default apple_bundle_version if not provided (rules_apple only).
+    if backend == "rules_apple" and not version:
         apple_bundle_version(
             name = "__%s_version" % name,
             build_version = "1.0",
@@ -674,11 +683,42 @@ def flutter_macos_app(
             **kwargs
         )
     else:
+        valid_xtool_kwargs = (
+            "build_version",
+            "certificate",
+            "certificate_password",
+            "certificate_password_env",
+            "certificate_password_file",
+            "compatible_with",
+            "defines",
+            "exec_compatible_with",
+            "executable",
+            "features",
+            "provisioning_profile",
+            "require_sdk",
+            "restricted_to",
+            "short_version",
+            "target_compatible_with",
+            "testonly",
+            "zsign",
+        )
+        forwarded_kwargs = {k: v for k, v in kwargs.items() if k in valid_xtool_kwargs}
+        unsupported_kwargs = [k for k in kwargs if k not in valid_xtool_kwargs]
+        default_menu_xib_label = Label("@rules_flutter//flutter/private/runners/macos:MainMenu.xib")
+        xtool_menu_xib = menu_xib
+        if type(menu_xib) == "string" and Label(menu_xib) == default_menu_xib_label:
+            xtool_menu_xib = None
+        elif type(menu_xib) == "Label" and menu_xib == default_menu_xib_label:
+            xtool_menu_xib = None
         _flutter_xtool_macos_bundle(
             name = name,
             app_name = display_name,
             bundle_id = bundle_id,
             minimum_os_version = minimum_os_version,
+            version = version,
+            additional_contents = additional_contents,
+            menu_xib = xtool_menu_xib,
+            app_icons = app_icons if app_icons != None else [],
             infoplists = [actual_info_plist],
             srcs = runner_srcs,
             registrant = ":__%s_registrant" % name,
@@ -691,9 +731,10 @@ def flutter_macos_app(
             native_libs = [":__%s_native_libs" % name],
             resources = resources + [
                 ":__%s_privacy_manifests" % name,
-                ":__%s_menu_xib" % name,
             ],
             entitlements = entitlements,
             tags = tags,
             visibility = visibility,
+            unsupported_kwargs = unsupported_kwargs,
+            **forwarded_kwargs
         )

@@ -93,6 +93,8 @@ _UNCONFIGURED_SDK_ERROR = (
     "    flutter.darwin_sdk(path = \"<path-to-darwin.artifactbundle>\")"
 )
 
+UNCONFIGURED_SDK_ERROR = _UNCONFIGURED_SDK_ERROR
+
 _COMPILE_ACTIONS = [
     ACTION_NAMES.c_compile,
     ACTION_NAMES.cpp_compile,

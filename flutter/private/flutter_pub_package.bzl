@@ -866,6 +866,16 @@ flutter_apple_plugin_library(
     module_name = "{name}",
     platform = "macos",
     visibility = ["//visibility:public"],
+)
+
+flutter_apple_plugin_library(
+    name = "{name}_apple_macos_xtool",
+    srcs = {srcs},
+    includes = {includes},
+    module_name = "{name}",
+    platform = "macos",
+    backend = "xtool",
+    visibility = ["//visibility:public"],
 )""".format(
             name = name,
             srcs = _glob_block(apple_macos_srcs_dirs, _APPLE_SRC_EXTENSIONS),
@@ -880,6 +890,16 @@ flutter_apple_plugin_library(
     includes = {includes},
     module_name = "{name}",
     platform = "ios",
+    visibility = ["//visibility:public"],
+)
+
+flutter_apple_plugin_library(
+    name = "{name}_apple_ios_xtool",
+    srcs = {srcs},
+    includes = {includes},
+    module_name = "{name}",
+    platform = "ios",
+    backend = "xtool",
     visibility = ["//visibility:public"],
 )""".format(
             name = name,
@@ -924,10 +944,18 @@ flutter_windows_plugin_library(
 
     if apple_macos_srcs_dirs or apple_ios_srcs_dirs:
         macos_branch = '            ":{name}_apple_macos",'.format(name = name) if apple_macos_srcs_dirs else ""
+        macos_xtool_branch = '            ":{name}_apple_macos_xtool",'.format(name = name) if apple_macos_srcs_dirs else ""
         ios_branch = '            ":{name}_apple_ios",'.format(name = name) if apple_ios_srcs_dirs else ""
+        ios_xtool_branch = '            ":{name}_apple_ios_xtool",'.format(name = name) if apple_ios_srcs_dirs else ""
         apple_libs_arg = """    apple_libs = select({{
+        "@rules_flutter//flutter/settings:macos_xtool_backend": [
+{macos_xtool_branch}
+        ],
         "@platforms//os:macos": [
 {macos_branch}
+        ],
+        "@rules_flutter//flutter/settings:ios_xtool_backend": [
+{ios_xtool_branch}
         ],
         "@platforms//os:ios": [
 {ios_branch}
@@ -936,7 +964,9 @@ flutter_windows_plugin_library(
     }}),
 """.format(
             macos_branch = macos_branch,
+            macos_xtool_branch = macos_xtool_branch,
             ios_branch = ios_branch,
+            ios_xtool_branch = ios_xtool_branch,
         )
 
     if linux_src_dir:

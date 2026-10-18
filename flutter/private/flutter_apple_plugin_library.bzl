@@ -27,7 +27,7 @@ load("@rules_cc//cc:objc_library.bzl", "objc_library")
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_swift//swift:swift.bzl", "SwiftInfo", "swift_library")
-load("//flutter:providers.bzl", _FlutterApplePluginInfo = "FlutterApplePluginInfo")
+load("//flutter:providers.bzl", "FlutterDarwinFrameworkInfo", _FlutterApplePluginInfo = "FlutterApplePluginInfo")
 load(":flutter_xtool_bundle.bzl", "flutter_darwin_xcframework_import")
 
 FlutterApplePluginInfo = _FlutterApplePluginInfo
@@ -99,9 +99,14 @@ def _flutter_xtool_apple_plugin_library_impl(ctx):
         cc_infos = dep_cc_infos,
     )
     dep_swift_infos = [dep[SwiftInfo] for dep in ctx.attr.deps if SwiftInfo in dep]
+    dep_framework_files = [
+        dep[FlutterDarwinFrameworkInfo].framework_files
+        for dep in ctx.attr.deps
+        if FlutterDarwinFrameworkInfo in dep and not dep.label.name.endswith("__flutter_framework")
+    ]
 
     return [
-        DefaultInfo(files = depset(all_plugin_files)),
+        DefaultInfo(files = depset(all_plugin_files, transitive = dep_framework_files)),
         merged_cc_info,
         SwiftInfo(swift_infos = dep_swift_infos),
         FlutterApplePluginInfo(
