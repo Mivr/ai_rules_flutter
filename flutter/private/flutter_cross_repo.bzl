@@ -27,12 +27,17 @@ def generate_cross_repo_build(
     exe_suffix = ".exe" if host_platform.startswith("windows") else ""
     if has_aot:
         if profile_gen_snapshot_label:
+            toolchain_gen_snapshot_attr = """    gen_snapshot = select({{
+        "@rules_flutter//flutter/private:profile": "{profile}",
+        "//conditions:default": "{default}",
+    }}),\n""".format(profile = profile_gen_snapshot_label, default = actual_gen_snapshot_label)
             gen_snapshot_attr = """select({{
         "@rules_flutter//flutter/private:dbg": None,
         "@rules_flutter//flutter/private:profile": "{profile}",
         "//conditions:default": "{default}",
     }})""".format(profile = profile_gen_snapshot_label, default = actual_gen_snapshot_label)
         else:
+            toolchain_gen_snapshot_attr = '    gen_snapshot = "{default}",\n'.format(default = actual_gen_snapshot_label)
             gen_snapshot_attr = """select({{
         "@rules_flutter//flutter/private:dbg": None,
         "//conditions:default": "{default}",
@@ -51,6 +56,7 @@ flutter_aot_toolchain(
 )
 """.format(gen_snapshot_attr = gen_snapshot_attr)
     else:
+        toolchain_gen_snapshot_attr = ""
         load_block = 'load("@rules_flutter//flutter:toolchain.bzl", "flutter_toolchain")'
         aot_toolchain_block = ""
 
@@ -63,6 +69,7 @@ flutter_aot_toolchain(
         dartaotruntime_bin = dartaotruntime_binary_name(host_platform),
         target_os = platform_to_os(target_platform),
         target_arch = platform_to_arch(target_platform),
+        toolchain_gen_snapshot_attr = toolchain_gen_snapshot_attr,
         aot_toolchain_block = aot_toolchain_block,
         exe_suffix = exe_suffix,
     )
@@ -107,6 +114,7 @@ _BUILD_TEMPLATE = """{load_block}
 
 flutter_toolchain(
     name = "flutter_toolchain",
+    const_finder = "@{host_repo_name}//:font-subset-tools/const_finder.dart.snapshot",
     dart = "@{host_repo_name}//:dart-sdk/bin/{dart_bin}",
     dart_sdk = "@{host_repo_name}//:dart_sdk_files",
     dart_vm_files = "@{host_repo_name}//:dart_vm_files",
@@ -115,14 +123,17 @@ flutter_toolchain(
     dart2js_files = "@{host_repo_name}//:dart2js_files",
     dartaotruntime = "@{host_repo_name}//:dart-sdk/bin/{dartaotruntime_bin}",
     engine_revision = "{engine_revision}",
+    font_subset = "@{host_repo_name}//:font-subset-tools/font-subset{exe_suffix}",
     frontend_server = "@{host_repo_name}//:host-tools/frontend_server_aot.dart.snapshot",
-    icu_data = "@{host_repo_name}//:host-tools/icudtl.dat",
+{toolchain_gen_snapshot_attr}    icu_data = "@{host_repo_name}//:host-tools/icudtl.dat",
     impellerc = "@{host_repo_name}//:host-tools/impellerc{exe_suffix}",
+    material_icons_font = "@{host_repo_name}//:material-fonts/MaterialIcons-Regular.otf",
     vm_isolate_snapshot = "@{host_repo_name}//:host-tools/vm_isolate_snapshot.bin",
     isolate_snapshot = "@{host_repo_name}//:host-tools/isolate_snapshot.bin",
     shader_lib = "@{host_repo_name}//:shader_lib_files",
     patched_sdk = "@{host_repo_name}//:patched_sdk",
     platform_kernel_dill = "@{host_repo_name}//:patched-sdk/flutter_patched_sdk/platform_strong.dill",
+    platform_kernel_dill_product = "@{host_repo_name}//:patched-sdk-product/flutter_patched_sdk_product/platform_strong.dill",
     target_arch = "{target_arch}",
     target_os = "{target_os}",
     version = "{flutter_version}",

@@ -121,7 +121,228 @@ flutter_host_tools_release_repo = repository_rule(
     },
 )
 
-# The profile engine's repository: its flutter.jar, and the stripped copy
+_PATCHED_SDK_PRODUCT_FILES = [
+    "patched-sdk-product/LICENSE.flutter_patched_sdk.md",
+    "patched-sdk-product/flutter_patched_sdk_product/platform_strong.dill",
+    "patched-sdk-product/flutter_patched_sdk_product/vm_outline_strong.dill",
+]
+
+_FONT_SUBSET_BASE_FILES = [
+    "font-subset-tools/LICENSE.font_subset.md",
+    "font-subset-tools/const_finder.dart.snapshot",
+]
+
+_MATERIAL_FONTS_FILES = [
+    "material-fonts/MaterialIcons-Regular.otf",
+    "material-fonts/MaterialIcons_LICENSE.txt",
+    "material-fonts/Roboto-Black.ttf",
+    "material-fonts/Roboto-BlackItalic.ttf",
+    "material-fonts/Roboto-Bold.ttf",
+    "material-fonts/Roboto-BoldItalic.ttf",
+    "material-fonts/Roboto-Italic.ttf",
+    "material-fonts/Roboto-Light.ttf",
+    "material-fonts/Roboto-LightItalic.ttf",
+    "material-fonts/Roboto-Medium.ttf",
+    "material-fonts/Roboto-MediumItalic.ttf",
+    "material-fonts/Roboto-Regular.ttf",
+    "material-fonts/Roboto-Thin.ttf",
+    "material-fonts/Roboto-ThinItalic.ttf",
+    "material-fonts/RobotoCondensed-Bold.ttf",
+    "material-fonts/RobotoCondensed-BoldItalic.ttf",
+    "material-fonts/RobotoCondensed-Italic.ttf",
+    "material-fonts/RobotoCondensed-Light.ttf",
+    "material-fonts/RobotoCondensed-LightItalic.ttf",
+    "material-fonts/RobotoCondensed-Regular.ttf",
+    "material-fonts/RobotoCondensed_LICENSE.txt",
+    "material-fonts/Roboto_LICENSE.txt",
+    "material-fonts/codepoints",
+]
+
+_HOST_TOOLS_RELEASE_FILES = [
+    "host-tools-release/LICENSE.artifacts.md",
+    "host-tools-release/gen_snapshot",
+]
+
+_LINUX_ENGINE_REL_FILES = [
+    "LICENSE.flutter_gtk.md",
+    "flutter_linux/fl_application.h",
+    "flutter_linux/fl_basic_message_channel.h",
+    "flutter_linux/fl_binary_codec.h",
+    "flutter_linux/fl_binary_messenger.h",
+    "flutter_linux/fl_dart_project.h",
+    "flutter_linux/fl_engine.h",
+    "flutter_linux/fl_event_channel.h",
+    "flutter_linux/fl_json_message_codec.h",
+    "flutter_linux/fl_json_method_codec.h",
+    "flutter_linux/fl_message_codec.h",
+    "flutter_linux/fl_method_call.h",
+    "flutter_linux/fl_method_channel.h",
+    "flutter_linux/fl_method_codec.h",
+    "flutter_linux/fl_method_response.h",
+    "flutter_linux/fl_pixel_buffer_texture.h",
+    "flutter_linux/fl_plugin_registrar.h",
+    "flutter_linux/fl_plugin_registry.h",
+    "flutter_linux/fl_standard_message_codec.h",
+    "flutter_linux/fl_standard_method_codec.h",
+    "flutter_linux/fl_string_codec.h",
+    "flutter_linux/fl_texture.h",
+    "flutter_linux/fl_texture_gl.h",
+    "flutter_linux/fl_texture_registrar.h",
+    "flutter_linux/fl_value.h",
+    "flutter_linux/fl_view.h",
+    "flutter_linux/flutter_linux.h",
+    "gen_snapshot",
+    "libflutter_linux_gtk.so",
+]
+
+_MACOS_FRAMEWORK_HEADERS = [
+    "FlutterAppDelegate.h",
+    "FlutterAppLifecycleDelegate.h",
+    "FlutterBinaryMessenger.h",
+    "FlutterChannels.h",
+    "FlutterCodecs.h",
+    "FlutterDartProject.h",
+    "FlutterEngine.h",
+    "FlutterHourFormat.h",
+    "FlutterMacOS.h",
+    "FlutterMacros.h",
+    "FlutterPlatformViews.h",
+    "FlutterPluginMacOS.h",
+    "FlutterPluginRegistrarMacOS.h",
+    "FlutterTexture.h",
+    "FlutterViewController.h",
+]
+
+_MACOS_FRAMEWORK_VERSION_REL_FILES = [
+    "FlutterMacOS",
+    "Modules/module.modulemap",
+    "Resources/Info.plist",
+    "Resources/PrivacyInfo.xcprivacy",
+    "Resources/icudtl.dat",
+] + ["Headers/" + h for h in _MACOS_FRAMEWORK_HEADERS]
+
+_MACOS_ENGINE_REL_FILES = [
+    "FlutterMacOS.framework/" + prefix + rel
+    for prefix in ("", "Versions/A/", "Versions/Current/")
+    for rel in _MACOS_FRAMEWORK_VERSION_REL_FILES
+] + [
+    "FlutterMacOS.framework/Versions/A/_CodeSignature/CodeResources",
+    "FlutterMacOS.framework/Versions/Current/_CodeSignature/CodeResources",
+]
+
+_WINDOWS_ENGINE_COMMON_REL_FILES = [
+    "LICENSE.windows_flutter.md",
+    "flutter_export.h",
+    "flutter_messenger.h",
+    "flutter_plugin_registrar.h",
+    "flutter_texture_registrar.h",
+    "flutter_windows.dll",
+    "flutter_windows.dll.exp",
+    "flutter_windows.dll.lib",
+    "flutter_windows.dll.pdb",
+    "flutter_windows.h",
+]
+
+_WINDOWS_ENGINE_RELEASE_REL_FILES = _WINDOWS_ENGINE_COMMON_REL_FILES + [
+    "gen_snapshot.exe",
+]
+
+_WINDOWS_CPP_CLIENT_WRAPPER_FILES = [
+    "cpp-client-wrapper/LICENSE.client_wrapper_archive.md",
+    "cpp-client-wrapper/cpp_client_wrapper/README",
+    "cpp-client-wrapper/cpp_client_wrapper/binary_messenger_impl.h",
+    "cpp-client-wrapper/cpp_client_wrapper/byte_buffer_streams.h",
+    "cpp-client-wrapper/cpp_client_wrapper/core_implementations.cc",
+    "cpp-client-wrapper/cpp_client_wrapper/engine_method_result.cc",
+    "cpp-client-wrapper/cpp_client_wrapper/flutter_engine.cc",
+    "cpp-client-wrapper/cpp_client_wrapper/flutter_view_controller.cc",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/basic_message_channel.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/binary_messenger.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/byte_streams.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/dart_project.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/encodable_value.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/engine_method_result.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/event_channel.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/event_sink.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/event_stream_handler.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/event_stream_handler_functions.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/flutter_engine.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/flutter_view.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/flutter_view_controller.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/message_codec.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/method_call.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/method_channel.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/method_codec.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/method_result.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/method_result_functions.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/plugin_registrar.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/plugin_registrar_windows.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/plugin_registry.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/standard_codec_serializer.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/standard_message_codec.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/standard_method_codec.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/texture_registrar.h",
+    "cpp-client-wrapper/cpp_client_wrapper/plugin_registrar.cc",
+    "cpp-client-wrapper/cpp_client_wrapper/standard_codec.cc",
+    "cpp-client-wrapper/cpp_client_wrapper/texture_registrar_impl.h",
+]
+
+def _format_alias(name, actual):
+    return """alias(
+    name = "{name}",
+    actual = "{actual}",
+    visibility = ["//visibility:public"],
+)""".format(name = name, actual = actual)
+
+def _lazy_repo_file_aliases(
+        os_name,
+        exe_suffix,
+        user_repo_name,
+        platform,
+        patched_sdk_product_repo,
+        font_subset_repo,
+        material_fonts_repo,
+        engine_release_repo,
+        engine_debug_repo):
+    """Generates alias() targets for all files moved into lazy SDK repositories."""
+    blocks = []
+
+    for path in _PATCHED_SDK_PRODUCT_FILES:
+        blocks.append(_format_alias(path, "@{}//:{}".format(patched_sdk_product_repo, path)))
+
+    for path in _FONT_SUBSET_BASE_FILES + ["font-subset-tools/font-subset" + exe_suffix]:
+        blocks.append(_format_alias(path, "@{}//:{}".format(font_subset_repo, path)))
+
+    for path in _MATERIAL_FONTS_FILES:
+        blocks.append(_format_alias(path, "@{}//:{}".format(material_fonts_repo, path)))
+
+    if os_name == "macos":
+        host_tools_release_repo = "{}_host_tools_release_{}".format(user_repo_name, platform)
+        for path in _HOST_TOOLS_RELEASE_FILES:
+            blocks.append(_format_alias(path, "@{}//:{}".format(host_tools_release_repo, path)))
+        release_rel = _MACOS_ENGINE_REL_FILES
+        debug_rel = _MACOS_ENGINE_REL_FILES
+    elif os_name == "linux":
+        release_rel = _LINUX_ENGINE_REL_FILES
+        debug_rel = _LINUX_ENGINE_REL_FILES
+    elif os_name == "windows":
+        release_rel = _WINDOWS_ENGINE_RELEASE_REL_FILES
+        debug_rel = _WINDOWS_ENGINE_COMMON_REL_FILES
+    else:
+        release_rel = []
+        debug_rel = []
+
+    for rel in release_rel:
+        blocks.append(_format_alias("engine/" + rel, "@{}//:engine/{}".format(engine_release_repo, rel)))
+    for rel in debug_rel:
+        blocks.append(_format_alias("engine-debug/" + rel, "@{}//:engine/{}".format(engine_debug_repo, rel)))
+
+    if os_name == "windows":
+        for path in _WINDOWS_CPP_CLIENT_WRAPPER_FILES:
+            blocks.append(_format_alias(path, "@{}//:{}".format(engine_release_repo, path)))
+
+    return "\n\n".join(blocks)
+
 # flutter_android_engine imports (see flutter_android_engine_repo.bzl).
 _ANDROID_PROFILE_ENGINE_BUILD = """\
 load("@rules_flutter//flutter/private:flutter_android_engine_jar.bzl", "flutter_android_engine_jar")
@@ -191,13 +412,22 @@ def _flutter_engine_artifacts_impl(repository_ctx):
     font_subset_repo = "{}_font_subset_{}".format(user_repo_name, platform)
     material_fonts_repo = "{}_material_fonts".format(user_repo_name)
 
-    # On macOS, @flutter_macos_engine aliases :engine_library (release) and
-    # :engine_debug_library (debug) separately and selects between them in
-    # flutter_macos_engine(). On Linux and Windows, :engine_library selects
-    # between debug and release directly.
+    lazy_file_aliases = _lazy_repo_file_aliases(
+        user_repo_name = user_repo_name,
+        platform = platform,
+        os_name = os_name,
+        exe_suffix = exe_suffix,
+        engine_release_repo = engine_release_repo,
+        engine_debug_repo = engine_debug_repo,
+        patched_sdk_product_repo = patched_sdk_product_repo,
+        font_subset_repo = font_subset_repo,
+        material_fonts_repo = material_fonts_repo,
+    )
+
+    # :engine_library (release) and :engine_debug_library (debug) alias the lazy
+    # desktop engine repos; flutter_toolchain selects between them by build mode.
     profile_repo = repository_ctx.attr.profile_repo_name
-    if os_name == "macos":
-        engine_aliases = """alias(
+    engine_aliases = """alias(
     name = "engine_library",
     actual = "@{engine_release_repo}//:engine_library",
     visibility = ["//visibility:public"],
@@ -208,35 +438,22 @@ alias(
     actual = "@{engine_debug_repo}//:engine_library",
     visibility = ["//visibility:public"],
 )""".format(
-            engine_release_repo = engine_release_repo,
-            engine_debug_repo = engine_debug_repo,
-        )
-        desktop_engine_library_attr = ""
-    else:
-        profile_engine_select_arm = ""
-        if profile_repo:
-            profile_engine_select_arm = '\n        "@rules_flutter//flutter/private:profile": "@{profile_repo}//:engine_library",'.format(
-                profile_repo = profile_repo,
-            )
-        engine_aliases = """alias(
-    name = "engine_library",
-    actual = select({{
-        "@rules_flutter//flutter/private:dbg": "@{engine_debug_repo}//:engine_library",{profile_engine_select_arm}
-        "//conditions:default": "@{engine_release_repo}//:engine_library",
-    }}),
-    visibility = ["//visibility:public"],
-)
+        engine_release_repo = engine_release_repo,
+        engine_debug_repo = engine_debug_repo,
+    )
 
-alias(
-    name = "engine_debug_library",
-    actual = "@{engine_debug_repo}//:engine_library",
-    visibility = ["//visibility:public"],
-)""".format(
-            engine_release_repo = engine_release_repo,
-            engine_debug_repo = engine_debug_repo,
-            profile_engine_select_arm = profile_engine_select_arm,
+    profile_engine_select_arm = ""
+    if profile_repo:
+        profile_engine_select_arm = '\n        "@rules_flutter//flutter/private:profile": "@{profile_repo}//:engine_library",'.format(
+            profile_repo = profile_repo,
         )
-        desktop_engine_library_attr = '    engine_library = ":engine_library",'
+    engine_library_attr = """    engine_library = select({{
+        "@rules_flutter//flutter/private:dbg": ":engine_debug_library",{profile_engine_select_arm}
+        "//conditions:default": ":engine_library",
+    }}),""".format(
+        profile_engine_select_arm = profile_engine_select_arm,
+    )
+    desktop_engine_library_attr = "" if os_name == "macos" else engine_library_attr
 
     # Release gen_snapshot path varies by platform:
     # - macOS: separate release host tools archive → @{name}_host_tools_release_{platform}//:host-tools-release/gen_snapshot
@@ -269,12 +486,12 @@ alias(
         dart_version = dart_version,
         dartaotruntime_bin = dartaotruntime_bin,
         engine_aliases = engine_aliases,
+        engine_library_attr = engine_library_attr,
         desktop_engine_library_attr = desktop_engine_library_attr,
         gen_snapshot_release_actual = gen_snapshot_release_actual,
         profile_gen_snapshot_select_arm = profile_gen_snapshot_select_arm,
         patched_sdk_product_repo = patched_sdk_product_repo,
-        font_subset_repo = font_subset_repo,
-        material_fonts_repo = material_fonts_repo,
+        lazy_file_aliases = lazy_file_aliases,
         exe_suffix = exe_suffix,
         linux_sysroot_attr = linux_sysroot_attr,
     )
@@ -393,29 +610,7 @@ alias(
     visibility = ["//visibility:public"],
 )
 
-alias(
-    name = "patched-sdk-product/flutter_patched_sdk_product/platform_strong.dill",
-    actual = "@{patched_sdk_product_repo}//:patched-sdk-product/flutter_patched_sdk_product/platform_strong.dill",
-    visibility = ["//visibility:public"],
-)
-
-alias(
-    name = "font-subset-tools/const_finder.dart.snapshot",
-    actual = "@{font_subset_repo}//:font-subset-tools/const_finder.dart.snapshot",
-    visibility = ["//visibility:public"],
-)
-
-alias(
-    name = "font-subset-tools/font-subset{exe_suffix}",
-    actual = "@{font_subset_repo}//:font-subset-tools/font-subset{exe_suffix}",
-    visibility = ["//visibility:public"],
-)
-
-alias(
-    name = "material-fonts/MaterialIcons-Regular.otf",
-    actual = "@{material_fonts_repo}//:material-fonts/MaterialIcons-Regular.otf",
-    visibility = ["//visibility:public"],
-)
+{lazy_file_aliases}
 
 alias(
     name = "gen_snapshot_release",
@@ -435,6 +630,7 @@ filegroup(
 
 flutter_toolchain(
     name = "flutter_toolchain",
+    const_finder = ":font-subset-tools/const_finder.dart.snapshot",
     dart = "dart-sdk/bin/{dart_bin}",
     dart_sdk = ":dart_sdk_files",
     dart_vm_files = ":dart_vm_files",
@@ -442,16 +638,25 @@ flutter_toolchain(
     dart2wasm_files = ":dart2wasm_files",
     dart2js_files = ":dart2js_files",
     dartaotruntime = "dart-sdk/bin/{dartaotruntime_bin}",
+{engine_library_attr}
     engine_revision = "{engine_revision}",
     flutter_tester = "host-tools/flutter_tester{exe_suffix}",
+    font_subset = ":font-subset-tools/font-subset{exe_suffix}",
     frontend_server = "host-tools/frontend_server_aot.dart.snapshot",
+    gen_snapshot = select({{
+        "@rules_flutter//flutter/private:dbg": "host-tools/gen_snapshot{exe_suffix}",{profile_gen_snapshot_select_arm}
+        "//conditions:default": ":gen_snapshot_release",
+    }}),
     icu_data = "host-tools/icudtl.dat",
     impellerc = "host-tools/impellerc{exe_suffix}",
+{linux_sysroot_attr}
+    material_icons_font = ":material-fonts/MaterialIcons-Regular.otf",
     vm_isolate_snapshot = "host-tools/vm_isolate_snapshot.bin",
     isolate_snapshot = "host-tools/isolate_snapshot.bin",
     shader_lib = ":shader_lib_files",
     patched_sdk = ":patched_sdk",
     platform_kernel_dill = "patched-sdk/flutter_patched_sdk/platform_strong.dill",
+    platform_kernel_dill_product = ":patched-sdk-product/flutter_patched_sdk_product/platform_strong.dill",
     version = "{flutter_version}",
     visibility = ["//visibility:public"],
 )

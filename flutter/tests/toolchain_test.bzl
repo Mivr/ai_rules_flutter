@@ -1,6 +1,6 @@
 """Unit tests for engine helpers and provider definitions."""
 
-load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
+load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("//flutter:providers.bzl", "FlutterSdkInfo", "resolve_exec_dart", "resolve_flutter_sdk_info")
 load("//flutter/private:engine_helpers.bzl", "dart_binary_name", "dartaotruntime_binary_name", "engine_arch_for_os", "platform_to_arch", "platform_to_os")
 
@@ -188,6 +188,73 @@ def _engine_arch_for_os_test_impl(ctx):
     asserts.equals(env, "x64", engine_arch_for_os("windows", "x64"))
     return unittest.end(env)
 
+_PrimaryToolchainProbeInfo = provider(
+    fields = ["sdk_info", "gen_snapshot_var", "is_linux"],
+)
+
+def _primary_toolchain_probe_impl(ctx):
+    sdk_info = ctx.toolchains["@rules_flutter//flutter:toolchain_type"].flutter_sdk_info
+    is_linux = ctx.target_platform_has_constraint(
+        ctx.attr._linux_constraint[platform_common.ConstraintValueInfo],
+    )
+    return [
+        _PrimaryToolchainProbeInfo(
+            sdk_info = sdk_info,
+            gen_snapshot_var = ctx.expand_make_variables("test", "$(GEN_SNAPSHOT)", {}),
+            is_linux = is_linux,
+        ),
+    ]
+
+_primary_toolchain_probe = rule(
+    implementation = _primary_toolchain_probe_impl,
+    attrs = {
+        "_linux_constraint": attr.label(default = "@platforms//os:linux"),
+    },
+    toolchains = ["@rules_flutter//flutter:toolchain_type"],
+)
+
+def _primary_toolchain_host_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    tut = analysistest.target_under_test(env)
+    probe = tut[_PrimaryToolchainProbeInfo]
+    sdk_info = probe.sdk_info
+
+    asserts.true(env, sdk_info.gen_snapshot != None, "Expected primary toolchain gen_snapshot to be populated")
+    asserts.true(env, sdk_info.const_finder != None, "Expected primary toolchain const_finder to be populated")
+    asserts.true(env, sdk_info.font_subset != None, "Expected primary toolchain font_subset to be populated")
+    asserts.true(env, sdk_info.platform_kernel_dill_product != None, "Expected primary toolchain platform_kernel_dill_product to be populated")
+    asserts.true(env, sdk_info.material_icons_font != None, "Expected primary toolchain material_icons_font to be populated")
+    asserts.true(env, sdk_info.engine_library != None, "Expected primary toolchain engine_library to be populated on desktop host")
+    if probe.is_linux:
+        asserts.true(env, sdk_info.linux_sysroot != None, "Expected primary toolchain linux_sysroot to be populated on Linux host")
+    if sdk_info.gen_snapshot != None:
+        asserts.equals(env, sdk_info.gen_snapshot.path, probe.gen_snapshot_var, "Expected $(GEN_SNAPSHOT) to expand to gen_snapshot path")
+    return analysistest.end(env)
+
+_primary_toolchain_host_test = analysistest.make(_primary_toolchain_host_test_impl)
+
+def _primary_toolchain_android_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    tut = analysistest.target_under_test(env)
+    probe = tut[_PrimaryToolchainProbeInfo]
+    sdk_info = probe.sdk_info
+
+    asserts.true(env, sdk_info.gen_snapshot != None, "Expected Android cross toolchain gen_snapshot to be populated")
+    asserts.true(env, sdk_info.const_finder != None, "Expected Android cross toolchain const_finder to be populated")
+    asserts.true(env, sdk_info.font_subset != None, "Expected Android cross toolchain font_subset to be populated")
+    asserts.true(env, sdk_info.platform_kernel_dill_product != None, "Expected Android cross toolchain platform_kernel_dill_product to be populated")
+    asserts.true(env, sdk_info.material_icons_font != None, "Expected Android cross toolchain material_icons_font to be populated")
+    if sdk_info.gen_snapshot != None:
+        asserts.equals(env, sdk_info.gen_snapshot.path, probe.gen_snapshot_var, "Expected $(GEN_SNAPSHOT) to expand to Android gen_snapshot path")
+    return analysistest.end(env)
+
+_primary_toolchain_android_test = analysistest.make(
+    _primary_toolchain_android_test_impl,
+    config_settings = {
+        "//command_line_option:platforms": str(Label("//flutter/platforms:android_arm64")),
+    },
+)
+
 _t0_test = unittest.make(_provider_exists_test_impl)
 _t1_test = unittest.make(_dart_binary_name_test_impl)
 _t2_test = unittest.make(_platform_mapping_test_impl)
@@ -196,4 +263,33 @@ _t4_test = unittest.make(_resolve_flutter_sdk_info_test_impl)
 _t5_test = unittest.make(_resolve_exec_dart_test_impl)
 
 def toolchain_test_suite(name):
-    unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test)
+    _primary_toolchain_probe(
+        name = name + "_primary_probe",
+        tags = ["manual"],
+    )
+    _primary_toolchain_host_test(
+        name = name + "_primary_host_test",
+        target_under_test = ":" + name + "_primary_probe",
+    )
+    _primary_toolchain_android_test(
+        name = name + "_primary_android_test",
+        target_under_test = ":" + name + "_primary_probe",
+    )
+    unittest.suite(
+        name + "_unit",
+        _t0_test,
+        _t1_test,
+        _t2_test,
+        _t3_test,
+        _t4_test,
+        _t5_test,
+    )
+    native.test_suite(
+        name = name,
+        tests = [
+            ":" + name + "_unit",
+            ":" + name + "_primary_host_test",
+            ":" + name + "_primary_android_test",
+        ],
+    )
+

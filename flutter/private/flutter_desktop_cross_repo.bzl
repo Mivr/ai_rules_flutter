@@ -63,6 +63,7 @@ load(
 
 flutter_toolchain(
     name = "flutter_toolchain",
+    const_finder = "@{host_repo_name}//:font-subset-tools/const_finder.dart.snapshot",
     dart = "@{host_repo_name}//:dart-sdk/bin/{dart_bin}",
     dart_sdk = "@{host_repo_name}//:dart_sdk_files",
     dart_vm_files = "@{host_repo_name}//:dart_vm_files",
@@ -70,15 +71,21 @@ flutter_toolchain(
     dart2wasm_files = "@{host_repo_name}//:dart2wasm_files",
     dart2js_files = "@{host_repo_name}//:dart2js_files",
     dartaotruntime = "@{host_repo_name}//:dart-sdk/bin/{dartaotruntime_bin}",
+{engine_library_attr}
     engine_revision = "{engine_revision}",
+    font_subset = "@{host_repo_name}//:font-subset-tools/font-subset{exe_suffix}",
     frontend_server = "@{host_repo_name}//:host-tools/frontend_server_aot.dart.snapshot",
+    gen_snapshot = "@{host_repo_name}//:host-tools/gen_snapshot{exe_suffix}",
     icu_data = "@{host_repo_name}//:host-tools/icudtl.dat",
     impellerc = "@{host_repo_name}//:host-tools/impellerc{exe_suffix}",
+{linux_sysroot_attr}
+    material_icons_font = "@{host_repo_name}//:material-fonts/MaterialIcons-Regular.otf",
     vm_isolate_snapshot = "@{host_repo_name}//:host-tools/vm_isolate_snapshot.bin",
     isolate_snapshot = "@{host_repo_name}//:host-tools/isolate_snapshot.bin",
     shader_lib = "@{host_repo_name}//:shader_lib_files",
     patched_sdk = "@{host_repo_name}//:patched_sdk",
     platform_kernel_dill = "@{host_repo_name}//:patched-sdk/flutter_patched_sdk/platform_strong.dill",
+    platform_kernel_dill_product = "@{host_repo_name}//:patched-sdk-product/flutter_patched_sdk_product/platform_strong.dill",
     target_arch = "{target_arch}",
     target_os = "{target_os}",
     version = "{flutter_version}",
