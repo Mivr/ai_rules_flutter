@@ -1,5 +1,6 @@
 load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_test")
 load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
+load(":flutter_sdk_kernel_binary.bzl", "flutter_sdk_kernel_binary")
 
 # The sources of tools built into standalone executables. Exported so their unit
 # tests below can import them via `srcs`. Build actions reach them through their
@@ -131,11 +132,9 @@ dart_binary(
     visibility = ["//flutter:__subpackages__"],
 )
 
-dart_binary(
+flutter_sdk_kernel_binary(
     name = "web_template",
-    compile_mode = "kernel",
     main = "web_template.dart",
-    modular_kernel = False,
     target_compatible_with = HOST_COMPATIBLE,
     visibility = ["//flutter:__subpackages__"],
 )

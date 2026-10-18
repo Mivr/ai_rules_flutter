@@ -9,6 +9,7 @@ bundled `dart-sdk/` and `patched-sdk/` trees.
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("@rules_dart//dart:analyze.bzl", "dart_analyze")
 load("@rules_dart//dart:defs.bzl", "dart_binary")
+load("@rules_dart//dart:toolchain.bzl", "DartSdkInfo")
 load("//flutter:defs.bzl", "flutter_library", "flutter_plugin", "flutter_test")
 load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
 load("//flutter/private:flutter_aot_target.bzl", "flutter_aot_target")
@@ -346,6 +347,8 @@ def _web_inputs_test_impl(ctx):
         wasm_paths,
         [
             "web-sdk/kernel/dart2wasm_platform.dill",
+            "dart-sdk/bin/dart",
+            "dart-sdk/bin/dartvm",
             "dart-sdk/bin/snapshots/dart2wasm",
             "dart-sdk/bin/snapshots/dartdev",
             "dart-sdk/bin/utils/wasm-opt",
@@ -377,6 +380,8 @@ def _web_inputs_test_impl(ctx):
         [
             "web-sdk/kernel/dart2js_platform.dill",
             "web-sdk/libraries.json",
+            "dart-sdk/bin/dart",
+            "dart-sdk/bin/dartvm",
             "dart-sdk/bin/snapshots/dart2js",
             "dart-sdk/bin/snapshots/dartdev",
         ],
@@ -397,6 +402,19 @@ def _web_inputs_test_impl(ctx):
             "analysis_server",
         ],
         "FlutterDart2JS",
+    )
+
+    template_action = _find_action(env, ["FlutterWebTemplate"])
+    template_paths = _input_paths(template_action)
+    _assert_some_path_contains(
+        env,
+        template_paths,
+        [
+            "dart-sdk/bin/dart",
+            "dart-sdk/bin/dartvm",
+            "web_template.dill",
+        ],
+        "FlutterWebTemplate",
     )
     return analysistest.end(env)
 
@@ -567,6 +585,155 @@ def _flutter_plugin_rule_kind_test_impl(ctx):
     )
     return analysistest.end(env)
 
+def _synthetic_dart_sdk_toolchain_impl(ctx):
+    """Provides a synthetic standalone `@rules_dart` SDK distinct from Flutter's bundled SDK."""
+    prefix = "synthetic_dart_sdk/"
+    dart = ctx.actions.declare_file(prefix + "bin/dart")
+    dartvm = ctx.actions.declare_file(prefix + "bin/dartvm")
+    dartaotruntime = ctx.actions.declare_file(prefix + "bin/dartaotruntime")
+    gen_kernel = ctx.actions.declare_file(prefix + "bin/snapshots/gen_kernel_aot.dart.snapshot")
+    kernel_worker = ctx.actions.declare_file(prefix + "bin/snapshots/kernel_worker_aot.dart.snapshot")
+    platform_dill = ctx.actions.declare_file(prefix + "lib/_internal/vm_platform_strong.dill")
+    product_platform_dill = ctx.actions.declare_file(prefix + "lib/_internal/vm_platform_product.dill")
+    libraries_json = ctx.actions.declare_file(prefix + "lib/libraries.json")
+
+    all_files = [
+        dart,
+        dartvm,
+        dartaotruntime,
+        gen_kernel,
+        kernel_worker,
+        platform_dill,
+        product_platform_dill,
+        libraries_json,
+    ]
+    for f in all_files:
+        ctx.actions.write(output = f, content = "", is_executable = f in (dart, dartvm, dartaotruntime))
+
+    compile_files = depset(all_files)
+    runtime_files = depset([dart, dartvm, platform_dill, libraries_json])
+    dart_sdk_info = DartSdkInfo(
+        dart = dart,
+        sdk_root = None,
+        version = "3.0.0-synthetic",
+        tool_files = compile_files,
+        compile_files = compile_files,
+        runtime_files = runtime_files,
+        analyze_files = compile_files,
+        target_os = "",
+        target_arch = "",
+    )
+    template_variables = platform_common.TemplateVariableInfo({"DART_BIN": dart.path})
+    default = DefaultInfo(files = compile_files)
+    return [
+        default,
+        platform_common.ToolchainInfo(
+            dart_sdk_info = dart_sdk_info,
+            template_variables = template_variables,
+            default = default,
+        ),
+        template_variables,
+    ]
+
+_synthetic_dart_sdk_toolchain = rule(
+    implementation = _synthetic_dart_sdk_toolchain_impl,
+)
+
+def _reverse_toolchain_flutter_test_impl(ctx):
+    """When `@rules_dart`'s SDK resolves first, modular `flutter_test` still compiles with Flutter's `kernel_worker`."""
+    env = analysistest.begin(ctx)
+
+    kernel_action = _find_action(env, ["DartKernel"])
+    kernel_inputs = _input_paths(kernel_action)
+    _assert_some_path_contains(
+        env,
+        kernel_inputs,
+        [
+            "dart-sdk/bin/dartaotruntime",
+            "dart-sdk/bin/snapshots/kernel_worker_aot.dart.snapshot",
+            "dart-sdk/lib/libraries.json",
+            "flutter_patched_sdk/platform_strong.dill",
+            "fake_test_api.flutter.koutline",
+        ],
+        "reverse-toolchain flutter_test DartKernel inputs",
+    )
+    _assert_no_path_contains(
+        env,
+        kernel_inputs,
+        [
+            "synthetic_dart_sdk/bin/dartaotruntime",
+            "synthetic_dart_sdk/bin/snapshots/kernel_worker_aot.dart.snapshot",
+        ],
+        "reverse-toolchain flutter_test DartKernel inputs",
+    )
+    argv_joined = " ".join(kernel_action.argv)
+    asserts.true(
+        env,
+        "dart-sdk/bin/snapshots/kernel_worker_aot.dart.snapshot" in argv_joined,
+        "expected Flutter SDK kernel_worker in DartKernel argv, got %s" % kernel_action.argv,
+    )
+    asserts.true(
+        env,
+        "dart-sdk/bin/dartaotruntime" in argv_joined,
+        "expected Flutter SDK dartaotruntime in DartKernel argv, got %s" % kernel_action.argv,
+    )
+
+    link_action = _find_action(env, ["DartKernelLink"])
+    _assert_some_path_contains(
+        env,
+        _input_paths(link_action),
+        ["fake_test_api.flutter.kmod"],
+        "reverse-toolchain flutter_test DartKernelLink inputs",
+    )
+    whole_program = [a for a in analysistest.target_actions(env) if a.mnemonic == "FlutterKernelCompile"]
+    asserts.equals(env, [], whole_program, "reverse-toolchain modular flutter_test must not fall back to FlutterKernelCompile")
+    return analysistest.end(env)
+
+def _reverse_toolchain_application_opt_fonts_test_impl(ctx):
+    """When `@rules_dart`'s SDK resolves first, `const_finder` (icon tree-shaking) uses Flutter's `dart-sdk/`."""
+    env = analysistest.begin(ctx)
+
+    asset_action = _find_action(env, ["FlutterAssetBundle"])
+    asset_paths = _input_paths(asset_action)
+    _assert_some_path_contains(
+        env,
+        asset_paths,
+        ["const_finder.dart.snapshot", "font-subset", "/dart-sdk/bin/dart", ".dill"],
+        "reverse-toolchain font-bearing release FlutterAssetBundle",
+    )
+    _assert_no_path_contains(
+        env,
+        asset_paths,
+        ["synthetic_dart_sdk/"],
+        "reverse-toolchain font-bearing release FlutterAssetBundle",
+    )
+    return analysistest.end(env)
+
+def _reverse_toolchain_web_test_impl(ctx):
+    """When `@rules_dart`'s SDK resolves first, `dart2wasm`, `dart2js`, and `web_template` use Flutter's `dart-sdk/`."""
+    env = analysistest.begin(ctx)
+
+    for mnemonic in ["FlutterDart2Wasm", "FlutterDart2JS", "FlutterWebTemplate"]:
+        action = _find_action(env, [mnemonic])
+        paths = _input_paths(action)
+        _assert_some_path_contains(
+            env,
+            paths,
+            ["dart-sdk/bin/dart", "dart-sdk/bin/dartvm"],
+            "reverse-toolchain " + mnemonic,
+        )
+        _assert_no_path_contains(
+            env,
+            paths,
+            ["synthetic_dart_sdk/"],
+            "reverse-toolchain " + mnemonic,
+        )
+    return analysistest.end(env)
+
+_REVERSE_TOOLCHAIN_EXTRA_TOOLCHAINS = [
+    str(Label("//flutter/tests:_synthetic_dart_exec_tools_toolchain")),
+    str(Label("//flutter/tests:_synthetic_dart_toolchain")),
+]
 _flutter_test_rule_kind_test = analysistest.make(
     _flutter_test_rule_kind_test_impl,
     extra_target_under_test_aspects = [_inspect_rule_kind_aspect],
@@ -670,8 +837,44 @@ _dart_toolchain_inputs_test = analysistest.make(
     _dart_toolchain_inputs_test_impl,
     extra_target_under_test_aspects = [_inspect_analyze_actions_aspect],
 )
+_reverse_toolchain_flutter_test = analysistest.make(
+    _reverse_toolchain_flutter_test_impl,
+    config_settings = {
+        "//command_line_option:extra_toolchains": _REVERSE_TOOLCHAIN_EXTRA_TOOLCHAINS,
+    },
+)
+_reverse_toolchain_application_opt_fonts_test = analysistest.make(
+    _reverse_toolchain_application_opt_fonts_test_impl,
+    config_settings = {
+        "//command_line_option:compilation_mode": "opt",
+        "//command_line_option:extra_toolchains": _REVERSE_TOOLCHAIN_EXTRA_TOOLCHAINS,
+        str(Label("//flutter:profile")): False,
+    },
+)
+_reverse_toolchain_web_test = analysistest.make(
+    _reverse_toolchain_web_test_impl,
+    config_settings = {
+        "//command_line_option:compilation_mode": "opt",
+        "//command_line_option:extra_toolchains": _REVERSE_TOOLCHAIN_EXTRA_TOOLCHAINS,
+        str(Label("//flutter:profile")): False,
+    },
+)
 
 def _setup_fixtures():
+    _synthetic_dart_sdk_toolchain(
+        name = "_synthetic_dart_sdk",
+        tags = ["manual"],
+    )
+    native.toolchain(
+        name = "_synthetic_dart_exec_tools_toolchain",
+        toolchain = ":_synthetic_dart_sdk",
+        toolchain_type = "@rules_dart//dart:exec_tools_toolchain_type",
+    )
+    native.toolchain(
+        name = "_synthetic_dart_toolchain",
+        toolchain = ":_synthetic_dart_sdk",
+        toolchain_type = "@rules_dart//dart:toolchain_type",
+    )
     flutter_test(
         name = "_inputs_flutter_test",
         package_name = _PACKAGE,
@@ -903,6 +1106,20 @@ def action_inputs_test_suite(name):
         target_under_test = ":_inputs_dart_binary",
         target_compatible_with = HOST_COMPATIBLE,
     )
+    _reverse_toolchain_flutter_test(
+        name = name + "_reverse_toolchain_flutter_test",
+        target_under_test = ":_inputs_flutter_test",
+        target_compatible_with = HOST_COMPATIBLE,
+    )
+    _reverse_toolchain_application_opt_fonts_test(
+        name = name + "_reverse_toolchain_application_opt_fonts",
+        target_under_test = ":_inputs_application_with_fonts",
+        target_compatible_with = HOST_COMPATIBLE,
+    )
+    _reverse_toolchain_web_test(
+        name = name + "_reverse_toolchain_web",
+        target_under_test = ":_inputs_web_bundle",
+    )
 
     native.test_suite(
         name = name,
@@ -932,6 +1149,8 @@ def action_inputs_test_suite(name):
             ":" + name + "_web",
             ":" + name + "_pub",
             ":" + name + "_dart_toolchain",
+            ":" + name + "_reverse_toolchain_flutter_test",
+            ":" + name + "_reverse_toolchain_application_opt_fonts",
+            ":" + name + "_reverse_toolchain_web",
         ],
     )
-

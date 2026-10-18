@@ -20,8 +20,10 @@ declare `toolchains = ["@rules_flutter//flutter:toolchain_type"] + FLUTTER_OPTIO
     fields = {
         "version": "str: The Flutter SDK version string (e.g. `3.41.2`).",
         "engine_revision": "str: The engine commit hash.",
-        "dart": "File: Deprecated. The `dart` executable from the Flutter-bundled Dart SDK. " +
-                "Prefer `@rules_dart//dart:exec_tools_toolchain_type` (`resolve_exec_dart(ctx)`).",
+        "dart": "File: The `dart` executable from the Flutter-bundled Dart SDK. " +
+                "Use for actions paired with `dart_vm_files`, `dart_pub_files`, " +
+                "`dart2wasm_files`, or `dart2js_files`; use `resolve_exec_dart(ctx)` " +
+                "for actions paired with `@rules_dart//dart:exec_tools_toolchain_type`.",
         "dartaotruntime": "File: The `dartaotruntime` executable for running AOT snapshots.",
         "gen_snapshot": "File or None: The `gen_snapshot` AOT compiler binary (resolved via `@rules_flutter//flutter:aot_toolchain_type` and `resolve_flutter_sdk_info`).",
         "flutter_tester": "File or None: The `flutter_tester` binary — a headless Flutter engine " +
@@ -135,49 +137,60 @@ def resolve_flutter_sdk_info(ctx):
 
     return FlutterSdkInfo(**fields)
 
-def resolve_exec_dart(ctx, flutter_sdk_info = None):
+def resolve_exec_dart(ctx, flutter_sdk_info = None):  # buildifier: disable=unused-variable
     """Resolves the host `dart` executable from `@rules_dart//dart:exec_tools_toolchain_type`.
 
-    Falls back to `flutter_sdk_info.dart` when the Dart exec-tools toolchain is
-    not declared or not resolved (for example in unit tests with synthetic
-    toolchains).
+    Fails analysis with a named error when `@rules_dart//dart:exec_tools_toolchain_type`
+    is not declared on the rule or no matching toolchain is registered. Never falls
+    back silently to `flutter_sdk_info.dart`.
 
     Args:
       ctx: Rule context.
-      flutter_sdk_info: Optional pre-resolved `FlutterSdkInfo` for the fallback path.
+      flutter_sdk_info: Unused; retained for call-site compatibility.
 
     Returns:
       The `dart` executable `File`.
     """
-    if _DART_EXEC_TOOLS_TOOLCHAIN_TYPE in ctx.toolchains:
-        dart_tc = ctx.toolchains[_DART_EXEC_TOOLS_TOOLCHAIN_TYPE]
-        if dart_tc and getattr(dart_tc, "dart_sdk_info", None) and dart_tc.dart_sdk_info.dart:
-            return dart_tc.dart_sdk_info.dart
-    if flutter_sdk_info == None:
-        flutter_sdk_info = resolve_flutter_sdk_info(ctx)
-    return flutter_sdk_info.dart
+    if _DART_EXEC_TOOLS_TOOLCHAIN_TYPE not in ctx.toolchains:
+        fail(
+            "Unresolved @rules_dart//dart:exec_tools_toolchain_type: rule does not declare " +
+            "@rules_dart//dart:exec_tools_toolchain_type in `toolchains`.",
+        )
+    dart_tc = ctx.toolchains[_DART_EXEC_TOOLS_TOOLCHAIN_TYPE]
+    if not dart_tc or not getattr(dart_tc, "dart_sdk_info", None) or not dart_tc.dart_sdk_info.dart:
+        fail(
+            "Unresolved @rules_dart//dart:exec_tools_toolchain_type: no host Dart exec-tools " +
+            "toolchain is registered for the execution platform.",
+        )
+    return dart_tc.dart_sdk_info.dart
 
-def resolve_exec_dart_vm(ctx, flutter_sdk_info = None):
+def resolve_exec_dart_vm(ctx, flutter_sdk_info = None):  # buildifier: disable=unused-variable
     """Resolves `(dart_exe, runtime_files_depset)` for running a `.dill` tool on the exec platform.
 
-    Prefers `@rules_dart//dart:exec_tools_toolchain_type` (`dart_sdk_info.dart`
-    and `dart_sdk_info.runtime_files`), falling back to `flutter_sdk_info.dart`
-    and `flutter_sdk_info.dart_vm_files`.
+    Reads `dart_sdk_info.dart` and `dart_sdk_info.runtime_files` from
+    `@rules_dart//dart:exec_tools_toolchain_type`. Fails analysis with a named
+    error if the toolchain is not declared or not resolved; never falls back
+    silently to `flutter_sdk_info`.
 
     Args:
       ctx: Rule context.
-      flutter_sdk_info: Optional pre-resolved `FlutterSdkInfo` for the fallback path.
+      flutter_sdk_info: Unused; retained for call-site compatibility.
 
     Returns:
       A tuple `(dart_exe, runtime_files_depset)`.
     """
-    if _DART_EXEC_TOOLS_TOOLCHAIN_TYPE in ctx.toolchains:
-        dart_tc = ctx.toolchains[_DART_EXEC_TOOLS_TOOLCHAIN_TYPE]
-        if dart_tc and getattr(dart_tc, "dart_sdk_info", None) and dart_tc.dart_sdk_info.dart:
-            return dart_tc.dart_sdk_info.dart, dart_tc.dart_sdk_info.runtime_files
-    if flutter_sdk_info == None:
-        flutter_sdk_info = resolve_flutter_sdk_info(ctx)
-    return flutter_sdk_info.dart, flutter_sdk_info.dart_vm_files
+    if _DART_EXEC_TOOLS_TOOLCHAIN_TYPE not in ctx.toolchains:
+        fail(
+            "Unresolved @rules_dart//dart:exec_tools_toolchain_type: rule does not declare " +
+            "@rules_dart//dart:exec_tools_toolchain_type in `toolchains`.",
+        )
+    dart_tc = ctx.toolchains[_DART_EXEC_TOOLS_TOOLCHAIN_TYPE]
+    if not dart_tc or not getattr(dart_tc, "dart_sdk_info", None) or not dart_tc.dart_sdk_info.dart:
+        fail(
+            "Unresolved @rules_dart//dart:exec_tools_toolchain_type: no host Dart exec-tools " +
+            "toolchain is registered for the execution platform.",
+        )
+    return dart_tc.dart_sdk_info.dart, dart_tc.dart_sdk_info.runtime_files
 
 FlutterInfo = provider(
     doc = """The channels a Flutter library contributes to its consumers.

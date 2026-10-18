@@ -785,9 +785,13 @@ def flutter_build_assets(ctx, flutter_sdk_info, output_dir, compiled_shaders = {
         font_subset != None
     )
 
+    # `const_finder.dart.snapshot` is a kernel snapshot built by the Flutter
+    # engine's bundled Dart SDK and analyzes `kernel_dill` compiled by Flutter's
+    # `frontend_server`, so it must run on `flutter_sdk_info.dart` paired with
+    # `flutter_sdk_info.dart_vm_files` rather than `@rules_dart`'s exec-tools SDK.
     return flutter_asset_bundle_action(
         ctx = ctx,
-        dart = resolve_exec_dart(ctx, flutter_sdk_info) if tree_shake_icons else None,
+        dart = flutter_sdk_info.dart if tree_shake_icons else None,
         flutter_sdk_files = flutter_sdk_info.dart_vm_files if tree_shake_icons else None,
         assets = all_assets,
         fonts = fonts,
@@ -1350,11 +1354,16 @@ _SHADER_ASPECT_BASE_ATTRS = {
     ),
 }
 
+_SHADER_ASPECT_TOOLCHAINS = [
+    "@rules_flutter//flutter:toolchain_type",
+    config_common.toolchain_type("@rules_dart//dart:exec_tools_toolchain_type", mandatory = False),
+]
+
 flutter_tester_shader_aspect = aspect(
     implementation = _tester_shader_aspect_impl,
     attr_aspects = ["deps"],
     attrs = _SHADER_ASPECT_BASE_ATTRS,
-    toolchains = ["@rules_flutter//flutter:toolchain_type"],
+    toolchains = _SHADER_ASPECT_TOOLCHAINS,
     doc = "Compiles transitive shaders for the flutter_tester platform on the owning targets.",
 )
 
@@ -1362,7 +1371,7 @@ flutter_web_shader_aspect = aspect(
     implementation = _web_shader_aspect_impl,
     attr_aspects = ["deps"],
     attrs = _SHADER_ASPECT_BASE_ATTRS,
-    toolchains = ["@rules_flutter//flutter:toolchain_type"],
+    toolchains = _SHADER_ASPECT_TOOLCHAINS,
     doc = "Compiles transitive shaders for the web platform on the owning targets.",
 )
 
@@ -1370,7 +1379,7 @@ flutter_app_shader_aspect = aspect(
     implementation = _app_shader_aspect_impl,
     attr_aspects = ["deps"],
     attrs = _SHADER_ASPECT_BASE_ATTRS | PLATFORM_CONSTRAINT_ATTRS,
-    toolchains = ["@rules_flutter//flutter:toolchain_type"],
+    toolchains = _SHADER_ASPECT_TOOLCHAINS,
     doc = "Compiles transitive shaders for the target application platform on the owning targets.",
 )
 

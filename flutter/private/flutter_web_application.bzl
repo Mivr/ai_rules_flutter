@@ -48,7 +48,6 @@ load(
     "make_web_wrapper_main_content",
     "merge_dart_defines",
     "resolve_dev_generated_sources",
-    "resolve_exec_dart",
     "resolve_exec_dart_vm",
     "resolve_flutter_sdk_info",
     "shader_sources",
@@ -449,10 +448,20 @@ def _flutter_web_bundle_impl(ctx):
     # flutter.js does the registering: it waits for the new worker to activate
     # (with a timeout) before booting the app, and — given only a version — it
     # registers nothing unless the visitor already has a worker to replace.
-    exec_dart, dart_vm_files = resolve_exec_dart_vm(ctx, flutter_sdk_info)
+    #
+    # `web_template` is compiled against `@rules_flutter//flutter:toolchain_type`
+    # (`flutter_sdk_kernel_binary`), and its `compile wasm` / `compile js`
+    # subcommands resolve `dartaotruntime`, `dart2wasm_product.snapshot`,
+    # `wasm-opt`, and `dart2js_aot.dart.snapshot` relative to the running `dart`
+    # executable's directory (`File(Platform.resolvedExecutable).parent.path`).
+    # Pair it with `flutter_sdk_info.dart` and `flutter_sdk_info.dart_vm_files`
+    # so `FlutterDart2Wasm`, `FlutterDart2JS`, and `FlutterWebTemplate` always
+    # execute within the Flutter engine's bundled `dart-sdk/`.
+    flutter_dart = flutter_sdk_info.dart
+    flutter_dart_vm_files = flutter_sdk_info.dart_vm_files
     web_compile_inputs = [
         f
-        for f in dart_vm_files.to_list()
+        for f in flutter_dart_vm_files.to_list()
         if f.basename in ("dartvm", "dartvm.exe")
     ]
     load_args = service_worker_load_args(ctx.attr.pwa)
@@ -468,7 +477,7 @@ def _flutter_web_bundle_impl(ctx):
             output_wasm_map = ctx.actions.declare_file(ctx.label.name + "_wasm/main.dart.wasm.map")
         flutter_dart2wasm_action(
             ctx = ctx,
-            dart = exec_dart,
+            dart = flutter_dart,
             flutter_sdk_files = flutter_sdk_info.dart2wasm_files,
             dart2wasm_platform_dill = ctx.file._dart2wasm_platform_dill,
             main_dart = entrypoint,
@@ -492,7 +501,7 @@ def _flutter_web_bundle_impl(ctx):
         output_js_fallback_dir = ctx.actions.declare_directory(ctx.label.name + "_dart2js_fallback")
         flutter_dart2js_action(
             ctx = ctx,
-            dart = exec_dart,
+            dart = flutter_dart,
             flutter_sdk_files = flutter_sdk_info.dart2js_files,
             web_sdk_files = dart2js_web_sdk_files,
             dart2js_platform_dill = ctx.file._dart2js_platform_dill,
@@ -528,7 +537,7 @@ def _flutter_web_bundle_impl(ctx):
         output_js_dir = ctx.actions.declare_directory(ctx.label.name + "_dart2js")
         flutter_dart2js_action(
             ctx = ctx,
-            dart = exec_dart,
+            dart = flutter_dart,
             flutter_sdk_files = flutter_sdk_info.dart2js_files,
             web_sdk_files = dart2js_web_sdk_files,
             dart2js_platform_dill = ctx.file._dart2js_platform_dill,
@@ -571,6 +580,7 @@ def _flutter_web_bundle_impl(ctx):
             ctx.file.main.short_path,
         )
         from_dill = None
+
         # Modular `.flutter.kmod` modules are compiled against the non-product
         # platform dill without `-Ddart.vm.product=true` or
         # `-Ddart.vm.profile=true`, so CFE folds `kReleaseMode` and
@@ -831,9 +841,8 @@ def _flutter_web_bundle_impl(ctx):
     template_config_file = ctx.actions.declare_file(ctx.label.name + "_web_template_config.json")
     ctx.actions.write(template_config_file, json.encode(template_config))
 
-    dart_exe = exec_dart
     ctx.actions.run(
-        executable = dart_exe,
+        executable = flutter_dart,
         arguments = [
             ctx.executable._web_template_tool.path,
             "--config",
@@ -841,7 +850,7 @@ def _flutter_web_bundle_impl(ctx):
         ],
         inputs = depset(
             direct = template_inputs + [template_config_file, ctx.executable._web_template_tool],
-            transitive = [dart_vm_files],
+            transitive = [flutter_dart_vm_files],
         ),
         outputs = [index_html, bootstrap_js] + ([dev_bootstrap_js] if dev_bootstrap_js else []),
         mnemonic = "FlutterWebTemplate",
@@ -975,8 +984,9 @@ def _flutter_web_bundle_impl(ctx):
     if service_worker_file:
         all_inputs.append(service_worker_file)
 
+    exec_dart, dart_vm_files = resolve_exec_dart_vm(ctx, flutter_sdk_info)
     ctx.actions.run(
-        executable = dart_exe,
+        executable = exec_dart,
         arguments = [
             ctx.executable._bundle_tool.path,
             "--config",

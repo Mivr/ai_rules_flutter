@@ -524,6 +524,7 @@ flutter_linux_bundle_rule = rule(
     toolchains = [
         "@rules_flutter//flutter:toolchain_type",
         config_common.toolchain_type("@rules_flutter//flutter/private:desktop_engine_toolchain_type", mandatory = False),
+        config_common.toolchain_type("@rules_dart//dart:exec_tools_toolchain_type", mandatory = False),
     ],
     doc = "Assembles a Linux application directory from a pre-compiled runner and flutter_application artifacts.",
 )

@@ -17,7 +17,6 @@ load(
     "@rules_dart//dart:utils.bzl",
     "KERNEL_MODULE_ATTRS",
     "MODULAR_KERNEL_TOOLCHAINS",
-    _DART_MODULAR_KERNEL_ATTRS = "MODULAR_KERNEL_ATTRS",
     "collect_transitive_srcs",
     "duplicated_source",
     "first_per_package",
@@ -28,6 +27,7 @@ load(
     "library_source_uri",
     "modular_kernel_eligible",
     "no_kernel_module",
+    _DART_MODULAR_KERNEL_ATTRS = "MODULAR_KERNEL_ATTRS",
 )
 load(
     "//flutter/private:app_entrypoint.bzl",
@@ -77,6 +77,111 @@ def _kernel_worker_defines(ctx):
         if "," not in d
     ]
 
+def _sdk_root_from_dart(dart_file):
+    p = dart_file.path
+    for suffix in ("/bin/dart", "/bin/dart.exe"):
+        if p.endswith(suffix):
+            return p[:-len(suffix)]
+    return p
+
+def is_same_sdk(exec_tools, flutter_sdk_info):
+    """Returns True when `exec_tools` and `flutter_sdk_info` refer to the same Dart SDK.
+
+    Compares executable file identity (`dartaotruntime`, then `dart`), falling back
+    to SDK version string comparison when neither executable pair is present.
+
+    Args:
+      exec_tools: The kernel tools struct (e.g. from `kernel_tools_for(ctx)`).
+      flutter_sdk_info: `FlutterSdkInfo` from the active Flutter toolchain.
+
+    Returns:
+      `True` if both toolchains refer to the same Dart SDK, else `False`.
+    """
+    if exec_tools == None or flutter_sdk_info == None:
+        return False
+    exec_aot = getattr(exec_tools, "dartaotruntime", None)
+    flutter_aot = getattr(flutter_sdk_info, "dartaotruntime", None)
+    if exec_aot != None and flutter_aot != None:
+        return exec_aot == flutter_aot
+    exec_dart = getattr(exec_tools, "dart", None)
+    flutter_dart = getattr(flutter_sdk_info, "dart", None)
+    if exec_dart != None and flutter_dart != None:
+        return exec_dart == flutter_dart
+    exec_version = getattr(exec_tools, "version", None)
+    flutter_version = getattr(flutter_sdk_info, "version", None)
+    if exec_version != None and flutter_version != None:
+        return exec_version == flutter_version
+    return False
+
+def find_flutter_kernel_module_tools(flutter_sdk_info, exec_tools = None):
+    """Selects kernel module tools matching `flutter_sdk_info`'s bundled Dart SDK.
+
+    When `exec_tools` is already from the same SDK (`is_same_sdk(exec_tools, flutter_sdk_info)`),
+    returns `exec_tools` directly. When `@rules_dart`'s standalone toolchain resolved
+    ahead of `@flutter_toolchains`, locates `kernel_worker_aot.dart.snapshot` and
+    `libraries.json` in `flutter_sdk_info.tool_files` so modular `.flutter.kmod`
+    compilation runs the `kernel_worker` and `dartaotruntime` matching
+    `flutter_sdk_info.platform_kernel_dill` and `flutter_tester`, while keeping
+    `exec_tools`'s outer VM (`dart`, `dartvm`, `runtime_files`) that launches the
+    `@rules_dart//dart/private/tools:kernel_module` `.dill` wrapper.
+
+    Args:
+      flutter_sdk_info: `FlutterSdkInfo` from the active Flutter toolchain.
+      exec_tools: Optional struct from `kernel_tools_for(ctx)`.
+
+    Returns:
+      A kernel tools struct whose `dartaotruntime`, `kernel_worker`, and
+      `libraries_json` match `flutter_sdk_info`, or `None` if `flutter_sdk_info`
+      lacks the required files.
+    """
+    if flutter_sdk_info == None or flutter_sdk_info.dart == None or flutter_sdk_info.dartaotruntime == None:
+        return None
+    if exec_tools != None and is_same_sdk(exec_tools, flutter_sdk_info):
+        return exec_tools
+
+    sdk_root = _sdk_root_from_dart(flutter_sdk_info.dart)
+    dartvm_paths = (sdk_root + "/bin/dartvm", sdk_root + "/bin/dartvm.exe")
+    wanted = {
+        "kernel_worker": sdk_root + "/bin/snapshots/kernel_worker_aot.dart.snapshot",
+        "libraries_json": sdk_root + "/lib/libraries.json",
+    }
+    dartvm = None
+    found = {}
+    for f in flutter_sdk_info.tool_files.to_list():
+        if f.path in dartvm_paths:
+            dartvm = f
+        for key, path in wanted.items():
+            if f.path == path:
+                found[key] = f
+    if len(found) != len(wanted):
+        return None
+
+    return struct(
+        dart = exec_tools.dart if exec_tools != None else flutter_sdk_info.dart,
+        dartvm = exec_tools.dartvm if exec_tools != None else dartvm,
+        runtime_files = exec_tools.runtime_files if exec_tools != None else flutter_sdk_info.dart_vm_files,
+        dartaotruntime = flutter_sdk_info.dartaotruntime,
+        kernel_worker = found["kernel_worker"],
+        platform_dill = flutter_sdk_info.platform_kernel_dill,
+        libraries_json = found["libraries_json"],
+        version = flutter_sdk_info.version,
+    )
+
+def flutter_kernel_tools_for(ctx, flutter_sdk_info):
+    """Returns kernel module tools whose compiler matches `flutter_sdk_info`, or `None`.
+
+    Args:
+      ctx: Rule or aspect context declaring `MODULAR_KERNEL_TOOLCHAINS`.
+      flutter_sdk_info: `FlutterSdkInfo` from the active Flutter toolchain.
+
+    Returns:
+      The kernel tools struct matching `flutter_sdk_info`, or `None`.
+    """
+    exec_tools = kernel_tools_for(ctx)
+    if exec_tools == None or flutter_sdk_info == None:
+        return None
+    return find_flutter_kernel_module_tools(flutter_sdk_info, exec_tools = exec_tools)
+
 def _own_package_record(info):
     """Returns the `DartPackageInfo` for the package a `DartInfo` itself owns."""
     if not info.package_name:
@@ -93,7 +198,8 @@ def _flutter_kernel_module_aspect_impl(target, ctx):
     enabled = ctx.attr._modular_kernel[BuildSettingInfo].value
     flutter_toolchain = ctx.toolchains["@rules_flutter//flutter:toolchain_type"]
     flutter_sdk_info = flutter_toolchain.flutter_sdk_info if flutter_toolchain else None
-    tools = kernel_tools_for(ctx)
+    tools = flutter_kernel_tools_for(ctx, flutter_sdk_info)
+    same_sdk = is_same_sdk(tools, flutter_sdk_info)
 
     dart_info = target[DartInfo]
     package_name = dart_info.package_name
@@ -113,7 +219,7 @@ def _flutter_kernel_module_aspect_impl(target, ctx):
     if own_srcs and (not package_name or own_record == None or any([not f.short_path.startswith(prefix) for f in own_srcs])):
         opaque = True
 
-    if opaque or not enabled or _has_comma_defines(ctx) or tools == None or flutter_sdk_info == None or flutter_sdk_info.platform_kernel_dill == None:
+    if opaque or not enabled or _has_comma_defines(ctx) or tools == None or not same_sdk or flutter_sdk_info == None or flutter_sdk_info.platform_kernel_dill == None:
         return [FlutterKernelModuleInfo(kernel_info = no_kernel_module())]
 
     dep_kernels = [
@@ -147,9 +253,7 @@ def _flutter_kernel_module_aspect_impl(target, ctx):
     upstream_excluded = depset(transitive = [k.closure_excluded for k in dep_kernels])
     has_cross_pkg_cycle = False
     cross_pkg_srcs = (
-        depset(own_srcs, transitive = [collect_transitive_srcs(rule_deps)])
-        if has_cross_pkg_cycle
-        else depset(transitive = [k.cross_pkg_srcs for k in dep_kernels])
+        depset(own_srcs, transitive = [collect_transitive_srcs(rule_deps)]) if has_cross_pkg_cycle else depset(transitive = [k.cross_pkg_srcs for k in dep_kernels])
     )
     owned = depset(
         [(str(target.label), f.short_path) for f in own_srcs],
@@ -262,7 +366,7 @@ flutter_kernel_module_aspect = aspect(
     doc = "Compiles each DartInfo library in a flutter_test closure into a modular .flutter.kmod directory.",
 )
 
-def flutter_modular_test_tools(ctx, flutter_sdk_info, own_files, packages, native_assets_list):
+def flutter_modular_test_tools(ctx, flutter_sdk_info, own_files, packages, native_assets_list, tools = None):
     """Decides whether a `flutter_test` compiles modularly, and with which tools.
 
     Args:
@@ -271,17 +375,21 @@ def flutter_modular_test_tools(ctx, flutter_sdk_info, own_files, packages, nativ
       own_files: The test's own `.dart` files (`[ctx.file.main] + ctx.files.srcs`).
       packages: The synthesized `DartPackageInfo` list for the test.
       native_assets_list: Resolved native code assets for the test.
+      tools: Optional pre-resolved kernel tools struct; defaults to
+        `flutter_kernel_tools_for(ctx, flutter_sdk_info)`.
 
     Returns:
-      The kernel tools struct from `kernel_tools_for`, or `None` when the test
+      The kernel tools struct from `flutter_kernel_tools_for`, or `None` when the test
       must fall back to whole-program `FlutterKernelCompile`.
     """
     enabled = ctx.attr._modular_kernel[BuildSettingInfo].value if hasattr(ctx.attr, "_modular_kernel") else False
     if not enabled or _has_comma_defines(ctx) or flutter_sdk_info == None or flutter_sdk_info.platform_kernel_dill == None:
         return None
-    tools = kernel_tools_for(ctx)
+    if tools == None:
+        tools = flutter_kernel_tools_for(ctx, flutter_sdk_info)
     if tools == None:
         return None
+    same_sdk = is_same_sdk(tools, flutter_sdk_info)
 
     dep_kernels = [
         dep[FlutterKernelModuleInfo].kernel_info
@@ -303,7 +411,7 @@ def flutter_modular_test_tools(ctx, flutter_sdk_info, own_files, packages, nativ
         has_own_defines = len(ctx.attr.defines) > 0,
         has_compile_flags = False,
         has_duplicate_source = duplicate != None,
-        same_sdk = True,
+        same_sdk = same_sdk,
     )
     return tools if eligible else None
 

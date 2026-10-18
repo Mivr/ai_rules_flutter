@@ -866,10 +866,9 @@ def _flutter_integration_test_impl(ctx):
     compile_copies = []
     dart2js_dirs = []
 
-    exec_dart, dart_vm_files = resolve_exec_dart_vm(ctx, flutter_sdk_info)
     web_compile_inputs = [
         f
-        for f in dart_vm_files.to_list()
+        for f in flutter_sdk_info.dart_vm_files.to_list()
         if f.basename in ("dartvm", "dartvm.exe")
     ]
     if ctx.attr.compiler == "dart2wasm":
@@ -880,7 +879,7 @@ def _flutter_integration_test_impl(ctx):
             output_wasm_map = ctx.actions.declare_file(ctx.label.name + "_wasm/main.dart.wasm.map")
         flutter_dart2wasm_action(
             ctx = ctx,
-            dart = exec_dart,
+            dart = flutter_sdk_info.dart,
             flutter_sdk_files = flutter_sdk_info.dart2wasm_files,
             dart2wasm_platform_dill = ctx.file._dart2wasm_platform_dill,
             main_dart = entrypoint,
@@ -912,7 +911,7 @@ def _flutter_integration_test_impl(ctx):
         output_js_dir = ctx.actions.declare_directory(ctx.label.name + "_dart2js")
         flutter_dart2js_action(
             ctx = ctx,
-            dart = exec_dart,
+            dart = flutter_sdk_info.dart,
             flutter_sdk_files = flutter_sdk_info.dart2js_files,
             web_sdk_files = dart2js_web_sdk_files,
             dart2js_platform_dill = ctx.file._dart2js_platform_dill,
@@ -1018,7 +1017,7 @@ def _flutter_integration_test_impl(ctx):
     ctx.actions.write(template_config_file, json.encode(template_config))
 
     ctx.actions.run(
-        executable = exec_dart,
+        executable = flutter_sdk_info.dart,
         arguments = [
             ctx.executable._web_template_tool.path,
             "--config",
@@ -1026,7 +1025,7 @@ def _flutter_integration_test_impl(ctx):
         ],
         inputs = depset(
             direct = template_inputs + [template_config_file, ctx.executable._web_template_tool],
-            transitive = [dart_vm_files],
+            transitive = [flutter_sdk_info.dart_vm_files],
         ),
         outputs = [index_html, bootstrap_js],
         mnemonic = "FlutterWebTemplate",
@@ -1070,6 +1069,7 @@ def _flutter_integration_test_impl(ctx):
     bundle_config_file = ctx.actions.declare_file(ctx.label.name + "_web_bundle_config.json")
     ctx.actions.write(bundle_config_file, json.encode(bundle_config))
 
+    exec_dart, dart_vm_files = resolve_exec_dart_vm(ctx, flutter_sdk_info)
     all_bundle_inputs = (
         compile_outputs +
         dart2js_dirs +

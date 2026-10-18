@@ -26,11 +26,10 @@ from the build graph instead, so that file has no consumer here.
 """
 
 load("@rules_dart//dart:utils.bzl", "runfiles_path")
-load("//flutter:providers.bzl", "resolve_exec_dart")
 
 def _flutter_pub_impl(ctx):
     flutter_sdk_info = ctx.toolchains["@rules_flutter//flutter:toolchain_type"].flutter_sdk_info
-    exec_dart = resolve_exec_dart(ctx, flutter_sdk_info)
+    flutter_dart = flutter_sdk_info.dart
 
     tool = ctx.attr._tool
     is_windows = ctx.target_platform_has_constraint(
@@ -45,12 +44,12 @@ def _flutter_pub_impl(ctx):
 
     workspace_name = ctx.workspace_name
     env = {
-        "FLUTTER_PUB_DART": runfiles_path(exec_dart, workspace_name),
+        "FLUTTER_PUB_DART": runfiles_path(flutter_dart, workspace_name),
         "FLUTTER_PUB_VERSION_MANIFEST": runfiles_path(ctx.file.version_manifest, workspace_name),
     }
 
     runfiles = ctx.runfiles(
-        files = [exec_dart, ctx.file.version_manifest],
+        files = [flutter_dart, ctx.file.version_manifest],
         transitive_files = depset(
             ctx.files.dev_root,
             transitive = [flutter_sdk_info.dart_pub_files],
@@ -68,7 +67,6 @@ flutter_pub = rule(
     executable = True,
     toolchains = [
         "@rules_flutter//flutter:toolchain_type",
-        config_common.toolchain_type("@rules_dart//dart:exec_tools_toolchain_type", mandatory = False),
     ],
     attrs = {
         "dev_root": attr.label(

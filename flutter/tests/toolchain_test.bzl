@@ -1,8 +1,9 @@
 """Unit tests for engine helpers and provider definitions."""
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
-load("//flutter:providers.bzl", "FlutterSdkInfo", "resolve_exec_dart", "resolve_flutter_sdk_info")
+load("//flutter:providers.bzl", "FlutterSdkInfo", "resolve_exec_dart", "resolve_exec_dart_vm", "resolve_flutter_sdk_info")
 load("//flutter/private:engine_helpers.bzl", "dart_binary_name", "dartaotruntime_binary_name", "engine_arch_for_os", "platform_to_arch", "platform_to_os")
+load("//flutter/private:flutter_kernel_module.bzl", "find_flutter_kernel_module_tools", "is_same_sdk")
 
 def _provider_exists_test_impl(ctx):
     env = unittest.begin(ctx)
@@ -130,31 +131,185 @@ def _resolve_exec_dart_test_impl(ctx):
         target_arch = "x64",
         linux_sysroot = None,
     )
+    runtime_files = depset(["exec_runtime_file"])
     with_exec_tc = struct(
         toolchains = {
             "@rules_flutter//flutter:toolchain_type": struct(flutter_sdk_info = raw),
             "@rules_dart//dart:exec_tools_toolchain_type": struct(
-                dart_sdk_info = struct(dart = "exec_dart_bin"),
+                dart_sdk_info = struct(
+                    dart = "exec_dart_bin",
+                    runtime_files = runtime_files,
+                ),
             ),
         },
     )
     asserts.equals(env, "exec_dart_bin", resolve_exec_dart(with_exec_tc, raw))
-
-    with_none_exec_tc = struct(
-        toolchains = {
-            "@rules_flutter//flutter:toolchain_type": struct(flutter_sdk_info = raw),
-            "@rules_dart//dart:exec_tools_toolchain_type": None,
-        },
-    )
-    asserts.equals(env, "flutter_dart_bin", resolve_exec_dart(with_none_exec_tc, raw))
-
-    without_exec_tc = struct(
-        toolchains = {
-            "@rules_flutter//flutter:toolchain_type": struct(flutter_sdk_info = raw),
-        },
-    )
-    asserts.equals(env, "flutter_dart_bin", resolve_exec_dart(without_exec_tc))
+    asserts.equals(env, "exec_dart_bin", resolve_exec_dart(with_exec_tc))
+    dart_exe, vm_files = resolve_exec_dart_vm(with_exec_tc, raw)
+    asserts.equals(env, "exec_dart_bin", dart_exe)
+    asserts.equals(env, ["exec_runtime_file"], vm_files.to_list())
     return unittest.end(env)
+
+def _is_same_sdk_and_find_tools_test_impl(ctx):
+    env = unittest.begin(ctx)
+
+    flutter_dart = struct(path = "external/flutter_linux/dart-sdk/bin/dart", basename = "dart")
+    flutter_aot = struct(path = "external/flutter_linux/dart-sdk/bin/dartaotruntime", basename = "dartaotruntime")
+    flutter_dartvm = struct(path = "external/flutter_linux/dart-sdk/bin/dartvm", basename = "dartvm")
+    flutter_kw = struct(path = "external/flutter_linux/dart-sdk/bin/snapshots/kernel_worker_aot.dart.snapshot")
+    flutter_libs = struct(path = "external/flutter_linux/dart-sdk/lib/libraries.json")
+
+    rules_dart_bin = struct(path = "external/dart_sdk_linux/bin/dart", basename = "dart")
+    rules_dart_aot = struct(path = "external/dart_sdk_linux/bin/dartaotruntime", basename = "dartaotruntime")
+    rules_dart_vm = struct(path = "external/dart_sdk_linux/bin/dartvm", basename = "dartvm")
+    rules_dart_kw = struct(path = "external/dart_sdk_linux/bin/snapshots/kernel_worker_aot.dart.snapshot")
+    rules_dart_libs = struct(path = "external/dart_sdk_linux/lib/libraries.json")
+
+    flutter_info = FlutterSdkInfo(
+        version = "3.41.2",
+        engine_revision = "abc123",
+        dart = flutter_dart,
+        dartaotruntime = flutter_aot,
+        gen_snapshot = None,
+        flutter_tester = None,
+        frontend_server = "frontend_server_snap",
+        platform_kernel_dill = "flutter_platform_strong.dill",
+        platform_kernel_dill_product = None,
+        patched_sdk = "patched_sdk_target",
+        icu_data = "icudtl.dat",
+        tool_files = depset([flutter_dart, flutter_aot, flutter_dartvm, flutter_kw, flutter_libs]),
+        dart_vm_files = depset([flutter_dart, flutter_dartvm]),
+        dart_pub_files = depset([]),
+        dart2wasm_files = depset([]),
+        dart2js_files = depset([]),
+        engine_library = None,
+        const_finder = None,
+        font_subset = None,
+        impellerc = None,
+        shader_lib = [],
+        material_icons_font = None,
+        vm_isolate_snapshot = None,
+        isolate_snapshot = None,
+        target_os = "linux",
+        target_arch = "x64",
+        linux_sysroot = None,
+    )
+
+    matching_exec_tools = struct(
+        dart = flutter_dart,
+        dartvm = flutter_dartvm,
+        runtime_files = depset([flutter_dart, flutter_dartvm]),
+        dartaotruntime = flutter_aot,
+        kernel_worker = flutter_kw,
+        platform_dill = "vm_platform_strong.dill",
+        libraries_json = flutter_libs,
+        version = "3.13.4",
+    )
+    mismatched_exec_tools = struct(
+        dart = rules_dart_bin,
+        dartvm = rules_dart_vm,
+        runtime_files = depset([rules_dart_bin, rules_dart_vm]),
+        dartaotruntime = rules_dart_aot,
+        kernel_worker = rules_dart_kw,
+        platform_dill = "rules_dart_vm_platform_strong.dill",
+        libraries_json = rules_dart_libs,
+        version = "3.13.5",
+    )
+
+    asserts.true(env, is_same_sdk(matching_exec_tools, flutter_info), "matching dartaotruntime should be same SDK")
+    asserts.false(env, is_same_sdk(mismatched_exec_tools, flutter_info), "different dartaotruntime should not be same SDK")
+    asserts.false(env, is_same_sdk(None, flutter_info), "None exec_tools should not be same SDK")
+    asserts.false(env, is_same_sdk(matching_exec_tools, None), "None flutter_sdk_info should not be same SDK")
+
+    # Fallback to version comparison when executable files are absent.
+    asserts.true(
+        env,
+        is_same_sdk(struct(version = "3.13.4"), struct(version = "3.13.4")),
+        "matching version strings should be same SDK when executables are absent",
+    )
+    asserts.false(
+        env,
+        is_same_sdk(struct(version = "3.13.5"), struct(version = "3.13.4")),
+        "different version strings should not be same SDK",
+    )
+
+    # When exec_tools matches flutter_info, find_flutter_kernel_module_tools returns exec_tools unchanged.
+    same_result = find_flutter_kernel_module_tools(flutter_info, matching_exec_tools)
+    asserts.equals(env, matching_exec_tools, same_result)
+
+    # When @rules_dart's toolchain resolved first (mismatched_exec_tools),
+    # find_flutter_kernel_module_tools selects Flutter's dartaotruntime, kernel_worker,
+    # platform_dill, and libraries_json while keeping exec_tools' outer VM for kernel_module.dill.
+    selected = find_flutter_kernel_module_tools(flutter_info, mismatched_exec_tools)
+    asserts.true(env, selected != None, "should select Flutter SDK kernel module tools on mismatch")
+    asserts.true(env, is_same_sdk(selected, flutter_info), "selected tools must match flutter_info SDK")
+    asserts.equals(env, flutter_aot, selected.dartaotruntime)
+    asserts.equals(env, flutter_kw, selected.kernel_worker)
+    asserts.equals(env, "flutter_platform_strong.dill", selected.platform_dill)
+    asserts.equals(env, flutter_libs, selected.libraries_json)
+    asserts.equals(env, rules_dart_bin, selected.dart)
+    asserts.equals(env, rules_dart_vm, selected.dartvm)
+
+    # If flutter_info lacks kernel_worker in tool_files, returns None rather than silently using mismatched tools.
+    incomplete_flutter_info = FlutterSdkInfo(
+        version = "3.41.2",
+        engine_revision = "abc123",
+        dart = flutter_dart,
+        dartaotruntime = flutter_aot,
+        gen_snapshot = None,
+        flutter_tester = None,
+        frontend_server = "frontend_server_snap",
+        platform_kernel_dill = "flutter_platform_strong.dill",
+        platform_kernel_dill_product = None,
+        patched_sdk = "patched_sdk_target",
+        icu_data = "icudtl.dat",
+        tool_files = depset([flutter_dart, flutter_aot]),
+        dart_vm_files = depset([]),
+        dart_pub_files = depset([]),
+        dart2wasm_files = depset([]),
+        dart2js_files = depset([]),
+        engine_library = None,
+        const_finder = None,
+        font_subset = None,
+        impellerc = None,
+        shader_lib = [],
+        material_icons_font = None,
+        vm_isolate_snapshot = None,
+        isolate_snapshot = None,
+        target_os = "linux",
+        target_arch = "x64",
+        linux_sysroot = None,
+    )
+    asserts.equals(env, None, find_flutter_kernel_module_tools(incomplete_flutter_info, mismatched_exec_tools))
+    return unittest.end(env)
+
+def _missing_exec_dart_rule_impl(ctx):
+    resolve_exec_dart(ctx)
+    return [DefaultInfo()]
+
+_missing_exec_dart_rule = rule(
+    implementation = _missing_exec_dart_rule_impl,
+    toolchains = [],
+)
+
+def _missing_exec_dart_vm_rule_impl(ctx):
+    resolve_exec_dart_vm(ctx)
+    return [DefaultInfo()]
+
+_missing_exec_dart_vm_rule = rule(
+    implementation = _missing_exec_dart_vm_rule_impl,
+    toolchains = [],
+)
+
+def _unresolved_exec_dart_failure_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    asserts.expect_failure(env, "Unresolved @rules_dart//dart:exec_tools_toolchain_type")
+    return analysistest.end(env)
+
+_unresolved_exec_dart_failure_test = analysistest.make(
+    _unresolved_exec_dart_failure_test_impl,
+    expect_failure = True,
+)
 
 def _dart_binary_name_test_impl(ctx):
     env = unittest.begin(ctx)
@@ -261,6 +416,7 @@ _t2_test = unittest.make(_platform_mapping_test_impl)
 _t3_test = unittest.make(_engine_arch_for_os_test_impl)
 _t4_test = unittest.make(_resolve_flutter_sdk_info_test_impl)
 _t5_test = unittest.make(_resolve_exec_dart_test_impl)
+_t6_test = unittest.make(_is_same_sdk_and_find_tools_test_impl)
 
 def toolchain_test_suite(name):
     _primary_toolchain_probe(
@@ -275,6 +431,22 @@ def toolchain_test_suite(name):
         name = name + "_primary_android_test",
         target_under_test = ":" + name + "_primary_probe",
     )
+    _missing_exec_dart_rule(
+        name = name + "_missing_exec_dart_fixture",
+        tags = ["manual"],
+    )
+    _missing_exec_dart_vm_rule(
+        name = name + "_missing_exec_dart_vm_fixture",
+        tags = ["manual"],
+    )
+    _unresolved_exec_dart_failure_test(
+        name = name + "_unresolved_exec_dart_test",
+        target_under_test = ":" + name + "_missing_exec_dart_fixture",
+    )
+    _unresolved_exec_dart_failure_test(
+        name = name + "_unresolved_exec_dart_vm_test",
+        target_under_test = ":" + name + "_missing_exec_dart_vm_fixture",
+    )
     unittest.suite(
         name + "_unit",
         _t0_test,
@@ -283,6 +455,7 @@ def toolchain_test_suite(name):
         _t3_test,
         _t4_test,
         _t5_test,
+        _t6_test,
     )
     native.test_suite(
         name = name,
@@ -290,6 +463,7 @@ def toolchain_test_suite(name):
             ":" + name + "_unit",
             ":" + name + "_primary_host_test",
             ":" + name + "_primary_android_test",
+            ":" + name + "_unresolved_exec_dart_test",
+            ":" + name + "_unresolved_exec_dart_vm_test",
         ],
     )
-
