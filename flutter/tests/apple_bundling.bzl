@@ -10,6 +10,73 @@ load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_swift//swift:swift.bzl", "SwiftInfo")
 load("//flutter:providers.bzl", "FlutterApplePluginInfo", "FlutterApplicationInfo", "resolve_exec_dart_vm")
 
+def _write_fake_macho(ctx, dart_exe, dart_vm_files, out_file, install_name):
+    if ctx.attr.fat_macho:
+        arm_slice = ctx.actions.declare_file(out_file.short_path + ".arm64")
+        x86_slice = ctx.actions.declare_file(out_file.short_path + ".x86_64")
+        for arch, slice_file in [("arm64", arm_slice), ("x86_64", x86_slice)]:
+            ctx.actions.run(
+                executable = dart_exe,
+                arguments = [
+                    ctx.executable._macho_edit.path,
+                    "stub",
+                    "--output",
+                    slice_file.path,
+                    "--arch",
+                    arch,
+                    "--platform",
+                    "macos",
+                    "--min-os",
+                    "11.0",
+                    "--install-name",
+                    install_name,
+                ],
+                inputs = depset(
+                    direct = [ctx.executable._macho_edit],
+                    transitive = [dart_vm_files],
+                ),
+                outputs = [slice_file],
+            )
+        ctx.actions.run(
+            executable = dart_exe,
+            arguments = [
+                ctx.executable._macho_edit.path,
+                "fat",
+                "--output",
+                out_file.path,
+                x86_slice.path,
+                arm_slice.path,
+            ],
+            inputs = depset(
+                direct = [x86_slice, arm_slice, ctx.executable._macho_edit],
+                transitive = [dart_vm_files],
+            ),
+            outputs = [out_file],
+        )
+    else:
+        ctx.actions.run(
+            executable = dart_exe,
+            arguments = [
+                ctx.executable._macho_edit.path,
+                "stub",
+                "--output",
+                out_file.path,
+                "--arch",
+                "arm64",
+                "--platform",
+                "macos",
+                "--min-os",
+                "13.0",
+                "--install-name",
+                install_name,
+            ],
+            inputs = depset(
+                direct = [ctx.executable._macho_edit],
+                transitive = [dart_vm_files],
+            ),
+            outputs = [out_file],
+        )
+
 def _fake_application_impl(ctx):
     """Placeholder outputs, every one declared under this target's name.
 
@@ -26,27 +93,12 @@ def _fake_application_impl(ctx):
         if path not in libs:
             lib = ctx.actions.declare_file("%s/%s" % (ctx.label.name, path))
             if ctx.attr.macho_aot:
-                ctx.actions.run(
-                    executable = dart_exe,
-                    arguments = [
-                        ctx.executable._macho_edit.path,
-                        "stub",
-                        "--output",
-                        lib.path,
-                        "--arch",
-                        "arm64",
-                        "--platform",
-                        "ios",
-                        "--min-os",
-                        "13.0",
-                        "--install-name",
-                        "@rpath/libplaceholder.dylib",
-                    ],
-                    inputs = depset(
-                        direct = [ctx.executable._macho_edit],
-                        transitive = [dart_vm_files],
-                    ),
-                    outputs = [lib],
+                _write_fake_macho(
+                    ctx,
+                    dart_exe,
+                    dart_vm_files,
+                    lib,
+                    "@rpath/%s/%s" % (ctx.label.name, path),
                 )
             else:
                 ctx.actions.write(lib, "%s %s" % (ctx.label, path))
@@ -64,27 +116,12 @@ def _fake_application_impl(ctx):
         kernel_dill = None
         aot_output = ctx.actions.declare_file(ctx.label.name + "/app.so")
         if ctx.attr.macho_aot:
-            ctx.actions.run(
-                executable = dart_exe,
-                arguments = [
-                    ctx.executable._macho_edit.path,
-                    "stub",
-                    "--output",
-                    aot_output.path,
-                    "--arch",
-                    "arm64",
-                    "--platform",
-                    "macos",
-                    "--min-os",
-                    "13.0",
-                    "--install-name",
-                    "@rpath/App.framework/App",
-                ],
-                inputs = depset(
-                    direct = [ctx.executable._macho_edit],
-                    transitive = [dart_vm_files],
-                ),
-                outputs = [aot_output],
+            _write_fake_macho(
+                ctx,
+                dart_exe,
+                dart_vm_files,
+                aot_output,
+                "@rpath/%s/App.framework/App" % ctx.label.name,
             )
         else:
             ctx.actions.write(aot_output, str(ctx.label))
@@ -149,7 +186,8 @@ fake_application = rule(
         "apple_libs": attr.label_list(),
         "code_assets": attr.string_list(),
         "debug": attr.bool(default = False),
-        "macho_aot": attr.bool(default = False),
+        "fat_macho": attr.bool(default = False),
+        "macho_aot": attr.bool(default = True),
         "native_libs": attr.string_list(),
         "plugin_class": attr.string(default = ""),
         "plugin_name": attr.string(default = ""),
@@ -309,3 +347,80 @@ fake_xcframework = rule(
         config_common.toolchain_type("@rules_dart//dart:exec_tools_toolchain_type", mandatory = False),
     ],
 )
+
+def _macho_verify_probe_impl(ctx):
+    dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx)
+    files = ctx.attr.target[DefaultInfo].files.to_list()
+    if not files:
+        fail("%s: target %s produced no files" % (ctx.label, ctx.attr.target.label))
+
+    relpath = ctx.attr.binary_relpath
+    input_file = None
+    use_relpath = False
+    if len(files) == 1 and files[0].is_directory:
+        input_file = files[0]
+        use_relpath = bool(relpath)
+    elif relpath:
+        for f in files:
+            if f.short_path.endswith("/" + relpath) or f.basename == relpath:
+                input_file = f
+                break
+        if not input_file:
+            fail("%s: no file matching %r in %s" % (ctx.label, relpath, [f.short_path for f in files]))
+    else:
+        input_file = files[0]
+
+    stamp = ctx.actions.declare_file(ctx.label.name + ".verified")
+    args = [
+        ctx.executable._macho_edit.path,
+        "verify",
+        "--input",
+        input_file.path,
+        "--objdump",
+        ctx.executable._objdump.path,
+        "--output",
+        stamp.path,
+    ]
+    if use_relpath:
+        args.extend(["--binary-relpath", relpath])
+    for substr in ctx.attr.expected_substrings:
+        args.extend(["--expect", substr])
+
+    ctx.actions.run(
+        executable = dart_exe,
+        arguments = args,
+        inputs = depset(
+            direct = [input_file, ctx.executable._macho_edit, ctx.executable._objdump],
+            transitive = [dart_vm_files],
+        ),
+        outputs = [stamp],
+        mnemonic = "FlutterMachOVerifyProbe",
+        progress_message = "Verifying Mach-O binary for %s with llvm-objdump" % ctx.label,
+    )
+    return [DefaultInfo(files = depset([stamp]))]
+
+macho_verify_probe = rule(
+    implementation = _macho_verify_probe_impl,
+    attrs = {
+        "binary_relpath": attr.string(default = ""),
+        "expected_substrings": attr.string_list(default = []),
+        "target": attr.label(mandatory = True),
+        "_macho_edit": attr.label(
+            default = Label("//flutter/private/tools:macho_edit"),
+            executable = True,
+            cfg = "exec",
+        ),
+        "_objdump": attr.label(
+            default = Label("@llvm//tools:llvm-objdump"),
+            allow_single_file = True,
+            executable = True,
+            cfg = "exec",
+        ),
+    },
+    toolchains = [
+        "@rules_flutter//flutter:toolchain_type",
+        config_common.toolchain_type("@rules_dart//dart:exec_tools_toolchain_type", mandatory = False),
+    ],
+    doc = "Verifies a built Mach-O binary or framework using @llvm//tools:llvm-objdump.",
+)
+

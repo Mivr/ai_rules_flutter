@@ -7,7 +7,7 @@ load("//flutter:ios.bzl", "flutter_apple_plugin_library", "flutter_ios_app")
 load("//flutter/private:flutter_ios_application.bzl", "flutter_ios_framework", "flutter_ios_native_frameworks")
 load("//flutter/private:flutter_xtool_bundle.bzl", "flutter_darwin_xcframework_import", "flutter_xtool_ios_bundle")
 load("//flutter/private:ios_entitlements.bzl", "resolve_ios_entitlements")
-load(":apple_bundling.bzl", "fake_application", "fake_macho_binary", "fake_xcframework", "outputs_under_target_dir_test")
+load(":apple_bundling.bzl", "fake_application", "fake_macho_binary", "fake_xcframework", "macho_verify_probe", "outputs_under_target_dir_test")
 
 def _ios_device_transition_impl(_settings, _attr):
     return {
@@ -245,6 +245,7 @@ def _bundling_tests(name):
         name = name + "_e2e_ios_app",
         application = ":" + name + "_fake_release_app",
         bundle_id = "com.example.e2e.ios",
+        minimum_os_version = "15.4",
         srcs = [
             "@rules_flutter//flutter/private/runners/ios:AppDelegate.swift",
             "@rules_flutter//flutter/private/runners/ios:SceneDelegate.swift",
@@ -255,6 +256,101 @@ def _bundling_tests(name):
         backend = "xtool",
         tags = ["manual"],
     )
+
+    macho_verify_probe(
+        name = name + "_fake_app_framework_verify",
+        target = ":" + name + "_fake_app_framework",
+        expected_substrings = [
+            "__TEXT",
+            "__LINKEDIT",
+            "LC_ID_DYLIB",
+            "@rpath/App.framework/App",
+            "LC_UUID",
+            "LC_BUILD_VERSION",
+            "LC_SYMTAB",
+            "LC_DYSYMTAB",
+            "NOUNDEFS",
+            "DYLDLINK",
+            "TWOLEVEL",
+        ],
+        tags = ["manual"],
+    )
+
+    macho_verify_probe(
+        name = name + "_e2e_ios_app_framework_verify",
+        target = ":__" + name + "_e2e_ios_app_app_framework",
+        expected_substrings = [
+            "@rpath/App.framework/App",
+            "minos 15.4",
+        ],
+        tags = ["manual"],
+    )
+
+    macho_verify_probe(
+        name = name + "_e2e_ios_app_native_framework_verify",
+        target = ":__" + name + "_e2e_ios_app_native_frameworks",
+        binary_relpath = "foo.framework/foo",
+        expected_substrings = [
+            "@rpath/foo.framework/foo",
+            "minos 15.4",
+        ],
+        tags = ["manual"],
+    )
+
+    fake_application(
+        name = name + "_fake_fat_ios_app",
+        debug = False,
+        macho_aot = True,
+        fat_macho = True,
+        native_libs = ["libfatplugin.dylib"],
+        tags = ["manual"],
+    )
+    flutter_ios_framework(
+        name = name + "_fake_fat_ios_app_framework",
+        application = ":" + name + "_fake_fat_ios_app",
+        minimum_os_version = "16.2",
+        tags = ["manual"],
+    )
+    flutter_ios_native_frameworks(
+        name = name + "_fake_fat_ios_app_native_frameworks",
+        application = ":" + name + "_fake_fat_ios_app",
+        minimum_os_version = "16.2",
+        tags = ["manual"],
+    )
+    macho_verify_probe(
+        name = name + "_fake_fat_ios_app_framework_verify",
+        target = ":" + name + "_fake_fat_ios_app_framework",
+        expected_substrings = [
+            "@rpath/App.framework/App",
+            "minos 16.2",
+        ],
+        tags = ["manual"],
+    )
+    macho_verify_probe(
+        name = name + "_fake_fat_ios_app_native_framework_verify",
+        target = ":" + name + "_fake_fat_ios_app_native_frameworks",
+        binary_relpath = "fatplugin.framework/fatplugin",
+        expected_substrings = [
+            "@rpath/fatplugin.framework/fatplugin",
+            "minos 16.2",
+        ],
+        tags = ["manual"],
+    )
+
+    fake_application(
+        name = name + "_fake_non_macho_ios_app",
+        debug = True,
+        macho_aot = False,
+        native_libs = ["libnonmacho.dylib"],
+        tags = ["manual"],
+    )
+    flutter_ios_native_frameworks(
+        name = name + "_fake_non_macho_ios_native_frameworks",
+        application = ":" + name + "_fake_non_macho_ios_app",
+        allow_non_macho = ["libnonmacho.dylib"],
+        tags = ["manual"],
+    )
+
     _ios_device_targets(
         name = name + "_release_device_targets",
         targets = [
@@ -264,6 +360,11 @@ def _bundling_tests(name):
             name + "_fake_xtool_ios_bundle",
             name + "_sample_ios_plugin_lib",
             name + "_e2e_ios_app",
+            name + "_e2e_ios_app_framework_verify",
+            name + "_e2e_ios_app_native_framework_verify",
+            name + "_fake_fat_ios_app_framework_verify",
+            name + "_fake_fat_ios_app_native_framework_verify",
+            name + "_fake_non_macho_ios_native_frameworks",
         ],
         tags = ["manual"],
     )
@@ -285,6 +386,7 @@ def _bundling_tests(name):
         name = name + "_two_apps_one_package",
         targets = [
             name + "_fake_app_framework",
+            name + "_fake_app_framework_verify",
             name + "_fake_app_other_framework",
             name + "_release_device_targets",
         ],

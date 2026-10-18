@@ -154,22 +154,27 @@ def _flutter_ios_framework_impl(ctx):
         dylib = app_info.aot_output
 
         # Copy the dylib and rewrite its LC_BUILD_VERSION with macho_edit.
+        patch_args = [
+            ctx.executable._macho_edit.path,
+            "patch",
+            "--input",
+            dylib.path,
+            "--output",
+            framework_binary.path,
+            "--platform",
+            vtool_platform,
+            "--min-os",
+            minimum_os_version,
+            "--sdk-version",
+            minimum_os_version,
+            "--install-name",
+            "@rpath/App.framework/App",
+        ]
+        for allowed in ctx.attr.allow_non_macho:
+            patch_args.extend(["--allow-non-macho", allowed])
         ctx.actions.run(
             executable = dart_exe,
-            arguments = [
-                ctx.executable._macho_edit.path,
-                "patch",
-                "--input",
-                dylib.path,
-                "--output",
-                framework_binary.path,
-                "--platform",
-                vtool_platform,
-                "--min-os",
-                minimum_os_version,
-                "--sdk-version",
-                minimum_os_version,
-            ],
+            arguments = patch_args,
             inputs = depset(
                 direct = [dylib, ctx.executable._macho_edit],
                 transitive = [dart_vm_files],
@@ -311,6 +316,10 @@ flutter_ios_framework = rule(
     attrs = dicts.add(
         apple_support.platform_constraint_attrs(),
         {
+            "allow_non_macho": attr.string_list(
+                doc = "Explicit allow-list of binary or framework names permitted to bypass Mach-O validation.",
+                default = [],
+            ),
             "application": attr.label(
                 doc = "A flutter_ios_application target providing Flutter compilation outputs.",
                 mandatory = True,
@@ -380,6 +389,8 @@ def _flutter_ios_native_frameworks_impl(ctx):
     app_info = ctx.attr.application[FlutterApplicationInfo]
     dylibs = list(app_info.native_libs) + app_info.bundled_code_assets.to_list()
     minimum_os_version = ctx.attr.minimum_os_version
+    is_device = apple_support.target_environment_from_rule_ctx(ctx) == "device"
+    vtool_platform = "ios" if is_device else "iossim"
 
     dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx) if dylibs else (None, None)
 
@@ -397,21 +408,30 @@ def _flutter_ios_native_frameworks_impl(ctx):
         binary = ctx.actions.declare_file("%s/%s.framework/%s" % (ctx.label.name, name, name))
         plist = ctx.actions.declare_file("%s/%s.framework/Info.plist" % (ctx.label.name, name))
 
-        # Copy the dylib into the framework and rewrite its install name so the
-        # dynamic linker resolves it from the embedded framework via @rpath.
+        # Copy the dylib into the framework and rewrite its install name and
+        # LC_BUILD_VERSION so the dynamic linker resolves it from the embedded
+        # framework via @rpath with the configured deployment target.
+        patch_args = [
+            ctx.executable._macho_edit.path,
+            "patch",
+            "--input",
+            dylib.path,
+            "--output",
+            binary.path,
+            "--platform",
+            vtool_platform,
+            "--min-os",
+            minimum_os_version,
+            "--sdk-version",
+            minimum_os_version,
+            "--install-name",
+            "@rpath/%s.framework/%s" % (name, name),
+        ]
+        for allowed in ctx.attr.allow_non_macho:
+            patch_args.extend(["--allow-non-macho", allowed])
         ctx.actions.run(
             executable = dart_exe,
-            arguments = [
-                ctx.executable._macho_edit.path,
-                "patch",
-                "--input",
-                dylib.path,
-                "--output",
-                binary.path,
-                "--install-name",
-                "@rpath/%s.framework/%s" % (name, name),
-                "--allow-non-macho",
-            ],
+            arguments = patch_args,
             inputs = depset(
                 direct = [dylib, ctx.executable._macho_edit],
                 transitive = [dart_vm_files],
@@ -451,6 +471,10 @@ flutter_ios_native_frameworks = rule(
     attrs = dicts.add(
         apple_support.platform_constraint_attrs(),
         {
+            "allow_non_macho": attr.string_list(
+                doc = "Explicit allow-list of binary or framework names permitted to bypass Mach-O validation.",
+                default = [],
+            ),
             "application": attr.label(
                 doc = "A flutter_application target providing FlutterApplicationInfo.",
                 mandatory = True,

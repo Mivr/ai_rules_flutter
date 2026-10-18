@@ -128,16 +128,22 @@ def flutter_ios_registrant_gen(name, **kwargs):
     tags = kwargs.pop("tags", ["manual"])
     _flutter_ios_registrant_rule(name = name, tags = tags, **kwargs)
 
-def flutter_ios_native_frameworks_gen(name, **kwargs):
+def flutter_ios_native_frameworks_gen(name, minimum_os_version = IOS_MINIMUM_OS_VERSION, **kwargs):
     """Wraps native dylibs in .frameworks for iOS bundling. See `flutter_ios_native_frameworks`.
 
     Args:
         name: Target name.
+        minimum_os_version: Minimum iOS deployment target.
         **kwargs: Forwarded to the underlying rule. `tags` defaults to
             `["manual"]` — build via the consuming `ios_application`.
     """
     tags = kwargs.pop("tags", ["manual"])
-    _flutter_ios_native_frameworks_rule(name = name, tags = tags, **kwargs)
+    _flutter_ios_native_frameworks_rule(
+        name = name,
+        minimum_os_version = minimum_os_version,
+        tags = tags,
+        **kwargs
+    )
 
 def flutter_ios_privacy_manifests_gen(name, **kwargs):
     """Exposes plugin privacy manifests. See `flutter_ios_privacy_manifests`.
@@ -373,6 +379,7 @@ def flutter_ios_app(
         runner_deps = [],
         srcs = None,
         engine = None,
+        allow_non_macho = [],
         backend = "rules_apple",
         **kwargs):
     """Builds a Flutter iOS .app bundle from a flutter_application target.
@@ -472,6 +479,8 @@ def flutter_ios_app(
             **kwargs. For App Intents, pass the library here *and* to
             rules_apple's `app_intents` (which passes through **kwargs):
             `app_intents` only extracts the metadata, it does not link.
+        allow_non_macho: Explicit allow-list of binary or framework names
+            permitted to bypass Mach-O validation.
         backend: Apple bundling backend: `"rules_apple"` (default) or
             `"xtool"` (explicit opt-in).
         **kwargs: Passed through to ios_application. The macro sets
@@ -566,6 +575,7 @@ def flutter_ios_app(
         name = "__%s_app_framework" % name,
         application = "__%s_intermediates" % name,
         minimum_os_version = minimum_os_version,
+        allow_non_macho = allow_non_macho,
         tags = internal_tags,
     )
 
@@ -584,6 +594,7 @@ def flutter_ios_app(
         name = "__%s_native_frameworks" % name,
         application = application,
         minimum_os_version = minimum_os_version,
+        allow_non_macho = allow_non_macho,
         tags = internal_tags,
     )
 

@@ -101,16 +101,22 @@ def _engine_framework_select():
 # build (host configuration) is wrong everywhere and fails outright on
 # non-macOS hosts.
 
-def flutter_macos_framework_gen(name, **kwargs):
+def flutter_macos_framework_gen(name, minimum_os_version = MACOS_MINIMUM_OS_VERSION, **kwargs):
     """Generates App.framework. See `flutter_macos_framework`.
 
     Args:
         name: Target name.
+        minimum_os_version: Minimum macOS deployment target.
         **kwargs: Forwarded to the underlying rule. `tags` defaults to
             `["manual"]` — build via the consuming `macos_application`.
     """
     tags = kwargs.pop("tags", ["manual"])
-    _flutter_macos_framework_rule(name = name, tags = tags, **kwargs)
+    _flutter_macos_framework_rule(
+        name = name,
+        minimum_os_version = minimum_os_version,
+        tags = tags,
+        **kwargs
+    )
 
 def flutter_macos_registrant_gen(name, **kwargs):
     """Generates the macOS GeneratedPluginRegistrant. See `flutter_macos_registrant`.
@@ -123,16 +129,22 @@ def flutter_macos_registrant_gen(name, **kwargs):
     tags = kwargs.pop("tags", ["manual"])
     _flutter_macos_registrant_rule(name = name, tags = tags, **kwargs)
 
-def flutter_macos_native_libs_gen(name, **kwargs):
+def flutter_macos_native_libs_gen(name, minimum_os_version = MACOS_MINIMUM_OS_VERSION, **kwargs):
     """Exposes native dylibs for bundling. See `flutter_macos_native_libs`.
 
     Args:
         name: Target name.
+        minimum_os_version: Minimum macOS deployment target.
         **kwargs: Forwarded to the underlying rule. `tags` defaults to
             `["manual"]` — build via the consuming `macos_application`.
     """
     tags = kwargs.pop("tags", ["manual"])
-    _flutter_macos_native_libs_rule(name = name, tags = tags, **kwargs)
+    _flutter_macos_native_libs_rule(
+        name = name,
+        minimum_os_version = minimum_os_version,
+        tags = tags,
+        **kwargs
+    )
 
 def flutter_macos_privacy_manifests_gen(name, **kwargs):
     """Exposes plugin privacy manifests. See `flutter_macos_privacy_manifests`.
@@ -328,6 +340,7 @@ def flutter_macos_app(
         srcs = None,
         engine = None,
         menu_xib = None,
+        allow_non_macho = [],
         backend = "rules_apple",
         **kwargs):
     """Builds a Flutter macOS .app bundle from a flutter_application target.
@@ -411,6 +424,8 @@ def flutter_macos_app(
             **kwargs. For App Intents, pass the library here *and* to
             rules_apple's `app_intents` (which passes through **kwargs):
             `app_intents` only extracts the metadata, it does not link.
+        allow_non_macho: Explicit allow-list of binary or framework names
+            permitted to bypass Mach-O validation.
         backend: Apple bundling backend: `"rules_apple"` (default) or
             `"xtool"` (explicit opt-in).
         **kwargs: Passed through to macos_application. The macro sets
@@ -501,6 +516,8 @@ def flutter_macos_app(
     _flutter_macos_framework_rule(
         name = "__%s_app_framework" % name,
         application = application,
+        minimum_os_version = minimum_os_version,
+        allow_non_macho = allow_non_macho,
         tags = internal_tags,
     )
 
@@ -508,6 +525,8 @@ def flutter_macos_app(
     _flutter_macos_native_libs_rule(
         name = "__%s_native_libs" % name,
         application = application,
+        minimum_os_version = minimum_os_version,
+        allow_non_macho = allow_non_macho,
         tags = internal_tags,
     )
 

@@ -8,7 +8,7 @@ load("//flutter:macos.bzl", "flutter_apple_plugin_library", "flutter_macos_app")
 load("//flutter/private:flutter_macos_application.bzl", "flutter_macos_framework", "flutter_macos_native_libs")
 load("//flutter/private:flutter_xtool_bundle.bzl", "flutter_xtool_macos_bundle")
 load("//flutter/private:validation.bzl", "is_valid_bundle_id", "minimum_os_version_is_below")
-load(":apple_bundling.bzl", "fake_application", "fake_macho_binary", "fake_xcframework", "outputs_under_target_dir_test")
+load(":apple_bundling.bzl", "fake_application", "fake_macho_binary", "fake_xcframework", "macho_verify_probe", "outputs_under_target_dir_test")
 
 def _macos_arm64_transition_impl(_settings, _attr):
     return {
@@ -347,15 +347,80 @@ def _bundling_tests(name):
         application = name + "_fake_debug_app",
         tags = ["manual"],
     )
+    macho_verify_probe(
+        name = name + "_verify_debug_stub_framework",
+        target = ":" + name + "_fake_debug_app_framework",
+        binary_relpath = "App.framework/Versions/A/App",
+        expected_substrings = [
+            "NOUNDEFS",
+            "DYLDLINK",
+            "TWOLEVEL",
+            "NO_REEXPORTED_DYLIBS",
+            "segname __TEXT",
+            "segname __LINKEDIT",
+            "cmd LC_ID_DYLIB",
+            "@rpath/App.framework/Versions/A/App",
+            "cmd LC_SYMTAB",
+            "cmd LC_DYSYMTAB",
+            "cmd LC_UUID",
+            "cmd LC_BUILD_VERSION",
+            "platform macos",
+        ],
+        tags = ["manual"],
+    )
     fake_application(
         name = name + "_fake_release_macho_app",
         debug = False,
         macho_aot = True,
+        native_libs = ["libplugin.dylib"],
         tags = ["manual"],
     )
     flutter_macos_framework(
         name = name + "_fake_release_macho_app_framework",
         application = name + "_fake_release_macho_app",
+        tags = ["manual"],
+    )
+    fake_application(
+        name = name + "_fake_fat_macos_app",
+        debug = False,
+        fat_macho = True,
+        macho_aot = True,
+        native_libs = ["libfat.dylib"],
+        tags = ["manual"],
+    )
+    flutter_macos_framework(
+        name = name + "_fake_fat_macos_app_framework",
+        application = name + "_fake_fat_macos_app",
+        minimum_os_version = "14.2",
+        tags = ["manual"],
+    )
+    flutter_macos_native_libs(
+        name = name + "_fake_fat_macos_native_libs",
+        application = name + "_fake_fat_macos_app",
+        minimum_os_version = "14.2",
+        tags = ["manual"],
+    )
+    macho_verify_probe(
+        name = name + "_verify_fat_macos_framework",
+        target = ":" + name + "_fake_fat_macos_app_framework",
+        binary_relpath = "App.framework/Versions/A/App",
+        expected_substrings = [
+            "platform macos",
+            "minos 14.2",
+            "sdk 14.2",
+            "@rpath/App.framework/Versions/A/App",
+        ],
+        tags = ["manual"],
+    )
+    macho_verify_probe(
+        name = name + "_verify_fat_macos_native_libs",
+        target = ":" + name + "_fake_fat_macos_native_libs",
+        binary_relpath = "libfat.dylib",
+        expected_substrings = [
+            "platform macos",
+            "minos 14.2",
+            "sdk 14.2",
+        ],
         tags = ["manual"],
     )
     fake_macho_binary(
@@ -414,6 +479,7 @@ def _bundling_tests(name):
         name = name + "_e2e_macos_app",
         application = ":" + name + "_fake_release_macho_app",
         bundle_id = "com.example.e2e.macos",
+        minimum_os_version = "13.4",
         srcs = [
             "@rules_flutter//flutter/private/runners/macos:AppDelegate.swift",
             "@rules_flutter//flutter/private/runners/macos:MainFlutterWindow.swift",
@@ -426,14 +492,56 @@ def _bundling_tests(name):
         backend = "xtool",
         tags = ["manual"],
     )
+    macho_verify_probe(
+        name = name + "_verify_e2e_macos_app_framework",
+        target = ":__" + name + "_e2e_macos_app_app_framework",
+        binary_relpath = "App.framework/Versions/A/App",
+        expected_substrings = [
+            "platform macos",
+            "minos 13.4",
+            "sdk 13.4",
+            "@rpath/App.framework/Versions/A/App",
+        ],
+        tags = ["manual"],
+    )
+    macho_verify_probe(
+        name = name + "_verify_e2e_macos_native_libs",
+        target = ":__" + name + "_e2e_macos_app_native_libs",
+        binary_relpath = "libplugin.dylib",
+        expected_substrings = [
+            "platform macos",
+            "minos 13.4",
+            "sdk 13.4",
+        ],
+        tags = ["manual"],
+    )
+    fake_application(
+        name = name + "_fake_non_macho_app",
+        debug = True,
+        macho_aot = False,
+        native_libs = ["libnonmacho.dylib"],
+        tags = ["manual"],
+    )
+    flutter_macos_native_libs(
+        name = name + "_fake_non_macho_native_libs",
+        application = name + "_fake_non_macho_app",
+        allow_non_macho = ["libnonmacho.dylib"],
+        tags = ["manual"],
+    )
     _macos_arm64_targets(
         name = name + "_macos_arm64_release_targets",
         targets = [
             name + "_fake_debug_app_framework",
+            name + "_verify_debug_stub_framework",
             name + "_fake_release_macho_app_framework",
+            name + "_verify_fat_macos_framework",
+            name + "_verify_fat_macos_native_libs",
+            name + "_fake_non_macho_native_libs",
             name + "_fake_xtool_macos_bundle",
             name + "_sample_macos_plugin_lib",
             name + "_e2e_macos_app",
+            name + "_verify_e2e_macos_app_framework",
+            name + "_verify_e2e_macos_native_libs",
         ],
         tags = ["manual"],
     )

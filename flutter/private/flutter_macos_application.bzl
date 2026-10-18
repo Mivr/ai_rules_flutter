@@ -123,25 +123,27 @@ def _flutter_macos_framework_impl(ctx):
     else:
         if not app_info.aot_output:
             fail("flutter_macos_framework requires an AOT build (not debug mode) or a kernel_dill in debug mode.")
+        patch_args = [
+            ctx.executable._macho_edit.path,
+            "patch",
+            "--input",
+            app_info.aot_output.path,
+            "--output",
+            prepared_binary.path,
+            "--platform",
+            "macos",
+            "--min-os",
+            minimum_os_version,
+            "--sdk-version",
+            minimum_os_version,
+            "--install-name",
+            "@rpath/App.framework/Versions/A/App",
+        ]
+        for allowed in ctx.attr.allow_non_macho:
+            patch_args.extend(["--allow-non-macho", allowed])
         ctx.actions.run(
             executable = dart_exe,
-            arguments = [
-                ctx.executable._macho_edit.path,
-                "patch",
-                "--input",
-                app_info.aot_output.path,
-                "--output",
-                prepared_binary.path,
-                "--platform",
-                "macos",
-                "--min-os",
-                minimum_os_version,
-                "--sdk-version",
-                minimum_os_version,
-                "--install-name",
-                "@rpath/App.framework/Versions/A/App",
-                "--allow-non-macho",
-            ],
+            arguments = patch_args,
             inputs = depset(
                 direct = [app_info.aot_output, ctx.executable._macho_edit],
                 transitive = [dart_vm_files],
@@ -216,6 +218,10 @@ flutter_macos_framework = rule(
     attrs = dicts.add(
         apple_support.platform_constraint_attrs(),
         {
+            "allow_non_macho": attr.string_list(
+                doc = "Explicit allow-list of binary or framework names permitted to bypass Mach-O validation.",
+                default = [],
+            ),
             "application": attr.label(
                 doc = "A flutter_application target providing FlutterApplicationInfo.",
                 mandatory = True,
@@ -298,11 +304,21 @@ def _flutter_macos_native_libs_impl(ctx):
     if not libs_by_basename:
         return [DefaultInfo(files = depset())]
 
+    minimum_os_version = ctx.attr.minimum_os_version
     dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx)
     staged = ctx.actions.declare_directory(ctx.label.name)
     args = ctx.actions.args()
     args.add(ctx.executable._macho_edit.path)
     args.add("copy-files")
+    args.add("--platform")
+    args.add("macos")
+    args.add("--min-os")
+    args.add(minimum_os_version)
+    args.add("--sdk-version")
+    args.add(minimum_os_version)
+    for allowed in ctx.attr.allow_non_macho:
+        args.add("--allow-non-macho")
+        args.add(allowed)
     args.add("--output-dir")
     args.add(staged.path)
     for basename, lib in libs_by_basename.items():
@@ -324,10 +340,18 @@ def _flutter_macos_native_libs_impl(ctx):
 flutter_macos_native_libs = rule(
     implementation = _flutter_macos_native_libs_impl,
     attrs = {
+        "allow_non_macho": attr.string_list(
+            doc = "Explicit allow-list of binary names permitted to bypass Mach-O validation.",
+            default = [],
+        ),
         "application": attr.label(
             doc = "A flutter_application target providing FlutterApplicationInfo.",
             mandatory = True,
             providers = [FlutterApplicationInfo],
+        ),
+        "minimum_os_version": attr.string(
+            doc = "Minimum macOS deployment target version.",
+            default = MACOS_MINIMUM_OS_VERSION,
         ),
         "_macho_edit": attr.label(
             default = Label("//flutter/private/tools:macho_edit"),

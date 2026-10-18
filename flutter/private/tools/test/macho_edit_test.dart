@@ -155,6 +155,42 @@ Uint8List _buildSignedMachO({
   return buf;
 }
 
+String? _resolveHermeticTool(String envVar) {
+  final rel = Platform.environment[envVar];
+  if (rel == null || rel.isEmpty) return null;
+  if (File(rel).existsSync()) return File(rel).absolute.path;
+  final runfilesDir =
+      Platform.environment['RUNFILES_DIR'] ??
+      Platform.environment['TEST_SRCDIR'];
+  if (runfilesDir != null) {
+    for (final candidate in [
+      '$runfilesDir/$rel',
+      '$runfilesDir/_main/$rel',
+    ]) {
+      if (File(candidate).existsSync()) return File(candidate).absolute.path;
+    }
+  }
+  return null;
+}
+
+/// Builds a synthetic 32-bit little-endian Mach-O header (`MH_MAGIC = 0xfeedface`).
+Uint8List _buildMachO32({int cputype = macho.cpuTypeArm}) {
+  final buf = Uint8List(64);
+  final bd = ByteData.sublistView(buf);
+  bd.setUint32(0, macho.mhMagic32, Endian.little);
+  bd.setUint32(4, cputype, Endian.little);
+  bd.setUint32(8, 9, Endian.little); // cpusubtype = ARM_V7
+  bd.setUint32(12, macho.mhDylib, Endian.little);
+  bd.setUint32(16, 0, Endian.little); // ncmds = 0
+  bd.setUint32(20, 0, Endian.little); // sizeofcmds = 0
+  bd.setUint32(
+    24,
+    macho.mhNoundefs | macho.mhDyldlink | macho.mhTwolevel,
+    Endian.little,
+  );
+  return buf;
+}
+
 void main() {
   group('sha256', () {
     test('matches FIPS 180-4 test vectors', () {
@@ -190,33 +226,108 @@ void main() {
   });
 
   group('generateStubMachO', () {
-    test('synthesizes valid arm64 iOS stub dylib', () {
+    test('synthesizes well-formed arm64 iOS stub dylib with segments, symtab, UUID, and flags', () {
       final bytes = macho.generateStubMachO(
         arch: 'arm64',
         platform: macho.platformIos,
         minOs: macho.parsePackedVersion('13.0'),
-        sdkVersion: macho.parsePackedVersion('13.0'),
+        sdkVersion: macho.parsePackedVersion('16.2'),
         installName: '@rpath/App.framework/App',
       );
       expect(macho.isMachO64(bytes), isTrue);
       final bd = ByteData.sublistView(bytes);
       expect(bd.getUint32(4, Endian.little), macho.cpuTypeArm64);
       expect(bd.getUint32(12, Endian.little), macho.mhDylib);
+      final flags = bd.getUint32(24, Endian.little);
+      expect(
+        flags,
+        macho.mhNoundefs |
+            macho.mhDyldlink |
+            macho.mhTwolevel |
+            macho.mhNoReexportedDylibs,
+      );
 
       final cmds = macho.parseLoadCommands(bytes);
       expect(cmds.map((c) => c.cmd), [
-        macho.lcSegment64,
+        macho.lcSegment64, // __TEXT
+        macho.lcSegment64, // __LINKEDIT
         macho.lcIdDylib,
+        macho.lcSymtab,
+        macho.lcDysymtab,
+        macho.lcUuid,
         macho.lcBuildVersion,
       ]);
 
-      final idLc = cmds[1];
+      // Verify __TEXT segment.
+      expect(_readCString(cmds[0].bytes, 8), '__TEXT');
+      final textBd = ByteData.sublistView(cmds[0].bytes);
+      expect(textBd.getUint64(24, Endian.little), 0); // vmaddr
+      expect(textBd.getUint64(32, Endian.little), 0x4000); // vmsize
+      expect(textBd.getUint64(40, Endian.little), 0); // fileoff
+      expect(textBd.getUint64(48, Endian.little), 0x4000); // filesize
+      expect(textBd.getUint32(56, Endian.little), 5); // maxprot = r-x
+      expect(textBd.getUint32(60, Endian.little), 5); // initprot = r-x
+
+      // Verify __LINKEDIT segment.
+      expect(_readCString(cmds[1].bytes, 8), '__LINKEDIT');
+      final linkeditBd = ByteData.sublistView(cmds[1].bytes);
+      expect(linkeditBd.getUint64(24, Endian.little), 0x4000); // vmaddr
+      expect(linkeditBd.getUint64(32, Endian.little), 0x4000); // vmsize
+      expect(linkeditBd.getUint64(40, Endian.little), 0x4000); // fileoff
+      expect(linkeditBd.getUint64(48, Endian.little), 8); // filesize
+      expect(linkeditBd.getUint32(56, Endian.little), 1); // maxprot = r--
+      expect(linkeditBd.getUint32(60, Endian.little), 1); // initprot = r--
+
+      // Verify LC_ID_DYLIB.
+      final idLc = cmds.singleWhere((c) => c.cmd == macho.lcIdDylib);
       expect(_readCString(idLc.bytes, 24), '@rpath/App.framework/App');
 
-      final bvBd = ByteData.sublistView(cmds[2].bytes);
+      // Verify LC_SYMTAB points into __LINKEDIT.
+      final symtabLc = cmds.singleWhere((c) => c.cmd == macho.lcSymtab);
+      final symtabBd = ByteData.sublistView(symtabLc.bytes);
+      expect(symtabBd.getUint32(8, Endian.little), 0x4000); // symoff
+      expect(symtabBd.getUint32(12, Endian.little), 0); // nsyms
+      expect(symtabBd.getUint32(16, Endian.little), 0x4000); // stroff
+      expect(symtabBd.getUint32(20, Endian.little), 8); // strsize
+
+      // Verify LC_DYSYMTAB is 80 bytes.
+      final dysymtabLc = cmds.singleWhere((c) => c.cmd == macho.lcDysymtab);
+      expect(dysymtabLc.cmdsize, 80);
+
+      // Verify LC_UUID is non-zero, deterministic, and content-derived.
+      final uuidLc = cmds.singleWhere((c) => c.cmd == macho.lcUuid);
+      final uuidBytes = uuidLc.bytes.sublist(8, 24);
+      expect(uuidBytes.any((b) => b != 0), isTrue);
+
+      final bytesSame = macho.generateStubMachO(
+        arch: 'arm64',
+        platform: macho.platformIos,
+        minOs: macho.parsePackedVersion('13.0'),
+        sdkVersion: macho.parsePackedVersion('16.2'),
+        installName: '@rpath/App.framework/App',
+      );
+      expect(_hex(bytes), _hex(bytesSame));
+
+      final bytesDiffContent = macho.generateStubMachO(
+        arch: 'arm64',
+        platform: macho.platformIos,
+        minOs: macho.parsePackedVersion('14.0'),
+        sdkVersion: macho.parsePackedVersion('16.2'),
+        installName: '@rpath/App.framework/App',
+      );
+      final uuidDiff = macho
+          .parseLoadCommands(bytesDiffContent)
+          .singleWhere((c) => c.cmd == macho.lcUuid)
+          .bytes
+          .sublist(8, 24);
+      expect(_hex(uuidBytes), isNot(_hex(uuidDiff)));
+
+      // Verify LC_BUILD_VERSION.
+      final bvLc = cmds.singleWhere((c) => c.cmd == macho.lcBuildVersion);
+      final bvBd = ByteData.sublistView(bvLc.bytes);
       expect(bvBd.getUint32(8, Endian.little), macho.platformIos);
       expect(bvBd.getUint32(12, Endian.little), 0x000d0000);
-      expect(bvBd.getUint32(16, Endian.little), 0x000d0000);
+      expect(bvBd.getUint32(16, Endian.little), 0x00100200);
     });
 
     test('synthesizes valid x86_64 iOS simulator stub dylib', () {
@@ -231,10 +342,76 @@ void main() {
       expect(bd.getUint32(4, Endian.little), macho.cpuTypeX86_64);
       expect(bd.getUint32(8, Endian.little), macho.cpuSubtypeX86_64All);
       final cmds = macho.parseLoadCommands(bytes);
-      final bvBd = ByteData.sublistView(cmds[2].bytes);
+      final bvLc = cmds.singleWhere((c) => c.cmd == macho.lcBuildVersion);
+      final bvBd = ByteData.sublistView(bvLc.bytes);
       expect(bvBd.getUint32(8, Endian.little), macho.platformIosSimulator);
       expect(bvBd.getUint32(12, Endian.little), 0x000e0000);
       expect(bvBd.getUint32(16, Endian.little), 0x000f0000);
+    });
+
+    test('hermetic llvm-objdump and llvm-otool accept generated stubs', () {
+      final objdump = _resolveHermeticTool('LLVM_OBJDUMP');
+      final otool = _resolveHermeticTool('LLVM_OTOOL');
+      if (Platform.environment.containsKey('TEST_SRCDIR')) {
+        expect(
+          objdump,
+          isNotNull,
+          reason: 'LLVM_OBJDUMP must resolve in Bazel test',
+        );
+        expect(
+          otool,
+          isNotNull,
+          reason: 'LLVM_OTOOL must resolve in Bazel test',
+        );
+      }
+      if (objdump == null || otool == null) return;
+
+      final tempDir = Directory.systemTemp.createTempSync('macho_llvm_stub_');
+      addTearDown(() => tempDir.deleteSync(recursive: true));
+
+      for (final arch in ['arm64', 'x86_64']) {
+        final dylibPath = '${tempDir.path}/stub_$arch.dylib';
+        File(dylibPath).writeAsBytesSync(
+          macho.generateStubMachO(
+            arch: arch,
+            platform: macho.platformMacos,
+            minOs: macho.parsePackedVersion('12.3'),
+            sdkVersion: macho.parsePackedVersion('14.1'),
+            installName: '@rpath/App.framework/Versions/A/App',
+          ),
+        );
+
+        final objdumpRes = Process.runSync(objdump, [
+          '--macho',
+          '--private-headers',
+          '--dylib-id',
+          dylibPath,
+        ]);
+        expect(objdumpRes.exitCode, 0, reason: '${objdumpRes.stderr}');
+        final out = objdumpRes.stdout as String;
+        expect(out, contains('NOUNDEFS'));
+        expect(out, contains('DYLDLINK'));
+        expect(out, contains('TWOLEVEL'));
+        expect(out, contains('NO_REEXPORTED_DYLIBS'));
+        expect(out, contains('segname __TEXT'));
+        expect(out, contains('segname __LINKEDIT'));
+        expect(out, contains('cmd LC_ID_DYLIB'));
+        expect(out, contains('@rpath/App.framework/Versions/A/App'));
+        expect(out, contains('cmd LC_SYMTAB'));
+        expect(out, contains('cmd LC_DYSYMTAB'));
+        expect(out, contains('cmd LC_UUID'));
+        expect(out, contains('cmd LC_BUILD_VERSION'));
+        expect(out, contains('platform macos'));
+        expect(out, contains('minos 12.3'));
+        expect(out, contains('sdk 14.1'));
+
+        final otoolRes = Process.runSync(otool, ['-hv', '-l', '-L', dylibPath]);
+        expect(otoolRes.exitCode, 0, reason: '${otoolRes.stderr}');
+        expect(
+          otoolRes.stdout as String,
+          contains('NOUNDEFS DYLDLINK TWOLEVEL'),
+        );
+      }
     });
   });
 
@@ -318,6 +495,173 @@ void main() {
       expect(bv2Bd.getUint32(12, Endian.little), 0x000b0000);
       expect(bv2Bd.getUint32(16, Endian.little), 0x000e0000);
     });
+
+    test('patches all slices in a fat (0xcafebabe) Mach-O binary and thins when arch is set', () {
+      final arm64Slice = macho.generateStubMachO(
+        arch: 'arm64',
+        platform: macho.platformMacos,
+        minOs: macho.parsePackedVersion('11.0'),
+        sdkVersion: macho.parsePackedVersion('11.0'),
+        installName: '@rpath/Old.dylib',
+      );
+      final x86Slice = macho.generateStubMachO(
+        arch: 'x86_64',
+        platform: macho.platformMacos,
+        minOs: macho.parsePackedVersion('11.0'),
+        sdkVersion: macho.parsePackedVersion('11.0'),
+        installName: '@rpath/Old.dylib',
+      );
+
+      final fatInput = macho.buildFatMachO([
+        macho.FatSlice(
+          cputype: macho.cpuTypeX86_64,
+          cpusubtype: macho.cpuSubtypeX86_64All,
+          bytes: x86Slice,
+        ),
+        macho.FatSlice(
+          cputype: macho.cpuTypeArm64,
+          cpusubtype: macho.cpuSubtypeArm64All,
+          bytes: arm64Slice,
+        ),
+      ]);
+      expect(macho.isFatMachO(fatInput), isTrue);
+
+      // Patch all slices in fat binary.
+      final patchedFat = macho.patchMachO(
+        fatInput,
+        platform: macho.platformIosSimulator,
+        minOs: macho.parsePackedVersion('15.4'),
+        sdkVersion: macho.parsePackedVersion('17.0'),
+        installName: '@rpath/MyFat.framework/MyFat',
+      );
+      expect(macho.isFatMachO(patchedFat), isTrue);
+      final slices = macho.extractFatSlices(patchedFat);
+      expect(slices.length, 2);
+      for (final s in slices) {
+        final cmds = macho.parseLoadCommands(s.bytes);
+        final idCmd = cmds.singleWhere((c) => c.cmd == macho.lcIdDylib);
+        expect(_readCString(idCmd.bytes, 24), '@rpath/MyFat.framework/MyFat');
+        final bvCmd = cmds.singleWhere((c) => c.cmd == macho.lcBuildVersion);
+        final bvBd = ByteData.sublistView(bvCmd.bytes);
+        expect(bvBd.getUint32(8, Endian.little), macho.platformIosSimulator);
+        expect(bvBd.getUint32(12, Endian.little), 0x000f0400);
+        expect(bvBd.getUint32(16, Endian.little), 0x00110000);
+      }
+
+      // Thin fat binary to arm64 slice while patching.
+      final thinnedArm64 = macho.patchMachO(
+        fatInput,
+        platform: macho.platformIos,
+        minOs: macho.parsePackedVersion('16.1'),
+        sdkVersion: macho.parsePackedVersion('17.0'),
+        installName: '@rpath/Thinned.framework/Thinned',
+        arch: 'arm64',
+      );
+      expect(macho.isFatMachO(thinnedArm64), isFalse);
+      expect(macho.isMachO64(thinnedArm64), isTrue);
+      expect(
+        ByteData.sublistView(thinnedArm64).getUint32(4, Endian.little),
+        macho.cpuTypeArm64,
+      );
+      final thinCmds = macho.parseLoadCommands(thinnedArm64);
+      expect(
+        _readCString(
+          thinCmds.singleWhere((c) => c.cmd == macho.lcIdDylib).bytes,
+          24,
+        ),
+        '@rpath/Thinned.framework/Thinned',
+      );
+
+      // Verify with hermetic llvm-lipo and llvm-objdump if available.
+      final lipo = _resolveHermeticTool('LLVM_LIPO');
+      final objdump = _resolveHermeticTool('LLVM_OBJDUMP');
+      if (lipo != null && objdump != null) {
+        final tempDir = Directory.systemTemp.createTempSync('macho_fat_test_');
+        addTearDown(() => tempDir.deleteSync(recursive: true));
+        final fatPath = '${tempDir.path}/patched_fat.dylib';
+        File(fatPath).writeAsBytesSync(patchedFat);
+
+        final lipoRes = Process.runSync(lipo, ['-archs', fatPath]);
+        expect(lipoRes.exitCode, 0, reason: '${lipoRes.stderr}');
+        expect((lipoRes.stdout as String).trim(), 'x86_64 arm64');
+
+        final objdumpRes = Process.runSync(objdump, [
+          '--macho',
+          '--private-headers',
+          '--arch=all',
+          fatPath,
+        ]);
+        expect(objdumpRes.exitCode, 0, reason: '${objdumpRes.stderr}');
+        final out = objdumpRes.stdout as String;
+        expect('minos 15.4'.allMatches(out).length, 2);
+        expect('@rpath/MyFat.framework/MyFat'.allMatches(out).length, 2);
+      }
+    });
+
+    test(
+      'rejects 32-bit Mach-O and non-Mach-O inputs with FormatException',
+      () {
+        final macho32 = _buildMachO32();
+        expect(macho.isMachO32(macho32), isTrue);
+        expect(
+          () => macho.patchMachO(
+            macho32,
+            platform: macho.platformIos,
+            minOs: macho.parsePackedVersion('13.0'),
+          ),
+          throwsA(
+            isA<FormatException>().having(
+              (e) => e.message,
+              'message',
+              contains('32-bit Mach-O'),
+            ),
+          ),
+        );
+
+        // Fat binary containing a 32-bit slice must also fail loudly.
+        final fatWith32 = macho.buildFatMachO([
+          macho.FatSlice(
+            cputype: macho.cpuTypeArm,
+            cpusubtype: 9,
+            bytes: macho32,
+          ),
+        ]);
+        expect(macho.isFatMachO(fatWith32), isTrue);
+        expect(
+          () => macho.patchMachO(
+            fatWith32,
+            platform: macho.platformIos,
+            minOs: macho.parsePackedVersion('13.0'),
+          ),
+          throwsA(
+            isA<FormatException>().having(
+              (e) => e.message,
+              'message',
+              contains('32-bit Mach-O'),
+            ),
+          ),
+        );
+
+        // Plain non-Mach-O bytes must fail loudly.
+        final plainBytes = Uint8List.fromList(
+          utf8.encode('not a macho binary'),
+        );
+        expect(
+          () => macho.patchMachO(
+            plainBytes,
+            platform: macho.platformMacos,
+            minOs: macho.parsePackedVersion('11.0'),
+          ),
+          throwsA(
+            isA<FormatException>().having(
+              (e) => e.message,
+              'message',
+              contains('Not a Mach-O'),
+            ),
+          ),
+        );
+      },
+    );
   });
 
   group('CLI', () {
@@ -377,11 +721,56 @@ void main() {
       expect(bvBd.getUint32(16, Endian.little), 0x00100200);
     });
 
-    test('--allow-non-macho copies non-Mach-O input unchanged', () {
+    test('patch fails loudly on non-Mach-O and 32-bit Mach-O unless named in --allow-non-macho', () {
       final dummyIn = File('${tempDir.path}/dummy.dylib')
         ..writeAsStringSync('not a macho file');
+      final macho32In = File('${tempDir.path}/legacy32.dylib')
+        ..writeAsBytesSync(_buildMachO32());
       final dummyOut = File('${tempDir.path}/out.dylib');
 
+      // Without --allow-non-macho, non-Mach-O fails with FormatException.
+      expect(
+        () => macho.main([
+          'patch',
+          '--input',
+          dummyIn.path,
+          '--output',
+          dummyOut.path,
+          '--install-name',
+          '@rpath/Foo.framework/Foo',
+        ]),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            allOf(contains('dummy.dylib'), contains('non-Mach-O')),
+          ),
+        ),
+      );
+
+      // Without --allow-non-macho (or with a different name), 32-bit Mach-O fails.
+      expect(
+        () => macho.main([
+          'patch',
+          '--input',
+          macho32In.path,
+          '--output',
+          dummyOut.path,
+          '--install-name',
+          '@rpath/Legacy.framework/Legacy',
+          '--allow-non-macho',
+          'Other.framework',
+        ]),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            allOf(contains('legacy32.dylib'), contains('32-bit Mach-O')),
+          ),
+        ),
+      );
+
+      // Naming the input or framework in --allow-non-macho allows it through.
       macho.main([
         'patch',
         '--input',
@@ -391,8 +780,8 @@ void main() {
         '--install-name',
         '@rpath/Foo.framework/Foo',
         '--allow-non-macho',
+        'dummy.dylib',
       ]);
-
       expect(dummyOut.readAsStringSync(), 'not a macho file');
     });
 
@@ -416,10 +805,16 @@ void main() {
       expect(macho.isMachO64(bytes), isTrue);
       final bd = ByteData.sublistView(bytes);
       expect(bd.getUint32(12, Endian.little), macho.mhExecute);
-      expect(bd.getUint32(24, Endian.little), macho.mhPie);
+      expect(
+        bd.getUint32(24, Endian.little),
+        macho.mhNoundefs | macho.mhDyldlink | macho.mhTwolevel | macho.mhPie,
+      );
       final cmds = macho.parseLoadCommands(bytes);
       expect(cmds.where((c) => c.cmd == macho.lcIdDylib), isEmpty);
       expect(cmds.where((c) => c.cmd == macho.lcBuildVersion).length, 1);
+      expect(cmds.where((c) => c.cmd == macho.lcUuid).length, 1);
+      expect(cmds.where((c) => c.cmd == macho.lcSymtab).length, 1);
+      expect(cmds.where((c) => c.cmd == macho.lcDysymtab).length, 1);
       expect(cmds.where((c) => c.cmd == macho.lcRpath).length, 1);
     });
 
@@ -501,7 +896,7 @@ void main() {
     );
 
     test(
-      'copy-files copies source files under basenames or explicit names',
+      'copy-files copies source files under basenames or explicit names and patches when --platform/--min-os are given',
       () {
         final f1 = File('${tempDir.path}/one/libadd.dylib')
           ..parent.createSync(recursive: true)
@@ -522,6 +917,64 @@ void main() {
 
         expect(File('$outDir/libadd.dylib').readAsStringSync(), 'add');
         expect(File('$outDir/libsub.dylib').readAsStringSync(), 'sub');
+
+        // With --platform and --min-os, copy-files rewrites LC_BUILD_VERSION on Mach-O dylibs
+        // and rejects non-Mach-O files unless named in --allow-non-macho.
+        final machoLib = File('${tempDir.path}/three/libreal.dylib')
+          ..parent.createSync(recursive: true)
+          ..writeAsBytesSync(
+            macho.generateStubMachO(
+              arch: 'arm64',
+              platform: macho.platformMacos,
+              minOs: macho.parsePackedVersion('10.15'),
+              sdkVersion: macho.parsePackedVersion('10.15'),
+              installName: '@rpath/libreal.dylib',
+            ),
+          );
+        final patchedStaged = '${tempDir.path}/staged_patched';
+        expect(
+          () => macho.main([
+            'copy-files',
+            '--platform',
+            'macos',
+            '--min-os',
+            '13.2',
+            '--sdk-version',
+            '13.2',
+            '--output-dir',
+            patchedStaged,
+            f1.path,
+            'libadd.dylib',
+          ]),
+          throwsA(isA<FormatException>()),
+        );
+
+        macho.main([
+          'copy-files',
+          '--platform',
+          'macos',
+          '--min-os',
+          '13.2',
+          '--sdk-version',
+          '13.2',
+          '--allow-non-macho',
+          'libadd.dylib',
+          '--output-dir',
+          patchedStaged,
+          machoLib.path,
+          'libreal.dylib',
+          f1.path,
+          'libadd.dylib',
+        ]);
+
+        final realCmds = macho.parseLoadCommands(
+          File('$patchedStaged/libreal.dylib').readAsBytesSync(),
+        );
+        final bvBd = ByteData.sublistView(
+          realCmds.singleWhere((c) => c.cmd == macho.lcBuildVersion).bytes,
+        );
+        expect(bvBd.getUint32(12, Endian.little), 0x000d0200);
+        expect(File('$patchedStaged/libadd.dylib').readAsStringSync(), 'add');
       },
     );
   });

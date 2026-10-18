@@ -192,10 +192,29 @@ _TOOL_SRCS = {
     "flutter_integration_test_runner.dart": ["bazel_test_protocol.dart"],
 }
 
+_TEST_DATA = {
+    "macho_edit_test": [
+        "@llvm//tools:llvm-lipo",
+        "@llvm//tools:llvm-objdump",
+        "@llvm//tools:llvm-otool",
+    ],
+}
+
+_TEST_ENV = {
+    "macho_edit_test": {
+        "LLVM_LIPO": "$(rlocationpath @llvm//tools:llvm-lipo)",
+        "LLVM_OBJDUMP": "$(rlocationpath @llvm//tools:llvm-objdump)",
+        "LLVM_OTOOL": "$(rlocationpath @llvm//tools:llvm-otool)",
+    },
+}
+
 [dart_test(
     name = name,
     srcs = [tool] + _TOOL_SRCS.get(tool, []),
+    data = _TEST_DATA.get(name, []),
+    env = _TEST_ENV.get(name, {}),
     main = "test/%s.dart" % name,
     target_compatible_with = HOST_COMPATIBLE,
     deps = ["@dev_tool_deps//:test"] + extra_deps,
 ) for name, (tool, extra_deps) in _UNIT_TESTS.items()]
+

@@ -11,18 +11,30 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
-// Mach-O 64-bit constants.
+// Mach-O 32-bit, 64-bit, and Universal (Fat) constants.
+const int mhMagic32 = 0xfeedface;
+const int mhCigam32 = 0xcefaedfe;
 const int mhMagic64 = 0xfeedfacf;
+const int mhCigam64 = 0xcffaedfe;
+const int fatMagic = 0xcafebabe;
+const int fatCigam = 0xbebafeca;
+const int fatMagic64 = 0xcafebabf;
+const int fatCigam64 = 0xbfbafeca;
 const int mhHeaderSize64 = 32;
 
 const int cpuArchAbi64 = 0x01000000;
-const int cpuTypeX86_64 = 0x00000007 | cpuArchAbi64; // 0x01000007
+const int cpuTypeI386 = 0x00000007;
+const int cpuTypeX86_64 = cpuTypeI386 | cpuArchAbi64; // 0x01000007
 const int cpuSubtypeX86_64All = 3;
-const int cpuTypeArm64 = 0x0000000c | cpuArchAbi64; // 0x0100000c
+const int cpuTypeArm = 0x0000000c;
+const int cpuTypeArm64 = cpuTypeArm | cpuArchAbi64; // 0x0100000c
 const int cpuSubtypeArm64All = 0;
 
 const int mhExecute = 0x2;
 const int mhDylib = 0x6;
+const int mhNoundefs = 0x00000001;
+const int mhDyldlink = 0x00000004;
+const int mhTwolevel = 0x00000080;
 const int mhNoReexportedDylibs = 0x00100000;
 const int mhPie = 0x00200000;
 
@@ -32,6 +44,7 @@ const int lcSymtab = 0x02;
 const int lcDysymtab = 0x0b;
 const int lcIdDylib = 0x0d;
 const int lcSegment64 = 0x19;
+const int lcUuid = 0x1b;
 const int lcRpath = 0x1c | lcReqDyld; // 0x8000001c
 const int lcCodeSignature = 0x1d;
 const int lcDyldInfo = 0x22;
@@ -59,7 +72,7 @@ const int csHashTypeSha256 = 2;
 void main(List<String> args) {
   if (args.isEmpty) {
     _usageError(
-      'Expected subcommand: "patch", "stub", "copy-assets", '
+      'Expected subcommand: "patch", "stub", "fat", "verify", "copy-assets", '
       '"assemble-macos-framework", or "copy-files".',
     );
   }
@@ -70,6 +83,10 @@ void main(List<String> args) {
       _runPatch(rest);
     case 'stub':
       _runStub(rest);
+    case 'fat':
+      _runFat(rest);
+    case 'verify':
+      _runVerify(rest);
     case 'copy-assets':
       _runCopyAssets(rest);
     case 'assemble-macos-framework':
@@ -78,8 +95,8 @@ void main(List<String> args) {
       _runCopyFiles(rest);
     default:
       _usageError(
-        'Unknown subcommand "$subcommand". Expected "patch", "stub", '
-        '"copy-assets", "assemble-macos-framework", or "copy-files".',
+        'Unknown subcommand "$subcommand". Expected "patch", "stub", "fat", '
+        '"verify", "copy-assets", "assemble-macos-framework", or "copy-files".',
       );
   }
 }
@@ -89,6 +106,52 @@ Never _usageError(String message) {
   exit(64);
 }
 
+String _basename(String path) {
+  final normalized = path.replaceAll(r'\', '/');
+  final parts = normalized.split('/').where((s) => s.isNotEmpty);
+  return parts.isEmpty ? path : parts.last;
+}
+
+String _stripExtension(String name) {
+  final dot = name.lastIndexOf('.');
+  return dot > 0 ? name.substring(0, dot) : name;
+}
+
+/// Checks whether a non-Mach-O or 32-bit binary is explicitly named in [allowList].
+bool _isAllowedNonMacho(
+  Set<String> allowList, {
+  required String inputPath,
+  String? outputPath,
+  String? installName,
+}) {
+  if (allowList.isEmpty) return false;
+  if (allowList.contains('*')) return true;
+
+  final candidates = <String>{};
+  void addPathCandidates(String? p) {
+    if (p == null || p.isEmpty) return;
+    candidates.add(p);
+    final base = _basename(p);
+    candidates.add(base);
+    final stem = _stripExtension(base);
+    candidates.add(stem);
+    if (stem.startsWith('lib') && stem.length > 3) {
+      candidates.add(stem.substring(3));
+    }
+    for (final seg in p.replaceAll(r'\', '/').split('/')) {
+      if (seg.endsWith('.framework')) {
+        candidates.add(seg);
+        candidates.add(seg.substring(0, seg.length - '.framework'.length));
+      }
+    }
+  }
+
+  addPathCandidates(inputPath);
+  addPathCandidates(outputPath);
+  addPathCandidates(installName);
+  return candidates.any(allowList.contains);
+}
+
 void _runPatch(List<String> args) {
   String? inputPath;
   String? outputPath;
@@ -96,11 +159,19 @@ void _runPatch(List<String> args) {
   String? minOsStr;
   String? sdkVersionStr;
   String? installName;
+  String? arch;
   final rpaths = <String>[];
-  var allowNonMacho = false;
+  final allowNonMacho = <String>{};
 
   for (var i = 0; i < args.length; i++) {
     final arg = args[i];
+    if (arg.startsWith('--allow-non-macho=')) {
+      final value = arg.substring('--allow-non-macho='.length);
+      for (final part in value.split(',')) {
+        if (part.isNotEmpty) allowNonMacho.add(part);
+      }
+      continue;
+    }
     switch (arg) {
       case '--input':
         if (++i >= args.length) _usageError('--input requires a value');
@@ -120,13 +191,24 @@ void _runPatch(List<String> args) {
       case '--install-name':
         if (++i >= args.length) _usageError('--install-name requires a value');
         installName = args[i];
+      case '--arch':
+        if (++i >= args.length) _usageError('--arch requires a value');
+        arch = args[i];
       case '--rpath':
         if (++i >= args.length) _usageError('--rpath requires a value');
         for (final part in args[i].split(',')) {
           if (part.isNotEmpty) rpaths.add(part);
         }
       case '--allow-non-macho':
-        allowNonMacho = true;
+        if (i + 1 >= args.length || args[i + 1].startsWith('--')) {
+          _usageError(
+            '--allow-non-macho requires an explicit binary or framework name',
+          );
+        }
+        i++;
+        for (final part in args[i].split(',')) {
+          if (part.isNotEmpty) allowNonMacho.add(part);
+        }
       default:
         _usageError('Unknown flag for patch: $arg');
     }
@@ -134,19 +216,6 @@ void _runPatch(List<String> args) {
 
   if (inputPath == null || outputPath == null) {
     _usageError('patch requires --input and --output');
-  }
-
-  final inputBytes = File(inputPath).readAsBytesSync();
-  if (!isMachO64(inputBytes)) {
-    if (allowNonMacho) {
-      final outFile = File(outputPath);
-      outFile.parent.createSync(recursive: true);
-      outFile.writeAsBytesSync(inputBytes);
-      return;
-    }
-    throw FormatException(
-      'Input file "$inputPath" is not a 64-bit little-endian Mach-O binary.',
-    );
   }
 
   int? platform;
@@ -163,14 +232,55 @@ void _runPatch(List<String> args) {
         : minOs;
   }
 
-  final patched = patchMachO(
-    inputBytes,
-    platform: platform,
-    minOs: minOs,
-    sdkVersion: sdkVersion,
+  final inputBytes = File(inputPath).readAsBytesSync();
+  final isAllowed = _isAllowedNonMacho(
+    allowNonMacho,
+    inputPath: inputPath,
+    outputPath: outputPath,
     installName: installName,
-    rpaths: rpaths,
   );
+
+  if (!isMachO64(inputBytes) && !isFatMachO(inputBytes)) {
+    if (isAllowed) {
+      final outFile = File(outputPath);
+      outFile.parent.createSync(recursive: true);
+      outFile.writeAsBytesSync(inputBytes);
+      return;
+    }
+    if (isMachO32(inputBytes)) {
+      throw FormatException(
+        'Input file "$inputPath" is an unsupported 32-bit Mach-O binary '
+        '(0xfeedface). Only 64-bit Mach-O binaries are supported unless '
+        'explicitly listed in allow_non_macho.',
+      );
+    }
+    throw FormatException(
+      'Input file "$inputPath" is a non-Mach-O file (not a 64-bit or '
+      'universal Mach-O binary). Only Mach-O binaries are permitted unless '
+      'explicitly listed in allow_non_macho.',
+    );
+  }
+
+  final Uint8List patched;
+  try {
+    patched = patchMachO(
+      inputBytes,
+      platform: platform,
+      minOs: minOs,
+      sdkVersion: sdkVersion,
+      installName: installName,
+      rpaths: rpaths,
+      arch: arch,
+    );
+  } on FormatException catch (e) {
+    if (isAllowed) {
+      final outFile = File(outputPath);
+      outFile.parent.createSync(recursive: true);
+      outFile.writeAsBytesSync(inputBytes);
+      return;
+    }
+    throw FormatException('Input file "$inputPath": ${e.message}');
+  }
 
   final outFile = File(outputPath);
   outFile.parent.createSync(recursive: true);
@@ -419,13 +529,45 @@ void _runAssembleMacosFramework(List<String> args) {
 
 void _runCopyFiles(List<String> args) {
   String? outputDirPath;
+  String? platformName;
+  String? minOsStr;
+  String? sdkVersionStr;
+  String? arch;
+  final allowNonMacho = <String>{};
   final positional = <String>[];
 
   for (var i = 0; i < args.length; i++) {
     final arg = args[i];
-    if (arg == '--output-dir') {
+    if (arg.startsWith('--allow-non-macho=')) {
+      final value = arg.substring('--allow-non-macho='.length);
+      for (final part in value.split(',')) {
+        if (part.isNotEmpty) allowNonMacho.add(part);
+      }
+    } else if (arg == '--output-dir') {
       if (++i >= args.length) _usageError('--output-dir requires a value');
       outputDirPath = args[i];
+    } else if (arg == '--platform') {
+      if (++i >= args.length) _usageError('--platform requires a value');
+      platformName = args[i];
+    } else if (arg == '--min-os') {
+      if (++i >= args.length) _usageError('--min-os requires a value');
+      minOsStr = args[i];
+    } else if (arg == '--sdk-version') {
+      if (++i >= args.length) _usageError('--sdk-version requires a value');
+      sdkVersionStr = args[i];
+    } else if (arg == '--arch') {
+      if (++i >= args.length) _usageError('--arch requires a value');
+      arch = args[i];
+    } else if (arg == '--allow-non-macho') {
+      if (i + 1 >= args.length || args[i + 1].startsWith('--')) {
+        _usageError(
+          '--allow-non-macho requires an explicit binary or framework name',
+        );
+      }
+      i++;
+      for (final part in args[i].split(',')) {
+        if (part.isNotEmpty) allowNonMacho.add(part);
+      }
     } else if (arg.startsWith('--')) {
       _usageError('Unknown flag for copy-files: $arg');
     } else {
@@ -435,6 +577,20 @@ void _runCopyFiles(List<String> args) {
 
   if (outputDirPath == null) {
     _usageError('copy-files requires --output-dir');
+  }
+
+  int? platform;
+  int? minOs;
+  int? sdkVersion;
+  if (platformName != null || minOsStr != null) {
+    if (platformName == null || minOsStr == null) {
+      _usageError('--platform and --min-os must be provided together');
+    }
+    platform = parsePlatform(platformName);
+    minOs = parsePackedVersion(minOsStr);
+    sdkVersion = sdkVersionStr != null
+        ? parsePackedVersion(sdkVersionStr)
+        : minOs;
   }
 
   final outDir = Directory(outputDirPath)..createSync(recursive: true);
@@ -453,8 +609,177 @@ void _runCopyFiles(List<String> args) {
       ).pathSegments.where((s) => s.isNotEmpty).last;
       i += 1;
     }
-    File(srcPath).copySync('${outDir.path}/$destName');
+    final destPath = '${outDir.path}/$destName';
+    if (platform != null && minOs != null) {
+      final inputBytes = File(srcPath).readAsBytesSync();
+      final isAllowed = _isAllowedNonMacho(
+        allowNonMacho,
+        inputPath: srcPath,
+        outputPath: destName,
+      );
+      if (!isMachO64(inputBytes) && !isFatMachO(inputBytes)) {
+        if (isAllowed) {
+          File(destPath).writeAsBytesSync(inputBytes);
+          continue;
+        }
+        if (isMachO32(inputBytes)) {
+          throw FormatException(
+            'Input file "$srcPath" ("$destName") is an unsupported 32-bit '
+            'Mach-O binary (0xfeedface). Only 64-bit Mach-O binaries are '
+            'supported unless explicitly listed in allow_non_macho.',
+          );
+        }
+        throw FormatException(
+          'Input file "$srcPath" ("$destName") is a non-Mach-O file (not a '
+          '64-bit or universal Mach-O binary). Only Mach-O binaries are '
+          'permitted unless explicitly listed in allow_non_macho.',
+        );
+      }
+      try {
+        final patched = patchMachO(
+          inputBytes,
+          platform: platform,
+          minOs: minOs,
+          sdkVersion: sdkVersion,
+          arch: arch,
+        );
+        File(destPath).writeAsBytesSync(patched);
+      } on FormatException catch (e) {
+        if (isAllowed) {
+          File(destPath).writeAsBytesSync(inputBytes);
+          continue;
+        }
+        throw FormatException(
+          'Input file "$srcPath" ("$destName"): ${e.message}',
+        );
+      }
+    } else {
+      File(srcPath).copySync(destPath);
+    }
   }
+}
+
+void _runFat(List<String> args) {
+  String? outputPath;
+  final slicePaths = <String>[];
+
+  for (var i = 0; i < args.length; i++) {
+    final arg = args[i];
+    if (arg == '--output') {
+      if (++i >= args.length) _usageError('--output requires a value');
+      outputPath = args[i];
+    } else if (arg.startsWith('--')) {
+      _usageError('Unknown flag for fat: $arg');
+    } else {
+      slicePaths.add(arg);
+    }
+  }
+
+  if (outputPath == null || slicePaths.isEmpty) {
+    _usageError('fat requires --output and at least one input slice path');
+  }
+
+  final slices = <FatSlice>[];
+  for (final p in slicePaths) {
+    final bytes = File(p).readAsBytesSync();
+    if (!isMachO64(bytes) && !isMachO32(bytes)) {
+      throw FormatException('Input slice "$p" is not a thin Mach-O binary.');
+    }
+    final bd = ByteData.sublistView(bytes);
+    final cputype = bd.getUint32(4, Endian.little);
+    final cpusubtype = bd.getUint32(8, Endian.little);
+    slices.add(
+      FatSlice(cputype: cputype, cpusubtype: cpusubtype, bytes: bytes),
+    );
+  }
+
+  final out = buildFatMachO(slices);
+  final outFile = File(outputPath);
+  outFile.parent.createSync(recursive: true);
+  outFile.writeAsBytesSync(out);
+}
+
+void _runVerify(List<String> args) {
+  String? inputPath;
+  String? binaryRelpath;
+  String? objdumpPath;
+  String? outputPath;
+  final expectedSubstrings = <String>[];
+
+  for (var i = 0; i < args.length; i++) {
+    final arg = args[i];
+    switch (arg) {
+      case '--input':
+        if (++i >= args.length) _usageError('--input requires a value');
+        inputPath = args[i];
+      case '--binary-relpath':
+        if (++i >= args.length) {
+          _usageError('--binary-relpath requires a value');
+        }
+        binaryRelpath = args[i];
+      case '--objdump':
+        if (++i >= args.length) _usageError('--objdump requires a value');
+        objdumpPath = args[i];
+      case '--expect':
+        if (++i >= args.length) _usageError('--expect requires a value');
+        expectedSubstrings.add(args[i]);
+      case '--output':
+        if (++i >= args.length) _usageError('--output requires a value');
+        outputPath = args[i];
+      default:
+        _usageError('Unknown flag for verify: $arg');
+    }
+  }
+
+  if (inputPath == null || outputPath == null) {
+    _usageError('verify requires --input and --output');
+  }
+
+  final targetPath = binaryRelpath != null && binaryRelpath.isNotEmpty
+      ? '$inputPath/$binaryRelpath'
+      : inputPath;
+  final bytes = File(targetPath).readAsBytesSync();
+  if (!isMachO64(bytes) && !isFatMachO(bytes)) {
+    throw FormatException(
+      'File "$targetPath" is not a 64-bit or universal Mach-O binary.',
+    );
+  }
+  if (isFatMachO(bytes)) {
+    for (final s in extractFatSlices(bytes)) {
+      parseLoadCommands(s.bytes);
+    }
+  } else {
+    parseLoadCommands(bytes);
+  }
+
+  if (objdumpPath != null && objdumpPath.isNotEmpty) {
+    final res = Process.runSync(objdumpPath, [
+      '--macho',
+      '--private-headers',
+      '--dylib-id',
+      '--arch=all',
+      targetPath,
+    ]);
+    if (res.exitCode != 0) {
+      throw StateError(
+        'llvm-objdump failed on "$targetPath" (exit ${res.exitCode}):\n'
+        '${res.stderr}',
+      );
+    }
+    final stdoutStr = res.stdout as String;
+    for (final expected in expectedSubstrings) {
+      if (!stdoutStr.contains(expected)) {
+        throw StateError(
+          'Expected substring "$expected" not found in llvm-objdump output for '
+          '"$targetPath":\n$stdoutStr',
+        );
+      }
+    }
+  }
+
+  final outFile = File(outputPath);
+  outFile.parent.createSync(recursive: true);
+  outFile.writeAsStringSync('verified\n');
 }
 
 /// Returns true if [bytes] begins with a 64-bit little-endian Mach-O header.
@@ -462,6 +787,210 @@ bool isMachO64(Uint8List bytes) {
   if (bytes.length < mhHeaderSize64) return false;
   final bd = ByteData.sublistView(bytes);
   return bd.getUint32(0, Endian.little) == mhMagic64;
+}
+
+/// Returns true if [bytes] begins with a 32-bit Mach-O magic (`MH_MAGIC` or `MH_CIGAM`).
+bool isMachO32(Uint8List bytes) {
+  if (bytes.length < 4) return false;
+  final bd = ByteData.sublistView(bytes);
+  final magic = bd.getUint32(0, Endian.little);
+  return magic == mhMagic32 || magic == mhCigam32;
+}
+
+/// Returns true if [bytes] begins with a Universal (Fat) Mach-O header
+/// (`FAT_MAGIC` `0xcafebabe` or `FAT_MAGIC_64` `0xcafebabf`).
+bool isFatMachO(Uint8List bytes) {
+  if (bytes.length < 8) return false;
+  final bd = ByteData.sublistView(bytes);
+  final magicBE = bd.getUint32(0, Endian.big);
+  if (magicBE == fatMagic || magicBE == fatMagic64) {
+    final nfat = bd.getUint32(4, Endian.big);
+    return nfat >= 1 && nfat <= 32;
+  }
+  final magicLE = bd.getUint32(0, Endian.little);
+  if (magicLE == fatMagic || magicLE == fatMagic64) {
+    final nfat = bd.getUint32(4, Endian.little);
+    return nfat >= 1 && nfat <= 32;
+  }
+  return false;
+}
+
+/// Represents a single architecture slice inside a universal (fat) Mach-O binary.
+class FatSlice {
+  final int cputype;
+  final int cpusubtype;
+  final int align;
+  final Uint8List bytes;
+
+  FatSlice({
+    required this.cputype,
+    required this.cpusubtype,
+    required this.bytes,
+    int? align,
+  }) : align = align ?? (cputype == cpuTypeArm64 ? 14 : 12);
+}
+
+/// Extracts all architecture slices from a universal (fat) Mach-O binary.
+List<FatSlice> extractFatSlices(Uint8List bytes) {
+  if (bytes.length < 8) {
+    throw const FormatException('Not a universal (fat) Mach-O binary.');
+  }
+  final bd = ByteData.sublistView(bytes);
+  final magicBE = bd.getUint32(0, Endian.big);
+  final magicLE = bd.getUint32(0, Endian.little);
+  late final Endian headerEndian;
+  late final bool is64;
+  if (magicBE == fatMagic) {
+    headerEndian = Endian.big;
+    is64 = false;
+  } else if (magicBE == fatMagic64) {
+    headerEndian = Endian.big;
+    is64 = true;
+  } else if (magicLE == fatMagic) {
+    headerEndian = Endian.little;
+    is64 = false;
+  } else if (magicLE == fatMagic64) {
+    headerEndian = Endian.little;
+    is64 = true;
+  } else {
+    throw const FormatException('Not a universal (fat) Mach-O binary.');
+  }
+
+  final nfatArch = bd.getUint32(4, headerEndian);
+  if (nfatArch == 0 || nfatArch > 32) {
+    throw FormatException('Invalid fat Mach-O nfat_arch count: $nfatArch.');
+  }
+  final archEntrySize = is64 ? 32 : 20;
+  final tableEnd = 8 + nfatArch * archEntrySize;
+  if (tableEnd > bytes.length) {
+    throw const FormatException('Truncated fat Mach-O architecture table.');
+  }
+
+  final slices = <FatSlice>[];
+  for (var i = 0; i < nfatArch; i++) {
+    final entryOff = 8 + i * archEntrySize;
+    final cputype = bd.getUint32(entryOff, headerEndian);
+    final cpusubtype = bd.getUint32(entryOff + 4, headerEndian);
+    final sliceOffset = is64
+        ? bd.getUint64(entryOff + 8, headerEndian)
+        : bd.getUint32(entryOff + 8, headerEndian);
+    final sliceSize = is64
+        ? bd.getUint64(entryOff + 16, headerEndian)
+        : bd.getUint32(entryOff + 12, headerEndian);
+    final align = is64
+        ? bd.getUint32(entryOff + 24, headerEndian)
+        : bd.getUint32(entryOff + 16, headerEndian);
+    if (sliceOffset < tableEnd ||
+        sliceSize == 0 ||
+        sliceOffset + sliceSize > bytes.length) {
+      throw FormatException(
+        'Fat Mach-O slice $i (offset $sliceOffset, size $sliceSize) is out of '
+        'bounds (file length ${bytes.length}).',
+      );
+    }
+    slices.add(
+      FatSlice(
+        cputype: cputype,
+        cpusubtype: cpusubtype,
+        align: align,
+        bytes: Uint8List.fromList(
+          bytes.sublist(sliceOffset, sliceOffset + sliceSize),
+        ),
+      ),
+    );
+  }
+  return slices;
+}
+
+/// Builds a universal (fat) Mach-O binary from [slices].
+Uint8List buildFatMachO(List<FatSlice> slices, {bool fat64 = false}) {
+  if (slices.isEmpty) {
+    throw ArgumentError.value(
+      slices,
+      'slices',
+      'Must contain at least one slice.',
+    );
+  }
+  final archEntrySize = fat64 ? 32 : 20;
+  final headerAndTableSize = 8 + slices.length * archEntrySize;
+  final sliceOffsets = <int>[];
+  var currentOffset = headerAndTableSize;
+  for (final s in slices) {
+    final effAlign = s.align.clamp(0, 20);
+    final alignment = 1 << effAlign;
+    currentOffset = (currentOffset + alignment - 1) & ~(alignment - 1);
+    sliceOffsets.add(currentOffset);
+    currentOffset += s.bytes.length;
+  }
+
+  final out = Uint8List(currentOffset);
+  final bd = ByteData.sublistView(out);
+  bd.setUint32(0, fat64 ? fatMagic64 : fatMagic, Endian.big);
+  bd.setUint32(4, slices.length, Endian.big);
+  for (var i = 0; i < slices.length; i++) {
+    final s = slices[i];
+    final entryOff = 8 + i * archEntrySize;
+    final off = sliceOffsets[i];
+    bd.setUint32(entryOff, s.cputype, Endian.big);
+    bd.setUint32(entryOff + 4, s.cpusubtype, Endian.big);
+    if (fat64) {
+      bd.setUint64(entryOff + 8, off, Endian.big);
+      bd.setUint64(entryOff + 16, s.bytes.length, Endian.big);
+      bd.setUint32(entryOff + 24, s.align, Endian.big);
+      bd.setUint32(entryOff + 28, 0, Endian.big);
+    } else {
+      bd.setUint32(entryOff + 8, off, Endian.big);
+      bd.setUint32(entryOff + 12, s.bytes.length, Endian.big);
+      bd.setUint32(entryOff + 16, s.align, Endian.big);
+    }
+    out.setRange(off, off + s.bytes.length, s.bytes);
+  }
+  return out;
+}
+
+int _cpuTypeForArch(String arch) {
+  switch (arch) {
+    case 'arm64':
+      return cpuTypeArm64;
+    case 'x86_64':
+      return cpuTypeX86_64;
+    default:
+      throw ArgumentError.value(arch, 'arch', 'Expected "arm64" or "x86_64".');
+  }
+}
+
+/// Extracts the single 64-bit Mach-O slice matching [arch] (`arm64` or `x86_64`)
+/// from a universal (fat) Mach-O binary.
+Uint8List thinFatMachO(Uint8List bytes, String arch) {
+  final targetCpuType = _cpuTypeForArch(arch);
+  final slices = extractFatSlices(bytes);
+  for (final s in slices) {
+    if (s.cputype == targetCpuType) {
+      if (isMachO32(s.bytes) || (s.cputype & cpuArchAbi64) == 0) {
+        throw FormatException(
+          'Fat Mach-O slice for "$arch" is an unsupported 32-bit Mach-O binary.',
+        );
+      }
+      if (!isMachO64(s.bytes)) {
+        throw FormatException(
+          'Fat Mach-O slice for "$arch" is not a valid 64-bit Mach-O binary.',
+        );
+      }
+      return s.bytes;
+    }
+  }
+  final has32Bit = slices.any(
+    (s) => isMachO32(s.bytes) || (s.cputype & cpuArchAbi64) == 0,
+  );
+  if (has32Bit) {
+    throw FormatException(
+      'Fat Mach-O binary contains unsupported 32-bit Mach-O slice(s) and no '
+      '64-bit slice for architecture "$arch".',
+    );
+  }
+  throw FormatException(
+    'Fat Mach-O binary does not contain a slice for architecture "$arch".',
+  );
 }
 
 /// Parses a platform name (`ios`, `iossim`, `macos`) into its Mach-O constant.
@@ -510,6 +1039,75 @@ class LoadCommand {
   LoadCommand(this.cmd, this.bytes);
 
   int get cmdsize => bytes.length;
+}
+
+/// Builds a 72-byte `LC_SEGMENT_64` load command with 0 sections.
+LoadCommand buildLcSegment64({
+  required String segname,
+  required int vmaddr,
+  required int vmsize,
+  required int fileoff,
+  required int filesize,
+  required int maxprot,
+  required int initprot,
+  int nsects = 0,
+  int flags = 0,
+}) {
+  final buf = Uint8List(72);
+  final bd = ByteData.sublistView(buf);
+  bd.setUint32(0, lcSegment64, Endian.little);
+  bd.setUint32(4, 72, Endian.little);
+  final nameBytes = ascii.encode(segname);
+  buf.setRange(8, 8 + math.min<int>(16, nameBytes.length), nameBytes);
+  bd.setUint64(24, vmaddr, Endian.little);
+  bd.setUint64(32, vmsize, Endian.little);
+  bd.setUint64(40, fileoff, Endian.little);
+  bd.setUint64(48, filesize, Endian.little);
+  bd.setUint32(56, maxprot, Endian.little);
+  bd.setUint32(60, initprot, Endian.little);
+  bd.setUint32(64, nsects, Endian.little);
+  bd.setUint32(68, flags, Endian.little);
+  return LoadCommand(lcSegment64, buf);
+}
+
+/// Builds a 24-byte `LC_SYMTAB` load command.
+LoadCommand buildLcSymtab({
+  required int symoff,
+  required int nsyms,
+  required int stroff,
+  required int strsize,
+}) {
+  final buf = Uint8List(24);
+  final bd = ByteData.sublistView(buf);
+  bd.setUint32(0, lcSymtab, Endian.little);
+  bd.setUint32(4, 24, Endian.little);
+  bd.setUint32(8, symoff, Endian.little);
+  bd.setUint32(12, nsyms, Endian.little);
+  bd.setUint32(16, stroff, Endian.little);
+  bd.setUint32(20, strsize, Endian.little);
+  return LoadCommand(lcSymtab, buf);
+}
+
+/// Builds an 80-byte `LC_DYSYMTAB` load command with empty symbol tables.
+LoadCommand buildLcDysymtab() {
+  final buf = Uint8List(80);
+  final bd = ByteData.sublistView(buf);
+  bd.setUint32(0, lcDysymtab, Endian.little);
+  bd.setUint32(4, 80, Endian.little);
+  return LoadCommand(lcDysymtab, buf);
+}
+
+/// Builds a 24-byte `LC_UUID` load command with the given 16-byte [uuid].
+LoadCommand buildLcUuid(Uint8List uuid) {
+  if (uuid.length != 16) {
+    throw ArgumentError.value(uuid.length, 'uuid.length', 'Must be 16 bytes.');
+  }
+  final buf = Uint8List(24);
+  final bd = ByteData.sublistView(buf);
+  bd.setUint32(0, lcUuid, Endian.little);
+  bd.setUint32(4, 24, Endian.little);
+  buf.setRange(8, 24, uuid);
+  return LoadCommand(lcUuid, buf);
 }
 
 /// Builds a 24-byte `LC_BUILD_VERSION` load command (`ntools = 0`).
@@ -580,6 +1178,11 @@ String _readLcString(Uint8List bytes, int offset) {
 /// Parses the load commands from a 64-bit Mach-O binary.
 List<LoadCommand> parseLoadCommands(Uint8List bytes) {
   if (!isMachO64(bytes)) {
+    if (isMachO32(bytes)) {
+      throw const FormatException(
+        'Unsupported 32-bit Mach-O binary; expected 64-bit Mach-O.',
+      );
+    }
     throw const FormatException('Not a 64-bit little-endian Mach-O binary.');
   }
   final bd = ByteData.sublistView(bytes);
@@ -672,8 +1275,17 @@ int _findFirstPayloadOffset(List<LoadCommand> commands, int totalLength) {
   return minOffset;
 }
 
-/// Patches a 64-bit Mach-O binary in memory and recomputes its embedded
-/// `LC_CODE_SIGNATURE` SHA-256 page hashes if present.
+/// Patches a 64-bit or universal (fat) Mach-O binary in memory and recomputes
+/// its embedded `LC_CODE_SIGNATURE` SHA-256 page hashes if present.
+///
+/// When [inputBytes] is a universal (fat) Mach-O binary:
+/// - If [arch] is provided (`"arm64"` or `"x86_64"`), the fat binary is thinned
+///   to that slice and the slice is patched.
+/// - Otherwise, every slice in the fat binary is patched and reassembled into
+///   a universal (fat) Mach-O binary.
+///
+/// Throws [FormatException] if [inputBytes] (or any slice being patched) is a
+/// 32-bit Mach-O binary or non-Mach-O data.
 Uint8List patchMachO(
   Uint8List inputBytes, {
   int? platform,
@@ -681,10 +1293,103 @@ Uint8List patchMachO(
   int? sdkVersion,
   String? installName,
   List<String> rpaths = const [],
+  String? arch,
 }) {
-  if (!isMachO64(inputBytes)) {
-    throw const FormatException('Not a 64-bit little-endian Mach-O binary.');
+  if (isFatMachO(inputBytes)) {
+    if (arch != null) {
+      final thinSlice = thinFatMachO(inputBytes, arch);
+      return _patchSingleMachO64(
+        thinSlice,
+        platform: platform,
+        minOs: minOs,
+        sdkVersion: sdkVersion,
+        installName: installName,
+        rpaths: rpaths,
+      );
+    }
+    final slices = extractFatSlices(inputBytes);
+    final bd = ByteData.sublistView(inputBytes);
+    final isFat64 =
+        bd.getUint32(0, Endian.big) == fatMagic64 ||
+        bd.getUint32(0, Endian.little) == fatMagic64;
+    final patchedSlices = <FatSlice>[];
+    for (var i = 0; i < slices.length; i++) {
+      final s = slices[i];
+      if (isMachO32(s.bytes) || (s.cputype & cpuArchAbi64) == 0) {
+        throw FormatException(
+          'Fat Mach-O slice $i (cputype 0x${s.cputype.toRadixString(16)}) is '
+          'an unsupported 32-bit Mach-O binary.',
+        );
+      }
+      if (!isMachO64(s.bytes)) {
+        throw FormatException(
+          'Fat Mach-O slice $i is not a valid 64-bit Mach-O binary.',
+        );
+      }
+      final patchedBytes = _patchSingleMachO64(
+        s.bytes,
+        platform: platform,
+        minOs: minOs,
+        sdkVersion: sdkVersion,
+        installName: installName,
+        rpaths: rpaths,
+      );
+      patchedSlices.add(
+        FatSlice(
+          cputype: s.cputype,
+          cpusubtype: s.cpusubtype,
+          align: s.align,
+          bytes: patchedBytes,
+        ),
+      );
+    }
+    return buildFatMachO(patchedSlices, fat64: isFat64);
   }
+
+  if (isMachO32(inputBytes)) {
+    throw const FormatException(
+      'Unsupported 32-bit Mach-O binary (0xfeedface); only 64-bit Mach-O '
+      'binaries are supported.',
+    );
+  }
+
+  if (!isMachO64(inputBytes)) {
+    throw const FormatException(
+      'Not a Mach-O binary (expected 64-bit or universal Mach-O).',
+    );
+  }
+
+  if (arch != null) {
+    final targetCpu = _cpuTypeForArch(arch);
+    final actualCpu = ByteData.sublistView(
+      inputBytes,
+    ).getUint32(4, Endian.little);
+    if (actualCpu != targetCpu) {
+      throw FormatException(
+        'Mach-O cputype 0x${actualCpu.toRadixString(16)} does not match '
+        'requested architecture "$arch".',
+      );
+    }
+  }
+
+  return _patchSingleMachO64(
+    inputBytes,
+    platform: platform,
+    minOs: minOs,
+    sdkVersion: sdkVersion,
+    installName: installName,
+    rpaths: rpaths,
+  );
+}
+
+Uint8List _patchSingleMachO64(
+  Uint8List inputBytes, {
+  int? platform,
+  int? minOs,
+  int? sdkVersion,
+  String? installName,
+  List<String> rpaths = const [],
+}) {
   final bdIn = ByteData.sublistView(inputBytes);
   final oldSizeofcmds = bdIn.getUint32(20, Endian.little);
   final originalCommands = parseLoadCommands(inputBytes);
@@ -903,7 +1608,12 @@ void _resignEmbeddedCodeSignature(Uint8List bytes, LoadCommand codeSigLc) {
   }
 }
 
-/// Synthesizes a minimal valid 64-bit Mach-O `MH_DYLIB` or `MH_EXECUTE` stub binary.
+/// Synthesizes a well-formed 64-bit Mach-O `MH_DYLIB` or `MH_EXECUTE` stub binary.
+///
+/// Includes `__TEXT` and `__LINKEDIT` segments, `LC_ID_DYLIB` (for `MH_DYLIB`),
+/// `LC_SYMTAB`, `LC_DYSYMTAB`, a deterministic content-derived `LC_UUID`,
+/// `LC_BUILD_VERSION`, and `MH_NOUNDEFS | MH_DYLDLINK | MH_TWOLEVEL` flags
+/// so Apple tools (`codesign`, `otool`, `ld64`, `llvm-objdump`) accept it.
 Uint8List generateStubMachO({
   required String arch,
   required int platform,
@@ -927,23 +1637,40 @@ Uint8List generateStubMachO({
 
   // Page size: 16 KB (0x4000) for arm64, 4 KB (0x1000) for x86_64.
   final pageSize = arch == 'arm64' ? 0x4000 : 0x1000;
+  // 8-byte aligned empty string table (" \0" padded to 8 bytes) in __LINKEDIT.
+  const linkeditFileSize = 8;
 
   // LC_SEGMENT_64 (__TEXT) - 72 bytes (0 sections).
-  final textSeg = Uint8List(72);
-  final textBd = ByteData.sublistView(textSeg);
-  textBd.setUint32(0, lcSegment64, Endian.little);
-  textBd.setUint32(4, 72, Endian.little);
-  final segNameBytes = ascii.encode('__TEXT');
-  textSeg.setRange(8, 8 + segNameBytes.length, segNameBytes);
-  textBd.setUint64(24, 0, Endian.little); // vmaddr
-  textBd.setUint64(32, pageSize, Endian.little); // vmsize
-  textBd.setUint64(40, 0, Endian.little); // fileoff
-  textBd.setUint64(48, pageSize, Endian.little); // filesize
-  textBd.setUint32(56, 5, Endian.little); // maxprot = R|X
-  textBd.setUint32(60, 5, Endian.little); // initprot = R|X
-  textBd.setUint32(64, 0, Endian.little); // nsects = 0
-  textBd.setUint32(68, 0, Endian.little); // flags = 0
+  final textSeg = buildLcSegment64(
+    segname: '__TEXT',
+    vmaddr: 0,
+    vmsize: pageSize,
+    fileoff: 0,
+    filesize: pageSize,
+    maxprot: 5, // VM_PROT_READ | VM_PROT_EXECUTE
+    initprot: 5, // VM_PROT_READ | VM_PROT_EXECUTE
+  );
 
+  // LC_SEGMENT_64 (__LINKEDIT) - 72 bytes (0 sections).
+  final linkeditSeg = buildLcSegment64(
+    segname: '__LINKEDIT',
+    vmaddr: pageSize,
+    vmsize: pageSize,
+    fileoff: pageSize,
+    filesize: linkeditFileSize,
+    maxprot: 1, // VM_PROT_READ
+    initprot: 1, // VM_PROT_READ
+  );
+
+  // LC_SYMTAB and LC_DYSYMTAB pointing into __LINKEDIT.
+  final symtab = buildLcSymtab(
+    symoff: pageSize,
+    nsyms: 0,
+    stroff: pageSize,
+    strsize: linkeditFileSize,
+  );
+  final dysymtab = buildLcDysymtab();
+  final placeholderUuid = buildLcUuid(Uint8List(16));
   final buildVersion = buildLcBuildVersion(
     platform: platform,
     minos: minOs,
@@ -951,9 +1678,13 @@ Uint8List generateStubMachO({
   );
 
   final commands = <LoadCommand>[
-    LoadCommand(lcSegment64, textSeg),
+    textSeg,
+    linkeditSeg,
     if (fileType == mhDylib && installName.isNotEmpty)
       buildLcIdDylib(installName),
+    symtab,
+    dysymtab,
+    placeholderUuid,
     buildVersion,
     if (fileType == mhExecute)
       buildLcRpath(
@@ -968,7 +1699,13 @@ Uint8List generateStubMachO({
     sizeofcmds += lc.cmdsize;
   }
 
-  final out = Uint8List(pageSize);
+  final flags =
+      mhNoundefs |
+      mhDyldlink |
+      mhTwolevel |
+      (fileType == mhExecute ? mhPie : mhNoReexportedDylibs);
+
+  final out = Uint8List(pageSize + linkeditFileSize);
   final bd = ByteData.sublistView(out);
   bd.setUint32(0, mhMagic64, Endian.little);
   bd.setUint32(4, cputype, Endian.little);
@@ -976,17 +1713,31 @@ Uint8List generateStubMachO({
   bd.setUint32(12, fileType, Endian.little);
   bd.setUint32(16, commands.length, Endian.little);
   bd.setUint32(20, sizeofcmds, Endian.little);
-  bd.setUint32(
-    24,
-    fileType == mhExecute ? mhPie : mhNoReexportedDylibs,
-    Endian.little,
-  );
+  bd.setUint32(24, flags, Endian.little);
   bd.setUint32(28, 0, Endian.little);
 
   var offset = mhHeaderSize64;
+  var uuidDataOffset = -1;
   for (final lc in commands) {
+    if (lc.cmd == lcUuid) {
+      uuidDataOffset = offset + 8;
+    }
     out.setRange(offset, offset + lc.cmdsize, lc.bytes);
     offset += lc.cmdsize;
+  }
+
+  // Standard Mach-O string table begins with a leading space and NUL byte.
+  out[pageSize] = 0x20;
+  out[pageSize + 1] = 0x00;
+
+  // Compute deterministic UUID from the binary content (with UUID bytes zeroed),
+  // formatted as an RFC 4122 v5 UUID (matching ld64 / ld64.lld).
+  if (uuidDataOffset >= 0) {
+    final digest = sha256(out);
+    final uuid = Uint8List.fromList(digest.sublist(0, 16));
+    uuid[6] = (uuid[6] & 0x0f) | 0x50;
+    uuid[8] = (uuid[8] & 0x3f) | 0x80;
+    out.setRange(uuidDataOffset, uuidDataOffset + 16, uuid);
   }
 
   return out;
