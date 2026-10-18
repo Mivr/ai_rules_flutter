@@ -144,25 +144,6 @@ Uint8List encodeStandardMessage(Object? message) {
 
 // -- Icon tree shaking helpers -----------------------------------------------
 
-const Set<String> _knownIconFontFamilies = <String>{
-  'MaterialIcons',
-  'CupertinoIcons',
-};
-
-/// Returns true if [family] is a known Flutter icon font family
-/// (`MaterialIcons`, `CupertinoIcons`, or `packages/<pkg>/<family>`).
-bool isKnownIconFontFamily(String family) {
-  if (_knownIconFontFamilies.contains(family)) {
-    return true;
-  }
-  for (final iconFamily in _knownIconFontFamilies) {
-    if (family.startsWith('packages/') && family.endsWith('/$iconFamily')) {
-      return true;
-    }
-  }
-  return false;
-}
-
 /// Returns true if [copyKey] matches [assetPath] either exactly or on a `/`
 /// path-segment boundary (`packages/<pkg>/<assetPath>`).
 bool matchesFontAssetPath(String copyKey, String assetPath) {
@@ -327,7 +308,9 @@ Future<void> main(List<String> args) async {
         final pkg = m['fontPackage'] as String?;
         final codePoint = m['codePoint'] as int?;
         if (family != null && codePoint != null) {
-          final key = pkg == null ? family : 'packages/$pkg/$family';
+          final key = (pkg == null || pkg.isEmpty)
+              ? family
+              : 'packages/$pkg/$family';
           usedCodePoints.putIfAbsent(key, () => <int>{}).add(codePoint);
         }
       }
@@ -360,20 +343,9 @@ Future<void> main(List<String> args) async {
 
       if (matchedFamily != null) {
         final codePoints = usedCodePoints[matchedFamily];
-        // When a known icon font family (MaterialIcons / CupertinoIcons) has 0
-        // used icons, pass a single dummy space glyph (0x20 / '32') so
-        // font-subset strips the unused icon font down to ~1 KB instead of
-        // shipping the full 1.65 MB font, while leaving non-icon text fonts
-        // (`codePoints == null` and not a known icon font family) untouched.
-        final effectiveCodePoints =
-            (codePoints != null && codePoints.isNotEmpty)
-            ? codePoints
-            : (isKnownIconFontFamily(matchedFamily) ? const <int>{0x20} : null);
-        if (effectiveCodePoints != null) {
+        if (codePoints != null && codePoints.isNotEmpty) {
           // Run font-subset: code points are piped via stdin.
-          final codePointStr = effectiveCodePoints
-              .map((cp) => cp.toString())
-              .join(' ');
+          final codePointStr = codePoints.map((cp) => cp.toString()).join(' ');
           final success = await _runFontSubset(
             fontSubsetBin,
             dest,

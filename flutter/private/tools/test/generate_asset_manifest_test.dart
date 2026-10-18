@@ -1,30 +1,31 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:test/test.dart';
 
 // Import the library directly.
-import '../generate_asset_manifest.dart';
+import '../generate_asset_manifest.dart' as manifest;
 
 void main() {
   group('encodeStandardMessage', () {
     test('encodes null to empty bytes', () {
-      final result = encodeStandardMessage(null);
+      final result = manifest.encodeStandardMessage(null);
       expect(result, isEmpty);
     });
 
     test('encodes bool true to tag 1', () {
-      final result = encodeStandardMessage(true);
+      final result = manifest.encodeStandardMessage(true);
       expect(result[0], 1); // _tagTrue
     });
 
     test('encodes bool false to tag 2', () {
-      final result = encodeStandardMessage(false);
+      final result = manifest.encodeStandardMessage(false);
       expect(result[0], 2); // _tagFalse
     });
 
     test('encodes int32 to tag 3 + 4 bytes', () {
-      final result = encodeStandardMessage(42);
+      final result = manifest.encodeStandardMessage(42);
       expect(result[0], 3); // _tagInt32
       expect(result.length, 5); // 1 tag + 4 bytes
       // Decode the int32 value.
@@ -33,14 +34,14 @@ void main() {
     });
 
     test('encodes string to tag 7 + length + UTF-8 bytes', () {
-      final result = encodeStandardMessage('hello');
+      final result = manifest.encodeStandardMessage('hello');
       expect(result[0], 7); // _tagString
       expect(result[1], 5); // length of "hello" in UTF-8
       expect(utf8.decode(result.sublist(2)), 'hello');
     });
 
     test('encodes list to tag 12 + length + elements', () {
-      final result = encodeStandardMessage([true, false]);
+      final result = manifest.encodeStandardMessage([true, false]);
       expect(result[0], 12); // _tagList
       expect(result[1], 2); // 2 elements
       expect(result[2], 1); // true
@@ -48,7 +49,7 @@ void main() {
     });
 
     test('encodes map to tag 13 + length + key-value pairs', () {
-      final result = encodeStandardMessage({'a': true});
+      final result = manifest.encodeStandardMessage({'a': true});
       expect(result[0], 13); // _tagMap
       expect(result[1], 1); // 1 entry
       // Key: string "a"
@@ -61,13 +62,13 @@ void main() {
 
     test('encodes nested asset manifest structure', () {
       // Simulate a real asset manifest: Map<String, List<Map<String, Object>>>
-      final manifest = {
+      final manifestData = {
         'assets/logo.png': [
           {'asset': 'assets/logo.png'},
           {'asset': 'assets/2.0x/logo.png', 'dpr': 2.0},
         ],
       };
-      final result = encodeStandardMessage(manifest);
+      final result = manifest.encodeStandardMessage(manifestData);
       // Just verify it encodes without error and starts with map tag.
       expect(result[0], 13); // _tagMap
       expect(result.length, greaterThan(10));
@@ -75,15 +76,133 @@ void main() {
 
     test('writeSize encodes 1-byte, 2-byte, 4-byte sizes', () {
       // 1-byte: size < 254 — encode a short string
-      final short = encodeStandardMessage('hi');
+      final short = manifest.encodeStandardMessage('hi');
       expect(short[1], 2); // size fits in 1 byte
 
       // 2-byte: size 254..65535 — encode a long string
       final mediumStr = 'x' * 300;
-      final medium = encodeStandardMessage(mediumStr);
+      final medium = manifest.encodeStandardMessage(mediumStr);
       expect(medium[1], 254); // marker for 2-byte size
 
       // 4-byte: would need a huge string (65536+), skip for perf.
+    });
+  });
+
+  group('icon tree shaking', () {
+    late Directory tempDir;
+
+    setUp(() {
+      tempDir = Directory.systemTemp.createTempSync('asset_manifest_test_');
+    });
+
+    tearDown(() {
+      tempDir.deleteSync(recursive: true);
+    });
+
+    test('ships font families with zero const IconData usage whole', () async {
+      final materialFont = File('${tempDir.path}/MaterialIcons-Regular.otf')
+        ..writeAsBytesSync(List<int>.filled(1024, 0x4d));
+      final robotoFont = File('${tempDir.path}/Roboto-Regular.ttf')
+        ..writeAsBytesSync(List<int>.filled(512, 0x52));
+      final cupertinoFont = File('${tempDir.path}/CupertinoIcons.ttf')
+        ..writeAsBytesSync(List<int>.filled(768, 0x43));
+
+      // Fake const_finder reports only CupertinoIcons usage; MaterialIcons and
+      // Roboto have 0 const IconData instances (e.g., used via TextStyle or
+      // web-only paths) and must be copied whole without invoking font-subset.
+      final fakeConstFinder = File('${tempDir.path}/fake_const_finder.dart')
+        ..writeAsStringSync('''
+import 'dart:convert';
+void main(List<String> args) {
+  print(json.encode({
+    'constantInstances': [
+      {
+        'fontFamily': 'CupertinoIcons',
+        'fontPackage': 'cupertino_icons',
+        'codePoint': 0xf4c4,
+      },
+    ],
+    'nonConstantLocations': [],
+  }));
+}
+''');
+
+      // Fake font-subset writes the stdin code points into the output file so
+      // the test can verify which font was subsetted and with which code points.
+      final fakeFontSubset = File('${tempDir.path}/fake_font_subset.sh')
+        ..writeAsStringSync('''#!/bin/sh
+out="\$1"
+cat > "\$out"
+''');
+      Process.runSync('chmod', ['+x', fakeFontSubset.path]);
+
+      final configFile = File('${tempDir.path}/config.json')
+        ..writeAsStringSync(
+          json.encode({
+            'assets': <String, Object>{},
+            'fonts': [
+              {
+                'family': 'MaterialIcons',
+                'fonts': [
+                  {'asset': 'fonts/MaterialIcons-Regular.otf'},
+                ],
+              },
+              {
+                'family': 'Roboto',
+                'fonts': [
+                  {'asset': 'fonts/Roboto-Regular.ttf'},
+                ],
+              },
+              {
+                'family': 'packages/cupertino_icons/CupertinoIcons',
+                'fonts': [
+                  {
+                    'asset':
+                        'packages/cupertino_icons/assets/CupertinoIcons.ttf',
+                  },
+                ],
+              },
+            ],
+            'copies': {
+              'fonts/MaterialIcons-Regular.otf': materialFont.path,
+              'fonts/Roboto-Regular.ttf': robotoFont.path,
+              'packages/cupertino_icons/assets/CupertinoIcons.ttf':
+                  cupertinoFont.path,
+            },
+            'icon_tree_shaking': {
+              'dart': Platform.resolvedExecutable,
+              'const_finder': fakeConstFinder.path,
+              'font_subset': fakeFontSubset.path,
+              'kernel_dill': '${tempDir.path}/dummy.dill',
+            },
+          }),
+        );
+
+      final outDir = '${tempDir.path}/out';
+      await manifest.main([
+        '--config',
+        configFile.path,
+        '--output-dir',
+        outDir,
+      ]);
+
+      // MaterialIcons and Roboto had 0 const IconData usages -> shipped whole.
+      expect(
+        File('$outDir/fonts/MaterialIcons-Regular.otf').readAsBytesSync(),
+        equals(materialFont.readAsBytesSync()),
+      );
+      expect(
+        File('$outDir/fonts/Roboto-Regular.ttf').readAsBytesSync(),
+        equals(robotoFont.readAsBytesSync()),
+      );
+
+      // CupertinoIcons had 1 const IconData usage -> subsetted to 0xf4c4 (62660).
+      expect(
+        File(
+          '$outDir/packages/cupertino_icons/assets/CupertinoIcons.ttf',
+        ).readAsStringSync().trim(),
+        equals('${0xf4c4}'),
+      );
     });
   });
 }
