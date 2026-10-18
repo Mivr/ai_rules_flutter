@@ -288,6 +288,19 @@ exports_files(
         stack_mapper_select = "\n".join(stack_mapper_select_entries),
     )
 
+def _detect_host_platform(repository_ctx):
+    os_info = getattr(repository_ctx, "os", None)
+    if os_info == None:
+        return "linux-x64"
+    os_name = getattr(os_info, "name", "").lower()
+    arch = getattr(os_info, "arch", "").lower()
+    is_arm = arch in ("aarch64", "arm64")
+    if "mac" in os_name or "darwin" in os_name:
+        return "darwin-arm64" if is_arm else "darwin-x64"
+    if "windows" in os_name:
+        return "windows-x64"
+    return "linux-arm64" if is_arm else "linux-x64"
+
 def _flutter_web_sdk_repo_impl(repository_ctx):
     engine_revision = repository_ctx.attr.engine_revision
     if engine_revision:
@@ -320,6 +333,7 @@ def _flutter_web_sdk_repo_impl(repository_ctx):
         getattr(repository_ctx.attr, "user_repository_name", "flutter"),
     )
 
+    host_platform = _detect_host_platform(repository_ctx)
     default_rewritten = None
     for platform, info in resolved.items():
         rewritten = rewrite_web_sdk_libraries_json(
@@ -328,7 +342,7 @@ def _flutter_web_sdk_repo_impl(repository_ctx):
             source = source_name,
         )
         repository_ctx.file("web-sdk/libraries.%s.json" % platform, rewritten)
-        if default_rewritten == None or platform == "linux-x64":
+        if default_rewritten == None or platform == host_platform:
             default_rewritten = rewritten
 
     if default_rewritten != None:

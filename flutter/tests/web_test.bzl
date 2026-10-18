@@ -7,6 +7,7 @@ load(
     "//flutter/private:flutter_web_compile.bzl",
     "default_dart2js_optimization_level",
     "default_dart2wasm_optimization_level",
+    "flutter_dart2js_action",
     "resolve_web_minify",
     "resolve_web_optimization_level",
     "web_mode_defines",
@@ -246,7 +247,7 @@ def _assert_optimization_level(env, action, expected):
     )
 
 def _assert_dart2js_platform_binaries(env, action):
-    """Assert dart2js receives `--platform-binaries=<.../web-sdk/kernel>`."""
+    """Assert dart2js receives `--platform-binaries=<.../web-sdk/kernel>` and exec-platform `--libraries-spec`."""
     if action == None:
         return
     flags = [a for a in action.argv if a.startswith("--platform-binaries=")]
@@ -262,6 +263,35 @@ def _assert_dart2js_platform_binaries(env, action):
             flags[0].endswith("/web-sdk/kernel"),
             "--platform-binaries must point at web-sdk/kernel, got %r" % flags[0],
         )
+    spec_flags = [a for a in action.argv if a.startswith("--libraries-spec=")]
+    asserts.equals(
+        env,
+        1,
+        len(spec_flags),
+        "FlutterDart2JS must state --libraries-spec once: %s" % action.argv,
+    )
+    if spec_flags:
+        asserts.false(
+            env,
+            spec_flags[0].endswith("/web-sdk/libraries.json"),
+            "--libraries-spec must select exec-platform libraries.<platform>.json, got %r" % spec_flags[0],
+        )
+        asserts.true(
+            env,
+            "/web-sdk/libraries." in spec_flags[0] and spec_flags[0].endswith(".json"),
+            "--libraries-spec must point at web-sdk/libraries.<platform>.json, got %r" % spec_flags[0],
+        )
+    input_paths = [f.path for f in action.inputs.to_list()]
+    asserts.true(
+        env,
+        any(["/web-sdk/libraries." in p and not p.endswith("/web-sdk/libraries.json") for p in input_paths]),
+        "FlutterDart2JS inputs must contain exec-platform web-sdk/libraries.<platform>.json: %s" % input_paths,
+    )
+    asserts.true(
+        env,
+        any([p.endswith("/dart-sdk/lib/libraries.json") for p in input_paths]),
+        "FlutterDart2JS inputs must contain the exec platform's dart-sdk/lib/libraries.json: %s" % input_paths,
+    )
 
 def _default_basenames(env):
     target = analysistest.target_under_test(env)
@@ -1671,6 +1701,11 @@ def _setup_web_fixtures():
         scenario = "missing_libraries_entry",
         tags = ["manual"],
     )
+    _web_sdk_exec_probe(
+        name = "_web_sdk_exec_fixture",
+        main = "lib/web_fixture_main.dart",
+        tags = ["manual"],
+    )
 
 _VALID_WEB_SDK_LIBRARIES_JSON = """{
   "comment:0": "NOTE: THIS FILE IS GENERATED. DO NOT EDIT.",
@@ -1818,18 +1853,31 @@ def _web_sdk_repo_rewrite_and_build_test_impl(ctx):
 
     host_sdks = {
         Label("@@custom_darwin_arm64_sdk//:dart-sdk/lib/libraries.json"): "darwin-arm64",
+        Label("@@custom_darwin_x64_sdk//:dart-sdk/lib/libraries.json"): "darwin-x64",
+        Label("@@custom_windows_x64_sdk//:dart-sdk/lib/libraries.json"): "windows-x64",
         Label("@@custom_linux_x64_sdk//:dart-sdk/lib/libraries.json"): "linux-x64",
+        Label("@@custom_linux_arm64_sdk//:dart-sdk/lib/libraries.json"): "linux-arm64",
     }
     resolved = resolve_web_sdk_host_repos(host_sdks)
     asserts.equals(env, "custom_darwin_arm64_sdk", resolved["darwin-arm64"].repo_name)
+    asserts.equals(env, "custom_darwin_x64_sdk", resolved["darwin-x64"].repo_name)
+    asserts.equals(env, "custom_windows_x64_sdk", resolved["windows-x64"].repo_name)
     asserts.equals(env, "custom_linux_x64_sdk", resolved["linux-x64"].repo_name)
+    asserts.equals(env, "custom_linux_arm64_sdk", resolved["linux-arm64"].repo_name)
 
     build_content = generate_web_sdk_build(host_sdks)
     asserts.true(env, '":darwin-arm64": ["web-sdk/libraries.darwin-arm64.json"]' in build_content)
+    asserts.true(env, '":darwin-x64": ["web-sdk/libraries.darwin-x64.json"]' in build_content)
+    asserts.true(env, '":windows-x64": ["web-sdk/libraries.windows-x64.json"]' in build_content)
     asserts.true(env, '":linux-x64": ["web-sdk/libraries.linux-x64.json"]' in build_content)
+    asserts.true(env, '":linux-arm64": ["web-sdk/libraries.linux-arm64.json"]' in build_content)
     asserts.true(env, "custom_darwin_arm64_sdk//:dart-sdk/lib/libraries.json" in build_content)
+    asserts.true(env, "custom_darwin_x64_sdk//:dart-sdk/lib/libraries.json" in build_content)
+    asserts.true(env, "custom_windows_x64_sdk//:dart-sdk/lib/libraries.json" in build_content)
     asserts.true(env, "custom_linux_x64_sdk//:dart-sdk/lib/libraries.json" in build_content)
+    asserts.true(env, "custom_linux_arm64_sdk//:dart-sdk/lib/libraries.json" in build_content)
     asserts.true(env, "custom_darwin_arm64_sdk//:dart-sdk/lib/dev_compiler/ddc/ddc_module_loader.js" in build_content)
+    asserts.true(env, "custom_windows_x64_sdk//:dart-sdk/lib/dev_compiler/ddc/ddc_module_loader.js" in build_content)
     asserts.true(env, "custom_linux_x64_sdk//:dart-sdk/lib/dev_compiler/ddc/ddc_module_loader.js" in build_content)
 
     # Also exercise `flutter_web_sdk_repo_impl` directly with a fake repository_ctx
@@ -1838,6 +1886,7 @@ def _web_sdk_repo_rewrite_and_build_test_impl(ctx):
     written_files = {}
     fake_rctx = struct(
         name = "arbitrary_web_repo_name",
+        os = struct(name = "mac os x", arch = "aarch64"),
         attr = struct(
             engine_revision = "",
             sha256 = "",
@@ -1851,9 +1900,16 @@ def _web_sdk_repo_rewrite_and_build_test_impl(ctx):
     )
     flutter_web_sdk_repo_impl(fake_rctx)
     asserts.true(env, "web-sdk/libraries.darwin-arm64.json" in written_files)
+    asserts.true(env, "web-sdk/libraries.darwin-x64.json" in written_files)
+    asserts.true(env, "web-sdk/libraries.windows-x64.json" in written_files)
     asserts.true(env, "web-sdk/libraries.linux-x64.json" in written_files)
+    asserts.true(env, "web-sdk/libraries.linux-arm64.json" in written_files)
     asserts.true(env, "../../custom_darwin_arm64_sdk/dart-sdk/lib/libraries.json" in written_files["web-sdk/libraries.darwin-arm64.json"])
+    asserts.true(env, "../../custom_darwin_x64_sdk/dart-sdk/lib/libraries.json" in written_files["web-sdk/libraries.darwin-x64.json"])
+    asserts.true(env, "../../custom_windows_x64_sdk/dart-sdk/lib/libraries.json" in written_files["web-sdk/libraries.windows-x64.json"])
     asserts.true(env, "../../custom_linux_x64_sdk/dart-sdk/lib/libraries.json" in written_files["web-sdk/libraries.linux-x64.json"])
+    asserts.true(env, "../../custom_linux_arm64_sdk/dart-sdk/lib/libraries.json" in written_files["web-sdk/libraries.linux-arm64.json"])
+    asserts.true(env, "../../custom_darwin_arm64_sdk/dart-sdk/lib/libraries.json" in written_files["web-sdk/libraries.json"])
 
     return unittest.end(env)
 
@@ -1915,14 +1971,65 @@ _web_sdk_libraries_json_failure_test = analysistest.make(
     },
 )
 
+def _web_sdk_exec_probe_impl(ctx):
+    fake_dart = ctx.actions.declare_file(ctx.label.name + "_fake_dart")
+    ctx.actions.write(fake_dart, "", is_executable = True)
+    pkg_cfg = ctx.actions.declare_file(ctx.label.name + "_package_config.json")
+    ctx.actions.write(pkg_cfg, '{"configVersion": 2, "packages": []}\n')
+    out_dir = ctx.actions.declare_directory(ctx.label.name + "_dart2js")
+    flutter_dart2js_action(
+        ctx = ctx,
+        dart = fake_dart,
+        flutter_sdk_files = depset(),
+        web_sdk_files = [ctx.file._default_libraries_json] + ctx.files._libraries_json,
+        dart2js_platform_dill = ctx.file._dart2js_platform_dill,
+        main_dart = ctx.file.main,
+        srcs = [ctx.file.main],
+        package_config = pkg_cfg,
+        output_dir = out_dir,
+        mode = "release",
+    )
+    return [DefaultInfo(files = depset(ctx.files._libraries_json + [out_dir]))]
+
+_web_sdk_exec_probe = rule(
+    implementation = _web_sdk_exec_probe_impl,
+    attrs = {
+        "main": attr.label(allow_single_file = [".dart"], mandatory = True),
+        "_default_libraries_json": attr.label(
+            default = Label("@flutter_web_sdk//:web-sdk/libraries.json"),
+            allow_single_file = True,
+            cfg = "exec",
+        ),
+        "_libraries_json": attr.label(
+            default = Label("@flutter_web_sdk//:libraries_json"),
+            cfg = "exec",
+        ),
+        "_dart2js_platform_dill": attr.label(
+            default = Label("@flutter_web_sdk//:web-sdk/kernel/dart2js_platform.dill"),
+            allow_single_file = True,
+            cfg = "exec",
+        ),
+    },
+)
+
 def _web_sdk_exec_platform_selection_test_impl(ctx):
     """`@flutter_web_sdk//:libraries_json` selects `web-sdk/libraries.<platform>.json`."""
     env = analysistest.begin(ctx)
     tut = analysistest.target_under_test(env)
-    files = tut[DefaultInfo].files.to_list()
+    files = [f for f in tut[DefaultInfo].files.to_list() if f.basename.endswith(".json")]
     asserts.equals(env, 1, len(files))
     if files:
         asserts.equals(env, ctx.attr.expected_basename, files[0].basename)
+    js_actions = [a for a in analysistest.target_actions(env) if a.mnemonic == "FlutterDart2JS"]
+    if js_actions:
+        spec_flags = [a for a in js_actions[0].argv if a.startswith("--libraries-spec=")]
+        asserts.equals(env, 1, len(spec_flags))
+        if spec_flags:
+            asserts.true(
+                env,
+                spec_flags[0].endswith("/web-sdk/" + ctx.attr.expected_basename),
+                "--libraries-spec must end with /web-sdk/%s, got %r" % (ctx.attr.expected_basename, spec_flags[0]),
+            )
     return analysistest.end(env)
 
 def _make_web_sdk_platform_selection_test(platform_label):
@@ -1930,6 +2037,8 @@ def _make_web_sdk_platform_selection_test(platform_label):
         _web_sdk_exec_platform_selection_test_impl,
         config_settings = {
             "//command_line_option:platforms": str(Label(platform_label)),
+            "//command_line_option:host_platform": str(Label(platform_label)),
+            "//command_line_option:extra_execution_platforms": [str(Label(platform_label))],
         },
         attrs = {
             "expected_basename": attr.string(mandatory = True),
@@ -1939,6 +2048,7 @@ def _make_web_sdk_platform_selection_test(platform_label):
 _web_sdk_select_linux_x64_test = _make_web_sdk_platform_selection_test("//flutter/platforms:linux_x64")
 _web_sdk_select_linux_arm64_test = _make_web_sdk_platform_selection_test("//flutter/platforms:linux_arm64")
 _web_sdk_select_macos_arm64_test = _make_web_sdk_platform_selection_test("//flutter/platforms:macos_arm64")
+_web_sdk_select_macos_x64_test = _make_web_sdk_platform_selection_test("//flutter/platforms:macos_x64")
 _web_sdk_select_windows_x64_test = _make_web_sdk_platform_selection_test("//flutter/platforms:windows_x64")
 
 def web_test_suite(name):
@@ -1993,22 +2103,27 @@ def web_test_suite(name):
 
     _web_sdk_select_linux_x64_test(
         name = name + "_web_sdk_select_linux_x64",
-        target_under_test = "@flutter_web_sdk//:libraries_json",
+        target_under_test = ":_web_sdk_exec_fixture",
         expected_basename = "libraries.linux-x64.json",
     )
     _web_sdk_select_linux_arm64_test(
         name = name + "_web_sdk_select_linux_arm64",
-        target_under_test = "@flutter_web_sdk//:libraries_json",
+        target_under_test = ":_web_sdk_exec_fixture",
         expected_basename = "libraries.linux-arm64.json",
     )
     _web_sdk_select_macos_arm64_test(
         name = name + "_web_sdk_select_macos_arm64",
-        target_under_test = "@flutter_web_sdk//:libraries_json",
+        target_under_test = ":_web_sdk_exec_fixture",
         expected_basename = "libraries.darwin-arm64.json",
+    )
+    _web_sdk_select_macos_x64_test(
+        name = name + "_web_sdk_select_macos_x64",
+        target_under_test = ":_web_sdk_exec_fixture",
+        expected_basename = "libraries.darwin-x64.json",
     )
     _web_sdk_select_windows_x64_test(
         name = name + "_web_sdk_select_windows_x64",
-        target_under_test = "@flutter_web_sdk//:libraries_json",
+        target_under_test = ":_web_sdk_exec_fixture",
         expected_basename = "libraries.windows-x64.json",
     )
 

@@ -380,10 +380,10 @@ def flutter_dart2js_action(
     # (falling back to web-sdk/libraries.json one level above kernel/).
     libraries_spec = dart2js_platform_dill.dirname + "/../libraries.json"
     for f in web_sdk_files:
-        if "/web-sdk/libraries." in f.path and f.path.endswith(".json"):
+        if f.basename.startswith("libraries.") and f.basename != "libraries.json" and f.basename.endswith(".json"):
             libraries_spec = f.path
             break
-        elif f.path.endswith("/web-sdk/libraries.json"):
+        elif f.basename == "libraries.json" and "/web-sdk/" in f.path:
             libraries_spec = f.path
     args.add("--platform-binaries=" + dart2js_platform_dill.dirname)
     args.add("--libraries-spec=" + libraries_spec)

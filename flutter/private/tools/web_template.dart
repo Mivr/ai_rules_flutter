@@ -377,8 +377,9 @@ void _runWebCompile(List<String> args) {
 }
 
 void _runDart2Wasm(List<String> args) {
+  final exeSuffix = Platform.isWindows ? '.exe' : '';
   final sdkBin = File(Platform.resolvedExecutable).parent.path;
-  final dartaotruntime = '$sdkBin/dartaotruntime';
+  final dartaotruntime = '$sdkBin/dartaotruntime$exeSuffix';
 
   String? packagesPath;
   String? outputWasm;
@@ -417,7 +418,8 @@ void _runDart2Wasm(List<String> args) {
   final tmpDir = Directory.systemTemp.createTempSync('flutter_dart2wasm_');
   try {
     final cwdPath = Directory.current.absolute.path;
-    final cwdPrefix = cwdPath.endsWith('/') ? cwdPath : '$cwdPath/';
+    final normCwd = cwdPath.replaceAll(r'\', '/');
+    final cwdPrefix = normCwd.endsWith('/') ? normCwd : '$normCwd/';
     final pkgFile = File(packagesPath).absolute;
     final pkgJson =
         json.decode(pkgFile.readAsStringSync()) as Map<String, dynamic>;
@@ -427,14 +429,14 @@ void _runDart2Wasm(List<String> args) {
       final rootUri = p['rootUri'] as String;
       final resolved = pkgFile.uri.resolve(rootUri);
       if (resolved.scheme == 'file') {
-        final fsPath = resolved.toFilePath();
+        final fsPath = resolved.toFilePath().replaceAll(r'\', '/');
         if (fsPath.startsWith(cwdPrefix)) {
           var rel = fsPath.substring(cwdPrefix.length);
           if (rel.endsWith('/') && rel.length > 1) {
             rel = rel.substring(0, rel.length - 1);
           }
           p['rootUri'] = 'org-dartlang-app:///$rel';
-        } else if (fsPath == cwdPath || fsPath == cwdPrefix) {
+        } else if (fsPath == normCwd || fsPath == cwdPrefix) {
           p['rootUri'] = 'org-dartlang-app:///';
         } else {
           p['rootUri'] = resolved.toString();
@@ -445,15 +447,16 @@ void _runDart2Wasm(List<String> args) {
     File(rewrittenPkgPath).writeAsStringSync(json.encode(pkgJson));
 
     final tmpWasm = '${tmpDir.path}/main.dart.wasm';
+    final normMainDart = mainDart.replaceAll(r'\', '/');
     final wasmArgs = <String>[
       '$sdkBin/snapshots/dart2wasm_product.snapshot',
       ...extraOptions,
       '--packages=$rewrittenPkgPath',
       '--multi-root-scheme=org-dartlang-app',
       '--multi-root=$cwdPath',
-      '--wasm-opt=$sdkBin/utils/wasm-opt',
+      '--wasm-opt=$sdkBin/utils/wasm-opt$exeSuffix',
       ...forwardArgs,
-      'org-dartlang-app:///$mainDart',
+      'org-dartlang-app:///$normMainDart',
       tmpWasm,
     ];
     final res = Process.runSync(dartaotruntime, wasmArgs);
@@ -483,8 +486,9 @@ void _runDart2Wasm(List<String> args) {
 }
 
 void _runDart2Js(List<String> args) {
+  final exeSuffix = Platform.isWindows ? '.exe' : '';
   final sdkBin = File(Platform.resolvedExecutable).parent.path;
-  final dartaotruntime = '$sdkBin/dartaotruntime';
+  final dartaotruntime = '$sdkBin/dartaotruntime$exeSuffix';
 
   String? outJs;
   for (var i = 0; i < args.length; i++) {
