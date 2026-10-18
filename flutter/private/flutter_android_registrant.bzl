@@ -41,13 +41,14 @@ flutter_android_registrant = rule(
             providers = [FlutterApplicationInfo],
         ),
         "android_abi": attr.string(
-            doc = """Android ABI to build for ("arm64-v8a" or "x86_64").
+            doc = """Optional Android ABI override ("arm64-v8a" or "x86_64").
 
-Transitions `application` to the matching Android platform and configuration so
-it shares the exact same configuration as `flutter_android_bundle` instead of
-re-analyzing `application` in the outer/host configuration.""",
-            default = "arm64-v8a",
-            values = ANDROID_ABIS.keys(),
+When omitted, preserves the caller's configured Android platform/ABI (or
+transitions to Android while keeping the caller's architecture and
+`dynamic_mode`). When set (e.g. by `flutter_android_app`), transitions
+`application` to the matching Android ABI platform.""",
+            default = "",
+            values = [""] + ANDROID_ABIS.keys(),
         ),
         "_allowlist_function_transition": attr.label(
             default = "@bazel_tools//tools/allowlists/function_transition_allowlist",
@@ -105,9 +106,9 @@ flutter_android_plugins_aggregator = rule(
             providers = [FlutterApplicationInfo],
         ),
         "android_abi": attr.string(
-            doc = "Android ABI to build for (\"arm64-v8a\" or \"x86_64\").",
-            default = "arm64-v8a",
-            values = ANDROID_ABIS.keys(),
+            doc = "Optional Android ABI override (\"arm64-v8a\" or \"x86_64\").",
+            default = "",
+            values = [""] + ANDROID_ABIS.keys(),
         ),
         "_allowlist_function_transition": attr.label(
             default = "@bazel_tools//tools/allowlists/function_transition_allowlist",

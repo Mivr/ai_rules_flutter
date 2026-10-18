@@ -47,28 +47,57 @@ is a hard build error.
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
 load("//flutter/private:common.bzl", "ANDROID_ABIS", "android_elf_machine_for_abi", "android_platform_for_abi", "compute_android_jni_path", "resolve_exec_dart_vm")
 
-def _android_platform_transition_impl(_settings, attr):
+def _android_platform_transition_impl(settings, attr):
+    abi = getattr(attr, "android_abi", "")
+    if abi:
+        return {
+            "//command_line_option:platforms": [android_platform_for_abi(abi)],
+        }
+
+    for platform in settings["//command_line_option:platforms"]:
+        platform_str = str(platform).lower()
+        if "android" in platform_str:
+            return {
+                "//command_line_option:platforms": list(settings["//command_line_option:platforms"]),
+            }
+        if "x86_64" in platform_str or "x64" in platform_str or "amd64" in platform_str:
+            return {
+                "//command_line_option:platforms": [android_platform_for_abi("x86_64")],
+            }
+        if "arm64" in platform_str or "aarch64" in platform_str:
+            return {
+                "//command_line_option:platforms": [android_platform_for_abi("arm64-v8a")],
+            }
+
+    android_platforms = settings["//command_line_option:android_platforms"]
+    if android_platforms:
+        return {
+            "//command_line_option:platforms": list(android_platforms),
+        }
+
+    cpu = settings["//command_line_option:cpu"]
+    if cpu in ("x86_64", "x86", "x64", "amd64"):
+        return {
+            "//command_line_option:platforms": [android_platform_for_abi("x86_64")],
+        }
     return {
-        "//command_line_option:platforms": [android_platform_for_abi(attr.android_abi)],
-        "//command_line_option:dynamic_mode": "off",
+        "//command_line_option:platforms": [android_platform_for_abi("arm64-v8a")],
     }
 
 # Builds the bundle and everything behind it (the flutter_application, its
 # AOT compile, FFI cc deps, Native Assets) for the Android platform matching
-# `android_abi`. The ABI attribute is the single source of truth: the platform
-# is always derived from it, so the jar's lib/<abi>/ layout and the code inside
-# it cannot disagree — including when android_binary's own split transition
-# (--android_platforms) already re-configured this target.
-# Also normalizes `dynamic_mode = "off"` to match android_binary's split
-# transition (`deps`), so reaching the bundle via `android_binary.assets`
-# (`dynamic_mode = "default"`) and `android_binary.deps` (`dynamic_mode = "off"`)
-# collapses to a single configuration instead of building the application twice.
+# `android_abi` (or the caller's configured Android ABI when `android_abi` is
+# omitted on `flutter_android_registrant`). Only `//command_line_option:platforms`
+# changes; the caller's `dynamic_mode` and ABI are preserved.
 _android_platform_transition = transition(
     implementation = _android_platform_transition_impl,
-    inputs = [],
+    inputs = [
+        "//command_line_option:platforms",
+        "//command_line_option:android_platforms",
+        "//command_line_option:cpu",
+    ],
     outputs = [
         "//command_line_option:platforms",
-        "//command_line_option:dynamic_mode",
     ],
 )
 

@@ -205,6 +205,8 @@ def _fake_android_app_impl(ctx):
         fail("Expected application to be analyzed in an Android target configuration")
     if ctx.attr.target_cpu != ctx.attr.expected_cpu:
         fail("Expected target_cpu %r, got %r" % (ctx.attr.expected_cpu, ctx.attr.target_cpu))
+    if ctx.attr.expected_dynamic_mode and ctx.attr.dynamic_mode != ctx.attr.expected_dynamic_mode:
+        fail("Expected dynamic_mode %r, got %r" % (ctx.attr.expected_dynamic_mode, ctx.attr.dynamic_mode))
     plugin = struct(
         name = "test_android_plugin",
         platforms = {
@@ -231,6 +233,8 @@ _fake_android_app = rule(
         "is_android": attr.bool(mandatory = True),
         "target_cpu": attr.string(mandatory = True),
         "expected_cpu": attr.string(mandatory = True),
+        "dynamic_mode": attr.string(default = ""),
+        "expected_dynamic_mode": attr.string(default = ""),
     },
 )
 
@@ -248,48 +252,36 @@ def _android_registrant_transition_test_impl(ctx):
 
 _android_registrant_transition_test = analysistest.make(_android_registrant_transition_test_impl)
 
-def _split_dynamic_mode_transition_impl(_settings, _attr):
-    return {
-        "assets_path": {"//command_line_option:dynamic_mode": "default"},
-        "deps_path": {"//command_line_option:dynamic_mode": "off"},
-    }
-
-_split_dynamic_mode_transition = transition(
-    implementation = _split_dynamic_mode_transition_impl,
-    inputs = [],
-    outputs = ["//command_line_option:dynamic_mode"],
-)
-
-def _android_split_probe_impl(ctx):
-    if len(ctx.attr.targets) != 1:
-        fail("Expected dynamic_mode=default and dynamic_mode=off split arms to collapse to 1 configured target, got %d: %r" % (
-            len(ctx.attr.targets),
-            [t.files.to_list() for t in ctx.attr.targets],
-        ))
-    return [DefaultInfo(files = depset(ctx.files.targets))]
-
-_android_split_probe = rule(
-    implementation = _android_split_probe_impl,
-    attrs = {
-        "targets": attr.label_list(
-            cfg = _split_dynamic_mode_transition,
-            mandatory = True,
-        ),
-        "_allowlist_function_transition": attr.label(
-            default = "@bazel_tools//tools/allowlists/function_transition_allowlist",
-        ),
+_android_registrant_direct_x64_fully_test = analysistest.make(
+    _android_registrant_transition_test_impl,
+    config_settings = {
+        "//command_line_option:platforms": [str(Label("//flutter/platforms:android_x64"))],
+        "//command_line_option:dynamic_mode": "fully",
     },
 )
 
-def _android_single_config_across_dynamic_mode_test_impl(ctx):
-    """Reaching Android targets via dynamic_mode=default and dynamic_mode=off produces one config."""
-    env = analysistest.begin(ctx)
-    target = analysistest.target_under_test(env)
-    asserts.equals(env, 1, len(target[DefaultInfo].files.to_list()))
-    return analysistest.end(env)
+_android_registrant_direct_arm64_default_test = analysistest.make(
+    _android_registrant_transition_test_impl,
+    config_settings = {
+        "//command_line_option:platforms": [str(Label("//flutter/platforms:android_arm64"))],
+        "//command_line_option:dynamic_mode": "default",
+    },
+)
 
-_android_single_config_across_dynamic_mode_test = analysistest.make(
-    _android_single_config_across_dynamic_mode_test_impl,
+_android_registrant_direct_android_platforms_x64_test = analysistest.make(
+    _android_registrant_transition_test_impl,
+    config_settings = {
+        "//command_line_option:android_platforms": [str(Label("//flutter/platforms:android_x64"))],
+        "//command_line_option:dynamic_mode": "fully",
+    },
+)
+
+_android_registrant_direct_cpu_x64_test = analysistest.make(
+    _android_registrant_transition_test_impl,
+    config_settings = {
+        "//command_line_option:cpu": "x86_64",
+        "//command_line_option:dynamic_mode": "default",
+    },
 )
 
 def _fake_android_bundle_app_impl(ctx):
@@ -299,6 +291,8 @@ def _fake_android_bundle_app_impl(ctx):
         arguments = [],
         outputs = [assets],
     )
+    icu = ctx.actions.declare_file(ctx.label.name + "_icudtl.dat")
+    ctx.actions.write(icu, "")
     kernel = None
     if ctx.attr.with_kernel:
         kernel = ctx.actions.declare_file(ctx.label.name + ".dill")
@@ -312,6 +306,8 @@ def _fake_android_bundle_app_impl(ctx):
             kernel_dill = kernel,
             aot_output = aot,
             flutter_assets = assets,
+            icu_data = icu,
+            is_debug = ctx.attr.with_kernel,
             native_libs = [],
             plugins = [],
             bundled_code_assets = depset(),
@@ -383,6 +379,31 @@ _t10_test = unittest.make(_android_abi_table_complete_test_impl)
 _t11_test = unittest.make(_android_jni_path_scoped_per_target_test_impl)
 
 def platform_bundle_test_suite(name):
+    """Test suite for platform bundle rules and Android registrant transitions.
+
+    Args:
+      name: Base name for the test suite targets.
+    """
+    native.config_setting(
+        name = "_dynamic_mode_off",
+        values = {"dynamic_mode": "off"},
+    )
+    native.config_setting(
+        name = "_dynamic_mode_default",
+        values = {"dynamic_mode": "default"},
+    )
+    native.config_setting(
+        name = "_dynamic_mode_fully",
+        values = {"dynamic_mode": "fully"},
+    )
+
+    dynamic_mode_select = select({
+        ":_dynamic_mode_off": "off",
+        ":_dynamic_mode_default": "default",
+        ":_dynamic_mode_fully": "fully",
+        "//conditions:default": "other",
+    })
+
     _fake_android_app(
         name = "_fake_app_arm64",
         is_android = select({
@@ -395,6 +416,8 @@ def platform_bundle_test_suite(name):
             "//conditions:default": "other",
         }),
         expected_cpu = "arm64",
+        dynamic_mode = dynamic_mode_select,
+        expected_dynamic_mode = "default",
         tags = ["manual"],
     )
 
@@ -410,17 +433,6 @@ def platform_bundle_test_suite(name):
         target_under_test = ":_registrant_arm64_under_test",
     )
 
-    _android_split_probe(
-        name = "_split_dynamic_mode_probe",
-        targets = [":_registrant_arm64_under_test"],
-        tags = ["manual"],
-    )
-
-    _android_single_config_across_dynamic_mode_test(
-        name = name + "_single_config_across_dynamic_mode",
-        target_under_test = ":_split_dynamic_mode_probe",
-    )
-
     _fake_android_app(
         name = "_fake_app_x64",
         is_android = select({
@@ -433,6 +445,8 @@ def platform_bundle_test_suite(name):
             "//conditions:default": "other",
         }),
         expected_cpu = "x86_64",
+        dynamic_mode = dynamic_mode_select,
+        expected_dynamic_mode = "default",
         tags = ["manual"],
     )
 
@@ -446,6 +460,79 @@ def platform_bundle_test_suite(name):
     _android_registrant_transition_test(
         name = name + "_registrant_x64_transition",
         target_under_test = ":_registrant_x64_under_test",
+    )
+
+    # Direct callers (omitting android_abi) keep their configured ABI and dynamic_mode.
+    _fake_android_app(
+        name = "_fake_app_direct_x64_fully",
+        is_android = select({
+            "@platforms//os:android": True,
+            "//conditions:default": False,
+        }),
+        target_cpu = select({
+            "@platforms//cpu:arm64": "arm64",
+            "@platforms//cpu:x86_64": "x86_64",
+            "//conditions:default": "other",
+        }),
+        expected_cpu = "x86_64",
+        dynamic_mode = dynamic_mode_select,
+        expected_dynamic_mode = "fully",
+        tags = ["manual"],
+    )
+
+    flutter_android_registrant(
+        name = "_registrant_direct_x64_fully_under_test",
+        application = ":_fake_app_direct_x64_fully",
+        tags = ["manual"],
+    )
+
+    _android_registrant_direct_x64_fully_test(
+        name = name + "_registrant_direct_x64_fully",
+        target_under_test = ":_registrant_direct_x64_fully_under_test",
+    )
+
+    _android_registrant_direct_android_platforms_x64_test(
+        name = name + "_registrant_direct_android_platforms_x64",
+        target_under_test = ":_registrant_direct_x64_fully_under_test",
+    )
+
+    _fake_android_app(
+        name = "_fake_app_direct_x64_default",
+        is_android = select({
+            "@platforms//os:android": True,
+            "//conditions:default": False,
+        }),
+        target_cpu = select({
+            "@platforms//cpu:arm64": "arm64",
+            "@platforms//cpu:x86_64": "x86_64",
+            "//conditions:default": "other",
+        }),
+        expected_cpu = "x86_64",
+        dynamic_mode = dynamic_mode_select,
+        expected_dynamic_mode = "default",
+        tags = ["manual"],
+    )
+
+    flutter_android_registrant(
+        name = "_registrant_direct_cpu_x64_under_test",
+        application = ":_fake_app_direct_x64_default",
+        tags = ["manual"],
+    )
+
+    _android_registrant_direct_cpu_x64_test(
+        name = name + "_registrant_direct_cpu_x64",
+        target_under_test = ":_registrant_direct_cpu_x64_under_test",
+    )
+
+    flutter_android_registrant(
+        name = "_registrant_direct_arm64_default_under_test",
+        application = ":_fake_app_arm64",
+        tags = ["manual"],
+    )
+
+    _android_registrant_direct_arm64_default_test(
+        name = name + "_registrant_direct_arm64_default",
+        target_under_test = ":_registrant_direct_arm64_default_under_test",
     )
 
     _fake_android_bundle_app(
@@ -506,7 +593,10 @@ def platform_bundle_test_suite(name):
             ":" + name + "_unit",
             ":" + name + "_registrant_arm64_transition",
             ":" + name + "_registrant_x64_transition",
-            ":" + name + "_single_config_across_dynamic_mode",
+            ":" + name + "_registrant_direct_x64_fully",
+            ":" + name + "_registrant_direct_android_platforms_x64",
+            ":" + name + "_registrant_direct_cpu_x64",
+            ":" + name + "_registrant_direct_arm64_default",
             ":" + name + "_android_bundle_debug_actions",
             ":" + name + "_android_bundle_release_actions",
         ],
