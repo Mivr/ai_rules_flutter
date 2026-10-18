@@ -534,7 +534,6 @@ def _bundling_tests(name):
             "@rules_flutter//flutter/private/runners/macos:MainFlutterWindow.swift",
         ],
         info_plist = "@rules_flutter//flutter/private/runners/macos:Info.plist",
-        menu_xib = "@rules_flutter//flutter/private/runners/macos:MainMenu.xib",
         entitlements = ":" + name + "_sample_macos_entitlements",
         engine = ":" + name + "_fake_macos_xcframework",
         runner_deps = [":" + name + "_sample_macos_plugin_lib"],
@@ -926,7 +925,39 @@ def _xtool_macos_validation_tests(name):
     _expect_failure_test(
         name = name + "_xtool_menu_xib_fails",
         target_under_test = ":" + name + "_xtool_menu_xib_macos_app",
-        expected_substrings = ["'menu_xib'", "ibtool"],
+        expected_substrings = ["'menu_xib'", "ibtool", "Remove", "rules_apple"],
+    )
+
+    # Explicit default template menu_xib on xtool
+    flutter_macos_app(
+        name = name + "_xtool_default_menu_xib_macos_app",
+        application = ":" + name + "_fake_release_macho_app",
+        bundle_id = "com.example.defaultmenuxib",
+        menu_xib = "@rules_flutter//flutter/private/runners/macos:MainMenu.xib",
+        srcs = ["@rules_flutter//flutter/private/runners/macos:AppDelegate.swift"],
+        info_plist = "@rules_flutter//flutter/private/runners/macos:Info.plist",
+        entitlements = ":" + name + "_sample_macos_entitlements",
+        engine = ":" + name + "_fake_macos_xcframework",
+        backend = "xtool",
+        tags = ["manual"],
+    )
+    _expect_failure_test(
+        name = name + "_xtool_default_menu_xib_fails",
+        target_under_test = ":" + name + "_xtool_default_menu_xib_macos_app",
+        expected_substrings = ["'menu_xib'", "MainMenu.xib", "ibtool", "Remove", "rules_apple"],
+    )
+
+    # Discovered conventional macos/Runner/Base.lproj/MainMenu.xib on xtool
+    _expect_failure_test(
+        name = name + "_xtool_discovered_menu_xib_fails",
+        target_under_test = "//flutter/tests/macos_xib_fixture:discovered_menu_xib_app",
+        expected_substrings = [
+            "'menu_xib'",
+            "macos/Runner/Base.lproj/MainMenu.xib",
+            "ibtool",
+            "Remove",
+            "rules_apple",
+        ],
     )
 
     # app_icons on xtool
@@ -1010,6 +1041,8 @@ def _xtool_macos_validation_tests(name):
         name + "_xtool_macos_attrs_and_secrets",
         name + "_xtool_macos_bad_version_fails",
         name + "_xtool_menu_xib_fails",
+        name + "_xtool_default_menu_xib_fails",
+        name + "_xtool_discovered_menu_xib_fails",
         name + "_xtool_macos_app_icons_fails",
         name + "_xtool_macos_plaintext_pw_fails",
         name + "_xtool_macos_require_sdk_fails",

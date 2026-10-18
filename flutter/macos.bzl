@@ -413,10 +413,15 @@ def flutter_macos_app(
         srcs: Override conventional `macos/Runner/*.swift` runner sources.
         engine: Override default macOS engine target.
         menu_xib: Override conventional `macos/Runner/Base.lproj/MainMenu.xib`.
-            On the `xtool` backend, the default runner creates its menu
-            programmatically without Interface Builder compilation; user-supplied
-            `.xib` files are rejected at analysis because compiling them requires
-            Xcode `ibtool`.
+            On the `xtool` backend, when `menu_xib` is omitted and no
+            `macos/Runner/Base.lproj/MainMenu.xib` exists on disk, the default
+            runner creates its menu programmatically without Interface Builder
+            compilation. Any explicit `menu_xib` (including the default
+            template label) or a discovered conventional
+            `macos/Runner/Base.lproj/MainMenu.xib` fails at analysis with a
+            named error because compiling `.xib` files requires Xcode `ibtool`
+            (remove `macos/Runner/Base.lproj/MainMenu.xib` and omit `menu_xib`
+            to use the programmatic menu, or use `backend = "rules_apple"`).
         allow_non_macho: Explicit allow-list of binary or framework names
             permitted to bypass Mach-O validation.
         backend: Apple bundling backend: `"rules_apple"` (default) or
@@ -719,12 +724,8 @@ def flutter_macos_app(
         )
         forwarded_kwargs = {k: v for k, v in kwargs.items() if k in valid_xtool_kwargs}
         unsupported_kwargs = [k for k in kwargs if k not in valid_xtool_kwargs]
-        default_menu_xib_label = Label("@rules_flutter//flutter/private/runners/macos:MainMenu.xib")
-        xtool_menu_xib = menu_xib
-        if type(menu_xib) == "string" and Label(menu_xib) == default_menu_xib_label:
-            xtool_menu_xib = None
-        elif type(menu_xib) == "Label" and menu_xib == default_menu_xib_label:
-            xtool_menu_xib = None
+        discovered_menu_xib = native.glob(["macos/Runner/Base.lproj/MainMenu.xib"], allow_empty = True)
+        xtool_menu_xib = menu_xib if menu_xib != None else (discovered_menu_xib[0] if discovered_menu_xib else None)
         _flutter_xtool_macos_bundle(
             name = name,
             app_name = display_name,

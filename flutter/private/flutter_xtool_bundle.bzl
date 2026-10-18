@@ -598,13 +598,13 @@ def _run_xtool_pack_bundle(
         )
 
     if hasattr(ctx.file, "menu_xib") and ctx.file.menu_xib:
-        if not ctx.file.menu_xib.short_path.endswith("flutter/private/runners/macos/MainMenu.xib"):
-            ib_errors.append(
-                "%s: 'menu_xib' (%s) is not supported on the xtool backend because compiling .xib files requires Xcode 'ibtool', which has no hermetic cross-platform implementation." % (
-                    ctx.label,
-                    ctx.file.menu_xib.short_path,
-                ),
-            )
+        ib_errors.append(
+            "%s: 'menu_xib' (%s) is not supported on the xtool backend because compiling .xib files requires Xcode 'ibtool', which has no hermetic cross-platform implementation. Remove %s (and omit 'menu_xib') to use the default programmatic menu, or use backend = \"rules_apple\"." % (
+                ctx.label,
+                ctx.file.menu_xib.short_path,
+                ctx.file.menu_xib.short_path,
+            ),
+        )
 
     if ctx.files.app_icons:
         fail(
