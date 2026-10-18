@@ -1,0 +1,99 @@
+load("@rules_dart//dart:defs.bzl", "dart_test")
+load("//flutter:defs.bzl", "flutter_library")
+load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
+load("//flutter/private:flutter_web_application.bzl", "flutter_web_bundle")
+load(":mode_build.bzl", "fastbuild_build", "font_fixture", "opt_build")
+
+package(default_visibility = ["//flutter/tests:__subpackages__"])
+
+flutter_library(
+    name = "flutter_stub",
+    srcs = [
+        "lib/foundation.dart",
+        "lib/material.dart",
+        "lib/src/widgets/icon_data.dart",
+    ],
+    package_name = "flutter",
+)
+
+font_fixture(
+    name = "roboto_font",
+    font_files = {
+        "@flutter_material_fonts//:material-fonts/Roboto-Regular.ttf": "fonts/Roboto-Regular.ttf",
+    },
+    fonts_json = '[{"family":"Roboto","fonts":[{"asset":"fonts/Roboto-Regular.ttf"}]}]',
+    package_name = "",
+)
+
+font_fixture(
+    name = "cupertino_text_font",
+    font_files = {
+        "@flutter_material_fonts//:material-fonts/MaterialIcons-Regular.otf": "assets/CupertinoIcons.ttf",
+    },
+    fonts_json = '[{"family":"CupertinoIcons","fonts":[{"asset":"assets/CupertinoIcons.ttf"}]}]',
+    package_name = "cupertino_icons",
+)
+
+font_fixture(
+    name = "unused_icon_family",
+    font_files = {
+        "@flutter_material_fonts//:material-fonts/MaterialIcons-Regular.otf": "fonts/UnusedFamily.otf",
+    },
+    fonts_json = '[{"family":"UnusedFamily","fonts":[{"asset":"fonts/UnusedFamily.otf"}]}]',
+    package_name = "unused_icons",
+)
+
+flutter_web_bundle(
+    name = "text_only_material_fixture",
+    main = "lib/text_only_material_main.dart",
+    package_name = "flutter",
+    tags = ["manual"],
+    deps = [
+        ":flutter_stub",
+        "//flutter:material_icons",
+    ],
+)
+
+fastbuild_build(
+    name = "fastbuild_web_font_fixture",
+    targets = [
+        ":text_only_material_fixture",
+        "//flutter/tests:_web_font_fixture",
+    ],
+    tags = ["manual"],
+)
+
+opt_build(
+    name = "opt_web_font_fixture",
+    targets = [
+        ":text_only_material_fixture",
+        "//flutter/tests:_web_font_fixture",
+    ],
+    tags = ["manual"],
+)
+
+dart_test(
+    name = "icon_tree_shake_fastbuild_test",
+    size = "small",
+    main = "icon_tree_shake_test.dart",
+    data = [
+        ":fastbuild_web_font_fixture",
+        "@flutter_material_fonts//:material-fonts/MaterialIcons-Regular.otf",
+        "@flutter_material_fonts//:material-fonts/Roboto-Regular.ttf",
+    ],
+    target_compatible_with = HOST_COMPATIBLE,
+    deps = ["@dev_tool_deps//:test"],
+)
+
+dart_test(
+    name = "icon_tree_shake_opt_test",
+    size = "small",
+    main = "icon_tree_shake_test.dart",
+    data = [
+        ":opt_web_font_fixture",
+        "@flutter_material_fonts//:material-fonts/MaterialIcons-Regular.otf",
+        "@flutter_material_fonts//:material-fonts/Roboto-Regular.ttf",
+    ],
+    target_compatible_with = HOST_COMPATIBLE,
+    deps = ["@dev_tool_deps//:test"],
+)

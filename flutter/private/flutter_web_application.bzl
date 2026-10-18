@@ -570,7 +570,12 @@ def _flutter_web_bundle_impl(ctx):
     fonts, _ = aggregate_pub_contributions(ctx.attr.deps)
     const_finder, font_subset = resolve_font_subset_tools(ctx.attr.deps, flutter_sdk_info) if fonts else (None, None)
     has_font_tree_shake = bool(fonts) and const_finder != None and font_subset != None
-    has_experiment_kernel = bool(ctx.attr.enable_experiments) and flutter_sdk_info.platform_kernel_dill_product != None
+    icon_platform_dill = (
+        flutter_sdk_info.platform_kernel_dill
+        if is_profile and flutter_sdk_info.platform_kernel_dill != None
+        else flutter_sdk_info.platform_kernel_dill_product
+    )
+    has_experiment_kernel = bool(ctx.attr.enable_experiments) and icon_platform_dill != None
     kernel_dill = None
     if ctx.attr.tree_shake_icons and not is_debug and (has_font_tree_shake or has_experiment_kernel):
         kernel_dill = ctx.actions.declare_file(ctx.label.name + "_icon_tree_shaking.dill")
@@ -581,13 +586,11 @@ def _flutter_web_bundle_impl(ctx):
         )
         from_dill = None
 
-        # Modular `.flutter.kmod` modules are compiled against the non-product
-        # platform dill without `-Ddart.vm.product=true` or
-        # `-Ddart.vm.profile=true`, so CFE folds `kReleaseMode` and
-        # `kProfileMode` to `false` inside `const` expressions in `.flutter.kmod`
-        # and strips source text. Passing `--from-dill` to `frontend_server` does
-        # not re-evaluate already-folded constants, so `-c opt` and `profile`
-        # builds must compile the icon tree-shaking kernel from source.
+        # `fastbuild` web builds pre-link modular `.flutter_product.kmod` modules
+        # compiled with `-Ddart.vm.product=true` against the product platform
+        # dill so `kReleaseMode` folds to `true` and `kDebugMode` folds to `false`
+        # in both dependency modules and the entry module, matching the release
+        # web bundle that ships.
         if (not is_opt and
             not is_profile and
             not ctx.attr.enable_experiments and
@@ -601,6 +604,7 @@ def _flutter_web_bundle_impl(ctx):
                 own_files,
                 packages,
                 [],
+                product = True,
             )
             if modular_tools != None:
                 from_dill = ctx.actions.declare_file(ctx.label.name + "_icon_tree_shaking.modular.dill")
@@ -624,7 +628,7 @@ def _flutter_web_bundle_impl(ctx):
             dartaotruntime = flutter_sdk_info.dartaotruntime,
             kernel_filter_tool = ctx.executable._kernel_filter_tool,
             frontend_server = flutter_sdk_info.frontend_server,
-            platform_dill = flutter_sdk_info.platform_kernel_dill_product,
+            platform_dill = icon_platform_dill,
             main = ctx.file.main,
             entrypoint_uri = entrypoint_uri,
             srcs = all_srcs,

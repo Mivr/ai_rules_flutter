@@ -41,6 +41,7 @@ FlutterKernelModuleInfo = provider(
     doc = "Modular Flutter kernel info for a DartInfo target.",
     fields = {
         "kernel_info": "DartKernelInfo compiled for the Flutter target and patched SDK.",
+        "product_kernel_info": "DartKernelInfo compiled for the Flutter target and product patched SDK (`-Ddart.vm.product=true`).",
     },
 )
 
@@ -50,6 +51,15 @@ MODULAR_KERNEL_ATTRS = _DART_MODULAR_KERNEL_ATTRS | {
         providers = [BuildSettingInfo],
     ),
 }
+
+def _no_flutter_kernel_module():
+    empty = no_kernel_module()
+    return [
+        FlutterKernelModuleInfo(
+            kernel_info = empty,
+            product_kernel_info = empty,
+        ),
+    ]
 
 def _global_extra_defines(ctx):
     defines = []
@@ -193,7 +203,7 @@ def _own_package_record(info):
 
 def _flutter_kernel_module_aspect_impl(target, ctx):
     if DartInfo not in target:
-        return [FlutterKernelModuleInfo(kernel_info = no_kernel_module())]
+        return _no_flutter_kernel_module()
 
     enabled = ctx.attr._modular_kernel[BuildSettingInfo].value
     flutter_toolchain = ctx.toolchains["@rules_flutter//flutter:toolchain_type"]
@@ -220,15 +230,18 @@ def _flutter_kernel_module_aspect_impl(target, ctx):
         opaque = True
 
     if opaque or not enabled or _has_comma_defines(ctx) or tools == None or not same_sdk or flutter_sdk_info == None or flutter_sdk_info.platform_kernel_dill == None:
-        return [FlutterKernelModuleInfo(kernel_info = no_kernel_module())]
+        return _no_flutter_kernel_module()
 
-    dep_kernels = [
-        dep[FlutterKernelModuleInfo].kernel_info
+    dep_mod_infos = [
+        dep[FlutterKernelModuleInfo]
         for dep in rule_deps
         if type(dep) == "Target" and FlutterKernelModuleInfo in dep
     ]
-    if len(dep_kernels) != len(rule_deps):
-        return [FlutterKernelModuleInfo(kernel_info = no_kernel_module())]
+    if len(dep_mod_infos) != len(rule_deps):
+        return _no_flutter_kernel_module()
+
+    dep_kernels = [m.kernel_info for m in dep_mod_infos]
+    dep_product_kernels = [m.product_kernel_info for m in dep_mod_infos]
 
     raw = depset(
         transitive = [
@@ -238,9 +251,16 @@ def _flutter_kernel_module_aspect_impl(target, ctx):
         ],
     ).to_list()
     records = ([own_record] if own_record != None else []) + raw
-    modular = kernel_packages_consistent(records) and all([k.modular for k in dep_kernels])
+    packages_ok = kernel_packages_consistent(records)
+    modular = packages_ok and all([k.modular for k in dep_kernels])
     if not modular:
-        return [FlutterKernelModuleInfo(kernel_info = no_kernel_module())]
+        return _no_flutter_kernel_module()
+
+    product_modular = (
+        packages_ok and
+        flutter_sdk_info.platform_kernel_dill_product != None and
+        all([k.modular for k in dep_product_kernels])
+    )
 
     dep_closure = depset(
         order = "postorder",
@@ -275,6 +295,31 @@ def _flutter_kernel_module_aspect_impl(target, ctx):
             base_kmods = getattr(k, "base_kmods", depset())
             break
     if not own_srcs:
+        product_kernel_info = (
+            DartKernelInfo(
+                kmod = None,
+                koutline = None,
+                transitive_kmods = depset(
+                    order = "postorder",
+                    transitive = [k.transitive_kmods for k in dep_product_kernels],
+                ),
+                transitive_koutlines = depset(
+                    order = "postorder",
+                    transitive = [k.transitive_koutlines for k in dep_product_kernels],
+                ),
+                modular = True,
+                closure_excluded = depset(transitive = [k.closure_excluded for k in dep_product_kernels]),
+                cross_pkg_srcs = cross_pkg_srcs,
+                owned = owned,
+                edges = edges,
+                base_dill = None,
+                base_keys = None,
+                base_kmods = depset(),
+                unseeded_base_kmods = depset(),
+            )
+            if product_modular
+            else no_kernel_module()
+        )
         return [
             FlutterKernelModuleInfo(
                 kernel_info = DartKernelInfo(
@@ -292,6 +337,7 @@ def _flutter_kernel_module_aspect_impl(target, ctx):
                     base_kmods = base_kmods,
                     unseeded_base_kmods = depset(),
                 ),
+                product_kernel_info = product_kernel_info,
             ),
         ]
 
@@ -301,15 +347,17 @@ def _flutter_kernel_module_aspect_impl(target, ctx):
         struct(uri = library_source_uri(package_name, lib_root, f.short_path), file = f)
         for f in own_srcs
     ]
+    deduped_packages = first_per_package(records)
+    worker_defines = _kernel_worker_defines(ctx)
     excluded = kernel_module_action(
         ctx,
         tools,
         sources,
-        first_per_package(records),
+        deduped_packages,
         dep_outline_closure,
         kmod,
         koutline = koutline,
-        defines = _kernel_worker_defines(ctx),
+        defines = worker_defines,
         exclude_non_sources = True,
         droppable = True,
         closure_excluded = upstream_excluded,
@@ -331,6 +379,56 @@ def _flutter_kernel_module_aspect_impl(target, ctx):
             write_keys = base_keys,
         )
         base_kmods = depset(direct = [kmod], transitive = [dep_closure])
+
+    if product_modular:
+        product_dep_closure = depset(
+            order = "postorder",
+            transitive = [k.transitive_kmods for k in dep_product_kernels],
+        )
+        product_dep_outline_closure = depset(
+            order = "postorder",
+            transitive = [k.transitive_koutlines for k in dep_product_kernels],
+        )
+        product_upstream_excluded = depset(
+            transitive = [k.closure_excluded for k in dep_product_kernels],
+        )
+        product_kmod = ctx.actions.declare_directory(target.label.name + ".flutter_product.kmod")
+        product_koutline = ctx.actions.declare_directory(target.label.name + ".flutter_product.koutline")
+        product_excluded = kernel_module_action(
+            ctx,
+            tools,
+            sources,
+            deduped_packages,
+            product_dep_outline_closure,
+            product_kmod,
+            koutline = product_koutline,
+            defines = worker_defines + ["dart.vm.product=true"],
+            exclude_non_sources = True,
+            droppable = True,
+            closure_excluded = product_upstream_excluded,
+            target = "flutter",
+            platform_dill = flutter_sdk_info.platform_kernel_dill_product,
+            extra_libraries = ["ui", "nativewrappers"],
+            scheme = APP_SCHEME,
+        )
+        product_kernel_info = DartKernelInfo(
+            kmod = product_kmod,
+            koutline = product_koutline,
+            transitive_kmods = depset(order = "postorder", direct = [product_kmod], transitive = [product_dep_closure]),
+            transitive_koutlines = depset(order = "postorder", direct = [product_koutline], transitive = [product_dep_outline_closure]),
+            modular = True,
+            closure_excluded = depset(direct = [product_excluded], transitive = [product_upstream_excluded]),
+            cross_pkg_srcs = cross_pkg_srcs,
+            owned = owned,
+            edges = edges,
+            base_dill = None,
+            base_keys = None,
+            base_kmods = depset(),
+            unseeded_base_kmods = depset(),
+        )
+    else:
+        product_kernel_info = no_kernel_module()
+
     return [
         FlutterKernelModuleInfo(
             kernel_info = DartKernelInfo(
@@ -348,6 +446,7 @@ def _flutter_kernel_module_aspect_impl(target, ctx):
                 base_kmods = base_kmods,
                 unseeded_base_kmods = depset(),
             ),
+            product_kernel_info = product_kernel_info,
         ),
     ]
 
@@ -366,24 +465,31 @@ flutter_kernel_module_aspect = aspect(
     doc = "Compiles each DartInfo library in a flutter_test closure into a modular .flutter.kmod directory.",
 )
 
-def flutter_modular_test_tools(ctx, flutter_sdk_info, own_files, packages, native_assets_list, tools = None):
-    """Decides whether a `flutter_test` compiles modularly, and with which tools.
+def flutter_modular_test_tools(ctx, flutter_sdk_info, own_files, packages, native_assets_list, tools = None, product = False):
+    """Decides whether a target compiles modularly, and with which tools.
 
     Args:
-      ctx: The `flutter_test` rule context.
+      ctx: The rule context.
       flutter_sdk_info: `FlutterSdkInfo` from the active Flutter toolchain.
-      own_files: The test's own `.dart` files (`[ctx.file.main] + ctx.files.srcs`).
-      packages: The synthesized `DartPackageInfo` list for the test.
-      native_assets_list: Resolved native code assets for the test.
+      own_files: The target's own `.dart` files (`[ctx.file.main] + ctx.files.srcs`).
+      packages: The synthesized `DartPackageInfo` list for the target.
+      native_assets_list: Resolved native code assets for the target.
       tools: Optional pre-resolved kernel tools struct; defaults to
         `flutter_kernel_tools_for(ctx, flutter_sdk_info)`.
+      product: When `True`, checks eligibility for `product_kernel_info`
+        (`-Ddart.vm.product=true` against `platform_kernel_dill_product`).
 
     Returns:
-      The kernel tools struct from `flutter_kernel_tools_for`, or `None` when the test
+      The kernel tools struct from `flutter_kernel_tools_for`, or `None` when the target
       must fall back to whole-program `FlutterKernelCompile`.
     """
     enabled = ctx.attr._modular_kernel[BuildSettingInfo].value if hasattr(ctx.attr, "_modular_kernel") else False
-    if not enabled or _has_comma_defines(ctx) or flutter_sdk_info == None or flutter_sdk_info.platform_kernel_dill == None:
+    platform_dill = (
+        flutter_sdk_info.platform_kernel_dill_product
+        if product and flutter_sdk_info != None
+        else (flutter_sdk_info.platform_kernel_dill if flutter_sdk_info != None else None)
+    )
+    if not enabled or _has_comma_defines(ctx) or platform_dill == None:
         return None
     if tools == None:
         tools = flutter_kernel_tools_for(ctx, flutter_sdk_info)
@@ -392,7 +498,7 @@ def flutter_modular_test_tools(ctx, flutter_sdk_info, own_files, packages, nativ
     same_sdk = is_same_sdk(tools, flutter_sdk_info)
 
     dep_kernels = [
-        dep[FlutterKernelModuleInfo].kernel_info
+        dep[FlutterKernelModuleInfo].product_kernel_info if product else dep[FlutterKernelModuleInfo].kernel_info
         for dep in ctx.attr.deps
         if FlutterKernelModuleInfo in dep
     ]
@@ -541,7 +647,7 @@ def compile_flutter_modular_web_kernel(
         ))
 
     dep_kernels = [
-        dep[FlutterKernelModuleInfo].kernel_info
+        dep[FlutterKernelModuleInfo].product_kernel_info
         for dep in ctx.attr.deps
         if FlutterKernelModuleInfo in dep
     ]
@@ -564,13 +670,13 @@ def compile_flutter_modular_web_kernel(
         first_per_package(packages),
         dep_outline_closure,
         entry,
-        defines = _kernel_worker_defines(ctx),
+        defines = _kernel_worker_defines(ctx) + ["dart.vm.product=true"],
         exclude_non_sources = True,
         droppable = False,
         extra_inputs = cross_pkg_srcs,
         closure_excluded = depset(transitive = [k.closure_excluded for k in dep_kernels]),
         target = "flutter",
-        platform_dill = flutter_sdk_info.platform_kernel_dill,
+        platform_dill = flutter_sdk_info.platform_kernel_dill_product,
         extra_libraries = ["ui", "nativewrappers"],
         scheme = APP_SCHEME,
     )

@@ -904,16 +904,58 @@ _experiments_test = analysistest.make(
 )
 
 def _font_icon_tree_shake_test_impl(ctx):
-    """A fastbuild web build with fonts pre-links a modular dill for icon tree-shaking."""
+    """A fastbuild web build links product modular `.flutter_product.kmod` modules for icon tree-shaking."""
     env = analysistest.begin(ctx)
-    _action(env, "DartKernel")
+    entry_kernel = _action(env, "DartKernel")
+    _assert_argv(
+        env,
+        entry_kernel,
+        present = ["-Ddart.vm.product=true"],
+        absent_substrings = [
+            "/flutter_patched_sdk/platform_strong.dill",
+            ".flutter.koutline",
+        ],
+    )
+    entry_inputs = [f.path for f in entry_kernel.inputs.to_list()] if entry_kernel else []
+    asserts.true(
+        env,
+        any(["/flutter_patched_sdk_product/platform_strong.dill" in p for p in entry_inputs]),
+        "fastbuild web icon entry kmod must compile against the product platform dill: %s" % entry_inputs,
+    )
+    asserts.true(
+        env,
+        any([".flutter_product.koutline" in p for p in entry_inputs]),
+        "fastbuild web icon entry kmod must read .flutter_product.koutline summaries: %s" % entry_inputs,
+    )
+
     link_action = _action(env, "DartKernelLink")
-    _assert_argv(env, link_action, present = ["--platform"])
+    _assert_argv(
+        env,
+        link_action,
+        present = ["--platform"],
+        absent_substrings = [
+            "/flutter_patched_sdk/platform_strong.dill",
+            ".flutter.kmod",
+        ],
+    )
+    link_inputs = [f.path for f in link_action.inputs.to_list()] if link_action else []
+    asserts.true(
+        env,
+        any(["/flutter_patched_sdk_product/platform_strong.dill" in p for p in link_inputs]),
+        "fastbuild web icon DartKernelLink must link the product platform dill: %s" % link_inputs,
+    )
+    asserts.true(
+        env,
+        any([".flutter_product.kmod" in p for p in link_inputs]),
+        "fastbuild web icon DartKernelLink must link .flutter_product.kmod modules: %s" % link_inputs,
+    )
+
     kernel_action = _action(env, "FlutterKernelCompile")
     _assert_argv(
         env,
         kernel_action,
-        present = ["--from-dill", "--no-embed-source-text"],
+        present = ["-Ddart.vm.product=true", "--from-dill", "--no-embed-source-text"],
+        absent_substrings = ["/flutter_patched_sdk/platform_strong.dill"],
     )
     return analysistest.end(env)
 
@@ -1467,9 +1509,16 @@ def _setup_web_fixtures():
     flutter_web_bundle(
         name = "_web_font_fixture",
         package_name = "web_fixture",
-        main = "lib/web_fixture_main.dart",
-        deps = ["//flutter:material_icons"],
+        main = "lib/web_font_fixture_main.dart",
+        deps = [
+            "//flutter:material_icons",
+            "//flutter/tests/icon_tree_shake_fixture:cupertino_text_font",
+            "//flutter/tests/icon_tree_shake_fixture:roboto_font",
+            "//flutter/tests/icon_tree_shake_fixture:unused_icon_family",
+            "//flutter/tests/icon_tree_shake_fixture/icon_choice_lib",
+        ],
         tags = ["manual"],
+        visibility = ["//flutter/tests:__subpackages__"],
     )
 
     flutter_web_bundle(
