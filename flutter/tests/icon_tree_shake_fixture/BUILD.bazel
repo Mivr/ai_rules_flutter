@@ -43,6 +43,24 @@ font_fixture(
     package_name = "unused_icons",
 )
 
+font_fixture(
+    name = "icons_suffix_family",
+    font_files = {
+        "@flutter_material_fonts//:material-fonts/MaterialIcons-Regular.otf": "fonts/Icons.otf",
+    },
+    fonts_json = '[{"family":"Icons","fonts":[{"asset":"fonts/Icons.otf"}]}]',
+    package_name = "",
+)
+
+font_fixture(
+    name = "pkg_icons_suffix_family",
+    font_files = {
+        "@flutter_material_fonts//:material-fonts/MaterialIcons-Regular.otf": "fonts/Icons.otf",
+    },
+    fonts_json = '[{"family":"Icons","fonts":[{"asset":"fonts/Icons.otf"}]}]',
+    package_name = "custom_icons",
+)
+
 flutter_web_bundle(
     name = "text_only_material_fixture",
     main = "lib/text_only_material_main.dart",

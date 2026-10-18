@@ -15,6 +15,13 @@ import 'package:icon_choice_lib/icon_choice.dart';
 
 const IconData mainSelectedIcon = kDebugMode ? Icons.c : Icons.d;
 
+const IconData bareIconsIcon = IconData(0xe047, fontFamily: 'Icons');
+const IconData pkgIconsIcon = IconData(
+  0xe145,
+  fontFamily: 'Icons',
+  fontPackage: 'custom_icons',
+);
+
 const TextStyle robotoTextStyle = TextStyle(fontFamily: 'Roboto');
 const TextStyle cupertinoTextStyle = TextStyle(
   fontFamily: 'CupertinoIcons',
@@ -26,6 +33,8 @@ void main() {
   final keep = <Object?>[
     depSelectedIcon,
     mainSelectedIcon,
+    bareIconsIcon,
+    pkgIconsIcon,
     robotoTextStyle,
     cupertinoTextStyle,
     frameworkDefaultIcon,

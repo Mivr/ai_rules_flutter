@@ -770,6 +770,13 @@ def flutter_build_assets(ctx, flutter_sdk_info, output_dir, compiled_shaders = {
 
     const_finder, font_subset = resolve_font_subset_tools(ctx.attr.deps, flutter_sdk_info) if fonts else (None, None)
 
+    if ctx.attr.tree_shake_icons and bool(fonts) and not is_debug and kernel_dill != None and (const_finder == None or font_subset == None):
+        fail(
+            "%s: icon tree shaking is enabled (`tree_shake_icons = True`) and the target bundles fonts, " % ctx.label +
+            "but `const_finder` or `font_subset` (`font-subset`) is not available in the Flutter toolchain " +
+            "(`@rules_flutter//flutter:font_subset_toolchain_type`) for the execution platform.",
+        )
+
     # Icon tree shaking: enabled only in non-debug mode with tree_shake_icons=True
     # when the dependency graph actually contributes at least one font family.
     tree_shake_icons = (

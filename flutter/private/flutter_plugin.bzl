@@ -27,7 +27,7 @@ load("//flutter:providers.bzl", "FlutterApplePluginInfo", "FlutterDataAssetInfo"
 load("//flutter/private:common.bzl", "collect_binding_contracts", "collect_native_libs")
 load("//flutter/private:flutter_desktop_plugin_info.bzl", "FlutterLinuxPluginInfo", "FlutterWindowsPluginInfo")
 load("//flutter/private:flutter_info.bzl", "LINK_HOOK_ATTR", "flutter_info")
-load("//flutter/private:flutter_library.bzl", "FONT_SUBSET_TOOLS_ATTR", "FlutterFontSubsetToolsInfo", "SKY_ENGINE_ATTR", "build_pub_contributions", "flutter_analyzable_info")
+load("//flutter/private:flutter_library.bzl", "SKY_ENGINE_ATTR", "build_pub_contributions", "flutter_analyzable_info")
 load("//flutter/private:native_sources.bzl", "collect_native_source_pairs", "native_sources_aspect")
 
 def build_plugin_struct(name, plugin_platforms):
@@ -214,7 +214,6 @@ def _flutter_plugin_impl(ctx):
     # bundled assets — same shape as flutter_library). asset_pkg uses the
     # rule's `package_name` attr verbatim (empty = bare paths).
     asset_pkg = ctx.attr.package_name
-    font_subset_tools = ctx.attr._font_subset_tools[FlutterFontSubsetToolsInfo] if ctx.attr._font_subset_tools else None
     extra_pub_fonts, extra_pub_assets, extra_pub_shaders = build_pub_contributions(
         asset_pkg,
         ctx.attr.fonts_json,
@@ -222,8 +221,6 @@ def _flutter_plugin_impl(ctx):
         ctx.attr.pkg_assets,
         ctx.attr.pkg_shaders,
         ctx.files.shader_includes,
-        const_finder = font_subset_tools.const_finder if font_subset_tools else None,
-        font_subset = font_subset_tools.font_subset if font_subset_tools else None,
     )
 
     # `resources` names the non-Dart remainder of `lib/`; a Dart source there
@@ -282,7 +279,6 @@ flutter_plugin = rule(
     implementation = _flutter_plugin_impl,
     attrs = {
         "_sky_engine": SKY_ENGINE_ATTR,
-        "_font_subset_tools": FONT_SUBSET_TOOLS_ATTR,
         "srcs": attr.label_list(
             doc = "Dart source files for the plugin's public API.",
             allow_files = [".dart"],

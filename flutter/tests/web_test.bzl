@@ -1536,6 +1536,8 @@ def _setup_web_fixtures():
         deps = [
             "//flutter:material_icons",
             "//flutter/tests/icon_tree_shake_fixture:cupertino_text_font",
+            "//flutter/tests/icon_tree_shake_fixture:icons_suffix_family",
+            "//flutter/tests/icon_tree_shake_fixture:pkg_icons_suffix_family",
             "//flutter/tests/icon_tree_shake_fixture:roboto_font",
             "//flutter/tests/icon_tree_shake_fixture:unused_icon_family",
             "//flutter/tests/icon_tree_shake_fixture/icon_choice_lib",

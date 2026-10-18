@@ -571,6 +571,12 @@ def _flutter_web_bundle_impl(ctx):
     # so we compile one specifically for const_finder to analyze IconData constants.
     fonts, _ = aggregate_pub_contributions(ctx.attr.deps)
     const_finder, font_subset = resolve_font_subset_tools(ctx.attr.deps, flutter_sdk_info) if fonts else (None, None)
+    if ctx.attr.tree_shake_icons and not is_debug and bool(fonts) and (const_finder == None or font_subset == None):
+        fail(
+            "%s: icon tree shaking is enabled (`tree_shake_icons = True`) and the target bundles fonts, " % ctx.label +
+            "but `const_finder` or `font_subset` (`font-subset`) is not available in the Flutter toolchain " +
+            "(`@rules_flutter//flutter:font_subset_toolchain_type`) for the execution platform.",
+        )
     has_font_tree_shake = bool(fonts) and const_finder != None and font_subset != None
     icon_platform_dill = (
         flutter_sdk_info.platform_kernel_dill
@@ -1617,6 +1623,7 @@ build knows which served file is a native module.
     toolchains = [
         "@rules_flutter//flutter:toolchain_type",
         config_common.toolchain_type("@rules_flutter//flutter/private:product_tools_toolchain_type", mandatory = False),
+        config_common.toolchain_type("@rules_flutter//flutter/private:font_subset_toolchain_type", mandatory = False),
     ] + COPY_TO_DIRECTORY_TOOLCHAINS + MODULAR_KERNEL_TOOLCHAINS,
     doc = "Builds a Flutter web application (WASM or JS) with all deployment artifacts.",
 )

@@ -674,14 +674,8 @@ flutter_product_tools_toolchain(
 
 flutter_font_subset_toolchain(
     name = "font_subset_toolchain",
-    const_finder = select({{
-        "@rules_flutter//flutter/private:dbg": None,
-        "//conditions:default": ":font-subset-tools/const_finder.dart.snapshot",
-    }}),
-    font_subset = select({{
-        "@rules_flutter//flutter/private:dbg": None,
-        "//conditions:default": ":font-subset-tools/font-subset{exe_suffix}",
-    }}),
+    const_finder = ":font-subset-tools/const_finder.dart.snapshot",
+    font_subset = ":font-subset-tools/font-subset{exe_suffix}",
     visibility = ["//visibility:public"],
 )
 

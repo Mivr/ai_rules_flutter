@@ -144,10 +144,9 @@ Uint8List encodeStandardMessage(Object? message) {
 
 // -- Icon tree shaking helpers -----------------------------------------------
 
-/// Returns true if [copyKey] matches [assetPath] either exactly or on a `/`
-/// path-segment boundary (`packages/<pkg>/<assetPath>`).
+/// Returns true if [copyKey] matches [assetPath] exactly.
 bool matchesFontAssetPath(String copyKey, String assetPath) {
-  return copyKey == assetPath || copyKey.endsWith('/$assetPath');
+  return copyKey == assetPath;
 }
 
 /// Builds a map from font `family` name to all declared `asset` paths in

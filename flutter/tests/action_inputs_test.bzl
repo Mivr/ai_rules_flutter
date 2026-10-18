@@ -10,11 +10,14 @@ load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("@rules_dart//dart:analyze.bzl", "dart_analyze")
 load("@rules_dart//dart:defs.bzl", "dart_binary")
 load("@rules_dart//dart:toolchain.bzl", "DartSdkInfo")
+load("@rules_dart//dart:utils.bzl", "dart_info_no_package")
 load("//flutter:defs.bzl", "flutter_library", "flutter_plugin", "flutter_test")
+load("//flutter:toolchain.bzl", "flutter_font_subset_toolchain")
 load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
 load("//flutter/private:flutter_aot_target.bzl", "flutter_aot_target")
 load("//flutter/private:flutter_application.bzl", "flutter_application")
 load("//flutter/private:flutter_asset_bundle.bzl", "flutter_asset_bundle")
+load("//flutter/private:flutter_info.bzl", "flutter_info")
 load("//flutter/private:flutter_kernel_target.bzl", "flutter_kernel_target")
 load("//flutter/private:flutter_web_application.bzl", "flutter_web_bundle")
 
@@ -734,6 +737,80 @@ _REVERSE_TOOLCHAIN_EXTRA_TOOLCHAINS = [
     str(Label("//flutter/tests:_synthetic_dart_exec_tools_toolchain")),
     str(Label("//flutter/tests:_synthetic_dart_toolchain")),
 ]
+
+def _generated_tool_file_impl(ctx):
+    out = ctx.actions.declare_file(ctx.attr.filename)
+    ctx.actions.write(output = out, content = "", is_executable = True)
+    return [DefaultInfo(files = depset([out]))]
+
+_generated_tool_file = rule(
+    implementation = _generated_tool_file_impl,
+    attrs = {
+        "filename": attr.string(mandatory = True),
+    },
+)
+
+def _bare_pub_fonts_dep_impl(ctx):
+    font_file = ctx.actions.declare_file(ctx.label.name + "_CustomIcons.otf")
+    ctx.actions.write(output = font_file, content = "")
+    contribution = struct(
+        package_name = "",
+        family = "CustomIcons",
+        fonts = (struct(
+            asset_path = "fonts/CustomIcons.otf",
+            weight = None,
+            style = None,
+        ),),
+        files = (font_file,),
+    )
+    return [
+        DefaultInfo(files = depset([font_file])),
+        dart_info_no_package(),
+        flutter_info(pub_fonts = [contribution]),
+    ]
+
+_bare_pub_fonts_dep = rule(
+    implementation = _bare_pub_fonts_dep_impl,
+)
+
+def _exec_font_subset_toolchain_test_impl(ctx):
+    """App rules resolve `const_finder` and `font_subset` in `exec` config from their own toolchain, independent of `deps`."""
+    env = analysistest.begin(ctx)
+
+    asset_action = _find_action(env, ["FlutterAssetBundle"])
+    asset_paths = _input_paths(asset_action)
+    _assert_some_path_contains(
+        env,
+        asset_paths,
+        ["exec_const_finder.dart.snapshot", "exec_font_subset"],
+        "exec-configured font_subset_toolchain FlutterAssetBundle",
+    )
+    exec_tool_paths = [
+        p
+        for p in asset_paths
+        if p.endswith("exec_const_finder.dart.snapshot") or p.endswith("exec_font_subset")
+    ]
+    for p in exec_tool_paths:
+        asserts.true(
+            env,
+            "-exec-" in p,
+            "expected font-subset tool %r to be in exec configuration (-exec- in path)" % p,
+        )
+    return analysistest.end(env)
+
+def _missing_font_subset_toolchain_test_impl(ctx):
+    """App rules fail with a named error when icon tree shaking is active and font-subset is unavailable for the exec platform."""
+    env = analysistest.begin(ctx)
+    asserts.expect_failure(env, "font-subset")
+    return analysistest.end(env)
+
+_EXEC_FONT_SUBSET_EXTRA_TOOLCHAINS = [
+    str(Label("//flutter/tests:_exec_font_subset_registered_toolchain")),
+]
+_EMPTY_FONT_SUBSET_EXTRA_TOOLCHAINS = [
+    str(Label("//flutter/tests:_empty_font_subset_registered_toolchain")),
+]
+
 _flutter_test_rule_kind_test = analysistest.make(
     _flutter_test_rule_kind_test_impl,
     extra_target_under_test_aspects = [_inspect_rule_kind_aspect],
@@ -859,6 +936,23 @@ _reverse_toolchain_web_test = analysistest.make(
         str(Label("//flutter:profile")): False,
     },
 )
+_exec_font_subset_toolchain_test = analysistest.make(
+    _exec_font_subset_toolchain_test_impl,
+    config_settings = {
+        "//command_line_option:compilation_mode": "opt",
+        "//command_line_option:extra_toolchains": _EXEC_FONT_SUBSET_EXTRA_TOOLCHAINS,
+        str(Label("//flutter:profile")): False,
+    },
+)
+_missing_font_subset_toolchain_test = analysistest.make(
+    _missing_font_subset_toolchain_test_impl,
+    expect_failure = True,
+    config_settings = {
+        "//command_line_option:compilation_mode": "opt",
+        "//command_line_option:extra_toolchains": _EMPTY_FONT_SUBSET_EXTRA_TOOLCHAINS,
+        str(Label("//flutter:profile")): False,
+    },
+)
 
 def _setup_fixtures():
     _synthetic_dart_sdk_toolchain(
@@ -874,6 +968,54 @@ def _setup_fixtures():
         name = "_synthetic_dart_toolchain",
         toolchain = ":_synthetic_dart_sdk",
         toolchain_type = "@rules_dart//dart:toolchain_type",
+    )
+    _generated_tool_file(
+        name = "_generated_exec_const_finder",
+        filename = "exec_const_finder.dart.snapshot",
+        tags = ["manual"],
+    )
+    _generated_tool_file(
+        name = "_generated_exec_font_subset",
+        filename = "exec_font_subset",
+        tags = ["manual"],
+    )
+    flutter_font_subset_toolchain(
+        name = "_exec_font_subset_tc",
+        const_finder = ":_generated_exec_const_finder",
+        font_subset = ":_generated_exec_font_subset",
+        tags = ["manual"],
+    )
+    native.toolchain(
+        name = "_exec_font_subset_registered_toolchain",
+        toolchain = ":_exec_font_subset_tc",
+        toolchain_type = "//flutter/private:font_subset_toolchain_type",
+    )
+    flutter_font_subset_toolchain(
+        name = "_empty_font_subset_tc",
+        tags = ["manual"],
+    )
+    native.toolchain(
+        name = "_empty_font_subset_registered_toolchain",
+        toolchain = ":_empty_font_subset_tc",
+        toolchain_type = "//flutter/private:font_subset_toolchain_type",
+    )
+    _bare_pub_fonts_dep(
+        name = "_inputs_bare_pub_fonts_dep",
+        tags = ["manual"],
+    )
+    flutter_application(
+        name = "_inputs_application_bare_fonts",
+        package_name = _PACKAGE,
+        main = _MAIN,
+        deps = [":_inputs_bare_pub_fonts_dep"],
+        tags = ["manual"],
+    )
+    flutter_web_bundle(
+        name = "_inputs_web_bundle_bare_fonts",
+        package_name = _PACKAGE,
+        main = _MAIN,
+        deps = [":_inputs_bare_pub_fonts_dep"],
+        tags = ["manual"],
     )
     flutter_test(
         name = "_inputs_flutter_test",
@@ -1120,6 +1262,24 @@ def action_inputs_test_suite(name):
         name = name + "_reverse_toolchain_web",
         target_under_test = ":_inputs_web_bundle",
     )
+    _exec_font_subset_toolchain_test(
+        name = name + "_exec_font_subset_application",
+        target_under_test = ":_inputs_application_bare_fonts",
+        target_compatible_with = HOST_COMPATIBLE,
+    )
+    _exec_font_subset_toolchain_test(
+        name = name + "_exec_font_subset_web",
+        target_under_test = ":_inputs_web_bundle_bare_fonts",
+    )
+    _missing_font_subset_toolchain_test(
+        name = name + "_missing_font_subset_application",
+        target_under_test = ":_inputs_application_bare_fonts",
+        target_compatible_with = HOST_COMPATIBLE,
+    )
+    _missing_font_subset_toolchain_test(
+        name = name + "_missing_font_subset_web",
+        target_under_test = ":_inputs_web_bundle_bare_fonts",
+    )
 
     native.test_suite(
         name = name,
@@ -1152,5 +1312,9 @@ def action_inputs_test_suite(name):
             ":" + name + "_reverse_toolchain_flutter_test",
             ":" + name + "_reverse_toolchain_application_opt_fonts",
             ":" + name + "_reverse_toolchain_web",
+            ":" + name + "_exec_font_subset_application",
+            ":" + name + "_exec_font_subset_web",
+            ":" + name + "_missing_font_subset_application",
+            ":" + name + "_missing_font_subset_web",
         ],
     )

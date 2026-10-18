@@ -2371,6 +2371,10 @@ _flutter_integration_test = rule(
             "@rules_flutter//flutter/private:product_tools_toolchain_type",
             mandatory = False,
         ),
+        config_common.toolchain_type(
+            "@rules_flutter//flutter/private:font_subset_toolchain_type",
+            mandatory = False,
+        ),
     ] + COPY_TO_DIRECTORY_TOOLCHAINS + MODULAR_KERNEL_TOOLCHAINS,
     doc = "Compiles a Flutter app with an in-app integration test and runs it on the web platform.",
 )

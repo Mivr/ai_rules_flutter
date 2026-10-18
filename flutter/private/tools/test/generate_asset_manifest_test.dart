@@ -204,5 +204,126 @@ cat > "\$out"
         equals('${0xf4c4}'),
       );
     });
+
+    test(
+      'subsets families with suffix names and suffix asset paths independently',
+      () async {
+        final materialFont = File('${tempDir.path}/MaterialIcons-Regular.otf')
+          ..writeAsBytesSync(List<int>.filled(1024, 0x4d));
+        final bareIconsFont = File('${tempDir.path}/Icons.otf')
+          ..writeAsBytesSync(List<int>.filled(1024, 0x49));
+        final pkgIconsFont = File('${tempDir.path}/PkgIcons.otf')
+          ..writeAsBytesSync(List<int>.filled(1024, 0x50));
+
+        expect(
+          manifest.matchesFontAssetPath('fonts/Icons.otf', 'fonts/Icons.otf'),
+          isTrue,
+        );
+        expect(
+          manifest.matchesFontAssetPath(
+            'packages/custom_icons/fonts/Icons.otf',
+            'fonts/Icons.otf',
+          ),
+          isFalse,
+        );
+
+        final fakeConstFinder = File('${tempDir.path}/fake_const_finder.dart')
+          ..writeAsStringSync('''
+import 'dart:convert';
+void main(List<String> args) {
+  print(json.encode({
+    'constantInstances': [
+      {
+        'fontFamily': 'MaterialIcons',
+        'fontPackage': null,
+        'codePoint': 0xe111,
+      },
+      {
+        'fontFamily': 'Icons',
+        'fontPackage': null,
+        'codePoint': 0xe222,
+      },
+      {
+        'fontFamily': 'Icons',
+        'fontPackage': 'custom_icons',
+        'codePoint': 0xe333,
+      },
+    ],
+    'nonConstantLocations': [],
+  }));
+}
+''');
+
+        final fakeFontSubset = File('${tempDir.path}/fake_font_subset.sh')
+          ..writeAsStringSync('''#!/bin/sh
+out="\$1"
+cat > "\$out"
+''');
+        Process.runSync('chmod', ['+x', fakeFontSubset.path]);
+
+        final configFile = File('${tempDir.path}/config.json')
+          ..writeAsStringSync(
+            json.encode({
+              'assets': <String, Object>{},
+              'fonts': [
+                {
+                  'family': 'MaterialIcons',
+                  'fonts': [
+                    {'asset': 'fonts/MaterialIcons-Regular.otf'},
+                  ],
+                },
+                {
+                  'family': 'Icons',
+                  'fonts': [
+                    {'asset': 'fonts/Icons.otf'},
+                  ],
+                },
+                {
+                  'family': 'packages/custom_icons/Icons',
+                  'fonts': [
+                    {'asset': 'packages/custom_icons/fonts/Icons.otf'},
+                  ],
+                },
+              ],
+              'copies': {
+                'fonts/MaterialIcons-Regular.otf': materialFont.path,
+                'fonts/Icons.otf': bareIconsFont.path,
+                'packages/custom_icons/fonts/Icons.otf': pkgIconsFont.path,
+              },
+              'icon_tree_shaking': {
+                'dart': Platform.resolvedExecutable,
+                'const_finder': fakeConstFinder.path,
+                'font_subset': fakeFontSubset.path,
+                'kernel_dill': '${tempDir.path}/dummy.dill',
+              },
+            }),
+          );
+
+        final outDir = '${tempDir.path}/out';
+        await manifest.main([
+          '--config',
+          configFile.path,
+          '--output-dir',
+          outDir,
+        ]);
+
+        expect(
+          File('$outDir/fonts/MaterialIcons-Regular.otf')
+              .readAsStringSync()
+              .trim(),
+          equals('${0xe111}'),
+        );
+        expect(
+          File('$outDir/fonts/Icons.otf').readAsStringSync().trim(),
+          equals('${0xe222}'),
+        );
+        expect(
+          File('$outDir/packages/custom_icons/fonts/Icons.otf')
+              .readAsStringSync()
+              .trim(),
+          equals('${0xe333}'),
+        );
+      },
+    );
   });
 }

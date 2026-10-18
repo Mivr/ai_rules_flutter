@@ -236,4 +236,41 @@ void main() {
       expect(codePoints, isNot(contains(0xe145)));
     },
   );
+
+  test(
+    'families where one name or asset path is a suffix of another get distinct subsets',
+    () {
+      final bundledMaterial = _findRunfile(
+        '_web_font_fixture_web/assets/fonts/MaterialIcons-Regular.otf',
+      ).readAsBytesSync();
+      final bundledBareIcons = _findRunfile(
+        '_web_font_fixture_web/assets/fonts/Icons.otf',
+      ).readAsBytesSync();
+      final bundledPkgIcons = _findRunfile(
+        '_web_font_fixture_web/assets/packages/custom_icons/fonts/Icons.otf',
+      ).readAsBytesSync();
+
+      final materialCodePoints = readCmapCodePoints(bundledMaterial);
+      final bareIconsCodePoints = readCmapCodePoints(bundledBareIcons);
+      final pkgIconsCodePoints = readCmapCodePoints(bundledPkgIcons);
+
+      // MaterialIcons retains 0xe567 and 0xe88a, not 0xe047 or 0xe145.
+      expect(materialCodePoints, containsAll(<int>[0xe567, 0xe88a]));
+      expect(materialCodePoints, isNot(contains(0xe047)));
+      expect(materialCodePoints, isNot(contains(0xe145)));
+
+      // Bare 'Icons' (fonts/Icons.otf) retains only 0xe047.
+      expect(bareIconsCodePoints, contains(0xe047));
+      expect(bareIconsCodePoints, isNot(contains(0xe145)));
+      expect(bareIconsCodePoints, isNot(contains(0xe567)));
+      expect(bareIconsCodePoints, isNot(contains(0xe88a)));
+
+      // Package 'packages/custom_icons/Icons' (packages/custom_icons/fonts/Icons.otf)
+      // retains only 0xe145 and is not clobbered by bare 'fonts/Icons.otf'.
+      expect(pkgIconsCodePoints, contains(0xe145));
+      expect(pkgIconsCodePoints, isNot(contains(0xe047)));
+      expect(pkgIconsCodePoints, isNot(contains(0xe567)));
+      expect(pkgIconsCodePoints, isNot(contains(0xe88a)));
+    },
+  );
 }

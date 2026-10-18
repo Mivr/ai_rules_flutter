@@ -57,10 +57,16 @@ def _flutter_toolchain_impl(ctx):
         runfiles = ctx.runfiles(transitive_files = tool_files),
     )
 
+    is_builtin_default = (
+        ctx.label.workspace_root != "" and
+        ctx.label.package == "" and
+        ctx.label.name == "flutter_toolchain"
+    )
     toolchain_info = platform_common.ToolchainInfo(
         flutter_sdk_info = flutter_sdk_info,
         template_variables = template_variables,
         default = default,
+        _is_builtin_default = is_builtin_default,
     )
     return [
         default,
@@ -139,10 +145,12 @@ flutter_toolchain = rule(
         "const_finder": attr.label(
             doc = "The `const_finder.dart.snapshot` for icon tree shaking.",
             allow_single_file = True,
+            cfg = "exec",
         ),
         "font_subset": attr.label(
             doc = "The `font-subset` binary for font subsetting.",
             allow_single_file = True,
+            cfg = "exec",
         ),
         "impellerc": attr.label(
             doc = "The `impellerc` shader compiler binary.",
@@ -197,10 +205,12 @@ flutter_product_tools_toolchain = rule(
         "const_finder": attr.label(
             doc = "The `const_finder.dart.snapshot` for icon tree shaking.",
             allow_single_file = True,
+            cfg = "exec",
         ),
         "font_subset": attr.label(
             doc = "The `font-subset` binary for font subsetting.",
             allow_single_file = True,
+            cfg = "exec",
         ),
     },
     doc = "Lazy sub-toolchain providing the product patched SDK and font-subset tools.",
@@ -258,9 +268,15 @@ flutter_material_icons_toolchain = rule(
 )
 
 def _flutter_font_subset_toolchain_impl(ctx):
+    is_builtin_default = (
+        ctx.label.workspace_root != "" and
+        ctx.label.package == "" and
+        ctx.label.name == "font_subset_toolchain"
+    )
     return [platform_common.ToolchainInfo(
         const_finder = ctx.file.const_finder,
         font_subset = ctx.file.font_subset,
+        _is_builtin_default = is_builtin_default,
     )]
 
 flutter_font_subset_toolchain = rule(
@@ -269,10 +285,12 @@ flutter_font_subset_toolchain = rule(
         "const_finder": attr.label(
             doc = "The `const_finder.dart.snapshot` for icon tree shaking.",
             allow_single_file = True,
+            cfg = "exec",
         ),
         "font_subset": attr.label(
             doc = "The `font-subset` binary for font subsetting.",
             allow_single_file = True,
+            cfg = "exec",
         ),
     },
     doc = "Lazy sub-toolchain providing the `const_finder` and `font-subset` icon tree-shaking tools.",

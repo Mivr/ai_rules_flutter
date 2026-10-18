@@ -109,8 +109,14 @@ def resolve_flutter_sdk_info(ctx):
         "@rules_flutter//flutter/private:font_subset_toolchain_type",
         "@rules_flutter//flutter:font_subset_toolchain_type",
     )
+    has_font_subset_tc_type = (
+        "@rules_flutter//flutter/private:font_subset_toolchain_type" in ctx.toolchains or
+        "@rules_flutter//flutter:font_subset_toolchain_type" in ctx.toolchains
+    )
+    primary_is_builtin = getattr(flutter_toolchain, "_is_builtin_default", False)
+    font_subset_is_builtin = getattr(font_subset_tc, "_is_builtin_default", False) if font_subset_tc else False
 
-    if not product_tc and not aot_tc and not desktop_tc and not material_tc and not font_subset_tc:
+    if not product_tc and not aot_tc and not desktop_tc and not material_tc and not font_subset_tc and not has_font_subset_tc_type:
         return info
 
     fields = {
@@ -122,7 +128,13 @@ def resolve_flutter_sdk_info(ctx):
         for k in ("platform_kernel_dill_product", "const_finder", "font_subset"):
             if not fields.get(k):
                 fields[k] = getattr(product_tc, k, None)
-    if font_subset_tc:
+    if font_subset_tc and not font_subset_is_builtin:
+        for k in ("const_finder", "font_subset"):
+            fields[k] = getattr(font_subset_tc, k, None)
+    elif primary_is_builtin and has_font_subset_tc_type:
+        for k in ("const_finder", "font_subset"):
+            fields[k] = getattr(font_subset_tc, k, None) if font_subset_tc else None
+    elif font_subset_tc:
         for k in ("const_finder", "font_subset"):
             if not fields.get(k):
                 fields[k] = getattr(font_subset_tc, k, None)
