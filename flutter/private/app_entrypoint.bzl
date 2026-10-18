@@ -27,6 +27,20 @@ load("@rules_dart//dart:utils.bzl", "colocate_packages", "generate_package_confi
 # second name to choose.
 APP_SCHEME = "org-dartlang-app"
 
+def app_scheme_rel_path(file):
+    """The path of `file` under `APP_SCHEME` (without leading slash).
+
+    Args:
+        file: A `File`.
+
+    Returns:
+        Workspace-relative path (`external/<repo>/...` for external repos).
+    """
+    rel = file.short_path
+    if rel.startswith("../"):
+        rel = "external/" + rel[len("../"):]
+    return rel
+
 def app_scheme_location(file):
     """Where `file` sits under `APP_SCHEME`, and the root it sits under.
 
@@ -45,13 +59,65 @@ def app_scheme_location(file):
         struct(uri, root): `org-dartlang-app:///<path>`, and the
         exec-root-relative directory to mount for it (`""` for the exec root).
     """
-    rel = file.short_path
-    if rel.startswith("../"):
-        rel = "external/" + rel[len("../"):]
+    rel = app_scheme_rel_path(file)
     if not file.path.endswith(rel):
         fail("%s: cannot place %s under a file-system root: its path does not end in %s" % (file.owner, file.path, rel))
     root = file.path[:len(file.path) - len(rel)].rstrip("/")
     return struct(uri = "%s:///%s" % (APP_SCHEME, rel), root = root)
+
+def stage_generated_inputs(ctx, files, scope):
+    """Stages non-source `files` into a per-action multi-root directory.
+
+    Instead of mounting `ctx.bin_dir.path` (which leaks stale generated outputs
+    under `--spawn_strategy=local` or persistent workers and misses generated
+    inputs from transitioned configurations), symlinks only the declared
+    generated inputs (`not f.is_source`) into `<scope>.stage/<app_scheme_rel_path>`.
+
+    When a source file and a generated file share the same `APP_SCHEME` path,
+    mounting the staging root before `.` makes the declared generated file win
+    deterministically across sandbox, local, and worker strategies, while an
+    undeclared stale file in `bazel-out` is never staged and cannot shadow the
+    source file.
+
+    Args:
+        ctx: Rule or aspect context.
+        files: Iterable of `File`s to inspect.
+        scope: Action-unique prefix (e.g. `output.basename`) for the staging
+            directory under the current package.
+
+    Returns:
+        `struct(root, files)` where `root` is the exec-root-relative staging
+        directory path (or `None` when `files` contains no generated files) and
+        `files` is the list of staged symlink `File`s to add to action inputs.
+    """
+    stage_prefix = scope + ".stage"
+    staged = []
+    seen = {}
+    root = None
+    for f in files:
+        if f == None or f.is_source or f.is_directory:
+            continue
+        rel = app_scheme_rel_path(f)
+        prev = seen.get(rel)
+        if prev != None:
+            if prev != f:
+                fail("%s: conflicting generated inputs at %s: %s and %s" % (
+                    ctx.label,
+                    rel,
+                    prev.path,
+                    f.path,
+                ))
+            continue
+        seen[rel] = f
+        link = ctx.actions.declare_file(stage_prefix + "/" + rel)
+        ctx.actions.symlink(output = link, target_file = f)
+        staged.append(link)
+        if root == None:
+            root = link.path[:len(link.path) - len(rel) - 1]
+    return struct(
+        root = root,
+        files = staged,
+    )
 
 def with_root(roots, root):
     """`roots` with `root` appended unless it is None or already there.

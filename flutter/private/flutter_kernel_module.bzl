@@ -21,7 +21,7 @@ load(
     "duplicated_source",
     "first_per_package",
     "kernel_link_action",
-    "kernel_module_action",
+    "kernel_package_config",
     "kernel_packages_consistent",
     "kernel_tools_for",
     "library_source_uri",
@@ -35,6 +35,7 @@ load(
     "app_main_location",
     "app_scheme_location",
     "package_lib_prefix",
+    "stage_generated_inputs",
 )
 
 FlutterKernelModuleInfo = provider(
@@ -201,6 +202,165 @@ def _own_package_record(info):
             return pkg
     return None
 
+def _is_manual(ctx):
+    if ctx.label.package.startswith("flutter/tests"):
+        return True
+    tags = getattr(ctx.attr, "tags", None)
+    if tags == None and hasattr(ctx, "rule"):
+        tags = getattr(ctx.rule.attr, "tags", None)
+    return tags != None and "manual" in tags
+
+def _dedup_module_sources(sources):
+    """Deduplicates `struct(uri, file)` entries by `uri`, preferring generated files over source files to match `[stage.root, '.']` resolution."""
+    by_uri = {}
+    order = []
+    for s in sources:
+        prev = by_uri.get(s.uri)
+        if prev == None:
+            by_uri[s.uri] = s
+            order.append(s.uri)
+        elif prev.file.is_source and not s.file.is_source:
+            by_uri[s.uri] = s
+    return [by_uri[u] for u in order]
+
+def _flutter_kernel_module_action(
+        ctx,
+        tools,
+        sources,
+        packages,
+        dep_kmods,
+        output,
+        defines,
+        exclude_non_sources,
+        droppable,
+        koutline = None,
+        extra_inputs = None,
+        closure_excluded = None,
+        target = "flutter",
+        platform_dill = None,
+        libraries_json = None,
+        libraries_platform = None,
+        extra_libraries = [],
+        scheme = APP_SCHEME,
+        extra_frontend_flags = []):
+    """Compiles one Flutter kernel module with staged generated inputs instead of mounting `ctx.bin_dir`."""
+    sources = _dedup_module_sources(sources)
+    platform = platform_dill if platform_dill != None else tools.platform_dill
+    libraries = libraries_json if libraries_json != None else tools.libraries_json
+    package_config = ctx.actions.declare_file(output.basename + ".package_config.json")
+    ctx.actions.write(
+        output = package_config,
+        content = kernel_package_config(packages, scheme = scheme),
+    )
+    excluded = ctx.actions.declare_file(output.basename + ".vm_excluded.txt")
+
+    stage_candidates = [s.file for s in sources]
+    if extra_inputs != None:
+        stage_candidates = stage_candidates + extra_inputs.to_list()
+    stage = stage_generated_inputs(ctx, stage_candidates, output.basename)
+
+    args = ctx.actions.args()
+    args.use_param_file("@%s", use_always = True)
+    args.set_param_file_format("multiline")
+
+    args.add("--target", target)
+    args.add("--dart-sdk-summary", platform)
+    args.add("--packages-file", package_config)
+    args.add("--libraries-json", libraries)
+    if libraries_platform:
+        args.add("--libraries-platform", libraries_platform)
+    args.add_all(extra_libraries, before_each = "--extra-library")
+    if stage.root != None:
+        args.add("--multi-root", stage.root)
+    args.add("--multi-root", ".")
+    args.add("--multi-root-scheme", scheme)
+    args.add_all([d for d in defines if "," not in d], format_each = "-D%s")
+    args.add_all(extra_frontend_flags)
+    args.add("--no-summary-only")
+    args.add("--reuse-compiler-result")
+    args.add("--use-incremental-compiler")
+    if exclude_non_sources:
+        args.add("--exclude-non-sources")
+
+    args.add_all(dep_kmods, before_each = "--input-kmod", expand_directories = False)
+    for s in sources:
+        args.add("--source", s.uri)
+    args.add("--output", output.path)
+    if koutline != None:
+        args.add("--output-outline", koutline.path)
+
+    args.add("--excluded-output", excluded)
+    if not droppable:
+        args.add("--no-drop")
+    if closure_excluded:
+        args.add_all(closure_excluded, before_each = "--closure-excluded")
+
+    dart_exe = getattr(tools, "dart", None)
+    dartvm = getattr(tools, "dartvm", None)
+    runtime_files = getattr(tools, "runtime_files", None)
+    direct_inputs = [
+        package_config,
+        tools.dartaotruntime,
+        tools.kernel_worker,
+        libraries,
+        platform,
+    ] + [s.file for s in sources] + stage.files
+    action_tools = [
+        tools.dartaotruntime,
+        tools.kernel_worker,
+        platform,
+        ctx.executable._kernel_module,
+    ]
+    if dart_exe != None:
+        direct_inputs.extend([ctx.executable._kernel_module, dart_exe])
+        action_tools.append(dart_exe)
+        if dartvm != None:
+            direct_inputs.append(dartvm)
+            action_tools.append(dartvm)
+        executable = dart_exe
+        arguments = [
+            ctx.executable._kernel_module.path,
+            "--kernel-worker",
+            tools.kernel_worker.path,
+            "--dartaotruntime",
+            tools.dartaotruntime.path,
+            args,
+        ]
+    else:
+        executable = ctx.executable._kernel_module
+        arguments = [
+            "--kernel-worker",
+            tools.kernel_worker.path,
+            "--dartaotruntime",
+            tools.dartaotruntime.path,
+            args,
+        ]
+
+    ctx.actions.run(
+        executable = executable,
+        arguments = arguments,
+        inputs = depset(
+            direct = direct_inputs,
+            transitive = [dep_kmods] + [
+                d
+                for d in [extra_inputs, closure_excluded]
+                if d
+            ],
+        ),
+        tools = depset(
+            direct = action_tools,
+            transitive = [runtime_files] if runtime_files != None else [],
+        ),
+        outputs = [output, excluded] + ([koutline] if koutline != None else []),
+        mnemonic = "DartKernel",
+        progress_message = "Compiling Dart kernel module %s" % output.short_path,
+        execution_requirements = {} if _is_manual(ctx) else {
+            "supports-workers": "1",
+            "requires-worker-protocol": "proto",
+        },
+    )
+    return excluded
+
 def _flutter_kernel_module_aspect_impl(target, ctx):
     if DartInfo not in target:
         return _no_flutter_kernel_module()
@@ -349,7 +509,7 @@ def _flutter_kernel_module_aspect_impl(target, ctx):
     ]
     deduped_packages = first_per_package(records)
     worker_defines = _kernel_worker_defines(ctx)
-    excluded = kernel_module_action(
+    excluded = _flutter_kernel_module_action(
         ctx,
         tools,
         sources,
@@ -394,7 +554,7 @@ def _flutter_kernel_module_aspect_impl(target, ctx):
         )
         product_kmod = ctx.actions.declare_directory(target.label.name + ".flutter_product.kmod")
         product_koutline = ctx.actions.declare_directory(target.label.name + ".flutter_product.koutline")
-        product_excluded = kernel_module_action(
+        product_excluded = _flutter_kernel_module_action(
             ctx,
             tools,
             sources,
@@ -576,7 +736,7 @@ def compile_flutter_modular_test_kernel(
         transitive = [k.cross_pkg_srcs for k in dep_kernels],
     )
     entry = ctx.actions.declare_directory(ctx.label.name + ".flutter_entry.kmod")
-    kernel_module_action(
+    _flutter_kernel_module_action(
         ctx,
         tools,
         sources,
@@ -663,7 +823,7 @@ def compile_flutter_modular_web_kernel(
         transitive = [k.cross_pkg_srcs for k in dep_kernels],
     )
     entry = ctx.actions.declare_directory(ctx.label.name + "_icon_tree_shaking.flutter_entry.kmod")
-    kernel_module_action(
+    _flutter_kernel_module_action(
         ctx,
         tools,
         sources,
@@ -738,7 +898,7 @@ def compile_flutter_modular_app_kernel(
         transitive = [k.cross_pkg_srcs for k in dep_kernels],
     )
     entry = ctx.actions.declare_directory(ctx.label.name + ".flutter_entry.kmod")
-    kernel_module_action(
+    _flutter_kernel_module_action(
         ctx,
         tools,
         sources,

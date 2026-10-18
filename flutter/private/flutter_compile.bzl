@@ -6,7 +6,7 @@ Flutter compilation differs from vanilla Dart in that it uses:
 """
 
 load("//flutter:providers.bzl", "resolve_exec_dart_vm")
-load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME")
+load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "stage_generated_inputs")
 
 def flutter_kernel_compile_action(
         ctx,
@@ -124,10 +124,17 @@ def flutter_kernel_compile_action(
     for d in defines:
         args.add("-D" + d)
 
-    # Always mount the output bin_dir first and the exec root (`.`) second under
-    # APP_SCHEME so multi-root package_config.json entries (`org-dartlang-app:///...`)
-    # resolve both generated files in bazel-out and hand-written files in the source tree.
-    mounted_roots = [ctx.bin_dir.path, ""]
+    # Stage only declared generated inputs into a per-action staging root and
+    # mount it before the exec root (`.`) under APP_SCHEME. Never mount
+    # `ctx.bin_dir.path` directly: doing so allows stale generated files in
+    # `bazel-out` to shadow source files when running unsandboxed (local/worker)
+    # and misses generated inputs produced in transitioned configurations.
+    compile_sources = [main] if from_dill != None else [main] + srcs
+    stage = stage_generated_inputs(ctx, compile_sources, output.basename)
+    mounted_roots = []
+    if stage.root != None:
+        mounted_roots.append(stage.root)
+    mounted_roots.append("")
     for r in filesystem_roots:
         if r != None and r not in mounted_roots:
             mounted_roots.append(r)
@@ -166,9 +173,9 @@ def flutter_kernel_compile_action(
         env["HOME"] = output.dirname
 
     if from_dill != None:
-        direct_inputs = [main, package_config, frontend_server, platform_dill, from_dill]
+        direct_inputs = [main, package_config, frontend_server, platform_dill, from_dill] + stage.files
     else:
-        direct_inputs = [main, package_config, frontend_server, platform_dill] + srcs
+        direct_inputs = [main, package_config, frontend_server, platform_dill] + srcs + stage.files
     if native_assets_manifest != None:
         direct_inputs.append(native_assets_manifest)
     outputs = [output]

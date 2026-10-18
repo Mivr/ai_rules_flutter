@@ -13,8 +13,11 @@ mounts one scheme at a time.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
+load("@bazel_skylib//rules:build_test.bzl", "build_test")
+load("//flutter:providers.bzl", "resolve_exec_dart_vm")
 load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
 load("//flutter/private:flutter_application.bzl", "flutter_application")
+load("//flutter/private:flutter_kernel_target.bzl", "flutter_kernel_target")
 load(":action_content.bzl", "package_entry", "written_json")
 
 _PACKAGE = "ae_fixture"
@@ -32,17 +35,26 @@ def _kernel_argv(env):
 def _flag_values(argv, flag):
     return [argv[i + 1] for i in range(len(argv) - 1) if argv[i] == flag]
 
-def _assert_multi_root_and_package_config(env, argv):
-    """FlutterKernelCompile mounts [bin_dir, '.'] under org-dartlang-app and emits stable rootUris."""
+def _assert_multi_root_and_package_config(env, argv, expect_stage = True):
+    """FlutterKernelCompile mounts only staged generated inputs + '.' under org-dartlang-app and emits stable rootUris."""
     roots = _flag_values(argv, "--filesystem-root")
-    asserts.equals(env, 2, len(roots), "expected [bin_dir, '.'] mounted, got %r" % roots)
-    if len(roots) >= 2:
-        asserts.true(
+    for r in roots:
+        asserts.false(
             env,
-            roots[0].startswith("bazel-out/") and roots[0].endswith("/bin"),
-            "first --filesystem-root must be bazel-out/.../bin, got %r" % roots[0],
+            r.endswith("/bin"),
+            "FlutterKernelCompile must never mount whole bin_dir, got %r" % roots,
         )
-        asserts.equals(env, ".", roots[1], "second --filesystem-root must be '.', got %r" % roots[1])
+    if expect_stage:
+        asserts.equals(env, 2, len(roots), "expected [stage_root, '.'] mounted, got %r" % roots)
+        if len(roots) >= 2:
+            asserts.true(
+                env,
+                roots[0].startswith("bazel-out/") and roots[0].endswith(".stage"),
+                "first --filesystem-root must be per-action .stage dir, got %r" % roots[0],
+            )
+            asserts.equals(env, ".", roots[1], "second --filesystem-root must be '.', got %r" % roots[1])
+    else:
+        asserts.equals(env, ["."], roots, "source-only compile must mount only '.', got %r" % roots)
     asserts.equals(env, ["org-dartlang-app"], _flag_values(argv, "--filesystem-scheme"))
 
     pkg_config = written_json(env, ".package_config.json")
@@ -83,7 +95,7 @@ def _assert_registrant_on_app_scheme(env, argv):
         registrant.startswith("org-dartlang-app:///flutter/tests/"),
         "the registrant is named by its workspace path under the app scheme, got %r" % registrant,
     )
-    _assert_multi_root_and_package_config(env, argv)
+    _assert_multi_root_and_package_config(env, argv, expect_stage = True)
 
 def _outside_lib_test_impl(ctx):
     env = analysistest.begin(ctx)
@@ -145,7 +157,7 @@ def _in_lib_test_impl(ctx):
     return analysistest.end(env)
 
 def _opt_in_lib_test_impl(ctx):
-    """Release builds (no registrant) also mount [bin_dir, '.'] and write stable rootUris."""
+    """Release builds with only source inputs mount '.' alone and write stable rootUris."""
     env = analysistest.begin(ctx)
     argv = _kernel_argv(env)
     asserts.equals(
@@ -158,7 +170,180 @@ def _opt_in_lib_test_impl(ctx):
         "--no-embed-source-text" in argv,
         "AOT FlutterKernelCompile must pass --no-embed-source-text, got %r" % argv,
     )
-    _assert_multi_root_and_package_config(env, argv)
+    _assert_multi_root_and_package_config(env, argv, expect_stage = False)
+    return analysistest.end(env)
+
+def _stale_bin_dir_seed_impl(ctx):
+    """Materializes an invalid Dart file at `bazel-out/<cfg>/bin/flutter/tests/lib/web_fixture_main.dart` alongside a declared generated source."""
+    stale_tmpl = ctx.actions.declare_file(ctx.label.name + "_stale.tmpl")
+    ctx.actions.write(
+        stale_tmpl,
+        "THIS IS STALE GENERATED GARBAGE IN BAZEL-OUT THAT MUST NOT BE PICKED UP;\n",
+    )
+    seed_tmpl = ctx.actions.declare_file(ctx.label.name + "_seed.tmpl")
+    ctx.actions.write(
+        seed_tmpl,
+        "const int staleProbeSeed = 1;\n",
+    )
+
+    # `stale_out` lands at `bazel-out/<cfg>/bin/flutter/tests/lib/web_fixture_main.dart`,
+    # the exact bin_dir path corresponding to the source `lib/web_fixture_main.dart`.
+    # Producing both outputs from one action guarantees `stale_out` exists on disk
+    # in `bazel-out/<cfg>/bin` whenever a consumer builds `seed_out`, while only
+    # `seed_out` is exposed in `DefaultInfo.files`.
+    stale_out = ctx.actions.declare_file("lib/web_fixture_main.dart")
+    seed_out = ctx.actions.declare_file("lib/stale_probe_seed.dart")
+    cfg = ctx.actions.declare_file(ctx.label.name + "_config.json")
+    ctx.actions.write(
+        cfg,
+        json.encode({
+            "web_defines": {},
+            "keep_placeholders": [],
+            "files": [
+                {
+                    "template": stale_tmpl.path,
+                    "output": stale_out.path,
+                    "label": "stale",
+                    "base_href": "",
+                    "static_assets_url": None,
+                    "dev_loop_guard": False,
+                    "manages_service_worker": False,
+                    "check_constructs": False,
+                    "builtins": {},
+                },
+                {
+                    "template": seed_tmpl.path,
+                    "output": seed_out.path,
+                    "label": "seed",
+                    "base_href": "",
+                    "static_assets_url": None,
+                    "dev_loop_guard": False,
+                    "manages_service_worker": False,
+                    "check_constructs": False,
+                    "builtins": {},
+                },
+            ],
+        }),
+    )
+    dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx)
+    ctx.actions.run(
+        executable = dart_exe,
+        arguments = [ctx.executable._web_template_tool.path, "--config", cfg.path],
+        inputs = depset(
+            direct = [stale_tmpl, seed_tmpl, cfg, ctx.executable._web_template_tool],
+            transitive = [dart_vm_files],
+        ),
+        outputs = [stale_out, seed_out],
+        mnemonic = "StaleBinDirSeed",
+    )
+    return [
+        DefaultInfo(files = depset([seed_out])),
+        OutputGroupInfo(stale = depset([stale_out])),
+    ]
+
+_stale_bin_dir_seed = rule(
+    implementation = _stale_bin_dir_seed_impl,
+    attrs = {
+        "_web_template_tool": attr.label(
+            default = Label("//flutter/private/tools:web_template"),
+            executable = True,
+            cfg = "exec",
+        ),
+    },
+    toolchains = [
+        "@rules_flutter//flutter:toolchain_type",
+        config_common.toolchain_type("@rules_dart//dart:exec_tools_toolchain_type", mandatory = False),
+    ],
+)
+
+def _other_cfg_transition_impl(settings, _attr):
+    mode = settings["//command_line_option:compilation_mode"]
+    return {
+        "//command_line_option:compilation_mode": "dbg" if mode != "dbg" else "fastbuild",
+    }
+
+_other_cfg_transition = transition(
+    implementation = _other_cfg_transition_impl,
+    inputs = ["//command_line_option:compilation_mode"],
+    outputs = ["//command_line_option:compilation_mode"],
+)
+
+def _transitioned_dart_src_impl(ctx):
+    part_out = ctx.actions.declare_file("lib/transitioned_part.dart")
+    ctx.actions.write(part_out, "const int transitionedValue = 7;\n")
+    main_out = ctx.actions.declare_file("lib/transitioned_main.dart")
+    ctx.actions.write(
+        main_out,
+        "import 'package:%s/transitioned_part.dart';\nvoid main() { if (transitionedValue != 7) throw StateError('bad'); }\n" % _PACKAGE,
+    )
+    return [DefaultInfo(files = depset([part_out, main_out]))]
+
+_transitioned_dart_src = rule(
+    implementation = _transitioned_dart_src_impl,
+    cfg = _other_cfg_transition,
+)
+
+def _transitioned_main_only_impl(ctx):
+    for f in ctx.files.src:
+        if f.basename == "transitioned_main.dart":
+            return [DefaultInfo(files = depset([f]))]
+    fail("expected transitioned_main.dart")
+
+_transitioned_main_only = rule(
+    implementation = _transitioned_main_only_impl,
+    attrs = {"src": attr.label(mandatory = True)},
+)
+
+def _declared_shadow_src_impl(ctx):
+    # Generates `app_entrypoint_sibling.dart` at the same package-relative path
+    # as the checked-in source `app_entrypoint_sibling.dart`, adding
+    # `generatedShadowSymbol` which is absent from the source file.
+    shadow_sibling = ctx.actions.declare_file("app_entrypoint_sibling.dart")
+    ctx.actions.write(
+        shadow_sibling,
+        "const sibling = 'generated';\nconst int generatedShadowSymbol = 99;\n",
+    )
+    return [DefaultInfo(files = depset([shadow_sibling]))]
+
+_declared_shadow_src = rule(
+    implementation = _declared_shadow_src_impl,
+)
+
+def _shadow_consumer_main_impl(ctx):
+    main_out = ctx.actions.declare_file("shadow_consumer_main.dart")
+    ctx.actions.write(
+        main_out,
+        "import 'app_entrypoint_sibling.dart';\nvoid main() { if (generatedShadowSymbol != 99) throw StateError(sibling); }\n",
+    )
+    return [DefaultInfo(files = depset([main_out]))]
+
+_shadow_consumer_main = rule(
+    implementation = _shadow_consumer_main_impl,
+)
+
+def _stale_probe_analysis_test_impl(ctx):
+    """Declared generated inputs are staged in `.stage`, while undeclared files in `bazel-out` are not."""
+    env = analysistest.begin(ctx)
+    kernels = [a for a in analysistest.target_actions(env) if a.mnemonic == "FlutterKernelCompile"]
+    asserts.equals(env, 1, len(kernels), "expected one FlutterKernelCompile")
+    if kernels:
+        action = kernels[0]
+        _assert_multi_root_and_package_config(env, action.argv, expect_stage = True)
+        input_paths = [f.path for f in action.inputs.to_list()]
+        staged_seed = [p for p in input_paths if p.endswith(".stage/flutter/tests/lib/stale_probe_seed.dart")]
+        asserts.equals(
+            env,
+            1,
+            len(staged_seed),
+            "expected declared generated file staged in .stage, got %r" % input_paths,
+        )
+        staged_main = [p for p in input_paths if p.endswith(".stage/flutter/tests/lib/web_fixture_main.dart")]
+        asserts.equals(
+            env,
+            [],
+            staged_main,
+            "undeclared stale file in bazel-out must not be staged in .stage: %r" % staged_main,
+        )
     return analysistest.end(env)
 
 _DBG = {
@@ -173,6 +358,7 @@ _OPT = {
 _outside_lib_test = analysistest.make(_outside_lib_test_impl, config_settings = _DBG)
 _in_lib_test = analysistest.make(_in_lib_test_impl, config_settings = _DBG)
 _opt_in_lib_test = analysistest.make(_opt_in_lib_test_impl, config_settings = _OPT)
+_stale_probe_analysis_test = analysistest.make(_stale_probe_analysis_test_impl, config_settings = _OPT)
 
 def app_entrypoint_test_suite(name):
     """Fixtures and tests for where a native app's `main` is compiled from.
@@ -197,6 +383,81 @@ def app_entrypoint_test_suite(name):
         main = "lib/web_fixture_main.dart",
         tags = ["manual"],
     )
+    _stale_bin_dir_seed(
+        name = "_ae_stale_bin_dir_seed",
+        tags = ["manual"],
+    )
+    flutter_kernel_target(
+        name = "_ae_stale_probe_aot",
+        srcs = [":_ae_stale_bin_dir_seed"],
+        aot = True,
+        package_name = _PACKAGE,
+        main = "lib/web_fixture_main.dart",
+        tags = ["manual"],
+    )
+    flutter_kernel_target(
+        name = "_ae_stale_probe_modular",
+        srcs = [":_ae_stale_bin_dir_seed"],
+        aot = False,
+        package_name = _PACKAGE,
+        main = "lib/web_fixture_main.dart",
+        tags = ["manual"],
+    )
+    _transitioned_dart_src(
+        name = "_ae_transitioned_srcs",
+        tags = ["manual"],
+    )
+    _transitioned_main_only(
+        name = "_ae_transitioned_main",
+        src = ":_ae_transitioned_srcs",
+        tags = ["manual"],
+    )
+    flutter_kernel_target(
+        name = "_ae_transitioned_probe_aot",
+        srcs = [":_ae_transitioned_srcs"],
+        aot = True,
+        package_name = _PACKAGE,
+        main = ":_ae_transitioned_main",
+        tags = ["manual"],
+    )
+    flutter_kernel_target(
+        name = "_ae_transitioned_probe_modular",
+        srcs = [":_ae_transitioned_srcs"],
+        aot = False,
+        package_name = _PACKAGE,
+        main = ":_ae_transitioned_main",
+        tags = ["manual"],
+    )
+    _declared_shadow_src(
+        name = "_ae_declared_shadow_src",
+        tags = ["manual"],
+    )
+    _shadow_consumer_main(
+        name = "_ae_shadow_consumer_main",
+        tags = ["manual"],
+    )
+    flutter_kernel_target(
+        name = "_ae_shadow_probe_aot",
+        srcs = [
+            "app_entrypoint_sibling.dart",
+            ":_ae_declared_shadow_src",
+        ],
+        aot = True,
+        package_name = _PACKAGE,
+        main = ":_ae_shadow_consumer_main",
+        tags = ["manual"],
+    )
+    flutter_kernel_target(
+        name = "_ae_shadow_probe_modular",
+        srcs = [
+            "app_entrypoint_sibling.dart",
+            ":_ae_declared_shadow_src",
+        ],
+        aot = False,
+        package_name = _PACKAGE,
+        main = ":_ae_shadow_consumer_main",
+        tags = ["manual"],
+    )
     _outside_lib_test(
         name = name + "_outside_lib",
         target_under_test = ":_ae_outside_lib",
@@ -210,11 +471,30 @@ def app_entrypoint_test_suite(name):
         target_under_test = ":_ae_in_lib",
         target_compatible_with = HOST_COMPATIBLE,
     )
+    _stale_probe_analysis_test(
+        name = name + "_stale_probe_analysis",
+        target_under_test = ":_ae_stale_probe_aot",
+        target_compatible_with = HOST_COMPATIBLE,
+    )
+    build_test(
+        name = name + "_stale_generated_build_test",
+        targets = [
+            ":_ae_stale_probe_aot",
+            ":_ae_stale_probe_modular",
+            ":_ae_transitioned_probe_aot",
+            ":_ae_transitioned_probe_modular",
+            ":_ae_shadow_probe_aot",
+            ":_ae_shadow_probe_modular",
+        ],
+        target_compatible_with = HOST_COMPATIBLE,
+    )
     native.test_suite(
         name = name,
         tests = [
             ":" + name + "_outside_lib",
             ":" + name + "_in_lib",
             ":" + name + "_opt_in_lib",
+            ":" + name + "_stale_probe_analysis",
+            ":" + name + "_stale_generated_build_test",
         ],
     )
