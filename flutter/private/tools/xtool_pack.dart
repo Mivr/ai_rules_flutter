@@ -1779,12 +1779,11 @@ class BundleConfig {
   for (final candidate in envCandidates) {
     if (candidate != null && candidate.isNotEmpty) {
       final base = Directory(candidate);
-      final existed = base.existsSync();
-      if (!existed) {
+      if (!base.existsSync()) {
         base.createSync(recursive: true);
       }
       final stage = base.createTempSync('xtool_pack_');
-      return (stage, existed ? null : base);
+      return (stage, null);
     }
   }
 
