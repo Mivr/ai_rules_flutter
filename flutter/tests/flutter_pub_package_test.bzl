@@ -22,6 +22,9 @@ load(
     "parse_android_manifest_package",
     "parse_gradle_android_namespace",
     "render_overlay_deps",
+    "resolve_overlay",
+    "resolve_overlay_roots",
+    "resolve_overlay_template",
 )
 
 # Verbatim shape of record_android 1.5.1's android/build.gradle (trimmed):
@@ -599,6 +602,333 @@ hardcoded_overlay_dependency_is_rejected_test = unittest.make(
     _hardcoded_overlay_dependency_is_rejected_test_impl,
 )
 
+def _make_mock_overlay_ctx(files, root_anchors = None, hub_name = "deps"):
+    """Construct a fake repository_ctx recording ctx.watch and ctx.read calls.
+
+    Args:
+        files: Dict mapping absolute path string -> file content string.
+        root_anchors: Optional dict mapping anchor label string -> absolute
+            anchor file path. Defaults to `{"//plugin_overlays:BUILD.bazel":
+            "/workspace/plugin_overlays/BUILD.bazel"}`.
+        hub_name: Value for `ctx.attr.hub_name`.
+
+    Returns:
+        A struct with `.ctx`, `.watched` (list of watched path strings), and
+        `.probed` (list of all path strings constructed via `get_child`).
+    """
+    anchors = root_anchors if root_anchors != None else {
+        "//plugin_overlays:BUILD.bazel": "/workspace/plugin_overlays/BUILD.bazel",
+    }
+    existing_paths = {}
+    for anchor_path in anchors.values():
+        existing_paths[anchor_path] = True
+        parent = anchor_path.rsplit("/", 1)[0] if "/" in anchor_path else ""
+        if parent:
+            existing_paths[parent] = True
+    for file_path in files.keys():
+        existing_paths[file_path] = True
+        parts = file_path.split("/")
+        for i in range(1, len(parts)):
+            prefix = "/".join(parts[:i])
+            if prefix:
+                existing_paths[prefix] = True
+
+    watched = []
+    probed = []
+
+    def _make_path(path_str):
+        parent_str = path_str.rsplit("/", 1)[0] if "/" in path_str else ""
+
+        def _get_child(segment):
+            child_str = path_str + "/" + segment
+            probed.append(child_str)
+            return _make_path(child_str)
+
+        return struct(
+            path = path_str,
+            exists = path_str in existing_paths,
+            dirname = struct(
+                path = parent_str,
+                exists = parent_str in existing_paths,
+                get_child = lambda seg: _get_child_from(parent_str, seg),
+            ) if parent_str else None,
+            get_child = _get_child,
+        )
+
+    def _get_child_from(base_str, segment):
+        child_str = base_str + "/" + segment
+        probed.append(child_str)
+        return _make_path(child_str)
+
+    def _path(label_or_str):
+        key = str(label_or_str)
+        resolved = anchors.get(key, key)
+        return _make_path(resolved)
+
+    def _watch(path_obj):
+        p = path_obj.path if hasattr(path_obj, "path") else str(path_obj)
+        watched.append(p)
+
+    def _read(path_obj):
+        p = path_obj.path if hasattr(path_obj, "path") else str(path_obj)
+        if p not in files:
+            fail("mock ctx.read on missing file: " + p)
+        return files[p]
+
+    return struct(
+        ctx = struct(
+            attr = struct(hub_name = hub_name),
+            path = _path,
+            watch = _watch,
+            read = _read,
+        ),
+        watched = watched,
+        probed = probed,
+    )
+
+def _overlay_watches_missing_package_and_candidates_test_impl(ctx):
+    """Probing an overlay root with no matching package watches the package dir and all version candidates.
+
+    Without `ctx.watch` on the probed paths, adding `<root>/<pkg>/<ver>/BUILD.bazel.tpl`
+    after `@<hub>__<pkg>` has been fetched once leaves the spoke repository stale
+    on incremental builds.
+    """
+    env = unittest.begin(ctx)
+
+    mock = _make_mock_overlay_ctx(files = {})
+    rendered = resolve_overlay(
+        mock.ctx,
+        "//plugin_overlays:BUILD.bazel",
+        "audio_session",
+        "0.1.21",
+        "3.4",
+        ["@deps__meta//:meta"],
+    )
+
+    asserts.equals(env, "", rendered)
+    asserts.equals(
+        env,
+        [
+            "/workspace/plugin_overlays/BUILD.bazel",
+            "/workspace/plugin_overlays",
+            "/workspace/plugin_overlays/audio_session",
+            "/workspace/plugin_overlays/audio_session/0.1.21",
+            "/workspace/plugin_overlays/audio_session/0.1.21/BUILD.bazel.tpl",
+            "/workspace/plugin_overlays/audio_session/0.1",
+            "/workspace/plugin_overlays/audio_session/0.1/BUILD.bazel.tpl",
+            "/workspace/plugin_overlays/audio_session/0",
+            "/workspace/plugin_overlays/audio_session/0/BUILD.bazel.tpl",
+            "/workspace/plugin_overlays/audio_session/BUILD.bazel.tpl",
+        ],
+        mock.watched,
+    )
+    for p in mock.probed:
+        asserts.true(
+            env,
+            p in mock.watched,
+            "probed path %s must be watched by ctx.watch, got watched=%s" % (p, mock.watched),
+        )
+
+    return unittest.end(env)
+
+overlay_watches_missing_package_and_candidates_test = unittest.make(
+    _overlay_watches_missing_package_and_candidates_test_impl,
+)
+
+def _overlay_watches_more_specific_version_candidates_test_impl(ctx):
+    """Matching `<major>/BUILD.bazel.tpl` still watches `<major>.<minor>.<patch>` and `<major>.<minor>`.
+
+    When a user drops a more specific `<major>.<minor>.<patch>/BUILD.bazel.tpl`
+    override alongside an existing `<major>/BUILD.bazel.tpl`, Bazel only
+    invalidates the spoke if the higher-precedence candidate paths were watched
+    during the initial lookup.
+    """
+    env = unittest.begin(ctx)
+
+    files = {
+        "/workspace/plugin_overlays/audio_session/0/BUILD.bazel.tpl": (
+            'flutter_plugin(name = "{PKG}", version = "{VERSION}", language_version = "{LANGUAGE_VERSION}", deps = [\n        {DEPS}\n    ]) # major'
+        ),
+    }
+    mock1 = _make_mock_overlay_ctx(files = files)
+    rendered1 = resolve_overlay(
+        mock1.ctx,
+        "//plugin_overlays:BUILD.bazel",
+        "audio_session",
+        "0.1.21",
+        "3.4",
+        ["@deps__meta//:meta"],
+    )
+    asserts.true(env, "# major" in rendered1, rendered1)
+    asserts.true(
+        env,
+        "/workspace/plugin_overlays/audio_session/0.1.21/BUILD.bazel.tpl" in mock1.watched,
+        "patch candidate must be watched so a later override invalidates the spoke: %s" % mock1.watched,
+    )
+    asserts.true(
+        env,
+        "/workspace/plugin_overlays/audio_session/0.1/BUILD.bazel.tpl" in mock1.watched,
+        "minor candidate must be watched so a later override invalidates the spoke: %s" % mock1.watched,
+    )
+    asserts.true(
+        env,
+        "/workspace/plugin_overlays/audio_session/0/BUILD.bazel.tpl" in mock1.watched,
+        "matched major candidate must be watched: %s" % mock1.watched,
+    )
+
+    # Simulate adding the patch-specific override on an incremental build: the
+    # newly added path must have been in mock1.watched, and re-running resolves
+    # the patch-specific template.
+    patch_tpl = "/workspace/plugin_overlays/audio_session/0.1.21/BUILD.bazel.tpl"
+    asserts.true(env, patch_tpl in mock1.watched)
+    files_after = dict(files)
+    files_after[patch_tpl] = (
+        'flutter_plugin(name = "{PKG}", version = "{VERSION}", language_version = "{LANGUAGE_VERSION}", deps = [\n        {DEPS}\n    ]) # patch'
+    )
+    mock2 = _make_mock_overlay_ctx(files = files_after)
+    rendered2 = resolve_overlay(
+        mock2.ctx,
+        "//plugin_overlays:BUILD.bazel",
+        "audio_session",
+        "0.1.21",
+        "3.4",
+        ["@deps__meta//:meta"],
+    )
+    asserts.true(env, "# patch" in rendered2, rendered2)
+
+    return unittest.end(env)
+
+overlay_watches_more_specific_version_candidates_test = unittest.make(
+    _overlay_watches_more_specific_version_candidates_test_impl,
+)
+
+def _overlay_watches_android_subpackage_candidates_test_impl(ctx):
+    """Looking up `android/BUILD.bazel.tpl` watches all candidate paths along the version ladder.
+
+    When a top-level overlay is present without an `android/BUILD.bazel.tpl`,
+    the spoke emits an empty stub `android/BUILD.bazel`. If the user later adds
+    `<root>/<pkg>/<ver>/android/BUILD.bazel.tpl` (or upgrades it to a more
+    specific version), the spoke must re-evaluate on incremental builds.
+    """
+    env = unittest.begin(ctx)
+
+    files = {
+        "/workspace/plugin_overlays/audio_session/0/BUILD.bazel.tpl": (
+            'flutter_plugin(name = "{PKG}", language_version = "{LANGUAGE_VERSION}")'
+        ),
+    }
+    mock1 = _make_mock_overlay_ctx(files = files)
+    android1 = resolve_overlay_template(
+        mock1.ctx,
+        "//plugin_overlays:BUILD.bazel",
+        "audio_session",
+        "0.1.21",
+        "3.4",
+        [],
+        "android/BUILD.bazel.tpl",
+    )
+    asserts.equals(env, "", android1)
+    for expected in [
+        "/workspace/plugin_overlays/audio_session/0.1.21/android",
+        "/workspace/plugin_overlays/audio_session/0.1.21/android/BUILD.bazel.tpl",
+        "/workspace/plugin_overlays/audio_session/0.1/android",
+        "/workspace/plugin_overlays/audio_session/0.1/android/BUILD.bazel.tpl",
+        "/workspace/plugin_overlays/audio_session/0/android",
+        "/workspace/plugin_overlays/audio_session/0/android/BUILD.bazel.tpl",
+        "/workspace/plugin_overlays/audio_session/android",
+        "/workspace/plugin_overlays/audio_session/android/BUILD.bazel.tpl",
+    ]:
+        asserts.true(
+            env,
+            expected in mock1.watched,
+            "expected %s in watched %s" % (expected, mock1.watched),
+        )
+
+    # Adding `0/android/BUILD.bazel.tpl` touches a path watched during mock1.
+    major_android_tpl = "/workspace/plugin_overlays/audio_session/0/android/BUILD.bazel.tpl"
+    asserts.true(env, major_android_tpl in mock1.watched)
+    files_with_android = dict(files)
+    files_with_android[major_android_tpl] = 'kt_android_library(name = "lib", custom_package = "{PKG}")'
+    mock2 = _make_mock_overlay_ctx(files = files_with_android)
+    android2 = resolve_overlay_template(
+        mock2.ctx,
+        "//plugin_overlays:BUILD.bazel",
+        "audio_session",
+        "0.1.21",
+        "3.4",
+        [],
+        "android/BUILD.bazel.tpl",
+    )
+    asserts.equals(env, 'kt_android_library(name = "lib", custom_package = "audio_session")', android2)
+    asserts.true(
+        env,
+        "/workspace/plugin_overlays/audio_session/0.1.21/android/BUILD.bazel.tpl" in mock2.watched,
+    )
+
+    return unittest.end(env)
+
+overlay_watches_android_subpackage_candidates_test = unittest.make(
+    _overlay_watches_android_subpackage_candidates_test_impl,
+)
+
+def _overlay_multi_root_watches_higher_priority_root_test_impl(ctx):
+    """When a lower-priority root matches, higher-priority roots that missed are still watched.
+
+    `flutter.plugin_overlays` prepends user roots ahead of `@rules_flutter//ext:BUILD.bazel`.
+    When a package initially resolves from `@rules_flutter//ext`, the user root's
+    probed candidate paths must all be watched so dropping a local override into
+    the user root invalidates the spoke on the next incremental build.
+    """
+    env = unittest.begin(ctx)
+
+    anchors = {
+        "//plugin_overlays:BUILD.bazel": "/workspace/plugin_overlays/BUILD.bazel",
+        "@rules_flutter//ext:BUILD.bazel": "/ext_repo/ext/BUILD.bazel",
+    }
+    files = {
+        "/ext_repo/ext/objective_c/9/BUILD.bazel.tpl": (
+            'flutter_plugin(name = "{PKG}", language_version = "{LANGUAGE_VERSION}", deps = [\n        {DEPS}\n    ]) # bundled'
+        ),
+    }
+    mock = _make_mock_overlay_ctx(files = files, root_anchors = anchors)
+
+    overlay_content, overlay_android_content = resolve_overlay_roots(
+        mock.ctx,
+        ["//plugin_overlays:BUILD.bazel", "@rules_flutter//ext:BUILD.bazel"],
+        "objective_c",
+        "9.3.0",
+        "3.10",
+        ["@deps__ffi//:ffi"],
+    )
+
+    asserts.true(env, "# bundled" in overlay_content, overlay_content)
+    asserts.equals(env, "", overlay_android_content)
+    for expected_watched in [
+        "/workspace/plugin_overlays/objective_c",
+        "/workspace/plugin_overlays/objective_c/9.3.0/BUILD.bazel.tpl",
+        "/workspace/plugin_overlays/objective_c/9.3/BUILD.bazel.tpl",
+        "/workspace/plugin_overlays/objective_c/9/BUILD.bazel.tpl",
+        "/workspace/plugin_overlays/objective_c/BUILD.bazel.tpl",
+        "/ext_repo/ext/objective_c/9.3.0/BUILD.bazel.tpl",
+        "/ext_repo/ext/objective_c/9.3/BUILD.bazel.tpl",
+        "/ext_repo/ext/objective_c/9/BUILD.bazel.tpl",
+        "/ext_repo/ext/objective_c/9.3.0/android/BUILD.bazel.tpl",
+        "/ext_repo/ext/objective_c/9.3/android/BUILD.bazel.tpl",
+        "/ext_repo/ext/objective_c/9/android/BUILD.bazel.tpl",
+        "/ext_repo/ext/objective_c/android/BUILD.bazel.tpl",
+    ]:
+        asserts.true(
+            env,
+            expected_watched in mock.watched,
+            "expected %s in watched: %s" % (expected_watched, mock.watched),
+        )
+
+    return unittest.end(env)
+
+overlay_multi_root_watches_higher_priority_root_test = unittest.make(
+    _overlay_multi_root_watches_higher_priority_root_test_impl,
+)
+
 def flutter_pub_package_test_suite(name):
     unittest.suite(
         name,
@@ -609,6 +939,10 @@ def flutter_pub_package_test_suite(name):
         overlay_without_a_language_version_is_left_alone_test,
         overlay_substitutes_the_dependencies_test,
         hardcoded_overlay_dependency_is_rejected_test,
+        overlay_watches_missing_package_and_candidates_test,
+        overlay_watches_more_specific_version_candidates_test,
+        overlay_watches_android_subpackage_candidates_test,
+        overlay_multi_root_watches_higher_priority_root_test,
         parse_gradle_android_namespace_test,
         parse_android_manifest_package_test,
         record_android_subpackage_test,

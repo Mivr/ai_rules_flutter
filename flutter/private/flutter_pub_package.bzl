@@ -1413,10 +1413,12 @@ def _resolve_overlay_template(ctx, overlay_root_label, package_name, version, la
       transitive deps not in the curated `_MAVEN_COORD_TO_LABEL`)
       ship this alongside the top-level overlay.
     """
-    root = ctx.path(overlay_root_label).dirname
+    anchor = ctx.path(overlay_root_label)
+    ctx.watch(anchor)
+    root = anchor.dirname
+    ctx.watch(root)
     pkg_dir = root.get_child(package_name)
-    if not pkg_dir.exists:
-        return ""
+    ctx.watch(pkg_dir)
 
     # Build the version ladder.
     parts = version.split(".")
@@ -1425,15 +1427,19 @@ def _resolve_overlay_template(ctx, overlay_root_label, package_name, version, la
         candidates.append("{}.{}.{}".format(parts[0], parts[1], parts[2]))
     if len(parts) >= 2:
         candidates.append("{}.{}".format(parts[0], parts[1]))
-    if len(parts) >= 1:
+    if len(parts) >= 1 and parts[0]:
         candidates.append(parts[0])
     candidates.append("")  # bare <pkg>/<relpath>
 
     relpath_parts = relpath.split("/")
     for candidate in candidates:
-        tpl = pkg_dir.get_child(candidate) if candidate else pkg_dir
+        cand_dir = pkg_dir.get_child(candidate) if candidate else pkg_dir
+        if candidate:
+            ctx.watch(cand_dir)
+        tpl = cand_dir
         for part in relpath_parts:
             tpl = tpl.get_child(part)
+            ctx.watch(tpl)
         if tpl.exists:
             content = ctx.read(tpl)
             hardcoded_dep = find_hardcoded_hub_dep(content) if guard_hub_deps else ""
@@ -1482,6 +1488,8 @@ def _resolve_overlay_template(ctx, overlay_root_label, package_name, version, la
             )
     return ""
 
+resolve_overlay_template = _resolve_overlay_template
+
 def _resolve_overlay(ctx, overlay_root_label, package_name, version, language_version, dep_labels):
     """Resolve the top-level BUILD.bazel.tpl overlay.
 
@@ -1500,6 +1508,55 @@ def _resolve_overlay(ctx, overlay_root_label, package_name, version, language_ve
         "BUILD.bazel.tpl",
         guard_hub_deps = True,
     )
+
+resolve_overlay = _resolve_overlay
+
+def resolve_overlay_roots(ctx, overlay_roots, package_name, version, language_version, dep_labels):
+    """Resolve `(overlay_content, overlay_android_content)` across `overlay_roots`.
+
+    Walks `overlay_roots` in order and stops on the first root that supplies a
+    top-level `BUILD.bazel.tpl` for `package_name` at `version`, then looks up
+    the matching `android/BUILD.bazel.tpl` from that same root.
+
+    Args:
+        ctx: The repository rule context (`repository_ctx`).
+        overlay_roots: Anchor labels for candidate overlay trees, ordered by precedence.
+        package_name: The pub package name to look up.
+        version: The resolved package version string.
+        language_version: The Dart language version derived from the package's pubspec.
+        dep_labels: Sibling spoke label strings for `{DEPS}` substitution.
+
+    Returns:
+        A `(overlay_content, overlay_android_content)` tuple of substituted
+        BUILD contents (each `""` when no matching template was found).
+    """
+    overlay_content = ""
+    overlay_android_content = ""
+    for overlay_label in overlay_roots:
+        overlay_content = _resolve_overlay(
+            ctx,
+            overlay_label,
+            package_name,
+            version,
+            language_version,
+            dep_labels,
+        )
+        if overlay_content:
+            # Look up the matching `android/BUILD.bazel.tpl` from the same
+            # overlay root. Plugins whose Android side has real sources
+            # ship one alongside the top-level BUILD; plugins that don't
+            # leave it absent and the empty-stub fallback fires below.
+            overlay_android_content = _resolve_overlay_template(
+                ctx,
+                overlay_label,
+                package_name,
+                version,
+                language_version,
+                dep_labels,
+                "android/BUILD.bazel.tpl",
+            )
+            break
+    return overlay_content, overlay_android_content
 
 def _flutter_pub_package_impl(ctx):
     url = "{base}/packages/{name}/versions/{version}.tar.gz".format(
@@ -1582,32 +1639,14 @@ def _flutter_pub_package_impl(ctx):
     # `@rules_flutter//ext/` tree). On match, the overlay replaces
     # auto-generation entirely; the user takes responsibility for the
     # spoke's BUILD content.
-    overlay_content = ""
-    overlay_android_content = ""
-    for overlay_label in ctx.attr.overlay_roots:
-        overlay_content = _resolve_overlay(
-            ctx,
-            overlay_label,
-            ctx.attr.package_name,
-            ctx.attr.version,
-            language_version,
-            dep_labels,
-        )
-        if overlay_content:
-            # Look up the matching `android/BUILD.bazel.tpl` from the same
-            # overlay root. Plugins whose Android side has real sources
-            # ship one alongside the top-level BUILD; plugins that don't
-            # leave it absent and the empty-stub fallback fires below.
-            overlay_android_content = _resolve_overlay_template(
-                ctx,
-                overlay_label,
-                ctx.attr.package_name,
-                ctx.attr.version,
-                language_version,
-                dep_labels,
-                "android/BUILD.bazel.tpl",
-            )
-            break
+    overlay_content, overlay_android_content = resolve_overlay_roots(
+        ctx,
+        ctx.attr.overlay_roots,
+        ctx.attr.package_name,
+        ctx.attr.version,
+        language_version,
+        dep_labels,
+    )
 
     if overlay_content:
         ctx.file("BUILD.bazel", overlay_content)
