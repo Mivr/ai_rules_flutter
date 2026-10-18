@@ -7,6 +7,7 @@ load(":asset_bundle_test.bzl", "asset_bundle_test_suite")
 load(":common_test.bzl", "common_test_suite")
 load(":flutter_application_test.bzl", "flutter_application_test_suite")
 load(":flutter_info_test.bzl", "flutter_info_test_suite")
+load(":flutter_integration_test_test.bzl", "flutter_integration_test_test_suite")
 load(":flutter_library_test.bzl", "flutter_library_test_suite")
 load(":flutter_plugin_test.bzl", "flutter_plugin_test_suite")
 load(":flutter_pub_package_test.bzl", "flutter_pub_package_test_suite")
@@ -57,6 +58,8 @@ plist_merge_test_suite(name = "plist_merge_test")
 web_test_suite(name = "web_test")
 
 flutter_info_test_suite(name = "flutter_info_test")
+
+flutter_integration_test_test_suite(name = "flutter_integration_test_test")
 
 flutter_library_test_suite(name = "flutter_library_test")
 

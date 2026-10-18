@@ -636,6 +636,7 @@ cd e2e/ios_example && bazel test //...
 cd e2e/multi_window_example && bazel test //...
 cd e2e/android_example && bazel test //...
 cd e2e/web_example && bazel test //...
+cd e2e/integration_web && bazel test //...  # Linux-only (hermetic chrome-headless-shell)
 cd e2e/linux_example && bazel test //...    # Linux-only (target_compatible_with)
 cd e2e/windows_example && bazel test //...  # Windows-only (target_compatible_with)
 ```
@@ -707,6 +708,7 @@ cd e2e/windows_example && bazel test //...  # Windows-only (target_compatible_wi
 | macos_example | Full macOS app build + bundle structure verification (Info.plist, ObjC symbols, framework linkage, AOT dylib, flutter_assets, and a native library built in a subdirectory of its package landing flat at `Contents/Frameworks/libsub.dylib`) |
 | ios_example | iOS app build (requires Xcode) |
 | web_example | Web app builds (dart2wasm + dart2js) with web_assets |
+| integration_web | End-to-end web `flutter_integration_test` running a real counter + asset app in hermetic `chrome-headless-shell` |
 | multi_window_example | Multi-window macOS + multi-scene iOS builds with FlutterEngineGroup; macOS bundle verification |
 | android_example | Android APK build (3 approaches: flutter_android_app, Bazel-generated manifest, custom manifest) + APK content verification + web build |
 | linux_example | Linux desktop app (2 approaches: flutter_linux_app, Bazel-generated runner) + bundle structure verification |

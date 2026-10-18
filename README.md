@@ -1205,6 +1205,43 @@ Two limits come from Flutter rather than from these rules:
 - **Goldens are host-specific.** Font rendering and antialiasing differ between operating systems, so a PNG generated on macOS may not match on Linux or Windows. Regenerate on the platform that checks them, or keep per-OS golden directories.
 - **Replacing the comparator disables regeneration.** If a test assigns its own `goldenFileComparator`, `--update-goldens` calls that object's `update()`, which for `LocalFileComparator` writes into runfiles. The run passes, prints nothing, and leaves the source PNG unchanged.
 
+### flutter_integration_test
+
+Builds a Flutter application with an integration test (`package:integration_test` / `package:flutter_test` `WidgetTester` code) compiled in as its entrypoint, runs it on the target platform, and collects results as a Bazel test.
+
+```starlark
+load("@rules_flutter//flutter:defs.bzl", "flutter_integration_test")
+
+flutter_integration_test(
+    name = "app_test",
+    platform = "web",
+    package_name = "my_app",
+    main = "integration_test/app_test.dart",
+    app_srcs = glob(["lib/**/*.dart"]),
+    assets = glob(["assets/**"]),
+    deps = [
+        "@deps//:flutter",
+        "@deps//:flutter_test",
+        "@deps//:integration_test",
+        "@rules_flutter//flutter:material_icons",
+    ],
+)
+```
+
+For `platform = "web"`, add `flutter_web_sdk` and `flutter_chrome_headless_shell` to `use_repo(flutter, ...)` in `MODULE.bazel`, and add `integration_test: {sdk: flutter}` under `dev_dependencies` in `pubspec.yaml`. The test runner serves the compiled web bundle from `127.0.0.1` on an ephemeral port, launches the hermetic pinned `chrome-headless-shell` binary with its pinned shared-library closure (`--no-sandbox`, `--disable-dev-shm-usage`), drives the in-app `WidgetTester` suite over a WebSocket channel, and fails the test on any assertion failure, uncaught error, browser crash, or timeout.
+
+| Attribute | Description |
+|---|---|
+| `platform` | Target platform (`"web"`, `"linux"`, or `"android"`). Defaults to `"web"`. |
+| `main` | Integration test Dart entrypoint. Required if `srcs` does not contain a single file. |
+| `srcs` | Integration test Dart source files. If `main` is omitted and `srcs` has one file, that file is used as `main`. |
+| `app_srcs` | Application Dart source files compiled alongside the integration test. |
+| `deps` | `dart_library` or `flutter_library` targets (`@deps//:flutter`, `@deps//:flutter_test`, `@deps//:integration_test`, or an application `flutter_library`). |
+| `assets` | Asset files bundled into `flutter_assets/`. |
+| `package_name` | Dart package name matching `pubspec.yaml`. |
+| `compiler` | Web compiler (`"dart2js"` or `"dart2wasm"`). Defaults to `"dart2js"`. |
+| `renderer` | Web renderer (`"canvaskit"` or `"skwasm"`). Defaults to matching `compiler`. |
+
 ### flutter_plugin
 
 Declares a Flutter plugin written in your workspace: its Dart code plus per-platform native implementations. Plugins from pub do not need this; the hub declares them.
@@ -1849,6 +1886,7 @@ The `e2e/` directory holds working workspaces, each with its own tests:
 | `e2e/linux_example` | A Linux app built three ways, with bundle checks. |
 | `e2e/windows_example` | A Windows app built three ways, with bundle checks. |
 | `e2e/web_example` | WASM and JavaScript web builds with `web_assets`. |
+| `e2e/integration_web` | End-to-end web `flutter_integration_test` running in hermetic `chrome-headless-shell`. |
 | `e2e/cross_compile_example` | A Linux bundle cross-compiled from macOS. |
 | `e2e/multi_window_example` | Multi-window macOS and multi-scene iOS with `FlutterEngineGroup`. |
 | `e2e/dual_hub` | Two pub hubs in one workspace that disagree on a package version. |

@@ -5,6 +5,7 @@ See https://docs.bazel.build/versions/main/skylark/deploying.html#dependencies
 """
 
 load("//flutter/private:artifact_urls.bzl", "android_engine_artifact_path", "dart_sdk_artifact_path", "desktop_engine_artifact_path", "engine_artifact_url", "gen_snapshot_cross_artifact_path", "host_artifacts_path", "ios_engine_artifact_path", "require_sha256")
+load("//flutter/private:chrome_headless_shell_repo.bzl", "chrome_headless_shell_repo")
 load("//flutter/private:constants.bzl", "ANDROID_ABI_FOR_ARCH")
 load("//flutter/private:engine_helpers.bzl", "PLATFORM_PREFIX_TO_OS", "dart_binary_name", "dartaotruntime_binary_name", "engine_arch_for_os", "engine_filegroup_for_os", "gen_snapshot_host_platform")
 load("//flutter/private:flutter_android_engine_repo.bzl", "flutter_android_engine_repo")
@@ -931,6 +932,12 @@ exports_files(["gen_snapshot_arm64"], visibility = ["//visibility:public"])
         url = darwin_sdk_url,
         sha256 = darwin_sdk_sha256,
         swift_toolchain_path = darwin_sdk_swift_toolchain_path,
+    )
+
+    # Hermetic Chrome for Testing headless shell and runtime libraries (lazy —
+    # only fetched when a web flutter_integration_test is built).
+    chrome_headless_shell_repo(
+        name = name + "_chrome_headless_shell",
     )
 
     flutter_toolchains_repo(

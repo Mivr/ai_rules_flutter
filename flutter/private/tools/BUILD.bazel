@@ -18,6 +18,7 @@ exports_files(
         "web_template.dart",
         "xtool_pack.dart",
         "flutter_test_runner.dart",
+        "flutter_integration_test_runner.dart",
         "bazel_test_protocol.dart",
     ],
     visibility = ["//flutter:__subpackages__"],
@@ -46,6 +47,16 @@ dart_binary(
     srcs = ["bazel_test_protocol.dart"],
     compile_mode = "exe",
     main = "flutter_test_runner.dart",
+    target_compatible_with = HOST_COMPATIBLE,
+    visibility = ["//flutter:__subpackages__"],
+    deps = ["@rules_dart//dart/runfiles"],
+)
+
+dart_binary(
+    name = "flutter_integration_test_runner",
+    srcs = ["bazel_test_protocol.dart"],
+    compile_mode = "exe",
+    main = "flutter_integration_test_runner.dart",
     target_compatible_with = HOST_COMPATIBLE,
     visibility = ["//flutter:__subpackages__"],
     deps = ["@rules_dart//dart/runfiles"],
@@ -168,6 +179,10 @@ _UNIT_TESTS = {
         "flutter_test_runner.dart",
         ["@rules_dart//dart/runfiles"],
     ),
+    "flutter_integration_test_runner_test": (
+        "flutter_integration_test_runner.dart",
+        ["@rules_dart//dart/runfiles"],
+    ),
     "bazel_test_protocol_test": ("bazel_test_protocol.dart", []),
 }
 
@@ -175,6 +190,7 @@ _UNIT_TESTS = {
 # runner carries it too.
 _TOOL_SRCS = {
     "flutter_test_runner.dart": ["bazel_test_protocol.dart"],
+    "flutter_integration_test_runner.dart": ["bazel_test_protocol.dart"],
 }
 
 [dart_test(

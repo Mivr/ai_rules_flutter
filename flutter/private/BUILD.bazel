@@ -468,6 +468,29 @@ bzl_library(
 )
 
 bzl_library(
+    name = "flutter_integration_test",
+    srcs = ["flutter_integration_test.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+    deps = [
+        ":common",
+        ":flutter_asset_bundle",
+        ":flutter_info",
+        ":flutter_kernel_module",
+        ":flutter_web_compile",
+        ":plugin_registrant",
+        ":validation",
+        "//flutter:providers",
+    ],
+)
+
+bzl_library(
+    name = "chrome_headless_shell_repo",
+    srcs = ["chrome_headless_shell_repo.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+    deps = [":artifact_urls"],
+)
+
+bzl_library(
     name = "plugin_registrant",
     srcs = ["plugin_registrant.bzl"],
     visibility = ["//flutter:__subpackages__"],

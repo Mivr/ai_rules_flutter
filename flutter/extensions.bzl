@@ -27,7 +27,7 @@ _DEFAULT_NAME = "flutter"
 
 # Flutter SDK packages that exist as source under packages/ in the Flutter repo.
 # sky_engine is excluded — it provides dart:ui which is already in platform_strong.dill.
-_FLUTTER_SDK_PACKAGES = {"flutter": True, "flutter_test": True, "flutter_driver": True, "flutter_localizations": True, "flutter_web_plugins": True}
+_FLUTTER_SDK_PACKAGES = {"flutter": True, "flutter_test": True, "flutter_driver": True, "flutter_localizations": True, "flutter_web_plugins": True, "integration_test": True}
 
 def _parse_version(v):
     """Splits a version string into a list of ints for comparison."""

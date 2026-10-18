@@ -104,6 +104,7 @@ bzl_library(
         "//flutter/private:flutter_aot_target",
         "//flutter/private:flutter_application",
         "//flutter/private:flutter_asset_bundle",
+        "//flutter/private:flutter_integration_test",
         "//flutter/private:flutter_kernel_target",
         "//flutter/private:flutter_library",
         "//flutter/private:flutter_plugin",
@@ -169,6 +170,7 @@ bzl_library(
     srcs = ["web.bzl"],
     visibility = ["//visibility:public"],
     deps = [
+        "//flutter/private:flutter_integration_test",
         "//flutter/private:flutter_web_application",
         "@bazel_skylib//rules:expand_template",
     ],
@@ -197,6 +199,7 @@ bzl_library(
     visibility = ["//visibility:public"],
     deps = [
         "//flutter/private:artifact_urls",
+        "//flutter/private:chrome_headless_shell_repo",
         "//flutter/private:engine_helpers",
         "//flutter/private:flutter_android_engine_repo",
         "//flutter/private:flutter_cross_repo",
