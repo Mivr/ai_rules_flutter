@@ -249,6 +249,7 @@ def _is_same_sdk_and_find_tools_test_impl(ctx):
     asserts.equals(env, flutter_libs, selected.libraries_json)
     asserts.equals(env, rules_dart_bin, selected.dart)
     asserts.equals(env, rules_dart_vm, selected.dartvm)
+    asserts.equals(env, "3.13.5", selected.version)
 
     # If flutter_info lacks kernel_worker in tool_files, returns None rather than silently using mismatched tools.
     incomplete_flutter_info = FlutterSdkInfo(

@@ -133,8 +133,8 @@ def find_flutter_kernel_module_tools(flutter_sdk_info, exec_tools = None):
     `libraries.json` in `flutter_sdk_info.tool_files` so modular `.flutter.kmod`
     compilation runs the `kernel_worker` and `dartaotruntime` matching
     `flutter_sdk_info.platform_kernel_dill` and `flutter_tester`, while keeping
-    `exec_tools`'s outer VM (`dart`, `dartvm`, `runtime_files`) that launches the
-    `@rules_dart//dart/private/tools:kernel_module` `.dill` wrapper.
+    `exec_tools`'s outer VM (`dart`, `dartvm`, `runtime_files`, `version`) that
+    launches the `@rules_dart//dart/private/tools:kernel_module` `.dill` wrapper.
 
     Args:
       flutter_sdk_info: `FlutterSdkInfo` from the active Flutter toolchain.
@@ -175,7 +175,7 @@ def find_flutter_kernel_module_tools(flutter_sdk_info, exec_tools = None):
         kernel_worker = found["kernel_worker"],
         platform_dill = flutter_sdk_info.platform_kernel_dill,
         libraries_json = found["libraries_json"],
-        version = flutter_sdk_info.version,
+        version = exec_tools.version if exec_tools != None else flutter_sdk_info.version,
     )
 
 def flutter_kernel_tools_for(ctx, flutter_sdk_info):
