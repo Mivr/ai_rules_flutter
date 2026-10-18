@@ -345,6 +345,10 @@ def _flutter_test_impl(ctx):
 
     # Compile bootstrap+test to kernel modularly when eligible, falling back
     # to whole-program compilation otherwise (e.g. per-test defines or code assets).
+    # Both paths compile against the debug platform dill with assertions enabled
+    # (`--enable-asserts` on `frontend_server`, and `AssertStatement` /
+    # `AssertInitializer` preservation in `.flutter.kmod` / `.flutter_entry.kmod`
+    # under `flutter_tester --enable-checked-mode`).
     kernel_dill = ctx.actions.declare_file(ctx.label.name + ".dill")
     own_files = [ctx.file.main] + [f for f in ctx.files.srcs if f != ctx.file.main]
     modular_tools = flutter_modular_test_tools(

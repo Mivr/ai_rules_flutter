@@ -476,9 +476,7 @@ def _flutter_kernel_module_aspect_impl(target, ctx):
                 base_keys = None,
                 base_kmods = depset(),
                 unseeded_base_kmods = depset(),
-            )
-            if product_modular
-            else no_kernel_module()
+            ) if product_modular else no_kernel_module()
         )
         return [
             FlutterKernelModuleInfo(
@@ -645,9 +643,7 @@ def flutter_modular_test_tools(ctx, flutter_sdk_info, own_files, packages, nativ
     """
     enabled = ctx.attr._modular_kernel[BuildSettingInfo].value if hasattr(ctx.attr, "_modular_kernel") else False
     platform_dill = (
-        flutter_sdk_info.platform_kernel_dill_product
-        if product and flutter_sdk_info != None
-        else (flutter_sdk_info.platform_kernel_dill if flutter_sdk_info != None else None)
+        flutter_sdk_info.platform_kernel_dill_product if product and flutter_sdk_info != None else (flutter_sdk_info.platform_kernel_dill if flutter_sdk_info != None else None)
     )
     if not enabled or _has_comma_defines(ctx) or platform_dill == None:
         return None
@@ -692,6 +688,12 @@ def compile_flutter_modular_test_kernel(
         output):
     """Compiles a `flutter_test`'s entry module and links it with dependency modules.
 
+    Compiles against the debug `platform_kernel_dill` without product defines so
+    `kernel_worker` preserves `AssertStatement` and `AssertInitializer` nodes in
+    both `.flutter.kmod` / `.flutter.koutline` and `.flutter_entry.kmod` (matching
+    `--enable-asserts` in a whole-program `-c dbg` compile), which fire at runtime
+    under `flutter_tester --enable-checked-mode`.
+
     Args:
       ctx: The `flutter_test` rule context.
       flutter_sdk_info: `FlutterSdkInfo` from the active Flutter toolchain.
@@ -701,6 +703,9 @@ def compile_flutter_modular_test_kernel(
       lib_root: The test package's `lib_root` from `derive_lib_root`.
       packages: The synthesized `DartPackageInfo` list for the test.
       output: The linked `.dill` File to produce.
+
+    Returns:
+      The `base_dill` File from the transitive SDK packages if present, or `None`.
     """
     sources = [
         struct(uri = app_scheme_location(bootstrap).uri, file = bootstrap),
@@ -850,7 +855,7 @@ def compile_flutter_modular_web_kernel(
 
 def compile_flutter_modular_app_kernel(
         ctx,
-        flutter_sdk_info,
+        _flutter_sdk_info,
         tools,
         lib_root,
         packages,
@@ -860,7 +865,7 @@ def compile_flutter_modular_app_kernel(
 
     Args:
       ctx: The rule context (`flutter_kernel_target`, etc.).
-      flutter_sdk_info: `FlutterSdkInfo` from the active Flutter toolchain.
+      _flutter_sdk_info: `FlutterSdkInfo` from the active Flutter toolchain.
       tools: The kernel tools struct returned by `flutter_modular_test_tools`.
       lib_root: The app package's `lib_root` from `derive_lib_root`.
       packages: The synthesized `DartPackageInfo` list for the app.

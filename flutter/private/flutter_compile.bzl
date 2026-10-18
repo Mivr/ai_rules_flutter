@@ -116,9 +116,10 @@ def flutter_kernel_compile_action(
         args.add("--tfa")
         args.add("--no-embed-source-text")
 
-    # Compilation mode flags
+    # Compilation mode flags: enable assertions in `-c dbg` and in non-AOT
+    # compiles (such as `flutter_test` fallback compiles).
     bazel_mode = ctx.var["COMPILATION_MODE"]
-    if bazel_mode == "dbg":
+    if bazel_mode == "dbg" or not aot:
         args.add("--enable-asserts")
 
     for d in defines:

@@ -115,9 +115,14 @@ def _flutter_test_runfiles_test_impl(ctx):
     return analysistest.end(env)
 
 def _flutter_test_defines_fallback_test_impl(ctx):
-    """When per-test `defines` are set, `flutter_test` falls back to `FlutterKernelCompile`."""
+    """When per-test `defines` are set, `flutter_test` falls back to `FlutterKernelCompile` with `--enable-asserts`."""
     env = analysistest.begin(ctx)
-    _find_action(env, ["FlutterKernelCompile"])
+    compile_action = _find_action(env, ["FlutterKernelCompile"])
+    asserts.true(
+        env,
+        "--enable-asserts" in compile_action.argv,
+        "expected --enable-asserts in flutter_test FlutterKernelCompile argv, got %s" % compile_action.argv,
+    )
     modular_links = [a for a in analysistest.target_actions(env) if a.mnemonic == "DartKernelLink"]
     asserts.equals(env, [], modular_links, "flutter_test with own defines must fall back from DartKernelLink")
     return analysistest.end(env)
