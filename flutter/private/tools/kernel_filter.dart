@@ -50,20 +50,140 @@ Future<int> runFiltered(
   }
   final executable = argv[i + 1];
   final cmdArgs = argv.sublist(i + 2);
-  var result = await Process.run(executable, cmdArgs);
-  if (result.exitCode != 0) {
-    final retried = await _retryWithoutUnavailableWebPlugins(
-      executable,
-      cmdArgs,
-      '${result.stdout}${result.stderr}',
-    );
-    if (retried != null) {
-      result = retried;
+  final webPluginOverrides = _rewriteWebPluginsUiWebImports(cmdArgs);
+  ProcessResult result;
+  try {
+    result = await Process.run(executable, cmdArgs);
+    if (result.exitCode != 0) {
+      final retried = await _retryWithoutUnavailableWebPlugins(
+        executable,
+        cmdArgs,
+        '${result.stdout}${result.stderr}',
+      );
+      if (retried != null) {
+        result = retried;
+      }
+    }
+  } finally {
+    for (final override in webPluginOverrides.reversed) {
+      override.restore();
     }
   }
   out.write(withoutBoundaryLines(result.stdout as String));
   err.write(result.stderr as String);
   return result.exitCode;
+}
+
+class _StagedFileOverride {
+  _StagedFileOverride._(
+    this.file,
+    this.originalContent, {
+    required this.wasLink,
+    required this.linkTarget,
+  });
+
+  final File file;
+  final String originalContent;
+  final bool wasLink;
+  final String? linkTarget;
+
+  static _StagedFileOverride apply(
+    File file,
+    String newContent, {
+    String? originalContent,
+  }) {
+    final savedContent = originalContent ?? file.readAsStringSync();
+    final link = Link(file.path);
+    final wasLink = link.existsSync();
+    final linkTarget = wasLink ? link.targetSync() : null;
+    if (wasLink) {
+      link.deleteSync();
+    }
+    file.writeAsStringSync(newContent);
+    return _StagedFileOverride._(
+      file,
+      savedContent,
+      wasLink: wasLink,
+      linkTarget: linkTarget,
+    );
+  }
+
+  void restore() {
+    if (wasLink && linkTarget != null) {
+      if (file.existsSync()) {
+        file.deleteSync();
+      }
+      Link(file.path).createSync(linkTarget!);
+    } else {
+      file.writeAsStringSync(originalContent);
+    }
+  }
+}
+
+/// Rewrites `dart:ui_web` imports/exports and `dart.library.ui_web` conditions
+/// in a `flutter_web_plugins` source [content] to target [uiWebStubUri].
+String rewriteFlutterWebPluginsSource(String content, String uiWebStubUri) {
+  return content
+      .replaceAll("'dart:ui_web'", "'$uiWebStubUri'")
+      .replaceAll('"dart:ui_web"', '"$uiWebStubUri"')
+      .replaceAll('if (dart.library.ui_web)', 'if (dart.library.async)');
+}
+
+List<_StagedFileOverride> _rewriteWebPluginsUiWebImports(List<String> cmdArgs) {
+  var scheme = 'org-dartlang-app';
+  for (var j = 0; j < cmdArgs.length - 1; j++) {
+    if (cmdArgs[j] == '--filesystem-scheme') {
+      scheme = cmdArgs[j + 1];
+      break;
+    }
+  }
+
+  final overrides = <_StagedFileOverride>[];
+  for (var j = 0; j < cmdArgs.length - 1; j++) {
+    if (cmdArgs[j] != '--filesystem-root' || cmdArgs[j + 1] == '.') {
+      continue;
+    }
+    final dir = Directory(cmdArgs[j + 1]);
+    if (!dir.existsSync()) continue;
+
+    final rootPrefix = dir.path
+        .replaceAll(r'\', '/')
+        .replaceFirst(RegExp(r'/+$'), '');
+    String? stubRelPath;
+    final webPluginFiles = <File>[];
+
+    for (final entity in dir.listSync(recursive: true, followLinks: false)) {
+      final normPath = entity.path.replaceAll(r'\', '/');
+      if (!normPath.startsWith('$rootPrefix/')) continue;
+      final relPath = normPath.substring(rootPrefix.length + 1);
+      if (relPath.endsWith('_ui_web_stub.dart')) {
+        stubRelPath ??= relPath;
+      } else if (relPath.endsWith('.dart') &&
+          (relPath.startsWith('flutter_web_plugins/lib/') ||
+              relPath.contains('/flutter_web_plugins/lib/') ||
+              relPath.contains('__flutter_web_plugins/lib/'))) {
+        webPluginFiles.add(File(entity.path));
+      }
+    }
+
+    if (stubRelPath == null || webPluginFiles.isEmpty) continue;
+    final stubUri = '$scheme:///$stubRelPath';
+    for (final file in webPluginFiles) {
+      if (!file.existsSync()) continue;
+      final original = file.readAsStringSync();
+      final rewritten = rewriteFlutterWebPluginsSource(original, stubUri);
+      if (rewritten != original) {
+        overrides.add(
+          _StagedFileOverride.apply(
+            file,
+            rewritten,
+            originalContent: original,
+          ),
+        );
+      }
+    }
+  }
+  return overrides;
 }
 
 final _unavailableRegistrantPlugin = RegExp(
@@ -113,24 +233,15 @@ Future<ProcessResult?> _retryWithoutUnavailableWebPlugins(
     return null;
   }
 
-  final link = Link(stagedRegistrant.path);
-  final wasLink = link.existsSync();
-  final linkTarget = wasLink ? link.targetSync() : null;
+  final override = _StagedFileOverride.apply(
+    stagedRegistrant,
+    filteredContent,
+    originalContent: originalContent,
+  );
   try {
-    if (wasLink) {
-      link.deleteSync();
-    }
-    stagedRegistrant.writeAsStringSync(filteredContent);
     return await Process.run(executable, cmdArgs);
   } finally {
-    if (wasLink && linkTarget != null) {
-      if (stagedRegistrant.existsSync()) {
-        stagedRegistrant.deleteSync();
-      }
-      link.createSync(linkTarget);
-    } else {
-      stagedRegistrant.writeAsStringSync(originalContent);
-    }
+    override.restore();
   }
 }
 

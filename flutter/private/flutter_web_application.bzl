@@ -20,7 +20,7 @@ so we skip the frontend_server kernel compilation step used by desktop/mobile.
 """
 
 load("@rules_dart//dart:providers.bzl", "DartInfo")
-load("@rules_dart//dart:utils.bzl", "MODULAR_KERNEL_TOOLCHAINS", "collect_packages", "collect_transitive_srcs", "colocate_packages", "dart_analyzable_info_with_package", "derive_lib_root", "generate_dev_package_config", "generate_package_config", "generate_stable_package_config")
+load("@rules_dart//dart:utils.bzl", "MODULAR_KERNEL_TOOLCHAINS", "collect_packages", "collect_transitive_srcs", "colocate_packages", "dart_analyzable_info_with_package", "derive_lib_root", "generate_dev_package_config", "generate_package_config")
 load("//flutter:providers.bzl", "FlutterInfo", "FlutterNativeLibraryInfo")
 load(
     "//flutter/private:app_entrypoint.bzl",
@@ -412,13 +412,20 @@ def _flutter_web_bundle_impl(ctx):
     ui_web_stub = ctx.actions.declare_file(ctx.label.name + "_ui_web_stub.dart")
     ctx.actions.write(ui_web_stub, make_web_ui_web_stub_content())
 
-    web_plugins_stub = None
-    stub_lib_root = ""
-    stub_pkg = None
     has_real_web_plugins = any([p.package_name == "flutter_web_plugins" for p in packages])
-    if registrant != None:
+    if registrant != None and not has_real_web_plugins:
+        has_flutter_services = any([
+            p.package_name == "flutter" and any([
+                app_scheme_rel_path(f) == ((p.lib_root + "/lib/services.dart") if p.lib_root else "lib/services.dart")
+                for f in all_srcs
+            ])
+            for p in packages
+        ])
         web_plugins_stub = ctx.actions.declare_file(ctx.label.name + "_flutter_web_plugins_stub/lib/flutter_web_plugins.dart")
-        ctx.actions.write(web_plugins_stub, make_web_plugins_stub_content())
+        ctx.actions.write(
+            web_plugins_stub,
+            make_web_plugins_stub_content(has_flutter_services = has_flutter_services),
+        )
         stub_rel = app_scheme_rel_path(web_plugins_stub)
         stub_lib_root = stub_rel[:-len("/lib/flutter_web_plugins.dart")]
         stub_pkg = struct(
@@ -426,9 +433,8 @@ def _flutter_web_bundle_impl(ctx):
             lib_root = stub_lib_root,
             language_version = "",
         )
-        if not has_real_web_plugins:
-            packages = packages + [stub_pkg]
-            all_srcs = all_srcs + [web_plugins_stub]
+        packages = packages + [stub_pkg]
+        all_srcs = all_srcs + [web_plugins_stub]
 
     build_package_config = None
     build_package_dirs = []
@@ -652,31 +658,6 @@ def _flutter_web_bundle_impl(ctx):
         )
         entrypoint_uri = app_scheme_location(entrypoint).uri
 
-        icon_config_file = config_file
-        icon_srcs = all_srcs
-        if registrant != None and has_real_web_plugins and stub_pkg != None and web_plugins_stub != None:
-            real_roots = [
-                p.lib_root
-                for p in packages
-                if p.package_name == "flutter_web_plugins"
-            ]
-            icon_packages = [p for p in packages if p.package_name != "flutter_web_plugins"] + [stub_pkg]
-            icon_srcs = [
-                f
-                for f in all_srcs
-                if not any([app_scheme_rel_path(f).startswith(r + "/") for r in real_roots if r])
-            ] + [web_plugins_stub]
-            icon_config_file = ctx.actions.declare_file(ctx.label.name + "_icon_package_config.json")
-            ctx.actions.write(
-                icon_config_file,
-                generate_stable_package_config(
-                    icon_packages,
-                    icon_srcs,
-                    roots = {ctx.attr.package_name: True} if ctx.attr.package_name else None,
-                    scheme = APP_SCHEME,
-                ),
-            )
-
         icon_renderers = shipped_renderers if has_font_tree_shake else [renderer]
         for idx, r in enumerate(icon_renderers):
             dill_suffix = "_icon_tree_shaking.dill" if idx == 0 else ("_icon_tree_shaking_%s.dill" % r)
@@ -694,6 +675,7 @@ def _flutter_web_bundle_impl(ctx):
                 not ctx.attr.enable_experiments and
                 not user_defines and
                 registrant == None and
+                not has_real_web_plugins and
                 r == "skwasm" and
                 main_pkg_uri != None and
                 flutter_sdk_info.platform_kernel_dill_product != None):
@@ -730,8 +712,8 @@ def _flutter_web_bundle_impl(ctx):
                 platform_dill = icon_platform_dill,
                 main = entrypoint,
                 entrypoint_uri = entrypoint_uri,
-                srcs = icon_srcs,
-                package_config = icon_config_file,
+                srcs = all_srcs,
+                package_config = config_file,
                 output = dill_out,
                 aot = True,
                 # Mode-derived and renderer-derived so icon tree-shaking compiles

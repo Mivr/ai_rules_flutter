@@ -85,5 +85,86 @@ void main() {
       expect(await runFiltered(['--'], StringBuffer(), err), 2);
       expect(err.toString(), contains('Usage'));
     });
+
+    test(
+      'rewrites staged flutter_web_plugins dart:ui_web imports during compile and restores symlinks',
+      () async {
+        final externalDir = Directory('${dir.path}/external_repo')
+          ..createSync(recursive: true);
+        const originalRegistry =
+            "import 'dart:ui_web' as ui_web;\n"
+            'void register() => ui_web.setPluginHandler((a, b, c) {});\n';
+        const originalUrlStrategy =
+            "export 'src/navigation_non_web/url_strategy.dart'\n"
+            "    if (dart.library.ui_web) 'src/navigation/url_strategy.dart';\n";
+        final extRegistry = File('${externalDir.path}/plugin_registry.dart')
+          ..writeAsStringSync(originalRegistry);
+        final extUrlStrategy = File('${externalDir.path}/url_strategy.dart')
+          ..writeAsStringSync(originalUrlStrategy);
+
+        final stageRoot = Directory('${dir.path}/stage')
+          ..createSync(recursive: true);
+        File(
+          '${stageRoot.path}/app/plugin_web_ui_web_stub.dart',
+        ).createSync(recursive: true);
+
+        final stagedWebPluginsDir = Directory(
+          '${stageRoot.path}/external/deps__flutter_web_plugins/lib/src',
+        )..createSync(recursive: true);
+        final stagedRegistryPath =
+            '${stagedWebPluginsDir.path}/plugin_registry.dart';
+        final stagedUrlStrategyPath =
+            '${stageRoot.path}/external/deps__flutter_web_plugins/lib/url_strategy.dart';
+        Link(stagedRegistryPath).createSync(extRegistry.path);
+        Link(stagedUrlStrategyPath).createSync(extUrlStrategy.path);
+
+        final fakeCompiler = File('${dir.path}/fake_compiler.dart')
+          ..writeAsStringSync(
+            'import "dart:io";\n'
+            'void main() {\n'
+            '  final reg = File(r"$stagedRegistryPath").readAsStringSync();\n'
+            '  final url = File(r"$stagedUrlStrategyPath").readAsStringSync();\n'
+            '  stdout.writeln(reg);\n'
+            '  stdout.writeln(url);\n'
+            '}\n',
+          );
+
+        final out = StringBuffer();
+        final err = StringBuffer();
+        final code = await runFiltered(
+          [
+            '--',
+            Platform.resolvedExecutable,
+            fakeCompiler.path,
+            '--filesystem-root',
+            stageRoot.path,
+            '--filesystem-scheme',
+            'org-dartlang-app',
+          ],
+          out,
+          err,
+        );
+
+        expect(code, 0);
+        expect(
+          out.toString(),
+          contains(
+            "import 'org-dartlang-app:///app/plugin_web_ui_web_stub.dart' as ui_web;",
+          ),
+        );
+        expect(out.toString(), contains('if (dart.library.async)'));
+
+        // External target files were never modified and symlinks are restored.
+        expect(extRegistry.readAsStringSync(), originalRegistry);
+        expect(extUrlStrategy.readAsStringSync(), originalUrlStrategy);
+        expect(Link(stagedRegistryPath).existsSync(), isTrue);
+        expect(Link(stagedUrlStrategyPath).existsSync(), isTrue);
+        expect(File(stagedRegistryPath).readAsStringSync(), originalRegistry);
+        expect(
+          File(stagedUrlStrategyPath).readAsStringSync(),
+          originalUrlStrategy,
+        );
+      },
+    );
   });
 }

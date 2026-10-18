@@ -2,6 +2,11 @@
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
+load(
+    "//flutter/private:common.bzl",
+    "make_web_plugins_stub_content",
+    "make_web_ui_web_stub_content",
+)
 load("//flutter/private:flutter_web_application.bzl", "flutter_web_bundle")
 load(
     "//flutter/private:flutter_web_compile.bzl",
@@ -1985,8 +1990,73 @@ def _web_sdk_repo_rewrite_and_build_test_impl(ctx):
 
     return unittest.end(env)
 
+def _web_stubs_api_surface_test_impl(ctx):
+    """`make_web_ui_web_stub_content` and `make_web_plugins_stub_content` cover the real `flutter_web_plugins` and `dart:ui_web` API surface."""
+    env = unittest.begin(ctx)
+
+    ui_web = make_web_ui_web_stub_content()
+    for required in [
+        "Future<void> bootstrapEngine(",
+        "void setPluginHandler(ui.PlatformMessageCallback handler)",
+        "typedef EventListener =",
+        "typedef PopStateListener =",
+        "abstract interface class PlatformLocation",
+        "class BrowserPlatformLocation implements PlatformLocation",
+        "abstract class UrlStrategy",
+        "UrlStrategy? urlStrategy;",
+        "class HashUrlStrategy extends UrlStrategy",
+    ]:
+        asserts.true(
+            env,
+            required in ui_web,
+            "ui_web stub missing %r" % required,
+        )
+
+    for has_services in (True, False):
+        plugins_stub = make_web_plugins_stub_content(has_flutter_services = has_services)
+        for required in [
+            "class Registrar extends BinaryMessenger",
+            "void registerMessageHandler()",
+            "Future<void> handlePlatformMessage(",
+            "Future<void> handleFrameworkMessage(",
+            "BinaryMessenger get messenger => this;",
+            "Future<ByteData?> send(String channel, ByteData? message)",
+            "void setMessageHandler(String channel, MessageHandler? handler)",
+            "class PluginRegistry extends Registrar",
+            "Registrar registrarFor(Type key) => this;",
+            "final Registrar webPluginRegistrar = PluginRegistry();",
+            "PluginRegistry get webPluginRegistry =>",
+            "BinaryMessenger get pluginBinaryMessenger => webPluginRegistrar;",
+            "class PluginEventChannel<T>",
+            "void setController(StreamController<T>? controller)",
+            "class PathUrlStrategy extends HashUrlStrategy",
+            "void setUrlStrategy(UrlStrategy? strategy)",
+            "void usePathUrlStrategy()",
+            "String extractPathname(String url)",
+            "String checkBaseHref(String? baseHref)",
+            "String ensureLeadingSlash(String path)",
+            "String stripTrailingSlash(String path)",
+        ]:
+            asserts.true(
+                env,
+                required in plugins_stub,
+                "flutter_web_plugins stub (has_flutter_services=%s) missing %r" % (has_services, required),
+            )
+
+    asserts.true(
+        env,
+        "import 'package:flutter/services.dart';" in make_web_plugins_stub_content(has_flutter_services = True),
+    )
+    asserts.true(
+        env,
+        "abstract class BinaryMessenger" in make_web_plugins_stub_content(has_flutter_services = False),
+    )
+
+    return unittest.end(env)
+
 _t6_test = unittest.make(_web_optimization_level_defaults_test_impl)
 _t7_test = unittest.make(_web_sdk_repo_rewrite_and_build_test_impl)
+_t8_test = unittest.make(_web_stubs_api_surface_test_impl)
 
 def _web_sdk_libraries_json_probe_impl(ctx):
     scenario = ctx.attr.scenario
@@ -2338,4 +2408,4 @@ def web_test_suite(name):
         targets = [":_web_nonlib_generated_src_fixture"],
     )
 
-    unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test, _t6_test, _t7_test)
+    unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test, _t6_test, _t7_test, _t8_test)
