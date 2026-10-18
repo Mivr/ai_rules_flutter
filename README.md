@@ -1148,7 +1148,7 @@ flutter_application(
 | `license_files` | License and NOTICE files to include in `NOTICES.Z`. |
 | `min_os_version` | Minimum Apple deployment target, passed to `gen_snapshot` as `--macho-min-os-version`. |
 
-**Defines from the command line.** The repeatable flag `--@rules_flutter//flutter:extra_dart_defines=KEY=VALUE` adds a define to every Dart compile: native kernel, `flutter_test`, dart2wasm, and dart2js. Each occurrence of the flag is one define, so values may contain commas. When a key is set both by the flag and by the `defines` attribute, the flag wins. The keys `dart.vm.profile` and `dart.vm.product` are set by the build from the compilation mode and cannot be passed. The dev tool's `--dart-define` forwards to this flag and replays the defines on hot reload and restart, matching `flutter run --dart-define`.
+**Defines from the command line.** The repeatable flag `--@rules_flutter//flutter:extra_dart_defines=KEY=VALUE` adds a define to every Dart compile: native kernel, `flutter_test`, dart2wasm, and dart2js. Each occurrence of the flag is one define, so values may contain commas. When a key is set both by the flag and by the `defines` attribute, the flag wins. Reserved defines (`dart.vm.*`, `dart.library.*`, `dart.tool.*`, `flutter.*`) are set by the build and SDK and cannot be passed. The dev tool's `--dart-define` forwards to this flag and replays the defines on hot reload and restart, matching `flutter run --dart-define`.
 
 ### flutter_test
 

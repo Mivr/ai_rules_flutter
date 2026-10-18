@@ -49,18 +49,12 @@ MODULAR_KERNEL_ATTRS = _DART_MODULAR_KERNEL_ATTRS | {
         default = Label("//flutter:extra_dart_defines"),
         providers = [BuildSettingInfo],
     ),
-    "_extra_dart_defines_from_dart": attr.label(
-        default = Label("@rules_dart//dart:extra_dart_defines"),
-        providers = [BuildSettingInfo],
-    ),
 }
 
 def _global_extra_defines(ctx):
     defines = []
     if hasattr(ctx.attr, "_extra_dart_defines") and ctx.attr._extra_dart_defines != None:
         defines.extend(ctx.attr._extra_dart_defines[BuildSettingInfo].value)
-    if hasattr(ctx.attr, "_extra_dart_defines_from_dart") and ctx.attr._extra_dart_defines_from_dart != None:
-        defines.extend(ctx.attr._extra_dart_defines_from_dart[BuildSettingInfo].value)
     return defines
 
 def _has_comma_defines(ctx):
@@ -259,10 +253,6 @@ flutter_kernel_module_aspect = aspect(
     attrs = KERNEL_MODULE_ATTRS | {
         "_extra_dart_defines": attr.label(
             default = Label("//flutter:extra_dart_defines"),
-            providers = [BuildSettingInfo],
-        ),
-        "_extra_dart_defines_from_dart": attr.label(
-            default = Label("@rules_dart//dart:extra_dart_defines"),
             providers = [BuildSettingInfo],
         ),
     },

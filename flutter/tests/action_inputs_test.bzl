@@ -131,6 +131,23 @@ def _comma_defines_fallback_test_impl(ctx):
     asserts.equals(env, [], modular_links, "comma-containing extra_dart_defines must fall back from DartKernelLink")
     return analysistest.end(env)
 
+def _dart_extra_defines_ignored_test_impl(ctx):
+    """`@rules_dart//dart:extra_dart_defines` does not change a Flutter kernel action's command line."""
+    env = analysistest.begin(ctx)
+    kernel_action = _find_action(env, ["FlutterKernelCompile", "DartKernel"])
+    argv_joined = " ".join(kernel_action.argv)
+    asserts.false(
+        env,
+        "FROM_DART=1" in argv_joined,
+        "@rules_dart//dart:extra_dart_defines must not be forwarded to Flutter kernel action, got %s" % kernel_action.argv,
+    )
+    asserts.false(
+        env,
+        "dart.vm.product=true" in argv_joined,
+        "@rules_dart//dart:extra_dart_defines must not flip debug Flutter kernel action to product mode, got %s" % kernel_action.argv,
+    )
+    return analysistest.end(env)
+
 def _application_opt_inputs_test_impl(ctx):
     """In `-c opt`, AOT takes no SDK tree and asset bundling takes only the VM."""
     env = analysistest.begin(ctx)
@@ -524,9 +541,13 @@ _flutter_comma_defines_fallback_test = analysistest.make(
     _comma_defines_fallback_test_impl,
     config_settings = {str(Label("//flutter:extra_dart_defines")): ["FOO=a,b"]},
 )
-_dart_comma_defines_fallback_test = analysistest.make(
-    _comma_defines_fallback_test_impl,
-    config_settings = {str(Label("@rules_dart//dart:extra_dart_defines")): ["FOO=a,b"]},
+_dart_extra_defines_ignored_test = analysistest.make(
+    _dart_extra_defines_ignored_test_impl,
+    config_settings = {
+        "//command_line_option:compilation_mode": "dbg",
+        str(Label("//flutter:profile")): False,
+        str(Label("@rules_dart//dart:extra_dart_defines")): ["FROM_DART=1", "dart.vm.product=true"],
+    },
 )
 _application_opt_inputs_test = analysistest.make(
     _application_opt_inputs_test_impl,
@@ -707,8 +728,8 @@ def action_inputs_test_suite(name):
         target_under_test = ":_inputs_flutter_test",
         target_compatible_with = HOST_COMPATIBLE,
     )
-    _dart_comma_defines_fallback_test(
-        name = name + "_flutter_test_dart_comma_defines_fallback",
+    _dart_extra_defines_ignored_test(
+        name = name + "_flutter_test_dart_extra_defines_ignored",
         target_under_test = ":_inputs_flutter_test",
         target_compatible_with = HOST_COMPATIBLE,
     )
@@ -716,8 +737,8 @@ def action_inputs_test_suite(name):
         name = name + "_kernel_target_comma_defines_fallback",
         target_under_test = ":_inputs_kernel_target",
     )
-    _dart_comma_defines_fallback_test(
-        name = name + "_kernel_target_dart_comma_defines_fallback",
+    _dart_extra_defines_ignored_test(
+        name = name + "_kernel_target_dart_extra_defines_ignored",
         target_under_test = ":_inputs_kernel_target",
     )
     _application_opt_inputs_test(
@@ -788,9 +809,9 @@ def action_inputs_test_suite(name):
             ":" + name + "_flutter_test_runfiles",
             ":" + name + "_flutter_test_defines_fallback",
             ":" + name + "_flutter_test_comma_defines_fallback",
-            ":" + name + "_flutter_test_dart_comma_defines_fallback",
+            ":" + name + "_flutter_test_dart_extra_defines_ignored",
             ":" + name + "_kernel_target_comma_defines_fallback",
-            ":" + name + "_kernel_target_dart_comma_defines_fallback",
+            ":" + name + "_kernel_target_dart_extra_defines_ignored",
             ":" + name + "_application_opt",
             ":" + name + "_application_opt_fonts",
             ":" + name + "_application_dbg",
