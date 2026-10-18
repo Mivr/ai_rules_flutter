@@ -497,7 +497,6 @@ def flutter_compile_kernel(ctx, flutter_sdk_info, aot = None, platform_dill = No
         config_file = None
         compile_flutter_modular_app_kernel(
             ctx,
-            flutter_sdk_info,
             modular_tools,
             app_lib_root,
             packages,
@@ -775,7 +774,7 @@ def flutter_build_assets(ctx, flutter_sdk_info, output_dir, compiled_shaders = {
 
     license_files = ctx.files.license_files
 
-    const_finder, font_subset = resolve_font_subset_tools(ctx.attr.deps, flutter_sdk_info) if fonts else (None, None)
+    const_finder, font_subset = resolve_font_subset_tools(flutter_sdk_info) if fonts else (None, None)
 
     if ctx.attr.tree_shake_icons and bool(fonts) and not is_debug and kernel_dill != None and (const_finder == None or font_subset == None):
         fail(
@@ -1243,7 +1242,7 @@ KERNEL_COMPILE_ATTRS = {
     ),
 } | EXTRA_DART_DEFINES_ATTR | BUILD_MODE_ATTR
 
-def _shader_aspect_impl(_target, ctx, fixed_platform):
+def _shader_aspect_impl(ctx, fixed_platform):
     if fixed_platform != None:
         target_platform = fixed_platform
     else:
@@ -1347,14 +1346,14 @@ def _shader_aspect_impl(_target, ctx, fixed_platform):
         ),
     ]
 
-def _tester_shader_aspect_impl(target, ctx):
-    return _shader_aspect_impl(target, ctx, "tester")
+def _tester_shader_aspect_impl(_target, ctx):
+    return _shader_aspect_impl(ctx, "tester")
 
-def _web_shader_aspect_impl(target, ctx):
-    return _shader_aspect_impl(target, ctx, "web")
+def _web_shader_aspect_impl(_target, ctx):
+    return _shader_aspect_impl(ctx, "web")
 
-def _app_shader_aspect_impl(target, ctx):
-    return _shader_aspect_impl(target, ctx, None)
+def _app_shader_aspect_impl(_target, ctx):
+    return _shader_aspect_impl(ctx, None)
 
 _SHADER_ASPECT_BASE_ATTRS = {
     "_shader_compile_tool": attr.label(

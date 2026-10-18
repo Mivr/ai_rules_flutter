@@ -220,6 +220,11 @@ _t6_test = unittest.make(_every_download_is_checksummed_test_impl)
 _t7_test = unittest.make(_artifact_sha256_returns_recorded_value_test_impl)
 
 def versions_test_suite(name):
+    """Defines unit and analysis tests for `versions.bzl` and artifact SHA-256 verification.
+
+    Args:
+      name: The test_suite target name.
+    """
     _artifact_checksum_probe(
         name = name + "_missing_artifact_probe",
         flutter_version = "3.47.5",

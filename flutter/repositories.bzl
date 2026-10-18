@@ -758,6 +758,14 @@ def resolve_aot_gen_snapshot(name, host_platform, target_platform):
     `gen_snapshot` built for the Darwin target from the pinned engine artifacts.
     Where no such binary exists for a host (Linux and Windows), returns `None`.
     Cross-OS desktop pairs also have no cross-OS AOT `gen_snapshot` and return `None`.
+
+    Args:
+      name: Base repository name prefix (e.g. `"flutter"`).
+      host_platform: Host platform string (e.g. `"darwin-arm64"`, `"linux-x64"`).
+      target_platform: Target platform string (e.g. `"ios-arm64"`, `"android-arm64"`).
+
+    Returns:
+      A `struct(release, profile)` of `gen_snapshot` label strings, or `None` if unsupported.
     """
     if host_platform == target_platform and host_platform in HOST_PLATFORMS:
         os_part = host_platform.split("-")[0]

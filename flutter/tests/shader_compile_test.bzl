@@ -1,7 +1,7 @@
 """Unit and analysis tests for flutter_shader_compile.bzl and shader aspect sharing."""
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
-load("//flutter:defs.bzl", "flutter_application", "flutter_library", "flutter_test")
+load("//flutter:defs.bzl", "flutter_application", "flutter_test")
 load(
     "//flutter:providers.bzl",
     "FlutterCompiledShadersInfo",
@@ -10,7 +10,6 @@ load(
     "//flutter/private:common.bzl",
     "HOST_COMPATIBLE",
     "flutter_app_shader_aspect",
-    "flutter_tester_shader_aspect",
 )
 load(
     "//flutter/private:flutter_shader_compile.bzl",
@@ -159,6 +158,11 @@ _aspect_compiles_on_library_test = analysistest.make(
 )
 
 def shader_compile_test_suite(name):
+    """Defines unit, analysis, and execution tests for shader compilation and aspect sharing.
+
+    Args:
+      name: The test_suite target name.
+    """
     unittest.suite(
         name + "_flags_pure",
         _t0_test,

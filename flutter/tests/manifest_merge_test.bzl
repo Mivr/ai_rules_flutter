@@ -91,7 +91,7 @@ def _manifest_content_test_impl(ctx):
     for s in ctx.attr.forbidden_substrings:
         lines.append('if grep -Fq -- %r "$FILE"; then echo "Found forbidden substring: %s"; cat "$FILE"; exit 1; fi' % (s, s))
     for s in ctx.attr.expected_once:
-        lines.append('count=$(grep -Fo -- %r "$FILE" | wc -l | tr -d " ")' % s)
+        lines.append('count=$(grep -F -o -- %r "$FILE" | wc -l | tr -d " ")' % s)
         lines.append('if [ "$count" -ne 1 ]; then echo "Expected %s exactly once, got $count"; cat "$FILE"; exit 1; fi' % s)
 
     ctx.actions.write(

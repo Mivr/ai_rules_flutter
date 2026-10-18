@@ -3,6 +3,7 @@
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
+load("//flutter:repositories.bzl", "resolve_aot_gen_snapshot")
 load("//flutter/private:flutter_aot_compile.bzl", "flutter_aot_macho_action")
 load("//flutter/private:flutter_aot_target.bzl", "flutter_aot_target")
 load("//flutter/private:flutter_application.bzl", "flutter_application")
@@ -19,14 +20,12 @@ load(
 )
 load(
     "//flutter/private:xtool_darwin_sdk_repo.bzl",
-    "FlutterXtoolSdkInfo",
     "XTOOL_DARWIN_TARGETS",
     "generate_xtool_darwin_sdk_build",
     "resolve_darwin_artifactbundle_sdk_paths",
     "resolve_darwin_sdk_from_modules",
     "validate_darwin_sdk_config",
 )
-load("//flutter:repositories.bzl", "resolve_aot_gen_snapshot")
 load("//flutter/settings:apple_backend.bzl", "APPLE_BACKEND_VALUES")
 
 def _desktop_cross_pairs_keys_are_host_platforms_test_impl(ctx):
@@ -516,7 +515,10 @@ _expect_analysis_failure_test = analysistest.make(
     },
 )
 
-_BackendProbeInfo = provider(fields = ["backend"])
+_BackendProbeInfo = provider(
+    doc = "Test probe provider recording the selected Apple backend.",
+    fields = ["backend"],
+)
 
 def _backend_probe_impl(ctx):
     return [_BackendProbeInfo(backend = ctx.attr.selected_backend)]
@@ -687,6 +689,11 @@ _t7_test = unittest.make(_apple_aot_matrix_by_host_target_mode_test_impl)
 _t8_test = unittest.make(_darwin_sdk_module_resolution_test_impl)
 
 def toolchains_repo_test_suite(name):
+    """Defines unit and analysis tests for `toolchains_repo.bzl`, `xtool_darwin_sdk_repo.bzl`, and Apple AOT toolchains.
+
+    Args:
+      name: The test_suite target name.
+    """
     _backend_probe(
         name = name + "_backend_probe",
         selected_backend = select({

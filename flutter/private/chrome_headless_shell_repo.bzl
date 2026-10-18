@@ -7,7 +7,7 @@ and the C++ runtime (`libgcc_s.so.1`, `libstdc++.so.6`).
 
 Note that Chromium's `debian_bullseye_amd64-sysroot` cannot be used at runtime:
 its `.so` files are link-only stubs whose relocation sections are zeroed out,
-which causes `ld.so` to abort with `elf_machine_rela_relative: Assertion failed`.
+which causes `ld.so` to abort with an assertion failure during relative relocation.
 The `.deb` packages extracted here carry real runtime shared objects, extracted
 entirely via Bazel's built-in JVM archive extractors (`ar`/`.deb` + `tar.xz`)
 without relying on any host `ar`, `xz`, or `unzip` binaries.
@@ -86,6 +86,14 @@ def validate_chrome_headless_shell_downloads(version, sha256, runtime_debs = CHR
 
     Every download goes through `require_sha256` so a missing checksum fails
     immediately rather than performing an unverified fetch.
+
+    Args:
+      version: The Chrome for Testing version string (e.g. `"155.0.8059.84"`).
+      sha256: Expected SHA-256 hex digest of the `chrome-headless-shell-linux64.zip` archive.
+      runtime_debs: Sequence of `(package_name, debian_pool_path, sha256)` tuples for runtime `.deb` packages.
+
+    Returns:
+      A `struct(browser_url, browser_sha256, runtime_debs)` with validated URLs and SHA-256 digests.
     """
     browser_url = chrome_headless_shell_url(version)
     verified_browser_sha256 = require_sha256(sha256, browser_url)

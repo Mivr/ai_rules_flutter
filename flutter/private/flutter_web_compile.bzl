@@ -225,6 +225,10 @@ def flutter_dart2wasm_action(
         enable_experiments: Dart language experiments to enable.
         defines: Dart -D defines.
         renderer: Web renderer ("skwasm" or "canvaskit").
+        web_compile_tool: Optional wrapper script or snapshot `File` passed before
+            `compile wasm` when staging multi-root sources.
+        web_compile_inputs: Additional input `File`s required by `web_compile_tool`
+            (such as staged generated files or multi-root package configs).
     """
     if output_source_map != None and output_source_map.path != output_wasm.path + ".map":
         fail("output_source_map must be declared at <output_wasm>.map " +
@@ -361,6 +365,10 @@ def flutter_dart2js_action(
         source_maps: Whether to generate source maps.
         defines: Dart -D defines.
         renderer: Web renderer ("canvaskit" or "skwasm").
+        web_compile_tool: Optional wrapper script or snapshot `File` passed before
+            `compile js` when staging multi-root sources.
+        web_compile_inputs: Additional input `File`s required by `web_compile_tool`
+            (such as staged generated files or multi-root package configs).
     """
     args = ctx.actions.args()
     if web_compile_tool != None:

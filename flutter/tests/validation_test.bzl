@@ -154,6 +154,11 @@ _t12_test = unittest.make(_runner_module_is_distinct_test_impl)
 _t13_test = unittest.make(_runner_module_is_injective_test_impl)
 
 def validation_test_suite(name):
+    """Defines unit and analysis tests for `validation.bzl` and `extra_dart_defines`.
+
+    Args:
+      name: The test_suite target name.
+    """
     _reserved_dart_vm_define_fails_test(
         name = name + "_reserved_dart_vm_extra_define_fails",
         target_under_test = "//flutter:extra_dart_defines",

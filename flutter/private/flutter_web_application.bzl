@@ -570,7 +570,7 @@ def _flutter_web_bundle_impl(ctx):
     # Web targets don't otherwise need a kernel (they use dart2wasm/dart2js),
     # so we compile one specifically for const_finder to analyze IconData constants.
     fonts, _ = aggregate_pub_contributions(ctx.attr.deps)
-    const_finder, font_subset = resolve_font_subset_tools(ctx.attr.deps, flutter_sdk_info) if fonts else (None, None)
+    const_finder, font_subset = resolve_font_subset_tools(flutter_sdk_info) if fonts else (None, None)
     if ctx.attr.tree_shake_icons and not is_debug and bool(fonts) and (const_finder == None or font_subset == None):
         fail(
             "%s: icon tree shaking is enabled (`tree_shake_icons = True`) and the target bundles fonts, " % ctx.label +

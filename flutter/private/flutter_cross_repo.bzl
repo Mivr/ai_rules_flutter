@@ -20,7 +20,21 @@ def generate_cross_repo_build(
         gen_snapshot_label = "",
         profile_gen_snapshot_label = "",
         downloaded_gen_snapshot = False):
-    """Generates BUILD.bazel content for a cross-compilation toolchain repo."""
+    """Generates BUILD.bazel content for a cross-compilation toolchain repo.
+
+    Args:
+      flutter_version: The Flutter SDK version string (e.g. `"3.41.2"`).
+      engine_revision: The Flutter engine commit SHA string.
+      host_platform: Execution host platform string (e.g. `"darwin-arm64"`).
+      target_platform: Target platform string (e.g. `"ios-arm64"`, `"android-arm64"`).
+      host_repo_name: Name of the host Flutter SDK repository providing `dart` and `frontend_server`.
+      gen_snapshot_label: Optional label string for the release `gen_snapshot` binary.
+      profile_gen_snapshot_label: Optional label string for the profile `gen_snapshot` binary.
+      downloaded_gen_snapshot: Whether this repository downloads its own `gen_snapshot` binary.
+
+    Returns:
+      The rendered `BUILD.bazel` file content string.
+    """
     has_aot = bool(gen_snapshot_label or downloaded_gen_snapshot)
     actual_gen_snapshot_label = gen_snapshot_label if gen_snapshot_label else (":gen_snapshot" if downloaded_gen_snapshot else "")
 

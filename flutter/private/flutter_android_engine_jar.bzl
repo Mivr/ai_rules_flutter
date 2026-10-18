@@ -46,7 +46,6 @@ _engine_jar_transition = transition(
 )
 
 def _flutter_android_engine_jar_impl(ctx):
-    flutter_sdk_info = ctx.toolchains["@rules_flutter//flutter:toolchain_type"].flutter_sdk_info
     cc_toolchain = find_cc_toolchain(ctx)
     feature_configuration = cc_common.configure_features(
         ctx = ctx,
@@ -67,7 +66,7 @@ def _flutter_android_engine_jar_impl(ctx):
     args.add("--input", ctx.file.jar)
     args.add("--output", output)
 
-    dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx, flutter_sdk_info)
+    dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx)
     ctx.actions.run(
         executable = dart_exe,
         arguments = [args],

@@ -855,7 +855,6 @@ def compile_flutter_modular_web_kernel(
 
 def compile_flutter_modular_app_kernel(
         ctx,
-        _flutter_sdk_info,
         tools,
         lib_root,
         packages,
@@ -865,7 +864,6 @@ def compile_flutter_modular_app_kernel(
 
     Args:
       ctx: The rule context (`flutter_kernel_target`, etc.).
-      _flutter_sdk_info: `FlutterSdkInfo` from the active Flutter toolchain.
       tools: The kernel tools struct returned by `flutter_modular_test_tools`.
       lib_root: The app package's `lib_root` from `derive_lib_root`.
       packages: The synthesized `DartPackageInfo` list for the app.

@@ -120,7 +120,7 @@ def _symlink_assets_dir(ctx, flutter_assets):
     ctx.actions.symlink(output = out, target_file = flutter_assets)
     return out
 
-def _create_native_libs_jar(ctx, aot_output, native_libs, abi, flutter_sdk_info):
+def _create_native_libs_jar(ctx, aot_output, native_libs, abi):
     """Package native libs into a jar at lib/<abi>/*.so.
 
     This matches flutter.jar's convention (which puts libflutter.so at
@@ -140,7 +140,6 @@ def _create_native_libs_jar(ctx, aot_output, native_libs, abi, flutter_sdk_info)
             System.loadLibrary("app")). None in debug/JIT mode.
         native_libs: Plugin/FFI .so files to package under their own names.
         abi: Android ABI string (e.g. "arm64-v8a").
-        flutter_sdk_info: FlutterSdkInfo from toolchain.
 
     Returns:
         The output .jar File.
@@ -174,7 +173,7 @@ def _create_native_libs_jar(ctx, aot_output, native_libs, abi, flutter_sdk_info)
             src = lib.path,
         ))
 
-    dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx, flutter_sdk_info)
+    dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx)
     args = ctx.actions.args()
     args.add(ctx.executable._android_bundle_tool.path)
     args.add("native-libs-jar")
@@ -267,7 +266,7 @@ def _flutter_android_bundle_impl(ctx):
     # package — create an empty jar so the java_import pipeline in the
     # macro doesn't break.
     if all_native_libs:
-        native_libs_jar = _create_native_libs_jar(ctx, aot_output, native_libs, abi, flutter_sdk_info)
+        native_libs_jar = _create_native_libs_jar(ctx, aot_output, native_libs, abi)
     else:
         native_libs_jar = ctx.actions.declare_file(ctx.label.name + "_native_libs.jar")
 

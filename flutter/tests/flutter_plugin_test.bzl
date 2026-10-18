@@ -120,6 +120,12 @@ _t2_test = unittest.make(_multi_platform_plugin_test_impl)
 _t3_test = unittest.make(_empty_platforms_test_impl)
 
 def flutter_plugin_test_suite(name):
+    """Defines unit and analysis tests for `flutter_plugin` and Apple plugin library routing.
+
+    Args:
+      name: The test_suite target name.
+    """
+
     # Provider-driven platform routing: target names have no "macos"/"ios" or
     # even contain the opposite platform word, yet FlutterApplePluginInfo.platform
     # determines the platform.

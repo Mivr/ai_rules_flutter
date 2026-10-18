@@ -144,11 +144,17 @@ def aggregate_pub_contributions(deps):
 
     return (fonts, extra_asset_copies)
 
-def resolve_font_subset_tools(deps, flutter_sdk_info):  # buildifier: disable=unused-variable
-    """Resolve (const_finder, font_subset) from the app rule's `flutter_sdk_info`.
+def resolve_font_subset_tools(flutter_sdk_info):
+    """Resolve `(const_finder, font_subset)` from the app rule's `flutter_sdk_info`.
 
     Font subsetting tools are resolved directly from the app rule's toolchain
     for the execution platform, never from library targets in `deps`.
+
+    Args:
+        flutter_sdk_info: `FlutterSdkInfo` from the active Flutter toolchain, or `None`.
+
+    Returns:
+        A `(const_finder, font_subset)` tuple of `File` or `None`.
     """
     const_finder = flutter_sdk_info.const_finder if flutter_sdk_info else None
     font_subset = flutter_sdk_info.font_subset if flutter_sdk_info else None

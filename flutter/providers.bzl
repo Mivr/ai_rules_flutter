@@ -80,6 +80,12 @@ def resolve_flutter_sdk_info(ctx):
     `platform_kernel_dill_product`, `const_finder`, `font_subset`, `gen_snapshot`,
     `engine_library`, `linux_sysroot`, and `material_icons_font` from any optional
     sub-toolchains declared on the rule.
+
+    Args:
+      ctx: Rule context declaring `@rules_flutter//flutter:toolchain_type` and optional sub-toolchains.
+
+    Returns:
+      The merged `FlutterSdkInfo` provider instance.
     """
     flutter_toolchain = ctx.toolchains["@rules_flutter//flutter:toolchain_type"]
     info = flutter_toolchain.flutter_sdk_info
@@ -149,7 +155,7 @@ def resolve_flutter_sdk_info(ctx):
 
     return FlutterSdkInfo(**fields)
 
-def resolve_exec_dart(ctx, flutter_sdk_info = None):  # buildifier: disable=unused-variable
+def resolve_exec_dart(ctx, _flutter_sdk_info = None):
     """Resolves the host `dart` executable from `@rules_dart//dart:exec_tools_toolchain_type`.
 
     Fails analysis with a named error when `@rules_dart//dart:exec_tools_toolchain_type`
@@ -158,7 +164,7 @@ def resolve_exec_dart(ctx, flutter_sdk_info = None):  # buildifier: disable=unus
 
     Args:
       ctx: Rule context.
-      flutter_sdk_info: Unused; retained for call-site compatibility.
+      _flutter_sdk_info: Unused; retained for call-site compatibility.
 
     Returns:
       The `dart` executable `File`.
@@ -176,7 +182,7 @@ def resolve_exec_dart(ctx, flutter_sdk_info = None):  # buildifier: disable=unus
         )
     return dart_tc.dart_sdk_info.dart
 
-def resolve_exec_dart_vm(ctx, flutter_sdk_info = None):  # buildifier: disable=unused-variable
+def resolve_exec_dart_vm(ctx, _flutter_sdk_info = None):
     """Resolves `(dart_exe, runtime_files_depset)` for running a `.dill` tool on the exec platform.
 
     Reads `dart_sdk_info.dart` and `dart_sdk_info.runtime_files` from
@@ -186,7 +192,7 @@ def resolve_exec_dart_vm(ctx, flutter_sdk_info = None):  # buildifier: disable=u
 
     Args:
       ctx: Rule context.
-      flutter_sdk_info: Unused; retained for call-site compatibility.
+      _flutter_sdk_info: Unused; retained for call-site compatibility.
 
     Returns:
       A tuple `(dart_exe, runtime_files_depset)`.
