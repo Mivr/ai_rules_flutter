@@ -20,15 +20,17 @@ so we skip the frontend_server kernel compilation step used by desktop/mobile.
 """
 
 load("@rules_dart//dart:providers.bzl", "DartInfo")
-load("@rules_dart//dart:utils.bzl", "MODULAR_KERNEL_TOOLCHAINS", "collect_packages", "collect_transitive_srcs", "dart_analyzable_info_with_package", "derive_lib_root", "generate_dev_package_config")
+load("@rules_dart//dart:utils.bzl", "MODULAR_KERNEL_TOOLCHAINS", "collect_packages", "collect_transitive_srcs", "colocate_packages", "dart_analyzable_info_with_package", "derive_lib_root", "generate_dev_package_config", "generate_package_config", "generate_stable_package_config")
 load("//flutter:providers.bzl", "FlutterInfo", "FlutterNativeLibraryInfo")
 load(
     "//flutter/private:app_entrypoint.bzl",
     "APP_SCHEME",
     "app_main_location",
     "app_main_package_uri",
+    "app_scheme_location",
+    "app_scheme_rel_path",
     "app_scheme_sources",
-    "compile_package_config",
+    "compile_kernel_package_config",
     "package_lib_prefix",
     "resolve_wrapper_main_import",
     "synthesize_app_package",
@@ -45,6 +47,8 @@ load(
     "flutter_build_assets",
     "flutter_compile_shaders",
     "flutter_web_shader_aspect",
+    "make_web_plugins_stub_content",
+    "make_web_ui_web_stub_content",
     "make_web_wrapper_main_content",
     "merge_dart_defines",
     "resolve_dev_generated_sources",
@@ -69,6 +73,7 @@ load(
     "web_build_mode",
     "web_experiment_flags",
     "web_mode_defines",
+    "web_renderer_defines",
 )
 load("//flutter/private:plugin_registrant.bzl", "generate_dart_plugin_registrant")
 load(
@@ -393,10 +398,6 @@ def _flutter_web_bundle_impl(ctx):
             all_srcs + [ctx.file.main],
         )
 
-    pc = compile_package_config(ctx, packages, all_srcs + [ctx.file.main])
-    config_file = pc.config_file
-    all_srcs = pc.srcs
-
     # Generate web wrapper main with ui_web.bootstrapEngine().
     # Flutter web ALWAYS needs this wrapper to properly initialize the engine
     # (create the implicit view, set up the platform dispatcher, etc.)
@@ -408,26 +409,64 @@ def _flutter_web_bundle_impl(ctx):
     plugins = dedup_plugins(all_dep_plugins)
     registrant = generate_dart_plugin_registrant(ctx, plugins, target_platform = "web")
 
-    wrapper = ctx.actions.declare_file(ctx.label.name + "_wrapper_main.dart")
-    wrapper_depth = len(wrapper.dirname.split("/"))
+    ui_web_stub = ctx.actions.declare_file(ctx.label.name + "_ui_web_stub.dart")
+    ctx.actions.write(ui_web_stub, make_web_ui_web_stub_content())
 
-    # Import the user's main via its `package:` URI when available. That URI
-    # resolves through `package_config.json` to the colocated package's
-    # `rootUri`, so the user's `main.dart` is read from the assembled
-    # directory and its relative imports find their colocated siblings.
+    web_plugins_stub = None
+    stub_lib_root = ""
+    stub_pkg = None
+    has_real_web_plugins = any([p.package_name == "flutter_web_plugins" for p in packages])
+    if registrant != None:
+        web_plugins_stub = ctx.actions.declare_file(ctx.label.name + "_flutter_web_plugins_stub/lib/flutter_web_plugins.dart")
+        ctx.actions.write(web_plugins_stub, make_web_plugins_stub_content())
+        stub_rel = app_scheme_rel_path(web_plugins_stub)
+        stub_lib_root = stub_rel[:-len("/lib/flutter_web_plugins.dart")]
+        stub_pkg = struct(
+            package_name = "flutter_web_plugins",
+            lib_root = stub_lib_root,
+            language_version = "",
+        )
+        if not has_real_web_plugins:
+            packages = packages + [stub_pkg]
+            all_srcs = all_srcs + [web_plugins_stub]
+
+    build_package_config = None
+    build_package_dirs = []
+    if is_debug:
+        dbg_packages, dbg_srcs = colocate_packages(ctx, packages, all_srcs + [ctx.file.main])
+        build_package_config = ctx.actions.declare_file(ctx.label.name + "_build_package_config.json")
+        ctx.actions.write(build_package_config, generate_package_config(dbg_packages, dbg_srcs, build_package_config))
+        build_package_dirs = [f for f in dbg_srcs if f.is_directory]
+
+    pc = compile_kernel_package_config(
+        ctx,
+        packages,
+        all_srcs + [ctx.file.main],
+        roots = {ctx.attr.package_name: True} if ctx.attr.package_name else None,
+    )
+    config_file = pc.config_file
+    all_srcs = pc.srcs
+
+    wrapper = ctx.actions.declare_file(ctx.label.name + "_wrapper_main.dart")
+    wrapper_rel = app_scheme_rel_path(wrapper)
+    wrapper_depth = len(wrapper_rel.split("/")) - 1
+
+    # Import the user's main via its `package:` URI when available, or via a
+    # relative path within the staged multi-root tree when `main` is outside `lib/`.
     wrapper_content = make_web_wrapper_main_content(
         resolve_wrapper_main_import(
             ctx.attr.package_name,
             lib_root,
             ctx.file.main.short_path,
-            ctx.file.main.path,
+            app_scheme_rel_path(ctx.file.main),
             wrapper_depth,
         ),
         registrant.basename if registrant else None,
+        ui_web_stub_import = ui_web_stub.basename,
     )
     ctx.actions.write(wrapper, wrapper_content)
     entrypoint = wrapper
-    extra_wrapper_srcs = [ctx.file.main, wrapper]
+    extra_wrapper_srcs = [ctx.file.main, wrapper, ui_web_stub]
     if registrant:
         extra_wrapper_srcs.append(registrant)
     all_srcs = all_srcs + extra_wrapper_srcs
@@ -595,23 +634,27 @@ def _flutter_web_bundle_impl(ctx):
                 "or set `platform_kernel_dill_product` on `flutter_toolchain`.",
             )
         kernel_dill = ctx.actions.declare_file(ctx.label.name + "_icon_tree_shaking.dill")
-        entrypoint_uri = app_main_package_uri(
+        main_pkg_uri = app_main_package_uri(
             ctx.attr.package_name,
             lib_root,
             ctx.file.main.short_path,
         )
+        entrypoint_uri = app_scheme_location(entrypoint).uri
+        renderer_defines = web_renderer_defines(renderer)
         from_dill = None
 
         # `fastbuild` web builds pre-link modular `.flutter_product.kmod` modules
-        # compiled with `-Ddart.vm.product=true` against the product platform
-        # dill so `kReleaseMode` folds to `true` and `kDebugMode` folds to `false`
-        # in both dependency modules and the entry module, matching the release
-        # web bundle that ships.
+        # compiled with `-Ddart.vm.product=true` and default skwasm renderer
+        # defines against the product platform dill so `kReleaseMode` and
+        # renderer defines fold identically in both dependency modules and the
+        # entry module, matching the release web bundle that ships.
         if (not is_opt and
             not is_profile and
             not ctx.attr.enable_experiments and
             not user_defines and
-            entrypoint_uri != None and
+            registrant == None and
+            renderer == "skwasm" and
+            main_pkg_uri != None and
             flutter_sdk_info.platform_kernel_dill_product != None):
             own_files = [ctx.file.main] + [f for f in ctx.files.srcs if f != ctx.file.main]
             modular_tools = flutter_modular_test_tools(
@@ -631,37 +674,59 @@ def _flutter_web_bundle_impl(ctx):
                     lib_root,
                     packages,
                     from_dill,
+                    entrypoint = entrypoint,
+                    ui_web_stub = ui_web_stub,
+                    renderer_defines = renderer_defines,
                 )
 
-        # When the app is a Dart package, key the entrypoint by its `package:`
-        # URI so the compile reads `main.dart` from the colocated package and
-        # its relative imports resolve to the assembled siblings (handwritten
-        # + generated). Without this, `main.dart` is read from its source-tree
-        # exec path and reaches the source-tree copies of its siblings, which
-        # miss any `dart_codegen`-produced `.g.dart` in `bazel-out`.
+        icon_config_file = config_file
+        icon_srcs = all_srcs
+        if registrant != None and has_real_web_plugins and stub_pkg != None and web_plugins_stub != None:
+            real_roots = [
+                p.lib_root
+                for p in packages
+                if p.package_name == "flutter_web_plugins"
+            ]
+            icon_packages = [p for p in packages if p.package_name != "flutter_web_plugins"] + [stub_pkg]
+            icon_srcs = [
+                f
+                for f in all_srcs
+                if not any([app_scheme_rel_path(f).startswith(r + "/") for r in real_roots if r])
+            ] + [web_plugins_stub]
+            icon_config_file = ctx.actions.declare_file(ctx.label.name + "_icon_package_config.json")
+            ctx.actions.write(
+                icon_config_file,
+                generate_stable_package_config(
+                    icon_packages,
+                    icon_srcs,
+                    roots = {ctx.attr.package_name: True} if ctx.attr.package_name else None,
+                    scheme = APP_SCHEME,
+                ),
+            )
+
         flutter_kernel_compile_action(
             ctx = ctx,
             dartaotruntime = flutter_sdk_info.dartaotruntime,
             kernel_filter_tool = ctx.executable._kernel_filter_tool,
             frontend_server = flutter_sdk_info.frontend_server,
             platform_dill = icon_platform_dill,
-            main = ctx.file.main,
+            main = entrypoint,
             entrypoint_uri = entrypoint_uri,
-            srcs = all_srcs,
-            package_config = config_file,
+            srcs = icon_srcs,
+            package_config = icon_config_file,
             output = kernel_dill,
             aot = True,
-            # Mode-derived rather than hardcoded: this branch is reachable in
-            # both non-debug modes, and a profile build that shook its icons
-            # against `dart.vm.product=true` would be shaking a different
-            # program than the one it goes on to compile.
-            defines = list(user_defines) + web_mode_defines(mode),
+            # Mode-derived and renderer-derived so icon tree-shaking compiles
+            # the same entrypoint, plugin registrant, and defines as the shipped
+            # web program.
+            defines = list(user_defines) + web_mode_defines(mode) + renderer_defines,
             # The experiments have to reach this compile too: they change how
             # the source *parses*, so a release build of experiment-using code
             # would die here — in an icon-shaking step the user never asked
             # for — while both real compilers accepted it.
             extra_flags = web_experiment_flags(ctx.attr.enable_experiments),
             from_dill = from_dill,
+            stage_all = True,
         )
 
     flutter_assets = declare_flutter_assets_dir(ctx)
@@ -1189,7 +1254,7 @@ def _flutter_web_bundle_impl(ctx):
             # cannot: DWDS asked through it gets "Cannot extract a file path
             # from a org-dartlang-app URI" and shows no source at all. This
             # one's rootUris are ordinary relative paths, so they resolve.
-            "buildPackageConfig": config_file.path,
+            "buildPackageConfig": build_package_config.path if build_package_config else config_file.path,
             "filesystemRoots": dev_filesystem_roots,
             "filesystemScheme": dev_filesystem_scheme,
             "generatedSourcePaths": dev_generated_source_paths,
@@ -1235,6 +1300,9 @@ def _flutter_web_bundle_impl(ctx):
         ddc_files.extend(dev_generated_source_files)
         if dev_package_config:
             ddc_files.append(dev_package_config)
+        if build_package_config:
+            ddc_files.append(build_package_config)
+        ddc_files.extend(build_package_dirs)
 
         # Include package_config in debug outputs.
         ddc_files.append(config_file)

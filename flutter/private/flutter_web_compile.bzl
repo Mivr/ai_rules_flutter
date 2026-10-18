@@ -5,7 +5,27 @@ Both `dart compile wasm` and `dart compile js` take .dart source directly,
 not a kernel .dill.
 """
 
+load("//flutter/private:app_entrypoint.bzl", "stage_generated_inputs")
 load("//flutter/private:common.bzl", "flutter_build_mode")
+
+def web_renderer_defines(renderer):
+    """The Dart renderer defines a web compile carries for `renderer`.
+
+    Args:
+        renderer: "skwasm" or "canvaskit".
+
+    Returns:
+        List of KEY=VALUE define strings (no -D prefix).
+    """
+    if renderer == "skwasm":
+        return [
+            "FLUTTER_WEB_USE_SKIA=false",
+            "FLUTTER_WEB_USE_SKWASM=true",
+        ]
+    return [
+        "FLUTTER_WEB_USE_SKIA=true",
+        "FLUTTER_WEB_USE_SKWASM=false",
+    ]
 
 def web_build_mode(ctx):
     """The web build mode for the current Bazel compilation mode.
@@ -235,11 +255,18 @@ def flutter_dart2wasm_action(
              "(dart2wasm writes it there): got %s for %s" %
              (output_source_map.path, output_wasm.path))
 
+    stage = struct(root = None, files = [])
+    if web_compile_tool != None:
+        stage_scope = output_wasm.dirname.split("/")[-1] + "." + output_wasm.basename
+        stage = stage_generated_inputs(ctx, [main_dart] + srcs, stage_scope, include_sources = True)
+
     args = ctx.actions.args()
     if web_compile_tool != None:
         args.add(web_compile_tool)
     args.add("compile")
     args.add("wasm")
+    if stage.root != None:
+        args.add("--multi-root=" + stage.root)
 
     # Platform dill.
     args.add("--extra-compiler-option=--platform=" + dart2wasm_platform_dill.path)
@@ -278,19 +305,15 @@ def flutter_dart2wasm_action(
         # meant to measure.
         for uri in ("dart:ui", "package:flutter"):
             args.add("--extra-compiler-option=--delete-tostring-package-uri=" + uri)
-    if renderer == "skwasm":
-        args.add("-DFLUTTER_WEB_USE_SKIA=false")
-        args.add("-DFLUTTER_WEB_USE_SKWASM=true")
-    else:
-        args.add("-DFLUTTER_WEB_USE_SKIA=true")
-        args.add("-DFLUTTER_WEB_USE_SKWASM=false")
+    for d in web_renderer_defines(renderer):
+        args.add("-D" + d)
     for d in defines:
         args.add("-D" + d)
 
     args.add("-o", output_wasm)
     args.add(main_dart)
 
-    direct_inputs = [main_dart, package_config, dart2wasm_platform_dill] + srcs + web_compile_inputs
+    direct_inputs = [main_dart, package_config, dart2wasm_platform_dill] + srcs + stage.files + web_compile_inputs
     if web_compile_tool != None:
         direct_inputs.append(web_compile_tool)
     ctx.actions.run(
@@ -370,11 +393,17 @@ def flutter_dart2js_action(
         web_compile_inputs: Additional input `File`s required by `web_compile_tool`
             (such as staged generated files or multi-root package configs).
     """
+    stage = struct(root = None, files = [])
+    if web_compile_tool != None:
+        stage = stage_generated_inputs(ctx, [main_dart] + srcs, output_dir.basename + ".dart2js", include_sources = True)
+
     args = ctx.actions.args()
     if web_compile_tool != None:
         args.add(web_compile_tool)
     args.add("compile")
     args.add("js")
+    if stage.root != None:
+        args.add("--multi-root=" + stage.root)
 
     # Prefer the exec-platform-specific libraries.<platform>.json from web_sdk_files
     # (falling back to web-sdk/libraries.json one level above kernel/).
@@ -425,7 +454,7 @@ def flutter_dart2js_action(
     args.add("-o", output_dir.path + "/main.dart.js")
     args.add(main_dart)
 
-    direct_inputs = [main_dart, package_config, dart2js_platform_dill] + srcs + web_compile_inputs
+    direct_inputs = [main_dart, package_config, dart2js_platform_dill] + srcs + stage.files + web_compile_inputs
     if web_compile_tool != None:
         direct_inputs.append(web_compile_tool)
     ctx.actions.run(

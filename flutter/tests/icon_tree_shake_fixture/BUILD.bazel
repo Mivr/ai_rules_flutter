@@ -72,10 +72,40 @@ flutter_web_bundle(
     ],
 )
 
+flutter_web_bundle(
+    name = "skwasm_plugin_icon_fixture",
+    package_name = "flutter",
+    compiler = "dart2wasm",
+    main = "lib/renderer_plugin_icon_main.dart",
+    renderer = "skwasm",
+    tags = ["manual"],
+    deps = [
+        ":flutter_stub",
+        "//flutter:material_icons",
+        "//flutter/tests/icon_tree_shake_fixture/web_icon_plugin",
+    ],
+)
+
+flutter_web_bundle(
+    name = "canvaskit_plugin_icon_fixture",
+    package_name = "flutter",
+    compiler = "dart2wasm",
+    main = "lib/renderer_plugin_icon_main.dart",
+    renderer = "canvaskit",
+    tags = ["manual"],
+    deps = [
+        ":flutter_stub",
+        "//flutter:material_icons",
+        "//flutter/tests/icon_tree_shake_fixture/web_icon_plugin",
+    ],
+)
+
 fastbuild_build(
     name = "fastbuild_web_font_fixture",
     tags = ["manual"],
     targets = [
+        ":canvaskit_plugin_icon_fixture",
+        ":skwasm_plugin_icon_fixture",
         ":text_only_material_fixture",
         "//flutter/tests:_web_font_fixture",
     ],
@@ -85,6 +115,8 @@ opt_build(
     name = "opt_web_font_fixture",
     tags = ["manual"],
     targets = [
+        ":canvaskit_plugin_icon_fixture",
+        ":skwasm_plugin_icon_fixture",
         ":text_only_material_fixture",
         "//flutter/tests:_web_font_fixture",
     ],

@@ -75,8 +75,8 @@ load(
     "//flutter/private:app_entrypoint.bzl",
     "app_main_location",
     "app_scheme_location",
+    "app_scheme_rel_path",
     "compile_kernel_package_config",
-    "compile_package_config",
     "package_lib_prefix",
     "resolve_wrapper_main_import",
     "synthesize_app_package",
@@ -1101,18 +1101,24 @@ def _flutter_integration_test_impl(ctx):
         ctx.attr.language_version,
     )
 
-    pc = compile_package_config(ctx, packages, all_srcs + [main_file])
+    pc = compile_kernel_package_config(
+        ctx,
+        packages,
+        all_srcs + [main_file],
+        roots = {package_name: True} if package_name else None,
+    )
     config_file = pc.config_file
     all_srcs = pc.srcs
 
     # Step 1a: Generate the test bootstrap `<name>_bootstrap.dart`.
     bootstrap = ctx.actions.declare_file(ctx.label.name + "_bootstrap.dart")
-    bootstrap_depth = len(bootstrap.dirname.split("/"))
+    bootstrap_rel = app_scheme_rel_path(bootstrap)
+    bootstrap_depth = len(bootstrap_rel.split("/")) - 1
     test_import = resolve_wrapper_main_import(
         package_name,
         lib_root,
         main_file.short_path,
-        main_file.path,
+        app_scheme_rel_path(main_file),
         bootstrap_depth,
     )
     has_integration_test = _exposes_package(ctx.attr.deps, ["integration_test"])

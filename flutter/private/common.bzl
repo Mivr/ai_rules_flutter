@@ -29,7 +29,41 @@ resolve_exec_dart = _resolve_exec_dart
 resolve_exec_dart_vm = _resolve_exec_dart_vm
 resolve_flutter_sdk_info = _resolve_flutter_sdk_info
 
-def make_web_wrapper_main_content(original_import, registrant_import = None):
+def make_web_ui_web_stub_content():
+    """Generate a VM-compatible stub for `dart:ui_web` used during icon tree-shaking kernel compilation."""
+    return "\n".join([
+        "// GENERATED — do not edit.",
+        "// ignore_for_file: type=lint",
+        "import 'dart:async';",
+        "",
+        "Future<void> bootstrapEngine({",
+        "  FutureOr<void> Function()? runApp,",
+        "  FutureOr<void> Function()? registerPlugins,",
+        "}) async {",
+        "  await registerPlugins?.call();",
+        "  await runApp?.call();",
+        "}",
+        "",
+    ])
+
+def make_web_plugins_stub_content():
+    """Generate a VM-compatible stub for `package:flutter_web_plugins/flutter_web_plugins.dart`."""
+    return "\n".join([
+        "// GENERATED — do not edit.",
+        "// ignore_for_file: type=lint",
+        "library flutter_web_plugins;",
+        "",
+        "class Registrar {",
+        "  void registerMessageHandler() {}",
+        "}",
+        "",
+        "class PluginRegistry {}",
+        "",
+        "final dynamic webPluginRegistrar = Registrar();",
+        "",
+    ])
+
+def make_web_wrapper_main_content(original_import, registrant_import = None, ui_web_stub_import = None):
     """Generate a web wrapper main.dart that uses ui_web.bootstrapEngine().
 
     Flutter web requires ui_web.bootstrapEngine() to properly initialize the
@@ -43,16 +77,22 @@ def make_web_wrapper_main_content(original_import, registrant_import = None):
         original_import: Import URI for the original main.
         registrant_import: Optional relative import path for the generated
             registrant file. If None, plugin registration is a no-op.
+        ui_web_stub_import: Optional relative import path for a VM-compatible
+            `dart:ui_web` stub, conditionally selected when `dart.library.ui_web`
+            is absent (as in the `--target=flutter` icon tree-shaking kernel).
 
     Returns:
         String of Dart source code.
     """
+    ui_web_import = (
+        "import '%s' if (dart.library.ui_web) 'dart:ui_web' as ui_web;" % ui_web_stub_import if ui_web_stub_import else "import 'dart:ui_web' as ui_web;"
+    )
     lines = [
         "// GENERATED — do not edit.",
         "// Flutter web bootstrap script.",
         "// ignore_for_file: type=lint",
         "",
-        "import 'dart:ui_web' as ui_web;",
+        ui_web_import,
         "import 'dart:async';",
         "",
         "import '%s' as entrypoint;" % original_import,

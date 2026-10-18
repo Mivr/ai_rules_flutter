@@ -376,6 +376,47 @@ void _runWebCompile(List<String> args) {
   }
 }
 
+String _toAppSchemeRelPath(String path) {
+  final norm = path.replaceAll(r'\', '/');
+  return norm.replaceFirst(RegExp(r'^(?:\./)?bazel-out/[^/]+/(?:bin|genfiles)/'), '');
+}
+
+void _rewritePackageConfig(
+  String packagesPath,
+  String normCwd,
+  String cwdPrefix,
+  String outPath,
+) {
+  final pkgFile = File(packagesPath).absolute;
+  final pkgJson =
+      json.decode(pkgFile.readAsStringSync()) as Map<String, dynamic>;
+  final pkgs = (pkgJson['packages'] as List<dynamic>)
+      .cast<Map<String, dynamic>>();
+  for (final p in pkgs) {
+    final rootUri = p['rootUri'] as String;
+    if (rootUri.startsWith('org-dartlang-app:///')) {
+      continue;
+    }
+    final resolved = pkgFile.uri.resolve(rootUri);
+    if (resolved.scheme == 'file') {
+      final fsPath = resolved.toFilePath().replaceAll(r'\', '/');
+      if (fsPath.startsWith(cwdPrefix)) {
+        var rel = fsPath.substring(cwdPrefix.length);
+        if (rel.endsWith('/') && rel.length > 1) {
+          rel = rel.substring(0, rel.length - 1);
+        }
+        rel = _toAppSchemeRelPath(rel);
+        p['rootUri'] = 'org-dartlang-app:///$rel';
+      } else if (fsPath == normCwd || fsPath == cwdPrefix) {
+        p['rootUri'] = 'org-dartlang-app:///';
+      } else {
+        p['rootUri'] = resolved.toString();
+      }
+    }
+  }
+  File(outPath).writeAsStringSync(json.encode(pkgJson));
+}
+
 void _runDart2Wasm(List<String> args) {
   final exeSuffix = Platform.isWindows ? '.exe' : '';
   final sdkBin = File(Platform.resolvedExecutable).parent.path;
@@ -384,6 +425,7 @@ void _runDart2Wasm(List<String> args) {
   String? packagesPath;
   String? outputWasm;
   String? mainDart;
+  String? multiRoot;
   var noSourceMaps = false;
   final extraOptions = <String>[];
   final forwardArgs = <String>[];
@@ -392,6 +434,8 @@ void _runDart2Wasm(List<String> args) {
     final arg = args[i];
     if (arg.startsWith('--packages=')) {
       packagesPath = arg.substring('--packages='.length);
+    } else if (arg.startsWith('--multi-root=')) {
+      multiRoot = arg.substring('--multi-root='.length);
     } else if (arg.startsWith('--extra-compiler-option=')) {
       extraOptions.add(arg.substring('--extra-compiler-option='.length));
     } else if (arg == '-o') {
@@ -418,42 +462,24 @@ void _runDart2Wasm(List<String> args) {
   final tmpDir = Directory.systemTemp.createTempSync('flutter_dart2wasm_');
   try {
     final cwdPath = Directory.current.absolute.path;
+    final rootDirPath = multiRoot != null
+        ? Directory(multiRoot).absolute.path
+        : cwdPath;
     final normCwd = cwdPath.replaceAll(r'\', '/');
     final cwdPrefix = normCwd.endsWith('/') ? normCwd : '$normCwd/';
-    final pkgFile = File(packagesPath).absolute;
-    final pkgJson =
-        json.decode(pkgFile.readAsStringSync()) as Map<String, dynamic>;
-    final pkgs = (pkgJson['packages'] as List<dynamic>)
-        .cast<Map<String, dynamic>>();
-    for (final p in pkgs) {
-      final rootUri = p['rootUri'] as String;
-      final resolved = pkgFile.uri.resolve(rootUri);
-      if (resolved.scheme == 'file') {
-        final fsPath = resolved.toFilePath().replaceAll(r'\', '/');
-        if (fsPath.startsWith(cwdPrefix)) {
-          var rel = fsPath.substring(cwdPrefix.length);
-          if (rel.endsWith('/') && rel.length > 1) {
-            rel = rel.substring(0, rel.length - 1);
-          }
-          p['rootUri'] = 'org-dartlang-app:///$rel';
-        } else if (fsPath == normCwd || fsPath == cwdPrefix) {
-          p['rootUri'] = 'org-dartlang-app:///';
-        } else {
-          p['rootUri'] = resolved.toString();
-        }
-      }
-    }
     final rewrittenPkgPath = '${tmpDir.path}/package_config.json';
-    File(rewrittenPkgPath).writeAsStringSync(json.encode(pkgJson));
+    _rewritePackageConfig(packagesPath, normCwd, cwdPrefix, rewrittenPkgPath);
 
     final tmpWasm = '${tmpDir.path}/main.dart.wasm';
-    final normMainDart = mainDart.replaceAll(r'\', '/');
+    final normMainDart = multiRoot != null
+        ? _toAppSchemeRelPath(mainDart)
+        : mainDart.replaceAll(r'\', '/');
     final wasmArgs = <String>[
       '$sdkBin/snapshots/dart2wasm_product.snapshot',
       ...extraOptions,
       '--packages=$rewrittenPkgPath',
       '--multi-root-scheme=org-dartlang-app',
-      '--multi-root=$cwdPath',
+      '--multi-root=$rootDirPath',
       '--wasm-opt=$sdkBin/utils/wasm-opt$exeSuffix',
       ...forwardArgs,
       'org-dartlang-app:///$normMainDart',
@@ -485,30 +511,136 @@ void _runDart2Wasm(List<String> args) {
   }
 }
 
+void _rewritePackageConfigForFileRoot(
+  String packagesPath,
+  String rootDirPath,
+  String normCwd,
+  String cwdPrefix,
+  String outPath,
+) {
+  final pkgFile = File(packagesPath).absolute;
+  final pkgJson =
+      json.decode(pkgFile.readAsStringSync()) as Map<String, dynamic>;
+  final pkgs = (pkgJson['packages'] as List<dynamic>)
+      .cast<Map<String, dynamic>>();
+  const schemePrefix = 'org-dartlang-app:///';
+  for (final p in pkgs) {
+    final rootUri = p['rootUri'] as String;
+    if (rootUri.startsWith(schemePrefix)) {
+      final rel = rootUri.substring(schemePrefix.length);
+      final dirPath = rel.isEmpty ? rootDirPath : '$rootDirPath/$rel';
+      var uriStr = Uri.directory(dirPath).toString();
+      if (uriStr.endsWith('/') && uriStr.length > 1) {
+        uriStr = uriStr.substring(0, uriStr.length - 1);
+      }
+      p['rootUri'] = uriStr;
+      continue;
+    }
+    final resolved = pkgFile.uri.resolve(rootUri);
+    if (resolved.scheme == 'file') {
+      final fsPath = resolved.toFilePath().replaceAll(r'\', '/');
+      if (fsPath.startsWith(cwdPrefix)) {
+        var rel = fsPath.substring(cwdPrefix.length);
+        if (rel.endsWith('/') && rel.length > 1) {
+          rel = rel.substring(0, rel.length - 1);
+        }
+        rel = _toAppSchemeRelPath(rel);
+        final dirPath = rel.isEmpty ? rootDirPath : '$rootDirPath/$rel';
+        var uriStr = Uri.directory(dirPath).toString();
+        if (uriStr.endsWith('/') && uriStr.length > 1) {
+          uriStr = uriStr.substring(0, uriStr.length - 1);
+        }
+        p['rootUri'] = uriStr;
+      } else if (fsPath == normCwd || fsPath == cwdPrefix) {
+        var uriStr = Uri.directory(rootDirPath).toString();
+        if (uriStr.endsWith('/') && uriStr.length > 1) {
+          uriStr = uriStr.substring(0, uriStr.length - 1);
+        }
+        p['rootUri'] = uriStr;
+      } else {
+        p['rootUri'] = resolved.toString();
+      }
+    }
+  }
+  File(outPath).writeAsStringSync(json.encode(pkgJson));
+}
+
 void _runDart2Js(List<String> args) {
   final exeSuffix = Platform.isWindows ? '.exe' : '';
   final sdkBin = File(Platform.resolvedExecutable).parent.path;
   final dartaotruntime = '$sdkBin/dartaotruntime$exeSuffix';
 
   String? outJs;
+  String? multiRoot;
+  String? packagesPath;
+  String? mainDart;
+  final forwardArgs = <String>[];
   for (var i = 0; i < args.length; i++) {
     final arg = args[i];
     if (arg == '-o' && i + 1 < args.length) {
-      outJs = args[i + 1];
+      outJs = args[++i];
+      forwardArgs.addAll(['-o', outJs]);
     } else if (arg.startsWith('-o=')) {
       outJs = arg.substring('-o='.length);
+      forwardArgs.add(arg);
+    } else if (arg.startsWith('--multi-root=')) {
+      multiRoot = arg.substring('--multi-root='.length);
+    } else if (arg.startsWith('--packages=')) {
+      packagesPath = arg.substring('--packages='.length);
+      forwardArgs.add(arg);
+    } else if (arg.startsWith('-')) {
+      forwardArgs.add(arg);
+    } else {
+      mainDart = arg;
     }
   }
 
-  final res = Process.runSync(dartaotruntime, [
-    '$sdkBin/snapshots/dart2js_aot.dart.snapshot',
-    '--invoker=dart_cli',
-    ...args,
-  ]);
-  if (res.exitCode != 0) {
-    stdout.write(res.stdout as String);
-    stderr.write(res.stderr as String);
-    exit(res.exitCode);
+  Directory? tmpDir;
+  String? rootDirPath;
+  try {
+    List<String> jsArgs;
+    if (multiRoot != null && packagesPath != null && mainDart != null) {
+      tmpDir = Directory.systemTemp.createTempSync('flutter_dart2js_');
+      final cwdPath = Directory.current.absolute.path;
+      rootDirPath = Directory(multiRoot).absolute.path;
+      final normCwd = cwdPath.replaceAll(r'\', '/');
+      final cwdPrefix = normCwd.endsWith('/') ? normCwd : '$normCwd/';
+      final rewrittenPkgPath = '${tmpDir.path}/package_config.json';
+      _rewritePackageConfigForFileRoot(
+        packagesPath,
+        rootDirPath,
+        normCwd,
+        cwdPrefix,
+        rewrittenPkgPath,
+      );
+      final relMain = _toAppSchemeRelPath(mainDart);
+      jsArgs = <String>[
+        for (final a in forwardArgs)
+          if (a.startsWith('--packages='))
+            '--packages=$rewrittenPkgPath'
+          else
+            a,
+        '$rootDirPath/$relMain',
+      ];
+    } else {
+      jsArgs = <String>[
+        ...forwardArgs,
+        if (mainDart != null) mainDart,
+      ];
+    }
+
+    final res = Process.runSync(dartaotruntime, [
+      '$sdkBin/snapshots/dart2js_aot.dart.snapshot',
+      '--invoker=dart_cli',
+      ...jsArgs,
+    ]);
+    if (res.exitCode != 0) {
+      stdout.write(res.stdout as String);
+      stderr.write(res.stderr as String);
+      exit(res.exitCode);
+    }
+  } finally {
+    tmpDir?.deleteSync(recursive: true);
   }
 
   if (outJs != null) {
@@ -516,6 +648,9 @@ void _runDart2Js(List<String> args) {
     if (outDir.existsSync()) {
       final cwdUriPrefix = Uri.directory(Directory.current.absolute.path)
           .toString();
+      final stageUriPrefix = rootDirPath != null
+          ? Uri.directory(rootDirPath).toString()
+          : null;
       final entries = outDir.listSync(recursive: true)
         ..sort((a, b) => a.path.compareTo(b.path));
       for (final entity in entries) {
@@ -525,6 +660,10 @@ void _runDart2Js(List<String> args) {
                 entity.path.endsWith('.map'))) {
           var content = entity.readAsStringSync();
           var changed = false;
+          if (stageUriPrefix != null && content.contains(stageUriPrefix)) {
+            content = content.replaceAll(stageUriPrefix, 'org-dartlang-app:///');
+            changed = true;
+          }
           if (content.contains(cwdUriPrefix)) {
             content = content.replaceAll(cwdUriPrefix, 'org-dartlang-app:///');
             changed = true;

@@ -1,8 +1,14 @@
 import 'package:flutter/material.dart';
 
 /// Selected in a dependency `.kmod` so modular web icon tree-shaking must
-/// compile dependency modules with `-Ddart.vm.product=true`.
-const IconData depSelectedIcon = kDebugMode ? Icons.a : Icons.b;
+/// compile dependency modules with `-Ddart.vm.product=true` and default
+/// skwasm renderer defines.
+const IconData depSelectedIcon =
+    (kDebugMode ||
+        !bool.fromEnvironment('FLUTTER_WEB_USE_SKWASM') ||
+        bool.fromEnvironment('FLUTTER_WEB_USE_SKIA'))
+    ? Icons.a
+    : Icons.b;
 
 @staticIconProvider
 abstract final class UnusedFamilyIcons {

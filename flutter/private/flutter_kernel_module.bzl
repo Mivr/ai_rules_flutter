@@ -242,7 +242,8 @@ def _flutter_kernel_module_action(
         libraries_platform = None,
         extra_libraries = [],
         scheme = APP_SCHEME,
-        extra_frontend_flags = []):
+        extra_frontend_flags = [],
+        stage_all = False):
     """Compiles one Flutter kernel module with staged generated inputs instead of mounting `ctx.bin_dir`."""
     sources = _dedup_module_sources(sources)
     platform = platform_dill if platform_dill != None else tools.platform_dill
@@ -257,7 +258,7 @@ def _flutter_kernel_module_action(
     stage_candidates = [s.file for s in sources]
     if extra_inputs != None:
         stage_candidates = stage_candidates + extra_inputs.to_list()
-    stage = stage_generated_inputs(ctx, stage_candidates, output.basename)
+    stage = stage_generated_inputs(ctx, stage_candidates, output.basename, include_sources = stage_all)
 
     args = ctx.actions.args()
     args.use_param_file("@%s", use_always = True)
@@ -272,7 +273,8 @@ def _flutter_kernel_module_action(
     args.add_all(extra_libraries, before_each = "--extra-library")
     if stage.root != None:
         args.add("--multi-root", stage.root)
-    args.add("--multi-root", ".")
+    if not stage_all:
+        args.add("--multi-root", ".")
     args.add("--multi-root-scheme", scheme)
     args.add_all([d for d in defines if "," not in d], format_each = "-D%s")
     args.add_all(extra_frontend_flags)
@@ -560,7 +562,11 @@ def _flutter_kernel_module_aspect_impl(target, ctx):
             product_dep_outline_closure,
             product_kmod,
             koutline = product_koutline,
-            defines = worker_defines + ["dart.vm.product=true"],
+            defines = worker_defines + [
+                "dart.vm.product=true",
+                "FLUTTER_WEB_USE_SKIA=false",
+                "FLUTTER_WEB_USE_SKWASM=true",
+            ],
             exclude_non_sources = True,
             droppable = True,
             closure_excluded = product_upstream_excluded,
@@ -786,7 +792,13 @@ def compile_flutter_modular_web_kernel(
         tools,
         lib_root,
         packages,
-        output):
+        output,
+        entrypoint = None,
+        ui_web_stub = None,
+        renderer_defines = [
+            "FLUTTER_WEB_USE_SKIA=false",
+            "FLUTTER_WEB_USE_SKWASM=true",
+        ]):
     """Compiles a `flutter_web_bundle`'s entry module and links it with dependency modules and the product platform dill.
 
     Args:
@@ -796,13 +808,25 @@ def compile_flutter_modular_web_kernel(
       lib_root: The web app package's `lib_root` from `derive_lib_root`.
       packages: The synthesized `DartPackageInfo` list for the web app.
       output: The linked `.dill` File to produce (with product platform dill prepended).
+      entrypoint: Optional generated `<name>_wrapper_main.dart` File.
+      ui_web_stub: Optional generated `<name>_ui_web_stub.dart` File.
+      renderer_defines: Renderer `-D` define strings (`KEY=VALUE`).
     """
-    sources = [
-        struct(
-            uri = app_main_location(ctx.attr.package_name, lib_root, ctx.file.main).uri,
-            file = ctx.file.main,
-        ),
-    ]
+    sources = []
+    if entrypoint != None:
+        sources.append(struct(
+            uri = app_scheme_location(entrypoint).uri,
+            file = entrypoint,
+        ))
+    if ui_web_stub != None:
+        sources.append(struct(
+            uri = app_scheme_location(ui_web_stub).uri,
+            file = ui_web_stub,
+        ))
+    sources.append(struct(
+        uri = app_main_location(ctx.attr.package_name, lib_root, ctx.file.main).uri,
+        file = ctx.file.main,
+    ))
     for f in ctx.files.srcs:
         if f == ctx.file.main:
             continue
@@ -835,7 +859,7 @@ def compile_flutter_modular_web_kernel(
         first_per_package(packages),
         dep_outline_closure,
         entry,
-        defines = _kernel_worker_defines(ctx) + ["dart.vm.product=true"],
+        defines = _kernel_worker_defines(ctx) + ["dart.vm.product=true"] + list(renderer_defines),
         exclude_non_sources = True,
         droppable = False,
         extra_inputs = cross_pkg_srcs,
@@ -844,6 +868,7 @@ def compile_flutter_modular_web_kernel(
         platform_dill = flutter_sdk_info.platform_kernel_dill_product,
         extra_libraries = ["ui", "nativewrappers"],
         scheme = APP_SCHEME,
+        stage_all = True,
     )
     kernel_link_action(
         ctx,

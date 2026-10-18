@@ -65,35 +65,71 @@ def app_scheme_location(file):
     root = file.path[:len(file.path) - len(rel)].rstrip("/")
     return struct(uri = "%s:///%s" % (APP_SCHEME, rel), root = root)
 
-def stage_generated_inputs(ctx, files, scope):
-    """Stages non-source `files` into a per-action multi-root directory.
+def stage_generated_inputs(ctx, files, scope, include_sources = False):
+    """Stages declared `files` into a per-action multi-root directory.
 
     Instead of mounting `ctx.bin_dir.path` (which leaks stale generated outputs
     under `--spawn_strategy=local` or persistent workers and misses generated
-    inputs from transitioned configurations), symlinks only the declared
-    generated inputs (`not f.is_source`) into `<scope>.stage/<app_scheme_rel_path>`.
+    inputs from transitioned configurations), symlinks declared inputs into a
+    staging directory under `<app_scheme_rel_path>`.
 
-    When a source file and a generated file share the same `APP_SCHEME` path,
-    mounting the staging root before `.` makes the declared generated file win
-    deterministically across sandbox, local, and worker strategies, while an
-    undeclared stale file in `bazel-out` is never staged and cannot shadow the
-    source file.
+    When `include_sources` is False, only generated inputs (`not f.is_source`)
+    are staged into `<scope>.stage/<app_scheme_rel_path>`. When `include_sources`
+    is True, both source and generated inputs are staged into a manifest-hashed
+    `<scope>.<hash>.stage/<app_scheme_rel_path>` directory so the compiler can
+    mount only the staging root without exposing undeclared workspace files.
 
     Args:
         ctx: Rule or aspect context.
         files: Iterable of `File`s to inspect.
         scope: Action-unique prefix (e.g. `output.basename`) for the staging
             directory under the current package.
+        include_sources: If True, stage source files as well as generated files.
 
     Returns:
         `struct(root, files)` where `root` is the exec-root-relative staging
-        directory path (or `None` when `files` contains no generated files) and
-        `files` is the list of staged symlink `File`s to add to action inputs.
+        directory path (or `None` when no files were staged) and `files` is the
+        list of staged symlink `File`s to add to action inputs.
     """
-    stage_prefix = scope + ".stage"
     staged = []
     seen = {}
     root = None
+    if include_sources:
+        for f in files:
+            if f == None or f.is_directory:
+                continue
+            rel = app_scheme_rel_path(f)
+            prev = seen.get(rel)
+            if prev != None:
+                if prev == f:
+                    continue
+                if not prev.is_source and not f.is_source:
+                    fail("%s: conflicting generated inputs at %s: %s and %s" % (
+                        ctx.label,
+                        rel,
+                        prev.path,
+                        f.path,
+                    ))
+                if prev.is_source and not f.is_source:
+                    seen[rel] = f
+                continue
+            seen[rel] = f
+        if not seen:
+            return struct(root = None, files = [])
+        manifest_hash = hash("\n".join(sorted(seen.keys()))) & 0xffffffff
+        stage_prefix = "%s.%x.stage" % (scope, manifest_hash)
+        for rel, f in seen.items():
+            link = ctx.actions.declare_file(stage_prefix + "/" + rel)
+            ctx.actions.symlink(output = link, target_file = f)
+            staged.append(link)
+            if root == None:
+                root = link.path[:len(link.path) - len(rel) - 1]
+        return struct(
+            root = root,
+            files = staged,
+        )
+
+    stage_prefix = scope + ".stage"
     for f in files:
         if f == None or f.is_source or f.is_directory:
             continue

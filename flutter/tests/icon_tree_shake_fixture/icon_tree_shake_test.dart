@@ -273,4 +273,45 @@ void main() {
       expect(pkgIconsCodePoints, isNot(contains(0xe88a)));
     },
   );
+
+  test(
+    'bundled MaterialIcons covers plugin-registered and renderer-guarded code points',
+    () {
+      final skwasmMaterial = _findRunfile(
+        'skwasm_plugin_icon_fixture_web/assets/fonts/MaterialIcons-Regular.otf',
+      ).readAsBytesSync();
+      final canvaskitMaterial = _findRunfile(
+        'canvaskit_plugin_icon_fixture_web/assets/fonts/MaterialIcons-Regular.otf',
+      ).readAsBytesSync();
+
+      expect(
+        skwasmMaterial.length,
+        lessThan(originalMaterialBytes.length ~/ 20),
+      );
+      expect(
+        canvaskitMaterial.length,
+        lessThan(originalMaterialBytes.length ~/ 20),
+      );
+
+      final skwasmCodePoints = readCmapCodePoints(skwasmMaterial);
+      final canvaskitCodePoints = readCmapCodePoints(canvaskitMaterial);
+
+      // Both renderer bundles must retain Icons.a (0xe047) reached only via
+      // WebIconPlugin.registerWith in the generated web plugin registrant.
+      expect(skwasmCodePoints, contains(0xe047));
+      expect(canvaskitCodePoints, contains(0xe047));
+
+      // skwasm bundle retains Icons.b (0xe567, FLUTTER_WEB_USE_SKWASM=true)
+      // and shakes out Icons.c (0xe145, FLUTTER_WEB_USE_SKIA) and Icons.d (0xe88a).
+      expect(skwasmCodePoints, contains(0xe567));
+      expect(skwasmCodePoints, isNot(contains(0xe145)));
+      expect(skwasmCodePoints, isNot(contains(0xe88a)));
+
+      // canvaskit bundle retains Icons.c (0xe145, FLUTTER_WEB_USE_SKIA=true)
+      // and shakes out Icons.b (0xe567, FLUTTER_WEB_USE_SKWASM) and Icons.d (0xe88a).
+      expect(canvaskitCodePoints, contains(0xe145));
+      expect(canvaskitCodePoints, isNot(contains(0xe567)));
+      expect(canvaskitCodePoints, isNot(contains(0xe88a)));
+    },
+  );
 }

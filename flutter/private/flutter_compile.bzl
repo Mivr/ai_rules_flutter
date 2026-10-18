@@ -27,7 +27,8 @@ def flutter_kernel_compile_action(
         dart_plugin_registrant_uri = None,
         filesystem_roots = [],
         recorded_uses = None,
-        from_dill = None):
+        from_dill = None,
+        stage_all = False):
     """Creates a Flutter kernel compilation action.
 
     Invokes the frontend_server via dartaotruntime to compile Dart sources
@@ -86,6 +87,8 @@ def flutter_kernel_compile_action(
         from_dill: Optional pre-linked modular `.dill` File passed via
             `--from-dill` to initialize `frontend_server` without re-parsing
             transitive sources.
+        stage_all: If True, stage both source and generated inputs into the
+            staging directory and mount only the staging root (never `.`).
     """
     args = ctx.actions.args()
     args.add("--")
@@ -131,11 +134,12 @@ def flutter_kernel_compile_action(
     # `bazel-out` to shadow source files when running unsandboxed (local/worker)
     # and misses generated inputs produced in transitioned configurations.
     compile_sources = [main] if from_dill != None else [main] + srcs
-    stage = stage_generated_inputs(ctx, compile_sources, output.basename)
+    stage = stage_generated_inputs(ctx, compile_sources, output.basename, include_sources = stage_all)
     mounted_roots = []
     if stage.root != None:
         mounted_roots.append(stage.root)
-    mounted_roots.append("")
+    if not stage_all:
+        mounted_roots.append("")
     for r in filesystem_roots:
         if r != None and r not in mounted_roots:
             mounted_roots.append(r)

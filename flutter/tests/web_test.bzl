@@ -963,7 +963,11 @@ def _font_icon_tree_shake_test_impl(ctx):
     _assert_argv(
         env,
         entry_kernel,
-        present = ["-Ddart.vm.product=true"],
+        present = [
+            "-Ddart.vm.product=true",
+            "-DFLUTTER_WEB_USE_SKIA=false",
+            "-DFLUTTER_WEB_USE_SKWASM=true",
+        ],
         absent_substrings = [
             "/flutter_patched_sdk/platform_strong.dill",
             ".flutter.koutline",
@@ -1007,7 +1011,14 @@ def _font_icon_tree_shake_test_impl(ctx):
     _assert_argv(
         env,
         kernel_action,
-        present = ["-Ddart.vm.product=true", "--from-dill", "--no-embed-source-text"],
+        present = [
+            "-Ddart.vm.product=true",
+            "-DFLUTTER_WEB_USE_SKIA=false",
+            "-DFLUTTER_WEB_USE_SKWASM=true",
+            "--from-dill",
+            "--no-embed-source-text",
+            "org-dartlang-app:///flutter/tests/_web_font_fixture_wrapper_main.dart",
+        ],
         absent_substrings = ["/flutter_patched_sdk/platform_strong.dill"],
     )
     return analysistest.end(env)
@@ -1033,7 +1044,13 @@ def _font_icon_tree_shake_opt_test_impl(ctx):
     _assert_argv(
         env,
         kernel_action,
-        present = ["-Ddart.vm.product=true", "--no-embed-source-text"],
+        present = [
+            "-Ddart.vm.product=true",
+            "-DFLUTTER_WEB_USE_SKIA=false",
+            "-DFLUTTER_WEB_USE_SKWASM=true",
+            "--no-embed-source-text",
+            "org-dartlang-app:///flutter/tests/_web_font_fixture_wrapper_main.dart",
+        ],
         absent_substrings = ["--from-dill"],
     )
     return analysistest.end(env)
@@ -1507,6 +1524,13 @@ def _setup_web_fixtures():
         name = "_web_pkg_root_main_fixture",
         package_name = "web_fixture",
         main = "web_fixture_main.dart",
+        tags = ["manual"],
+    )
+    flutter_web_bundle(
+        name = "_web_nonlib_generated_src_fixture",
+        srcs = [":_ae_declared_shadow_src"],
+        package_name = "web_fixture",
+        main = "nonlib/nonlib_shadow_main.dart",
         tags = ["manual"],
     )
     flutter_web_bundle(
@@ -2260,6 +2284,10 @@ def web_test_suite(name):
     build_test(
         name = name + "_profile_build",
         targets = [":_web_profile_fixture"],
+    )
+    build_test(
+        name = name + "_nonlib_generated_src_build",
+        targets = [":_web_nonlib_generated_src_fixture"],
     )
 
     unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test, _t6_test, _t7_test)
