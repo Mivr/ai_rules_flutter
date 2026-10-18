@@ -48,6 +48,7 @@ def flutter_info(
         native_lib_sources = [],
         binding_contracts = [],
         apple_plugin_libraries = [],
+        android_plugin_libraries = [],
         linux_plugin_libraries = [],
         windows_plugin_libraries = [],
         apple_privacy_manifests = [],
@@ -82,6 +83,8 @@ def flutter_info(
         contributes, one per `flutter_native_library` in its `native_deps`.
       apple_plugin_libraries: Apple plugin library structs this target
         declares (`platform`, `label`, `cc_info`, `swift_info`, `package`).
+      android_plugin_libraries: Android plugin library structs this target
+        declares (`label`, `java_info`, `resources_info`, `package`).
       linux_plugin_libraries: Linux plugin source bundles this target declares
         (`label`, `srcs`, `hdrs`, `include_dirs`, `package`).
       windows_plugin_libraries: Windows plugin source bundles, same shape.
@@ -126,15 +129,20 @@ def flutter_info(
             direct = binding_contracts,
             transitive = [info.binding_contracts for info in dep_infos],
         ),
-        # Four per-platform channels rather than one tagged union, because the
+        # Per-platform channels rather than one tagged union, because the
         # integration mechanisms genuinely differ: Apple carries compiled
-        # `CcInfo`/`SwiftInfo` to link against, Linux and Windows carry source
+        # `CcInfo`/`SwiftInfo` to link against, Android carries `JavaInfo`
+        # and resource manifests, Linux and Windows carry source
         # bundles their runner folds into its own compile. Apple multiplexes
         # macOS and iOS in one channel precisely because those two do share a
         # mechanism.
         apple_plugin_libraries = depset(
             direct = apple_plugin_libraries,
             transitive = [info.apple_plugin_libraries for info in dep_infos],
+        ),
+        android_plugin_libraries = depset(
+            direct = android_plugin_libraries,
+            transitive = [info.android_plugin_libraries for info in dep_infos],
         ),
         linux_plugin_libraries = depset(
             direct = linux_plugin_libraries,

@@ -25,6 +25,7 @@ silently mis-merge a variant manifest it does not fully understand.
 """
 
 load("@rules_android//providers:providers.bzl", "StarlarkAndroidResourcesInfo")
+load("//flutter/private:flutter_android_registrant.bzl", "FlutterAndroidPluginManifestsInfo")
 
 _TOOL = Label("//flutter/private/tools:merge_android_manifests")
 
@@ -32,7 +33,8 @@ def _exported_library_manifests(libraries):
     """The manifests rules_android would merge into a binary over `libraries`.
 
     The same selection its merger makes: every resources node in the
-    closure that exports its manifest.
+    closure that exports its manifest, plus any manifests exported by
+    transitive `flutter_plugin(android_libs = ...)` targets.
     """
     nodes = depset(transitive = [
         d
@@ -43,7 +45,12 @@ def _exported_library_manifests(libraries):
             lib[StarlarkAndroidResourcesInfo].transitive_resources_nodes,
         ]
     ])
-    return [node.manifest for node in nodes.to_list() if node.exports_manifest]
+    plugin_manifests = depset(transitive = [
+        lib[FlutterAndroidPluginManifestsInfo].manifests
+        for lib in libraries
+        if FlutterAndroidPluginManifestsInfo in lib
+    ])
+    return [node.manifest for node in nodes.to_list() if node.exports_manifest] + plugin_manifests.to_list()
 
 def _flutter_android_manifest_merge_impl(ctx):
     tool = ctx.executable._merge_tool

@@ -4,6 +4,7 @@ These are needed for local dev, and users must install them as well.
 See https://docs.bazel.build/versions/main/skylark/deploying.html#dependencies
 """
 
+load("//flutter/private:android_headless_runtime_repo.bzl", "android_headless_runtime_repo")
 load("//flutter/private:artifact_urls.bzl", "android_engine_artifact_path", "dart_sdk_artifact_path", "desktop_engine_artifact_path", "engine_artifact_url", "gen_snapshot_cross_artifact_path", "host_artifacts_path", "ios_engine_artifact_path", "require_sha256")
 load("//flutter/private:chrome_headless_shell_repo.bzl", "chrome_headless_shell_repo")
 load("//flutter/private:constants.bzl", "ANDROID_ABI_FOR_ARCH")
@@ -1150,6 +1151,13 @@ exports_files(["gen_snapshot_arm64"], visibility = ["//visibility:public"])
     # (lazy — only fetched when a linux flutter_integration_test is built).
     linux_headless_runtime_repo(
         name = name + "_linux_headless_runtime",
+    )
+
+    # Hermetic Android headless emulator, platform-tools (adb), system image,
+    # and runtime libraries (lazy — only fetched when an android
+    # flutter_integration_test is built).
+    android_headless_runtime_repo(
+        name = name + "_android_headless_runtime",
     )
 
     flutter_toolchains_repo(

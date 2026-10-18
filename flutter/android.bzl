@@ -57,7 +57,7 @@ load("//flutter/private:constants.bzl", _ANDROID_ABI_FOR_ARCH = "ANDROID_ABI_FOR
 load("//flutter/private:flutter_android_application.bzl", _flutter_android_bundle = "flutter_android_bundle")
 load("//flutter/private:flutter_android_manifest_merge.bzl", _flutter_android_manifest_merge = "flutter_android_manifest_merge")
 load("//flutter/private:flutter_android_plugin_library.bzl", _flutter_android_plugin_library = "flutter_android_plugin_library")
-load("//flutter/private:flutter_android_registrant.bzl", _flutter_android_registrant = "flutter_android_registrant")
+load("//flutter/private:flutter_android_registrant.bzl", _flutter_android_plugins_aggregator = "flutter_android_plugins_aggregator", _flutter_android_registrant = "flutter_android_registrant")
 
 # Re-export constants for user BUILD files.
 ANDROID_MIN_SDK_VERSION = _ANDROID_MIN_SDK_VERSION
@@ -141,11 +141,38 @@ def flutter_android_permissions_manifest(name, permissions, **kwargs):
         **kwargs
     )
 
-# Public wrapper that compiles a Flutter plugin's Android Kotlin/Java sources
-# into a kt_android_library. For pub.dev plugins, flutter_pub_package emits
-# this automatically; expose it here so users can wire a monorepo plugin's
-# BUILD.bazel without going through the ext/ overlay system.
-flutter_android_plugin_library = _flutter_android_plugin_library
+def flutter_android_plugin_library(name, flutter_engine = None, tags = None, **kwargs):
+    """Wrap a Flutter plugin's Android Kotlin/Java sources in a kt_android_library.
+
+    For pub.dev plugins, `flutter_pub_package` emits this automatically; expose
+    it here so users can wire a workspace plugin's BUILD.bazel without going
+    through the ext/ overlay system. When `flutter_engine` is omitted, a
+    private `neverlink = True` engine target is created automatically.
+
+    Args:
+        name: Target name. Pass to `flutter_plugin(android_libs = [...])` or
+            `flutter_android_app(deps = [...])`.
+        flutter_engine: Optional `flutter_android_engine` target declared with
+            `neverlink = True`. If omitted, a private compile-only engine is
+            synthesized automatically.
+        tags: Bazel tags. Defaults to `["manual"]`.
+        **kwargs: Forwarded to `_flutter_android_plugin_library`.
+    """
+    if flutter_engine == None:
+        engine_tags = tags if tags != None else ["manual"]
+        flutter_android_engine(
+            name = "_%s__engine" % name,
+            neverlink = True,
+            tags = engine_tags,
+            visibility = ["//visibility:private"],
+        )
+        flutter_engine = ":_%s__engine" % name
+    _flutter_android_plugin_library(
+        name = name,
+        flutter_engine = flutter_engine,
+        tags = tags,
+        **kwargs
+    )
 
 # Registrant rule that emits GeneratedPluginRegistrant.java from a
 # flutter_application's transitive FlutterInfo. Wired automatically by
@@ -198,11 +225,11 @@ def flutter_android_engine(name, android_abi = "arm64", neverlink = False, **kwa
         # The engine with its native libraries stripped, as Gradle packages
         # it (flutter_android_engine_jar.bzl).
         jars = select({
-            "@rules_flutter//flutter/private:dbg": ["@%s//:debug_stripped" % repo],
+            "@rules_flutter//flutter/private:dbg": [Label("@%s//:debug_stripped" % repo)],
             # Named through rules_flutter's own repo mapping, so a consumer
             # needs no use_repo entry for a repo only profile builds fetch.
             "@rules_flutter//flutter/private:profile": [Label("@%s_profile//:stripped" % repo)],
-            "//conditions:default": ["@%s//:stripped" % repo],
+            "//conditions:default": [Label("@%s//:stripped" % repo)],
         }),
         tags = tags,
         neverlink = neverlink,
@@ -602,9 +629,20 @@ def flutter_android_app(
         tags = tags,
     )
 
-    # `deps` too: a plugin written in the workspace reaches the app only
-    # through them, and the registrant names its class.
-    registrant_deps = ["__%s_engine" % name]
+    _flutter_android_plugins_aggregator(
+        name = "__%s_android_plugins" % name,
+        application = application,
+        android_abi = _short_abi_to_full(android_abi),
+        tags = tags,
+    )
+
+    # `deps` and `flutter_plugin(android_libs = ...)` too: a plugin written in
+    # the workspace reaches the app through them, and the registrant names its
+    # class.
+    registrant_deps = [
+        "__%s_engine" % name,
+        "__%s_android_plugins" % name,
+    ]
     if pub_hub_name:
         registrant_deps.append("@%s//android:all_android_plugin_libs" % pub_hub_name)
     registrant_deps = registrant_deps + deps
@@ -624,6 +662,7 @@ def flutter_android_app(
         "__%s_native_libs" % name,
         "__%s_engine" % name,
         "__%s_registrant" % name,
+        "__%s_android_plugins" % name,
     ]
 
     # 8. Plugin auto-wiring: compile every transitively-needed plugin's

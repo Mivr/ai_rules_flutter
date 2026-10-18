@@ -490,8 +490,22 @@ bzl_library(
 )
 
 bzl_library(
+    name = "android_headless_runtime_repo",
+    srcs = ["android_headless_runtime_repo.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+    deps = [":artifact_urls"],
+)
+
+bzl_library(
     name = "chrome_headless_shell_repo",
     srcs = ["chrome_headless_shell_repo.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+    deps = [":artifact_urls"],
+)
+
+bzl_library(
+    name = "linux_headless_runtime_repo",
+    srcs = ["linux_headless_runtime_repo.bzl"],
     visibility = ["//flutter:__subpackages__"],
     deps = [":artifact_urls"],
 )

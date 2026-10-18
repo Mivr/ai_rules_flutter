@@ -638,6 +638,7 @@ cd e2e/android_example && bazel test //...
 cd e2e/web_example && bazel test //...
 cd e2e/integration_web && bazel test //...  # Linux-only (hermetic chrome-headless-shell)
 cd e2e/integration_linux && bazel test //...  # Linux-only (hermetic Xvfb + GTK3/Mesa runtime)
+cd e2e/integration_android && bazel test //...  # Linux-only with /dev/kvm (hermetic headless Android emulator)
 cd e2e/linux_example && bazel test //...    # Linux-only (target_compatible_with)
 cd e2e/windows_example && bazel test //...  # Windows-only (target_compatible_with)
 ```
@@ -711,6 +712,7 @@ cd e2e/windows_example && bazel test //...  # Windows-only (target_compatible_wi
 | web_example | Web app builds (dart2wasm + dart2js) with web_assets |
 | integration_web | End-to-end web `flutter_integration_test` running a real counter + asset app in hermetic `chrome-headless-shell` |
 | integration_linux | End-to-end Linux desktop `flutter_integration_test` running a counter + asset app and a native C++ method-channel plugin under hermetic `Xvfb` + GTK3/Mesa `llvmpipe` |
+| integration_android | End-to-end Android `flutter_integration_test` running a counter + asset app and a Kotlin method-channel plugin in a hermetic headless Android emulator with KVM |
 | multi_window_example | Multi-window macOS + multi-scene iOS builds with FlutterEngineGroup; macOS bundle verification |
 | android_example | Android APK build (3 approaches: flutter_android_app, Bazel-generated manifest, custom manifest) + APK content verification + web build |
 | linux_example | Linux desktop app (2 approaches: flutter_linux_app, Bazel-generated runner) + bundle structure verification |

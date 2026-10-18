@@ -239,6 +239,7 @@ def _flutter_application_impl(ctx):
     # library graph and does not contribute to another one.
     all_dep_plugins = []
     apple_plugin_lib_depsets = []
+    android_plugin_lib_depsets = []
     linux_plugin_lib_depsets = []
     windows_plugin_lib_depsets = []
     apple_privacy_manifest_depsets = []
@@ -246,11 +247,13 @@ def _flutter_application_impl(ctx):
         if FlutterInfo in dep:
             all_dep_plugins.extend(dep[FlutterInfo].plugins)
             apple_plugin_lib_depsets.append(dep[FlutterInfo].apple_plugin_libraries)
+            android_plugin_lib_depsets.append(dep[FlutterInfo].android_plugin_libraries)
             linux_plugin_lib_depsets.append(dep[FlutterInfo].linux_plugin_libraries)
             windows_plugin_lib_depsets.append(dep[FlutterInfo].windows_plugin_libraries)
             apple_privacy_manifest_depsets.append(dep[FlutterInfo].apple_privacy_manifests)
     all_plugins = dedup_plugins(all_dep_plugins)
     apple_plugin_libraries = depset(transitive = apple_plugin_lib_depsets)
+    android_plugin_libraries = depset(transitive = android_plugin_lib_depsets)
     linux_plugin_libraries = depset(transitive = linux_plugin_lib_depsets)
     windows_plugin_libraries = depset(transitive = windows_plugin_lib_depsets)
     apple_privacy_manifests = depset(transitive = apple_privacy_manifest_depsets)
@@ -454,6 +457,7 @@ def _flutter_application_impl(ctx):
             apple_privacy_manifests = apple_privacy_manifests,
             plugins = all_plugins,
             apple_plugin_libraries = apple_plugin_libraries,
+            android_plugin_libraries = android_plugin_libraries,
             linux_plugin_libraries = linux_plugin_libraries,
             windows_plugin_libraries = windows_plugin_libraries,
         ),

@@ -198,6 +198,7 @@ bzl_library(
     srcs = ["repositories.bzl"],
     visibility = ["//visibility:public"],
     deps = [
+        "//flutter/private:android_headless_runtime_repo",
         "//flutter/private:artifact_urls",
         "//flutter/private:chrome_headless_shell_repo",
         "//flutter/private:engine_helpers",
@@ -210,6 +211,7 @@ bzl_library(
         "//flutter/private:flutter_profile_repo",
         "//flutter/private:flutter_sky_engine_repo",
         "//flutter/private:flutter_web_sdk_repo",
+        "//flutter/private:linux_headless_runtime_repo",
         "//flutter/private:toolchains_repo",
         "//flutter/private:versions",
         "//flutter/private:xtool_darwin_sdk_repo",

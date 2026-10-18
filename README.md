@@ -1232,6 +1232,8 @@ For `platform = "web"`, add `flutter_web_sdk` and `flutter_chrome_headless_shell
 
 For `platform = "linux"`, the rule compiles the Linux desktop GTK runner, Dart kernel (or AOT `libapp.so`), bundled `flutter_assets/`, and any transitive native Linux plugins (`flutter_linux_plugin_library`) into a Linux application bundle. At test time, the runner starts a hermetic `Xvfb` virtual display (`@flutter_linux_headless_runtime`, choosing a free display via `-displayfd`) and runs the app against sha256-pinned GTK3, GLib, fontconfig, and Mesa `llvmpipe` software-rasterizer shared libraries — requiring no host X server, `Xvfb`, or GTK installation.
 
+For `platform = "android"`, add `flutter_android_engine_x64` (or `flutter_android_engine_arm64` for `android_abi = "arm64"`) and `flutter_android_headless_runtime` to `use_repo(flutter, ...)` in `MODULE.bazel`. The rule compiles a full Android APK (`android_binary`) with the integration test as its entrypoint, generated `MainActivity` and `GeneratedPluginRegistrant`, bundled `flutter_assets/`, and any transitive Android plugins (`flutter_android_plugin_library` attached via `flutter_plugin.android_libs`). At test time on Linux (`x86_64` with `/dev/kvm`), the runner boots a hermetic sha256-pinned Android 35 `aosp_atd` `x86_64` emulator headless (`-no-window`, `-gpu swiftshader_indirect`, `-accel on`) against its pinned shared-library closure (`@flutter_android_headless_runtime`), installs and launches the APK via `adb`, forwards the test harness WebSocket port over `adb reverse`, and fails the test on any assertion failure, uncaught error, native crash, ANR, or timeout.
+
 | Attribute | Description |
 |---|---|
 | `platform` | Target platform (`"web"`, `"linux"`, or `"android"`). Defaults to `"web"`. |
@@ -1245,6 +1247,8 @@ For `platform = "linux"`, the rule compiles the Linux desktop GTK runner, Dart k
 | `renderer` | Web renderer (`"canvaskit"` or `"skwasm"`). Defaults to matching `compiler`. |
 | `gtk_app_id` | Linux GTK application identifier (`platform = "linux"`). Defaults to `"com.example.flutter_integration_test"`. |
 | `window_title` | Linux GTK window title (`platform = "linux"`). Defaults to the target name. |
+| `android_package_name` | Android application package name (`platform = "android"`). Defaults to `"com.example.flutter_integration_test"`. |
+| `android_abi` | Android ABI (`"x64"` or `"arm64"`, `platform = "android"`). Defaults to `"x64"`. |
 
 ### flutter_plugin
 
@@ -1268,6 +1272,8 @@ flutter_plugin(
 | `dart_plugin_class` | The Dart class registered with the engine at startup. |
 | `plugin_class` | The native plugin class, for plugins with a native registration. |
 | `android_package` | The Java package of the Android `plugin_class`. Required when `platforms` lists `android` with a `plugin_class`. |
+| `android_libs` | `flutter_android_plugin_library` targets auto-wired into `flutter_android_app` and `flutter_integration_test(platform = "android")`. |
+| `linux_libs` | `flutter_linux_plugin_library` targets auto-wired into `flutter_linux_app` and `flutter_integration_test(platform = "linux")`. |
 | `native_deps` | Shared libraries bundled for `dart:ffi`. |
 | `native_assets` | `flutter_native_asset` targets, usually inside a `select()` on platform. |
 | `assets`, `resources` | Asset and resource files. |
@@ -1275,7 +1281,7 @@ flutter_plugin(
 | `package_name`, `language_version`, `version` | The package's name, language version, and version. |
 | `link_hook` | The package's `hook/link.dart`. See [Link hooks](#link-hooks). `flutter_library` takes it too. |
 
-A plugin's native code is its own target. Swift goes in a `flutter_apple_plugin_library` per platform, passed as `apple_libs`. Kotlin or Java goes in a `flutter_android_plugin_library` listed in the app's `flutter_android_app(deps = ...)`, which packages it, registers its plugin class and merges its `manifest` (receivers, services, permissions) into the app's. Its `flutter_engine` is a `flutter_android_engine(neverlink = True)`: the plugin compiles against the engine and the app ships its own, of the app's ABI. `e2e/plugin_example/glass_plugin` shows both, with shaders.
+A plugin's native code is its own target. Swift goes in a `flutter_apple_plugin_library` per platform, passed as `apple_libs`. Kotlin or Java goes in a `flutter_android_plugin_library` passed as `android_libs` on `flutter_plugin` (or listed directly in `flutter_android_app(deps = ...)`), which packages it, registers its plugin class and merges its `manifest` (receivers, services, permissions) into the app's. Its `flutter_engine` is a `flutter_android_engine(neverlink = True)`: the plugin compiles against the engine and the app ships its own, of the app's ABI. `e2e/plugin_example/glass_plugin` and `e2e/integration_android/android_greeting_plugin` show both.
 
 `e2e/ffi_example` shows a plugin built on Native Assets, `e2e/ffi_plugin_example` one with a Dart plugin class and `native_deps`, and `e2e/plugin_example` one with a Dart plugin class only.
 
@@ -1892,6 +1898,7 @@ The `e2e/` directory holds working workspaces, each with its own tests:
 | `e2e/web_example` | WASM and JavaScript web builds with `web_assets`. |
 | `e2e/integration_web` | End-to-end web `flutter_integration_test` running in hermetic `chrome-headless-shell`. |
 | `e2e/integration_linux` | End-to-end Linux desktop `flutter_integration_test` with a native C++ plugin running under hermetic `Xvfb` and Mesa `llvmpipe`. |
+| `e2e/integration_android` | End-to-end Android `flutter_integration_test` with a Kotlin method-channel plugin running in a hermetic headless Android emulator with KVM. |
 | `e2e/cross_compile_example` | A Linux bundle cross-compiled from macOS. |
 | `e2e/multi_window_example` | Multi-window macOS and multi-scene iOS with `FlutterEngineGroup`. |
 | `e2e/dual_hub` | Two pub hubs in one workspace that disagree on a package version. |

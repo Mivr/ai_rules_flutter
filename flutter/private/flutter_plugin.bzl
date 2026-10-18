@@ -17,9 +17,11 @@ Platform-specific native dependencies use select() in BUILD files:
     )
 """
 
+load("@rules_android//providers:providers.bzl", "AndroidLibraryResourceClassJarProvider", "StarlarkAndroidResourcesInfo")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo")
 load("@rules_dart//dart:utils.bzl", "dart_info", "derive_lib_root", "derive_package_name")
+load("@rules_java//java/common:java_info.bzl", "JavaInfo")
 load("@rules_swift//swift:swift.bzl", "SwiftInfo")
 load("//flutter:providers.bzl", "FlutterApplePluginInfo", "FlutterDataAssetInfo", "FlutterInfo", "FlutterNativeAssetInfo")
 load("//flutter/private:common.bzl", "collect_binding_contracts", "collect_native_libs")
@@ -176,6 +178,16 @@ def _flutter_plugin_impl(ctx):
             package = package_name,
         ))
 
+    extra_android_plugin_libraries = []
+    for lib in ctx.attr.android_libs:
+        extra_android_plugin_libraries.append(struct(
+            label = lib.label,
+            java_info = lib[JavaInfo],
+            resources_info = lib[StarlarkAndroidResourcesInfo] if StarlarkAndroidResourcesInfo in lib else None,
+            resource_class_jars = lib[AndroidLibraryResourceClassJarProvider].jars if AndroidLibraryResourceClassJarProvider in lib else None,
+            package = package_name,
+        ))
+
     # Native Assets contributed by this plugin (or its parent ext/ overlay).
     extra_native_assets = []
     for dep in ctx.attr.native_assets:
@@ -254,6 +266,7 @@ def _flutter_plugin_impl(ctx):
             binding_contracts = binding_contracts,
             native_lib_sources = native_lib_sources,
             apple_plugin_libraries = extra_apple_plugin_libraries,
+            android_plugin_libraries = extra_android_plugin_libraries,
             linux_plugin_libraries = extra_linux_plugin_libraries,
             windows_plugin_libraries = extra_windows_plugin_libraries,
             apple_privacy_manifests = extra_apple_privacy_manifests,
@@ -299,7 +312,8 @@ flutter_plugin = rule(
             doc = "Java package of the Android `plugin_class`, as " +
                   "`flutter.plugin.platforms.android.package` in a pubspec. " +
                   "Required when `platforms` lists android with a " +
-                  "`plugin_class`. Its Kotlin/Java goes to the app as a " +
+                  "`plugin_class`. Its Kotlin/Java goes to the app via " +
+                  "`android_libs` on `flutter_plugin` or as a " +
                   "`flutter_android_plugin_library` in " +
                   "`flutter_android_app(deps = ...)`.",
         ),
@@ -350,6 +364,10 @@ flutter_plugin = rule(
         "ios_libs": attr.label_list(
             doc = "iOS Apple plugin libraries providing `CcInfo` (and optionally `SwiftInfo`). Routed to the iOS runner aggregator.",
             providers = [CcInfo],
+        ),
+        "android_libs": attr.label_list(
+            doc = "Android plugin libraries (`flutter_android_plugin_library`, `kt_android_library`, `android_library`, or `java_library`) providing `JavaInfo`. Propagated through `FlutterInfo.android_plugin_libraries` so `flutter_android_app` and `flutter_integration_test(platform = \"android\")` compile and package them automatically.",
+            providers = [JavaInfo],
         ),
         "linux_libs": attr.label_list(
             doc = "Linux plugin source bundles (`flutter_linux_plugin_library`). Propagated through `FlutterInfo.linux_plugin_libraries` so the Linux runner folds them into its `cc_common.compile()` pass.",
