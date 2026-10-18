@@ -60,7 +60,8 @@ void main() {
       final actualTarget = Link(path).targetSync();
       if (actualTarget != expectedTarget) {
         stderr.writeln(
-          'FAIL: $description — expected symlink $path -> $expectedTarget, got $actualTarget',
+          'FAIL: $description — expected symlink $path -> $expectedTarget, '
+          'got $actualTarget',
         );
         failed = true;
       } else {
@@ -81,8 +82,14 @@ void main() {
       '$bundlePath/Contents/Frameworks/libsqlite3.dylib',
     );
     final appFw = '$bundlePath/Contents/Frameworks/App.framework';
-    check('App.framework exists', appFw);
-    check('App.framework/Versions/A/App exists', '$appFw/Versions/A/App');
+    check(
+      'App.framework exists',
+      appFw,
+    );
+    check(
+      'App.framework/Versions/A/App exists',
+      '$appFw/Versions/A/App',
+    );
     check(
       'App.framework/Versions/A/Resources/Info.plist exists',
       '$appFw/Versions/A/Resources/Info.plist',
@@ -103,9 +110,11 @@ void main() {
       'Versions/Current/Resources',
     );
     final appFwPlist = File('$appFw/Versions/A/Resources/Info.plist');
+    final fmwkPattern = RegExp(
+      r'<key>CFBundlePackageType</key>\s*<string>FMWK</string>',
+    );
     if (appFwPlist.existsSync() &&
-        !RegExp(r'<key>CFBundlePackageType</key>\s*<string>FMWK</string>')
-            .hasMatch(appFwPlist.readAsStringSync())) {
+        !fmwkPattern.hasMatch(appFwPlist.readAsStringSync())) {
       stderr.writeln(
         'FAIL: App.framework Info.plist missing CFBundlePackageType = FMWK',
       );
@@ -115,8 +124,14 @@ void main() {
       'FlutterMacOS.framework exists',
       '$bundlePath/Contents/Frameworks/FlutterMacOS.framework',
     );
-    check('Runner binary exists', '$bundlePath/Contents/MacOS/ffi_macos');
-    check('Info.plist exists', '$bundlePath/Contents/Info.plist');
+    check(
+      'Runner binary exists',
+      '$bundlePath/Contents/MacOS/ffi_macos',
+    );
+    check(
+      'Info.plist exists',
+      '$bundlePath/Contents/Info.plist',
+    );
 
     if (failed) {
       final fwDir = Directory('$bundlePath/Contents/Frameworks');

@@ -131,7 +131,8 @@ void main() {
       final actualTarget = Link(path).targetSync();
       if (actualTarget != expectedTarget) {
         stderr.writeln(
-          'FAIL: $description — expected symlink $path -> $expectedTarget, got $actualTarget',
+          'FAIL: $description — expected symlink $path -> $expectedTarget, '
+          'got $actualTarget',
         );
         failed = true;
       } else {
@@ -140,8 +141,14 @@ void main() {
     }
 
     final appFw = '$bundlePath/Contents/Frameworks/App.framework';
-    check('App.framework exists', appFw);
-    check('App.framework/Versions/A/App exists', '$appFw/Versions/A/App');
+    check(
+      'App.framework exists',
+      appFw,
+    );
+    check(
+      'App.framework/Versions/A/App exists',
+      '$appFw/Versions/A/App',
+    );
     check(
       'App.framework/Versions/A/Resources/Info.plist exists',
       '$appFw/Versions/A/Resources/Info.plist',
@@ -176,8 +183,14 @@ void main() {
       'FlutterMacOS.framework exists',
       '$bundlePath/Contents/Frameworks/FlutterMacOS.framework',
     );
-    check('Runner binary exists', runnerBinary);
-    check('Info.plist exists', '$bundlePath/Contents/Info.plist');
+    check(
+      'Runner binary exists',
+      runnerBinary,
+    );
+    check(
+      'Info.plist exists',
+      '$bundlePath/Contents/Info.plist',
+    );
     check(
       'MainMenu.nib exists',
       '$bundlePath/Contents/Resources/Base.lproj/MainMenu.nib',
@@ -189,53 +202,67 @@ void main() {
 
     // --- Info.plist validation ---
 
-    checkCommand('Info.plist NSMainNibFile is MainMenu', 'plutil', [
-      '-extract',
-      'NSMainNibFile',
-      'raw',
-      '$bundlePath/Contents/Info.plist',
-    ], (stdout) => stdout == 'MainMenu');
+    checkCommand(
+      'Info.plist NSMainNibFile is MainMenu',
+      'plutil',
+      ['-extract', 'NSMainNibFile', 'raw', '$bundlePath/Contents/Info.plist'],
+      (stdout) => stdout == 'MainMenu',
+    );
 
-    checkCommand('Info.plist CFBundleExecutable is Flutter App', 'plutil', [
-      '-extract',
-      'CFBundleExecutable',
-      'raw',
-      '$bundlePath/Contents/Info.plist',
-    ], (stdout) => stdout == 'Flutter App');
+    checkCommand(
+      'Info.plist CFBundleExecutable is Flutter App',
+      'plutil',
+      [
+        '-extract',
+        'CFBundleExecutable',
+        'raw',
+        '$bundlePath/Contents/Info.plist',
+      ],
+      (stdout) => stdout == 'Flutter App',
+    );
 
-    checkCommand('Info.plist CFBundleName is Flutter App', 'plutil', [
-      '-extract',
-      'CFBundleName',
-      'raw',
-      '$bundlePath/Contents/Info.plist',
-    ], (stdout) => stdout == 'Flutter App');
+    checkCommand(
+      'Info.plist CFBundleName is Flutter App',
+      'plutil',
+      ['-extract', 'CFBundleName', 'raw', '$bundlePath/Contents/Info.plist'],
+      (stdout) => stdout == 'Flutter App',
+    );
 
     // --- NIB class references ---
 
-    checkCommand('MainMenu.nib references AppDelegate class', 'strings', [
-      '$bundlePath/Contents/Resources/Base.lproj/MainMenu.nib',
-    ], (stdout) => stdout.contains('AppDelegate'));
+    checkCommand(
+      'MainMenu.nib references AppDelegate class',
+      'strings',
+      ['$bundlePath/Contents/Resources/Base.lproj/MainMenu.nib'],
+      (stdout) => stdout.contains('AppDelegate'),
+    );
 
     // --- ObjC class symbols in runner binary ---
 
     // flutter-create Swift files don't use @objc annotations, so class symbols
     // are Swift-mangled: _OBJC_CLASS_$__TtC6Runner11AppDelegate.
-    checkCommand('Runner binary exports AppDelegate ObjC class', 'nm', [
-      '-gU',
-      runnerBinary,
-    ], (stdout) => stdout.contains('AppDelegate'));
+    checkCommand(
+      'Runner binary exports AppDelegate ObjC class',
+      'nm',
+      ['-gU', runnerBinary],
+      (stdout) => stdout.contains('AppDelegate'),
+    );
 
-    checkCommand('Runner binary exports MainFlutterWindow ObjC class', 'nm', [
-      '-gU',
-      runnerBinary,
-    ], (stdout) => stdout.contains('MainFlutterWindow'));
+    checkCommand(
+      'Runner binary exports MainFlutterWindow ObjC class',
+      'nm',
+      ['-gU', runnerBinary],
+      (stdout) => stdout.contains('MainFlutterWindow'),
+    );
 
     // --- Framework linkage ---
 
-    checkCommand('Runner binary links FlutterMacOS.framework', 'otool', [
-      '-L',
-      runnerBinary,
-    ], (stdout) => stdout.contains('FlutterMacOS.framework'));
+    checkCommand(
+      'Runner binary links FlutterMacOS.framework',
+      'otool',
+      ['-L', runnerBinary],
+      (stdout) => stdout.contains('FlutterMacOS.framework'),
+    );
 
     // --- AOT dylib (App.framework/App) is valid Mach-O ---
 
@@ -243,9 +270,12 @@ void main() {
         '$bundlePath/Contents/Frameworks/App.framework/App';
     check('App.framework/App binary exists', appFrameworkBinary);
 
-    checkCommand('App.framework/App is valid Mach-O', 'file', [
-      appFrameworkBinary,
-    ], (stdout) => stdout.contains('Mach-O'));
+    checkCommand(
+      'App.framework/App is valid Mach-O',
+      'file',
+      [appFrameworkBinary],
+      (stdout) => stdout.contains('Mach-O'),
+    );
 
     // --- flutter_assets completeness ---
 
