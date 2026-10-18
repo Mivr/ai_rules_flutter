@@ -7,26 +7,31 @@
 // yaml file read at action time cannot inform that.
 //
 // Paths are interpreted relative to the process's working directory, which for
-// a Bazel action is the exec root. The rule passes the arb directory and the
-// output directory as exec-root-relative paths, so the generator writes
-// Bazel's declared outputs in place.
+// a Bazel action is the exec root. The rule passes each declared `.arb` file
+// via `--arb-file=PATH` and the output directory as an exec-root-relative path.
+// Only the declared `--arb-file` inputs are staged into an in-memory file
+// system before invoking `generateLocalizations`, so `AppResourceBundleCollection`
+// never scans `--arb-dir` on the host file system or ingests undeclared `.arb`
+// files sitting in the same directory.
 
 import 'dart:io' as io;
 
 import 'package:file/local.dart';
+import 'package:file/memory.dart';
 
 import 'package:flutter_gen_l10n/src/base/logger.dart';
 import 'package:flutter_gen_l10n/src/localizations/gen_l10n.dart';
 import 'package:flutter_gen_l10n/src/localizations/localizations_utils.dart';
 
 const _usage = '''
-Usage: gen_l10n --arb-dir=DIR --output-dir=DIR [options]
+Usage: gen_l10n --arb-file=PATH [--arb-file=PATH ...] --output-dir=DIR [options]
 
 Required:
-  --arb-dir=DIR                  Directory holding the .arb files.
+  --arb-file=PATH                Declared .arb input file (repeatable).
   --output-dir=DIR               Directory to write generated Dart into.
 
 Optional:
+  --arb-dir=DIR                  Logical directory holding the .arb files.
   --project-dir=DIR              Base for relative paths (default ".").
   --template-arb-file=NAME       Template arb (default "app_en.arb").
   --output-localization-file=N   Base output file (default
@@ -60,8 +65,11 @@ Never _fail(String message) {
   io.exit(1);
 }
 
-Map<String, String> _parseArgs(List<String> argv) {
+({Map<String, String> options, List<String> arbFiles}) _parseArgs(
+  List<String> argv,
+) {
   final parsed = <String, String>{};
+  final arbFiles = <String>[];
   for (final arg in argv) {
     if (!arg.startsWith('--')) {
       _fail('unexpected positional argument "$arg".\n$_usage');
@@ -78,10 +86,18 @@ Map<String, String> _parseArgs(List<String> argv) {
       if (_switches.contains(name)) {
         _fail('flag "--$name" takes no value.\n$_usage');
       }
-      parsed[name] = body.substring(eq + 1);
+      final value = body.substring(eq + 1);
+      if (name == 'arb-file') {
+        if (value.isEmpty) {
+          _fail('flag "--arb-file" requires a non-empty path.\n$_usage');
+        }
+        arbFiles.add(value);
+      } else {
+        parsed[name] = value;
+      }
     }
   }
-  return parsed;
+  return (options: parsed, arbFiles: arbFiles);
 }
 
 /// Everything the generator printed, for surfacing on stderr.
@@ -95,16 +111,24 @@ String _drain(BufferLogger logger) => <String>[
 ].where((String s) => s.trim().isNotEmpty).join();
 
 Future<void> main(List<String> argv) async {
-  final args = _parseArgs(argv);
+  final parsed = _parseArgs(argv);
+  final args = parsed.options;
+  final arbFiles = parsed.arbFiles;
 
-  final arbDir = args['arb-dir'];
   final outputDir = args['output-dir'];
-  if (arbDir == null || outputDir == null) {
-    _fail('--arb-dir and --output-dir are both required.\n$_usage');
+  if (outputDir == null || outputDir.isEmpty || arbFiles.isEmpty) {
+    _fail('--output-dir and at least one --arb-file are required.\n$_usage');
   }
 
-  const fs = LocalFileSystem();
+  const localFs = LocalFileSystem();
+  final memFs = MemoryFileSystem.test();
   final logger = BufferLogger.test();
+
+  final projectDirPath = args['project-dir'] ?? '.';
+  final rawArbDir = args['arb-dir'];
+  final arbDir = (rawArbDir != null && rawArbDir.isNotEmpty)
+      ? rawArbDir
+      : localFs.path.dirname(arbFiles.first);
 
   final options = LocalizationOptions(
     arbDir: arbDir,
@@ -135,12 +159,71 @@ Future<void> main(List<String> argv) async {
   );
 
   try {
-    await generateLocalizations(
-      projectDir: fs.directory(args['project-dir'] ?? '.'),
+    final memProjectDir = memFs.directory(projectDirPath)
+      ..createSync(recursive: true);
+    final memInputDir = memFs.directory(
+      memFs.path.join(memProjectDir.path, arbDir),
+    )..createSync(recursive: true);
+
+    final stagedSources = <String, String>{};
+    for (final arbPath in arbFiles) {
+      var srcFile = localFs.file(arbPath);
+      if (!srcFile.existsSync() && projectDirPath != '.') {
+        srcFile = localFs.file(localFs.path.join(projectDirPath, arbPath));
+      }
+      if (!srcFile.existsSync()) {
+        _fail('arb file "$arbPath" does not exist.');
+      }
+      final basename = localFs.path.basename(arbPath);
+      final resolvedPath = localFs.path.normalize(srcFile.path);
+      final previous = stagedSources[basename];
+      if (previous != null && previous != resolvedPath) {
+        _fail(
+          'multiple --arb-file inputs share basename "$basename": '
+          '"$previous" and "$arbPath".',
+        );
+      }
+      stagedSources[basename] = resolvedPath;
+      memInputDir
+          .childFile(basename)
+          .writeAsBytesSync(srcFile.readAsBytesSync());
+    }
+
+    final headerFile = args['header-file'];
+    if (headerFile != null) {
+      var localHeader = localFs.file(
+        localFs.path.join(projectDirPath, arbDir, headerFile),
+      );
+      if (!localHeader.existsSync()) {
+        localHeader = localFs.file(
+          localFs.path.join(projectDirPath, headerFile),
+        );
+      }
+      if (localHeader.existsSync()) {
+        final memHeader = memInputDir.childFile(headerFile);
+        memHeader.parent.createSync(recursive: true);
+        memHeader.writeAsBytesSync(localHeader.readAsBytesSync());
+      }
+    }
+
+    final generator = await generateLocalizations(
+      projectDir: memProjectDir,
       options: options,
       logger: logger,
-      fileSystem: fs,
+      fileSystem: memFs,
     );
+
+    final localOutputDir = localFs.directory(
+      localFs.path.join(projectDirPath, outputDir),
+    )..createSync(recursive: true);
+    for (final outPath in generator.outputFileList) {
+      final memFile = memFs.file(outPath);
+      final dstFile = localOutputDir.childFile(memFile.basename);
+      if (dstFile.existsSync()) {
+        dstFile.deleteSync();
+      }
+      dstFile.writeAsBytesSync(memFile.readAsBytesSync());
+    }
   } on Object catch (e) {
     final output = _drain(logger);
     if (output.isNotEmpty) {

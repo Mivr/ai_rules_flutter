@@ -406,6 +406,14 @@ dart_library(
 # one Dart file per primary language subtag, so the two collapse into a single
 # app_localizations_es.dart. A rule deriving one output per input arb would
 # declare a file the generator never writes; this target is what holds that.
+# Undeclared regional `.arb` sitting in the same `lib/l10n/` directory; staged
+# via `data` on `:l10n_test` so it is present in the execroot alongside the
+# declared `arbs` of `:app_l10n`.
+filegroup(
+    name = "undeclared_l10n_arb",
+    srcs = ["lib/l10n/app_en_US.arb"],
+)
+
 flutter_gen_l10n(
     name = "app_l10n",
     arbs = [
@@ -419,6 +427,7 @@ flutter_test(
     name = "l10n_test",
     package_name = "codegen_e2e",
     srcs = [":app_l10n"],
+    data = [":undeclared_l10n_arb"],
     main = "test/l10n_test.dart",
     target_compatible_with = _HOST_COMPATIBLE,
     deps = [

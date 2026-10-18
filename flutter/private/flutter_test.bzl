@@ -484,9 +484,16 @@ def _flutter_test_impl(ctx):
         dependency_attributes = ["deps"],
     )
 
+    generated_dart_srcs = [
+        f
+        for f in ctx.files.srcs
+        if f.extension == "dart" and not f.is_source
+    ]
+
     return [
         DefaultInfo(
             executable = executable,
+            files = depset([executable] + generated_dart_srcs),
             runfiles = runfiles,
         ),
         env_info,

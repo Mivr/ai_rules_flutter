@@ -36,7 +36,11 @@ def _primary_subtag(locale):
             return locale.split(sep)[0]
     return locale
 
-def _output_names(ctx, prefix):
+def _short_dirname(f):
+    """Workspace-relative directory of `f`, independent of source vs generated root."""
+    return f.short_path[:-len(f.basename)].rstrip("/")
+
+def _output_names(ctx, prefix, srcs):
     """Declared output filenames: the base file plus one per primary subtag."""
     base = ctx.attr.output_localization_file
     if not base.endswith(".dart"):
@@ -47,7 +51,7 @@ def _output_names(ctx, prefix):
     stem = base[:-len(".dart")]
 
     subtags = []
-    for src in ctx.files.arbs:
+    for src in srcs:
         subtag = _primary_subtag(_locale_of(src.basename, prefix, ctx.label))
         if subtag not in subtags:
             subtags.append(subtag)
@@ -65,9 +69,27 @@ def _flutter_gen_l10n_impl(ctx):
         )
     prefix = template[:underscore + 1]
 
-    srcs = ctx.files.arbs
-    if not srcs:
+    raw_srcs = ctx.files.arbs
+    if not raw_srcs:
         fail("%s: `arbs` must not be empty." % ctx.label)
+
+    seen_by_name = {}
+    srcs = []
+    for s in raw_srcs:
+        prev = seen_by_name.get(s.basename)
+        if prev != None:
+            if prev != s:
+                fail(
+                    "%s: multiple arb files named %r (%r and %r)." % (
+                        ctx.label,
+                        s.basename,
+                        prev.path,
+                        s.path,
+                    ),
+                )
+            continue
+        seen_by_name[s.basename] = s
+        srcs.append(s)
 
     templates = [s for s in srcs if s.basename == template]
     if not templates:
@@ -81,9 +103,10 @@ def _flutter_gen_l10n_impl(ctx):
     # Outputs land beside the arb files, matching how dart_codegen places its
     # own output next to the source: the generated files import each other by
     # bare filename, so they have to be siblings.
-    arb_dir = srcs[0].dirname
+    arb_dir = _short_dirname(srcs[0])
     for s in srcs:
-        if s.dirname != arb_dir:
+        s_dir = _short_dirname(s)
+        if s_dir != arb_dir:
             fail(
                 ("%s: every arb must sit in one directory (gen-l10n takes a " +
                  "single --arb-dir); %r is in %r but %r is in %r.") % (
@@ -91,7 +114,7 @@ def _flutter_gen_l10n_impl(ctx):
                     srcs[0].basename,
                     arb_dir,
                     s.basename,
-                    s.dirname,
+                    s_dir,
                 ),
             )
 
@@ -101,12 +124,13 @@ def _flutter_gen_l10n_impl(ctx):
 
     outs = [
         ctx.actions.declare_file(rel_dir + name)
-        for name in _output_names(ctx, prefix)
+        for name in _output_names(ctx, prefix, srcs)
     ]
 
     # The entrypoint parses `--key=value`, so each flag is one argv entry.
     # Everything here is known at analysis time, so a plain list is clearer
-    # than an Args builder.
+    # than an Args builder. Each declared `.arb` is passed explicitly via
+    # `--arb-file=` so the generator never scans `--arb-dir` on disk.
     argv = [
         "--project-dir=.",
         "--arb-dir=" + arb_dir,
@@ -114,6 +138,9 @@ def _flutter_gen_l10n_impl(ctx):
         "--template-arb-file=" + template,
         "--output-localization-file=" + ctx.attr.output_localization_file,
         "--output-class=" + ctx.attr.output_class,
+    ] + [
+        "--arb-file=" + s.path
+        for s in srcs
     ]
     if ctx.attr.preferred_supported_locales:
         argv.append("--preferred-supported-locales=" +
