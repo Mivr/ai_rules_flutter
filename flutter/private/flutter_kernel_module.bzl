@@ -12,7 +12,7 @@ output-path collisions.
 """
 
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
-load("@rules_dart//dart:providers.bzl", "DartInfo", "DartKernelInfo")
+load("@rules_dart//dart:providers.bzl", "DartCompileInfo", "DartInfo", "DartKernelInfo")
 load(
     "@rules_dart//dart:utils.bzl",
     "KERNEL_MODULE_ATTRS",
@@ -134,7 +134,7 @@ def find_flutter_kernel_module_tools(flutter_sdk_info, exec_tools = None):
     compilation runs the `kernel_worker` and `dartaotruntime` matching
     `flutter_sdk_info.platform_kernel_dill` and `flutter_tester`, while keeping
     `exec_tools`'s outer VM (`dart`, `dartvm`, `runtime_files`, `version`) that
-    launches the `@rules_dart//dart/private/tools:kernel_module` `.dill` wrapper.
+    launches the `@rules_dart//dart/private/tools:kernel_module` tool.
 
     Args:
       flutter_sdk_info: `FlutterSdkInfo` from the active Flutter toolchain.
@@ -313,7 +313,25 @@ def _flutter_kernel_module_action(
         platform,
         ctx.executable._kernel_module,
     ]
-    if dart_exe != None:
+    tool_target = getattr(ctx.attr, "_kernel_module", None)
+    tool_compile_mode = (
+        tool_target[DartCompileInfo].compile_mode if tool_target != None and DartCompileInfo in tool_target else "kernel"
+    )
+    if tool_compile_mode == "aot-snapshot":
+        # The tool is an AOT snapshot: `dart` refuses to run `.aot` files, so
+        # `dartaotruntime` executes it directly. This also drops the `dart` and
+        # `dartvm` inputs: the snapshot needs only the runtime.
+        direct_inputs.append(ctx.executable._kernel_module)
+        executable = tools.dartaotruntime
+        arguments = [
+            ctx.executable._kernel_module.path,
+            "--kernel-worker",
+            tools.kernel_worker.path,
+            "--dartaotruntime",
+            tools.dartaotruntime.path,
+            args,
+        ]
+    elif dart_exe != None:
         direct_inputs.extend([ctx.executable._kernel_module, dart_exe])
         action_tools.append(dart_exe)
         if dartvm != None:
