@@ -772,8 +772,8 @@ void _runDart2Js(List<String> args) {
   final baseTmpParent = cfeOnly
       ? Directory.systemTemp.path
       : (outJs != null
-          ? (File(outJs).parent..createSync(recursive: true)).path
-          : cwdPath);
+            ? (File(outJs).parent..createSync(recursive: true)).path
+            : cwdPath);
   final tmpDir = Directory(
     cfeOnly
         ? '${baseTmpParent}/rules_flutter_dart2js_cfe_${DateTime.now().microsecondsSinceEpoch}_${pid}'
