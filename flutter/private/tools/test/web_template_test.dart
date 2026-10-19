@@ -436,6 +436,47 @@ void main() {
     },
   );
 
+  group('dart2js stable scheme', () {
+    test(
+      'snapshot args compile the staged entry and packages under org-dartlang-app',
+      () {
+        const stageExecRel =
+            'bazel-out/k8-fastbuild/bin/pkg/app.dart2js_cfe.1234.stage';
+        final args = buildDart2JsSnapshotArgs(
+          forwardArgs: [
+            '--packages=/tmp/rewritten/package_config.json',
+            '--cfe-only',
+            '-Ddart.vm.product=true',
+            '-o',
+            'out.dill',
+          ],
+          rewrittenPkgPath: '/tmp/rewritten/package_config.json',
+          stageExecRel: stageExecRel,
+          normMainDart: 'pkg/lib/main.dart',
+        );
+
+        expect(args, contains('--multi-root-scheme=org-dartlang-app'));
+        // `dart compile js` only honours the execroot itself as the
+        // multi-root; the staging tree is addressed through it.
+        expect(args, contains('--multi-root=.'));
+        expect(
+          args,
+          contains('org-dartlang-app:///$stageExecRel/pkg/lib/main.dart'),
+        );
+        expect(args, contains('--packages=/tmp/rewritten/package_config.json'));
+        for (final a in args) {
+          expect(a, isNot(contains('file://')));
+          expect(a, isNot(contains('sandbox')));
+          expect(a, isNot(contains('/execroot/')));
+        }
+        expect(
+          args.last,
+          'org-dartlang-app:///$stageExecRel/pkg/lib/main.dart',
+        );
+      },
+    );
+  });
+
   group('scrubDart2JsOutputs', () {
     test(
       'rewrites temp package_config.json, stage, and cwd file URIs in .deps, .map, and .info.json',

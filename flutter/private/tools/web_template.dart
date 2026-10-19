@@ -384,6 +384,55 @@ String _toAppSchemeRelPath(String path) {
   );
 }
 
+void _rewritePackageConfigForStage(
+  String packagesPath,
+  String stageExecRel,
+  String normCwd,
+  String cwdPrefix,
+  String outPath,
+) {
+  final pkgFile = File(packagesPath).absolute;
+  final pkgJson =
+      json.decode(pkgFile.readAsStringSync()) as Map<String, dynamic>;
+  final pkgs = (pkgJson['packages'] as List<dynamic>)
+      .cast<Map<String, dynamic>>();
+  final stagePrefix = stageExecRel
+      .replaceAll(r'\', '/')
+      .replaceFirst(RegExp(r'^(?:\./)+'), '');
+  for (final p in pkgs) {
+    final rootUri = p['rootUri'] as String;
+    String rel = '';
+    if (rootUri.startsWith('org-dartlang-app:///')) {
+      rel = _toAppSchemeRelPath(
+        rootUri.substring('org-dartlang-app:///'.length),
+      );
+    } else {
+      final resolved = pkgFile.uri.resolve(rootUri);
+      if (resolved.scheme != 'file') {
+        continue;
+      }
+      final fsPath = resolved.toFilePath().replaceAll(r'\', '/');
+      if (fsPath.startsWith(cwdPrefix)) {
+        var r = fsPath.substring(cwdPrefix.length);
+        if (r.endsWith('/') && r.length > 1) {
+          r = r.substring(0, r.length - 1);
+        }
+        rel = _toAppSchemeRelPath(r);
+      } else if (fsPath == normCwd || fsPath == cwdPrefix) {
+        rel = '';
+      } else {
+        p['rootUri'] = resolved.toString();
+        continue;
+      }
+    }
+    final stagedRel = rel.isEmpty
+        ? stagePrefix
+        : (stagePrefix.isEmpty ? rel : '$stagePrefix/$rel');
+    p['rootUri'] = 'org-dartlang-app:///$stagedRel';
+  }
+  File(outPath).writeAsStringSync(json.encode(pkgJson));
+}
+
 void _rewritePackageConfig(
   String packagesPath,
   String normCwd,
@@ -525,60 +574,6 @@ void _runDart2Wasm(List<String> args) {
       tmpDir.deleteSync(recursive: true);
     }
   }
-}
-
-void _rewritePackageConfigForFileRoot(
-  String packagesPath,
-  String rootDirPath,
-  String normCwd,
-  String cwdPrefix,
-  String outPath,
-) {
-  final pkgFile = File(packagesPath).absolute;
-  final pkgJson =
-      json.decode(pkgFile.readAsStringSync()) as Map<String, dynamic>;
-  final pkgs = (pkgJson['packages'] as List<dynamic>)
-      .cast<Map<String, dynamic>>();
-  const schemePrefix = 'org-dartlang-app:///';
-  for (final p in pkgs) {
-    final rootUri = p['rootUri'] as String;
-    if (rootUri.startsWith(schemePrefix)) {
-      final rel = rootUri.substring(schemePrefix.length);
-      final dirPath = rel.isEmpty ? rootDirPath : '$rootDirPath/$rel';
-      var uriStr = Uri.directory(dirPath).toString();
-      if (uriStr.endsWith('/') && uriStr.length > 1) {
-        uriStr = uriStr.substring(0, uriStr.length - 1);
-      }
-      p['rootUri'] = uriStr;
-      continue;
-    }
-    final resolved = pkgFile.uri.resolve(rootUri);
-    if (resolved.scheme == 'file') {
-      final fsPath = resolved.toFilePath().replaceAll(r'\', '/');
-      if (fsPath.startsWith(cwdPrefix)) {
-        var rel = fsPath.substring(cwdPrefix.length);
-        if (rel.endsWith('/') && rel.length > 1) {
-          rel = rel.substring(0, rel.length - 1);
-        }
-        rel = _toAppSchemeRelPath(rel);
-        final dirPath = rel.isEmpty ? rootDirPath : '$rootDirPath/$rel';
-        var uriStr = Uri.directory(dirPath).toString();
-        if (uriStr.endsWith('/') && uriStr.length > 1) {
-          uriStr = uriStr.substring(0, uriStr.length - 1);
-        }
-        p['rootUri'] = uriStr;
-      } else if (fsPath == normCwd || fsPath == cwdPrefix) {
-        var uriStr = Uri.directory(rootDirPath).toString();
-        if (uriStr.endsWith('/') && uriStr.length > 1) {
-          uriStr = uriStr.substring(0, uriStr.length - 1);
-        }
-        p['rootUri'] = uriStr;
-      } else {
-        p['rootUri'] = resolved.toString();
-      }
-    }
-  }
-  File(outPath).writeAsStringSync(json.encode(pkgJson));
 }
 
 String _toAppSchemeUri(String path, String cwdPrefix) {
@@ -729,6 +724,36 @@ void scrubDart2JsOutputs(
   }
 }
 
+/// Builds the `dart2js` snapshot argv for a staged multi-root compile.
+///
+/// `dart compile js` only honours `--multi-root=.` (the action execroot), so
+/// the entrypoint and every package root are addressed as execroot-relative
+/// `org-dartlang-app:///<stage>/<rel>` URIs: the `<stage>` prefix routes the
+/// lookup into the per-action staging tree holding both source and generated
+/// inputs, while the recorded library URIs stay stable relative URIs with no
+/// sandbox or execroot absolute paths. Mirrors [_runDart2Wasm]'s stable
+/// scheme, adapted to the js frontend's `.`-rooted multi-root.
+List<String> buildDart2JsSnapshotArgs({
+  required List<String> forwardArgs,
+  required String rewrittenPkgPath,
+  required String stageExecRel,
+  required String normMainDart,
+}) {
+  final stagePrefix = stageExecRel
+      .replaceAll(r'\', '/')
+      .replaceFirst(RegExp(r'^(?:\./)+'), '');
+  final entryUri = stagePrefix.isEmpty
+      ? 'org-dartlang-app:///$normMainDart'
+      : 'org-dartlang-app:///$stagePrefix/$normMainDart';
+  return <String>[
+    for (final a in forwardArgs)
+      if (a.startsWith('--packages=')) '--packages=$rewrittenPkgPath' else a,
+    '--multi-root-scheme=org-dartlang-app',
+    '--multi-root=.',
+    entryUri,
+  ];
+}
+
 void _runDart2Js(List<String> args) {
   final exeSuffix = Platform.isWindows ? '.exe' : '';
   final sdkBin = File(Platform.resolvedExecutable).parent.path;
@@ -789,22 +814,21 @@ void _runDart2Js(List<String> args) {
       final normCwd = cwdPath.replaceAll(r'\', '/');
       final cwdPrefix = normCwd.endsWith('/') ? normCwd : '$normCwd/';
       rewrittenPkgPath = '${tmpDir.path}/package_config.json';
-      _rewritePackageConfigForFileRoot(
+      final stageExecRel = multiRoot.replaceAll(r'\', '/');
+      _rewritePackageConfigForStage(
         packagesPath,
-        rootDirPath,
+        stageExecRel,
         normCwd,
         cwdPrefix,
         rewrittenPkgPath,
       );
       final relMain = _toAppSchemeRelPath(mainDart);
-      jsArgs = <String>[
-        for (final a in forwardArgs)
-          if (a.startsWith('--packages='))
-            '--packages=$rewrittenPkgPath'
-          else
-            a,
-        '$rootDirPath/$relMain',
-      ];
+      jsArgs = buildDart2JsSnapshotArgs(
+        forwardArgs: forwardArgs,
+        rewrittenPkgPath: rewrittenPkgPath,
+        stageExecRel: stageExecRel,
+        normMainDart: relMain,
+      );
     } else {
       jsArgs = <String>[
         ...forwardArgs,

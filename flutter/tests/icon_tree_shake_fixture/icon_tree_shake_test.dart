@@ -87,6 +87,73 @@ Set<int> readCmapCodePoints(Uint8List fontBytes) {
   return codePoints;
 }
 
+List<File> _findAllRunfiles(String suffix) {
+  final matchSuffix = suffix;
+  final found = <File>[];
+  final runfilesPath =
+      Platform.environment['RUNFILES_DIR'] ??
+      Platform.environment['TEST_SRCDIR'];
+  if (runfilesPath != null && Directory(runfilesPath).existsSync()) {
+    for (final entity in Directory(
+      runfilesPath,
+    ).listSync(recursive: true, followLinks: true)) {
+      if (entity is File &&
+          entity.path.replaceAll('\\', '/').endsWith(matchSuffix)) {
+        found.add(entity);
+      }
+    }
+  }
+  final manifestPath = Platform.environment['RUNFILES_MANIFEST_FILE'];
+  if (manifestPath != null && File(manifestPath).existsSync()) {
+    for (final line in File(manifestPath).readAsLinesSync()) {
+      final space = line.indexOf(' ');
+      if (space <= 0) continue;
+      final target = line.substring(space + 1).trim();
+      if (target.replaceAll('\\', '/').endsWith(matchSuffix) &&
+          File(target).existsSync()) {
+        found.add(File(target));
+      }
+      if (Directory(target).existsSync()) {
+        for (final entity in Directory(
+          target,
+        ).listSync(recursive: true, followLinks: true)) {
+          if (entity is File &&
+              entity.path.replaceAll('\\', '/').endsWith(matchSuffix)) {
+            found.add(entity);
+          }
+        }
+      }
+    }
+  }
+  final seen = <String>{};
+  return found.where((f) => seen.add(f.path)).toList();
+}
+
+List<File> _findIconTreeShakeDills() {
+  final dills = <File>[
+    ..._findAllRunfiles('_icon_tree_shaking.dill'),
+    ..._findAllRunfiles('.icon_tree_shaking.dill'),
+  ];
+  final seen = <String>{};
+  final unique = <File>[];
+  for (final d in dills) {
+    if (seen.add(d.path) &&
+        d.path.replaceAll('\\', '/').contains('icon_tree_shaking')) {
+      unique.add(d);
+    }
+  }
+  // Also catch renderer-suffixed dills (e.g. _icon_tree_shaking_skwasm.dill)
+  // whose suffix above already matches, plus any dill under a forwarded
+  // icon-tree-shake output that the exact suffix missed.
+  for (final d in _findAllRunfiles('.dill')) {
+    final norm = d.path.replaceAll('\\', '/');
+    if (norm.contains('icon_tree_shaking') && seen.add(d.path)) {
+      unique.add(d);
+    }
+  }
+  return unique;
+}
+
 File _findRunfile(String suffix) {
   final matchSuffix = suffix.startsWith('/') ? suffix : '/$suffix';
   final runfilesPath =
@@ -299,6 +366,50 @@ void main() {
       expect(dart2jsCanvaskitCodePoints, isNot(contains(0xe88a)));
     },
   );
+
+  test('icon tree-shake kernel dills record only stable URIs', () {
+    final dills = _findIconTreeShakeDills();
+    expect(
+      dills,
+      isNotEmpty,
+      reason: 'expected forwarded icon tree-shake dills',
+    );
+    for (final dill in dills) {
+      final bytes = dill.readAsBytesSync();
+      final text = String.fromCharCodes(bytes);
+      // Absolute `file://` URIs would make the dill differ per checkout,
+      // machine and sandbox run number. `file://` itself also appears in
+      // Dart error strings (e.g. `file:///80443` in URI parsing), so only
+      // `file://` URIs carrying a filesystem location are refused.
+      for (final fragment in [
+        'file:///bazel-out',
+        'file:///tmp',
+        'file:///src',
+        'file:///home',
+        'file:///build',
+        'file:///external',
+        'file://C:',
+        'file://c:',
+        'processwrapper',
+        'execroot',
+        'rules_flutter_dart2js_cfe_',
+        'sandbox/',
+        'sandbox\\',
+      ]) {
+        expect(
+          text,
+          isNot(contains(fragment)),
+          reason: '${dill.path} embeds an absolute path ($fragment)',
+        );
+      }
+      expect(
+        text,
+        contains('org-dartlang-app:///'),
+        reason:
+            '${dill.path} should key libraries under the stable multi-root scheme',
+      );
+    }
+  });
 
   test(
     'FlutterDart2JS main.dart.js.deps contains only hermetic org-dartlang-* URIs and no host temp paths',

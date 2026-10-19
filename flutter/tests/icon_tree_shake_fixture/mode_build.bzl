@@ -49,8 +49,15 @@ def _forward_files_impl(ctx):
         if a.mnemonic == "FlutterDart2JS"
         for out in a.outputs.to_list()
     ]
+    icon_kernel_outputs = [
+        out
+        for t in ctx.attr.targets
+        for a in t.actions
+        if a.mnemonic == "FlutterDart2JSCFE"
+        for out in a.outputs.to_list()
+    ]
     return [DefaultInfo(files = depset(
-        direct = dart2js_outputs,
+        direct = dart2js_outputs + icon_kernel_outputs,
         transitive = [
             t[DefaultInfo].files
             for t in ctx.attr.targets
