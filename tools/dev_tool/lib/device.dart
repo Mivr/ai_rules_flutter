@@ -3683,6 +3683,24 @@ const chromeDebugFlags = [
   '--disable-translate',
   '--disable-search-engine-choice-screen',
   '--disable-background-timer-throttling',
+  // The rest cut startup work that varies with machine load and buys nothing
+  // the run tests. The window, the sandbox and rendering stay exactly as the
+  // user runs them: a headed browser that still paints the app.
+  //
+  // `--disable-dev-shm-usage`: /dev/shm is tiny on many CI and container
+  // runners, and a renderer that cannot get shared memory stalls or crashes
+  // around the time the browser would announce its debugging port. Backing it
+  // with disk under the profile directory instead removes that shape.
+  '--disable-dev-shm-usage',
+  // `--disable-background-networking`: no component-update, variations-seed
+  // or safebrowsing fetches at startup — the cold-start network variance on a
+  // shared runner. The app itself is served from localhost, which this does
+  // not touch.
+  '--disable-background-networking',
+  // `--password-store=basic`: no D-Bus secret-service negotiation for a
+  // keyring that does not exist under xvfb/CI, which otherwise blocks startup
+  // before falling back.
+  '--password-store=basic',
 ];
 
 /// One launched Chrome, owned end to end: the process, the throwaway profile
@@ -3756,12 +3774,18 @@ class ChromeSession {
   /// Launch Chrome on [url] and wait until it is observably up: debugging
   /// port announced *and* the tab navigated to the app. A failed launch
   /// leaves nothing behind — no browser, no profile directory.
+  ///
+  /// [portTimeout] is generous on purpose: a headed first run with a virgin
+  /// profile does real initialization work before it announces anything, and
+  /// on a loaded shared runner that sometimes takes far longer than the
+  /// second-or-two a warm browser needs. A browser that refuses to start
+  /// still fails fast — its output ending fails the wait before the timeout.
   static Future<ChromeSession> launch({
     required String url,
     required ProcessStarter startProcess,
     BrowserLaunchOptions options = const BrowserLaunchOptions(),
     String? chromePath,
-    Duration portTimeout = const Duration(seconds: 15),
+    Duration portTimeout = const Duration(seconds: 60),
     Duration pageTimeout = const Duration(seconds: 15),
     Duration pollInterval = const Duration(milliseconds: 50),
   }) async {
@@ -3772,6 +3796,10 @@ class ChromeSession {
       );
     }
     final userDataDir = await createTempDir('flutter_chrome_');
+    // How long a healthy browser takes to announce is the number the port
+    // timeout has to clear, so every launch reports it: the next slow start
+    // then arrives with measurements instead of a bare "within Ns".
+    final launchClock = Stopwatch()..start();
     final Process chrome;
     try {
       chrome = await startProcess(
@@ -3798,6 +3826,14 @@ class ChromeSession {
         timeout: portTimeout,
         requestedPort: options.debugPort,
       );
+      _logger.info({
+        'message': 'chrome_port_announced',
+        'text':
+            'Chrome announced its DevTools debugging port after '
+            '${_secondsText(launchClock.elapsed)}.',
+        'elapsed_ms': launchClock.elapsedMilliseconds,
+        'port': cdpPort,
+      });
       // The announcement is the readiness signal, not merely the number, so
       // it is awaited even when the port was dictated. A browser that takes a
       // different one than it was given is a state nothing here can drive:
@@ -4275,24 +4311,40 @@ final cdpPortPattern = RegExp(r'DevTools listening on ws://\S+?:(\d+)/');
 /// message. Upstream tool-exits in the same situation (`chrome.dart`'s "Unable to
 /// connect to Chrome debug port"). The two causes are reported separately
 /// because they call for different fixes.
+///
+/// The timeout error quotes how long the wait ran and what the browser
+/// printed: a browser still working through a slow first run is otherwise
+/// indistinguishable from one that was never going to announce.
 Future<int> _discoverCdpPort(
   AppLogStream browserDiagnostics, {
-  Duration timeout = const Duration(seconds: 15),
+  Duration timeout = const Duration(seconds: 60),
   int? requestedPort,
 }) async {
+  // Measured, not assumed: the timeout error below quotes how long the wait
+  // actually ran, so a failure says whether the browser was moments or an
+  // eternity from announcing.
+  final waited = Stopwatch()..start();
   final completer = Completer<int>();
   final timer = Timer(timeout, () {
     if (!completer.isCompleted) {
       completer.completeError(
         StateError(
           'Chrome did not announce a DevTools debugging port within '
-          '${timeout.inSeconds}s of launch. Without it there is no debugging '
+          '${timeout.inSeconds}s of launch '
+          '(waited ${_secondsText(waited.elapsed)}). '
+          'Without it there is no debugging '
           'connection: no DWDS VM service, no hot restart, no screenshots.'
           // A dictated port is the one thing about this launch that can be
           // wrong before Chrome even starts, and Chrome says nothing when it
           // cannot take one.
           '${requestedPort == null ? '' : ' --web-browser-debug-port '
-                    '$requestedPort may already be in use.'}',
+                    '$requestedPort may already be in use.'}'
+          // Reaching the timeout means the browser's output never ended: had
+          // it exited, the stream closing would have failed this wait first.
+          // So the browser was still starting up, and what it printed is
+          // where the reason lives.
+          ' Its output had not ended; the browser was still starting up. '
+          '${_browserLastWords(browserDiagnostics, ended: false)}',
         ),
       );
     }
@@ -4346,14 +4398,29 @@ Future<int> _discoverCdpPort(
 /// it rules out every cause that announces itself, and says the search belongs
 /// somewhere other than the browser's output. An empty tail rendered as
 /// nothing at all would instead read as if the quoting had been forgotten.
-String _browserLastWords(AppLogStream browserDiagnostics, {int lines = 20}) {
+///
+/// [ended] selects the phrasing: the browser that exited printed "on the way
+/// out", while one still starting up when the wait ran out has printed
+/// "so far".
+String _browserLastWords(
+  AppLogStream browserDiagnostics, {
+  int lines = 20,
+  bool ended = true,
+}) {
   final tail = browserDiagnostics.read(-lines).lines;
   if (tail.isEmpty) {
-    return 'It printed nothing at all on the way out, so its own output does '
-        'not hold the reason.';
+    return ended
+        ? 'It printed nothing at all on the way out, so its own output does '
+              'not hold the reason.'
+        : 'It had printed nothing at all so far, so its own output does not '
+              'yet hold a reason.';
   }
   return 'It last said:\n${tail.map((l) => '  ${l.text}').join('\n')}';
 }
+
+/// Seconds with one decimal, for launch timings in errors and logs.
+String _secondsText(Duration d) =>
+    '${(d.inMilliseconds / 1000).toStringAsFixed(1)}s';
 
 /// Lay the app's page out at [viewport], and prove that it did.
 ///
