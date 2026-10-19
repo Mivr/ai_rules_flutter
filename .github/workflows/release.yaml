@@ -34,7 +34,7 @@ jobs:
           sha="${{ github.sha }}"
           deadline=$((SECONDS + 220 * 60))
           while true; do
-            runs="$(gh run list --repo '${{ github.repository }}' --workflow full.yaml --commit "$sha" --limit 50 --json databaseId,status,conclusion,event,headBranch)"
+            runs="$(gh run list --repo '${{ github.repository }}' --workflow full.yaml --commit "$sha" --limit 50 --json databaseId,status,conclusion,event,headBranch || echo '[]')"
             if echo "$runs" | jq -e 'map(select(.conclusion == "success")) | length > 0' >/dev/null; then
               echo "Full workflow passed for $sha"
               exit 0
