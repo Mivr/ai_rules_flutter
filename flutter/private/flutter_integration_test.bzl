@@ -1411,7 +1411,6 @@ def _flutter_integration_test_impl(ctx):
         "FLUTTER_INTEGRATION_TEST_FONTCONFIG": runfiles_path(ctx.file._chrome_fontconfig, workspace_name),
         "FLUTTER_INTEGRATION_TEST_ROBOTO_FONT": runfiles_path(ctx.file._roboto_font, workspace_name),
         "FLUTTER_INTEGRATION_TEST_PATH": main_file.short_path,
-        "FLUTTER_INTEGRATION_TEST_DECLARED_ENV": json.encode(ctx.attr.env),
     }
     for key, value in ctx.attr.env.items():
         if key in env:
@@ -1769,7 +1768,6 @@ def _flutter_linux_integration_test_impl(ctx):
         "FLUTTER_INTEGRATION_TEST_XKBCOMP": runfiles_path(ctx.file._linux_xkbcomp, workspace_name),
         "FLUTTER_INTEGRATION_TEST_FONTCONFIG": runfiles_path(ctx.file._linux_fontconfig, workspace_name),
         "FLUTTER_INTEGRATION_TEST_PATH": main_file.short_path,
-        "FLUTTER_INTEGRATION_TEST_DECLARED_ENV": json.encode(ctx.attr.env),
     }
     for key, value in ctx.attr.env.items():
         if key in env:
@@ -2104,7 +2102,6 @@ def _flutter_android_integration_test_impl(ctx):
         "FLUTTER_INTEGRATION_TEST_ANDROID_EMULATOR": runfiles_path(ctx.file._android_emulator, workspace_name),
         "FLUTTER_INTEGRATION_TEST_ANDROID_ADB": runfiles_path(ctx.file._android_adb, workspace_name),
         "FLUTTER_INTEGRATION_TEST_PATH": main_file.short_path,
-        "FLUTTER_INTEGRATION_TEST_DECLARED_ENV": json.encode(ctx.attr.env),
     }
     for key, value in ctx.attr.env.items():
         if key in env:

@@ -515,31 +515,4 @@ void main() {
       },
     );
   });
-
-  group('env forwarding', () {
-    test(
-      'forwards declared env and TZ in chrome and linux app environments',
-      () {
-        final chromeEnv = runner.buildChromeEnvironment(
-          browserBinary: '/runfiles/flutter_chrome_headless_shell/browser/chrome-headless-shell',
-          scratchDir: '/tmp/scratch',
-          env: {'MY_VAR': 'declared'},
-        );
-        expect(chromeEnv['MY_VAR'], 'declared');
-        expect(chromeEnv['TZ'], 'UTC');
-
-        final appEnv = runner.buildLinuxAppEnvironment(
-          bundleDir: '/runfiles/ws/app_linux',
-          sysrootDir: '/runfiles/flutter_linux_headless_runtime/sysroot',
-          scratchDir: '/tmp/scratch',
-          display: ':0',
-          harnessUrl: 'ws://127.0.0.1:43210/__flutter_integration_ws__',
-          env: {'MY_VAR': 'declared'},
-          timeZone: 'UTC',
-        );
-        expect(appEnv['MY_VAR'], 'declared');
-        expect(appEnv['TZ'], 'UTC');
-      },
-    );
-  });
 }

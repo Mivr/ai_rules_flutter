@@ -147,10 +147,13 @@ def _create_native_libs_jar(ctx, aot_output, native_libs, abi):
     jar = ctx.actions.declare_file(ctx.label.name + "_native_libs.jar")
     expected_machine = android_elf_machine_for_abi(abi)
 
-    entries = ([("libapp.so", aot_output)] if aot_output else []) + [
-        (lib.basename, lib)
-        for lib in native_libs
-    ]
+    entries = sorted(
+        ([("libapp.so", aot_output)] if aot_output else []) + [
+            (lib.basename, lib)
+            for lib in native_libs
+        ],
+        key = lambda e: e[0],
+    )
 
     zip_entries = []
     seen_basenames = {}
@@ -180,7 +183,6 @@ def _create_native_libs_jar(ctx, aot_output, native_libs, abi):
     args.add("--output", jar.path)
     args.add("--abi", abi)
     args.add("--machine", str(expected_machine))
-    args.add("--zipper", ctx.executable._zipper.path)
     args.add_all(zip_entries)
 
     ctx.actions.run(
@@ -190,7 +192,6 @@ def _create_native_libs_jar(ctx, aot_output, native_libs, abi):
             direct = [ctx.executable._android_bundle_tool] + [lib for _, lib in entries],
             transitive = [dart_vm_files],
         ),
-        tools = [ctx.executable._zipper],
         outputs = [jar],
         mnemonic = "FlutterNativeLibsJar",
         progress_message = "Packaging Flutter native libs into jar %s" % ctx.label,
@@ -349,11 +350,6 @@ agree.""",
         ),
         "_android_bundle_tool": attr.label(
             default = Label("//flutter/private/tools:android_bundle"),
-            executable = True,
-            cfg = "exec",
-        ),
-        "_zipper": attr.label(
-            default = "@bazel_tools//tools/zip:zipper",
             executable = True,
             cfg = "exec",
         ),

@@ -14,6 +14,8 @@ library;
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'xtool_pack.dart' show ZipEntry, encodeDeterministicZip;
+
 /// Minimal valid 22-byte ZIP file (End of Central Directory record with zero
 /// entries), identical to the output of `zip` on an empty archive.
 const List<int> emptyJarBytes = <int>[
@@ -81,7 +83,7 @@ Future<void> packageNativeLibsJar({
   required String outputPath,
   required String abi,
   required int wantMachine,
-  required String zipperPath,
+  String? zipperPath,
   required List<String> entries,
 }) async {
   if (entries.isEmpty) {
@@ -89,6 +91,7 @@ Future<void> packageNativeLibsJar({
     return;
   }
 
+  final zipEntries = <ZipEntry>[];
   for (final spec in entries) {
     final eq = spec.indexOf('=');
     if (eq <= 0 || eq == spec.length - 1) {
@@ -98,6 +101,7 @@ Future<void> packageNativeLibsJar({
         'expected <jar_entry>=<source_path>',
       );
     }
+    final entryPath = spec.substring(0, eq);
     final srcPath = spec.substring(eq + 1);
     final raf = File(srcPath).openSync();
     final Uint8List header;
@@ -112,19 +116,26 @@ Future<void> packageNativeLibsJar({
       wantMachine: wantMachine,
       abi: abi,
     );
+
+    // Normalize file mode bits: only the executable bit of the source is
+    // honoured; all other permission bits come from a fixed, host-independent
+    // value (0644 / 0755), matching xtool_pack.dart. Host umask and source
+    // stat.mode beyond the executable bit never leak into the jar.
+    final sourceMode = File(srcPath).statSync().mode;
+    final isExecutable = (sourceMode & 0x49) != 0;
+    final bytes = File(srcPath).readAsBytesSync();
+    zipEntries.add(
+      ZipEntry(
+        path: entryPath,
+        data: bytes,
+        isExecutable: isExecutable,
+      ),
+    );
   }
 
   File(outputPath).parent.createSync(recursive: true);
-  final zipArgs = <String>['cC', outputPath, ...entries];
-  final result = await Process.run(zipperPath, zipArgs);
-  if (result.exitCode != 0) {
-    throw ProcessException(
-      zipperPath,
-      zipArgs,
-      '${result.stdout}${result.stderr}',
-      result.exitCode,
-    );
-  }
+  final zipBytes = encodeDeterministicZip(zipEntries);
+  File(outputPath).writeAsBytesSync(zipBytes, flush: true);
 }
 
 /// Copies [assetsDir] (dereferencing symlinks) into [outputDir] and adds
@@ -232,10 +243,10 @@ Future<void> _runNativeLibsJar(List<String> args) async {
     }
   }
 
-  if (output == null || abi == null || machine == null || zipper == null) {
+  if (output == null || abi == null || machine == null) {
     throw ArgumentError(
       'Usage: android_bundle.dart native-libs-jar --output <jar> --abi <abi> '
-      '--machine <machine> --zipper <zipper> [<entry=src>...]',
+      '--machine <machine> [<entry=src>...]',
     );
   }
 

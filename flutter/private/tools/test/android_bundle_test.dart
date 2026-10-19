@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:test/test.dart';
 
 import '../android_bundle.dart';
+import '../xtool_pack.dart' show readZipEntries;
 
 Uint8List _syntheticElf({required int machine, List<int> payload = const []}) {
   final header = Uint8List(20 + payload.length);
@@ -165,12 +166,12 @@ void main() {
             'lib/arm64-v8a/libplugin.so=${libPlugin.path}',
           ]);
 
-          expect(File(outJar).readAsStringSync(), 'JAR_BYTES');
-          expect(File(fakeZipperLog).readAsLinesSync(), [
-            'cC',
-            outJar,
-            'lib/arm64-v8a/libapp.so=${libApp.path}',
-            'lib/arm64-v8a/libplugin.so=${libPlugin.path}',
+          expect(File(outJar).existsSync(), isTrue);
+          expect(File(outJar).lengthSync(), greaterThan(0));
+          final readEntries = readZipEntries(File(outJar).readAsBytesSync());
+          expect(readEntries.map((e) => e.path).toList(), [
+            'lib/arm64-v8a/libapp.so',
+            'lib/arm64-v8a/libplugin.so',
           ]);
         },
         testOn: '!windows',

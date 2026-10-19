@@ -20,6 +20,8 @@
 /// Usage:
 ///   dart strip_native_libs.dart --zipper <path> --strip <path>
 ///       --input <jar> --output <jar>
+import 'dart:convert';
+import 'dart:ffi' as ffi;
 import 'dart:io';
 
 /// The entries of [entries] that are native libraries: shared objects under
@@ -101,6 +103,17 @@ Future<void> main(List<String> args) async {
       File(stripped).renameSync(unstripped);
     }
 
+    // Normalize file mode bits in the unpacked tree before repacking, so host
+    // stat.mode bits (including umask) never leak into the output jar. Only
+    // the executable bit of each entry is honoured (0755 vs 0644), matching
+    // xtool_pack.dart.
+    for (final entry in entries) {
+      final file = File('${unpacked.path}/$entry');
+      final mode = file.statSync().mode;
+      final normalized = (mode & 0x49) != 0 ? 0x1ed : 0x1a4;
+      _chmodFile(file.path, normalized);
+    }
+
     final argfile = File('${scratch.path}/entries')
       ..writeAsStringSync(
         entries.map((e) => '$e=${unpacked.path}/$e\n').join(),
@@ -108,5 +121,36 @@ Future<void> main(List<String> args) async {
     await _run(zipper, ['cC', output, '@${argfile.path}']);
   } finally {
     scratch.deleteSync(recursive: true);
+  }
+}
+
+typedef _MallocNative = ffi.Pointer<ffi.Uint8> Function(ffi.Size);
+typedef _MallocDart = ffi.Pointer<ffi.Uint8> Function(int);
+typedef _FreeNative = ffi.Void Function(ffi.Pointer<ffi.Uint8>);
+typedef _FreeDart = void Function(ffi.Pointer<ffi.Uint8>);
+typedef _ChmodNative = ffi.Int Function(ffi.Pointer<ffi.Uint8>, ffi.Uint32);
+typedef _ChmodDart = int Function(ffi.Pointer<ffi.Uint8>, int);
+
+void _chmodFile(String path, int mode) {
+  if (Platform.isWindows) return;
+  final lib = ffi.DynamicLibrary.process();
+  final malloc = lib.lookupFunction<_MallocNative, _MallocDart>('malloc');
+  final free = lib.lookupFunction<_FreeNative, _FreeDart>('free');
+  final chmod = lib.lookupFunction<_ChmodNative, _ChmodDart>('chmod');
+  final bytes = utf8.encode(path);
+  final ptr = malloc(bytes.length + 1);
+  if (ptr == ffi.nullptr) {
+    throw FileSystemException('malloc failed for chmod', path);
+  }
+  try {
+    ptr.asTypedList(bytes.length + 1)
+      ..setAll(0, bytes)
+      ..[bytes.length] = 0;
+    final rc = chmod(ptr, mode);
+    if (rc != 0) {
+      throw FileSystemException('chmod failed (rc=$rc)', path);
+    }
+  } finally {
+    free(ptr);
   }
 }
