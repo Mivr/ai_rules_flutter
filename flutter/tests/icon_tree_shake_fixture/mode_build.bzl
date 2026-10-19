@@ -42,10 +42,20 @@ _opt_transition = transition(
 )
 
 def _forward_files_impl(ctx):
-    return [DefaultInfo(files = depset(transitive = [
-        t[DefaultInfo].files
+    dart2js_outputs = [
+        out
         for t in ctx.attr.targets
-    ]))]
+        for a in t.actions
+        if a.mnemonic == "FlutterDart2JS"
+        for out in a.outputs.to_list()
+    ]
+    return [DefaultInfo(files = depset(
+        direct = dart2js_outputs,
+        transitive = [
+            t[DefaultInfo].files
+            for t in ctx.attr.targets
+        ],
+    ))]
 
 fastbuild_build = rule(
     implementation = _forward_files_impl,

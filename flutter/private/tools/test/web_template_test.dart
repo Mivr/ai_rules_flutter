@@ -435,4 +435,100 @@ void main() {
       expect(out, created.replaceAll(r'$FLUTTER_BASE_HREF', '/'));
     },
   );
+
+  group('scrubDart2JsOutputs', () {
+    test(
+      'rewrites temp package_config.json, stage, and cwd file URIs in .deps, .map, and .info.json',
+      () {
+        final fakeCwd = Directory('${_tmp.path}/execroot/_main')
+          ..createSync(recursive: true);
+        final stageDir = Directory(
+          '${fakeCwd.path}/bazel-out/k8-fastbuild/bin/pkg/app_stage',
+        )..createSync(recursive: true);
+        final outDir = Directory(
+          '${fakeCwd.path}/bazel-out/k8-fastbuild/bin/pkg/app_dart2js_fallback',
+        )..createSync(recursive: true);
+        final tmpDir = Directory('${outDir.path}/_dart2js_tmp')
+          ..createSync(recursive: true);
+
+        const relPkgPath =
+            'bazel-out/k8-fastbuild/bin/pkg/app.package_config.json';
+        final origPkgFile = File('${fakeCwd.path}/$relPkgPath')
+          ..parent.createSync(recursive: true)
+          ..writeAsStringSync('{"configVersion":2,"packages":[]}');
+        final rewrittenPkgFile = File('${tmpDir.path}/package_config.json')
+          ..writeAsStringSync('{"configVersion":2,"packages":[]}');
+        tmpDir.deleteSync(recursive: true);
+
+        final stageUri = Uri.directory(stageDir.path).toString();
+        final cwdUri = Uri.directory(fakeCwd.path).toString();
+        final rewrittenPkgUri = Uri.file(rewrittenPkgFile.path).toString();
+
+        final depsFile = File('${outDir.path}/main.dart.js.deps')
+          ..writeAsStringSync(
+            '${stageUri}pkg/lib/main.dart\n'
+            '$rewrittenPkgUri\n'
+            '${cwdUri}external/flutter_sdk/lib/core.dart\n'
+            'org-dartlang-sdk:///lib/core/core.dart\n',
+          );
+        final mapFile = File('${outDir.path}/main.dart.js.map')
+          ..writeAsStringSync(
+            '{"sources":["../../app_stage/pkg/lib/main.dart","${stageUri}pkg/lib/other.dart"]}',
+          );
+        final infoFile = File('${outDir.path}/main.dart.js.info.json')
+          ..writeAsStringSync(
+            '{"compilationMoment": "2026-04-18 12:34:56.789012", '
+            '"compilationDuration": 12345, '
+            '"toJsonDuration": 678, '
+            '"dumpInfoDuration": 90, '
+            '"uri": "${stageUri}pkg/lib/main.dart", '
+            '"rel": "bazel-out/k8-fastbuild/bin/pkg/app_stage/pkg/lib/main.dart"}',
+          );
+
+        scrubDart2JsOutputs(
+          outDir,
+          cwdPath: fakeCwd.path,
+          rootDirPath: stageDir.path,
+          tmpDirPath: tmpDir.path,
+          packagesPath: origPkgFile.path,
+          rewrittenPkgPath: rewrittenPkgFile.path,
+        );
+
+        final depsLines = depsFile
+            .readAsStringSync()
+            .split('\n')
+            .where((l) => l.isNotEmpty)
+            .toList();
+        expect(
+          depsLines,
+          equals([
+            'org-dartlang-app:///external/flutter_sdk/lib/core.dart',
+            'org-dartlang-app:///pkg/app.package_config.json',
+            'org-dartlang-app:///pkg/lib/main.dart',
+            'org-dartlang-sdk:///lib/core/core.dart',
+          ]),
+        );
+
+        final mapContent = mapFile.readAsStringSync();
+        expect(
+          mapContent,
+          equals(
+            '{"sources":["org-dartlang-app:///pkg/lib/main.dart","org-dartlang-app:///pkg/lib/other.dart"]}',
+          ),
+        );
+
+        final infoContent = infoFile.readAsStringSync();
+        expect(infoContent, isNot(contains('file:')));
+        expect(infoContent, isNot(contains('app_stage')));
+        expect(infoContent, isNot(contains('bazel-out')));
+        expect(
+          infoContent,
+          contains('"compilationMoment": "1970-01-01 00:00:00.000000"'),
+        );
+        expect(infoContent, contains('"compilationDuration": 0'));
+        expect(infoContent, contains('"toJsonDuration": 0'));
+        expect(infoContent, contains('"dumpInfoDuration": 0'));
+      },
+    );
+  });
 }

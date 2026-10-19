@@ -462,7 +462,10 @@ void _runDart2Wasm(List<String> args) {
     exit(64);
   }
 
-  final tmpDir = Directory.systemTemp.createTempSync('flutter_dart2wasm_');
+  final outWasmFile = File(outputWasm)..parent.createSync(recursive: true);
+  final tmpDir = Directory('${outWasmFile.parent.path}/_wasm_tmp')
+    ..createSync(recursive: true);
+  final tmpAbsPath = tmpDir.absolute.path;
   try {
     final cwdPath = Directory.current.absolute.path;
     final rootDirPath = multiRoot != null
@@ -488,14 +491,22 @@ void _runDart2Wasm(List<String> args) {
       'org-dartlang-app:///$normMainDart',
       tmpWasm,
     ];
-    final res = Process.runSync(dartaotruntime, wasmArgs);
+    final res = Process.runSync(
+      dartaotruntime,
+      wasmArgs,
+      environment: {
+        ...Platform.environment,
+        'TMPDIR': tmpAbsPath,
+        'TMP': tmpAbsPath,
+        'TEMP': tmpAbsPath,
+      },
+    );
     if (res.exitCode != 0) {
       stdout.write(res.stdout as String);
       stderr.write(res.stderr as String);
       exit(res.exitCode);
     }
 
-    final outWasmFile = File(outputWasm)..parent.createSync(recursive: true);
     File(tmpWasm).copySync(outWasmFile.path);
 
     final outputMjs = outputWasm.endsWith('.wasm')
@@ -510,7 +521,9 @@ void _runDart2Wasm(List<String> args) {
       }
     }
   } finally {
-    tmpDir.deleteSync(recursive: true);
+    if (tmpDir.existsSync()) {
+      tmpDir.deleteSync(recursive: true);
+    }
   }
 }
 
@@ -568,6 +581,154 @@ void _rewritePackageConfigForFileRoot(
   File(outPath).writeAsStringSync(json.encode(pkgJson));
 }
 
+String _toAppSchemeUri(String path, String cwdPrefix) {
+  var norm = path.replaceAll(r'\', '/');
+  if (norm.startsWith(cwdPrefix)) {
+    norm = norm.substring(cwdPrefix.length);
+  }
+  return 'org-dartlang-app:///${_toAppSchemeRelPath(norm)}';
+}
+
+/// Scrubs host-specific file URIs, temporary package_config paths, stage paths,
+/// and compilation timestamps from dart2js output artifacts in [outDir].
+void scrubDart2JsOutputs(
+  Directory outDir, {
+  required String cwdPath,
+  String? rootDirPath,
+  String? tmpDirPath,
+  String? packagesPath,
+  String? rewrittenPkgPath,
+}) {
+  if (!outDir.existsSync()) return;
+  final normCwd = cwdPath.replaceAll(r'\', '/');
+  final cwdPrefix = normCwd.endsWith('/') ? normCwd : '$normCwd/';
+  final cwdUriPrefix = Uri.directory(cwdPath).toString();
+  final stageUriPrefix = rootDirPath != null
+      ? Uri.directory(rootDirPath).toString()
+      : null;
+  final tmpDirUriPrefix = tmpDirPath != null
+      ? Uri.directory(tmpDirPath).toString()
+      : null;
+  final origPkgUri = packagesPath != null
+      ? Uri.file(File(packagesPath).absolute.path).toString()
+      : null;
+  final rewrittenPkgUri = rewrittenPkgPath != null
+      ? Uri.file(File(rewrittenPkgPath).absolute.path).toString()
+      : null;
+  final pkgAppUri = packagesPath != null
+      ? _toAppSchemeUri(packagesPath, cwdPrefix)
+      : null;
+  final stageSegments = rootDirPath != null
+      ? Directory(
+          rootDirPath,
+        ).uri.pathSegments.where((s) => s.isNotEmpty).toList()
+      : const <String>[];
+  final stageDirName = stageSegments.isNotEmpty ? stageSegments.last : null;
+  final normRootDir = rootDirPath?.replaceAll(r'\', '/');
+  final relStagePrefix =
+      normRootDir != null && normRootDir.startsWith(cwdPrefix)
+      ? _toAppSchemeRelPath(normRootDir.substring(cwdPrefix.length))
+      : null;
+
+  final entries = outDir.listSync(recursive: true)
+    ..sort((a, b) => a.path.compareTo(b.path));
+  for (final entity in entries) {
+    if (entity is File &&
+        (entity.path.endsWith('.deps') ||
+            entity.path.endsWith('.info.json') ||
+            entity.path.endsWith('.map') ||
+            entity.path.endsWith('.js'))) {
+      var content = entity.readAsStringSync();
+      var changed = false;
+      if (pkgAppUri != null) {
+        if (rewrittenPkgUri != null && content.contains(rewrittenPkgUri)) {
+          content = content.replaceAll(rewrittenPkgUri, pkgAppUri);
+          changed = true;
+        }
+        if (origPkgUri != null && content.contains(origPkgUri)) {
+          content = content.replaceAll(origPkgUri, pkgAppUri);
+          changed = true;
+        }
+      }
+      if (tmpDirUriPrefix != null && content.contains(tmpDirUriPrefix)) {
+        content = content.replaceAll(tmpDirUriPrefix, 'org-dartlang-app:///');
+        changed = true;
+      }
+      if (stageUriPrefix != null && content.contains(stageUriPrefix)) {
+        content = content.replaceAll(stageUriPrefix, 'org-dartlang-app:///');
+        changed = true;
+      }
+      if (content.contains(cwdUriPrefix)) {
+        content = content.replaceAll(cwdUriPrefix, 'org-dartlang-app:///');
+        changed = true;
+      }
+      final bazelOutAppUri = RegExp(
+        r'org-dartlang-app:///(?:\./)?bazel-out/[^/]+/(?:bin|genfiles)/',
+      );
+      if (bazelOutAppUri.hasMatch(content)) {
+        content = content.replaceAll(bazelOutAppUri, 'org-dartlang-app:///');
+        changed = true;
+      }
+      if (entity.path.endsWith('.map') &&
+          stageDirName != null &&
+          stageDirName.isNotEmpty) {
+        final relStageInMap = RegExp(
+          '(?:\\.\\./)+${RegExp.escape(stageDirName)}/',
+        );
+        if (relStageInMap.hasMatch(content)) {
+          content = content.replaceAll(relStageInMap, 'org-dartlang-app:///');
+          changed = true;
+        }
+      }
+      if (entity.path.endsWith('.info.json')) {
+        final bazelOutRel = RegExp(
+          r'(?:\./)?bazel-out/[^/]+/(?:bin|genfiles)/',
+        );
+        if (bazelOutRel.hasMatch(content)) {
+          content = content.replaceAll(bazelOutRel, '');
+          changed = true;
+        }
+        if (relStagePrefix != null &&
+            relStagePrefix.isNotEmpty &&
+            content.contains('$relStagePrefix/')) {
+          content = content.replaceAll('$relStagePrefix/', '');
+          changed = true;
+        }
+        content = content
+            .replaceAllMapped(
+              RegExp(r'"compilationMoment":\s*"[^"]*"'),
+              (_) => '"compilationMoment": "1970-01-01 00:00:00.000000"',
+            )
+            .replaceAllMapped(
+              RegExp(
+                r'"(compilationDuration|toJsonDuration|dumpInfoDuration)":\s*\d+',
+              ),
+              (m) => '"${m.group(1)}": 0',
+            );
+        changed = true;
+      }
+      if (entity.path.endsWith('.deps')) {
+        final lines =
+            content
+                .split('\n')
+                .map((l) => l.trimRight())
+                .where((l) => l.isNotEmpty)
+                .toSet()
+                .toList()
+              ..sort();
+        final normalized = lines.isEmpty ? '' : '${lines.join('\n')}\n';
+        if (normalized != content) {
+          content = normalized;
+          changed = true;
+        }
+      }
+      if (changed) {
+        entity.writeAsStringSync(content);
+      }
+    }
+  }
+}
+
 void _runDart2Js(List<String> args) {
   final exeSuffix = Platform.isWindows ? '.exe' : '';
   final sdkBin = File(Platform.resolvedExecutable).parent.path;
@@ -598,17 +759,22 @@ void _runDart2Js(List<String> args) {
     }
   }
 
-  Directory? tmpDir;
+  final cwdPath = Directory.current.absolute.path;
+  final baseTmpParent = outJs != null
+      ? (File(outJs).parent..createSync(recursive: true)).path
+      : cwdPath;
+  final tmpDir = Directory('$baseTmpParent/_dart2js_tmp')
+    ..createSync(recursive: true);
+  final tmpAbsPath = tmpDir.absolute.path;
   String? rootDirPath;
+  String? rewrittenPkgPath;
   try {
     List<String> jsArgs;
     if (multiRoot != null && packagesPath != null && mainDart != null) {
-      tmpDir = Directory.systemTemp.createTempSync('flutter_dart2js_');
-      final cwdPath = Directory.current.absolute.path;
       rootDirPath = Directory(multiRoot).absolute.path;
       final normCwd = cwdPath.replaceAll(r'\', '/');
       final cwdPrefix = normCwd.endsWith('/') ? normCwd : '$normCwd/';
-      final rewrittenPkgPath = '${tmpDir.path}/package_config.json';
+      rewrittenPkgPath = '${tmpDir.path}/package_config.json';
       _rewritePackageConfigForFileRoot(
         packagesPath,
         rootDirPath,
@@ -632,67 +798,39 @@ void _runDart2Js(List<String> args) {
       ];
     }
 
-    final res = Process.runSync(dartaotruntime, [
-      '$sdkBin/snapshots/dart2js_aot.dart.snapshot',
-      '--invoker=dart_cli',
-      ...jsArgs,
-    ]);
+    final res = Process.runSync(
+      dartaotruntime,
+      [
+        '$sdkBin/snapshots/dart2js_aot.dart.snapshot',
+        '--invoker=dart_cli',
+        ...jsArgs,
+      ],
+      environment: {
+        ...Platform.environment,
+        'TMPDIR': tmpAbsPath,
+        'TMP': tmpAbsPath,
+        'TEMP': tmpAbsPath,
+      },
+    );
     if (res.exitCode != 0) {
       stdout.write(res.stdout as String);
       stderr.write(res.stderr as String);
       exit(res.exitCode);
     }
   } finally {
-    tmpDir?.deleteSync(recursive: true);
+    if (tmpDir.existsSync()) {
+      tmpDir.deleteSync(recursive: true);
+    }
   }
 
   if (outJs != null) {
-    final outDir = File(outJs).parent;
-    if (outDir.existsSync()) {
-      final cwdUriPrefix = Uri.directory(Directory.current.absolute.path)
-          .toString();
-      final stageUriPrefix = rootDirPath != null
-          ? Uri.directory(rootDirPath).toString()
-          : null;
-      final entries = outDir.listSync(recursive: true)
-        ..sort((a, b) => a.path.compareTo(b.path));
-      for (final entity in entries) {
-        if (entity is File &&
-            (entity.path.endsWith('.deps') ||
-                entity.path.endsWith('.info.json') ||
-                entity.path.endsWith('.map'))) {
-          var content = entity.readAsStringSync();
-          var changed = false;
-          if (stageUriPrefix != null && content.contains(stageUriPrefix)) {
-            content = content.replaceAll(
-              stageUriPrefix,
-              'org-dartlang-app:///',
-            );
-            changed = true;
-          }
-          if (content.contains(cwdUriPrefix)) {
-            content = content.replaceAll(cwdUriPrefix, 'org-dartlang-app:///');
-            changed = true;
-          }
-          if (entity.path.endsWith('.info.json')) {
-            content = content
-                .replaceAllMapped(
-                  RegExp(r'"compilationMoment":\s*"[^"]*"'),
-                  (_) => '"compilationMoment": "1970-01-01 00:00:00.000000"',
-                )
-                .replaceAllMapped(
-                  RegExp(
-                    r'"(compilationDuration|toJsonDuration|dumpInfoDuration)":\s*\d+',
-                  ),
-                  (m) => '"${m.group(1)}": 0',
-                );
-            changed = true;
-          }
-          if (changed) {
-            entity.writeAsStringSync(content);
-          }
-        }
-      }
-    }
+    scrubDart2JsOutputs(
+      File(outJs).parent,
+      cwdPath: cwdPath,
+      rootDirPath: rootDirPath,
+      tmpDirPath: tmpAbsPath,
+      packagesPath: packagesPath,
+      rewrittenPkgPath: rewrittenPkgPath,
+    );
   }
 }

@@ -299,4 +299,42 @@ void main() {
       expect(dart2jsCanvaskitCodePoints, isNot(contains(0xe88a)));
     },
   );
+
+  test(
+    'FlutterDart2JS main.dart.js.deps contains only hermetic org-dartlang-* URIs and no host temp paths',
+    () {
+      for (final (depsSuffix, expectedPkgConfigUri) in [
+        (
+          'text_only_material_fixture_dart2js_fallback/main.dart.js.deps',
+          'org-dartlang-app:///flutter/tests/icon_tree_shake_fixture/text_only_material_fixture.package_config.json',
+        ),
+        (
+          'dart2js_canvaskit_plugin_icon_fixture_dart2js/main.dart.js.deps',
+          'org-dartlang-app:///flutter/tests/icon_tree_shake_fixture/dart2js_canvaskit_plugin_icon_fixture.package_config.json',
+        ),
+      ]) {
+        final depsContent = _findRunfile(depsSuffix).readAsStringSync();
+        final lines = depsContent
+            .split('\n')
+            .where((l) => l.isNotEmpty)
+            .toList();
+        expect(lines, isNotEmpty);
+        expect(lines, contains(expectedPkgConfigUri));
+        for (final line in lines) {
+          expect(line, isNot(contains('file:')));
+          expect(line, isNot(contains('flutter_dart2js_')));
+          expect(line, isNot(contains('_dart2js_tmp')));
+          expect(line, isNot(contains('bazel-out/')));
+          expect(
+            line.startsWith('org-dartlang-app:///') ||
+                line.startsWith('org-dartlang-sdk:///'),
+            isTrue,
+            reason: 'unexpected URI scheme in $depsSuffix: $line',
+          );
+        }
+        final sorted = [...lines]..sort();
+        expect(lines, equals(sorted));
+      }
+    },
+  );
 }

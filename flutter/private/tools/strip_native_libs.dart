@@ -75,9 +75,11 @@ Future<void> main(List<String> args) async {
   final zipper = File(options['--zipper']!).absolute.path;
   final strip = File(options['--strip']!).absolute.path;
   final input = File(options['--input']!).absolute.path;
-  final output = File(options['--output']!).absolute.path;
+  final outputFile = File(options['--output']!).absolute;
+  outputFile.parent.createSync(recursive: true);
+  final output = outputFile.path;
 
-  final scratch = Directory.systemTemp.createTempSync('strip_native_libs');
+  final scratch = Directory('$output.scratch')..createSync(recursive: true);
   try {
     final unpacked = Directory('${scratch.path}/jar')..createSync();
     // zipper takes `-d` relative to its working directory, absolute or not.
