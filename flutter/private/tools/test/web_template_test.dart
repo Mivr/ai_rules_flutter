@@ -571,5 +571,37 @@ void main() {
         expect(infoContent, contains('"dumpInfoDuration": 0'));
       },
     );
+
+    test(
+      'staged app-scheme URIs normalize to their unstaged form in .deps',
+      () {
+        final fakeCwd = Directory('${_tmp.path}/execroot/_main')
+          ..createSync(recursive: true);
+        final outDir = Directory(
+          '${fakeCwd.path}/bazel-out/k8-fastbuild/bin/pkg/app_dart2js_cfe',
+        )..createSync(recursive: true);
+        final depsFile = File('${outDir.path}/app.dill.deps')
+          ..writeAsStringSync(
+            'org-dartlang-app:///flutter/tests/pkg/app.dart2js_cfe.1234.stage/flutter/tests/pkg/lib/main.dart\n'
+            'org-dartlang-app:///flutter/tests/pkg/lib/main.dart\n'
+            'org-dartlang-sdk:///lib/core/core.dart\n',
+          );
+
+        scrubDart2JsOutputs(outDir, cwdPath: fakeCwd.path);
+
+        final depsLines = depsFile
+            .readAsStringSync()
+            .split('\n')
+            .where((l) => l.isNotEmpty)
+            .toList();
+        expect(
+          depsLines,
+          equals([
+            'org-dartlang-app:///flutter/tests/pkg/lib/main.dart',
+            'org-dartlang-sdk:///lib/core/core.dart',
+          ]),
+        );
+      },
+    );
   });
 }

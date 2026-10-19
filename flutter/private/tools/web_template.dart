@@ -664,6 +664,15 @@ void scrubDart2JsOutputs(
         content = content.replaceAll(bazelOutAppUri, 'org-dartlang-app:///');
         changed = true;
       }
+      // A staged input is addressed as `<stage>/<rel>` under the same scheme,
+      // so the same file is recorded with and without the `<stage>/` prefix
+      // depending on which copy the frontend chose. Without this the depfile
+      // differs per strategy even though every URI is already stable.
+      final stagedAppUri = RegExp(r'org-dartlang-app:///.*?\.stage/');
+      if (stagedAppUri.hasMatch(content)) {
+        content = content.replaceAll(stagedAppUri, 'org-dartlang-app:///');
+        changed = true;
+      }
       if (entity.path.endsWith('.map') &&
           stageDirName != null &&
           stageDirName.isNotEmpty) {
