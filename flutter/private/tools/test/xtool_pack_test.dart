@@ -1029,6 +1029,84 @@ void main() {
               ),
             ),
           );
+
+          // Building the same macOS bundle from the same inputs under two
+          // different temp roots (and with --isolated-env +
+          // --certificate-password-env TMPDIR) must produce byte-for-byte
+          // identical .app.zip archives with no temp root or TMPDIR bytes.
+          final sigZsign = File('${tempDir.path}/sig_zsign.sh')
+            ..writeAsStringSync('''#!/bin/sh
+pw=""
+prev=""
+last=""
+for arg in "\$@"; do
+  if [ "\$prev" = "-p" ]; then
+    pw="\$arg"
+  fi
+  prev="\$arg"
+  last="\$arg"
+done
+mkdir -p "\$last/Contents/_CodeSignature"
+printf 'pw=%s\\ntmpdir=%s\\ntest_tmpdir=%s\\n' "\$pw" "\${TMPDIR:-}" "\${TEST_TMPDIR:-}" > "\$last/Contents/_CodeSignature/CodeResources"
+''');
+          Process.runSync('chmod', ['+x', sigZsign.path]);
+
+          List<int> buildUnderTempRoot(String rootName) {
+            final rootDir = Directory('${tempDir.path}/$rootName')
+              ..createSync(recursive: true);
+            final rootExec = File('${rootDir.path}/RunnerBin')
+              ..writeAsBytesSync(execFile.readAsBytesSync());
+            final rootCert = File('${rootDir.path}/cert.p12')
+              ..writeAsBytesSync(certFile.readAsBytesSync());
+            final rootRes = File('${rootDir.path}/greeting.txt')
+              ..writeAsStringSync('hello world');
+            final outZip = '${rootDir.path}/out/macos_bundle.app.zip';
+            final outAppDir = '${rootDir.path}/out/Runner.app';
+            final cfg = parseBundleCliArgs([
+              '--platform',
+              'macos',
+              '--app-name',
+              'Runner',
+              '--bundle-id',
+              'com.example.repro',
+              '--executable',
+              rootExec.path,
+              '--minimum-os-version',
+              '12.0',
+              '--resource',
+              rootRes.path,
+              '--zsign',
+              sigZsign.path,
+              '--certificate',
+              rootCert.path,
+              '--certificate-password-env',
+              'TMPDIR',
+              '--isolated-env',
+              '--output-archive',
+              outZip,
+              '--output-app-dir',
+              outAppDir,
+            ]);
+            assembleBundle(cfg);
+            return File(outZip).readAsBytesSync();
+          }
+
+          final bytesRootA = buildUnderTempRoot('tmp_root_alpha_111');
+          final bytesRootB = buildUnderTempRoot('tmp_root_bravo_999999');
+          expect(bytesRootA, equals(bytesRootB));
+
+          final entriesA = {
+            for (final e in readZipEntries(Uint8List.fromList(bytesRootA)))
+              e.path: e,
+          };
+          final codeResEntry =
+              entriesA['Runner.app/Contents/_CodeSignature/CodeResources'];
+          expect(codeResEntry, isNotNull);
+          final codeResText = utf8.decode(codeResEntry!.data);
+          expect(codeResText, equals('pw=\ntmpdir=\ntest_tmpdir=\n'));
+          for (final entry in entriesA.values) {
+            expect(entry.path, isNot(contains('tmp_root_')));
+          }
         }
 
         // Plain-text --certificate-password on CLI must be rejected.

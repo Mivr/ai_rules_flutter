@@ -1784,11 +1784,11 @@ Directory _allocateDeterministicStageSubdir(Directory base, String prefix) {
   }
 
   final outputParentCandidates = [
+    if (config.outputAppDirPath != null && config.outputAppDirPath!.isNotEmpty)
+      Directory(config.outputAppDirPath!).parent.path,
     if (config.outputArchivePath != null &&
         config.outputArchivePath!.isNotEmpty)
       File(config.outputArchivePath!).parent.path,
-    if (config.outputAppDirPath != null && config.outputAppDirPath!.isNotEmpty)
-      Directory(config.outputAppDirPath!).parent.path,
   ];
 
   for (final candidate in outputParentCandidates) {
@@ -2184,12 +2184,23 @@ void assembleBundle(BundleConfig config) {
         );
       } else if (config.certificatePasswordEnv != null &&
           config.certificatePasswordEnv!.isNotEmpty) {
-        final effectiveEnv = config.environment ?? Platform.environment;
-        final envVal = effectiveEnv[config.certificatePasswordEnv!];
+        final pwEnvKey = config.certificatePasswordEnv!;
+        final String? envVal;
+        if (pwEnvKey == 'TMPDIR' || pwEnvKey == 'TEST_TMPDIR') {
+          envVal = config.environment != null
+              ? (config.environment![pwEnvKey] ?? '')
+              : '';
+        } else if (config.environment != null) {
+          envVal = config.environment![pwEnvKey];
+        } else if (_ambientHostEnvVars.contains(pwEnvKey)) {
+          envVal = null;
+        } else {
+          envVal = Platform.environment[pwEnvKey];
+        }
         if (envVal == null) {
           throw ArgumentError(
             'Certificate password environment variable '
-            '"${config.certificatePasswordEnv}" is not set.',
+            '"$pwEnvKey" is not set.',
           );
         }
         resolvedPassword = envVal;
@@ -3117,6 +3128,19 @@ void _runCompileRunnerCli(List<String> args) {
   }
 }
 
+const Set<String> _ambientHostEnvVars = {
+  'TMPDIR',
+  'TEST_TMPDIR',
+  'HOME',
+  'PATH',
+  'PWD',
+  'USER',
+  'LOGNAME',
+  'SHELL',
+  'SHLVL',
+  '_',
+};
+
 /// Parses `bundle` CLI arguments into a [BundleConfig], throwing [ArgumentError]
 /// on invalid or forbidden flags (such as plain-text `--certificate-password`).
 BundleConfig parseBundleCliArgs(List<String> args) {
@@ -3139,6 +3163,8 @@ BundleConfig parseBundleCliArgs(List<String> args) {
   String? certificatePath;
   String? certificatePasswordFilePath;
   String? certificatePasswordEnv;
+  var isolatedEnv = false;
+  final declaredEnvVars = <String>{};
   String? tempDirPath;
   String? outputArchivePath;
   String? outputAppDirPath;
@@ -3206,6 +3232,10 @@ BundleConfig parseBundleCliArgs(List<String> args) {
         certificatePasswordFilePath = nextVal();
       case '--certificate-password-env':
         certificatePasswordEnv = nextVal();
+      case '--isolated-env':
+        isolatedEnv = true;
+      case '--declared-env':
+        declaredEnvVars.add(nextVal());
       case '--temp-dir':
         tempDirPath = nextVal();
       case '--output-archive':
@@ -3226,6 +3256,35 @@ BundleConfig parseBundleCliArgs(List<String> args) {
       'Required flags: --platform, --app-name, --bundle-id, --executable, '
       'and at least one of --output-archive or --output-app-dir.',
     );
+  }
+
+  final resolvedEnv = <String, String>{};
+  if (isolatedEnv) {
+    for (final key in declaredEnvVars) {
+      if (key == 'TMPDIR' || key == 'TEST_TMPDIR') continue;
+      final val = Platform.environment[key];
+      if (val != null) {
+        resolvedEnv[key] = val;
+      }
+    }
+    if (certificatePasswordEnv != null && certificatePasswordEnv.isNotEmpty) {
+      resolvedEnv.putIfAbsent(certificatePasswordEnv, () => '');
+    }
+  } else {
+    for (final entry in Platform.environment.entries) {
+      if (_ambientHostEnvVars.contains(entry.key) &&
+          !declaredEnvVars.contains(entry.key)) {
+        continue;
+      }
+      if (entry.key == 'TMPDIR' || entry.key == 'TEST_TMPDIR') {
+        continue;
+      }
+      resolvedEnv[entry.key] = entry.value;
+    }
+    if (certificatePasswordEnv == 'TMPDIR' ||
+        certificatePasswordEnv == 'TEST_TMPDIR') {
+      resolvedEnv[certificatePasswordEnv!] = '';
+    }
   }
 
   return BundleConfig(
@@ -3251,6 +3310,7 @@ BundleConfig parseBundleCliArgs(List<String> args) {
     tempDirPath: tempDirPath,
     outputArchivePath: outputArchivePath,
     outputAppDirPath: outputAppDirPath,
+    environment: resolvedEnv,
   );
 }
 

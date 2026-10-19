@@ -453,6 +453,31 @@ def _bundling_tests(name):
         platform = "macos",
         tags = ["manual"],
     )
+    write_file(
+        name = name + "_fake_xtool_cert",
+        out = name + "_fake_xtool_cert.p12",
+        content = ["fake-p12"],
+        tags = ["manual"],
+    )
+    write_file(
+        name = name + "_fake_xtool_zsign",
+        out = name + "_fake_xtool_zsign.sh",
+        content = [
+            "#!/bin/sh",
+            'pw=""',
+            'prev=""',
+            'last=""',
+            'for arg in "$@"; do',
+            '  if [ "$prev" = "-p" ]; then pw="$arg"; fi',
+            '  prev="$arg"',
+            '  last="$arg"',
+            "done",
+            'mkdir -p "$last/Contents/_CodeSignature"',
+            'printf "pw=%s\\ntmpdir=%s\\ntest_tmpdir=%s\\n" "$pw" "${TMPDIR:-}" "${TEST_TMPDIR:-}" > "$last/Contents/_CodeSignature/CodeResources"',
+        ],
+        is_executable = True,
+        tags = ["manual"],
+    )
     flutter_xtool_macos_bundle(
         name = name + "_fake_xtool_macos_bundle",
         app_name = "Runner",
@@ -460,6 +485,21 @@ def _bundling_tests(name):
         executable = name + "_fake_macos_runner_bin",
         frameworks = [name + "_fake_release_macho_app_framework"],
         native_libs = [name + "_native_libs"],
+        certificate = ":" + name + "_fake_xtool_cert",
+        certificate_password_env = "TMPDIR",
+        zsign = ":" + name + "_fake_xtool_zsign",
+        tags = ["manual"],
+    )
+    flutter_xtool_macos_bundle(
+        name = name + "_fake_xtool_macos_bundle_alt",
+        app_name = "Runner",
+        bundle_id = "com.example.runner",
+        executable = name + "_fake_macos_runner_bin",
+        frameworks = [name + "_fake_release_macho_app_framework"],
+        native_libs = [name + "_native_libs"],
+        certificate = ":" + name + "_fake_xtool_cert",
+        certificate_password_env = "TMPDIR",
+        zsign = ":" + name + "_fake_xtool_zsign",
         tags = ["manual"],
     )
     fake_xcframework(
@@ -683,6 +723,7 @@ def _bundling_tests(name):
             name + "_verify_fat_macos_native_libs",
             name + "_fake_non_macho_native_libs",
             name + "_fake_xtool_macos_bundle",
+            name + "_fake_xtool_macos_bundle_alt",
             name + "_sample_macos_plugin_lib",
             name + "_e2e_macos_app",
             "__" + name + "_e2e_macos_app_app_framework",

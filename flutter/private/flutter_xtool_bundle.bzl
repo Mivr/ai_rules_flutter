@@ -101,6 +101,8 @@ def _flutter_xtool_bundle_version_impl(ctx):
                 "--output",
                 bundle_version_file.path,
             ],
+            env = {"TMPDIR": "/tmp"},
+            use_default_shell_env = False,
             inputs = [control_file, ctx.info_file],
             outputs = [bundle_version_file],
             mnemonic = "FlutterXtoolBundleVersion",
@@ -694,6 +696,8 @@ def _run_xtool_pack_bundle(
         ctx.actions.run(
             executable = ctx.executable._xtool_pack,
             arguments = [runner_args],
+            env = {"TMPDIR": "/tmp"},
+            use_default_shell_env = False,
             inputs = depset(
                 direct = sources + headers + modulemaps + fw_direct_inputs,
                 transitive = fw_transitive_inputs + plugin_transitive_sets + sdk_transitive,
@@ -790,10 +794,16 @@ def _run_xtool_pack_bundle(
         direct_inputs.append(ctx.file.certificate_password_file)
 
     action_env = dict(ctx.attr.env)
+    args.add("--isolated-env")
+    for env_key in sorted(ctx.attr.env.keys()):
+        if env_key != "TMPDIR" and env_key != "TEST_TMPDIR":
+            args.add("--declared-env", env_key)
     if ctx.attr.certificate_password_env:
         args.add("--certificate-password-env", ctx.attr.certificate_password_env)
         if ctx.attr.certificate_password_env not in action_env:
             action_env[ctx.attr.certificate_password_env] = ""
+    if not action_env.get("TMPDIR"):
+        action_env["TMPDIR"] = "/tmp"
 
     ctx.actions.run(
         executable = ctx.executable._xtool_pack,

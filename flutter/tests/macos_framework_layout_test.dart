@@ -418,5 +418,31 @@ void main() {
         binaryName: 'FlutterMacOS',
       );
     });
+
+    test('xtool macOS bundles built under different staging roots with certificate_password_env=TMPDIR are byte-identical', () {
+      final zipAEntities = _findRunfileEntities(
+        (p) => p.endsWith('/macos_test_fake_xtool_macos_bundle.app.zip'),
+      );
+      final zipBEntities = _findRunfileEntities(
+        (p) => p.endsWith('/macos_test_fake_xtool_macos_bundle_alt.app.zip'),
+      );
+      expect(zipAEntities, isNotEmpty);
+      expect(zipBEntities, isNotEmpty);
+
+      final fileA = File(zipAEntities.first.path);
+      final fileB = File(zipBEntities.first.path);
+      final bytesA = fileA.readAsBytesSync();
+      final bytesB = fileB.readAsBytesSync();
+      expect(bytesA, equals(bytesB));
+
+      final entriesA = _readZip(fileA);
+      final codeRes =
+          entriesA['Runner.app/Contents/_CodeSignature/CodeResources'];
+      expect(codeRes, isNotNull);
+      expect(
+        utf8.decode(codeRes!.decodeBytes()),
+        equals('pw=\ntmpdir=\ntest_tmpdir=\n'),
+      );
+    });
   });
 }
