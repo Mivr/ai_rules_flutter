@@ -1726,6 +1726,7 @@ class BundleConfig {
   final String? outputArchivePath;
   final String? outputAppDirPath;
   final String? tempDirPath;
+  final Map<String, String>? environment;
 
   const BundleConfig({
     required this.platform,
@@ -1750,7 +1751,23 @@ class BundleConfig {
     this.outputArchivePath,
     this.outputAppDirPath,
     this.tempDirPath,
+    this.environment,
   });
+}
+
+Directory _allocateDeterministicStageSubdir(Directory base, String prefix) {
+  final primary = Directory('${base.path}/$prefix');
+  if (!primary.existsSync()) {
+    primary.createSync(recursive: true);
+    return primary;
+  }
+  for (var i = 1; ; i++) {
+    final candidate = Directory('${base.path}/${prefix}_$i');
+    if (!candidate.existsSync()) {
+      candidate.createSync(recursive: true);
+      return candidate;
+    }
+  }
 }
 
 (Directory stageDir, Directory? createdBaseDir) _createStagingDirectory(
@@ -1762,27 +1779,28 @@ class BundleConfig {
     if (!existed) {
       base.createSync(recursive: true);
     }
-    final stage = base.createTempSync('stage_');
+    final stage = _allocateDeterministicStageSubdir(base, 'stage');
     return (stage, existed ? null : base);
   }
 
-  final envCandidates = [
-    Platform.environment['TEST_TMPDIR'],
+  final outputParentCandidates = [
     if (config.outputArchivePath != null &&
         config.outputArchivePath!.isNotEmpty)
       File(config.outputArchivePath!).parent.path,
     if (config.outputAppDirPath != null && config.outputAppDirPath!.isNotEmpty)
       Directory(config.outputAppDirPath!).parent.path,
-    Platform.environment['TMPDIR'],
   ];
 
-  for (final candidate in envCandidates) {
-    if (candidate != null && candidate.isNotEmpty) {
+  for (final candidate in outputParentCandidates) {
+    if (candidate.isNotEmpty) {
       final base = Directory(candidate);
       if (!base.existsSync()) {
         base.createSync(recursive: true);
       }
-      final stage = base.createTempSync('xtool_pack_');
+      final stage = _allocateDeterministicStageSubdir(
+        base,
+        '.xtool_pack_stage',
+      );
       return (stage, null);
     }
   }
@@ -1792,7 +1810,7 @@ class BundleConfig {
   if (!existed) {
     fallbackBase.createSync(recursive: true);
   }
-  final stage = fallbackBase.createTempSync('stage_');
+  final stage = _allocateDeterministicStageSubdir(fallbackBase, 'stage');
   return (stage, existed ? null : fallbackBase);
 }
 
@@ -2166,7 +2184,8 @@ void assembleBundle(BundleConfig config) {
         );
       } else if (config.certificatePasswordEnv != null &&
           config.certificatePasswordEnv!.isNotEmpty) {
-        final envVal = Platform.environment[config.certificatePasswordEnv!];
+        final effectiveEnv = config.environment ?? Platform.environment;
+        final envVal = effectiveEnv[config.certificatePasswordEnv!];
         if (envVal == null) {
           throw ArgumentError(
             'Certificate password environment variable '
@@ -2199,7 +2218,12 @@ void assembleBundle(BundleConfig config) {
       }
       zsignArgs.add(appDir.path);
       redactedArgs.add(appDir.path);
-      final result = Process.runSync(config.zsignPath!, zsignArgs);
+      final result = Process.runSync(
+        config.zsignPath!,
+        zsignArgs,
+        environment: const {'PATH': '/usr/bin:/bin'},
+        includeParentEnvironment: false,
+      );
       if (result.exitCode != 0) {
         throw ProcessException(
           config.zsignPath!,
@@ -2749,7 +2773,12 @@ void compileRunner(RunnerCompileConfig config) {
     ]);
 
     File(config.outputPath).parent.createSync(recursive: true);
-    final result = Process.runSync(config.swiftcPath!, swiftcArgs);
+    final result = Process.runSync(
+      config.swiftcPath!,
+      swiftcArgs,
+      environment: const {'PATH': '/usr/bin:/bin'},
+      includeParentEnvironment: false,
+    );
     if (result.exitCode != 0) {
       throw ProcessException(
         config.swiftcPath!,

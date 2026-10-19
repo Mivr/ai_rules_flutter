@@ -938,9 +938,12 @@ void main() {
         final certFile = File('${tempDir.path}/cert.p12')
           ..writeAsStringSync('mock-p12');
         final argsLog = File('${tempDir.path}/zsign_args.txt');
+        final envLog = File('${tempDir.path}/zsign_env.txt');
         final fakeZsign = File('${tempDir.path}/fake_zsign.sh')
           ..writeAsStringSync(
-            '#!/bin/sh\nprintf "%s\\n" "\$@" > "${argsLog.path}"\n',
+            '#!/bin/sh\n'
+            'printf "%s\\n" "\$@" > "${argsLog.path}"\n'
+            'env > "${envLog.path}"\n',
           );
         if (!Platform.isWindows) {
           Process.runSync('chmod', ['0755', fakeZsign.path]);
@@ -961,6 +964,71 @@ void main() {
           final logged = argsLog.readAsLinesSync();
           expect(logged, contains('-p'));
           expect(logged, contains('file-secret-pw'));
+          expect(
+            logged.last,
+            equals('${tempDir.path}/tmp_sec/stage/Payload/Runner.app'),
+          );
+
+          // Verify certificatePasswordEnv reads from declared environment and
+          // does not leak parent environment variables (like TMPDIR or TEST_TMPDIR)
+          // into the zsign subprocess.
+          assembleBundle(
+            BundleConfig(
+              platform: 'macos',
+              appName: 'Runner',
+              bundleId: 'com.example.sec.env',
+              executablePath: execFile.path,
+              minimumOsVersion: '11.0',
+              zsignPath: fakeZsign.path,
+              certificatePath: certFile.path,
+              certificatePasswordEnv: 'DECLARED_CERT_PW',
+              environment: const {'DECLARED_CERT_PW': 'env-secret-pw'},
+              outputArchivePath: '${tempDir.path}/out/SecEnv.app.zip',
+            ),
+          );
+          final envLoggedArgs = argsLog.readAsLinesSync();
+          expect(envLoggedArgs, contains('-p'));
+          expect(envLoggedArgs, contains('env-secret-pw'));
+          expect(
+            envLoggedArgs.last,
+            equals('${tempDir.path}/out/.xtool_pack_stage/Runner.app'),
+          );
+          final zsignEnvLines = envLog.readAsLinesSync();
+          expect(
+            zsignEnvLines.any((l) => l.startsWith('DECLARED_CERT_PW=')),
+            isFalse,
+          );
+          expect(zsignEnvLines.any((l) => l.startsWith('TMPDIR=')), isFalse);
+          expect(
+            zsignEnvLines.any((l) => l.startsWith('TEST_TMPDIR=')),
+            isFalse,
+          );
+
+          // Undeclared env var in BundleConfig.environment must fail even if
+          // present in the host process environment.
+          expect(
+            () => assembleBundle(
+              BundleConfig(
+                platform: 'macos',
+                appName: 'Runner',
+                bundleId: 'com.example.sec.missing',
+                executablePath: execFile.path,
+                minimumOsVersion: '11.0',
+                zsignPath: fakeZsign.path,
+                certificatePath: certFile.path,
+                certificatePasswordEnv: 'PATH',
+                environment: const {},
+                outputArchivePath: '${tempDir.path}/out/SecMissing.app.zip',
+              ),
+            ),
+            throwsA(
+              isA<ArgumentError>().having(
+                (e) => e.message,
+                'message',
+                contains('is not set'),
+              ),
+            ),
+          );
         }
 
         // Plain-text --certificate-password on CLI must be rejected.

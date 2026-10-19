@@ -778,6 +778,7 @@ def flutter_ios_app(
             "certificate_password_file",
             "compatible_with",
             "defines",
+            "env",
             "exec_compatible_with",
             "executable",
             "features",

@@ -789,6 +789,11 @@ def _xtool_macos_attrs_and_secrets_test_impl(ctx):
         "--certificate-password-env" in argv and "MACOS_CERT_PW_ENV" in argv,
         "Expected --certificate-password-env MACOS_CERT_PW_ENV in argv: %s" % argv,
     )
+    asserts.true(
+        env,
+        "MACOS_CERT_PW_ENV" in bundle_actions[0].env,
+        "Expected MACOS_CERT_PW_ENV to be explicitly bound in FlutterXtoolMacosBundle action env, got: %s" % bundle_actions[0].env,
+    )
     for a in actions:
         for arg in a.argv:
             asserts.false(

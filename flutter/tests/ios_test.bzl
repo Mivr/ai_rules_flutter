@@ -773,6 +773,11 @@ def _xtool_ios_attrs_and_secrets_test_impl(ctx):
         "--certificate-password-env" in argv and "IOS_CERT_PW_ENV" in argv,
         "Expected --certificate-password-env IOS_CERT_PW_ENV in argv: %s" % argv,
     )
+    asserts.true(
+        env,
+        "IOS_CERT_PW_ENV" in bundle_actions[0].env,
+        "Expected IOS_CERT_PW_ENV to be explicitly bound in FlutterXtoolIosBundle action env, got: %s" % bundle_actions[0].env,
+    )
     for a in actions:
         for arg in a.argv:
             asserts.false(

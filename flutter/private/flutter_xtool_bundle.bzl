@@ -789,12 +789,17 @@ def _run_xtool_pack_bundle(
         args.add("--certificate-password-file", ctx.file.certificate_password_file.path)
         direct_inputs.append(ctx.file.certificate_password_file)
 
+    action_env = dict(ctx.attr.env)
     if ctx.attr.certificate_password_env:
         args.add("--certificate-password-env", ctx.attr.certificate_password_env)
+        if ctx.attr.certificate_password_env not in action_env:
+            action_env[ctx.attr.certificate_password_env] = ""
 
     ctx.actions.run(
         executable = ctx.executable._xtool_pack,
         arguments = [args],
+        env = action_env,
+        use_default_shell_env = False,
         inputs = depset(
             direct = direct_inputs,
             transitive = fw_transitive_inputs,
@@ -871,6 +876,10 @@ _COMMON_BUNDLE_ATTRS = {
     "defines": attr.string_dict(
         default = {},
         doc = "Optional variable substitutions (`KEY: VALUE`) applied when merging `Info.plist` files.",
+    ),
+    "env": attr.string_dict(
+        default = {},
+        doc = "Optional explicit environment variables set on the `xtool_pack` bundle action.",
     ),
     "infoplists": attr.label_list(
         allow_files = [".plist"],
@@ -950,7 +959,7 @@ _COMMON_BUNDLE_ATTRS = {
     ),
     "certificate_password_env": attr.string(
         default = "",
-        doc = "Optional environment variable name holding the password for `certificate`, read at execution time by `xtool_pack`.",
+        doc = "Optional environment variable name holding the password for `certificate`, read at execution time from the action's declared `env` by `xtool_pack`.",
     ),
     "certificate_password": attr.string(
         default = "",
