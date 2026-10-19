@@ -69,7 +69,9 @@ def _flutter_aot_target_impl(ctx):
 
     strip = ctx.var["COMPILATION_MODE"] == "opt"
 
-    extra_flags, extra_outputs, debug_info_output = flutter_aot_gen_snapshot_flags(ctx)
+    # Obfuscation forces `--strip` (see `flutter_aot_gen_snapshot_flags`):
+    # unstripped DWARF would leak the original names.
+    extra_flags, extra_outputs, debug_info_output, strip = flutter_aot_gen_snapshot_flags(ctx, strip)
 
     if is_ios or is_macos:
         output = ctx.actions.declare_file(ctx.label.name + ".dylib")

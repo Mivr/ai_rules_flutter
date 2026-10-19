@@ -2,6 +2,7 @@ load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
 load("//flutter/private:flutter_aot_target.bzl", "flutter_aot_target")
 load(":action_inputs_test.bzl", "action_inputs_test_suite")
+load(":aot_flags_test.bzl", "aot_flags_test_suite")
 load(":app_entrypoint_test.bzl", "app_entrypoint_test_suite")
 load(":artifact_urls_test.bzl", "artifact_urls_test_suite")
 load(":asset_bundle_test.bzl", "asset_bundle_test_suite")
@@ -137,3 +138,5 @@ build_test(
     target_compatible_with = HOST_COMPATIBLE,
     targets = [":aot_split_debug_target"],
 )
+
+aot_flags_test_suite(name = "aot_flags_test")

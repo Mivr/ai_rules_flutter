@@ -55,7 +55,7 @@ def _has_gen_snapshot_flag(flags, name):
             return True
     return False
 
-def flutter_aot_gen_snapshot_flags(ctx):
+def flutter_aot_gen_snapshot_flags(ctx, strip):
     """Build gen_snapshot extra flags/outputs from a rule's AOT attrs.
 
     Shared by `flutter_application` and `flutter_aot_target` so the two cannot
@@ -67,11 +67,17 @@ def flutter_aot_gen_snapshot_flags(ctx):
     the debugging info. `--dwarf-stack-traces` keeps DWARF stack traces and
     `--save-debugging-info` keeps the split output without resolving paths.
 
+    When `obfuscate` is set the returned `strip` is forced True: gen_snapshot
+    embeds full DWARF debugging info carrying the original, unobfuscated names
+    unless `--strip` is passed (it warns about this itself), so an unstripped
+    "obfuscated" snapshot still leaks every class name.
+
     Args:
         ctx: Rule context carrying the AOT attributes.
+        strip: Whether the caller would strip for the current compilation mode.
 
     Returns:
-        A tuple of (extra_flags, extra_outputs, debug_info_output).
+        A tuple of (extra_flags, extra_outputs, debug_info_output, strip).
     """
     extra_flags = list(ctx.attr.extra_gen_snapshot_options)
     extra_outputs = []
@@ -88,7 +94,21 @@ def flutter_aot_gen_snapshot_flags(ctx):
             extra_flags.append("--save-debugging-info=" + debug_info_output.path)
         extra_outputs.append(debug_info_output)
 
-    return extra_flags, extra_outputs, debug_info_output
+    if ctx.attr.obfuscate:
+        strip = True
+
+    if strip:
+        # `--strip` is emitted from the action's `strip` parameter, so drop any
+        # user-supplied spelling: the command line carries it exactly once.
+        # `--no-strip` contradicts `obfuscate` (it would keep the unobfuscated
+        # DWARF), so obfuscation wins over it.
+        extra_flags = [
+            f
+            for f in extra_flags
+            if f != "--strip" and (f != "--no-strip" or not ctx.attr.obfuscate)
+        ]
+
+    return extra_flags, extra_outputs, debug_info_output, strip
 
 def flutter_aot_elf_action(ctx, gen_snapshot, kernel_dill, output, strip = True, extra_flags = [], extra_outputs = []):
     """AOT compile to ELF shared library. Used for Android, Linux, Windows."""

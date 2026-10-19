@@ -159,8 +159,9 @@ def _flutter_application_impl(ctx):
     debug_info_output = None
     if not is_debug:
         # Collect gen_snapshot extra flags from user attrs (shared with
-        # flutter_aot_target so the two stay in step).
-        extra_flags, extra_outputs, debug_info_output = flutter_aot_gen_snapshot_flags(ctx)
+        # flutter_aot_target so the two stay in step). Obfuscation forces
+        # `--strip`: unstripped DWARF would leak the original names.
+        extra_flags, extra_outputs, debug_info_output, strip = flutter_aot_gen_snapshot_flags(ctx, strip)
 
         # Step 2: AOT compile — choose format based on target platform.
         if is_ios or is_macos:
