@@ -192,7 +192,11 @@ Map<String, Set<int>>? mergeConstFinderCodePoints(
       final m = instance as Map<String, dynamic>;
       final family = m['fontFamily'] as String?;
       final pkg = m['fontPackage'] as String?;
-      final codePoint = m['codePoint'] as int?;
+      // const_finder emits whole-number code points as JSON numbers, which
+      // decode as int from VM kernels but as double (e.g. 57669.0) from DDC
+      // web kernels. Accept either, like upstream's `codePoint.round()`.
+      final codePointRaw = m['codePoint'];
+      final codePoint = codePointRaw is num ? codePointRaw.toInt() : null;
       if (family != null && codePoint != null) {
         final key = (pkg == null || pkg.isEmpty)
             ? family

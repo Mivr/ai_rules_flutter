@@ -55,19 +55,17 @@ load(
     "resolve_flutter_sdk_info",
     "shader_sources",
 )
-load("//flutter/private:flutter_compile.bzl", "flutter_kernel_compile_action")
 load("//flutter/private:flutter_info.bzl", "dedup_plugins")
 load(
     "//flutter/private:flutter_kernel_module.bzl",
     "MODULAR_KERNEL_ATTRS",
-    "compile_flutter_modular_web_kernel",
     "flutter_kernel_module_aspect",
-    "flutter_modular_test_tools",
 )
 load("//flutter/private:flutter_library.bzl", "aggregate_pub_contributions", "resolve_font_subset_tools")
 load(
     "//flutter/private:flutter_web_compile.bzl",
     "flutter_dart2js_action",
+    "flutter_dart2js_cfe_action",
     "flutter_dart2wasm_action",
     "web_build_mode",
     "web_experiment_flags",
@@ -332,7 +330,6 @@ def _flutter_web_bundle_impl(ctx):
     # the same way the native kernel path switches on COMPILATION_MODE.
     mode = web_build_mode(ctx)
     is_debug = mode == "debug"
-    is_profile = mode == "profile"
 
     # Step 1: Collect sources, generate package config, handle plugin registrant.
     # dart compile wasm/js take .dart source directly (not kernel .dill).
@@ -626,10 +623,7 @@ def _flutter_web_bundle_impl(ctx):
             "(`@rules_flutter//flutter:font_subset_toolchain_type`) for the execution platform.",
         )
     has_font_tree_shake = bool(fonts) and const_finder != None and font_subset != None
-    icon_platform_dill = (
-        flutter_sdk_info.platform_kernel_dill if is_profile and flutter_sdk_info.platform_kernel_dill != None else flutter_sdk_info.platform_kernel_dill_product
-    )
-    has_experiment_kernel = bool(ctx.attr.enable_experiments) and icon_platform_dill != None
+    has_experiment_kernel = bool(ctx.attr.enable_experiments)
 
     shipped_renderers = []
     for b in builds:
@@ -639,85 +633,49 @@ def _flutter_web_bundle_impl(ctx):
     kernel_dills = []
     tree_shake_key_parts = []
     if ctx.attr.tree_shake_icons and not is_debug and (has_font_tree_shake or has_experiment_kernel):
-        if icon_platform_dill == None:
-            fail(
-                "Unresolved @rules_flutter//flutter:product_tools_toolchain_type " +
-                "(@rules_flutter//flutter/private:product_tools_toolchain_type): " +
-                "Flutter toolchain does not provide platform_kernel_dill_product, " +
-                "which is required for release icon tree-shaking kernel compilation. " +
-                "Register the Flutter toolchains (e.g. `flutter.toolchain()` in " +
-                "MODULE.bazel or `register_toolchains(\"@flutter_toolchains//:all\")`) " +
-                "or set `platform_kernel_dill_product` on `flutter_toolchain`.",
-            )
-        entrypoint_uri = app_scheme_location(entrypoint).uri
-
+        # The icon tree-shake kernel must see the web program the dart2js and
+        # dart2wasm compilers build: conditional imports guarded by
+        # `dart.library.js_interop`/`dart.library.html` resolve from the
+        # platform's `dart.library.*` environment. Compiling with
+        # `--target flutter` against the VM `platform_strong.dill` resolves
+        # them to the VM branch while the web compilers take the web branch,
+        # so the tree-shaken font lacks glyphs the shipped bundle draws.
+        # Compile here with `dart compile js --cfe-only`, which is what
+        # upstream runs to produce the `app.dill` const_finder reads: the
+        # kernel resolves web conditionals the way the shipped compilers do,
+        # and `dart:js_interop`/`dart:ui_web` type-check against the real web
+        # libraries instead of VM stubs. One dill per shipped renderer, with
+        # that renderer's defines, merged downstream by const_finder. The
+        # compile takes the same sources as the shipped programs, so editing
+        # a web-branch file re-runs it instead of hitting a stale disk-cache
+        # entry.
         icon_renderers = shipped_renderers if has_font_tree_shake else [renderer]
         for idx, r in enumerate(icon_renderers):
             dill_suffix = "_icon_tree_shaking.dill" if idx == 0 else ("_icon_tree_shaking_%s.dill" % r)
             dill_out = ctx.actions.declare_file(ctx.label.name + dill_suffix)
+            deps_out = ctx.actions.declare_file(ctx.label.name + dill_suffix + ".deps")
             renderer_defines = web_renderer_defines(r)
-            from_dill = None
-
-            # `fastbuild` web builds pre-link modular `.flutter_product.kmod` modules
-            # compiled with `-Ddart.vm.product=true` and default skwasm renderer
-            # defines against the product platform dill so `kReleaseMode` and
-            # renderer defines fold identically in both dependency modules and the
-            # entry module, matching the release web bundle that ships.
-            if (False):
-                own_files = [ctx.file.main] + [f for f in ctx.files.srcs if f != ctx.file.main]
-                modular_tools = flutter_modular_test_tools(
-                    ctx,
-                    flutter_sdk_info,
-                    own_files,
-                    packages,
-                    [],
-                    product = True,
-                )
-                if modular_tools != None:
-                    from_dill = dill_out
-                    compile_flutter_modular_web_kernel(
-                        ctx,
-                        flutter_sdk_info,
-                        modular_tools,
-                        lib_root,
-                        packages,
-                        dill_out,
-                        entrypoint = entrypoint,
-                        ui_web_stub = ui_web_stub,
-                        renderer_defines = renderer_defines,
-                    )
 
             r_defines = list(user_defines) + web_mode_defines(mode) + renderer_defines
             r_salt = entrypoint_salt + "\n" + "\n".join(r_defines) + "\n" + "\n".join(ctx.attr.enable_experiments)
-            if from_dill != None:
-                kernel_dills.append(from_dill)
-                tree_shake_key_parts.append(r + ":" + r_salt)
-                continue
-            flutter_kernel_compile_action(
+            flutter_dart2js_cfe_action(
                 ctx = ctx,
-                dartaotruntime = flutter_sdk_info.dartaotruntime,
-                kernel_filter_tool = ctx.executable._kernel_filter_tool,
-                frontend_server = flutter_sdk_info.frontend_server,
-                platform_dill = icon_platform_dill,
-                main = entrypoint,
-                entrypoint_uri = entrypoint_uri,
+                dart = flutter_dart,
+                flutter_sdk_files = flutter_sdk_info.dart2js_files,
+                web_sdk_files = dart2js_web_sdk_files,
+                dart2js_platform_dill = ctx.file._dart2js_platform_dill,
+                main_dart = entrypoint,
                 srcs = all_srcs,
                 package_config = config_file,
-                output = dill_out,
-                aot = True,
-                # Mode-derived and renderer-derived so icon tree-shaking compiles
-                # the same entrypoint, plugin registrant, and defines as each
-                # shipped web program.
-                defines = r_defines,
-                # The experiments have to reach this compile too: they change how
-                # the source *parses*, so a release build of experiment-using code
-                # would die here — in an icon-shaking step the user never asked
-                # for — while both real compilers accepted it.
-                extra_flags = web_experiment_flags(ctx.attr.enable_experiments),
-                from_dill = from_dill,
-                stage_all = True,
+                output_dill = dill_out,
+                output_deps = deps_out,
+                mode = mode,
+                enable_experiments = ctx.attr.enable_experiments,
+                defines = user_defines,
+                renderer = r,
+                web_compile_tool = ctx.executable._web_template_tool,
+                web_compile_inputs = web_compile_inputs,
                 stage_salt = r_salt,
-                rewrite_web_conditionals = True,
             )
             kernel_dills.append(dill_out)
             tree_shake_key_parts.append(r + ":" + r_salt)

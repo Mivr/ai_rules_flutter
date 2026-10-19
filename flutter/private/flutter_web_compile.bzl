@@ -473,3 +473,133 @@ def flutter_dart2js_action(
         progress_message = "Compiling Flutter to JavaScript %s" % ctx.label,
         env = _sandbox_env(dart, output_dir.path),
     )
+
+def flutter_dart2js_cfe_action(
+        ctx,
+        dart,
+        flutter_sdk_files,
+        web_sdk_files,
+        dart2js_platform_dill,
+        main_dart,
+        srcs,
+        package_config,
+        output_dill,
+        output_deps,
+        mode,
+        optimization_level = "auto",
+        minify = "auto",
+        native_null_assertions = True,
+        frequency_based_minification = True,
+        enable_experiments = [],
+        defines = [],
+        renderer = "canvaskit",
+        web_compile_tool = None,
+        web_compile_inputs = [],
+        stage_salt = ""):
+    """Compiles Dart to a kernel dill with dart2js's frontend for icon tree-shaking.
+
+    Runs `dart compile js --cfe-only`, the same frontend upstream runs to
+    produce the `app.dill` const_finder reads on web builds. The kernel
+    resolves platform-conditional imports (`if (dart.library.js_interop)`)
+    to the web branch, as the shipped dart2js/dart2wasm programs do, and
+    type-checks `dart:js_interop`/`dart:ui_web` against the real web
+    libraries. One dill is compiled per shipped renderer (with that
+    renderer's defines); const_finder unions the code points across them.
+
+    Args:
+        ctx: Rule context.
+        dart: The `dart` executable File.
+        flutter_sdk_files: SDK files needed to run dart.
+        web_sdk_files: Flutter web SDK files.
+        dart2js_platform_dill: The dart2js_platform.dill File.
+        main_dart: The main .dart source File.
+        srcs: All transitive source Files needed for compilation, so editing
+            a web-branch file re-runs the compile instead of hitting a stale
+            disk-cache entry.
+        package_config: The package_config.json File.
+        output_dill: Output kernel .dill File (`-o`). dart2js also writes
+            `<dill>.deps` beside it, declared as `output_deps`.
+        output_deps: Output depfile File (`<dill>.deps`).
+        mode: A `web_build_mode` value; selects the mode defines.
+        optimization_level: Tristate `-O` level, as in `flutter_dart2js_action`.
+        minify: Tristate name minification, as in `flutter_dart2js_action`.
+        native_null_assertions: As in `flutter_dart2js_action`.
+        frequency_based_minification: As in `flutter_dart2js_action`.
+        enable_experiments: Dart language experiments to enable.
+        defines: Dart -D defines (user defines; mode and renderer defines
+            are added here to match each shipped program).
+        renderer: Web renderer ("canvaskit" or "skwasm"), for the renderer
+            defines when the caller does not state them in `defines`.
+        web_compile_tool: Optional wrapper, as in `flutter_dart2js_action`.
+        web_compile_inputs: Additional inputs, as in `flutter_dart2js_action`.
+        stage_salt: Optional salt, as in `flutter_dart2js_action`.
+    """
+    stage = struct(root = None, files = [])
+    if web_compile_tool != None:
+        stage = stage_generated_inputs(ctx, [main_dart] + srcs, output_dill.basename + ".dart2js_cfe", include_sources = True, salt = stage_salt)
+
+    args = ctx.actions.args()
+    if web_compile_tool != None:
+        args.add(web_compile_tool)
+    args.add("compile")
+    args.add("js")
+    if stage.root != None:
+        args.add("--multi-root=" + stage.root)
+
+    libraries_spec = dart2js_platform_dill.dirname + "/../libraries.json"
+    for f in web_sdk_files:
+        if f.basename.startswith("libraries.") and f.basename != "libraries.json" and f.basename.endswith(".json"):
+            libraries_spec = f.path
+            break
+        elif f.basename == "libraries.json" and "/web-sdk/" in f.path:
+            libraries_spec = f.path
+    args.add("--platform-binaries=" + dart2js_platform_dill.dirname)
+    args.add("--libraries-spec=" + libraries_spec)
+
+    args.add("--packages=" + package_config.path)
+
+    args.add_all(web_experiment_flags(enable_experiments))
+
+    args.add("-O%d" % resolve_web_optimization_level(
+        optimization_level,
+        default_dart2js_optimization_level(mode),
+    ))
+    if native_null_assertions:
+        args.add("--native-null-assertions")
+    args.add("--minify" if resolve_web_minify(minify, mode) else "--no-minify")
+    if not frequency_based_minification:
+        args.add("--no-frequency-based-minification")
+
+    for d in web_mode_defines(mode):
+        args.add("-D" + d)
+    if mode == "debug":
+        args.add("--enable-asserts")
+    if renderer == "canvaskit":
+        args.add("-DFLUTTER_WEB_USE_SKIA=true")
+        args.add("-DFLUTTER_WEB_USE_SKWASM=false")
+    elif renderer == "skwasm":
+        args.add("-DFLUTTER_WEB_USE_SKIA=false")
+        args.add("-DFLUTTER_WEB_USE_SKWASM=true")
+    for d in defines:
+        args.add("-D" + d)
+
+    # Frontend-only: emit the kernel const_finder reads, not JavaScript.
+    args.add("--cfe-only")
+    args.add("-o", output_dill)
+    args.add(main_dart)
+
+    direct_inputs = [main_dart, package_config, dart2js_platform_dill] + srcs + stage.files + web_compile_inputs
+    if web_compile_tool != None:
+        direct_inputs.append(web_compile_tool)
+    ctx.actions.run(
+        executable = dart,
+        arguments = [args],
+        inputs = depset(
+            direct = direct_inputs,
+            transitive = [flutter_sdk_files, depset(web_sdk_files)],
+        ),
+        outputs = [output_dill, output_deps],
+        mnemonic = "FlutterDart2JSCFE",
+        progress_message = "Compiling Flutter web icon kernel %s" % ctx.label,
+        env = _sandbox_env(dart, output_dill.dirname),
+    )

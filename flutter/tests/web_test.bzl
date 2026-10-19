@@ -946,11 +946,11 @@ def _experiments_test_impl(ctx):
     kernels = [
         a
         for a in analysistest.target_actions(env)
-        if a.mnemonic == "FlutterKernelCompile"
+        if a.mnemonic == "FlutterDart2JSCFE"
     ]
     asserts.equals(env, 1, len(kernels), "expected the icon tree-shake kernel compile")
     if kernels:
-        _assert_argv(env, kernels[0], present = [flag, "--no-embed-source-text"])
+        _assert_argv(env, kernels[0], present = [flag, "--cfe-only"])
     return analysistest.end(env)
 
 _experiments_test = analysistest.make(
@@ -961,61 +961,106 @@ _experiments_test = analysistest.make(
     },
 )
 
-def _font_icon_tree_shake_test_impl(ctx):
-    """A fastbuild web build links product modular `.flutter_product.kmod` modules for skwasm and compiles canvaskit fallback for icon tree-shaking."""
+def _web_conditional_icon_test_impl(ctx):
+    """The icon tree-shake kernel compiles with the web compiler so platform-conditional imports resolve to the web branch.
+
+    `package:cond_icons` exports `icon_vm.dart` normally and `icon_web.dart`
+    when `dart.library.js_interop` is available. The web compilers take the
+    web branch; a `--target flutter` kernel against the VM platform takes the
+    VM branch, so const_finder misses the web icon. Asserted here as the
+    action shape that guarantees the resolution: a `dart compile js
+    --cfe-only` kernel (the same frontend upstream runs to produce the
+    `app.dill` const_finder reads), with the web platform binaries and
+    libraries spec, and both branches' files among the inputs (so editing
+    the web branch re-runs the compile instead of hitting a stale disk-cache
+    entry keyed only on the VM-resolved digest).
+    """
     env = analysistest.begin(ctx)
-    entry_kernel = _action(env, "DartKernel")
-    _assert_argv(
-        env,
-        entry_kernel,
-        present = [
-            "-Ddart.vm.product=true",
-            "-DFLUTTER_WEB_USE_SKIA=false",
-            "-DFLUTTER_WEB_USE_SKWASM=true",
-        ],
-        absent_substrings = [
-            "/flutter_patched_sdk/platform_strong.dill",
-            ".flutter.koutline",
-        ],
-    )
-    entry_inputs = [f.path for f in entry_kernel.inputs.to_list()] if entry_kernel else []
-    asserts.true(
-        env,
-        any(["/flutter_patched_sdk_product/platform_strong.dill" in p for p in entry_inputs]),
-        "fastbuild web icon entry kmod must compile against the product platform dill: %s" % entry_inputs,
-    )
-    asserts.true(
-        env,
-        any([".flutter_product.koutline" in p for p in entry_inputs]),
-        "fastbuild web icon entry kmod must read .flutter_product.koutline summaries: %s" % entry_inputs,
-    )
-
-    link_action = _action(env, "DartKernelLink")
-    _assert_argv(
-        env,
-        link_action,
-        present = ["--platform"],
-        absent_substrings = [
-            "/flutter_patched_sdk/platform_strong.dill",
-            ".flutter.kmod",
-        ],
-    )
-    link_inputs = [f.path for f in link_action.inputs.to_list()] if link_action else []
-    asserts.true(
-        env,
-        any(["/flutter_patched_sdk_product/platform_strong.dill" in p for p in link_inputs]),
-        "fastbuild web icon DartKernelLink must link the product platform dill: %s" % link_inputs,
-    )
-    asserts.true(
-        env,
-        any([".flutter_product.kmod" in p for p in link_inputs]),
-        "fastbuild web icon DartKernelLink must link .flutter_product.kmod modules: %s" % link_inputs,
-    )
-
     kernels = [
         a
         for a in analysistest.target_actions(env)
-        if a.mnemonic == "FlutterKernelCompile"
+        if a.mnemonic == "FlutterDart2JSCFE"
+    ]
+    asserts.true(env, len(kernels) > 0, "expected at least one icon tree-shake kernel compile")
+    for k in kernels:
+        _assert_argv(
+            env,
+            k,
+            present = [
+                "--cfe-only",
+                "-Ddart.vm.product=true",
+            ],
+            absent_substrings = [
+                "/flutter_patched_sdk",
+                "/flutter_patched_sdk_product/platform_strong.dill",
+            ],
+        )
+        input_paths = [f.path for f in k.inputs.to_list()]
+        asserts.true(
+            env,
+            any(["dart2js_platform.dill" in p for p in input_paths]),
+            "web icon kernel must compile against the web platform dill: %s" % input_paths,
+        )
+        asserts.true(
+            env,
+            any(["cond_icons/lib/src/icon_web.dart" in p for p in input_paths]),
+            "web icon kernel must take the web branch file as an input: %s" % input_paths,
+        )
+        asserts.true(
+            env,
+            any(["cond_icons/lib/src/icon_vm.dart" in p for p in input_paths]),
+            "web icon kernel must take the VM branch file as an input: %s" % input_paths,
+        )
+    return analysistest.end(env)
+
+_web_conditional_icon_test = analysistest.make(
+    _web_conditional_icon_test_impl,
+    config_settings = {
+        "//command_line_option:compilation_mode": "opt",
+        str(Label("//flutter:profile")): False,
+    },
+)
+
+def _font_icon_tree_shake_test_impl(ctx):
+    """A fastbuild web build compiles both shipped renderers' icon tree-shaking kernels with the web compiler.
+
+    The icon tree-shake must see the web program the dart2js/dart2wasm
+    compilers build. Upstream produces that kernel with `dart compile js
+    --cfe-only` (the `app.dill` const_finder reads); here the same frontend
+    compiles one dill per shipped renderer, so `if
+    (dart.library.js_interop)`/`if (dart.library.html)` resolve to the web
+    branch. A `--target flutter` kernel against the VM `platform_strong.dill`
+    would resolve them to the VM branch and miss the web branch's icons,
+    while still type-checking the stubbed sources — which is why the previous
+    VM-based compile passed these tests with a stub Flutter package yet broke
+    real Flutter web builds (`dart:js_interop` types such as `JSAny` do not
+    exist on the VM platform). There is no modular `DartKernel`/`DartKernelLink`
+    step: dependency modules are built against the VM platform, so linking them
+    here would reintroduce the VM resolution.
+    """
+    env = analysistest.begin(ctx)
+    asserts.equals(
+        env,
+        [],
+        [a for a in analysistest.target_actions(env) if a.mnemonic == "DartKernel"],
+        "web icon tree-shaking must not compile VM-targeted modular kernels",
+    )
+    asserts.equals(
+        env,
+        [],
+        [a for a in analysistest.target_actions(env) if a.mnemonic == "DartKernelLink"],
+        "web icon tree-shaking must not link VM-targeted modular dills",
+    )
+    asserts.equals(
+        env,
+        [],
+        [a for a in analysistest.target_actions(env) if a.mnemonic == "FlutterKernelCompile"],
+        "web icon tree-shaking must not compile a VM-targeted kernel",
+    )
+    kernels = [
+        a
+        for a in analysistest.target_actions(env)
+        if a.mnemonic == "FlutterDart2JSCFE"
     ]
     asserts.equals(env, 2, len(kernels), "expected skwasm and canvaskit fallback icon tree-shake kernel compiles")
     if len(kernels) == 2:
@@ -1023,30 +1068,37 @@ def _font_icon_tree_shake_test_impl(ctx):
             env,
             kernels[0],
             present = [
+                "--cfe-only",
                 "-Ddart.vm.product=true",
                 "-DFLUTTER_WEB_USE_SKIA=false",
                 "-DFLUTTER_WEB_USE_SKWASM=true",
-                "--from-dill",
-                "--no-embed-source-text",
-                "org-dartlang-app:///flutter/tests/_web_font_fixture_wrapper_main.dart",
             ],
-            absent_substrings = ["/flutter_patched_sdk/platform_strong.dill"],
+            absent_substrings = [
+                "/flutter_patched_sdk",
+                "/flutter_patched_sdk_product/platform_strong.dill",
+            ],
         )
         _assert_argv(
             env,
             kernels[1],
             present = [
+                "--cfe-only",
                 "-Ddart.vm.product=true",
                 "-DFLUTTER_WEB_USE_SKIA=true",
                 "-DFLUTTER_WEB_USE_SKWASM=false",
-                "--no-embed-source-text",
-                "org-dartlang-app:///flutter/tests/_web_font_fixture_wrapper_main.dart",
             ],
             absent_substrings = [
-                "--from-dill",
-                "/flutter_patched_sdk/platform_strong.dill",
+                "/flutter_patched_sdk",
+                "/flutter_patched_sdk_product/platform_strong.dill",
             ],
         )
+        for k in kernels:
+            input_paths = [f.path for f in k.inputs.to_list()]
+            asserts.true(
+                env,
+                any(["dart2js_platform.dill" in p for p in input_paths]),
+                "web icon kernel must compile against the web platform dill: %s" % input_paths,
+            )
 
     asset_cfg = written_json(env, ".asset_bundle_config.json")
     if asset_cfg != None:
@@ -1067,7 +1119,7 @@ _font_icon_tree_shake_test = analysistest.make(
 )
 
 def _font_icon_tree_shake_opt_test_impl(ctx):
-    """An `-c opt` web build compiles both shipped renderers' icon tree-shaking dills from source so `kReleaseMode` folds to `true`."""
+    """An `-c opt` web build compiles both shipped renderers' icon tree-shaking dills with the web compiler so `kReleaseMode` folds to `true`."""
     env = analysistest.begin(ctx)
     asserts.equals(
         env,
@@ -1075,10 +1127,22 @@ def _font_icon_tree_shake_opt_test_impl(ctx):
         [a for a in analysistest.target_actions(env) if a.mnemonic == "DartKernelLink"],
         "an -c opt web build must not link a debug modular dill for icon tree-shaking",
     )
+    asserts.equals(
+        env,
+        [],
+        [a for a in analysistest.target_actions(env) if a.mnemonic == "DartKernel"],
+        "an -c opt web build must not compile VM-targeted modular kernels for icon tree-shaking",
+    )
+    asserts.equals(
+        env,
+        [],
+        [a for a in analysistest.target_actions(env) if a.mnemonic == "FlutterKernelCompile"],
+        "an -c opt web build must not compile a VM-targeted kernel for icon tree-shaking",
+    )
     kernels = [
         a
         for a in analysistest.target_actions(env)
-        if a.mnemonic == "FlutterKernelCompile"
+        if a.mnemonic == "FlutterDart2JSCFE"
     ]
     asserts.equals(env, 2, len(kernels), "expected skwasm and canvaskit fallback icon tree-shake kernel compiles")
     if len(kernels) == 2:
@@ -1086,26 +1150,31 @@ def _font_icon_tree_shake_opt_test_impl(ctx):
             env,
             kernels[0],
             present = [
+                "--cfe-only",
                 "-Ddart.vm.product=true",
                 "-DFLUTTER_WEB_USE_SKIA=false",
                 "-DFLUTTER_WEB_USE_SKWASM=true",
-                "--no-embed-source-text",
-                "org-dartlang-app:///flutter/tests/_web_font_fixture_wrapper_main.dart",
             ],
-            absent_substrings = ["--from-dill"],
+            absent_substrings = ["/flutter_patched_sdk"],
         )
         _assert_argv(
             env,
             kernels[1],
             present = [
+                "--cfe-only",
                 "-Ddart.vm.product=true",
                 "-DFLUTTER_WEB_USE_SKIA=true",
                 "-DFLUTTER_WEB_USE_SKWASM=false",
-                "--no-embed-source-text",
-                "org-dartlang-app:///flutter/tests/_web_font_fixture_wrapper_main.dart",
             ],
-            absent_substrings = ["--from-dill"],
+            absent_substrings = ["/flutter_patched_sdk"],
         )
+        for k in kernels:
+            input_paths = [f.path for f in k.inputs.to_list()]
+            asserts.true(
+                env,
+                any(["dart2js_platform.dill" in p for p in input_paths]),
+                "web icon kernel must compile against the web platform dill: %s" % input_paths,
+            )
     return analysistest.end(env)
 
 _font_icon_tree_shake_opt_test = analysistest.make(
@@ -1648,6 +1717,20 @@ def _setup_web_fixtures():
             "//flutter/tests/icon_tree_shake_fixture:roboto_font",
             "//flutter/tests/icon_tree_shake_fixture:unused_icon_family",
             "//flutter/tests/icon_tree_shake_fixture/icon_choice_lib",
+        ],
+        tags = ["manual"],
+        visibility = ["//flutter/tests:__subpackages__"],
+    )
+
+    # Platform-conditional icon regression fixture: the app draws the web
+    # branch's icon (0xe04b); the VM branch draws 0xe04c.
+    flutter_web_bundle(
+        name = "_web_cond_fixture",
+        package_name = "web_fixture",
+        main = "lib/web_cond_fixture_main.dart",
+        deps = [
+            "//flutter:material_icons",
+            "//flutter/tests/icon_tree_shake_fixture/cond_icons",
         ],
         tags = ["manual"],
         visibility = ["//flutter/tests:__subpackages__"],
@@ -2355,9 +2438,17 @@ def web_test_suite(name):
         name = name + "_font_icon_tree_shake_opt",
         target_under_test = ":_web_font_fixture",
     )
+    _web_conditional_icon_test(
+        name = name + "_conditional_icon",
+        target_under_test = ":_web_cond_fixture",
+    )
     build_test(
         name = name + "_font_icon_tree_shake_build",
         targets = [":_web_font_fixture"],
+    )
+    build_test(
+        name = name + "_conditional_icon_build",
+        targets = [":_web_cond_fixture"],
     )
     _dev_config_overrides_test(
         name = name + "_dev_config_overrides",

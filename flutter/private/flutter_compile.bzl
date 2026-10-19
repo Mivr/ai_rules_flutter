@@ -29,8 +29,7 @@ def flutter_kernel_compile_action(
         recorded_uses = None,
         from_dill = None,
         stage_all = False,
-        stage_salt = "",
-        rewrite_web_conditionals = False):
+        stage_salt = ""):
     """Creates a Flutter kernel compilation action.
 
     Invokes the frontend_server via dartaotruntime to compile Dart sources
@@ -93,8 +92,6 @@ def flutter_kernel_compile_action(
             staging directory and mount only the staging root (never `.`).
         stage_salt: Optional salt mixed into the staging root hash when
             `stage_all` is True.
-        rewrite_web_conditionals: If True, rewrite platform-conditional
-            imports/exports selecting web branches during the compile.
     """
     args = ctx.actions.args()
     args.add("--")
@@ -177,8 +174,6 @@ def flutter_kernel_compile_action(
     # Suppress Dart/Flutter analytics (avoids writes to $HOME/.dart/ in sandbox).
     # Provide a writable HOME scoped to this action's output directory.
     env = {"CI": "true", "FLUTTER_SUPPRESS_ANALYTICS": "true"}
-    if rewrite_web_conditionals:
-        env["RULES_FLUTTER_REWRITE_WEB_CONDITIONALS"] = "1"
     if dartaotruntime.basename.endswith(".exe"):
         env["USERPROFILE"] = output.dirname
         env["LOCALAPPDATA"] = output.dirname

@@ -759,12 +759,26 @@ void _runDart2Js(List<String> args) {
     }
   }
 
+  // `dart compile js --cfe-only` produces a kernel dill for const_finder
+  // (the `app.dill` upstream runs icon tree-shaking on) rather than
+  // JavaScript. Its `-o` names a file, not a directory, so the scratch
+  // directory cannot sit alongside the output (for a Bazel File output the
+  // parent is undeclared); use the system temp instead. JS scrubbing is
+  // skipped: there is no JS to scrub, and the `.deps` sibling is normalized
+  // below.
+  final cfeOnly = forwardArgs.contains('--cfe-only');
+
   final cwdPath = Directory.current.absolute.path;
-  final baseTmpParent = outJs != null
-      ? (File(outJs).parent..createSync(recursive: true)).path
-      : cwdPath;
-  final tmpDir = Directory('$baseTmpParent/_dart2js_tmp')
-    ..createSync(recursive: true);
+  final baseTmpParent = cfeOnly
+      ? Directory.systemTemp.path
+      : (outJs != null
+          ? (File(outJs).parent..createSync(recursive: true)).path
+          : cwdPath);
+  final tmpDir = Directory(
+    cfeOnly
+        ? '${baseTmpParent}/rules_flutter_dart2js_cfe_${DateTime.now().microsecondsSinceEpoch}_${pid}'
+        : '$baseTmpParent/_dart2js_tmp',
+  )..createSync(recursive: true);
   final tmpAbsPath = tmpDir.absolute.path;
   String? rootDirPath;
   String? rewrittenPkgPath;
@@ -823,7 +837,7 @@ void _runDart2Js(List<String> args) {
     }
   }
 
-  if (outJs != null) {
+  if (outJs != null && !cfeOnly) {
     scrubDart2JsOutputs(
       File(outJs).parent,
       cwdPath: cwdPath,
@@ -832,5 +846,21 @@ void _runDart2Js(List<String> args) {
       packagesPath: packagesPath,
       rewrittenPkgPath: rewrittenPkgPath,
     );
+  }
+  if (outJs != null && cfeOnly) {
+    // Normalize the CFE depfile sibling (`<dill>.deps`) the same way JS
+    // `.deps` files are: sorted unique lines, no tmp/cwd/stage prefixes, so
+    // the declared output does not depend on host paths.
+    final depsFile = File('$outJs.deps');
+    if (depsFile.existsSync()) {
+      scrubDart2JsOutputs(
+        depsFile.parent,
+        cwdPath: cwdPath,
+        rootDirPath: rootDirPath,
+        tmpDirPath: tmpAbsPath,
+        packagesPath: packagesPath,
+        rewrittenPkgPath: rewrittenPkgPath,
+      );
+    }
   }
 }

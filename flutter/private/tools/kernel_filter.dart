@@ -51,7 +51,6 @@ Future<int> runFiltered(
   final executable = argv[i + 1];
   final cmdArgs = argv.sublist(i + 2);
   final webPluginOverrides = _rewriteWebPluginsUiWebImports(cmdArgs);
-  final conditionalOverrides = _rewriteWebConditionalImports(cmdArgs);
   ProcessResult result;
   try {
     result = await Process.run(executable, cmdArgs);
@@ -66,9 +65,6 @@ Future<int> runFiltered(
       }
     }
   } finally {
-    for (final override in conditionalOverrides.reversed) {
-      override.restore();
-    }
     for (final override in webPluginOverrides.reversed) {
       override.restore();
     }
@@ -134,6 +130,22 @@ String rewriteFlutterWebPluginsSource(String content, String uiWebStubUri) {
 }
 
 List<_StagedFileOverride> _rewriteWebPluginsUiWebImports(List<String> cmdArgs) {
+  // Only the VM-targeted icon tree-shake kernel (``--target flutter``) needs
+  // the stub: it compiles against the VM platform dill, which has no
+  // ``dart:ui_web``. Web-targeted compiles (``--target dartdevc`` against the
+  // web platform) resolve the real ``dart:ui_web`` from the web SDK, so
+  // rewriting to the VM-compatible stub would replace the real library with
+  // a lesser one.
+  var target = "flutter";
+  for (var j = 0; j < cmdArgs.length - 1; j++) {
+    if (cmdArgs[j] == "--target") {
+      target = cmdArgs[j + 1];
+      break;
+    }
+  }
+  if (target != "flutter") {
+    return <_StagedFileOverride>[];
+  }
   var scheme = 'org-dartlang-app';
   for (var j = 0; j < cmdArgs.length - 1; j++) {
     if (cmdArgs[j] == '--filesystem-scheme') {
@@ -188,45 +200,6 @@ List<_StagedFileOverride> _rewriteWebPluginsUiWebImports(List<String> cmdArgs) {
     }
   }
   return overrides;
-}
-
-/// Rewrites Dart platform-conditional imports/exports so the web branch is
-/// selected during icon tree-shaking, which compiles against the VM platform.
-List<_StagedFileOverride> _rewriteWebConditionalImports(List<String> cmdArgs) {
-  if (Platform.environment['RULES_FLUTTER_REWRITE_WEB_CONDITIONALS'] != '1') {
-    return <_StagedFileOverride>[];
-  }
-  final overrides = <_StagedFileOverride>[];
-  for (var j = 0; j < cmdArgs.length - 1; j++) {
-    if (cmdArgs[j] != '--filesystem-root' || cmdArgs[j + 1] == '.') {
-      continue;
-    }
-    final dir = Directory(cmdArgs[j + 1]);
-    if (!dir.existsSync()) continue;
-    final rootPrefix = dir.path.replaceAll(r'\\', '/').replaceFirst(RegExp(r'/+$'), '');
-    for (final entity in dir.listSync(recursive: true, followLinks: true)) {
-      if (entity is! File) continue;
-      final normPath = entity.path.replaceAll(r'\\', '/');
-      if (!normPath.startsWith('$rootPrefix/')) continue;
-      if (!normPath.endsWith('.dart')) continue;
-      final file = File(entity.path);
-      final original = file.readAsStringSync();
-      final rewritten = _rewriteConditionalImports(original);
-      if (rewritten != original) {
-        overrides.add(_StagedFileOverride.apply(file, rewritten, originalContent: original));
-      }
-    }
-  }
-  return overrides;
-}
-
-String _rewriteConditionalImports(String content) {
-  // Rewrite `if (dart.library.x, ...)` conditions to `if (true)` so the
-  // web (second) branch of platform-conditional imports/exports is selected.
-  return content.replaceAllMapped(
-    RegExp(r"if\s*\(\s*(?:!?\s*dart\.library\.(?:js_interop|js_util|html)\s*,?\s*)+\)"),
-    (m) => 'if (dart.library.async)',
-  );
 }
 
 final _unavailableRegistrantPlugin = RegExp(
