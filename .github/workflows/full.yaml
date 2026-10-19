@@ -5,6 +5,13 @@
 # coverage lives in push CI. Triggered by release tags, weekly, or manually;
 # the release workflow waits for this workflow to pass on the tagged commit
 # (see the gate job in release.yaml) before publishing.
+#
+# Disk caches are the push-CI shards' keys below, restored only (except the
+# plugin job, which owns its key and re-saves it on pushes and schedules so
+# tag runs hit it). See ci.yaml for why saves delete the key first.
+permissions:
+  actions: write
+  contents: read
 name: Full
 on:
   push:
@@ -34,41 +41,57 @@ jobs:
       max-parallel: 2
       matrix:
         include:
-          # disk names match the push-CI shards that build the same content,
-          # so this restores their caches; only the plugin job saves (its own
-          # key), the rest are restore-only to keep push CI's keys clean.
+          # shard names the push-CI disk keys of the same content; only the
+          # plugin job saves (its own key).
           - workspace: smoke
-            disk-cache: macos-b
+            shard: macos-b
             cache-save: false
           - workspace: dual_hub
-            disk-cache: false
+            shard: none
             cache-save: false
           - workspace: hello_world
-            disk-cache: macos-a
+            shard: macos-a
             cache-save: false
           - workspace: ffi_example
-            disk-cache: false
+            shard: none
             cache-save: false
           - workspace: plugin_example
-            disk-cache: macos-plugin
+            shard: macos-plugin
             cache-save: true
           - workspace: ffi_plugin_example
-            disk-cache: false
+            shard: none
             cache-save: false
           - workspace: codegen
-            disk-cache: false
+            shard: none
             cache-save: false
+    env:
+      DISK_CACHE_DIR: ~/.cache/bazel-disk
     steps:
       - uses: actions/checkout@v7
+      - name: Set disk cache key
+        run: echo "DISK_CACHE_KEY=ff-disk-${{ runner.os }}-${{ matrix.shard }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'e2e/*/MODULE.bazel', 'flutter/private/versions.bzl') }}" >> "$GITHUB_ENV"
       # The repository cache is shared per OS with push CI (same key files).
-      # The disk cache restores the push shard of the same name where one
-      # exists; workspaces with no push-CI macOS content rebuild from the
-      # repository cache. Nothing saves except the plugin job's own key.
       - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
         with:
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
-          disk-cache: ${{ matrix['disk-cache'] }}
-          cache-save: ${{ matrix['cache-save'] }}
+          cache-save: ${{ matrix['cache-save'] && (github.event_name == 'push' || github.event_name == 'schedule') }}
+      # Workspaces with shard `none` have no push-CI macOS content and rebuild
+      # from the repository cache; the rest restore their push shard's key.
+      - name: Restore disk cache
+        if: matrix.shard != 'none'
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.DISK_CACHE_DIR }}
+          key: ${{ env.DISK_CACHE_KEY }}
+          restore-keys: ff-disk-${{ runner.os }}-${{ matrix.shard }}-
+      - name: Point Bazel at the disk cache
+        if: matrix.shard != 'none'
+        run: |
+          dir="${{ env.DISK_CACHE_DIR }}"
+          case "$dir" in "~"*) dir="$HOME${dir#\~}";; esac
+          mkdir -p "$dir"
+          echo "build --disk_cache=$dir" >> ~/.bazelrc
       # --test_output=errors so a failure's assertion reaches this log. Without
       # it the output stays in a test.log on the runner and is discarded with
       # the machine.
@@ -78,6 +101,21 @@ jobs:
       - name: Report cache sizes
         if: always()
         run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true
+      - name: Delete stale disk cache key
+        if: always() && matrix['cache-save'] && (github.event_name == 'push' || github.event_name == 'schedule')
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ids=$(gh api "repos/${{ github.repository }}/actions/caches?per_page=100" --jq ".actions_caches[] | select(.key == \"$DISK_CACHE_KEY\" and .ref == \"${{ github.ref }}\") | .id" || true)
+          for id in $ids; do gh api -X DELETE "repos/${{ github.repository }}/actions/caches/$id" >/dev/null || true; done
+      - name: Save disk cache
+        if: always() && matrix['cache-save'] && (github.event_name == 'push' || github.event_name == 'schedule')
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.DISK_CACHE_DIR }}
+          key: ${{ env.DISK_CACHE_KEY }}
   conclusion:
     name: Conclusion
     needs: [e2e-macos]
