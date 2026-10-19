@@ -1282,6 +1282,23 @@ class AndroidPlatformLauncher implements PlatformLauncher {
       );
     }
 
+    // Align the device timezone with the test's TZ so the app observes it.
+    final deviceTz = Platform.environment['TZ'] ?? 'UTC';
+    await _runAdb(serial, <String>[
+      'shell',
+      'settings',
+      'put',
+      'global',
+      'time_zone',
+      deviceTz,
+    ]);
+    await _runAdb(serial, <String>[
+      'shell',
+      'setprop',
+      'persist.sys.timezone',
+      deviceTz,
+    ]);
+
     // Clear logcat buffers prior to launching the activity.
     await _runAdb(serial, const <String>['logcat', '-b', 'all', '-c']);
 
