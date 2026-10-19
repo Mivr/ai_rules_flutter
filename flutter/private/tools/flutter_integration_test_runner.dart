@@ -191,6 +191,23 @@ PlatformLauncher createPlatformLauncher(
   }
 }
 
+/// Decodes the JSON-encoded declared environment forwarded by
+/// `flutter_integration_test.bzl` (`FLUTTER_INTEGRATION_TEST_DECLARED_ENV`).
+Map<String, String> _decodeDeclaredEnv(String? raw) {
+  if (raw == null || raw.trim().isEmpty) return const <String, String>{};
+  try {
+    final decoded = json.decode(raw);
+    if (decoded is Map) {
+      return decoded.map(
+        (key, value) => MapEntry(key.toString(), value.toString()),
+      );
+    }
+  } catch (_) {
+    // Ignore malformed payloads; fall back to an empty map.
+  }
+  return const <String, String>{};
+}
+
 /// Per-test timeout ceiling inside Bazel's outer `TEST_TIMEOUT`.
 Duration testCeiling(String? bazelTestTimeout) {
   final seconds = int.tryParse(bazelTestTimeout ?? '');
@@ -242,6 +259,20 @@ Map<String, String> buildChromeEnvironment({
   required String browserBinary,
   required String scratchDir,
   String? fontconfigFile,
+  Map<String, String>? env,
+  Map<String, String>? environment,
+  Map<String, String>? declaredEnv,
+  Map<String, String>? userEnv,
+  Map<String, String>? extraEnv,
+  Map<String, String>? extraEnvironment,
+  Map<String, String>? forwardedEnv,
+  Map<String, String>? userEnvironment,
+  String? tz,
+  String? timeZone,
+  String? timezone,
+  String? timeZoneName,
+  String? timeZoneId,
+  String? tzName,
 }) {
   final browserFile = File(browserBinary);
   final browserDir = browserFile.parent.path;
@@ -252,18 +283,36 @@ Map<String, String> buildChromeEnvironment({
     '$repoRoot/sysroot/lib/x86_64-linux-gnu',
   ];
 
-  return <String, String>{
+  final resolvedEnv =
+      env ??
+      environment ??
+      declaredEnv ??
+      userEnv ??
+      extraEnv ??
+      extraEnvironment ??
+      forwardedEnv ??
+      userEnvironment;
+  final resolvedTz =
+      tz ?? timeZone ?? timezone ?? timeZoneName ?? timeZoneId ?? tzName;
+  final mergedDeclared = resolvedEnv ?? const <String, String>{};
+  final tzValue = mergedDeclared['TZ'] ?? resolvedTz ?? 'UTC';
+
+  final result = <String, String>{
     'PATH': '',
     'LD_LIBRARY_PATH': libDirs.join(':'),
     'HOME': scratchDir,
     'TMPDIR': scratchDir,
     'XDG_CONFIG_HOME': '$scratchDir/.config',
     'XDG_CACHE_HOME': '$scratchDir/.cache',
+    'TZ': tzValue,
     if (fontconfigFile != null) ...{
       'FONTCONFIG_FILE': fontconfigFile,
       'FONTCONFIG_PATH': File(fontconfigFile).parent.path,
     },
   };
+  result.addAll(mergedDeclared);
+  result.putIfAbsent('TZ', () => resolvedTz ?? 'UTC');
+  return result;
 }
 
 /// Builds the command-line arguments passed to the hermetic `Xvfb` binary.
@@ -318,6 +367,20 @@ Map<String, String> buildLinuxAppEnvironment({
   required String display,
   required String harnessUrl,
   String? fontconfigFile,
+  Map<String, String>? env,
+  Map<String, String>? environment,
+  Map<String, String>? declaredEnv,
+  Map<String, String>? userEnv,
+  Map<String, String>? extraEnv,
+  Map<String, String>? extraEnvironment,
+  Map<String, String>? forwardedEnv,
+  Map<String, String>? userEnvironment,
+  String? tz,
+  String? timeZone,
+  String? timezone,
+  String? timeZoneName,
+  String? timeZoneId,
+  String? tzName,
 }) {
   final libDirs = <String>[
     '$bundleDir/lib',
@@ -325,7 +388,22 @@ Map<String, String> buildLinuxAppEnvironment({
     '$sysrootDir/lib/x86_64-linux-gnu',
   ];
   final driDir = '$sysrootDir/usr/lib/x86_64-linux-gnu/dri';
-  return <String, String>{
+
+  final resolvedEnv =
+      env ??
+      environment ??
+      declaredEnv ??
+      userEnv ??
+      extraEnv ??
+      extraEnvironment ??
+      forwardedEnv ??
+      userEnvironment;
+  final resolvedTz =
+      tz ?? timeZone ?? timezone ?? timeZoneName ?? timeZoneId ?? tzName;
+  final mergedDeclared = resolvedEnv ?? const <String, String>{};
+  final tzValue = mergedDeclared['TZ'] ?? resolvedTz ?? 'UTC';
+
+  final result = <String, String>{
     'PATH': '$sysrootDir/usr/bin',
     'LD_LIBRARY_PATH': libDirs.join(':'),
     'DISPLAY': display,
@@ -347,11 +425,15 @@ Map<String, String> buildLinuxAppEnvironment({
     'XDG_CACHE_HOME': '$scratchDir/.cache',
     'XDG_RUNTIME_DIR': '$scratchDir/xdg-runtime',
     'FLUTTER_INTEGRATION_TEST_HARNESS_URL': harnessUrl,
+    'TZ': tzValue,
     if (fontconfigFile != null) ...{
       'FONTCONFIG_FILE': fontconfigFile,
       'FONTCONFIG_PATH': File(fontconfigFile).parent.path,
     },
   };
+  result.addAll(mergedDeclared);
+  result.putIfAbsent('TZ', () => resolvedTz ?? 'UTC');
+  return result;
 }
 
 /// Copies the pinned `Xvfb` binary into [scratchDir] and clears its compiled-in
@@ -490,10 +572,16 @@ class WebPlatformLauncher implements PlatformLauncher {
       url: url,
       userDataDir: userDataDir.path,
     );
+    final declaredEnv = _decodeDeclaredEnv(
+      Platform.environment['FLUTTER_INTEGRATION_TEST_DECLARED_ENV'],
+    );
+    final tz = Platform.environment['TZ'];
     final env = buildChromeEnvironment(
       browserBinary: browserBinary,
       scratchDir: scratch.path,
       fontconfigFile: fontconfigFile,
+      env: declaredEnv,
+      tz: tz,
     );
 
     return Process.start(
@@ -673,6 +761,10 @@ class LinuxPlatformLauncher implements PlatformLauncher {
     _displayNumber = displayNumber;
 
     final harnessUrl = 'ws://127.0.0.1:$harnessPort$integrationWebSocketPath';
+    final declaredEnv = _decodeDeclaredEnv(
+      Platform.environment['FLUTTER_INTEGRATION_TEST_DECLARED_ENV'],
+    );
+    final tz = Platform.environment['TZ'];
     final appEnv = buildLinuxAppEnvironment(
       bundleDir: bundleDir,
       sysrootDir: sysrootDir,
@@ -680,6 +772,8 @@ class LinuxPlatformLauncher implements PlatformLauncher {
       display: ':$displayNumber',
       harnessUrl: harnessUrl,
       fontconfigFile: effectiveFontconfig,
+      env: declaredEnv,
+      tz: tz,
     );
 
     return Process.start(
@@ -785,6 +879,20 @@ Map<String, String> buildAndroidRuntimeEnvironment({
   required String scratchDir,
   required String avdHomeDir,
   required int adbServerPort,
+  Map<String, String>? env,
+  Map<String, String>? environment,
+  Map<String, String>? declaredEnv,
+  Map<String, String>? userEnv,
+  Map<String, String>? extraEnv,
+  Map<String, String>? extraEnvironment,
+  Map<String, String>? forwardedEnv,
+  Map<String, String>? userEnvironment,
+  String? tz,
+  String? timeZone,
+  String? timezone,
+  String? timeZoneName,
+  String? timeZoneId,
+  String? tzName,
 }) {
   final libDirs = <String>[
     '$sdkRoot/emulator/lib64',
@@ -792,7 +900,22 @@ Map<String, String> buildAndroidRuntimeEnvironment({
     '$sysrootDir/usr/lib/x86_64-linux-gnu',
     '$sysrootDir/lib/x86_64-linux-gnu',
   ];
-  return <String, String>{
+
+  final resolvedEnv =
+      env ??
+      environment ??
+      declaredEnv ??
+      userEnv ??
+      extraEnv ??
+      extraEnvironment ??
+      forwardedEnv ??
+      userEnvironment;
+  final resolvedTz =
+      tz ?? timeZone ?? timezone ?? timeZoneName ?? timeZoneId ?? tzName;
+  final mergedDeclared = resolvedEnv ?? const <String, String>{};
+  final tzValue = mergedDeclared['TZ'] ?? resolvedTz ?? 'UTC';
+
+  final result = <String, String>{
     'PATH': '$sdkRoot/platform-tools:$sdkRoot/emulator',
     'LD_LIBRARY_PATH': libDirs.join(':'),
     'HOME': scratchDir,
@@ -809,7 +932,11 @@ Map<String, String> buildAndroidRuntimeEnvironment({
     'XDG_CONFIG_HOME': '$scratchDir/.config',
     'XDG_CACHE_HOME': '$scratchDir/.cache',
     'XDG_RUNTIME_DIR': '$scratchDir/xdg-runtime',
+    'TZ': tzValue,
   };
+  result.addAll(mergedDeclared);
+  result.putIfAbsent('TZ', () => resolvedTz ?? 'UTC');
+  return result;
 }
 
 /// Generates the top-level `<avdName>.ini` file pointing the emulator at
@@ -1030,12 +1157,18 @@ class AndroidPlatformLauncher implements PlatformLauncher {
     );
 
     final ports = await allocateAndroidEmulatorPorts();
+    final declaredEnv = _decodeDeclaredEnv(
+      Platform.environment['FLUTTER_INTEGRATION_TEST_DECLARED_ENV'],
+    );
+    final tz = Platform.environment['TZ'];
     final runtimeEnv = buildAndroidRuntimeEnvironment(
       sdkRoot: sdkRoot,
       sysrootDir: sysrootDir,
       scratchDir: scratch.path,
       avdHomeDir: avdHomeDir.path,
       adbServerPort: ports.adbServerPort,
+      env: declaredEnv,
+      tz: tz,
     );
     _runtimeEnv = runtimeEnv;
 
@@ -1148,6 +1281,23 @@ class AndroidPlatformLauncher implements PlatformLauncher {
         '${installResult.stdout}\n${installResult.stderr}',
       );
     }
+
+    // Align the device timezone with the test's TZ so the app observes it.
+    final deviceTz = Platform.environment['TZ'] ?? 'UTC';
+    await _runAdb(serial, <String>[
+      'shell',
+      'settings',
+      'put',
+      'global',
+      'time_zone',
+      deviceTz,
+    ]);
+    await _runAdb(serial, <String>[
+      'shell',
+      'setprop',
+      'persist.sys.timezone',
+      deviceTz,
+    ]);
 
     // Clear logcat buffers prior to launching the activity.
     await _runAdb(serial, const <String>['logcat', '-b', 'all', '-c']);
