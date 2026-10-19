@@ -22,6 +22,7 @@ load(
     "//flutter/private:xtool_darwin_sdk_repo.bzl",
     "XTOOL_DARWIN_TARGETS",
     "generate_xtool_darwin_sdk_build",
+    "render_xtool_wrapper_scripts",
     "resolve_darwin_artifactbundle_sdk_paths",
     "resolve_darwin_sdk_from_modules",
     "validate_darwin_sdk_config",
@@ -368,6 +369,63 @@ def _xtool_darwin_sdk_build_test_impl(ctx):
     asserts.true(env, "sdk/iPhoneOS.sdk" in configured_build, "Expected iPhoneOS.sdk path")
     asserts.true(env, "sdk/MacOSX.sdk" in configured_build, "Expected MacOSX.sdk path")
     asserts.true(env, "xtool_darwin_sdk_status(" in configured_build, "Expected xtool_darwin_sdk_status target")
+    asserts.true(env, '"llvm/**"' in configured_build, "Expected llvm/** in sdk_files glob")
+    asserts.true(env, 'ar_files = ":sdk_files"' in configured_build, "Expected ar_files = :sdk_files on cc_toolchain")
+    asserts.true(env, 'as_files = ":sdk_files"' in configured_build, "Expected as_files = :sdk_files on cc_toolchain")
+
+    forbidden_bare = (
+        "exec clang ",
+        "exec clang++ ",
+        "exec ld64.lld ",
+        "exec llvm-ar ",
+        "exec llvm-cov ",
+        "exec llvm-nm ",
+        "exec llvm-objdump ",
+        "exec llvm-strip ",
+        "exec swiftc ",
+    )
+    for scripts in (
+        render_xtool_wrapper_scripts(sdk_available = False),
+        render_xtool_wrapper_scripts(
+            sdk_available = True,
+            sdk_paths = {
+                "iPhoneOS": "sdk/iPhoneOS.sdk",
+                "iPhoneSimulator": "sdk/iPhoneSimulator.sdk",
+                "MacOSX": "sdk/MacOSX.sdk",
+            },
+            swift_bin_dir = "swift_bin",
+        ),
+    ):
+        for tool in ("llvm-ar", "llvm-cov", "llvm-nm", "llvm-objdump", "llvm-strip"):
+            body = scripts["bin/%s" % tool]
+            asserts.true(
+                env,
+                '"${REPO_ROOT}/llvm/bin/%s"' % tool in body,
+                "Expected hermetic llvm path in bin/%s, got:\n%s" % (tool, body),
+            )
+        for key in expected_triples.keys():
+            asserts.true(
+                env,
+                '"${REPO_ROOT}/llvm/bin/clang"' in scripts["bin/clang_%s" % key],
+                "Expected hermetic clang path in bin/clang_%s" % key,
+            )
+            asserts.true(
+                env,
+                '"${REPO_ROOT}/llvm/bin/clang++"' in scripts["bin/clang-cpp_%s" % key],
+                "Expected hermetic clang++ path in bin/clang-cpp_%s" % key,
+            )
+            asserts.true(
+                env,
+                '"${REPO_ROOT}/llvm/bin/ld64.lld"' in scripts["bin/ld64.lld_%s" % key],
+                "Expected hermetic ld64.lld path in bin/ld64.lld_%s" % key,
+            )
+        for script_path, body in scripts.items():
+            for bare in forbidden_bare:
+                asserts.false(
+                    env,
+                    bare in body,
+                    "Forbidden bare tool invocation %r in %s:\n%s" % (bare, script_path, body),
+                )
 
     info_json = json.encode({
         "schemaVersion": "1.0",
@@ -867,6 +925,17 @@ def toolchains_repo_test_suite(name):
         expected_error = "flutter.darwin_sdk may be specified at most once in the root module",
     )
 
+    _xtool_hermetic_llvm_probe(
+        name = name + "_xtool_hermetic_llvm_probe",
+        tags = ["manual"],
+    )
+    build_test(
+        name = name + "_xtool_hermetic_llvm_build",
+        targets = [
+            ":" + name + "_xtool_hermetic_llvm_probe",
+        ],
+    )
+
     unittest.suite(
         name + "_unit",
         _t0_test,
@@ -888,6 +957,7 @@ def toolchains_repo_test_suite(name):
             ":" + name + "_apple_backend_rules_apple",
             ":" + name + "_macho_aot_flags",
             ":" + name + "_xtool_sdk_status_build",
+            ":" + name + "_xtool_hermetic_llvm_build",
             ":" + name + "_unconfigured_sdk_files_fails",
             ":" + name + "_unconfigured_ios_cc_toolchain_fails",
             ":" + name + "_unconfigured_macos_cc_toolchain_fails",
@@ -898,3 +968,68 @@ def toolchains_repo_test_suite(name):
             ":" + name + "_darwin_sdk_multiple_tags_rejected",
         ] + analysis_tests,
     )
+
+def _xtool_hermetic_llvm_probe_impl(ctx):
+    out = ctx.actions.declare_file(ctx.label.name + ".dylib")
+    work_dir = ctx.actions.declare_directory(ctx.label.name + "_work")
+    clang_wrapper = None
+    for f in ctx.files.toolchain_files:
+        if f.path.endswith("/bin/clang_macos_arm64"):
+            clang_wrapper = f
+            break
+    if not clang_wrapper:
+        fail("Missing bin/clang_macos_arm64 in @flutter_xtool_darwin_sdk//:toolchain_files")
+    repo_root = clang_wrapper.dirname[:-len("/bin")]
+    ctx.actions.run_shell(
+        inputs = ctx.files.toolchain_files,
+        outputs = [out, work_dir],
+        mnemonic = "FlutterXtoolHermeticLlvmProbe",
+        use_default_shell_env = False,
+        command = """set -euo pipefail
+REPO_ROOT="{repo_root}"
+WORK="{work_dir}"
+OUT="{out}"
+mkdir -p "$WORK/decoy_bin"
+for tool in clang clang++ ld64.lld llvm-ar llvm-cov llvm-nm llvm-objdump llvm-strip; do
+  cat > "$WORK/decoy_bin/$tool" <<'EOF'
+#!/bin/bash
+echo "ERROR: non-hermetic PATH fallback invoked: $0" >&2
+exit 99
+EOF
+  chmod +x "$WORK/decoy_bin/$tool"
+done
+
+cat > "$WORK/sample.c" <<'EOF'
+#include <stdint.h>
+int32_t xtool_test_add(int32_t a, int32_t b) {{
+  return a + b;
+}}
+EOF
+
+export PATH="$WORK/decoy_bin"
+"$REPO_ROOT/bin/clang_macos_arm64" -c "$WORK/sample.c" -o "$WORK/sample.o"
+PATH="" "$REPO_ROOT/bin/clang_macos_arm64" -c "$WORK/sample.c" -o "$WORK/sample_empty_path.o"
+"$REPO_ROOT/bin/llvm-ar" rcs "$WORK/libsample.a" "$WORK/sample.o"
+"$REPO_ROOT/bin/llvm-nm" "$WORK/libsample.a" > "$WORK/nm.txt"
+"$REPO_ROOT/bin/ld64.lld_macos_arm64" -arch arm64 -platform_version macos 11.0.0 11.0.0 -dylib "$WORK/sample.o" -o "$WORK/libsample_unstripped.dylib"
+PATH="" "$REPO_ROOT/bin/ld64.lld_macos_arm64" -arch arm64 -platform_version macos 11.0.0 11.0.0 -dylib "$WORK/sample_empty_path.o" -o "$WORK/libsample_empty_path.dylib"
+"$REPO_ROOT/bin/llvm-objdump" --macho --private-headers "$WORK/libsample_unstripped.dylib" > "$WORK/objdump.txt"
+"$REPO_ROOT/bin/llvm-strip" -x "$WORK/libsample_unstripped.dylib" -o "$OUT"
+"$REPO_ROOT/bin/llvm-cov" --version > "$WORK/cov.txt"
+""".format(
+            repo_root = repo_root,
+            work_dir = work_dir.path,
+            out = out.path,
+        ),
+    )
+    return [DefaultInfo(files = depset([out]))]
+
+_xtool_hermetic_llvm_probe = rule(
+    implementation = _xtool_hermetic_llvm_probe_impl,
+    attrs = {
+        "toolchain_files": attr.label(
+            default = Label("@flutter_xtool_darwin_sdk//:toolchain_files"),
+            allow_files = True,
+        ),
+    },
+)

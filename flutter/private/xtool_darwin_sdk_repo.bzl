@@ -24,6 +24,7 @@ and supply their own `darwin.artifactbundle` (`iPhoneOS.sdk`,
 Apple SDKs Agreement.
 """
 
+load("@llvm//toolchain:selects.bzl", "resource_dir_arg")
 load("@rules_cc//cc:action_names.bzl", "ACTION_NAMES")
 load(
     "@rules_cc//cc:cc_toolchain_config_lib.bzl",
@@ -115,18 +116,27 @@ def _xtool_darwin_cc_toolchain_config_impl(ctx):
     if not ctx.attr.sdk_available or not ctx.attr.sdk_path:
         fail(_UNCONFIGURED_SDK_ERROR)
 
+    ws_root = ctx.label.workspace_root
+    sysroot_path = (
+        "%s/%s" % (ws_root, ctx.attr.sdk_path) if (ws_root and not ctx.attr.sdk_path.startswith("/")) else ctx.attr.sdk_path
+    )
+    llvm_bin_path = "%s/llvm/bin" % ws_root if ws_root else "llvm/bin"
+    llvm_clang_lib_path = "%s/llvm/lib/clang" % ws_root if ws_root else "llvm/lib/clang"
+
     compile_flags = [
         "-target",
         ctx.attr.triple,
         "-isysroot",
-        ctx.attr.sdk_path,
+        sysroot_path,
+        "-no-canonical-prefixes",
     ]
     link_flags = [
         "-target",
         ctx.attr.triple,
-        "-fuse-ld=lld",
+        "--ld-path=%s/ld64.lld" % llvm_bin_path,
         "-isysroot",
-        ctx.attr.sdk_path,
+        sysroot_path,
+        "-no-canonical-prefixes",
     ]
 
     default_flags_feature = feature(
@@ -155,9 +165,19 @@ def _xtool_darwin_cc_toolchain_config_impl(ctx):
         tool_path(name = "strip", path = "bin/llvm-strip"),
     ]
 
+    builtin_include_dirs = [
+        sysroot_path,
+        llvm_clang_lib_path,
+    ]
+    if ctx.attr.sdk_path not in builtin_include_dirs:
+        builtin_include_dirs.append(ctx.attr.sdk_path)
+    if "llvm/lib/clang" not in builtin_include_dirs:
+        builtin_include_dirs.append("llvm/lib/clang")
+
     return cc_common.create_cc_toolchain_config_info(
         ctx = ctx,
         features = [default_flags_feature],
+        cxx_builtin_include_directories = builtin_include_dirs,
         toolchain_identifier = "xtool_darwin_%s" % ctx.attr.target_key,
         host_system_name = "x86_64-unknown-linux-gnu",
         target_system_name = ctx.attr.triple,
@@ -403,10 +423,20 @@ def generate_xtool_darwin_sdk_build(
         "SDK_AVAILABLE = %s" % ("True" if sdk_available else "False"),
         "SWIFT_BIN_DIR = %r" % swift_bin_dir,
         "",
+        "filegroup(",
+        '    name = "llvm_files",',
+        '    srcs = glob(["llvm/**"], allow_empty = True),',
+        ")",
+        "",
+        "filegroup(",
+        '    name = "toolchain_files",',
+        '    srcs = glob(["bin/**", "llvm/**"], allow_empty = True),',
+        ")",
+        "",
         "xtool_darwin_sdk_target(",
         '    name = "sdk_files",',
         "    sdk_available = SDK_AVAILABLE,",
-        '    srcs = glob(["sdk/**", "bin/**", "swift_bin/**"], allow_empty = True),',
+        '    srcs = glob(["sdk/**", "bin/**", "llvm/**", "swift_bin/**"], allow_empty = True),',
         ")",
         "",
         "filegroup(",
@@ -444,6 +474,8 @@ def generate_xtool_darwin_sdk_build(
             '    toolchain_identifier = "xtool_darwin_%s",' % target_key,
             '    toolchain_config = ":%s_cc_toolchain_config",' % target_key,
             '    all_files = ":sdk_files",',
+            '    ar_files = ":sdk_files",',
+            '    as_files = ":sdk_files",',
             '    compiler_files = ":sdk_files",',
             '    dwp_files = ":empty",',
             '    linker_files = ":sdk_files",',
@@ -475,52 +507,158 @@ def generate_xtool_darwin_sdk_build(
 
     return "\n".join(lines) + "\n"
 
-def _write_wrapper_scripts(repository_ctx, sdk_available, sdk_paths, swift_bin_dir):
-    bin_prefix = (swift_bin_dir.rstrip("/") + "/") if swift_bin_dir else ""
-    for tool in ("llvm-ar", "llvm-cov", "llvm-nm", "llvm-objdump", "llvm-strip"):
-        repository_ctx.file(
-            "bin/%s" % tool,
-            """#!/usr/bin/env bash
+_REPO_ROOT_PREAMBLE = """#!/bin/bash
 set -euo pipefail
-exec "{bin_prefix}{tool}" "$@"
-""".format(bin_prefix = bin_prefix, tool = tool),
-            executable = True,
+SCRIPT_DIR="${BASH_SOURCE[0]%/*}"
+if [[ "${SCRIPT_DIR}" == "${BASH_SOURCE[0]}" ]]; then
+  SCRIPT_DIR="."
+fi
+if [[ "${SCRIPT_DIR}" == */bin ]]; then
+  REPO_ROOT="${SCRIPT_DIR%/bin}"
+else
+  REPO_ROOT="${SCRIPT_DIR}/.."
+fi
+"""
+
+_CLANG_LINK_ARGS_SNIPPET = """LINK_ARGS=()
+IS_COMPILE_ONLY=0
+for arg in "$@"; do
+  case "${arg}" in
+    -c|-S|-E|-M|-MM)
+      IS_COMPILE_ONLY=1
+      break
+      ;;
+  esac
+done
+if [[ "${IS_COMPILE_ONLY}" -eq 0 ]]; then
+  LINK_ARGS=(--ld-path="${REPO_ROOT}/%s/ld64.lld")
+fi
+"""
+
+def render_xtool_wrapper_scripts(
+        sdk_available,
+        sdk_paths = {},
+        swift_bin_dir = "",
+        llvm_bin_dir = "llvm/bin"):
+    """Renders hermetic wrapper scripts for `@flutter_xtool_darwin_sdk//bin:*`.
+
+    All C/C++, linker, and LLVM binutils wrappers invoke tools by their
+    hermetic paths under `${REPO_ROOT}/<llvm_bin_dir>/...` and never fall back
+    to bare tool names on `PATH`.
+
+    Args:
+        sdk_available: bool indicating whether `darwin.artifactbundle` was configured.
+        sdk_paths: dict mapping SDK name (`iPhoneOS`, `iPhoneSimulator`, `MacOSX`)
+            to its relative path inside the repository.
+        swift_bin_dir: optional relative path to the Swift toolchain `bin` directory.
+        llvm_bin_dir: relative path to the hermetic LLVM `bin` directory.
+
+    Returns:
+        Dict mapping relative file path (`"bin/..."`) to script content string.
+    """
+    llvm_rel = llvm_bin_dir.strip("/")
+    swift_rel = swift_bin_dir.strip("/")
+    link_args_snippet = _CLANG_LINK_ARGS_SNIPPET % llvm_rel
+    scripts = {}
+
+    for tool in ("llvm-ar", "llvm-cov", "llvm-nm", "llvm-objdump", "llvm-strip"):
+        scripts["bin/%s" % tool] = (
+            _REPO_ROOT_PREAMBLE +
+            'exec "${{REPO_ROOT}}/{llvm_rel}/{tool}" "$@"\n'.format(
+                llvm_rel = llvm_rel,
+                tool = tool,
+            )
         )
 
     for target_key, meta in XTOOL_DARWIN_TARGETS.items():
         sdk_path = sdk_paths.get(meta.sdk_name, "")
+        default_sdk_path = sdk_path if sdk_path else "sdk/%s.sdk" % meta.sdk_name
+        ld_body = (
+            _REPO_ROOT_PREAMBLE +
+            'exec "${{REPO_ROOT}}/{llvm_rel}/ld64.lld" "$@"\n'.format(
+                llvm_rel = llvm_rel,
+            )
+        )
         if sdk_available and sdk_path:
-            clang_body = """#!/usr/bin/env bash
-set -euo pipefail
-exec "{bin_prefix}clang" -target "{triple}" -isysroot "{sdk_path}" "$@"
-""".format(bin_prefix = bin_prefix, triple = meta.triple, sdk_path = sdk_path)
-            cpp_body = """#!/usr/bin/env bash
-set -euo pipefail
-exec "{bin_prefix}clang++" -target "{triple}" -isysroot "{sdk_path}" "$@"
-""".format(bin_prefix = bin_prefix, triple = meta.triple, sdk_path = sdk_path)
-            ld_body = """#!/usr/bin/env bash
-set -euo pipefail
-exec "{bin_prefix}ld64.lld" "$@"
-""".format(bin_prefix = bin_prefix)
-            swiftc_body = """#!/usr/bin/env bash
-set -euo pipefail
-exec "{bin_prefix}swiftc" -target "{triple}" -sdk "{sdk_path}" -Xcc -isysroot -Xcc "{sdk_path}" -use-ld=lld "$@"
-""".format(bin_prefix = bin_prefix, triple = meta.triple, sdk_path = sdk_path)
+            clang_body = (
+                _REPO_ROOT_PREAMBLE +
+                link_args_snippet +
+                'exec "${{REPO_ROOT}}/{llvm_rel}/clang" -no-canonical-prefixes -B"${{REPO_ROOT}}/{llvm_rel}" "${{LINK_ARGS[@]}}" -target "{triple}" -isysroot "${{REPO_ROOT}}/{sdk_path}" "$@"\n'.format(
+                    llvm_rel = llvm_rel,
+                    triple = meta.triple,
+                    sdk_path = sdk_path,
+                )
+            )
+            cpp_body = (
+                _REPO_ROOT_PREAMBLE +
+                link_args_snippet +
+                'exec "${{REPO_ROOT}}/{llvm_rel}/clang++" -no-canonical-prefixes -B"${{REPO_ROOT}}/{llvm_rel}" "${{LINK_ARGS[@]}}" -target "{triple}" -isysroot "${{REPO_ROOT}}/{sdk_path}" "$@"\n'.format(
+                    llvm_rel = llvm_rel,
+                    triple = meta.triple,
+                    sdk_path = sdk_path,
+                )
+            )
+            if swift_rel:
+                swiftc_body = (
+                    _REPO_ROOT_PREAMBLE +
+                    'exec "${{REPO_ROOT}}/{swift_rel}/swiftc" -tools-directory "${{REPO_ROOT}}/{llvm_rel}" -target "{triple}" -sdk "${{REPO_ROOT}}/{sdk_path}" -Xcc -isysroot -Xcc "${{REPO_ROOT}}/{sdk_path}" -use-ld=lld "$@"\n'.format(
+                        swift_rel = swift_rel,
+                        llvm_rel = llvm_rel,
+                        triple = meta.triple,
+                        sdk_path = sdk_path,
+                    )
+                )
+            else:
+                swiftc_body = """#!/bin/bash
+echo "ERROR: xtool Swift toolchain (swift_toolchain_path) is not configured in @flutter_xtool_darwin_sdk for {target_key} ({triple})." >&2
+echo "Configure flutter.darwin_sdk(..., swift_toolchain_path = ...) in your root MODULE.bazel." >&2
+exit 1
+""".format(target_key = target_key, triple = meta.triple)
         else:
-            stub_err = """#!/usr/bin/env bash
+            sysroot_check = """SYSROOT_ARGS=()
+if [[ -d "${{REPO_ROOT}}/{default_sdk_path}" ]]; then
+  SYSROOT_ARGS=(-isysroot "${{REPO_ROOT}}/{default_sdk_path}")
+fi
+""".format(default_sdk_path = default_sdk_path)
+            clang_body = (
+                _REPO_ROOT_PREAMBLE +
+                link_args_snippet +
+                sysroot_check +
+                'exec "${{REPO_ROOT}}/{llvm_rel}/clang" -no-canonical-prefixes -B"${{REPO_ROOT}}/{llvm_rel}" "${{LINK_ARGS[@]}}" -target "{triple}" "${{SYSROOT_ARGS[@]}}" "$@"\n'.format(
+                    llvm_rel = llvm_rel,
+                    triple = meta.triple,
+                )
+            )
+            cpp_body = (
+                _REPO_ROOT_PREAMBLE +
+                link_args_snippet +
+                sysroot_check +
+                'exec "${{REPO_ROOT}}/{llvm_rel}/clang++" -no-canonical-prefixes -B"${{REPO_ROOT}}/{llvm_rel}" "${{LINK_ARGS[@]}}" -target "{triple}" "${{SYSROOT_ARGS[@]}}" "$@"\n'.format(
+                    llvm_rel = llvm_rel,
+                    triple = meta.triple,
+                )
+            )
+            swiftc_body = """#!/bin/bash
 echo "ERROR: xtool Darwin SDK (@flutter_xtool_darwin_sdk) is not configured for {target_key} ({triple})." >&2
 echo "Configure flutter.darwin_sdk(url = ..., sha256 = ...) or flutter.darwin_sdk(path = ...) in your root MODULE.bazel." >&2
 exit 1
 """.format(target_key = target_key, triple = meta.triple)
-            clang_body = stub_err
-            cpp_body = stub_err
-            ld_body = stub_err
-            swiftc_body = stub_err
 
-        repository_ctx.file("bin/clang_%s" % target_key, clang_body, executable = True)
-        repository_ctx.file("bin/clang-cpp_%s" % target_key, cpp_body, executable = True)
-        repository_ctx.file("bin/ld64.lld_%s" % target_key, ld_body, executable = True)
-        repository_ctx.file("bin/swiftc_%s" % target_key, swiftc_body, executable = True)
+        scripts["bin/clang_%s" % target_key] = clang_body
+        scripts["bin/clang-cpp_%s" % target_key] = cpp_body
+        scripts["bin/ld64.lld_%s" % target_key] = ld_body
+        scripts["bin/swiftc_%s" % target_key] = swiftc_body
+
+    return scripts
+
+def _write_wrapper_scripts(repository_ctx, sdk_available, sdk_paths, swift_bin_dir):
+    scripts = render_xtool_wrapper_scripts(
+        sdk_available = sdk_available,
+        sdk_paths = sdk_paths,
+        swift_bin_dir = swift_bin_dir,
+    )
+    for rel_path, body in scripts.items():
+        repository_ctx.file(rel_path, body, executable = True)
 
 def _resolve_bundle_sdk_paths(repository_ctx):
     direct_info = repository_ctx.path("sdk/info.json")
@@ -536,6 +674,22 @@ def _resolve_bundle_sdk_paths(repository_ctx):
         return resolve_darwin_artifactbundle_sdk_paths("", "sdk/darwin.artifactbundle")
     return resolve_darwin_artifactbundle_sdk_paths("", "sdk")
 
+def _host_llvm_exec_pair(repository_ctx):
+    os_name = repository_ctx.os.name.lower()
+    arch = repository_ctx.os.arch.lower()
+    exec_os = "macos" if ("mac" in os_name or "darwin" in os_name) else "linux"
+    exec_cpu = "aarch64" if arch in ("aarch64", "arm64") else "x86_64"
+    return exec_os, exec_cpu
+
+def _symlink_hermetic_llvm(repository_ctx):
+    exec_os, exec_cpu = _host_llvm_exec_pair(repository_ctx)
+    llvm_build_path = repository_ctx.path(
+        resource_dir_arg(exec_os, exec_cpu).relative(":BUILD.bazel"),
+    )
+    llvm_root = llvm_build_path.dirname
+    repository_ctx.symlink(llvm_root.get_child("bin"), "llvm/bin")
+    repository_ctx.symlink(llvm_root.get_child("lib"), "llvm/lib")
+
 def _xtool_darwin_sdk_repo_impl(repository_ctx):
     cfg = validate_darwin_sdk_config(
         url = repository_ctx.attr.url,
@@ -545,6 +699,8 @@ def _xtool_darwin_sdk_repo_impl(repository_ctx):
         require_configured = False,
         context = "xtool_darwin_sdk_repo",
     )
+
+    _symlink_hermetic_llvm(repository_ctx)
 
     sdk_available = False
     sdk_paths = {}
