@@ -26,7 +26,6 @@ load(
     "//flutter/private:app_entrypoint.bzl",
     "APP_SCHEME",
     "app_main_location",
-    "app_scheme_location",
     "app_scheme_rel_path",
     "app_scheme_sources",
     "compile_kernel_package_config",
@@ -68,7 +67,6 @@ load(
     "flutter_dart2js_cfe_action",
     "flutter_dart2wasm_action",
     "web_build_mode",
-    "web_experiment_flags",
     "web_mode_defines",
     "web_renderer_defines",
 )
