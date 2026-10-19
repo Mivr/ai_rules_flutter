@@ -6,8 +6,26 @@
 # No job checks out rules_dart: every workspace below takes it as a registry
 # `bazel_dep`. Local sibling overrides live in gitignored `.bazelrc.user` files,
 # which never exist on a runner. The one committed sibling override, in
-# e2e/_overlay_tests/native_assets_synthetic, is in no matrix — adding it means
-# adding a checkout step too.
+# e2e/_overlay_tests/native_assets_synthetic, is in no shard below — adding
+# it means adding a checkout step too.
+#
+# SHARDING (wall-time budget: a warm push on main must finish in under 7 min;
+# the Free plan has only 5 macOS slots shared with rules_dart, so at most 2
+# macOS jobs): each job below runs several workspaces in sequence over one
+# shared repository cache and one shared disk cache, so Bazel startup and
+# cache restore happen once per job instead of once per workspace. Every
+# workspace still runs on every OS it ran on before, with the same command
+# (`bazel test //...`, the Windows output root and tag filters, the KVM step
+# for the Android emulator), only grouped:
+#   e2e-macos-a:         smoke, dual_hub, hello_world, ffi_example (macOS)
+#   e2e-macos-b:         plugin_example, ffi_plugin_example, codegen (macOS)
+#   e2e-linux-app:       root unit tests, hello_world, codegen (Linux)
+#   e2e-linux-integration: integration_web, integration_linux,
+#     integration_android (Linux, with KVM for the emulator)
+#   web-smoke:           web_example through the installed binary (Linux)
+#   e2e-windows:         hello_world (Windows)
+# integration_web and integration_linux used to run twice (once in the e2e
+# matrix, once in a standalone job); now each runs once.
 name: CI
 on:
   push:
@@ -28,11 +46,16 @@ concurrency:
 # any of these files starts a new key, restored from the newest older one; the
 # cache only grows that way, so bump `cache-version` to start it over.
 #
-# Only e2e hello_world saves it, on pushes to main. It builds for every
-# platform and so fetches the most; were every job allowed to save, the first
-# to finish (smoke, fetching almost nothing) would take the key and the rest
-# could not replace it. Every other job, and every pull request, only restores,
-# then downloads whatever its own workspace needs beyond that.
+# The disk cache (action outputs) is one key per OS per shard, named after the
+# job below, so parallel jobs never fight over one key: each shard restores
+# its own key and only its own job saves it, on pushes to main. Pull requests
+# only restore. The repository key stays shared per OS; on a main push every
+# saver job tries to save it and the first to finish wins, so a shard whose
+# workspaces fetch extra downloads (e.g. the iOS engine artifacts, fetched
+# only by e2e-macos-b) re-downloads that delta on later runs.
+#
+# Pushes (main and `ci/**`) save; pull requests only restore, so a second
+# run on the same branch is the warm measurement.
 env:
   BAZEL_REPOSITORY_CACHE_KEY_FILES: |
     - MODULE.bazel
@@ -40,17 +63,204 @@ env:
     - e2e/*/MODULE.bazel
     - flutter/private/versions.bzl
 jobs:
-  unit-tests:
-    name: Unit tests
-    runs-on: ubuntu-latest
+  e2e-macos-a:
+    name: E2E macOS A (smoke, dual_hub, hello_world, ffi_example)
+    runs-on: macos-latest
+    env:
+      WORKSPACES: smoke dual_hub hello_world ffi_example
+    steps:
+      - uses: actions/checkout@v7
+      # See the note above `env`: one repository cache per OS, one disk cache
+      # per shard. The output base setup-bazel sets (~/.bazel) is shared by
+      # every workspace in the loop below.
+      - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+        with:
+          repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
+          disk-cache: macos-a
+          cache-save: ${{ github.event_name == 'push' }}
+      # --test_output=errors so a failure's assertion reaches this log. Without
+      # it the output stays in a test.log on the runner and is discarded with
+      # the machine. Every workspace runs; a failure is recorded and the loop
+      # continues, then the step fails (the old matrix used fail-fast: false).
+      - name: bazel test //... (shard workspaces)
+        run: |
+          failed=""
+          for ws in $WORKSPACES; do
+            echo "::group::e2e/$ws"
+            if (cd "e2e/$ws" && bazel test //... --test_output=errors); then
+              echo "PASS e2e/$ws"
+            else
+              echo "FAIL e2e/$ws"
+              failed="$failed $ws"
+            fi
+            echo "::endgroup::"
+          done
+          if [ -n "$failed" ]; then
+            echo "failing workspaces:$failed"
+            exit 1
+          fi
+      - name: Report cache sizes
+        if: always()
+        run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true
+  e2e-macos-b:
+    name: E2E macOS B (plugin_example, ffi_plugin_example, codegen)
+    runs-on: macos-latest
+    env:
+      WORKSPACES: plugin_example ffi_plugin_example codegen
     steps:
       - uses: actions/checkout@v7
       - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
         with:
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
-          cache-save: false
-      - name: bazel test //...
+          disk-cache: macos-b
+          cache-save: ${{ github.event_name == 'push' }}
+      - name: bazel test //... (shard workspaces)
+        run: |
+          failed=""
+          for ws in $WORKSPACES; do
+            echo "::group::e2e/$ws"
+            if (cd "e2e/$ws" && bazel test //... --test_output=errors); then
+              echo "PASS e2e/$ws"
+            else
+              echo "FAIL e2e/$ws"
+              failed="$failed $ws"
+            fi
+            echo "::endgroup::"
+          done
+          if [ -n "$failed" ]; then
+            echo "failing workspaces:$failed"
+            exit 1
+          fi
+      - name: Report cache sizes
+        if: always()
+        run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true
+  e2e-linux-app:
+    name: E2E Linux app (unit, hello_world, codegen)
+    runs-on: ubuntu-latest
+    env:
+      WORKSPACES: hello_world codegen
+    steps:
+      - uses: actions/checkout@v7
+      - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+        with:
+          repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
+          disk-cache: linux-app
+          cache-save: ${{ github.event_name == 'push' }}
+      - name: bazel test //... (root unit tests)
         run: bazel test //... --test_output=errors
+      - name: bazel test //... (shard workspaces)
+        run: |
+          failed=""
+          for ws in $WORKSPACES; do
+            echo "::group::e2e/$ws"
+            if (cd "e2e/$ws" && bazel test //... --test_output=errors); then
+              echo "PASS e2e/$ws"
+            else
+              echo "FAIL e2e/$ws"
+              failed="$failed $ws"
+            fi
+            echo "::endgroup::"
+          done
+          if [ -n "$failed" ]; then
+            echo "failing workspaces:$failed"
+            exit 1
+          fi
+      - name: Report cache sizes
+        if: always()
+        run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true
+  e2e-linux-integration:
+    name: E2E Linux integration (web, linux, android)
+    runs-on: ubuntu-latest
+    env:
+      WORKSPACES: integration_web integration_linux integration_android
+    steps:
+      - uses: actions/checkout@v7
+      - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+        with:
+          repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
+          disk-cache: linux-integration
+          cache-save: ${{ github.event_name == 'push' }}
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: bazel test //... (shard workspaces)
+        run: |
+          failed=""
+          for ws in $WORKSPACES; do
+            echo "::group::e2e/$ws"
+            if (cd "e2e/$ws" && bazel test //... --test_output=errors); then
+              echo "PASS e2e/$ws"
+            else
+              echo "FAIL e2e/$ws"
+              failed="$failed $ws"
+            fi
+            echo "::endgroup::"
+          done
+          if [ -n "$failed" ]; then
+            echo "failing workspaces:$failed"
+            exit 1
+          fi
+      - name: Report cache sizes
+        if: always()
+        run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true
+  e2e-windows:
+    name: E2E (hello_world, windows-latest)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      # See the note above `env` for the shared repository cache. The output
+      # base setup-bazel sets (D:/_bazel) takes precedence over the Windows
+      # step's --output_user_root and is as short.
+      - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+        with:
+          repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
+          disk-cache: windows-hello
+          cache-save: ${{ github.event_name == 'push' }}
+      # GitHub's windows-latest image exports ANDROID_NDK_HOME with backslashes
+      # (C:\Android\...), but rules_android_ndk's _create_symlinks() strips the
+      # NDK prefix with a forward-slash string match against ctx.path() output,
+      # so a backslashed value makes the symlink target escape the repo dir and
+      # the fetch fails. Hand it a forward-slash path, as upstream's own Windows
+      # CI does. See https://github.com/bazelbuild/rules_android_ndk/pull/108
+      - name: Normalize ANDROID_NDK_HOME to forward slashes (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ndk = $env:ANDROID_NDK_HOME ?? $env:ANDROID_NDK_ROOT
+          "ANDROID_NDK_HOME=$($ndk -replace '\\','/')" >> $env:GITHUB_ENV
+      # --test_output=errors so a failure's assertion reaches this log. Without
+      # it the output stays in a test.log on the runner and is discarded with
+      # the machine.
+      - name: bazel test //... (e2e/hello_world)
+        if: runner.os != 'Windows'
+        working-directory: e2e/hello_world
+        run: bazel test //... --test_output=errors
+      # On Windows, Bazel's default output root lives under a long per-user
+      # temp path; nested runfiles (e.g. the hermetic Python interpreter's
+      # _socket.pyd used by rules_android's aar_embedded_jars_extractor) then
+      # exceed the 260-char MAX_PATH limit and fail to load with
+      # "DLL load failed ... The filename or extension is too long".
+      # A short --output_user_root keeps every generated path well under MAX_PATH.
+      # (`BAZEL_OUTPUT_BASE` is not read by Bazel; the startup flag is required.)
+      # --*_tag_filters=-no-windows-ci skips targets that build fine on
+      # macOS/Linux but exceed the windows-latest runner's commit limit
+      # (RAM + its small fixed pagefile). Today that's hello_world's Android
+      # target: rules_android's resource compiler launches its JVM with
+      # -Xms3G, eagerly committing 3 GiB and OOMing. Android is still covered
+      # on the macOS and Linux runners. The build filter (not just the test
+      # filter) is required because `bazel test //...` builds every matched
+      # target, including the non-test app, so a test-only filter wouldn't
+      # stop the OOMing build action.
+      - name: bazel test //... (e2e/hello_world)
+        if: runner.os == 'Windows'
+        working-directory: e2e/hello_world
+        run: bazel --output_user_root=C:/b test //... --test_output=errors --build_tag_filters=-no-windows-ci --test_tag_filters=-no-windows-ci
+      - name: Report cache sizes
+        if: always()
+        shell: bash
+        run: du -sh D:/_bazel-disk D:/_bazel-repo C:/_bazel-disk C:/_bazel-repo 2>/dev/null || true
   # The hooks in .pre-commit-config.yaml, over every file. Nothing else runs
   # them for a commit made without `prek install`.
   pre-commit:
@@ -90,7 +300,7 @@ jobs:
       - name: Run private tool tests
         working-directory: flutter/private/tools
         run: dart pub get && dart test -x runfiles
-  # The only web coverage CI has — web_example is in no e2e matrix below — and
+  # The only web coverage CI has — web_example is in no shard above — and
   # the only place CI runs the binary users install rather than `dart run`.
   # One `-c dbg` Chrome run, asserted down to a VM service that answers
   # `getVersion` — `app.started` alone does not prove DWDS came up.
@@ -105,7 +315,8 @@ jobs:
       - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
         with:
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
-          cache-save: false
+          disk-cache: linux-web
+          cache-save: ${{ github.event_name == 'push' }}
       # setup-bazel pins every workspace to one output base with a `startup`
       # line in ~/.bazelrc. This job runs two workspaces: the root, whose
       # bazel-bin holds the dev tool binary under test, and e2e/web_example,
@@ -141,126 +352,14 @@ jobs:
       # itself and resolves tools/dev_tool from its own location.
       - name: Web smoke
         run: xvfb-run -a dart run tools/dev_tool/tool/e2e.dart test/e2e/web_smoke_e2e_test.dart
-  e2e:
-    name: E2E (${{ matrix.workspace }}, ${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        workspace:
-          - smoke
-          # Two pub hubs over two locks — cheap (no Flutter SDK, no app) and the
-          # only coverage of duplicate package records across hubs.
-          - dual_hub
-          - hello_world
-          - ffi_example
-          - plugin_example
-          - ffi_plugin_example
-          - codegen
-        os:
-          - macos-latest
-        include:
-          # Run hello_world on Linux for native Linux bundle testing.
-          - workspace: hello_world
-            os: ubuntu-latest
-          # Run hello_world on Windows for native Windows bundle testing.
-          - workspace: hello_world
-            os: windows-latest
-          # Run codegen on Linux (no platform-specific code).
-          - workspace: codegen
-            os: ubuntu-latest
-          # Run integration_web on Linux (hermetic chrome-headless-shell).
-          - workspace: integration_web
-            os: ubuntu-latest
-          # Run integration_linux on Linux (hermetic Xvfb + GTK3/Mesa runtime).
-          - workspace: integration_linux
-            os: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      # See the note above `env` for why only hello_world saves. The output base
-      # setup-bazel sets (~/.bazel; D:/_bazel on Windows) takes precedence over
-      # the Windows step's --output_user_root and is as short.
-      - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
-        with:
-          repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
-          cache-save: ${{ github.event_name == 'push' && matrix.workspace == 'hello_world' }}
-      # GitHub's windows-latest image exports ANDROID_NDK_HOME with backslashes
-      # (C:\Android\...), but rules_android_ndk's _create_symlinks() strips the
-      # NDK prefix with a forward-slash string match against ctx.path() output,
-      # so a backslashed value makes the symlink target escape the repo dir and
-      # the fetch fails. Hand it a forward-slash path, as upstream's own Windows
-      # CI does. See https://github.com/bazelbuild/rules_android_ndk/pull/108
-      - name: Normalize ANDROID_NDK_HOME to forward slashes (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $ndk = $env:ANDROID_NDK_HOME ?? $env:ANDROID_NDK_ROOT
-          "ANDROID_NDK_HOME=$($ndk -replace '\\','/')" >> $env:GITHUB_ENV
-      # --test_output=errors so a failure's assertion reaches this log. Without
-      # it the output stays in a test.log on the runner and is discarded with
-      # the machine.
-      - name: bazel test //... (e2e/${{ matrix.workspace }})
-        if: runner.os != 'Windows'
-        working-directory: e2e/${{ matrix.workspace }}
-        run: bazel test //... --test_output=errors
-      # On Windows, Bazel's default output root lives under a long per-user
-      # temp path; nested runfiles (e.g. the hermetic Python interpreter's
-      # _socket.pyd used by rules_android's aar_embedded_jars_extractor) then
-      # exceed the 260-char MAX_PATH limit and fail to load with
-      # "DLL load failed ... The filename or extension is too long".
-      # A short --output_user_root keeps every generated path well under MAX_PATH.
-      # (`BAZEL_OUTPUT_BASE` is not read by Bazel; the startup flag is required.)
-      # --*_tag_filters=-no-windows-ci skips targets that build fine on
-      # macOS/Linux but exceed the windows-latest runner's commit limit
-      # (RAM + its small fixed pagefile). Today that's hello_world's Android
-      # target: rules_android's resource compiler launches its JVM with
-      # -Xms3G, eagerly committing 3 GiB and OOMing. Android is still covered
-      # on the macOS and Linux runners. The build filter (not just the test
-      # filter) is required because `bazel test //...` builds every matched
-      # target, including the non-test app, so a test-only filter wouldn't
-      # stop the OOMing build action.
-      - name: bazel test //... (e2e/${{ matrix.workspace }})
-        if: runner.os == 'Windows'
-        working-directory: e2e/${{ matrix.workspace }}
-        run: bazel --output_user_root=C:/b test //... --test_output=errors --build_tag_filters=-no-windows-ci --test_tag_filters=-no-windows-ci
-  integration-web:
-    name: E2E (integration_web)
+      - name: Report cache sizes
+        if: always()
+        run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true
+  conclusion:
+    name: Conclusion
+    needs: [e2e-macos-a, e2e-macos-b, e2e-linux-app, e2e-linux-integration, e2e-windows, dart-tool-tests, pre-commit, web-smoke]
+    if: always()
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
-        with:
-          repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
-          cache-save: false
-      - name: bazel test //... (e2e/integration_web)
-        working-directory: e2e/integration_web
-        run: bazel test //... --test_output=errors
-  integration-linux:
-    name: E2E (integration_linux)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
-        with:
-          repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
-          cache-save: false
-      - name: bazel test //... (e2e/integration_linux)
-        working-directory: e2e/integration_linux
-        run: bazel test //... --test_output=errors
-  integration-android:
-    name: E2E (integration_android)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
-        with:
-          repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
-          cache-save: false
-      - name: Enable KVM
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-      - name: bazel test //... (e2e/integration_android)
-        working-directory: e2e/integration_android
-        run: bazel test //... --test_output=errors
+      - name: Fail if any job failed
+        run: echo '${{ toJSON(needs) }}' | jq -e 'with_entries(select(.value.result != "success" and .value.result != "skipped")) | length == 0'
