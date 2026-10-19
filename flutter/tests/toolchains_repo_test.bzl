@@ -973,23 +973,29 @@ def _xtool_hermetic_llvm_probe_impl(ctx):
     out = ctx.actions.declare_file(ctx.label.name + ".dylib")
     work_dir = ctx.actions.declare_directory(ctx.label.name + "_work")
     clang_wrapper = None
+    clang_include_dir = None
     for f in ctx.files.toolchain_files:
         if f.path.endswith("/bin/clang_macos_arm64"):
             clang_wrapper = f
-            break
+        if f.path.endswith("/include/stdint.h") and "/llvm/lib/clang/" in f.path:
+            clang_include_dir = f.dirname
     if not clang_wrapper:
         fail("Missing bin/clang_macos_arm64 in @flutter_xtool_darwin_sdk//:toolchain_files")
+    if not clang_include_dir:
+        fail("Missing llvm/lib/clang/*/include/stdint.h in @flutter_xtool_darwin_sdk//:toolchain_files")
     repo_root = clang_wrapper.dirname[:-len("/bin")]
     ctx.actions.run_shell(
         inputs = ctx.files.toolchain_files,
         outputs = [out, work_dir],
         mnemonic = "FlutterXtoolHermeticLlvmProbe",
+        env = {"TMPDIR": "/tmp"},
         use_default_shell_env = False,
         command = """set -euo pipefail
 REPO_ROOT="{repo_root}"
+CLANG_INCLUDE_DIR="{clang_include_dir}"
 WORK="{work_dir}"
 OUT="{out}"
-mkdir -p "$WORK/decoy_bin"
+mkdir -p "$WORK/decoy_bin" "$WORK/MacOSX.sdk/usr/include"
 for tool in clang clang++ ld64.lld llvm-ar llvm-cov llvm-nm llvm-objdump llvm-strip; do
   cat > "$WORK/decoy_bin/$tool" <<'EOF'
 #!/bin/bash
@@ -999,16 +1005,36 @@ EOF
   chmod +x "$WORK/decoy_bin/$tool"
 done
 
+cat > "$WORK/MacOSX.sdk/usr/include/TargetConditionals.h" <<'EOF'
+#ifndef __TARGETCONDITIONALS__
+#define __TARGETCONDITIONALS__
+#define TARGET_OS_MAC 1
+#define TARGET_OS_OSX 1
+#endif
+EOF
+
 cat > "$WORK/sample.c" <<'EOF'
 #include <stdint.h>
+#include <TargetConditionals.h>
 int32_t xtool_test_add(int32_t a, int32_t b) {{
   return a + b;
 }}
 EOF
 
 export PATH="$WORK/decoy_bin"
-"$REPO_ROOT/bin/clang_macos_arm64" -c "$WORK/sample.c" -o "$WORK/sample.o"
-PATH="" "$REPO_ROOT/bin/clang_macos_arm64" -c "$WORK/sample.c" -o "$WORK/sample_empty_path.o"
+"$REPO_ROOT/bin/clang_macos_arm64" -nostdinc --sysroot="$WORK/MacOSX.sdk" -isysroot "$WORK/MacOSX.sdk" -isystem "$CLANG_INCLUDE_DIR" -isystem "$WORK/MacOSX.sdk/usr/include" -MD -MF "$WORK/sample.d" -c "$WORK/sample.c" -o "$WORK/sample.o"
+PATH="" "$REPO_ROOT/bin/clang_macos_arm64" -nostdinc --sysroot="$WORK/MacOSX.sdk" -isysroot "$WORK/MacOSX.sdk" -isystem "$CLANG_INCLUDE_DIR" -isystem "$WORK/MacOSX.sdk/usr/include" -MD -MF "$WORK/sample_empty_path.d" -c "$WORK/sample.c" -o "$WORK/sample_empty_path.o"
+"$REPO_ROOT/bin/clang_macos_arm64" -I"$WORK/MacOSX.sdk/usr/include" -MD -MF "$WORK/sample_default.d" -c "$WORK/sample.c" -o "$WORK/sample_default.o"
+for depfile in "$WORK/sample.d" "$WORK/sample_empty_path.d" "$WORK/sample_default.d"; do
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    for tok in $line; do
+      if [[ "$tok" == /usr/* ]]; then
+        echo "ERROR: non-hermetic host /usr header read ($tok) in $depfile" >&2
+        exit 98
+      fi
+    done
+  done < "$depfile"
+done
 "$REPO_ROOT/bin/llvm-ar" rcs "$WORK/libsample.a" "$WORK/sample.o"
 "$REPO_ROOT/bin/llvm-nm" "$WORK/libsample.a" > "$WORK/nm.txt"
 "$REPO_ROOT/bin/ld64.lld_macos_arm64" -arch arm64 -platform_version macos 11.0.0 11.0.0 -dylib "$WORK/sample.o" -o "$WORK/libsample_unstripped.dylib"
@@ -1018,6 +1044,7 @@ PATH="" "$REPO_ROOT/bin/ld64.lld_macos_arm64" -arch arm64 -platform_version maco
 "$REPO_ROOT/bin/llvm-cov" --version > "$WORK/cov.txt"
 """.format(
             repo_root = repo_root,
+            clang_include_dir = clang_include_dir,
             work_dir = work_dir.path,
             out = out.path,
         ),

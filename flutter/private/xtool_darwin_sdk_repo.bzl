@@ -583,7 +583,7 @@ def render_xtool_wrapper_scripts(
             clang_body = (
                 _REPO_ROOT_PREAMBLE +
                 link_args_snippet +
-                'exec "${{REPO_ROOT}}/{llvm_rel}/clang" -no-canonical-prefixes -B"${{REPO_ROOT}}/{llvm_rel}" "${{LINK_ARGS[@]}}" -target "{triple}" -isysroot "${{REPO_ROOT}}/{sdk_path}" "$@"\n'.format(
+                'exec "${{REPO_ROOT}}/{llvm_rel}/clang" -no-canonical-prefixes -B"${{REPO_ROOT}}/{llvm_rel}" "${{LINK_ARGS[@]}}" -target "{triple}" --sysroot="${{REPO_ROOT}}/{sdk_path}" -isysroot "${{REPO_ROOT}}/{sdk_path}" "$@"\n'.format(
                     llvm_rel = llvm_rel,
                     triple = meta.triple,
                     sdk_path = sdk_path,
@@ -592,7 +592,7 @@ def render_xtool_wrapper_scripts(
             cpp_body = (
                 _REPO_ROOT_PREAMBLE +
                 link_args_snippet +
-                'exec "${{REPO_ROOT}}/{llvm_rel}/clang++" -no-canonical-prefixes -B"${{REPO_ROOT}}/{llvm_rel}" "${{LINK_ARGS[@]}}" -target "{triple}" -isysroot "${{REPO_ROOT}}/{sdk_path}" "$@"\n'.format(
+                'exec "${{REPO_ROOT}}/{llvm_rel}/clang++" -no-canonical-prefixes -B"${{REPO_ROOT}}/{llvm_rel}" "${{LINK_ARGS[@]}}" -target "{triple}" --sysroot="${{REPO_ROOT}}/{sdk_path}" -isysroot "${{REPO_ROOT}}/{sdk_path}" "$@"\n'.format(
                     llvm_rel = llvm_rel,
                     triple = meta.triple,
                     sdk_path = sdk_path,
@@ -615,27 +615,22 @@ echo "Configure flutter.darwin_sdk(..., swift_toolchain_path = ...) in your root
 exit 1
 """.format(target_key = target_key, triple = meta.triple)
         else:
-            sysroot_check = """SYSROOT_ARGS=()
-if [[ -d "${{REPO_ROOT}}/{default_sdk_path}" ]]; then
-  SYSROOT_ARGS=(-isysroot "${{REPO_ROOT}}/{default_sdk_path}")
-fi
-""".format(default_sdk_path = default_sdk_path)
             clang_body = (
                 _REPO_ROOT_PREAMBLE +
                 link_args_snippet +
-                sysroot_check +
-                'exec "${{REPO_ROOT}}/{llvm_rel}/clang" -no-canonical-prefixes -B"${{REPO_ROOT}}/{llvm_rel}" "${{LINK_ARGS[@]}}" -target "{triple}" "${{SYSROOT_ARGS[@]}}" "$@"\n'.format(
+                'exec "${{REPO_ROOT}}/{llvm_rel}/clang" -no-canonical-prefixes -B"${{REPO_ROOT}}/{llvm_rel}" "${{LINK_ARGS[@]}}" -target "{triple}" --sysroot="${{REPO_ROOT}}/{default_sdk_path}" -isysroot "${{REPO_ROOT}}/{default_sdk_path}" -Wno-missing-sysroot "$@"\n'.format(
                     llvm_rel = llvm_rel,
                     triple = meta.triple,
+                    default_sdk_path = default_sdk_path,
                 )
             )
             cpp_body = (
                 _REPO_ROOT_PREAMBLE +
                 link_args_snippet +
-                sysroot_check +
-                'exec "${{REPO_ROOT}}/{llvm_rel}/clang++" -no-canonical-prefixes -B"${{REPO_ROOT}}/{llvm_rel}" "${{LINK_ARGS[@]}}" -target "{triple}" "${{SYSROOT_ARGS[@]}}" "$@"\n'.format(
+                'exec "${{REPO_ROOT}}/{llvm_rel}/clang++" -no-canonical-prefixes -B"${{REPO_ROOT}}/{llvm_rel}" "${{LINK_ARGS[@]}}" -target "{triple}" --sysroot="${{REPO_ROOT}}/{default_sdk_path}" -isysroot "${{REPO_ROOT}}/{default_sdk_path}" -Wno-missing-sysroot "$@"\n'.format(
                     llvm_rel = llvm_rel,
                     triple = meta.triple,
+                    default_sdk_path = default_sdk_path,
                 )
             )
             swiftc_body = """#!/bin/bash
