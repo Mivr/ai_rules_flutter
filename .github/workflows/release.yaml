@@ -15,8 +15,45 @@ permissions:
   id-token: write
   attestations: write
   contents: write
+  actions: read
 jobs:
+  # Releases wait for the Full workflow (full.yaml: the complete macOS matrix
+  # that push CI no longer runs) to pass on the tagged commit: pushing the tag
+  # starts both workflows, and this job polls until a Full run on this commit
+  # succeeds. It fails closed (a failed Full run, or no Full run within the
+  # timeout, blocks the release).
+  gate-full-matrix:
+    name: Full matrix passed for this tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - name: Wait for the Full workflow on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha="${{ github.sha }}"
+          deadline=$((SECONDS + 220 * 60))
+          while true; do
+            runs="$(gh run list --repo '${{ github.repository }}' --workflow full.yaml --commit "$sha" --limit 50 --json databaseId,status,conclusion,event,headBranch)"
+            if echo "$runs" | jq -e 'map(select(.conclusion == "success")) | length > 0' >/dev/null; then
+              echo "Full workflow passed for $sha"
+              exit 0
+            fi
+            if echo "$runs" | jq -e 'map(select(.status == "completed" and (.conclusion | IN("failure", "cancelled", "timed_out", "action_required")))) | length > 0' >/dev/null; then
+              echo "Full workflow failed for $sha:"
+              echo "$runs" | jq .
+              exit 1
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "Timed out waiting for the Full workflow on $sha:"
+              echo "$runs" | jq .
+              exit 1
+            fi
+            echo "Waiting for the Full workflow on $sha ..."
+            sleep 60
+          done
   release:
+    needs: gate-full-matrix
     uses: bazel-contrib/.github/.github/workflows/release_ruleset.yaml@v7.7.0
     with:
       release_files: rules_flutter-*.tar.gz

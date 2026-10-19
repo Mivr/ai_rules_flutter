@@ -1,7 +1,7 @@
-# CI workflow for rules_flutter
+# CI workflow for rules_flutter (push and pull-request CI; 7-minute budget)
 #
-# Runs repo-root tests (Starlark unit tests, buildifier lint) and
-# e2e tests across all workspaces on every push/PR.
+# Runs repo-root tests (Starlark unit tests, buildifier lint) and e2e tests
+# on every push/PR.
 #
 # No job checks out rules_dart: every workspace below takes it as a registry
 # `bazel_dep`. Local sibling overrides live in gitignored `.bazelrc.user` files,
@@ -9,23 +9,25 @@
 # e2e/_overlay_tests/native_assets_synthetic, is in no shard below — adding
 # it means adding a checkout step too.
 #
-# SHARDING (wall-time budget: a warm push on main must finish in under 7 min;
-# the Free plan has only 5 macOS slots shared with rules_dart, so at most 2
-# macOS jobs): each job below runs several workspaces in sequence over one
-# shared repository cache and one shared disk cache, so Bazel startup and
-# cache restore happen once per job instead of once per workspace. Every
-# workspace still runs on every OS it ran on before, with the same command
-# (`bazel test //...`, the Windows output root and tag filters, the KVM step
-# for the Android emulator), only grouped:
-#   e2e-macos-a:         smoke, dual_hub, hello_world, ffi_example (macOS)
-#   e2e-macos-b:         plugin_example, ffi_plugin_example, codegen (macOS)
-#   e2e-linux-app:       root unit tests, hello_world, codegen (Linux)
+# SHARDING: push CI keeps at most 2 macOS jobs (the Free plan has 5 macOS
+# slots shared with rules_dart), so macOS runs only two fast smoke jobs and
+# Linux carries every workspace whose targets can build there (Apple-only
+# targets skip themselves through Bazel's own `target_compatible_with`; no
+# new tag filters). The complete macOS coverage runs in full.yaml instead
+# (weekly, on release tags, or on demand), which releases wait for.
+#   e2e-macos-apple:     hello_world's Apple bundles (macOS + iOS simulator)
+#   e2e-macos-toolchain: smoke workspace (toolchain resolution, all platforms)
+#   e2e-linux-app:       root unit tests, hello_world, codegen, web_example
+#   e2e-linux-small:     smoke, dual_hub, ffi_example, ffi_plugin_example
 #   e2e-linux-integration: integration_web, integration_linux,
-#     integration_android (Linux, with KVM for the emulator)
-#   web-smoke:           web_example through the installed binary (Linux)
+#     integration_android (with KVM for the emulator)
+#   web-smoke:           web_example through the installed binary
 #   e2e-windows:         hello_world (Windows)
-# integration_web and integration_linux used to run twice (once in the e2e
-# matrix, once in a standalone job); now each runs once.
+# plugin_example runs in full.yaml only: every target it can build under
+# `bazel test //...` is Apple- or Windows-only (its Linux-buildable targets
+# are `manual`-tagged, which `//...` excludes everywhere), so a Linux push
+# run would execute zero tests there. integration_web/integration_linux used
+# to run twice (matrix plus standalone job); now each runs once.
 name: CI
 on:
   push:
@@ -48,14 +50,10 @@ concurrency:
 #
 # The disk cache (action outputs) is one key per OS per shard, named after the
 # job below, so parallel jobs never fight over one key: each shard restores
-# its own key and only its own job saves it, on pushes to main. Pull requests
-# only restore. The repository key stays shared per OS; on a main push every
-# saver job tries to save it and the first to finish wins, so a shard whose
-# workspaces fetch extra downloads (e.g. the iOS engine artifacts, fetched
-# only by e2e-macos-b) re-downloads that delta on later runs.
-#
-# Pushes (main and `ci/**`) save; pull requests only restore, so a second
-# run on the same branch is the warm measurement.
+# its own key and only its own job saves it, on pushes. Pull requests only
+# restore. The repository key stays shared per OS; on a push every saver job
+# tries to save it and the first to finish wins, so a shard whose workspaces
+# fetch extra downloads re-downloads that delta on later runs.
 env:
   BAZEL_REPOSITORY_CACHE_KEY_FILES: |
     - MODULE.bazel
@@ -63,50 +61,31 @@ env:
     - e2e/*/MODULE.bazel
     - flutter/private/versions.bzl
 jobs:
-  e2e-macos-a:
-    name: E2E macOS A (smoke, dual_hub, hello_world, ffi_example)
+  # The macOS-specific signal Linux cannot give: building the macOS desktop
+  # bundle and the iOS simulator bundle exercises the Xcode toolchain, the
+  # Apple SDKs and the Apple bundle rules (packaging, simulator runtime).
+  e2e-macos-apple:
+    name: macOS Apple bundles (hello_world macOS + iOS)
     runs-on: macos-latest
-    env:
-      WORKSPACES: smoke dual_hub hello_world ffi_example
     steps:
       - uses: actions/checkout@v7
-      # See the note above `env`: one repository cache per OS, one disk cache
-      # per shard. The output base setup-bazel sets (~/.bazel) is shared by
-      # every workspace in the loop below.
       - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
         with:
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
           disk-cache: macos-a
           cache-save: ${{ github.event_name == 'push' }}
-      # --test_output=errors so a failure's assertion reaches this log. Without
-      # it the output stays in a test.log on the runner and is discarded with
-      # the machine. Every workspace runs; a failure is recorded and the loop
-      # continues, then the step fails (the old matrix used fail-fast: false).
-      - name: bazel test //... (shard workspaces)
-        run: |
-          failed=""
-          for ws in $WORKSPACES; do
-            echo "::group::e2e/$ws"
-            if (cd "e2e/$ws" && bazel test //... --test_output=errors); then
-              echo "PASS e2e/$ws"
-            else
-              echo "FAIL e2e/$ws"
-              failed="$failed $ws"
-            fi
-            echo "::endgroup::"
-          done
-          if [ -n "$failed" ]; then
-            echo "failing workspaces:$failed"
-            exit 1
-          fi
+      - name: bazel test Apple bundles (e2e/hello_world)
+        working-directory: e2e/hello_world
+        run: bazel test //:macos_bundle_build_test //:ios_bundle_build_test --test_output=errors
       - name: Report cache sizes
         if: always()
         run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true
-  e2e-macos-b:
-    name: E2E macOS B (plugin_example, ffi_plugin_example, codegen)
+  # The cheapest job in CI (a dozen actions): verifies that every Flutter
+  # toolchain alias resolves, guarding the shared rule code all workspaces
+  # load, on the OS whose toolchain is the most fragile.
+  e2e-macos-toolchain:
+    name: macOS toolchain resolution (smoke)
     runs-on: macos-latest
-    env:
-      WORKSPACES: plugin_example ffi_plugin_example codegen
     steps:
       - uses: actions/checkout@v7
       - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
@@ -114,31 +93,17 @@ jobs:
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
           disk-cache: macos-b
           cache-save: ${{ github.event_name == 'push' }}
-      - name: bazel test //... (shard workspaces)
-        run: |
-          failed=""
-          for ws in $WORKSPACES; do
-            echo "::group::e2e/$ws"
-            if (cd "e2e/$ws" && bazel test //... --test_output=errors); then
-              echo "PASS e2e/$ws"
-            else
-              echo "FAIL e2e/$ws"
-              failed="$failed $ws"
-            fi
-            echo "::endgroup::"
-          done
-          if [ -n "$failed" ]; then
-            echo "failing workspaces:$failed"
-            exit 1
-          fi
+      - name: bazel test //... (e2e/smoke)
+        working-directory: e2e/smoke
+        run: bazel test //... --test_output=errors
       - name: Report cache sizes
         if: always()
         run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true
   e2e-linux-app:
-    name: E2E Linux app (unit, hello_world, codegen)
+    name: E2E Linux app (unit, hello_world, codegen, web_example)
     runs-on: ubuntu-latest
     env:
-      WORKSPACES: hello_world codegen
+      WORKSPACES: hello_world codegen web_example
     steps:
       - uses: actions/checkout@v7
       - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
@@ -148,6 +113,42 @@ jobs:
           cache-save: ${{ github.event_name == 'push' }}
       - name: bazel test //... (root unit tests)
         run: bazel test //... --test_output=errors
+      # --test_output=errors so a failure's assertion reaches this log. Without
+      # it the output stays in a test.log on the runner and is discarded with
+      # the machine. Every workspace runs; a failure is recorded and the loop
+      # continues, then the step fails.
+      - name: bazel test //... (shard workspaces)
+        run: |
+          failed=""
+          for ws in $WORKSPACES; do
+            echo "::group::e2e/$ws"
+            if (cd "e2e/$ws" && bazel test //... --test_output=errors); then
+              echo "PASS e2e/$ws"
+            else
+              echo "FAIL e2e/$ws"
+              failed="$failed $ws"
+            fi
+            echo "::endgroup::"
+          done
+          if [ -n "$failed" ]; then
+            echo "failing workspaces:$failed"
+            exit 1
+          fi
+      - name: Report cache sizes
+        if: always()
+        run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true
+  e2e-linux-small:
+    name: E2E Linux small (smoke, dual_hub, ffi_example, ffi_plugin_example)
+    runs-on: ubuntu-latest
+    env:
+      WORKSPACES: smoke dual_hub ffi_example ffi_plugin_example
+    steps:
+      - uses: actions/checkout@v7
+      - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+        with:
+          repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
+          disk-cache: linux-small
+          cache-save: ${{ github.event_name == 'push' }}
       - name: bazel test //... (shard workspaces)
         run: |
           failed=""
@@ -300,8 +301,7 @@ jobs:
       - name: Run private tool tests
         working-directory: flutter/private/tools
         run: dart pub get && dart test -x runfiles
-  # The only web coverage CI has — web_example is in no shard above — and
-  # the only place CI runs the binary users install rather than `dart run`.
+  # The only place CI runs the binary users install rather than `dart run`.
   # One `-c dbg` Chrome run, asserted down to a VM service that answers
   # `getVersion` — `app.started` alone does not prove DWDS came up.
   web-smoke:
@@ -357,7 +357,7 @@ jobs:
         run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true
   conclusion:
     name: Conclusion
-    needs: [e2e-macos-a, e2e-macos-b, e2e-linux-app, e2e-linux-integration, e2e-windows, dart-tool-tests, pre-commit, web-smoke]
+    needs: [e2e-macos-apple, e2e-macos-toolchain, e2e-linux-app, e2e-linux-small, e2e-linux-integration, e2e-windows, dart-tool-tests, pre-commit, web-smoke]
     if: always()
     runs-on: ubuntu-latest
     steps:
