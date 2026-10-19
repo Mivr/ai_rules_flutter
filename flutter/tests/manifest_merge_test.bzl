@@ -9,7 +9,17 @@ arm relies on.
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_android//providers:providers.bzl", "StarlarkAndroidResourcesInfo")
-load("//flutter:android.bzl", "flutter_android_manifest_merge")
+load("//flutter:android.bzl", "flutter_android_manifest_merge", "flutter_android_plugin_library")
+
+def _plugin_synth_manifest_action_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    actions = analysistest.target_actions(env)
+    mnemonics = [a.mnemonic for a in actions]
+    asserts.true(env, "FileWrite" in mnemonics, "expected FileWrite action, got %s" % mnemonics)
+    asserts.false(env, "Genrule" in mnemonics, "synthesized manifest must not use Genrule: %s" % mnemonics)
+    return analysistest.end(env)
+
+_plugin_synth_manifest_action_test = analysistest.make(_plugin_synth_manifest_action_test_impl)
 
 def _merge_action_test_impl(ctx):
     env = analysistest.begin(ctx)
@@ -448,6 +458,27 @@ def manifest_merge_test_suite(name):
         ],
     )
 
+    flutter_android_plugin_library(
+        name = "_synth_manifest_plugin",
+        java_package = "com.example.synth",
+        tags = ["manual"],
+    )
+
+    _plugin_synth_manifest_action_test(
+        name = name + "_plugin_synth_manifest_action",
+        target_under_test = ":__synth_manifest_plugin__manifest",
+    )
+
+    _manifest_content_test(
+        name = name + "_plugin_synth_manifest_content",
+        manifest = ":__synth_manifest_plugin__manifest",
+        expected_substrings = [
+            '<?xml version="1.0" encoding="utf-8"?>',
+            'package="com.example.synth">',
+            "</manifest>",
+        ],
+    )
+
     native.test_suite(
         name = name,
         tests = [
@@ -456,5 +487,7 @@ def manifest_merge_test_suite(name):
             ":" + name + "_tools_node_remove",
             ":" + name + "_max_sdk_version_upgrade",
             ":" + name + "_sdk23_remove_scoping",
+            ":" + name + "_plugin_synth_manifest_action",
+            ":" + name + "_plugin_synth_manifest_content",
         ],
     )

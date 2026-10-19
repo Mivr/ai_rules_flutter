@@ -148,6 +148,14 @@ def _record_android_subpackage_test_impl(ctx):
         "_build_config/com/llfbandit/record/BuildConfig.java" in content,
         "expected BuildConfig against the plugin namespace in:\n" + content,
     )
+    asserts.true(
+        env,
+        'load("@bazel_skylib//rules:write_file.bzl", "write_file")' in content,
+        content,
+    )
+    asserts.true(env, "write_file(\n    name = \"_build_config_src\"," in content, content)
+    asserts.false(env, "genrule" in content, content)
+    asserts.false(env, "cat >" in content, content)
 
     # The plugin's own manifest is used (RECORD_AUDIO merges into the APK).
     asserts.true(
@@ -194,12 +202,15 @@ def _resources_without_manifest_test_impl(ctx):
     # AGP treats a missing library manifest as an empty one, so we
     # synthesize the equivalent.
     asserts.true(env, 'manifest = ":_manifest"' in content, content)
+    asserts.true(env, "write_file(\n    name = \"_manifest\"," in content, content)
     asserts.true(
         env,
         'package=\\"dev.example.res_only_manifestless\\"' in content,
         content,
     )
     asserts.false(env, "exports_manifest" in content, content)
+    asserts.false(env, "genrule" in content, content)
+    asserts.false(env, "cat >" in content, content)
 
     return unittest.end(env)
 
@@ -929,6 +940,47 @@ overlay_multi_root_watches_higher_priority_root_test = unittest.make(
     _overlay_multi_root_watches_higher_priority_root_test_impl,
 )
 
+def _overlay_rewrites_cat_genrules_to_write_file_test_impl(ctx):
+    """Overlay templates using `cat > $@ <<'EOF'` genrules are rewritten to `write_file`."""
+    env = unittest.begin(ctx)
+
+    tpl = """\
+load("@rules_flutter//flutter:android.bzl", "flutter_android_engine")
+load("@rules_java//java:java_library.bzl", "java_library")
+
+genrule(
+    name = "_build_config_src",
+    outs = ["_build_config/com/ryanheise/audio_session/BuildConfig.java"],
+    cmd = "cat > $@ <<'EOF'\\npackage com.ryanheise.audio_session;\\npublic final class BuildConfig {\\n  public static final boolean DEBUG = false;\\n  public static final String LIBRARY_PACKAGE_NAME = \\"com.ryanheise.audio_session\\";\\n  public static final String BUILD_TYPE = \\"release\\";\\n}\\nEOF\\n",
+)
+"""
+    rendered = apply_overlay_substitutions(
+        content = tpl,
+        hub_name = "deps",
+        package_name = "audio_session",
+        version = "0.1.21",
+        language_version = "3.4",
+        deps = "",
+    )
+    asserts.true(
+        env,
+        'load("@bazel_skylib//rules:write_file.bzl", "write_file")' in rendered,
+        rendered,
+    )
+    asserts.true(
+        env,
+        'write_file(\n    name = "_build_config_src",\n    out = "_build_config/com/ryanheise/audio_session/BuildConfig.java",' in rendered,
+        rendered,
+    )
+    asserts.false(env, "genrule" in rendered, rendered)
+    asserts.false(env, "cat >" in rendered, rendered)
+
+    return unittest.end(env)
+
+overlay_rewrites_cat_genrules_to_write_file_test = unittest.make(
+    _overlay_rewrites_cat_genrules_to_write_file_test_impl,
+)
+
 def flutter_pub_package_test_suite(name):
     unittest.suite(
         name,
@@ -943,6 +995,7 @@ def flutter_pub_package_test_suite(name):
         overlay_watches_more_specific_version_candidates_test,
         overlay_watches_android_subpackage_candidates_test,
         overlay_multi_root_watches_higher_priority_root_test,
+        overlay_rewrites_cat_genrules_to_write_file_test,
         parse_gradle_android_namespace_test,
         parse_android_manifest_package_test,
         record_android_subpackage_test,

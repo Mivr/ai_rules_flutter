@@ -1181,10 +1181,16 @@ kt_android_library(
 # Minimal manifest for resource processing. AGP treats a missing library
 # manifest as an empty one; rules_android requires an explicit file when
 # resource_files is set.
-genrule(
+write_file(
     name = "_manifest",
-    outs = ["_manifest/AndroidManifest.xml"],
-    cmd = "cat > $@ <<'EOF'\\n<manifest xmlns:android=\\"http://schemas.android.com/apk/res/android\\"\\n    package=\\"{pkg}\\">\\n</manifest>\\nEOF\\n",
+    out = "_manifest/AndroidManifest.xml",
+    content = [
+        "<manifest xmlns:android=\\"http://schemas.android.com/apk/res/android\\"",
+        "    package=\\"{pkg}\\">",
+        "</manifest>",
+        "",
+    ],
+    newline = "unix",
 )
 """.format(pkg = java_package)
 
@@ -1226,6 +1232,7 @@ genrule(
     bc_package = java_package if java_package else "_unknown"
 
     return """\
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_flutter//flutter:android.bzl", "flutter_android_engine")
 load("@rules_java//java:java_library.bzl", "java_library")
 load("@rules_kotlin//kotlin:android.bzl", "kt_android_library")
@@ -1245,10 +1252,19 @@ flutter_android_engine(
 # (matching `android.namespace`). rules_android doesn't, so we generate
 # a minimal one — `DEBUG = false`, which is correct for release builds
 # and harmless for debug (the engine ABI / mode is decided elsewhere).
-genrule(
+write_file(
     name = "_build_config_src",
-    outs = ["_build_config/{bc_package_path}/BuildConfig.java"],
-    cmd = "cat > $@ <<'EOF'\\npackage {bc_package};\\npublic final class BuildConfig {{\\n  public static final boolean DEBUG = false;\\n  public static final String LIBRARY_PACKAGE_NAME = \\"{bc_package}\\";\\n  public static final String BUILD_TYPE = \\"release\\";\\n}}\\nEOF\\n",
+    out = "_build_config/{bc_package_path}/BuildConfig.java",
+    content = [
+        "package {bc_package};",
+        "public final class BuildConfig {{",
+        "  public static final boolean DEBUG = false;",
+        "  public static final String LIBRARY_PACKAGE_NAME = \\"{bc_package}\\";",
+        "  public static final String BUILD_TYPE = \\"release\\";",
+        "}}",
+        "",
+    ],
+    newline = "unix",
 )
 
 java_library(
@@ -1382,6 +1398,68 @@ def render_overlay_deps(dep_labels):
     """
     return "\n        ".join(['"%s",' % label for label in dep_labels])
 
+_WRITE_FILE_LOAD = 'load("@bazel_skylib//rules:write_file.bzl", "write_file")\n'
+_CAT_HEREDOC_PREFIX = "    cmd = \"cat > $@ <<'EOF'\\n"
+_CAT_HEREDOC_SUFFIX = "\\nEOF\\n\",\n)"
+
+def _rewrite_cat_genrules(content):
+    """Rewrite heredoc `cat` `genrule` targets in overlay templates to `write_file`."""
+    if _CAT_HEREDOC_PREFIX not in content:
+        return content
+    out_chunks = []
+    rest = content
+    for _ in range(16):
+        idx = rest.find("genrule(\n")
+        if idx < 0:
+            break
+        end_idx = rest.find(_CAT_HEREDOC_SUFFIX, idx)
+        if end_idx < 0:
+            break
+        block = rest[idx:end_idx + len(_CAT_HEREDOC_SUFFIX)]
+        cmd_idx = block.find(_CAT_HEREDOC_PREFIX)
+        if cmd_idx < 0:
+            out_chunks.append(rest[:idx + len("genrule(\n")])
+            rest = rest[idx + len("genrule(\n"):]
+            continue
+        header = block[:cmd_idx]
+        body = block[cmd_idx + len(_CAT_HEREDOC_PREFIX):len(block) - len(_CAT_HEREDOC_SUFFIX)]
+        name_val = ""
+        out_val = ""
+        for hline in header.split("\n"):
+            s = hline.strip()
+            if s.startswith('name = "') and s.endswith('",'):
+                name_val = s[len('name = "'):-2]
+            elif s.startswith('outs = ["') and s.endswith('"],'):
+                out_val = s[len('outs = ["'):-3]
+        if not name_val or not out_val:
+            out_chunks.append(rest[:idx + len("genrule(\n")])
+            rest = rest[idx + len("genrule(\n"):]
+            continue
+        body_lines = body.split("\\n") + [""]
+        content_entries = "\n".join(['        "%s",' % line for line in body_lines])
+        replacement = (
+            "write_file(\n" +
+            '    name = "%s",\n' % name_val +
+            '    out = "%s",\n' % out_val +
+            "    content = [\n" +
+            content_entries + "\n" +
+            "    ],\n" +
+            '    newline = "unix",\n' +
+            ")"
+        )
+        out_chunks.append(rest[:idx])
+        out_chunks.append(replacement)
+        rest = rest[end_idx + len(_CAT_HEREDOC_SUFFIX):]
+    out_chunks.append(rest)
+    rewritten = "".join(out_chunks)
+    if _WRITE_FILE_LOAD not in rewritten:
+        load_idx = rewritten.find("load(")
+        if load_idx >= 0:
+            rewritten = rewritten[:load_idx] + _WRITE_FILE_LOAD + rewritten[load_idx:]
+        else:
+            rewritten = _WRITE_FILE_LOAD + rewritten
+    return rewritten
+
 def apply_overlay_substitutions(content, hub_name, package_name, version, language_version, deps):
     """Fill an overlay template's placeholders.
 
@@ -1399,7 +1477,7 @@ def apply_overlay_substitutions(content, hub_name, package_name, version, langua
     Returns:
         The substituted content.
     """
-    return content.replace(
+    substituted = content.replace(
         "{HUB_NAME}",
         hub_name,
     ).replace(
@@ -1415,6 +1493,7 @@ def apply_overlay_substitutions(content, hub_name, package_name, version, langua
         _DEPS_PLACEHOLDER,
         deps,
     )
+    return _rewrite_cat_genrules(substituted)
 
 def _resolve_overlay_template(ctx, overlay_root_label, package_name, version, language_version, dep_labels, relpath, guard_hub_deps = False):
     """Look up an overlay template at `<root>/<package>/<version-ladder>/<relpath>`.
