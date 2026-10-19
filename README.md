@@ -78,7 +78,7 @@ bazel_dep(name = "rules_dart", version = "0.7.3")
 
 git_override(
     module_name = "rules_dart",
-    commit = "387de072b16e104b260e2a894111a922e1c67a9c",
+    commit = "72e962bf54cf7a76682b00830affdfb46a4de878",
     remote = "https://github.com/Mivr/rules_dart.git",
 )
 ```
