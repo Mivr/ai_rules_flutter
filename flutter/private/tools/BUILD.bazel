@@ -99,6 +99,7 @@ dart_binary(
     modular_kernel = False,
     target_compatible_with = HOST_COMPATIBLE,
     visibility = ["//flutter:__subpackages__"],
+    deps = ["@rules_dart//dart/guard:directive_guard"],
 )
 
 dart_binary(
@@ -169,7 +170,10 @@ _UNIT_TESTS = {
     "android_bundle_test": ("android_bundle.dart", []),
     "bundle_app_test": ("bundle_app.dart", []),
     "compile_shader_test": ("compile_shader.dart", []),
-    "kernel_filter_test": ("kernel_filter.dart", []),
+    "kernel_filter_test": (
+        "kernel_filter.dart",
+        ["@rules_dart//dart/guard:directive_guard"]
+    ),
     "macho_edit_test": ("macho_edit.dart", []),
     "generate_asset_manifest_test": ("generate_asset_manifest.dart", []),
     "merge_android_manifests_test": ("merge_android_manifests.dart", []),
