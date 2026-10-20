@@ -11,6 +11,7 @@ exports_files(
         "generate_asset_manifest.dart",
         "bundle_app.dart",
         "compile_shader.dart",
+        "directive_guard.dart",
         "kernel_filter.dart",
         "macho_edit.dart",
         "merge_android_manifests.dart",
@@ -92,6 +93,7 @@ dart_binary(
 
 dart_binary(
     name = "kernel_filter",
+    srcs = ["directive_guard.dart"],
     compile_mode = "kernel",
     main = "kernel_filter.dart",
     modular_kernel = False,
@@ -192,6 +194,7 @@ _TOOL_SRCS = {
     "android_bundle.dart": ["xtool_pack.dart"],
     "flutter_test_runner.dart": ["bazel_test_protocol.dart"],
     "flutter_integration_test_runner.dart": ["bazel_test_protocol.dart"],
+    "kernel_filter.dart": ["directive_guard.dart"],
 }
 
 _TEST_DATA = {

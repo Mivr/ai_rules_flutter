@@ -35,10 +35,9 @@ def make_web_ui_web_stub_content():
     Provides the `dart:ui_web` entrypoints referenced by the web bootstrap
     wrapper (`bootstrapEngine`) and by the real `package:flutter_web_plugins`
     sources (`setPluginHandler` and the URL strategy / platform location types
-    re-exported by `src/navigation/url_strategy.dart`), allowing
-    `FlutterKernelCompile` (`--target=flutter`) to compile directly against the
-    real `flutter_web_plugins` package when `kernel_filter` redirects its
-    `dart:ui_web` imports/exports to this staged stub.
+    re-exported by `src/navigation/url_strategy.dart`) for compiles against a
+    platform without `dart:ui_web`, which select it through the wrapper's
+    conditional import.
     """
     return "\n".join([
         "// GENERATED — do not edit.",

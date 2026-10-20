@@ -23,20 +23,33 @@ load(":action_content.bzl", "package_entry", "written_json")
 _PACKAGE = "ae_fixture"
 _OUTSIDE_LIB_URI = "org-dartlang-app:///flutter/tests/web_fixture_main.dart"
 
-def _kernel_argv(env):
+def _kernel_action(env):
     kernels = [
         a
         for a in analysistest.target_actions(env)
         if a.mnemonic == "FlutterKernelCompile"
     ]
     asserts.equals(env, 1, len(kernels), "expected one FlutterKernelCompile")
-    return kernels[0].argv if kernels else []
+    return kernels[0] if kernels else None
+
+def _kernel_argv(env):
+    action = _kernel_action(env)
+    return action.argv if action else []
 
 def _flag_values(argv, flag):
     return [argv[i + 1] for i in range(len(argv) - 1) if argv[i] == flag]
 
-def _assert_multi_root_and_package_config(env, argv, expect_stage = True):
-    """FlutterKernelCompile mounts only staged generated inputs + '.' under org-dartlang-app and emits stable rootUris."""
+def _assert_multi_root_and_package_config(env, action):
+    """FlutterKernelCompile mounts only its staging root under org-dartlang-app and emits stable rootUris.
+
+    Every declared source (source and generated alike) is staged into the
+    per-action staging root, which is the only `--filesystem-root` the
+    compiler sees. The exec root (`.`) is never mounted: an undeclared file
+    is then not there for the compiler to read whatever its spelling, and
+    `kernel_filter` refuses disallowed directives and verifies the read set
+    against the `--declared-inputs` manifest on top.
+    """
+    argv = action.argv if action else []
     roots = _flag_values(argv, "--filesystem-root")
     for r in roots:
         asserts.false(
@@ -44,18 +57,29 @@ def _assert_multi_root_and_package_config(env, argv, expect_stage = True):
             r.endswith("/bin"),
             "FlutterKernelCompile must never mount whole bin_dir, got %r" % roots,
         )
-    if expect_stage:
-        asserts.equals(env, 2, len(roots), "expected [stage_root, '.'] mounted, got %r" % roots)
-        if len(roots) >= 2:
-            asserts.true(
-                env,
-                roots[0].startswith("bazel-out/") and roots[0].endswith(".stage"),
-                "first --filesystem-root must be per-action .stage dir, got %r" % roots[0],
-            )
-            asserts.equals(env, ".", roots[1], "second --filesystem-root must be '.', got %r" % roots[1])
-    else:
-        asserts.equals(env, ["."], roots, "source-only compile must mount only '.', got %r" % roots)
+    asserts.false(
+        env,
+        "." in roots,
+        "FlutterKernelCompile must never mount the exec root '.', got %r" % roots,
+    )
+    asserts.equals(env, 1, len(roots), "expected only the staging root mounted, got %r" % roots)
+    if len(roots) >= 1:
+        asserts.true(
+            env,
+            roots[0].startswith("bazel-out/") and roots[0].endswith(".stage"),
+            "the --filesystem-root must be the per-action .stage dir, got %r" % roots[0],
+        )
     asserts.equals(env, ["org-dartlang-app"], _flag_values(argv, "--filesystem-scheme"))
+
+    manifests = _flag_values(argv, "--declared-inputs")
+    asserts.equals(env, 1, len(manifests), "expected --declared-inputs <manifest>, got %r" % argv)
+    if action and len(manifests) == 1:
+        input_paths = [f.path for f in action.inputs.to_list()]
+        asserts.true(
+            env,
+            manifests[0] in input_paths,
+            "the --declared-inputs manifest %r must be an action input" % manifests[0],
+        )
 
     pkg_config = written_json(env, ".package_config.json")
     entry = package_entry(pkg_config, _PACKAGE)
@@ -71,8 +95,9 @@ def _assert_multi_root_and_package_config(env, argv, expect_stage = True):
     copy_actions = [a for a in analysistest.target_actions(env) if a.mnemonic == "DartCopyTree"]
     asserts.equals(env, [], copy_actions, "FlutterKernelCompile must not emit DartCopyTree actions")
 
-def _assert_registrant_on_app_scheme(env, argv):
+def _assert_registrant_on_app_scheme(env, action):
     """The registrant's `--source`, its define and its root agree."""
+    argv = action.argv if action else []
     defines = [
         a[len("-Dflutter.dart_plugin_registrant="):]
         for a in argv
@@ -95,20 +120,18 @@ def _assert_registrant_on_app_scheme(env, argv):
         registrant.startswith("org-dartlang-app:///flutter/tests/"),
         "the registrant is named by its workspace path under the app scheme, got %r" % registrant,
     )
-    _assert_multi_root_and_package_config(env, argv, expect_stage = True)
+    _assert_multi_root_and_package_config(env, action)
 
 def _outside_lib_test_impl(ctx):
     env = analysistest.begin(ctx)
-    argv = _kernel_argv(env)
+    action = _kernel_action(env)
+    argv = action.argv if action else []
 
-    # The compilation root, and the exec root it resolves under.
+    # The compilation root. A `main` outside lib/ has no `package:` URI, so it
+    # compiles under the app scheme — resolved through the staging root, which
+    # stages the source by its workspace path. The exec root is never mounted.
     asserts.equals(env, _OUTSIDE_LIB_URI, argv[-1] if argv else None)
-    asserts.true(
-        env,
-        "." in _flag_values(argv, "--filesystem-root"),
-        "a source `main` outside lib/ needs the exec root mounted",
-    )
-    _assert_registrant_on_app_scheme(env, argv)
+    _assert_registrant_on_app_scheme(env, action)
 
     # The dev loop names it the same way, from the same root — `""` is the
     # exec root in the dev config's exec-root-relative convention.
@@ -134,7 +157,8 @@ def _outside_lib_test_impl(ctx):
 
 def _in_lib_test_impl(ctx):
     env = analysistest.begin(ctx)
-    argv = _kernel_argv(env)
+    action = _kernel_action(env)
+    argv = action.argv if action else []
     asserts.equals(
         env,
         "package:%s/web_fixture_main.dart" % _PACKAGE,
@@ -145,7 +169,7 @@ def _in_lib_test_impl(ctx):
         "--no-embed-source-text" in argv,
         "JIT FlutterKernelCompile must keep embedded source text, got %r" % argv,
     )
-    _assert_registrant_on_app_scheme(env, argv)
+    _assert_registrant_on_app_scheme(env, action)
 
     # Nothing for the dev loop to mount: the entrypoint resolves through the
     # package config, and the dev tool compiles its own registrant as a file.
@@ -157,9 +181,10 @@ def _in_lib_test_impl(ctx):
     return analysistest.end(env)
 
 def _opt_in_lib_test_impl(ctx):
-    """Release builds with only source inputs mount '.' alone and write stable rootUris."""
+    """Release builds stage every source and mount only the staging root."""
     env = analysistest.begin(ctx)
-    argv = _kernel_argv(env)
+    action = _kernel_action(env)
+    argv = action.argv if action else []
     asserts.equals(
         env,
         "package:%s/web_fixture_main.dart" % _PACKAGE,
@@ -170,7 +195,7 @@ def _opt_in_lib_test_impl(ctx):
         "--no-embed-source-text" in argv,
         "AOT FlutterKernelCompile must pass --no-embed-source-text, got %r" % argv,
     )
-    _assert_multi_root_and_package_config(env, argv, expect_stage = False)
+    _assert_multi_root_and_package_config(env, action)
     return analysistest.end(env)
 
 def _stale_bin_dir_seed_impl(ctx):
@@ -322,13 +347,13 @@ _shadow_consumer_main = rule(
 )
 
 def _stale_probe_analysis_test_impl(ctx):
-    """Declared generated inputs are staged in `.stage`, while undeclared files in `bazel-out` are not."""
+    """Declared inputs are staged in `.stage`, while undeclared files in `bazel-out` are not."""
     env = analysistest.begin(ctx)
     kernels = [a for a in analysistest.target_actions(env) if a.mnemonic == "FlutterKernelCompile"]
     asserts.equals(env, 1, len(kernels), "expected one FlutterKernelCompile")
     if kernels:
         action = kernels[0]
-        _assert_multi_root_and_package_config(env, action.argv, expect_stage = True)
+        _assert_multi_root_and_package_config(env, action)
         input_paths = [f.path for f in action.inputs.to_list()]
         staged_seed = [p for p in input_paths if p.endswith(".stage/flutter/tests/lib/stale_probe_seed.dart")]
         asserts.equals(
@@ -340,9 +365,23 @@ def _stale_probe_analysis_test_impl(ctx):
         staged_main = [p for p in input_paths if p.endswith(".stage/flutter/tests/lib/web_fixture_main.dart")]
         asserts.equals(
             env,
+            1,
+            len(staged_main),
+            "expected declared main staged in .stage, got %r" % input_paths,
+        )
+        # The stale sibling in bazel-out is in no output group the compile
+        # declares, so it reaches neither the inputs nor the staging root.
+        # The staged link above resolves the `package:` entrypoint, and the
+        # accompanying build test only passes when that link points at the
+        # declared source — the stale file holds no valid Dart. An unstaged
+        # `bin/...` path would be readable only behind a mounted root, and
+        # only the staging root is mounted.
+        unstaged = [p for p in input_paths if p.endswith("bin/flutter/tests/lib/web_fixture_main.dart") and ".stage/" not in p]
+        asserts.equals(
+            env,
             [],
-            staged_main,
-            "undeclared stale file in bazel-out must not be staged in .stage: %r" % staged_main,
+            unstaged,
+            "undeclared stale file in bazel-out must not be an action input: %r" % unstaged,
         )
     return analysistest.end(env)
 

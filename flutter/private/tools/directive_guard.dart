@@ -1,0 +1,1311 @@
+// Flutter's copy of rules_dart's directive-URI check, synced verbatim from
+// rules_dart Commit cfb5f2d (`dart/private/tools/directive_guard.dart`);
+// only this header and the trailing `findDisallowedFlutterDirectives` entry
+// point (with its two key helpers, mirroring rules_dart's `app_jit_snapshot`
+// whole-program wrapper) are flutter-specific. rules_dart keeps the file
+// private to its own package (only `app_jit_snapshot.dart` is exported for
+// source runs), so there is no exported API to reuse; re-sync by copying the
+// file again and re-applying the header and the trailing entry point.
+//
+// The front end behind `flutter_kernel_compile_action` (`frontend_server`)
+// loads `file:` URIs straight off the host filesystem, outside every
+// `--filesystem-root`, so a compile that mounts the exec root embeds
+// undeclared bytes and Bazel caches the stale result. `kernel_filter.dart`
+// runs this check over every declared source before the compiler runs, and
+// the action mounts only its staging root, so an undeclared file is not there
+// to be read whatever its spelling.
+//
+// The Dart front end loads `file:` URIs straight off the host filesystem,
+// outside every `--multi-root` (and outside the sandbox roots a spawn sees),
+// so a planner that resolves such a URI to nothing and compiles anyway embeds
+// undeclared bytes. Every tool that compiles or analyzes Dart sources — the
+// modular kernel planner, the whole-program `gen_kernel` wrapper, the
+// `dart compile js`/`wasm` runner, and the `dart analyze`/`dart fix` runners —
+// rejects these URIs before the compiler runs, with a diagnostic naming the
+// file, the directive and the URI.
+//
+// The prologue scanner and the directive-URI resolution moved here from
+// `kernel_module.dart` unchanged, so every tool classifies exactly what the
+// planner classifies. `scanAllDirectiveUris` collects the declared URI and
+// every `if` alternative without evaluating conditions, for validators that
+// have no VM library set: a `file:` spelling in any branch fails, whichever
+// configuration would select it.
+
+import 'dart:convert';
+import 'dart:io';
+
+/// The multi-root scheme every compile resolves its inputs through.
+const defaultMultiRootPrefix = 'org-dartlang-root:///';
+
+/// The path after `multiRootPrefix`, or null for any other URI.
+String? _stripPrefix(String uri, String multiRootPrefix) {
+  if (uri.startsWith(multiRootPrefix)) {
+    return uri.substring(multiRootPrefix.length);
+  }
+  return null;
+}
+
+// BEGIN staged-resolver-mirror: byte-identical in directive_guard.dart,
+// app_jit_snapshot.dart and builder_shim.dart (pinned by
+// directive_guard_test.dart). Edit only by syncing all three copies.
+
+/// Decodes one raw URI path segment the way the front end does (RFC 3986): each
+/// valid `%XX` escape becomes its byte (bytes together decode as UTF-8, either
+/// hex case), while anything else — including a lone `%` — stays literal.
+/// Decoding happens once: a `%` produced by decoding is never decoded again.
+String decodeUriSegment(String segment) {
+  if (!segment.contains('%')) return segment;
+  final out = StringBuffer();
+  final bytes = <int>[];
+  void flush() {
+    if (bytes.isEmpty) return;
+    out.write(utf8.decode(bytes, allowMalformed: true));
+    bytes.clear();
+  }
+
+  for (var i = 0; i < segment.length; i++) {
+    final c = segment.codeUnitAt(i);
+    if (c == 0x25 && i + 2 < segment.length) {
+      final hex = int.tryParse(segment.substring(i + 1, i + 3), radix: 16);
+      if (hex != null && hex >= 0 && hex <= 0xff) {
+        bytes.add(hex);
+        i += 2;
+        continue;
+      }
+    }
+    flush();
+    out.writeCharCode(c);
+  }
+  flush();
+  return out.toString();
+}
+
+/// Whether [uri] is a `package:` URI whose path climbs above its package
+/// directory (`package:pkg/sub/../../x.dart`). The front end reports leaving
+/// the package, but a tool that resolves against the real filesystem reads a
+/// host file instead, so the staged-source check refuses it before they run.
+/// False for any other URI, including a `package:` URI that stays inside its
+/// package (an unknown package name fails closed downstream, where the
+/// analyzer cannot resolve it, so it is not refused here).
+bool isEscapingPackageUri(String uri) {
+  if (!uri.startsWith('package:')) return false;
+  final rest = uri.substring('package:'.length);
+  if (rest.contains('?') || rest.contains('#')) return false;
+  final slash = rest.indexOf('/');
+  if (slash <= 0) return false;
+  final text = rest.substring(slash + 1).replaceAll(r'\', '/');
+  var depth = 0;
+  for (final raw in text.split('/')) {
+    if (raw.isEmpty) continue;
+    final seg = decodeUriSegment(raw);
+    if (seg.isEmpty || seg == '.') continue;
+    if (seg == '..') {
+      depth--;
+      if (depth < 0) return true;
+    } else if (!seg.contains('/')) {
+      depth++;
+    }
+  }
+  return false;
+}
+
+/// Whether [path] is absolute: POSIX `/`, a Windows drive (`C:/`, `C:\`), or
+/// a UNC share (`\\`).
+bool _isAbsoluteStagedPath(String path) =>
+    path.startsWith('/') ||
+    path.startsWith(r'\') ||
+    (path.length >= 3 &&
+        ((path.codeUnitAt(0) >= 0x41 && path.codeUnitAt(0) <= 0x5a) ||
+            (path.codeUnitAt(0) >= 0x61 && path.codeUnitAt(0) <= 0x7a)) &&
+        path.codeUnitAt(1) == 0x3a &&
+        (path.codeUnitAt(2) == 0x2f || path.codeUnitAt(2) == 0x5c));
+
+bool _isWindowsDriveSegment(String s) =>
+    s.length == 2 &&
+    ((s.codeUnitAt(0) >= 0x41 && s.codeUnitAt(0) <= 0x5a) ||
+        (s.codeUnitAt(0) >= 0x61 && s.codeUnitAt(0) <= 0x7a)) &&
+    s.codeUnitAt(1) == 0x3a;
+
+/// [path] as an absolute `/`-separated path: backslashes become separators,
+/// a relative path resolves against the current directory, and empty and `.`
+/// segments drop out. `..` segments stay (the caller applies them against its
+/// own base), except the resolution below, which clamps them at the
+/// filesystem root the way the analyzer does.
+String _normAbsStagedPath(String path) {
+  final slashed = path.replaceAll(r'\', '/');
+  final absolute = _isAbsoluteStagedPath(slashed)
+      ? slashed
+      : '${Directory.current.path.replaceAll(r'\', '/')}/$slashed';
+  final unc = absolute.startsWith('//');
+  final parts = <String>[];
+  for (final part in absolute.split('/')) {
+    if (part.isEmpty || part == '.') continue;
+    if (part == '..') {
+      // `..` clamps at the filesystem root the way the analyzer clamps it:
+      // past `/`, past a drive (`C:`), or past a UNC share's host.
+      final floor = unc
+          ? (parts.length <= 2 ? parts.length : 2)
+          : (parts.isNotEmpty && _isWindowsDriveSegment(parts.first) ? 1 : 0);
+      if (parts.length > floor) {
+        parts.removeLast();
+      }
+      continue;
+    }
+    parts.add(part);
+  }
+  final joined = parts.join('/');
+  if (unc) return '//$joined';
+  if (absolute.startsWith('/')) return '/$joined';
+  return joined;
+}
+
+/// The absolute `/`-separated path a schemeless relative or `/`-absolute
+/// directive URI in the staged file [fromPath] refers to, resolved the way the
+/// analyzer resolves it on the real filesystem: `\` separates, escapes decode
+/// once, a `?...` query is dropped (the front end reads the file the path part
+/// names, query or not), and `..` climbs past the staged tree (clamped at the
+/// filesystem root, where overshooting names any host path) instead of staying
+/// inside the declared inputs.
+///
+/// An empty reference — `''`, or `'?query'` with no path — names the importing
+/// file itself (RFC 3986): a self-import, always declared.
+///
+/// Null when [uri] is not such a URI: any scheme (`dart:`, `package:`,
+/// `file:`, the multi-root scheme, or anything else with a `:`), a fragment
+/// (the front end reports a URI with one instead of reading through it), or a
+/// `//`-prefixed authority. A decoded `/` also yields null: it names no file,
+/// so the compiler reports it and the guard has nothing to confine. Null means
+/// "no host file beyond what the scheme check already refuses", never "inside
+/// the declared inputs".
+String? resolveStagedRelativeTarget(String uri, String fromPath) {
+  final text = uri.contains(r'\') ? uri.replaceAll(r'\', '/') : uri;
+  // A fragment names no file: the front end reports a URI with one instead of
+  // reading through it, whatever path precedes it.
+  if (text.contains('#')) return null;
+  // A query names no file either: the front end reads the file the path part
+  // names, so the path part alone is classified and resolved below. Cutting
+  // here also keeps a `:` inside the query from looking like a scheme.
+  final query = text.indexOf('?');
+  final path = query < 0 ? text : text.substring(0, query);
+  if (path.contains(':')) return null;
+  if (path.startsWith('//')) return null;
+  final from = _normAbsStagedPath(fromPath);
+  // An empty reference names the importing file itself (RFC 3986).
+  if (path.isEmpty) return from;
+  final rooted = from.startsWith('/');
+  final drive =
+      !rooted &&
+      from.contains('/') &&
+      _isWindowsDriveSegment(from.split('/').first);
+  final stack = from.split('/');
+  // Drop the file name: the URI resolves against its directory.
+  if (stack.isNotEmpty) stack.removeLast();
+  final floor = rooted || drive ? 1 : 0;
+  final absolute = path.startsWith('/');
+  final base = absolute ? stack.sublist(0, floor) : stack;
+  final queue = absolute ? path.substring(1) : path;
+  for (final raw in queue.split('/')) {
+    if (raw.isEmpty) continue;
+    final seg = decodeUriSegment(raw);
+    if (seg.isEmpty || seg == '.') continue;
+    if (seg == '..') {
+      if (base.length > floor) base.removeLast();
+      continue;
+    }
+    if (seg.contains('/')) return null;
+    base.add(seg);
+  }
+  final joined = base.join('/');
+  // A rooted `from` splits with a leading empty segment, so the join already
+  // starts with `/` (or `//` for a UNC share); only fill in a bare `/` when
+  // the base ran empty.
+  if (rooted) return joined.startsWith('/') ? joined : '/$joined';
+  return joined;
+}
+
+/// Whether `uri` is a `file:` URI in any spelling: any letter case, any
+/// authority (`file://localhost/`), a bare path (`file:x.dart`), backslash
+/// separators, or a query or fragment suffix. The front end reads all of these
+/// off the host filesystem, outside every multi-root.
+bool isFileSchemeDirectiveUri(String uri) {
+  final colon = uri.indexOf(':');
+  if (colon != 4) return false;
+  const scheme = 'file';
+  for (var i = 0; i < 4; i++) {
+    var c = uri.codeUnitAt(i);
+    if (c >= 0x41 && c <= 0x5A) c += 0x20;
+    if (c != scheme.codeUnitAt(i)) return false;
+  }
+  return true;
+}
+
+bool _isSchemeStart(int c) =>
+    (c >= 0x41 && c <= 0x5A) || (c >= 0x61 && c <= 0x7a);
+
+bool _isSchemeChar(int c) =>
+    _isSchemeStart(c) ||
+    (c >= 0x30 && c <= 0x39) ||
+    c == 0x2B ||
+    c == 0x2D ||
+    c == 0x2E;
+
+/// Whether an `import` or `export` directive URI must fail the build: it names
+/// no file the action can read through its declared inputs. That is a `file:`
+/// URI in any spelling, or any other URI scheme but `dart:`, `package:` and
+/// the multi-root scheme. `dart:` libraries are checked against the VM set and
+/// `package:` URIs against the package config by the caller. Schemeless
+/// relative URIs are not classified here: the staged-source check resolves
+/// those against the importing file's declared location itself, since no
+/// caller confines them.
+bool isDisallowedDirectiveUri(
+  String uri, {
+  String multiRootPrefix = defaultMultiRootPrefix,
+}) {
+  if (uri.startsWith(multiRootPrefix)) return false;
+  if (uri.startsWith('package:') || uri.startsWith('dart:')) return false;
+  if (isFileSchemeDirectiveUri(uri)) return true;
+  final colon = uri.indexOf(':');
+  if (colon <= 0) return false;
+  if (!_isSchemeStart(uri.codeUnitAt(0))) return false;
+  for (var i = 1; i < colon; i++) {
+    if (!_isSchemeChar(uri.codeUnitAt(i))) return false;
+  }
+  return true;
+}
+
+// END staged-resolver-mirror
+
+/// The segments of the longest [packageDirs] directory holding `fromKey`, or
+/// the empty list when no package holds it (an unpackaged file).
+List<String> _packageDirOf(String fromKey, Map<String, String> packageDirs) {
+  var best = const <String>[];
+  for (final dir in packageDirs.values) {
+    if (dir.isEmpty) continue;
+    if (fromKey == dir || fromKey.startsWith('$dir/')) {
+      final segs = dir.split('/');
+      if (segs.length > best.length) best = segs;
+    }
+  }
+  return best;
+}
+
+/// Applies the segments of a directive path onto [base]: empty and `.` segments
+/// are dropped, each `..` pops while deeper than [floor], and a decoded `/`
+/// (`%2F`) names no file, since no file can be read through it. Above [floor],
+/// `..` either fails ([failAboveFloor], for `package:` URIs, where the front
+/// end reports leaving the package) or is dropped (relative and absolute URIs,
+/// which the front end clamps to the package directory or the multi-root).
+String? _resolveDirectivePath(
+  String path,
+  List<String> base,
+  int floor,
+  bool failAboveFloor,
+) {
+  final stack = base.toList();
+  for (final raw in path.split('/')) {
+    if (raw.isEmpty) continue;
+    final seg = decodeUriSegment(raw);
+    if (seg.isEmpty || seg == '.') continue;
+    if (seg == '..') {
+      if (stack.length > floor) {
+        stack.removeLast();
+      } else if (failAboveFloor) {
+        return null;
+      }
+      continue;
+    }
+    if (seg.contains('/')) return null;
+    stack.add(seg);
+  }
+  return stack.join('/');
+}
+
+/// The key a directive URI (`import`, `export`, `part`, `part of`) in the file
+/// named `fromKey` refers to: the key of the file the front end reads.
+///
+/// `packageDirs` maps each package name to its directory key (`pkg/lib`).
+/// [multiRootPrefix] is the scheme the absolute URIs of multi-root files start
+/// with (`org-dartlang-root:///`). Null when the URI names no workspace file:
+/// an unknown package or scheme, an escape above a `package:` directory, a
+/// fragment, an authority, or a decoded `/`. A `?...` query is dropped and the
+/// path part resolved instead: an empty reference names the importing file
+/// itself.
+///
+/// The resolution mirrors the front end exactly: `\` is a separator everywhere,
+/// escapes decode once (either hex case), `/`-absolute URIs resolve against the
+/// importer's package directory (unpackaged files against the multi-root), and
+/// relative URIs against the importer's directory, clamped so `..` never leaves
+/// the package directory.
+String? resolveDirectiveUri(
+  String uri,
+  String fromKey,
+  Map<String, String> packageDirs, {
+  String multiRootPrefix = defaultMultiRootPrefix,
+}) {
+  final text = uri.contains(r'\') ? uri.replaceAll(r'\', '/') : uri;
+  final absolute = _stripPrefix(text, multiRootPrefix);
+  if (absolute != null) {
+    return _resolveDirectivePath(absolute, const [], 0, false);
+  }
+  if (text.startsWith('package:')) {
+    final rest = text.substring('package:'.length);
+    if (rest.contains('?') || rest.contains('#')) return null;
+    final slash = rest.indexOf('/');
+    if (slash <= 0) return null;
+    final dir = packageDirs[rest.substring(0, slash)];
+    if (dir == null) return null;
+    final base = dir.isEmpty ? const <String>[] : dir.split('/');
+    return _resolveDirectivePath(
+      rest.substring(slash + 1),
+      base,
+      base.length,
+      true,
+    );
+  }
+  // A fragment names no file: the front end reports a URI with one instead of
+  // reading through it. A query names no file either: the front end reads the
+  // file the path part names, so the path part alone is classified and
+  // resolved below.
+  if (text.contains('#')) return null;
+  final query = text.indexOf('?');
+  final path = query < 0 ? text : text.substring(0, query);
+  if (path.contains(':')) return null;
+  if (path.startsWith('//')) return null;
+  // An empty reference names the importing file itself (RFC 3986).
+  if (path.isEmpty) return fromKey;
+  if (path.startsWith('/')) {
+    final base = _packageDirOf(fromKey, packageDirs);
+    return _resolveDirectivePath(path, base, base.length, false);
+  }
+  final slash = fromKey.lastIndexOf('/');
+  final base = slash < 0
+      ? const <String>[]
+      : fromKey.substring(0, slash).split('/');
+  final floor = _packageDirOf(fromKey, packageDirs).length;
+  return _resolveDirectivePath(path, base, floor, false);
+}
+
+/// One URI-bearing directive of a source's prologue.
+class ScanRef {
+  const ScanRef(this.kind, this.uri);
+
+  /// `import`, `export`, `part` or `part of`.
+  final String kind;
+
+  /// The URI. A configurable import gives the alternative it takes for the VM.
+  final String uri;
+
+  bool get isPart => kind == 'part';
+
+  bool get isPartOf => kind == 'part of';
+}
+
+/// The directives of a source's prologue.
+class ScanResult {
+  const ScanResult(this.refs, {this.libraryName, this.partOfLibrary});
+
+  final List<ScanRef> refs;
+
+  /// The name from `library <name>;`, when declared.
+  final String? libraryName;
+
+  /// The library name from `part of <name>;`, when a part names its library by
+  /// identifier rather than URI.
+  final String? partOfLibrary;
+}
+
+/// The directives in the prologue of a Dart source, or null when the prologue has a
+/// form this scanner does not read.
+ScanResult? scanDirectives(String source, Set<String> vmLibraries) {
+  try {
+    return _Prologue(_Lexer(source), vmLibraries).parse();
+  } on _Unparsable {
+    return null;
+  }
+}
+
+class _Unparsable implements Exception {
+  const _Unparsable();
+}
+
+const _identKind = 0;
+const _stringKind = 1;
+const _punctKind = 2;
+const _otherKind = 3;
+
+class _Token {
+  const _Token(this.kind, this.text, {this.raw = false});
+
+  final int kind;
+  final String text;
+  final bool raw;
+}
+
+bool _isDigit(int c) => c >= 0x30 && c <= 0x39;
+
+bool _isIdentStart(int c) =>
+    (c >= 0x41 && c <= 0x5a) ||
+    (c >= 0x61 && c <= 0x7a) ||
+    c == 0x5f ||
+    c == 0x24 ||
+    c >= 0x80;
+
+bool _isIdentChar(int c) => _isIdentStart(c) || _isDigit(c);
+
+int _skipLine(String src, int start) {
+  var at = start;
+  while (at < src.length && src[at] != '\n' && src[at] != '\r') {
+    at++;
+  }
+  return at;
+}
+
+/// The index just past the block comment that starts at `start`. Dart block
+/// comments nest.
+int _skipBlockComment(String src, int start) {
+  var depth = 0;
+  var at = start;
+  while (at < src.length) {
+    if (src.startsWith('/*', at)) {
+      depth++;
+      at += 2;
+    } else if (src.startsWith('*/', at)) {
+      depth--;
+      at += 2;
+      if (depth == 0) return at;
+    } else {
+      at++;
+    }
+  }
+  throw const _Unparsable();
+}
+
+String _unescape(String s) {
+  if (!s.contains('\\')) return s;
+  final out = StringBuffer();
+  var i = 0;
+  while (i < s.length) {
+    final ch = s[i++];
+    if (ch != '\\') {
+      out.write(ch);
+      continue;
+    }
+    if (i >= s.length) throw const _Unparsable();
+    final esc = s[i++];
+    switch (esc) {
+      case 'n':
+        out.write('\n');
+      case 'r':
+        out.write('\r');
+      case 'f':
+        out.write('\f');
+      case 'b':
+        out.write('\b');
+      case 't':
+        out.write('\t');
+      case 'v':
+        out.write('\v');
+      case 'x':
+        if (i + 2 > s.length) throw const _Unparsable();
+        final code = int.tryParse(s.substring(i, i + 2), radix: 16);
+        if (code == null) throw const _Unparsable();
+        out.writeCharCode(code);
+        i += 2;
+      case 'u':
+        if (i < s.length && s[i] == '{') {
+          final close = s.indexOf('}', i + 1);
+          if (close < 0) throw const _Unparsable();
+          final code = int.tryParse(s.substring(i + 1, close), radix: 16);
+          if (code == null || code < 0 || code > 0x10FFFF) {
+            throw const _Unparsable();
+          }
+          out.writeCharCode(code);
+          i = close + 1;
+        } else {
+          if (i + 4 > s.length) throw const _Unparsable();
+          final code = int.tryParse(s.substring(i, i + 4), radix: 16);
+          if (code == null) throw const _Unparsable();
+          out.writeCharCode(code);
+          i += 4;
+        }
+      default:
+        out.write(esc);
+    }
+  }
+  return out.toString();
+}
+
+/// Reads the tokens of a Dart source one at a time, so a scan that stops at the end
+/// of the directives never reads the rest of the file.
+class _Lexer {
+  _Lexer(this._src);
+
+  final String _src;
+  var _at = 0;
+  _Token? _ahead;
+
+  _Token? peek() => _ahead ??= _scan();
+
+  _Token? take() {
+    final token = peek();
+    _ahead = null;
+    return token;
+  }
+
+  _Token? _scan() {
+    final src = _src;
+    final n = src.length;
+    if (_at == 0) {
+      if (src.startsWith('\uFEFF')) _at++;
+      if (src.startsWith('#!', _at)) {
+        _at = _skipLine(src, _at + 2);
+      }
+    }
+    while (_at < n) {
+      final ch = src[_at];
+      if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') {
+        _at++;
+        continue;
+      }
+      if (ch == '/' && _at + 1 < n && src[_at + 1] == '/') {
+        _at = _skipLine(src, _at + 2);
+        continue;
+      }
+      if (ch == '/' && _at + 1 < n && src[_at + 1] == '*') {
+        _at = _skipBlockComment(src, _at);
+        continue;
+      }
+      final code = ch.codeUnitAt(0);
+      if (_isIdentStart(code)) {
+        final start = _at;
+        while (_at < n && _isIdentChar(src.codeUnitAt(_at))) {
+          _at++;
+        }
+        final word = src.substring(start, _at);
+        if (word == 'r' && _at < n && (src[_at] == "'" || src[_at] == '"')) {
+          return _string(raw: true);
+        }
+        return _Token(_identKind, word);
+      }
+      if (_isDigit(code)) {
+        final start = _at;
+        while (_at < n && _isIdentChar(src.codeUnitAt(_at))) {
+          _at++;
+        }
+        return _Token(_otherKind, src.substring(start, _at));
+      }
+      if (ch == "'" || ch == '"') return _string(raw: false);
+      _at++;
+      return _Token(_punctKind, ch);
+    }
+    return null;
+  }
+
+  /// The string literal at `_at`, with its quotes removed and its escapes kept.
+  _Token _string({required bool raw}) {
+    final src = _src;
+    final quote = src[_at];
+    final triple = src.startsWith(quote * 3, _at);
+    final delim = triple ? quote * 3 : quote;
+    var contentStart = _at + delim.length;
+    final endQuote = _skipString(_at, raw: raw);
+    final contentEnd = endQuote - delim.length;
+    if (triple && contentStart < contentEnd) {
+      if (src.startsWith('\r\n', contentStart)) {
+        contentStart += 2;
+      } else if (src[contentStart] == '\n' || src[contentStart] == '\r') {
+        contentStart += 1;
+      }
+    }
+    _at = endQuote;
+    return _Token(
+      _stringKind,
+      src.substring(contentStart, contentEnd),
+      raw: raw,
+    );
+  }
+
+  /// The index just past the string literal that starts at `quoteAt`.
+  int _skipString(int quoteAt, {required bool raw}) {
+    final src = _src;
+    final n = src.length;
+    final quote = src[quoteAt];
+    final triple = src.startsWith(quote * 3, quoteAt);
+    final delim = triple ? quote * 3 : quote;
+    var at = quoteAt + delim.length;
+    while (true) {
+      if (at >= n) throw const _Unparsable();
+      if (!raw && src[at] == '\\') {
+        if (at + 1 >= n) throw const _Unparsable();
+        at += 2;
+        continue;
+      }
+      if (!raw && src.startsWith(r'${', at)) {
+        at = _skipInterpolation(at + 2);
+        continue;
+      }
+      if (src.startsWith(delim, at)) {
+        return at + delim.length;
+      }
+      if (!triple && (src[at] == '\n' || src[at] == '\r')) {
+        throw const _Unparsable();
+      }
+      at++;
+    }
+  }
+
+  /// The index just past the `}` that closes a `${...}` string interpolation
+  /// whose body starts at `start`.
+  int _skipInterpolation(int start) {
+    final src = _src;
+    final n = src.length;
+    var at = start;
+    var depth = 1;
+    while (at < n) {
+      final ch = src[at];
+      if (ch == '/' && at + 1 < n && src[at + 1] == '/') {
+        at = _skipLine(src, at + 2);
+        continue;
+      }
+      if (ch == '/' && at + 1 < n && src[at + 1] == '*') {
+        at = _skipBlockComment(src, at);
+        continue;
+      }
+      final code = ch.codeUnitAt(0);
+      if (_isIdentStart(code) || _isDigit(code)) {
+        final wordStart = at;
+        while (at < n && _isIdentChar(src.codeUnitAt(at))) {
+          at++;
+        }
+        if (at - wordStart == 1 &&
+            src[wordStart] == 'r' &&
+            at < n &&
+            (src[at] == "'" || src[at] == '"')) {
+          at = _skipString(at, raw: true);
+        }
+        continue;
+      }
+      if (ch == "'" || ch == '"') {
+        at = _skipString(at, raw: false);
+        continue;
+      }
+      if (ch == '{') {
+        depth++;
+      } else if (ch == '}') {
+        depth--;
+        if (depth == 0) return at + 1;
+      }
+      at++;
+    }
+    throw const _Unparsable();
+  }
+}
+
+/// Reads the directive prologue: `library`, `import`, `export`, `part` and `part
+/// of`, with the annotations before them. The first other token ends it.
+class _Prologue {
+  _Prologue(this._lexer, this._vm, {this.collectAll = false});
+
+  final _Lexer _lexer;
+  final Set<String> _vm;
+
+  /// When true, every URI of an `import` or `export` directive is collected:
+  /// the declared URI and each `if` alternative, without evaluating which one
+  /// the configuration selects. Validators without the VM library set use this
+  /// so no spelling of a disallowed scheme hides in an unselected branch.
+  final bool collectAll;
+
+  _Token? _peek() => _lexer.peek();
+
+  _Token _take() {
+    final token = _lexer.take();
+    if (token == null) throw const _Unparsable();
+    return token;
+  }
+
+  bool _is(String text, int kind) {
+    final token = _peek();
+    return token != null && token.kind == kind && token.text == text;
+  }
+
+  bool _ident(String text) => _is(text, _identKind);
+
+  bool _punct(String text) => _is(text, _punctKind);
+
+  void _expect(String text) {
+    if (!_punct(text)) throw const _Unparsable();
+    _lexer.take();
+  }
+
+  /// Consumes up to and including `text`.
+  void _skipPast(String text) {
+    while (!_punct(text)) {
+      _take();
+    }
+    _lexer.take();
+  }
+
+  void _identToken() {
+    if (_take().kind != _identKind) throw const _Unparsable();
+  }
+
+  /// A dotted identifier such as `foo` or `foo.bar.baz`.
+  String _dottedIdent() {
+    final first = _take();
+    if (first.kind != _identKind) throw const _Unparsable();
+    final out = StringBuffer(first.text);
+    while (_punct('.')) {
+      _lexer.take();
+      final next = _take();
+      if (next.kind != _identKind) throw const _Unparsable();
+      out
+        ..write('.')
+        ..write(next.text);
+    }
+    return out.toString();
+  }
+
+  /// Adjacent string literals are one URI.
+  String _string() {
+    final token = _take();
+    if (token.kind != _stringKind) throw const _Unparsable();
+    final out = StringBuffer(token.raw ? token.text : _unescape(token.text));
+    while (_peek()?.kind == _stringKind) {
+      final next = _take();
+      out.write(next.raw ? next.text : _unescape(next.text));
+    }
+    return out.toString();
+  }
+
+  /// `@name`, `@name.name`, `@name<...>(...)`, or `@name<...>.name(...)`.
+  void _annotation() {
+    _expect('@');
+    _identToken();
+    while (_punct('.')) {
+      _lexer.take();
+      _identToken();
+    }
+    if (_punct('<')) {
+      var depth = 0;
+      do {
+        final token = _take();
+        if (token.kind == _punctKind && token.text == '<') depth++;
+        if (token.kind == _punctKind && token.text == '>') depth--;
+      } while (depth > 0);
+      while (_punct('.')) {
+        _lexer.take();
+        _identToken();
+      }
+    }
+    if (_punct('(')) {
+      var depth = 0;
+      do {
+        final token = _take();
+        if (token.kind == _punctKind && token.text == '(') depth++;
+        if (token.kind == _punctKind && token.text == ')') depth--;
+      } while (depth > 0);
+    }
+  }
+
+  /// The `if (...)` test of a configurable import, after its `(`, through its `)`.
+  /// True when it holds for the VM. In CFE's configurable-import environment,
+  /// available SDK libraries are mapped to `'true'` and all other names are
+  /// unspecified (matching only `== ''`).
+  bool _condition() {
+    final text = _dottedIdent();
+    String? value;
+    if (_punct('=')) {
+      _lexer.take();
+      _expect('=');
+      value = _string();
+    }
+    _expect(')');
+    const prefix = 'dart.library.';
+    if (text.startsWith(prefix)) {
+      final present = _vm.contains(text.substring(prefix.length));
+      if (!present) return false;
+      return value == null || value == 'true';
+    }
+    return value == '';
+  }
+
+  /// `import` or `export` after its keyword: the URI, then any `if`
+  /// alternatives, then the rest of the directive, which names nothing to read.
+  ScanRef _uriDirective(String kind, List<ScanRef> refs) {
+    final declared = _string();
+    if (collectAll) refs.add(ScanRef(kind, declared));
+    var chosen = declared;
+    var picked = false;
+    while (_ident('if')) {
+      _lexer.take();
+      _expect('(');
+      final holds = _condition();
+      final alternative = _string();
+      if (collectAll) refs.add(ScanRef(kind, alternative));
+      if (holds && !picked) {
+        chosen = alternative;
+        picked = true;
+      }
+    }
+    _skipPast(';');
+    return ScanRef(kind, chosen);
+  }
+
+  ScanResult parse() {
+    final refs = <ScanRef>[];
+    String? libraryName;
+    String? partOfLibrary;
+    while (true) {
+      final token = _peek();
+      if (token == null) break;
+      if (token.kind == _punctKind && token.text == '@') {
+        _annotation();
+        continue;
+      }
+      if (token.kind != _identKind) break;
+      if (token.text == 'library') {
+        _lexer.take();
+        if (_punct(';')) {
+          _lexer.take();
+        } else if (_peek()?.kind == _identKind) {
+          libraryName ??= _dottedIdent();
+          _expect(';');
+        } else {
+          break;
+        }
+      } else if (token.text == 'import' || token.text == 'export') {
+        _lexer.take();
+        if (_peek()?.kind != _stringKind) break;
+        final ref = _uriDirective(token.text, refs);
+        if (!collectAll) refs.add(ref);
+      } else if (token.text == 'part') {
+        _lexer.take();
+        if (_ident('of')) {
+          _lexer.take();
+          if (_peek()?.kind == _stringKind) {
+            refs.add(ScanRef('part of', _string()));
+          } else {
+            partOfLibrary ??= _dottedIdent();
+          }
+          _expect(';');
+        } else if (_peek()?.kind == _stringKind) {
+          refs.add(ScanRef('part', _string()));
+          _expect(';');
+        } else {
+          break;
+        }
+      } else {
+        break;
+      }
+    }
+    return ScanResult(
+      refs,
+      libraryName: libraryName,
+      partOfLibrary: partOfLibrary,
+    );
+  }
+}
+
+/// Every URI-bearing directive of a source's prologue: each `import` and
+/// `export` contributes its declared URI and every `if` alternative, each
+/// `part` and `part of` its URI. Conditions are not evaluated, so no VM
+/// library set is needed. An empty list when the prologue does not scan (the
+/// compiler then reports the genuine syntax error).
+List<ScanRef> scanAllDirectiveUris(String source) {
+  try {
+    return _Prologue(_Lexer(source), const {}, collectAll: true).parse().refs;
+  } on _Unparsable {
+    return const [];
+  }
+}
+
+/// The diagnostics for every disallowed-scheme directive URI in `fileContents`
+/// (display path to source text), in path order. Empty when clean. Each names
+/// the file, the directive and the URI.
+List<String> findDisallowedDirectives(
+  Map<String, String> fileContents, {
+  String tool = 'dart',
+  String multiRootPrefix = defaultMultiRootPrefix,
+}) {
+  final errors = <String>[];
+  final paths = fileContents.keys.toList()..sort();
+  for (final path in paths) {
+    final content = fileContents[path];
+    if (content == null) continue;
+    for (final ref in scanAllDirectiveUris(content)) {
+      final disallowed = ref.isPart || ref.isPartOf
+          ? isFileSchemeDirectiveUri(ref.uri)
+          : isDisallowedDirectiveUri(ref.uri, multiRootPrefix: multiRootPrefix);
+      if (disallowed) {
+        errors.add(
+          "$tool: $path ${ref.kind} '${ref.uri}' is not a declared input.",
+        );
+      }
+    }
+  }
+  return errors;
+}
+
+/// The contents of every `.dart` file under [roots], keyed by path, skipping
+/// directories that do not exist and files that vanish or do not decode: the
+/// compiler reports those itself. Synchronous for the sync build-action
+/// runners, which validate their staged sources before invoking the compiler.
+///
+/// Staged trees hold symlinks (`ctx.actions.symlink`), which list as `Link`,
+/// not `File`: links to `.dart` files are read through the link, so a `file:`
+/// import staged as a symlink is still refused. Keys use `/` separators on
+/// every platform, so diagnostics read the same on Windows and POSIX.
+Map<String, String> readStagedDartSources(Iterable<String> roots) {
+  final contents = <String, String>{};
+  for (final root in roots) {
+    final dir = Directory(root);
+    if (!dir.existsSync()) continue;
+    for (final entity in dir.listSync(recursive: true, followLinks: false)) {
+      final isDart = entity.path.endsWith('.dart');
+      if (entity is File) {
+        if (!isDart) continue;
+      } else if (entity is Link) {
+        if (!isDart) continue;
+      } else {
+        continue;
+      }
+      final key = entity.path.replaceAll(r'\', '/');
+      try {
+        contents[key] = File(entity.path).readAsStringSync();
+      } on FileSystemException {
+        // Gone between listing and reading; the compiler reports it.
+      } on FormatException {
+        // Not decodable text; the compiler reports it.
+      }
+    }
+  }
+  return contents;
+}
+
+/// The diagnostics for every disallowed-scheme directive URI in the `.dart`
+/// files under [roots], in path order. Empty when clean. The one shared
+/// staged-source check: the web, analyze and fix runners refuse these files
+/// before the compiler or analyzer can read the host through them.
+List<String> findDisallowedStagedDirectives(
+  Iterable<String> roots, {
+  required String tool,
+  String multiRootPrefix = defaultMultiRootPrefix,
+}) {
+  return findStagedDirectiveViolations(
+    roots,
+    tool: tool,
+    multiRootPrefix: multiRootPrefix,
+  );
+}
+
+/// The staged roots a `<name>.proj` project's guard scans: the project itself
+/// plus its `<name>.extpkgs` sibling. Nonexistent roots scan as empty, so
+/// callers pass both unconditionally.
+List<String> projectStagedRoots(String project) {
+  var trimmed = project;
+  while (trimmed.length > 1 &&
+      (trimmed.endsWith('/') || trimmed.endsWith(r'\'))) {
+    trimmed = trimmed.substring(0, trimmed.length - 1);
+  }
+  final roots = <String>[project];
+  if (trimmed.endsWith('.proj')) {
+    roots.add(
+      '${trimmed.substring(0, trimmed.length - '.proj'.length)}.extpkgs',
+    );
+  }
+  return roots;
+}
+
+/// Whether the absolute `/`-separated [target] is the staged [root] itself or
+/// a file under it. Both sides are normalized first, so a root passed with a
+/// trailing slash or backslashes still matches.
+bool _isWithinStagedRoot(String target, String root) {
+  final want = _normAbsStagedPath(root);
+  if (target == want) return true;
+  return target.startsWith('$want/');
+}
+
+/// Every staged spelling of [root]: as passed and with symlinks resolved.
+/// Staged trees hold symlinks, and the analyzer may spell one staged file through
+/// either, so a target matching either spelling counts as declared.
+Set<String> _stagedRootSpellings(String root) {
+  final spellings = <String>{_normAbsStagedPath(root)};
+  try {
+    final resolved = Directory(root).resolveSymbolicLinksSync();
+    spellings.add(_normAbsStagedPath(resolved));
+  } on FileSystemException {
+    // Vanished or unresolvable; the passed spelling still applies.
+  }
+  return spellings;
+}
+
+/// The diagnostics for every directive in the `.dart` files under [roots]
+/// that would read a file outside the staged tree, in path order. Empty when
+/// clean. The one shared staged-source check every rules_dart tool that reads
+/// Dart sources enforces before the compiler or analyzer runs: the analyze,
+/// summary, fix and web runners and the link-hook runner call it directly,
+/// while the whole-program `gen_kernel` wrapper and the builder shims enforce
+/// their byte-identical copies (see above).
+///
+/// Beyond the scheme check ([findDisallowedDirectives]), every schemeless
+/// relative (and `/`-absolute, which the analyzer reads off the filesystem
+/// root) URI is resolved against its importing file's staged path — climbing
+/// `..` segments are followed past the staged tree, never clamped — and any
+/// target outside [roots] is refused, as is a `package:` URI that climbs above
+/// its package ([isEscapingPackageUri]). Each diagnostic names the file, the
+/// directive and the URI.
+List<String> findStagedDirectiveViolations(
+  Iterable<String> roots, {
+  required String tool,
+  String multiRootPrefix = defaultMultiRootPrefix,
+}) {
+  final allowed = <String>{
+    for (final root in roots) ..._stagedRootSpellings(root),
+  };
+  bool declared(String target) =>
+      allowed.any((root) => _isWithinStagedRoot(target, root));
+  final errors = <String>[];
+  final contents = readStagedDartSources(roots);
+  final paths = contents.keys.toList()..sort();
+  for (final path in paths) {
+    final content = contents[path];
+    if (content == null) continue;
+    final from = _normAbsStagedPath(path.replaceAll(r'\', '/'));
+    for (final ref in scanAllDirectiveUris(content)) {
+      final uri = ref.uri;
+      if (uri.startsWith(multiRootPrefix) || uri.startsWith('dart:')) {
+        continue;
+      }
+      if (uri.startsWith('package:')) {
+        if (isEscapingPackageUri(uri)) {
+          errors.add(
+            "$tool: $path ${ref.kind} '$uri' is not a declared input.",
+          );
+        }
+        continue;
+      }
+      if (isFileSchemeDirectiveUri(uri) ||
+          isDisallowedDirectiveUri(uri, multiRootPrefix: multiRootPrefix)) {
+        errors.add("$tool: $path ${ref.kind} '$uri' is not a declared input.");
+        continue;
+      }
+      final target = resolveStagedRelativeTarget(uri, from);
+      if (target != null && !declared(target)) {
+        errors.add("$tool: $path ${ref.kind} '$uri' is not a declared input.");
+      }
+    }
+  }
+  return errors;
+}
+
+/// The multi-root scheme a whole-program Flutter kernel compile resolves its
+/// inputs through (see `APP_SCHEME` in `app_entrypoint.bzl`).
+const flutterMultiRootPrefix = 'org-dartlang-app:///';
+
+/// The multi-root key naming the declared input source [path]: the
+/// exec-root-relative path with its longest `--filesystem-root` prefix
+/// stripped. Mirrors the derivation in rules_dart's whole-program `gen_kernel`
+/// wrapper: the compile runs with the exec root as its working directory, so
+/// an absolute declared path under it becomes relative, and a staged file's
+/// key drops the staging-root prefix. A relative directive URI resolved
+/// against one declared source's key therefore names the same key the front
+/// end looks up whether the target lives in the source tree or in the staging
+/// root. Paths already relative, or absolute but under no root and outside the
+/// working directory (tests), keep the [stripFsRootPrefix] spelling, which
+/// stays consistent because every key in the comparison uses this function.
+String flutterSourceKey(String path, List<String> fsRoots) {
+  var slash = path.replaceAll(r'\', '/');
+  final cwd = Directory.current.path
+      .replaceAll(r'\', '/')
+      .replaceFirst(RegExp(r'/+$'), '');
+  if (slash == cwd) {
+    slash = '';
+  } else if (slash.startsWith('$cwd/')) {
+    slash = slash.substring(cwd.length + 1);
+  }
+  slash = slash.replaceFirst(RegExp(r'^(?:\./)+'), '');
+  String? best;
+  for (final rawRoot in fsRoots) {
+    final root = rawRoot
+        .replaceAll(r'\', '/')
+        .replaceFirst(RegExp(r'/+$'), '')
+        .replaceFirst(RegExp(r'^(?:\./)+'), '');
+    if (root.isEmpty || root == '.') continue;
+    if ((slash == root || slash.startsWith('$root/')) &&
+        (best == null || root.length > best.length)) {
+      best = root;
+    }
+  }
+  if (best != null) {
+    slash = slash == best ? '' : slash.substring(best.length + 1);
+  }
+  return slash;
+}
+
+/// The exec-root-relative path of [path] with its longest `--filesystem-root`
+/// prefix stripped (`<root>/` only; a bare `<root>` without the slash is not a
+/// prefix). Mirrors rules_dart's whole-program `gen_kernel` wrapper.
+String stripFsRootPrefix(String path, List<String> fsRoots) {
+  final slashPath = path.replaceAll(r'\', '/');
+  var bestRootLen = -1;
+  String? bestRel;
+  for (final rawRoot in fsRoots) {
+    final root = rawRoot.replaceAll(r'\', '/').replaceFirst(RegExp(r'/+$'), '');
+    if (root.isEmpty || root == '.') continue;
+    final prefix = '$root/';
+    if (slashPath.startsWith(prefix) && root.length > bestRootLen) {
+      bestRootLen = root.length;
+      bestRel = slashPath.substring(prefix.length);
+    }
+  }
+  return bestRel ?? slashPath.replaceFirst(RegExp(r'^(?:\./)+'), '');
+}
+
+/// The multi-root key a schemeless relative directive URI in the declared
+/// source with key [fromKey] refers to: the front end resolves the URI against
+/// the importing file's key and finds each key where it is, whether in the
+/// source tree or in the staging root, so a generated sibling staged beside
+/// its importer names a declared input. `\` separates and escapes decode once,
+/// as in [resolveStagedRelativeTarget]; a `..` climbing above the key root
+/// drops away, the way the front end's own resolution stays inside the
+/// multi-root space, and the caller accepts the result only when some declared
+/// source holds that key. Mirrors rules_dart's whole-program wrapper.
+///
+/// Null when [uri] is not a relative URI (any scheme, a fragment, a
+/// `//`-prefixed authority, or a `/`-absolute path, which names a host file
+/// outside every root) or when a decoded `/` names no file. A `?...` query is
+/// dropped and the path part resolved instead: an empty reference names the
+/// importing file itself. Null never means "declared": the caller refuses it
+/// unless the filesystem-path check already accepted it.
+String? resolveFlutterKeyRelativeTarget(String uri, String fromKey) {
+  final text = uri.contains(r'\') ? uri.replaceAll(r'\', '/') : uri;
+  // A fragment names no file: the front end reports a URI with one instead of
+  // reading through it. A query names no file either: the front end reads the
+  // file the path part names, so the path part alone is resolved below.
+  if (text.contains('#')) return null;
+  final query = text.indexOf('?');
+  final path = query < 0 ? text : text.substring(0, query);
+  if (path.contains(':')) return null;
+  if (path.startsWith('//') || path.startsWith('/')) return null;
+  // An empty reference names the importing file itself (RFC 3986).
+  if (path.isEmpty) return fromKey;
+  final stack = <String>[];
+  for (final part in fromKey.split('/')) {
+    if (part.isNotEmpty) stack.add(part);
+  }
+  // Drop the file name: the URI resolves against its directory.
+  if (stack.isNotEmpty) stack.removeLast();
+  for (final raw in path.split('/')) {
+    if (raw.isEmpty) continue;
+    final seg = decodeUriSegment(raw);
+    if (seg.isEmpty || seg == '.') continue;
+    if (seg == '..') {
+      if (stack.isNotEmpty) stack.removeLast();
+      continue;
+    }
+    if (seg.contains('/')) return null;
+    stack.add(seg);
+  }
+  return stack.join('/');
+}
+
+/// A diagnostic for every input source with a directive URI that names no
+/// file the action can read through its declared inputs: a `file:` URI in any
+/// spelling, any other scheme but `dart:`, `package:` and the app scheme, a
+/// `package:` URI climbing above its package, or a relative URI resolving to
+/// no declared input source. The front end reads such a URI off the host,
+/// outside every `--filesystem-root`, so the wrapper refuses before compiling.
+/// Climbing `..` segments are followed past the declared inputs, never
+/// clamped: enough segments name any host path. Every `if` alternative is
+/// checked, since the wrapper has no configuration to select by. Empty when
+/// clean. Each diagnostic names the file, the directive and the URI.
+///
+/// A relative URI is accepted when it resolves to a declared source beside the
+/// importing file, or when it resolves to a declared source's multi-root key
+/// ([resolveFlutterKeyRelativeTarget] over [flutterSourceKey]): the front end
+/// finds each key where it is, so a generated sibling in the staging root
+/// beside a source-tree importer reads a declared input, not the host.
+///
+/// [sources] are filesystem paths of the declared Dart sources (read in the
+/// compile's working directory; missing or undecodable files are skipped — the
+/// compiler reports those itself). [fsRoots] are the `--filesystem-root`
+/// values the compile forwards to the front end.
+List<String> findDisallowedFlutterDirectives(
+  List<String> sources,
+  List<String> fsRoots, {
+  String tool = 'flutter',
+  String multiRootPrefix = flutterMultiRootPrefix,
+}) {
+  final contents = <String, String>{};
+  for (final path in sources) {
+    try {
+      contents[path] = File(path).readAsStringSync();
+    } on FileSystemException {
+      // Missing or unreadable here; the compiler reports it.
+    } on FormatException {
+      // Not decodable text; the compiler reports it.
+    }
+  }
+  final declared = <String>{
+    for (final path in contents.keys) _normAbsStagedPath(path),
+  };
+  final declaredKeys = <String>{
+    for (final path in contents.keys) flutterSourceKey(path, fsRoots),
+  };
+  final errors = <String>[];
+  final paths = contents.keys.toList()..sort();
+  for (final path in paths) {
+    final content = contents[path];
+    if (content == null) continue;
+    final from = _normAbsStagedPath(path);
+    final fromKey = flutterSourceKey(path, fsRoots);
+    for (final ref in scanAllDirectiveUris(content)) {
+      final uri = ref.uri;
+      if (uri.startsWith('dart:')) {
+        continue;
+      }
+      if (uri.startsWith(multiRootPrefix)) {
+        // The app scheme resolves only across the compile's `--filesystem-root`
+        // values, which name nothing but staged declared inputs: a URI that
+        // names no declared key fails the build here instead of at the front
+        // end, where the message would name the URI but not the file that
+        // reads it.
+        final key = _resolveDirectivePath(
+          uri.substring(multiRootPrefix.length),
+          const [],
+          0,
+          false,
+        );
+        if (key == null || !declaredKeys.contains(key)) {
+          errors.add(
+            "$tool: $path ${ref.kind} '$uri' is not a declared input.",
+          );
+        }
+        continue;
+      }
+      if (uri.startsWith('package:')) {
+        if (isEscapingPackageUri(uri)) {
+          errors.add(
+            "$tool: $path ${ref.kind} '$uri' is not a declared input.",
+          );
+        }
+        continue;
+      }
+      if (isFileSchemeDirectiveUri(uri) ||
+          isDisallowedDirectiveUri(uri, multiRootPrefix: multiRootPrefix)) {
+        errors.add(
+          "$tool: $path ${ref.kind} '$uri' is not a declared input.",
+        );
+        continue;
+      }
+      final target = resolveStagedRelativeTarget(uri, from);
+      if (target != null && declared.contains(target)) continue;
+      final keyTarget = resolveFlutterKeyRelativeTarget(uri, fromKey);
+      if (keyTarget != null && declaredKeys.contains(keyTarget)) continue;
+      errors.add(
+        "$tool: $path ${ref.kind} '$uri' is not a declared input.",
+      );
+    }
+  }
+  return errors;
+}

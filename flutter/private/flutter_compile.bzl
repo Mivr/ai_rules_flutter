@@ -27,9 +27,7 @@ def flutter_kernel_compile_action(
         dart_plugin_registrant_uri = None,
         filesystem_roots = [],
         recorded_uses = None,
-        from_dill = None,
-        stage_all = False,
-        stage_salt = ""):
+        from_dill = None):
     """Creates a Flutter kernel compilation action.
 
     Invokes the frontend_server via dartaotruntime to compile Dart sources
@@ -77,10 +75,11 @@ def flutter_kernel_compile_action(
             multi-root scheme keeps the library's importUri identical to
             the define regardless of sandbox location — the engine matches
             them by exact string equality.
-        filesystem_roots: Exec-root-relative directories (`""` for the exec
-            root) mounted under `APP_SCHEME`, for every `APP_SCHEME` URI
-            above — the registrant's and, for a `main` with no `package:`
-            URI, [entrypoint_uri]'s.
+        filesystem_roots: Extra exec-root-relative directories mounted under
+            `APP_SCHEME` alongside the staging root. The exec root itself is
+            never mounted: only declared inputs are staged, so an undeclared
+            file is not there for the compiler to read whatever its spelling.
+            (`""` and `"."` entries are dropped.)
         recorded_uses: Optional declared File the compiler writes the
             `@RecordUse` uses that survive tree-shaking to (`--recorded-uses`),
             the input of package link hooks. Only an AOT compile records; a
@@ -88,10 +87,6 @@ def flutter_kernel_compile_action(
         from_dill: Optional pre-linked modular `.dill` File passed via
             `--from-dill` to initialize `frontend_server` without re-parsing
             transitive sources.
-        stage_all: If True, stage both source and generated inputs into the
-            staging directory and mount only the staging root (never `.`).
-        stage_salt: Optional salt mixed into the staging root hash when
-            `stage_all` is True.
     """
     args = ctx.actions.args()
     args.add("--")
@@ -109,12 +104,11 @@ def flutter_kernel_compile_action(
     args.add("--packages", package_config)
     args.add("--output-dill", output)
 
-    # Suppress frontend_server's `+file://...` dependency lines and info-level
-    # messages. Bazel surfaces all action stdout on success; without these, a
-    # successful compile produces dozens of `INFO: From Compiling Flutter
-    # kernel` lines. The boundary-key framing has no flag; kernel_filter.dart
-    # drops it.
-    args.add("--no-print-incremental-dependencies")
+    # The compiler reports every file it reads as a `+file://` line unless
+    # told not to. `kernel_filter` verifies those lines against the declared
+    # inputs and drops them, so a successful compile still prints nothing (see
+    # below). The boundary-key framing has no flag; kernel_filter.dart drops
+    # it too.
     args.add("--verbosity=error")
 
     if aot:
@@ -131,23 +125,28 @@ def flutter_kernel_compile_action(
     for d in defines:
         args.add("-D" + d)
 
-    # Stage only declared generated inputs into a per-action staging root and
-    # mount it before the exec root (`.`) under APP_SCHEME. Never mount
-    # `ctx.bin_dir.path` directly: doing so allows stale generated files in
-    # `bazel-out` to shadow source files when running unsandboxed (local/worker)
-    # and misses generated inputs produced in transitioned configurations.
+    # Stage every declared input into a per-action staging root and mount only
+    # it under APP_SCHEME — never the exec root (`.`) and never
+    # `ctx.bin_dir.path`. Mounting either lets the compiler read files the
+    # action did not declare: a `file:` directive reads them straight off the
+    # host under every strategy, and Bazel caches the stale result. Behind the
+    # staging root an undeclared file is not there to be read whatever its
+    # spelling, and `kernel_filter` refuses disallowed directives and verifies
+    # the compiler's read set on top. Staging by workspace path keeps every
+    # `org-dartlang-app:///` URI (package roots, the entrypoint, the
+    # registrant) resolving where it did under `.`.
     compile_sources = [main] if from_dill != None else [main] + srcs
-    stage = stage_generated_inputs(ctx, compile_sources, output.basename, include_sources = stage_all, salt = stage_salt)
+    stage = stage_generated_inputs(ctx, compile_sources, output.basename, include_sources = True)
     mounted_roots = []
     if stage.root != None:
         mounted_roots.append(stage.root)
-    if not stage_all:
-        mounted_roots.append("")
     for r in filesystem_roots:
-        if r != None and r not in mounted_roots:
+        if r != None and r != "" and r != "." and r not in mounted_roots:
             mounted_roots.append(r)
+    if not mounted_roots:
+        fail("%s: no filesystem root to compile under: staging is empty and no filesystem_roots were given" % ctx.label)
     for root in mounted_roots:
-        args.add("--filesystem-root", root or ".")
+        args.add("--filesystem-root", root)
     args.add("--filesystem-scheme", APP_SCHEME)
 
     if dart_plugin_registrant_uri:
@@ -190,12 +189,26 @@ def flutter_kernel_compile_action(
     if recorded_uses != None:
         outputs.append(recorded_uses)
 
+    # The declared-inputs manifest `kernel_filter` guards and verifies the
+    # compile against: the declared sources, then the staging root's symlinks
+    # to them (see kernel_filter.dart). Written by path so the tool reads the
+    # same files the compiler resolves through the staging root.
+    manifest = ctx.actions.declare_file(output.basename + ".flutter_inputs")
+    ctx.actions.write(
+        output = manifest,
+        content = "\n".join(
+            [f.path for f in compile_sources if f != None] +
+            ["# staged"] +
+            [f.path for f in stage.files],
+        ) + "\n",
+    )
+
     dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx)
     ctx.actions.run(
         executable = dart_exe,
-        arguments = [kernel_filter_tool.path, args],
+        arguments = [kernel_filter_tool.path, "--declared-inputs", manifest.path, args],
         inputs = depset(
-            direct = direct_inputs + [dartaotruntime, kernel_filter_tool],
+            direct = direct_inputs + [dartaotruntime, kernel_filter_tool, manifest],
             transitive = [dart_vm_files],
         ),
         outputs = outputs,
