@@ -27,13 +27,13 @@ through the proxy; nothing should reference the private
 load("@rules_android//providers:providers.bzl", "AndroidFeatureFlagSet", "AndroidInstrumentationInfo", "ApkInfo", "StarlarkApkInfo")
 load("@rules_java//java/common:java_info.bzl", "JavaInfo")
 
-def _pure_go_transition_impl(settings, attr):
+def _pure_go_transition_impl(settings, _attr):
     """Set rules_go pure mode for the Android binary subtree, unless opted out.
 
     Args:
         settings: The incoming configuration. Only `//flutter:android_pure_go`
             is read; everything else passes through untouched.
-        attr: Unused (the opt-out is a flag, not a rule attribute).
+        _attr: Unused (the opt-out is a flag, not a rule attribute).
 
     Returns:
         `{"@rules_go//go/config:pure": True}` by default, `{}` when the user

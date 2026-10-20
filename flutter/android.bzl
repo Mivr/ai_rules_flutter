@@ -828,6 +828,7 @@ def flutter_android_app(
             passthrough[key] = kwargs.pop(key)
     binary_kwargs = dict(kwargs)
     binary_kwargs.update(passthrough)
+
     # Like every other internal target, the binary stays out of wildcard
     # builds (see internal_tags above): the proxy is the only entry point.
     _android_binary(

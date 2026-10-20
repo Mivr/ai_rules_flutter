@@ -717,6 +717,8 @@ No platform flags are needed to build. `flutter_android_app` transitions the app
 bazel build //:my_app_android
 ```
 
+**Pure Go host tools.** `flutter_android_app` builds rules_android's Go host tools in rules_go pure mode: without a C++ toolchain, so the hermetic LLVM runtimes are never compiled from source. The APK is unchanged (only the host tools' own binaries differ). The setting is scoped to the app — desktop builds and your own Go targets keep their configuration. Opt out with `--@rules_flutter//flutter:android_pure_go=false`; you need that only if the app's own subtree contains cgo Go code, which pure mode cannot compile. Hand-assembled Tier-2 `android_binary` targets are unaffected either way: add the global `--@rules_go//go/config:pure=true` yourself if you want the same saving there and have no cgo Go code.
+
 | Attribute | Description |
 |---|---|
 | `application` | A `flutter_application` target. Required. |
