@@ -248,6 +248,26 @@ def flutter_kernel_module_action(
     """Compiles one Flutter kernel module with staged generated inputs instead of mounting `ctx.bin_dir`.
 
     Args:
+      ctx: The rule or aspect context, used to declare outputs and register the action.
+      tools: Kernel tool files (compiler, platform dill, libraries specification).
+      sources: Structs with `uri` and `file` for the module's own Dart sources.
+      packages: Package records rendered into the `--packages-file` package config.
+      dep_kmods: Transitive dependency kernels and outlines (`--input-kmod`).
+      output: The module output (a `.kmod` directory for libraries, entries otherwise).
+      defines: Extra `--define` flags forwarded to the kernel worker.
+      exclude_non_sources: Whether the compile writes the VM exclusion report.
+      droppable: Whether unreachable libraries may be dropped from the module.
+      koutline: Optional outline output receiving `--output-outline`.
+      extra_inputs: Optional additional input files (e.g. entry sources).
+      closure_excluded: Optional upstream exclusion reports for the closed world.
+      target: Kernel worker `--target` (defaults to `"flutter"`).
+      platform_dill: SDK summary override; defaults to the toolchain's.
+      libraries_json: Libraries specification override; defaults to the toolchain's.
+      libraries_platform: Optional platform libraries specification override.
+      extra_libraries: Extra SDK libraries available to the compile.
+      scheme: Package-config URI scheme for the module's sources.
+      extra_frontend_flags: Additional flags forwarded to the frontend.
+      stage_all: Whether to stage every source instead of only generated ones.
       unused_inputs: Whether the compile writes its unused-inputs list — the
         declared inputs no compile of this action read — and takes it as the
         action's `unused_inputs_list`, so Bazel skips the action when only an
@@ -255,6 +275,9 @@ def flutter_kernel_module_action(
         action once (the aspect's evaluations of one target compute identical
         actions, which Bazel merges), as `dart_library`'s own module does in
         rules_dart. False registers the historical action with no list.
+
+    Returns:
+      The declared VM exclusion report file.
     """
     sources = _dedup_module_sources(sources)
     platform = platform_dill if platform_dill != None else tools.platform_dill

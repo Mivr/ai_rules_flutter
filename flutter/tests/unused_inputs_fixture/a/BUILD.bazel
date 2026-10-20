@@ -2,9 +2,9 @@ load("@rules_dart//dart:defs.bzl", "dart_library")
 
 dart_library(
     name = "a",
-    tags = ["no-dart-analyze"],  # adopted-part fixture: legal for the compiler, unresolvable for the analyzer
     package_name = "unused_a",
     srcs = ["lib/adopt.dart"],
+    tags = ["no-dart-analyze"],  # adopted-part fixture: legal for the compiler, unresolvable for the analyzer
     visibility = ["//flutter/tests:__subpackages__"],
     deps = [
         "//flutter/tests/unused_inputs_fixture/b",
