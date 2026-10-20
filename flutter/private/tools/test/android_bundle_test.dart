@@ -401,6 +401,12 @@ void main() {
               path: 'AndroidManifest.xml',
               data: Uint8List.fromList([9, 8, 7]),
             ),
+            // A bare MANIFEST.MF is normal singlejar output, not a
+            // signature: it must pass through untouched.
+            ZipEntry(
+              path: 'META-INF/MANIFEST.MF',
+              data: Uint8List.fromList([77, 79, 84]),
+            ),
             ZipEntry(
               path: 'classes.dex',
               data: Uint8List.fromList(List<int>.filled(10000, 7)),
@@ -598,6 +604,70 @@ void main() {
             data: Uint8List.fromList([1, 2, 3]),
           ),
         ]);
+        final jarPath = await writeNativeLibsJar();
+        final assetsPath = writeFlutterAssets();
+
+        expect(
+          runAndroidBundle([
+            'apk-overlay',
+            '--base',
+            basePath,
+            '--native-libs-jar',
+            jarPath,
+            '--flutter-assets',
+            assetsPath,
+            '--output',
+            '${tempDir.path}/should_not_exist.apk',
+          ]),
+          throwsA(isA<ArgumentError>()),
+        );
+      });
+
+      test('refuses a base APK carrying an APK Signing Block', () async {
+        // A v2-signed APK need not contain META-INF signature files; the
+        // block sits between the local entries and the central directory.
+        final clean = encodeDeterministicZip([
+          ZipEntry(path: 'classes.dex', data: Uint8List.fromList([1])),
+        ]);
+        final cdOffset = readCentralForTest(clean).cdOffset;
+        final block = BytesBuilder(copy: false);
+        void u64(BytesBuilder b, int v) => b.add([
+          v & 0xff,
+          (v >> 8) & 0xff,
+          (v >> 16) & 0xff,
+          (v >> 24) & 0xff,
+          0,
+          0,
+          0,
+          0,
+        ]);
+        u64(block, 24);
+        block.add(List<int>.filled(8, 0));
+        u64(block, 24);
+        block.add(utf8.encode('APK Sig Block 42'));
+        final blockBytes = block.takeBytes();
+        final forged = BytesBuilder(copy: false)
+          ..add(Uint8List.sublistView(clean, 0, cdOffset))
+          ..add(blockBytes)
+          ..add(Uint8List.sublistView(clean, cdOffset));
+        final forgedBytes = forged.takeBytes();
+        final eocd = ByteData.sublistView(
+          forgedBytes,
+          forgedBytes.length - 22,
+          forgedBytes.length,
+        );
+        eocd.setUint32(
+          12,
+          eocd.getUint32(12, Endian.little) + blockBytes.length,
+          Endian.little,
+        );
+        eocd.setUint32(
+          16,
+          eocd.getUint32(16, Endian.little) + blockBytes.length,
+          Endian.little,
+        );
+        final basePath = '${tempDir.path}/base_v2signed.apk';
+        File(basePath).writeAsBytesSync(forgedBytes);
         final jarPath = await writeNativeLibsJar();
         final assetsPath = writeFlutterAssets();
 

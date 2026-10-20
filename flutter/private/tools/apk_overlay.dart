@@ -291,8 +291,10 @@ bool _storeUncompressed(String path, Uint8List data, Uint8List deflated) {
 
 /// Injects the Flutter payload into a copy of the unsigned base APK.
 ///
-/// [baseApkPath] must be an unsigned APK (no `META-INF/MANIFEST.MF`, no APK
-/// Signing Block): injecting into a signed APK would silently invalidate its
+/// [baseApkPath] must be an unsigned APK: no v1 signature files
+/// (`META-INF/*.SF/*.RSA/*.DSA/*.EC`) and no APK Signing Block. (A bare
+/// `META-INF/MANIFEST.MF` is fine — singlejar adds one to every unsigned
+/// APK.) Injecting into a signed APK would silently invalidate its
 /// signatures. The caller signs the returned archive with `apksigner`.
 void spliceApkOverlay({
   required String baseApkPath,
@@ -316,7 +318,9 @@ void spliceApkOverlay({
     }
   }
   for (final signedMarker in [
-    'META-INF/MANIFEST.MF',
+    // NB: META-INF/MANIFEST.MF alone is NOT a signature marker — singlejar
+    // adds a bare manifest to every unsigned APK it builds. Only the
+    // signature files apksigner adds (.SF/.RSA/.DSA/.EC) prove signing.
     'META-INF/CERT.SF',
     'META-INF/CERT.RSA',
     'META-INF/CERT.DSA',
@@ -325,6 +329,31 @@ void spliceApkOverlay({
     if (central.names.contains(signedMarker)) {
       throw ArgumentError(
         'apk-overlay: base APK looks signed (contains $signedMarker). '
+        'Pass the unsigned APK instead; the caller signs after injection.',
+      );
+    }
+  }
+  // A v2/v3-signed APK carries no META-INF signature files when v1 signing
+  // is disabled; its APK Signing Block sits between the local entries and
+  // the central directory. Injecting into it would silently invalidate the
+  // block signature, so refuse: the 16-byte magic ends exactly where the
+  // central directory begins.
+  const signingBlockMagic = 'APK Sig Block 42';
+  if (central.cdOffset >= 16) {
+    final magicBytes = base.sublist(
+      central.cdOffset - 16,
+      central.cdOffset,
+    );
+    // Byte-wise: the preceding bytes are arbitrary zip content, usually not
+    // valid UTF-8, so decode-then-compare would throw on innocent APKs.
+    final expected = utf8.encode(signingBlockMagic);
+    var matches = magicBytes.length == expected.length;
+    for (var i = 0; matches && i < expected.length; i++) {
+      if (magicBytes[i] != expected[i]) matches = false;
+    }
+    if (matches) {
+      throw ArgumentError(
+        'apk-overlay: base APK looks v2-signed (APK Signing Block present). '
         'Pass the unsigned APK instead; the caller signs after injection.',
       );
     }
