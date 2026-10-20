@@ -20,16 +20,25 @@ e2e/hello_world after touching them (see the H18 commit).
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 
 # Actions whose outputs must not change on a Dart edit. Each is checked when
-# present; LinkAndroidResources and ApkBuilder are additionally required so
-# the test is not vacuous.
+# present; PackageAndroidResources and ApkBuilder are additionally required so
+# the test is not vacuous. These are the mnemonics rules_android 0.8.0 actually
+# registers on the base android_binary (verified by aquery on
+# :__hello_world_android_binary): the app link step is PackageAndroidResources,
+# not LinkAndroidResources, and dexing is Desugar/DexBuilder/DexShardsToMerge/
+# DexMerger/ShardForMultidex/AppendDesugarDexes/MergeDexZips, not AndroidDexer/
+# ShardClassesToDex.
 _LINK_DEX_MNEMONICS = [
-    "LinkAndroidResources",
+    "PackageAndroidResources",
+    "MergeManifests",
+    "StarlarkRClassGenerator",
+    "KotlinCompile",
     "Desugar",
-    "AndroidDexer",
-    "ShardClassesToDex",
+    "DexBuilder",
+    "DexShardsToMerge",
+    "DexMerger",
+    "ShardForMultidex",
+    "AppendDesugarDexes",
     "MergeDexZips",
-    "TrimDexZip",
-    "JavaIjar",
     "JavaDeployJar",
     "ResourceExtractor",
     "ApkBuilder",
@@ -60,7 +69,7 @@ def _base_binary_test_impl(ctx):
     for a in actions:
         by_mnemonic.setdefault(a.mnemonic, []).append(a)
 
-    for mnemonic in ("LinkAndroidResources", "ApkBuilder"):
+    for mnemonic in ("PackageAndroidResources", "ApkBuilder"):
         asserts.true(
             env,
             mnemonic in by_mnemonic,
