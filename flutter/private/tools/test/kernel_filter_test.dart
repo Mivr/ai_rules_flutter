@@ -263,6 +263,44 @@ void main() {}
       });
       expect(errors, hasLength(1));
     });
+
+    test('accepts a generated part and its part of, in both directions', () {
+      // A declared codegen sibling lives under bazel-out/<config>/bin/ and is
+      // staged at its workspace-relative path: the source's `part` and the
+      // sibling's `part of` name the same multi-root key the front end looks
+      // up, so both directions are declared inputs.
+      const stage = 'bazel-out/k8-fastbuild/bin/app.dill.1a2b3c4d.stage';
+      final errors = check(
+        {
+          'lib/user.dart': "part 'user.g.dart';\n",
+          'bazel-out/k8-fastbuild/bin/lib/user.g.dart':
+              "part of 'user.dart';\n",
+        },
+        [stage],
+      );
+      expect(errors, isEmpty);
+    });
+
+    test('accepts generated parts in a dependency package', () {
+      const stage = 'bazel-out/k8-fastbuild/bin/app.dill.1a2b3c4d.stage';
+      final errors = check(
+        {
+          'dep_part/lib/settings.dart': "part 'settings.g.dart';\n",
+          'bazel-out/k8-fastbuild/bin/dep_part/lib/settings.g.dart':
+              "part of 'settings.dart';\n",
+        },
+        [stage],
+      );
+      expect(errors, isEmpty);
+    });
+
+    test('still refuses a part whose generated sibling is undeclared', () {
+      final errors = check({
+        'lib/user.dart': "part 'user.g.dart';\n",
+      });
+      expect(errors, hasLength(1));
+      expect(errors.single, contains("part 'user.g.dart'"));
+    });
   });
 
   group('runFiltered', () {

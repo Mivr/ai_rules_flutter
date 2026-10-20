@@ -1104,15 +1104,29 @@ const flutterMultiRootPrefix = 'org-dartlang-app:///';
 
 /// The multi-root key naming the declared input source [path]: the
 /// exec-root-relative path with its longest `--filesystem-root` prefix
-/// stripped. Mirrors the derivation in rules_dart's whole-program `gen_kernel`
-/// wrapper: the compile runs with the exec root as its working directory, so
-/// an absolute declared path under it becomes relative, and a staged file's
-/// key drops the staging-root prefix. A relative directive URI resolved
-/// against one declared source's key therefore names the same key the front
-/// end looks up whether the target lives in the source tree or in the staging
-/// root. Paths already relative, or absolute but under no root and outside the
-/// working directory (tests), keep the [stripFsRootPrefix] spelling, which
-/// stays consistent because every key in the comparison uses this function.
+/// stripped, then with a generated file's `bazel-out/<config>/bin/` prefix
+/// stripped to the workspace-relative path it is staged at. Mirrors the
+/// derivation in rules_dart's whole-program `gen_kernel` wrapper (whose
+/// filesystem roots include the bin root, so the same strip falls out of its
+/// prefix loop): the compile runs with the exec root as its working directory,
+/// so an absolute declared path under it becomes relative, a staged file's key
+/// drops the staging-root prefix, and a generated file's key drops the
+/// bin-directory prefix. A relative directive URI resolved against one
+/// declared source's key therefore names the same key the front end looks up
+/// whether the target lives in the source tree or in `bazel-out` — a `part`
+/// and its `part of` meet in either direction, in the app's own package and in
+/// dependency packages.
+///
+/// Every key in the comparison uses this function, so the strip cannot admit
+/// an undeclared file: a stale output in `bazel-out` that no target declares
+/// holds a key no declared source holds, and a `file:` URI naming it is
+/// refused by the scheme check before keys are compared. The front end finds
+/// each key where it is — every kernel entrypoint compiles under a `package:`
+/// or app-scheme URI routed across the staging root — so a generated sibling
+/// staged beside its importer reads a declared input, not the host. Paths
+/// already relative, or absolute but under no root and outside the working
+/// directory (tests), keep the [stripFsRootPrefix] spelling, which stays
+/// consistent because every key in the comparison uses this function.
 String flutterSourceKey(String path, List<String> fsRoots) {
   var slash = path.replaceAll(r'\', '/');
   final cwd = Directory.current.path
@@ -1138,6 +1152,17 @@ String flutterSourceKey(String path, List<String> fsRoots) {
   }
   if (best != null) {
     slash = slash == best ? '' : slash.substring(best.length + 1);
+  }
+  // A generated file's exec path names it under `bazel-out/<config>/bin/`;
+  // its key is the workspace-relative path it is staged at (see above).
+  // Sources never live under `bazel-out/`, so the prefix cannot collide with
+  // one. Both sides of every comparison use this function, so whatever
+  // spelling a repository's generated files arrive under, their keys meet the
+  // importers' keys exactly when the files are staged as siblings — the same
+  // condition under which the front end resolves the import.
+  final bin = RegExp('^bazel-out/[^/]+/bin/').firstMatch(slash);
+  if (bin != null) {
+    slash = slash.substring(bin[0]!.length);
   }
   return slash;
 }
