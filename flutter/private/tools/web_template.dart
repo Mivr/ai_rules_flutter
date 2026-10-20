@@ -586,6 +586,14 @@ String _toAppSchemeUri(String path, String cwdPrefix) {
 
 /// Scrubs host-specific file URIs, temporary package_config paths, stage paths,
 /// and compilation timestamps from dart2js output artifacts in [outDir].
+///
+/// Directory-wide scrubbing is only safe when no other action writes compiler
+/// outputs into [outDir] concurrently: every scrub below is a read-modify-write
+/// computed with only this action's temp paths, so scrubbing a sibling
+/// action's file can overwrite its normalized result with a sorted-but-raw
+/// copy. A compile that shares its output directory — the base and canvaskit
+/// icon kernels both emit `<dill>.deps` into the same `bin` dir — must scrub
+/// only its own files with [scrubDart2JsFile].
 void scrubDart2JsOutputs(
   Directory outDir, {
   required String cwdPath,
@@ -595,6 +603,46 @@ void scrubDart2JsOutputs(
   String? rewrittenPkgPath,
 }) {
   if (!outDir.existsSync()) return;
+
+  final entries = outDir.listSync(recursive: true)
+    ..sort((a, b) => a.path.compareTo(b.path));
+  for (final entity in entries) {
+    if (entity is File &&
+        (entity.path.endsWith('.deps') ||
+            entity.path.endsWith('.info.json') ||
+            entity.path.endsWith('.map') ||
+            entity.path.endsWith('.js'))) {
+      scrubDart2JsFile(
+        entity,
+        cwdPath: cwdPath,
+        rootDirPath: rootDirPath,
+        tmpDirPath: tmpDirPath,
+        packagesPath: packagesPath,
+        rewrittenPkgPath: rewrittenPkgPath,
+      );
+    }
+  }
+}
+
+/// Scrubs one compiler output file in place.
+///
+/// This is the per-file core of [scrubDart2JsOutputs], split out so an action
+/// whose outputs share a directory with a concurrent action's outputs can
+/// normalize exactly the files it owns and never read-modify-write a file
+/// another action is still producing. The base and canvaskit icon kernels
+/// (see the `--cfe-only` branch of [_runDart2Js]) compile concurrently into
+/// the same `bin` dir: with a directory-wide scrub, a scrub that read the
+/// sibling's `<dill>.deps` while raw and wrote it back after the sibling's
+/// own scrub overwrote the normalized file with a sorted-but-still-raw copy —
+/// a declared output differing per strategy (P-web-icon-dill-paths).
+void scrubDart2JsFile(
+  File file, {
+  required String cwdPath,
+  String? rootDirPath,
+  String? tmpDirPath,
+  String? packagesPath,
+  String? rewrittenPkgPath,
+}) {
   final normCwd = cwdPath.replaceAll(r'\', '/');
   final cwdPrefix = normCwd.endsWith('/') ? normCwd : '$normCwd/';
   final cwdUriPrefix = Uri.directory(cwdPath).toString();
@@ -625,111 +673,101 @@ void scrubDart2JsOutputs(
       ? _toAppSchemeRelPath(normRootDir.substring(cwdPrefix.length))
       : null;
 
-  final entries = outDir.listSync(recursive: true)
-    ..sort((a, b) => a.path.compareTo(b.path));
-  for (final entity in entries) {
-    if (entity is File &&
-        (entity.path.endsWith('.deps') ||
-            entity.path.endsWith('.info.json') ||
-            entity.path.endsWith('.map') ||
-            entity.path.endsWith('.js'))) {
-      var content = entity.readAsStringSync();
-      var changed = false;
-      if (pkgAppUri != null) {
-        if (rewrittenPkgUri != null && content.contains(rewrittenPkgUri)) {
-          content = content.replaceAll(rewrittenPkgUri, pkgAppUri);
-          changed = true;
-        }
-        if (origPkgUri != null && content.contains(origPkgUri)) {
-          content = content.replaceAll(origPkgUri, pkgAppUri);
-          changed = true;
-        }
-      }
-      if (tmpDirUriPrefix != null && content.contains(tmpDirUriPrefix)) {
-        content = content.replaceAll(tmpDirUriPrefix, 'org-dartlang-app:///');
-        changed = true;
-      }
-      if (stageUriPrefix != null && content.contains(stageUriPrefix)) {
-        content = content.replaceAll(stageUriPrefix, 'org-dartlang-app:///');
-        changed = true;
-      }
-      if (content.contains(cwdUriPrefix)) {
-        content = content.replaceAll(cwdUriPrefix, 'org-dartlang-app:///');
-        changed = true;
-      }
-      final bazelOutAppUri = RegExp(
-        r'org-dartlang-app:///(?:\./)?bazel-out/[^/]+/(?:bin|genfiles)/',
-      );
-      if (bazelOutAppUri.hasMatch(content)) {
-        content = content.replaceAll(bazelOutAppUri, 'org-dartlang-app:///');
-        changed = true;
-      }
-      // A staged input is addressed as `<stage>/<rel>` under the same scheme,
-      // so the same file is recorded with and without the `<stage>/` prefix
-      // depending on which copy the frontend chose. Without this the depfile
-      // differs per strategy even though every URI is already stable.
-      final stagedAppUri = RegExp(r'org-dartlang-app:///.*?\.stage/');
-      if (stagedAppUri.hasMatch(content)) {
-        content = content.replaceAll(stagedAppUri, 'org-dartlang-app:///');
-        changed = true;
-      }
-      if (entity.path.endsWith('.map') &&
-          stageDirName != null &&
-          stageDirName.isNotEmpty) {
-        final relStageInMap = RegExp(
-          '(?:\\.\\./)+${RegExp.escape(stageDirName)}/',
-        );
-        if (relStageInMap.hasMatch(content)) {
-          content = content.replaceAll(relStageInMap, 'org-dartlang-app:///');
-          changed = true;
-        }
-      }
-      if (entity.path.endsWith('.info.json')) {
-        final bazelOutRel = RegExp(
-          r'(?:\./)?bazel-out/[^/]+/(?:bin|genfiles)/',
-        );
-        if (bazelOutRel.hasMatch(content)) {
-          content = content.replaceAll(bazelOutRel, '');
-          changed = true;
-        }
-        if (relStagePrefix != null &&
-            relStagePrefix.isNotEmpty &&
-            content.contains('$relStagePrefix/')) {
-          content = content.replaceAll('$relStagePrefix/', '');
-          changed = true;
-        }
-        content = content
-            .replaceAllMapped(
-              RegExp(r'"compilationMoment":\s*"[^"]*"'),
-              (_) => '"compilationMoment": "1970-01-01 00:00:00.000000"',
-            )
-            .replaceAllMapped(
-              RegExp(
-                r'"(compilationDuration|toJsonDuration|dumpInfoDuration)":\s*\d+',
-              ),
-              (m) => '"${m.group(1)}": 0',
-            );
-        changed = true;
-      }
-      if (entity.path.endsWith('.deps')) {
-        final lines =
-            content
-                .split('\n')
-                .map((l) => l.trimRight())
-                .where((l) => l.isNotEmpty)
-                .toSet()
-                .toList()
-              ..sort();
-        final normalized = lines.isEmpty ? '' : '${lines.join('\n')}\n';
-        if (normalized != content) {
-          content = normalized;
-          changed = true;
-        }
-      }
-      if (changed) {
-        entity.writeAsStringSync(content);
-      }
+  var content = file.readAsStringSync();
+  var changed = false;
+  if (pkgAppUri != null) {
+    if (rewrittenPkgUri != null && content.contains(rewrittenPkgUri)) {
+      content = content.replaceAll(rewrittenPkgUri, pkgAppUri);
+      changed = true;
     }
+    if (origPkgUri != null && content.contains(origPkgUri)) {
+      content = content.replaceAll(origPkgUri, pkgAppUri);
+      changed = true;
+    }
+  }
+  if (tmpDirUriPrefix != null && content.contains(tmpDirUriPrefix)) {
+    content = content.replaceAll(tmpDirUriPrefix, 'org-dartlang-app:///');
+    changed = true;
+  }
+  if (stageUriPrefix != null && content.contains(stageUriPrefix)) {
+    content = content.replaceAll(stageUriPrefix, 'org-dartlang-app:///');
+    changed = true;
+  }
+  if (content.contains(cwdUriPrefix)) {
+    content = content.replaceAll(cwdUriPrefix, 'org-dartlang-app:///');
+    changed = true;
+  }
+  final bazelOutAppUri = RegExp(
+    r'org-dartlang-app:///(?:\./)?bazel-out/[^/]+/(?:bin|genfiles)/',
+  );
+  if (bazelOutAppUri.hasMatch(content)) {
+    content = content.replaceAll(bazelOutAppUri, 'org-dartlang-app:///');
+    changed = true;
+  }
+  // A staged input is addressed as `<stage>/<rel>` under the same scheme,
+  // so the same file is recorded with and without the `<stage>/` prefix
+  // depending on which copy the frontend chose. Without this the depfile
+  // differs per strategy even though every URI is already stable.
+  final stagedAppUri = RegExp(r'org-dartlang-app:///.*?\.stage/');
+  if (stagedAppUri.hasMatch(content)) {
+    content = content.replaceAll(stagedAppUri, 'org-dartlang-app:///');
+    changed = true;
+  }
+  if (file.path.endsWith('.map') &&
+      stageDirName != null &&
+      stageDirName.isNotEmpty) {
+    final relStageInMap = RegExp(
+      '(?:\\.\\./)+${RegExp.escape(stageDirName)}/',
+    );
+    if (relStageInMap.hasMatch(content)) {
+      content = content.replaceAll(relStageInMap, 'org-dartlang-app:///');
+      changed = true;
+    }
+  }
+  if (file.path.endsWith('.info.json')) {
+    final bazelOutRel = RegExp(
+      r'(?:\./)?bazel-out/[^/]+/(?:bin|genfiles)/',
+    );
+    if (bazelOutRel.hasMatch(content)) {
+      content = content.replaceAll(bazelOutRel, '');
+      changed = true;
+    }
+    if (relStagePrefix != null &&
+        relStagePrefix.isNotEmpty &&
+        content.contains('$relStagePrefix/')) {
+      content = content.replaceAll('$relStagePrefix/', '');
+      changed = true;
+    }
+    content = content
+        .replaceAllMapped(
+          RegExp(r'"compilationMoment":\s*"[^"]*"'),
+          (_) => '"compilationMoment": "1970-01-01 00:00:00.000000"',
+        )
+        .replaceAllMapped(
+          RegExp(
+            r'"(compilationDuration|toJsonDuration|dumpInfoDuration)":\s*\d+',
+          ),
+          (m) => '"${m.group(1)}": 0',
+        );
+    changed = true;
+  }
+  if (file.path.endsWith('.deps')) {
+    final lines =
+        content
+            .split('\n')
+            .map((l) => l.trimRight())
+            .where((l) => l.isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort();
+    final normalized = lines.isEmpty ? '' : '${lines.join('\n')}\n';
+    if (normalized != content) {
+      content = normalized;
+      changed = true;
+    }
+  }
+  if (changed) {
+    file.writeAsStringSync(content);
   }
 }
 
@@ -881,13 +919,19 @@ void _runDart2Js(List<String> args) {
     );
   }
   if (outJs != null && cfeOnly) {
-    // Normalize the CFE depfile sibling (`<dill>.deps`) the same way JS
-    // `.deps` files are: sorted unique lines, no tmp/cwd/stage prefixes, so
-    // the declared output does not depend on host paths.
+    // Normalize only this action's own depfile sibling (`<dill>.deps`), never
+    // the whole output directory: the base and canvaskit icon kernels compile
+    // concurrently into the same `bin` dir, and a directory-wide scrub is a
+    // read-modify-write of the sibling's depfile with only this action's temp
+    // paths known. A scrub that read the sibling's file while raw and writes
+    // it back after the sibling's own scrub overwrites the normalized file
+    // with a sorted-but-still-raw copy — a declared output that then differs
+    // per strategy (P-web-icon-dill-paths). The `.dill` itself needs no
+    // scrubbing: the kernel records workspace-relative library URIs.
     final depsFile = File('$outJs.deps');
     if (depsFile.existsSync()) {
-      scrubDart2JsOutputs(
-        depsFile.parent,
+      scrubDart2JsFile(
+        depsFile,
         cwdPath: cwdPath,
         rootDirPath: rootDirPath,
         tmpDirPath: tmpAbsPath,
