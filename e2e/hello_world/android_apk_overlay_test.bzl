@@ -137,19 +137,24 @@ def _overlay_test_impl(ctx):
 
 _overlay_test = analysistest.make(_overlay_test_impl)
 
-def android_apk_overlay_test_suite(name, app_name):
+def android_apk_overlay_test_suite(name, app_name, tags = []):
     """Defines the APK overlay analysis tests for one `flutter_android_app`.
 
     Args:
       name: Prefix for the test targets.
       app_name: The `flutter_android_app` name; its `__<app>_binary` and
         `__<app>_overlay` targets are analyzed.
+      tags: Tags forwarded to each test. Pass `["no-windows-ci"]`: the tests
+        analyze the Android app, which is skipped on the Windows CI runner
+        (pagefile OOM) via --build_tag_filters/--test_tag_filters.
     """
     _base_binary_test(
         name = name + "_base_binary",
         target_under_test = ":__%s_binary" % app_name,
+        tags = tags,
     )
     _overlay_test(
         name = name + "_overlay",
         target_under_test = ":__%s_overlay" % app_name,
+        tags = tags,
     )

@@ -377,6 +377,9 @@ build_test(
 android_apk_overlay_test_suite(
     name = "android_apk_overlay_test",
     app_name = "hello_world_android",
+    # See hello_world_android: skipped on the Windows CI runner (pagefile OOM)
+    # via --build_tag_filters/--test_tag_filters. Builds normally everywhere else.
+    tags = ["no-windows-ci"],
 )
 
 build_test(
