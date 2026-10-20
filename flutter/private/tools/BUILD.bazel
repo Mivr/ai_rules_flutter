@@ -172,7 +172,7 @@ _UNIT_TESTS = {
     "compile_shader_test": ("compile_shader.dart", []),
     "kernel_filter_test": (
         "kernel_filter.dart",
-        ["@rules_dart//dart/guard:directive_guard"]
+        ["@rules_dart//dart/guard:directive_guard"],
     ),
     "macho_edit_test": ("macho_edit.dart", []),
     "generate_asset_manifest_test": ("generate_asset_manifest.dart", []),
