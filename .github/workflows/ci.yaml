@@ -531,9 +531,13 @@ jobs:
         # are covered by their Bazel targets, which this job does not replace.
         run: dart test -x e2e -x runfiles
       # `-x runfiles` for the same reason as the dev_tool step above: these
-      # tools are Bazel scripts, and one of them imports a package that arrives
-      # through its `dart_test` deps rather than through this pubspec. Excluded
-      # here, covered by //flutter/private/tools:flutter_test_runner_test.
+      # tools are Bazel scripts, and two of them import packages that arrive
+      # through their `dart_test` deps rather than through this pubspec
+      # (`flutter_test_runner` imports `package:runfiles`, `kernel_filter`'s
+      # guard imports `package:rules_dart_guard`). Excluded here, covered by
+      # //flutter/private/tools:flutter_test_runner_test and
+      # //flutter/private/tools:kernel_filter_test, which the `unit-tests`
+      # job runs via `bazel test //...`.
       - name: Run private tool tests
         working-directory: flutter/private/tools
         run: dart pub get && dart test -x runfiles

@@ -1,3 +1,12 @@
+// Tagged `runfiles`: the guard under test imports `package:rules_dart_guard`,
+// which Bazel supplies via the `@rules_dart//dart/guard:directive_guard` dep
+// its `dart_test` declares. A bare `dart test` resolves only this package's
+// pubspec, where that import does not exist, so the file fails to load rather
+// than failing a test.
+// Coverage comes from //flutter/private/tools:kernel_filter_test.
+@Tags(['runfiles'])
+library;
+
 import 'dart:io';
 
 import 'package:test/test.dart';
