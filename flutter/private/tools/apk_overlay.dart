@@ -142,11 +142,11 @@ int _findEocd(Uint8List bytes) {
       );
     }
     final flags = _getUint16LE(bd, pos + 8);
-    if ((flags & 0x08) != 0) {
-      throw FormatException(
-        'apk-overlay: data descriptors are not supported.',
-      );
-    }
+    // Entries with data descriptors (bit 3, e.g. the merged classes.dex
+    // singlejar emits) need no special handling: the splice copies the whole
+    // local-file region byte-for-byte, descriptors ride along untouched, and
+    // the central record — which carries the authoritative sizes — is copied
+    // verbatim too. Only refuse what the offset math cannot survive.
     if ((flags & 0x01) != 0) {
       throw FormatException(
         'apk-overlay: encrypted entries are not supported.',

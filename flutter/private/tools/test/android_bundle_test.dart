@@ -7,7 +7,7 @@ import 'package:test/test.dart';
 
 import '../android_bundle.dart';
 import '../xtool_pack.dart'
-    show ZipEntry, encodeDeterministicZip, readZipEntries;
+    show ZipEntry, crc32, encodeDeterministicZip, readZipEntries;
 
 Uint8List _syntheticElf({required int machine, List<int> payload = const []}) {
   final header = Uint8List(20 + payload.length);
@@ -287,6 +287,74 @@ void main() {
         return path;
       }
 
+      // Builds a minimal zip holding one stored entry with bit 3 (data
+      // descriptor) set and zeroed local size fields, the way singlejar
+      // emits the merged classes.dex entries of a real unsigned APK.
+      Uint8List zipWithDescriptorEntry(String path, Uint8List data) {
+        final name = utf8.encode(path);
+        final crc = crc32(data);
+        final u16 = (BytesBuilder b, int v) =>
+            b.add([v & 0xff, (v >> 8) & 0xff]);
+        final u32 = (BytesBuilder b, int v) => b.add([
+          v & 0xff,
+          (v >> 8) & 0xff,
+          (v >> 16) & 0xff,
+          (v >> 24) & 0xff,
+        ]);
+        final local = BytesBuilder(copy: false);
+        u32(local, 0x04034b50);
+        u16(local, 20);
+        u16(local, 0x0808);
+        u16(local, 0);
+        u16(local, 0);
+        u16(local, 0x3C21);
+        u32(local, 0);
+        u32(local, 0);
+        u32(local, 0);
+        u16(local, name.length);
+        u16(local, 0);
+        local.add(name);
+        local.add(data);
+        u32(local, crc);
+        u32(local, data.length);
+        u32(local, data.length);
+        final localBytes = local.takeBytes();
+        final central = BytesBuilder(copy: false);
+        u32(central, 0x02014b50);
+        u16(central, (3 << 8) | 20);
+        u16(central, 20);
+        u16(central, 0x0808);
+        u16(central, 0);
+        u16(central, 0);
+        u16(central, 0x3C21);
+        u32(central, crc);
+        u32(central, data.length);
+        u32(central, data.length);
+        u16(central, name.length);
+        u16(central, 0);
+        u16(central, 0);
+        u16(central, 0);
+        u16(central, 0);
+        u32(central, 0x81A40000);
+        u32(central, 0);
+        central.add(name);
+        final centralBytes = central.takeBytes();
+        final eocd = BytesBuilder(copy: false);
+        u32(eocd, 0x06054b50);
+        u16(eocd, 0);
+        u16(eocd, 0);
+        u16(eocd, 1);
+        u16(eocd, 1);
+        u32(eocd, centralBytes.length);
+        u32(eocd, localBytes.length);
+        u16(eocd, 0);
+        final out = BytesBuilder(copy: false)
+          ..add(localBytes)
+          ..add(centralBytes)
+          ..add(eocd.takeBytes());
+        return out.takeBytes();
+      }
+
       Future<String> writeNativeLibsJar() async {
         final libApp = File('${tempDir.path}/libapp.so')
           ..writeAsBytesSync(_syntheticElf(machine: 183, payload: [1, 2, 3]));
@@ -431,6 +499,39 @@ void main() {
           expect(methods['assets/flutter_assets/AssetManifest.json'], 8);
         },
       );
+
+      test('preserves base entries that use data descriptors', () async {
+        // singlejar emits the merged classes.dex with bit 3 set; the splice
+        // copies the local-file region (descriptor trailers included)
+        // byte-for-byte, so these entries need no special handling.
+        final dexData = Uint8List.fromList(List<int>.filled(1000, 5));
+        final baseBytes = zipWithDescriptorEntry('classes.dex', dexData);
+        final basePath = '${tempDir.path}/base_desc.apk';
+        File(basePath).writeAsBytesSync(baseBytes);
+        final jarPath = await writeNativeLibsJar();
+        final assetsPath = writeFlutterAssets();
+        final outPath = '${tempDir.path}/overlay_desc.apk';
+
+        await runAndroidBundle([
+          'apk-overlay',
+          '--base',
+          basePath,
+          '--native-libs-jar',
+          jarPath,
+          '--flutter-assets',
+          assetsPath,
+          '--output',
+          outPath,
+        ]);
+
+        final outBytes = File(outPath).readAsBytesSync();
+        final baseCd = readCentralForTest(baseBytes).cdOffset;
+        expect(
+          outBytes.sublist(0, baseCd),
+          equals(baseBytes.sublist(0, baseCd)),
+        );
+        expect(entriesByPath(outPath)['classes.dex'], equals(dexData.toList()));
+      });
 
       test('empty payload reproduces the base APK byte-for-byte', () async {
         final basePath = await writeBaseApk([
