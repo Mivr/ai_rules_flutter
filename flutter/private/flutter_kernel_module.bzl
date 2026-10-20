@@ -223,7 +223,7 @@ def _dedup_module_sources(sources):
             by_uri[s.uri] = s
     return [by_uri[u] for u in order]
 
-def _flutter_kernel_module_action(
+def flutter_kernel_module_action(
         ctx,
         tools,
         sources,
@@ -243,8 +243,19 @@ def _flutter_kernel_module_action(
         extra_libraries = [],
         scheme = APP_SCHEME,
         extra_frontend_flags = [],
-        stage_all = False):
-    """Compiles one Flutter kernel module with staged generated inputs instead of mounting `ctx.bin_dir`."""
+        stage_all = False,
+        unused_inputs = False):
+    """Compiles one Flutter kernel module with staged generated inputs instead of mounting `ctx.bin_dir`.
+
+    Args:
+      unused_inputs: Whether the compile writes its unused-inputs list — the
+        declared inputs no compile of this action read — and takes it as the
+        action's `unused_inputs_list`, so Bazel skips the action when only an
+        unread input changed. True at every call site: each registers its
+        action once (the aspect's evaluations of one target compute identical
+        actions, which Bazel merges), as `dart_library`'s own module does in
+        rules_dart. False registers the historical action with no list.
+    """
     sources = _dedup_module_sources(sources)
     platform = platform_dill if platform_dill != None else tools.platform_dill
     libraries = libraries_json if libraries_json != None else tools.libraries_json
@@ -254,6 +265,13 @@ def _flutter_kernel_module_action(
         content = kernel_package_config(packages, scheme = scheme),
     )
     excluded = ctx.actions.declare_file(output.basename + ".vm_excluded.txt")
+    if unused_inputs:
+        # Written by `kernel_module` alongside the module. Declared here, where
+        # the one registering action is, so the declaration and the action
+        # that generates the file can never part ways.
+        unused_inputs_list = ctx.actions.declare_file(output.basename + ".unused_inputs")
+    else:
+        unused_inputs_list = None
 
     stage_candidates = [s.file for s in sources]
     if extra_inputs != None:
@@ -287,15 +305,22 @@ def _flutter_kernel_module_action(
     args.add_all(dep_kmods, before_each = "--input-kmod", expand_directories = False)
     for s in sources:
         args.add("--source", s.uri)
+        args.add("--input-source", s.file)
+        if unused_inputs_list != None:
+            args.add("--own-source-file", s.file)
     args.add("--output", output.path)
     if koutline != None:
         args.add("--output-outline", koutline.path)
 
     args.add("--excluded-output", excluded)
+    if unused_inputs_list != None:
+        args.add("--unused-inputs-list", unused_inputs_list)
     if not droppable:
         args.add("--no-drop")
     if closure_excluded:
         args.add_all(closure_excluded, before_each = "--closure-excluded")
+    if extra_inputs:
+        args.add_all(extra_inputs, before_each = "--input-source")
 
     dart_exe = getattr(tools, "dart", None)
     dartvm = getattr(tools, "dartvm", None)
@@ -371,7 +396,8 @@ def _flutter_kernel_module_action(
             direct = action_tools,
             transitive = [runtime_files] if runtime_files != None else [],
         ),
-        outputs = [output, excluded] + ([koutline] if koutline != None else []),
+        outputs = [output, excluded] + ([unused_inputs_list] if unused_inputs_list != None else []) + ([koutline] if koutline != None else []),
+        unused_inputs_list = unused_inputs_list,
         mnemonic = "DartKernel",
         progress_message = "Compiling Dart kernel module %s" % output.short_path,
         execution_requirements = {} if _is_manual(ctx) else {
@@ -527,7 +553,7 @@ def _flutter_kernel_module_aspect_impl(target, ctx):
     ]
     deduped_packages = first_per_package(records)
     worker_defines = _kernel_worker_defines(ctx)
-    excluded = _flutter_kernel_module_action(
+    excluded = flutter_kernel_module_action(
         ctx,
         tools,
         sources,
@@ -543,6 +569,7 @@ def _flutter_kernel_module_aspect_impl(target, ctx):
         platform_dill = flutter_sdk_info.platform_kernel_dill,
         extra_libraries = ["ui", "nativewrappers"],
         scheme = APP_SCHEME,
+        unused_inputs = True,
     )
     if package_name == "flutter_test" and hasattr(ctx.executable, "_kernel_link"):
         base_dill = ctx.actions.declare_file(target.label.name + ".flutter_base.dill")
@@ -572,7 +599,7 @@ def _flutter_kernel_module_aspect_impl(target, ctx):
         )
         product_kmod = ctx.actions.declare_directory(target.label.name + ".flutter_product.kmod")
         product_koutline = ctx.actions.declare_directory(target.label.name + ".flutter_product.koutline")
-        product_excluded = _flutter_kernel_module_action(
+        product_excluded = flutter_kernel_module_action(
             ctx,
             tools,
             sources,
@@ -592,6 +619,7 @@ def _flutter_kernel_module_aspect_impl(target, ctx):
             platform_dill = flutter_sdk_info.platform_kernel_dill_product,
             extra_libraries = ["ui", "nativewrappers"],
             scheme = APP_SCHEME,
+            unused_inputs = True,
         )
         product_kernel_info = DartKernelInfo(
             kmod = product_kmod,
@@ -765,7 +793,7 @@ def compile_flutter_modular_test_kernel(
         transitive = [k.cross_pkg_srcs for k in dep_kernels],
     )
     entry = ctx.actions.declare_directory(ctx.label.name + ".flutter_entry.kmod")
-    _flutter_kernel_module_action(
+    flutter_kernel_module_action(
         ctx,
         tools,
         sources,
@@ -781,6 +809,7 @@ def compile_flutter_modular_test_kernel(
         platform_dill = flutter_sdk_info.platform_kernel_dill,
         extra_libraries = ["ui", "nativewrappers"],
         scheme = APP_SCHEME,
+        unused_inputs = True,
     )
     base_dill = None
     base_keys = None
@@ -874,7 +903,7 @@ def compile_flutter_modular_web_kernel(
         transitive = [k.cross_pkg_srcs for k in dep_kernels],
     )
     entry = ctx.actions.declare_directory(ctx.label.name + "_icon_tree_shaking.flutter_entry.kmod")
-    _flutter_kernel_module_action(
+    flutter_kernel_module_action(
         ctx,
         tools,
         sources,
@@ -891,6 +920,7 @@ def compile_flutter_modular_web_kernel(
         extra_libraries = ["ui", "nativewrappers"],
         scheme = APP_SCHEME,
         stage_all = True,
+        unused_inputs = True,
     )
     kernel_link_action(
         ctx,
@@ -948,7 +978,7 @@ def compile_flutter_modular_app_kernel(
         transitive = [k.cross_pkg_srcs for k in dep_kernels],
     )
     entry = ctx.actions.declare_directory(ctx.label.name + ".flutter_entry.kmod")
-    _flutter_kernel_module_action(
+    flutter_kernel_module_action(
         ctx,
         tools,
         sources,
@@ -964,6 +994,7 @@ def compile_flutter_modular_app_kernel(
         platform_dill = platform_dill,
         extra_libraries = ["ui", "nativewrappers"],
         scheme = APP_SCHEME,
+        unused_inputs = True,
     )
     kernel_link_action(
         ctx,

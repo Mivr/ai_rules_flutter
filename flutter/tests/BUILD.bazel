@@ -34,6 +34,7 @@ load(":pub_lock_sdks_test.bzl", "pub_lock_sdks_test_suite")
 load(":shader_compile_test.bzl", "shader_compile_test_suite")
 load(":toolchain_test.bzl", "toolchain_test_suite")
 load(":toolchains_repo_test.bzl", "toolchains_repo_test_suite")
+load(":unused_inputs_test.bzl", "unused_inputs_test_suite")
 load(":validation_test.bzl", "validation_test_suite")
 load(":versions_test.bzl", "versions_test_suite")
 load(":web_test.bzl", "web_test_suite")
@@ -45,6 +46,8 @@ versions_test_suite(name = "versions_test")
 artifact_urls_test_suite(name = "artifact_urls_test")
 
 toolchain_test_suite(name = "toolchain_test")
+
+unused_inputs_test_suite(name = "unused_inputs_test")
 
 common_test_suite(name = "common_test")
 

@@ -256,6 +256,24 @@ flutter_test(
     ],
 )
 
+# Exercises: the kernel `unused_inputs_list` wiring. `//unused_inputs/a`
+# adopts `//unused_inputs/b`'s `part of` file, re-exports
+# `//unused_inputs/c`, and folds a constant from `//unused_inputs/d`; editing
+# any of those must rebuild to the same dill a clean build produces. A wrongly
+# skipped compile would keep a stale value and fail these expectations after
+# an incremental rebuild.
+flutter_test(
+    name = "unused_inputs_test",
+    package_name = "codegen_e2e",
+    main = "test/unused_inputs_test.dart",
+    target_compatible_with = _HOST_COMPATIBLE,
+    deps = [
+        "//unused_inputs/a",
+        "@deps//:flutter",
+        "@deps//:flutter_test",
+    ],
+)
+
 # Exercises: Native Assets under flutter_tester. The library is owned by a
 # dependency, so nothing here names an asset — the way a pub package's
 # hook-built library arrives. A test loads no application bundle, so this is
