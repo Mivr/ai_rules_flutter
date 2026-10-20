@@ -32,10 +32,6 @@ def _kernel_action(env):
     asserts.equals(env, 1, len(kernels), "expected one FlutterKernelCompile")
     return kernels[0] if kernels else None
 
-def _kernel_argv(env):
-    action = _kernel_action(env)
-    return action.argv if action else []
-
 def _flag_values(argv, flag):
     return [argv[i + 1] for i in range(len(argv) - 1) if argv[i] == flag]
 
@@ -369,6 +365,7 @@ def _stale_probe_analysis_test_impl(ctx):
             len(staged_main),
             "expected declared main staged in .stage, got %r" % input_paths,
         )
+
         # The stale sibling in bazel-out is in no output group the compile
         # declares, so it reaches neither the inputs nor the staging root.
         # The staged link above resolves the `package:` entrypoint, and the
