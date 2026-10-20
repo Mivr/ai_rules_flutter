@@ -47,7 +47,7 @@ is a hard build error.
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
 load("//flutter/private:common.bzl", "ANDROID_ABIS", "android_elf_machine_for_abi", "android_platform_for_abi", "compute_android_jni_path", "resolve_exec_dart_vm")
 
-def _android_platform_transition_impl(settings, attr):
+def _android_platform_transition_platforms(settings, attr):
     abi = getattr(attr, "android_abi", "")
     if abi:
         return {
@@ -84,20 +84,38 @@ def _android_platform_transition_impl(settings, attr):
         "//command_line_option:platforms": [android_platform_for_abi("arm64-v8a")],
     }
 
+def _android_platform_transition_impl(settings, attr):
+    # Idempotent on every edge: besides the platform, pin `dynamic_mode` to
+    # what rules_android itself uses for the native deps of an android_binary
+    # (`_cc_flags_from_android` sets it to "off"). The bundle, the registrant
+    # sources and the plugin aggregator are each reachable through both a
+    # split `deps` edge (dynamic_mode=off) and an unsplit edge (the binary's
+    # `assets`, the manifest merge's `libraries`), and passing the caller's
+    # value through forked the whole application subgraph — including the AOT
+    # kernel compile and the cross gen_snapshot — into two configurations
+    # with byte-identical outputs. `dynamic_mode` feeds no Dart action, so
+    # the surviving configuration produces the same app.dill and app.so.
+    result = _android_platform_transition_platforms(settings, attr)
+    result["//command_line_option:dynamic_mode"] = "off"
+    return result
+
 # Builds the bundle and everything behind it (the flutter_application, its
 # AOT compile, FFI cc deps, Native Assets) for the Android platform matching
 # `android_abi` (or the caller's configured Android ABI when `android_abi` is
-# omitted on `flutter_android_registrant`). Only `//command_line_option:platforms`
-# changes; the caller's `dynamic_mode` and ABI are preserved.
+# omitted on `flutter_android_registrant`). `//command_line_option:platforms`
+# and `//command_line_option:dynamic_mode` are set; every other setting is
+# the caller's.
 _android_platform_transition = transition(
     implementation = _android_platform_transition_impl,
     inputs = [
         "//command_line_option:platforms",
         "//command_line_option:android_platforms",
         "//command_line_option:cpu",
+        "//command_line_option:dynamic_mode",
     ],
     outputs = [
         "//command_line_option:platforms",
+        "//command_line_option:dynamic_mode",
     ],
 )
 

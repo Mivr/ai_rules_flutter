@@ -459,7 +459,7 @@ def platform_bundle_test_suite(name):
         }),
         expected_cpu = "arm64",
         dynamic_mode = dynamic_mode_select,
-        expected_dynamic_mode = "default",
+        expected_dynamic_mode = "off",
         tags = ["manual"],
     )
 
@@ -488,7 +488,7 @@ def platform_bundle_test_suite(name):
         }),
         expected_cpu = "x86_64",
         dynamic_mode = dynamic_mode_select,
-        expected_dynamic_mode = "default",
+        expected_dynamic_mode = "off",
         tags = ["manual"],
     )
 
@@ -504,7 +504,10 @@ def platform_bundle_test_suite(name):
         target_under_test = ":_registrant_x64_under_test",
     )
 
-    # Direct callers (omitting android_abi) keep their configured ABI and dynamic_mode.
+    # Direct callers (omitting android_abi) keep their configured ABI; every
+    # edge pins dynamic_mode to off (see _android_platform_transition_impl),
+    # so callers reached through split and unsplit edges share one
+    # configuration instead of compiling the application subgraph twice.
     _fake_android_app(
         name = "_fake_app_direct_x64_fully",
         is_android = select({
@@ -518,7 +521,7 @@ def platform_bundle_test_suite(name):
         }),
         expected_cpu = "x86_64",
         dynamic_mode = dynamic_mode_select,
-        expected_dynamic_mode = "fully",
+        expected_dynamic_mode = "off",
         tags = ["manual"],
     )
 
@@ -551,7 +554,7 @@ def platform_bundle_test_suite(name):
         }),
         expected_cpu = "x86_64",
         dynamic_mode = dynamic_mode_select,
-        expected_dynamic_mode = "default",
+        expected_dynamic_mode = "off",
         tags = ["manual"],
     )
 
