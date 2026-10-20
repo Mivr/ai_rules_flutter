@@ -8,6 +8,7 @@ load(":flutter_sdk_kernel_binary.bzl", "flutter_sdk_kernel_binary")
 exports_files(
     [
         "android_bundle.dart",
+        "apk_overlay.dart",
         "generate_asset_manifest.dart",
         "bundle_app.dart",
         "compile_shader.dart",
@@ -28,7 +29,10 @@ exports_files(
 
 dart_binary(
     name = "android_bundle",
-    srcs = ["xtool_pack.dart"],
+    srcs = [
+        "apk_overlay.dart",
+        "xtool_pack.dart",
+    ],
     compile_mode = "kernel",
     main = "android_bundle.dart",
     modular_kernel = False,
@@ -195,7 +199,10 @@ _UNIT_TESTS = {
 # The runner imports its protocol module by relative path, so every test of the
 # runner carries it too.
 _TOOL_SRCS = {
-    "android_bundle.dart": ["xtool_pack.dart"],
+    "android_bundle.dart": [
+        "xtool_pack.dart",
+        "apk_overlay.dart",
+    ],
     "flutter_test_runner.dart": ["bazel_test_protocol.dart"],
     "flutter_integration_test_runner.dart": ["bazel_test_protocol.dart"],
     "kernel_filter.dart": ["directive_guard.dart"],

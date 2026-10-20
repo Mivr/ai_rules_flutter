@@ -25,6 +25,7 @@ Two tiers of API:
         load("@rules_flutter//flutter:android.bzl",
             "ANDROID_MIN_SDK_VERSION",
             "ANDROID_TARGET_SDK_VERSION",
+            "flutter_android_apk_overlay",
             "flutter_android_bundle",
             "flutter_android_engine",
             "flutter_android_manifest_gen",
@@ -54,6 +55,7 @@ load("@rules_android//android:rules.bzl", _android_binary = "android_binary", _a
 load("@rules_java//java:java_import.bzl", _java_import = "java_import")
 load("@rules_kotlin//kotlin:android.bzl", _kt_android_library = "kt_android_library")
 load("//flutter/private:constants.bzl", _ANDROID_ABI_FOR_ARCH = "ANDROID_ABI_FOR_ARCH", _ANDROID_MIN_SDK_VERSION = "ANDROID_MIN_SDK_VERSION", _ANDROID_TARGET_SDK_VERSION = "ANDROID_TARGET_SDK_VERSION")
+load("//flutter/private:flutter_android_apk_overlay.bzl", _flutter_android_apk_overlay = "flutter_android_apk_overlay")
 load("//flutter/private:flutter_android_application.bzl", _flutter_android_bundle = "flutter_android_bundle")
 load("//flutter/private:flutter_android_binary_proxy.bzl", _flutter_android_binary_proxy = "flutter_android_binary_proxy")
 load("//flutter/private:flutter_android_manifest_merge.bzl", _flutter_android_manifest_merge = "flutter_android_manifest_merge")
@@ -97,6 +99,12 @@ _ANDROIDX_EMBEDDING_DEPS = [
 # -- Composable rules (Tier 2) ------------------------------------------------
 
 flutter_android_bundle = _flutter_android_bundle
+
+# Finishes a payload-free android_binary into a signed APK by injecting the
+# Flutter payload (native libraries and flutter_assets) after resource
+# linking. Wired automatically by flutter_android_app; expose for Tier-2
+# control when assembling an `android_binary` by hand.
+flutter_android_apk_overlay = _flutter_android_apk_overlay
 
 # Merges a variant AndroidManifest.xml overlay (e.g. flutter create's
 # android/app/src/debug/AndroidManifest.xml) into a base manifest — the
@@ -621,12 +629,12 @@ def flutter_android_app(
         tags = internal_tags,
     )
 
-    # 5. Extract flutter_assets for inclusion in the APK.
-    # The mobile_install output group has assets at assets/flutter_assets/.
+    # 5. Extract flutter_assets for injection into the APK after resource
+    # linking (see flutter_android_apk_overlay).
     native.filegroup(
-        name = "__%s_flutter_assets" % name,
+        name = "__%s_overlay_assets" % name,
         srcs = ["__%s_bundle" % name],
-        output_group = "mobile_install",
+        output_group = "flutter_assets",
         tags = internal_tags,
     )
 
@@ -676,12 +684,18 @@ def flutter_android_app(
     # 7. Resolve manifests (main + debug variant), resources, and Kotlin
     # sources.
     base_manifest = manifest
-    binary_deps = [
-        "__%s_native_libs" % name,
+
+    # The android_binary below builds a payload-free base APK: neither the
+    # native_libs java_import (whose jar carries libapp.so through the dex
+    # chain) nor flutter_assets (which aapt2 would link into the resources
+    # APK) are its inputs, so Dart edits re-run neither resource linking nor
+    # dexing. The overlay (step 10) injects both after resource linking.
+    base_binary_deps = [
         "__%s_engine" % name,
         "__%s_registrant" % name,
         "__%s_android_plugins" % name,
     ]
+    binary_deps = list(base_binary_deps)
 
     # 8. Plugin auto-wiring: compile every transitively-needed plugin's
     # Kotlin/Java via the hub's aggregator. Each spoke unconditionally
@@ -794,11 +808,13 @@ def flutter_android_app(
     # 8c. Lift the permissions the app's Android libraries declare (plugins,
     # AARs) into its own manifest, as Gradle does. Bazel's merger drops them
     # unless --merge_android_manifest_permissions is set; done here, they
-    # reach the APK whatever the flags.
+    # reach the APK whatever the flags. The merger sees the full library
+    # list including the native libs java_import, exactly as before the
+    # payload-free split: native_libs first, then every binary dep.
     flutter_android_manifest_merge(
         name = "__%s_manifest_with_library_permissions" % name,
         base = actual_manifest,
-        libraries = binary_deps + deps,
+        libraries = ["__%s_native_libs" % name] + binary_deps + deps,
         placeholders = ["applicationId", "minSdkVersion", "targetSdkVersion"],
         tags = internal_tags,
     )
@@ -840,18 +856,40 @@ def flutter_android_app(
             "targetSdkVersion": target_sdk_version,
         },
         resource_files = resources if resources else None,
-        assets = ["__%s_flutter_assets" % name],
-        assets_dir = "assets",
         deps = binary_deps + deps,
         tags = internal_tags,
         **binary_kwargs
+    )
+
+    # 10. Inject the Flutter payload after resource linking, then align and
+    # sign — the same steps android_binary would have run. `signing` follows
+    # @rules_android//flags:apk_signing_method so the overlay signs exactly
+    # like the binary would have. Signing/alignment overrides passed for the
+    # binary apply to the overlay too.
+    overlay_kwargs = {}
+    for key in ("debug_key", "debug_signing_keys", "debug_signing_lineage_file", "key_rotation_min_sdk", "zipalign_alignment"):
+        if key in kwargs:
+            overlay_kwargs[key] = kwargs[key]
+    _flutter_android_apk_overlay(
+        name = "__%s_overlay" % name,
+        binary = "__%s_binary" % name,
+        native_libs_jar = "__%s_native_libs_jar" % name,
+        flutter_assets = "__%s_overlay_assets" % name,
+        signing = select({
+            "@rules_flutter//flutter:apk_signing_v1": "v1",
+            "@rules_flutter//flutter:apk_signing_v2": "v2",
+            "@rules_flutter//flutter:apk_signing_v4": "v4",
+            "//conditions:default": "v1_v2",
+        }),
+        tags = internal_tags,
+        **overlay_kwargs
     )
 
     # The user-facing target: same providers and the same `<name>.apk` output
     # as the android_binary used to be, with pure Go scoped to its subtree.
     _flutter_android_binary_proxy(
         name = name,
-        binary = ":__%s_binary" % name,
+        binary = ":__%s_overlay" % name,
         tags = tags,
         **passthrough
     )

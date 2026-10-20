@@ -1,10 +1,13 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'dart:convert';
+
 import 'package:test/test.dart';
 
 import '../android_bundle.dart';
-import '../xtool_pack.dart' show readZipEntries;
+import '../xtool_pack.dart'
+    show ZipEntry, encodeDeterministicZip, readZipEntries;
 
 Uint8List _syntheticElf({required int machine, List<int> payload = const []}) {
   final header = Uint8List(20 + payload.length);
@@ -244,6 +247,274 @@ void main() {
           'iso-snap-bytes',
         );
       }, testOn: '!windows');
+    });
+
+    group('apk-overlay', () {
+      // Test-local central directory reader: maps each entry path to its
+      // compression method, and reports the central directory offset.
+      ({Map<String, int> methods, int cdOffset}) readCentralForTest(
+        Uint8List bytes,
+      ) {
+        final bd = ByteData.sublistView(bytes);
+        var eocd = -1;
+        for (var i = bytes.length - 22; i >= 0; i--) {
+          if (bd.getUint32(i, Endian.little) == 0x06054b50) {
+            eocd = i;
+            break;
+          }
+        }
+        expect(eocd, isNot(equals(-1)));
+        final count = bd.getUint16(eocd + 8, Endian.little);
+        final cdOffset = bd.getUint32(eocd + 16, Endian.little);
+        final methods = <String, int>{};
+        var pos = cdOffset;
+        for (var i = 0; i < count; i++) {
+          expect(bd.getUint32(pos, Endian.little), 0x02014b50);
+          final method = bd.getUint16(pos + 10, Endian.little);
+          final nameLen = bd.getUint16(pos + 28, Endian.little);
+          final extraLen = bd.getUint16(pos + 30, Endian.little);
+          final commentLen = bd.getUint16(pos + 32, Endian.little);
+          methods[utf8.decode(bytes.sublist(pos + 46, pos + 46 + nameLen))] =
+              method;
+          pos += 46 + nameLen + extraLen + commentLen;
+        }
+        return (methods: methods, cdOffset: cdOffset);
+      }
+
+      Future<String> writeBaseApk(List<ZipEntry> entries) async {
+        final path = '${tempDir.path}/base_unsigned.apk';
+        File(path).writeAsBytesSync(encodeDeterministicZip(entries));
+        return path;
+      }
+
+      Future<String> writeNativeLibsJar() async {
+        final libApp = File('${tempDir.path}/libapp.so')
+          ..writeAsBytesSync(_syntheticElf(machine: 183, payload: [1, 2, 3]));
+        final jarPath = '${tempDir.path}/native_libs.jar';
+        await runAndroidBundle([
+          'native-libs-jar',
+          '--output',
+          jarPath,
+          '--abi',
+          'arm64-v8a',
+          '--machine',
+          '183',
+          'lib/arm64-v8a/libapp.so=${libApp.path}',
+        ]);
+        return jarPath;
+      }
+
+      String writeFlutterAssets() {
+        final assetsDir = Directory('${tempDir.path}/flutter_assets')
+          ..createSync();
+        File('${assetsDir.path}/AssetManifest.json').writeAsStringSync(
+          '{"assets": ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]}',
+        );
+        File('${assetsDir.path}/logo.png').writeAsBytesSync(
+          // Highly compressible bytes: stored anyway, since aapt2 leaves
+          // .png uncompressed by default.
+          List<int>.filled(10000, 7),
+        );
+        return assetsDir.path;
+      }
+
+      Map<String, List<int>> entriesByPath(String apkPath) {
+        return {
+          for (final e in readZipEntries(File(apkPath).readAsBytesSync()))
+            e.path: e.data.toList(),
+        };
+      }
+
+      test(
+        'injects stored .so and assets preserving every base byte',
+        () async {
+          final baseEntries = [
+            ZipEntry(
+              path: 'AndroidManifest.xml',
+              data: Uint8List.fromList([9, 8, 7]),
+            ),
+            ZipEntry(
+              path: 'classes.dex',
+              data: Uint8List.fromList(List<int>.filled(10000, 7)),
+            ),
+            ZipEntry(
+              path: 'lib/arm64-v8a/libflutter.so',
+              data: Uint8List.fromList(List<int>.filled(1000, 3)),
+            ),
+            ZipEntry(
+              path: 'resources.arsc',
+              data: Uint8List.fromList([1, 2]),
+            ),
+          ];
+          final basePath = await writeBaseApk(baseEntries);
+          final baseBytes = File(basePath).readAsBytesSync();
+          final jarPath = await writeNativeLibsJar();
+          final assetsPath = writeFlutterAssets();
+          final outPath = '${tempDir.path}/overlay_unsigned.apk';
+
+          await runAndroidBundle([
+            'apk-overlay',
+            '--base',
+            basePath,
+            '--native-libs-jar',
+            jarPath,
+            '--flutter-assets',
+            assetsPath,
+            '--output',
+            outPath,
+          ]);
+
+          final outBytes = File(outPath).readAsBytesSync();
+          final outEntries = entriesByPath(outPath);
+
+          // Every base entry keeps its exact content.
+          for (final entry in baseEntries) {
+            expect(outEntries[entry.path], equals(entry.data.toList()));
+          }
+          // Payload entries land at the flutter-tool paths with exact content.
+          expect(
+            outEntries['lib/arm64-v8a/libapp.so'],
+            equals(_syntheticElf(machine: 183, payload: [1, 2, 3]).toList()),
+          );
+          expect(
+            outEntries['assets/flutter_assets/AssetManifest.json'],
+            equals(
+              utf8.encode(
+                '{"assets": ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]}',
+              ),
+            ),
+          );
+          expect(
+            outEntries['assets/flutter_assets/logo.png'],
+            equals(List<int>.filled(10000, 7)),
+          );
+
+          // Base local file sections are preserved byte-for-byte: the output
+          // starts with the base bytes up to the base central directory.
+          final baseCentralOffset = readCentralForTest(baseBytes).cdOffset;
+          expect(
+            outBytes.sublist(0, baseCentralOffset),
+            equals(baseBytes.sublist(0, baseCentralOffset)),
+          );
+        },
+      );
+
+      test(
+        'stores .so and aapt2 no-compress extensions, deflates the rest',
+        () async {
+          final basePath = await writeBaseApk([
+            ZipEntry(
+              path: 'AndroidManifest.xml',
+              data: Uint8List.fromList([1]),
+            ),
+          ]);
+          final jarPath = await writeNativeLibsJar();
+          final assetsPath = writeFlutterAssets();
+          final outPath = '${tempDir.path}/overlay_methods.apk';
+
+          await runAndroidBundle([
+            'apk-overlay',
+            '--base',
+            basePath,
+            '--native-libs-jar',
+            jarPath,
+            '--flutter-assets',
+            assetsPath,
+            '--output',
+            outPath,
+          ]);
+
+          final methods = readCentralForTest(File(outPath).readAsBytesSync())
+              .methods;
+          expect(methods['lib/arm64-v8a/libapp.so'], 0);
+          expect(methods['assets/flutter_assets/logo.png'], 0);
+          expect(methods['assets/flutter_assets/AssetManifest.json'], 8);
+        },
+      );
+
+      test('empty payload reproduces the base APK byte-for-byte', () async {
+        final basePath = await writeBaseApk([
+          ZipEntry(
+            path: 'classes.dex',
+            data: Uint8List.fromList(List<int>.filled(1000, 5)),
+          ),
+          ZipEntry(path: 'resources.arsc', data: Uint8List.fromList([1, 2])),
+        ]);
+        final emptyJar = '${tempDir.path}/empty.jar';
+        await runAndroidBundle(['empty-jar', '--output', emptyJar]);
+        final emptyAssets = Directory('${tempDir.path}/empty_assets')
+          ..createSync();
+        final outPath = '${tempDir.path}/overlay_empty.apk';
+
+        await runAndroidBundle([
+          'apk-overlay',
+          '--base',
+          basePath,
+          '--native-libs-jar',
+          emptyJar,
+          '--flutter-assets',
+          emptyAssets.path,
+          '--output',
+          outPath,
+        ]);
+
+        expect(
+          File(outPath).readAsBytesSync(),
+          equals(File(basePath).readAsBytesSync()),
+        );
+      });
+
+      test('refuses a payload entry that collides with the base APK', () async {
+        final basePath = await writeBaseApk([
+          ZipEntry(
+            path: 'assets/flutter_assets/AssetManifest.json',
+            data: Uint8List.fromList([1]),
+          ),
+        ]);
+        final jarPath = await writeNativeLibsJar();
+        final assetsPath = writeFlutterAssets();
+
+        expect(
+          runAndroidBundle([
+            'apk-overlay',
+            '--base',
+            basePath,
+            '--native-libs-jar',
+            jarPath,
+            '--flutter-assets',
+            assetsPath,
+            '--output',
+            '${tempDir.path}/should_not_exist.apk',
+          ]),
+          throwsA(isA<ArgumentError>()),
+        );
+      });
+
+      test('refuses a base APK that is already signed', () async {
+        final basePath = await writeBaseApk([
+          ZipEntry(
+            path: 'META-INF/CERT.SF',
+            data: Uint8List.fromList([1, 2, 3]),
+          ),
+        ]);
+        final jarPath = await writeNativeLibsJar();
+        final assetsPath = writeFlutterAssets();
+
+        expect(
+          runAndroidBundle([
+            'apk-overlay',
+            '--base',
+            basePath,
+            '--native-libs-jar',
+            jarPath,
+            '--flutter-assets',
+            assetsPath,
+            '--output',
+            '${tempDir.path}/should_not_exist.apk',
+          ]),
+          throwsA(isA<ArgumentError>()),
+        );
+      });
     });
   });
 }

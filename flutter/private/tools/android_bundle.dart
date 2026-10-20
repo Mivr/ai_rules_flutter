@@ -9,10 +9,16 @@
 ///   - `debug-assets`: Copies the `flutter_assets` tree (dereferencing
 ///     symlinks), `kernel_blob.bin`, and optional `vm_snapshot_data` /
 ///     `isolate_snapshot_data` into the debug assets directory.
+///   - `apk-overlay`: Injects the Flutter payload (`native_libs.jar` entries
+///     plus the `flutter_assets` tree) into an unsigned base APK after
+///     resource linking, so Dart edits re-run only this step plus the stock
+///     `zipalign`/`apksigner` steps instead of aapt2 and the dex chain.
 library;
 
 import 'dart:io';
 import 'dart:typed_data';
+
+import 'apk_overlay.dart' show runApkOverlay;
 
 import 'xtool_pack.dart' show ZipEntry, encodeDeterministicZip;
 
@@ -188,7 +194,7 @@ void _copyDirectoryDereferencingLinks(Directory src, Directory dst) {
 Future<void> runAndroidBundle(List<String> args) async {
   if (args.isEmpty) {
     throw ArgumentError(
-      'Expected subcommand: "native-libs-jar", "empty-jar", or "debug-assets".',
+      'Expected subcommand: "native-libs-jar", "empty-jar", "debug-assets", or "apk-overlay".',
     );
   }
   final subcommand = args.first;
@@ -200,6 +206,8 @@ Future<void> runAndroidBundle(List<String> args) async {
       _runEmptyJar(rest);
     case 'debug-assets':
       _runDebugAssets(rest);
+    case 'apk-overlay':
+      runApkOverlay(rest);
     default:
       throw ArgumentError('Unknown subcommand: $subcommand');
   }

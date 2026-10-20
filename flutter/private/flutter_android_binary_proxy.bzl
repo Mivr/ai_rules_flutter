@@ -96,7 +96,7 @@ flutter_android_binary_proxy = rule(
     implementation = _flutter_android_binary_proxy_impl,
     attrs = {
         "binary": attr.label(
-            doc = "The android_binary built behind this proxy, in pure-Go configuration.",
+            doc = "The APK target built behind this proxy (the apk overlay), in pure-Go configuration.",
             mandatory = True,
             providers = [ApkInfo],
             cfg = flutter_android_pure_go_transition,

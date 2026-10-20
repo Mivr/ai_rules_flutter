@@ -76,6 +76,28 @@ bool_flag(
     visibility = ["//visibility:public"],
 )
 
+# `flutter_android_app` finishes its APK by injecting the Flutter payload after
+# resource linking and re-running the stock zipalign/sign steps. The signature
+# schemes follow `@rules_android//flags:apk_signing_method`, read here so the
+# overlay signs exactly like the android_binary would have.
+config_setting(
+    name = "apk_signing_v1",
+    flag_values = {"@rules_android//flags:apk_signing_method": "v1"},
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "apk_signing_v2",
+    flag_values = {"@rules_android//flags:apk_signing_method": "v2"},
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "apk_signing_v4",
+    flag_values = {"@rules_android//flags:apk_signing_method": "v4"},
+    visibility = ["//visibility:public"],
+)
+
 # Extra Dart environment defines folded into every Dart compile after any
 # target-level `defines`. Repeatable:
 #   bazel build //app --@rules_flutter//flutter:extra_dart_defines=FOO=bar

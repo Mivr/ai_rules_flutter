@@ -21,6 +21,7 @@ load("@rules_flutter//flutter:linux.bzl", "flutter_linux_app")
 load("@rules_flutter//flutter:macos.bzl", "flutter_macos_app")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
 load("@rules_flutter//flutter:windows.bzl", "flutter_windows_app")
+load(":android_apk_overlay_test.bzl", "android_apk_overlay_test_suite")
 
 exports_files(["pubspec.lock"])
 
@@ -371,6 +372,11 @@ build_test(
     # via --build_tag_filters/--test_tag_filters. Builds normally everywhere else.
     tags = ["no-windows-ci"],
     targets = [":hello_world_android"],
+)
+
+android_apk_overlay_test_suite(
+    name = "android_apk_overlay_test",
+    app_name = "hello_world_android",
 )
 
 build_test(
