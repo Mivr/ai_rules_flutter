@@ -110,31 +110,23 @@ void main() {
       // Fake const_finder reports only CupertinoIcons usage; MaterialIcons and
       // Roboto have 0 const IconData instances (e.g., used via TextStyle or
       // web-only paths) and must be copied whole without invoking font-subset.
-      final fakeConstFinder = File('${tempDir.path}/fake_const_finder.dart')
-        ..writeAsStringSync('''
-import 'dart:convert';
-void main(List<String> args) {
-  print(json.encode({
-    'constantInstances': [
-      {
-        'fontFamily': 'CupertinoIcons',
-        'fontPackage': 'cupertino_icons',
-        'codePoint': 0xf4c4,
-      },
-    ],
-    'nonConstantLocations': [],
-  }));
-}
+      // Fake const_finder is a shell script (not Dart): it boots in
+      // milliseconds and never reads the process working directory, so it is
+      // immune to parallel-test cwd churn that would crash a Dart child.
+      final fakeConstFinder = File('${tempDir.path}/fake_const_finder.sh')
+        ..writeAsStringSync('''#!/bin/sh
+printf '%s' '{"constantInstances": [{"fontFamily": "CupertinoIcons", "fontPackage": "cupertino_icons", "codePoint": 62660}], "nonConstantLocations": []}'
 ''');
 
       // Fake font-subset writes the stdin code points into the output file so
       // the test can verify which font was subsetted and with which code points.
+      await Process.run('chmod', ['+x', fakeConstFinder.path]);
       final fakeFontSubset = File('${tempDir.path}/fake_font_subset.sh')
         ..writeAsStringSync('''#!/bin/sh
 out="\$1"
 cat > "\$out"
 ''');
-      Process.runSync('chmod', ['+x', fakeFontSubset.path]);
+      await Process.run('chmod', ['+x', fakeFontSubset.path]);
 
       final configFile = File('${tempDir.path}/config.json')
         ..writeAsStringSync(
@@ -170,7 +162,9 @@ cat > "\$out"
                   cupertinoFont.path,
             },
             'icon_tree_shaking': {
-              'dart': Platform.resolvedExecutable,
+              // Runs the fake_const_finder.sh shell script directly instead of
+              // a Dart program (see the fixture comment above).
+              'dart': '/bin/sh',
               'const_finder': fakeConstFinder.path,
               'font_subset': fakeFontSubset.path,
               'kernel_dill': '${tempDir.path}/dummy.dill',
@@ -227,39 +221,21 @@ cat > "\$out"
           isFalse,
         );
 
-        final fakeConstFinder = File('${tempDir.path}/fake_const_finder.dart')
-          ..writeAsStringSync('''
-import 'dart:convert';
-void main(List<String> args) {
-  print(json.encode({
-    'constantInstances': [
-      {
-        'fontFamily': 'MaterialIcons',
-        'fontPackage': null,
-        'codePoint': 0xe111,
-      },
-      {
-        'fontFamily': 'Icons',
-        'fontPackage': null,
-        'codePoint': 0xe222,
-      },
-      {
-        'fontFamily': 'Icons',
-        'fontPackage': 'custom_icons',
-        'codePoint': 0xe333,
-      },
-    ],
-    'nonConstantLocations': [],
-  }));
-}
+        // Fake const_finder is a shell script (see the first icon test): it
+        // boots in milliseconds and never reads the process working
+        // directory, so parallel-test cwd churn cannot crash it.
+        final fakeConstFinder = File('${tempDir.path}/fake_const_finder.sh')
+          ..writeAsStringSync('''#!/bin/sh
+printf '%s' '{"constantInstances": [{"fontFamily": "MaterialIcons", "fontPackage": null, "codePoint": 57617}, {"fontFamily": "Icons", "fontPackage": null, "codePoint": 57890}, {"fontFamily": "Icons", "fontPackage": "custom_icons", "codePoint": 58163}], "nonConstantLocations": []}'
 ''');
+        await Process.run('chmod', ['+x', fakeConstFinder.path]);
 
         final fakeFontSubset = File('${tempDir.path}/fake_font_subset.sh')
           ..writeAsStringSync('''#!/bin/sh
 out="\$1"
 cat > "\$out"
 ''');
-        Process.runSync('chmod', ['+x', fakeFontSubset.path]);
+        await Process.run('chmod', ['+x', fakeFontSubset.path]);
 
         final configFile = File('${tempDir.path}/config.json')
           ..writeAsStringSync(
@@ -291,7 +267,9 @@ cat > "\$out"
                 'packages/custom_icons/fonts/Icons.otf': pkgIconsFont.path,
               },
               'icon_tree_shaking': {
-                'dart': Platform.resolvedExecutable,
+                // Runs the fake_const_finder.sh shell script directly (see the
+                // fixture comment above), not a Dart program.
+                'dart': '/bin/sh',
                 'const_finder': fakeConstFinder.path,
                 'font_subset': fakeFontSubset.path,
                 'kernel_dill': '${tempDir.path}/dummy.dill',
@@ -332,38 +310,25 @@ cat > "\$out"
         final materialFont = File('${tempDir.path}/MaterialIcons-Regular.otf')
           ..writeAsBytesSync(List<int>.filled(1024, 0x4d));
 
-        final fakeConstFinder = File('${tempDir.path}/fake_const_finder.dart')
-          ..writeAsStringSync('''
-import 'dart:convert';
-void main(List<String> args) {
-  final idx = args.indexOf('--kernel-file');
-  final dill = idx >= 0 && idx + 1 < args.length ? args[idx + 1] : '';
-  if (dill.endsWith('skwasm.dill')) {
-    print(json.encode({
-      'constantInstances': [
-        {'fontFamily': 'MaterialIcons', 'fontPackage': null, 'codePoint': 0xe047},
-        {'fontFamily': 'MaterialIcons', 'fontPackage': null, 'codePoint': 0xe567},
-      ],
-      'nonConstantLocations': [],
-    }));
-  } else {
-    print(json.encode({
-      'constantInstances': [
-        {'fontFamily': 'MaterialIcons', 'fontPackage': null, 'codePoint': 0xe047},
-        {'fontFamily': 'MaterialIcons', 'fontPackage': null, 'codePoint': 0xe145},
-      ],
-      'nonConstantLocations': [],
-    }));
-  }
-}
+        // Fake const_finder is a shell script (see the first icon test): it
+        // boots in milliseconds and never reads the process working
+        // directory, so parallel-test cwd churn cannot crash it. The second
+        // argument ($2) is the --kernel-file value.
+        final fakeConstFinder = File('${tempDir.path}/fake_const_finder.sh')
+          ..writeAsStringSync('''#!/bin/sh
+case "\$2" in
+*skwasm.dill) printf '%s' '{"constantInstances": [{"fontFamily": "MaterialIcons", "fontPackage": null, "codePoint": 57415}, {"fontFamily": "MaterialIcons", "fontPackage": null, "codePoint": 58727}], "nonConstantLocations": []}' ;;
+*) printf '%s' '{"constantInstances": [{"fontFamily": "MaterialIcons", "fontPackage": null, "codePoint": 57415}, {"fontFamily": "MaterialIcons", "fontPackage": null, "codePoint": 57669}], "nonConstantLocations": []}' ;;
+esac
 ''');
+        await Process.run('chmod', ['+x', fakeConstFinder.path]);
 
         final fakeFontSubset = File('${tempDir.path}/fake_font_subset.sh')
           ..writeAsStringSync('''#!/bin/sh
 out="\$1"
 cat > "\$out"
 ''');
-        Process.runSync('chmod', ['+x', fakeFontSubset.path]);
+        await Process.run('chmod', ['+x', fakeFontSubset.path]);
 
         final configFile = File('${tempDir.path}/config.json')
           ..writeAsStringSync(
@@ -379,7 +344,9 @@ cat > "\$out"
               ],
               'copies': {'fonts/MaterialIcons-Regular.otf': materialFont.path},
               'icon_tree_shaking': {
-                'dart': Platform.resolvedExecutable,
+                // Runs the fake_const_finder.sh shell script directly (see the
+                // fixture comment above), not a Dart program.
+                'dart': '/bin/sh',
                 'const_finder': fakeConstFinder.path,
                 'font_subset': fakeFontSubset.path,
                 'kernel_dill': '${tempDir.path}/skwasm.dill',

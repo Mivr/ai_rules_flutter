@@ -309,9 +309,12 @@ Future<void> main(List<String> args) async {
 
     if (kernelDills.isNotEmpty) {
       // Step 1: Run const_finder on each kernel to discover used icon code points.
+      // Async (not runSync): a child that never exits must surface as a test
+      // timeout or an action timeout, never as a wedged isolate that no
+      // timeout can interrupt.
       final outputs = <Map<String, dynamic>>[];
       for (final kernelDill in kernelDills) {
-        final constFinderResult = Process.runSync(dart, [
+        final constFinderResult = await Process.run(dart, [
           constFinder,
           '--kernel-file',
           kernelDill,
