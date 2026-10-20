@@ -64,6 +64,18 @@ config_setting(
     visibility = ["//visibility:public"],
 )
 
+# Whether `flutter_android_app` builds rules_android's Go host tools in
+# rules_go pure mode (no C++ toolchain, so the hermetic LLVM runtimes are never
+# compiled from source). Default on; opt out with
+# `--@rules_flutter//flutter:android_pure_go=false`, for example when the app's
+# own subtree needs cgo. Scoped to the app: nothing outside a Flutter Android
+# app's build sees it.
+bool_flag(
+    name = "android_pure_go",
+    build_setting_default = True,
+    visibility = ["//visibility:public"],
+)
+
 # Extra Dart environment defines folded into every Dart compile after any
 # target-level `defines`. Repeatable:
 #   bazel build //app --@rules_flutter//flutter:extra_dart_defines=FOO=bar
@@ -118,6 +130,7 @@ bzl_library(
     visibility = ["//visibility:public"],
     deps = [
         "//flutter/private:flutter_android_application",
+        "//flutter/private:flutter_android_binary_proxy",
         "//flutter/private:flutter_android_manifest_merge",
         "@bazel_skylib//rules:expand_template",
         "@bazel_skylib//rules:write_file",

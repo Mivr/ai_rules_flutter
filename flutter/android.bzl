@@ -55,6 +55,7 @@ load("@rules_java//java:java_import.bzl", _java_import = "java_import")
 load("@rules_kotlin//kotlin:android.bzl", _kt_android_library = "kt_android_library")
 load("//flutter/private:constants.bzl", _ANDROID_ABI_FOR_ARCH = "ANDROID_ABI_FOR_ARCH", _ANDROID_MIN_SDK_VERSION = "ANDROID_MIN_SDK_VERSION", _ANDROID_TARGET_SDK_VERSION = "ANDROID_TARGET_SDK_VERSION")
 load("//flutter/private:flutter_android_application.bzl", _flutter_android_bundle = "flutter_android_bundle")
+load("//flutter/private:flutter_android_binary_proxy.bzl", _flutter_android_binary_proxy = "flutter_android_binary_proxy")
 load("//flutter/private:flutter_android_manifest_merge.bzl", _flutter_android_manifest_merge = "flutter_android_manifest_merge")
 load("//flutter/private:flutter_android_plugin_library.bzl", _flutter_android_plugin_library = "flutter_android_plugin_library")
 load("//flutter/private:flutter_android_registrant.bzl", _flutter_android_plugins_aggregator = "flutter_android_plugins_aggregator", _flutter_android_registrant = "flutter_android_registrant")
@@ -528,8 +529,15 @@ def flutter_android_app(
         permissions unless `--merge_android_manifest_permissions` is set;
         the app no longer depends on that flag.
 
+    The app target builds rules_android's Go host tools in rules_go pure
+    mode (no C++ toolchain, so the hermetic LLVM runtimes are never
+    compiled from source), scoped to this app:
+    `--@rules_flutter//flutter:android_pure_go=false` opts out, for example
+    when the app's own subtree needs cgo. See the README's Android section
+    for the trade-off.
+
     Args:
-        name: Target name (Bazel identifier). Produces an android_binary.
+        name: Target name (Bazel identifier). Produces the app APK (an android_binary behind a pure-Go proxy).
         application: A flutter_application target (required).
         package_name: Android package name, e.g. "com.example.myapp" (required).
         app_name: User-facing display name. Defaults to name.
@@ -571,6 +579,16 @@ def flutter_android_app(
     display_name = app_name or name
     tags = kwargs.pop("tags", ["manual"])
 
+    # Internal `__{name}_` targets (and the android_binary behind the proxy)
+    # stay out of wildcard builds: behind the proxy's pure-Go transition they
+    # would otherwise build the whole Android subtree a second time in the
+    # plain configuration. The default tags already carry "manual"; re-add it
+    # when the caller overrides tags. The user-facing proxy keeps the
+    # caller's tags verbatim.
+    internal_tags = list(tags) if tags else []
+    if "manual" not in internal_tags:
+        internal_tags.append("manual")
+
     # -- Internal targets (all __{name}_ prefixed) --
 
     # 1. Bundle Flutter outputs (native_libs.jar + flutter_assets).
@@ -578,7 +596,7 @@ def flutter_android_app(
         name = "__%s_bundle" % name,
         application = application,
         android_abi = _short_abi_to_full(android_abi),
-        tags = tags,
+        tags = internal_tags,
     )
 
     # 2. Extract native_libs.jar from the bundle.
@@ -586,21 +604,21 @@ def flutter_android_app(
         name = "__%s_native_libs_jar" % name,
         srcs = ["__%s_bundle" % name],
         output_group = "native_libs_jar",
-        tags = tags,
+        tags = internal_tags,
     )
 
     # 3. Wrap native_libs.jar as java_import.
     _java_import(
         name = "__%s_native_libs" % name,
         jars = ["__%s_native_libs_jar" % name],
-        tags = tags,
+        tags = internal_tags,
     )
 
     # 4. Import Flutter engine.
     flutter_android_engine(
         name = "__%s_engine" % name,
         android_abi = android_abi,
-        tags = tags,
+        tags = internal_tags,
     )
 
     # 5. Extract flutter_assets for inclusion in the APK.
@@ -609,7 +627,7 @@ def flutter_android_app(
         name = "__%s_flutter_assets" % name,
         srcs = ["__%s_bundle" % name],
         output_group = "mobile_install",
-        tags = tags,
+        tags = internal_tags,
     )
 
     # 6. Auto-wire the plugin registrant. Generates
@@ -626,14 +644,14 @@ def flutter_android_app(
         name = "__%s_registrant_src" % name,
         application = application,
         android_abi = _short_abi_to_full(android_abi),
-        tags = tags,
+        tags = internal_tags,
     )
 
     _flutter_android_plugins_aggregator(
         name = "__%s_android_plugins" % name,
         application = application,
         android_abi = _short_abi_to_full(android_abi),
-        tags = tags,
+        tags = internal_tags,
     )
 
     # `deps` and `flutter_plugin(android_libs = ...)` too: a plugin written in
@@ -651,7 +669,7 @@ def flutter_android_app(
         name = "__%s_registrant" % name,
         srcs = ["__%s_registrant_src" % name],
         custom_package = "io.flutter.plugins",
-        tags = tags,
+        tags = internal_tags,
         deps = registrant_deps,
     )
 
@@ -690,7 +708,7 @@ def flutter_android_app(
                 substitutions = {
                     "${applicationName}": "android.app.Application",
                 },
-                tags = tags,
+                tags = internal_tags,
             )
             base_manifest = "__%s_manifest" % name
 
@@ -711,7 +729,7 @@ def flutter_android_app(
                     name = "__%s_runner" % name,
                     srcs = discovered_kotlin,
                     custom_package = package_name,
-                    tags = tags,
+                    tags = internal_tags,
                     deps = ["__%s_engine" % name],
                 )
                 binary_deps.append("__%s_runner" % name)
@@ -733,7 +751,7 @@ def flutter_android_app(
             app_name = display_name,
             min_sdk_version = min_sdk_version,
             target_sdk_version = target_sdk_version,
-            tags = tags,
+            tags = internal_tags,
         )
         actual_manifest = "__%s_manifest" % name
     elif debug_overlay != None or profile_overlay != None:
@@ -748,7 +766,7 @@ def flutter_android_app(
                 name = "__%s_manifest_merged_%s" % (name, mode),
                 base = base_manifest,
                 overlay = overlay,
-                tags = tags,
+                tags = internal_tags,
             )
             variants["@rules_flutter//flutter/private:" + mode] = "__%s_manifest_merged_%s" % (name, mode)
         actual_manifest = select(variants | {"//conditions:default": base_manifest})
@@ -763,13 +781,13 @@ def flutter_android_app(
         flutter_android_permissions_manifest(
             name = "__%s_permissions" % name,
             permissions = permissions,
-            tags = tags,
+            tags = internal_tags,
         )
         flutter_android_manifest_merge(
             name = "__%s_manifest_with_permissions" % name,
             base = actual_manifest,
             overlay = "__%s_permissions" % name,
-            tags = tags,
+            tags = internal_tags,
         )
         actual_manifest = "__%s_manifest_with_permissions" % name
 
@@ -782,11 +800,12 @@ def flutter_android_app(
         base = actual_manifest,
         libraries = binary_deps + deps,
         placeholders = ["applicationId", "minSdkVersion", "targetSdkVersion"],
-        tags = tags,
+        tags = internal_tags,
     )
     actual_manifest = "__%s_manifest_with_library_permissions" % name
 
-    # 9. Final android_binary.
+    # 9. Final android_binary, behind a proxy that scopes rules_go pure mode
+    # to this app (see flutter_android_binary_proxy.bzl).
     # `android_binary` resolves `_cc_toolchain` in the outer target
     # configuration before transitioning to Android, so it can be analyzed on
     # host or Android platforms (both of which register a CC toolchain) but not
@@ -798,8 +817,21 @@ def flutter_android_app(
             "//conditions:default": [],
         }),
     )
+
+    # Attributes describing the app target itself, mirrored onto both the proxy
+    # (what users build) and the binary behind it so the two agree on where the
+    # app can build and how it is released. Everything else configures the
+    # binary alone.
+    passthrough = {}
+    for key in ("compatible_with", "deprecation", "restricted_to", "target_compatible_with", "testonly", "visibility"):
+        if key in kwargs:
+            passthrough[key] = kwargs.pop(key)
+    binary_kwargs = dict(kwargs)
+    binary_kwargs.update(passthrough)
+    # Like every other internal target, the binary stays out of wildcard
+    # builds (see internal_tags above): the proxy is the only entry point.
     _android_binary(
-        name = name,
+        name = "__%s_binary" % name,
         manifest = actual_manifest,
         manifest_values = {
             "applicationId": package_name,
@@ -810,8 +842,17 @@ def flutter_android_app(
         assets = ["__%s_flutter_assets" % name],
         assets_dir = "assets",
         deps = binary_deps + deps,
+        tags = internal_tags,
+        **binary_kwargs
+    )
+
+    # The user-facing target: same providers and the same `<name>.apk` output
+    # as the android_binary used to be, with pure Go scoped to its subtree.
+    _flutter_android_binary_proxy(
+        name = name,
+        binary = ":__%s_binary" % name,
         tags = tags,
-        **kwargs
+        **passthrough
     )
 
 def _short_abi_to_full(abi):

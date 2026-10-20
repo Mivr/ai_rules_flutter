@@ -154,6 +154,12 @@ bzl_library(
 )
 
 bzl_library(
+    name = "flutter_android_binary_proxy",
+    srcs = ["flutter_android_binary_proxy.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+)
+
+bzl_library(
     name = "flutter_plist_merge",
     srcs = ["flutter_plist_merge.bzl"],
     visibility = ["//flutter:__subpackages__"],
