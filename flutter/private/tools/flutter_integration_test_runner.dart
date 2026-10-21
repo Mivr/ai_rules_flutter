@@ -1841,10 +1841,18 @@ class _IntegrationHarness {
     );
 
     if (root != null) {
-      final selected = selection.select(root);
+      Map<String, dynamic>? selected;
+      try {
+        selected = selection.select(root);
+      } on FormatException catch (e) {
+        // An `include_tags` attribute selection that matches no test: a tag
+        // name nobody carries is a typo, and passing an empty suite would
+        // hide it.
+        results.recordError(e.message);
+      }
       if (selected != null) {
         await _runGroup(selected, results, ceiling);
-      } else if (selection.narrows) {
+      } else if (!results.hasFailure && selection.narrows) {
         stdout.writeln(
           'flutter_integration_test: no test case in this suite matches '
           'this run\'s --test_filter, tags or shard.',

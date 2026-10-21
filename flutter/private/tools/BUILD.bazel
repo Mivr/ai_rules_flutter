@@ -67,7 +67,10 @@ dart_binary(
     main = "flutter_test_runner.dart",
     target_compatible_with = HOST_COMPATIBLE,
     visibility = ["//flutter:__subpackages__"],
-    deps = ["@rules_dart//dart/runfiles"],
+    deps = [
+        "@dev_tool_deps//:boolean_selector",
+        "@rules_dart//dart/runfiles",
+    ],
 )
 
 dart_binary(
@@ -77,7 +80,10 @@ dart_binary(
     main = "flutter_integration_test_runner.dart",
     target_compatible_with = HOST_COMPATIBLE,
     visibility = ["//flutter:__subpackages__"],
-    deps = ["@rules_dart//dart/runfiles"],
+    deps = [
+        "@dev_tool_deps//:boolean_selector",
+        "@rules_dart//dart/runfiles",
+    ],
 )
 
 dart_binary(
@@ -233,13 +239,22 @@ _UNIT_TESTS = {
     "xtool_pack_test": ("xtool_pack.dart", []),
     "flutter_test_runner_test": (
         "flutter_test_runner.dart",
-        ["@rules_dart//dart/runfiles"],
+        [
+            "@dev_tool_deps//:boolean_selector",
+            "@rules_dart//dart/runfiles",
+        ],
     ),
     "flutter_integration_test_runner_test": (
         "flutter_integration_test_runner.dart",
-        ["@rules_dart//dart/runfiles"],
+        [
+            "@dev_tool_deps//:boolean_selector",
+            "@rules_dart//dart/runfiles",
+        ],
     ),
-    "bazel_test_protocol_test": ("bazel_test_protocol.dart", []),
+    "bazel_test_protocol_test": (
+        "bazel_test_protocol.dart",
+        ["@dev_tool_deps//:boolean_selector"],
+    ),
     "extract_library_tags_test": ("extract_library_tags.dart", []),
 }
 

@@ -8,13 +8,14 @@
 ///
 /// - `TESTBRIDGE_TEST_ONLY` (`--test_filter`) is a regular expression matched
 ///   against each test's full name, as `--name` is.
-/// - `FLUTTER_TEST_EXCLUDE_TAGS` drops every test carrying one of the named
-///   tags, as `flutter test --exclude-tags` does. `FLUTTER_TEST_TAGS` keeps
-///   only tests carrying at least one of them, as `--tags` does. Both are
-///   comma-separated; whitespace is trimmed and empty entries ignored. Tags
-///   are each entry's `metadata` tags as `package:test` sends them, inherited
-///   down the tree, so library-level `@Tags` on the root group reach every
-///   test. Exclusion wins over inclusion.
+/// - `FLUTTER_TEST_EXCLUDE_TAGS` drops every test matching any of its
+///   selectors, as `flutter test --exclude-tags` does. `FLUTTER_TEST_TAGS`
+///   keeps only tests matching all of its selectors, as `--tags` does: several
+///   entries (or comma-separated values) name the intersection, and each entry
+///   is a `package:test` boolean selector (`a && b`, `a || b`, `!a`,
+///   parentheses). Tags are each entry's `metadata` tags as `package:test`
+///   sends them, inherited down the tree, so library-level `@Tags` on the root
+///   group reach every test. Exclusion wins over inclusion.
 ///
 ///   A `--test_env` value for either key overrides the rule's `include_tags` /
 ///   `exclude_tags` attribute, which the rule forwards under the `_ATTR` names
@@ -22,6 +23,13 @@
 ///   key, so sharing one key would make the attribute shadow the flag.
 ///   Presence decides — even an empty `--test_env=FLUTTER_TEST_TAGS=` clears
 ///   the attribute — because only presence survives the merge.
+///
+///   An `include_tags` attribute selection that matches no test in the suite
+///   fails the run: across one target a tag name nobody carries is a typo, and
+///   a suite that silently runs nothing hides it. A selection that comes only
+///   from `--test_env` — one flag value applied across many targets — still
+///   passes with a note when it matches nothing, as does a `--test_filter`
+///   that matches nothing: most of those targets were never meant to match.
 /// - `TEST_TOTAL_SHARDS`/`TEST_SHARD_INDEX` give each shard a contiguous share
 ///   of the tests the filter left, as `--total-shards`/`--shard-index` do.
 /// - A group left with no test is dropped, and its `setUpAll`/`tearDownAll`
@@ -33,14 +41,17 @@ library;
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:boolean_selector/boolean_selector.dart';
+
 /// Which of a suite's tests this run executes.
 class TestSelection {
   TestSelection({
     this.filter,
     this.totalShards = 1,
     this.shardIndex = 0,
-    this.includeTags = const {},
-    this.excludeTags = const {},
+    this.includeSelectors = const [],
+    this.excludeSelectors = const [],
+    this.includeFromAttribute = false,
   }) {
     if (totalShards < 1 || shardIndex < 0 || shardIndex >= totalShards) {
       throw FormatException(
@@ -57,9 +68,9 @@ class TestSelection {
   /// class doc): presence decides, so an empty `--test_env` value clears the
   /// attribute rather than falling back to it.
   ///
-  /// Throws [FormatException] for a filter that is not a regular expression or
-  /// shard numbers that are not numbers: a run that guessed would report a
-  /// selection that never happened.
+  /// Throws [FormatException] for a filter that is not a regular expression, a
+  /// tag entry that is not a boolean selector, or shard numbers that are not
+  /// numbers: a run that guessed would report a selection that never happened.
   factory TestSelection.fromEnvironment(Map<String, String> env) {
     final pattern = env['TESTBRIDGE_TEST_ONLY'];
     RegExp? filter;
@@ -72,12 +83,15 @@ class TestSelection {
         );
       }
     }
+    final include = _tagSelection(env, 'FLUTTER_TEST_TAGS');
+    final exclude = _tagSelection(env, 'FLUTTER_TEST_EXCLUDE_TAGS');
     final total = env['TEST_TOTAL_SHARDS'];
     if (total == null) {
       return TestSelection(
         filter: filter,
-        includeTags: _tagSelection(env, 'FLUTTER_TEST_TAGS'),
-        excludeTags: _tagSelection(env, 'FLUTTER_TEST_EXCLUDE_TAGS'),
+        includeSelectors: include.selectors,
+        excludeSelectors: exclude.selectors,
+        includeFromAttribute: include.fromAttribute,
       );
     }
     final totalShards = int.tryParse(total);
@@ -92,8 +106,9 @@ class TestSelection {
       filter: filter,
       totalShards: totalShards,
       shardIndex: shardIndex,
-      includeTags: _tagSelection(env, 'FLUTTER_TEST_TAGS'),
-      excludeTags: _tagSelection(env, 'FLUTTER_TEST_EXCLUDE_TAGS'),
+      includeSelectors: include.selectors,
+      excludeSelectors: exclude.selectors,
+      includeFromAttribute: include.fromAttribute,
     );
   }
 
@@ -101,26 +116,41 @@ class TestSelection {
   final int totalShards;
   final int shardIndex;
 
-  /// Only tests carrying at least one of these `package:test` tags run, as
-  /// `flutter test --tags` keeps them. Empty means tags keep everything.
-  final Set<String> includeTags;
+  /// Only tests matching all of these `package:test` boolean selectors run,
+  /// as `flutter test --tags` keeps them. Empty means tags keep everything.
+  final List<BooleanSelector> includeSelectors;
 
-  /// Tests carrying any of these `package:test` tags never run, as
-  /// `flutter test --exclude-tags` drops them. Wins over [includeTags].
-  final Set<String> excludeTags;
+  /// Tests matching any of these `package:test` boolean selectors never run,
+  /// as `flutter test --exclude-tags` drops them. Wins over
+  /// [includeSelectors].
+  final List<BooleanSelector> excludeSelectors;
+
+  /// Whether the include selection came from the rule's `include_tags`
+  /// attribute rather than `--test_env`: the attribute names one target's
+  /// tags, so a selection matching nothing is a typo and [select] fails
+  /// instead of passing an empty suite. A `--test_env` value names tags
+  /// across many targets, so matching nothing there still passes.
+  final bool includeFromAttribute;
 
   /// Whether this run asked for less than the whole suite. A selection that
-  /// matches nothing is then a pass, not a failure: `bazel test //...
-  /// --test_filter=x` has to pass every target the filter does not touch, and
-  /// a shard can draw no case at all.
+  /// matches nothing is then a pass, not a failure — unless it is an
+  /// attribute include selection (see [includeFromAttribute]):
+  /// `bazel test //... --test_filter=x` has to pass every target the filter
+  /// does not touch, and a shard can draw no case at all.
   bool get narrows =>
       filter != null ||
       totalShards > 1 ||
-      includeTags.isNotEmpty ||
-      excludeTags.isNotEmpty;
+      includeSelectors.isNotEmpty ||
+      excludeSelectors.isNotEmpty;
 
   /// [root], a `RemoteListener` group tree, cut down to the tests this run
   /// executes. Null when none is left.
+  ///
+  /// Throws [FormatException] when the include selection came from the rule's
+  /// attribute and no test in the suite matches it: a tag name nobody carries
+  /// is a typo, and passing an empty suite would hide it. The check runs
+  /// before sharding, so a shard that draws no share of a matching selection
+  /// still passes.
   Map<String, dynamic>? select(Map<String, dynamic> root) {
     final found = <_Candidate>[];
     _collect(root, const {}, found);
@@ -130,6 +160,14 @@ class TestSelection {
             (filter?.hasMatch(candidate.test['name'] as String? ?? '') ?? true))
           candidate.test,
     ];
+    if (matching.isEmpty &&
+        includeFromAttribute &&
+        !found.any((candidate) => _keptByInclude(candidate.tags))) {
+      throw FormatException(
+        'include_tags ${includeSelectors.map((s) => '"$s"').join(', ')} '
+        'matches no test in this suite; check the tag spelling',
+      );
+    }
     final share = matching.length / totalShards;
     final start = (share * shardIndex).round();
     final end = (share * (shardIndex + 1)).round();
@@ -140,32 +178,62 @@ class TestSelection {
     return _prune(root, chosen);
   }
 
+  /// Whether a test carrying [tags] survives this run's include selection:
+  /// every include selector must match, as `flutter test --tags` intersects
+  /// them.
+  bool _keptByInclude(Set<String> tags) =>
+      includeSelectors.every((s) => s.evaluate(tags.contains));
+
   /// Whether a test carrying [tags] survives this run's tag selection:
-  /// excluded when it carries an excluded tag, included only when it carries
-  /// an included one. Exclusion wins, as `flutter test` resolves it.
+  /// dropped when any exclude selector matches, kept only when every include
+  /// selector matches. Exclusion wins, as `flutter test` resolves it.
   bool _keptByTags(Set<String> tags) {
-    if (tags.any(excludeTags.contains)) return false;
-    if (includeTags.isNotEmpty && !tags.any(includeTags.contains)) return false;
+    if (excludeSelectors.any((s) => s.evaluate(tags.contains))) return false;
+    if (!_keptByInclude(tags)) return false;
     return true;
   }
 
-  /// A comma-separated tag list with whitespace trimmed and empty entries
-  /// dropped, so `golden, slow` and `golden,,slow,` name the same tags.
-  static Set<String> _parseTags(String? raw) {
-    if (raw == null || raw.isEmpty) return const {};
-    return {
-      for (final part in raw.split(','))
-        if (part.trim().isNotEmpty) part.trim(),
-    };
+  /// One comma-separated tag selection as `package:test` boolean selectors:
+  /// entries split on commas, whitespace trimmed, empty entries dropped, so
+  /// `golden, slow` and `golden,,slow,` select the same intersection.
+  /// Several entries mean ALL of them, each a boolean selector (`a && b`,
+  /// `a || b`, `!a`, parentheses), as `flutter test --tags` intersects them.
+  ///
+  /// Throws [FormatException] naming [key] and the offending entry when one
+  /// is not a boolean selector.
+  static List<BooleanSelector> _parseTagSelectors(String? raw, String key) {
+    if (raw == null || raw.isEmpty) return const [];
+    final selectors = <BooleanSelector>[];
+    for (final part in raw.split(',')) {
+      final expression = part.trim();
+      if (expression.isEmpty) continue;
+      try {
+        selectors.add(BooleanSelector.parse(expression));
+      } on FormatException catch (e) {
+        throw FormatException(
+          '$key "$expression" is not a boolean tag selector: ${e.message}',
+        );
+      }
+    }
+    return selectors;
   }
 
   /// The tag selection for [key] (`FLUTTER_TEST_TAGS` or
   /// `FLUTTER_TEST_EXCLUDE_TAGS`): the `--test_env` value when present, else
   /// the rule's attribute under `<key>_ATTR`. Presence decides, so an empty
   /// `--test_env` value clears the attribute.
-  static Set<String> _tagSelection(Map<String, String> env, String key) {
-    if (env.containsKey(key)) return _parseTags(env[key]);
-    return _parseTags(env['${key}_ATTR']);
+  static ({List<BooleanSelector> selectors, bool fromAttribute}) _tagSelection(
+    Map<String, String> env,
+    String key,
+  ) {
+    if (env.containsKey(key)) {
+      return (
+        selectors: _parseTagSelectors(env[key], key),
+        fromAttribute: false,
+      );
+    }
+    final selectors = _parseTagSelectors(env['${key}_ATTR'], key);
+    return (selectors: selectors, fromAttribute: selectors.isNotEmpty);
   }
 
   /// The `tags` `package:test` reports in [entry]'s `metadata`, or none when

@@ -476,15 +476,19 @@ _TEST_ATTRS["env"] = attr.string_dict(
 # Library-level `@Tags` on the entrypoint need no attribute: they are extracted
 # at build time and always honoured (see `extract_library_tags_action`).
 _TEST_ATTRS["include_tags"] = attr.string_list(
-    doc = "Run only tests carrying at least one of these `package:test` " +
-          "tags (library, group or test level), as `flutter test --tags` " +
-          "does. A test carrying an `exclude_tags` tag never runs, even " +
-          "when it also carries one of these.",
+    doc = "Run only tests matching every one of these `package:test` tag " +
+          "selectors (library, group or test level), as `flutter test " +
+          "--tags` intersects them. Each entry is a boolean selector " +
+          "(`a && b`, `a || b`, `!a`, parentheses); several entries, or " +
+          "comma-separated values in one entry, all have to match. A test " +
+          "matching an `exclude_tags` selector never runs. An attribute " +
+          "selection that matches no test fails the target, so a tag name " +
+          "nobody carries is a typo, not an empty pass.",
 )
 _TEST_ATTRS["exclude_tags"] = attr.string_list(
-    doc = "Skip tests carrying any of these `package:test` tags " +
+    doc = "Skip tests matching any of these `package:test` tag selectors " +
           "(library, group or test level), as `flutter test " +
-          "--exclude-tags` does. Wins over `include_tags`.",
+          "--exclude-tags` unions them. Wins over `include_tags`.",
 )
 _TEST_ATTRS.update(PLATFORM_CONSTRAINT_ATTRS)
 _TEST_ATTRS.update(MODULAR_KERNEL_ATTRS)

@@ -222,6 +222,176 @@ void main() {
       ]);
     });
 
+    test(
+      'several include_tags mean ALL of them, as flutter test intersects',
+      () {
+        final selection = TestSelection.fromEnvironment(const {
+          'FLUTTER_TEST_TAGS': 'slow,golden',
+        });
+        expect(_names(selection.select(_taggedSuite())), [
+          'mixed group golden slow case',
+        ]);
+      },
+    );
+
+    test('comma-separated include_tags trim and skip empties', () {
+      final selection = TestSelection.fromEnvironment(const {
+        'FLUTTER_TEST_TAGS': ' slow ,, golden ',
+      });
+      expect(_names(selection.select(_taggedSuite())), [
+        'mixed group golden slow case',
+      ]);
+    });
+
+    test('an include_tags entry is a boolean selector: &&', () {
+      final selection = TestSelection.fromEnvironment(const {
+        'FLUTTER_TEST_TAGS': 'slow && golden',
+      });
+      expect(_names(selection.select(_taggedSuite())), [
+        'mixed group golden slow case',
+      ]);
+    });
+
+    test('an include_tags entry is a boolean selector: ||', () {
+      final selection = TestSelection.fromEnvironment(const {
+        'FLUTTER_TEST_TAGS': 'slow || golden',
+      });
+      expect(_names(selection.select(_taggedSuite())), [
+        'slow case',
+        'golden group case',
+        'mixed group slow case',
+        'mixed group golden slow case',
+      ]);
+    });
+
+    test('an include_tags entry is a boolean selector: !', () {
+      final selection = TestSelection.fromEnvironment(const {
+        'FLUTTER_TEST_TAGS': '!slow',
+      });
+      expect(_names(selection.select(_taggedSuite())), [
+        'untagged case',
+        'golden group case',
+      ]);
+    });
+
+    test('an include_tags entry is a boolean selector: parentheses', () {
+      final selection = TestSelection.fromEnvironment(const {
+        'FLUTTER_TEST_TAGS': '(slow || golden) && !golden',
+      });
+      expect(_names(selection.select(_taggedSuite())), [
+        'slow case',
+        'mixed group slow case',
+      ]);
+    });
+
+    test('attribute entries join the same intersection', () {
+      final selection = TestSelection.fromEnvironment(const {
+        'FLUTTER_TEST_TAGS_ATTR': 'slow,golden',
+      });
+      expect(_names(selection.select(_taggedSuite())), [
+        'mixed group golden slow case',
+      ]);
+    });
+
+    test('exclude_tags drops tests matching ANY selector', () {
+      final selection = TestSelection.fromEnvironment(const {
+        'FLUTTER_TEST_EXCLUDE_TAGS': 'golden || slow',
+      });
+      expect(_names(selection.select(_taggedSuite())), ['untagged case']);
+    });
+
+    test('exclude_tags entries are selectors too: !', () {
+      final selection = TestSelection.fromEnvironment(const {
+        'FLUTTER_TEST_EXCLUDE_TAGS': '!slow',
+      });
+      expect(_names(selection.select(_taggedSuite())), [
+        'slow case',
+        'mixed group slow case',
+        'mixed group golden slow case',
+      ]);
+    });
+
+    test('an entry that is not a boolean selector is an error', () {
+      expect(
+        () => TestSelection.fromEnvironment(const {
+          'FLUTTER_TEST_TAGS': 'slow &&',
+        }),
+        throwsFormatException,
+      );
+      expect(
+        () => TestSelection.fromEnvironment(const {
+          'FLUTTER_TEST_TAGS_ATTR': 'slow &&',
+        }),
+        throwsFormatException,
+      );
+      expect(
+        () => TestSelection.fromEnvironment(const {
+          'FLUTTER_TEST_EXCLUDE_TAGS': '(slow',
+        }),
+        throwsFormatException,
+      );
+    });
+
+    test('an attribute include selection that matches nothing fails', () {
+      final selection = TestSelection.fromEnvironment(const {
+        'FLUTTER_TEST_TAGS_ATTR': 'nosuchtag',
+      });
+      expect(selection.narrows, isTrue);
+      expect(() => selection.select(_taggedSuite()), throwsFormatException);
+    });
+
+    test('an attribute selector that matches nothing fails', () {
+      final selection = TestSelection.fromEnvironment(const {
+        'FLUTTER_TEST_TAGS_ATTR': 'slow && golden && nosuchtag',
+      });
+      expect(() => selection.select(_taggedSuite()), throwsFormatException);
+    });
+
+    test('the typo guard runs before sharding', () {
+      final selection = TestSelection.fromEnvironment(const {
+        'FLUTTER_TEST_TAGS_ATTR': 'nosuchtag',
+        'TEST_TOTAL_SHARDS': '8',
+        'TEST_SHARD_INDEX': '1',
+      });
+      expect(() => selection.select(_taggedSuite()), throwsFormatException);
+    });
+
+    test('an attribute selection the filter empties still passes', () {
+      final selection = TestSelection.fromEnvironment(const {
+        'FLUTTER_TEST_TAGS_ATTR': 'slow',
+        'TESTBRIDGE_TEST_ONLY': 'no such test',
+      });
+      expect(selection.select(_taggedSuite()), isNull);
+    });
+
+    test('an attribute selection a shard empties still passes', () {
+      final selection = TestSelection.fromEnvironment(const {
+        // Three slow tests over eight shards: shard 2 draws the empty [1, 1).
+        'FLUTTER_TEST_TAGS_ATTR': 'slow',
+        'TEST_TOTAL_SHARDS': '8',
+        'TEST_SHARD_INDEX': '2',
+      });
+      expect(selection.select(_taggedSuite()), isNull);
+    });
+
+    test('a --test_env value clears the typo guard with the attribute', () {
+      final selection = TestSelection.fromEnvironment(const {
+        'FLUTTER_TEST_TAGS': '',
+        'FLUTTER_TEST_TAGS_ATTR': 'nosuchtag',
+      });
+      expect(selection.narrows, isFalse);
+      expect(_names(selection.select(_taggedSuite())), hasLength(5));
+    });
+
+    test('a --test_env selection that matches nothing passes', () {
+      final selection = TestSelection.fromEnvironment(const {
+        'FLUTTER_TEST_TAGS': 'nosuchtag',
+        'FLUTTER_TEST_TAGS_ATTR': 'nosuchattrtag',
+      });
+      expect(selection.narrows, isTrue);
+      expect(selection.select(_taggedSuite()), isNull);
+    });
+
     test('exclusion wins over inclusion', () {
       final selection = TestSelection.fromEnvironment(const {
         'FLUTTER_TEST_TAGS': 'slow',
@@ -293,9 +463,9 @@ void main() {
       );
     });
 
-    test('tags that match nothing leave no tree, and pass', () {
+    test('a --test_env tag selection that matches nothing passes', () {
       final selection = TestSelection.fromEnvironment(const {
-        'FLUTTER_TEST_TAGS': 'no such tag',
+        'FLUTTER_TEST_TAGS': 'nosuchtag',
       });
       expect(selection.narrows, isTrue);
       expect(selection.select(_taggedSuite()), isNull);

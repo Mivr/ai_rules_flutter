@@ -506,10 +506,20 @@ class _Harness {
 
     final results = _Results();
     if (root != null) {
-      final selected = selection.select(root);
+      Map<String, dynamic>? selected;
+      try {
+        selected = selection.select(root);
+      } on FormatException catch (e) {
+        // An `include_tags` attribute selection that matches no test: a tag
+        // name nobody carries is a typo, and passing an empty suite would
+        // hide it. Recorded as a suite error so the target fails with the
+        // message; a `--test_env` selection that matches nothing still
+        // passes with the note below.
+        results.recordError(e.message);
+      }
       if (selected != null) {
         await _runGroup(selected, results);
-      } else if (selection.narrows) {
+      } else if (!results.hasFailure && selection.narrows) {
         stdout.writeln(
           'flutter_test: no test case in this suite matches this run\'s '
           '--test_filter, tags or shard.',

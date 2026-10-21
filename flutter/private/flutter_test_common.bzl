@@ -236,9 +236,9 @@ def flutter_test_runner(
         test_path: Display path for the suite in `package:test` report
             output. Defaults to the dill's basename.
         enable_impeller: Render with Impeller instead of software Skia.
-        include_tags: Run only tests carrying one of these `package:test`
-            tags. A `--test_env=FLUTTER_TEST_TAGS=...` value overrides this.
-        exclude_tags: Skip tests carrying any of these tags. Wins over
+        include_tags: Run only tests matching every one of these `package:test`
+            tag selectors. A `--test_env=FLUTTER_TEST_TAGS=...` value overrides this.
+        exclude_tags: Skip tests matching any of these tag selectors. Wins over
             `include_tags`; `--test_env=FLUTTER_TEST_EXCLUDE_TAGS=...`
             overrides this.
         user_env: Extra environment variables for the test process. Values

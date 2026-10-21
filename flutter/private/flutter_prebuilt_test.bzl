@@ -125,15 +125,20 @@ flutter_prebuilt_test = rule(
             default = False,
         ),
         "include_tags": attr.string_list(
-            doc = "Run only tests carrying at least one of these `package:test` " +
-                  "tags (library, group or test level), as `flutter test --tags` " +
-                  "does. A test carrying an `exclude_tags` tag never runs, even " +
-                  "when it also carries one of these.",
+            doc = "Run only tests matching every one of these `package:test` " +
+                  "tag selectors (library, group or test level), as " +
+                  "`flutter test --tags` intersects them. Each entry is a " +
+                  "boolean selector (`a && b`, `a || b`, `!a`, parentheses); " +
+                  "several entries, or comma-separated values in one entry, " +
+                  "all have to match. A test matching an `exclude_tags` " +
+                  "selector never runs. An attribute selection that matches " +
+                  "no test fails the target.",
         ),
         "exclude_tags": attr.string_list(
-            doc = "Skip tests carrying any of these `package:test` tags " +
-                  "(library, group or test level), as `flutter test " +
-                  "--exclude-tags` does. Wins over `include_tags`.",
+            doc = "Skip tests matching any of these `package:test` tag " +
+                  "selectors (library, group or test level), as `flutter " +
+                  "test --exclude-tags` unions them. Wins over " +
+                  "`include_tags`.",
         ),
         "_tool": attr.label(
             default = Label("//flutter/private/tools:flutter_test_runner"),
