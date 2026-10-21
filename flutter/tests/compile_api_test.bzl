@@ -376,6 +376,7 @@ def compile_api_test_suite(name):
         vm_flags = ["--old-gen-heap-size=2147483648", "frontend_server_aot.dart.snapshot"],
         tags = ["manual"],
     )
+
     # Analysis-only: allow-listed `vm_flags` spellings (a bare diagnostic
     # plus an underscore-spelled sizing) keep their order before the snapshot.
     _compile_api_caller(
@@ -384,6 +385,7 @@ def compile_api_test_suite(name):
         vm_flags = ["--enable-asserts", "--old_gen_heap_size=1048576"],
         tags = ["manual"],
     )
+
     # Analysis negatives (each must fail with its `fail` message): a
     # file-naming `vm_flags` entry, a host-writing one, an unlisted one, a
     # file-naming `extra_flags` entry, and a mount-smuggling one.
