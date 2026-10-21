@@ -101,7 +101,8 @@ def _flutter_sdk_package_impl(repository_ctx):
         # strips the tarball to it). Only `lib/` and the pubspec are linked:
         # they are everything the spoke BUILD below consumes, and linking the
         # whole directory would drag in per-package tooling the build never
-        # references.
+        # references. Both links are watched, so SDK edits invalidate the
+        # repository.
         sdk_root = resolve_local_sdk_root(repository_ctx, getattr(repository_ctx.attr, "local_path", ""))
         pkg_rel = "packages/" + package_name
         link_local_dir(
@@ -111,14 +112,13 @@ def _flutter_sdk_package_impl(repository_ctx):
             "lib",
             "the {} package sources".format(package_name),
         )
-        if sdk_root.get_child(pkg_rel + "/pubspec.yaml").exists:
-            link_local_file(
-                repository_ctx,
-                sdk_root,
-                pkg_rel + "/pubspec.yaml",
-                "pubspec.yaml",
-                "the {} package pubspec".format(package_name),
-            )
+        link_local_file(
+            repository_ctx,
+            sdk_root,
+            pkg_rel + "/pubspec.yaml",
+            "pubspec.yaml",
+            "the {} package pubspec".format(package_name),
+        )
     else:
         # Download Flutter SDK source, extracting only the relevant package.
         #
@@ -136,12 +136,10 @@ def _flutter_sdk_package_impl(repository_ctx):
             stripPrefix = strip_prefix + "packages/{}".format(package_name),
         )
 
-    # Discover deps and the language version from the downloaded pubspec.yaml,
+    # Discover deps and the language version from the spoke pubspec.yaml,
     # filtering deps to packages available in the lock file (same pattern as
-    # pub_lock_package). No pubspec means no constraint was read, so the
-    # language version stays empty rather than taking `derive_language_version`'s
-    # missing-constraint default — that default is pub's answer for a pubspec
-    # that *has* no `environment.sdk`, not for a package we never inspected.
+    # pub_lock_package). Both modes always stage the pubspec (the local fetch
+    # links it, the download extracts it), so it is always read here.
     bazel_deps = []
     language_version = ""
     pubspec_path = repository_ctx.path("pubspec.yaml")

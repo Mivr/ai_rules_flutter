@@ -9,7 +9,7 @@ One repo per unique target platform, shared across hosts.
 
 load(":artifact_urls.bzl", "desktop_engine_artifact_path", "engine_artifact_url", "require_sha256")
 load(":engine_helpers.bzl", "engine_filegroup_for_os", "extract_macos_inner_framework")
-load(":local_sdk.bzl", "engine_cache_dir", "link_local_dir", "resolve_local_sdk_root")
+load(":local_sdk.bzl", "engine_cache_dir", "link_local_dir", "macos_framework_cache_path", "resolve_local_sdk_root")
 
 def _flutter_desktop_engine_repo_impl(repository_ctx):
     engine_revision = repository_ctx.attr.engine_revision
@@ -25,12 +25,14 @@ def _flutter_desktop_engine_repo_impl(repository_ctx):
         sdk_root = resolve_local_sdk_root(repository_ctx, getattr(repository_ctx.attr, "local_path", ""))
         sdk_dir_rel = "bin/cache/artifacts/engine/" + engine_cache_dir(artifact_path)
         if target_os == "macos":
-            # The SDK already holds the extracted framework; only a
-            # downloaded double-zip needs unpacking.
+            # A real install holds the extracted framework inside the
+            # xcframework; only a downloaded double-zip needs unpacking. The
+            # linked inner framework has the same Versions/A shape the
+            # download mode produces, so consumers cannot tell the difference.
             link_local_dir(
                 repository_ctx,
                 sdk_root,
-                sdk_dir_rel + "/FlutterMacOS.framework",
+                "bin/cache/artifacts/engine/" + macos_framework_cache_path(engine_cache_dir(artifact_path)),
                 "engine/FlutterMacOS.framework",
                 "the {} desktop engine".format(artifact_path),
             )

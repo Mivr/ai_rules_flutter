@@ -79,8 +79,8 @@ over 3.47.7's bytes, and resolves a toolchain from it.
 ## Offline SDKs (`local_path`)
 
 `flutter.toolchain(local_path = ...)` sources every repository out of a
-pre-extracted Flutter SDK — one that has run `flutter precache` — instead of
-the network:
+pre-extracted Flutter SDK instead of the network. The SDK must be a complete
+install that has run `flutter precache` for every platform the build touches:
 
 ```starlark
 flutter.toolchain(
@@ -89,16 +89,48 @@ flutter.toolchain(
 )
 ```
 
+```sh
+# One host's desktop tools plus every target platform (Android, iOS, macOS,
+# Linux, Windows, web). Repeat on each host OS you build on: the host-tools
+# directories (`bin/cache/artifacts/engine/<host>/`) are per host.
+flutter precache --android --ios --web --linux --windows --macos
+# ... or everything for every host at once:
+flutter precache --all-platforms
+```
+
 A relative path resolves against the main workspace root; an absolute path is
 used as-is. Each repository symlinks the SDK subtree it needs out of the
-`bin/cache` layout (`dart-sdk`, `artifacts/engine/<platform>`,
-`artifacts/engine/common`, `flutter.version.json`) and fails — never falling
-back to the network — when a piece is absent. Linked trees are watched, so
-SDK edits invalidate the repositories. Files a fetch must modify (the dartdev
-AOT snapshot, the gen-l10n subset) are staged as repo-owned copies; the SDK
-tree itself is never written through. Only the root module may use
-`local_path`, and it is mutually exclusive with downloading. `e2e/smoke`
-resolves a toolchain from a checked-in `fake_sdk` tree this way.
+`bin/cache` layout and fails — never falling back to the network — when a
+piece is absent:
+
+- `bin/cache/dart-sdk` (the Flutter-bundled Dart SDK) and
+  `bin/cache/flutter.version.json` (the version stamp every check reads);
+- `bin/cache/artifacts/engine/<host>/` host tools, where `<host>` is per host
+  OS family: `darwin-x64` on every Mac (even Apple Silicon), `linux-x64`,
+  `linux-arm64`, or `windows-x64`;
+- `bin/cache/artifacts/engine/common/` (debug and product patched SDKs),
+  `bin/cache/artifacts/material_fonts/`, and `bin/cache/flutter_web_sdk/`;
+- per-target engines: `ios*` / `android-*` (device and simulator, every mode),
+  `darwin-x64*` / `linux-<arch>` / `windows-<arch>*` desktop engines (the
+  macOS one as `FlutterMacOS.xcframework`), and the `android-*-release/` and
+  `android-*-profile/` cross-compile `gen_snapshot` binaries;
+- `packages/` (the framework sources), `packages/flutter_tools/` (the
+  `gen-l10n` generator subset), and `bin/cache/pkg/sky_engine/` (the analyzer
+  package).
+
+Linked trees are watched, so SDK edits invalidate the repositories. Files a
+fetch must modify (the dartdev AOT snapshot, the gen-l10n subset) are staged
+as repo-owned copies. The SDK tree itself is never written: every `BUILD`
+file lands in a repo-owned directory, and links are never written through,
+so a read-only system-wide install works. A `pubspec.lock` with a `flutter:`
+floor is checked against the local SDK's own version at fetch time, exactly
+like the download-mode pin.
+
+Only the root module may use `local_path`, and it is mutually exclusive with
+downloading. `e2e/smoke` resolves a toolchain from a checked-in `fake_sdk`
+tree this way; the tree mirrors the real cache layout above with placeholder
+files (see `flutter precache --all-platforms` on a real install for the
+reference), so the offline fetch paths run in CI without a 7 GB SDK.
 
 ## Mirrors
 

@@ -24,6 +24,27 @@ ARTIFACT_CHECKSUMS maps version → artifact_path → sha256.
 
 load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url")
 
+def unknown_version_message(flutter_version):
+    """Renders the failure message for a version no table knows.
+
+    A pure helper (no lookups) so the wording is unit-testable: the message
+    must name the real requested version. Shared by the extension (which
+    resolves the toolchain request) and `flutter_register_toolchains` (which
+    resolves explicit revision metadata), so both report an unknown version
+    the same way.
+
+    Args:
+        flutter_version: The requested Flutter release tag.
+
+    Returns:
+        The failure message string.
+    """
+    return (
+        "Flutter version \"{v}\" is not listed in " +
+        "flutter/private/versions.bzl; register it with " +
+        "flutter.version(...) in the root module."
+    ).format(v = flutter_version)
+
 FLUTTER_VERSIONS = {
     "3.41.2": struct(
         engine_revision = "6c0baaebf70e0148f485f27d5616b3d3382da7bf",

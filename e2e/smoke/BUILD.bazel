@@ -88,3 +88,132 @@ build_test(
         "@local_linux-x64//:dart_sdk_files",
     ],
 )
+
+# Offline mode, every host: each host repo links the same fixture's
+# bin/cache/dart-sdk and its per-OS-family engine directory (macOS is always
+# darwin-x64, even on Apple Silicon). The dart_sdk_files target forces every
+# fetch, so all five layouts are symlink-farmed for real in CI.
+build_test(
+    name = "local_host_repos_test",
+    targets = [
+        "@local_darwin-arm64//:dart_sdk_files",
+        "@local_darwin-x64//:dart_sdk_files",
+        "@local_linux-x64//:dart_sdk_files",
+        "@local_linux-arm64//:dart_sdk_files",
+        "@local_windows-x64//:dart_sdk_files",
+    ],
+)
+
+# Offline mode, desktop engines: release and debug for every desktop target.
+# Each repo links its engine-cache directory out of the fixture (Linux and
+# Windows debug engines live in the bare host directory, macOS inside the
+# xcframework slice); the engine_library filegroups only glob, so empty
+# placeholder files prove the layout without needing real binaries.
+build_test(
+    name = "local_desktop_engines_test",
+    targets = [
+        "@local_desktop_engine_linux-x64//:engine_library",
+        "@local_desktop_engine_linux-x64_debug//:engine_library",
+        "@local_desktop_engine_linux-arm64//:engine_library",
+        "@local_desktop_engine_linux-arm64_debug//:engine_library",
+        "@local_desktop_engine_windows-x64//:engine_library",
+        "@local_desktop_engine_windows-x64_debug//:engine_library",
+        "@local_desktop_engine_darwin-x64//:engine_library",
+        "@local_desktop_engine_darwin-x64_debug//:engine_library",
+    ],
+)
+
+# Offline mode, profiles: the profile repos link their profile cache
+# directories (Linux bundles gen_snapshot with the desktop engine, macOS
+# publishes it in the profile host-tools archive).
+build_test(
+    name = "local_profiles_test",
+    targets = [
+        "@local_linux-x64_profile//:engine_library",
+        "@local_darwin-arm64_profile//:engine_library",
+        "@local_host_tools_release_darwin-arm64//:host-tools-release/gen_snapshot",
+    ],
+)
+
+# Offline mode, shared support repos: dev root (FLUTTER_ROOT shape),
+# product patched SDK, material fonts, font-subset tools per host OS family,
+# and sky_engine (whose lib/ + pubspec links are what keep the analyzer's
+# package:sky_engine/_embedder.yaml contract working without writing into
+# the SDK).
+build_test(
+    name = "local_support_repos_test",
+    targets = [
+        "@local_dev_root//:version_manifest",
+        "@local_dev_root//:flutter_plugins_dart",
+        "@local_patched_sdk_product//:patched_sdk_product",
+        "@local_material_fonts//:material-fonts/MaterialIcons-Regular.otf",
+        "@local_font_subset_linux-x64//:font-subset-tools/const_finder.dart.snapshot",
+        "@local_font_subset_darwin-arm64//:font-subset-tools/const_finder.dart.snapshot",
+        "@local_font_subset_windows-x64//:font-subset-tools/const_finder.dart.snapshot",
+    ],
+)
+
+# Offline mode, sky_engine fetch probe: the package's dart_library would
+# compile its sources (a real-SDK job), so this filegroup over the dev
+# root's symlinked sky_engine tree proves the lib/ + pubspec links instead.
+build_test(
+    name = "local_sky_engine_files_test",
+    targets = [
+        "@local_dev_root//:dev_root",
+    ],
+)
+
+# Offline mode, mobile engines: Android flutter.jar per ABI (release at the
+# root, debug under debug/, profile apart) and the iOS xcframeworks. Only
+# file targets are built: the Android `stripped` rules would process the
+# placeholder jars, which is a real-SDK job (see e2e/hello_world).
+build_test(
+    name = "local_mobile_engines_test",
+    targets = [
+        "@local_android_engine_arm64//:flutter.jar",
+        "@local_android_engine_arm64//:debug/flutter.jar",
+        "@local_android_engine_arm64_profile//:flutter.jar",
+        "@local_android_engine_x64//:flutter.jar",
+        "@local_android_engine_x64//:debug/flutter.jar",
+        "@local_android_engine_x64_profile//:flutter.jar",
+        "@local_ios_engine//:Flutter_xcframework",
+        "@local_ios_engine//:Flutter_xcframework_debug",
+        "@local_ios_engine_profile//:Flutter_xcframework",
+        "@local_ios_engine_profile//:gen_snapshot_arm64",
+    ],
+)
+
+# Offline mode, Android cross-compile gen_snapshots (linux host): release
+# links out of the target's release cache directory, profile out of the
+# profile one. iOS cross repos need no fixture files (they reference the iOS
+# engine repo's binaries through labels).
+build_test(
+    name = "local_cross_test",
+    targets = [
+        "@local_cross_linux-x64_android-arm64//:gen_snapshot",
+        "@local_cross_linux-x64_android-arm64_profile//:gen_snapshot",
+        "@local_cross_linux-x64_android-x64//:gen_snapshot",
+        "@local_cross_linux-x64_android-x64_profile//:gen_snapshot",
+    ],
+)
+
+# Offline mode, web SDK: the whole flutter_web_sdk tree links out of the
+# fixture and libraries.json is validated and rewritten repo-side. Building
+# :libraries_json resolves the per-platform selects, which fetches every
+# host repo's dart-sdk/lib/libraries.json label as well.
+build_test(
+    name = "local_web_sdk_test",
+    targets = [
+        "@local_web_sdk//:libraries_json",
+        "@local_web_sdk//:web_sdk",
+    ],
+)
+
+# Offline mode, macOS engine alias: resolves the host's engine libraries
+# through the stable alias repo name.
+build_test(
+    name = "local_macos_engine_test",
+    targets = [
+        "@local_macos_engine//:engine_debug_library",
+    ],
+)

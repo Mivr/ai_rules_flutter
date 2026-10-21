@@ -29,7 +29,7 @@ load("//flutter/private:flutter_pub_package.bzl", "flutter_pub_package")
 load("//flutter/private:flutter_sdk_package.bzl", "flutter_sdk_package")
 load("//flutter/private:pub_lock_sdks.bzl", "hosted_package_sha256", "parse_lock_sdk_constraints", "version_below_lower_bound")
 load("//flutter/private:toolchain_selection.bzl", "select_toolchain_source")
-load("//flutter/private:versions.bzl", "custom_engine_base_url", "custom_source_url", "flutter_source_sha256", "merge_custom_versions")
+load("//flutter/private:versions.bzl", "custom_engine_base_url", "custom_source_url", "flutter_source_sha256", "merge_custom_versions", "unknown_version_message")
 load("//flutter/private:xtool_darwin_sdk_repo.bzl", "resolve_darwin_sdk_from_modules")
 load(":repositories.bzl", "flutter_register_toolchains")
 
@@ -224,6 +224,17 @@ def _toolchain_extension(module_ctx):
     ]
     merged = merge_custom_versions(custom_tags)
 
+    # Pub lock floors, collected before any toolchain registers: download mode
+    # checks them at evaluation below, while local mode hands them to the
+    # host repos, which check them against the local SDK's own version at
+    # fetch time (the version is only known once the SDK is read).
+    lock_flutter_constraints = {}
+    for mod in module_ctx.modules:
+        for pub_tag in mod.tags.pub:
+            constraint = parse_lock_sdk_constraints(module_ctx.read(pub_tag.lock)).get("flutter", "")
+            if constraint:
+                lock_flutter_constraints[str(pub_tag.lock)] = constraint
+
     for mod in module_ctx.modules:
         for toolchain in mod.tags.toolchain:
             if toolchain.name != _DEFAULT_NAME and not mod.is_root:
@@ -254,6 +265,7 @@ def _toolchain_extension(module_ctx):
             flutter_register_toolchains(
                 name = name,
                 local_path = local_path,
+                flutter_constraints = lock_flutter_constraints,
                 darwin_sdk_path = darwin_sdk.path,
                 darwin_sdk_url = darwin_sdk.url,
                 darwin_sdk_sha256 = darwin_sdk.sha256,
@@ -274,11 +286,7 @@ def _toolchain_extension(module_ctx):
         selected = source.version
 
         if selected not in merged.versions:
-            fail(
-                "Flutter version \"{v}\" is not listed in " +
-                "flutter/private/versions.bzl; register it with " +
-                "flutter.version(...) in the root module.".format(v = selected),
-            )
+            fail(unknown_version_message(selected))
         meta = merged.versions[selected]
         version_source_url = custom_source_url(selected, merged.source_urls)
         flutter_register_toolchains(
@@ -345,22 +353,12 @@ def _toolchain_extension(module_ctx):
             # record the resolver's version, but it does record the floor its
             # solution needs; a toolchain below that floor cannot compile what
             # the lock pins. A local SDK reads its version out of
-            # bin/cache/flutter.version.json at fetch time, so the check runs
-            # against the download-mode pin only.
+            # bin/cache/flutter.version.json at fetch time, so in local mode
+            # the floor travels with the toolchain registration (see above)
+            # and each host repo checks it once the SDK is read; only the
+            # download-mode pin is checked here.
             flutter_constraint = parse_lock_sdk_constraints(lock_content).get("flutter", "")
             flutter_version = toolchain_info.version
-            if not flutter_version:
-                if flutter_constraint:
-                    fail((
-                        "{lock} requires flutter {constraint}, but the " +
-                        "flutter.toolchain() pins a local SDK (local_path); " +
-                        "the local SDK version is only known at fetch time. " +
-                        "Resolve the lock with the local SDK first:\n" +
-                        "    bazel run @rules_flutter//flutter:pub -- upgrade"
-                    ).format(
-                        lock = str(pub_tag.lock),
-                        constraint = flutter_constraint,
-                    ))
             if flutter_constraint and flutter_version and version_below_lower_bound(flutter_version, flutter_constraint):
                 fail((
                     "{lock} was resolved against a newer Flutter than this " +

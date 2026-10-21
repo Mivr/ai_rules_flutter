@@ -10,7 +10,7 @@ its repo.
 
 load(":artifact_urls.bzl", "engine_artifact_url", "require_sha256")
 load(":engine_helpers.bzl", "extract_macos_inner_framework")
-load(":local_sdk.bzl", "engine_cache_dir", "link_local_dir", "link_local_file", "resolve_local_sdk_root")
+load(":local_sdk.bzl", "engine_cache_dir", "link_local_dir", "link_local_file", "macos_framework_cache_path", "resolve_local_sdk_root")
 
 def _link_profile_artifact(repository_ctx, sdk_root, artifact_path, output):
     """Links one profile artifact out of a local SDK's engine cache.
@@ -33,10 +33,12 @@ def _link_profile_artifact(repository_ctx, sdk_root, artifact_path, output):
     sdk_dir_rel = "bin/cache/artifacts/engine/" + engine_cache_dir(artifact_path)
     base = artifact_path.split("/")[-1]
     if base == "FlutterMacOS.framework.zip":
+        # A real install holds the extracted framework inside the xcframework;
+        # only a downloaded double-zip needs unpacking.
         link_local_dir(
             repository_ctx,
             sdk_root,
-            sdk_dir_rel + "/FlutterMacOS.framework",
+            "bin/cache/artifacts/engine/" + macos_framework_cache_path(engine_cache_dir(artifact_path)),
             output + "/FlutterMacOS.framework",
             "the profile FlutterMacOS framework",
         )

@@ -111,9 +111,10 @@ def _flutter_cross_compilation_repo_impl(repository_ctx):
         engine_revision = sdk_version.engine_revision
         if not repository_ctx.attr.gen_snapshot_label and not target_platform.startswith("ios"):
             # Android and similar: link the target-specific gen_snapshot out
-            # of the SDK's engine cache. Its directory mirrors the artifact
-            # path minus the filename; iOS instead references the iOS engine
-            # repo's binary through `gen_snapshot_label`.
+            # of the SDK's engine cache. Its directory is the artifact path
+            # minus the `.zip` suffix (cross-compile archives extract one
+            # level deeper than their directory); iOS instead references the
+            # iOS engine repo's binary through `gen_snapshot_label`.
             artifact_host = gen_snapshot_host_platform(host_platform)
             binary = "gen_snapshot.exe" if artifact_host.startswith("windows") else "gen_snapshot"
             link_local_file(

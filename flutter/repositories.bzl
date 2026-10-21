@@ -21,9 +21,10 @@ load("//flutter/private:flutter_profile_repo.bzl", "flutter_profile_repo")
 load("//flutter/private:flutter_sky_engine_repo.bzl", "flutter_sky_engine_repo")
 load("//flutter/private:flutter_web_sdk_repo.bzl", "flutter_web_sdk_repo")
 load("//flutter/private:linux_headless_runtime_repo.bzl", "linux_headless_runtime_repo")
-load("//flutter/private:local_sdk.bzl", "copy_local_file", "link_local_dir", "link_local_file", "read_local_sdk_version", "resolve_local_sdk_root")
+load("//flutter/private:local_sdk.bzl", "copy_local_file", "host_engine_cache_dir", "link_local_dir", "link_local_file", "read_local_sdk_version", "resolve_local_sdk_root")
+load("//flutter/private:pub_lock_sdks.bzl", "version_below_lower_bound")
 load("//flutter/private:toolchains_repo.bzl", "CROSS_COMPILATION_PAIRS", "DESKTOP_CROSS_PAIRS", "HOST_PLATFORMS", "flutter_toolchains_repo")
-load("//flutter/private:versions.bzl", "FLUTTER_VERSIONS", "LINUX_SYSROOT_CHECKSUMS", "flutter_artifact_sha256", "flutter_source_sha256")
+load("//flutter/private:versions.bzl", "FLUTTER_VERSIONS", "LINUX_SYSROOT_CHECKSUMS", "flutter_artifact_sha256", "flutter_source_sha256", "unknown_version_message")
 load("//flutter/private:xtool_darwin_sdk_repo.bzl", "validate_darwin_sdk_config", "xtool_darwin_sdk_repo")
 
 def _flutter_patched_sdk_product_repo_impl(repository_ctx):
@@ -144,7 +145,10 @@ flutter_material_fonts_repo = repository_rule(
 def _flutter_font_subset_repo_impl(repository_ctx):
     if getattr(repository_ctx.attr, "local_path", ""):
         sdk = resolve_local_sdk_root(repository_ctx, getattr(repository_ctx.attr, "local_path", ""))
-        host_dir = "bin/cache/artifacts/engine/" + repository_ctx.attr.platform
+
+        # Per host OS family, not per Bazel platform: macOS is always
+        # `darwin-x64` (see `host_engine_cache_dir`).
+        host_dir = "bin/cache/artifacts/engine/" + host_engine_cache_dir(repository_ctx.attr.platform)
         link_local_file(
             repository_ctx,
             sdk,
@@ -213,7 +217,7 @@ def _flutter_host_tools_release_repo_impl(repository_ctx):
         link_local_dir(
             repository_ctx,
             sdk,
-            "bin/cache/artifacts/engine/" + repository_ctx.attr.platform + "-release",
+            "bin/cache/artifacts/engine/" + host_engine_cache_dir(repository_ctx.attr.platform) + "-release",
             "host-tools-release",
             "release host tools (product-mode gen_snapshot)",
         )
@@ -619,6 +623,25 @@ def _flutter_engine_artifacts_local_impl(repository_ctx):
     flutter_version = sdk_version.flutter_version
     engine_revision = sdk_version.engine_revision
 
+    # A lock resolved by a newer Flutter than the local SDK cannot compile
+    # what it pins. Download mode checks the floor at extension evaluation;
+    # the local SDK's version is only known at fetch time, so the host repos
+    # (fetched by every build through the toolchain) check it here instead.
+    for lock, constraint in repository_ctx.attr.flutter_constraints.items():
+        if constraint and version_below_lower_bound(flutter_version, constraint):
+            fail((
+                "{lock} was resolved against a newer Flutter than the " +
+                "local SDK: the lock requires flutter {constraint}, and " +
+                "the local SDK is {version}.\n" +
+                "Either point local_path at a newer SDK or re-resolve with " +
+                "the local SDK:\n" +
+                "    bazel run @rules_flutter//flutter:pub -- upgrade"
+            ).format(
+                lock = lock,
+                constraint = constraint,
+                version = flutter_version,
+            ))
+
     # The whole bundled Dart SDK, exactly as `flutter precache` left it.
     link_local_dir(
         repository_ctx,
@@ -632,11 +655,13 @@ def _flutter_engine_artifacts_local_impl(repository_ctx):
     # real install (flutter_tool extracts both archives into it), which is
     # why the symlinked tree carries the desktop files alongside
     # frontend_server and gen_snapshot. The BUILD aliases below only name the
-    # host tools; the desktop engine repos link their own views.
+    # host tools; the desktop engine repos link their own views. The directory
+    # is per host OS family, not per Bazel platform: macOS is always
+    # `darwin-x64`, even on Apple Silicon.
     link_local_dir(
         repository_ctx,
         sdk_root,
-        "bin/cache/artifacts/engine/" + platform,
+        "bin/cache/artifacts/engine/" + host_engine_cache_dir(platform),
         "host-tools",
         "the host tools for " + platform,
     )
@@ -1177,6 +1202,13 @@ flutter_engine_artifacts = repository_rule(
         "profile_repo_name": attr.string(
             doc = "Name of the repo holding this host's profile gen_snapshot and profile engine.",
         ),
+        "flutter_constraints": attr.string_dict(
+            doc = "pubspec.lock label → `flutter:` floor constraint, checked " +
+                  "against the local SDK's own version at fetch time. Empty " +
+                  "means no lock constrains this toolchain. Unused without " +
+                  "`local_path`.",
+            default = {},
+        ),
     },
 )
 
@@ -1279,6 +1311,7 @@ def flutter_register_toolchains(
         source_url = "",
         source_strip_prefix = "",
         local_path = "",
+        flutter_constraints = None,
         darwin_sdk_path = "",
         darwin_sdk_url = "",
         darwin_sdk_sha256 = "",
@@ -1322,6 +1355,10 @@ def flutter_register_toolchains(
         local_path: Path to a pre-extracted Flutter SDK (bin/cache layout)
             to source every artifact from instead of the network. Mutually
             exclusive with downloading.
+        flutter_constraints: pubspec.lock label → `flutter:` floor constraint,
+            checked against the local SDK's own version at fetch time. Only
+            meaningful with `local_path`; None (the default) means no lock
+            constrains this toolchain.
         darwin_sdk_path: optional local path to xtool darwin.artifactbundle (local, non-hermetic)
         darwin_sdk_url: optional URL for xtool darwin.artifactbundle archive (hermetic; requires darwin_sdk_sha256)
         darwin_sdk_sha256: required SHA-256 checksum when darwin_sdk_url is set
@@ -1352,7 +1389,7 @@ def flutter_register_toolchains(
                 )
         if artifact_sha256s != None:
             fail("flutter_register_toolchains: local_path is mutually exclusive with downloading, but artifact_sha256s is also set.")
-        _register_local_toolchains(name, local_path)
+        _register_local_toolchains(name, local_path, flutter_constraints = flutter_constraints or {})
         _register_shared_toolchains(name, darwin_sdk_path, darwin_sdk_url, darwin_sdk_sha256, darwin_sdk_swift_toolchain_path, darwin_sdk_llvm_tool_repos)
         return
     if not flutter_version:
@@ -1366,11 +1403,7 @@ def flutter_register_toolchains(
         if not source_sha256:
             source_sha256 = flutter_source_sha256(flutter_version)
     elif not engine_revision or not source_sha256 or not material_fonts_url:
-        fail(
-            "Flutter version \"{v}\" is not listed in " +
-            "flutter/private/versions.bzl; register it with " +
-            "flutter.version(...) in the root module.".format(v = flutter_version),
-        )
+        fail(unknown_version_message(flutter_version))
 
     # `artifact_sha256s` is a single-version table (artifact path → sha256
     # for `flutter_version`); wrap it so the lookups below keep reading a
@@ -1765,7 +1798,7 @@ def _register_shared_toolchains(
         user_repository_name = name,
     )
 
-def _register_local_toolchains(name, local_path):
+def _register_local_toolchains(name, local_path, flutter_constraints = {}):
     """Sets up Flutter SDK repositories out of a pre-extracted local SDK.
 
     Declares the same repository names as the download mode, so consumers
@@ -1779,6 +1812,9 @@ def _register_local_toolchains(name, local_path):
         name: base name for all created repos, like "flutter"
         local_path: path to the pre-extracted Flutter SDK, as passed to
             `flutter.toolchain(local_path = ...)`.
+        flutter_constraints: pubspec.lock label → `flutter:` floor constraint,
+            checked against the local SDK's own version at fetch time by each
+            host platform repo.
     """
 
     # FLUTTER_ROOT-shaped tree behind `@rules_flutter//flutter:pub`.
@@ -1816,11 +1852,14 @@ def _register_local_toolchains(name, local_path):
             user_repository_name = name,
             profile_repo_name = name + "_" + platform + "_profile",
             local_path = local_path,
+            flutter_constraints = flutter_constraints,
         )
 
         # Profile repos carry the same downloads dict as download mode (the
         # local fetch maps each artifact path into the SDK's engine cache);
-        # checksums and the macOS double-zip unpacking are download-only.
+        # checksums and the macOS double-zip unpacking are download-only. The
+        # host-tools entry names the cache directory, not the download: macOS
+        # is always `darwin-x64` in a real install, even on Apple Silicon.
         host_os_name = PLATFORM_PREFIX_TO_OS[platform.split("-")[0]]
         host_engine_arch = engine_arch_for_os(host_os_name, platform.split("-")[1])
         host_profile_downloads = {
@@ -1828,7 +1867,7 @@ def _register_local_toolchains(name, local_path):
         }
         host_profile_framework_dirs = []
         if host_os_name == "macos":
-            host_profile_downloads[host_artifacts_path(platform, mode = "profile")] = "host-tools"
+            host_profile_downloads[host_artifacts_path(host_engine_cache_dir(platform), mode = "profile")] = "host-tools"
             host_profile_framework_dirs = ["engine"]
         flutter_profile_repo(
             name = name + "_" + platform + "_profile",
@@ -2046,7 +2085,7 @@ exports_files(["{gen_snapshot}"], visibility = ["//visibility:public"])
         build_file_content = """filegroup(
     name = "Flutter_xcframework",
     srcs = glob(["Flutter.xcframework/**"]),
-    visibility = ["//visibility:public"])
+    visibility = ["//visibility:public"],
 )
 
 exports_files(["gen_snapshot_arm64"], visibility = ["//visibility:public"])

@@ -118,6 +118,6 @@ flutter.toolchain(
     name = "local",
     local_path = "fake_sdk",
 )
-use_repo(flutter, "custom_linux-x64", "custom_toolchains", "dev_tool_deps", "flutter_macos_engine", "flutter_toolchains", "flutter_web_sdk", "local_linux-x64", "local_toolchains")
+use_repo(flutter, "custom_linux-x64", "custom_toolchains", "dev_tool_deps", "flutter_macos_engine", "flutter_toolchains", "flutter_web_sdk", "local_android_engine_arm64", "local_android_engine_arm64_profile", "local_android_engine_x64", "local_android_engine_x64_profile", "local_cross_linux-x64_android-arm64", "local_cross_linux-x64_android-arm64_profile", "local_cross_linux-x64_android-x64", "local_cross_linux-x64_android-x64_profile", "local_darwin-arm64", "local_darwin-arm64_profile", "local_darwin-x64", "local_desktop_engine_darwin-x64", "local_desktop_engine_darwin-x64_debug", "local_desktop_engine_linux-arm64", "local_desktop_engine_linux-arm64_debug", "local_desktop_engine_linux-x64", "local_desktop_engine_linux-x64_debug", "local_desktop_engine_windows-x64", "local_desktop_engine_windows-x64_debug", "local_dev_root", "local_font_subset_darwin-arm64", "local_font_subset_linux-x64", "local_font_subset_windows-x64", "local_host_tools_release_darwin-arm64", "local_ios_engine", "local_ios_engine_profile", "local_linux-arm64", "local_linux-x64", "local_linux-x64_profile", "local_macos_engine", "local_material_fonts", "local_patched_sdk_product", "local_sky_engine", "local_toolchains", "local_web_sdk", "local_windows-x64")
 
 register_toolchains("@flutter_toolchains//:all")
