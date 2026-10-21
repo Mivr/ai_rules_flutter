@@ -117,9 +117,11 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
+          REF: ${{ github.ref }}
+          REPO: ${{ github.repository }}
         run: |
-          ids=$(gh api "repos/${{ github.repository }}/actions/caches?per_page=100" --jq ".actions_caches[] | select(.key == \"$DISK_CACHE_KEY\" and .ref == \"${{ github.ref }}\") | .id" || true)
-          for id in $ids; do gh api -X DELETE "repos/${{ github.repository }}/actions/caches/$id" >/dev/null || true; done
+          ids=$(gh api "repos/$REPO/actions/caches?per_page=100" --jq '.actions_caches[] | select(.key == env.DISK_CACHE_KEY and .ref == env.REF) | .id' || true)
+          for id in $ids; do gh api -X DELETE "repos/$REPO/actions/caches/$id" >/dev/null || true; done
       - name: Save disk cache
         if: matrix['cache-save'] && (github.event_name == 'push' || github.event_name == 'schedule') && !inputs.uncached
         continue-on-error: true
@@ -200,9 +202,11 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
+          REF: ${{ github.ref }}
+          REPO: ${{ github.repository }}
         run: |
-          ids=$(gh api "repos/${{ github.repository }}/actions/caches?per_page=100" --jq ".actions_caches[] | select(.key == \"$DISK_CACHE_KEY\" and .ref == \"${{ github.ref }\") | .id" || true)
-          for id in $ids; do gh api -X DELETE "repos/${{ github.repository }}/actions/caches/$id" >/dev/null || true; done
+          ids=$(gh api "repos/$REPO/actions/caches?per_page=100" --jq '.actions_caches[] | select(.key == env.DISK_CACHE_KEY and .ref == env.REF) | .id' || true)
+          for id in $ids; do gh api -X DELETE "repos/$REPO/actions/caches/$id" >/dev/null || true; done
       - name: Save disk cache
         if: (github.event_name == 'push' || github.event_name == 'schedule') && !inputs.uncached
         continue-on-error: true

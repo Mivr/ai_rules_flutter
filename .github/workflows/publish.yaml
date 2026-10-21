@@ -11,6 +11,11 @@ on:
     secrets:
       publish_token:
         required: true
+      # Repo-level fallback for manual dispatches, which cannot pass
+      # secrets: no caller passes it today, and the `||` below keeps
+      # reading the repo secret. Declared so the expression type-checks.
+      bcr_publish_token:
+        required: false
   # In case of problems, let release engineers retry by manually dispatching
   # the workflow from the GitHub UI
   workflow_dispatch:
