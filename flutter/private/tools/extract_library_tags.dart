@@ -56,7 +56,16 @@ final class TagsParseException implements Exception {
 /// and throws [TagsParseException] for anything else in a `@Tags(...)`, as
 /// upstream throws `SourceSpanFormatException`: a non-list argument, a
 /// non-string element (including one with interpolation, whose value is not
-/// constant), or a second `@Tags` annotation.
+/// constant), an invalid tag name, or a second `@Tags` annotation.
+///
+/// Name resolution follows upstream's `_resolveConstructor`: a bare `@Tags`
+/// always counts, and `@p.Tags` counts when `p` is an import prefix in the
+/// file. The one narrowing is deliberate: upstream accepts any prefix (a
+/// re-export could supply `Tags`), while this scanner accepts only prefixes
+/// imported from `package:test` or `package:flutter_test`, the libraries
+/// whose `Tags` `flutter test` reads. Anything else (`@visibleForTesting`,
+/// `@p.Tags` for another library's `p`) is skipped over, strings and comments
+/// included.
 Set<String> extractLibraryTags(String source) {
   // A script tag (`#!/usr/bin/env dart`) may open the file; the analyzer's
   // scanner skips it before the first directive, so this scan does too.
@@ -65,63 +74,67 @@ Set<String> extractLibraryTags(String source) {
     final newline = source.indexOf('\n');
     i = newline < 0 ? source.length : newline + 1;
   }
-  final found = <String>[];
-  var seenTags = false;
+  // The annotations before the first directive: the only ones upstream reads.
+  // Their arguments stay unparsed here — whether `@p.Tags` counts depends on
+  // the imports below, which textually follow — so each is only skipped over.
+  final candidates = <int>[];
+  var directivesStart = source.length;
   while (true) {
     i = _skipTrivia(source, i);
     if (i >= source.length) return const {};
     if (source[i] == '@') {
-      // Upstream rejects a second `@Tags` before reading it.
-      if (_isTagsAnnotation(source, i)) {
-        if (seenTags) {
-          throw TagsParseException(
-            _lineOf(source, i),
-            'Only a single Tags may be used.',
-          );
-        }
-        seenTags = true;
-      }
-      final annotation = _parseAnnotation(source, i);
-      i = annotation.end;
-      found.addAll(annotation.tags);
+      candidates.add(i);
+      i = _skipAnnotationTail(source, i);
     } else if (_isDirective(source, i)) {
-      // The first directive ends the hunt: annotations after it attach to a
-      // later directive, which upstream does not read.
-      i = _skipDirective(source, i);
-      return found.toSet();
+      directivesStart = i;
+      break;
     } else {
       // A declaration before any directive: the file has no directives, so
       // upstream reads no annotations either.
       return const {};
     }
   }
-}
-
-/// Whether the annotation at [i] invokes something named `Tags`, as
-/// [_parseAnnotation] reads it: a dotted name ending in `Tags` with an argument
-/// list.
-bool _isTagsAnnotation(String source, int i) {
-  final name = _parseDottedName(source, i + 1);
-  if (name.segments.isEmpty || name.segments.last != 'Tags') return false;
-  final j = _skipTrivia(source, name.end);
-  return j < source.length && source[j] == '(';
-}
-
-/// The end offset of the annotation at [i] and any `@Tags` strings it carries.
-///
-/// A `Tags` annotation's argument is parsed strictly by [_parseTagsArgument];
-/// anything else is skipped over, strings and comments included.
-({int end, List<String> tags}) _parseAnnotation(String source, int i) {
-  final name = _parseDottedName(source, i + 1);
-  var j = _skipTrivia(source, name.end);
-  if (name.segments.isEmpty ||
-      name.segments.last != 'Tags' ||
-      j >= source.length ||
-      source[j] != '(') {
-    return (end: _skipAnnotationTail(source, i), tags: const []);
+  final testPrefixes = _testImportPrefixes(source, directivesStart);
+  final found = <String>[];
+  var seenTags = false;
+  for (final at in candidates) {
+    final name = _parseDottedName(source, at + 1);
+    if (name.segments.isEmpty || name.segments.last != 'Tags') continue;
+    if (name.segments.length == 1) {
+      // A bare `@Tags`, as upstream resolves it with no import check.
+    } else if (name.segments.length == 2 &&
+        testPrefixes.contains(name.segments.first)) {
+      // `@p.Tags` through a `package:test` / `package:flutter_test` prefix
+      // import, the libraries whose `Tags` upstream reads.
+    } else {
+      continue;
+    }
+    // Upstream rejects a second `@Tags` before reading it.
+    if (seenTags) {
+      throw TagsParseException(
+        _lineOf(source, at),
+        'Only a single Tags may be used.',
+      );
+    }
+    seenTags = true;
+    found.addAll(_parseTagsAnnotation(source, at, name.end));
   }
-  final argument = _parseTagsArgument(source, j);
-  return (end: argument.end, tags: argument.tags);
+  return found.toSet();
+}
+
+/// The tags in the `@Tags` annotation at [at] whose dotted name ends at
+/// [nameEnd]: its argument list, strictly parsed.
+///
+/// Anything but `@Tags([...])` never reaches here (a bare `@Tags` with no
+/// argument list cannot compile, so it is skipped, not reported): the caller
+/// resolves the name first, and only a resolvable `Tags` is parsed.
+List<String> _parseTagsAnnotation(String source, int at, int nameEnd) {
+  var j = _skipTrivia(source, nameEnd);
+  if (j < source.length && source[j] == '<') {
+    j = _skipTrivia(source, _skipTypeArguments(source, j));
+  }
+  if (j >= source.length || source[j] != '(') return const [];
+  return _parseTagsArgument(source, j).tags;
 }
 
 /// The `@Tags(...)` argument list opening at [i] (the `(`) and the tags in it.
@@ -161,6 +174,7 @@ bool _isTagsAnnotation(String source, int i) {
       return (end: j + 1, tags: tags);
     }
     if (_readsKeyword(source, j, 'const')) j = _skipTrivia(source, j + 5);
+    final literalStart = j;
     final literal = _parseString(source, j, strict: true);
     if (literal == null) {
       // Upstream distinguishes collection elements (spreads, `if` and `for`
@@ -176,6 +190,13 @@ bool _isTagsAnnotation(String source, int i) {
       throw TagsParseException(
         _lineOf(source, j),
         'Expected a String literal.',
+      );
+    }
+    if (!_tagName.hasMatch(literal.value)) {
+      throw TagsParseException(
+        _lineOf(source, literalStart),
+        'Invalid tag name. Tags must be (optionally hyphenated) Dart '
+        'identifiers.',
       );
     }
     tags.add(literal.value);
@@ -238,6 +259,12 @@ int _skipTypeArguments(String source, int i) {
     'Unterminated type arguments in @Tags.',
   );
 }
+
+/// A tag name, as `test_api`'s `anchoredHyphenatedIdentifier` accepts it: a
+/// Dart identifier that may also contain hyphens. Anything else in a `@Tags`
+/// is refused with upstream's wording, because a tag no selector can name
+/// would silently never match.
+final _tagName = RegExp(r'^[a-zA-Z_-][a-zA-Z0-9_-]*$');
 
 /// The 1-based line number of [offset] in [source], for error messages.
 int _lineOf(String source, int offset) {
@@ -304,15 +331,112 @@ bool _isIdentifierChar(String c) {
   return (end: j, segments: segments);
 }
 
-/// Past an annotation whose name is not `Tags`: its argument list if it has
-/// one, which may hold strings and comments that must not scan as code.
+/// Past an annotation at [i]: its type arguments, dotted continuations and
+/// argument list, over strings and comments. Never throws — this is the
+/// skipping pass, and a malformed non-`Tags` annotation must not fail the
+/// scan; the compiler rejects the file with better words.
 int _skipAnnotationTail(String source, int i) {
   final name = _parseDottedName(source, i + 1);
   var j = _skipTrivia(source, name.end);
+  while (j < source.length) {
+    if (source[j] == '<') {
+      // Type arguments, as on a generic annotation (`@Foo<int>(...)`): the
+      // `<` after an annotation name can open nothing else this early in the
+      // file. Bailing past the end when unterminated ends the hunt with no
+      // tags, which is all a file this broken deserves from a scanner.
+      try {
+        j = _skipTypeArguments(source, j);
+      } on TagsParseException {
+        return source.length;
+      }
+      j = _skipTrivia(source, j);
+    } else if (source[j] == '.' &&
+        j + 1 < source.length &&
+        _isIdentifierChar(source[j + 1])) {
+      // A dotted continuation after type arguments (`@C<T>.named(...)`).
+      j++;
+      while (j < source.length && _isIdentifierChar(source[j])) {
+        j++;
+      }
+      j = _skipTrivia(source, j);
+    } else {
+      break;
+    }
+  }
   if (j < source.length && source[j] == '(') {
     return _skipBalanced(source, j, '(', ')');
   }
   return j;
+}
+
+/// The prefixes `package:test` / `package:flutter_test` are imported under,
+/// scanning the directives from [i] until the first declaration. Only these
+/// libraries' `Tags` counts for a `@p.Tags` (see [extractLibraryTags]); the
+/// scan skips every other directive and annotation exactly as the main loop
+/// does, because a `@p.Tags` may precede the import that binds `p`.
+Set<String> _testImportPrefixes(String source, int i) {
+  final prefixes = <String>{};
+  while (true) {
+    i = _skipTrivia(source, i);
+    if (i >= source.length) return prefixes;
+    if (source[i] == '@') {
+      i = _skipAnnotationTail(source, i);
+    } else if (_isDirective(source, i)) {
+      if (_readsKeyword(source, i, 'import')) {
+        final prefix = _testImportPrefix(source, i);
+        if (prefix != null) prefixes.add(prefix);
+      }
+      i = _skipDirective(source, i);
+    } else {
+      return prefixes;
+    }
+  }
+}
+
+/// The prefix the `import` directive at [i] binds, when it imports
+/// `package:test` or `package:flutter_test` — the libraries that expose the
+/// `Tags` annotation `flutter test` reads — else null.
+///
+/// Conditional (`if (cond) 'uri'`) and `deferred` imports bind the same way;
+/// `show` / `hide` combinators are not read, which over-accepts a prefix whose
+/// import hides `Tags`. Upstream resolves the annotation through the analyzer
+/// and would not count it; nobody writes that import, so the scanner trades
+/// the case for staying a scanner.
+String? _testImportPrefix(String source, int i) {
+  var j = _skipTrivia(source, i + 'import'.length);
+  if (j >= source.length) return null;
+  // The URI in its own variable: `parsed` is reassigned in the loop below,
+  // which would un-promote a record local read after it.
+  var parsed = _parseString(source, j);
+  if (parsed == null) return null;
+  var uri = parsed.value;
+  j = _skipTrivia(source, parsed.end);
+  while (_readsKeyword(source, j, 'if')) {
+    var k = _skipTrivia(source, j + 2);
+    if (k >= source.length || source[k] != '(') return null;
+    j = _skipTrivia(source, _skipBalanced(source, k, '(', ')'));
+    if (j >= source.length) return null;
+    parsed = _parseString(source, j);
+    if (parsed == null) return null;
+    uri = parsed.value;
+    j = _skipTrivia(source, parsed.end);
+  }
+  if (_readsKeyword(source, j, 'deferred')) j = _skipTrivia(source, j + 8);
+  if (!_readsKeyword(source, j, 'as')) return null;
+  j = _skipTrivia(source, j + 2);
+  final start = j;
+  while (j < source.length && _isIdentifierChar(source[j])) {
+    j++;
+  }
+  if (j == start) return null;
+  return _isTestUri(uri) ? source.substring(start, j) : null;
+}
+
+/// Whether [uri] is an import of `package:test` or `package:flutter_test`.
+bool _isTestUri(String uri) {
+  if (!uri.startsWith('package:')) return false;
+  final first = uri.substring('package:'.length).split('/').first;
+  return first == 'test' || first == 'flutter_test';
 }
 
 /// Past the balanced [open]..[close] pair opening at [i], over strings and
@@ -427,7 +551,7 @@ int _skipDirective(String source, int i) {
     }
     final c = source[j];
     if (!raw && c == r'\') {
-      final escape = _parseEscape(source, j);
+      final escape = _parseEscape(source, j, strict: strict);
       value.write(escape.value);
       j = escape.end;
     } else if (!raw && c == r'$') {
@@ -453,8 +577,16 @@ int _skipDirective(String source, int i) {
 }
 
 /// The escape opening at [i] (`\` plus its sequence) and the character it
-/// stands for. Unknown escapes are kept literally.
-({int end, String value}) _parseEscape(String source, int i) {
+/// stands for. With [strict], an unknown escape throws [TagsParseException]:
+/// it is a compile error in the file, so upstream never reads tags from it,
+/// and decoding it to something else would name a tag the file cannot carry.
+/// Without it the character is kept literally: a skipped-over string's escapes
+/// never become tags.
+({int end, String value}) _parseEscape(
+  String source,
+  int i, {
+  bool strict = false,
+}) {
   final j = i + 1;
   if (j >= source.length) return (end: j, value: r'\');
   final c = source[j];
@@ -487,6 +619,12 @@ int _skipDirective(String source, int i) {
       final hex = _parseHex(source, j + 1, 4);
       return (end: hex.end, value: hex.value);
     default:
+      if (strict) {
+        throw TagsParseException(
+          _lineOf(source, i),
+          'Expected a String literal.',
+        );
+      }
       return (end: j + 1, value: c);
   }
 }
@@ -516,7 +654,9 @@ int _skipInterpolation(String source, int i) {
   return j;
 }
 
-/// Past whitespace and comments from [i].
+/// Past whitespace and comments from [i]. Block comments nest, as the
+/// analyzer nests them: `/* /* */` needs two closers, so a `@Tags` after one
+/// is still found.
 int _skipTrivia(String source, int i) {
   var j = i;
   while (j < source.length) {
@@ -527,10 +667,31 @@ int _skipTrivia(String source, int i) {
       final end = source.indexOf('\n', j + 2);
       j = end < 0 ? source.length : end + 1;
     } else if (c == '/' && j + 1 < source.length && source[j + 1] == '*') {
-      final end = source.indexOf('*/', j + 2);
-      j = end < 0 ? source.length : end + 2;
+      j = _skipNestedComment(source, j);
     } else {
       break;
+    }
+  }
+  return j;
+}
+
+/// Past the block comment opening at [i] (`/*`), over nested block comments.
+/// Comment text is opaque — a quote or `//` inside one opens nothing — so
+/// only `/*` and `*/` move the scan. Past the end when unterminated.
+int _skipNestedComment(String source, int i) {
+  var j = i + 2;
+  var depth = 1;
+  while (j < source.length && depth > 0) {
+    if (source[j] == '/' && j + 1 < source.length && source[j + 1] == '*') {
+      depth++;
+      j += 2;
+    } else if (source[j] == '*' &&
+        j + 1 < source.length &&
+        source[j + 1] == '/') {
+      depth--;
+      j += 2;
+    } else {
+      j++;
     }
   }
   return j;

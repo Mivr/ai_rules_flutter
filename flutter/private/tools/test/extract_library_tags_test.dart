@@ -112,11 +112,90 @@ void main() {
     test('concatenates adjacent strings and unescapes', () {
       expect(
         extractLibraryTags(
-          "@Tags(['gol' 'den', 's\\\\low', 'sp ace'])\n"
+          // The backslash escape decodes to a tag no selector could name, so
+          // it stays out of the list: tag names must name valid selector
+          // atoms, and invalid names are refused below.
+          "@Tags(['gol' 'den', 'slow-mo', 'under_score'])\n"
           "import 'package:flutter_test/flutter_test.dart';\n"
           'void main() {}\n',
         ),
-        {'golden', r's\low', 'sp ace'},
+        {'golden', 'slow-mo', 'under_score'},
+      );
+    });
+
+    test('an invalid tag name is an error', () {
+      expect(
+        () => extractLibraryTags(
+          "@Tags(['sp ace'])\n"
+          "import 'package:flutter_test/flutter_test.dart';\n"
+          'void main() {}\n',
+        ),
+        throwsA(
+          isA<TagsParseException>()
+              .having((e) => e.line, 'line', 1)
+              .having(
+                (e) => e.message,
+                'message',
+                'Invalid tag name. Tags must be (optionally hyphenated) Dart '
+                    'identifiers.',
+              ),
+        ),
+      );
+      expect(
+        () => extractLibraryTags(
+          r"@Tags(['s\low'])"
+          '\n'
+          "import 'package:flutter_test/flutter_test.dart';\n"
+          'void main() {}\n',
+        ),
+        throwsA(isA<TagsParseException>()),
+      );
+    });
+
+    test('reads tags after a nested block comment', () {
+      expect(
+        extractLibraryTags(
+          '/* outer /* inner */ still outer */\n'
+          "@Tags(['golden'])\n"
+          "import 'package:flutter_test/flutter_test.dart';\n"
+          'void main() {}\n',
+        ),
+        {'golden'},
+      );
+    });
+
+    test('a quote inside a block comment opens no string', () {
+      expect(
+        extractLibraryTags(
+          "/* don't */\n"
+          "@Tags(['golden'])\n"
+          "import 'package:flutter_test/flutter_test.dart';\n"
+          'void main() {}\n',
+        ),
+        {'golden'},
+      );
+    });
+
+    test('reads tags after a generic annotation', () {
+      expect(
+        extractLibraryTags(
+          '@Foo<int>(3)\n'
+          "@Tags(['golden'])\n"
+          "import 'package:flutter_test/flutter_test.dart';\n"
+          'void main() {}\n',
+        ),
+        {'golden'},
+      );
+    });
+
+    test('a generic Tags annotation still counts', () {
+      expect(
+        extractLibraryTags(
+          "@Tags<String>(['golden'])\n"
+          "import 'package:flutter_test/flutter_test.dart';\n"
+          'void main() {}\n',
+        ),
+        {'golden'},
       );
     });
 
@@ -284,6 +363,69 @@ void main() {
                 'message',
                 'Only a single Tags may be used.',
               ),
+        ),
+      );
+    });
+
+    test('a Tags through another library prefix does not count', () {
+      expect(
+        extractLibraryTags(
+          "@other.Tags(['golden'])\n"
+          "import 'package:other/other.dart' as other;\n"
+          "import 'package:flutter_test/flutter_test.dart';\n"
+          'void main() {}\n',
+        ),
+        isEmpty,
+      );
+    });
+
+    test('a Tags through a package:test prefix counts', () {
+      expect(
+        extractLibraryTags(
+          "@t.Tags(['golden'])\n"
+          "import 'package:test/test.dart' as t;\n"
+          'void main() {}\n',
+        ),
+        {'golden'},
+      );
+    });
+
+    test('a Tags through a conditional test import prefix counts', () {
+      expect(
+        extractLibraryTags(
+          "@t.Tags(['golden'])\n"
+          "import 'a.dart' if (dart.library.io) 'package:test/test.dart' as t;\n"
+          'void main() {}\n',
+        ),
+        {'golden'},
+      );
+    });
+
+    test('a three-part Tags name does not count', () {
+      expect(
+        extractLibraryTags(
+          "@a.b.Tags(['golden'])\n"
+          "import 'package:flutter_test/flutter_test.dart' as a;\n"
+          'void main() {}\n',
+        ),
+        isEmpty,
+      );
+    });
+
+    test('a second Tags through a prefix is still a duplicate', () {
+      expect(
+        () => extractLibraryTags(
+          "@Tags(['a'])\n"
+          "@t.Tags(['b'])\n"
+          "import 'package:test/test.dart' as t;\n"
+          'void main() {}\n',
+        ),
+        throwsA(
+          isA<TagsParseException>().having(
+            (e) => e.message,
+            'message',
+            'Only a single Tags may be used.',
+          ),
         ),
       );
     });
