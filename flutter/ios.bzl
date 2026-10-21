@@ -61,7 +61,6 @@ load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
 load("@rules_apple//apple:apple.bzl", "apple_dynamic_framework_import", "apple_dynamic_xcframework_import")
 load("@rules_apple//apple:ios.bzl", "ios_application")
 load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
-load("@rules_cc//cc:objc_library.bzl", "objc_library")
 load("@rules_swift//swift:swift.bzl", "swift_library")
 load("//flutter/private:constants.bzl", _IOS_MINIMUM_OS_VERSION = "IOS_MINIMUM_OS_VERSION")
 load("//flutter/private:debug_build.bzl", _debug_build = "debug_build")
@@ -392,7 +391,6 @@ def flutter_ios_app(
         runner_deps = [],
         srcs = None,
         engine = None,
-        language = "swift",
         exclude_plugins = [],
         allow_non_macho = [],
         backend = "rules_apple",
@@ -496,14 +494,6 @@ def flutter_ios_app(
             `app_intents` only extracts the metadata, it does not link.
         srcs: Override conventional `ios/Runner/*.swift` runner sources.
         engine: Override default `@flutter_ios_engine//:engine` target.
-        language: Registrant language: `"swift"` (default) emits
-            GeneratedPluginRegistrant.swift; `"objc"` emits
-            GeneratedPluginRegistrant.h and GeneratedPluginRegistrant.m
-            matching the flutter tool's own template. An ObjC registrant
-            cannot live in the Swift runner library, so it is compiled by
-            an internal `objc_library` linked into the runner instead —
-            and only an ObjC runner (via `srcs`) can call its
-            `registerWithRegistry:`.
         exclude_plugins: Plugin module names to leave out of the
             registrant. A name that is not a native iOS plugin of the
             application is an error, listing the valid names.
@@ -530,8 +520,6 @@ def flutter_ios_app(
     """
     if backend not in ("rules_apple", "xtool"):
         fail("flutter_ios_app: backend must be 'rules_apple' or 'xtool', got %r" % backend)
-    if language not in ("swift", "objc"):
-        fail("flutter_ios_app: language must be 'swift' or 'objc', got %r" % language)
 
     display_name = app_name or name
     tags = kwargs.pop("tags", ["manual"])
@@ -595,43 +583,13 @@ def flutter_ios_app(
 
     # -- Internal targets (all __{name}_ prefixed) --
 
-    # 1. Generate iOS plugin registrant (Swift or ObjC).
+    # 1. Generate iOS Swift plugin registrant.
     _flutter_ios_registrant_rule(
         name = "__%s_registrant" % name,
         application = application,
-        language = language,
         exclude_plugins = exclude_plugins,
         tags = internal_tags,
     )
-
-    # An ObjC registrant cannot live in the Swift runner library, so it is
-    # compiled by an internal objc_library linked into the runner instead.
-    # (Only an ObjC runner calling `registerWithRegistry:` uses it; the
-    # default Swift runner leaves it unreferenced but linked.)
-    runner_registrant_srcs = []
-    runner_registrant_deps = []
-    if language == "swift":
-        runner_registrant_srcs.append("__%s_registrant" % name)
-    elif backend == "rules_apple":
-        native.filegroup(
-            name = "__%s_registrant_hdrs" % name,
-            srcs = ["__%s_registrant" % name],
-            output_group = "hdrs",
-            tags = internal_tags,
-        )
-        native.filegroup(
-            name = "__%s_registrant_srcs" % name,
-            srcs = ["__%s_registrant" % name],
-            output_group = "srcs",
-            tags = internal_tags,
-        )
-        objc_library(
-            name = "__%s_registrant_lib" % name,
-            hdrs = ["__%s_registrant_hdrs" % name],
-            srcs = ["__%s_registrant_srcs" % name],
-            tags = internal_tags,
-        )
-        runner_registrant_deps.append("__%s_registrant_lib" % name)
 
     # 2. Extract intermediates (AOT dylib + flutter_assets + native_libs).
     _flutter_ios_application(
@@ -711,14 +669,14 @@ def flutter_ios_app(
     if backend == "rules_apple":
         swift_library(
             name = "__%s_runner" % name,
-            srcs = runner_srcs + runner_registrant_srcs,
+            srcs = runner_srcs + ["__%s_registrant" % name],
             data = discovered_main_storyboard,
             module_name = module_name,
             tags = internal_tags,
             deps = [
                 engine_target,
                 "__%s_apple_plugins" % name,
-            ] + runner_deps + runner_registrant_deps,
+            ] + runner_deps,
         )
 
     # 8. Info.plist — preprocess to resolve Xcode variables that rules_apple

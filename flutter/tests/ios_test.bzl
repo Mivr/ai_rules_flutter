@@ -1076,12 +1076,12 @@ def _ios_registrant_objc_groups_test_impl(ctx):
     asserts.equals(env, 1, len(srcs))
     asserts.true(
         env,
-        hdrs[0].short_path.endswith("_objc_plugin_registrant.h"),
+        hdrs[0].short_path.endswith("GeneratedPluginRegistrant.h"),
         "Expected the ObjC header, got: %s" % [f.short_path for f in hdrs],
     )
     asserts.true(
         env,
-        srcs[0].short_path.endswith("_objc_plugin_registrant.m"),
+        srcs[0].short_path.endswith("GeneratedPluginRegistrant.m"),
         "Expected the ObjC source, got: %s" % [f.short_path for f in srcs],
     )
     asserts.equals(env, 2, len(tut[DefaultInfo].files.to_list()))
@@ -1152,66 +1152,28 @@ def _registrant_tests(name):
         expected_substrings = ["exclude_plugins", "typo_plugin", "sample_plugin"],
     )
 
-    # An ObjC Tier-1 app: the registrant compiles through an internal
-    # objc_library linked into the runner, and exclusions forward.
-    objc_app = name + "_objc_app"
-    before_objc = native.existing_rules().keys()
+    # An app excluding the only plugin: the macro forwards exclude_plugins
+    # to its internal registrant, which stays a Swift registrant. The
+    # objc_drift_test suite reads that registrant's bytes and proves the
+    # exclusion arrived.
+    excl_app = name + "_excl_app"
     flutter_ios_app(
-        name = objc_app,
+        name = excl_app,
         application = ":" + name + "_reg_app",
-        bundle_id = "com.example.objc.ios",
+        bundle_id = "com.example.excl.ios",
         srcs = [
             "@rules_flutter//flutter/private/runners/ios:AppDelegate.swift",
             "@rules_flutter//flutter/private/runners/ios:SceneDelegate.swift",
         ],
         info_plist = "@rules_flutter//flutter/private/runners/ios:Info.plist",
-        language = "objc",
         exclude_plugins = ["sample_plugin"],
         entitlements = False,
         app_icons = [],
         tags = ["manual"],
     )
-    after_objc = native.existing_rules()
-    created_objc = {
-        k: after_objc[k]["kind"]
-        for k in after_objc
-        if k not in before_objc
-    }
-    _ios_macro_surface_test(
-        name = name + "_objc_macro_surface",
-        actual_kinds = created_objc,
-        expected_kinds = {
-            "__%s_registrant" % objc_app: "flutter_ios_registrant",
-            "__%s_registrant_hdrs" % objc_app: "filegroup",
-            "__%s_registrant_srcs" % objc_app: "filegroup",
-            "__%s_registrant_lib" % objc_app: "objc_library",
-            "__%s_intermediates" % objc_app: "flutter_ios_application",
-            "__%s_app_framework" % objc_app: "flutter_ios_framework",
-            "__%s_app_bundle" % objc_app: "apple_dynamic_framework_import",
-            "__%s_engine" % objc_app: "apple_dynamic_xcframework_import",
-            "__%s_native_frameworks" % objc_app: "flutter_ios_native_frameworks",
-            "__%s_privacy_manifests" % objc_app: "flutter_ios_privacy_manifests",
-            "__%s_apple_plugins" % objc_app: "flutter_apple_plugins_aggregator",
-            "__%s_runner" % objc_app: "swift_library",
-            "__%s_version" % objc_app: "apple_bundle_version",
-            "__%s_info_plist_dev" % objc_app: "flutter_plist_merge",
-            objc_app: "ios_application",
-        },
-        unexpected_xtool_targets = [
-            k
-            for k, kind in created_objc.items()
-            if "xtool" in k or "xtool" in kind or kind == "flutter_darwin_xcframework_import"
-        ],
-        actual_app_deps = [str(d) for d in after_objc[objc_app]["deps"]],
-        expected_app_deps = [
-            ":__%s_runner" % objc_app,
-            ":__%s_app_bundle" % objc_app,
-            ":__%s_native_frameworks" % objc_app,
-        ],
-    )
-    _ios_registrant_objc_groups_test(
-        name = name + "_objc_app_registrant_groups",
-        target_under_test = ":__%s_registrant" % objc_app,
+    _ios_registrant_swift_groups_test(
+        name = name + "_excl_app_registrant_groups",
+        target_under_test = ":__%s_registrant" % excl_app,
     )
 
     return [
@@ -1219,6 +1181,5 @@ def _registrant_tests(name):
         name + "_reg_objc_groups",
         name + "_reg_excluded_groups",
         name + "_reg_typo_fails",
-        name + "_objc_macro_surface",
-        name + "_objc_app_registrant_groups",
+        name + "_excl_app_registrant_groups",
     ]

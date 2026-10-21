@@ -294,94 +294,18 @@ _t15_test = unittest.make(_android_registrant_names_the_declared_package_test_im
 
 # -- iOS registrants (Swift and ObjC) ------------------------------------------
 #
-# The ObjC goldens below are the flutter tool's own
+# These assert structure (imports, registration calls, exclusions). That the
+# ObjC bytes equal the flutter tool's own
 # `_objcPluginRegistryHeaderTemplate` /
 # `_objcPluginRegistryImplementationTemplate` from
-# `packages/flutter_tools/lib/src/flutter_plugins.dart`, rendered for the
-# same plugin set (see `make_ios_objc_impl_content`).
+# `packages/flutter_tools/lib/src/flutter_plugins.dart` is guarded by the
+# `objc_drift_test` suite, which renders those templates with the tool's
+# mustache semantics and compares against the rule's output.
 
 _IOS_GOLDEN_PLUGINS = [
     struct(name = "path_provider_foundation", plugin_class = "PathProviderPlugin"),
     struct(name = "url_launcher_ios", plugin_class = "URLLauncherPlugin"),
 ]
-
-# Golden GeneratedPluginRegistrant.h: the header names no plugin, so one
-# golden covers the empty and the multi-plugin app.
-_IOS_OBJC_HEADER_GOLDEN = "\n".join([
-    "",
-    "//",
-    "//  Generated file. Do not edit.",
-    "//",
-    "",
-    "// clang-format off",
-    "",
-    "#ifndef GeneratedPluginRegistrant_h",
-    "#define GeneratedPluginRegistrant_h",
-    "",
-    "#import <Flutter/Flutter.h>",
-    "",
-    "NS_ASSUME_NONNULL_BEGIN",
-    "",
-    "@interface GeneratedPluginRegistrant : NSObject",
-    "+ (void)registerWithRegistry:(NSObject<FlutterPluginRegistry>*)registry;",
-    "@end",
-    "",
-    "NS_ASSUME_NONNULL_END",
-    "#endif /* GeneratedPluginRegistrant_h */",
-    "",  # trailing newline
-])
-
-_IOS_OBJC_EMPTY_IMPL_GOLDEN = "\n".join([
-    "",
-    "//",
-    "//  Generated file. Do not edit.",
-    "//",
-    "",
-    "// clang-format off",
-    "",
-    "#import \"GeneratedPluginRegistrant.h\"",
-    "",
-    "@implementation GeneratedPluginRegistrant",
-    "",
-    "+ (void)registerWithRegistry:(NSObject<FlutterPluginRegistry>*)registry {",
-    "}",
-    "",
-    "@end",
-    "",  # trailing newline
-])
-
-_IOS_OBJC_TWO_PLUGIN_IMPL_GOLDEN = "\n".join([
-    "",
-    "//",
-    "//  Generated file. Do not edit.",
-    "//",
-    "",
-    "// clang-format off",
-    "",
-    "#import \"GeneratedPluginRegistrant.h\"",
-    "",
-    "#if __has_include(<path_provider_foundation/PathProviderPlugin.h>)",
-    "#import <path_provider_foundation/PathProviderPlugin.h>",
-    "#else",
-    "@import path_provider_foundation;",
-    "#endif",
-    "",
-    "#if __has_include(<url_launcher_ios/URLLauncherPlugin.h>)",
-    "#import <url_launcher_ios/URLLauncherPlugin.h>",
-    "#else",
-    "@import url_launcher_ios;",
-    "#endif",
-    "",
-    "@implementation GeneratedPluginRegistrant",
-    "",
-    "+ (void)registerWithRegistry:(NSObject<FlutterPluginRegistry>*)registry {",
-    "  [PathProviderPlugin registerWithRegistrar:[registry registrarForPlugin:@\"PathProviderPlugin\"]];",
-    "  [URLLauncherPlugin registerWithRegistrar:[registry registrarForPlugin:@\"URLLauncherPlugin\"]];",
-    "}",
-    "",
-    "@end",
-    "",  # trailing newline
-])
 
 def _ios_swift_empty_test_impl(ctx):
     """An app with no iOS plugins still gets a registrant with no imports."""
@@ -418,25 +342,44 @@ def _ios_swift_exclusion_test_impl(ctx):
     return unittest.end(env)
 
 def _ios_objc_header_test_impl(ctx):
-    """The ObjC header matches the flutter tool template (it names no plugin)."""
+    """The ObjC header declares the registry entry point (it names no plugin)."""
     env = unittest.begin(ctx)
-    asserts.equals(env, _IOS_OBJC_HEADER_GOLDEN, make_ios_objc_header_content())
+    result = make_ios_objc_header_content()
+    asserts.true(env, result.startswith("//\n//  Generated file. Do not edit."), result)
+    asserts.true(env, "#import <Flutter/Flutter.h>" in result, result)
+    asserts.true(
+        env,
+        "+ (void)registerWithRegistry:(NSObject<FlutterPluginRegistry>*)registry;" in result,
+        result,
+    )
     return unittest.end(env)
 
 def _ios_objc_empty_impl_test_impl(ctx):
     """An app with no iOS plugins gets an empty ObjC registrant."""
     env = unittest.begin(ctx)
-    asserts.equals(env, _IOS_OBJC_EMPTY_IMPL_GOLDEN, make_ios_objc_impl_content([]))
+    result = make_ios_objc_impl_content([])
+    asserts.true(env, result.startswith("//\n//  Generated file. Do not edit."), result)
+    asserts.true(env, '#import "GeneratedPluginRegistrant.h"' in result, result)
+    asserts.true(env, "@implementation GeneratedPluginRegistrant" in result, result)
+    asserts.true(env, "registerWithRegistrar" not in result, result)
     return unittest.end(env)
 
 def _ios_objc_two_plugin_impl_test_impl(ctx):
-    """A two-plugin app renders the flutter tool template byte-for-byte."""
+    """Every plugin gets an import fallback and a registration call."""
     env = unittest.begin(ctx)
-    asserts.equals(
-        env,
-        _IOS_OBJC_TWO_PLUGIN_IMPL_GOLDEN,
-        make_ios_objc_impl_content(_IOS_GOLDEN_PLUGINS),
-    )
+    result = make_ios_objc_impl_content(_IOS_GOLDEN_PLUGINS)
+    for p in _IOS_GOLDEN_PLUGINS:
+        asserts.true(
+            env,
+            "#if __has_include(<%s/%s.h>)" % (p.name, p.plugin_class) in result,
+            result,
+        )
+        asserts.true(env, "@import %s;" % p.name in result, result)
+        asserts.true(
+            env,
+            '[%s registerWithRegistrar:[registry registrarForPlugin:@"%s"]];' % (p.plugin_class, p.plugin_class) in result,
+            result,
+        )
     return unittest.end(env)
 
 def _ios_objc_exclusion_test_impl(ctx):

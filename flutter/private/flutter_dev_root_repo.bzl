@@ -44,6 +44,15 @@ filegroup(
     srcs = ["bin/cache/flutter.version.json"],
     visibility = ["//visibility:public"],
 )
+
+# Just the plugin-template source, so a test can read the two ObjC template
+# constants the flutter tool renders GeneratedPluginRegistrant.h/.m from
+# without materializing the whole tree in its runfiles.
+filegroup(
+    name = "flutter_plugins_dart",
+    srcs = ["packages/flutter_tools/lib/src/flutter_plugins.dart"],
+    visibility = ["//visibility:public"],
+)
 """
 
 def _flutter_dev_root_repo_impl(repository_ctx):

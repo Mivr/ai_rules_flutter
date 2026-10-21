@@ -392,14 +392,15 @@ def make_ios_objc_header_content():
     Byte-for-byte the flutter tool's `_objcPluginRegistryHeaderTemplate` in
     `packages/flutter_tools/lib/src/flutter_plugins.dart` (Flutter 3.47.7,
     the repo's default toolchain; the template is identical in every
-    release listed in `//flutter/private:versions.bzl`). The header names
-    no plugin, so it takes no input.
+    release listed in `//flutter/private:versions.bzl`) once Dart parses
+    the template literal: a `'''` string drops its empty first line, so
+    the rendered file starts with `//`. The header names no plugin, so it
+    takes no input.
 
     Returns:
         String of ObjC source code for GeneratedPluginRegistrant.h.
     """
     lines = [
-        "",
         "//",
         "//  Generated file. Do not edit.",
         "//",
@@ -445,7 +446,6 @@ def make_ios_objc_impl_content(native_plugins):
         String of ObjC source code for GeneratedPluginRegistrant.m.
     """
     lines = [
-        "",
         "//",
         "//  Generated file. Do not edit.",
         "//",
@@ -607,7 +607,8 @@ def generate_native_plugin_registrant(ctx, plugins, target_platform, exclude_plu
     Args:
         ctx: Rule context.
         plugins: List of plugin structs.
-        target_platform: Platform string ("linux", "windows", "macos").
+        target_platform: Platform string ("linux", "windows", "macos",
+            "ios", "android").
         exclude_plugins: Plugin module names to omit from the registrant.
             A name that is not a native plugin for the platform is an
             error, listing the valid names.
@@ -654,7 +655,10 @@ def generate_ios_objc_registrant(ctx, plugins, exclude_plugins = []):
     The pair matches the flutter tool's own
     `GeneratedPluginRegistrant.h` / `GeneratedPluginRegistrant.m`
     byte-for-byte for the same plugin set (see
-    `make_ios_objc_impl_content`).
+    `make_ios_objc_impl_content`). Both files are declared under a
+    directory named after the target, under the tool's own file names, so
+    the implementation's `#import "GeneratedPluginRegistrant.h"` resolves
+    to its sibling header.
 
     Args:
         ctx: Rule context.
@@ -668,8 +672,8 @@ def generate_ios_objc_registrant(ctx, plugins, exclude_plugins = []):
     """
     native_plugins = _collect_native_plugins(plugins, "ios")
     native_plugins = filter_excluded_native_plugins(native_plugins, exclude_plugins, "ios")
-    header = ctx.actions.declare_file(ctx.label.name + "_objc_plugin_registrant.h")
-    impl = ctx.actions.declare_file(ctx.label.name + "_objc_plugin_registrant.m")
+    header = ctx.actions.declare_file(ctx.label.name + "/GeneratedPluginRegistrant.h")
+    impl = ctx.actions.declare_file(ctx.label.name + "/GeneratedPluginRegistrant.m")
     ctx.actions.write(header, make_ios_objc_header_content())
     ctx.actions.write(impl, make_ios_objc_impl_content(native_plugins))
     return (header, impl)

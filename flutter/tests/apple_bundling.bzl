@@ -158,6 +158,14 @@ def _fake_application_impl(ctx):
                 "macos": {"pluginClass": ctx.attr.plugin_class},
             },
         ))
+    for plugin_name in sorted(ctx.attr.extra_plugins.keys()):
+        plugins.append(struct(
+            name = plugin_name,
+            platforms = {
+                "ios": {"pluginClass": ctx.attr.extra_plugins[plugin_name]},
+                "macos": {"pluginClass": ctx.attr.extra_plugins[plugin_name]},
+            },
+        ))
     for lib in ctx.attr.apple_libs + ctx.attr.apple_plugin_libraries:
         if FlutterApplePluginInfo not in lib:
             fail("fake_application: apple_libs entry %s must provide FlutterApplePluginInfo" % lib.label)
@@ -197,6 +205,10 @@ fake_application = rule(
         "native_libs": attr.string_list(),
         "plugin_class": attr.string(default = ""),
         "plugin_name": attr.string(default = ""),
+        "extra_plugins": attr.string_dict(
+            default = {},
+            doc = "Additional native plugins as {module name: plugin class}, exposed on ios and macos like plugin_name/plugin_class.",
+        ),
         "_macho_edit": attr.label(
             default = Label("//flutter/private/tools:macho_edit"),
             executable = True,
