@@ -5,8 +5,66 @@ Flutter compilation differs from vanilla Dart in that it uses:
 - The frontend_server_aot.dart.snapshot instead of `dart compile kernel`
 """
 
-load("//flutter:providers.bzl", "resolve_exec_dart_vm")
+load("//flutter:providers.bzl", "resolve_exec_dart_vm", "resolve_flutter_sdk_info")
 load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "stage_generated_inputs")
+
+# Private tool labels a downstream rule merges into its own `attrs` to call
+# `flutter_kernel_compile_action` — the Flutter half of what rules_dart
+# publishes as `KERNEL_MODULE_ATTRS`. Carries no user-facing attrs: the
+# caller's rule declares its own `main`, `srcs` and `deps`.
+FLUTTER_KERNEL_COMPILE_ATTRS = {
+    "_kernel_filter_tool": attr.label(
+        default = Label("//flutter/private/tools:kernel_filter"),
+        executable = True,
+        cfg = "exec",
+    ),
+}
+
+# Toolchains a downstream rule declares to call `flutter_kernel_compile_action`
+# (via `flutter_kernel_compile_tools`) and `compile_package_config` — the
+# Flutter half of what rules_dart publishes as `MODULAR_KERNEL_TOOLCHAINS`.
+# The product-tools toolchain is optional: only `flutter_kernel_compile_tools`
+# with `product = True` reads it.
+FLUTTER_KERNEL_COMPILE_TOOLCHAINS = [
+    "@rules_flutter//flutter:toolchain_type",
+    "@rules_dart//dart:exec_tools_toolchain_type",
+    config_common.toolchain_type("@rules_flutter//flutter:product_tools_toolchain_type", mandatory = False),
+    Label("@rules_dart//dart:copy_toolchain_type"),
+]
+
+def flutter_kernel_compile_tools(ctx, product = False):
+    """Resolves the tool Files a `flutter_kernel_compile_action` call needs.
+
+    For a rule in another module composing over `@rules_flutter//flutter:utils.bzl`
+    — the Flutter half of what rules_dart publishes as `find_kernel_module_tools`.
+    The rule declares `FLUTTER_KERNEL_COMPILE_ATTRS` in its `attrs` and
+    `FLUTTER_KERNEL_COMPILE_TOOLCHAINS` in its `toolchains`, then calls this
+    and threads the struct into `flutter_kernel_compile_action`.
+
+    Args:
+        ctx: The caller rule's context.
+        product: When True, `platform_dill` is the release
+            `platform_strong_product.dill`; otherwise the debug
+            `platform_strong.dill`. A True caller needs the product-tools
+            sub-toolchain resolved (it is in `FLUTTER_KERNEL_COMPILE_TOOLCHAINS`).
+
+    Returns:
+        struct with `dartaotruntime`, `kernel_filter_tool`, `frontend_server`
+        and `platform_dill`.
+    """
+    flutter_sdk_info = resolve_flutter_sdk_info(ctx)
+    platform_dill = flutter_sdk_info.platform_kernel_dill_product if product else flutter_sdk_info.platform_kernel_dill
+    if platform_dill == None:
+        fail(
+            "%s: no %s platform dill: declare the product-tools sub-toolchain from FLUTTER_KERNEL_COMPILE_TOOLCHAINS." %
+            (ctx.label, "product" if product else "debug"),
+        )
+    return struct(
+        dartaotruntime = flutter_sdk_info.dartaotruntime,
+        kernel_filter_tool = ctx.executable._kernel_filter_tool,
+        frontend_server = flutter_sdk_info.frontend_server,
+        platform_dill = platform_dill,
+    )
 
 def flutter_kernel_compile_action(
         ctx,
@@ -27,7 +85,10 @@ def flutter_kernel_compile_action(
         dart_plugin_registrant_uri = None,
         filesystem_roots = [],
         recorded_uses = None,
-        from_dill = None):
+        from_dill = None,
+        vm_flags = [],
+        import_dill = None,
+        resource_set = None):
     """Creates a Flutter kernel compilation action.
 
     Invokes the frontend_server via dartaotruntime to compile Dart sources
@@ -87,10 +148,28 @@ def flutter_kernel_compile_action(
         from_dill: Optional pre-linked modular `.dill` File passed via
             `--from-dill` to initialize `frontend_server` without re-parsing
             transitive sources.
+        vm_flags: Optional Dart VM flags placed right after `dartaotruntime`,
+            before the `frontend_server` snapshot (e.g.
+            `--old-gen-heap-size=1073741824`). Every entry must be a `--flag`
+            (a bare `--` or anything else fails the build), so the flags
+            cannot inject a different snapshot or further argv.
+        import_dill: Optional pre-compiled summary `.dill` File passed via
+            `--import-dill=<path>` and added to the action inputs. Libraries
+            arriving through it are compiled, declared inputs — not sources —
+            so the read-set check and the directive guard accept them while
+            still refusing undeclared source reads beside them.
+        resource_set: Optional value passed to
+            `ctx.actions.run(resource_set = ...)` constraining the compile
+            action's host resources. Unset by default, so existing callers
+            keep byte-identical actions.
     """
+    for flag in vm_flags:
+        if not flag.startswith("--") or flag == "--":
+            fail("%s: vm_flags entries must be `--flag` passed to dartaotruntime, got %r" % (ctx.label, flag))
     args = ctx.actions.args()
     args.add("--")
     args.add(dartaotruntime)
+    args.add_all(vm_flags)
     args.add(frontend_server)
 
     # --sdk-root points to the directory containing the platform dill.
@@ -165,6 +244,9 @@ def flutter_kernel_compile_action(
     if from_dill != None:
         args.add("--from-dill", from_dill.path)
 
+    if import_dill != None:
+        args.add("--import-dill=" + import_dill.path)
+
     if entrypoint_uri:
         args.add(entrypoint_uri)
     else:
@@ -185,6 +267,8 @@ def flutter_kernel_compile_action(
         direct_inputs = [main, package_config, frontend_server, platform_dill] + srcs + stage.files
     if native_assets_manifest != None:
         direct_inputs.append(native_assets_manifest)
+    if import_dill != None:
+        direct_inputs.append(import_dill)
     outputs = [output]
     if recorded_uses != None:
         outputs.append(recorded_uses)
@@ -204,7 +288,9 @@ def flutter_kernel_compile_action(
     )
 
     dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx)
-    ctx.actions.run(
+    # `resource_set` stays out of the call unless set, so callers that leave
+    # it unset keep byte-identical actions (same argv and action key).
+    run_kwargs = dict(
         executable = dart_exe,
         arguments = [kernel_filter_tool.path, "--declared-inputs", manifest.path, args],
         inputs = depset(
@@ -216,3 +302,6 @@ def flutter_kernel_compile_action(
         progress_message = "Compiling Flutter kernel %s" % ctx.label,
         env = env,
     )
+    if resource_set != None:
+        run_kwargs["resource_set"] = resource_set
+    ctx.actions.run(**run_kwargs)

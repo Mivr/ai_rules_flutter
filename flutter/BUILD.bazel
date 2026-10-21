@@ -231,6 +231,17 @@ bzl_library(
 )
 
 bzl_library(
+    name = "utils",
+    srcs = ["utils.bzl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":providers",
+        "//flutter/private:app_entrypoint",
+        "//flutter/private:flutter_compile",
+    ],
+)
+
+bzl_library(
     name = "providers",
     srcs = ["providers.bzl"],
     visibility = ["//visibility:public"],

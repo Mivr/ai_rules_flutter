@@ -261,10 +261,20 @@ bzl_library(
 )
 
 bzl_library(
+    name = "app_entrypoint",
+    srcs = ["app_entrypoint.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+    deps = ["@rules_dart//dart:utils"],
+)
+
+bzl_library(
     name = "flutter_compile",
     srcs = ["flutter_compile.bzl"],
     visibility = ["//flutter:__subpackages__"],
-    deps = ["//flutter:providers"],
+    deps = [
+        ":app_entrypoint",
+        "//flutter:providers",
+    ],
 )
 
 bzl_library(

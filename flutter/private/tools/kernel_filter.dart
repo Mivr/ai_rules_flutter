@@ -89,7 +89,8 @@ String? dependencyExecPath(String line) {
 /// declared input: each entry is the offending line. [declared] holds the
 /// exec-root-relative paths from the `--declared-inputs` manifest, and
 /// [extraAllowed] the compiler's own data files (`--packages`,
-/// `--native-assets`, `--platform`, `--from-dill`), resolved the same way.
+/// `--native-assets`, `--platform`, `--from-dill`, `--import-dill`),
+/// resolved the same way.
 List<String> findUndeclaredReads(
   List<String> lines,
   Set<String> declared,
@@ -251,6 +252,7 @@ Future<int> runFiltered(
     '--native-assets',
     '--platform',
     '--from-dill',
+    '--import-dill',
   ]) {
     final value = flagValue(cmdArgs, flag);
     if (value == null) continue;

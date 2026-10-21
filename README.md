@@ -1327,6 +1327,25 @@ These are what `flutter_application` is made of. Most apps never need them.
 | `flutter_native_library` | Pairs a native library with its binding contract. See [Hot reload across a native rebuild](#hot-reload-across-a-native-rebuild). |
 | `flutter_native_asset`, `flutter_data_asset` | Declare Dart Native Assets, from `@rules_flutter//flutter:native_assets.bzl`. A data asset is bundled at `flutter_assets/packages/<package>/<name>`. |
 
+#### Composing your own compile rules (`flutter:utils.bzl`)
+
+A rule in another module can run the same kernel compile `flutter_application` uses, loading only `@rules_flutter//flutter:utils.bzl`:
+
+```starlark
+load(
+    "@rules_flutter//flutter:utils.bzl",
+    "FLUTTER_KERNEL_COMPILE_ATTRS",
+    "FLUTTER_KERNEL_COMPILE_TOOLCHAINS",
+    "compile_package_config",
+    "flutter_kernel_compile_action",
+    "flutter_kernel_compile_tools",
+)
+```
+
+`flutter_kernel_compile_tools(ctx)` resolves the tool files (`dartaotruntime`, `kernel_filter_tool`, `frontend_server`, `platform_dill` — the release dill with `product = True`), `compile_package_config` writes the `package_config.json` (with `extra_roots` for packages that contribute no sources, such as `flutter` or `sky_engine` from the toolchain — the caller must also make those roots' files action inputs), and `flutter_kernel_compile_action` runs the compile, with optional `vm_flags` (Dart VM flags before the snapshot), `import_dill` (a pre-compiled summary passed as `--import-dill`), and `resource_set` (host resource constraints). Merge `FLUTTER_KERNEL_COMPILE_ATTRS` into the rule's `attrs` and declare `FLUTTER_KERNEL_COMPILE_TOOLCHAINS`; the rule keeps its own `main`, `srcs` and `deps`.
+
+Stability note: `flutter:utils.bzl` is stable for external use. New optional parameters may be added to `flutter_kernel_compile_action`, but existing calls keep their command line and action keys.
+
 ### Code generation
 
 rules_dart provides `dart_codegen` and `dart_aggregate_codegen`, which replace `build_runner` with ordinary Bazel actions. They load from `@rules_dart//dart:defs.bzl`. A generated file goes into the consuming target's `srcs`, and the rules place it next to its hand-written sibling so a `part` directive resolves:

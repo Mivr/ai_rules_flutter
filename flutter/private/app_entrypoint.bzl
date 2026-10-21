@@ -357,7 +357,7 @@ def resolve_wrapper_main_import(package_name, lib_root, main_short_path, main_pa
     """
     return app_main_package_uri(package_name, lib_root, main_short_path) or compute_wrapper_main_import(wrapper_depth, main_path)
 
-def compile_package_config(ctx, packages, all_srcs):
+def compile_package_config(ctx, packages, all_srcs, extra_roots = {}):
     """Co-locate packages and write the matching `package_config.json`.
 
     The co-location step assembles any package whose hand-written + generated
@@ -376,6 +376,13 @@ def compile_package_config(ctx, packages, all_srcs):
       all_srcs: Flat list of transitive source Files; should include the
         app's own `main` if the consumer wants `main` co-located with its
         package siblings.
+      extra_roots: Optional dict of package name to exec-root-relative root,
+        forwarded as `roots` to `generate_package_config`, for packages with
+        no sources in `all_srcs` (flutter, flutter_test, sky_engine from the
+        toolchain) so they still get entries. A root found from the files
+        wins. The caller must also make those roots' files action inputs —
+        an entry whose files the compile action did not declare resolves
+        nowhere at compile time.
 
     Returns:
       `struct(config_file, srcs, packages)` — `srcs` and `packages` are
@@ -383,7 +390,7 @@ def compile_package_config(ctx, packages, all_srcs):
     """
     packages2, srcs2 = colocate_packages(ctx, packages, all_srcs)
     config_file = ctx.actions.declare_file(ctx.label.name + ".package_config.json")
-    ctx.actions.write(config_file, generate_package_config(packages2, srcs2, config_file))
+    ctx.actions.write(config_file, generate_package_config(packages2, srcs2, config_file, roots = extra_roots))
     return struct(config_file = config_file, srcs = srcs2, packages = packages2)
 
 def compile_kernel_package_config(ctx, packages, all_srcs, roots = None):
