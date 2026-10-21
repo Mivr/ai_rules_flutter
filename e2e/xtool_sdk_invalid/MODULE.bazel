@@ -33,5 +33,4 @@ flutter.toolchain(flutter_version = "3.47.7")
 # "configured darwin.artifactbundle path '/nonexistent/darwin.artifactbundle'
 # does not exist".
 flutter.darwin_sdk(path = "/nonexistent/darwin.artifactbundle")
-
 use_repo(flutter, "flutter_xtool_darwin_sdk")

@@ -76,6 +76,7 @@ bazel_dep(name = "bazelrc-preset.bzl", version = "1.9.2", dev_dependency = True)
 # The eight LLVM toolchain registrations below stay dev-only: this repo's own
 # builds need them, consumers never see them.
 bazel_dep(name = "llvm", version = "0.8.19")
+
 llvm_toolchain_minimal = use_extension("@llvm//extensions:llvm_toolchain_minimal.bzl", "llvm_toolchain_minimal")
 use_repo(
     llvm_toolchain_minimal,

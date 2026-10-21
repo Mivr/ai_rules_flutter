@@ -783,9 +783,9 @@ xtool_darwin_sdk_repo = repository_rule(
         ),
         "llvm_tool_repos": attr.string_list(
             doc = "Apparent names of llvm's per-host prebuilt-toolchain repos, " +
-                "in the fixed order shared with the flutter extension. Only the entry " +
-                "matching the exec host is resolved; an empty list symlinks nothing " +
-                "and fetches no LLVM.",
+                  "in the fixed order shared with the flutter extension. Only the entry " +
+                  "matching the exec host is resolved; an empty list symlinks nothing " +
+                  "and fetches no LLVM.",
             default = [],
         ),
     },
