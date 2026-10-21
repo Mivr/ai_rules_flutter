@@ -75,6 +75,12 @@ jobs:
           - workspace: codegen
             shard: none
             cache-save: false
+          # The version-floor fixture: full //... incl. the Android leg (the
+          # runner's unzip/python3 satisfy the AAR extractors) and both
+          # Apple legs, all against the minimum rules_apple.
+          - workspace: min_versions
+            shard: none
+            cache-save: false
     env:
       DISK_CACHE_DIR: ~/.cache/bazel-disk
     steps:

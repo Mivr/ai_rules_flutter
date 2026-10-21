@@ -30,8 +30,26 @@ bazel_dep(name = "package_metadata", version = "0.0.13")
 bazel_dep(name = "platforms", version = "1.1.0")
 bazel_dep(name = "rules_cc", version = "0.2.26")
 bazel_dep(name = "apple_support", version = "2.9.1")
-bazel_dep(name = "rules_apple", version = "5.2.0")
+
+# Minimum supported Apple rule set: consumers may resolve rules_apple 4.5.3+.
+# Every rules_apple symbol our macros load (ios/macos_application,
+# apple_bundle_version, framework/app-intent imports, and the internal
+# AppleBundleInfo constructor) exists with a compatible signature there;
+# e2e/min_versions pins this exact version and builds every native leg.
+# rules_swift and apple_support keep their versions: they float to the
+# graph's maxima for consumers too, and 4.5.3 accepts rules_swift at
+# compatibility_level 3.
+bazel_dep(name = "rules_apple", version = "4.5.3")
 bazel_dep(name = "rules_swift", version = "4.1.2")
+
+# rules_android stays at 0.8.0: that is the floor. flutter_android_app's
+# signing overlay reads `@rules_android//flags:apk_signing_method` through
+# the `apk_signing_v*` config_settings, and that package exists only in
+# 0.8.0+ (0.7.2 and 0.7.3 have no `flags/` directory at all) — with anything
+# older every Android app fails at analysis with "no such package
+# '@rules_android//flags'". There is no version-tolerant way to read their
+# flag, and mirroring it with our own default would silently sign
+# differently from the android_binary for consumers who set theirs.
 bazel_dep(name = "rules_android", version = "0.8.0")
 bazel_dep(name = "rules_kotlin", version = "2.4.20")
 bazel_dep(name = "rules_java", version = "9.9.0")
@@ -55,6 +73,15 @@ git_override(
     module_name = "rules_dart",
     commit = "ce18c42daa5bdd633f8fe3c6a6dc88ed20d3bb63",
     remote = "https://github.com/Mivr/rules_dart.git",
+)
+
+# This repo's own builds stay on the current Apple release.
+# single_version_override is root-only: consumers ignore this line and
+# resolve the floor above, while e2e/min_versions pins the floor exactly
+# to prove it.
+single_version_override(
+    module_name = "rules_apple",
+    version = "5.2.0",
 )
 
 # Pinned Go toolchain for this repo's own Android builds only (dev-only, so

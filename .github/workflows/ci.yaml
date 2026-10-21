@@ -15,7 +15,8 @@
 # targets skip themselves through Bazel's own `target_compatible_with`; no
 # new tag filters). The complete macOS coverage runs in full.yaml instead
 # (weekly, on release tags, or on demand), which releases wait for.
-#   e2e-macos-apple:     hello_world's Apple bundles (macOS + iOS simulator)
+#   e2e-macos-apple:     hello_world's Apple bundles (macOS + iOS simulator),
+#     plus min_versions' iOS/macOS legs against the Apple version floor
 #   e2e-macos-toolchain: smoke workspace (toolchain resolution, all platforms)
 #   unit-tests:          root unit tests, plus the digest-mismatch red fetch
 #     (e2e/digest_mismatch, expected to fail on Bazel's checksum error)
@@ -24,7 +25,9 @@
 #     web_example
 #   e2e-linux-examples:  linux_example, cross_compile_example
 #   e2e-linux-integration: integration_web, integration_linux,
-#     integration_android (with KVM for the emulator)
+#     integration_android (with KVM for the emulator), min_versions (Dart app
+#     plus the Android leg against the rules_android floor; the Apple legs
+#     skip themselves via target_compatible_with)
 #   e2e-coverage:        //tools/check_e2e_coverage (every e2e module in a
 #     workflow or with a recorded reason)
 #   web-smoke:           web_example through the installed binary
@@ -116,6 +119,12 @@ jobs:
       - name: bazel test Apple bundles (e2e/hello_world)
         working-directory: e2e/hello_world
         run: bazel test //:macos_bundle_build_test //:ios_bundle_build_test --test_output=errors
+      # The same Apple legs against the minimum supported rules_apple: the
+      # Linux job below already proves min_versions' Dart app and Android
+      # leg, so only the macOS-gated tests run here.
+      - name: bazel test Apple bundles (e2e/min_versions)
+        working-directory: e2e/min_versions
+        run: bazel test //:ios_build_test //:macos_build_test --test_output=errors
       - name: Report cache sizes
         if: always()
         run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true
@@ -399,7 +408,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
-      WORKSPACES: integration_web integration_linux integration_android
+      WORKSPACES: integration_web integration_linux integration_android min_versions
       DISK_CACHE_DIR: ~/.cache/bazel-disk
       DISK_CACHE_SHARD: linux-integration
     steps:
