@@ -29,7 +29,9 @@
 #   e2e-linux-integration: integration_web, integration_linux,
 #     integration_android (with KVM for the emulator), min_versions (Dart app
 #     plus the Android leg against the rules_android floor; the Apple legs
-#     skip themselves via target_compatible_with)
+#     skip themselves via target_compatible_with), android_no_go_sdk (Android
+#     leg with no go_sdk block, proving rules_flutter's pinned Go SDK is the
+#     default)
 #   e2e-coverage:        //tools/check_e2e_coverage (every e2e module in a
 #     workflow or with a recorded reason)
 #   web-smoke:           web_example through the installed binary
@@ -425,7 +427,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
-      WORKSPACES: integration_web integration_linux integration_android min_versions
+      WORKSPACES: integration_web integration_linux integration_android min_versions android_no_go_sdk
       DISK_CACHE_DIR: ~/.cache/bazel-disk
       DISK_CACHE_SHARD: linux-integration
     steps:
