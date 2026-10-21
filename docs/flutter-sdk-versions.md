@@ -18,13 +18,21 @@ sha256.
 Each module in the build graph may request `flutter.toolchain(flutter_version
 = ...)` for the default toolchain name, but the root module's pin wins:
 `select_toolchain_version()` (in `flutter/private/toolchain_selection.bzl`,
-mirroring `rules_dart`) picks the root request when there is one and fails on
-a conflict between two non-root requests. A dependency can suggest a version;
+mirroring `rules_dart`) picks the root request when there is one, and the
+highest requested version otherwise. A dependency can suggest a version;
 only the root module decides. Pins accept a numeric dotted core with an
 optional semver-style `-<prerelease>` and/or `+<build>` suffix
 (`3.44.1-acme`, `3.45.0-0.1.pre`, `3.44.1+corp.7`): ordering is numeric on
 the core, a prerelease sorts below its release, and build metadata never
 decides. Anything else fails naming the offending version.
+
+The same root-wins rule applies to `local_path`: a root
+`flutter.toolchain(local_path = ...)` overrides same-name version requests
+from dependencies (the override is printed as a NOTE), so a root that goes
+offline never conflicts with a dependency that suggests a download. "Mixed"
+is an error only when the root module itself sets both — `local_path` and
+`flutter_version` in one tag, or a local tag and a download tag for the same
+name. A `local_path` in a non-root module is always an error.
 
 ## Custom releases (`flutter.version`)
 

@@ -115,3 +115,52 @@ def select_toolchain_version(name, requests):
         if keys[request.version] > keys[selected]:
             selected = request.version
     return struct(version = selected, note = None)
+
+def select_toolchain_source(name, requests):
+    """Selects the source (local SDK or downloaded version) for one toolchain name.
+
+    The root module's choice wins exactly as it does for versions: a root
+    `local_path` replaces every non-root version request for the name, and a
+    root version pin goes through `select_toolchain_version`. "Mixed" is an
+    error only when the root module itself sets both `local_path` and
+    `flutter_version` for the name. A non-root `local_path` is always an
+    error: dependencies must request downloadable versions.
+
+    Args:
+      name: The toolchain name, used in notes and errors.
+      requests: Non-empty list of `struct(version, local_path, is_root)`, one
+        per tag. `version` is `""` for local requests, `local_path` is `""`
+        for download requests. A request setting both counts as both, so it
+        trips the root-mix error below.
+
+    Returns:
+      `struct(local_path, version, note)`: exactly one of `local_path` and
+      `version` is set. `note` names the overridden non-root requests, if
+      any, and None otherwise.
+    """
+    for r in requests:
+        if r.local_path and not r.is_root:
+            fail("Only the root module may source a Flutter toolchain from a local SDK (local_path); dependencies must request downloadable versions.")
+    root_locals = [r for r in requests if r.is_root and r.local_path]
+    root_downloads = [r for r in requests if r.is_root and r.version]
+    dep_downloads = [r for r in requests if not r.is_root and not r.local_path]
+    if root_locals and root_downloads:
+        fail("Flutter toolchain {} mixes a local SDK (local_path) with a downloaded version; use one or the other.".format(name))
+    if root_locals:
+        local_paths = {r.local_path: True for r in root_locals}.keys()
+        if len(local_paths) > 1:
+            fail("Flutter toolchain {} has multiple local SDKs {}; keep exactly one local_path.".format(name, list(local_paths)))
+        local_path = root_locals[0].local_path
+        note = None
+        if dep_downloads:
+            note = "Flutter toolchain {} uses local SDK {} requested by the root module, ignoring {} version request(s) from dependencies".format(
+                name,
+                local_path,
+                len(dep_downloads),
+            )
+        return struct(local_path = local_path, version = "", note = note)
+    selection = select_toolchain_version(
+        name,
+        [struct(version = r.version, is_root = r.is_root) for r in requests],
+    )
+    return struct(local_path = "", version = selection.version, note = selection.note)

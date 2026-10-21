@@ -28,7 +28,7 @@ load("//flutter/private:flutter_pub_lock_hub.bzl", "flutter_pub_lock_hub")
 load("//flutter/private:flutter_pub_package.bzl", "flutter_pub_package")
 load("//flutter/private:flutter_sdk_package.bzl", "flutter_sdk_package")
 load("//flutter/private:pub_lock_sdks.bzl", "hosted_package_sha256", "parse_lock_sdk_constraints", "version_below_lower_bound")
-load("//flutter/private:toolchain_selection.bzl", "select_toolchain_version")
+load("//flutter/private:toolchain_selection.bzl", "select_toolchain_source")
 load("//flutter/private:versions.bzl", "custom_engine_base_url", "custom_source_url", "flutter_source_sha256", "merge_custom_versions")
 load("//flutter/private:xtool_darwin_sdk_repo.bzl", "resolve_darwin_sdk_from_modules")
 load(":repositories.bzl", "flutter_register_toolchains")
@@ -206,15 +206,12 @@ def _toolchain_extension(module_ctx):
                 is_root = mod.is_root,
             ))
     for name, requests in registrations.items():
-        local_requests = [r for r in requests if r.local_path]
-        download_requests = [r for r in requests if not r.local_path]
-        if local_requests and download_requests:
-            fail("Flutter toolchain {} mixes a local SDK (local_path) with a downloaded version; use one or the other.".format(name))
-        if local_requests:
-            local_paths = {r.local_path: True for r in local_requests}.keys()
-            if len(local_paths) > 1:
-                fail("Flutter toolchain {} has multiple local SDKs {}; keep exactly one local_path.".format(name, list(local_paths)))
-            local_path = local_requests[0].local_path
+        source = select_toolchain_source(name, requests)
+        if source.note:
+            # buildifier: disable=print
+            print("NOTE: " + source.note)
+        if source.local_path:
+            local_path = source.local_path
             flutter_register_toolchains(
                 name = name,
                 local_path = local_path,
@@ -231,14 +228,7 @@ def _toolchain_extension(module_ctx):
             selected_info[name] = struct(version = "", local_path = local_path)
             continue
 
-        selection = select_toolchain_version(
-            name,
-            [struct(version = r.version, is_root = r.is_root) for r in requests],
-        )
-        if selection.note:
-            # buildifier: disable=print
-            print("NOTE: " + selection.note)
-        selected = selection.version
+        selected = source.version
 
         if selected not in merged.versions:
             fail(
