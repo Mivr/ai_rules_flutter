@@ -640,6 +640,7 @@ cd e2e/integration_web && bazel test //...  # Linux-only (hermetic chrome-headle
 cd e2e/integration_linux && bazel test //...  # Linux-only (hermetic Xvfb + GTK3/Mesa runtime)
 cd e2e/integration_android && bazel test //...  # Linux-only with /dev/kvm (hermetic headless Android emulator)
 cd e2e/linux_example && bazel test //...    # Linux-only (target_compatible_with)
+cd e2e/cross_compile_example && bazel test //...    # Linux-only (target_compatible_with)
 cd e2e/windows_example && bazel test //...  # Windows-only (target_compatible_with)
 ```
 
@@ -684,18 +685,18 @@ cd e2e/windows_example && bazel test //...  # Windows-only (target_compatible_wi
   SDK build *that workspace's* hooks before the tool's `main` runs at all, so
   the process dies before `daemon.connected`. The hook's actual error is in
   `<workspace>/.dart_tool/hooks_runner/<pkg>/<hash>/stderr.txt`.
-- `cross_compile_example` has **no test targets**, so it is verified with
-  `bazel build //...`, not `bazel test`. Its `.bazelrc` pins
-  `--platforms=linux_x64` for every command, and a test there would find no test
-  toolchain on a macOS host. The analysis and format checks are an aspect, not
-  tests, and that workspace enables it under `build`, so one command covers the
-  cross-compiled bundle and the checks:
+- `cross_compile_example`'s only test target is `cross_linux_build_test`, a
+  `build_test` over `:cross_linux` with `target_compatible_with` Linux: Linux
+  CI executes the cross-compiled bundle build with `bazel test //...`, while
+  on macOS the test skips itself (there is no Linux test toolchain on that
+  host) and the cross-compile flow stays `bazel build :cross_linux`. Its
+  `.bazelrc` pins `--platforms=linux_x64` for every command. The analysis and
+  format checks are an aspect, not tests, and that workspace enables it under
+  `build`, so one command covers the cross-compiled bundle and the checks:
   ```sh
   cd e2e/cross_compile_example
   bazel build //...
   ```
-  `bazel test //...` there exits 4 ("No test targets were found") however clean
-  the checks are.
 
 ### What the automated e2e tests cover
 
