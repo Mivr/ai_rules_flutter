@@ -2191,8 +2191,11 @@ class _Results {
     stderr.writeln('flutter_integration_test: $message');
   }
 
-  bool get hasFailure =>
-      integrationRunFailed(passed: passed, failed: failed, suiteError: _suiteError);
+  bool get hasFailure => integrationRunFailed(
+    passed: passed,
+    failed: failed,
+    suiteError: _suiteError,
+  );
 
   String summary() {
     final pieces = <String>[
