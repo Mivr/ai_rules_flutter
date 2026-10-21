@@ -417,6 +417,8 @@ flutter_ios_app(
 | `provisioning_profile` | A `.mobileprovision` file, usually a `local_provisioning_profile` target. Required for device builds, unused by simulator builds. See [Running on an iOS device](#running-on-an-ios-device). |
 | `app_icons` | Defaults to the `AppIcon.appiconset` in `ios/Runner/Assets.xcassets`. See [App icons](#app-icons). |
 | `runner_deps` | `swift_library` targets linked into the runner. See [App Intents](#app-intents). |
+| `language` | Registrant language: `"swift"` (default) or `"objc"`. See [iOS plugin registrant](#ios-plugin-registrant). |
+| `exclude_plugins` | Plugin module names left out of the registrant. See [iOS plugin registrant](#ios-plugin-registrant). |
 
 `rules_apple`'s `ios_application` handles the transition to iOS arm64.
 
@@ -552,6 +554,38 @@ load("@rules_flutter//flutter:ios.bzl", "flutter_ios_simulator_build_test")
 flutter_ios_simulator_build_test(
     name = "ios_app_build_test",
     targets = [":app_ios"],
+)
+```
+
+#### iOS plugin registrant
+
+By default the registrant is `GeneratedPluginRegistrant.swift`. Apps whose runner is Objective-C (`AppDelegate.m`) need the Objective-C registrant instead: `language = "objc"` emits `GeneratedPluginRegistrant.h` and `GeneratedPluginRegistrant.m` matching the flutter tool's own template, exposed through the `hdrs` and `srcs` output groups so an `objc_library` can consume them. `flutter_ios_app` compiles them into the runner automatically; with the composable rules, wire the groups into your own library:
+
+```starlark
+flutter_ios_registrant_gen(
+    name = "my_registrant",
+    application = ":my_app",
+    language = "objc",
+)
+
+filegroup(name = "registrant_hdrs", srcs = [":my_registrant"], output_group = "hdrs")
+filegroup(name = "registrant_srcs", srcs = [":my_registrant"], output_group = "srcs")
+
+objc_library(
+    name = "my_registrant_lib",
+    hdrs = [":registrant_hdrs"],
+    srcs = [":registrant_srcs"],
+)
+```
+
+`exclude_plugins` drops named plugin modules from the registrant — no import and no registration call, in either language — for plugins compiled conditionally or linked elsewhere. A name that is not a native iOS plugin of the application is an error listing the valid names, so a typo fails the build instead of silently shipping an unregistered plugin:
+
+```starlark
+flutter_ios_app(
+    name = "my_app_ios",
+    application = ":my_app",
+    bundle_id = "com.example.myapp",
+    exclude_plugins = ["deferred_plugin"],
 )
 ```
 
