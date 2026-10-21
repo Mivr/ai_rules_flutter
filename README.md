@@ -20,6 +20,7 @@ If `flutter build` works for you, here is what Bazel adds:
 ## Contents
 
 - [Getting started](#getting-started)
+- [Flutter SDK versions](docs/flutter-sdk-versions.md): pins, custom releases, offline SDKs, mirrors
 - [Dependencies](#dependencies): pub packages, build hooks, native code
 - [Building for each platform](#building-for-each-platform): macOS, iOS, Android, Linux, Windows, web, cross-compiling, release permissions
 - [Rules reference](#rules-reference): libraries, applications, tests, plugins, code generation, providers
@@ -68,6 +69,12 @@ Some platforms need one more repository from the same extension. Add it to `use_
 | Web | `flutter_web_sdk` |
 
 Static analysis needs nothing extra. rules_dart's analysis resolves `dart:ui` in a `flutter_library`, `flutter_plugin` or `flutter_test` through the `sky_engine` package, which those rules add to the analyzer's closure themselves. Their compiled output does not change.
+
+### Flutter SDK versions
+
+The stock release is pinned by `flutter.toolchain(flutter_version = ...)`, and every SDK byte it downloads is verified against a sha256 recorded in `flutter/private/versions.bzl` — a missing checksum fails the fetch rather than accepting unverified bytes. Your root module's pin wins over any version a dependency requests.
+
+Two extensions cover the rest. A root-registered custom release (an older stable, a rebuild, an enterprise engine) carries its own pinned checksums through `flutter.version`, and `flutter.toolchain(local_path = ...)` sources every repository out of a pre-extracted SDK on disk instead of the network. To mirror stock bytes, keep the stock version and point Bazel at the mirror with `--downloader_config` so the recorded checksums still verify everything. See [Flutter SDK versions](docs/flutter-sdk-versions.md).
 
 #### Overriding `rules_dart`
 
