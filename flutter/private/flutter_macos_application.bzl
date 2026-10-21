@@ -53,7 +53,7 @@ _APP_FRAMEWORK_INFO_PLIST = """\
 """
 
 def _flutter_macos_framework_impl(ctx):
-    """Assembles App.framework as a versioned macOS framework (tree artifact + bundle zip).
+    """Assembles App.framework as a versioned macOS framework bundle zip.
 
     Uses the standard macOS versioned framework layout required by NSBundle
     and `/usr/bin/codesign`:
@@ -73,6 +73,15 @@ def _flutter_macos_framework_impl(ctx):
     macos` works. The Flutter engine discovers and loads it at runtime via
     NSBundle.
 
+    Bazel does not preserve directory symlinks inside tree artifacts when it
+    stages them as action or test inputs (a link to a directory is materialized
+    as a real directory, on local execution as well as on disk-cache hits), so
+    the versioned layout travels between actions ONLY as the deterministic
+    `App.framework.zip` below — never as a tree artifact. Every consumer
+    extracts it locally with the rules' own tools (`extractFrameworkZip` in
+    `macho_edit.dart`, used directly and via `xtool_pack.dart`), which
+    recreate the `Versions/Current`, `App`, and `Resources` symlinks exactly.
+
     Returning `AppleBundleInfo(archive = framework_zip)` causes rules_apple's
     `macos_additional_contents_partial` to merge `App.framework.zip` via
     `bundle_merge_zips` (which preserves `S_IFLNK` symlinks) rather than
@@ -89,12 +98,16 @@ def _flutter_macos_framework_impl(ctx):
     stub_arch = "arm64" if target_arch == "arm64" else "x86_64"
     dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx, flutter_sdk_info)
 
-    # Use a wrapper directory so that direct tree-artifact consumers preserve
-    # the App.framework/ level, and emit a deterministic `App.framework.zip`
+    # The versioned layout is emitted as a deterministic `App.framework.zip`
     # for `AppleBundleInfo.archive` so `rules_apple`'s `bundletool` preserves
-    # the `Versions/Current`, `App`, and `Resources` symlinks.
-    wrapper_dir = ctx.actions.declare_directory(ctx.label.name)
-    framework_zip = ctx.actions.declare_file("%s_macho/App.framework.zip" % ctx.label.name)
+    # the `Versions/Current`, `App`, and `Resources` symlinks. The zip sits
+    # directly under this target's directory so two apps in one package never
+    # share an output. The assembly staging directory is deliberately NOT a
+    # declared output: a tree artifact carrying the version links must never
+    # reach a consumer, because Bazel's input staging materializes directory
+    # symlinks as real directories (see the rule docstring).
+    framework_zip = ctx.actions.declare_file("%s/App.framework.zip" % ctx.label.name)
+    stage_dir = framework_zip.path + ".stage"
     prepared_binary = ctx.actions.declare_file("%s_macho/App" % ctx.label.name)
 
     if is_debug:
@@ -171,7 +184,7 @@ def _flutter_macos_framework_impl(ctx):
         "--assets",
         flutter_assets.path,
         "--output-dir",
-        wrapper_dir.path,
+        stage_dir,
         "--output-zip",
         framework_zip.path,
     ]
@@ -198,13 +211,13 @@ def _flutter_macos_framework_impl(ctx):
             direct = inputs,
             transitive = [dart_vm_files],
         ),
-        outputs = [wrapper_dir, framework_zip],
+        outputs = [framework_zip],
         mnemonic = "FlutterMacOSFramework",
         progress_message = "Assembling App.framework for %s" % ctx.label,
     )
 
     return [
-        DefaultInfo(files = depset([wrapper_dir])),
+        DefaultInfo(files = depset([framework_zip])),
         new_applebundleinfo(
             archive = framework_zip,
             binary = prepared_binary,
@@ -221,12 +234,12 @@ def _flutter_macos_framework_impl(ctx):
         framework_import_support.framework_import_info_with_dependencies(
             build_archs = [target_arch],
             deps = [],
-            framework_imports = [wrapper_dir],
+            framework_imports = [framework_zip],
         ),
         FlutterDarwinFrameworkInfo(
             framework_name = "App",
-            framework_files = depset([wrapper_dir]),
-            framework_dir = wrapper_dir.path + "/App.framework",
+            framework_files = depset([framework_zip]),
+            framework_dir = framework_zip.path,
             headers = depset(),
             is_dynamic = True,
         ),
@@ -287,9 +300,9 @@ def _flutter_macos_native_libs_impl(ctx):
 
     So the libraries are copied into one directory under their basenames, and
     that directory is what this target provides: rules_apple expands a tree
-    artifact's contents into the destination, as it does for App.framework's
-    wrapper. The directory is named after this target, which keeps two apps in
-    one package from declaring the same output.
+    artifact's contents into the destination. The directory is named after
+    this target, which keeps two apps in one package from declaring the same
+    output.
 
     Two different libraries with the same basename would overwrite one another
     there, so that fails the build and names both.

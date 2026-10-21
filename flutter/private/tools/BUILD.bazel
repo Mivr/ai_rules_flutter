@@ -31,6 +31,7 @@ dart_binary(
     name = "android_bundle",
     srcs = [
         "apk_overlay.dart",
+        "macho_edit.dart",
         "xtool_pack.dart",
     ],
     compile_mode = "kernel",
@@ -149,6 +150,7 @@ flutter_sdk_kernel_binary(
 
 dart_binary(
     name = "xtool_pack",
+    srcs = ["macho_edit.dart"],
     compile_mode = "exe",
     main = "xtool_pack.dart",
     target_compatible_with = HOST_COMPATIBLE,
@@ -202,7 +204,9 @@ _TOOL_SRCS = {
     "android_bundle.dart": [
         "xtool_pack.dart",
         "apk_overlay.dart",
+        "macho_edit.dart",
     ],
+    "xtool_pack.dart": ["macho_edit.dart"],
     "flutter_test_runner.dart": ["bazel_test_protocol.dart"],
     "flutter_integration_test_runner.dart": ["bazel_test_protocol.dart"],
     "kernel_filter.dart": ["directive_guard.dart"],

@@ -108,9 +108,9 @@ def _flutter_ios_framework_impl(ctx):
     # Every output under a directory named after this target. Without it two
     # apps in one package would both declare `App.framework/Info.plist` and the
     # build would fail with conflicting actions — the same defect
-    # `flutter_macos_framework` names its wrapper directory to avoid, and the
-    # shape `flutter_ios_native_frameworks` already uses for its plugin
-    # frameworks.
+    # `flutter_macos_framework` avoids by declaring `App.framework.zip` under
+    # its own directory, and the shape `flutter_ios_native_frameworks`
+    # already uses for its plugin frameworks.
     #
     # The prefix does not reach the bundle: rules_apple groups framework
     # imports by their deepest `.framework` ancestor and takes the framework's

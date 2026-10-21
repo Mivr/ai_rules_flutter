@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:test/test.dart';
 
 import '../xtool_pack.dart';
+import '../macho_edit.dart' as macho;
 
 String _hex(Uint8List bytes) =>
     bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
@@ -727,6 +728,97 @@ void main() {
       );
       expect(macExecText, contains('modulemap=sample_macos_plugin.modulemap'));
     });
+
+    test(
+      'embeds macOS App.framework from its .framework.zip archive with real symlinks',
+      () {
+        // The producer (flutter_macos_framework) archives the versioned
+        // layout with its own tool; build the fixture the same way so the
+        // archive container matches production byte for byte in structure.
+        final prodFw = Directory('${tempDir.path}/prod/App.framework')
+          ..createSync(recursive: true);
+        Directory('${prodFw.path}/Versions/A/Resources/flutter_assets')
+            .createSync(recursive: true);
+        File('${prodFw.path}/Versions/A/App')
+            .writeAsBytesSync([0xCF, 0xFA, 0xED, 0xFE, 9]);
+        File('${prodFw.path}/Versions/A/Resources/Info.plist')
+            .writeAsStringSync('<plist version="1.0"><dict/></plist>');
+        Link('${prodFw.path}/Versions/Current').createSync('A');
+        Link('${prodFw.path}/App').createSync('Versions/Current/App');
+        Link('${prodFw.path}/Resources')
+            .createSync('Versions/Current/Resources');
+        final zipBytes = macho.createFrameworkZipBytes(
+          prodFw,
+          archiveRootName: 'App.framework',
+          executableRelPaths: {'App.framework/Versions/A/App'},
+        );
+        final zipPath = '${tempDir.path}/App.framework.zip';
+        File(zipPath).writeAsBytesSync(zipBytes);
+
+        final runnerBin = '${tempDir.path}/out/ZipMacRunner';
+        compileRunner(
+          RunnerCompileConfig(
+            platform: 'macos',
+            arch: 'arm64',
+            appName: 'ZipMacRunner',
+            minimumOsVersion: '11.0',
+            sdkAvailable: false,
+            frameworkPaths: [zipPath],
+            outputPath: runnerBin,
+          ),
+        );
+
+        final appDirPath = '${tempDir.path}/out/ZipMacRunner.app';
+        final appZipPath = '$appDirPath.zip';
+        assembleBundle(
+          BundleConfig(
+            platform: 'macos',
+            appName: 'ZipMacRunner',
+            bundleId: 'com.example.zip.macos',
+            executablePath: runnerBin,
+            minimumOsVersion: '11.0',
+            frameworkPaths: [zipPath],
+            outputArchivePath: appZipPath,
+            outputAppDirPath: appDirPath,
+          ),
+        );
+
+        // The assembled bundle on disk carries real symlinks (what codesign
+        // and the layout tests inspect), not materialized directories.
+        final fwDir = '$appDirPath/Contents/Frameworks/App.framework';
+        expect(
+          FileSystemEntity.typeSync(
+            '$fwDir/Versions/Current',
+            followLinks: false,
+          ),
+          FileSystemEntityType.link,
+        );
+        expect(Link('$fwDir/Versions/Current').targetSync(), 'A');
+        expect(Link('$fwDir/App').targetSync(), 'Versions/Current/App');
+        expect(
+          Link('$fwDir/Resources').targetSync(),
+          'Versions/Current/Resources',
+        );
+        expect(
+          File('$fwDir/Versions/A/App').readAsBytesSync(),
+          [0xCF, 0xFA, 0xED, 0xFE, 9],
+        );
+
+        // The outer archive preserves the links as S_IFLNK entries.
+        final zipEntries = {
+          for (final e in readZipEntries(File(appZipPath).readAsBytesSync()))
+            e.path: e,
+        };
+        const prefix = 'ZipMacRunner.app/Contents/Frameworks/App.framework';
+        expect(zipEntries['$prefix/Versions/Current']!.isSymlink, isTrue);
+        expect(zipEntries['$prefix/App']!.isSymlink, isTrue);
+        expect(zipEntries['$prefix/Resources']!.isSymlink, isTrue);
+        expect(
+          zipEntries['$prefix/Versions/A/App']!.isExecutable,
+          isTrue,
+        );
+      },
+    );
 
     test(
       'sets archive entry file modes explicitly from role and produces byte-identical output across runs',

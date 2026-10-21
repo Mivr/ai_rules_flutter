@@ -135,10 +135,11 @@ _t3_test = unittest.make(_minimum_os_version_floor_test_impl)
 # -- Bundling ------------------------------------------------------------------
 #
 # rules_apple places what `additional_contents` hands it under the directory
-# that holds it, relative to its owning package. So the App.framework wrapper
-# and the native-library staging are each a directory at the package root,
-# named after its target so that two apps in one package cannot both declare
-# it, with the layout the bundle needs inside it.
+# that holds it, relative to its owning package. App.framework travels as its
+# deterministic App.framework.zip (merged from `AppleBundleInfo.archive`, so
+# the version links survive), while the native-library staging is a directory
+# at the package root, named after its target so that two apps in one package
+# cannot both declare it, with the layout the bundle needs inside it.
 
 def _native_libs_staged_test_impl(ctx):
     """Every library is copied to its basename in one package-root directory."""
@@ -759,6 +760,45 @@ def _bundling_tests(name):
         target_compatible_with = HOST_COMPATIBLE,
     )
 
+    # Regression guards: the App.framework version links travel between
+    # actions as App.framework.zip, never as a tree artifact (Bazel's input
+    # staging materializes directory symlinks as real directories). Each
+    # framework fixture gets a provider-shape test; the xtool bundle and the
+    # Mach-O probes get consumer-input tests.
+    archive_tests = []
+    for framework_target in [
+        name + "_fake_debug_app_framework",
+        name + "_fake_release_macho_app_framework",
+        name + "_fake_fat_macos_app_framework",
+        "__" + name + "_e2e_macos_app_app_framework",
+        "__" + name + "_default_macos_app_app_framework",
+        name + "_default_fg",
+    ]:
+        test_name = name + "_framework_archive_" + framework_target.replace(":", "").replace("__", "")
+        _framework_archive_test(
+            name = test_name,
+            target_under_test = ":" + framework_target,
+        )
+        archive_tests.append(test_name)
+    _xtool_bundle_framework_archive_test(
+        name = name + "_xtool_bundle_framework_archive",
+        target_under_test = ":" + name + "_fake_xtool_macos_bundle",
+    )
+    archive_tests.append(name + "_xtool_bundle_framework_archive")
+    for probe_target in [
+        name + "_verify_fat_macos_framework",
+        name + "_verify_release_macho_app_framework",
+        name + "_verify_default_macos_app_framework",
+        name + "_verify_e2e_macos_app_framework",
+        name + "_verify_default_fg_framework",
+    ]:
+        test_name = name + "_probe_inputs_" + probe_target[len(name) + 1:]
+        _framework_probe_inputs_test(
+            name = test_name,
+            target_under_test = ":" + probe_target,
+        )
+        archive_tests.append(test_name)
+
     _xtool_macos_app_actions_test(
         name = name + "_xtool_macos_app_actions",
         target_under_test = name + "_e2e_macos_app",
@@ -772,7 +812,7 @@ def _bundling_tests(name):
         name + "_xtool_macos_app_actions",
         name + "_two_apps_one_package",
         name + "_macos_framework_layout_test",
-    ] + surface_tests + _xtool_macos_validation_tests(name)
+    ] + archive_tests + surface_tests + _xtool_macos_validation_tests(name)
 
 def _macos_framework_bundle_info_test_impl(ctx):
     """flutter_macos_framework must provide AppleBundleInfo so rules_apple merges it as a zip."""
@@ -803,6 +843,116 @@ def _macos_framework_bundle_info_test_impl(ctx):
     return analysistest.end(env)
 
 _macos_framework_bundle_info_test = analysistest.make(_macos_framework_bundle_info_test_impl)
+
+def _framework_archive_test_impl(ctx):
+    """flutter_macos_framework must hand consumers the archive, never the tree.
+
+    Bazel does not preserve directory symlinks inside tree artifacts when it
+    stages them as action or test inputs (a link to a directory arrives as a
+    real directory), so the versioned App.framework layout travels between
+    actions only as its deterministic App.framework.zip. This test fails if a
+    framework tree artifact with internal directory symlinks is ever handed
+    straight to a consumer again through DefaultInfo or
+    FlutterDarwinFrameworkInfo.
+    """
+    env = analysistest.begin(ctx)
+    tut = analysistest.target_under_test(env)
+
+    files = tut[DefaultInfo].files.to_list()
+    for f in files:
+        asserts.false(
+            env,
+            f.is_directory,
+            "DefaultInfo must not hand out the framework tree artifact %s: " % f.path +
+            "consumers would see materialized directories instead of symlinks; " +
+            "hand out App.framework.zip instead",
+        )
+    asserts.true(
+        env,
+        any([f.short_path.endswith("/App.framework.zip") for f in files]),
+        "Expected App.framework.zip in DefaultInfo.files, got: %s" % [f.short_path for f in files],
+    )
+
+    asserts.true(
+        env,
+        FlutterDarwinFrameworkInfo in tut,
+        "Expected FlutterDarwinFrameworkInfo on flutter_macos_framework",
+    )
+    fw_info = tut[FlutterDarwinFrameworkInfo]
+    for f in fw_info.framework_files.to_list():
+        asserts.false(
+            env,
+            f.is_directory,
+            "FlutterDarwinFrameworkInfo.framework_files must not contain the framework tree %s; " % f.path +
+            "the xtool backend would stage it with materialized symlinks",
+        )
+    asserts.true(
+        env,
+        fw_info.framework_dir != None and fw_info.framework_dir.endswith("App.framework.zip"),
+        "Expected FlutterDarwinFrameworkInfo.framework_dir at App.framework.zip, got: %s" % fw_info.framework_dir,
+    )
+    return analysistest.end(env)
+
+_framework_archive_test = analysistest.make(_framework_archive_test_impl)
+
+def _xtool_bundle_framework_archive_test_impl(ctx):
+    """The xtool bundle/runner actions must take the framework archive, not the tree.
+
+    Both the FlutterXtoolMacosBundle embed step and the FlutterXtoolRunner
+    link step receive `--framework` paths for every entry of `frameworks`.
+    This test fails if App.framework ever reaches either action as a staged
+    tree artifact directory again: only the `.framework.zip` archive (which
+    the tool extracts locally with real symlinks) or a non-tree input may.
+    """
+    env = analysistest.begin(ctx)
+    saw_archive = False
+    for action in analysistest.target_actions(env):
+        if action.mnemonic not in ("FlutterXtoolMacosBundle", "FlutterXtoolRunner"):
+            continue
+        argv = action.argv
+        for idx, arg in enumerate(argv):
+            if arg == "--framework" and argv[idx + 1].endswith(".framework.zip"):
+                saw_archive = True
+        for f in action.inputs.to_list():
+            asserts.false(
+                env,
+                f.is_directory and "App.framework" in f.path,
+                "%s takes the framework tree %s as an input: " % (action.mnemonic, f.path) +
+                "staging would materialize its symlinks; take App.framework.zip instead",
+            )
+    asserts.true(
+        env,
+        saw_archive,
+        "Expected a --framework App.framework.zip argument on the xtool bundle/runner actions",
+    )
+    return analysistest.end(env)
+
+_xtool_bundle_framework_archive_test = analysistest.make(_xtool_bundle_framework_archive_test_impl)
+
+def _framework_probe_inputs_test_impl(ctx):
+    """A Mach-O verify probe over a framework must not take a tree input.
+
+    The probe reads the binary either from the staged input or from the
+    `--framework-zip`; a tree input would additionally route the layout
+    assertions in `verifyMacosFramework` at staged (possibly materialized)
+    symlinks. Framework probes take App.framework.zip.
+    """
+    env = analysistest.begin(ctx)
+    actions = [a for a in analysistest.target_actions(env) if a.mnemonic == "FlutterMachOVerifyProbe"]
+    asserts.equals(env, 1, len(actions), "expected one verify action, got %s" % [a.mnemonic for a in analysistest.target_actions(env)])
+    if len(actions) != 1:
+        return analysistest.end(env)
+    for f in actions[0].inputs.to_list():
+        asserts.false(
+            env,
+            f.is_directory,
+            "verify probe must not take a directory input (%s): " % f.path +
+            "a tree artifact's symlinks would arrive materialized at the " +
+            "staged layout assertions; verify App.framework.zip instead",
+        )
+    return analysistest.end(env)
+
+_framework_probe_inputs_test = analysistest.make(_framework_probe_inputs_test_impl)
 
 def _xtool_macos_attrs_and_secrets_test_impl(ctx):
     env = analysistest.begin(ctx)

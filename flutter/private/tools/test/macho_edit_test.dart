@@ -17,6 +17,74 @@ String _readCString(Uint8List bytes, int start) {
   return utf8.decode(bytes.sublist(start, end));
 }
 
+/// Builds a minimal valid stored (uncompressed) ZIP from [files] and
+/// [symlinks] (link path to target), with Unix modes matching the framework
+/// producer (`0100644` files, `0120777` links). For
+/// `extractFrameworkZip` unit coverage, including hostile names.
+Uint8List _storedZip(
+  Map<String, List<int>> files, {
+  Map<String, String> symlinks = const {},
+}) {
+  final local = BytesBuilder(copy: false);
+  final central = BytesBuilder(copy: false);
+  final names = [...files.keys, ...symlinks.keys]..sort();
+  var offset = 0;
+  for (final name in names) {
+    final isLink = symlinks.containsKey(name);
+    final payload = isLink ? utf8.encode(symlinks[name]!) : files[name]!;
+    final nameBytes = utf8.encode(name);
+    final lh = ByteData(30)
+      ..setUint32(0, 0x04034b50, Endian.little)
+      ..setUint16(4, 20, Endian.little)
+      ..setUint16(6, 0, Endian.little)
+      ..setUint16(8, 0, Endian.little)
+      ..setUint16(10, 0, Endian.little)
+      ..setUint16(12, 0, Endian.little)
+      ..setUint32(14, 0, Endian.little)
+      ..setUint32(18, payload.length, Endian.little)
+      ..setUint32(22, payload.length, Endian.little)
+      ..setUint16(26, nameBytes.length, Endian.little)
+      ..setUint16(28, 0, Endian.little);
+    local.add(lh.buffer.asUint8List());
+    local.add(nameBytes);
+    local.add(payload);
+    final mode = isLink ? 0xA1FF : 0x81A4;
+    final ch = ByteData(46)
+      ..setUint32(0, 0x02014b50, Endian.little)
+      ..setUint16(4, 20, Endian.little)
+      ..setUint16(6, 20, Endian.little)
+      ..setUint16(8, 0, Endian.little)
+      ..setUint16(10, 0, Endian.little)
+      ..setUint16(12, 0, Endian.little)
+      ..setUint16(14, 0, Endian.little)
+      ..setUint32(16, 0, Endian.little)
+      ..setUint32(20, payload.length, Endian.little)
+      ..setUint32(24, payload.length, Endian.little)
+      ..setUint16(28, nameBytes.length, Endian.little)
+      ..setUint16(30, 0, Endian.little)
+      ..setUint16(32, 0, Endian.little)
+      ..setUint16(34, 0, Endian.little)
+      ..setUint16(36, 0, Endian.little)
+      ..setUint32(38, mode << 16, Endian.little)
+      ..setUint32(42, offset, Endian.little);
+    central.add(ch.buffer.asUint8List());
+    central.add(nameBytes);
+    offset += 30 + nameBytes.length + payload.length;
+  }
+  final centralBytes = central.toBytes();
+  final eocd = ByteData(22)
+    ..setUint32(0, 0x06054b50, Endian.little)
+    ..setUint16(8, names.length, Endian.little)
+    ..setUint16(10, names.length, Endian.little)
+    ..setUint32(12, centralBytes.length, Endian.little)
+    ..setUint32(16, offset, Endian.little);
+  return Uint8List.fromList([
+    ...local.toBytes(),
+    ...centralBytes,
+    ...eocd.buffer.asUint8List(),
+  ]);
+}
+
 /// Builds a synthetic 64-bit Mach-O binary with an embedded `LC_CODE_SIGNATURE`
 /// (`CS_SuperBlob` + `CS_CodeDirectory` with SHA-256 4096-byte page hashes)
 /// at offset 0x2000 (spanning 2 code pages of 0x1000 bytes each).
@@ -965,6 +1033,168 @@ void main() {
         );
       },
     );
+
+    test(
+      'extractFrameworkZip recreates the versioned layout with real symlinks',
+      () {
+        final dylibBytes = macho.generateStubMachO(
+          arch: 'arm64',
+          platform: macho.platformMacos,
+          minOs: macho.parsePackedVersion('15.0'),
+          sdkVersion: macho.parsePackedVersion('15.0'),
+          installName: '@rpath/App.framework/Versions/A/App',
+        );
+        final binFile = File('${tempDir.path}/App_bin2')
+          ..writeAsBytesSync(dylibBytes);
+        const plistXml =
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<plist version="1.0"><dict>\n'
+            '  <key>CFBundleExecutable</key><string>App</string>\n'
+            '  <key>CFBundleIdentifier</key><string>io.flutter.flutter.app</string>\n'
+            '  <key>CFBundlePackageType</key><string>FMWK</string>\n'
+            '</dict></plist>\n';
+        final plistFile = File('${tempDir.path}/Info2.plist')
+          ..writeAsStringSync(plistXml);
+        final assetsDir = Directory('${tempDir.path}/flutter_assets2')
+          ..createSync(recursive: true);
+        File('${assetsDir.path}/a.txt').writeAsStringSync('asset');
+        final wrapperDir = '${tempDir.path}/wrapper2';
+        final outputZip = '${tempDir.path}/App2.framework.zip';
+
+        macho.main([
+          'assemble-macos-framework',
+          '--binary',
+          binFile.path,
+          '--info-plist',
+          plistFile.path,
+          '--assets',
+          assetsDir.path,
+          '--output-dir',
+          wrapperDir,
+          '--output-zip',
+          outputZip,
+        ]);
+
+        // A consumer extracts the archive locally instead of trusting Bazel
+        // to stage the framework tree with its symlinks intact.
+        final extractedRoot = Directory('${tempDir.path}/extracted')
+          ..createSync(recursive: true);
+        macho.extractFrameworkZip(
+          File(outputZip).readAsBytesSync(),
+          extractedRoot,
+        );
+        final fwPath = '${extractedRoot.path}/App.framework';
+        expect(
+          File('$fwPath/Versions/A/App').readAsBytesSync(),
+          equals(dylibBytes),
+        );
+        expect(
+          File('$fwPath/Versions/A/Resources/flutter_assets/a.txt')
+              .readAsStringSync(),
+          'asset',
+        );
+        expect(
+          FileSystemEntity.typeSync(
+            '$fwPath/Versions/Current',
+            followLinks: false,
+          ),
+          FileSystemEntityType.link,
+        );
+        expect(Link('$fwPath/Versions/Current').targetSync(), 'A');
+        expect(Link('$fwPath/App').targetSync(), 'Versions/Current/App');
+        expect(
+          Link('$fwPath/Resources').targetSync(),
+          'Versions/Current/Resources',
+        );
+        macho.verifyMacosFramework(
+          fwPath,
+          frameworkName: 'App',
+          frameworkZipPath: outputZip,
+        );
+      },
+    );
+
+    test('extractFrameworkZip refuses unsafe entry paths and targets', () {
+      Directory fresh(String name) =>
+          Directory('${tempDir.path}/$name')..createSync(recursive: true);
+
+      // Well-formed entries extract with contents and link targets intact.
+      final goodDir = fresh('good');
+      macho.extractFrameworkZip(
+        _storedZip(
+          {
+            'F/Versions/A/f': [1, 2, 3],
+          },
+          symlinks: {
+            'F/Versions/Current': 'A',
+            'F/top': 'Versions/Current/f',
+          },
+        ),
+        goodDir,
+      );
+      expect(File('${goodDir.path}/F/Versions/A/f').readAsBytesSync(), [
+        1,
+        2,
+        3,
+      ]);
+      expect(Link('${goodDir.path}/F/Versions/Current').targetSync(), 'A');
+      expect(Link('${goodDir.path}/F/top').targetSync(), 'Versions/Current/f');
+
+      // Parent escapes in entry paths.
+      expect(
+        () => macho.extractFrameworkZip(
+          _storedZip({
+            '../evil': [1],
+          }),
+          fresh('evil1'),
+        ),
+        throwsA(isA<FormatException>()),
+      );
+      expect(
+        () => macho.extractFrameworkZip(
+          _storedZip({
+            'F/../../evil': [1],
+          }),
+          fresh('evil2'),
+        ),
+        throwsA(isA<FormatException>()),
+      );
+      // Absolute entry path.
+      expect(
+        () => macho.extractFrameworkZip(
+          _storedZip({
+            '/abs/evil': [1],
+          }),
+          fresh('evil3'),
+        ),
+        throwsA(isA<FormatException>()),
+      );
+      // Absolute and escaping symlink targets.
+      expect(
+        () => macho.extractFrameworkZip(
+          _storedZip(
+            {
+              'F/Versions/A/f': [1],
+            },
+            symlinks: {'F/l': '/abs'},
+          ),
+          fresh('evil4'),
+        ),
+        throwsA(isA<FormatException>()),
+      );
+      expect(
+        () => macho.extractFrameworkZip(
+          _storedZip(
+            {
+              'F/Versions/A/f': [1],
+            },
+            symlinks: {'F/l': '../A'},
+          ),
+          fresh('evil5'),
+        ),
+        throwsA(isA<FormatException>()),
+      );
+    });
 
     test(
       'copy-files copies source files under basenames or explicit names and patches when --platform/--min-os are given',

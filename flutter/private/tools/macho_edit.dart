@@ -695,6 +695,54 @@ List<FrameworkZipEntry> readFrameworkZipEntries(Uint8List zipBytes) {
   return entries;
 }
 
+/// Extracts a framework ZIP archive produced by [createFrameworkZipBytes] into
+/// [destDir], recreating symbolic links with their exact stored targets.
+///
+/// Bazel does not preserve directory symlinks inside tree artifacts when it
+/// stages them as action or test inputs (a link to a directory is materialized
+/// as a real directory), so `App.framework` travels between actions as its
+/// deterministic `.framework.zip` and each consumer extracts it locally with
+/// this helper. Extraction is deterministic: entries are applied in sorted
+/// path order, and only file contents and link targets affect the result.
+///
+/// Entry paths and symlink targets must be relative and free of `..`
+/// segments; anything else throws, since archives only ever come from the
+/// rules' own producer.
+void extractFrameworkZip(Uint8List zipBytes, Directory destDir) {
+  final entries = readFrameworkZipEntries(zipBytes)
+    ..sort((a, b) => a.path.compareTo(b.path));
+  if (entries.isEmpty) {
+    throw const FormatException('Refusing to extract an empty ZIP archive.');
+  }
+  for (final entry in entries) {
+    final segments = entry.path.split('/');
+    if (segments.any((s) => s.isEmpty || s == '.' || s == '..') ||
+        entry.path.startsWith('/')) {
+      throw FormatException(
+        'Refusing to extract unsafe ZIP entry: ${entry.path}',
+      );
+    }
+    final destPath = '${destDir.path}/${entry.path}';
+    if (entry.isSymlink) {
+      final target = utf8.decode(entry.data);
+      final targetSegments = target.split('/');
+      if (target.isEmpty ||
+          target.startsWith('/') ||
+          targetSegments.any((s) => s == '..')) {
+        throw FormatException(
+          'Refusing to extract unsafe symlink ${entry.path} -> $target',
+        );
+      }
+      Directory(destPath).parent.createSync(recursive: true);
+      _createSymlinkReplacingSync(destPath, target);
+    } else {
+      final destFile = File(destPath);
+      destFile.parent.createSync(recursive: true);
+      destFile.writeAsBytesSync(entry.data);
+    }
+  }
+}
+
 void _runAssembleMacosFramework(List<String> args) {
   String? binaryPath;
   String? infoPlistPath;

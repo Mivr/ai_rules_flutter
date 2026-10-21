@@ -48,6 +48,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'macho_edit.dart' show extractFrameworkZip;
+
 // ---------------------------------------------------------------------------
 // Pure-Dart SHA-1 (RFC 3174) & SHA-256 (FIPS 180-4)
 // ---------------------------------------------------------------------------
@@ -1414,6 +1416,11 @@ List<ZipEntry> readZipEntries(Uint8List zipBytes) {
 ///     slice matching [platform] (`ios`, `ios_sim`, or `macos`).
 ///   - A wrapper directory containing `*.framework` or `*.xcframework` children
 ///     (such as a Bazel tree artifact output).
+///
+/// A `.framework.zip` archive is NOT accepted here: callers extract those
+/// with [extractFrameworkArchive] first, since Bazel does not preserve
+/// directory symlinks inside tree artifacts staged as action inputs and
+/// `App.framework` travels between actions as its deterministic zip.
 List<Directory> resolveFrameworkDirectories(String inputPath, String platform) {
   final dir = Directory(inputPath);
   if (!dir.existsSync()) {
@@ -1447,6 +1454,37 @@ List<Directory> resolveFrameworkDirectories(String inputPath, String platform) {
     );
   }
   return results;
+}
+
+/// Extracts a `.framework.zip` archive (the form `App.framework` travels in
+/// between Bazel actions: Bazel does not preserve directory symlinks inside
+/// tree artifacts when staging them as action inputs) into [scratchRoot] and
+/// returns the extracted `.framework` directory.
+///
+/// Entry paths in the archive carry the `<Name>.framework/` prefix written by
+/// the producer, so the extracted directory is
+/// `<scratchRoot>/<archive-basename-minus-.zip>/<archive-basename-minus-.zip>/`.
+/// Any previous extraction at that path is removed first so a re-run over a
+/// reused scratch root can never see stale entries.
+Directory extractFrameworkArchive(String zipPath, Directory scratchRoot) {
+  final zipBase = zipPath.split('/').where((s) => s.isNotEmpty).last;
+  if (!zipBase.endsWith('.framework.zip')) {
+    throw ArgumentError('Not a framework archive: $zipPath');
+  }
+  final fwFileName = zipBase.substring(0, zipBase.length - '.zip'.length);
+  final scratch = Directory('${scratchRoot.path}/$fwFileName');
+  if (scratch.existsSync()) {
+    scratch.deleteSync(recursive: true);
+  }
+  scratch.createSync(recursive: true);
+  extractFrameworkZip(File(zipPath).readAsBytesSync(), scratch);
+  final extracted = Directory('${scratch.path}/$fwFileName');
+  if (!extracted.existsSync()) {
+    throw ArgumentError(
+      'Framework archive $zipPath did not contain $fwFileName/.',
+    );
+  }
+  return extracted;
 }
 
 List<Directory> _resolveXcframeworkSlice(
@@ -2070,8 +2108,17 @@ void assembleBundle(BundleConfig config) {
     }
 
     // 5. Resolve and embed frameworks and native dynamic libraries.
+    final frameworksScratch = Directory('${tempDir.path}/frameworks');
     for (final fwInput in config.frameworkPaths) {
-      final fwDirs = resolveFrameworkDirectories(fwInput, config.platform);
+      final List<Directory> fwDirs;
+      if (fwInput.endsWith('.framework.zip')) {
+        // App.framework travels between actions as its deterministic archive
+        // because Bazel does not preserve the framework's directory symlinks
+        // when staging a tree artifact as an action input.
+        fwDirs = [extractFrameworkArchive(fwInput, frameworksScratch)];
+      } else {
+        fwDirs = resolveFrameworkDirectories(fwInput, config.platform);
+      }
       for (final fwDir in fwDirs) {
         frameworksDir.createSync(recursive: true);
         final fwFileName = fwDir.uri.pathSegments
@@ -2678,8 +2725,18 @@ void compileRunner(RunnerCompileConfig config) {
 
   final resolvedFrameworkDirs = <Directory>[];
   final linkedFrameworkNames = <String>[];
+  Directory? frameworksScratch;
   for (final fwInput in config.frameworkPaths) {
-    final dirs = resolveFrameworkDirectories(fwInput, config.platform);
+    final List<Directory> dirs;
+    if (fwInput.endsWith('.framework.zip')) {
+      // Same archive form as bundle embedding (see above): extract beside
+      // the declared runner output so the linker gets a real directory.
+      frameworksScratch ??= Directory('${config.outputPath}.frameworks')
+        ..createSync(recursive: true);
+      dirs = [extractFrameworkArchive(fwInput, frameworksScratch)];
+    } else {
+      dirs = resolveFrameworkDirectories(fwInput, config.platform);
+    }
     for (final d in dirs) {
       resolvedFrameworkDirs.add(d);
       final base = d.uri.pathSegments.where((s) => s.isNotEmpty).last;

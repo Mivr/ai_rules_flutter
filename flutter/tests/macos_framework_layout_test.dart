@@ -194,26 +194,10 @@ List<FileSystemEntity> _findRunfileEntities(bool Function(String path) match) {
 }
 
 void _assertFrameworkDirLayout(
-  Directory fwDirInput, {
+  Directory fwDir, {
   required String binaryName,
   bool expectFat = false,
 }) {
-  var fwDir = fwDirInput;
-  final probeBinary = '${fwDir.path}/Versions/A/$binaryName';
-  if (FileSystemEntity.typeSync(probeBinary, followLinks: false) ==
-      FileSystemEntityType.link) {
-    final target = Link(probeBinary).targetSync().replaceAll('\\', '/');
-    final suffix = '/$binaryName.framework/Versions/A/$binaryName';
-    if (target.startsWith('/') && target.endsWith(suffix)) {
-      fwDir = Directory(
-        target.substring(0, target.length - '/Versions/A/$binaryName'.length),
-      );
-    }
-  } else if (FileSystemEntity.typeSync(fwDir.path, followLinks: false) ==
-      FileSystemEntityType.link) {
-    fwDir = Directory(fwDir.resolveSymbolicLinksSync());
-  }
-
   final path = fwDir.path;
   final rootEntries = fwDir
       .listSync(followLinks: false)
@@ -278,6 +262,56 @@ void _assertFrameworkDirLayout(
     File('$path/Resources/Info.plist').readAsStringSync(),
     equals(plistContent),
   );
+}
+
+String _testTmpDir() {
+  final tmp = Platform.environment['TEST_TMPDIR'];
+  if (tmp != null && Directory(tmp).existsSync()) {
+    return tmp;
+  }
+  return Directory.systemTemp.createTempSync('macos_layout_test').path;
+}
+
+/// Extracts framework ZIP [entries] under [destDir], recreating symbolic
+/// links with their exact stored targets.
+///
+/// The on-disk layout assertions below run against this local extraction:
+/// Bazel does not preserve a framework tree artifact's directory symlinks
+/// when staging it as a test input (a link to a directory arrives as a real
+/// directory), so the test extracts the deterministic `App.framework.zip`
+/// exactly as every other consumer (codesign input staging, the .app
+/// assembler, the xtool packager) does, then asserts real `test -L` links.
+void _extractZip(Map<String, _ZipCentralEntry> entries, Directory destDir) {
+  final names = entries.keys.toList()..sort();
+  for (final name in names) {
+    final entry = entries[name]!;
+    final segments = name.split('/');
+    if (segments.any((s) => s.isEmpty || s == '.' || s == '..')) {
+      throw StateError('Refusing to extract unsafe zip entry: $name');
+    }
+    final destPath = '${destDir.path}/$name';
+    if (entry.isSymlink) {
+      final target = utf8.decode(entry.decodeBytes());
+      final targetSegments = target.split('/');
+      if (target.isEmpty ||
+          target.startsWith('/') ||
+          targetSegments.any((s) => s == '..')) {
+        throw StateError(
+          'Refusing to extract unsafe symlink $name -> $target',
+        );
+      }
+      Directory(destPath).parent.createSync(recursive: true);
+      final link = Link(destPath);
+      if (link.existsSync()) {
+        link.deleteSync();
+      }
+      link.createSync(target);
+    } else if (!name.endsWith('/')) {
+      final file = File(destPath);
+      file.parent.createSync(recursive: true);
+      file.writeAsBytesSync(entry.decodeBytes());
+    }
+  }
 }
 
 void _assertFrameworkZipLayout(
@@ -362,28 +396,13 @@ void main() {
       test(
         '$targetName produces versioned App.framework directory and zip',
         () {
-          final fwDirs = _findRunfileEntities(
-            (p) => p.endsWith('/$targetName/App.framework'),
-          );
-          expect(
-            fwDirs,
-            isNotEmpty,
-            reason: 'Expected $targetName/App.framework in runfiles',
-          );
-          _assertFrameworkDirLayout(
-            Directory(fwDirs.first.path),
-            binaryName: 'App',
-            expectFat: expectFat,
-          );
-
           final fwZips = _findRunfileEntities(
-            (p) => p.endsWith('/${targetName}_macho/App.framework.zip'),
+            (p) => p.endsWith('/$targetName/App.framework.zip'),
           );
           expect(
             fwZips,
             isNotEmpty,
-            reason:
-                'Expected ${targetName}_macho/App.framework.zip in runfiles',
+            reason: 'Expected $targetName/App.framework.zip in runfiles',
           );
           final zipEntries = _readZip(File(fwZips.first.path));
           _assertFrameworkZipLayout(
@@ -392,6 +411,15 @@ void main() {
             binaryName: 'App',
             expectFat: expectFat,
             forbidDirectoryEntries: true,
+          );
+
+          final extractRoot = Directory('${_testTmpDir()}/$targetName')
+            ..createSync(recursive: true);
+          _extractZip(zipEntries, extractRoot);
+          _assertFrameworkDirLayout(
+            Directory('${extractRoot.path}/App.framework'),
+            binaryName: 'App',
+            expectFat: expectFat,
           );
         },
       );
