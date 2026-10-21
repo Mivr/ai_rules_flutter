@@ -494,6 +494,46 @@ def check_unreplaced_hooks(label, deps):
         ]),
     )
 
+# Implicit attr for the build-time `@Tags` extractor (see
+# `//flutter/private/tools:extract_library_tags`). The test isolate never
+# parses annotations — `package:test`'s analyzer-backed loader does that for
+# `flutter test`, but under `flutter_tester` only this action reads the
+# entrypoint — so every test rule extracts the tags at build time and ships
+# the JSON to the runner, which injects them as the root group's metadata.
+LIBRARY_TAGS_TOOL_ATTR = attr.label(
+    default = Label("//flutter/private/tools:extract_library_tags"),
+    executable = True,
+    cfg = "exec",
+)
+
+def extract_library_tags_action(ctx, main_file):
+    """Extract the entrypoint's `@Tags` into a JSON file for the test runner.
+
+    Only the entrypoint file is read. An imported file's own `@Tags` stays
+    invisible, exactly as under `flutter test`: the test_core loader parses
+    each suite file, and only the suite file's annotations become that suite's
+    root metadata.
+
+    Args:
+        ctx: Rule context. Must declare `_library_tags_tool`
+            (`LIBRARY_TAGS_TOOL_ATTR`).
+        main_file: The test entrypoint source `File`.
+
+    Returns:
+        The `{"tags": [...]}` JSON `File`, to ship in runfiles and name from
+        `FLUTTER_TEST_LIBRARY_TAGS`.
+    """
+    output = ctx.actions.declare_file(ctx.label.name + ".library_tags.json")
+    ctx.actions.run(
+        executable = ctx.executable._library_tags_tool,
+        arguments = [main_file.path, output.path],
+        inputs = [main_file],
+        outputs = [output],
+        mnemonic = "FlutterExtractLibraryTags",
+        progress_message = "Extracting library tags %s" % ctx.label,
+    )
+    return output
+
 def collect_native_libs(native_deps):
     """Collect shared libraries from native_deps for dart:ffi.
 

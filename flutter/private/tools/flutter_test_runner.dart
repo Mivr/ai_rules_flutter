@@ -119,6 +119,16 @@ void main(List<String> args) async {
     stderr.writeln('flutter_test runner: ${e.message}');
     exit(64);
   }
+  // The suite's library-level `@Tags`, extracted at build time: sent in the
+  // handshake below so the test isolate's root group carries them, as
+  // `test_core` sends `parseMetadata`'s result.
+  final Set<String> libraryTags;
+  try {
+    libraryTags = readLibraryTags(Platform.environment, r.rlocation);
+  } on FormatException catch (e) {
+    stderr.writeln('flutter_test runner: ${e.message}');
+    exit(64);
+  }
   // Touched before the run, as Bazel asks: it is how a runner says it supports
   // sharding at all, and Bazel 9 fails a sharded test whose runner never does.
   final shardStatus = Platform.environment['TEST_SHARD_STATUS_FILE'];
@@ -134,6 +144,7 @@ void main(List<String> args) async {
     coverageOutput: coverageOutput,
     updateGoldens: updateGoldens,
     selection: selection,
+    libraryTags: libraryTags,
     xmlOutput: Platform.environment['XML_OUTPUT_FILE'],
     impeller: Platform.environment['FLUTTER_TEST_IMPELLER'] == '1',
   );
@@ -149,6 +160,7 @@ Future<int> _runOnce({
   required String? coverageOutput,
   required bool updateGoldens,
   required TestSelection selection,
+  required Set<String> libraryTags,
   required String? xmlOutput,
   required bool impeller,
 }) async {
@@ -178,6 +190,7 @@ Future<int> _runOnce({
       coverageOutput: coverageOutput,
       updateGoldens: updateGoldens,
       selection: selection,
+      libraryTags: libraryTags,
       xmlOutput: xmlOutput,
       impeller: impeller,
     );
@@ -329,6 +342,7 @@ class _Harness {
     required String? coverageOutput,
     required bool updateGoldens,
     required TestSelection selection,
+    required Set<String> libraryTags,
     required String? xmlOutput,
     required bool impeller,
   }) async {
@@ -481,7 +495,7 @@ class _Harness {
     );
 
     // Send the initial suite handshake.
-    _send(0, _initialMessage(testPath));
+    _send(0, _initialMessage(testPath, libraryTags));
 
     // Bounded inside Bazel's own budget, like each test below, so a suite that
     // never finishes loading is reported here rather than killed silently.
@@ -498,7 +512,7 @@ class _Harness {
       } else if (selection.narrows) {
         stdout.writeln(
           'flutter_test: no test case in this suite matches this run\'s '
-          '--test_filter or shard.',
+          '--test_filter, tags or shard.',
         );
       }
     } else {
@@ -760,11 +774,15 @@ class _Harness {
     }
   }
 
-  Map<String, dynamic> _initialMessage(String testPath) {
+  Map<String, dynamic> _initialMessage(
+    String testPath,
+    Set<String> libraryTags,
+  ) {
     return {
       'type': 'initial',
       'metadata': _defaultMetadata(
         suiteTimeout(Platform.environment['TEST_TIMEOUT']),
+        libraryTags,
       ),
       'platform': _suitePlatform(),
       'platformVariables': const <String>[],
@@ -780,8 +798,12 @@ class _Harness {
   }
 
   /// Minimal `Metadata.serialize` payload — all optional flags omitted, an
-  /// empty `forTag`, and [timeout] as [suiteTimeout] serializes it.
-  static Map<String, Object?> _defaultMetadata(Object timeout) {
+  /// empty `forTag`, [libraryTags] as the suite's `@Tags`, and [timeout] as
+  /// [suiteTimeout] serializes it.
+  static Map<String, Object?> _defaultMetadata(
+    Object timeout,
+    Set<String> libraryTags,
+  ) {
     return {
       'testOn': null,
       'timeout': timeout,
@@ -790,7 +812,7 @@ class _Harness {
       'verboseTrace': null,
       'chainStackTraces': null,
       'retry': null,
-      'tags': const <String>[],
+      'tags': libraryTags.toList(),
       'onPlatform': const <List<Object>>[],
       'forTag': const <String, Object?>{},
       'languageVersionComment': null,

@@ -6,6 +6,13 @@ import '../bazel_test_protocol.dart';
 /// A test entry, named in full as `package:test` names it.
 Map<String, dynamic> _test(String name) => {'type': 'test', 'name': name};
 
+/// A test entry carrying `package:test` metadata tags.
+Map<String, dynamic> _taggedTest(String name, List<String> tags) => {
+  'type': 'test',
+  'name': name,
+  'metadata': {'tags': tags},
+};
+
 Map<String, dynamic> _group(
   String name,
   List<Map<String, dynamic>> entries, {
@@ -30,6 +37,39 @@ Map<String, dynamic> _suite() => _group('', [
   ], fixtures: true),
   _test('a widget test is a case like any other'),
 ]);
+
+/// A suite with tags at every level `package:test` reports them: group tags
+/// and test tags. Library-level `@Tags` ride on the root group; they get
+/// their own suite below so they do not colour this one.
+Map<String, dynamic> _taggedSuite() => _group('', [
+  _taggedTest('untagged case', []),
+  _taggedTest('slow case', ['slow']),
+  {
+    'type': 'group',
+    'name': 'golden group',
+    'metadata': {
+      'tags': ['golden'],
+    },
+    'entries': [_test('golden group case')],
+    'setUpAll': _test('golden group (setUpAll)'),
+    'tearDownAll': _test('golden group (tearDownAll)'),
+  },
+  _group('mixed group', [
+    _taggedTest('mixed group slow case', ['slow']),
+    _taggedTest('mixed group golden slow case', ['golden', 'slow']),
+  ]),
+]);
+
+/// A suite whose root group carries a library-level `@Tags`, as `package:test`
+/// reports it: every test in the file inherits it.
+Map<String, dynamic> _libraryTaggedSuite() => {
+  'type': 'group',
+  'name': '',
+  'metadata': {
+    'tags': ['library'],
+  },
+  'entries': [_test('first case'), _test('second case')],
+};
 
 List<String> _names(Map<String, dynamic>? group) => [
   for (final entry in group?['entries'] as List? ?? const [])
@@ -149,6 +189,154 @@ void main() {
         }),
         throwsFormatException,
       );
+    });
+
+    test('exclude_tags drops every test carrying an excluded tag', () {
+      final selection = TestSelection.fromEnvironment(const {
+        'FLUTTER_TEST_EXCLUDE_TAGS': 'golden',
+      });
+      expect(selection.narrows, isTrue);
+      expect(_names(selection.select(_taggedSuite())), [
+        'untagged case',
+        'slow case',
+        'mixed group slow case',
+      ]);
+    });
+
+    test('exclude_tags is comma-separated, trimmed, and skips empties', () {
+      final selection = TestSelection.fromEnvironment(const {
+        'FLUTTER_TEST_EXCLUDE_TAGS': ' golden ,, slow ',
+      });
+      expect(_names(selection.select(_taggedSuite())), ['untagged case']);
+    });
+
+    test('include_tags keeps only tests carrying an included tag', () {
+      final selection = TestSelection.fromEnvironment(const {
+        'FLUTTER_TEST_TAGS': 'slow',
+      });
+      expect(selection.narrows, isTrue);
+      expect(_names(selection.select(_taggedSuite())), [
+        'slow case',
+        'mixed group slow case',
+        'mixed group golden slow case',
+      ]);
+    });
+
+    test('exclusion wins over inclusion', () {
+      final selection = TestSelection.fromEnvironment(const {
+        'FLUTTER_TEST_TAGS': 'slow',
+        'FLUTTER_TEST_EXCLUDE_TAGS': 'golden',
+      });
+      expect(_names(selection.select(_taggedSuite())), [
+        'slow case',
+        'mixed group slow case',
+      ]);
+    });
+
+    test('a group tag reaches every case in the group', () {
+      final selection = TestSelection.fromEnvironment(const {
+        'FLUTTER_TEST_TAGS': 'golden',
+      });
+      expect(_names(selection.select(_taggedSuite())), [
+        'golden group case',
+        'mixed group golden slow case',
+      ]);
+    });
+
+    test('a library-level tag on the root group reaches every test', () {
+      final keeping = TestSelection.fromEnvironment(const {
+        'FLUTTER_TEST_TAGS': 'library',
+      });
+      expect(_names(keeping.select(_libraryTaggedSuite())), [
+        'first case',
+        'second case',
+      ]);
+      final dropping = TestSelection.fromEnvironment(const {
+        'FLUTTER_TEST_EXCLUDE_TAGS': 'library',
+      });
+      expect(dropping.narrows, isTrue);
+      expect(dropping.select(_libraryTaggedSuite()), isNull);
+    });
+
+    test('a group the tags empty goes, fixtures and all', () {
+      final selection = TestSelection.fromEnvironment(const {
+        'FLUTTER_TEST_TAGS': 'slow',
+      });
+      final selected = selection.select(_taggedSuite())!;
+      expect(_names(selected), [
+        'slow case',
+        'mixed group slow case',
+        'mixed group golden slow case',
+      ]);
+      final entries = selected['entries'] as List;
+      // The golden group kept nothing, so its setUpAll/tearDownAll went with
+      // it; the mixed group kept tests, so it stays.
+      expect(entries, hasLength(2));
+    });
+
+    test('tags apply before the filter and the shards split what is left', () {
+      final shards = [
+        for (var i = 0; i < 2; i++)
+          _names(
+            TestSelection.fromEnvironment({
+              'FLUTTER_TEST_EXCLUDE_TAGS': 'golden',
+              'TESTBRIDGE_TEST_ONLY': 'case',
+              'TEST_TOTAL_SHARDS': '2',
+              'TEST_SHARD_INDEX': '$i',
+            }).select(_taggedSuite()),
+          ),
+      ];
+      expect(shards.expand((s) => s), hasLength(3));
+      expect(
+        shards.expand((s) => s),
+        everyElement(isNot(contains('golden'))),
+      );
+    });
+
+    test('tags that match nothing leave no tree, and pass', () {
+      final selection = TestSelection.fromEnvironment(const {
+        'FLUTTER_TEST_TAGS': 'no such tag',
+      });
+      expect(selection.narrows, isTrue);
+      expect(selection.select(_taggedSuite()), isNull);
+    });
+
+    test('the rule forwards attributes under _ATTR keys', () {
+      final selection = TestSelection.fromEnvironment(const {
+        'FLUTTER_TEST_TAGS_ATTR': 'slow',
+        'FLUTTER_TEST_EXCLUDE_TAGS_ATTR': 'golden',
+      });
+      expect(selection.narrows, isTrue);
+      expect(_names(selection.select(_taggedSuite())), [
+        'slow case',
+        'mixed group slow case',
+      ]);
+    });
+
+    test('a --test_env value overrides the attribute', () {
+      final selection = TestSelection.fromEnvironment(const {
+        'FLUTTER_TEST_EXCLUDE_TAGS': 'slow',
+        'FLUTTER_TEST_EXCLUDE_TAGS_ATTR': 'golden',
+      });
+      expect(_names(selection.select(_taggedSuite())), [
+        'untagged case',
+        'golden group case',
+      ]);
+    });
+
+    test('an empty --test_env value clears the attribute', () {
+      final selection = TestSelection.fromEnvironment(const {
+        'FLUTTER_TEST_EXCLUDE_TAGS': '',
+        'FLUTTER_TEST_EXCLUDE_TAGS_ATTR': 'golden',
+      });
+      expect(selection.narrows, isFalse);
+      expect(_names(selection.select(_taggedSuite())), [
+        'untagged case',
+        'slow case',
+        'golden group case',
+        'mixed group slow case',
+        'mixed group golden slow case',
+      ]);
     });
   });
 

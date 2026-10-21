@@ -345,6 +345,42 @@ flutter_test(
     ],
 )
 
+# Tag selection, as `flutter test --tags` / `--exclude-tags` resolve it:
+# `test/tags_test.dart` carries untagged cases plus cases tagged `golden` at
+# test level, and this target excludes that tag. Only the untagged cases
+# run — the tagged ones fail if they run at all, so a green run proves the
+# pruning. A `--test_env=FLUTTER_TEST_EXCLUDE_TAGS=...` value at run time
+# overrides this.
+flutter_test(
+    name = "tags_test",
+    package_name = "hello_world",
+    exclude_tags = ["golden"],
+    main = "test/tags_test.dart",
+    target_compatible_with = _HOST_COMPATIBLE,
+    deps = [
+        "@deps//:flutter",
+        "@deps//:flutter_test",
+    ],
+)
+
+# Library-level `@Tags`: `test/tags_library_test.dart` annotates its own
+# entrypoint with `@Tags(['golden'])`, which the rule extracts at build time
+# and the runner reports on the suite's root group, so every case inherits it.
+# Excluding `golden` prunes the suite to empty, and an empty suite passes — a
+# green run proves the root-group inheritance. (A `@Tags` on an imported file
+# would stay invisible, exactly as under `flutter test`.)
+flutter_test(
+    name = "tags_library_test",
+    package_name = "hello_world",
+    exclude_tags = ["golden"],
+    main = "test/tags_library_test.dart",
+    target_compatible_with = _HOST_COMPATIBLE,
+    deps = [
+        "@deps//:flutter",
+        "@deps//:flutter_test",
+    ],
+)
+
 # Verifies Dart environment defines: the `defines` attr, the
 # --@rules_flutter//flutter:extra_dart_defines flag (set in .bazelrc, value
 # contains a comma to prove repeatable-flag no-split semantics), and

@@ -70,10 +70,12 @@ load(
     "COPY_TO_DIRECTORY_TOOLCHAINS",
     "FLUTTER_APPLICATION_ATTRS",
     "FLUTTER_DEPS_DOC",
+    "LIBRARY_TAGS_TOOL_ATTR",
     "PLATFORM_CONSTRAINT_ATTRS",
     "check_unreplaced_hooks",
     "declare_flutter_assets_dir",
     "detect_target_platform",
+    "extract_library_tags_action",
     "flutter_build_assets",
     "flutter_compile_shaders",
     "flutter_tester_shader_aspect",
@@ -221,6 +223,19 @@ def _can_bootstrap(deps):
 
 def _has_flutter_test(deps):
     return _exposes_package(deps, ["flutter_test"])
+
+# Runner-contract keys the rule reserves for `--test_env` overrides. The rule
+# forwards `include_tags` / `exclude_tags` under the `_ATTR` names so a
+# `--test_env=FLUTTER_TEST_TAGS=...` (or `FLUTTER_TEST_EXCLUDE_TAGS`) value at
+# run time overrides the attribute; an `env` entry for any of these is
+# rejected in the implementation so the flag stays the one override channel.
+_RESERVED_TEST_ENV_KEYS = [
+    "FLUTTER_TEST_TAGS",
+    "FLUTTER_TEST_EXCLUDE_TAGS",
+    "FLUTTER_TEST_TAGS_ATTR",
+    "FLUTTER_TEST_EXCLUDE_TAGS_ATTR",
+    "FLUTTER_TEST_LIBRARY_TAGS",
+]
 
 def _flutter_test_impl(ctx):
     flutter_toolchain = ctx.toolchains["@rules_flutter//flutter:toolchain_type"]
@@ -443,11 +458,31 @@ def _flutter_test_impl(ctx):
     if base_dill != None:
         env["FLUTTER_TEST_BASE_DILL"] = runfiles_path(base_dill, workspace_name)
 
+    # Tag selection, as `flutter test --tags` / `--exclude-tags` resolve it.
+    # Forwarded under `_ATTR` keys: a `--test_env=FLUTTER_TEST_TAGS=...` (or
+    # `FLUTTER_TEST_EXCLUDE_TAGS`) value at run time overrides the attribute,
+    # and it can only do that when the rule leaves those keys alone — Bazel
+    # lets a rule-set variable win over `--test_env` for the same key. Set
+    # only when the attribute names tags.
+    if ctx.attr.include_tags:
+        env["FLUTTER_TEST_TAGS_ATTR"] = ",".join(ctx.attr.include_tags)
+    if ctx.attr.exclude_tags:
+        env["FLUTTER_TEST_EXCLUDE_TAGS_ATTR"] = ",".join(ctx.attr.exclude_tags)
+
+    # The entrypoint's own `@Tags`, extracted at build time (see
+    # `extract_library_tags_action`): the runner injects them as the root
+    # group's metadata, so they inherit down to every test in the suite.
+    library_tags = extract_library_tags_action(ctx, ctx.file.main)
+    env["FLUTTER_TEST_LIBRARY_TAGS"] = runfiles_path(library_tags, workspace_name)
+
     # User-supplied variables, merged last but never over the rule's own keys:
-    # those six are the runner's start-up contract, and a test that quietly
-    # replaced one would fail far from the cause.
+    # those are the runner's start-up contract, and a test that quietly
+    # replaced one would fail far from the cause. The tag keys the rule leaves
+    # for `--test_env` to override are rejected too, so the flag stays the one
+    # override channel: an `env` value would bake into the target while looking
+    # like a run-time choice.
     for key, value in ctx.attr.env.items():
-        if key in env:
+        if key in env or key in _RESERVED_TEST_ENV_KEYS:
             fail((
                 "flutter_test {name}: env key {key} is set by the rule itself " +
                 "and cannot be overridden."
@@ -461,6 +496,7 @@ def _flutter_test_impl(ctx):
         flutter_sdk_info.flutter_tester,
         flutter_sdk_info.icu_data,
         flutter_assets,
+        library_tags,
     ] + ([base_dill] if base_dill != None else [])
     tool_runfiles = tool[DefaultInfo].default_runfiles
     runfiles = ctx.runfiles(
@@ -611,9 +647,11 @@ _TEST_ATTRS["data"] = attr.label_list(
 # worse than not expanding, because the unexpanded form still looks like a
 # path.
 #
-# The five `FLUTTER_TEST_*` keys the rule sets are the runner's start-up
-# contract; supplying one is rejected in the implementation rather than
-# silently honoured or silently dropped.
+# The `FLUTTER_TEST_*` keys the runner reads are its start-up contract;
+# supplying one in `env` is rejected in the implementation rather than
+# silently honoured or silently dropped. Tag selection is the exception with
+# its own channel: a `--test_env=FLUTTER_TEST_TAGS=...` (or
+# `FLUTTER_TEST_EXCLUDE_TAGS`) value at run time overrides the attribute.
 _TEST_ATTRS["enable_impeller"] = attr.bool(
     doc = "Render with Impeller in flutter_tester, as `flutter test " +
           "--enable-impeller` does, instead of software Skia. A test that " +
@@ -625,10 +663,32 @@ _TEST_ATTRS["enable_impeller"] = attr.bool(
 _TEST_ATTRS["env"] = attr.string_dict(
     doc = "Extra environment variables for the test process. Values are " +
           "literal — no Make-variable or $(location) expansion. The " +
-          "FLUTTER_TEST_* keys the rule sets itself cannot be overridden.",
+          "FLUTTER_TEST_* keys the runner reads cannot be set here; " +
+          "override tag selection at run time with " +
+          "--test_env=FLUTTER_TEST_TAGS=... instead.",
+)
+
+# Tag selection, as `flutter test --tags` / `--exclude-tags` resolve it.
+# Named `include_tags` / `exclude_tags` rather than `tags` because Bazel's
+# own `tags` attribute means something else. A `--test_env=FLUTTER_TEST_TAGS=...`
+# (or `FLUTTER_TEST_EXCLUDE_TAGS`) value at run time overrides the attribute.
+#
+# Library-level `@Tags` on the entrypoint need no attribute: they are extracted
+# at build time and always honoured (see `extract_library_tags_action`).
+_TEST_ATTRS["include_tags"] = attr.string_list(
+    doc = "Run only tests carrying at least one of these `package:test` " +
+          "tags (library, group or test level), as `flutter test --tags` " +
+          "does. A test carrying an `exclude_tags` tag never runs, even " +
+          "when it also carries one of these.",
+)
+_TEST_ATTRS["exclude_tags"] = attr.string_list(
+    doc = "Skip tests carrying any of these `package:test` tags " +
+          "(library, group or test level), as `flutter test " +
+          "--exclude-tags` does. Wins over `include_tags`.",
 )
 _TEST_ATTRS.update(PLATFORM_CONSTRAINT_ATTRS)
 _TEST_ATTRS.update(MODULAR_KERNEL_ATTRS)
+_TEST_ATTRS["_library_tags_tool"] = LIBRARY_TAGS_TOOL_ATTR
 _TEST_ATTRS["_tool"] = attr.label(
     default = Label("//flutter/private/tools:flutter_test_runner"),
     cfg = "exec",

@@ -32,6 +32,7 @@ exports_files(
         "flutter_test_runner.dart",
         "flutter_integration_test_runner.dart",
         "bazel_test_protocol.dart",
+        "extract_library_tags.dart",
     ],
     visibility = ["//flutter:__subpackages__"],
 )
@@ -92,6 +93,15 @@ dart_binary(
     name = "compile_shader",
     compile_mode = "kernel",
     main = "compile_shader.dart",
+    modular_kernel = False,
+    target_compatible_with = HOST_COMPATIBLE,
+    visibility = ["//flutter:__subpackages__"],
+)
+
+dart_binary(
+    name = "extract_library_tags",
+    compile_mode = "exe",
+    main = "extract_library_tags.dart",
     modular_kernel = False,
     target_compatible_with = HOST_COMPATIBLE,
     visibility = ["//flutter:__subpackages__"],
@@ -230,6 +240,7 @@ _UNIT_TESTS = {
         ["@rules_dart//dart/runfiles"],
     ),
     "bazel_test_protocol_test": ("bazel_test_protocol.dart", []),
+    "extract_library_tags_test": ("extract_library_tags.dart", []),
 }
 
 # The runner imports its protocol module by relative path, so every test of the

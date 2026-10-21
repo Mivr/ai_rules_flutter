@@ -48,6 +48,16 @@ void main(List<String> args) async {
     stderr.writeln('flutter_integration_test runner: ${e.message}');
     exit(64);
   }
+  // The suite's library-level `@Tags`, extracted at build time: sent in the
+  // handshake below so the test isolate's root group carries them, as
+  // `test_core` sends `parseMetadata`'s result.
+  final Set<String> libraryTags;
+  try {
+    libraryTags = readLibraryTags(Platform.environment, r.rlocation);
+  } on FormatException catch (e) {
+    stderr.writeln('flutter_integration_test runner: ${e.message}');
+    exit(64);
+  }
 
   final shardStatus = Platform.environment['TEST_SHARD_STATUS_FILE'];
   if (shardStatus != null) {
@@ -66,6 +76,7 @@ void main(List<String> args) async {
     launcher: launcher,
     testPath: testPath,
     selection: selection,
+    libraryTags: libraryTags,
     xmlOutput: Platform.environment['XML_OUTPUT_FILE'],
     bazelTestTimeout: Platform.environment['TEST_TIMEOUT'],
   );
@@ -1630,6 +1641,7 @@ Future<int> runIntegrationSuite({
   required PlatformLauncher launcher,
   required String testPath,
   required TestSelection selection,
+  Set<String> libraryTags = const {},
   required String? xmlOutput,
   required String? bazelTestTimeout,
   Duration dialBackBound = const Duration(seconds: 45),
@@ -1644,6 +1656,7 @@ Future<int> runIntegrationSuite({
     return await harness.run(
       testPath: testPath,
       selection: selection,
+      libraryTags: libraryTags,
       xmlOutput: xmlOutput,
       bazelTestTimeout: bazelTestTimeout,
     );
@@ -1704,6 +1717,7 @@ class _IntegrationHarness {
   Future<int> run({
     required String testPath,
     required TestSelection selection,
+    Set<String> libraryTags = const {},
     required String? xmlOutput,
     required String? bazelTestTimeout,
   }) async {
@@ -1818,7 +1832,7 @@ class _IntegrationHarness {
       },
     );
 
-    _send(0, _initialMessage(testPath, bazelTestTimeout));
+    _send(0, _initialMessage(testPath, bazelTestTimeout, libraryTags));
 
     final ceiling = testCeiling(bazelTestTimeout);
     final root = await suiteReady.future.timeout(
@@ -1833,7 +1847,7 @@ class _IntegrationHarness {
       } else if (selection.narrows) {
         stdout.writeln(
           'flutter_integration_test: no test case in this suite matches '
-          'this run\'s --test_filter or shard.',
+          'this run\'s --test_filter, tags or shard.',
         );
       }
     } else {
@@ -2044,10 +2058,14 @@ class _IntegrationHarness {
   Map<String, dynamic> _initialMessage(
     String testPath,
     String? bazelTestTimeout,
+    Set<String> libraryTags,
   ) {
     return {
       'type': 'initial',
-      'metadata': _defaultMetadata(suiteTimeout(bazelTestTimeout)),
+      'metadata': _defaultMetadata(
+        suiteTimeout(bazelTestTimeout),
+        libraryTags,
+      ),
       'platform': {
         'runtime': _launcher.suiteRuntime,
         'compiler': _launcher.suiteCompiler,
@@ -2066,7 +2084,10 @@ class _IntegrationHarness {
     };
   }
 
-  static Map<String, Object?> _defaultMetadata(Object timeout) {
+  static Map<String, Object?> _defaultMetadata(
+    Object timeout,
+    Set<String> libraryTags,
+  ) {
     return {
       'testOn': null,
       'timeout': timeout,
@@ -2075,7 +2096,7 @@ class _IntegrationHarness {
       'verboseTrace': null,
       'chainStackTraces': null,
       'retry': null,
-      'tags': const <String>[],
+      'tags': libraryTags.toList(),
       'onPlatform': const <List<Object>>[],
       'forTag': const <String, Object?>{},
       'languageVersionComment': null,

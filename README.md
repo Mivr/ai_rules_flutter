@@ -1214,6 +1214,7 @@ Bazel's test protocol applies, as it does to `dart_test`:
 - **Time.** The target's `size` or `timeout` replaces `package:test`'s 30-second default, so a test with no `timeout:` of its own runs as long as Bazel lets the target run. A `timeout:` written on a test still applies, and `Timeout.factor` scales Bazel's limit.
 - **`--test_filter`.** A regular expression matched against each test's full name, group names included, like `flutter test --name`. A target the filter matches nothing in passes, so `bazel test //... --test_filter=x` runs only what it names.
 - **`shard_count`.** Splits the suite's tests into contiguous shares, one per shard.
+- **Tags.** `include_tags` runs only tests carrying at least one of the named `package:test` tags (library, group or test level), as `flutter test --tags` does; `exclude_tags` skips tests carrying any of them, as `flutter test --exclude-tags` does, and wins over `include_tags`. A target left with no test passes. A `--test_env=FLUTTER_TEST_TAGS=...` (or `FLUTTER_TEST_EXCLUDE_TAGS`) value at run time overrides the attribute. A `@Tags` on the test entrypoint itself is extracted at build time and always honoured, reaching every test through the suite's root group; a `@Tags` on a file the entrypoint imports stays invisible, as under `flutter test`.
 - **Results.** Each case is reported in the `test.xml` Bazel collects, so CI shows cases rather than one pass or fail per target.
 
 #### Golden files
@@ -1290,6 +1291,8 @@ For `platform = "android"`, add `flutter_android_engine_x64` (or `flutter_androi
 | `window_title` | Linux GTK window title (`platform = "linux"`). Defaults to the target name. |
 | `android_package_name` | Android application package name (`platform = "android"`). Defaults to `"com.example.flutter_integration_test"`. |
 | `android_abi` | Android ABI (`"x64"` or `"arm64"`, `platform = "android"`). Defaults to `"x64"`. |
+| `include_tags` | Run only tests carrying at least one of the named `package:test` tags, as `flutter test --tags` does. |
+| `exclude_tags` | Skip tests carrying any of the named `package:test` tags, as `flutter test --exclude-tags` does. Wins over `include_tags`. A `--test_env=FLUTTER_TEST_TAGS=...` (or `FLUTTER_TEST_EXCLUDE_TAGS`) value at run time overrides the attribute. A `@Tags` on the test entrypoint itself is extracted at build time and always honoured; a `@Tags` on an imported file stays invisible, as under `flutter test`. |
 
 ### flutter_plugin
 

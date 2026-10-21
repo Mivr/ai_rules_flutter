@@ -87,11 +87,13 @@ load(
     "FLUTTER_APPLICATION_ATTRS",
     "FLUTTER_DEPS_DOC",
     "KERNEL_COMPILE_ATTRS",
+    "LIBRARY_TAGS_TOOL_ATTR",
     "PLATFORM_CONSTRAINT_ATTRS",
     "check_unreplaced_hooks",
     "collect_native_libs",
     "compute_desktop_bundle_copies",
     "declare_flutter_assets_dir",
+    "extract_library_tags_action",
     "flutter_app_shader_aspect",
     "flutter_build_assets",
     "flutter_build_mode",
@@ -231,6 +233,32 @@ def _exposes_package(deps, names):
             if pkg.package_name in names:
                 return True
     return False
+
+def _test_tag_env(ctx, env):
+    """Forward `include_tags` / `exclude_tags` as the runner's tag env vars.
+
+    Forwarded under `_ATTR` keys: a `--test_env=FLUTTER_TEST_TAGS=...` (or
+    `FLUTTER_TEST_EXCLUDE_TAGS`) value at run time overrides the attribute,
+    and it can only do that when the rule leaves those keys alone — Bazel lets
+    a rule-set variable win over `--test_env` for the same key. Set only when
+    the attribute names tags. Called before the `env` merge so a colliding
+    `env` key is rejected like the rule's other keys.
+    """
+    if ctx.attr.include_tags:
+        env["FLUTTER_TEST_TAGS_ATTR"] = ",".join(ctx.attr.include_tags)
+    if ctx.attr.exclude_tags:
+        env["FLUTTER_TEST_EXCLUDE_TAGS_ATTR"] = ",".join(ctx.attr.exclude_tags)
+
+# Runner-contract tag keys the rule reserves for `--test_env` overrides (see
+# `_test_tag_env`): an `env` entry for any of these is rejected in the
+# implementations so the flag stays the one override channel.
+_RESERVED_TAG_ENV_KEYS = [
+    "FLUTTER_TEST_TAGS",
+    "FLUTTER_TEST_EXCLUDE_TAGS",
+    "FLUTTER_TEST_TAGS_ATTR",
+    "FLUTTER_TEST_EXCLUDE_TAGS_ATTR",
+    "FLUTTER_TEST_LIBRARY_TAGS",
+]
 
 def make_web_integration_bootstrap_content(test_import, has_integration_test = False):
     """Generate the per-target web integration test bootstrap Dart source.
@@ -1415,8 +1443,15 @@ def _flutter_integration_test_impl(ctx):
         "FLUTTER_INTEGRATION_TEST_PATH": main_file.short_path,
         "FLUTTER_INTEGRATION_TEST_DECLARED_ENV": json.encode(ctx.attr.env),
     }
+    _test_tag_env(ctx, env)
+
+    # The entrypoint's own `@Tags`, extracted at build time (see
+    # `extract_library_tags_action`): the runner injects them as the root
+    # group's metadata, so they inherit down to every test in the suite.
+    library_tags = extract_library_tags_action(ctx, main_file)
+    env["FLUTTER_TEST_LIBRARY_TAGS"] = runfiles_path(library_tags, workspace_name)
     for key, value in ctx.attr.env.items():
-        if key in env:
+        if key in env or key in _RESERVED_TAG_ENV_KEYS:
             fail((
                 "flutter_integration_test {name}: env key {key} is set by the " +
                 "rule itself and cannot be overridden."
@@ -1430,6 +1465,7 @@ def _flutter_integration_test_impl(ctx):
         ctx.file._chrome_headless_shell,
         ctx.file._chrome_fontconfig,
         ctx.file._roboto_font,
+        library_tags,
     ] + ctx.attr._chrome_all_files.files.to_list()
     tool_runfiles = tool[DefaultInfo].default_runfiles
     runfiles = ctx.runfiles(
@@ -1773,8 +1809,15 @@ def _flutter_linux_integration_test_impl(ctx):
         "FLUTTER_INTEGRATION_TEST_PATH": main_file.short_path,
         "FLUTTER_INTEGRATION_TEST_DECLARED_ENV": json.encode(ctx.attr.env),
     }
+    _test_tag_env(ctx, env)
+
+    # The entrypoint's own `@Tags`, extracted at build time (see
+    # `extract_library_tags_action`): the runner injects them as the root
+    # group's metadata, so they inherit down to every test in the suite.
+    library_tags = extract_library_tags_action(ctx, main_file)
+    env["FLUTTER_TEST_LIBRARY_TAGS"] = runfiles_path(library_tags, workspace_name)
     for key, value in ctx.attr.env.items():
-        if key in env:
+        if key in env or key in _RESERVED_TAG_ENV_KEYS:
             fail((
                 "flutter_integration_test {name}: env key {key} is set by the " +
                 "rule itself and cannot be overridden."
@@ -1788,6 +1831,7 @@ def _flutter_linux_integration_test_impl(ctx):
         ctx.file._linux_xvfb,
         ctx.file._linux_xkbcomp,
         ctx.file._linux_fontconfig,
+        library_tags,
     ] + ctx.attr._linux_runtime_all_files.files.to_list()
     tool_runfiles = tool[DefaultInfo].default_runfiles
     runfiles = ctx.runfiles(
@@ -2108,8 +2152,15 @@ def _flutter_android_integration_test_impl(ctx):
         "FLUTTER_INTEGRATION_TEST_PATH": main_file.short_path,
         "FLUTTER_INTEGRATION_TEST_DECLARED_ENV": json.encode(ctx.attr.env),
     }
+    _test_tag_env(ctx, env)
+
+    # The entrypoint's own `@Tags`, extracted at build time (see
+    # `extract_library_tags_action`): the runner injects them as the root
+    # group's metadata, so they inherit down to every test in the suite.
+    library_tags = extract_library_tags_action(ctx, main_file)
+    env["FLUTTER_TEST_LIBRARY_TAGS"] = runfiles_path(library_tags, workspace_name)
     for key, value in ctx.attr.env.items():
-        if key in env:
+        if key in env or key in _RESERVED_TAG_ENV_KEYS:
             fail((
                 "flutter_integration_test {name}: env key {key} is set by the " +
                 "rule itself and cannot be overridden."
@@ -2122,6 +2173,7 @@ def _flutter_android_integration_test_impl(ctx):
         apk_file,
         ctx.file._android_emulator,
         ctx.file._android_adb,
+        library_tags,
     ] + ctx.attr._android_runtime_all_files.files.to_list()
     tool_runfiles = tool[DefaultInfo].default_runfiles
     runfiles = ctx.runfiles(
@@ -2198,6 +2250,25 @@ _COMMON_INTEGRATION_TEST_ATTRS["data"] = attr.label_list(
 _COMMON_INTEGRATION_TEST_ATTRS["env"] = attr.string_dict(
     doc = "Extra environment variables for the test runner process.",
 )
+
+# Tag selection, as `flutter test --tags` / `--exclude-tags` resolve it.
+# Named `include_tags` / `exclude_tags` rather than `tags` because Bazel's
+# own `tags` attribute means something else. A `--test_env=FLUTTER_TEST_TAGS=...`
+# (or `FLUTTER_TEST_EXCLUDE_TAGS`) value at run time overrides the attribute.
+#
+# Library-level `@Tags` on the entrypoint need no attribute: they are extracted
+# at build time and always honoured (see `extract_library_tags_action`).
+_COMMON_INTEGRATION_TEST_ATTRS["include_tags"] = attr.string_list(
+    doc = "Run only tests carrying at least one of these `package:test` " +
+          "tags (library, group or test level), as `flutter test --tags` " +
+          "does. A test carrying an `exclude_tags` tag never runs, even " +
+          "when it also carries one of these.",
+)
+_COMMON_INTEGRATION_TEST_ATTRS["exclude_tags"] = attr.string_list(
+    doc = "Skip tests carrying any of these `package:test` tags " +
+          "(library, group or test level), as `flutter test " +
+          "--exclude-tags` does. Wins over `include_tags`.",
+)
 _COMMON_INTEGRATION_TEST_ATTRS.update(PLATFORM_CONSTRAINT_ATTRS)
 _COMMON_INTEGRATION_TEST_ATTRS.update(MODULAR_KERNEL_ATTRS)
 _COMMON_INTEGRATION_TEST_ATTRS["_tool"] = attr.label(
@@ -2205,6 +2276,7 @@ _COMMON_INTEGRATION_TEST_ATTRS["_tool"] = attr.label(
     executable = True,
     cfg = "exec",
 )
+_COMMON_INTEGRATION_TEST_ATTRS["_library_tags_tool"] = LIBRARY_TAGS_TOOL_ATTR
 _COMMON_INTEGRATION_TEST_ATTRS["_bundle_tool"] = attr.label(
     default = Label("//flutter/private/tools:bundle_app"),
     executable = True,
@@ -2390,7 +2462,10 @@ _ANDROID_INTEGRATION_TEST_ATTRS = {
     "platform": _COMMON_INTEGRATION_TEST_ATTRS["platform"],
     "data": _COMMON_INTEGRATION_TEST_ATTRS["data"],
     "env": _COMMON_INTEGRATION_TEST_ATTRS["env"],
+    "include_tags": _COMMON_INTEGRATION_TEST_ATTRS["include_tags"],
+    "exclude_tags": _COMMON_INTEGRATION_TEST_ATTRS["exclude_tags"],
     "_tool": _COMMON_INTEGRATION_TEST_ATTRS["_tool"],
+    "_library_tags_tool": _COMMON_INTEGRATION_TEST_ATTRS["_library_tags_tool"],
     "_sky_engine": _COMMON_INTEGRATION_TEST_ATTRS["_sky_engine"],
     "_android_emulator": attr.label(
         default = Label("@flutter_android_headless_runtime//:sdk/emulator/emulator"),
