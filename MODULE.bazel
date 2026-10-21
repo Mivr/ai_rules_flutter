@@ -45,7 +45,12 @@ bazel_dep(name = "rules_multitool", version = "1.11.1", dev_dependency = True)
 bazel_dep(name = "buildifier_prebuilt", version = "10.1.0", dev_dependency = True)
 bazel_dep(name = "bazelrc-preset.bzl", version = "1.9.2", dev_dependency = True)
 
-bazel_dep(name = "llvm", version = "0.8.19")
+# LLVM is only needed by the opt-in xtool Darwin SDK backend
+# (`flutter.darwin_sdk`): the `@flutter_xtool_darwin_sdk` repo symlinks the
+# hermetic LLVM `bin`/`lib` trees, and only when a bundle is configured.
+# It stays a dev dependency so this repo's own builds keep the hermetic
+# script tests green; xtool consumers add the same line to their root module.
+bazel_dep(name = "llvm", version = "0.8.19", dev_dependency = True)
 
 git_override(
     module_name = "rules_dart",
@@ -66,6 +71,12 @@ go_sdk.download(
     version = "1.26.2",
 )
 
+# Hermetic LLVM C++ toolchains for this repo's own builds only. Consumers
+# never see them: e2e workspaces and xtool users register the LLVM toolchains
+# they need in their own root modules. (The xtool Darwin cross-toolchains are
+# separate: `@flutter_xtool_darwin_sdk//:all` below stays registered for
+# everyone, but its toolchains are gated on the opt-in `use_xtool_backend`
+# setting, so they never participate in toolchain resolution otherwise.)
 register_toolchains(
     "@llvm//toolchain:linux_aarch64_to_linux_aarch64",
     "@llvm//toolchain:linux_aarch64_to_linux_x86_64",
@@ -75,6 +86,7 @@ register_toolchains(
     "@llvm//toolchain:macos_aarch64_to_linux_x86_64",
     "@llvm//toolchain:macos_x86_64_to_linux_aarch64",
     "@llvm//toolchain:macos_x86_64_to_linux_x86_64",
+    dev_dependency = True,
 )
 
 # Register the apple_cc CC toolchain explicitly so rules_swift's

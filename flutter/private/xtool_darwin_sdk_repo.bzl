@@ -24,7 +24,6 @@ and supply their own `darwin.artifactbundle` (`iPhoneOS.sdk`,
 Apple SDKs Agreement.
 """
 
-load("@llvm//toolchain:selects.bzl", "resource_dir_arg")
 load("@rules_cc//cc:action_names.bzl", "ACTION_NAMES")
 load(
     "@rules_cc//cc:cc_toolchain_config_lib.bzl",
@@ -676,10 +675,26 @@ def _host_llvm_exec_pair(repository_ctx):
     exec_cpu = "aarch64" if arch in ("aarch64", "arm64") else "x86_64"
     return exec_os, exec_cpu
 
+def _llvm_tool_repo(exec_os, exec_cpu):
+    """Canonical name of the hermetic LLVM prebuilt-toolchain repo for an exec pair.
+
+    Same mapping as `resource_dir_arg` in `@llvm//toolchain:selects.bzl`
+    (kept local so loading this file never fetches `@llvm`), spelled as a
+    canonical `@@llvm++llvm_toolchain_minimal+...` label: an apparent label
+    here would resolve against rules_flutter's own repo mapping, which has no
+    `@llvm` once the `bazel_dep` goes dev-only. The canonical form resolves
+    globally, so it works in any root module that depends on `llvm` 0.8.19
+    (the version xtool consumers are told to add). It is only resolved when
+    a Darwin SDK is configured, so plain consumers never fetch `@llvm`.
+    """
+    os_part = "darwin" if exec_os == "macos" else exec_os
+    cpu_part = "amd64" if exec_cpu == "x86_64" else "arm64"
+    return "@@llvm++llvm_toolchain_minimal+llvm-toolchain-minimal-%s-%s" % (os_part, cpu_part)
+
 def _symlink_hermetic_llvm(repository_ctx):
     exec_os, exec_cpu = _host_llvm_exec_pair(repository_ctx)
     llvm_build_path = repository_ctx.path(
-        resource_dir_arg(exec_os, exec_cpu).relative(":BUILD.bazel"),
+        Label(_llvm_tool_repo(exec_os, exec_cpu) + "//:compile_resource_dir").relative(":BUILD.bazel"),
     )
     llvm_root = llvm_build_path.dirname
     repository_ctx.symlink(llvm_root.get_child("bin"), "llvm/bin")
@@ -695,7 +710,13 @@ def _xtool_darwin_sdk_repo_impl(repository_ctx):
         context = "xtool_darwin_sdk_repo",
     )
 
-    _symlink_hermetic_llvm(repository_ctx)
+    # The hermetic LLVM toolchain archive is only resolved when a Darwin SDK
+    # is configured: resolving the label fetches `@llvm`, which plain
+    # consumers must never pay for. Unconfigured checkouts keep empty `llvm/`
+    # globs (all `allow_empty`) so `bazel test //...` still works; anything
+    # that executes the wrappers fails with the configuration error instead.
+    if cfg.url or cfg.path:
+        _symlink_hermetic_llvm(repository_ctx)
 
     sdk_available = False
     sdk_paths = {}
