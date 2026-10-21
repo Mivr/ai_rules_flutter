@@ -1,4 +1,5 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
+load("@rules_dart//dart:defs.bzl", "dart_test")
 load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
 load("//flutter/private:flutter_aot_target.bzl", "flutter_aot_target")
 load(":action_inputs_test.bzl", "action_inputs_test_suite")
@@ -39,6 +40,42 @@ load(":unused_inputs_test.bzl", "unused_inputs_test_suite")
 load(":validation_test.bzl", "validation_test_suite")
 load(":versions_test.bzl", "versions_test_suite")
 load(":web_test.bzl", "web_test_suite")
+
+# Static guard: every download in flutter/** passes a validated digest.
+# Each package holding `.bzl` files contributes a `download_guard_bzl`
+# filegroup; the aggregate below turns them into one `$(rlocationpaths)`
+# expansion, so a new subpackage's fetches stay covered as soon as its
+# filegroup joins the `srcs`.
+filegroup(
+    name = "download_guard_bzl_all",
+    srcs = [
+        ":download_guard_bzl",
+        "//flutter:download_guard_bzl",
+        "//flutter/private:download_guard_bzl",
+        "//flutter/private/tools:download_guard_bzl",
+        "//flutter/settings:download_guard_bzl",
+        "//flutter/tests/dbg_assert_fixture:download_guard_bzl",
+        "//flutter/tests/icon_tree_shake_fixture:download_guard_bzl",
+    ],
+)
+
+# This package's own `.bzl` files, for the aggregate above.
+filegroup(
+    name = "download_guard_bzl",
+    srcs = glob(["*.bzl"]),
+)
+
+dart_test(
+    name = "download_digest_guard_test",
+    size = "small",
+    args = ["$(rlocationpaths :download_guard_bzl_all)"],
+    data = [":download_guard_bzl_all"],
+    main = "download_digest_guard_test.dart",
+    deps = [
+        "@dev_tool_deps//:test",
+        "@rules_dart//dart/runfiles",
+    ],
+)
 
 action_inputs_test_suite(name = "action_inputs_test")
 

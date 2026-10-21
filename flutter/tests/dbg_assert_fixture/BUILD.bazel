@@ -36,3 +36,11 @@ dart_analysis_test(
         ":modular_dbg_assert_flutter_test",
     ],
 )
+
+# Every `.bzl` file in this package, staged as data for
+# //flutter/tests:download_digest_guard_test.
+filegroup(
+    name = "download_guard_bzl",
+    srcs = glob(["*.bzl"]),
+    visibility = ["//flutter/tests:__pkg__"],
+)

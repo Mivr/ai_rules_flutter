@@ -4,6 +4,14 @@ load("//flutter/private:build_settings.bzl", "dart_defines_flag")
 load("//flutter/private:flutter_material_icons.bzl", "flutter_material_icons")
 load("//flutter/private:flutter_pub.bzl", "flutter_pub")
 
+# Every `.bzl` file in this package, staged as data for
+# //flutter/tests:download_digest_guard_test.
+filegroup(
+    name = "download_guard_bzl",
+    srcs = glob(["*.bzl"]),
+    visibility = ["//flutter/tests:__pkg__"],
+)
+
 # This is the target rule authors should put in their "toolchains"
 # attribute in order to get a runtime for the correct platform.
 # See https://docs.bazel.build/versions/main/toolchains.html#writing-rules-that-use-toolchains

@@ -3,6 +3,14 @@ load("@bazel_skylib//lib:selects.bzl", "selects")
 load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
 load(":apple_backend.bzl", "APPLE_BACKEND_VALUES")
 
+# Every `.bzl` file in this package, staged as data for
+# //flutter/tests:download_digest_guard_test.
+filegroup(
+    name = "download_guard_bzl",
+    srcs = glob(["*.bzl"]),
+    visibility = ["//flutter/tests:__pkg__"],
+)
+
 # Controls which Apple build backend (`rules_apple` or `xtool`) is used by
 # `flutter_ios_app`, `flutter_macos_app`, `flutter_apple_plugin_library`,
 # `flutter_ios_engine`, and `flutter_macos_engine`:
