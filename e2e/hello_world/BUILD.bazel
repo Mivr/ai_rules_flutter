@@ -29,6 +29,7 @@ load("@rules_flutter//flutter:macos.bzl", "flutter_macos_app")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
 load("@rules_flutter//flutter:windows.bzl", "flutter_windows_app")
 load(":android_apk_overlay_test.bzl", "android_apk_overlay_test_suite")
+load(":custom_test_kernel.bzl", "custom_test_kernel")
 
 exports_files(["pubspec.lock"])
 
@@ -515,6 +516,124 @@ flutter_prebuilt_test(
     base_dill = [":prebuilt_failing_base_kernel"],
     dill = ":prebuilt_failing_kernel",
     tags = ["manual"],
+    target_compatible_with = _HOST_COMPATIBLE,
+)
+
+# Library tags through the stock prebuilt pipeline: `:tags_library_test`'s
+# `test_library_tags` output group feeds `library_tags`, so the entrypoint's
+# own `@Tags(['golden'])` reaches the suite's root group exactly as on the
+# `flutter_test` oracle. Excluding `golden` prunes the suite to empty, and an
+# empty suite passes — a green run proves the tags flowed through the
+# output group into the prebuilt run.
+filegroup(
+    name = "tags_library_test_kernel",
+    testonly = True,
+    srcs = [":tags_library_test"],
+    output_group = "test_kernel",
+)
+
+filegroup(
+    name = "tags_library_test_base_kernel",
+    testonly = True,
+    srcs = [":tags_library_test"],
+    output_group = "test_base_kernel",
+)
+
+filegroup(
+    name = "tags_library_test_assets",
+    testonly = True,
+    srcs = [":tags_library_test"],
+    output_group = "test_assets",
+)
+
+filegroup(
+    name = "tags_library_test_tags",
+    testonly = True,
+    srcs = [":tags_library_test"],
+    output_group = "test_library_tags",
+)
+
+flutter_prebuilt_test(
+    name = "tags_library_prebuilt_test",
+    assets = ":tags_library_test_assets",
+    base_dill = [":tags_library_test_base_kernel"],
+    dill = ":tags_library_test_kernel",
+    exclude_tags = ["golden"],
+    library_tags = ":tags_library_test_tags",
+    target_compatible_with = _HOST_COMPATIBLE,
+)
+
+# -- Custom test kernels: the `flutter_test_bootstrap` docstring, running -----
+#
+# Each `custom_test_kernel` below compiles its suite by hand over the public
+# `//flutter:utils.bzl` helpers (see `custom_test_kernel.bzl`) and runs under
+# `flutter_prebuilt_test`, with a `flutter_test` on the same sources as the
+# oracle. The asset trees are the oracles' own `test_assets`: bundles are
+# kernel-independent (only icon tree-shaking reads the kernel), so a
+# hand-built kernel runs on the stock bundle.
+
+# The counter-tap widget suite, compiled by hand: passes exactly when
+# `:widget_test` passes, proving a custom kernel over the bootstrap dials the
+# harness and runs a real `package:flutter_test` suite.
+custom_test_kernel(
+    name = "widget_custom_kernel",
+    srcs = [
+        "lib/common_widgets.dart",
+        "lib/main.dart",
+    ],
+    main = "test/widget_test.dart",
+    target_compatible_with = _HOST_COMPATIBLE,
+    deps = [
+        ":app_lib",
+        "@deps//:cupertino_icons",
+        "@deps//:flutter",
+        "@deps//:flutter_localized_locales",
+        "@deps//:flutter_test",
+        "@rules_flutter//flutter:material_icons",
+    ],
+)
+
+filegroup(
+    name = "widget_custom_kernel_tags",
+    testonly = True,
+    srcs = [":widget_custom_kernel"],
+    output_group = "test_library_tags",
+)
+
+flutter_prebuilt_test(
+    name = "widget_custom_bootstrap_test",
+    assets = ":widget_test_assets",
+    dill = ":widget_custom_kernel",
+    library_tags = ":widget_custom_kernel_tags",
+    target_compatible_with = _HOST_COMPATIBLE,
+)
+
+# The `@Tags(['golden'])` suite, compiled by hand: excluding `golden` prunes
+# it to empty, proving library tags extracted by a custom pipeline reach the
+# prebuilt run's root group exactly as through the stock one.
+custom_test_kernel(
+    name = "tags_library_custom_kernel",
+    main = "test/tags_library_test.dart",
+    target_compatible_with = _HOST_COMPATIBLE,
+    deps = [
+        "@deps//:flutter",
+        "@deps//:flutter_test",
+    ],
+)
+
+filegroup(
+    name = "tags_library_custom_kernel_tags",
+    testonly = True,
+    srcs = [":tags_library_custom_kernel"],
+    output_group = "test_library_tags",
+)
+
+flutter_prebuilt_test(
+    name = "tags_library_custom_bootstrap_test",
+    assets = ":tags_library_test_assets",
+    dill = ":tags_library_custom_kernel",
+    exclude_tags = ["golden"],
+    library_tags = ":tags_library_custom_kernel_tags",
     target_compatible_with = _HOST_COMPATIBLE,
 )
 
