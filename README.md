@@ -95,7 +95,7 @@ git_override(
 Two settings are required. Paste them into your project's `.bazelrc`:
 
 ```bazelrc
-# rules_flutter's Java dependencies (rules_jvm_external 7+, rules_android 0.7.2+)
+# rules_flutter's Java dependencies (rules_jvm_external 7+, rules_android 0.8+)
 # ship tool jars compiled for Java 21+. Bazel's default tool JDK is older.
 common --tool_java_language_version=25
 common --tool_java_runtime_version=remotejdk_25
@@ -305,6 +305,20 @@ What a `hot_patch` target builds, and what the library exports, is a small contr
 Patches reach apps on macOS, the iOS simulator, iOS devices and Android. Linux, Windows and web apps report the edit the way they did before: stale until restart.
 
 On the web the same wrapper goes in `flutter_web_bundle`'s `native_modules`, which both serves the `.wasm` module and declares it. The situation is the same: the page instantiates the module once and a hot reload does not re-run `main()`. A web hot restart does re-run `main()`, so it re-fetches the module with no relaunch.
+
+### Bazel modules
+
+What a plain consumer's module graph pulls in, by feature. Floors are what `rules_flutter`'s own `MODULE.bazel` declares; higher versions resolve by MVS as usual, except where noted.
+
+| Feature | Modules | Notes |
+|---|---|---|
+| Every app | `rules_dart` 0.7.3 (plus the `git_override` to the `Mivr` fork above), `bazel_skylib`, `platforms`, `package_metadata` | Dart compilation, hooks, codegen. |
+| iOS / macOS bundles | `rules_apple` ≥ 4.5.3, `rules_swift`, `apple_support`, `rules_cc` | 4.5.3 is the proven floor: `e2e/min_versions` pins it exactly and builds both Apple legs. `rules_swift`/`apple_support` float to the graph's maxima (4.5.3 accepts Swift at compatibility level 3). |
+| Android APK | `rules_android` 0.8.0, `rules_kotlin`, `rules_java`, `rules_jvm_external` 7.1, `rules_go` ≥ 0.59.0 | 0.8.0 is the floor: the signing overlay reads `rules_android`'s `apk_signing_method` flag, which exists only in 0.8.0+. `rules_go` stays a regular dependency because the Android proxy transition sets `go/config:pure`, which must resolve in every consumer; Android apps should also copy the pinned `go_sdk.download` block from `MODULE.bazel` (as `e2e/hello_world` does). The `.bazelrc` Java settings above are required, and the build host needs `unzip` and `python3` for the AAR extractors. |
+| Dev tool, `gen_l10n` | Resolved inside `rules_flutter` | `dev_tool_deps` and `gen_l10n_deps` are the ruleset's own `flutter.pub` hubs; consumers never name them. |
+| No feature | No `rules_python` | The iOS screenshot/tunnel helpers are `dart_binary` drivers over a host `python3` (a documented host prerequisite like Xcode), so neither this repo's graph nor any consumer's contains `rules_python`. |
+
+Dev-only and never evaluated by consumers: `llvm` (only the opt-in xtool Darwin backend consumes it, and only when a bundle is configured), the `go_sdk.download` pin, `rules_multitool`, `buildifier_prebuilt`, `bazelrc-preset.bzl`, and the root-only `single_version_override` pinning this repo's own builds to `rules_apple` 5.2.0.
 
 ## Building for each platform
 
