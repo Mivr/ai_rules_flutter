@@ -54,7 +54,9 @@ def _flutter_android_apk_overlay_impl(ctx):
         if type(base_deploy_group) == "depset":
             base_deploy_files = base_deploy_group.to_list()
     merged_manifests = [
-        f for f in base_deploy_files if not f.basename.endswith(".pb")
+        f
+        for f in base_deploy_files
+        if not f.basename.endswith(".pb")
     ]
     if len(merged_manifests) != 1:
         fail(

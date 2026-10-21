@@ -235,10 +235,10 @@ android_binary(
         "//conditions:default": [],
     }),
     deps = [
+        ":__hello_world_android_android_plugins",
         ":__hello_world_android_engine",
         ":__hello_world_android_native_libs",
         ":__hello_world_android_registrant",
-        ":__hello_world_android_android_plugins",
         ":__hello_world_android_runner",
         "@deps//android:all_android_plugin_libs",
     ],

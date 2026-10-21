@@ -509,6 +509,7 @@ def flutter_android_app(
         resources = [],
         deps = [],
         pub_hub_name = "deps",
+        nocompress_extensions = None,
         **kwargs):
     """Builds a Flutter Android APK from a flutter_application target.
 
@@ -891,6 +892,8 @@ def flutter_android_app(
             passthrough[key] = kwargs.pop(key)
     binary_kwargs = dict(kwargs)
     binary_kwargs.update(passthrough)
+    if nocompress_extensions != None:
+        binary_kwargs["nocompress_extensions"] = nocompress_extensions
 
     # Like every other internal target, the binary stays out of wildcard
     # builds (see internal_tags above): the proxy is the only entry point.
@@ -914,9 +917,11 @@ def flutter_android_app(
     # like the binary would have. Signing/alignment overrides passed for the
     # binary apply to the overlay too.
     overlay_kwargs = {}
-    for key in ("debug_key", "debug_signing_keys", "debug_signing_lineage_file", "key_rotation_min_sdk", "zipalign_alignment", "nocompress_extensions"):
+    for key in ("debug_key", "debug_signing_keys", "debug_signing_lineage_file", "key_rotation_min_sdk", "zipalign_alignment"):
         if key in kwargs:
             overlay_kwargs[key] = kwargs[key]
+    if nocompress_extensions != None:
+        overlay_kwargs["nocompress_extensions"] = nocompress_extensions
 
     # L-1: the overlay is the target users actually build, so it must carry
     # the same testonly/compatible_with/restricted_to as the user-facing
