@@ -8,8 +8,10 @@ kernel with `vm_flags`/`import_dill`/`resource_set`. The tests pin what the
 hidden consumer checks rely on:
 
 - the default argv is unchanged (no `vm_flags` slot, no `--import-dill`);
-- `vm_flags` sit right after `dartaotruntime`, before the snapshot, and
-  anything that is not a `--flag` fails the build;
+- `vm_flags` sit right after `dartaotruntime`, before the snapshot, and only
+  the allow-listed tuning flags are accepted (anything naming a file or a
+  side effect fails the build, as does any `extra_flags` entry naming a
+  file the compile does not declare);
 - `import_dill` is passed as `--import-dill=<path>` and is an action input,
   while an undeclared source beside it stays out of the inputs and the
   mounted roots (its refusal is pinned in `kernel_filter_test.dart`);
@@ -195,6 +197,37 @@ def _vm_flags_reject_test_impl(ctx):
     asserts.expect_failure(env, "vm_flags")
     return analysistest.end(env)
 
+def _vm_flags_allowed_test_impl(ctx):
+    """Allow-listed `vm_flags` precede the snapshot in the caller's order."""
+    env = analysistest.begin(ctx)
+    action = _kernel_action(env)
+    argv = _compile_argv(env, action)
+    asserts.true(env, len(argv) > 4, "expected a full compile argv, got %r" % (argv,))
+    if len(argv) > 4:
+        asserts.equals(
+            env,
+            "--enable-asserts",
+            argv[1],
+            "the first vm_flag sits right after dartaotruntime, got %r" % (argv[:5],),
+        )
+        asserts.equals(
+            env,
+            "--old_gen_heap_size=1048576",
+            argv[2],
+            "the second vm_flag follows in order, got %r" % (argv[:5],),
+        )
+        asserts.true(
+            env,
+            argv[3].endswith(".snapshot"),
+            "the snapshot follows vm_flags, got %r" % (argv[:5],),
+        )
+    return analysistest.end(env)
+
+def _extra_flags_reject_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    asserts.expect_failure(env, "extra_flags")
+    return analysistest.end(env)
+
 def _undeclared_staged_out_test_impl(ctx):
     """An undeclared source beside an `import_dill` stays out of the compile.
 
@@ -264,6 +297,8 @@ _DBG = {
 _default_argv_test = analysistest.make(_default_argv_test_impl, config_settings = _DBG)
 _extras_argv_test = analysistest.make(_extras_argv_test_impl, config_settings = _DBG)
 _vm_flags_reject_test = analysistest.make(_vm_flags_reject_test_impl, config_settings = _DBG, expect_failure = True)
+_vm_flags_allowed_test = analysistest.make(_vm_flags_allowed_test_impl, config_settings = _DBG)
+_extra_flags_reject_test = analysistest.make(_extra_flags_reject_test_impl, config_settings = _DBG, expect_failure = True)
 _undeclared_staged_out_test = analysistest.make(_undeclared_staged_out_test_impl, config_settings = _DBG)
 _extra_roots_test = analysistest.make(_extra_roots_test_impl, config_settings = _DBG)
 _no_extra_roots_test = analysistest.make(_no_extra_roots_test_impl, config_settings = _DBG)
@@ -341,6 +376,47 @@ def compile_api_test_suite(name):
         vm_flags = ["--old-gen-heap-size=2147483648", "frontend_server_aot.dart.snapshot"],
         tags = ["manual"],
     )
+    # Analysis-only: allow-listed `vm_flags` spellings (a bare diagnostic
+    # plus an underscore-spelled sizing) keep their order before the snapshot.
+    _compile_api_caller(
+        name = "_compile_api_vm_allowed",
+        main = "compile_api_main.dart",
+        vm_flags = ["--enable-asserts", "--old_gen_heap_size=1048576"],
+        tags = ["manual"],
+    )
+    # Analysis negatives (each must fail with its `fail` message): a
+    # file-naming `vm_flags` entry, a host-writing one, an unlisted one, a
+    # file-naming `extra_flags` entry, and a mount-smuggling one.
+    _compile_api_caller(
+        name = "_compile_api_bad_vm_files",
+        main = "compile_api_main.dart",
+        vm_flags = ["--packages=lib/secret.dart"],
+        tags = ["manual"],
+    )
+    _compile_api_caller(
+        name = "_compile_api_bad_vm_sideeffect",
+        main = "compile_api_main.dart",
+        vm_flags = ["--timeline-recorder=file:/tmp/timeline"],
+        tags = ["manual"],
+    )
+    _compile_api_caller(
+        name = "_compile_api_bad_vm_unknown",
+        main = "compile_api_main.dart",
+        vm_flags = ["--ignore_unrecognized_flags"],
+        tags = ["manual"],
+    )
+    _compile_api_caller(
+        name = "_compile_api_bad_extra_files",
+        main = "compile_api_main.dart",
+        extra_flags = ["--import-dill=compile_api_import.dill"],
+        tags = ["manual"],
+    )
+    _compile_api_caller(
+        name = "_compile_api_bad_extra_mount",
+        main = "compile_api_main.dart",
+        extra_flags = ["--filesystem-root", "."],
+        tags = ["manual"],
+    )
     _compile_api_caller(
         name = "_compile_api_undeclared",
         main = "compile_api_undeclared_main.dart",
@@ -376,7 +452,7 @@ def compile_api_test_suite(name):
         name = "_compile_api_build_extras",
         main = "compile_api_extras_main.dart",
         deps = [":_compile_api_dep"],
-        vm_flags = ["--old-gen-heap-size=2147483648"],
+        vm_flags = ["--old-gen-heap-size=2147483648", "--enable-asserts"],
         use_resource_set = True,
         tags = ["manual"],
         target_compatible_with = _HOST_COMPATIBLE,
@@ -403,6 +479,30 @@ def compile_api_test_suite(name):
     _vm_flags_reject_test(
         name = name + "_vm_flags_reject",
         target_under_test = ":_compile_api_bad_flags",
+    )
+    _vm_flags_allowed_test(
+        name = name + "_vm_flags_allowed",
+        target_under_test = ":_compile_api_vm_allowed",
+    )
+    _vm_flags_reject_test(
+        name = name + "_vm_flags_files",
+        target_under_test = ":_compile_api_bad_vm_files",
+    )
+    _vm_flags_reject_test(
+        name = name + "_vm_flags_sideeffect",
+        target_under_test = ":_compile_api_bad_vm_sideeffect",
+    )
+    _vm_flags_reject_test(
+        name = name + "_vm_flags_unknown",
+        target_under_test = ":_compile_api_bad_vm_unknown",
+    )
+    _extra_flags_reject_test(
+        name = name + "_extra_flags_files",
+        target_under_test = ":_compile_api_bad_extra_files",
+    )
+    _extra_flags_reject_test(
+        name = name + "_extra_flags_mount",
+        target_under_test = ":_compile_api_bad_extra_mount",
     )
     _undeclared_staged_out_test(
         name = name + "_undeclared_staged_out",
@@ -433,6 +533,12 @@ def compile_api_test_suite(name):
             ":" + name + "_default_argv",
             ":" + name + "_extras_argv",
             ":" + name + "_vm_flags_reject",
+            ":" + name + "_vm_flags_allowed",
+            ":" + name + "_vm_flags_files",
+            ":" + name + "_vm_flags_sideeffect",
+            ":" + name + "_vm_flags_unknown",
+            ":" + name + "_extra_flags_files",
+            ":" + name + "_extra_flags_mount",
             ":" + name + "_undeclared_staged_out",
             ":" + name + "_extra_roots",
             ":" + name + "_no_extra_roots",

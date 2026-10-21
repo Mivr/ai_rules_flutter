@@ -46,6 +46,18 @@ Stability note: these helpers are stable for external use. New optional
 parameters may be added to `flutter_kernel_compile_action` (and matching
 fields to the `flutter_kernel_compile_tools` struct), but existing calls keep
 their argv and action keys.
+
+Allowed `vm_flags` (Dart VM flags before the snapshot): heap/GC sizing, each
+spelled `--name=<bytes>` with a plain integer (`--old-gen-heap-size`,
+`--new-gen-semi-initial-size`, `--new-gen-semi-max-size`,
+`--new-gen-garbage-threshold`, `--new-gen-growth-factor`), and bare
+diagnostics (`--enable-asserts`, `--verbose-gc`, `--concurrent-mark`,
+`--concurrent-sweep`). Anything else — notably `--packages`, `--platform`,
+`--*-dill`, `--native-assets`, `--timeline-recorder`, `--snapshot*`,
+`--observe`, `--dfe` — fails the build at analysis, as does any
+`extra_flags` entry naming a file the compile does not declare. The compile
+guard takes every allowed read from a manifest of declared files, never from
+the argv, so a smuggled flag cannot widen what the compile may read.
 """
 
 load(

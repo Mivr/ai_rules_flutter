@@ -8,6 +8,107 @@ Flutter compilation differs from vanilla Dart in that it uses:
 load("//flutter:providers.bzl", "resolve_exec_dart_vm", "resolve_flutter_sdk_info")
 load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "stage_generated_inputs")
 
+# `vm_flags` entries analysis accepts, as flag names without the leading
+# `--`. The Dart VM interprets every flag before the snapshot, so only flags
+# with no file, network or compilation-semantics side effects are allowed:
+#
+# - heap and GC sizing, each spelled `--name=<bytes>` with a plain integer:
+#   `old-gen-heap-size`, `new-gen-semi-initial-size`, `new-gen-semi-max-size`,
+#   `new-gen-garbage-threshold`, `new-gen-growth-factor`;
+# - side-effect-free diagnostics, spelled bare: `enable-asserts`,
+#   `verbose-gc`, `concurrent-mark`, `concurrent-sweep`.
+#
+# Name matching ignores case and treats `-` and `_` as the same, the way the
+# VM parses them. Everything else fails the build at analysis — notably
+# `--packages`, `--platform`, `--*-dill`, `--native-assets`,
+# `--timeline-recorder`, `--snapshot*`, `--observe`, `--dfe`,
+# `--ignore-unrecognized-flags` and `--define`/`-D` (defines belong in
+# `defines`): such flags rename the compile's inputs, smuggle undeclared
+# bytes into the dill, or write host files outside the action's declared
+# inputs and outputs.
+_VM_FLAG_SIZES = [
+    "old-gen-heap-size",
+    "new-gen-semi-initial-size",
+    "new-gen-semi-max-size",
+    "new-gen-garbage-threshold",
+    "new-gen-growth-factor",
+]
+
+_VM_FLAGS_BARE = [
+    "enable-asserts",
+    "verbose-gc",
+    "concurrent-mark",
+    "concurrent-sweep",
+]
+
+# `extra_flags` entries analysis refuses, as flag names without leading
+# dashes: `frontend_server` flags that name a file (or a host side effect)
+# the action does not declare. The action passes its own inputs
+# (`--packages`, `--platform`, `--filesystem-root`, `--source`,
+# `--native-assets`, `--recorded-uses`, `--from-dill`, `--import-dill`,
+# `--output-dill`) from Starlark `File` objects and records them in the
+# `kernel_filter` manifest; a caller spelling any of them in `extra_flags`
+# fails the build at analysis instead. Name matching ignores case and treats
+# `-` and `_` as the same.
+_EXTRA_FLAG_BLOCKED = [
+    "packages",
+    "package-config",
+    "platform",
+    "sdk-root",
+    "filesystem-root",
+    "filesystem-scheme",
+    "source",
+    "native-assets",
+    "recorded-uses",
+    "from-dill",
+    "import-dill",
+    "output-dill",
+    "output-incremental-dill",
+    "depfile",
+    "timeline-recorder",
+    "snapshot",
+    "snapshot-kind",
+    "save-debugging-info",
+    "observe",
+    "enable-vm-service",
+    "dfe",
+]
+
+def _normalize_flag_name(name):
+    return name.lower().replace("_", "-")
+
+def _is_uint(value):
+    if value == "":
+        return False
+    for c in value.elems():
+        if c not in "0123456789":
+            return False
+    return True
+
+def _check_vm_flags(label, vm_flags):
+    for flag in vm_flags:
+        if not flag.startswith("--") or flag == "--":
+            fail("%s: vm_flags entries must be `--flag` passed to dartaotruntime, got %r" % (label, flag))
+        name, eq, value = flag[2:].partition("=")
+        norm = _normalize_flag_name(name)
+        if norm in _VM_FLAGS_BARE:
+            if eq:
+                fail("%s: vm_flags %r takes no value: `%s` is a bare diagnostic flag" % (label, flag, flag))
+        elif norm in _VM_FLAG_SIZES:
+            if not eq or not _is_uint(value):
+                fail("%s: vm_flags %r needs `--name=<bytes>` with a plain integer value" % (label, flag))
+        else:
+            fail("%s: vm_flags %r is not allowed: only heap/GC sizing (%s) and bare diagnostics (%s) may precede the snapshot; flags naming files or side effects (`--packages`, `--*-dill`, `--platform`, `--native-assets`, `--timeline-recorder`, `--snapshot*` and similar) are refused" % (label, flag, ", ".join(["--" + f for f in _VM_FLAG_SIZES]), ", ".join(["--" + f for f in _VM_FLAGS_BARE])))
+
+def _check_extra_flags(label, extra_flags):
+    for flag in extra_flags:
+        if not flag.startswith("-") or flag == "-" or flag == "--":
+            fail("%s: extra_flags entries must be frontend_server `--flag`s, got %r" % (label, flag))
+        stripped = flag[2:] if flag.startswith("--") else flag[1:]
+        name, _, _ = stripped.partition("=")
+        if _normalize_flag_name(name) in _EXTRA_FLAG_BLOCKED:
+            fail("%s: extra_flags %r names a file the compile does not declare: pass inputs through `srcs`/`deps`/`import_dill`/`from_dill`/`native_assets_manifest` instead" % (label, flag))
+
 # Private tool labels a downstream rule merges into its own `attrs` to call
 # `flutter_kernel_compile_action` — the Flutter half of what rules_dart
 # publishes as `KERNEL_MODULE_ATTRS`. Carries no user-facing attrs: the
@@ -121,7 +222,13 @@ def flutter_kernel_compile_action(
             application builds.
         aot: If True, compile for AOT (adds --aot --tfa flags).
         defines: Environment declarations; each entry becomes a -D flag.
-        extra_flags: Additional frontend_server flags.
+        extra_flags: Additional frontend_server flags (e.g. `--incremental`,
+            `--track-widget-creation`). Each entry must be a `--flag`; a
+            flag naming a file the compile does not declare (`--packages`,
+            `--platform`, `--filesystem-root`, `--source`,
+            `--native-assets`, `--recorded-uses`, `--from-dill`,
+            `--import-dill`, `--output-dill` and similar) fails the build
+            at analysis.
         target: Frontend server target model ("flutter" or "dartdevc" for web).
         native_assets_manifest: Optional `native_assets.json` File. Passed
             to the frontend_server via `--native-assets`. The frontend
@@ -150,9 +257,20 @@ def flutter_kernel_compile_action(
             transitive sources.
         vm_flags: Optional Dart VM flags placed right after `dartaotruntime`,
             before the `frontend_server` snapshot (e.g.
-            `--old-gen-heap-size=1073741824`). Every entry must be a `--flag`
-            (a bare `--` or anything else fails the build), so the flags
-            cannot inject a different snapshot or further argv.
+            `--old-gen-heap-size=1073741824`). Only side-effect-free tuning
+            is allowed: heap/GC sizing (`--old-gen-heap-size`,
+            `--new-gen-semi-initial-size`, `--new-gen-semi-max-size`,
+            `--new-gen-garbage-threshold`, `--new-gen-growth-factor`, each
+            `--name=<bytes>`) and bare diagnostics (`--enable-asserts`,
+            `--verbose-gc`, `--concurrent-mark`, `--concurrent-sweep`).
+            Every entry must be a `--flag` from that list (a bare `--` or
+            anything else fails the build); flags naming files or side
+            effects (`--packages`, `--*-dill`, `--platform`,
+            `--native-assets`, `--timeline-recorder`, `--snapshot*` and
+            similar) fail at analysis. The allow-list is enforced here, and
+            `kernel_filter` additionally takes every allowed read from its
+            manifest — never from the argv — so a smuggled flag cannot
+            widen what the compile may read.
         import_dill: Optional pre-compiled summary `.dill` File passed via
             `--import-dill=<path>` and added to the action inputs. Libraries
             arriving through it are compiled, declared inputs — not sources —
@@ -163,9 +281,8 @@ def flutter_kernel_compile_action(
             action's host resources. Unset by default, so existing callers
             keep byte-identical actions.
     """
-    for flag in vm_flags:
-        if not flag.startswith("--") or flag == "--":
-            fail("%s: vm_flags entries must be `--flag` passed to dartaotruntime, got %r" % (ctx.label, flag))
+    _check_vm_flags(ctx.label, vm_flags)
+    _check_extra_flags(ctx.label, extra_flags)
     args = ctx.actions.args()
     args.add("--")
     args.add(dartaotruntime)
@@ -275,15 +392,35 @@ def flutter_kernel_compile_action(
 
     # The declared-inputs manifest `kernel_filter` guards and verifies the
     # compile against: the declared sources, then the staging root's symlinks
-    # to them (see kernel_filter.dart). Written by path so the tool reads the
-    # same files the compiler resolves through the staging root.
+    # to them, then every other file the compiler may read (the package
+    # config, the platform dill, the summary dills, the native-assets
+    # manifest), the mounted filesystem roots the directive guard resolves
+    # through, and the output dill the refusal path deletes (see
+    # kernel_filter.dart). Every entry names a Starlark-declared `File` (or
+    # an action-constructed root/output string): `kernel_filter` derives
+    # nothing from the compile argv, so a flag smuggled into `vm_flags` or
+    # `extra_flags` cannot widen what the compile may read. Written by path
+    # so the tool reads the same files the compiler resolves through the
+    # staging root.
     manifest = ctx.actions.declare_file(output.basename + ".flutter_inputs")
+    allowed_reads = [package_config, platform_dill]
+    if from_dill != None:
+        allowed_reads.append(from_dill)
+    if import_dill != None:
+        allowed_reads.append(import_dill)
+    if native_assets_manifest != None:
+        allowed_reads.append(native_assets_manifest)
     ctx.actions.write(
         output = manifest,
         content = "\n".join(
             [f.path for f in compile_sources if f != None] +
             ["# staged"] +
-            [f.path for f in stage.files],
+            [f.path for f in stage.files] +
+            ["# allowed-reads"] +
+            [f.path for f in allowed_reads] +
+            ["# filesystem-roots"] +
+            mounted_roots +
+            ["# output", output.path],
         ) + "\n",
     )
 

@@ -337,11 +337,23 @@ void main() {}
     String writeManifest(
       List<String> sources, [
       List<String> staged = const [],
+      List<String> reads = const [],
+      List<String> roots = const [],
+      String? output,
     ]) {
+      final lines = <String>[
+        ...sources,
+        '# staged',
+        ...staged,
+        '# allowed-reads',
+        ...reads,
+        '# filesystem-roots',
+        ...roots,
+        '# output',
+        if (output != null) output,
+      ];
       final manifest = File('${dir.path}/inputs.manifest')
-        ..writeAsStringSync(
-          '${sources.join('\n')}\n# staged\n${staged.join('\n')}\n',
-        );
+        ..writeAsStringSync('${lines.join('\n')}\n');
       return manifest.path;
     }
 
@@ -462,7 +474,7 @@ void main() {}
         );
         final r = await run([
           '--declared-inputs',
-          writeManifest(['lib/main.dart']),
+          writeManifest(['lib/main.dart'], [], [], [], 'app.dill'),
           '--',
           Platform.resolvedExecutable,
           script.path,
@@ -476,7 +488,7 @@ void main() {}
       },
     );
 
-    test('accepts a read of the --import-dill summary', () async {
+    test('accepts a read named by the manifest', () async {
       writeWork('lib/main.dart', 'void main() {}\n');
       final summary = File('${work.path}/app_summary.dill')
         ..writeAsStringSync('compiled bytes');
@@ -493,7 +505,7 @@ void main() {}
       );
       final r = await run([
         '--declared-inputs',
-        writeManifest(['lib/main.dart']),
+        writeManifest(['lib/main.dart'], [], ['app_summary.dill']),
         '--',
         Platform.resolvedExecutable,
         script.path,
@@ -504,6 +516,113 @@ void main() {}
       expect(r.code, 0, reason: r.err);
       expect(r.out.trim(), isEmpty);
     });
+
+    test('allows a manifest read the argv never names', () async {
+      // The argv carries no `--import-dill` at all: the manifest alone
+      // allows the summary read.
+      writeWork('lib/main.dart', 'void main() {}\n');
+      final summary = File('${work.path}/app_summary.dill')
+        ..writeAsStringSync('compiled bytes');
+      final script = fakeCompiler(
+        'manifest_only_reader',
+        'import "dart:io";\n'
+            'void main() {\n'
+            '  stdout.writeln("result $_id");\n'
+            '  stdout.writeln("$_id");\n'
+            '  stdout.writeln("+file://${work.path}/lib/main.dart");\n'
+            '  stdout.writeln("+file://${summary.path}");\n'
+            '  stdout.writeln("$_id app.dill 0");\n'
+            '}\n',
+      );
+      final r = await run([
+        '--declared-inputs',
+        writeManifest(['lib/main.dart'], [], ['app_summary.dill']),
+        '--',
+        Platform.resolvedExecutable,
+        script.path,
+        '--output-dill',
+        '${work.path}/app.dill',
+      ]);
+      expect(r.code, 0, reason: r.err);
+      expect(r.out.trim(), isEmpty);
+    });
+
+    test('an argv-only flag allow-lists nothing', () async {
+      // Every smuggle spelling in the argv — `vm_flags` position (before
+      // any snapshot) and `extra_flags` position alike, `=` and space
+      // forms — while the manifest names no such read.
+      writeWork('lib/main.dart', 'void main() {}\n');
+      final sneak = File('${work.path}/sneak.dill')..writeAsStringSync('sneak');
+      final output = File('${work.path}/app.dill')
+        ..writeAsStringSync('stale bytes');
+      final script = fakeCompiler(
+        'argv_spoof',
+        'import "dart:io";\n'
+            'void main() {\n'
+            '  stdout.writeln("result $_id");\n'
+            '  stdout.writeln("$_id");\n'
+            '  stdout.writeln("+file://${work.path}/lib/main.dart");\n'
+            '  stdout.writeln("+file://${sneak.path}");\n'
+            '  stdout.writeln("$_id app.dill 0");\n'
+            '}\n',
+      );
+      final r = await run([
+        '--declared-inputs',
+        writeManifest(['lib/main.dart'], [], [], [], 'app.dill'),
+        '--',
+        Platform.resolvedExecutable,
+        script.path,
+        '--packages=sneak.dill',
+        '--platform',
+        'sneak.dill',
+        '--from-dill=sneak.dill',
+        '--import-dill=sneak.dill',
+        '--native-assets',
+        'sneak.dill',
+        '--output-dill',
+        '${work.path}/app.dill',
+      ]);
+      expect(r.code, 1);
+      expect(r.err, contains('+file://${sneak.path}'));
+      expect(r.err, contains('not a declared input'));
+      expect(output.existsSync(), isFalse);
+    });
+
+    test(
+      'the refusal deletes the manifest output, not the argv --output-dill',
+      () async {
+        writeWork('lib/main.dart', 'void main() {}\n');
+        final decoy = File('${work.path}/decoy.dill')
+          ..writeAsStringSync('decoy bytes');
+        final output = File('${work.path}/app.dill')
+          ..writeAsStringSync('stale bytes');
+        final script = fakeCompiler(
+          'spoofed_output',
+          'import "dart:io";\n'
+              'void main() {\n'
+              '  stdout.writeln("result $_id");\n'
+              '  stdout.writeln("$_id");\n'
+              '  stdout.writeln("+file://${work.path}/lib/main.dart");\n'
+              '  stdout.writeln("+file:///etc/hostname");\n'
+              '  stdout.writeln("$_id app.dill 0");\n'
+              '}\n',
+        );
+        final r = await run([
+          '--declared-inputs',
+          writeManifest(['lib/main.dart'], [], [], [], 'app.dill'),
+          '--',
+          Platform.resolvedExecutable,
+          script.path,
+          '--output-dill',
+          decoy.path,
+        ]);
+        expect(r.code, 1);
+        expect(r.err, contains('+file:///etc/hostname'));
+        expect(r.err, contains('not a declared input'));
+        expect(decoy.readAsStringSync(), 'decoy bytes');
+        expect(output.existsSync(), isFalse);
+      },
+    );
 
     test(
       'an undeclared source beside the --import-dill is still refused',
@@ -525,7 +644,7 @@ void main() {}
         );
         final r = await run([
           '--declared-inputs',
-          writeManifest(['lib/main.dart']),
+          writeManifest(['lib/main.dart'], [], ['app_summary.dill']),
           '--',
           Platform.resolvedExecutable,
           script.path,

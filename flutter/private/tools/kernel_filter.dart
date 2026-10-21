@@ -15,9 +15,15 @@
 /// root, so an undeclared file is not there to be read whatever its spelling.
 ///
 /// After the compiler runs, its `+file://` dependency lines are verified
-/// against the same declared inputs: a read of a file the action did not
-/// declare fails the build instead of caching bytes Bazel never reruns on.
+/// against the same manifest: a read of a file the manifest does not name
+/// fails the build instead of caching bytes Bazel never reruns on.
 /// The lines are dropped either way, so a successful build stays silent.
+///
+/// The manifest is the only source of allowances: the tool derives nothing
+/// from the compile argv. A flag smuggled into the argv (`--packages`,
+/// `--import-dill`, `--platform` and the like, whether in `vm_flags` or
+/// `extra_flags`) names no allowed read, and the refusal path deletes only
+/// the manifest's output — never a path the argv names.
 ///
 /// A plugin that is not available on the compiled platform fails the build
 /// with a hint saying so: shipping without its registration (where `flutter
@@ -87,10 +93,10 @@ String? dependencyExecPath(String line) {
 
 /// The subset of `frontend_server`'s `+uri` dependency [lines] that names no
 /// declared input: each entry is the offending line. [declared] holds the
-/// exec-root-relative paths from the `--declared-inputs` manifest, and
-/// [extraAllowed] the compiler's own data files (`--packages`,
-/// `--native-assets`, `--platform`, `--from-dill`, `--import-dill`),
-/// resolved the same way.
+/// exec-root-relative paths from the `--declared-inputs` manifest's source
+/// and staged sections, and [extraAllowed] the manifest's `allowed-reads`
+/// section (the package config, the platform dill, the summary dills, the
+/// native-assets manifest) — never the compile argv.
 List<String> findUndeclaredReads(
   List<String> lines,
   Set<String> declared,
@@ -107,46 +113,6 @@ List<String> findUndeclaredReads(
   return undeclared;
 }
 
-/// The value of the single-valued flag [flag] in [cmdArgs] (`--flag value` or
-/// `--flag=value`), or null when absent.
-String? flagValue(List<String> cmdArgs, String flag) {
-  for (var j = 0; j < cmdArgs.length; j++) {
-    if (cmdArgs[j] == flag && j + 1 < cmdArgs.length) return cmdArgs[j + 1];
-    if (cmdArgs[j].startsWith('$flag=')) {
-      return cmdArgs[j].substring(flag.length + 1);
-    }
-  }
-  return null;
-}
-
-/// The values of the repeated flag [flag] in [cmdArgs].
-List<String> flagValues(List<String> cmdArgs, String flag) {
-  final values = <String>[];
-  for (var j = 0; j < cmdArgs.length; j++) {
-    if (cmdArgs[j] == flag && j + 1 < cmdArgs.length) {
-      values.add(cmdArgs[j + 1]);
-    } else if (cmdArgs[j].startsWith('$flag=')) {
-      values.add(cmdArgs[j].substring(flag.length + 1));
-    }
-  }
-  return values;
-}
-
-/// The exec-root-relative form of the compiler flag value [value] (which the
-/// action passes exec-root-relative already), or null for an absolute path.
-String? execRelative(String value) {
-  final slash = value.replaceAll(r'\', '/');
-  if (slash.startsWith('/') || _isWindowsAbsolute(slash)) return null;
-  return slash.replaceFirst(RegExp(r'^(?:\./)+'), '');
-}
-
-bool _isWindowsAbsolute(String path) =>
-    path.length >= 3 &&
-    ((path.codeUnitAt(0) >= 0x41 && path.codeUnitAt(0) <= 0x5a) ||
-        (path.codeUnitAt(0) >= 0x61 && path.codeUnitAt(0) <= 0x7a)) &&
-    path.codeUnitAt(1) == 0x3a &&
-    (path.codeUnitAt(2) == 0x2f || path.codeUnitAt(2) == 0x5c);
-
 Future<void> main(List<String> argv) async {
   exit(await runFiltered(argv, stdout, stderr));
 }
@@ -156,11 +122,17 @@ Future<void> main(List<String> argv) async {
 ///
 /// The tool flags before `--` name the compile's declared inputs
 /// (`--declared-inputs <manifest>`): the manifest lists one exec-root-relative
-/// path per line — the declared sources, then a `# staged` marker, then the
-/// staging root's symlinks to them — written by
-/// `flutter_kernel_compile_action`. The sources' directives are refused before
-/// the compiler runs when they name an undeclared file, and the compiler's own
-/// read set is verified against both sections after it runs.
+/// path per line in sections — the declared sources, then a `# staged`
+/// marker, then the staging root's symlinks to them, then `# allowed-reads`
+/// (the package config, the platform dill, the summary dills, the
+/// native-assets manifest), then `# filesystem-roots` (the mounted roots the
+/// directive guard resolves through), then `# output` with the output dill —
+/// written by `flutter_kernel_compile_action` from its Starlark `File`
+/// objects. The sources' directives are refused before the compiler runs
+/// when they name an undeclared file, and the compiler's own read set is
+/// verified against the manifest after it runs. Nothing is read from the
+/// compile argv: flags after `--` run the compiler unchanged, and never
+/// widen what it may read.
 Future<int> runFiltered(
   List<String> argv,
   StringSink out,
@@ -195,26 +167,51 @@ Future<int> runFiltered(
     );
     return 2;
   }
-  // The manifest lists the declared sources, then `# staged`, then the
-  // staging root's symlinks to them: the guard scans the sources (the links
-  // hold the same bytes), while the read set allows both spellings.
+  // The manifest lists the declared sources, then `# staged` with the
+  // staging root's symlinks to them, then `# allowed-reads` with every other
+  // file the compiler may read, then `# filesystem-roots`, then `# output`
+  // with the output dill. The guard scans the sources (the links hold the
+  // same bytes), while the read set allows the source spellings, the staged
+  // spellings, and the allowed reads — all of them manifest entries, never
+  // argv values.
   final sources = <String>[];
   final declared = <String>{};
-  var staged = false;
+  final extraAllowed = <String>{};
+  final fsRoots = <String>[];
+  String? outputDill;
+  var section = 'sources';
   for (final line in manifest.readAsLinesSync()) {
     final path = line.trim().replaceAll(r'\', '/');
     if (path.isEmpty) continue;
     if (path.startsWith('#')) {
-      staged = true;
+      section = switch (path) {
+        '# staged' => 'staged',
+        '# allowed-reads' => 'reads',
+        '# filesystem-roots' => 'roots',
+        '# output' => 'output',
+        _ => 'unknown',
+      };
       continue;
     }
-    declared.add(path);
-    if (!staged && path.endsWith('.dart')) sources.add(path);
+    switch (section) {
+      case 'sources':
+        declared.add(path);
+        if (path.endsWith('.dart')) sources.add(path);
+      case 'staged':
+        declared.add(path);
+      case 'reads':
+        extraAllowed.add(path);
+      case 'roots':
+        fsRoots.add(path);
+      case 'output':
+        outputDill ??= path;
+      case 'unknown':
+        break;
+    }
   }
   final executable = argv[i + 1];
   final cmdArgs = argv.sublist(i + 2);
 
-  final fsRoots = flagValues(cmdArgs, '--filesystem-root');
   final guardErrors = findDisallowedFlutterDirectives(
     sources,
     fsRoots,
@@ -246,19 +243,6 @@ Future<int> runFiltered(
   }
 
   final split = splitDependencyLines(result.stdout as String);
-  final extraAllowed = <String>{};
-  for (final flag in [
-    '--packages',
-    '--native-assets',
-    '--platform',
-    '--from-dill',
-    '--import-dill',
-  ]) {
-    final value = flagValue(cmdArgs, flag);
-    if (value == null) continue;
-    final rel = execRelative(value);
-    if (rel != null) extraAllowed.add(rel);
-  }
   final undeclared = findUndeclaredReads(split.reads, declared, extraAllowed);
   if (undeclared.isNotEmpty) {
     for (final line in undeclared) {
@@ -268,7 +252,9 @@ Future<int> runFiltered(
         '`glob(["lib/**/*.dart"])`) or stop importing it.',
       );
     }
-    final outputDill = flagValue(cmdArgs, '--output-dill');
+    // Delete only the manifest's output: an `--output-dill` smuggled into
+    // the argv names no file here, so the refusal cannot be redirected at
+    // (or away from) another path.
     if (outputDill != null) {
       try {
         File(outputDill).deleteSync();
