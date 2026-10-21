@@ -20,7 +20,11 @@ Each module in the build graph may request `flutter.toolchain(flutter_version
 `select_toolchain_version()` (in `flutter/private/toolchain_selection.bzl`,
 mirroring `rules_dart`) picks the root request when there is one and fails on
 a conflict between two non-root requests. A dependency can suggest a version;
-only the root module decides.
+only the root module decides. Pins accept a numeric dotted core with an
+optional semver-style `-<prerelease>` and/or `+<build>` suffix
+(`3.44.1-acme`, `3.45.0-0.1.pre`, `3.44.1+corp.7`): ordering is numeric on
+the core, a prerelease sorts below its release, and build metadata never
+decides. Anything else fails naming the offending version.
 
 ## Custom releases (`flutter.version`)
 

@@ -1,8 +1,60 @@
 """Picks one Flutter SDK version per toolchain name from the versions modules request."""
 
+def _parse_identifier_list(text, what, version):
+    """Validates dot-separated prerelease/build identifiers."""
+    identifiers = []
+    for identifier in text.split("."):
+        if not identifier:
+            fail("Invalid Flutter SDK version \"{v}\": the {what} part is empty.".format(v = version, what = what))
+        for c in identifier.elems():
+            if not (c.isalnum() or c == "-"):
+                fail("Invalid Flutter SDK version \"{v}\": bad character {c} in the {what} part.".format(v = version, c = repr(c), what = what))
+        if identifier.isdigit():
+            identifiers.append((0, int(identifier), ""))
+        else:
+            identifiers.append((1, 0, identifier))
+    return identifiers
+
 def _parse_version(v):
-    """Splits a version string into a list of ints for comparison."""
-    return [int(x) for x in v.split(".")]
+    """Parses a Flutter SDK version into a comparable key.
+
+    Accepts a numeric dotted core plus an optional semver-style `-<prerelease>`
+    and/or `+<build>` suffix, so enterprise rebuilds (`3.44.1-acme`), Flutter
+    prereleases (`3.45.0-0.1.pre`) and build-stamped versions (`3.44.1+corp.7`)
+    all compare. Ordering is numeric on the core first; a prerelease sorts
+    below its release; build metadata never decides. Anything else fails with
+    the offending version named.
+
+    Args:
+      v: The version string.
+
+    Returns:
+      A `(core, release_rank, prerelease)` tuple of comparables.
+    """
+    build_split = v.split("+")
+    if len(build_split) > 2:
+        fail("Invalid Flutter SDK version \"{v}\": at most one +<build> suffix is allowed.".format(v = v))
+    without_build = build_split[0]
+    if len(build_split) == 2:
+        _parse_identifier_list(build_split[1], "build", v)
+    dash = without_build.find("-")
+    if dash == -1:
+        core_text = without_build
+        prerelease = []
+        release_rank = 1
+    else:
+        core_text = without_build[:dash]
+        prerelease_text = without_build[dash + 1:]
+        prerelease = _parse_identifier_list(prerelease_text, "prerelease", v)
+        release_rank = 0
+    core = []
+    for part in core_text.split("."):
+        if not part or not part.isdigit():
+            fail("Invalid Flutter SDK version \"{v}\": expected numeric components separated by dots (e.g. '3.44.1'), optionally followed by -<prerelease> and/or +<build>.".format(v = v))
+        core.append(int(part))
+    if not core:
+        fail("Invalid Flutter SDK version \"{v}\": the numeric core is empty.".format(v = v))
+    return (core, release_rank, prerelease)
 
 def select_toolchain_version(name, requests):
     """Selects the Flutter SDK version for one toolchain name.
@@ -26,10 +78,15 @@ def select_toolchain_version(name, requests):
     root_requests = [r for r in requests if r.is_root]
     dep_requests = [r for r in requests if not r.is_root]
 
+    # Every requested version parses up front, so a malformed string fails
+    # here naming the version — even a lone root pin that no comparison
+    # would otherwise touch.
+    keys = {r.version: _parse_version(r.version) for r in requests}
+
     if root_requests:
         selected = root_requests[0].version
         for request in root_requests[1:]:
-            if _parse_version(request.version) > _parse_version(selected):
+            if keys[request.version] > keys[selected]:
                 selected = request.version
 
         # The root pin wins even when it is older than a dependency's request;
@@ -37,13 +94,13 @@ def select_toolchain_version(name, requests):
         newer_dep_versions = [
             r.version
             for r in dep_requests
-            if _parse_version(r.version) > _parse_version(selected)
+            if keys[r.version] > keys[selected]
         ]
         note = None
         if newer_dep_versions:
             newest_dep = newer_dep_versions[0]
             for v in newer_dep_versions[1:]:
-                if _parse_version(v) > _parse_version(newest_dep):
+                if keys[v] > keys[newest_dep]:
                     newest_dep = v
             note = "Flutter toolchain {} uses {} requested by the root module, which is older than {} requested by a dependency".format(
                 name,
@@ -55,6 +112,6 @@ def select_toolchain_version(name, requests):
     # No root request: highest requested version wins.
     selected = requests[0].version
     for request in requests[1:]:
-        if _parse_version(request.version) > _parse_version(selected):
+        if keys[request.version] > keys[selected]:
             selected = request.version
     return struct(version = selected, note = None)

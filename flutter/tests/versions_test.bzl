@@ -320,13 +320,42 @@ _merge_probe = rule(
 )
 
 def _custom_missing_checksum_probe_impl(ctx):
-    merged = merge_custom_versions([_custom_tag()])
-    sha = flutter_artifact_sha256("3.47.70", "missing/artifact.zip", merged.checksums)
+    merged = merge_custom_versions([_custom_tag(version = ctx.attr.version)])
+    sha = flutter_artifact_sha256(ctx.attr.version, ctx.attr.artifact_path, merged.checksums)
     out = ctx.actions.declare_file(ctx.label.name + ".sha256")
     ctx.actions.write(out, sha)
     return [DefaultInfo(files = depset([out]))]
 
-_custom_missing_checksum_probe = rule(implementation = _custom_missing_checksum_probe_impl)
+_custom_missing_checksum_probe = rule(
+    implementation = _custom_missing_checksum_probe_impl,
+    attrs = {
+        "version": attr.string(default = "3.47.70"),
+        "artifact_path": attr.string(default = "missing/artifact.zip"),
+    },
+)
+
+def _merge_acme_sky_engine_test_impl(ctx):
+    env = unittest.begin(ctx)
+    merged = merge_custom_versions([struct(
+        version = "3.44.1-acme",
+        engine_revision = "0" * 40,
+        source_sha256 = "1" * 64,
+        material_fonts_url = "flutter_infra_release/flutter/fonts/0/fonts.zip",
+        artifact_sha256 = {"sky_engine.zip": "3" * 64},
+        engine_base_url = "",
+        source_url = "",
+        is_root = True,
+    )])
+    asserts.equals(
+        env,
+        "3" * 64,
+        flutter_artifact_sha256("3.44.1-acme", "sky_engine.zip", merged.checksums),
+    )
+    return unittest.end(env)
+
+_merge_acme_sky_engine_test = unittest.make(_merge_acme_sky_engine_test_impl)
+
+_t11_test = _merge_acme_sky_engine_test
 
 def versions_test_suite(name):
     """Defines unit and analysis tests for `versions.bzl` and artifact SHA-256 verification.
@@ -427,6 +456,22 @@ def versions_test_suite(name):
         ],
     )
 
+    _custom_missing_checksum_probe(
+        name = name + "_acme_missing_sky_probe",
+        version = "3.44.1-acme",
+        artifact_path = "sky_engine.zip",
+        tags = ["manual"],
+    )
+    _expect_failure_test(
+        name = name + "_acme_missing_sky_fails",
+        target_under_test = ":" + name + "_acme_missing_sky_probe",
+        expected_substrings = [
+            "No sha256 recorded for sky_engine.zip in Flutter 3.44.1-acme",
+            "sky_engine.zip",
+            "3.44.1-acme",
+        ],
+    )
+
     unittest.suite(
         name + "_unit",
         _t0_test,
@@ -440,6 +485,7 @@ def versions_test_suite(name):
         _t8_test,
         _t9_test,
         _t10_test,
+        _t11_test,
     )
 
     native.test_suite(
@@ -453,5 +499,6 @@ def versions_test_suite(name):
             ":" + name + "_merge_duplicate_fails",
             ":" + name + "_merge_missing_field_fails",
             ":" + name + "_custom_missing_checksum_fails",
+            ":" + name + "_acme_missing_sky_fails",
         ],
     )
