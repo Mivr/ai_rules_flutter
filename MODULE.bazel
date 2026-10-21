@@ -54,6 +54,7 @@ bazel_dep(name = "rules_android", version = "0.8.0")
 bazel_dep(name = "rules_kotlin", version = "2.4.20")
 bazel_dep(name = "rules_java", version = "9.9.0")
 bazel_dep(name = "rules_jvm_external", version = "7.1")
+
 # Minimum rules_dart with the fork APIs rules_flutter loads
 # (`@rules_dart//dart:hooks.bzl`, `@rules_dart//dart/private:record_use.bzl`,
 # `dart_codegen(package_name = ...)`): the `Mivr/rules_dart` fork release.
