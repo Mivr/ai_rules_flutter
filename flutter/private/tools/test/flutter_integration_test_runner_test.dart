@@ -514,6 +514,101 @@ void main() {
         }
       },
     );
+
+    test(
+      'fails with non-zero exit when the in-app suite executes zero cases',
+      () async {
+        final tmpDir = Directory.systemTemp.createTempSync('integration_zero_');
+        final xmlFile = File('${tmpDir.path}/test.xml');
+        WebSocket? clientWs;
+        try {
+          final launcher = _FakePlatformLauncher(
+            onStart: (port) async {
+              clientWs = await WebSocket.connect(
+                'ws://127.0.0.1:$port${runner.integrationWebSocketPath}',
+              );
+              clientWs!.listen((raw) {
+                final list = json.decode(raw as String) as List<dynamic>;
+                final id = (list[0] as num).toInt();
+                final payload = list[1] as Map<String, dynamic>;
+                if (id == 0 && payload['type'] == 'initial') {
+                  clientWs!.add(
+                    json.encode([
+                      0,
+                      {
+                        'type': 'success',
+                        'root': {
+                          'type': 'group',
+                          'name': '',
+                          'entries': [],
+                        },
+                      },
+                    ]),
+                  );
+                }
+              });
+              return Process.start(Platform.resolvedExecutable, ['--version']);
+            },
+          );
+
+          final code = await runner.runIntegrationSuite(
+            launcher: launcher,
+            testPath: 'integration_test/app_test.dart',
+            selection: TestSelection(),
+            xmlOutput: xmlFile.path,
+            bazelTestTimeout: '60',
+          );
+          expect(code, 1);
+        } finally {
+          await clientWs?.close();
+          if (tmpDir.existsSync()) {
+            tmpDir.deleteSync(recursive: true);
+          }
+        }
+      },
+    );
+  });
+
+  group('integrationRunFailed', () {
+    test(
+      'passes with executed cases, fails on failure, suite error, or zero executed cases',
+      () {
+        expect(
+          runner.integrationRunFailed(
+            passed: 3,
+            failed: 0,
+            suiteError: false,
+          ),
+          isFalse,
+        );
+        expect(
+          runner.integrationRunFailed(
+            passed: 2,
+            failed: 1,
+            suiteError: false,
+          ),
+          isTrue,
+        );
+        expect(
+          runner.integrationRunFailed(
+            passed: 3,
+            failed: 0,
+            suiteError: true,
+          ),
+          isTrue,
+        );
+        // Zero executed cases (including the all-skipped shape) is a broken
+        // harness, not a pass.
+        expect(
+          runner.integrationRunFailed(
+            passed: 0,
+            failed: 0,
+            suiteError: false,
+          ),
+          isTrue,
+        );
+      },
+    );
   });
 
   group('env forwarding', () {

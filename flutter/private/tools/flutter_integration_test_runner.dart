@@ -9,7 +9,9 @@
 /// - any test expectation failure (printing test name, expected, and actual),
 /// - any uncaught Dart/Flutter/JS error,
 /// - browser or target process crash / unexpected exit,
-/// - dial-back or per-test timeout.
+/// - dial-back or per-test timeout,
+/// - zero executed cases (no test passed or failed): a run that executes
+///   nothing is a broken harness, not a pass.
 library;
 
 import 'dart:async';
@@ -2127,6 +2129,18 @@ class _TestFailureSummary {
   }
 }
 
+/// Whether an integration run must be reported as a failure, given its counts.
+///
+/// A run that executes zero cases (nothing passed and nothing failed) is a
+/// broken harness, not a pass, so it fails even without a suite error.
+bool integrationRunFailed({
+  required int passed,
+  required int failed,
+  required bool suiteError,
+}) {
+  return failed > 0 || suiteError || passed + failed == 0;
+}
+
 class _Results {
   int passed = 0;
   int failed = 0;
@@ -2177,7 +2191,8 @@ class _Results {
     stderr.writeln('flutter_integration_test: $message');
   }
 
-  bool get hasFailure => failed > 0 || _suiteError;
+  bool get hasFailure =>
+      integrationRunFailed(passed: passed, failed: failed, suiteError: _suiteError);
 
   String summary() {
     final pieces = <String>[
