@@ -1344,6 +1344,8 @@ load(
 
 `flutter_kernel_compile_tools(ctx)` resolves the tool files (`dartaotruntime`, `kernel_filter_tool`, `frontend_server`, `platform_dill` — the release dill with `product = True`), `compile_package_config` writes the `package_config.json` (with `extra_roots` for packages that contribute no sources, such as `flutter` or `sky_engine` from the toolchain — the caller must also make those roots' files action inputs), and `flutter_kernel_compile_action` runs the compile, with optional `vm_flags` (Dart VM flags before the snapshot), `import_dill` (a pre-compiled summary passed as `--import-dill`), and `resource_set` (host resource constraints). Merge `FLUTTER_KERNEL_COMPILE_ATTRS` into the rule's `attrs` and declare `FLUTTER_KERNEL_COMPILE_TOOLCHAINS`; the rule keeps its own `main`, `srcs` and `deps`.
 
+Soundness rule for `import_dill`: `frontend_server` re-reads an imported dill's whole source closure on every compile, so the consuming compile must still declare those sources — the guard accepts the declared reads and refuses anything undeclared. Pass `--incremental` (via `extra_flags`) so the compiler does not additionally re-read the dill's own entry main. `e2e/smoke` shows the full chain from another module: a plain kernel, one with `vm_flags` and `resource_set`, and one consuming a real `import_dill` dill.
+
 Stability note: `flutter:utils.bzl` is stable for external use. New optional parameters may be added to `flutter_kernel_compile_action`, but existing calls keep their command line and action keys.
 
 ### Code generation

@@ -16,7 +16,9 @@ hidden consumer checks rely on:
 - `extra_roots` entries appear in the emitted `package_config.json`;
 - a caller that sets every new parameter still compiles (`build_test` —
   `resource_set` is not observable from analysis, so executing the action is
-  the presence check).
+  the presence check), including a real `import_dill` chain: a whole-program
+  dill of the dep entry seeding an incremental compile of a main importing
+  the dep.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
@@ -58,8 +60,9 @@ def _compile_api_caller_impl(ctx):
         vm_flags = ctx.attr.vm_flags,
         import_dill = ctx.file.import_dill if ctx.attr.import_dill else None,
         resource_set = _TEST_RESOURCE_SET if ctx.attr.use_resource_set else None,
+        extra_flags = ctx.attr.extra_flags,
     )
-    return [DefaultInfo(files = depset([output, pc.config_file]))]
+    return [DefaultInfo(files = depset([output]))]
 
 _compile_api_caller = rule(
     implementation = _compile_api_caller_impl,
@@ -79,6 +82,9 @@ _compile_api_caller = rule(
         ),
         "vm_flags": attr.string_list(
             doc = "Dart VM flags for dartaotruntime.",
+        ),
+        "extra_flags": attr.string_list(
+            doc = "Additional frontend_server flags.",
         ),
         "import_dill": attr.label(
             doc = "Pre-compiled summary dill.",
@@ -281,6 +287,40 @@ def compile_api_test_suite(name):
         tags = ["manual"],
     )
 
+    # A real summary dill of the dep package: a whole-program kernel compile
+    # of an entrypoint reaching the dep. The `_compile_api_import` target
+    # below consumes it as `import_dill`.
+    _compile_api_caller(
+        name = "_compile_api_dill_source",
+        main = "compile_api_extras_main.dart",
+        deps = [":_compile_api_dep"],
+        tags = ["manual"],
+        target_compatible_with = _HOST_COMPATIBLE,
+    )
+
+    # A real `import_dill` compile: the dep entry's dill seeds an incremental
+    # compile of a main importing the dep. The dep's sources stay declared
+    # inputs — `frontend_server` re-reads an imported dill's whole source
+    # closure (verified directly: even a main importing nothing from the dill
+    # makes it re-read the dill's entry and closure), so a sound `import_dill`
+    # compile must declare that closure. `kernel_filter` then accepts those
+    # declared reads plus the dill input, and still refuses undeclared ones
+    # (pinned in `kernel_filter_test.dart`). `--incremental` keeps the
+    # compiler from additionally re-reading the dill's own entry main, which
+    # this compile does not declare.
+    _compile_api_caller(
+        name = "_compile_api_import",
+        main = "compile_api_import_main.dart",
+        deps = [":_compile_api_dep"],
+        extra_roots = {"compile_api_dep": "flutter/tests"},
+        extra_flags = ["--incremental"],
+        import_dill = ":_compile_api_dill_source",
+        vm_flags = ["--old-gen-heap-size=2147483648"],
+        use_resource_set = True,
+        tags = ["manual"],
+        target_compatible_with = _HOST_COMPATIBLE,
+    )
+
     _compile_api_caller(
         name = "_compile_api_default",
         main = "compile_api_main.dart",
@@ -321,10 +361,11 @@ def compile_api_test_suite(name):
         tags = ["manual"],
     )
 
-    # Executed compiles: the default shape and every-new-parameter shape both
-    # build. `resource_set` is invisible to analysis, so running the action is
-    # its presence check. Neither sets `import_dill`: the checked-in stub is
-    # analysis-only, and a real compile would read it as a dill.
+    # Executed compiles: the default shape, the every-new-parameter shape, and
+    # the real `import_dill` chain all build. `resource_set` is invisible to
+    # analysis, so running the action is its presence check. The analysis-only
+    # `_compile_api_extras`/`_compile_api_undeclared` targets use the
+    # checked-in stub dill, which no executed compile reads as a dill.
     _compile_api_caller(
         name = "_compile_api_build_default",
         main = "compile_api_main.dart",
@@ -337,6 +378,16 @@ def compile_api_test_suite(name):
         deps = [":_compile_api_dep"],
         vm_flags = ["--old-gen-heap-size=2147483648"],
         use_resource_set = True,
+        tags = ["manual"],
+        target_compatible_with = _HOST_COMPATIBLE,
+    )
+
+    # Real negative (manual, deliberately NOT in `build_test`): the sibling
+    # import is never declared, so executing this compile must fail. Run it
+    # explicitly to see the refusal.
+    _compile_api_caller(
+        name = "_compile_api_build_negative",
+        main = "compile_api_undeclared_main.dart",
         tags = ["manual"],
         target_compatible_with = _HOST_COMPATIBLE,
     )
@@ -371,6 +422,8 @@ def compile_api_test_suite(name):
         targets = [
             ":_compile_api_build_default",
             ":_compile_api_build_extras",
+            ":_compile_api_dill_source",
+            ":_compile_api_import",
         ],
     )
 
