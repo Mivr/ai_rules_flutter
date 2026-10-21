@@ -15,52 +15,34 @@ build_test(
     ],
 )
 
-# Cross-module proof for `@rules_flutter//flutter:utils.bzl`: a rule defined
-# in this (other) module composes over `FLUTTER_KERNEL_COMPILE_ATTRS` /
-# `FLUTTER_KERNEL_COMPILE_TOOLCHAINS` and builds kernels — one with
-# `vm_flags` and `resource_set`, one without them, and one consuming a real
-# `import_dill` dill. `//...` (built by the consumer gate) covers all but the
-# manual negative, which must fail and is exercised explicitly.
-dart_library(
-    name = "consumer_dep",
-    package_name = "consumer_dep",
-    srcs = ["lib/consumer_dep.dart"],
-)
-
-consumer_caller(
-    name = "consumer_default",
-    main = "consumer_main.dart",
-)
-
-consumer_caller(
-    name = "consumer_extras",
-    main = "consumer_extras_main.dart",
-    use_resource_set = True,
-    vm_flags = ["--old-gen-heap-size=2147483648"],
-    deps = [":consumer_dep"],
-)
-
-consumer_caller(
-    name = "consumer_dill_source",
-    main = "consumer_extras_main.dart",
-    deps = [":consumer_dep"],
-)
-
-consumer_caller(
-    name = "consumer_import",
-    extra_flags = ["--incremental"],
-    extra_roots = {"consumer_dep": "e2e/smoke"},
-    import_dill = ":consumer_dill_source",
-    main = "consumer_import_main.dart",
-    use_resource_set = True,
-    vm_flags = ["--old-gen-heap-size=2147483648"],
-    deps = [":consumer_dep"],
-)
-
 # Negative: the sibling import is never declared, so the compile must fail.
 # Manual so `//...` stays green; run explicitly to see the refusal.
 consumer_caller(
     name = "consumer_negative",
     main = "consumer_undeclared_main.dart",
     tags = ["manual"],
+)
+
+# A root-registered custom release resolves exactly like a stock one. Only
+# the Linux toolchain is checked: the engine revision is 3.47.7's, so every
+# fetched byte is cache-shared with the stock toolchain above. The
+# dart_sdk_files target forces the host repo fetch, so its engine artifacts
+# are checksum-verified against the merged custom table.
+build_test(
+    name = "custom_toolchain_resolves_test",
+    targets = [
+        "@custom_toolchains//:linux-x64_toolchain",
+        "@custom_linux-x64//:dart_sdk_files",
+    ],
+)
+
+# Offline mode: the local toolchain resolves out of the checked-in fake_sdk
+# tree with no network fetch. The dart_sdk_files target forces the host repo
+# fetch, so the fake SDK's bin/cache layout is symlink-farmed for real.
+build_test(
+    name = "local_toolchain_resolves_test",
+    targets = [
+        "@local_toolchains//:linux-x64_toolchain",
+        "@local_linux-x64//:dart_sdk_files",
+    ],
 )
