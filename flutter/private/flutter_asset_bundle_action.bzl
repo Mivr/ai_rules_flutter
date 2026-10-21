@@ -6,7 +6,6 @@ rule so the rule can load the shader helpers from `common.bzl` without a
 load cycle.
 """
 
-
 # Regex-like DPR directory patterns we detect in Starlark.
 # A directory named like "2x", "1.5x", "3.0x" indicates a resolution variant.
 _DPR_SUFFIXES = {
@@ -193,4 +192,3 @@ def flutter_asset_bundle_action(
     )
 
     return output_dir
-
