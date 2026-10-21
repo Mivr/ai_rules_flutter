@@ -10,7 +10,7 @@ load(
     "FLUTTER_APK_AAPT_NO_COMPRESS_EXTENSIONS",
     "flutter_android_app",
 )
-load("@rules_flutter//flutter:defs.bzl", "flutter_aot_target", "flutter_application", "flutter_asset_bundle", "flutter_kernel_target", "flutter_library", "flutter_test")
+load("@rules_flutter//flutter:defs.bzl", "flutter_aot_target", "flutter_application", "flutter_asset_bundle", "flutter_kernel_target", "flutter_library", "flutter_prebuilt_test", "flutter_test")
 load(
     "@rules_flutter//flutter:ios.bzl",
     "IOS_DEFAULT_LAUNCH_STORYBOARD",
@@ -432,6 +432,90 @@ flutter_test(
     deps = [
         "@deps//:flutter_test",
     ],
+)
+
+# -- Prebuilt tests: run an already built kernel, compile nothing ---------------
+
+# `:widget_test`'s build products, one filegroup per `flutter_prebuilt_test`
+# attr. The prebuilt twin below runs the same kernel with the same assets and
+# passes exactly when `:widget_test` passes.
+filegroup(
+    name = "widget_test_kernel",
+    testonly = True,
+    srcs = [":widget_test"],
+    output_group = "test_kernel",
+)
+
+filegroup(
+    name = "widget_test_base_kernel",
+    testonly = True,
+    srcs = [":widget_test"],
+    output_group = "test_base_kernel",
+)
+
+filegroup(
+    name = "widget_test_assets",
+    testonly = True,
+    srcs = [":widget_test"],
+    output_group = "test_assets",
+)
+
+flutter_prebuilt_test(
+    name = "widget_prebuilt_test",
+    assets = ":widget_test_assets",
+    base_dill = [":widget_test_base_kernel"],
+    dill = ":widget_test_kernel",
+    target_compatible_with = _HOST_COMPATIBLE,
+)
+
+# The failing twin: a kernel whose single case fails, compiled by a `manual`
+# `flutter_test` (so `bazel test //...` stays green) and run by a `manual`
+# `flutter_prebuilt_test`. Its red run proves the prebuilt path executes the
+# kernel rather than passing vacuously. Run it explicitly:
+#   bazel test //:prebuilt_failing_test
+flutter_test(
+    name = "prebuilt_failing_source_test",
+    package_name = "hello_world",
+    main = "test/prebuilt_failing_test.dart",
+    tags = ["manual"],
+    target_compatible_with = _HOST_COMPATIBLE,
+    deps = [
+        "@deps//:flutter",
+        "@deps//:flutter_test",
+    ],
+)
+
+filegroup(
+    name = "prebuilt_failing_kernel",
+    testonly = True,
+    srcs = [":prebuilt_failing_source_test"],
+    output_group = "test_kernel",
+    tags = ["manual"],
+)
+
+filegroup(
+    name = "prebuilt_failing_base_kernel",
+    testonly = True,
+    srcs = [":prebuilt_failing_source_test"],
+    output_group = "test_base_kernel",
+    tags = ["manual"],
+)
+
+filegroup(
+    name = "prebuilt_failing_assets",
+    testonly = True,
+    srcs = [":prebuilt_failing_source_test"],
+    output_group = "test_assets",
+    tags = ["manual"],
+)
+
+flutter_prebuilt_test(
+    name = "prebuilt_failing_test",
+    assets = ":prebuilt_failing_assets",
+    base_dill = [":prebuilt_failing_base_kernel"],
+    dill = ":prebuilt_failing_kernel",
+    tags = ["manual"],
+    target_compatible_with = _HOST_COMPATIBLE,
 )
 
 # -- build_test targets verify that rules produce outputs without errors -------
