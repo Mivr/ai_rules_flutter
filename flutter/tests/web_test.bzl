@@ -1867,6 +1867,44 @@ def _setup_web_fixtures():
         tags = ["manual"],
     )
 
+    # The web-guard fixtures: `web_guard_fixture/lib/secret.dart` sits on the
+    # host but in no target's `srcs`, and each hostile `main` below imports it
+    # in one undeclared-input spelling. Every web compile runs behind
+    # `web_guard`, so building any hostile fixture must fail with `is not a
+    # declared input` before the compiler runs — under the sandboxed and the
+    # local strategy alike — and embed nothing. They stay `manual`: a passing
+    # `//flutter/...` cannot build a target that must fail. The clean bundle
+    # beside them builds for real (see the suite's build_test), proving the
+    # guard leaves declared imports alone.
+    flutter_web_bundle(
+        name = "_web_guard_clean",
+        package_name = "web_guard_fixture",
+        main = "web_guard_fixture/lib/clean_main.dart",
+        srcs = ["web_guard_fixture/lib/helper.dart"],
+        tags = ["manual"],
+    )
+    for spelling in [
+        "file",
+        "relative",
+        "app_scheme",
+        "double_slash",
+        "schemeless",
+    ]:
+        flutter_web_bundle(
+            name = "_web_guard_hostile_" + spelling,
+            package_name = "web_guard_fixture",
+            main = "web_guard_fixture/lib/hostile/%s_main.dart" % spelling,
+            tags = ["manual"],
+        )
+        flutter_web_bundle(
+            name = "_web_guard_hostile_%s_js" % spelling,
+            package_name = "web_guard_fixture",
+            main = "web_guard_fixture/lib/hostile/%s_main.dart" % spelling,
+            compiler = "dart2js",
+            renderer = "canvaskit",
+            tags = ["manual"],
+        )
+
 _VALID_WEB_SDK_LIBRARIES_JSON = """{
   "comment:0": "NOTE: THIS FILE IS GENERATED. DO NOT EDIT.",
   "dartdevc": {
@@ -2497,6 +2535,15 @@ def web_test_suite(name):
     build_test(
         name = name + "_nonlib_generated_src_build",
         targets = [":_web_nonlib_generated_src_fixture"],
+    )
+
+    # The guard's clean control builds for real: declared relative, package
+    # and app-scheme imports compile through `web_guard` untouched on both
+    # compilers. The hostile `_web_guard_hostile_*` fixtures beside it stay
+    # manual-only and must fail instead (see `_setup_web_fixtures`).
+    build_test(
+        name = name + "_guard_clean_build",
+        targets = [":_web_guard_clean"],
     )
 
     unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test, _t6_test, _t7_test, _t8_test)

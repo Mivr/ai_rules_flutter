@@ -18,6 +18,7 @@ exports_files(
         "merge_android_manifests.dart",
         "merge_plists.dart",
         "strip_native_libs.dart",
+        "web_guard.dart",
         "web_template.dart",
         "xtool_pack.dart",
         "flutter_test_runner.dart",
@@ -148,6 +149,24 @@ flutter_sdk_kernel_binary(
     visibility = ["//flutter:__subpackages__"],
 )
 
+# Guards a web compile's declared sources before `web_template` runs it (see
+# `web_guard.dart`): a `dart_binary` rather than part of `web_template`
+# because `web_template` compiles with an empty package config and cannot
+# import the guard library. `compile_mode = "exe"` keeps the guarded compile's
+# inputs minimal: the guard runs as a self-contained native executable, so the
+# action stages only the guard and its manifest — never the exec Dart VM's
+# snapshots and debug symbols.
+dart_binary(
+    name = "web_guard",
+    srcs = ["directive_guard.dart"],
+    compile_mode = "exe",
+    main = "web_guard.dart",
+    modular_kernel = False,
+    target_compatible_with = HOST_COMPATIBLE,
+    visibility = ["//flutter:__subpackages__"],
+    deps = ["@rules_dart//dart/guard:directive_guard"],
+)
+
 dart_binary(
     name = "xtool_pack",
     srcs = ["macho_edit.dart"],
@@ -185,6 +204,10 @@ _UNIT_TESTS = {
     "merge_android_manifests_test": ("merge_android_manifests.dart", []),
     "merge_plists_test": ("merge_plists.dart", []),
     "strip_native_libs_test": ("strip_native_libs.dart", []),
+    "web_guard_test": (
+        "web_guard.dart",
+        ["@rules_dart//dart/guard:directive_guard"],
+    ),
     "web_template_test": ("web_template.dart", []),
     "xtool_pack_test": ("xtool_pack.dart", []),
     "flutter_test_runner_test": (
@@ -210,6 +233,7 @@ _TOOL_SRCS = {
     "flutter_test_runner.dart": ["bazel_test_protocol.dart"],
     "flutter_integration_test_runner.dart": ["bazel_test_protocol.dart"],
     "kernel_filter.dart": ["directive_guard.dart"],
+    "web_guard.dart": ["directive_guard.dart"],
 }
 
 _TEST_DATA = {

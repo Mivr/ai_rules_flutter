@@ -440,8 +440,8 @@ void main() {
     test(
       'snapshot args compile the staged entry and packages under org-dartlang-app',
       () {
-        const stageExecRel =
-            'bazel-out/k8-fastbuild/bin/pkg/app.dart2js_cfe.1234.stage';
+        const stageRootUri =
+            'file:///execroot/_main/bazel-out/k8-fastbuild/bin/pkg/app.dart2js_cfe.1234.stage/';
         final args = buildDart2JsSnapshotArgs(
           forwardArgs: [
             '--packages=/tmp/rewritten/package_config.json',
@@ -451,30 +451,43 @@ void main() {
             'out.dill',
           ],
           rewrittenPkgPath: '/tmp/rewritten/package_config.json',
-          stageExecRel: stageExecRel,
+          stageRootUri: stageRootUri,
           normMainDart: 'pkg/lib/main.dart',
         );
 
         expect(args, contains('--multi-root-scheme=org-dartlang-app'));
-        // `dart compile js` only honours the execroot itself as the
-        // multi-root; the staging tree is addressed through it.
-        expect(args, contains('--multi-root=.'));
-        expect(
-          args,
-          contains('org-dartlang-app:///$stageExecRel/pkg/lib/main.dart'),
-        );
+        // The js frontend mounts the staging tree itself as a `file:`
+        // multi-root — never the execroot — so the compile reads only
+        // declared inputs whatever the strategy.
+        expect(args, contains('--multi-root=$stageRootUri'));
+        expect(args, contains('org-dartlang-app:///pkg/lib/main.dart'));
         expect(args, contains('--packages=/tmp/rewritten/package_config.json'));
         for (final a in args) {
-          expect(a, isNot(contains('file://')));
           expect(a, isNot(contains('sandbox')));
-          expect(a, isNot(contains('/execroot/')));
         }
         expect(
           args.last,
-          'org-dartlang-app:///$stageExecRel/pkg/lib/main.dart',
+          'org-dartlang-app:///pkg/lib/main.dart',
         );
       },
     );
+
+    test('stage root URIs name the staging directory', () {
+      expect(
+        stageRootUri('pkg/app.dart2js.1234.stage'),
+        startsWith('file:'),
+      );
+      expect(
+        stageRootUri('pkg/app.dart2js.1234.stage'),
+        endsWith('/pkg/app.dart2js.1234.stage/'),
+      );
+      expect(
+        stageRootUri(
+          'file:///execroot/_main/bazel-out/k8-fastbuild/bin/pkg/app.stage/',
+        ),
+        'file:///execroot/_main/bazel-out/k8-fastbuild/bin/pkg/app.stage/',
+      );
+    });
   });
 
   group('scrubDart2JsOutputs', () {

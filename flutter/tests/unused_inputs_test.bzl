@@ -60,8 +60,10 @@ def _fake_file(path):
     )
 
 def _fake_args(added):
+    # Records single-argument adds as strings and `--flag value` adds as
+    # pairs, so tests can assert both forwarded flags and multi-root values.
     return struct(
-        add = lambda *a, **_kw: added.append(a[0]),
+        add = lambda *a, **_kw: added.append(a[0] if len(a) == 1 else a),
         add_all = lambda *a, **_kw: added.append(a[0]),
         set_param_file_format = lambda *a, **_kw: None,
         use_param_file = lambda *a, **_kw: None,
@@ -131,7 +133,7 @@ def _library_unused_inputs_test_impl(ctx):
         runs[0]["unused_inputs_list"].basename,
         "the list file sits next to the module output",
     )
-    flags = [a for a in added if type(a) == "string"]
+    flags = [a for a in added if type(a) == "string"] + [a[0] for a in added if type(a) == "tuple"]
     for flag in ["--unused-inputs-list", "--own-source-file", "--input-source"]:
         asserts.true(
             env,
@@ -170,7 +172,7 @@ def _default_no_list_test_impl(ctx):
         runs[0]["unused_inputs_list"] == None,
         "the default registers the historical action with no list",
     )
-    flags = [a for a in added if type(a) == "string"]
+    flags = [a for a in added if type(a) == "string"] + [a[0] for a in added if type(a) == "tuple"]
     asserts.true(
         env,
         "--unused-inputs-list" not in flags,
@@ -183,9 +185,37 @@ def _default_no_list_test_impl(ctx):
     )
     return unittest.end(env)
 
+def _stage_all_test_impl(ctx):
+    """Every modular kernel compile stages all sources and never mounts `.`.
+
+    The exec root carries files the action did not declare; mounting it lets
+    the compile read (and Bazel cache) undeclared bytes. The staging root
+    holds only declared inputs.
+    """
+    env = unittest.begin(ctx)
+    added = []
+    runs = []
+    _compile(added, runs, unused_inputs = True)
+    pairs = [a for a in added if type(a) == "tuple"]
+    asserts.true(
+        env,
+        ("--multi-root", ".") not in pairs,
+        "no modular compile mounts the exec root '.', got %r" % (pairs,),
+    )
+    roots = [v for (k, v) in pairs if k == "--multi-root"]
+    asserts.equals(env, 1, len(roots), "expected only the staging root mounted, got %r" % (roots,))
+    if len(roots) == 1:
+        asserts.true(
+            env,
+            roots[0].endswith(".stage"),
+            "the --multi-root must be the per-action staging dir, got %r" % roots[0],
+        )
+    return unittest.end(env)
+
 _library_unused_inputs_test = unittest.make(_library_unused_inputs_test_impl)
 _entry_extra_inputs_test = unittest.make(_entry_extra_inputs_test_impl)
 _default_no_list_test = unittest.make(_default_no_list_test_impl)
+_stage_all_test = unittest.make(_stage_all_test_impl)
 
 def unused_inputs_test_suite(name):
     """Defines tests for the kernel `unused_inputs_list` wiring.
@@ -198,6 +228,7 @@ def unused_inputs_test_suite(name):
         _library_unused_inputs_test,
         _entry_extra_inputs_test,
         _default_no_list_test,
+        _stage_all_test,
     )
     _entry_unused_inputs_test(
         name = name + "_entry",

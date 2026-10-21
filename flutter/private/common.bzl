@@ -1549,6 +1549,11 @@ KERNEL_COMPILE_ATTRS = {
         executable = True,
         cfg = "exec",
     ),
+    "_web_guard_tool": attr.label(
+        default = Label("//flutter/private/tools:web_guard"),
+        executable = True,
+        cfg = "exec",
+    ),
     "main": attr.label(
         doc = "The main .dart entry point.",
         mandatory = True,

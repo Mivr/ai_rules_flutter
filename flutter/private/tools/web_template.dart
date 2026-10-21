@@ -384,9 +384,17 @@ String _toAppSchemeRelPath(String path) {
   );
 }
 
+/// Rewrites [packagesPath] so every package root resolves inside the compile's
+/// staging root, and writes the result to [outPath].
+///
+/// Roots under the app scheme name the staged tree directly. Roots on the
+/// filesystem must sit under the action's working directory, where the staging
+/// root holds their staged copies; a root anywhere else (a `file:` URI the
+/// compiler would read straight off the host, outside every multi-root) fails
+/// the compile instead of passing through. Roots under any other scheme are
+/// left alone: the compiler reports what it cannot resolve.
 void _rewritePackageConfigForStage(
   String packagesPath,
-  String stageExecRel,
   String normCwd,
   String cwdPrefix,
   String outPath,
@@ -396,9 +404,6 @@ void _rewritePackageConfigForStage(
       json.decode(pkgFile.readAsStringSync()) as Map<String, dynamic>;
   final pkgs = (pkgJson['packages'] as List<dynamic>)
       .cast<Map<String, dynamic>>();
-  final stagePrefix = stageExecRel
-      .replaceAll(r'\', '/')
-      .replaceFirst(RegExp(r'^(?:\./)+'), '');
   for (final p in pkgs) {
     final rootUri = p['rootUri'] as String;
     String rel = '';
@@ -421,18 +426,25 @@ void _rewritePackageConfigForStage(
       } else if (fsPath == normCwd || fsPath == cwdPrefix) {
         rel = '';
       } else {
-        p['rootUri'] = resolved.toString();
-        continue;
+        stderr.writeln(
+          'web_template compile: package ${p['name']} root $rootUri resolves '
+          'outside the declared inputs ($fsPath); refusing to compile.',
+        );
+        exit(1);
       }
     }
-    final stagedRel = rel.isEmpty
-        ? stagePrefix
-        : (stagePrefix.isEmpty ? rel : '$stagePrefix/$rel');
-    p['rootUri'] = 'org-dartlang-app:///$stagedRel';
+    p['rootUri'] = 'org-dartlang-app:///$rel';
   }
   File(outPath).writeAsStringSync(json.encode(pkgJson));
 }
 
+/// Rewrites [packagesPath] so every package root resolves inside the compile's
+/// staging root, and writes the result to [outPath]. The wasm compiler mounts
+/// the staging root itself (see [_runDart2Wasm]), so roots under the working
+/// directory name their staged copies; a root anywhere else (a `file:` URI the
+/// compiler would read straight off the host, outside every multi-root) fails
+/// the compile instead of passing through. Roots under any other scheme are
+/// left alone: the compiler reports what it cannot resolve.
 void _rewritePackageConfig(
   String packagesPath,
   String normCwd,
@@ -462,7 +474,11 @@ void _rewritePackageConfig(
       } else if (fsPath == normCwd || fsPath == cwdPrefix) {
         p['rootUri'] = 'org-dartlang-app:///';
       } else {
-        p['rootUri'] = resolved.toString();
+        stderr.writeln(
+          'web_template compile: package ${p['name']} root $rootUri resolves '
+          'outside the declared inputs ($fsPath); refusing to compile.',
+        );
+        exit(1);
       }
     }
   }
@@ -773,32 +789,40 @@ void scrubDart2JsFile(
 
 /// Builds the `dart2js` snapshot argv for a staged multi-root compile.
 ///
-/// `dart compile js` only honours `--multi-root=.` (the action execroot), so
-/// the entrypoint and every package root are addressed as execroot-relative
-/// `org-dartlang-app:///<stage>/<rel>` URIs: the `<stage>` prefix routes the
-/// lookup into the per-action staging tree holding both source and generated
-/// inputs, while the recorded library URIs stay stable relative URIs with no
-/// sandbox or execroot absolute paths. Mirrors [_runDart2Wasm]'s stable
-/// scheme, adapted to the js frontend's `.`-rooted multi-root.
+/// The js frontend resolves `org-dartlang-app:///` URIs against a `file:`
+/// multi-root naming the per-action staging tree that holds both source and
+/// generated inputs; the entrypoint and every package root are addressed as
+/// URIs relative to that root, so the compile reads only declared inputs
+/// whatever the strategy. The recorded library URIs stay stable relative URIs
+/// with no sandbox or execroot absolute paths. Mirrors [_runDart2Wasm]'s
+/// stable scheme, adapted to the js frontend's `file:`-rooted multi-root
+/// (a plain path multi-root answers "Unknown scheme in uri").
 List<String> buildDart2JsSnapshotArgs({
   required List<String> forwardArgs,
   required String rewrittenPkgPath,
-  required String stageExecRel,
+  required String stageRootUri,
   required String normMainDart,
 }) {
-  final stagePrefix = stageExecRel
-      .replaceAll(r'\', '/')
-      .replaceFirst(RegExp(r'^(?:\./)+'), '');
-  final entryUri = stagePrefix.isEmpty
-      ? 'org-dartlang-app:///$normMainDart'
-      : 'org-dartlang-app:///$stagePrefix/$normMainDart';
+  final entryUri = 'org-dartlang-app:///$normMainDart';
   return <String>[
     for (final a in forwardArgs)
       if (a.startsWith('--packages=')) '--packages=$rewrittenPkgPath' else a,
     '--multi-root-scheme=org-dartlang-app',
-    '--multi-root=.',
+    '--multi-root=$stageRootUri',
     entryUri,
   ];
+}
+
+/// The `file:` multi-root URI for the staging directory [multiRoot] names:
+/// the Bazel action passes it exec-root-relative, so absolutize against the
+/// working directory; an already-absolute or `file:` spelling is honored.
+String stageRootUri(String multiRoot) {
+  final norm = multiRoot.replaceAll(r'\', '/');
+  if (norm.startsWith('file:')) {
+    final uri = Uri.parse(norm);
+    return Uri.directory(uri.toFilePath()).toString();
+  }
+  return Uri.directory(Directory(multiRoot).absolute.path).toString();
 }
 
 void _runDart2Js(List<String> args) {
@@ -834,21 +858,26 @@ void _runDart2Js(List<String> args) {
   // `dart compile js --cfe-only` produces a kernel dill for const_finder
   // (the `app.dill` upstream runs icon tree-shaking on) rather than
   // JavaScript. Its `-o` names a file, not a directory, so the scratch
-  // directory cannot sit alongside the output (for a Bazel File output the
-  // parent is undeclared); use the system temp instead. JS scrubbing is
-  // skipped: there is no JS to scrub, and the `.deps` sibling is normalized
-  // below.
+  // directory is a uniquely-named sibling of the output (the compiler already
+  // writes `<dill>.deps` there, so the parent is the action's own output
+  // tree); two icon kernels compile concurrently into one `bin` dir, hence
+  // the timestamp/pid suffix. JS scrubbing is skipped: there is no JS to
+  // scrub, and the `.deps` sibling is normalized below.
   final cfeOnly = forwardArgs.contains('--cfe-only');
 
   final cwdPath = Directory.current.absolute.path;
-  final baseTmpParent = cfeOnly
-      ? Directory.systemTemp.path
-      : (outJs != null
-            ? (File(outJs).parent..createSync(recursive: true)).path
-            : cwdPath);
+  final baseTmpParent = (cfeOnly || outJs == null)
+      ? cwdPath
+      : (File(outJs).parent..createSync(recursive: true)).path;
+  // The icon-kernel scratch sits under the action's output directory when the
+  // output is known (never the shared system temp): for a tree-artifact
+  // output that is `outJs`'s own directory, for a dill output its parent dir.
+  final cfeScratchParent = cfeOnly && outJs != null
+      ? (File(outJs).parent..createSync(recursive: true)).path
+      : baseTmpParent;
   final tmpDir = Directory(
     cfeOnly
-        ? '${baseTmpParent}/rules_flutter_dart2js_cfe_${DateTime.now().microsecondsSinceEpoch}_${pid}'
+        ? '$cfeScratchParent/rules_flutter_dart2js_cfe_${DateTime.now().microsecondsSinceEpoch}_${pid}'
         : '$baseTmpParent/_dart2js_tmp',
   )..createSync(recursive: true);
   final tmpAbsPath = tmpDir.absolute.path;
@@ -857,14 +886,12 @@ void _runDart2Js(List<String> args) {
   try {
     List<String> jsArgs;
     if (multiRoot != null && packagesPath != null && mainDart != null) {
-      rootDirPath = Directory(multiRoot).absolute.path;
+      rootDirPath = Uri.parse(stageRootUri(multiRoot)).toFilePath();
       final normCwd = cwdPath.replaceAll(r'\', '/');
       final cwdPrefix = normCwd.endsWith('/') ? normCwd : '$normCwd/';
       rewrittenPkgPath = '${tmpDir.path}/package_config.json';
-      final stageExecRel = multiRoot.replaceAll(r'\', '/');
       _rewritePackageConfigForStage(
         packagesPath,
-        stageExecRel,
         normCwd,
         cwdPrefix,
         rewrittenPkgPath,
@@ -873,7 +900,7 @@ void _runDart2Js(List<String> args) {
       jsArgs = buildDart2JsSnapshotArgs(
         forwardArgs: forwardArgs,
         rewrittenPkgPath: rewrittenPkgPath,
-        stageExecRel: stageExecRel,
+        stageRootUri: stageRootUri(multiRoot),
         normMainDart: relMain,
       );
     } else {

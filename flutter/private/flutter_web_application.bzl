@@ -536,6 +536,7 @@ def _flutter_web_bundle_impl(ctx):
             defines = user_defines,
             renderer = renderer,
             web_compile_tool = ctx.executable._web_template_tool,
+            web_guard_tool = ctx.executable._web_guard_tool,
             web_compile_inputs = web_compile_inputs,
             stage_salt = entrypoint_salt,
         )
@@ -563,6 +564,7 @@ def _flutter_web_bundle_impl(ctx):
             defines = user_defines,
             renderer = "canvaskit",
             web_compile_tool = ctx.executable._web_template_tool,
+            web_guard_tool = ctx.executable._web_guard_tool,
             web_compile_inputs = web_compile_inputs,
             stage_salt = entrypoint_salt,
         )
@@ -600,6 +602,7 @@ def _flutter_web_bundle_impl(ctx):
             defines = user_defines,
             renderer = renderer,
             web_compile_tool = ctx.executable._web_template_tool,
+            web_guard_tool = ctx.executable._web_guard_tool,
             web_compile_inputs = web_compile_inputs,
             stage_salt = entrypoint_salt,
         )
@@ -672,6 +675,7 @@ def _flutter_web_bundle_impl(ctx):
                 defines = user_defines,
                 renderer = r,
                 web_compile_tool = ctx.executable._web_template_tool,
+                web_guard_tool = ctx.executable._web_guard_tool,
                 web_compile_inputs = web_compile_inputs,
                 stage_salt = r_salt,
             )

@@ -426,6 +426,80 @@ def _web_inputs_test_impl(ctx):
     )
     return analysistest.end(env)
 
+def _assert_web_guarded(env, action, context):
+    """A web compile runs behind the self-contained `web_guard` executable.
+
+    `web_guard` refuses disallowed directives in the compile's main and
+    sources before the compiler runs; the `--declared-inputs` manifest it
+    checks against must be an action input, and no `--multi-root` may name
+    `.` (the exec root carries files the action did not declare).
+    """
+    argv = action.argv if action else []
+    guards = [a for a in argv if a.split("/")[-1] in ("web_guard", "web_guard.exe")]
+    asserts.equals(
+        env,
+        1,
+        len(guards),
+        "%s must run behind the web_guard executable, got argv %r" % (context, argv[:8]),
+    )
+    manifests = [argv[i + 1] for i in range(len(argv) - 1) if argv[i] == "--declared-inputs"]
+    asserts.equals(
+        env,
+        1,
+        len(manifests),
+        "%s must carry --declared-inputs <manifest>, got %r" % (context, argv[:8]),
+    )
+    if action and len(manifests) == 1:
+        input_paths = [f.path for f in action.inputs.to_list()]
+        asserts.true(
+            env,
+            manifests[0] in input_paths,
+            "%s --declared-inputs manifest %r must be an action input" % (context, manifests[0]),
+        )
+        asserts.true(
+            env,
+            any([p.split("/")[-1] in ("web_guard", "web_guard.exe") for p in input_paths]),
+            "%s web_guard executable must be an action input" % context,
+        )
+    roots = []
+    for i, a in enumerate(argv):
+        if a == "--multi-root" and i + 1 < len(argv):
+            roots.append(argv[i + 1])
+        elif a.startswith("--multi-root="):
+            roots.append(a.split("=", 1)[1])
+    asserts.false(
+        env,
+        "." in roots,
+        "%s must never mount the exec root '.', got multi-roots %r" % (context, roots),
+    )
+    asserts.true(
+        env,
+        len(roots) > 0,
+        "%s must mount its staging root, got %r" % (context, argv[:8]),
+    )
+
+def _web_guard_inputs_test_impl(ctx):
+    """`FlutterDart2Wasm`, `FlutterDart2JS` and (where present) `FlutterDart2JSCFE` are guarded."""
+    env = analysistest.begin(ctx)
+    mnemonics = ["FlutterDart2Wasm", "FlutterDart2JS"]
+    if ctx.attr.expect_cfe:
+        mnemonics.append("FlutterDart2JSCFE")
+    for mnemonic in mnemonics:
+        actions = [a for a in analysistest.target_actions(env) if a.mnemonic == mnemonic]
+        asserts.true(
+            env,
+            len(actions) > 0,
+            "expected %s actions, got %s" % (mnemonic, [a.mnemonic for a in analysistest.target_actions(env)]),
+        )
+        for action in actions:
+            _assert_web_guarded(env, action, mnemonic)
+    return analysistest.end(env)
+
+_web_guard_inputs_test = analysistest.make(
+    _web_guard_inputs_test_impl,
+    attrs = {"expect_cfe": attr.bool(default = True)},
+)
+
 def _pub_runfiles_test_impl(ctx):
     """`//flutter:pub` runfiles carry `dartdev`, not the full Dart/patched SDK."""
     env = analysistest.begin(ctx)
@@ -1244,6 +1318,15 @@ def action_inputs_test_suite(name):
         name = name + "_web",
         target_under_test = ":_inputs_web_bundle",
     )
+    _web_guard_inputs_test(
+        name = name + "_web_guard",
+        target_under_test = ":_inputs_web_bundle",
+        expect_cfe = False,
+    )
+    _web_guard_inputs_test(
+        name = name + "_web_guard_fonts",
+        target_under_test = ":_inputs_web_bundle_bare_fonts",
+    )
     _pub_runfiles_test(
         name = name + "_pub",
         target_under_test = "//flutter:pub",
@@ -1312,6 +1395,8 @@ def action_inputs_test_suite(name):
             ":" + name + "_kernel_target_aot",
             ":" + name + "_kernel_target_aot_dbg",
             ":" + name + "_web",
+            ":" + name + "_web_guard",
+            ":" + name + "_web_guard_fonts",
             ":" + name + "_pub",
             ":" + name + "_dart_toolchain",
             ":" + name + "_reverse_toolchain_flutter_test",

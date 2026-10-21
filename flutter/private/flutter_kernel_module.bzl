@@ -243,7 +243,6 @@ def flutter_kernel_module_action(
         extra_libraries = [],
         scheme = APP_SCHEME,
         extra_frontend_flags = [],
-        stage_all = False,
         unused_inputs = False):
     """Compiles one Flutter kernel module with staged generated inputs instead of mounting `ctx.bin_dir`.
 
@@ -267,7 +266,6 @@ def flutter_kernel_module_action(
       extra_libraries: Extra SDK libraries available to the compile.
       scheme: Package-config URI scheme for the module's sources.
       extra_frontend_flags: Additional flags forwarded to the frontend.
-      stage_all: Whether to stage every source instead of only generated ones.
       unused_inputs: Whether the compile writes its unused-inputs list — the
         declared inputs no compile of this action read — and takes it as the
         action's `unused_inputs_list`, so Bazel skips the action when only an
@@ -299,7 +297,11 @@ def flutter_kernel_module_action(
     stage_candidates = [s.file for s in sources]
     if extra_inputs != None:
         stage_candidates = stage_candidates + extra_inputs.to_list()
-    stage = stage_generated_inputs(ctx, stage_candidates, output.basename, include_sources = stage_all)
+
+    # Every source is staged and only the staging root is mounted: mounting
+    # the exec root (`.`) lets the compile read files the action did not
+    # declare, which Bazel then caches without rerunning on their change.
+    stage = stage_generated_inputs(ctx, stage_candidates, output.basename, include_sources = True)
 
     args = ctx.actions.args()
     args.use_param_file("@%s", use_always = True)
@@ -314,8 +316,6 @@ def flutter_kernel_module_action(
     args.add_all(extra_libraries, before_each = "--extra-library")
     if stage.root != None:
         args.add("--multi-root", stage.root)
-    if not stage_all:
-        args.add("--multi-root", ".")
     args.add("--multi-root-scheme", scheme)
     args.add_all([d for d in defines if "," not in d], format_each = "-D%s")
     args.add_all(extra_frontend_flags)
@@ -942,7 +942,6 @@ def compile_flutter_modular_web_kernel(
         platform_dill = platform_dill if platform_dill != None else flutter_sdk_info.platform_kernel_dill_product,
         extra_libraries = ["ui", "nativewrappers"],
         scheme = APP_SCHEME,
-        stage_all = True,
         unused_inputs = True,
     )
     kernel_link_action(

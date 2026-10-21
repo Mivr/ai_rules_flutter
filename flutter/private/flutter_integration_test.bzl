@@ -1194,6 +1194,7 @@ def _flutter_integration_test_impl(ctx):
             defines = user_defines,
             renderer = renderer,
             web_compile_tool = ctx.executable._web_template_tool,
+            web_guard_tool = ctx.executable._web_guard_tool,
             web_compile_inputs = web_compile_inputs,
         )
         compile_outputs = [output_wasm, output_mjs]
@@ -1228,6 +1229,7 @@ def _flutter_integration_test_impl(ctx):
             defines = user_defines,
             renderer = renderer,
             web_compile_tool = ctx.executable._web_template_tool,
+            web_guard_tool = ctx.executable._web_guard_tool,
             web_compile_inputs = web_compile_inputs,
         )
         dart2js_dirs = [output_js_dir]

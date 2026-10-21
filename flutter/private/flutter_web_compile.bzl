@@ -197,6 +197,40 @@ def _sandbox_env(dart, writable_dir):
         env["HOME"] = writable_dir
     return env
 
+def _write_web_guard_manifest(ctx, scope, compile_sources, stage):
+    """Writes the declared-inputs manifest `web_guard` checks a compile against.
+
+    The manifest lists the declared sources, then a `# staged` marker, then
+    the staging root's symlinks to them — the same shape `kernel_filter`
+    reads (see `flutter_compile.bzl`). Written by path so the tool reads the
+    same files the compilers resolve through the staging root.
+
+    Args:
+        ctx: Rule context.
+        scope: Action-unique prefix for the manifest file: mirror the stage
+            tree's `<output-dir>.<output-base>` form, since a bare output
+            basename (`main.dart.wasm`) repeats across every bundle in the
+            package and collides.
+        compile_sources: The declared main and source `File`s.
+        stage: The `stage_generated_inputs` struct for the compile.
+
+    Returns:
+        The manifest `File`. The guard itself runs as a self-contained native
+        executable (see `//flutter/private/tools:web_guard`), so the compile
+        needs no Dart VM of its own: the guarded action's inputs grow only by
+        the guard executable and this manifest.
+    """
+    manifest = ctx.actions.declare_file(scope + ".web_inputs")
+    ctx.actions.write(
+        output = manifest,
+        content = "\n".join(
+            [f.path for f in compile_sources if f != None] +
+            ["# staged"] +
+            [f.path for f in stage.files],
+        ) + "\n",
+    )
+    return manifest
+
 def flutter_dart2wasm_action(
         ctx,
         dart,
@@ -217,7 +251,8 @@ def flutter_dart2wasm_action(
         renderer = "skwasm",
         web_compile_tool = None,
         web_compile_inputs = [],
-        stage_salt = ""):
+        stage_salt = "",
+        web_guard_tool = None):
     """Compiles Dart source to WebAssembly using dart2wasm.
 
     Args:
@@ -251,6 +286,11 @@ def flutter_dart2wasm_action(
         web_compile_inputs: Additional input `File`s required by `web_compile_tool`
             (such as staged generated files or multi-root package configs).
         stage_salt: Optional salt mixed into the staging directory hash.
+        web_guard_tool: Optional `web_guard` executable `File`. When set, the
+            compile runs behind it: it refuses disallowed directives in
+            `main_dart` and `srcs` before the compiler runs (see
+            `flutter/private/tools/web_guard.dart`), and the compiler never
+            runs on a refused input.
     """
     if output_source_map != None and output_source_map.path != output_wasm.path + ".map":
         fail("output_source_map must be declared at <output_wasm>.map " +
@@ -318,12 +358,25 @@ def flutter_dart2wasm_action(
     direct_inputs = [main_dart, package_config, dart2wasm_platform_dill] + srcs + stage.files + web_compile_inputs
     if web_compile_tool != None:
         direct_inputs.append(web_compile_tool)
+    executable = dart
+    arguments = [args]
+    transitive_inputs = [flutter_sdk_files]
+    if web_guard_tool != None:
+        manifest = _write_web_guard_manifest(
+            ctx,
+            output_wasm.dirname.split("/")[-1] + "." + output_wasm.basename,
+            [main_dart] + srcs,
+            stage,
+        )
+        executable = web_guard_tool
+        arguments = ["--declared-inputs", manifest.path, "--", dart.path, args]
+        direct_inputs = direct_inputs + [web_guard_tool, manifest]
     ctx.actions.run(
-        executable = dart,
-        arguments = [args],
+        executable = executable,
+        arguments = arguments,
         inputs = depset(
             direct = direct_inputs,
-            transitive = [flutter_sdk_files],
+            transitive = transitive_inputs,
         ),
         outputs = [output_wasm, output_mjs] + ([output_source_map] if output_source_map != None else []),
         mnemonic = "FlutterDart2Wasm",
@@ -353,7 +406,8 @@ def flutter_dart2js_action(
         renderer = "canvaskit",
         web_compile_tool = None,
         web_compile_inputs = [],
-        stage_salt = ""):
+        stage_salt = "",
+        web_guard_tool = None):
     """Compiles Dart source to JavaScript using dart2js.
 
     Output is a tree artifact (directory) because dart2js may produce
@@ -396,6 +450,8 @@ def flutter_dart2js_action(
         web_compile_inputs: Additional input `File`s required by `web_compile_tool`
             (such as staged generated files or multi-root package configs).
         stage_salt: Optional salt mixed into the staging directory hash.
+        web_guard_tool: Optional `web_guard` executable `File`, as in
+            `flutter_dart2wasm_action`.
     """
     stage = struct(root = None, files = [])
     if web_compile_tool != None:
@@ -461,12 +517,25 @@ def flutter_dart2js_action(
     direct_inputs = [main_dart, package_config, dart2js_platform_dill] + srcs + stage.files + web_compile_inputs
     if web_compile_tool != None:
         direct_inputs.append(web_compile_tool)
+    executable = dart
+    arguments = [args]
+    transitive_inputs = [flutter_sdk_files, depset(web_sdk_files)]
+    if web_guard_tool != None:
+        manifest = _write_web_guard_manifest(
+            ctx,
+            output_dir.dirname.split("/")[-1] + "." + output_dir.basename,
+            [main_dart] + srcs,
+            stage,
+        )
+        executable = web_guard_tool
+        arguments = ["--declared-inputs", manifest.path, "--", dart.path, args]
+        direct_inputs = direct_inputs + [web_guard_tool, manifest]
     ctx.actions.run(
-        executable = dart,
-        arguments = [args],
+        executable = executable,
+        arguments = arguments,
         inputs = depset(
             direct = direct_inputs,
-            transitive = [flutter_sdk_files, depset(web_sdk_files)],
+            transitive = transitive_inputs,
         ),
         outputs = [output_dir],
         mnemonic = "FlutterDart2JS",
@@ -495,7 +564,8 @@ def flutter_dart2js_cfe_action(
         renderer = "canvaskit",
         web_compile_tool = None,
         web_compile_inputs = [],
-        stage_salt = ""):
+        stage_salt = "",
+        web_guard_tool = None):
     """Compiles Dart to a kernel dill with dart2js's frontend for icon tree-shaking.
 
     Runs `dart compile js --cfe-only`, the same frontend upstream runs to
@@ -533,6 +603,8 @@ def flutter_dart2js_cfe_action(
         web_compile_tool: Optional wrapper, as in `flutter_dart2js_action`.
         web_compile_inputs: Additional inputs, as in `flutter_dart2js_action`.
         stage_salt: Optional salt, as in `flutter_dart2js_action`.
+        web_guard_tool: Optional `web_guard` executable `File`, as in
+            `flutter_dart2wasm_action`.
     """
     stage = struct(root = None, files = [])
     if web_compile_tool != None:
@@ -591,12 +663,25 @@ def flutter_dart2js_cfe_action(
     direct_inputs = [main_dart, package_config, dart2js_platform_dill] + srcs + stage.files + web_compile_inputs
     if web_compile_tool != None:
         direct_inputs.append(web_compile_tool)
+    executable = dart
+    arguments = [args]
+    transitive_inputs = [flutter_sdk_files, depset(web_sdk_files)]
+    if web_guard_tool != None:
+        manifest = _write_web_guard_manifest(
+            ctx,
+            output_dill.dirname.split("/")[-1] + "." + output_dill.basename,
+            [main_dart] + srcs,
+            stage,
+        )
+        executable = web_guard_tool
+        arguments = ["--declared-inputs", manifest.path, "--", dart.path, args]
+        direct_inputs = direct_inputs + [web_guard_tool, manifest]
     ctx.actions.run(
-        executable = dart,
-        arguments = [args],
+        executable = executable,
+        arguments = arguments,
         inputs = depset(
             direct = direct_inputs,
-            transitive = [flutter_sdk_files, depset(web_sdk_files)],
+            transitive = transitive_inputs,
         ),
         outputs = [output_dill, output_deps],
         mnemonic = "FlutterDart2JSCFE",
