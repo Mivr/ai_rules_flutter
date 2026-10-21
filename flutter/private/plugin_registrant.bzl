@@ -386,6 +386,118 @@ def make_ios_registrant_content(plugins):
     lines.append("")
     return "\n".join(lines)
 
+def make_ios_objc_header_content():
+    """Generate the ObjC header for iOS native plugin registration.
+
+    Byte-for-byte the flutter tool's `_objcPluginRegistryHeaderTemplate` in
+    `packages/flutter_tools/lib/src/flutter_plugins.dart` (Flutter 3.47.7,
+    the repo's default toolchain; the template is identical in every
+    release listed in `//flutter/private:versions.bzl`). The header names
+    no plugin, so it takes no input.
+
+    Returns:
+        String of ObjC source code for GeneratedPluginRegistrant.h.
+    """
+    lines = [
+        "",
+        "//",
+        "//  Generated file. Do not edit.",
+        "//",
+        "",
+        "// clang-format off",
+        "",
+        "#ifndef GeneratedPluginRegistrant_h",
+        "#define GeneratedPluginRegistrant_h",
+        "",
+        "#import <Flutter/Flutter.h>",
+        "",
+        "NS_ASSUME_NONNULL_BEGIN",
+        "",
+        "@interface GeneratedPluginRegistrant : NSObject",
+        "+ (void)registerWithRegistry:(NSObject<FlutterPluginRegistry>*)registry;",
+        "@end",
+        "",
+        "NS_ASSUME_NONNULL_END",
+        "#endif /* GeneratedPluginRegistrant_h */",
+        "",
+    ]
+    return "\n".join(lines)
+
+def make_ios_objc_impl_content(native_plugins):
+    """Generate the ObjC source for iOS native plugin registration.
+
+    Byte-for-byte the flutter tool's
+    `_objcPluginRegistryImplementationTemplate` in
+    `packages/flutter_tools/lib/src/flutter_plugins.dart` (Flutter 3.47.7,
+    the repo's default toolchain; the template is identical in every
+    release listed in `//flutter/private:versions.bzl`), rendered with
+    `framework = "Flutter"` and an empty `prefix`: the tool only ever
+    fills `prefix` from `IOSPlugin.classPrefix`, which its own
+    `IOSPlugin.fromYaml` always sets to `""`. Each plugin keeps the
+    tool's `__has_include` / `@import` fallback and its
+    `registerWithRegistrar:` call.
+
+    Args:
+        native_plugins: List of plugin structs (from _collect_native_plugins
+            for "ios") with `name` and `plugin_class` fields.
+
+    Returns:
+        String of ObjC source code for GeneratedPluginRegistrant.m.
+    """
+    lines = [
+        "",
+        "//",
+        "//  Generated file. Do not edit.",
+        "//",
+        "",
+        "// clang-format off",
+        "",
+        '#import "GeneratedPluginRegistrant.h"',
+        "",
+    ]
+    for p in native_plugins:
+        lines.append("#if __has_include(<%s/%s.h>)" % (p.name, p.plugin_class))
+        lines.append("#import <%s/%s.h>" % (p.name, p.plugin_class))
+        lines.append("#else")
+        lines.append("@import %s;" % p.name)
+        lines.append("#endif")
+        lines.append("")
+    lines.append("@implementation GeneratedPluginRegistrant")
+    lines.append("")
+    lines.append("+ (void)registerWithRegistry:(NSObject<FlutterPluginRegistry>*)registry {")
+    for p in native_plugins:
+        lines.append('  [%s registerWithRegistrar:[registry registrarForPlugin:@"%s"]];' % (p.plugin_class, p.plugin_class))
+    lines.append("}")
+    lines.append("")
+    lines.append("@end")
+    lines.append("")
+    return "\n".join(lines)
+
+def filter_excluded_native_plugins(native_plugins, exclude_plugins, target_platform):
+    """Drop the named plugins from a collected native plugin list.
+
+    Args:
+        native_plugins: List of plugin structs (from _collect_native_plugins)
+            with `name` fields.
+        exclude_plugins: Plugin module names to omit from the registrant.
+        target_platform: Platform string, named in the error when an
+            excluded name matches nothing.
+
+    Returns:
+        The native plugins whose names are not in `exclude_plugins`.
+    """
+    valid_names = [p.name for p in native_plugins]
+    unknown = [name for name in exclude_plugins if name not in valid_names]
+    if unknown:
+        fail("exclude_plugins names %d unknown %s plugin(s): %s; valid names: %s" % (
+            len(unknown),
+            target_platform,
+            ", ".join(sorted(unknown)),
+            ", ".join(sorted(valid_names)) if valid_names else "(none)",
+        ))
+    excluded = {name: True for name in exclude_plugins}
+    return [p for p in native_plugins if p.name not in excluded]
+
 def _to_snake_case(name):
     """Convert PascalCase to snake_case.
 
@@ -486,7 +598,7 @@ def generate_native_plugin_registrant_header(ctx, target_platform):
     ctx.actions.write(header, content)
     return header
 
-def generate_native_plugin_registrant(ctx, plugins, target_platform):
+def generate_native_plugin_registrant(ctx, plugins, target_platform, exclude_plugins = []):
     """Generate a native plugin registrant source file.
 
     Always generates a file (no-op if no native plugins) so the runner can
@@ -496,11 +608,15 @@ def generate_native_plugin_registrant(ctx, plugins, target_platform):
         ctx: Rule context.
         plugins: List of plugin structs.
         target_platform: Platform string ("linux", "windows", "macos").
+        exclude_plugins: Plugin module names to omit from the registrant.
+            A name that is not a native plugin for the platform is an
+            error, listing the valid names.
 
     Returns:
         File: The generated native source file, or None for unsupported platforms.
     """
     native_plugins = _collect_native_plugins(plugins, target_platform)
+    native_plugins = filter_excluded_native_plugins(native_plugins, exclude_plugins, target_platform)
 
     if target_platform == "linux":
         content = make_linux_registrant_content(native_plugins) if native_plugins else _EMPTY_LINUX_REGISTRANT
@@ -531,6 +647,32 @@ def generate_native_plugin_registrant(ctx, plugins, target_platform):
         registrant = ctx.actions.declare_file(ctx.label.name + "_native_plugin_registrant" + ext)
     ctx.actions.write(registrant, content)
     return registrant
+
+def generate_ios_objc_registrant(ctx, plugins, exclude_plugins = []):
+    """Generate the ObjC iOS plugin registrant header and source files.
+
+    The pair matches the flutter tool's own
+    `GeneratedPluginRegistrant.h` / `GeneratedPluginRegistrant.m`
+    byte-for-byte for the same plugin set (see
+    `make_ios_objc_impl_content`).
+
+    Args:
+        ctx: Rule context.
+        plugins: List of plugin structs.
+        exclude_plugins: Plugin module names to omit from the registrant.
+            A name that is not a native iOS plugin is an error, listing
+            the valid names.
+
+    Returns:
+        Tuple of (header File, implementation File).
+    """
+    native_plugins = _collect_native_plugins(plugins, "ios")
+    native_plugins = filter_excluded_native_plugins(native_plugins, exclude_plugins, "ios")
+    header = ctx.actions.declare_file(ctx.label.name + "_objc_plugin_registrant.h")
+    impl = ctx.actions.declare_file(ctx.label.name + "_objc_plugin_registrant.m")
+    ctx.actions.write(header, make_ios_objc_header_content())
+    ctx.actions.write(impl, make_ios_objc_impl_content(native_plugins))
+    return (header, impl)
 
 # The platforms a dev-loop registrant is generated for. Web is excluded on
 # purpose: its registrant has a different shape (`registerPlugins()` called
