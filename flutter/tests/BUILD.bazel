@@ -9,6 +9,7 @@ load(":app_entrypoint_test.bzl", "app_entrypoint_test_suite")
 load(":artifact_urls_test.bzl", "artifact_urls_test_suite")
 load(":asset_bundle_test.bzl", "asset_bundle_test_suite")
 load(":common_test.bzl", "common_test_suite")
+load(":compile_api_test.bzl", "compile_api_test_suite")
 load(":flutter_application_test.bzl", "flutter_application_test_suite")
 load(":flutter_info_test.bzl", "flutter_info_test_suite")
 load(":flutter_integration_test_test.bzl", "flutter_integration_test_test_suite")
@@ -90,6 +91,8 @@ toolchain_test_suite(name = "toolchain_test")
 unused_inputs_test_suite(name = "unused_inputs_test")
 
 common_test_suite(name = "common_test")
+
+compile_api_test_suite(name = "compile_api_test")
 
 asset_bundle_test_suite(name = "asset_bundle_test")
 

@@ -476,6 +476,70 @@ void main() {}
       },
     );
 
+    test('accepts a read of the --import-dill summary', () async {
+      writeWork('lib/main.dart', 'void main() {}\n');
+      final summary = File('${work.path}/app_summary.dill')
+        ..writeAsStringSync('compiled bytes');
+      final script = fakeCompiler(
+        'import_reader',
+        'import "dart:io";\n'
+            'void main() {\n'
+            '  stdout.writeln("result $_id");\n'
+            '  stdout.writeln("$_id");\n'
+            '  stdout.writeln("+file://${work.path}/lib/main.dart");\n'
+            '  stdout.writeln("+file://${summary.path}");\n'
+            '  stdout.writeln("$_id app.dill 0");\n'
+            '}\n',
+      );
+      final r = await run([
+        '--declared-inputs',
+        writeManifest(['lib/main.dart']),
+        '--',
+        Platform.resolvedExecutable,
+        script.path,
+        '--output-dill',
+        '${work.path}/app.dill',
+        '--import-dill=app_summary.dill',
+      ]);
+      expect(r.code, 0, reason: r.err);
+      expect(r.out.trim(), isEmpty);
+    });
+
+    test(
+      'an undeclared source beside the --import-dill is still refused',
+      () async {
+        writeWork('lib/main.dart', 'void main() {}\n');
+        final summary = File('${work.path}/app_summary.dill')
+          ..writeAsStringSync('compiled bytes');
+        final script = fakeCompiler(
+          'import_sneak_reader',
+          'import "dart:io";\n'
+              'void main() {\n'
+              '  stdout.writeln("result $_id");\n'
+              '  stdout.writeln("$_id");\n'
+              '  stdout.writeln("+file://${work.path}/lib/main.dart");\n'
+              '  stdout.writeln("+file://${summary.path}");\n'
+              '  stdout.writeln("+file://${work.path}/lib/sneak.dart");\n'
+              '  stdout.writeln("$_id app.dill 0");\n'
+              '}\n',
+        );
+        final r = await run([
+          '--declared-inputs',
+          writeManifest(['lib/main.dart']),
+          '--',
+          Platform.resolvedExecutable,
+          script.path,
+          '--output-dill',
+          '${work.path}/app.dill',
+          '--import-dill',
+          'app_summary.dill',
+        ]);
+        expect(r.code, 1);
+        expect(r.err, contains('+file://${work.path}/lib/sneak.dart'));
+        expect(r.err, contains('not a declared input'));
+      },
+    );
+
     test('accepts reads of declared sources and staged copies', () async {
       writeWork('lib/main.dart', 'void main() {}\n');
       final script = fakeCompiler(
