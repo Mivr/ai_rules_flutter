@@ -1,0 +1,34 @@
+"""Digest red path: fetching with a wrong checksum must fail loudly.
+
+This workspace instantiates a real Flutter engine-artifact repository rule
+(`flutter_sky_engine_repo`, the ~1.5 MB `sky_engine.zip`) with a deliberately
+wrong `sha256`. CI fetches it, expects the fetch to fail, and greps Bazel's
+exact checksum error. It guards the `require_sha256` call sites: dropping
+`sha256 =` at a fetch site (or failing to validate a checksum) keeps every
+other test green, so only this red path would turn red.
+"""
+
+module(name = "rules_flutter_digest_mismatch")
+
+bazel_dep(name = "rules_flutter", version = "0.0.0")
+
+local_path_override(
+    module_name = "rules_flutter",
+    path = "../..",
+)
+
+sky = use_repo_rule(
+    "@rules_flutter//flutter/private:flutter_sky_engine_repo.bzl",
+    "flutter_sky_engine_repo",
+)
+
+sky(
+    name = "red_sky_engine",
+    # Engine revision of Flutter 3.47.7 (see flutter/private/versions.bzl).
+    # Must name a revision whose artifacts still exist, so the fetch reaches
+    # the checksum comparison instead of failing on a 404.
+    engine_revision = "deb287481e3ce9468f3434937ced4240a70539ca",
+    # Deliberately wrong: the fetch must fail with
+    # "Checksum was <actual> but wanted <this>".
+    sha256 = "0000000000000000000000000000000000000000000000000000000000000000",
+)
