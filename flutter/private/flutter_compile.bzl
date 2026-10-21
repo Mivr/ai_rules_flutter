@@ -288,6 +288,7 @@ def flutter_kernel_compile_action(
     )
 
     dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx)
+
     # `resource_set` stays out of the call unless set, so callers that leave
     # it unset keep byte-identical actions (same argv and action key).
     run_kwargs = dict(

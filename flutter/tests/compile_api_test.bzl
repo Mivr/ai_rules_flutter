@@ -320,6 +320,7 @@ def compile_api_test_suite(name):
         deps = [":_compile_api_ghost"],
         tags = ["manual"],
     )
+
     # Executed compiles: the default shape and every-new-parameter shape both
     # build. `resource_set` is invisible to analysis, so running the action is
     # its presence check. Neither sets `import_dill`: the checked-in stub is
