@@ -9,12 +9,22 @@ cross-compile between desktop OSes for AOT.
 """
 
 load(":engine_helpers.bzl", "dart_binary_name", "dartaotruntime_binary_name", "platform_to_arch", "platform_to_os")
+load(":local_sdk.bzl", "read_local_sdk_version", "resolve_local_sdk_root")
 
 def _flutter_desktop_cross_repo_impl(repository_ctx):
     host_platform = repository_ctx.attr.host_platform
     target_platform = repository_ctx.attr.target_platform
     flutter_version = repository_ctx.attr.flutter_version
     engine_revision = repository_ctx.attr.engine_revision
+    if getattr(repository_ctx.attr, "local_path", ""):
+        # Version stamping comes from the SDK's own manifest: a local
+        # toolchain has no version pin to stamp.
+        sdk_version = read_local_sdk_version(
+            repository_ctx,
+            resolve_local_sdk_root(repository_ctx, getattr(repository_ctx.attr, "local_path", "")),
+        )
+        flutter_version = sdk_version.flutter_version
+        engine_revision = sdk_version.engine_revision
     host_repo_name = repository_ctx.attr.host_repo_name
     engine_repo_name = repository_ctx.attr.engine_repo_name
     engine_debug_repo_name = repository_ctx.attr.engine_debug_repo_name
@@ -104,8 +114,22 @@ flutter_desktop_cross_repo = repository_rule(
     _flutter_desktop_cross_repo_impl,
     doc = "Generates a desktop cross-platform toolchain wiring host tools with a target engine library.",
     attrs = {
-        "flutter_version": attr.string(mandatory = True),
-        "engine_revision": attr.string(mandatory = True),
+        "flutter_version": attr.string(
+            doc = "Flutter SDK version, stamped into the toolchain. Empty " +
+                  "means a local SDK whose version is only known at fetch time.",
+            default = "",
+        ),
+        "engine_revision": attr.string(
+            doc = "Engine commit hash, stamped into the toolchain. Empty " +
+                  "means a local SDK.",
+            default = "",
+        ),
+        "local_path": attr.string(
+            doc = "Optional path to a pre-extracted Flutter SDK " +
+                  "(bin/cache layout). Only the version manifest is read " +
+                  "from it; this repo downloads nothing either way.",
+            default = "",
+        ),
         "host_platform": attr.string(mandatory = True),
         "target_platform": attr.string(mandatory = True),
         "host_repo_name": attr.string(mandatory = True, doc = "Name of the host platform's engine artifacts repo."),

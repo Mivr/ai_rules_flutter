@@ -7,6 +7,7 @@ shared host Dart SDK repositories via declared labels.
 """
 
 load(":artifact_urls.bzl", "engine_artifact_url", "require_sha256")
+load(":local_sdk.bzl", "link_local_dir", "resolve_local_sdk_root")
 load(":toolchains_repo.bzl", "HOST_PLATFORMS")
 
 EXPECTED_WEB_SDK_TARGETS = ("dartdevc", "dart2js", "wasm")
@@ -187,12 +188,15 @@ def resolve_web_sdk_host_repos(host_sdks, user_repository_name = "flutter"):
             ordered[platform] = by_platform[platform]
     return ordered
 
-def generate_web_sdk_build(host_sdks = {}, user_repository_name = "flutter"):
+def generate_web_sdk_build(host_sdks = {}, user_repository_name = "flutter", rewritten_dir = "web-sdk"):
     """Generate `BUILD.bazel` for `@flutter_web_sdk` selecting the SDK by exec platform.
 
     Args:
         host_sdks: Dict mapping declared host SDK `Label`s to `HOST_PLATFORMS` keys.
         user_repository_name: Fallback repository base name when `host_sdks` is empty.
+        rewritten_dir: Directory holding the rewritten `libraries.<platform>.json`
+            files. Download mode rewrites them in place (`web-sdk`); local mode
+            keeps the symlinked SDK tree pristine and writes them alongside it.
 
     Returns:
         Generated `BUILD.bazel` content string.
@@ -215,7 +219,10 @@ def generate_web_sdk_build(host_sdks = {}, user_repository_name = "flutter"):
     ],
 )""".format(platform = platform, constraints = constraints))
         libraries_select_entries.append(
-            '        ":{platform}": ["web-sdk/libraries.{platform}.json"],'.format(platform = platform),
+            '        ":{platform}": ["{rewritten}/libraries.{platform}.json"],'.format(
+                platform = platform,
+                rewritten = rewritten_dir,
+            ),
         )
         dart_sdk_libraries_select_entries.append(
             '        ":{platform}": ["{label}"],'.format(platform = platform, label = info.libraries_json_label),
@@ -252,7 +259,7 @@ filegroup(
     srcs = glob([
         "web-sdk/canvaskit/**",
         "web-sdk/flutter_js/**",
-        "web-sdk/libraries.json",
+        "{rewritten}/libraries.json",
     ]) + [
         ":libraries_json",
         ":dart_sdk_libraries_json",
@@ -286,6 +293,7 @@ exports_files(
         dart_sdk_libraries_select = "\n".join(dart_sdk_libraries_select_entries),
         module_loader_select = "\n".join(module_loader_select_entries),
         stack_mapper_select = "\n".join(stack_mapper_select_entries),
+        rewritten = rewritten_dir,
     )
 
 def _detect_host_platform(repository_ctx):
@@ -303,8 +311,27 @@ def _detect_host_platform(repository_ctx):
 
 def _flutter_web_sdk_repo_impl(repository_ctx):
     engine_revision = repository_ctx.attr.engine_revision
-    if engine_revision:
-        web_url = engine_artifact_url(engine_revision, "flutter-web-sdk.zip")
+    rewritten_dir = "web-sdk"
+    if getattr(repository_ctx.attr, "local_path", ""):
+        # The whole web SDK links out of the SDK's cache directory; the
+        # rewritten libraries.json files land beside it, never inside it —
+        # overwriting the SDK's own manifest through the symlink would corrupt
+        # the install for every other use.
+        sdk_root = resolve_local_sdk_root(repository_ctx, getattr(repository_ctx.attr, "local_path", ""))
+        link_local_dir(
+            repository_ctx,
+            sdk_root,
+            "bin/cache/flutter_web_sdk",
+            "web-sdk",
+            "the Flutter web SDK",
+        )
+        rewritten_dir = "web-sdk-local"
+    elif engine_revision:
+        web_url = engine_artifact_url(
+            engine_revision,
+            "flutter-web-sdk.zip",
+            getattr(repository_ctx.attr, "engine_base_url", ""),
+        )
         repository_ctx.download_and_extract(
             url = web_url,
             sha256 = require_sha256(repository_ctx.attr.sha256, web_url),
@@ -341,18 +368,19 @@ def _flutter_web_sdk_repo_impl(repository_ctx):
             info.repo_name,
             source = source_name,
         )
-        repository_ctx.file("web-sdk/libraries.%s.json" % platform, rewritten)
+        repository_ctx.file("%s/libraries.%s.json" % (rewritten_dir, platform), rewritten)
         if default_rewritten == None or platform == host_platform:
             default_rewritten = rewritten
 
     if default_rewritten != None:
-        repository_ctx.file("web-sdk/libraries.json", default_rewritten)
+        repository_ctx.file("%s/libraries.json" % rewritten_dir, default_rewritten)
 
     repository_ctx.file(
         "BUILD.bazel",
         generate_web_sdk_build(
             getattr(repository_ctx.attr, "host_sdks", {}),
             getattr(repository_ctx.attr, "user_repository_name", "flutter"),
+            rewritten_dir = rewritten_dir,
         ),
     )
 
@@ -362,8 +390,26 @@ flutter_web_sdk_repo = repository_rule(
     _flutter_web_sdk_repo_impl,
     doc = "Downloads the Flutter web SDK (dart2wasm/dart2js platform dills) and references the exec platform's shared host Dart SDK.",
     attrs = {
-        "engine_revision": attr.string(mandatory = True),
-        "sha256": attr.string(doc = "Expected SHA-256 of flutter-web-sdk.zip. Required: an empty value fails the fetch."),
+        "engine_revision": attr.string(
+            doc = "The engine commit hash the artifact is published under. " +
+                  "Empty skips the download (a local SDK provides the tree).",
+            default = "",
+        ),
+        "engine_base_url": attr.string(
+            doc = "Optional replacement origin for the engine revision " +
+                  "directory (an enterprise build). Empty means the default GCS base.",
+            default = "",
+        ),
+        "local_path": attr.string(
+            doc = "Optional path to a pre-extracted Flutter SDK " +
+                  "(bin/cache layout) to source every artifact from instead " +
+                  "of the network. Mutually exclusive with downloading.",
+            default = "",
+        ),
+        "sha256": attr.string(
+            doc = "Expected SHA-256 of flutter-web-sdk.zip. Required: an empty value fails the fetch. Unused with `local_path`.",
+            default = "",
+        ),
         "user_repository_name": attr.string(
             default = "flutter",
             doc = "Base name for Flutter repositories (e.g. `flutter`).",

@@ -10,6 +10,7 @@ engine repo's gen_snapshot_arm64 instead of downloading a separate one.
 
 load(":artifact_urls.bzl", "engine_artifact_url", "gen_snapshot_cross_artifact_path", "require_sha256")
 load(":engine_helpers.bzl", "dart_binary_name", "dartaotruntime_binary_name", "gen_snapshot_host_platform", "platform_to_arch", "platform_to_os")
+load(":local_sdk.bzl", "link_local_file", "read_local_sdk_version", "resolve_local_sdk_root")
 
 def generate_cross_repo_build(
         flutter_version,
@@ -101,11 +102,37 @@ def _flutter_cross_compilation_repo_impl(repository_ctx):
     host_repo_name = repository_ctx.attr.host_repo_name
 
     downloaded_gen_snapshot = False
-    if not repository_ctx.attr.gen_snapshot_label and repository_ctx.attr.gen_snapshot_sha256:
+    if getattr(repository_ctx.attr, "local_path", ""):
+        # Version stamping comes from the SDK's own manifest: a local
+        # toolchain has no version pin to stamp.
+        sdk_root = resolve_local_sdk_root(repository_ctx, getattr(repository_ctx.attr, "local_path", ""))
+        sdk_version = read_local_sdk_version(repository_ctx, sdk_root)
+        flutter_version = sdk_version.flutter_version
+        engine_revision = sdk_version.engine_revision
+        if not repository_ctx.attr.gen_snapshot_label and not target_platform.startswith("ios"):
+            # Android and similar: link the target-specific gen_snapshot out
+            # of the SDK's engine cache. Its directory mirrors the artifact
+            # path minus the filename; iOS instead references the iOS engine
+            # repo's binary through `gen_snapshot_label`.
+            artifact_host = gen_snapshot_host_platform(host_platform)
+            binary = "gen_snapshot.exe" if artifact_host.startswith("windows") else "gen_snapshot"
+            link_local_file(
+                repository_ctx,
+                sdk_root,
+                "bin/cache/artifacts/engine/{}-release/{}/{}".format(target_platform, artifact_host, binary),
+                "gen_snapshot",
+                "the {} cross-compile gen_snapshot".format(target_platform),
+            )
+            downloaded_gen_snapshot = True
+    elif not repository_ctx.attr.gen_snapshot_label and repository_ctx.attr.gen_snapshot_sha256:
         # Android and similar: download a target-specific gen_snapshot.
         artifact_host = gen_snapshot_host_platform(host_platform)
         artifact_path = gen_snapshot_cross_artifact_path(target_platform, "release", artifact_host)
-        url = engine_artifact_url(engine_revision, artifact_path)
+        url = engine_artifact_url(
+            engine_revision,
+            artifact_path,
+            getattr(repository_ctx.attr, "engine_base_url", ""),
+        )
         repository_ctx.download_and_extract(
             url = url,
             sha256 = require_sha256(repository_ctx.attr.gen_snapshot_sha256, url),
@@ -159,19 +186,42 @@ flutter_cross_compilation_repo = repository_rule(
     _flutter_cross_compilation_repo_impl,
     doc = "Downloads cross-compiling gen_snapshot and creates a toolchain referencing the host repo.",
     attrs = {
-        "flutter_version": attr.string(mandatory = True),
-        "engine_revision": attr.string(mandatory = True),
+        "flutter_version": attr.string(
+            doc = "Flutter SDK version, stamped into the toolchain. Empty " +
+                  "means a local SDK whose version is only known at fetch time.",
+            default = "",
+        ),
+        "engine_revision": attr.string(
+            doc = "The engine commit hash. Empty means a local SDK (with `local_path`).",
+            default = "",
+        ),
+        "engine_base_url": attr.string(
+            doc = "Optional replacement origin for the engine revision " +
+                  "directory (an enterprise build). Empty means the default GCS base.",
+            default = "",
+        ),
+        "local_path": attr.string(
+            doc = "Optional path to a pre-extracted Flutter SDK " +
+                  "(bin/cache layout) to source every artifact from instead " +
+                  "of the network. Mutually exclusive with downloading.",
+            default = "",
+        ),
         "host_platform": attr.string(mandatory = True),
         "target_platform": attr.string(mandatory = True),
         "host_repo_name": attr.string(mandatory = True, doc = "Name of the host platform's engine artifacts repo."),
-        "gen_snapshot_sha256": attr.string(doc = "SHA-256 of the gen_snapshot archive."),
+        "gen_snapshot_sha256": attr.string(
+            doc = "SHA-256 of the gen_snapshot archive. Unused with `local_path`.",
+            default = "",
+        ),
         "profile_gen_snapshot_label": attr.string(
             doc = "Label of the profile-mode gen_snapshot, selected under " +
                   "`//flutter/private:profile`. Its repo is fetched only then.",
+            default = "",
         ),
         "gen_snapshot_label": attr.string(
             doc = "Explicit label for gen_snapshot binary from another repo (e.g. iOS engine repo). " +
                   "When set, no gen_snapshot is downloaded.",
+            default = "",
         ),
     },
 )

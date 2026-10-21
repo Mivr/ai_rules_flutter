@@ -12,13 +12,41 @@ This is lazy — only fetched when an Android build target is used.
 
 load(":artifact_urls.bzl", "android_engine_artifact_path", "engine_artifact_url", "require_sha256")
 load(":constants.bzl", "ANDROID_ABI_FOR_ARCH")
+load(":local_sdk.bzl", "engine_cache_dir", "link_local_file", "resolve_local_sdk_root")
 
 def _flutter_android_engine_repo_impl(repository_ctx):
     engine_revision = repository_ctx.attr.engine_revision
     android_arch = repository_ctx.attr.android_arch
 
+    if getattr(repository_ctx.attr, "local_path", ""):
+        sdk_root = resolve_local_sdk_root(repository_ctx, getattr(repository_ctx.attr, "local_path", ""))
+        release_dir = engine_cache_dir(android_engine_artifact_path(android_arch, "release"))
+        debug_dir = engine_cache_dir(android_engine_artifact_path(android_arch, "debug"))
+        link_local_file(
+            repository_ctx,
+            sdk_root,
+            "bin/cache/artifacts/engine/" + release_dir + "/flutter.jar",
+            "flutter.jar",
+            "the release Android engine",
+        )
+        link_local_file(
+            repository_ctx,
+            sdk_root,
+            "bin/cache/artifacts/engine/" + debug_dir + "/flutter.jar",
+            "debug/flutter.jar",
+            "the debug Android engine",
+        )
+        repository_ctx.file("BUILD.bazel", _BUILD_TEMPLATE.format(
+            abi = ANDROID_ABI_FOR_ARCH[android_arch],
+        ))
+        return
+
     # Release engine (AOT) at the repo root.
-    release_url = engine_artifact_url(engine_revision, android_engine_artifact_path(android_arch, "release"))
+    release_url = engine_artifact_url(
+        engine_revision,
+        android_engine_artifact_path(android_arch, "release"),
+        getattr(repository_ctx.attr, "engine_base_url", ""),
+    )
     repository_ctx.download_and_extract(
         url = release_url,
         sha256 = require_sha256(repository_ctx.attr.release_sha256, release_url),
@@ -26,7 +54,11 @@ def _flutter_android_engine_repo_impl(repository_ctx):
 
     # Debug engine (JIT) under debug/ — its flutter.jar would otherwise collide
     # with the release one at the repo root.
-    debug_url = engine_artifact_url(engine_revision, android_engine_artifact_path(android_arch, "debug"))
+    debug_url = engine_artifact_url(
+        engine_revision,
+        android_engine_artifact_path(android_arch, "debug"),
+        getattr(repository_ctx.attr, "engine_base_url", ""),
+    )
     repository_ctx.download_and_extract(
         url = debug_url,
         sha256 = require_sha256(repository_ctx.attr.debug_sha256, debug_url),
@@ -74,12 +106,33 @@ flutter_android_engine_repo = repository_rule(
     _flutter_android_engine_repo_impl,
     doc = "Downloads the Android Flutter engine (flutter.jar) for a specific ABI, both release and debug.",
     attrs = {
-        "engine_revision": attr.string(mandatory = True),
+        "engine_revision": attr.string(
+            doc = "The engine commit hash the artifacts are published under. " +
+                  "Empty means a local SDK (with `local_path`).",
+            default = "",
+        ),
+        "engine_base_url": attr.string(
+            doc = "Optional replacement origin for the engine revision " +
+                  "directory (an enterprise build). Empty means the default GCS base.",
+            default = "",
+        ),
+        "local_path": attr.string(
+            doc = "Optional path to a pre-extracted Flutter SDK " +
+                  "(bin/cache layout) to source every artifact from instead " +
+                  "of the network. Mutually exclusive with downloading.",
+            default = "",
+        ),
         "android_arch": attr.string(
             mandatory = True,
             doc = "Android architecture (arm64, x64, arm, x86, riscv64).",
         ),
-        "release_sha256": attr.string(doc = "Expected SHA-256 of the release archive."),
-        "debug_sha256": attr.string(doc = "Expected SHA-256 of the debug archive."),
+        "release_sha256": attr.string(
+            doc = "Expected SHA-256 of the release archive. Unused with `local_path`.",
+            default = "",
+        ),
+        "debug_sha256": attr.string(
+            doc = "Expected SHA-256 of the debug archive. Unused with `local_path`.",
+            default = "",
+        ),
     },
 )

@@ -10,7 +10,7 @@ load(
     "host_artifacts_path",
     "ios_engine_artifact_path",
 )
-load("//flutter/private:versions.bzl", "ARTIFACT_CHECKSUMS", "FLUTTER_VERSIONS", "flutter_artifact_sha256", "flutter_source_sha256")
+load("//flutter/private:versions.bzl", "ARTIFACT_CHECKSUMS", "FLUTTER_VERSIONS", "custom_engine_base_url", "custom_source_url", "flutter_artifact_sha256", "flutter_source_sha256", "merge_custom_versions")
 
 def _latest_version_first_test_impl(ctx):
     env = unittest.begin(ctx)
@@ -219,6 +219,115 @@ _t5_test = unittest.make(_source_sha256_recorded_for_all_versions_test_impl)
 _t6_test = unittest.make(_every_download_is_checksummed_test_impl)
 _t7_test = unittest.make(_artifact_sha256_returns_recorded_value_test_impl)
 
+def _custom_tag(version = "3.47.70", is_root = True, engine_revision = "0" * 40, source_url = "", engine_base_url = ""):
+    return struct(
+        version = version,
+        engine_revision = engine_revision,
+        source_sha256 = "1" * 64,
+        material_fonts_url = "flutter_infra_release/flutter/fonts/0/fonts.zip",
+        artifact_sha256 = {"linux-x64/artifacts.zip": "2" * 64},
+        engine_base_url = engine_base_url,
+        source_url = source_url,
+        is_root = is_root,
+    )
+
+def _merge_empty_tags_test_impl(ctx):
+    env = unittest.begin(ctx)
+    merged = merge_custom_versions([])
+    asserts.equals(env, FLUTTER_VERSIONS.keys(), merged.versions.keys())
+    asserts.equals(env, {}, merged.source_urls)
+    asserts.equals(env, {}, merged.engine_base_urls)
+    asserts.equals(env, "", custom_source_url("3.47.7", merged.source_urls))
+    asserts.equals(env, "", custom_engine_base_url("3.47.7", merged.engine_base_urls))
+    return unittest.end(env)
+
+def _merge_custom_version_test_impl(ctx):
+    env = unittest.begin(ctx)
+    merged = merge_custom_versions([_custom_tag(
+        source_url = "",
+        engine_base_url = "",
+    )])
+    asserts.true(env, "3.47.70" in merged.versions)
+    asserts.equals(env, "0" * 40, merged.versions["3.47.70"].engine_revision)
+    asserts.equals(
+        env,
+        "1" * 64,
+        flutter_source_sha256("3.47.70", merged.versions),
+    )
+    asserts.equals(
+        env,
+        "2" * 64,
+        flutter_artifact_sha256("3.47.70", "linux-x64/artifacts.zip", merged.checksums),
+    )
+
+    # The stock tables are untouched by the merge.
+    asserts.true(env, "3.47.70" not in FLUTTER_VERSIONS)
+    asserts.equals(env, "3.47.7", FLUTTER_VERSIONS.keys()[-1])
+    return unittest.end(env)
+
+def _merge_custom_urls_test_impl(ctx):
+    env = unittest.begin(ctx)
+    merged = merge_custom_versions([struct(
+        version = "3.47.70",
+        engine_revision = "0" * 40,
+        source_sha256 = "1" * 64,
+        material_fonts_url = "flutter_infra_release/flutter/fonts/0/fonts.zip",
+        artifact_sha256 = {},
+        engine_base_url = "https://eng.example.com",
+        source_url = "https://eng.example.com/flutter-3.47.70.tar.gz",
+        is_root = True,
+    )])
+    asserts.equals(
+        env,
+        "https://eng.example.com/flutter-3.47.70.tar.gz",
+        custom_source_url("3.47.70", merged.source_urls),
+    )
+    asserts.equals(
+        env,
+        "https://eng.example.com",
+        custom_engine_base_url("3.47.70", merged.engine_base_urls),
+    )
+    return unittest.end(env)
+
+_t8_test = unittest.make(_merge_empty_tags_test_impl)
+_t9_test = unittest.make(_merge_custom_version_test_impl)
+_t10_test = unittest.make(_merge_custom_urls_test_impl)
+
+def _merge_probe_impl(ctx):
+    merge_custom_versions([struct(
+        version = ctx.attr.version,
+        engine_revision = ctx.attr.engine_revision,
+        source_sha256 = ctx.attr.source_sha256,
+        material_fonts_url = ctx.attr.material_fonts_url,
+        artifact_sha256 = {},
+        engine_base_url = "",
+        source_url = "",
+        is_root = ctx.attr.is_root,
+    )])
+    out = ctx.actions.declare_file(ctx.label.name + ".txt")
+    ctx.actions.write(out, "ok")
+    return [DefaultInfo(files = depset([out]))]
+
+_merge_probe = rule(
+    implementation = _merge_probe_impl,
+    attrs = {
+        "version": attr.string(default = "3.47.70"),
+        "engine_revision": attr.string(default = "0" * 40),
+        "source_sha256": attr.string(default = "1" * 64),
+        "material_fonts_url": attr.string(default = "flutter_infra_release/flutter/fonts/0/fonts.zip"),
+        "is_root": attr.bool(default = True),
+    },
+)
+
+def _custom_missing_checksum_probe_impl(ctx):
+    merged = merge_custom_versions([_custom_tag()])
+    sha = flutter_artifact_sha256("3.47.70", "missing/artifact.zip", merged.checksums)
+    out = ctx.actions.declare_file(ctx.label.name + ".sha256")
+    ctx.actions.write(out, sha)
+    return [DefaultInfo(files = depset([out]))]
+
+_custom_missing_checksum_probe = rule(implementation = _custom_missing_checksum_probe_impl)
+
 def versions_test_suite(name):
     """Defines unit and analysis tests for `versions.bzl` and artifact SHA-256 verification.
 
@@ -271,6 +380,53 @@ def versions_test_suite(name):
         ],
     )
 
+    _merge_probe(
+        name = name + "_merge_nonroot_probe",
+        is_root = False,
+        tags = ["manual"],
+    )
+    _expect_failure_test(
+        name = name + "_merge_nonroot_fails",
+        target_under_test = ":" + name + "_merge_nonroot_probe",
+        expected_substrings = ["Only the root module may register a custom Flutter version"],
+    )
+
+    _merge_probe(
+        name = name + "_merge_duplicate_probe",
+        version = "3.47.7",
+        tags = ["manual"],
+    )
+    _expect_failure_test(
+        name = name + "_merge_duplicate_fails",
+        target_under_test = ":" + name + "_merge_duplicate_probe",
+        expected_substrings = ["already listed"],
+    )
+
+    _merge_probe(
+        name = name + "_merge_missing_field_probe",
+        engine_revision = "",
+        tags = ["manual"],
+    )
+    _expect_failure_test(
+        name = name + "_merge_missing_field_fails",
+        target_under_test = ":" + name + "_merge_missing_field_probe",
+        expected_substrings = ["missing a required field"],
+    )
+
+    _custom_missing_checksum_probe(
+        name = name + "_custom_missing_checksum_probe",
+        tags = ["manual"],
+    )
+    _expect_failure_test(
+        name = name + "_custom_missing_checksum_fails",
+        target_under_test = ":" + name + "_custom_missing_checksum_probe",
+        expected_substrings = [
+            "No sha256 recorded for missing/artifact.zip in Flutter 3.47.70",
+            "missing/artifact.zip",
+            "3.47.70",
+        ],
+    )
+
     unittest.suite(
         name + "_unit",
         _t0_test,
@@ -281,6 +437,9 @@ def versions_test_suite(name):
         _t5_test,
         _t6_test,
         _t7_test,
+        _t8_test,
+        _t9_test,
+        _t10_test,
     )
 
     native.test_suite(
@@ -290,5 +449,9 @@ def versions_test_suite(name):
             ":" + name + "_missing_artifact_fails",
             ":" + name + "_missing_version_fails",
             ":" + name + "_missing_source_sha_fails",
+            ":" + name + "_merge_nonroot_fails",
+            ":" + name + "_merge_duplicate_fails",
+            ":" + name + "_merge_missing_field_fails",
+            ":" + name + "_custom_missing_checksum_fails",
         ],
     )
