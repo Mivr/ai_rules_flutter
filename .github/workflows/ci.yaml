@@ -19,7 +19,9 @@
 #     plus min_versions' iOS/macOS legs against the Apple version floor
 #   e2e-macos-toolchain: smoke workspace (toolchain resolution, all platforms)
 #   unit-tests:          root unit tests, plus the digest-mismatch red fetch
-#     (e2e/digest_mismatch, expected to fail on Bazel's checksum error)
+#     (e2e/digest_mismatch, expected to fail on Bazel's checksum error) and
+#     the xtool red fetch (e2e/xtool_sdk_invalid, expected to fail on the
+#     nonexistent bundle path)
 #   e2e-linux-app:       hello_world, codegen
 #   e2e-linux-small:     smoke, dual_hub, ffi_example, ffi_plugin_example,
 #     web_example
@@ -245,6 +247,21 @@ jobs:
             exit 1
           fi
           echo "$out" | grep -F "but wanted 0000000000000000000000000000000000000000000000000000000000000000"
+      # Xtool red path: e2e/xtool_sdk_invalid opts into `flutter.darwin_sdk`
+      # with a bundle path that does not exist. The fetch must fail on that
+      # path — before any LLVM download starts — so an opting-in consumer
+      # with a bad path gets the configuration error rather than an LLVM
+      # resolution error. The grep pins the exact error so an LLVM failure
+      # or a refactor that skips the path check cannot pass as red.
+      - name: Invalid xtool SDK path fails on the path
+        working-directory: e2e/xtool_sdk_invalid
+        run: |
+          if out=$(bazel fetch @flutter_xtool_darwin_sdk//... 2>&1); then
+            echo "$out"
+            echo "expected the invalid-SDK-path fetch to fail, but it succeeded"
+            exit 1
+          fi
+          echo "$out" | grep -F "configured darwin.artifactbundle path '/nonexistent/darwin.artifactbundle' does not exist"
       - name: Report cache sizes
         if: always()
         run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true
