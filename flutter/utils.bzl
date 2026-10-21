@@ -59,6 +59,10 @@ load(
     _flutter_kernel_compile_action = "flutter_kernel_compile_action",
     _flutter_kernel_compile_tools = "flutter_kernel_compile_tools",
 )
+load(
+    "//flutter/private:flutter_test_common.bzl",
+    _flutter_test_bootstrap_action = "flutter_test_bootstrap_action",
+)
 
 # The whole-program kernel compile behind every Flutter target: runs
 # `frontend_server` via `dartaotruntime` behind the `kernel_filter` guard.
@@ -82,3 +86,55 @@ FLUTTER_KERNEL_COMPILE_TOOLCHAINS = _FLUTTER_KERNEL_COMPILE_TOOLCHAINS
 # Resolves the tool Files a `flutter_kernel_compile_action` call needs.
 # See `flutter_kernel_compile_tools`.
 flutter_kernel_compile_tools = _flutter_kernel_compile_tools
+
+def flutter_test_bootstrap(ctx, test_main_uri, output):
+    """Write the bootstrap library a prebuilt test kernel is compiled from.
+
+    The same bootstrap `flutter_test` compiles into its own test kernel: a
+    generated entry point that imports the test at `test_main_uri`, registers
+    it with `package:test_api`'s `RemoteListener`, and dials the test harness
+    back over a WebSocket. A kernel compiled from anything else does not speak
+    the harness protocol, so a `flutter_prebuilt_test` over it fails to
+    connect rather than running zero tests.
+
+    When the calling target's `deps` expose `package:flutter_test`, the golden
+    comparator is staged next to `output` and imported by the bootstrap, as in
+    `flutter_test`. That needs the implicit `_golden_comparator_src` file
+    (defaulting to `//flutter/private/goldens:comparator.dart`); without it —
+    or with only `package:test_api` in `deps` — the bootstrap carries no
+    golden block. Either way the harness, tag and JUnit handling match
+    `flutter_test`'s.
+
+    Compile `output` with `flutter_kernel_compile_action`, passing it as
+    `main`:
+
+    ```starlark
+    bootstrap = ctx.actions.declare_file(ctx.label.name + "_bootstrap.dart")
+    comparator = flutter_test_bootstrap(ctx, "package:my_app/widget_test.dart", bootstrap)
+    srcs = [bootstrap] + ([comparator] if comparator else [])
+    pc = compile_package_config(ctx, packages, srcs + all_test_srcs)
+    flutter_kernel_compile_action(
+        ctx = ctx,
+        dartaotruntime = tools.dartaotruntime,
+        kernel_filter_tool = tools.kernel_filter_tool,
+        frontend_server = tools.frontend_server,
+        platform_dill = tools.platform_dill,
+        main = bootstrap,
+        srcs = pc.srcs,
+        package_config = pc.config_file,
+        output = kernel_dill,
+    )
+    ```
+
+    Then run the resulting dill under `flutter_prebuilt_test`.
+
+    Args:
+        ctx: The calling rule's context.
+        test_main_uri: Import URI from the bootstrap to the test entrypoint.
+        output: The already-declared bootstrap `.dart` File to write.
+
+    Returns:
+        The staged golden comparator File, or None. Pass it to the kernel
+        compile alongside the bootstrap when present.
+    """
+    return _flutter_test_bootstrap_action(ctx, test_main_uri, output)

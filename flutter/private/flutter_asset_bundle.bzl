@@ -8,198 +8,31 @@ Produces a `flutter_assets/` tree artifact containing:
 """
 
 load("//flutter:providers.bzl", "FlutterInfo")
+load(
+    "//flutter/private:common.bzl",
+    "flutter_compile_shaders",
+    "flutter_tester_shader_aspect",
+)
+load(
+    "//flutter/private:flutter_asset_bundle_action.bzl",
+    "flutter_asset_bundle_action",
+    _build_asset_manifest = "build_asset_manifest",
+    _detect_dpr = "detect_dpr",
+)
 load("//flutter/private:flutter_library.bzl", "aggregate_pub_contributions")
 
 _TOOL = Label("//flutter/private/tools:generate_asset_manifest")
 
-# Regex-like DPR directory patterns we detect in Starlark.
-# A directory named like "2x", "1.5x", "3.0x" indicates a resolution variant.
-_DPR_SUFFIXES = {
-    "1.5x": 1.5,
-    "2x": 2.0,
-    "2.0x": 2.0,
-    "3x": 3.0,
-    "3.0x": 3.0,
-    "4x": 4.0,
-    "4.0x": 4.0,
-}
-
-def detect_dpr(path):
-    """Detect device-pixel-ratio from a resolution variant directory name.
-
-    Args:
-        path: Asset path string (e.g. "assets/2.0x/icon.png").
-
-    Returns:
-        (base_path, dpr) tuple.  base_path has the DPR dir removed (e.g.
-        "assets/icon.png").  dpr is a float or None if not a variant.
-    """
-    parts = path.split("/")
-    for i, part in enumerate(parts):
-        if part in _DPR_SUFFIXES:
-            base = "/".join(parts[:i] + parts[i + 1:])
-            return base, _DPR_SUFFIXES[part]
-    return path, None
-
-def build_asset_manifest(assets):
-    """Build the asset manifest structure from a list of asset paths.
-
-    Args:
-        assets: list of asset path strings relative to package root.
-
-    Returns:
-        dict mapping logical key → list of variant dicts.
-    """
-    manifest = {}
-
-    # Group by base path.
-    for path in sorted(assets):
-        base, dpr = detect_dpr(path)
-        if base not in manifest:
-            manifest[base] = []
-        entry = {"asset": path}
-        if dpr != None:
-            entry["dpr"] = dpr
-        manifest[base].append(entry)
-
-    # Ensure the main (1x) variant is first in each list.
-    for base in manifest:
-        variants = manifest[base]
-        main_idx = None
-        for i, v in enumerate(variants):
-            if v["asset"] == base:
-                main_idx = i
-                break
-        if main_idx != None and main_idx != 0:
-            main = variants.pop(main_idx)
-            variants.insert(0, main)
-
-    return manifest
-
-def flutter_asset_bundle_action(
-        ctx,
-        dart = None,
-        flutter_sdk_files = None,
-        assets = [],
-        fonts = [],
-        notices = "",
-        license_files = [],
-        output_dir = None,
-        const_finder = None,
-        font_subset = None,
-        kernel_dill = None,
-        kernel_dills = [],
-        tree_shake_key = "",
-        extra_asset_copies = {}):
-    """Create an action that generates the flutter_assets/ tree artifact.
-
-    Args:
-        ctx: Rule context.
-        dart: The `dart` executable File from the Flutter SDK (only required when icon tree shaking is enabled).
-        flutter_sdk_files: SDK files needed to run dart (for action inputs when icon tree shaking is enabled).
-        assets: list of File objects to include in the bundle.
-        fonts: list of font declaration dicts (FontManifest.json schema).
-        notices: License text string to compress into NOTICES.Z.
-        license_files: list of File objects containing license text to include in NOTICES.Z.
-        output_dir: The already-declared directory (tree artifact) File to
-            write the bundle into. Declared by the caller rather than here
-            because an application has to know where its assets will land
-            *before* this action runs — the path is baked into the app as
-            `rules_flutter.build_info.assetsDir`, which the dev tool matches
-            against the tree it watches and rebuilds. Declaring an output and
-            registering the action that fills it are separate steps in
-            Starlark, so hoisting the declaration introduces no cycle even
-            though icon tree shaking makes this action depend on the kernel.
-        const_finder: File for const_finder.dart.snapshot (enables icon tree shaking).
-        font_subset: File for font-subset binary (enables icon tree shaking).
-        kernel_dill: File for the compiled kernel .dill (needed for icon tree shaking).
-        kernel_dills: Optional list of compiled kernel .dill Files when icon tree
-            shaking unions code points across multiple shipped builds.
-        tree_shake_key: Optional configuration fingerprint for the shipped
-            programs whose icons are tree-shaken.
-        extra_asset_copies: dict mapping custom dest path → File for assets that
-            need a specific destination path (e.g. "fonts/MaterialIcons-Regular.otf").
-
-    Returns:
-        The `output_dir` it was given, so callers can chain.
-    """
-    if output_dir == None:
-        fail("flutter_asset_bundle_action: `output_dir` is required — declare it with ctx.actions.declare_directory().")
-    tool = ctx.executable._asset_bundle_tool
-
-    # Build asset paths and copy map relative to the output directory.
-    asset_paths = []
-    copies = {}
-    for f in assets:
-        # Use short_path as the logical key inside flutter_assets/.
-        asset_paths.append(f.short_path)
-        copies[f.short_path] = f.path
-
-    # Add extra copies with custom destination paths.
-    extra_files = []
-    for dest_path, f in extra_asset_copies.items():
-        asset_paths.append(dest_path)
-        copies[dest_path] = f.path
-        extra_files.append(f)
-
-    # Build manifest structure.
-    manifest = build_asset_manifest(asset_paths)
-
-    # Write the config JSON.
-    config = {
-        "assets": manifest,
-        "fonts": fonts,
-        "copies": copies,
-        "notices": notices,
-        "license_files": [f.path for f in license_files],
-    }
-
-    # Icon tree shaking config.
-    all_kernel_dills = list(kernel_dills) if kernel_dills else ([kernel_dill] if kernel_dill != None else [])
-    extra_inputs = []
-    transitive_inputs = []
-    if const_finder and font_subset and all_kernel_dills:
-        icon_cfg = {
-            "dart": dart.path,
-            "const_finder": const_finder.path,
-            "font_subset": font_subset.path,
-            "kernel_dill": all_kernel_dills[0].path,
-            "kernel_dills": [d.path for d in all_kernel_dills],
-        }
-        if tree_shake_key:
-            icon_cfg["key"] = "%x" % (hash(tree_shake_key) & 0xffffffff)
-        config["icon_tree_shaking"] = icon_cfg
-        extra_inputs.extend([dart, const_finder, font_subset] + all_kernel_dills)
-        if flutter_sdk_files:
-            transitive_inputs.append(flutter_sdk_files)
-
-    config_content = json.encode(config)
-    config_name = (
-        "%s.%x.asset_bundle_config.json" % (ctx.label.name, hash(config_content) & 0xffffffff) if tree_shake_key else ctx.label.name + ".asset_bundle_config.json"
-    )
-    config_file = ctx.actions.declare_file(config_name)
-    ctx.actions.write(config_file, config_content)
-
-    ctx.actions.run(
-        executable = tool,
-        arguments = [
-            "--config",
-            config_file.path,
-            "--output-dir",
-            output_dir.path,
-        ],
-        inputs = depset(
-            direct = [config_file] + assets + extra_files + license_files + extra_inputs,
-            transitive = transitive_inputs,
-        ),
-        outputs = [output_dir],
-        mnemonic = "FlutterAssetBundle",
-        progress_message = "Bundling Flutter assets %s" % ctx.label,
-    )
-
-    return output_dir
+# Re-exported from `//flutter/private:flutter_asset_bundle_action.bzl`, where the
+# manifest helpers live next to the action that consumes them. Kept under
+# these names so existing loads keep working.
+build_asset_manifest = _build_asset_manifest
+detect_dpr = _detect_dpr
 
 def _flutter_asset_bundle_impl(ctx):
+    flutter_toolchain = ctx.toolchains["@rules_flutter//flutter:toolchain_type"]
+    flutter_sdk_info = flutter_toolchain.flutter_sdk_info
+
     # Collect assets from direct attr + transitive FlutterInfo deps.
     all_assets = list(ctx.files.assets)
     for dep in ctx.attr.deps:
@@ -209,13 +42,23 @@ def _flutter_asset_bundle_impl(ctx):
     # Walk pub-package font/asset contributions from FlutterInfo. To get
     # MaterialIcons in the bundle, list `@rules_flutter//flutter:material_icons`
     # in deps — the same channel cupertino_icons et al. arrive through.
-    fonts, extra_asset_copies = aggregate_pub_contributions(ctx.attr.deps)
+    fonts, pub_extra_asset_copies = aggregate_pub_contributions(ctx.attr.deps)
+
+    # Shaders compiled for `flutter_tester`, as `flutter test` compiles them
+    # (SkSL for Skia, Vulkan for Impeller): the target's own `shaders` plus
+    # the SDK, package and dep shaders the tester aspect compiled on the
+    # owning targets. Without these a `flutter_prebuilt_test` over this tree
+    # cannot draw what the `flutter_test` it was split from drew.
+    compiled_shaders = flutter_compile_shaders(ctx, flutter_sdk_info, "tester")
+    extra_asset_copies = dict(compiled_shaders)
+    extra_asset_copies.update(pub_extra_asset_copies)
 
     output_dir = flutter_asset_bundle_action(
         ctx = ctx,
         assets = all_assets,
         fonts = fonts,
         notices = "",
+        license_files = ctx.files.license_files,
         output_dir = ctx.actions.declare_directory(ctx.label.name),
         extra_asset_copies = extra_asset_copies,
     )
@@ -230,10 +73,41 @@ flutter_asset_bundle = rule(
             allow_files = True,
         ),
         "deps": attr.label_list(
-            doc = "Flutter library dependencies whose assets to include.",
+            doc = "Flutter library dependencies whose assets to include. " +
+                  "Shaders owned by these deps are compiled for " +
+                  "`flutter_tester` and bundled, so list the same deps a " +
+                  "`flutter_test` over this tree would.",
+            aspects = [flutter_tester_shader_aspect],
+        ),
+        "shaders": attr.label_list(
+            doc = "Fragment shader files (.frag) to compile with impellerc " +
+                  "for `flutter_tester` and include in the asset bundle, as " +
+                  "`flutter_test` compiles its own `shaders`.",
+            allow_files = [".frag", ".glsl"],
+        ),
+        "shader_includes": attr.label_list(
+            doc = "Files the `shaders` may `#include`. A shader compiles in a " +
+                  "sandbox holding only its declared inputs, so an include not " +
+                  "listed here is not found.",
+            allow_files = True,
+        ),
+        "require_sksl_shaders": attr.bool(
+            doc = "Fail the build when a shader cannot be compiled for Skia " +
+                  "(SkSL). By default such a shader is compiled for Impeller " +
+                  "alone with a warning, as `flutter build` does.",
+            default = False,
+        ),
+        "license_files": attr.label_list(
+            doc = "License/NOTICE files to include in NOTICES.Z. Typically LICENSE files from dependencies.",
+            allow_files = True,
         ),
         "_asset_bundle_tool": attr.label(
             default = _TOOL,
+            executable = True,
+            cfg = "exec",
+        ),
+        "_shader_compile_tool": attr.label(
+            default = Label("//flutter/private/tools:compile_shader"),
             executable = True,
             cfg = "exec",
         ),

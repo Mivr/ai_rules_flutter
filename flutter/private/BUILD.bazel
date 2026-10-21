@@ -59,7 +59,7 @@ bzl_library(
     srcs = ["common.bzl"],
     visibility = ["//flutter:__subpackages__"],
     deps = [
-        ":flutter_asset_bundle",
+        ":flutter_asset_bundle_action",
         ":flutter_compile",
         ":flutter_info",
         ":flutter_kernel_module",
@@ -99,7 +99,17 @@ bzl_library(
     name = "flutter_asset_bundle",
     srcs = ["flutter_asset_bundle.bzl"],
     visibility = ["//flutter:__subpackages__"],
-    deps = ["//flutter:providers"],
+    deps = [
+        ":common",
+        ":flutter_asset_bundle_action",
+        "//flutter:providers",
+    ],
+)
+
+bzl_library(
+    name = "flutter_asset_bundle_action",
+    srcs = ["flutter_asset_bundle_action.bzl"],
+    visibility = ["//flutter:__subpackages__"],
 )
 
 bzl_library(
@@ -490,8 +500,26 @@ bzl_library(
     deps = [
         ":common",
         ":flutter_kernel_module",
+        ":flutter_test_common",
         "//flutter:providers",
     ],
+)
+
+bzl_library(
+    name = "flutter_test_common",
+    srcs = ["flutter_test_common.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+    deps = [
+        "@rules_dart//dart:providers",
+        "@rules_dart//dart:utils",
+    ],
+)
+
+bzl_library(
+    name = "flutter_prebuilt_test",
+    srcs = ["flutter_prebuilt_test.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+    deps = [":flutter_test_common"],
 )
 
 bzl_library(

@@ -150,6 +150,7 @@ bzl_library(
         "//flutter/private:flutter_kernel_target",
         "//flutter/private:flutter_library",
         "//flutter/private:flutter_plugin",
+        "//flutter/private:flutter_prebuilt_test",
         "//flutter/private:flutter_test",
     ],
 )
@@ -238,6 +239,7 @@ bzl_library(
         ":providers",
         "//flutter/private:app_entrypoint",
         "//flutter/private:flutter_compile",
+        "//flutter/private:flutter_test_common",
     ],
 )
 

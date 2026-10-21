@@ -1254,6 +1254,40 @@ Two limits come from Flutter rather than from these rules:
 - **Goldens are host-specific.** Font rendering and antialiasing differ between operating systems, so a PNG generated on macOS may not match on Linux or Windows. Regenerate on the platform that checks them, or keep per-OS golden directories.
 - **Replacing the comparator disables regeneration.** If a test assigns its own `goldenFileComparator`, `--update-goldens` calls that object's `update()`, which for `LocalFileComparator` writes into runfiles. The run passes, prints nothing, and leaves the source PNG unchanged.
 
+#### Modular compilation and the test action's cache key
+
+Each library in a `flutter_test` closure is compiled once into its own outline kernel (a separate, action-cached build action), and the test action links the entry module against those outlines and runs the resulting kernel under `flutter_tester`. Editing one library therefore recompiles only that library's outline plus the link — other libraries' outlines are reused.
+
+A test action re-runs only when its cache key changes. The key is the test kernel plus the `flutter_assets/` tree plus the runner binary plus the test env: editing a library that no test links, touching an asset no test bundles, or changing an unrelated target leaves a passing test cached.
+
+#### flutter_prebuilt_test
+
+Runs an already built test kernel under the same `flutter_tester` runtime — the same runner, protocol, env contract, JUnit XML and golden handling as `flutter_test` — without compiling anything itself. Use it when your own pipeline builds the kernel: split a large suite so one kernel build feeds many test shards, or reuse one kernel across targets whose test env differs. A `flutter_test` exposes exactly what it needs as output groups:
+
+```starlark
+filegroup(
+    name = "widget_test_kernel",
+    srcs = [":widget_test"],
+    output_group = "test_kernel",
+)
+
+filegroup(
+    name = "widget_test_assets",
+    srcs = [":widget_test"],
+    output_group = "test_assets",
+)
+
+flutter_prebuilt_test(
+    name = "widget_prebuilt_test",
+    dill = ":widget_test_kernel",
+    assets = ":widget_test_assets",
+)
+```
+
+`test_kernel` is the test `.dill`, `test_base_kernel` the base dill it links against at run time (empty for whole-program kernels), and `test_assets` its `flutter_assets/` tree. To build the assets tree yourself instead, use `flutter_asset_bundle` with the test's shaders (compiled for `flutter_tester`, as `flutter_test` compiles them) and the same `deps`: dep fonts, package assets and the Material shaders land in the bundle the same way.
+
+To compile the kernel yourself, write the bootstrap with `flutter_test_bootstrap` from `@rules_flutter//flutter:utils.bzl` and compile it as the entry point with `flutter_kernel_compile_action` (passing the bootstrap as `main`); then run the resulting dill under `flutter_prebuilt_test`. A kernel compiled from any other entry point does not dial the harness back and fails to connect.
+
 ### flutter_integration_test
 
 Builds a Flutter application with an integration test (`package:integration_test` / `package:flutter_test` `WidgetTester` code) compiled in as its entrypoint, runs it on the target platform, and collects results as a Bazel test.
