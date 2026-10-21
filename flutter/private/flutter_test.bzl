@@ -370,14 +370,17 @@ def _flutter_test_impl(ctx):
         # The test's own build products, for `flutter_prebuilt_test` to run
         # without compiling: `test_kernel` is exactly the test `.dill`,
         # `test_base_kernel` the base dill it links against at run time
-        # (empty when the kernel was compiled whole-program), and
-        # `test_assets` its `flutter_assets/` tree. A `filegroup` with
+        # (empty when the kernel was compiled whole-program),
+        # `test_assets` its `flutter_assets/` tree, and `test_library_tags`
+        # the entrypoint's `@Tags` as a `{"tags": [...]}` JSON file, for
+        # `flutter_prebuilt_test`'s `library_tags`. A `filegroup` with
         # `output_group` on one of these feeds the matching
         # `flutter_prebuilt_test` attr.
         OutputGroupInfo(
             test_kernel = depset([kernel_dill]),
             test_base_kernel = depset([base_dill]) if base_dill != None else depset(),
             test_assets = depset([flutter_assets]),
+            test_library_tags = depset([library_tags]),
         ),
     ]
 

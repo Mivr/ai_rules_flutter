@@ -99,6 +99,18 @@ FLUTTER_KERNEL_COMPILE_TOOLCHAINS = _FLUTTER_KERNEL_COMPILE_TOOLCHAINS
 # See `flutter_kernel_compile_tools`.
 flutter_kernel_compile_tools = _flutter_kernel_compile_tools
 
+# The attrs a rule calling `flutter_test_bootstrap` merges into its own. Only
+# the golden comparator: `flutter_test_bootstrap` reads the calling target's
+# `deps` itself, and `ctx.actions` / `ctx.label` need no attrs. Implicit (so no
+# private-named attr enters the caller's build-visible contract), defaulting to
+# the comparator `flutter_test` installs — see `flutter_test_bootstrap`.
+FLUTTER_TEST_BOOTSTRAP_ATTRS = {
+    "_golden_comparator_src": attr.label(
+        default = Label("//flutter/private/goldens:comparator.dart"),
+        allow_single_file = [".dart"],
+    ),
+}
+
 def flutter_test_bootstrap(ctx, test_main_uri, output):
     """Write the bootstrap library a prebuilt test kernel is compiled from.
 
@@ -111,18 +123,20 @@ def flutter_test_bootstrap(ctx, test_main_uri, output):
 
     When the calling target's `deps` expose `package:flutter_test`, the golden
     comparator is staged next to `output` and imported by the bootstrap, as in
-    `flutter_test`. That needs the implicit `_golden_comparator_src` file
-    (defaulting to `//flutter/private/goldens:comparator.dart`); without it —
-    or with only `package:test_api` in `deps` — the bootstrap carries no
-    golden block. Either way the harness, tag and JUnit handling match
-    `flutter_test`'s.
+    `flutter_test`. That needs `FLUTTER_TEST_BOOTSTRAP_ATTRS` merged into the
+    calling rule's attrs; without it — or with only `package:test_api` in
+    `deps` — the bootstrap carries no golden block. Either way the harness, tag
+    and JUnit handling match `flutter_test`'s.
 
-    Compile `output` with `flutter_kernel_compile_action`, passing it as
-    `main`:
+    A suite outside any `lib/` has no `package:` URI to import it by. Name it
+    by path from the bootstrap instead — climb out of the bootstrap's directory,
+    then descend to the suite's exec-root-relative path — as
+    `e2e/hello_world/custom_test_kernel.bzl` does:
 
     ```starlark
     bootstrap = ctx.actions.declare_file(ctx.label.name + "_bootstrap.dart")
-    comparator = flutter_test_bootstrap(ctx, "package:my_app/widget_test.dart", bootstrap)
+    test_main_uri = "../" * len(bootstrap.path.split("/")[:-1]) + ctx.file.main.path
+    comparator = flutter_test_bootstrap(ctx, test_main_uri, bootstrap)
     srcs = [bootstrap] + ([comparator] if comparator else [])
     pc = compile_package_config(ctx, packages, srcs + all_test_srcs)
     flutter_kernel_compile_action(
@@ -141,7 +155,9 @@ def flutter_test_bootstrap(ctx, test_main_uri, output):
     Then run the resulting dill under `flutter_prebuilt_test`.
 
     Args:
-        ctx: The calling rule's context.
+        ctx: The calling rule's context. Reads the calling target's `deps`
+            for `package:flutter_test`, and the `_golden_comparator_src` file
+            when the rule merges `FLUTTER_TEST_BOOTSTRAP_ATTRS`.
         test_main_uri: Import URI from the bootstrap to the test entrypoint.
         output: The already-declared bootstrap `.dart` File to write.
 

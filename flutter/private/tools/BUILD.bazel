@@ -110,7 +110,11 @@ dart_binary(
     main = "extract_library_tags.dart",
     modular_kernel = False,
     target_compatible_with = HOST_COMPATIBLE,
-    visibility = ["//flutter:__subpackages__"],
+    # Public like `kernel_filter` below: a rule in another module composing
+    # its own test kernel over `@rules_flutter//flutter:utils.bzl` extracts
+    # the suite's `@Tags` with this tool, as `extract_library_tags_action`
+    # does for `flutter_test`.
+    visibility = ["//visibility:public"],
 )
 
 dart_binary(

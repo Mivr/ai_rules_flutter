@@ -4,9 +4,10 @@
 must contain no compile (no `FlutterKernelCompile`, no `DartKernel` module
 compile or `DartKernelLink`), only what the runner needs. The kernel it runs
 comes from a `flutter_test`'s `test_kernel` / `test_base_kernel` /
-`test_assets` output groups, and the custom-compile path composes from the
-public `//flutter:utils.bzl` helpers (`flutter_test_bootstrap` plus
-`flutter_kernel_compile_action`) without loading `//flutter/private`.
+`test_assets` / `test_library_tags` output groups, and the custom-compile path
+composes from the public `//flutter:utils.bzl` helpers (`flutter_test_bootstrap`
+plus `flutter_kernel_compile_action`, with `FLUTTER_TEST_BOOTSTRAP_ATTRS` in
+the caller's attrs) without loading `//flutter/private`.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
@@ -15,6 +16,7 @@ load(
     "//flutter:utils.bzl",
     "FLUTTER_KERNEL_COMPILE_ATTRS",
     "FLUTTER_KERNEL_COMPILE_TOOLCHAINS",
+    "FLUTTER_TEST_BOOTSTRAP_ATTRS",
     "compile_package_config",
     "flutter_kernel_compile_action",
     "flutter_kernel_compile_tools",
@@ -67,10 +69,15 @@ def _prebuilt_no_compile_test_impl(ctx):
         any(["flutter_tester" in p for p in runfile_paths]),
         "flutter_tester must be in runfiles",
     )
+    asserts.true(
+        env,
+        any([p.endswith(".library_tags.json") for p in runfile_paths]),
+        "the fed library tags must be in runfiles",
+    )
     return analysistest.end(env)
 
 def _output_groups_test_impl(ctx):
-    """`flutter_test` exposes its kernel, base kernel and assets as output groups."""
+    """`flutter_test` exposes its kernel, base kernel, assets and tags as output groups."""
     env = analysistest.begin(ctx)
     groups = analysistest.target_under_test(env)[OutputGroupInfo]
 
@@ -94,6 +101,15 @@ def _output_groups_test_impl(ctx):
 
     assets = groups.test_assets.to_list()
     asserts.equals(env, 1, len(assets), "expected one test_assets tree")
+
+    tags = groups.test_library_tags.to_list()
+    asserts.equals(env, 1, len(tags), "expected one test_library_tags file")
+    if tags:
+        asserts.true(
+            env,
+            tags[0].basename.endswith(".library_tags.json"),
+            "test_library_tags must be the entrypoint's @Tags JSON, got %r" % tags[0].basename,
+        )
     return analysistest.end(env)
 
 def _bootstrap_pipeline_test_impl(ctx):
@@ -149,7 +165,9 @@ def _bootstrap_pipeline_caller_impl(ctx):
 
     Writes the bootstrap with `flutter_test_bootstrap`, then compiles it as
     the kernel entry point — the custom pipeline the `flutter_prebuilt_test`
-    docs describe. `deps` is empty, so no golden comparator is staged.
+    docs describe. Merges `FLUTTER_TEST_BOOTSTRAP_ATTRS` (the golden
+    comparator default must resolve for the rule to analyze); `deps` is empty,
+    so no comparator is staged and no golden block is emitted.
     """
     tools = flutter_kernel_compile_tools(ctx)
     bootstrap = ctx.actions.declare_file(ctx.label.name + "_bootstrap.dart")
@@ -178,7 +196,7 @@ _bootstrap_pipeline_caller = rule(
             mandatory = True,
             allow_single_file = [".dart"],
         ),
-    } | FLUTTER_KERNEL_COMPILE_ATTRS,
+    } | FLUTTER_KERNEL_COMPILE_ATTRS | FLUTTER_TEST_BOOTSTRAP_ATTRS,
     toolchains = FLUTTER_KERNEL_COMPILE_TOOLCHAINS,
 )
 
@@ -216,11 +234,19 @@ def flutter_prebuilt_test_suite(name):
         tags = ["manual"],
         testonly = True,
     )
+    native.filegroup(
+        name = "_prebuilt_inputs_tags",
+        srcs = [":_prebuilt_inputs_test"],
+        output_group = "test_library_tags",
+        tags = ["manual"],
+        testonly = True,
+    )
     flutter_prebuilt_test(
         name = "_prebuilt_test",
         dill = ":_prebuilt_inputs_kernel",
         base_dill = [":_prebuilt_inputs_base_kernel"],
         assets = ":_prebuilt_inputs_assets",
+        library_tags = ":_prebuilt_inputs_tags",
         tags = ["manual"],
     )
     _bootstrap_pipeline_caller(
