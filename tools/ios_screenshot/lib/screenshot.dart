@@ -1,3 +1,27 @@
+/// iOS device screenshot helper (Dart entrypoint).
+///
+/// The screenshot itself is taken through `pymobiledevice3`'s DVT service —
+/// `_flutter.screenshot` cannot capture on iOS because the Impeller renderer
+/// does not implement compressed image capture. Reimplementing the DVT
+/// protocol in Dart is out of scope, so this entrypoint is a thin driver:
+/// it resolves a host `python3` (a documented host prerequisite, like the
+/// Android SDK or Xcode) and runs the screenshot program below through it.
+///
+/// Keeping the program here as a `dart_binary` instead of a `py_binary`
+/// removes `rules_python` and the `pip` hub from every consumer's module
+/// graph: the helper needs no Bazel-built Python toolchain or wheels, only
+/// the host interpreter and an installed `pymobiledevice3`
+/// (`python3 -m pip install pymobiledevice3`).
+///
+/// Usage (same as before): `screenshot <output_path> --udid <device_udid>`.
+/// Requires the tunnel daemon (`tunneld`, this same package) running as root.
+import 'dart:io';
+
+import 'python_host.dart';
+
+/// The screenshot program, run by the host interpreter (stdin, so no
+/// source file is staged next to the binary).
+const String _screenshotProgram = r'''
 """Capture a screenshot from an iOS device via pymobiledevice3 DVT service.
 
 Requires a running tunnel daemon (started via tunneld.py or
@@ -61,3 +85,20 @@ def main():
 
 if __name__ == '__main__':
     main()
+''';
+
+Future<void> main(List<String> args) async {
+  final python = findHostPython();
+  if (python == null) {
+    stderr.writeln(missingPythonMessage(purpose: 'iOS device screenshots'));
+    exit(2);
+  }
+  final exitCode = await runPythonProgram(
+    python,
+    _screenshotProgram,
+    args,
+  );
+  if (exitCode != 0) {
+    exit(exitCode);
+  }
+}

@@ -3192,7 +3192,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       'throws structured error when bundled dxcam binary is missing',
       () async {
         // The implementation uses `resolveRunfileWithManifest` to locate
-        // the bundled dxcam `py_binary` and shells to it directly via
+        // the bundled native screenshot helper and shells to it directly via
         // `Process.run`; it doesn't go through the injected `runProcess`
         // hook. Under unit-test runfiles the tool isn't reachable, so the
         // observable contract is the actionable error that points at the

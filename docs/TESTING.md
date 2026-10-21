@@ -53,7 +53,7 @@ Which probe discriminates depends on the owning target's shape:
   Unimported is what makes it proof: an imported one is reached through `main`'s
   own closure, so the target goes red whether or not `srcs` carries it.
 * **Target is `main`-only** — a `main` and no `srcs`
-  (`//tools/update_flutter_version`, `//tools/pip_lock_guard:pip_facts_test`) →
+  (`//tools/update_flutter_version`, `//tools/dev_tool:process_group_exec`) →
   transiently repoint `main` at the probe; restoring must return it to green.
   The dropped-file form cannot discriminate here: a probe added to a `srcs` the
   committed target does not have goes red even if the `main` slot is never
@@ -113,11 +113,6 @@ Two consequences worth keeping in mind:
   Linux shells out to `scrot` from `PATH`, so capture fails on a host that
   lacks it. That is the same hermeticity gap as the `zip` dependency below,
   and it is unfixed.
-
-**Upstream ask**: rules_python's bootstrap should read
-`RUNFILES_MANIFEST_FILE` rather than only deriving a directory from it. That
-is the general fix for any `py_binary` spawned from another binary's runfiles
-on Windows.
 
 ### Two root tests shell out to host binaries
 

@@ -990,7 +990,7 @@ class WindowsDevice extends Device {
       return vmClient.screenshot(outputPath);
     }
     // GDI CopyFromScreen cannot capture D3D/Flutter surfaces.
-    // Use DXGI Desktop Duplication via bundled dxcam py_binary.
+    // Use DXGI Desktop Duplication via the bundled native helper.
     final resolved = resolveRunfileWithManifest(
       'rules_flutter/tools/windows_screenshot/screenshot',
     );
@@ -3530,7 +3530,8 @@ if not error.Success():
   /// Instead, we use pymobiledevice3's DVT screenshot, which captures via
   /// Apple's Developer Tools service (same mechanism as Xcode).
   ///
-  /// The screenshot binary is bundled as a Bazel py_binary and resolved from
+  /// The screenshot helper is bundled as a Bazel dart_binary driver (it runs
+  /// its pymobiledevice3 program through a host python3) and resolved from
   /// runfiles. Requires building via `bazel build //tools/dev_tool:flutter_bazel`.
   ///
   /// Prerequisites: the tunnel daemon, running as root in another terminal.
@@ -3558,8 +3559,9 @@ if not error.Success():
       );
     }
 
-    // The py_binary needs RUNFILES_MANIFEST_FILE to find its venv and
-    // bootstrap scripts within the dart_binary's runfiles.
+    // The driver reads no runfiles (its program is embedded, its Python is
+    // the host's), so unlike the old py_binary it needs no
+    // RUNFILES_MANIFEST_FILE forwarded.
     final result = await Process.run(
       resolved.path,
       [
@@ -3567,10 +3569,6 @@ if not error.Success():
         '--udid',
         _addressedUdid,
       ],
-      environment: {
-        if (resolved.manifestPath != null)
-          'RUNFILES_MANIFEST_FILE': resolved.manifestPath!,
-      },
     );
     if (result.exitCode != 0) {
       final err = result.stderr as String;

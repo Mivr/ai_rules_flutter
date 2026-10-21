@@ -100,7 +100,8 @@ Two settings are required. Paste them into your project's `.bazelrc`:
 common --tool_java_language_version=25
 common --tool_java_runtime_version=remotejdk_25
 
-# Windows only: rules_python 2+ needs symlink support.
+# Windows only: lets Bazel create real symlinks (runfiles trees and SDK
+# layouts use them where available) instead of falling back to copies.
 startup --windows_enable_symlinks
 ```
 
