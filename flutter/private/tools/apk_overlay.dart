@@ -28,17 +28,17 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'xtool_pack.dart' show crc32, readZipEntries;
+import 'xtool_pack.dart' show ZipRawEntry, crc32, readZipRawEntries;
 
 /// DOS timestamp used for injected entries: 2010-01-01 00:00:00, matching
 /// singlejar `--normalize` output surrounding them.
 const int _overlayDosTime = 0x0000;
 const int _overlayDosDate = 0x3C21;
 
-/// File extensions (lowercase, without the dot) that aapt2 leaves uncompressed
-/// by default (`kDefaultNoCompressExtensions`). Payload files with these
+/// File extensions (without the dot) that aapt2 leaves uncompressed by
+/// default (`kDefaultNoCompressExtensions`). Payload files with these
 /// extensions are stored, like the `.ap_` an `android_binary` with the same
-/// assets would have produced.
+/// assets would have produced. Matching is case-sensitive, like aapt2.
 const Set<String> _aaptNoCompressExtensions = {
   'jpg',
   'jpeg',
@@ -71,6 +71,7 @@ const Set<String> _aaptNoCompressExtensions = {
   'wmv',
   'webm',
   'mkv',
+  'webp',
 };
 
 /// Fixed Unix mode for injected regular files (`0644`), never inherited from
@@ -89,12 +90,18 @@ void _setUint16LE(ByteData bd, int offset, int value) =>
 void _setUint32LE(ByteData bd, int offset, int value) =>
     bd.setUint32(offset, value, Endian.little);
 
-/// A pending payload entry: archive [path] with its uncompressed [data].
+/// A pending payload entry: archive [path] holding [data] with CRC-32 [crc].
+///
+/// [crc] is the jar-recorded checksum for entries copied out of
+/// `native_libs.jar` (verified on read, reused here so large libraries are
+/// checksummed once); entries collected from `flutter_assets/` compute it
+/// when encoded.
 class _PayloadEntry {
   final String path;
   final Uint8List data;
+  final int? crc;
 
-  _PayloadEntry(this.path, this.data);
+  _PayloadEntry(this.path, this.data, {this.crc});
 }
 
 /// Locates the End of Central Directory record in [bytes], returning its
@@ -172,16 +179,46 @@ int _findEocd(Uint8List bytes) {
 /// `native_libs.jar` whose entries already carry their APK paths
 /// (`lib/<abi>/<name>`). Every entry is stored uncompressed in the APK so
 /// zipalign can page-align it.
+///
+/// Stored entries are copied as raw bytes with their recorded CRC — never
+/// inflated — so libraries of any size below the ZIP32 limits pass through
+/// (the jar writer stores `.so` files for exactly this reason). A deflated
+/// entry from an older jar is inflated as a fallback.
 List<_PayloadEntry> _payloadFromNativeLibsJar(Uint8List jarBytes) {
   final payload = <_PayloadEntry>[];
-  for (final entry in readZipEntries(jarBytes)) {
+  for (final ZipRawEntry entry in readZipRawEntries(jarBytes)) {
     if (entry.isDirectory) continue;
-    if (entry.data.isEmpty && entry.uncompressedSize > 0) {
-      throw FormatException(
-        'apk-overlay: entry ${entry.path} was not fully read.',
+    if (entry.method == 0) {
+      if (entry.rawData.length != entry.uncompressedSize) {
+        throw FormatException(
+          'apk-overlay: entry ${entry.path} size mismatch: central '
+          'directory says ${entry.uncompressedSize}, found '
+          '${entry.rawData.length}.',
+        );
+      }
+      if (crc32(entry.rawData) != entry.crc) {
+        throw FormatException(
+          'apk-overlay: entry ${entry.path} CRC mismatch.',
+        );
+      }
+      payload.add(_PayloadEntry(entry.path, entry.rawData, crc: entry.crc));
+    } else {
+      final data = Uint8List.fromList(
+        ZLibDecoder(raw: true).convert(entry.rawData),
       );
+      if (data.length != entry.uncompressedSize) {
+        throw FormatException(
+          'apk-overlay: entry ${entry.path} was not fully read: central '
+          'directory says ${entry.uncompressedSize}, got ${data.length}.',
+        );
+      }
+      if (crc32(data) != entry.crc) {
+        throw FormatException(
+          'apk-overlay: entry ${entry.path} CRC mismatch.',
+        );
+      }
+      payload.add(_PayloadEntry(entry.path, data, crc: entry.crc));
     }
-    payload.add(_PayloadEntry(entry.path, entry.data));
   }
   return payload;
 }
@@ -227,27 +264,77 @@ List<_PayloadEntry> _payloadFromFlutterAssets(Directory assetsDir) {
   return collected;
 }
 
-bool _storeUncompressed(String path, Uint8List data, Uint8List deflated) {
-  final dot = path.lastIndexOf('.');
-  final ext = dot == -1 ? '' : path.substring(dot + 1).toLowerCase();
-  if (ext == 'so' || _aaptNoCompressExtensions.contains(ext)) return true;
-  return deflated.length >= data.length;
+/// Whether the payload file at archive [path] is stored uncompressed:
+/// `.so` files (zipalign page-aligns them) and the aapt2 default no-compress
+/// extensions, plus the caller's `nocompress_extensions`.
+///
+/// Every comparison is a case-sensitive suffix match, like aapt2: each
+/// extension matches `.<ext>` at the end of the path. A user extension may
+/// carry its own leading dot.
+bool _storeUncompressedByName(String path, Set<String> extraNoCompress) {
+  bool suffix(String ext) => ext.isNotEmpty && path.endsWith('.$ext');
+  if (suffix('so')) return true;
+  for (final ext in _aaptNoCompressExtensions) {
+    if (suffix(ext)) return true;
+  }
+  for (var ext in extraNoCompress) {
+    if (ext.startsWith('.')) ext = ext.substring(1);
+    if (suffix(ext)) return true;
+  }
+  return false;
 }
+
+/// ZIP32 field limit: values at or above it need ZIP64, which APKs never use.
+const int _zip32Limit = 0xFFFFFFFF;
 
 /// Encodes one local file header plus payload and its central directory
 /// record for [path] holding [data].
+///
+/// Entries that [_storeUncompressedByName] selects are written stored without
+/// ever deflating (which is also what keeps large `.so` files fast);
+/// anything else is deflated unless that would grow it. [crc] reuses a
+/// verified checksum (jar entries); otherwise it is computed here.
 ({Uint8List local, Uint8List central}) _encodeEntry(
   String path,
-  Uint8List data,
-) {
+  Uint8List data, {
+  int? crc,
+  Set<String> extraNoCompress = const {},
+}) {
   final nameBytes = utf8.encode(path);
-  final deflated = Uint8List.fromList(
-    ZLibEncoder(raw: true).convert(data),
-  );
-  final stored = _storeUncompressed(path, data, deflated);
-  final method = stored ? 0 : 8;
-  final payload = stored ? data : deflated;
-  final crc = crc32(data);
+  if (nameBytes.length >= 0xFFFF) {
+    throw FormatException(
+      'apk-overlay: entry name too long for ZIP32: $path.',
+    );
+  }
+  if (data.length >= _zip32Limit) {
+    throw FormatException(
+      'apk-overlay: entry $path is ${data.length} bytes, larger than the '
+      'ZIP32 limit; ZIP64 archives are not supported.',
+    );
+  }
+  final mustStore = _storeUncompressedByName(path, extraNoCompress);
+  final Uint8List payload;
+  final int method;
+  if (mustStore) {
+    payload = data;
+    method = 0;
+  } else {
+    final deflated = Uint8List.fromList(ZLibEncoder(raw: true).convert(data));
+    if (deflated.length >= _zip32Limit) {
+      throw FormatException(
+        'apk-overlay: compressed entry $path is ${deflated.length} bytes, '
+        'larger than the ZIP32 limit; ZIP64 archives are not supported.',
+      );
+    }
+    if (deflated.length >= data.length) {
+      payload = data;
+      method = 0;
+    } else {
+      payload = deflated;
+      method = 8;
+    }
+  }
+  final checksum = crc ?? crc32(data);
 
   final local = ByteData(30 + nameBytes.length);
   _setUint32LE(local, 0, 0x04034b50);
@@ -256,7 +343,7 @@ bool _storeUncompressed(String path, Uint8List data, Uint8List deflated) {
   _setUint16LE(local, 8, method);
   _setUint16LE(local, 10, _overlayDosTime);
   _setUint16LE(local, 12, _overlayDosDate);
-  _setUint32LE(local, 14, crc);
+  _setUint32LE(local, 14, checksum);
   _setUint32LE(local, 18, payload.length);
   _setUint32LE(local, 22, data.length);
   _setUint16LE(local, 26, nameBytes.length);
@@ -271,7 +358,7 @@ bool _storeUncompressed(String path, Uint8List data, Uint8List deflated) {
   _setUint16LE(central, 10, method);
   _setUint16LE(central, 12, _overlayDosTime);
   _setUint16LE(central, 14, _overlayDosDate);
-  _setUint32LE(central, 16, crc);
+  _setUint32LE(central, 16, checksum);
   _setUint32LE(central, 20, payload.length);
   _setUint32LE(central, 24, data.length);
   _setUint16LE(central, 28, nameBytes.length);
@@ -296,11 +383,16 @@ bool _storeUncompressed(String path, Uint8List data, Uint8List deflated) {
 /// `META-INF/MANIFEST.MF` is fine — singlejar adds one to every unsigned
 /// APK.) Injecting into a signed APK would silently invalidate its
 /// signatures. The caller signs the returned archive with `apksigner`.
+///
+/// [nocompressExtensions] stores additional payload files uncompressed,
+/// mirroring `android_binary(nocompress_extensions = ...)`; the aapt2
+/// defaults always apply. Matching is a case-sensitive suffix match.
 void spliceApkOverlay({
   required String baseApkPath,
   required String nativeLibsJarPath,
   required String flutterAssetsDirPath,
   required String outputApkPath,
+  Set<String> nocompressExtensions = const {},
 }) {
   final base = File(baseApkPath).readAsBytesSync();
   final central = _readCentral(base);
@@ -364,7 +456,18 @@ void spliceApkOverlay({
   final newCentral = BytesBuilder(copy: false);
   var offset = central.cdOffset;
   for (final entry in payload) {
-    final encoded = _encodeEntry(entry.path, entry.data);
+    if (offset >= _zip32Limit) {
+      throw FormatException(
+        'apk-overlay: local header offset $offset for ${entry.path} '
+        'exceeds the ZIP32 limit; ZIP64 archives are not supported.',
+      );
+    }
+    final encoded = _encodeEntry(
+      entry.path,
+      entry.data,
+      crc: entry.crc,
+      extraNoCompress: nocompressExtensions,
+    );
     final centralBd = ByteData.sublistView(encoded.central);
     _setUint32LE(centralBd, 42, offset);
     out.add(encoded.local);
@@ -381,6 +484,19 @@ void spliceApkOverlay({
   out.add(newCentralBytes);
 
   final cdOffset = offset;
+  final cdSize = central.records.length + newCentralBytes.length;
+  if (cdOffset >= _zip32Limit) {
+    throw FormatException(
+      'apk-overlay: central directory offset $cdOffset exceeds the ZIP32 '
+      'limit; ZIP64 archives are not supported.',
+    );
+  }
+  if (cdSize >= _zip32Limit) {
+    throw FormatException(
+      'apk-overlay: central directory size $cdSize exceeds the ZIP32 '
+      'limit; ZIP64 archives are not supported.',
+    );
+  }
   final eocd = ByteData(22);
   _setUint32LE(eocd, 0, 0x06054b50);
   _setUint16LE(eocd, 4, 0);
@@ -403,21 +519,28 @@ void runApkOverlay(List<String> args) {
   String? nativeLibsJar;
   String? flutterAssets;
   String? output;
+  final nocompressExtensions = <String>{};
 
   for (var i = 0; i < args.length; i++) {
     final arg = args[i];
-    if (i + 1 >= args.length) {
-      throw ArgumentError('Missing value for $arg');
-    }
     switch (arg) {
       case '--base':
+        if (i + 1 >= args.length) throw ArgumentError('Missing value for $arg');
         base = args[++i];
       case '--native-libs-jar':
+        if (i + 1 >= args.length) throw ArgumentError('Missing value for $arg');
         nativeLibsJar = args[++i];
       case '--flutter-assets':
+        if (i + 1 >= args.length) throw ArgumentError('Missing value for $arg');
         flutterAssets = args[++i];
       case '--output':
+        if (i + 1 >= args.length) throw ArgumentError('Missing value for $arg');
         output = args[++i];
+      case '--nocompress-extensions':
+        if (i + 1 >= args.length) throw ArgumentError('Missing value for $arg');
+        nocompressExtensions.addAll(
+          args[++i].split(',').where((e) => e.isNotEmpty),
+        );
       default:
         throw ArgumentError('Unknown option for apk-overlay: $arg');
     }
@@ -429,7 +552,8 @@ void runApkOverlay(List<String> args) {
       output == null) {
     throw ArgumentError(
       'Usage: android_bundle.dart apk-overlay --base <unsigned.apk> '
-      '--native-libs-jar <jar> --flutter-assets <dir> --output <unsigned.apk>',
+      '--native-libs-jar <jar> --flutter-assets <dir> --output <unsigned.apk> '
+      '[--nocompress-extensions <csv>]',
     );
   }
 
@@ -438,5 +562,6 @@ void runApkOverlay(List<String> args) {
     nativeLibsJarPath: nativeLibsJar,
     flutterAssetsDirPath: flutterAssets,
     outputApkPath: output,
+    nocompressExtensions: nocompressExtensions,
   );
 }

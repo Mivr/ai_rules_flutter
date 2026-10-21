@@ -106,6 +106,47 @@ flutter_android_bundle = _flutter_android_bundle
 # control when assembling an `android_binary` by hand.
 flutter_android_apk_overlay = _flutter_android_apk_overlay
 
+# The aapt2 default no-compress extension list that both the overlay tool and
+# android_binary's own packaging apply (see
+# flutter/private/tools/apk_overlay.dart `_aaptNoCompressExtensions`, itself
+# mirroring singlejar). Reference apps in e2e tests pass this to
+# android_binary's nocompress_extensions so entry-by-entry parity checks
+# compare the same compression policy on both APKs.
+FLUTTER_APK_AAPT_NO_COMPRESS_EXTENSIONS = [
+    "jpg",
+    "jpeg",
+    "png",
+    "gif",
+    "wav",
+    "mp2",
+    "mp3",
+    "ogg",
+    "aac",
+    "mpg",
+    "mpeg",
+    "mid",
+    "midi",
+    "smf",
+    "jet",
+    "rtttl",
+    "imy",
+    "xmf",
+    "mp4",
+    "m4a",
+    "m4v",
+    "3gp",
+    "3gpp",
+    "3g2",
+    "3gpp2",
+    "amr",
+    "awb",
+    "wma",
+    "wmv",
+    "webm",
+    "mkv",
+    "webp",
+]
+
 # Merges a variant AndroidManifest.xml overlay (e.g. flutter create's
 # android/app/src/debug/AndroidManifest.xml) into a base manifest — the
 # Bazel counterpart of Gradle's per-variant manifest merge. Wired
@@ -582,6 +623,12 @@ def flutter_android_app(
             all plugin Kotlin/Java automatically. Defaults to `"deps"`,
             matching the convention in repo MODULE.bazel files. Set to
             `None` to opt out (e.g. for a workspace with no pub plugins).
+        nocompress_extensions: Extra asset extensions stored uncompressed in
+            the final APK, on top of the aapt2 defaults (see
+            FLUTTER_APK_AAPT_NO_COMPRESS_EXTENSIONS). Forwarded to both the
+            payload-free android_binary and the overlay that injects the
+            Flutter payload, so both agree on the compression policy.
+            Matched case-sensitively by suffix.
         **kwargs: Passed through to android_binary.
     """
     display_name = app_name or name
@@ -867,9 +914,17 @@ def flutter_android_app(
     # like the binary would have. Signing/alignment overrides passed for the
     # binary apply to the overlay too.
     overlay_kwargs = {}
-    for key in ("debug_key", "debug_signing_keys", "debug_signing_lineage_file", "key_rotation_min_sdk", "zipalign_alignment"):
+    for key in ("debug_key", "debug_signing_keys", "debug_signing_lineage_file", "key_rotation_min_sdk", "zipalign_alignment", "nocompress_extensions"):
         if key in kwargs:
             overlay_kwargs[key] = kwargs[key]
+
+    # L-1: the overlay is the target users actually build, so it must carry
+    # the same testonly/compatible_with/restricted_to as the user-facing
+    # proxy — otherwise a testonly app's APK would be buildable from
+    # non-testonly targets, or a constrained app from anywhere.
+    for key in ("compatible_with", "restricted_to", "testonly"):
+        if key in passthrough:
+            overlay_kwargs[key] = passthrough[key]
     _flutter_android_apk_overlay(
         name = "__%s_overlay" % name,
         binary = "__%s_binary" % name,

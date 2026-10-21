@@ -854,6 +854,12 @@ class ZipEntry {
   final bool isExecutable;
   final bool isSymlink;
 
+  /// When true, [encodeDeterministicZip] writes the entry stored (method 0)
+  /// even when deflating would shrink it. Native Android libraries (`.so`)
+  /// need this: the APK stores them uncompressed so `zipalign` can
+  /// page-align them, and the APK overlay copies them without inflating.
+  final bool storeOnly;
+
   const ZipEntry({
     required this.path,
     required this.data,
@@ -863,6 +869,7 @@ class ZipEntry {
     this.isDirectory = false,
     this.isExecutable = false,
     this.isSymlink = false,
+    this.storeOnly = false,
   });
 
   /// The uncompressed byte length of this entry (including 64-bit ZIP64 sizes).
@@ -991,10 +998,17 @@ Uint8List encodeDeterministicZip(List<ZipEntry> entries) {
 
     int compressionMethod = 0; // Stored
     Uint8List payload = uncompressed;
+    if (entry.storeOnly && entry.compressedData != null) {
+      throw ArgumentError(
+        'encodeDeterministicZip: entry ${entry.path} is storeOnly but '
+        'carries compressedData.',
+      );
+    }
     if (entry.compressedData != null) {
       compressionMethod = 8; // Deflate
       payload = entry.compressedData!;
-    } else if (!entry.isDirectory &&
+    } else if (!entry.storeOnly &&
+        !entry.isDirectory &&
         !entry.isSymlink &&
         uncompressed.isNotEmpty &&
         entry.uncompressedSizeOverride == null) {
@@ -1398,6 +1412,202 @@ List<ZipEntry> readZipEntries(Uint8List zipBytes) {
         isDirectory: isDir,
         isExecutable: isExec,
         isSymlink: isSymlink,
+      ),
+    );
+  }
+  return entries;
+}
+
+/// A ZIP entry's on-disk payload, without inflating.
+///
+/// Unlike [readZipEntries], this never inflates deflated data and never drops
+/// large entries: [rawData] is a view onto [zipBytes] holding the entry's
+/// bytes exactly as stored (deflated bytes when [method] is 8), so entries of
+/// any size below the ZIP32 limits can be copied through (for example a
+/// stored native library spliced from one archive into another).
+class ZipRawEntry {
+  /// Archive path, UTF-8 decoded from the central directory.
+  final String path;
+
+  /// Compression method: 0 (stored) or 8 (deflated).
+  final int method;
+
+  /// CRC-32 of the uncompressed data, from the central directory.
+  final int crc;
+
+  /// Uncompressed byte length, with the ZIP64 extra field applied.
+  final int uncompressedSize;
+
+  /// The entry's bytes as stored: uncompressed content when [method] is 0,
+  /// deflated content when [method] is 8. A view onto the input buffer.
+  final Uint8List rawData;
+  final bool isDirectory;
+
+  const ZipRawEntry({
+    required this.path,
+    required this.method,
+    required this.crc,
+    required this.uncompressedSize,
+    required this.rawData,
+    required this.isDirectory,
+  });
+}
+
+/// Reads the central directory of [zipBytes], returning each entry's raw
+/// payload without inflating.
+///
+/// Refuses archives without a readable extra field where a 64-bit size marker
+/// appears (writers that need 64-bit sizes must emit the ZIP64 extra fields
+/// [encodeDeterministicZip] emits), encrypted entries, and unsupported
+/// compression methods. Entries with data descriptors (bit 3) read fine: the
+/// central record carries the authoritative sizes. Anything else below the
+/// ZIP32 limits reads, at any size.
+List<ZipRawEntry> readZipRawEntries(Uint8List zipBytes) {
+  final bd = ByteData.sublistView(zipBytes);
+  // Locate End of Central Directory (0x06054b50): the last occurrence that
+  // exactly consumes the trailing bytes (signature + comment).
+  var eocdOffset = -1;
+  for (var i = zipBytes.length - 22; i >= 0; i--) {
+    if (bd.getUint32(i, Endian.little) == 0x06054b50 &&
+        i + 22 + bd.getUint16(i + 20, Endian.little) == zipBytes.length) {
+      eocdOffset = i;
+      break;
+    }
+    // The EOCD must lie within the last 64 KiB + 22 bytes; stop early.
+    if (i < zipBytes.length - 22 - 65536) break;
+  }
+  if (eocdOffset == -1) {
+    throw FormatException('Invalid ZIP archive: EOCD signature not found.');
+  }
+
+  var entryCount = bd.getUint16(eocdOffset + 10, Endian.little);
+  var cdOffset = bd.getUint32(eocdOffset + 16, Endian.little);
+
+  // Check for ZIP64 End of Central Directory Locator (0x07064b50) immediately
+  // preceding the standard EOCD record.
+  if (eocdOffset >= 20 &&
+      bd.getUint32(eocdOffset - 20, Endian.little) == 0x07064b50) {
+    final zip64EocdOffset = _getUint64LE(bd, eocdOffset - 20 + 8);
+    if (zip64EocdOffset + 56 > zipBytes.length ||
+        bd.getUint32(zip64EocdOffset, Endian.little) != 0x06064b50) {
+      throw FormatException(
+        'Invalid ZIP64 archive: ZIP64 EOCD signature not found at $zip64EocdOffset.',
+      );
+    }
+    entryCount = _getUint64LE(bd, zip64EocdOffset + 32);
+    cdOffset = _getUint64LE(bd, zip64EocdOffset + 48);
+  }
+
+  final entries = <ZipRawEntry>[];
+  var pos = cdOffset;
+  for (var i = 0; i < entryCount; i++) {
+    if (pos + 46 > zipBytes.length ||
+        bd.getUint32(pos, Endian.little) != 0x02014b50) {
+      throw FormatException('Invalid central directory header at $pos.');
+    }
+    final flags = bd.getUint16(pos + 8, Endian.little);
+    final method = bd.getUint16(pos + 10, Endian.little);
+    final crc = bd.getUint32(pos + 16, Endian.little);
+    var compressedSize = bd.getUint32(pos + 20, Endian.little);
+    var uncompressedSize = bd.getUint32(pos + 24, Endian.little);
+    final nameLen = bd.getUint16(pos + 28, Endian.little);
+    final extraLen = bd.getUint16(pos + 30, Endian.little);
+    final commentLen = bd.getUint16(pos + 32, Endian.little);
+    final externalAttrs = bd.getUint32(pos + 38, Endian.little);
+    var localOffset = bd.getUint32(pos + 42, Endian.little);
+
+    if (pos + 46 + nameLen > zipBytes.length) {
+      throw FormatException('Invalid central directory header at $pos.');
+    }
+    final path = utf8.decode(
+      zipBytes.sublist(pos + 46, pos + 46 + nameLen),
+    );
+
+    if (uncompressedSize == _zip64Limit32 ||
+        compressedSize == _zip64Limit32 ||
+        localOffset == _zip64Limit32) {
+      final extraStart = pos + 46 + nameLen;
+      final extraEnd = extraStart + extraLen;
+      var found = false;
+      var extraPos = extraStart;
+      while (extraPos + 4 <= extraEnd) {
+        final headerId = bd.getUint16(extraPos, Endian.little);
+        final dataSize = bd.getUint16(extraPos + 2, Endian.little);
+        final fieldDataStart = extraPos + 4;
+        if (headerId == _zip64HeaderId) {
+          var fieldPos = fieldDataStart;
+          if (uncompressedSize == _zip64Limit32 &&
+              fieldPos + 8 <= fieldDataStart + dataSize) {
+            uncompressedSize = _getUint64LE(bd, fieldPos);
+            fieldPos += 8;
+          }
+          if (compressedSize == _zip64Limit32 &&
+              fieldPos + 8 <= fieldDataStart + dataSize) {
+            compressedSize = _getUint64LE(bd, fieldPos);
+            fieldPos += 8;
+          }
+          if (localOffset == _zip64Limit32 &&
+              fieldPos + 8 <= fieldDataStart + dataSize) {
+            localOffset = _getUint64LE(bd, fieldPos);
+            fieldPos += 8;
+          }
+          found = true;
+          break;
+        }
+        extraPos += 4 + dataSize;
+      }
+      if (!found &&
+          (uncompressedSize == _zip64Limit32 ||
+              compressedSize == _zip64Limit32 ||
+              localOffset == _zip64Limit32)) {
+        throw FormatException(
+          'ZIP64 entry "$path" has no ZIP64 extra field; 64-bit sizes are '
+          'not supported here.',
+        );
+      }
+    }
+
+    pos += 46 + nameLen + extraLen + commentLen;
+
+    if (method != 0 && method != 8) {
+      throw UnsupportedError(
+        'Unsupported ZIP compression method $method for "$path".',
+      );
+    }
+    if ((flags & 0x01) != 0) {
+      throw FormatException('Encrypted ZIP entries are not supported: $path.');
+    }
+    if (localOffset + 30 > zipBytes.length ||
+        bd.getUint32(localOffset, Endian.little) != 0x04034b50) {
+      throw FormatException('Invalid local file header at $localOffset.');
+    }
+    final localNameLen = bd.getUint16(localOffset + 26, Endian.little);
+    final localExtraLen = bd.getUint16(localOffset + 28, Endian.little);
+    final dataStart = localOffset + 30 + localNameLen + localExtraLen;
+    if (dataStart + compressedSize > zipBytes.length) {
+      throw FormatException(
+        'ZIP entry "$path" overruns the archive '
+        '(offset $dataStart, size $compressedSize).',
+      );
+    }
+    final rawPayload = Uint8List.sublistView(
+      zipBytes,
+      dataStart,
+      dataStart + compressedSize,
+    );
+
+    final unixMode = (externalAttrs >>> 16) & 0xFFFF;
+    final fileType = unixMode & 0xF000;
+    final isDir = path.endsWith('/') || fileType == 0x4000;
+
+    entries.add(
+      ZipRawEntry(
+        path: path,
+        method: method,
+        crc: crc,
+        uncompressedSize: uncompressedSize,
+        rawData: rawPayload,
+        isDirectory: isDir,
       ),
     );
   }

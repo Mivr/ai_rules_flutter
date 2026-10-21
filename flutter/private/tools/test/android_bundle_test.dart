@@ -7,7 +7,12 @@ import 'package:test/test.dart';
 
 import '../android_bundle.dart';
 import '../xtool_pack.dart'
-    show ZipEntry, crc32, encodeDeterministicZip, readZipEntries;
+    show
+        ZipEntry,
+        crc32,
+        encodeDeterministicZip,
+        readZipEntries,
+        readZipRawEntries;
 
 Uint8List _syntheticElf({required int machine, List<int> payload = const []}) {
   final header = Uint8List(20 + payload.length);
@@ -178,6 +183,85 @@ void main() {
           ]);
         },
         testOn: '!windows',
+      );
+
+      // Libraries over 64 MiB: the jar writer stores `.so` files instead of
+      // deflating them, so they pass through the overlay without ever being
+      // inflated, at any size below the ZIP32 limits. 65 MiB sits just past
+      // the old 64 MiB streaming wall.
+      String writeBigElf(String name, {required bool compressible}) {
+        const size = 65 * 1024 * 1024;
+        final body = Uint8List(size);
+        if (compressible) {
+          body.fillRange(0, body.length, 7);
+        } else {
+          // xorshift32: deterministic, and its output defeats deflate.
+          var x = 0x12345678;
+          for (var i = 0; i < body.length; i++) {
+            x ^= (x << 13) & 0xFFFFFFFF;
+            x ^= x >> 17;
+            x ^= (x << 5) & 0xFFFFFFFF;
+            body[i] = x & 0xFF;
+          }
+        }
+        final path = '${tempDir.path}/$name';
+        final staged = BytesBuilder(copy: false)
+          ..add(_syntheticElf(machine: 183))
+          ..add(body);
+        File(path).writeAsBytesSync(staged.takeBytes(), flush: true);
+        return path;
+      }
+
+      Future<String> jarOf(String libPath, String entry) async {
+        final jarPath = '${tempDir.path}/big_native_libs.jar';
+        await runAndroidBundle([
+          'native-libs-jar',
+          '--output',
+          jarPath,
+          '--abi',
+          'arm64-v8a',
+          '--machine',
+          '183',
+          '$entry=$libPath',
+        ]);
+        return jarPath;
+      }
+
+      test('stores a compressible native library larger than 64 MiB', () async {
+        final libPath = writeBigElf('big_compressible.so', compressible: true);
+        final original = File(libPath).readAsBytesSync();
+        expect(original.length, greaterThan(64 * 1024 * 1024));
+
+        final jarPath = await jarOf(libPath, 'lib/arm64-v8a/libbig.so');
+        final raw = readZipRawEntries(File(jarPath).readAsBytesSync());
+        expect(raw.map((e) => e.path), ['lib/arm64-v8a/libbig.so']);
+        expect(raw.single.method, 0);
+        expect(raw.single.rawData.length, original.length);
+        expect(raw.single.crc, crc32(original));
+
+        final inflated = readZipEntries(File(jarPath).readAsBytesSync());
+        expect(inflated.single.data, original);
+      });
+
+      test(
+        'stores an incompressible native library larger than 64 MiB',
+        () async {
+          final libPath = writeBigElf(
+            'big_incompressible.so',
+            compressible: false,
+          );
+          final original = File(libPath).readAsBytesSync();
+          expect(original.length, greaterThan(64 * 1024 * 1024));
+
+          final jarPath = await jarOf(libPath, 'lib/arm64-v8a/libbig.so');
+          final raw = readZipRawEntries(File(jarPath).readAsBytesSync());
+          expect(raw.single.method, 0);
+          expect(raw.single.rawData.length, original.length);
+          expect(raw.single.crc, crc32(original));
+
+          final inflated = readZipEntries(File(jarPath).readAsBytesSync());
+          expect(inflated.single.data, original);
+        },
       );
     });
 
@@ -505,6 +589,127 @@ void main() {
           expect(methods['assets/flutter_assets/AssetManifest.json'], 8);
         },
       );
+
+      test(
+        'stores user nocompress extensions, matching them case-sensitively',
+        () async {
+          final assetsDir = Directory('${tempDir.path}/nc_assets')
+            ..createSync();
+          // Compressible filler: deflated unless a no-compress rule matches.
+          final filler = Uint8List.fromList(List<int>.filled(10000, 7));
+          File('${assetsDir.path}/data.custom').writeAsBytesSync(filler);
+          File('${assetsDir.path}/PHOTO.PNG').writeAsBytesSync(filler);
+          File('${assetsDir.path}/photo.webp').writeAsBytesSync(filler);
+          final basePath = await writeBaseApk([
+            ZipEntry(
+              path: 'AndroidManifest.xml',
+              data: Uint8List.fromList([1]),
+            ),
+          ]);
+          final jarPath = await writeNativeLibsJar();
+
+          Future<Map<String, int>> spliceMethods(List<String> extraArgs) async {
+            final outPath =
+                '${tempDir.path}/overlay_nc_${extraArgs.length}.apk';
+            await runAndroidBundle([
+              'apk-overlay',
+              '--base',
+              basePath,
+              '--native-libs-jar',
+              jarPath,
+              '--flutter-assets',
+              assetsDir.path,
+              '--output',
+              outPath,
+              ...extraArgs,
+            ]);
+            return readCentralForTest(File(outPath).readAsBytesSync()).methods;
+          }
+
+          // Without the flag the custom extension deflates.
+          expect(
+            (await spliceMethods([]))['assets/flutter_assets/data.custom'],
+            8,
+          );
+          // With it — bare or leading-dot form — the entry is stored.
+          for (final flag in ['custom', '.custom']) {
+            final methods = await spliceMethods([
+              '--nocompress-extensions',
+              flag,
+            ]);
+            expect(
+              methods['assets/flutter_assets/data.custom'],
+              0,
+              reason: 'extension flag "$flag" must store data.custom',
+            );
+          }
+          // Case-sensitive like aapt2: the uppercase PNG matches no rule.
+          final methods = await spliceMethods([
+            '--nocompress-extensions',
+            'custom',
+          ]);
+          expect(methods['assets/flutter_assets/PHOTO.PNG'], 8);
+          // webp is an aapt2 default: stored with no flag at all.
+          expect(methods['assets/flutter_assets/photo.webp'], 0);
+        },
+      );
+
+      test('copies a stored .so larger than 64 MiB as raw bytes', () async {
+        // The jar writer stores .so entries; the splice must reuse those raw
+        // bytes and their CRC without inflating — the entry never fits a
+        // 64 MiB streaming window, and below the ZIP32 limits it must work.
+        const size = 65 * 1024 * 1024;
+        final body = Uint8List(size)..fillRange(0, size, 7);
+        final staged = BytesBuilder(copy: false)
+          ..add(_syntheticElf(machine: 183))
+          ..add(body);
+        final libPath = '${tempDir.path}/huge_libapp.so';
+        File(libPath).writeAsBytesSync(staged.takeBytes(), flush: true);
+        final original = File(libPath).readAsBytesSync();
+
+        final jarPath = '${tempDir.path}/huge_native_libs.jar';
+        await runAndroidBundle([
+          'native-libs-jar',
+          '--output',
+          jarPath,
+          '--abi',
+          'arm64-v8a',
+          '--machine',
+          '183',
+          'lib/arm64-v8a/libapp.so=$libPath',
+        ]);
+
+        final basePath = await writeBaseApk([
+          ZipEntry(
+            path: 'AndroidManifest.xml',
+            data: Uint8List.fromList([1]),
+          ),
+        ]);
+        final emptyAssets = Directory('${tempDir.path}/huge_empty_assets')
+          ..createSync();
+        final outPath = '${tempDir.path}/overlay_huge.apk';
+        await runAndroidBundle([
+          'apk-overlay',
+          '--base',
+          basePath,
+          '--native-libs-jar',
+          jarPath,
+          '--flutter-assets',
+          emptyAssets.path,
+          '--output',
+          outPath,
+        ]);
+
+        final outRaw = {
+          for (final e in readZipRawEntries(File(outPath).readAsBytesSync()))
+            e.path: e,
+        };
+        final so = outRaw['lib/arm64-v8a/libapp.so']!;
+        expect(so.method, 0);
+        expect(so.rawData.length, original.length);
+        expect(so.rawData, original);
+        expect(so.crc, crc32(original));
+      });
 
       test('preserves base entries that use data descriptors', () async {
         // singlejar emits the merged classes.dex with bit 3 set; the splice

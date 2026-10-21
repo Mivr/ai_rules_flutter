@@ -35,12 +35,34 @@ load("@rules_java//java/common:java_info.bzl", "JavaInfo")
 load("//flutter/private:common.bzl", "resolve_exec_dart_vm")
 
 _ANDROID_SDK_TOOLCHAIN_TYPE = Label("@rules_android//toolchains/android_sdk:toolchain_type")
+_ANDROID_TOOLCHAIN_TYPE = Label("@rules_android//toolchains/android:toolchain_type")
 
 def _flutter_android_apk_overlay_impl(ctx):
     base = ctx.attr.binary
     base_apk_info = base[ApkInfo]
     base_unsigned = base_apk_info.unsigned_apk
     sdk = ctx.toolchains[_ANDROID_SDK_TOOLCHAIN_TYPE].android_sdk_info
+    android_toolchain = ctx.toolchains[_ANDROID_TOOLCHAIN_TYPE]
+
+    # ApkInfo carries no merged manifest; recover it from the base binary's
+    # android_deploy_info output group, which pairs the base deploy_info.pb
+    # with the merged manifest (see rules_android's apk_packaging).
+    base_groups = base[OutputGroupInfo] if OutputGroupInfo in base else None
+    base_deploy_files = []
+    if base_groups:
+        base_deploy_group = getattr(base_groups, "android_deploy_info", None)
+        if type(base_deploy_group) == "depset":
+            base_deploy_files = base_deploy_group.to_list()
+    merged_manifests = [
+        f for f in base_deploy_files if not f.basename.endswith(".pb")
+    ]
+    if len(merged_manifests) != 1:
+        fail(
+            "flutter_android_apk_overlay %s: expected exactly one merged " % ctx.label +
+            "manifest in the base android_deploy_info group, got %s" %
+            [f.path for f in base_deploy_files],
+        )
+    merged_manifest = merged_manifests[0]
 
     native_libs_jar = ctx.file.native_libs_jar
     flutter_assets = ctx.file.flutter_assets
@@ -55,6 +77,8 @@ def _flutter_android_apk_overlay_impl(ctx):
     overlay_args.add("--native-libs-jar", native_libs_jar.path)
     overlay_args.add("--flutter-assets", flutter_assets.path)
     overlay_args.add("--output", overlay_unsigned.path)
+    if ctx.attr.nocompress_extensions:
+        overlay_args.add_joined("--nocompress-extensions", ctx.attr.nocompress_extensions, join_with = ",")
     ctx.actions.run(
         executable = dart_exe,
         arguments = [overlay_args],
@@ -117,6 +141,11 @@ def _flutter_android_apk_overlay_impl(ctx):
     sign_args.add("--v1-signing-enabled", v1_enabled)
     sign_args.add("--v1-signer-name", "CERT")
     sign_args.add("--v2-signing-enabled", v2_enabled)
+
+    # L-4: pass --v4-signing-enabled explicitly so apksigner never writes an
+    # undeclared .idsig sidecar next to the APK output. V4 stays unsupported
+    # (see the fail() above); the value here is always false.
+    sign_args.add("--v4-signing-enabled", False)
     if rotation_min_sdk:
         sign_args.add("--rotation-min-sdk-version", rotation_min_sdk)
     sign_args.add("--out", signed)
@@ -129,6 +158,44 @@ def _flutter_android_apk_overlay_impl(ctx):
         mnemonic = "ApkSignerTool",
         progress_message = "Signing APK with Flutter payload %s" % ctx.label,
     )
+
+    # 4. Regenerate deploy info against the overlay's own signed APK and
+    # merged manifest, exactly as android_binary's WriteDeployInfo action
+    # does (deploy_info_writer from the android toolchain, --manifest/--apk/
+    # --deploy_info form), so mobile-install/deploy tooling sees the APK
+    # this rule actually produced.
+    deploy_info = ctx.actions.declare_file(ctx.label.name + ".deploy_info.pb")
+    ctx.actions.run(
+        executable = android_toolchain.deploy_info_writer.files_to_run,
+        arguments = [
+            "--manifest",
+            merged_manifest.path,
+            "--apk",
+            signed.path,
+            "--deploy_info",
+            deploy_info.path,
+        ],
+        inputs = depset(direct = [merged_manifest, signed]),
+        outputs = [deploy_info],
+        mnemonic = "WriteDeployInfo",
+        progress_message = "Writing deploy info for overlay APK %s" % ctx.label,
+    )
+
+    # Forward the base output groups verbatim EXCEPT android_deploy_info,
+    # which becomes overlay-owned: the freshly written deploy_info pointing
+    # at the overlay signed APK, paired with the merged manifest.
+    group_kwargs = {}
+    if base_groups:
+        for name in dir(base_groups):
+            if name in ("android_deploy_info", "to_json", "to_proto"):
+                continue
+            artifacts = getattr(base_groups, name, None)
+
+            # dir() may also surface non-field members; only depsets can be
+            # output group values.
+            if type(artifacts) == "depset":
+                group_kwargs[name] = artifacts
+    group_kwargs["android_deploy_info"] = depset([deploy_info, merged_manifest])
 
     keystore = signing_keys[0] if signing_keys else None
     providers = [
@@ -151,9 +218,8 @@ def _flutter_android_apk_overlay_impl(ctx):
             unsigned_apk = overlay_unsigned,
         ),
         base[JavaInfo],
+        OutputGroupInfo(**group_kwargs),
     ]
-    if OutputGroupInfo in base:
-        providers.append(base[OutputGroupInfo])
     if AndroidFeatureFlagSet in base:
         providers.append(base[AndroidFeatureFlagSet])
     if AndroidInstrumentationInfo in base:
@@ -187,6 +253,11 @@ flutter_android_apk_overlay = rule(
             doc = "Alignment in bytes, matching android_binary's zipalign_alignment.",
             default = 4,
         ),
+        "nocompress_extensions": attr.string_list(
+            doc = "Extra asset extensions stored uncompressed in the overlaid APK, " +
+                  "on top of the aapt2 defaults, matching android_binary's " +
+                  "nocompress_extensions. Matched case-sensitively by suffix.",
+        ),
         "debug_key": attr.label(
             doc = "Debug keystore, matching android_binary's debug_key.",
             cfg = "exec",
@@ -215,6 +286,7 @@ flutter_android_apk_overlay = rule(
         "@rules_flutter//flutter:toolchain_type",
         config_common.toolchain_type("@rules_dart//dart:exec_tools_toolchain_type", mandatory = False),
         "@rules_android//toolchains/android_sdk:toolchain_type",
+        "@rules_android//toolchains/android:toolchain_type",
     ],
     doc = """Finishes a payload-free android_binary into a signed APK by injecting the Flutter payload after resource linking.
 

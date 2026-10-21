@@ -130,11 +130,16 @@ Future<void> packageNativeLibsJar({
     final sourceMode = File(srcPath).statSync().mode;
     final isExecutable = (sourceMode & 0x49) != 0;
     final bytes = File(srcPath).readAsBytesSync();
+    // Stored, never deflated: the APK stores native libraries uncompressed
+    // so zipalign can page-align them, and the APK overlay copies them
+    // without inflating — which is also what lets libraries over 64 MiB
+    // through, at any size below the ZIP32 limits.
     zipEntries.add(
       ZipEntry(
         path: entryPath,
         data: bytes,
         isExecutable: isExecutable,
+        storeOnly: true,
       ),
     );
   }

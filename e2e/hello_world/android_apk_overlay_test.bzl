@@ -96,7 +96,7 @@ def _overlay_test_impl(ctx):
     for a in actions:
         by_mnemonic.setdefault(a.mnemonic, []).append(a)
 
-    for mnemonic in ("FlutterApkOverlay", "AndroidZipAlign", "ApkSignerTool"):
+    for mnemonic in ("FlutterApkOverlay", "AndroidZipAlign", "ApkSignerTool", "WriteDeployInfo"):
         asserts.equals(
             env,
             1,
@@ -132,6 +132,54 @@ def _overlay_test_impl(ctx):
         env,
         default_outputs[0].endswith(".apk"),
         "overlay must expose the signed APK, got %s" % default_outputs,
+    )
+
+    # The overlay regenerates deploy info against its own signed APK (the
+    # android toolchain's deploy_info_writer, same --manifest/--apk/
+    # --deploy_info form android_binary uses), so mobile-install tooling
+    # resolves the APK this rule produced rather than the payload-free base.
+    deploy_action = by_mnemonic["WriteDeployInfo"][0]
+    deploy_inputs = [f.path for f in deploy_action.inputs.to_list()]
+    asserts.true(
+        env,
+        any(["overlay" in p and p.endswith(".apk") for p in deploy_inputs]),
+        "deploy-info writer must read the overlay signed APK, inputs: %s" % deploy_inputs,
+    )
+    asserts.true(
+        env,
+        any([p.endswith(".xml") for p in deploy_inputs]),
+        "deploy-info writer must read the merged manifest, inputs: %s" % deploy_inputs,
+    )
+    deploy_outputs = [f.basename for f in deploy_action.outputs.to_list()]
+    asserts.equals(env, 1, len(deploy_outputs))
+    asserts.true(
+        env,
+        deploy_outputs[0].endswith(".deploy_info.pb"),
+        "unexpected deploy-info output: %s" % deploy_outputs,
+    )
+
+    # The android_deploy_info output group is overlay-owned: the freshly
+    # written .pb plus the merged manifest. Every other group is forwarded
+    # from the base binary, so actions over them keep resolving the base.
+    deploy_group = target[OutputGroupInfo].android_deploy_info.to_list()
+    pb = [f for f in deploy_group if f.basename.endswith(".deploy_info.pb")]
+    asserts.equals(
+        env,
+        1,
+        len(pb),
+        "android_deploy_info must hold exactly one overlay-written .pb, got %s" %
+        [f.path for f in deploy_group],
+    )
+    asserts.true(
+        env,
+        "overlay" in pb[0].path,
+        "deploy_info.pb must be written by the overlay, got %s" % pb[0].path,
+    )
+    asserts.true(
+        env,
+        any([f.basename.endswith(".xml") for f in deploy_group]),
+        "android_deploy_info must also carry the merged manifest, got %s" %
+        [f.path for f in deploy_group],
     )
     return analysistest.end(env)
 
