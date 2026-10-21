@@ -8,9 +8,9 @@ declares; higher versions resolve by MVS as usual, except where noted.
 
 | Feature | Modules | Notes |
 |---|---|---|
-| Every app | `rules_dart` 0.7.3 (plus the `git_override` to the `Mivr` fork), `bazel_skylib`, `platforms`, `package_metadata` | Dart compilation, hooks, codegen. |
+| Every app | `rules_dart` 0.11.1 (the `Mivr` fork release, see README.md), `bazel_skylib`, `platforms`, `package_metadata` | Dart compilation, hooks, codegen. |
 | iOS / macOS bundles | `rules_apple` ≥ 4.5.3, `rules_swift`, `apple_support`, `rules_cc` | 4.5.3 is the proven floor: `e2e/min_versions` pins it exactly and builds both Apple legs. `rules_swift`/`apple_support` float to the graph's maxima (4.5.3 accepts Swift at compatibility level 3). |
-| Android APK | `rules_android` 0.8.0, `rules_kotlin`, `rules_java`, `rules_jvm_external` 7.1, `rules_go` ≥ 0.59.0 | 0.8.0 is the floor (see below). `rules_go` stays a regular dependency because the Android proxy transition sets `go/config:pure`, which must resolve in every consumer; Android apps should also copy the pinned `go_sdk.download` block from `MODULE.bazel` (as `e2e/hello_world` does). |
+| Android APK | `rules_android` 0.8.0, `rules_kotlin`, `rules_java`, `rules_jvm_external` 7.1, `rules_go` ≥ 0.59.0 | 0.8.0 is the floor (see below). `rules_go` stays a regular dependency because the Android proxy transition sets `go/config:pure`, which must resolve in every consumer; the pinned `go_sdk.download` (Go 1.26.2, checksummed) in `MODULE.bazel` is non-dev, so consumers without their own `go_sdk` block build the Android host tools with it — it sorts before `rules_android`'s bundled unpinned 1.22.4 whatever order the root lists the modules in, while a root `go_sdk` block still wins. `e2e/android_no_go_sdk` covers the no-block consumer. |
 | xtool Darwin backend (opt-in) | `llvm` 0.8.19, exec-host toolchain archive only | Needs only `flutter.darwin_sdk(url = ..., sha256 = ...)` or `flutter.darwin_sdk(path = ...)` in the root module — no other `MODULE.bazel` lines. Plain consumers fetch nothing (see below). |
 | Dev tool, `gen_l10n` | Resolved inside `rules_flutter` | `dev_tool_deps` and `gen_l10n_deps` are the ruleset's own `flutter.pub` hubs; consumers never name them. |
 | No feature | No `rules_python` | The iOS screenshot/tunnel helpers are `dart_binary` drivers over a host `python3` (a documented host prerequisite like Xcode), so neither this repo's graph nor any consumer's contains `rules_python` from us. |
@@ -56,8 +56,10 @@ For a plain consumer (e.g. `e2e/smoke`) today:
 - `rules_go` arrives via `rules_dart` (directly and through `gazelle`)
   and via `rules_android`. The `go_toolchains`/`nogo` hub repos belong to
   its `go_sdk` extension. Our own pinned `go_sdk.download` (Go 1.26.2,
-  checksummed) is dev-only; Android consumers without their own override
-  build host tools with `rules_android`'s bundled Go SDK instead.
+  checksummed) is a regular dependency: it is evaluated in every consumer
+  and sorts first in the toolchain order, but toolchain registration is
+  lazy, so a plain consumer's `bazel build`/`bazel test` never fetches the
+  SDK archive — only resolving a Go toolchain (the Android host tools) does.
 - `llvm`'s `bazel_lib`, `rules_shell`, `tar.bzl`, `with_cfg.bzl`,
   `zlib-ng`, `zstd` module deps resolve in the graph but fetch only if
   something references them — for a plain consumer, nothing does.
