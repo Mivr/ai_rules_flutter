@@ -258,6 +258,10 @@ def _toolchain_extension(module_ctx):
                 darwin_sdk_url = darwin_sdk.url,
                 darwin_sdk_sha256 = darwin_sdk.sha256,
                 darwin_sdk_swift_toolchain_path = darwin_sdk.swift_toolchain_path,
+                darwin_sdk_llvm_tool_repos = _llvm_tool_repos_for_modules(
+                    modules = module_ctx.modules,
+                    sdk_configured = darwin_sdk.configured,
+                ),
             )
             flutter_gen_l10n_repo(
                 name = name + "_gen_l10n",
