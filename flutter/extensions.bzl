@@ -162,6 +162,45 @@ _flutter_darwin_sdk = tag_class(
     },
 )
 
+# Exec-host pairs the xtool repo can symlink a hermetic LLVM tree for, in a
+# fixed order shared with the repo rule (index = 2 * is_macos + is_x86_64).
+_LLVM_TOOL_EXECS = (
+    ("linux", "aarch64"),
+    ("linux", "x86_64"),
+    ("macos", "aarch64"),
+    ("macos", "x86_64"),
+)
+
+def _llvm_tool_repos_for_modules(*, modules, sdk_configured):
+    """Apparent names of llvm's per-host prebuilt-toolchain repos.
+
+    The names (`llvm-toolchain-minimal-<os>-<cpu>`) are imported into
+    rules_flutter's own repo mapping by this module's `use_repo` on llvm's
+    toolchain extension, so the xtool repo rule resolves them there — plain
+    strings cross the extension boundary because a `Label(...)` built in an
+    extension implementation cannot see them. The xtool repo only resolves
+    (fetches) the entry matching the exec host, and only when the returned
+    list is non-empty. The list is non-empty exactly when LLVM may be
+    linked: the root module opted into a Darwin SDK, or this evaluation runs
+    for rules_flutter itself (whose hermetic-LLVM script tests assert the
+    linkage with no SDK configured). Plain consumers get `[]`: no LLVM label
+    is ever built for them, so no LLVM repository is fetched.
+    Same host mapping as `resource_dir_arg` in `@llvm//toolchain:selects.bzl`.
+    """
+    self_root = False
+    for mod in modules:
+        if mod.is_root and mod.name == "rules_flutter":
+            self_root = True
+            break
+    if not sdk_configured and not self_root:
+        return []
+    names = []
+    for (exec_os, exec_cpu) in _LLVM_TOOL_EXECS:
+        os_part = "darwin" if exec_os == "macos" else exec_os
+        cpu_part = "amd64" if exec_cpu == "x86_64" else "arm64"
+        names.append("llvm-toolchain-minimal-%s-%s" % (os_part, cpu_part))
+    return names
+
 def _toolchain_extension(module_ctx):
     registrations = {}
     selected_info = {}
@@ -252,6 +291,10 @@ def _toolchain_extension(module_ctx):
             darwin_sdk_url = darwin_sdk.url,
             darwin_sdk_sha256 = darwin_sdk.sha256,
             darwin_sdk_swift_toolchain_path = darwin_sdk.swift_toolchain_path,
+            darwin_sdk_llvm_tool_repos = _llvm_tool_repos_for_modules(
+                modules = module_ctx.modules,
+                sdk_configured = darwin_sdk.configured,
+            ),
         )
 
         # The gen-l10n generator, carved out of the same release's

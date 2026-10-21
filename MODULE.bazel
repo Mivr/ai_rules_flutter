@@ -62,12 +62,28 @@ bazel_dep(name = "rules_multitool", version = "1.11.1", dev_dependency = True)
 bazel_dep(name = "buildifier_prebuilt", version = "10.1.0", dev_dependency = True)
 bazel_dep(name = "bazelrc-preset.bzl", version = "1.9.2", dev_dependency = True)
 
-# LLVM is only needed by the opt-in xtool Darwin SDK backend
-# (`flutter.darwin_sdk`): the `@flutter_xtool_darwin_sdk` repo symlinks the
-# hermetic LLVM `bin`/`lib` trees, and only when a bundle is configured.
-# It stays a dev dependency so this repo's own builds keep the hermetic
-# script tests green; xtool consumers add the same line to their root module.
-bazel_dep(name = "llvm", version = "0.8.19", dev_dependency = True)
+# LLVM backs the opt-in xtool Darwin SDK backend (`flutter.darwin_sdk`): the
+# `@flutter_xtool_darwin_sdk` repo symlinks the hermetic LLVM `bin`/`lib` trees
+# for the exec host, and only then — when a bundle is configured, or for this
+# repo's own hermetic-LLVM script tests. The dep stays non-dev because the
+# import below must resolve for every consumer: `use_extension` on llvm's
+# toolchain extension joins llvm's own instance of it (no tags needed here),
+# and `use_repo` imports the per-host prebuilt-toolchain repos into this
+# module's mapping, where the xtool repo rule resolves the one entry it
+# needs. The names mirror the `use_repo` list in llvm's own MODULE.bazel.
+# Plain consumers only pay the module-graph edge (see docs/dependencies.md):
+# no LLVM archive is fetched and no C/C++ toolchain is registered for them.
+# The eight LLVM toolchain registrations below stay dev-only: this repo's own
+# builds need them, consumers never see them.
+bazel_dep(name = "llvm", version = "0.8.19")
+llvm_toolchain_minimal = use_extension("@llvm//extensions:llvm_toolchain_minimal.bzl", "llvm_toolchain_minimal")
+use_repo(
+    llvm_toolchain_minimal,
+    "llvm-toolchain-minimal-darwin-amd64",
+    "llvm-toolchain-minimal-darwin-arm64",
+    "llvm-toolchain-minimal-linux-amd64",
+    "llvm-toolchain-minimal-linux-arm64",
+)
 
 git_override(
     module_name = "rules_dart",

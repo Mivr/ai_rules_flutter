@@ -1282,7 +1282,9 @@ def flutter_register_toolchains(
         darwin_sdk_path = "",
         darwin_sdk_url = "",
         darwin_sdk_sha256 = "",
-        darwin_sdk_swift_toolchain_path = ""):
+        darwin_sdk_swift_toolchain_path = "",
+        darwin_sdk_llvm_tool_repos = None,
+        **kwargs):
     """Convenience macro for setting up Flutter SDK repositories.
 
     Creates a repository for each host platform, lazy artifact repos,
@@ -1325,6 +1327,10 @@ def flutter_register_toolchains(
         darwin_sdk_url: optional URL for xtool darwin.artifactbundle archive (hermetic; requires darwin_sdk_sha256)
         darwin_sdk_sha256: required SHA-256 checksum when darwin_sdk_url is set
         darwin_sdk_swift_toolchain_path: optional local path to Linux Swift toolchain root (local, non-hermetic)
+        darwin_sdk_llvm_tool_repos: apparent names of llvm's per-host
+            prebuilt-toolchain repos (see the extension); the xtool repo
+            symlinks the entry matching the exec host, or nothing when empty
+        **kwargs: passed to each flutter_engine_artifacts call (must include flutter_version)
     """
     validate_darwin_sdk_config(
         path = darwin_sdk_path,
@@ -1729,6 +1735,7 @@ def _register_shared_toolchains(
         url = darwin_sdk_url,
         sha256 = darwin_sdk_sha256,
         swift_toolchain_path = darwin_sdk_swift_toolchain_path,
+        llvm_tool_repos = darwin_sdk_llvm_tool_repos or [],
     )
 
     # Hermetic Chrome for Testing headless shell and runtime libraries (lazy —

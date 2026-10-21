@@ -675,27 +675,21 @@ def _host_llvm_exec_pair(repository_ctx):
     exec_cpu = "aarch64" if arch in ("aarch64", "arm64") else "x86_64"
     return exec_os, exec_cpu
 
-def _llvm_tool_repo(exec_os, exec_cpu):
-    """Canonical name of the hermetic LLVM prebuilt-toolchain repo for an exec pair.
+def _symlink_hermetic_llvm(repository_ctx, tool_repos):
+    """Symlinks the hermetic LLVM prebuilt toolchain for the exec host.
 
-    Same mapping as `resource_dir_arg` in `@llvm//toolchain:selects.bzl`
-    (kept local so loading this file never fetches `@llvm`), spelled as a
-    canonical `@@llvm++llvm_toolchain_minimal+...` label: an apparent label
-    here would resolve against rules_flutter's own repo mapping, which has no
-    `@llvm` once the `bazel_dep` goes dev-only. The canonical form resolves
-    globally, so it works in any root module that depends on `llvm` 0.8.19
-    (the version xtool consumers are told to add). It is only resolved when
-    a Darwin SDK is configured, so plain consumers never fetch `@llvm`.
+    `tool_repos` holds the apparent names of llvm's per-host
+    prebuilt-toolchain repos, in the fixed order shared with the flutter
+    extension (index `2 * is_macos + is_x86_64`). The `Label(...)` is built
+    here, inside the repo rule, so it resolves in rules_flutter's own repo
+    mapping — whose MODULE.bazel imports exactly these names from llvm's
+    toolchain extension — and not in any consumer mapping. Only the selected
+    entry is resolved (fetched); the rest are never touched. Same host
+    mapping as `resource_dir_arg` in `@llvm//toolchain:selects.bzl`.
     """
-    os_part = "darwin" if exec_os == "macos" else exec_os
-    cpu_part = "amd64" if exec_cpu == "x86_64" else "arm64"
-    return "@@llvm++llvm_toolchain_minimal+llvm-toolchain-minimal-%s-%s" % (os_part, cpu_part)
-
-def _symlink_hermetic_llvm(repository_ctx):
     exec_os, exec_cpu = _host_llvm_exec_pair(repository_ctx)
-    llvm_build_path = repository_ctx.path(
-        Label(_llvm_tool_repo(exec_os, exec_cpu) + "//:compile_resource_dir").relative(":BUILD.bazel"),
-    )
+    index = (2 if exec_os == "macos" else 0) + (1 if exec_cpu == "x86_64" else 0)
+    llvm_build_path = repository_ctx.path(Label("@" + tool_repos[index] + "//:BUILD.bazel"))
     llvm_root = llvm_build_path.dirname
     repository_ctx.symlink(llvm_root.get_child("bin"), "llvm/bin")
     repository_ctx.symlink(llvm_root.get_child("lib"), "llvm/lib")
@@ -710,13 +704,24 @@ def _xtool_darwin_sdk_repo_impl(repository_ctx):
         context = "xtool_darwin_sdk_repo",
     )
 
-    # The hermetic LLVM toolchain archive is only resolved when a Darwin SDK
-    # is configured: resolving the label fetches `@llvm`, which plain
-    # consumers must never pay for. Unconfigured checkouts keep empty `llvm/`
-    # globs (all `allow_empty`) so `bazel test //...` still works; anything
-    # that executes the wrappers fails with the configuration error instead.
-    if cfg.url or cfg.path:
-        _symlink_hermetic_llvm(repository_ctx)
+    # The hermetic LLVM toolchain archive is only resolved when the flutter
+    # extension passes llvm's per-host tool repo names: a configured Darwin
+    # SDK, or rules_flutter's own module (whose hermetic-LLVM script tests
+    # assert the linkage with no SDK). Resolving the label fetches the
+    # matching toolchain archive, which plain consumers must never pay for:
+    # they get an empty list and keep empty `llvm/` globs (all `allow_empty`)
+    # so `bazel test //...` still works; anything that executes the wrappers
+    # fails with the configuration error. A configured-but-missing bundle
+    # path fails first, before any LLVM download starts.
+    bundle_path = None
+    if cfg.path:
+        bundle_path = repository_ctx.path(cfg.path)
+        if not bundle_path.exists:
+            fail(
+                "xtool_darwin_sdk_repo: configured darwin.artifactbundle path '%s' does not exist." % cfg.path,
+            )
+    if repository_ctx.attr.llvm_tool_repos:
+        _symlink_hermetic_llvm(repository_ctx, repository_ctx.attr.llvm_tool_repos)
 
     sdk_available = False
     sdk_paths = {}
@@ -731,11 +736,6 @@ def _xtool_darwin_sdk_repo_impl(repository_ctx):
         sdk_available = True
         sdk_paths = _resolve_bundle_sdk_paths(repository_ctx)
     elif cfg.path:
-        bundle_path = repository_ctx.path(cfg.path)
-        if not bundle_path.exists:
-            fail(
-                "xtool_darwin_sdk_repo: configured darwin.artifactbundle path '%s' does not exist." % cfg.path,
-            )
         repository_ctx.symlink(bundle_path, "sdk")
         sdk_available = True
         sdk_paths = _resolve_bundle_sdk_paths(repository_ctx)
@@ -780,6 +780,13 @@ xtool_darwin_sdk_repo = repository_rule(
         "swift_toolchain_path": attr.string(
             doc = "Optional local path to the Linux Swift toolchain root directory (non-hermetic).",
             default = "",
+        ),
+        "llvm_tool_repos": attr.string_list(
+            doc = "Apparent names of llvm's per-host prebuilt-toolchain repos, " +
+                "in the fixed order shared with the flutter extension. Only the entry " +
+                "matching the exec host is resolved; an empty list symlinks nothing " +
+                "and fetches no LLVM.",
+            default = [],
         ),
     },
     doc = "Configures the xtool Darwin SDK (iPhoneOS.sdk, iPhoneSimulator.sdk, MacOSX.sdk) and Linux -> Darwin C++/Swift cross-toolchains.",
