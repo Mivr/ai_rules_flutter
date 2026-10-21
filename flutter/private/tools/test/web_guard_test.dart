@@ -151,6 +151,36 @@ void main() {}
       expect(invoked.existsSync(), isFalse);
     });
 
+    test(
+      'refuses a triple-quoted import with a whitespace first line before running the compiler',
+      () async {
+        writeWork('secret.dart', 'const secret = 1;\n');
+        writeWork(
+          'lib/main.dart',
+          "import '''   \n../secret.dart''';\nvoid main() {}\n",
+        );
+        final invoked = File('${dir.path}/invoked');
+        final script = File('${dir.path}/counting.dart')
+          ..writeAsStringSync(
+            'import "dart:io";\n'
+            'void main() {\n'
+            '  File(r"${invoked.path}").writeAsStringSync("ran");\n'
+            '}\n',
+          );
+        final r = await run([
+          '--declared-inputs',
+          writeManifest(['lib/main.dart']),
+          '--',
+          Platform.resolvedExecutable,
+          script.path,
+        ]);
+        expect(r.code, 1);
+        expect(r.err, contains('lib/main.dart'));
+        expect(r.err, contains('is not a declared input'));
+        expect(invoked.existsSync(), isFalse);
+      },
+    );
+
     for (final spelling in [
       "import 'file:///etc/hostname';",
       "import 'FILE:///etc/hostname';",

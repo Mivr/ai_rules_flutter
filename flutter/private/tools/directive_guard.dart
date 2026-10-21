@@ -222,6 +222,17 @@ List<String> findDisallowedFlutterDirectives(
     final fromKey = flutterSourceKey(path, fsRoots);
     for (final ref in scanAllDirectiveUris(content)) {
       final uri = ref.uri;
+      // A URI spanning lines is refused however it spells its target: the
+      // front end drops a whitespace-only first line of a multi-line string
+      // literal and reads a different file than the resolvers below see, so
+      // multi-line directive URIs are refused outright rather than resolved
+      // (mirrors `hasLineBreak` in rules_dart's guard library).
+      if (uri.contains('\n') || uri.contains('\r')) {
+        errors.add(
+          "$tool: $path ${ref.kind} '$uri' is not a declared input.",
+        );
+        continue;
+      }
       // The resolvers below skip empty segments, but the front end resolves
       // some such spellings absolutely: refuse them before resolving.
       if (hasEmptyPathSegment(uri)) {

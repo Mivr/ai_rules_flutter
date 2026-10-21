@@ -186,6 +186,31 @@ void main() {}
       }
     });
 
+    test('refuses triple-quoted URIs with a whitespace first line', () {
+      // The front end drops a whitespace-only first line of a multi-line
+      // string literal and reads a different file than the resolvers see, so
+      // a scanned URI holding a line break is refused however it spells its
+      // target.
+      write('secret.dart', 'const secret = 1;\n');
+      for (final spelling in [
+        "import '''   \n../secret.dart''';",
+        'export """\t\n../secret.dart""";',
+        "part '''   \n../secret.dart''';",
+        "import '''../secret.dart\n''';",
+      ]) {
+        final errors = check({
+          'lib/main.dart': '$spelling\nvoid main() {}\n',
+        });
+        expect(errors, hasLength(1), reason: spelling);
+        expect(errors.single, contains('lib/main.dart'), reason: spelling);
+        expect(
+          errors.single,
+          contains('is not a declared input'),
+          reason: spelling,
+        );
+      }
+    });
+
     test('refuses percent-encoded escapes naming a host file', () {
       final errors = check({
         'lib/main.dart': """
@@ -454,6 +479,36 @@ void main() {}
       expect(r.err, contains('is not a declared input'));
       expect(invoked.existsSync(), isFalse);
     });
+
+    test(
+      'refuses a triple-quoted import with a whitespace first line before running the compiler',
+      () async {
+        writeWork('secret.dart', 'const secret = 1;\n');
+        writeWork(
+          'lib/main.dart',
+          "import '''   \n../secret.dart''';\nvoid main() {}\n",
+        );
+        final invoked = File('${dir.path}/invoked');
+        final script = fakeCompiler(
+          'counting',
+          'import "dart:io";\n'
+              'void main() {\n'
+              '  File(r"${invoked.path}").writeAsStringSync("ran");\n'
+              '}\n',
+        );
+        final r = await run([
+          '--declared-inputs',
+          writeManifest(['lib/main.dart']),
+          '--',
+          Platform.resolvedExecutable,
+          script.path,
+        ]);
+        expect(r.code, 1);
+        expect(r.err, contains('lib/main.dart'));
+        expect(r.err, contains('is not a declared input'));
+        expect(invoked.existsSync(), isFalse);
+      },
+    );
 
     test(
       'fails a read outside the declared inputs and drops the dill',
