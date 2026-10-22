@@ -44,11 +44,27 @@ my_compile = rule(
 
 Stability note: these helpers are stable for external use. New optional
 parameters may be added to `flutter_kernel_compile_action` (and matching
-fields to the `flutter_kernel_compile_tools` struct), but existing calls keep
-their argv and action keys. The minimal example above is itself a tested
+fields to the `flutter_kernel_compile_tools` struct). Two defaults changed
+once, and those calls' argv and action keys change with them: an omitted
+`entrypoint_uri` now compiles the entrypoint's stable
+`org-dartlang-app:///` URI instead of its exec path, and
+`compile_package_config` writes `org-dartlang-app:///` rootUris instead of
+exec-root-relative ones. Otherwise existing calls keep their argv and action
+keys. The minimal example above is itself a tested
 shape: `//flutter/tests:compile_api_test_docstring_example` instantiates this
 exact call, and `//flutter/tests:compile_api_test_full_argv` pins the resulting
 action's full argv element for element.
+
+Reproducibility guarantee: a kernel compiled through these helpers embeds no
+absolute host path. `compile_package_config` names every package root under
+`org-dartlang-app:///`, and `flutter_kernel_compile_action` compiles the
+entrypoint under that same scheme unless given an explicit `entrypoint_uri`,
+so the `.dill` is byte-identical across output bases, machines and runs —
+the same URIs the stock `flutter_test` kernel carries. Existing callers get
+this without code changes: a bootstrap importing its suite by the documented
+relative `"../" * depth` climb keeps working — URI resolution drops excess
+`..` segments at the scheme root, so the climb lands on the staged source —
+as `e2e/hello_world/custom_test_kernel.bzl` exercises.
 
 Allowed `vm_flags` (Dart VM flags before the snapshot): heap/GC sizing, each
 spelled `--name=<bytes>` with a plain integer (`--old-gen-heap-size`,
@@ -96,11 +112,11 @@ load(
 # `import_dill` and `resource_set`).
 flutter_kernel_compile_action = _flutter_kernel_compile_action
 
-# Co-locates packages and writes the matching `package_config.json`, including
-# `extra_roots` entries for packages with no sources in the closure. See
-# `compile_package_config` — the caller must also make those roots' files
-# action inputs (an undeclared root resolves nowhere sandboxed and is refused
-# as an undeclared read unsandboxed).
+# Writes the multi-root `package_config.json` the compile resolves through
+# `org-dartlang-app:///`, including `extra_roots` entries for packages with no
+# sources in the closure. See `compile_package_config` — the caller must also
+# make those roots' files action inputs (an undeclared root resolves nowhere
+# sandboxed and is refused as an undeclared read unsandboxed).
 compile_package_config = _compile_package_config
 
 # The attrs a calling rule merges into its own (`main`/`srcs`/`deps` stay the

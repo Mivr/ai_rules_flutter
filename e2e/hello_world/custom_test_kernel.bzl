@@ -36,7 +36,10 @@ def _custom_test_kernel_impl(ctx):
     # directory, then descend to the suite's exec-root-relative path. The
     # kernel guard accepts the import because it resolves to a declared input
     # (see `resolveFlutterKeyRelativeTarget`), and the compiler finds it
-    # materialized at its exec path under every execution strategy.
+    # materialized at its exec path under every execution strategy. The climb
+    # keeps working now the default entrypoint is the `org-dartlang-app:///`
+    # URI: URI resolution drops the excess `..` segments at the scheme root,
+    # so the same spelling lands on the staged source.
     test_main_uri = "../" * len(bootstrap.path.split("/")[:-1]) + ctx.file.main.path
     comparator = flutter_test_bootstrap(ctx, test_main_uri, bootstrap)
 

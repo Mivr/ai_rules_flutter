@@ -7,7 +7,7 @@ Flutter compilation differs from vanilla Dart in that it uses:
 
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("//flutter:providers.bzl", "resolve_exec_dart_vm", "resolve_flutter_sdk_info")
-load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "stage_generated_inputs")
+load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "app_scheme_location", "stage_generated_inputs")
 
 # `vm_flags` entries analysis accepts, as flag names without the leading
 # `--`. The Dart VM interprets every flag before the snapshot, so only flags
@@ -442,17 +442,16 @@ def flutter_kernel_compile_action(
         output: The output .dill File to produce.
         entrypoint_uri: The string frontend_server compiles as the root
             library, which fixes that library's `importUri` in the kernel.
-            Pass a `package:` URI (resolved via [package_config]) so the
-            URI is identical regardless of where the kernel was built —
-            this is required for hot reload, because `reloadSources` only
-            applies a delta when the dev tool's incremental dill keys the
-            library by the *same* URI as the running program. When None,
-            frontend_server is given [main]'s exec path, so the root
-            library's URI is a sandbox-specific `file://` path — acceptable
-            only for entrypoints that are never hot-reloaded and belong to
-            no package (e.g. a generated test bootstrap). The
-            app_entrypoint resolver always supplies a concrete value for
-            application builds.
+            When None (the default), the entrypoint is [main]'s stable
+            `org-dartlang-app:///` URI, so the compiled `.dill` embeds no
+            sandbox path and is byte-identical across output bases, machines
+            and runs. Pass an explicit `package:` URI (resolved via
+            [package_config]) instead when the entrypoint must key under a
+            package name — this is required for hot reload, because
+            `reloadSources` only applies a delta when the dev tool's
+            incremental dill keys the library by the *same* URI as the
+            running program. The app_entrypoint resolver always supplies a
+            concrete value for application builds.
         aot: If True, compile for AOT (adds --aot --tfa flags).
         defines: Environment declarations; each entry becomes a -D flag.
         extra_flags: Additional frontend_server flags (e.g. `--incremental`,
@@ -518,6 +517,16 @@ def flutter_kernel_compile_action(
     """
     _check_vm_flags(ctx.label, vm_flags)
     _check_extra_flags(ctx.label, extra_flags)
+
+    if entrypoint_uri == None:
+        # The default entrypoint is the stable app-scheme URI, not `main`'s
+        # exec path: compiling the exec path keys the root library by a
+        # sandbox-specific `file://` URI, which poisons the whole dill with
+        # absolute host paths. `main` is always staged (see
+        # `compile_sources` below), so the URI resolves through the staging
+        # root. Callers passing an explicit URI — every stock rule — are
+        # unaffected.
+        entrypoint_uri = app_scheme_location(main).uri
 
     # Opt-in incremental compiles run the debug JIT whole-program compile
     # through the persistent worker. With the flag off every action below is

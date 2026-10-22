@@ -57,9 +57,11 @@ void main() {
   });
 
   test('custom kernel names libraries under the stable schemes', () {
+    // Match on a boolean, not on the 50 MB decoded dill: on failure `contains`
+    // would print the whole artifact into the test log.
     expect(
-      dillText,
-      contains('org-dartlang-app:///'),
+      dillText.contains('org-dartlang-app:///'),
+      isTrue,
       reason:
           'widget_custom_kernel.dill names no library under '
           'org-dartlang-app:///: the custom pipeline does not compile '
