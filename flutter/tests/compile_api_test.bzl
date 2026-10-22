@@ -11,10 +11,14 @@ hidden consumer checks rely on:
 - `vm_flags` sit right after `dartaotruntime`, before the snapshot, and only
   the allow-listed tuning flags are accepted (anything naming a file or a
   side effect fails the build, as does any `extra_flags` entry naming a
-  file the compile does not declare);
+  file the compile does not declare, and any spelling of
+  `--[no-]print-incremental-dependencies`, which the compile controls
+  itself);
 - `import_dill` is passed as `--import-dill=<path>` and is an action input,
   while an undeclared source beside it stays out of the inputs and the
-  mounted roots (its refusal is pinned in `kernel_filter_test.dart`);
+  mounted roots (its refusal is pinned in `kernel_filter_test.dart`, including
+  under `extra_flags = ["--incremental"]`, which keeps working without
+  silencing the check);
 - `extra_roots` entries appear in the emitted `package_config.json`, and an
   absolute, empty, or `..`-escaping root fails at analysis naming the
   package and the value;
@@ -350,6 +354,12 @@ def _extra_flags_reject_test_impl(ctx):
     asserts.expect_failure(env, "extra_flags")
     return analysistest.end(env)
 
+def _extra_flags_message_reject_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    for expected in ctx.attr.expected_substrings:
+        asserts.expect_failure(env, expected)
+    return analysistest.end(env)
+
 def _extra_roots_reject_test_impl(ctx):
     env = analysistest.begin(ctx)
     for expected in ctx.attr.expected_substrings:
@@ -429,6 +439,12 @@ _extras_argv_test = analysistest.make(_extras_argv_test_impl, config_settings = 
 _vm_flags_reject_test = analysistest.make(_vm_flags_reject_test_impl, config_settings = _DBG, expect_failure = True)
 _vm_flags_allowed_test = analysistest.make(_vm_flags_allowed_test_impl, config_settings = _DBG)
 _extra_flags_reject_test = analysistest.make(_extra_flags_reject_test_impl, config_settings = _DBG, expect_failure = True)
+_extra_flags_message_reject_test = analysistest.make(
+    _extra_flags_message_reject_test_impl,
+    config_settings = _DBG,
+    expect_failure = True,
+    attrs = {"expected_substrings": attr.string_list(mandatory = True)},
+)
 _extra_roots_reject_test = analysistest.make(
     _extra_roots_reject_test_impl,
     config_settings = _DBG,
@@ -555,6 +571,47 @@ def compile_api_test_suite(name):
         extra_flags = ["--filesystem-root", "."],
         tags = ["manual"],
     )
+
+    # Analysis negatives for the dependency-report silencers: every spelling
+    # `_check_extra_flags` normalizes (case, `_` vs `-`, one or two dashes,
+    # with and without the `no-` prefix, including a `=value` form) fails at
+    # analysis naming the flag — the compile controls the report itself.
+    _compile_api_caller(
+        name = "_compile_api_bad_extra_silencer",
+        main = "compile_api_main.dart",
+        extra_flags = ["--no-print-incremental-dependencies"],
+        tags = ["manual"],
+    )
+    _compile_api_caller(
+        name = "_compile_api_bad_extra_silencer_bare",
+        main = "compile_api_main.dart",
+        extra_flags = ["--print-incremental-dependencies"],
+        tags = ["manual"],
+    )
+    _compile_api_caller(
+        name = "_compile_api_bad_extra_silencer_single",
+        main = "compile_api_main.dart",
+        extra_flags = ["-no-print-incremental-dependencies"],
+        tags = ["manual"],
+    )
+    _compile_api_caller(
+        name = "_compile_api_bad_extra_silencer_underscore",
+        main = "compile_api_main.dart",
+        extra_flags = ["--no_print_incremental_dependencies"],
+        tags = ["manual"],
+    )
+    _compile_api_caller(
+        name = "_compile_api_bad_extra_silencer_case",
+        main = "compile_api_main.dart",
+        extra_flags = ["--PRINT-INCREMENTAL-DEPENDENCIES"],
+        tags = ["manual"],
+    )
+    _compile_api_caller(
+        name = "_compile_api_bad_extra_silencer_value",
+        main = "compile_api_main.dart",
+        extra_flags = ["--no-print-incremental-dependencies=false"],
+        tags = ["manual"],
+    )
     _compile_api_caller(
         name = "_compile_api_undeclared",
         main = "compile_api_undeclared_main.dart",
@@ -645,6 +702,31 @@ def compile_api_test_suite(name):
         target_compatible_with = _HOST_COMPATIBLE,
     )
 
+    # Real negative under `--incremental` (manual, deliberately NOT in
+    # `build_test`): `--incremental` keeps working but does not silence the
+    # read-set check, so the same undeclared sibling is still refused. Run it
+    # explicitly to see the refusal.
+    _compile_api_caller(
+        name = "_compile_api_build_negative_incremental",
+        main = "compile_api_undeclared_main.dart",
+        extra_flags = ["--incremental"],
+        tags = ["manual"],
+        target_compatible_with = _HOST_COMPATIBLE,
+    )
+
+    # Real negative for an undeclared `package:` import under `--incremental`
+    # (manual, deliberately NOT in `build_test`): the directive guard accepts
+    # the non-escaping `package:` URI, so the post-compile read-set check is
+    # what refuses the build. Run it explicitly to see the refusal.
+    _compile_api_caller(
+        name = "_compile_api_build_negative_pkg",
+        main = "compile_api_undeclared_pkg_main.dart",
+        deps = [":_compile_api_dep"],
+        extra_flags = ["--incremental"],
+        tags = ["manual"],
+        target_compatible_with = _HOST_COMPATIBLE,
+    )
+
     # Analysis target for the docstring example: the exact minimal call shape
     # from the `//flutter:utils.bzl` module docstring.
     _docstring_example(
@@ -696,6 +778,36 @@ def compile_api_test_suite(name):
     _extra_flags_reject_test(
         name = name + "_extra_flags_mount",
         target_under_test = ":_compile_api_bad_extra_mount",
+    )
+    _extra_flags_message_reject_test(
+        name = name + "_extra_flags_silencer",
+        target_under_test = ":_compile_api_bad_extra_silencer",
+        expected_substrings = ["extra_flags", "--no-print-incremental-dependencies", "controls"],
+    )
+    _extra_flags_message_reject_test(
+        name = name + "_extra_flags_silencer_bare",
+        target_under_test = ":_compile_api_bad_extra_silencer_bare",
+        expected_substrings = ["extra_flags", "--print-incremental-dependencies", "controls"],
+    )
+    _extra_flags_message_reject_test(
+        name = name + "_extra_flags_silencer_single",
+        target_under_test = ":_compile_api_bad_extra_silencer_single",
+        expected_substrings = ["extra_flags", "-no-print-incremental-dependencies", "controls"],
+    )
+    _extra_flags_message_reject_test(
+        name = name + "_extra_flags_silencer_underscore",
+        target_under_test = ":_compile_api_bad_extra_silencer_underscore",
+        expected_substrings = ["extra_flags", "--no_print_incremental_dependencies", "controls"],
+    )
+    _extra_flags_message_reject_test(
+        name = name + "_extra_flags_silencer_case",
+        target_under_test = ":_compile_api_bad_extra_silencer_case",
+        expected_substrings = ["extra_flags", "--PRINT-INCREMENTAL-DEPENDENCIES", "controls"],
+    )
+    _extra_flags_message_reject_test(
+        name = name + "_extra_flags_silencer_value",
+        target_under_test = ":_compile_api_bad_extra_silencer_value",
+        expected_substrings = ["extra_flags", "--no-print-incremental-dependencies=false", "controls"],
     )
     _undeclared_staged_out_test(
         name = name + "_undeclared_staged_out",
@@ -755,6 +867,12 @@ def compile_api_test_suite(name):
             ":" + name + "_vm_flags_unknown",
             ":" + name + "_extra_flags_files",
             ":" + name + "_extra_flags_mount",
+            ":" + name + "_extra_flags_silencer",
+            ":" + name + "_extra_flags_silencer_bare",
+            ":" + name + "_extra_flags_silencer_single",
+            ":" + name + "_extra_flags_silencer_underscore",
+            ":" + name + "_extra_flags_silencer_case",
+            ":" + name + "_extra_flags_silencer_value",
             ":" + name + "_undeclared_staged_out",
             ":" + name + "_extra_roots",
             ":" + name + "_no_extra_roots",

@@ -473,10 +473,23 @@ void main() {}
     }
 
     test('a successful compile prints nothing', () async {
-      final r = await runSource(
-        'result $_id\n$_id\n$_id app_flutter.dill 0\n',
-        0,
-      );
+      writeWork('lib/main.dart', 'void main() {}\n');
+      final r = await run([
+        '--declared-inputs',
+        writeManifest(['lib/main.dart']),
+        '--',
+        Platform.resolvedExecutable,
+        fakeCompiler(
+          'clean',
+          'import "dart:io";\n'
+              'void main() {\n'
+              '  stdout.writeln("result $_id");\n'
+              '  stdout.writeln("$_id");\n'
+              '  stdout.writeln("+file://${work.path}/lib/main.dart");\n'
+              '  stdout.writeln("$_id app_flutter.dill 0");\n'
+              '}\n',
+        ).path,
+      ]);
       expect(r.code, 0);
       expect(r.out.trim(), isEmpty);
     });
@@ -858,6 +871,7 @@ void main() {}
               'void main() {\n'
               '  stdout.writeln("result $_id");\n'
               '  stdout.writeln("$_id");\n'
+              '  stdout.writeln("+file://${work.path}/lib/main.dart");\n'
               '  stdout.writeln("$_id app.dill 0");\n'
               '}\n',
         );
@@ -877,5 +891,122 @@ void main() {}
         expect(stub.readAsStringSync(), '// stub\n');
       },
     );
+
+    test('fails closed when a successful compile reported no reads', () async {
+      // A real compile reads at least its entrypoint: zero `+` lines means
+      // the report was silenced, so the build fails instead of caching
+      // unverified bytes.
+      writeWork('lib/main.dart', 'void main() {}\n');
+      final output = File('${work.path}/app.dill')
+        ..writeAsStringSync('stale bytes');
+      final script = fakeCompiler(
+        'silent',
+        'import "dart:io";\n'
+            'void main() {\n'
+            '  stdout.writeln("result $_id");\n'
+            '  stdout.writeln("$_id");\n'
+            '  stdout.writeln("$_id app.dill 0");\n'
+            '}\n',
+      );
+      final r = await run([
+        '--declared-inputs',
+        writeManifest(['lib/main.dart'], [], [], [], 'app.dill'),
+        '--',
+        Platform.resolvedExecutable,
+        script.path,
+        '--output-dill',
+        output.path,
+      ]);
+      expect(r.code, 1);
+      expect(r.err, contains('no dependency reads'));
+      expect(r.err, contains('--print-incremental-dependencies'));
+      expect(output.existsSync(), isFalse);
+    });
+
+    test(
+      'forces --print-incremental-dependencies after the caller flags',
+      () async {
+        writeWork('lib/main.dart', 'void main() {}\n');
+        final seen = File('${dir.path}/seen_args.txt');
+        final script = fakeCompiler(
+          'recorder',
+          'import "dart:io";\n'
+              'void main(List<String> args) {\n'
+              '  File(r"${seen.path}").writeAsStringSync(args.join("\\n"));\n'
+              '  stdout.writeln("result $_id");\n'
+              '  stdout.writeln("$_id");\n'
+              '  stdout.writeln("+file://${work.path}/lib/main.dart");\n'
+              '  stdout.writeln("$_id app.dill 0");\n'
+              '}\n',
+        );
+        final r = await run([
+          '--declared-inputs',
+          writeManifest(['lib/main.dart']),
+          '--',
+          Platform.resolvedExecutable,
+          script.path,
+          '--incremental',
+          '--no-print-incremental-dependencies',
+          'entry.dart',
+        ]);
+        expect(r.code, 0, reason: r.err);
+        final args = seen.readAsStringSync().split('\n');
+        final forced = args.lastIndexOf('--print-incremental-dependencies');
+        expect(forced, isNot(-1));
+        expect(args.last, 'entry.dart');
+        expect(forced, args.length - 2);
+        expect(
+          args.indexOf('--no-print-incremental-dependencies'),
+          lessThan(forced),
+        );
+      },
+    );
+
+    test('withForcedDependencyReport inserts the flag before the entry', () {
+      expect(withForcedDependencyReport([]), [
+        '--print-incremental-dependencies',
+      ]);
+      expect(withForcedDependencyReport(['script.dart']), [
+        'script.dart',
+        '--print-incremental-dependencies',
+      ]);
+      expect(
+        withForcedDependencyReport(['snap', '--incremental', 'main.dart']),
+        [
+          'snap',
+          '--incremental',
+          '--print-incremental-dependencies',
+          'main.dart',
+        ],
+      );
+    });
+
+    test('--incremental does not silence the check', () async {
+      // The e2e/smoke consumer passes `--incremental`: an undeclared read
+      // beside it is still refused.
+      writeWork('lib/main.dart', 'void main() {}\n');
+      final script = fakeCompiler(
+        'incremental_reader',
+        'import "dart:io";\n'
+            'void main() {\n'
+            '  stdout.writeln("result $_id");\n'
+            '  stdout.writeln("$_id");\n'
+            '  stdout.writeln("+file://${work.path}/lib/main.dart");\n'
+            '  stdout.writeln("+file://${work.path}/lib/sneak.dart");\n'
+            '  stdout.writeln("$_id app.dill 0");\n'
+            '}\n',
+      );
+      final r = await run([
+        '--declared-inputs',
+        writeManifest(['lib/main.dart']),
+        '--',
+        Platform.resolvedExecutable,
+        script.path,
+        '--incremental',
+      ]);
+      expect(r.code, 1);
+      expect(r.err, contains('+file://${work.path}/lib/sneak.dart'));
+      expect(r.err, contains('not a declared input'));
+    });
   });
 }
