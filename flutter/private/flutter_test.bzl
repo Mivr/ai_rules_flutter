@@ -410,6 +410,8 @@ _TEST_ATTRS = {
         "require_sksl_shaders",
         "_shader_compile_tool",
         "_kernel_filter_tool",
+        "_incremental_kernel",
+        "_incr_worker_tool",
         "license_files",
         "tree_shake_icons",
         "_asset_bundle_tool",

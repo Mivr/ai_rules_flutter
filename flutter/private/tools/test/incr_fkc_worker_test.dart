@@ -175,6 +175,18 @@ void main() {
         ['--x', '--a', '--b=1', '--y'],
       );
     });
+
+    test('unwraps single-quoted lines and leaves the rest literal', () {
+      final dir = Directory.systemTemp.createTempSync('incr_flagfile_q_');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      File(
+        '${dir.path}/args',
+      ).writeAsStringSync("'-Dname=a b'\n--c\n'a'b\n");
+      expect(
+        expandWorkerFlagfiles(['@${dir.path}/args']),
+        ['-Dname=a b', '--c', "'a'b"],
+      );
+    });
   });
 
   group('splitWorkerArgv', () {

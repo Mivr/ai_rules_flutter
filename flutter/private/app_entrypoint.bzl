@@ -65,7 +65,7 @@ def app_scheme_location(file):
     root = file.path[:len(file.path) - len(rel)].rstrip("/")
     return struct(uri = "%s:///%s" % (APP_SCHEME, rel), root = root)
 
-def stage_generated_inputs(ctx, files, scope, include_sources = False, salt = ""):
+def stage_generated_inputs(ctx, files, scope, include_sources = False, salt = "", stable_root = False):
     """Stages declared `files` into a per-action multi-root directory.
 
     Instead of mounting `ctx.bin_dir.path` (which leaks stale generated outputs
@@ -88,6 +88,11 @@ def stage_generated_inputs(ctx, files, scope, include_sources = False, salt = ""
         salt: Optional string mixed into the staging directory hash when
             `include_sources = True` so changes to generated wrapper/registrant
             contents or compilation defines produce a distinct staging root.
+        stable_root: If True, stage into a fixed `<scope>.incr.stage`
+            directory instead of hashing the file list into the name, so
+            adding or removing a source file does not change the root path a
+            warm incremental compiler sees. Only the incremental worker passes
+            True; every other caller keeps the hashed name.
 
     Returns:
         `struct(root, files)` where `root` is the exec-root-relative staging
@@ -119,11 +124,14 @@ def stage_generated_inputs(ctx, files, scope, include_sources = False, salt = ""
             seen[rel] = f
         if not seen:
             return struct(root = None, files = [])
-        manifest_items = sorted(seen.keys())
-        if salt:
-            manifest_items = manifest_items + [salt]
-        manifest_hash = hash("\n".join(manifest_items)) & 0xffffffff
-        stage_prefix = "%s.%x.stage" % (scope, manifest_hash)
+        if stable_root:
+            stage_prefix = "%s.incr.stage" % scope
+        else:
+            manifest_items = sorted(seen.keys())
+            if salt:
+                manifest_items = manifest_items + [salt]
+            manifest_hash = hash("\n".join(manifest_items)) & 0xffffffff
+            stage_prefix = "%s.%x.stage" % (scope, manifest_hash)
         for rel, f in seen.items():
             link = ctx.actions.declare_file(stage_prefix + "/" + rel)
             ctx.actions.symlink(output = link, target_file = f)

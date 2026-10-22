@@ -74,8 +74,10 @@ abstract class CompilerSession {
 
 /// Expands `@<flagfile>` entries in [argv] the way Bazel parameter files
 /// arrive: each non-empty line of the file is one argument, in order.
-/// [readFile] reads a flagfile's lines; it takes the working directory so
-/// tests can substitute a fake filesystem.
+/// Multiline param files shell-quote arguments holding whitespace with single
+/// quotes, so a line wrapped in exactly one pair of quotes unwraps; anything
+/// else passes through untouched. [readFile] reads a flagfile's lines; it
+/// takes the working directory so tests can substitute a fake filesystem.
 List<String> expandWorkerFlagfiles(
   List<String> argv, {
   List<String> Function(String path)? readFile,
@@ -84,7 +86,9 @@ List<String> expandWorkerFlagfiles(
   final out = <String>[];
   for (final a in argv) {
     if (a.startsWith('@')) {
-      out.addAll(read(a.substring(1)));
+      for (final line in read(a.substring(1))) {
+        out.add(_unquoteParamLine(line));
+      }
     } else {
       out.add(a);
     }
@@ -98,6 +102,18 @@ List<String> _readFlagfileLines(String path) {
     if (line.isNotEmpty) lines.add(line);
   }
   return lines;
+}
+
+/// Strips one pair of surrounding single quotes when the inside holds no
+/// quote of its own; every other line is already a literal argument.
+String _unquoteParamLine(String line) {
+  if (line.length >= 2 &&
+      line.startsWith("'") &&
+      line.endsWith("'") &&
+      !line.substring(1, line.length - 1).contains("'")) {
+    return line.substring(1, line.length - 1);
+  }
+  return line;
 }
 
 /// Normalizes an exec-root-relative path for prefix comparison: `/`

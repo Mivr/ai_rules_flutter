@@ -1571,6 +1571,14 @@ KERNEL_COMPILE_ATTRS = {
         executable = True,
         cfg = "exec",
     ),
+    "_incremental_kernel": attr.label(
+        default = Label("//flutter:incremental_kernel"),
+    ),
+    "_incr_worker_tool": attr.label(
+        default = Label("//flutter/private/tools:incr_fkc_worker"),
+        executable = True,
+        cfg = "exec",
+    ),
     "_web_guard_tool": attr.label(
         default = Label("//flutter/private/tools:web_guard"),
         executable = True,

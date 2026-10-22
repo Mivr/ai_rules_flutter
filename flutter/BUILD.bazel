@@ -108,6 +108,25 @@ dart_defines_flag(
     visibility = ["//visibility:public"],
 )
 
+# Opt-in incremental Flutter kernel compiles: when true, debug JIT
+# `FlutterKernelCompile` actions run through a persistent `frontend_server`
+# worker (`//flutter/private/tools:incr_fkc_worker`) instead of a batch
+# compile behind `kernel_filter`:
+#
+#   bazel build -c dbg --@rules_flutter//flutter:incremental_kernel //app
+#
+# Scope: debug JIT whole-program compiles only — never AOT, web,
+# `from_dill`, `import_dill` or `recorded_uses` compiles. Off by default; a
+# build with the flag off runs byte-identical actions to a build without it.
+# One warm server holds about 1.75 GiB; bound worker processes with
+# `--worker_max_instances=FlutterKernelCompile=N` (each worker keeps at most
+# one warm server by default).
+bool_flag(
+    name = "incremental_kernel",
+    build_setting_default = False,
+    visibility = ["//visibility:public"],
+)
+
 # Apps that use Material widgets list this in their flutter_application(
 # deps = [...]) to bundle MaterialIcons-Regular.otf into flutter_assets/.
 # Backed by the active flutter toolchain — the file ships with every

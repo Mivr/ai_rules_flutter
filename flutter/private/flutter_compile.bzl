@@ -5,6 +5,7 @@ Flutter compilation differs from vanilla Dart in that it uses:
 - The frontend_server_aot.dart.snapshot instead of `dart compile kernel`
 """
 
+load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("//flutter:providers.bzl", "resolve_exec_dart_vm", "resolve_flutter_sdk_info")
 load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "stage_generated_inputs")
 
@@ -133,6 +134,14 @@ def _check_extra_flags(label, extra_flags):
 FLUTTER_KERNEL_COMPILE_ATTRS = {
     "_kernel_filter_tool": attr.label(
         default = Label("//flutter/private/tools:kernel_filter"),
+        executable = True,
+        cfg = "exec",
+    ),
+    "_incremental_kernel": attr.label(
+        default = Label("//flutter:incremental_kernel"),
+    ),
+    "_incr_worker_tool": attr.label(
+        default = Label("//flutter/private/tools:incr_fkc_worker"),
         executable = True,
         cfg = "exec",
     ),
@@ -302,7 +311,26 @@ def flutter_kernel_compile_action(
     """
     _check_vm_flags(ctx.label, vm_flags)
     _check_extra_flags(ctx.label, extra_flags)
+
+    # Opt-in incremental compiles (`--@rules_flutter//flutter:incremental_kernel`):
+    # debug JIT whole-program compiles run through the persistent worker.
+    # Never AOT, web (`dartdevc`), `from_dill`, `import_dill` or
+    # `recorded_uses` compiles. With the flag off every action below is
+    # unchanged.
+    incr_worker = (
+        ctx.attr._incremental_kernel[BuildSettingInfo].value and
+        not aot and target == "flutter" and
+        from_dill == None and import_dill == None and recorded_uses == None
+    )
+    # Declared here so the worker's `--declared-inputs` prefix joins the same
+    # args object the compiler argv is built into below: with `use_param_file`
+    # a nested args object would stringify instead of flattening.
+    manifest = ctx.actions.declare_file(output.basename + ".flutter_inputs")
     args = ctx.actions.args()
+    if incr_worker:
+        args.use_param_file("@%s", use_always = True)
+        args.set_param_file_format("multiline")
+        args.add("--declared-inputs", manifest)
     args.add("--")
     args.add(dartaotruntime)
     args.add_all(vm_flags)
@@ -351,7 +379,7 @@ def flutter_kernel_compile_action(
     # `org-dartlang-app:///` URI (package roots, the entrypoint, the
     # registrant) resolving where it did under `.`.
     compile_sources = [main] if from_dill != None else [main] + srcs
-    stage = stage_generated_inputs(ctx, compile_sources, output.basename, include_sources = True)
+    stage = stage_generated_inputs(ctx, compile_sources, output.basename, include_sources = True, stable_root = incr_worker)
     mounted_roots = []
     if stage.root != None:
         mounted_roots.append(stage.root)
@@ -421,7 +449,6 @@ def flutter_kernel_compile_action(
     # `extra_flags` cannot widen what the compile may read. Written by path
     # so the tool reads the same files the compiler resolves through the
     # staging root.
-    manifest = ctx.actions.declare_file(output.basename + ".flutter_inputs")
     allowed_reads = [package_config, platform_dill]
     if from_dill != None:
         allowed_reads.append(from_dill)
@@ -461,4 +488,22 @@ def flutter_kernel_compile_action(
     )
     if resource_set != None:
         run_kwargs["resource_set"] = resource_set
+    if incr_worker:
+        # The worker takes exactly `kernel_filter`'s argv after argv[0]:
+        # `--declared-inputs <manifest> -- <executable> <arguments>`, built
+        # into the one args object above so the action's argv reads the same.
+        # Sandboxed, local and remote strategies run the worker's one-shot
+        # path (a fresh process per action); the worker strategy keeps its
+        # `frontend_server` warm across actions.
+        run_kwargs["executable"] = ctx.executable._incr_worker_tool
+        run_kwargs["arguments"] = [args]
+        run_kwargs["inputs"] = depset(
+            direct = direct_inputs + [dartaotruntime, ctx.executable._incr_worker_tool, manifest],
+        )
+        # The worker strategy keys the worker process on its tool files.
+        run_kwargs["tools"] = depset([dartaotruntime, frontend_server])
+        run_kwargs["execution_requirements"] = {
+            "supports-workers": "1",
+            "requires-worker-protocol": "json",
+        }
     ctx.actions.run(**run_kwargs)
