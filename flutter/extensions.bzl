@@ -25,7 +25,7 @@ load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_lock")
 load("//flutter/private:artifact_urls.bzl", "source_strip_prefix")
 load("//flutter/private:flutter_gen_l10n_repo.bzl", "flutter_gen_l10n_repo")
 load("//flutter/private:flutter_pub_lock_hub.bzl", "flutter_pub_lock_hub")
-load("//flutter/private:flutter_pub_package.bzl", "flutter_pub_package")
+load("//flutter/private:flutter_pub_package.bzl", "flutter_pub_package", "is_maven_dep_label")
 load("//flutter/private:flutter_sdk_package.bzl", "flutter_sdk_package")
 load("//flutter/private:pub_lock_sdks.bzl", "hosted_package_sha256", "parse_lock_sdk_constraints", "version_below_lower_bound")
 load("//flutter/private:toolchain_selection.bzl", "select_toolchain_source")
@@ -355,6 +355,24 @@ def _toolchain_extension(module_ctx):
     for mod in module_ctx.modules:
         for pub_tag in mod.tags.pub:
             hub_name = pub_tag.name
+
+            # Every android_maven_deps value lands in a generated spoke
+            # deps list; refuse a value that is not a label here, naming
+            # the key, rather than emitting it into BUILD text.
+            for _maven_key in pub_tag.android_maven_deps.keys():
+                _maven_label = pub_tag.android_maven_deps[_maven_key]
+                if not is_maven_dep_label(_maven_label):
+                    fail((
+                        "flutter.pub(name = \"{hub}\"): android_maven_deps[{key}] " +
+                        "is not a valid Bazel label ({label}). Map the " +
+                        "coordinate to a label in another repository " +
+                        "(\"@...\") or an absolute label (\"//...\") with no " +
+                        "quotes, backslashes or newlines."
+                    ).format(
+                        hub = hub_name,
+                        key = _maven_key,
+                        label = _maven_label,
+                    ))
             lock_content = module_ctx.read(pub_tag.lock)
             lock_pkgs = parse_pubspec_lock(lock_content)
             ignore_hooks = {pkg_name: True for pkg_name in pub_tag.ignore_hooks}

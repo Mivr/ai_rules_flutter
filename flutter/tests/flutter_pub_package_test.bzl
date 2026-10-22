@@ -16,6 +16,8 @@ load(
     "apply_overlay_substitutions",
     "find_hardcoded_hub_dep",
     "find_hardcoded_language_version",
+    "is_java_package_name",
+    "is_maven_dep_label",
     "make_android_subpackage_build_content",
     "make_flutter_library_build_content",
     "make_flutter_plugin_build_content",
@@ -1160,6 +1162,454 @@ maven_labels_unreadable_test = unittest.make(
     _maven_labels_unreadable_test_impl,
 )
 
+def _gradle_reader(scripts):
+    """A `read_script` callback serving `scripts` (path -> text)."""
+    return lambda p: scripts.get(p, None)
+
+def _maven_labels_single_line_test_impl(ctx):
+    """A single-line `dependencies { ... }` block resolves like multiline."""
+    env = unittest.begin(ctx)
+
+    content = "dependencies { implementation 'androidx.browser:browser:1.9.0' }\n"
+    result = maven_labels_for_gradle(content, {}, [])
+    asserts.equals(
+        env,
+        ["@rules_android_maven//:androidx_browser_browser"],
+        result.labels,
+    )
+    asserts.equals(env, [], result.unknown)
+    asserts.equals(env, [], result.unreadable)
+
+    # The same coordinate unmapped fails closed however it is laid out.
+    unmapped = maven_labels_for_gradle(
+        "dependencies { implementation 'com.example:thing:1.0' }\n",
+        {},
+        [],
+    )
+    asserts.equals(env, [], unmapped.labels)
+    asserts.equals(env, ["com.example:thing"], unmapped.unknown)
+
+    return unittest.end(env)
+
+maven_labels_single_line_test = unittest.make(
+    _maven_labels_single_line_test_impl,
+)
+
+def _maven_labels_semicolon_test_impl(ctx):
+    """Two declarations on one line separated by `;` both resolve."""
+    env = unittest.begin(ctx)
+
+    content = """\
+dependencies {
+    implementation 'androidx.browser:browser:1.9.0'; implementation 'com.example:thing:1.0'
+}
+"""
+    result = maven_labels_for_gradle(content, {}, [])
+    asserts.equals(
+        env,
+        ["@rules_android_maven//:androidx_browser_browser"],
+        result.labels,
+    )
+    asserts.equals(env, ["com.example:thing"], result.unknown)
+    asserts.equals(env, [], result.unreadable)
+
+    return unittest.end(env)
+
+maven_labels_semicolon_test = unittest.make(
+    _maven_labels_semicolon_test_impl,
+)
+
+def _maven_labels_add_call_test_impl(ctx):
+    """Gradle's `add(config, coord)` resolves in both quote spellings."""
+    env = unittest.begin(ctx)
+
+    content = """\
+dependencies {
+    add('implementation', 'androidx.browser:browser:1.9.0')
+    add("api", "androidx.core:core:1.17.0")
+    add('testImplementation', 'junit:junit:4.13.2')
+    add('implementation', project(':shared'))
+}
+"""
+    result = maven_labels_for_gradle(content, {}, [])
+    asserts.equals(
+        env,
+        [
+            "@rules_android_maven//:androidx_browser_browser",
+            "@rules_android_maven//:androidx_core_core",
+        ],
+        result.labels,
+    )
+    asserts.equals(env, [], result.unknown)
+    asserts.equals(env, [], result.unreadable)
+
+    # An `add()` with a non-literal notation is unreadable, not dropped.
+    bad = maven_labels_for_gradle(
+        "dependencies {\n    add('implementation', libs.thing)\n}\n",
+        {},
+        [],
+    )
+    asserts.equals(env, [], bad.labels)
+    asserts.equals(env, ["add('implementation', libs.thing)"], bad.unreadable)
+
+    return unittest.end(env)
+
+maven_labels_add_call_test = unittest.make(
+    _maven_labels_add_call_test_impl,
+)
+
+def _maven_labels_comments_test_impl(ctx):
+    """Comment-hidden declarations are ignored; strings keep comment marks."""
+    env = unittest.begin(ctx)
+
+    content = """\
+version = '1.0 /* still the version */'
+dependencies {
+    // implementation 'com.example:commented:1.0'
+    /* implementation 'com.example:blocked:1.0'
+       implementation 'com.example:blocked2:1.0' */
+    implementation 'androidx.browser:browser:1.9.0' // trailing comment
+}
+"""
+    result = maven_labels_for_gradle(content, {}, [])
+    asserts.equals(
+        env,
+        ["@rules_android_maven//:androidx_browser_browser"],
+        result.labels,
+    )
+    asserts.equals(env, [], result.unknown)
+    asserts.equals(env, [], result.unreadable)
+
+    # A `//` inside a string literal is kept: the whole declaration is
+    # reported, not the text before a phantom comment.
+    slashes = maven_labels_for_gradle(
+        "dependencies {\n    implementation 'com.exa//mple:thing:1.0'\n}\n",
+        {},
+        [],
+    )
+    asserts.equals(env, [], slashes.labels)
+    asserts.equals(
+        env,
+        ["implementation 'com.exa//mple:thing:1.0'"],
+        slashes.unreadable,
+    )
+
+    return unittest.end(env)
+
+maven_labels_comments_test = unittest.make(
+    _maven_labels_comments_test_impl,
+)
+
+def _maven_labels_buildscript_and_nested_test_impl(ctx):
+    """Buildscript classpaths are excluded; nested blocks are unreadable."""
+    env = unittest.begin(ctx)
+
+    content = """\
+buildscript {
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.3.1'
+    }
+}
+dependencies {
+    implementation 'androidx.browser:browser:1.9.0'
+    constraints {
+        implementation 'androidx.core:core:1.17.0'
+    }
+}
+"""
+    result = maven_labels_for_gradle(content, {}, [])
+    asserts.equals(
+        env,
+        ["@rules_android_maven//:androidx_browser_browser"],
+        result.labels,
+    )
+    asserts.equals(env, [], result.unknown)
+    asserts.equals(
+        env,
+        ["constraints", "implementation 'androidx.core:core:1.17.0'"],
+        result.unreadable,
+    )
+
+    return unittest.end(env)
+
+maven_labels_buildscript_and_nested_test = unittest.make(
+    _maven_labels_buildscript_and_nested_test_impl,
+)
+
+def _maven_labels_dependencies_mention_test_impl(ctx):
+    """`dependencies` outside the block form is unreadable."""
+    env = unittest.begin(ctx)
+
+    content = """\
+dependencies {
+    implementation 'androidx.browser:browser:1.9.0'
+}
+project.dependencies.add('implementation', 'com.example:thing:1.0')
+"""
+    result = maven_labels_for_gradle(content, {}, [])
+    asserts.equals(
+        env,
+        ["@rules_android_maven//:androidx_browser_browser"],
+        result.labels,
+    )
+    asserts.equals(
+        env,
+        ["project.dependencies.add('implementation', 'com.example:thing:1.0')"],
+        result.unreadable,
+    )
+
+    dotted = maven_labels_for_gradle(
+        "dependencies.implementation 'com.example:thing:1.0'\n",
+        {},
+        [],
+    )
+    asserts.equals(env, [], dotted.labels)
+    asserts.equals(
+        env,
+        ["dependencies.implementation 'com.example:thing:1.0'"],
+        dotted.unreadable,
+    )
+
+    # A prose string that merely names dependencies is not a mention.
+    prose = maven_labels_for_gradle(
+        "description = 'manages dependencies'\ndependencies {\n    implementation 'androidx.browser:browser:1.9.0'\n}\n",
+        {},
+        [],
+    )
+    asserts.equals(
+        env,
+        ["@rules_android_maven//:androidx_browser_browser"],
+        prose.labels,
+    )
+    asserts.equals(env, [], prose.unreadable)
+
+    return unittest.end(env)
+
+maven_labels_dependencies_mention_test = unittest.make(
+    _maven_labels_dependencies_mention_test_impl,
+)
+
+def _maven_labels_apply_from_test_impl(ctx):
+    """In-package `apply from:` scripts resolve; the rest fail closed."""
+    env = unittest.begin(ctx)
+
+    root = """\
+apply from: 'extra.gradle'
+dependencies {
+    implementation 'androidx.browser:browser:1.9.0'
+}
+"""
+    scripts = {
+        "extra.gradle": "dependencies {\n    implementation 'com.example:thing:1.0'\n}\n",
+    }
+    result = maven_labels_for_gradle(root, {}, [], _gradle_reader(scripts))
+    asserts.equals(
+        env,
+        ["@rules_android_maven//:androidx_browser_browser"],
+        result.labels,
+    )
+    asserts.equals(env, ["com.example:thing"], result.unknown)
+    asserts.equals(env, [], result.unreadable)
+
+    # Kotlin DSL spelling.
+    kts = maven_labels_for_gradle(
+        "apply(from = \"extra.gradle.kts\")\n",
+        {},
+        [],
+        _gradle_reader({
+            "extra.gradle.kts": "dependencies {\n    implementation(\"androidx.core:core:1.17.0\")\n}\n",
+        }),
+    )
+    asserts.equals(
+        env,
+        ["@rules_android_maven//:androidx_core_core"],
+        kts.labels,
+    )
+    asserts.equals(env, [], kts.unreadable)
+
+    # A URL, an escape, a missing file, and no reader at all: unreadable.
+    for stmt in [
+        "apply from: 'https://example.com/extra.gradle'",
+        "apply from: '../extra.gradle'",
+        "apply from: 'missing.gradle'",
+        "apply from: extraFile",
+    ]:
+        bad = maven_labels_for_gradle(stmt + "\n", {}, [], _gradle_reader(scripts))
+        asserts.equals(env, [], bad.labels, stmt)
+        asserts.equals(env, [stmt], bad.unreadable, stmt)
+
+    no_reader = maven_labels_for_gradle(root, {}, [])
+    asserts.equals(env, ["apply from: 'extra.gradle'"], no_reader.unreadable)
+
+    return unittest.end(env)
+
+maven_labels_apply_from_test = unittest.make(
+    _maven_labels_apply_from_test_impl,
+)
+
+def _maven_labels_apply_cycle_and_depth_test_impl(ctx):
+    """Apply cycles and over-deep chains are unreadable, not hangs."""
+    env = unittest.begin(ctx)
+
+    cycle = maven_labels_for_gradle(
+        "apply from: 'a.gradle'\n",
+        {},
+        [],
+        _gradle_reader({
+            "a.gradle": "apply from: 'b.gradle'\n",
+            "b.gradle": "apply from: 'a.gradle'\n",
+        }),
+    )
+    asserts.equals(env, [], cycle.labels)
+    asserts.equals(env, ["apply from: 'a.gradle'"], cycle.unreadable)
+
+    scripts = {}
+    for i in range(16):
+        scripts["f%d.gradle" % i] = "apply from: 'f%d.gradle'\n" % (i + 1)
+    scripts["f16.gradle"] = "dependencies {\n    implementation 'com.example:deep:1.0'\n}\n"
+    deep = maven_labels_for_gradle(
+        "apply from: 'f0.gradle'\n",
+        {},
+        [],
+        _gradle_reader(scripts),
+    )
+    asserts.equals(env, [], deep.labels)
+    asserts.true(env, len(deep.unreadable) > 0, "expected the depth cap to refuse: %s" % deep.unreadable)
+
+    return unittest.end(env)
+
+maven_labels_apply_cycle_and_depth_test = unittest.make(
+    _maven_labels_apply_cycle_and_depth_test_impl,
+)
+
+def _maven_labels_kotlin_add_test_impl(ctx):
+    """Kotlin DSL `add()` and parenthesised forms resolve together."""
+    env = unittest.begin(ctx)
+
+    content = """\
+dependencies {
+    implementation("androidx.annotation:annotation:1.9.1")
+    add("api", "androidx.media:media:1.7.0")
+}
+"""
+    result = maven_labels_for_gradle(content, {}, [])
+    asserts.equals(
+        env,
+        [
+            "@rules_android_maven//:androidx_annotation_annotation",
+            "@rules_android_maven//:androidx_media_media",
+        ],
+        result.labels,
+    )
+    asserts.equals(env, [], result.unreadable)
+
+    return unittest.end(env)
+
+maven_labels_kotlin_add_test = unittest.make(
+    _maven_labels_kotlin_add_test_impl,
+)
+
+def _maven_labels_map_and_interpolation_test_impl(ctx):
+    """Map notation, catalogs and interpolation stay unreadable."""
+    env = unittest.begin(ctx)
+
+    content = """\
+dependencies {
+    implementation group: 'com.example', name: 'thing', version: '1.0'
+    implementation "com.$ex:thing:1.0"
+    implementation libs.thing
+}
+"""
+    result = maven_labels_for_gradle(content, {}, [])
+    asserts.equals(env, [], result.labels)
+    asserts.equals(env, [], result.unknown)
+    asserts.equals(
+        env,
+        [
+            "implementation \"com.$ex:thing:1.0\"",
+            "implementation group: 'com.example', name: 'thing', version: '1.0'",
+            "implementation libs.thing",
+        ],
+        result.unreadable,
+    )
+
+    # Interpolation in the version still reduces the coordinate, so it
+    # fails as unknown rather than resolving.
+    interpolated = maven_labels_for_gradle(
+        "dependencies {\n    implementation \"com.example:thing:$version\"\n}\n",
+        {},
+        [],
+    )
+    asserts.equals(env, ["com.example:thing"], interpolated.unknown)
+    asserts.equals(env, [], interpolated.unreadable)
+
+    return unittest.end(env)
+
+maven_labels_map_and_interpolation_test = unittest.make(
+    _maven_labels_map_and_interpolation_test_impl,
+)
+
+def _java_package_name_validation_test_impl(ctx):
+    """Plugin-controlled namespaces must be Java package names."""
+    env = unittest.begin(ctx)
+
+    asserts.true(env, is_java_package_name("com.example.plugin"))
+    asserts.true(env, is_java_package_name("io.flutter.plugins.urllauncher"))
+    asserts.true(env, is_java_package_name("plugin"))
+    asserts.false(env, is_java_package_name(""))
+    asserts.false(env, is_java_package_name("com..example"))
+    asserts.false(env, is_java_package_name(".com.example"))
+    asserts.false(env, is_java_package_name("com.example."))
+    asserts.false(env, is_java_package_name("1com.example"))
+    asserts.false(env, is_java_package_name("com.ex ample"))
+    asserts.false(env, is_java_package_name("com.example-foo"))
+    asserts.false(env, is_java_package_name("com.ex\"ample"))
+    asserts.false(env, is_java_package_name("com.example.synth\", _x = \"pwned"))
+
+    return unittest.end(env)
+
+java_package_name_validation_test = unittest.make(
+    _java_package_name_validation_test_impl,
+)
+
+def _maven_dep_label_validation_test_impl(ctx):
+    """Workspace-provided dep values must be labels without quoting."""
+    env = unittest.begin(ctx)
+
+    asserts.true(env, is_maven_dep_label("@rules_android_maven//:androidx_core_core"))
+    asserts.true(env, is_maven_dep_label("//third_party:browser"))
+    asserts.false(env, is_maven_dep_label(""))
+    asserts.false(env, is_maven_dep_label(":browser"))
+    asserts.false(env, is_maven_dep_label("rules_android_maven//:x"))
+    asserts.false(env, is_maven_dep_label("@rules_android_maven//:x\",\n_injected = 1,\n_dummy = \"y"))
+    asserts.false(env, is_maven_dep_label("@rules_android_maven//:x\\y"))
+
+    return unittest.end(env)
+
+maven_dep_label_validation_test = unittest.make(
+    _maven_dep_label_validation_test_impl,
+)
+
+def _hostile_label_renders_inert_test_impl(ctx):
+    """A hostile label value cannot break out of the generated deps list."""
+    env = unittest.begin(ctx)
+
+    content = make_android_subpackage_build_content(
+        android_src_dir = "android/src/main",
+        java_package = "dev.example.ok",
+        extra_maven_labels = ["@rules_android_maven//:x\",\n_injected = 1,\n_dummy = \"y"],
+        android_manifest = "",
+        has_resources = False,
+    )
+
+    asserts.false(env, "\n_injected = 1," in content, content)
+
+    return unittest.end(env)
+
+hostile_label_renders_inert_test = unittest.make(
+    _hostile_label_renders_inert_test_impl,
+)
+
 def flutter_pub_package_test_suite(name):
     unittest.suite(
         name,
@@ -1189,4 +1639,17 @@ def flutter_pub_package_test_suite(name):
         maven_labels_mapping_and_ignore_test,
         maven_labels_scopes_test,
         maven_labels_unreadable_test,
+        maven_labels_single_line_test,
+        maven_labels_semicolon_test,
+        maven_labels_add_call_test,
+        maven_labels_comments_test,
+        maven_labels_buildscript_and_nested_test,
+        maven_labels_dependencies_mention_test,
+        maven_labels_apply_from_test,
+        maven_labels_apply_cycle_and_depth_test,
+        maven_labels_kotlin_add_test,
+        maven_labels_map_and_interpolation_test,
+        java_package_name_validation_test,
+        maven_dep_label_validation_test,
+        hostile_label_renders_inert_test,
     )

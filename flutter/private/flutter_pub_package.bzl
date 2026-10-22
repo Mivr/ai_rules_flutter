@@ -425,57 +425,30 @@ _MAVEN_COORDS_PROVIDED = {
 _MAVEN_RUNTIME_CONFIGS = ("implementation", "api", "runtimeOnly", "compile")
 _MAVEN_RUNTIME_SUFFIXES = ("Implementation", "Api", "RuntimeOnly")
 
-def _runtime_dep_rest(line):
-    """Return the dependency notation after a runtime configuration, or "".
+def _gradle_coord_from_inner(inner):
+    """Reduce a dependency-notation string's inner text to `group:artifact`.
 
-    `""` covers three different nothings: lines that are not dependency
-    declarations at all (`apply plugin:`, `classpath ...`,
-    `namespace = ...`), test-source-set configurations
-    (`testImplementation`, `androidTestImplementation`, ...), and
-    `compileOnly`. Test configurations exercise the plugin's own unit tests
-    and are never shipped in the APK; `compileOnly` is provided-scope —
-    Gradle never packages it, and the plugin's compile classpath already
-    carries the equivalent in the neverlink engine target. Neither can turn
-    into a Bazel label the APK needs, so both are left out rather than
-    reported.
+    `inner` is the text between one pair of quotes (or an `add()` notation
+    argument). Anything without a `group:artifact` pair — a version-catalog
+    ref, a variable, a local path, a Gradle map — yields "".
+
+    Args:
+        inner: The unquoted notation text.
+
+    Returns:
+        `group:artifact`, or "" when it has none.
     """
-    stripped = line.strip().replace("\t", " ")
-    if not stripped:
+    parts = inner.split(":")
+    if len(parts) < 2:
         return ""
-    if stripped.startswith("//") or stripped.startswith("#") or stripped.startswith("*") or stripped.startswith("/*"):
-        return ""
-    head = stripped.split("(")[0]
-    token = head.split(" ")[0]
-    if not token or "." in token:
-        return ""
-    if token.startswith("test") or "Test" in token:
-        return ""
-    if token == "compileOnly":
-        return ""
-    is_runtime = token in _MAVEN_RUNTIME_CONFIGS
-    if not is_runtime:
-        for suffix in _MAVEN_RUNTIME_SUFFIXES:
-            if token.endswith(suffix):
-                is_runtime = True
-                break
-    if not is_runtime:
-        return ""
-    rest = stripped[len(token):].strip()
-    if not rest:
-        return ""
-    return rest
-
-def _gradle_is_project_ref(rest):
-    """True when the dependency notation names a sibling Gradle module.
-
-    `project(':shared')` is an intra-build module reference, not an external
-    Maven artifact: there is no `group:artifact` to map to a label or to
-    ignore, so Maven resolution leaves it out. A plugin whose Android library
-    genuinely needs a sibling module cannot be translated automatically and
-    needs a plugin overlay (`flutter.plugin_overlays`), which replaces this
-    auto-detection wholesale.
-    """
-    return "project(" in rest
+    for part in (parts[0], parts[1]):
+        if not part:
+            return ""
+        for i in range(len(part)):
+            c = part[i:i + 1]
+            if c in " \t/$'\"{}()":
+                return ""
+    return parts[0] + ":" + parts[1]
 
 def _gradle_coord_of(rest):
     """Reduce dependency notation to `group:artifact`, or "" when it has none.
@@ -486,8 +459,8 @@ def _gradle_coord_of(rest):
     `files(...)` / `fileTree(...)` jar, a Gradle map
     (`group: ..., name: ...`) — yields "". The version part may carry Gradle
     templates (`$kotlin_version`); only `group:artifact` is validated, so
-    those still reduce. Callers report "" as unreadable unless
-    `_gradle_is_project_ref`.
+    those still reduce. Callers report "" as unreadable unless the notation
+    is a `project()` sibling-module reference, which is left out.
     """
     quote_idx = -1
     quote_char = ""
@@ -501,18 +474,7 @@ def _gradle_coord_of(rest):
     end = rest.find(quote_char, quote_idx + 1)
     if end < 0:
         return ""
-    inner = rest[quote_idx + 1:end]
-    parts = inner.split(":")
-    if len(parts) < 2:
-        return ""
-    for part in (parts[0], parts[1]):
-        if not part:
-            return ""
-        for i in range(len(part)):
-            c = part[i:i + 1]
-            if c in " \t/$'\"{}()":
-                return ""
-    return parts[0] + ":" + parts[1]
+    return _gradle_coord_from_inner(rest[quote_idx + 1:end])
 
 def _maven_add_coord(coord, merged, ignored, labels, unknown):
     """File one coordinate into `labels` or `unknown` (provided coords pass)."""
@@ -524,7 +486,635 @@ def _maven_add_coord(coord, merged, ignored, labels, unknown):
     elif coord not in ignored:
         unknown[coord] = True
 
-def maven_labels_for_gradle(content, mapping, ignore):
+def is_java_package_name(value):
+    """True when `value` is a well-formed Java package name.
+
+    Each dot-separated segment must start with a letter or underscore and
+    continue with letters, digits or underscores. Used to refuse a hostile
+    plugin-controlled Android namespace before it reaches generated BUILD
+    text.
+
+    Args:
+        value: The candidate package name.
+
+    Returns:
+        True for names like `com.example.plugin`, False for "", for empty
+        segments, and for anything holding quotes, dashes, spaces or `$`.
+    """
+    if not value:
+        return False
+    for part in value.split("."):
+        if not part:
+            return False
+        for i in range(len(part)):
+            c = part[i:i + 1]
+            is_start = ("a" <= c and c <= "z") or ("A" <= c and c <= "Z") or c == "_"
+            is_part = is_start or ("0" <= c and c <= "9")
+            if not (is_part if i else is_start):
+                return False
+    return True
+
+def is_maven_dep_label(value):
+    """True when `value` is a plausible Bazel label for `android_maven_deps`.
+
+    The value must look like a label in another repository (`@...`) or an
+    absolute label (`//...`), and must not hold a quote, a backslash or a
+    newline that could break out of the generated `deps` list.
+
+    Args:
+        value: The candidate label string.
+
+    Returns:
+        True when the value has a label shape and no quoting characters.
+    """
+    if not value:
+        return False
+    if not (value.startswith("@") or value.startswith("//")):
+        return False
+    for i in range(len(value)):
+        c = value[i:i + 1]
+        if c == '"' or c == "'" or c == "\\" or c == "\n" or c == "\r":
+            return False
+    return True
+
+# Cap on `apply from:` script nesting. A chain deeper than this is a cycle
+# in disguise (or a plugin no one can read); the exceeding statement is
+# reported unreadable instead of recursing forever.
+_GRADLE_APPLY_MAX_DEPTH = 10
+
+def _gradle_flush_to(events, buf, kind):
+    """Move `buf`'s text into `events` as a `kind` entry and clear `buf`.
+
+    Args:
+        events: The event list being built.
+        buf: The character accumulator for the current segment.
+        kind: `"stmt"` for a statement, `"open"` for a block header.
+    """
+    s = "".join(buf)
+    for _ in range(len(buf)):
+        buf.pop()
+    s = s.strip()
+    if s or kind == "open":
+        events.append(struct(kind = kind, text = s))
+
+def _gradle_lex_comment(content, i, buf, events):
+    """Consume a `//` or `/* */` comment; return the `(state, next_i)` pair."""
+    if content[i:i + 2] == "//":
+        _gradle_flush_to(events, buf, "stmt")
+        return (1, i + 2)
+    return (2, i + 2)
+
+def _gradle_lex_string_open(content, i, buf):
+    """Enter the string state for the quote at `i`; return `(state, next_i)`."""
+    if content[i:i + 3] == "'''":
+        buf.extend(["'", "'", "'"])
+        return (5, i + 3)
+    if content[i:i + 3] == '"""':
+        buf.extend(['"', '"', '"'])
+        return (6, i + 3)
+    c = content[i:i + 1]
+    buf.append(c)
+    if c == "'":
+        return (3, i + 1)
+    return (4, i + 1)
+
+def _gradle_lex_code(content, i, buf, events):
+    """Lex one code-state character; return the `(state, next_i)` pair."""
+    two = content[i:i + 2]
+    if two == "//" or two == "/*":
+        return _gradle_lex_comment(content, i, buf, events)
+    c = content[i:i + 1]
+    if c == "'" or c == '"':
+        return _gradle_lex_string_open(content, i, buf)
+    if c == "\n" or c == ";" or c == "\r":
+        _gradle_flush_to(events, buf, "stmt")
+        return (0, i + 1)
+    if c == "{":
+        _gradle_flush_to(events, buf, "open")
+        return (0, i + 1)
+    if c == "}":
+        _gradle_flush_to(events, buf, "stmt")
+        events.append(struct(kind = "close", text = ""))
+        return (0, i + 1)
+    buf.append(c)
+    return (0, i + 1)
+
+def _gradle_lex_short_string(content, n, i, buf, events, quote):
+    """Lex one character inside a single-line string; return `(state, next_i)`."""
+    c = content[i:i + 1]
+    buf.append(c)
+    if c == "\\" and i + 1 < n:
+        buf.append(content[i + 1:i + 2])
+        return (3 if quote == "'" else 4, i + 2)
+    if c == quote:
+        return (0, i + 1)
+    if c == "\n":
+        # An unterminated single-line string ends at the newline: the
+        # fragment flushes as a statement (unreadable downstream) instead
+        # of swallowing the rest of the file into a string.
+        _gradle_flush_to(events, buf, "stmt")
+        return (0, i + 1)
+    return (3 if quote == "'" else 4, i + 1)
+
+def _gradle_lex_long_string(content, n, i, buf, quote3):
+    """Lex one character inside a triple-quoted string; return `(state, next_i)`."""
+    if content[i:i + 3] == quote3:
+        buf.extend([quote3[0:1], quote3[0:1], quote3[0:1]])
+        return (0, i + 3)
+    c = content[i:i + 1]
+    buf.append(c)
+    if c == "\\" and i + 1 < n:
+        buf.append(content[i + 1:i + 2])
+        return (5 if quote3[0:1] == "'" else 6, i + 2)
+    if quote3[0:1] == "'":
+        return (5, i + 1)
+    return (6, i + 1)
+
+def _gradle_lex(content):
+    """Split Gradle script text into statement and brace events.
+
+    String-aware: `//` and `/* */` comments are dropped only outside
+    string literals (single, double or triple quoted), and newlines, `;`,
+    `{` and `}` split statements only outside strings. A backslash escapes
+    the next character inside a string.
+
+    Args:
+        content: The Gradle build-file or applied-script text.
+
+    Returns:
+        A list of structs: `struct(kind = "stmt", text)` for statements,
+        `struct(kind = "open", text)` for a block header (the text before
+        `{`), and `struct(kind = "close", text = "")` for `}`.
+    """
+    events = []
+    buf = []
+    n = len(content)
+    state = 0
+    i = 0
+    for _ in range(n + 2):
+        if i >= n:
+            break
+        c = content[i:i + 1]
+        two = content[i:i + 2]
+        if state == 0:
+            (state, i) = _gradle_lex_code(content, i, buf, events)
+        elif state == 1:
+            if c == "\n":
+                _gradle_flush_to(events, buf, "stmt")
+                state = 0
+            i += 1
+        elif state == 2:
+            if two == "*/":
+                state = 0
+                i += 2
+            else:
+                i += 1
+        elif state == 3:
+            (state, i) = _gradle_lex_short_string(content, n, i, buf, events, "'")
+        elif state == 4:
+            (state, i) = _gradle_lex_short_string(content, n, i, buf, events, '"')
+        elif state == 5:
+            (state, i) = _gradle_lex_long_string(content, n, i, buf, "'''")
+        else:
+            (state, i) = _gradle_lex_long_string(content, n, i, buf, '"""')
+    _gradle_flush_to(events, buf, "stmt")
+    return events
+
+def _gradle_leading_word(text):
+    """Return the leading `[A-Za-z0-9_]` word of `text` ("" when none)."""
+    out = []
+    for i in range(len(text)):
+        c = text[i:i + 1]
+        if ("a" <= c and c <= "z") or ("A" <= c and c <= "Z") or ("0" <= c and c <= "9") or c == "_":
+            out.append(c)
+        else:
+            break
+    return "".join(out)
+
+def _gradle_stmt_token(stmt):
+    """Return the leading identifier of a statement, dots kept.
+
+    `project.dependencies.add(...)` yields one dotted token so the `.`
+    rule can tell a method path from a bare configuration name.
+    """
+    out = []
+    for i in range(len(stmt)):
+        c = stmt[i:i + 1]
+        if ("a" <= c and c <= "z") or ("A" <= c and c <= "Z") or ("0" <= c and c <= "9") or c == "_" or c == "." or c == "$":
+            out.append(c)
+        else:
+            break
+    return "".join(out)
+
+def _gradle_is_runtime_config(token):
+    """True for configurations that land on the app's runtime classpath."""
+    if token in _MAVEN_RUNTIME_CONFIGS:
+        return True
+    for suffix in _MAVEN_RUNTIME_SUFFIXES:
+        if token.endswith(suffix):
+            return True
+    return False
+
+def _gradle_is_nonruntime_config(token):
+    """True for test-source-set and `compileOnly` configurations."""
+    if token == "compileOnly" or token.endswith("CompileOnly"):
+        return True
+    if token.startswith("test"):
+        return True
+    if "Test" in token:
+        return True
+    return False
+
+def _gradle_skip_ws(text, pos):
+    """Return the first position at or after `pos` that is not blank."""
+    n = len(text)
+    for _ in range(n + 1):
+        if pos >= n:
+            break
+        if text[pos:pos + 1] in " \t\r":
+            pos += 1
+        else:
+            break
+    return pos
+
+def _gradle_quoted_at(text, pos):
+    """Read the quoted literal at `pos`; return `(inner, end)` or `(None, pos)`.
+
+    Only single- and double-quoted literals count; anything else (a
+    variable, a catalog ref, string concatenation) is not a literal.
+    """
+    q = text[pos:pos + 1]
+    if q != "'" and q != '"':
+        return (None, pos)
+    out = []
+    n = len(text)
+    i = pos + 1
+    for _ in range(n + 1):
+        if i >= n:
+            return (None, pos)
+        c = text[i:i + 1]
+        if c == "\\" and i + 1 < n:
+            out.append(c)
+            out.append(text[i + 1:i + 2])
+            i += 2
+        elif c == q:
+            return ("".join(out), i + 1)
+        else:
+            out.append(c)
+            i += 1
+    return (None, pos)
+
+def _gradle_bad_add():
+    """The shared "not a modellable `add()` call" parse result."""
+    return struct(kind = "bad", config = "", notation = "", project = False)
+
+def _gradle_parse_add_tail(stmt, pos, paren, config):
+    """Parse the `(notation)` tail of an `add(config, ...)` statement."""
+    pos = _gradle_skip_ws(stmt, pos)
+    if stmt[pos:pos + 7] == "project" and stmt[pos + 7:pos + 8] == "(":
+        end = _gradle_match_paren(stmt, pos + 7)
+        if end < 0:
+            return _gradle_bad_add()
+        pos = _gradle_skip_ws(stmt, end + 1)
+        if paren:
+            if stmt[pos:pos + 1] != ")":
+                return _gradle_bad_add()
+            pos = _gradle_skip_ws(stmt, pos + 1)
+        if pos != len(stmt):
+            return _gradle_bad_add()
+        return struct(kind = "project", config = config, notation = "", project = True)
+    (notation, end) = _gradle_quoted_at(stmt, pos)
+    if notation == None:
+        return _gradle_bad_add()
+    pos = _gradle_skip_ws(stmt, end)
+    if paren:
+        if stmt[pos:pos + 1] != ")":
+            return _gradle_bad_add()
+        pos = _gradle_skip_ws(stmt, pos + 1)
+    if pos != len(stmt):
+        return _gradle_bad_add()
+    return struct(kind = "dep", config = config, notation = notation, project = False)
+
+def _parse_gradle_add(stmt):
+    """Parse a bare `add(config, notation)` dependency statement.
+
+    Covers `add('implementation', 'g:a:1')` and the double-quoted
+    spelling, with or without parentheses. A `project(...)` notation
+    parses as a project reference.
+
+    Args:
+        stmt: The statement text; its leading word must be `add`.
+
+    Returns:
+        A struct: `kind` is `"dep"` (with `config` and `notation`),
+        `"project"` (with `config`), or `"bad"` for anything else.
+    """
+    pos = _gradle_skip_ws(stmt, 3)
+    paren = False
+    if stmt[pos:pos + 1] == "(":
+        paren = True
+        pos = _gradle_skip_ws(stmt, pos + 1)
+    (config, end) = _gradle_quoted_at(stmt, pos)
+    if config == None:
+        return _gradle_bad_add()
+    pos = _gradle_skip_ws(stmt, end)
+    if stmt[pos:pos + 1] != ",":
+        return _gradle_bad_add()
+    return _gradle_parse_add_tail(stmt, pos + 1, paren, config)
+
+def _gradle_match_paren(text, open_pos):
+    """Return the index of the `)` matching the `(` at `open_pos`, or -1."""
+    depth = 0
+    n = len(text)
+    i = open_pos
+    for _ in range(n + 1):
+        if i >= n:
+            return -1
+        c = text[i:i + 1]
+        if c == "(":
+            depth += 1
+            i += 1
+        elif c == ")":
+            depth -= 1
+            if depth == 0:
+                return i
+            i += 1
+        elif c == "'" or c == '"':
+            (_, end) = _gradle_quoted_at(text, i)
+            if end <= i:
+                return -1
+            i = end
+        else:
+            i += 1
+    return -1
+
+def _gradle_apply_result(kind, path):
+    """Build the shared `apply`-parse result struct."""
+    return struct(kind = kind, path = path)
+
+def _parse_gradle_apply_kwargs(stmt, pos):
+    """Parse Kotlin `apply(...)` args; return the `from` path struct."""
+    n = len(stmt)
+    j = pos
+    for _ in range(n + 1):
+        j = _gradle_skip_ws(stmt, j)
+        if j >= n:
+            break
+        c = stmt[j:j + 1]
+        if c == ")":
+            break
+        if c == ",":
+            j += 1
+        elif c == "'" or c == '"':
+            # A positional string (a plugin id): not an applied script.
+            (_, end) = _gradle_quoted_at(stmt, j)
+            j = end if end > j else (j + 1)
+        else:
+            w = _gradle_leading_word(stmt[j:])
+            if not w:
+                j += 1
+            elif w == "from":
+                j2 = _gradle_skip_ws(stmt, j + 4)
+                if stmt[j2:j2 + 1] != "=":
+                    return _gradle_apply_result("bad", "")
+                j3 = _gradle_skip_ws(stmt, j2 + 1)
+                (path, _) = _gradle_quoted_at(stmt, j3)
+                if path == None:
+                    return _gradle_apply_result("bad", "")
+                return _gradle_apply_result("path", path)
+            else:
+                j = _gradle_skip_ws(stmt, j + len(w))
+                if stmt[j:j + 1] == "=":
+                    j = _gradle_skip_ws(stmt, j + 1)
+                    c2 = stmt[j:j + 1]
+                    if c2 == "'" or c2 == '"':
+                        (_, end) = _gradle_quoted_at(stmt, j)
+                        j = end if end > j else (j + 1)
+                    else:
+                        w2 = _gradle_leading_word(stmt[j:])
+                        j = j + len(w2) if w2 else (j + 1)
+    return _gradle_apply_result("none", "")
+
+def _parse_gradle_apply(stmt):
+    """Parse an `apply from:` statement; return a kind/path struct.
+
+    `kind` is `"path"` (with the literal script path) for the Groovy
+    `apply from: 'x.gradle'` and Kotlin `apply(from = "x.gradle.kts")`
+    spellings, `"bad"` for an `apply` whose `from` is missing or not a
+    plain quoted literal, and `"none"` for anything else (`apply plugin:`
+    and non-`apply` statements).
+
+    Args:
+        stmt: The stripped statement text.
+
+    Returns:
+        `struct(kind, path)`.
+    """
+    if _gradle_leading_word(stmt) != "apply":
+        return _gradle_apply_result("none", "")
+    pos = _gradle_skip_ws(stmt, 5)
+    if stmt[pos:pos + 1] == "(":
+        return _parse_gradle_apply_kwargs(stmt, pos + 1)
+    if _gradle_leading_word(stmt[pos:]) != "from":
+        return _gradle_apply_result("none", "")
+    j = _gradle_skip_ws(stmt, pos + 4)
+    if stmt[j:j + 1] != ":":
+        return _gradle_apply_result("bad", "")
+    j = _gradle_skip_ws(stmt, j + 1)
+    (path, end) = _gradle_quoted_at(stmt, j)
+    if path == None:
+        return _gradle_apply_result("bad", "")
+    j = _gradle_skip_ws(stmt, end)
+    if j < len(stmt) and stmt[j:j + 1] != ",":
+        # String concatenation or another expression: not a literal path.
+        return _gradle_apply_result("bad", "")
+    return _gradle_apply_result("path", path)
+
+def _gradle_normalize_apply_path(path):
+    """Resolve an applied-script path inside the package; "" when refused.
+
+    Dots collapse, `..` pops, and popping past the package root, a URL
+    scheme, an absolute path, an empty path or `$` interpolation refuses
+    the path (""), so the caller reports the statement unreadable.
+
+    Args:
+        path: The literal path from the `apply from:` statement.
+
+    Returns:
+        The package-relative path, or "" when it escapes or is not plain.
+    """
+    if not path or "$" in path:
+        return ""
+    for i in range(len(path)):
+        c = path[i:i + 1]
+        if c == "/":
+            break
+        if c == ":":
+            return ""
+    if path.startswith("/"):
+        return ""
+    out = []
+    for seg in path.split("/"):
+        if seg == "" or seg == ".":
+            continue
+        if seg == "..":
+            if not out:
+                return ""
+            out.pop()
+        else:
+            out.append(seg)
+    if not out:
+        return ""
+    return "/".join(out)
+
+def _gradle_code_without_strings(text):
+    """Return `text` with every quoted literal blanked to `""`.
+
+    Lets the `dependencies`-mention check see references (`project.dependencies.add`) while a prose string that merely names dependencies stays invisible.
+    """
+    out = []
+    n = len(text)
+    i = 0
+    for _ in range(n + 1):
+        if i >= n:
+            break
+        c = text[i:i + 1]
+        if c == "'" or c == '"':
+            (_, end) = _gradle_quoted_at(text, i)
+            if end <= i:
+                out.append(c)
+                i += 1
+            else:
+                i = end
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+def _maven_visit_add_stmt(text, merged, ignored, labels, unknown, unreadable):
+    """File one bare `add(config, notation)` statement."""
+    parsed = _parse_gradle_add(text)
+    if parsed.kind == "bad":
+        unreadable[text] = True
+        return
+    if parsed.kind == "project":
+        if _gradle_is_nonruntime_config(parsed.config) or _gradle_is_runtime_config(parsed.config):
+            return
+        unreadable[text] = True
+        return
+    if _gradle_is_nonruntime_config(parsed.config):
+        return
+    if _gradle_is_runtime_config(parsed.config):
+        coord = _gradle_coord_from_inner(parsed.notation)
+        if coord:
+            _maven_add_coord(coord, merged, ignored, labels, unknown)
+        else:
+            unreadable[text] = True
+        return
+    unreadable[text] = True
+
+def _maven_visit_dep_stmt(text, merged, ignored, labels, unknown, unreadable):
+    """File one statement inside a non-`buildscript` `dependencies` block."""
+    token = _gradle_stmt_token(text)
+    if token == "add":
+        _maven_visit_add_stmt(text, merged, ignored, labels, unknown, unreadable)
+        return
+    if not token or "." in token:
+        unreadable[text] = True
+        return
+    if _gradle_is_nonruntime_config(token):
+        return
+    if _gradle_is_runtime_config(token):
+        rest = text[len(token):].strip()
+        coord = _gradle_coord_of(rest)
+        if coord:
+            _maven_add_coord(coord, merged, ignored, labels, unknown)
+        elif "project(" in rest:
+            pass
+        else:
+            unreadable[text] = True
+        return
+    if "project(" in text:
+        return
+    unreadable[text] = True
+
+def _maven_resolve_apply(path, stmt_text, unreadable, read_script, seen, depth, pending):
+    """Resolve one `apply from:` path: validate, read, queue for parsing."""
+    norm = _gradle_normalize_apply_path(path)
+    if not norm or norm in seen:
+        unreadable[stmt_text] = True
+        return
+    if depth >= _GRADLE_APPLY_MAX_DEPTH or read_script == None:
+        unreadable[stmt_text] = True
+        return
+    sub_seen = dict(seen)
+    sub_seen[norm] = True
+    sub = read_script(norm)
+    if sub == None:
+        unreadable[stmt_text] = True
+    else:
+        pending.append((sub, sub_seen, depth + 1))
+
+def _maven_visit_gradle_stmt(text, stack, merged, ignored, labels, unknown, unreadable, read_script, seen, depth, pending):
+    """File one statement with its block context."""
+    tainted = False
+    in_buildscript = False
+    for name in stack:
+        if name == "!":
+            tainted = True
+        if name == "buildscript":
+            in_buildscript = True
+    if tainted:
+        # Inside a nested block already reported unreadable (for example
+        # `constraints {}` in a `dependencies` block): everything it holds
+        # is unmodellable too, so nothing in here resolves.
+        unreadable[text] = True
+        return
+    if in_buildscript:
+        return
+    applied = _parse_gradle_apply(text)
+    if applied.kind == "path":
+        _maven_resolve_apply(applied.path, text, unreadable, read_script, seen, depth, pending)
+        return
+    if applied.kind == "bad":
+        unreadable[text] = True
+        return
+    if stack and stack[len(stack) - 1] == "dependencies":
+        _maven_visit_dep_stmt(text, merged, ignored, labels, unknown, unreadable)
+        return
+    if "dependencies" in _gradle_code_without_strings(text).lower():
+        unreadable[text] = True
+
+def _maven_walk_gradle(content, merged, ignored, labels, unknown, unreadable, read_script, seen, depth, pending):
+    """Walk one Gradle script's lexed events, filing deps and refusals."""
+    stack = []
+    for e in _gradle_lex(content):
+        if e.kind == "open":
+            in_deps = False
+            in_buildscript = False
+            for name in stack:
+                if name == "dependencies":
+                    in_deps = True
+                if name == "buildscript":
+                    in_buildscript = True
+            if in_deps and not in_buildscript:
+                # A block nested in a `dependencies` block (for example
+                # `constraints {}`) is unmodellable: report the header and
+                # taint the interior (pushed as "!") so nothing in it
+                # resolves either.
+                unreadable[e.text if e.text else "{"] = True
+                stack.append("!")
+            else:
+                if e.text and e.text != "dependencies" and "dependencies" in _gradle_code_without_strings(e.text).lower():
+                    unreadable[e.text] = True
+                stack.append(_gradle_leading_word(e.text))
+        elif e.kind == "close":
+            if stack:
+                stack.pop()
+        else:
+            _maven_visit_gradle_stmt(e.text, stack, merged, ignored, labels, unknown, unreadable, read_script, seen, depth, pending)
+
+def maven_labels_for_gradle(content, mapping, ignore, read_script = None):
     """Translate a Gradle build file's runtime deps to Bazel labels.
 
     Pure and loadable from another .bzl: `content` is the `build.gradle` /
@@ -533,31 +1123,59 @@ def maven_labels_for_gradle(content, mapping, ignore):
     `_MAVEN_COORD_TO_LABEL` (`mapping` wins on collision), and `ignore` is a
     list of `group:artifact` coordinates that need no label.
 
+    The script is lexed string-aware (`//` and `/* */` comments strip only
+    outside single-, double- and triple-quoted literals) and split into
+    statements on newlines, `;`, `{` and `}` outside strings, so layout is
+    insignificant: a single-line `dependencies { implementation 'g:a:1' }`,
+    two declarations on one line separated by `;`, and Gradle's public
+    `add('implementation', 'g:a:1')` (single- or double-quoted) resolve
+    exactly like one declaration per line. Only statements inside a
+    `dependencies` block that is not inside `buildscript` count
+    (`buildscript` dependencies are build classpath, never packaged).
+
     Covers the configurations that put code on the app's runtime classpath —
-    `implementation`, `api` and `runtimeOnly` — in both Groovy (bare,
-    single-quoted) and Kotlin DSL (parenthesised, double-quoted) spellings,
-    including variant-prefixed siblings (`debugImplementation`, ...).
-    `compileOnly` is provided-scope (Gradle never packages it; the plugin's
-    compile classpath already carries the equivalent in the neverlink engine
-    target) and test-source-set configurations (`testImplementation`,
-    `androidTest...`, ...) exercise the plugin's own unit tests, never the
-    APK — both are left out of every list rather than reported. `project()`
-    references name a sibling Gradle module, not an external artifact (see
-    `_gradle_is_project_ref`), and are left out the same way.
+    `implementation`, `api`, `runtimeOnly` and legacy `compile` — in both
+    Groovy (bare, single-quoted) and Kotlin DSL (parenthesised,
+    double-quoted) spellings, including variant-prefixed siblings
+    (`debugImplementation`, ...). `compileOnly` is provided-scope (Gradle
+    never packages it; the plugin's compile classpath already carries the
+    equivalent in the neverlink engine target) and test-source-set
+    configurations (`testImplementation`, `androidTest...`, ...) exercise
+    the plugin's own unit tests, never the APK — both are left out of every
+    list rather than reported. `project()` references name a sibling Gradle
+    module, not an external artifact, and are left out the same way.
+
+    `apply from:` scripts in both DSL spellings (`apply from: 'x.gradle'`
+    and `apply(from = "x.gradle.kts")`) resolve when the path stays inside
+    the package: the script is read through `read_script` and parsed the
+    same way, recursively, with cycle detection and a depth cap of 10.
+
+    Refusals (each reported in `unreadable`, failing the spoke fetch):
+    statements in a `dependencies` block that are neither recognised
+    runtime nor non-runtime declarations nor `project()` references
+    (version-catalog `libs.*` refs, variables, local `files(...)` jars,
+    Gradle maps, interpolated coordinates, multi-line calls, nested blocks
+    such as `constraints {}`); `dependencies` mentions outside the block
+    form (`project.dependencies.add(...)`, `dependencies.implementation
+    ...`); `apply from:` with a URL, an absolute path, a path escaping the
+    package, a missing file, or a non-literal argument (or when no
+    `read_script` is given).
 
     Args:
         content: The Gradle build-file text.
         mapping: Dict from `group:artifact` to Bazel label string.
         ignore: List of `group:artifact` coordinates that need no label.
+        read_script: Optional callback taking a package-relative applied
+            script path and returning its text, or None when the file is
+            missing. The repository rule passes a reader confined to the
+            package; without one, applied scripts are unreadable.
 
     Returns:
         `struct(labels, unknown, unreadable)`: `labels` is the sorted,
         distinct Bazel labels for recognised coordinates; `unknown` is the
         sorted coordinates found in neither table and not in `ignore` (nor
         already provided, e.g. `kotlin-stdlib`); `unreadable` is the sorted
-        dependency declarations no coordinate could be reduced from
-        (version-catalog `libs.*` refs, variables, local `files(...)`
-        jars, ...).
+        dependency declarations no coordinate could be reduced from.
     """
     merged = dict(_MAVEN_COORD_TO_LABEL)
     if mapping:
@@ -568,15 +1186,18 @@ def maven_labels_for_gradle(content, mapping, ignore):
     labels = {}
     unknown = {}
     unreadable = {}
-    for raw_line in content.split("\n"):
-        rest = _runtime_dep_rest(raw_line)
-        if not rest:
-            continue
-        coord = _gradle_coord_of(rest)
-        if coord:
-            _maven_add_coord(coord, merged, ignored, labels, unknown)
-        elif not _gradle_is_project_ref(rest):
-            unreadable[raw_line.strip()] = True
+
+    # Starlark forbids recursion, so applied scripts queue here: each entry
+    # carries its own cycle chain (`seen`) and nesting depth. The queue is
+    # bounded; exhausting it fails closed rather than hanging.
+    pending = [(content, {}, 0)]
+    for _ in range(512):
+        if not pending:
+            break
+        (sub, seen, depth) = pending.pop()
+        _maven_walk_gradle(sub, merged, ignored, labels, unknown, unreadable, read_script, seen, depth, pending)
+    if pending:
+        unreadable["applied Gradle scripts exceed the parse budget"] = True
     return struct(
         labels = sorted(labels.keys()),
         unknown = sorted(unknown.keys()),
@@ -616,10 +1237,36 @@ def _resolve_plugin_maven_deps(ctx):
             break
     if not content:
         return []
+
+    # The workspace owner's label mapping is trusted like hand-written
+    # BUILD text, but a broken-out value would still poison the generated
+    # deps list; refuse it here (naming the package and the key) the way
+    # the extension refuses it at eval time.
+    for _coord_key in ctx.attr.android_maven_deps.keys():
+        _label_value = ctx.attr.android_maven_deps[_coord_key]
+        if not is_maven_dep_label(_label_value):
+            fail((
+                "flutter.pub spoke for \"{pkg}\": android_maven_deps[{key}] " +
+                "is not a valid Bazel label ({label}). Map the coordinate " +
+                "to a label in another repository (\"@...\" ) or an absolute " +
+                "label (\"//...\") with no quotes, backslashes or newlines."
+            ).format(
+                pkg = ctx.attr.package_name,
+                key = _coord_key,
+                label = _label_value,
+            ))
+
+    def _read_package_script(path):
+        gradle_file = ctx.path("android/" + path)
+        if not gradle_file.exists:
+            return None
+        return ctx.read(gradle_file)
+
     result = maven_labels_for_gradle(
         content,
         ctx.attr.android_maven_deps,
         ctx.attr.android_maven_ignore,
+        _read_package_script,
     )
     if result.unknown or result.unreadable:
         details = []
@@ -1253,7 +1900,19 @@ def make_android_subpackage_build_content(
 
     Returns:
         Generated BUILD content as a string.
+
+    Every string below renders with `repr()`, never `"..." % value`: the
+    namespace, manifest paths and labels arrive from plugin files and user
+    attributes, and a hostile value must at worst land inert inside a
+    string literal, never break out of one. A non-empty `java_package`
+    that is not a Java package name (see `is_java_package_name`) fails
+    instead of rendering at all.
     """
+    if java_package and not is_java_package_name(java_package):
+        fail(
+            "make_android_subpackage_build_content: java_package " +
+            repr(java_package) + " is not a valid Java package name.",
+        )
     if not android_src_dir and not has_resources:
         # Empty kt_android_library is valid in rules_kotlin. The hub's
         # aggregator depends on this spoke's `:lib` unconditionally, so
@@ -1285,13 +1944,16 @@ kt_android_library(
             sub_src = android_src_dir[len("android/"):]
         else:
             sub_src = android_src_dir
-        srcs_attr = 'glob(["{d}/**/*.kt", "{d}/**/*.java"], allow_empty = True)'.format(d = sub_src)
+        srcs_attr = "glob([{kt}, {java}], allow_empty = True)".format(
+            kt = repr(sub_src + "/**/*.kt"),
+            java = repr(sub_src + "/**/*.java"),
+        )
     else:
         srcs_attr = "[]"
 
     custom_package_arg = ""
     if java_package:
-        custom_package_arg = '    custom_package = "%s",\n' % java_package
+        custom_package_arg = "    custom_package = %s,\n" % repr(java_package)
 
     # `manifest = "..."` lets `android_binary`'s `ManifestMerger2` pick
     # up the plugin's `<activity>` / `<service>` / `<uses-permission>`
@@ -1314,9 +1976,16 @@ kt_android_library(
         sub_manifest = android_manifest
         if sub_manifest.startswith("android/"):
             sub_manifest = sub_manifest[len("android/"):]
-        manifest_arg = '    manifest = "%s",\n    exports_manifest = 1,\n' % sub_manifest
+        manifest_arg = "    manifest = %s,\n    exports_manifest = 1,\n" % repr(sub_manifest)
     elif has_resources:
         manifest_arg = '    manifest = ":_manifest",\n'
+        manifest_lines = [
+            "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"",
+            "    package=\"" + java_package + "\">",
+            "</manifest>",
+            "",
+        ]
+        manifest_content = "\n".join(["        %s," % repr(line) for line in manifest_lines])
         synthesized_manifest = """
 # Minimal manifest for resource processing. AGP treats a missing library
 # manifest as an empty one; rules_android requires an explicit file when
@@ -1325,14 +1994,11 @@ write_file(
     name = "_manifest",
     out = "_manifest/AndroidManifest.xml",
     content = [
-        "<manifest xmlns:android=\\"http://schemas.android.com/apk/res/android\\"",
-        "    package=\\"{pkg}\\">",
-        "</manifest>",
-        "",
+{content}
     ],
     newline = "unix",
 )
-""".format(pkg = java_package)
+""".format(content = manifest_content)
 
     # Resources are compiled into the library so the plugin's `R` class
     # resolves at compile time and the resources merge into the consuming
@@ -1348,7 +2014,7 @@ write_file(
     # sub-package, which is where the spoke lives in our layout.
     proguard_specs_arg = ""
     if consumer_proguard_specs:
-        spec_lines = ", ".join(['"%s"' % path for path in consumer_proguard_specs])
+        spec_lines = ", ".join([repr(path) for path in consumer_proguard_specs])
         proguard_specs_arg = "    proguard_specs = [%s],\n" % spec_lines
 
     # Base deps every plugin spoke gets: the engine (which carries the
@@ -1365,11 +2031,21 @@ write_file(
         if lbl not in seen:
             seen[lbl] = True
             all_labels.append(lbl)
-    deps_block = "\n        ".join(['"%s",' % label for label in all_labels])
+    deps_block = "\n        ".join([repr(label) + "," for label in all_labels])
 
     # BuildConfig.java stub — Gradle generates this implicitly per
     # plugin's namespace. rules_android does not, so we hand-emit one.
     bc_package = java_package if java_package else "_unknown"
+    bc_lines = [
+        "package " + bc_package + ";",
+        "public final class BuildConfig {",
+        "  public static final boolean DEBUG = false;",
+        "  public static final String LIBRARY_PACKAGE_NAME = \"" + bc_package + "\";",
+        "  public static final String BUILD_TYPE = \"release\";",
+        "}",
+        "",
+    ]
+    bc_content = "\n".join(["        %s," % repr(line) for line in bc_lines])
 
     return """\
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
@@ -1394,15 +2070,9 @@ flutter_android_engine(
 # and harmless for debug (the engine ABI / mode is decided elsewhere).
 write_file(
     name = "_build_config_src",
-    out = "_build_config/{bc_package_path}/BuildConfig.java",
+    out = {bc_out},
     content = [
-        "package {bc_package};",
-        "public final class BuildConfig {{",
-        "  public static final boolean DEBUG = false;",
-        "  public static final String LIBRARY_PACKAGE_NAME = \\"{bc_package}\\";",
-        "  public static final String BUILD_TYPE = \\"release\\";",
-        "}}",
-        "",
+{bc_content}
     ],
     newline = "unix",
 )
@@ -1428,8 +2098,8 @@ kt_android_library(
         resource_files = resource_files_arg,
         proguard_specs = proguard_specs_arg,
         deps = deps_block,
-        bc_package = bc_package,
-        bc_package_path = bc_package.replace(".", "/"),
+        bc_out = repr("_build_config/" + bc_package.replace(".", "/") + "/BuildConfig.java"),
+        bc_content = bc_content,
         synthesized_manifest = synthesized_manifest,
     )
 
@@ -2007,6 +2677,19 @@ def _flutter_pub_package_impl(ctx):
                 android_info.get("package", "") or
                 ""
             )
+            if android_java_package and not is_java_package_name(android_java_package):
+                fail((
+                    "flutter.pub spoke for \"{pkg}\": the Android namespace " +
+                    "{ns} is not a valid Java package name (checked " +
+                    "android.namespace in build.gradle(.kts), the " +
+                    "AndroidManifest.xml package attribute, and " +
+                    "flutter.plugin.platforms.android.package in " +
+                    "pubspec.yaml). Refusing it rather than emitting it " +
+                    "into the generated android/BUILD.bazel."
+                ).format(
+                    pkg = ctx.attr.package_name,
+                    ns = repr(android_java_package),
+                ))
             if android_src_dir or android_has_resources:
                 android_extra_maven_labels = _resolve_plugin_maven_deps(ctx)
                 android_manifest = _detect_android_manifest(ctx)
