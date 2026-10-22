@@ -197,9 +197,7 @@ Future<int> _runOnce({
   } finally {
     await harness.dispose();
     if (combinedDill != null && combinedDill.existsSync()) {
-      try {
-        combinedDill.deleteSync();
-      } catch (_) {}
+      cleanupQuietly(combinedDill.deleteSync);
     }
   }
 }
@@ -238,6 +236,40 @@ Object suiteTimeout(String? bazelTestTimeout) {
     'duration': Duration(seconds: seconds).inMicroseconds,
     'scaleFactor': null,
   };
+}
+
+/// Best-effort synchronous filesystem cleanup.
+///
+/// Swallows only [FileSystemException]: a file that vanished between the
+/// `existsSync` check and the deletion is a race with the platform, not a
+/// failure of the run. Anything else is a bug in the cleanup itself and
+/// propagates.
+///
+/// Public, like [collectCoverage], because the test reaches it directly.
+void cleanupQuietly(void Function() action) {
+  try {
+    action();
+  } on FileSystemException catch (_) {
+    // Best-effort cleanup only; anything else propagates by design.
+  }
+}
+
+/// Best-effort asynchronous teardown step.
+///
+/// Swallows only the races a closing resource reports — [IOException] when
+/// the peer went away first, [StateError] when the close already happened —
+/// so a bug in teardown itself still surfaces instead of masking the run's
+/// real result from a `finally` block.
+///
+/// Public, like [collectCoverage], because the test reaches it directly.
+Future<void> teardownQuietly(Future<void> Function() step) async {
+  try {
+    await step();
+  } on IOException catch (_) {
+    // Best-effort teardown only; anything else propagates by design.
+  } on StateError catch (_) {
+    // Best-effort teardown only; anything else propagates by design.
+  }
 }
 
 /// Harness state: server, tester process, WebSocket, channel demux.
@@ -324,13 +356,10 @@ class _Harness {
   /// the process is already dead." The `try` around it was guarding a failure
   /// that cannot happen, while the value that does report it went unread.
   Future<void> dispose() async {
-    try {
-      await _ws?.close();
-    } catch (_) {}
+    final ws = _ws;
+    if (ws != null) await teardownQuietly(ws.close);
     _process?.kill(ProcessSignal.sigkill);
-    try {
-      await _server.close(force: true);
-    } catch (_) {}
+    await teardownQuietly(() => _server.close(force: true));
   }
 
   Future<int> run({
@@ -692,10 +721,25 @@ class _Harness {
       }
       await File(coverageFile).writeAsString(lcov);
       return null;
-    } catch (e) {
-      return 'failed to collect coverage: $e';
+    } on IOException catch (e) {
+      // A source read or the LCOV write failed; reported as a coverage
+      // failure, never mistaken for a healthy run.
+      return _coverageFailure(e);
+    } on StateError catch (e) {
+      // The VM service refused an RPC; reported as a coverage failure.
+      return _coverageFailure(e);
+    } on TimeoutException catch (e) {
+      // The VM service stopped answering mid-collection; reported as a
+      // coverage failure rather than parking until Bazel's outer timeout.
+      return _coverageFailure(e);
+    } on TypeError catch (e) {
+      // A malformed report is a broken run, not empty coverage; reported.
+      return _coverageFailure(e);
     }
   }
+
+  /// Formats a coverage collection failure for the run's stderr report.
+  static String _coverageFailure(Object e) => 'failed to collect coverage: $e';
 
   /// Closes the suite down and waits for `flutter_tester` to exit.
   ///
@@ -703,9 +747,8 @@ class _Harness {
   /// signal-killed process reports `-signum`, and SIGHUP is signal 1, so
   /// `-1` is a real exit value. Track the timeout kill explicitly instead.
   Future<({bool killedAfterTimeout, int testerExit})> _shutdownTester() async {
-    try {
-      await _ws?.close();
-    } catch (_) {}
+    final ws = _ws;
+    if (ws != null) await teardownQuietly(ws.close);
     var killedAfterTimeout = false;
     final testerExit = await _process!.exitCode.timeout(
       const Duration(seconds: 30),
