@@ -143,6 +143,66 @@ flutter_xtool_bundle_version = rule(
     doc = "Host-agnostic replacement for `apple_bundle_version` on the `xtool` backend.",
 )
 
+def _xtool_version_name(version, pkg):
+    """The same-package target name behind a `version` label, or None when cross-package."""
+    ver_name = None
+    if version.startswith(":"):
+        ver_name = version[1:]
+    elif "/" not in version and ":" not in version:
+        ver_name = version
+    elif version.startswith("//" + pkg + ":"):
+        ver_name = version.split(":", 1)[1]
+    return ver_name
+
+def _mirror_xtool_bundle_version(name, existing, internal_tags):
+    """Mirror an `apple_bundle_version` rule's attributes into a host-agnostic helper target.
+
+    Returns the `(version_label, build_version, short_version)` triple.
+    """
+    bv = existing.get("build_version") or ""
+    sv = existing.get("short_version_string") or ""
+    blp = existing.get("build_label_pattern") or ""
+    cg = existing.get("capture_groups") or {}
+    fbl = existing.get("fallback_build_label") or ""
+    helper_name = "__%s_xtool_version" % name
+    flutter_xtool_bundle_version(
+        name = helper_name,
+        build_version = bv,
+        short_version_string = sv,
+        build_label_pattern = blp,
+        capture_groups = cg,
+        fallback_build_label = fbl,
+        tags = internal_tags,
+        visibility = ["//visibility:private"],
+    )
+    return ":" + helper_name, (bv if not blp else ""), ((sv or bv) if not blp else "")
+
+def _resolve_xtool_same_package(name, macro_name, ver_name, version, pkg, internal_tags):
+    """Resolve a same-package `version` label without triggering Apple toolchains."""
+    existing = native.existing_rule(ver_name)
+    if existing != None:
+        kind = existing.get("kind", "")
+        if kind == "apple_bundle_version" or "build_version" in existing or "short_version_string" in existing:
+            label, bv, sv = _mirror_xtool_bundle_version(name, existing, internal_tags)
+            return label, bv, sv, ""
+        if kind in ("flutter_xtool_bundle_version", "write_file", "_write_file", "genrule", "filegroup"):
+            return version, "", "", ""
+        return None, "", "", "%s(name = %r): 'version' target %r (rule kind %r) is not supported on the xtool backend; pass an 'apple_bundle_version' target, 'flutter_xtool_bundle_version', or a JSON version file." % (
+            macro_name,
+            name,
+            version,
+            kind,
+        )
+
+    if native.glob([ver_name], allow_empty = True):
+        return version, "", "", ""
+    return None, "", "", "%s(name = %r): 'version' target %r does not exist in package '//%s'; pass an 'apple_bundle_version' target or a JSON version file." % (
+        macro_name,
+        name,
+        version,
+        pkg,
+    )
+
 def resolve_xtool_version(name, macro_name, version, internal_tags):
     """Resolves a `version` attribute for `backend = 'xtool'` without triggering Apple toolchains.
 
@@ -169,53 +229,10 @@ def resolve_xtool_version(name, macro_name, version, internal_tags):
         )
 
     pkg = native.package_name()
-    ver_name = None
-    if version.startswith(":"):
-        ver_name = version[1:]
-    elif "/" not in version and ":" not in version:
-        ver_name = version
-    elif version.startswith("//" + pkg + ":"):
-        ver_name = version.split(":", 1)[1]
+    ver_name = _xtool_version_name(version, pkg)
 
     if ver_name != None:
-        existing = native.existing_rule(ver_name)
-        if existing != None:
-            kind = existing.get("kind", "")
-            if kind == "apple_bundle_version" or "build_version" in existing or "short_version_string" in existing:
-                bv = existing.get("build_version") or ""
-                sv = existing.get("short_version_string") or ""
-                blp = existing.get("build_label_pattern") or ""
-                cg = existing.get("capture_groups") or {}
-                fbl = existing.get("fallback_build_label") or ""
-                helper_name = "__%s_xtool_version" % name
-                flutter_xtool_bundle_version(
-                    name = helper_name,
-                    build_version = bv,
-                    short_version_string = sv,
-                    build_label_pattern = blp,
-                    capture_groups = cg,
-                    fallback_build_label = fbl,
-                    tags = internal_tags,
-                    visibility = ["//visibility:private"],
-                )
-                return ":" + helper_name, (bv if not blp else ""), ((sv or bv) if not blp else ""), ""
-            if kind in ("flutter_xtool_bundle_version", "write_file", "_write_file", "genrule", "filegroup"):
-                return version, "", "", ""
-            return None, "", "", "%s(name = %r): 'version' target %r (rule kind %r) is not supported on the xtool backend; pass an 'apple_bundle_version' target, 'flutter_xtool_bundle_version', or a JSON version file." % (
-                macro_name,
-                name,
-                version,
-                kind,
-            )
-
-        if native.glob([ver_name], allow_empty = True):
-            return version, "", "", ""
-        return None, "", "", "%s(name = %r): 'version' target %r does not exist in package '//%s'; pass an 'apple_bundle_version' target or a JSON version file." % (
-            macro_name,
-            name,
-            version,
-            pkg,
-        )
+        return _resolve_xtool_same_package(name, macro_name, ver_name, version, pkg, internal_tags)
 
     return None, "", "", "%s(name = %r): cross-package 'version' target %r is not supported on the xtool backend because 'apple_bundle_version' requires a macOS toolchain unless declared in the same package; declare 'apple_bundle_version' in '//%s' or pass `build_version` / `short_version`." % (
         macro_name,
@@ -301,7 +318,24 @@ def _infer_framework_name(files, explicit_name, fallback_name):
                 return segment[:-len(".xcframework")]
     return fallback_name
 
-def _select_framework_dir_and_headers(files, target_arch, is_simulator):
+def _scan_path_segments(parts, framework_dirs, framework_search_dirs, include_dirs):
+    """Index the `.framework` / `Headers` segments of one split file path."""
+    for idx, part in enumerate(parts):
+        if part.endswith(".framework"):
+            fw_dir = "/".join(parts[:idx + 1])
+            parent_dir = "/".join(parts[:idx])
+            if fw_dir not in framework_dirs:
+                framework_dirs.append(fw_dir)
+            if parent_dir:
+                framework_search_dirs[parent_dir] = True
+        if part == "Headers" and idx > 0 and (
+            parts[idx - 1].endswith(".framework") or
+            (idx >= 3 and parts[idx - 2] == "Versions")
+        ):
+            include_dirs["/".join(parts[:idx + 1])] = True
+
+def _scan_framework_search_paths(files):
+    """Index framework dirs, headers and include dirs across every file path."""
     framework_dirs = []
     headers = []
     include_dirs = {}
@@ -314,24 +348,14 @@ def _select_framework_dir_and_headers(files, target_arch, is_simulator):
                 framework_dirs.append(path)
 
         parts = path.split("/")
-        for idx, part in enumerate(parts):
-            if part.endswith(".framework"):
-                fw_dir = "/".join(parts[:idx + 1])
-                parent_dir = "/".join(parts[:idx])
-                if fw_dir not in framework_dirs:
-                    framework_dirs.append(fw_dir)
-                if parent_dir:
-                    framework_search_dirs[parent_dir] = True
-            if part == "Headers" and idx > 0 and (
-                parts[idx - 1].endswith(".framework") or
-                (idx >= 3 and parts[idx - 2] == "Versions")
-            ):
-                include_dirs["/".join(parts[:idx + 1])] = True
+        _scan_path_segments(parts, framework_dirs, framework_search_dirs, include_dirs)
 
         if path.endswith(".h"):
             headers.append(f)
+    return framework_dirs, headers, include_dirs, framework_search_dirs
 
-    # Prefer a slice matching simulator vs device when multiple slices exist in an xcframework.
+def _choose_framework_slice(framework_dirs, target_arch, is_simulator, files):
+    """Prefer a slice matching simulator vs device when several exist in an xcframework."""
     chosen_dir = ""
     if framework_dirs:
         chosen_dir = framework_dirs[0]
@@ -351,7 +375,11 @@ def _select_framework_dir_and_headers(files, target_arch, is_simulator):
 
     if not chosen_dir and files:
         chosen_dir = files[0].dirname
+    return chosen_dir
 
+def _select_framework_dir_and_headers(files, target_arch, is_simulator):
+    framework_dirs, headers, include_dirs, framework_search_dirs = _scan_framework_search_paths(files)
+    chosen_dir = _choose_framework_slice(framework_dirs, target_arch, is_simulator, files)
     return chosen_dir, headers, include_dirs.keys(), framework_search_dirs.keys()
 
 def _flutter_darwin_xcframework_import_impl(ctx):
@@ -436,6 +464,28 @@ def _extract_framework_dirs_from_files(files, seen_dirs, framework_dirs):
                         framework_dirs.append(candidate)
                     break
 
+def _record_framework_info(fw_info, seen_dirs, framework_dirs, transitive_inputs):
+    """Fold one `FlutterDarwinFrameworkInfo` into the shared accumulators."""
+    transitive_inputs.append(fw_info.framework_files)
+    if fw_info.framework_dir:
+        if fw_info.framework_dir not in seen_dirs:
+            seen_dirs[fw_info.framework_dir] = True
+            framework_dirs.append(fw_info.framework_dir)
+    else:
+        _extract_framework_dirs_from_files(
+            fw_info.framework_files.to_list(),
+            seen_dirs,
+            framework_dirs,
+        )
+
+def _framework_files_in(files):
+    """The subset of `files` that belongs to a `.framework` / `.xcframework`."""
+    return [
+        f
+        for f in files
+        if f.is_directory or ".framework/" in f.path or ".xcframework/" in f.path or f.path.endswith(".framework") or f.path.endswith(".xcframework")
+    ]
+
 def _collect_framework_args_and_inputs(framework_targets, plugin_and_dep_targets = []):
     framework_dirs = []
     seen_dirs = {}
@@ -444,18 +494,12 @@ def _collect_framework_args_and_inputs(framework_targets, plugin_and_dep_targets
 
     for target in framework_targets:
         if FlutterDarwinFrameworkInfo in target:
-            fw_info = target[FlutterDarwinFrameworkInfo]
-            transitive_inputs.append(fw_info.framework_files)
-            if fw_info.framework_dir:
-                if fw_info.framework_dir not in seen_dirs:
-                    seen_dirs[fw_info.framework_dir] = True
-                    framework_dirs.append(fw_info.framework_dir)
-            else:
-                _extract_framework_dirs_from_files(
-                    fw_info.framework_files.to_list(),
-                    seen_dirs,
-                    framework_dirs,
-                )
+            _record_framework_info(
+                target[FlutterDarwinFrameworkInfo],
+                seen_dirs,
+                framework_dirs,
+                transitive_inputs,
+            )
         else:
             files = target[DefaultInfo].files.to_list()
             direct_inputs.extend(files)
@@ -463,30 +507,71 @@ def _collect_framework_args_and_inputs(framework_targets, plugin_and_dep_targets
 
     for target in plugin_and_dep_targets:
         if FlutterDarwinFrameworkInfo in target:
-            fw_info = target[FlutterDarwinFrameworkInfo]
-            transitive_inputs.append(fw_info.framework_files)
-            if fw_info.framework_dir:
-                if fw_info.framework_dir not in seen_dirs:
-                    seen_dirs[fw_info.framework_dir] = True
-                    framework_dirs.append(fw_info.framework_dir)
-            else:
-                _extract_framework_dirs_from_files(
-                    fw_info.framework_files.to_list(),
-                    seen_dirs,
-                    framework_dirs,
-                )
+            _record_framework_info(
+                target[FlutterDarwinFrameworkInfo],
+                seen_dirs,
+                framework_dirs,
+                transitive_inputs,
+            )
         else:
-            files = target[DefaultInfo].files.to_list()
-            fw_files = [
-                f
-                for f in files
-                if f.is_directory or ".framework/" in f.path or ".xcframework/" in f.path or f.path.endswith(".framework") or f.path.endswith(".xcframework")
-            ]
+            fw_files = _framework_files_in(target[DefaultInfo].files.to_list())
             if fw_files:
                 direct_inputs.extend(fw_files)
                 _extract_framework_dirs_from_files(fw_files, seen_dirs, framework_dirs)
 
     return framework_dirs, direct_inputs, transitive_inputs
+
+def _classify_runner_file(seen, buckets, f):
+    """Sort one file into the runner's source/header/modulemap buckets, deduplicated by path."""
+    if f.path in seen:
+        return
+    seen[f.path] = True
+    if f.path.endswith(".swift") or f.path.endswith(".m") or f.path.endswith(".mm") or f.path.endswith(".c") or f.path.endswith(".cc") or f.path.endswith(".cpp"):
+        buckets["sources"].append(f)
+    elif f.path.endswith(".h"):
+        buckets["headers"].append(f)
+    elif f.path.endswith(".modulemap"):
+        buckets["modulemaps"].append(f)
+
+def _add_sdk_name(seen_names, ordered, value):
+    """Append an SDK framework/dylib name once, preserving first-seen order."""
+    if value and value not in seen_names:
+        seen_names[value] = True
+        ordered.append(value)
+
+def _collect_runner_own_files(ctx, seen, buckets):
+    """Classify the runner's own `srcs` and `registrant` files."""
+    for f in ctx.files.srcs:
+        _classify_runner_file(seen, buckets, f)
+    for f in ctx.files.registrant:
+        _classify_runner_file(seen, buckets, f)
+
+def _collect_runner_linker_sdk_names(target, sdk_frameworks, seen_sdk_fw, sdk_dylibs, seen_sdk_dylib):
+    """Record the SDK frameworks/dylibs named by a dep's linker flags."""
+    for li in target[CcInfo].linking_context.linker_inputs.to_list():
+        flags = li.user_link_flags
+        for idx in range(len(flags)):
+            if flags[idx] == "-framework" and idx + 1 < len(flags):
+                _add_sdk_name(seen_sdk_fw, sdk_frameworks, flags[idx + 1])
+            elif flags[idx].startswith("-l") and len(flags[idx]) > 2:
+                _add_sdk_name(seen_sdk_dylib, sdk_dylibs, flags[idx][2:])
+
+def _collect_runner_dep_files(ctx, seen, buckets, sdk_frameworks, seen_sdk_fw, sdk_dylibs, seen_sdk_dylib, transitive_sets):
+    """Classify plugin/dep files and record their SDK frameworks, dylibs and header sets."""
+    for target in ctx.attr.plugins + ctx.attr.deps:
+        for f in target[DefaultInfo].files.to_list():
+            _classify_runner_file(seen, buckets, f)
+        if FlutterApplePluginInfo in target:
+            for fw in target[FlutterApplePluginInfo].sdk_frameworks:
+                _add_sdk_name(seen_sdk_fw, sdk_frameworks, fw)
+            for dylib in target[FlutterApplePluginInfo].sdk_dylibs:
+                _add_sdk_name(seen_sdk_dylib, sdk_dylibs, dylib)
+        if CcInfo in target:
+            cc_hdrs = target[CcInfo].compilation_context.headers
+            transitive_sets.append(cc_hdrs)
+            for f in cc_hdrs.to_list():
+                _classify_runner_file(seen, buckets, f)
+            _collect_runner_linker_sdk_names(target, sdk_frameworks, seen_sdk_fw, sdk_dylibs, seen_sdk_dylib)
 
 def _collect_runner_compile_inputs(ctx):
     sources = []
@@ -498,53 +583,10 @@ def _collect_runner_compile_inputs(ctx):
     seen_sdk_fw = {}
     seen_sdk_dylib = {}
     transitive_sets = []
+    buckets = {"sources": sources, "headers": headers, "modulemaps": modulemaps}
 
-    def _add_file(f):
-        if f.path in seen:
-            return
-        seen[f.path] = True
-        if f.path.endswith(".swift") or f.path.endswith(".m") or f.path.endswith(".mm") or f.path.endswith(".c") or f.path.endswith(".cc") or f.path.endswith(".cpp"):
-            sources.append(f)
-        elif f.path.endswith(".h"):
-            headers.append(f)
-        elif f.path.endswith(".modulemap"):
-            modulemaps.append(f)
-
-    def _add_sdk_framework(fw):
-        if fw and fw not in seen_sdk_fw:
-            seen_sdk_fw[fw] = True
-            sdk_frameworks.append(fw)
-
-    def _add_sdk_dylib(dylib):
-        if dylib and dylib not in seen_sdk_dylib:
-            seen_sdk_dylib[dylib] = True
-            sdk_dylibs.append(dylib)
-
-    for f in ctx.files.srcs:
-        _add_file(f)
-    for f in ctx.files.registrant:
-        _add_file(f)
-
-    for target in ctx.attr.plugins + ctx.attr.deps:
-        for f in target[DefaultInfo].files.to_list():
-            _add_file(f)
-        if FlutterApplePluginInfo in target:
-            for fw in target[FlutterApplePluginInfo].sdk_frameworks:
-                _add_sdk_framework(fw)
-            for dylib in target[FlutterApplePluginInfo].sdk_dylibs:
-                _add_sdk_dylib(dylib)
-        if CcInfo in target:
-            cc_hdrs = target[CcInfo].compilation_context.headers
-            transitive_sets.append(cc_hdrs)
-            for f in cc_hdrs.to_list():
-                _add_file(f)
-            for li in target[CcInfo].linking_context.linker_inputs.to_list():
-                flags = li.user_link_flags
-                for idx in range(len(flags)):
-                    if flags[idx] == "-framework" and idx + 1 < len(flags):
-                        _add_sdk_framework(flags[idx + 1])
-                    elif flags[idx].startswith("-l") and len(flags[idx]) > 2:
-                        _add_sdk_dylib(flags[idx][2:])
+    _collect_runner_own_files(ctx, seen, buckets)
+    _collect_runner_dep_files(ctx, seen, buckets, sdk_frameworks, seen_sdk_fw, sdk_dylibs, seen_sdk_dylib, transitive_sets)
 
     return sources, headers, modulemaps, sdk_frameworks, sdk_dylibs, transitive_sets
 
@@ -566,14 +608,8 @@ def _check_resource_file_for_xtool(ctx, file_obj, attr_name):
             )
     return None
 
-def _run_xtool_pack_bundle(
-        ctx,
-        *,
-        platform,
-        archive_ext,
-        mnemonic,
-        families = [],
-        native_libs = []):
+def _fail_on_xtool_unsupported_attrs(ctx):
+    """Fail on xtool-backend attribute combinations that have no hermetic implementation."""
     if ctx.attr.unsupported_kwargs:
         fail(
             "%s (backend = 'xtool'): unsupported attribute(s) %s are not supported on the xtool backend." % (
@@ -590,6 +626,8 @@ def _run_xtool_pack_bundle(
             "%s: plain-text 'certificate_password' is not supported because signing secrets must never appear on action command lines. Use 'certificate_password_file' (a File label) or 'certificate_password_env' (an environment variable name) instead." % ctx.label,
         )
 
+def _collect_xtool_ib_errors(ctx):
+    """The Interface Builder / asset catalog errors for resources needing Xcode tools."""
     ib_errors = []
     if hasattr(ctx.file, "launch_storyboard") and ctx.file.launch_storyboard:
         ib_errors.append(
@@ -620,7 +658,10 @@ def _run_xtool_pack_bundle(
         err = _check_resource_file_for_xtool(ctx, res_file, "resources")
         if err:
             ib_errors.append(err)
+    return ib_errors
 
+def _collect_xtool_additional_contents(ctx, ib_errors):
+    """Validate `additional_contents` and return its `(subdir=file)` pairs and files."""
     additional_content_pairs = []
     additional_content_files = []
     for target, subdir in ctx.attr.additional_contents.items():
@@ -638,119 +679,64 @@ def _run_xtool_pack_bundle(
                 ib_errors.append(err)
             additional_content_pairs.append("%s=%s" % (subdir, f.path))
             additional_content_files.append(f)
+    return additional_content_pairs, additional_content_files
 
-    if ib_errors:
-        fail("\n".join(ib_errors))
-
+def _xtool_sdk_availability(ctx):
+    """Whether the xtool SDK repo resolved, plus its files for action inputs."""
     sdk_available = False
     sdk_transitive = []
     if ctx.attr._xtool_sdk_status and FlutterXtoolSdkInfo in ctx.attr._xtool_sdk_status:
         sdk_info = ctx.attr._xtool_sdk_status[FlutterXtoolSdkInfo]
         sdk_available = sdk_info.sdk_available
         sdk_transitive.append(sdk_info.sdk_files)
+    return sdk_available, sdk_transitive
 
-    if ctx.attr.require_sdk and not sdk_available:
-        fail(UNCONFIGURED_SDK_ERROR)
+def _compile_xtool_runner(ctx, platform, app_name, arch, sdk_available, fw_dirs, fw_direct_inputs, fw_transitive_inputs, sdk_transitive):
+    """Compile the runner executable via `xtool_pack compile-runner`; returns its File."""
+    executable_file = ctx.actions.declare_file("%s_runner_bin" % ctx.label.name)
+    sources, headers, modulemaps, sdk_frameworks, sdk_dylibs, plugin_transitive_sets = _collect_runner_compile_inputs(ctx)
 
-    app_name = ctx.attr.app_name if ctx.attr.app_name else ctx.label.name
-    archive_file = ctx.actions.declare_file("%s%s" % (ctx.label.name, archive_ext))
-    app_dir = ctx.actions.declare_directory("%s_bundle/%s.app" % (ctx.label.name, app_name))
+    runner_args = ctx.actions.args()
+    runner_args.add("compile-runner")
+    runner_args.add("--platform", platform)
+    runner_args.add("--arch", arch)
+    runner_args.add("--app-name", app_name)
+    runner_args.add("--minimum-os-version", ctx.attr.minimum_os_version)
+    runner_args.add("--sdk-available", "true" if sdk_available else "false")
+    runner_args.add("--output", executable_file.path)
 
-    infoplists = ctx.files.infoplists
-    resources = ctx.files.resources
+    for src in sources:
+        runner_args.add("--source", src.path)
+    for hdr in headers:
+        runner_args.add("--header", hdr.path)
+    for mm in modulemaps:
+        runner_args.add("--modulemap", mm.path)
+    for fw_dir in fw_dirs:
+        runner_args.add("--framework", fw_dir)
+    for sdk_fw in sdk_frameworks:
+        runner_args.add("--sdk-framework", sdk_fw)
+    for sdk_dylib in sdk_dylibs:
+        runner_args.add("--sdk-dylib", sdk_dylib)
 
-    fw_dirs, fw_direct_inputs, fw_transitive_inputs = _collect_framework_args_and_inputs(
-        ctx.attr.frameworks,
-        ctx.attr.plugins + ctx.attr.deps,
+    ctx.actions.run(
+        executable = ctx.executable._xtool_pack,
+        arguments = [runner_args],
+        env = {"TMPDIR": "/tmp"},
+        use_default_shell_env = False,
+        inputs = depset(
+            direct = sources + headers + modulemaps + fw_direct_inputs,
+            transitive = fw_transitive_inputs + plugin_transitive_sets + sdk_transitive,
+        ),
+        outputs = [executable_file],
+        mnemonic = "FlutterXtoolRunner",
+        progress_message = "Compiling runner executable for %s (%s) via xtool_pack" % (ctx.label, platform),
     )
+    return executable_file
 
-    arch = _target_arch(ctx)
-
-    executable_file = ctx.file.executable
-    if not executable_file:
-        executable_file = ctx.actions.declare_file("%s_runner_bin" % ctx.label.name)
-        sources, headers, modulemaps, sdk_frameworks, sdk_dylibs, plugin_transitive_sets = _collect_runner_compile_inputs(ctx)
-
-        runner_args = ctx.actions.args()
-        runner_args.add("compile-runner")
-        runner_args.add("--platform", platform)
-        runner_args.add("--arch", arch)
-        runner_args.add("--app-name", app_name)
-        runner_args.add("--minimum-os-version", ctx.attr.minimum_os_version)
-        runner_args.add("--sdk-available", "true" if sdk_available else "false")
-        runner_args.add("--output", executable_file.path)
-
-        for src in sources:
-            runner_args.add("--source", src.path)
-        for hdr in headers:
-            runner_args.add("--header", hdr.path)
-        for mm in modulemaps:
-            runner_args.add("--modulemap", mm.path)
-        for fw_dir in fw_dirs:
-            runner_args.add("--framework", fw_dir)
-        for sdk_fw in sdk_frameworks:
-            runner_args.add("--sdk-framework", sdk_fw)
-        for sdk_dylib in sdk_dylibs:
-            runner_args.add("--sdk-dylib", sdk_dylib)
-
-        ctx.actions.run(
-            executable = ctx.executable._xtool_pack,
-            arguments = [runner_args],
-            env = {"TMPDIR": "/tmp"},
-            use_default_shell_env = False,
-            inputs = depset(
-                direct = sources + headers + modulemaps + fw_direct_inputs,
-                transitive = fw_transitive_inputs + plugin_transitive_sets + sdk_transitive,
-            ),
-            outputs = [executable_file],
-            mnemonic = "FlutterXtoolRunner",
-            progress_message = "Compiling runner executable for %s (%s) via xtool_pack" % (ctx.label, platform),
-        )
-
-    args = ctx.actions.args()
-    args.add("bundle")
-    args.add("--platform", platform)
-    args.add("--app-name", app_name)
-    args.add("--bundle-id", ctx.attr.bundle_id)
-    args.add("--executable", executable_file.path)
-    args.add("--minimum-os-version", ctx.attr.minimum_os_version)
-    args.add("--temp-dir", archive_file.path + ".tmp")
-    args.add("--output-archive", archive_file.path)
-    args.add("--output-app-dir", app_dir.path)
-
+def _add_xtool_bundle_content_args(ctx, args, families, fw_dirs, native_libs, resources, additional_content_pairs, infoplists):
+    """Append the bundle payload flags (families, defines, plists, frameworks, libs, resources)."""
     for fam in families:
         args.add("--family", fam)
-
-    direct_inputs = (
-        [executable_file] +
-        infoplists +
-        resources +
-        native_libs +
-        additional_content_files +
-        fw_direct_inputs
-    )
-
-    if ctx.attr.version:
-        version_files = ctx.files.version
-        if not version_files:
-            fail(
-                "%s: 'version' target %s did not produce a version file; expected an 'apple_bundle_version' target, 'flutter_xtool_bundle_version', or a JSON file with 'build_version' and 'short_version_string'." % (
-                    ctx.label,
-                    ctx.attr.version.label,
-                ),
-            )
-        vf = version_files[0]
-        if FlutterXtoolVersionInfo not in ctx.attr.version and not (vf.basename.endswith(".json") or vf.basename.endswith(".bundle_version")):
-            fail(
-                "%s: 'version' target %s (%s) is not supported on the xtool backend; expected an 'apple_bundle_version' target, 'flutter_xtool_bundle_version', or a JSON file with 'build_version' and 'short_version_string'." % (
-                    ctx.label,
-                    ctx.attr.version.label,
-                    vf.short_path,
-                ),
-            )
-        args.add("--version-file", vf.path)
-        direct_inputs.append(vf)
-
     if ctx.attr.build_version:
         args.add("--define", "FLUTTER_BUILD_NUMBER=%s" % ctx.attr.build_version)
     if ctx.attr.short_version:
@@ -773,6 +759,30 @@ def _run_xtool_pack_bundle(
     for pair in additional_content_pairs:
         args.add("--additional-content", pair)
 
+def _add_xtool_version_args(ctx, args, direct_inputs):
+    """Append the `--version-file` flag and register the version file as an input."""
+    version_files = ctx.files.version
+    if not version_files:
+        fail(
+            "%s: 'version' target %s did not produce a version file; expected an 'apple_bundle_version' target, 'flutter_xtool_bundle_version', or a JSON file with 'build_version' and 'short_version_string'." % (
+                ctx.label,
+                ctx.attr.version.label,
+            ),
+        )
+    vf = version_files[0]
+    if FlutterXtoolVersionInfo not in ctx.attr.version and not (vf.basename.endswith(".json") or vf.basename.endswith(".bundle_version")):
+        fail(
+            "%s: 'version' target %s (%s) is not supported on the xtool backend; expected an 'apple_bundle_version' target, 'flutter_xtool_bundle_version', or a JSON file with 'build_version' and 'short_version_string'." % (
+                ctx.label,
+                ctx.attr.version.label,
+                vf.short_path,
+            ),
+        )
+    args.add("--version-file", vf.path)
+    direct_inputs.append(vf)
+
+def _add_xtool_signing_args(ctx, args, direct_inputs):
+    """Append the signing flags, registering each referenced file as an input."""
     if ctx.file.provisioning_profile:
         args.add("--provisioning-profile", ctx.file.provisioning_profile.path)
         direct_inputs.append(ctx.file.provisioning_profile)
@@ -793,7 +803,87 @@ def _run_xtool_pack_bundle(
         args.add("--certificate-password-file", ctx.file.certificate_password_file.path)
         direct_inputs.append(ctx.file.certificate_password_file)
 
+def _xtool_bundle_action_env(ctx):
+    """The hermetic environment for the `xtool_pack bundle` action."""
     action_env = dict(ctx.attr.env)
+    if ctx.attr.certificate_password_env:
+        if ctx.attr.certificate_password_env not in action_env:
+            action_env[ctx.attr.certificate_password_env] = ""
+    if not action_env.get("TMPDIR"):
+        action_env["TMPDIR"] = "/tmp"
+    return action_env
+
+def _xtool_bundle_base_args(ctx, platform, app_name, executable_file, archive_file, app_dir):
+    """The leading `xtool_pack bundle` flags identifying the app and its outputs."""
+    args = ctx.actions.args()
+    args.add("bundle")
+    args.add("--platform", platform)
+    args.add("--app-name", app_name)
+    args.add("--bundle-id", ctx.attr.bundle_id)
+    args.add("--executable", executable_file.path)
+    args.add("--minimum-os-version", ctx.attr.minimum_os_version)
+    args.add("--temp-dir", archive_file.path + ".tmp")
+    args.add("--output-archive", archive_file.path)
+    args.add("--output-app-dir", app_dir.path)
+    return args
+
+def _run_xtool_pack_bundle(
+        ctx,
+        *,
+        platform,
+        archive_ext,
+        mnemonic,
+        families = [],
+        native_libs = []):
+    _fail_on_xtool_unsupported_attrs(ctx)
+    ib_errors = _collect_xtool_ib_errors(ctx)
+    additional_content_pairs, additional_content_files = _collect_xtool_additional_contents(ctx, ib_errors)
+
+    if ib_errors:
+        fail("\n".join(ib_errors))
+
+    sdk_available, sdk_transitive = _xtool_sdk_availability(ctx)
+
+    if ctx.attr.require_sdk and not sdk_available:
+        fail(UNCONFIGURED_SDK_ERROR)
+
+    app_name = ctx.attr.app_name if ctx.attr.app_name else ctx.label.name
+    archive_file = ctx.actions.declare_file("%s%s" % (ctx.label.name, archive_ext))
+    app_dir = ctx.actions.declare_directory("%s_bundle/%s.app" % (ctx.label.name, app_name))
+
+    infoplists = ctx.files.infoplists
+    resources = ctx.files.resources
+
+    fw_dirs, fw_direct_inputs, fw_transitive_inputs = _collect_framework_args_and_inputs(
+        ctx.attr.frameworks,
+        ctx.attr.plugins + ctx.attr.deps,
+    )
+
+    arch = _target_arch(ctx)
+
+    executable_file = ctx.file.executable
+    if not executable_file:
+        executable_file = _compile_xtool_runner(ctx, platform, app_name, arch, sdk_available, fw_dirs, fw_direct_inputs, fw_transitive_inputs, sdk_transitive)
+
+    args = _xtool_bundle_base_args(ctx, platform, app_name, executable_file, archive_file, app_dir)
+
+    direct_inputs = (
+        [executable_file] +
+        infoplists +
+        resources +
+        native_libs +
+        additional_content_files +
+        fw_direct_inputs
+    )
+
+    if ctx.attr.version:
+        _add_xtool_version_args(ctx, args, direct_inputs)
+
+    _add_xtool_bundle_content_args(ctx, args, families, fw_dirs, native_libs, resources, additional_content_pairs, infoplists)
+
+    _add_xtool_signing_args(ctx, args, direct_inputs)
+
+    action_env = _xtool_bundle_action_env(ctx)
     args.add("--isolated-env")
     for env_key in sorted(ctx.attr.env.keys()):
         if env_key != "TMPDIR" and env_key != "TEST_TMPDIR":
