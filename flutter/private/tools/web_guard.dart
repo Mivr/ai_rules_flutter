@@ -50,38 +50,85 @@ Future<int> runGuarded(
   StringSink out,
   StringSink err,
 ) async {
+  final parsed = _parseGuardArgs(argv);
+  if (parsed.error != null) {
+    err.writeln(parsed.error);
+    return 2;
+  }
+  final sources = _readGuardSources(parsed.manifestPath!);
+  if (sources.error != null) {
+    err.writeln(sources.error);
+    return 2;
+  }
+  final refused = _refuseUndecodableSources(sources.paths, err);
+  if (refused != null) return refused;
+  final executable = argv[parsed.separator + 1];
+  final cmdArgs = argv.sublist(parsed.separator + 2);
+  final guardErrors = findDisallowedFlutterDirectives(
+    sources.paths,
+    _commandMultiRoots(cmdArgs),
+    tool: 'flutter',
+  );
+  if (guardErrors.isNotEmpty) {
+    for (final error in guardErrors) {
+      err.writeln(error);
+    }
+    return 1;
+  }
+  return _runGuardedCommand(executable, cmdArgs, out, err);
+}
+
+/// The `--` separator and `--declared-inputs` value in [argv], or the usage
+/// error to report when they are missing or malformed.
+({int separator, String? manifestPath, String? error}) _parseGuardArgs(
+  List<String> argv,
+) {
   final i = argv.indexOf('--');
   if (i < 0 || i + 1 >= argv.length) {
-    err.writeln(
-      'Usage: web_guard --declared-inputs <manifest> -- <executable> <arguments>',
+    return (
+      separator: -1,
+      manifestPath: null,
+      error:
+          'Usage: web_guard --declared-inputs <manifest> -- <executable> <arguments>',
     );
-    return 2;
   }
   String? manifestPath;
   for (var j = 0; j < i; j++) {
     if (argv[j] == '--declared-inputs' && j + 1 < i) {
       manifestPath = argv[++j];
     } else {
-      err.writeln('web_guard: unexpected argument ${argv[j]}.');
-      return 2;
+      return (
+        separator: i,
+        manifestPath: null,
+        error: 'web_guard: unexpected argument ${argv[j]}.',
+      );
     }
   }
   if (manifestPath == null) {
-    err.writeln(
-      'web_guard: missing required --declared-inputs <manifest>.',
+    return (
+      separator: i,
+      manifestPath: null,
+      error: 'web_guard: missing required --declared-inputs <manifest>.',
     );
-    return 2;
   }
+  return (separator: i, manifestPath: manifestPath, error: null);
+}
+
+/// The `.dart` sources the declared-inputs [manifestPath] lists, or the error
+/// to report when the manifest does not exist.
+///
+/// The manifest lists the declared sources, then `# staged`, then the staging
+/// root's symlinks to them: the guard scans the sources (the links hold the
+/// same bytes).
+({List<String> paths, String? error}) _readGuardSources(String manifestPath) {
   final manifest = File(manifestPath);
   if (!manifest.existsSync()) {
-    err.writeln(
-      'web_guard: declared-inputs manifest $manifestPath does not exist.',
+    return (
+      paths: const [],
+      error:
+          'web_guard: declared-inputs manifest $manifestPath does not exist.',
     );
-    return 2;
   }
-  // The manifest lists the declared sources, then `# staged`, then the
-  // staging root's symlinks to them: the guard scans the sources (the links
-  // hold the same bytes).
   final sources = <String>[];
   var staged = false;
   for (final line in manifest.readAsLinesSync()) {
@@ -93,15 +140,17 @@ Future<int> runGuarded(
     }
     if (!staged && path.endsWith('.dart')) sources.add(path);
   }
-  final executable = argv[i + 1];
-  final cmdArgs = argv.sublist(i + 2);
+  return (paths: sources, error: null);
+}
 
-  // A file the guard cannot decode is refused rather than skipped: the web
-  // front ends compile such files, so a skip would leave the import they
-  // carry unchecked. A file missing here is left to the compiler, which
-  // reports it. (`readAsStringSync` reports a decode failure as a
-  // `FileSystemException`, so existence is what tells a missing file from an
-  // undecodable one.)
+/// Refuses a declared source the guard cannot decode, or null when all scan.
+///
+/// A file the guard cannot decode is refused rather than skipped: the web
+/// front ends compile such files, so a skip would leave the import they carry
+/// unchecked. A file missing here is left to the compiler, which reports it.
+/// (`readAsStringSync` reports a decode failure as a `FileSystemException`, so
+/// existence is what tells a missing file from an undecodable one.)
+int? _refuseUndecodableSources(List<String> sources, StringSink err) {
   for (final path in sources) {
     final file = File(path);
     if (!file.existsSync()) continue;
@@ -114,10 +163,16 @@ Future<int> runGuarded(
       return 1;
     }
   }
+  return null;
+}
 
-  // The bzl helpers pass the staging root the compilers mount as
-  // `--multi-root=<stage>`: app-scheme keys resolve against it the way the
-  // compilers resolve them.
+/// The `--multi-root` values in the compiler's own [cmdArgs]: the filesystem
+/// roots the app-scheme keys resolve against.
+///
+/// The bzl helpers pass the staging root the compilers mount as
+/// `--multi-root=<stage>`: app-scheme keys resolve against it the way the
+/// compilers resolve them.
+List<String> _commandMultiRoots(List<String> cmdArgs) {
   final fsRoots = <String>[];
   for (var j = 0; j < cmdArgs.length; j++) {
     final arg = cmdArgs[j];
@@ -127,18 +182,16 @@ Future<int> runGuarded(
       fsRoots.add(arg.substring('--multi-root='.length));
     }
   }
-  final guardErrors = findDisallowedFlutterDirectives(
-    sources,
-    fsRoots,
-    tool: 'flutter',
-  );
-  if (guardErrors.isNotEmpty) {
-    for (final error in guardErrors) {
-      err.writeln(error);
-    }
-    return 1;
-  }
+  return fsRoots;
+}
 
+/// Runs the guarded [executable] with [cmdArgs], relaying its output.
+Future<int> _runGuardedCommand(
+  String executable,
+  List<String> cmdArgs,
+  StringSink out,
+  StringSink err,
+) async {
   final result = await Process.run(executable, cmdArgs);
   out.write(result.stdout as String);
   err.write(result.stderr as String);
