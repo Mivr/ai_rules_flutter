@@ -1427,6 +1427,12 @@ class _DeterministicZipEncoder {
   }
 }
 
+/// Encodes [entries] into a deterministic ZIP (or ZIP64) byte buffer.
+///
+/// Automatically writes ZIP64 extended information extra fields (`0x0001`),
+/// ZIP64 End of Central Directory record (`0x06064b50`), and ZIP64 End of
+/// Central Directory Locator (`0x07064b50`) when entry count >= 65,535 or any
+/// entry size or offset >= 4 GiB (`0xFFFFFFFF`).
 Uint8List encodeDeterministicZip(List<ZipEntry> entries) {
   final sorted = [...entries]..sort((a, b) => a.path.compareTo(b.path));
   final encoder = _DeterministicZipEncoder();
