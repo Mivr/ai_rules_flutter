@@ -314,10 +314,15 @@ bool _isIdentifierChar(String c) {
       (c.compareTo('0') >= 0 && c.compareTo('9') <= 0);
 }
 
-/// The dotted name at [i] (`Tags`, or `prefix.Tags`).
+/// The dotted name at [i] (`Tags`, or `prefix.Tags`), with whitespace and
+/// comments (line, block and doc, all trivia to the analyzer) skipped wherever
+/// Dart allows them: between `@` and the first segment, around each `.`, and
+/// after the last segment. Trivia never splits an identifier itself, so
+/// `Tag/*c*/s` stays two words, not one segment.
 ({int end, List<String> segments}) _parseDottedName(String source, int i) {
   final segments = <String>[];
-  var j = i;
+  var j = _skipTrivia(source, i);
+  var end = j;
   while (true) {
     final start = j;
     while (j < source.length && _isIdentifierChar(source[j])) {
@@ -325,10 +330,14 @@ bool _isIdentifierChar(String c) {
     }
     if (j == start) break;
     segments.add(source.substring(start, j));
-    if (j >= source.length || source[j] != '.') break;
-    j++;
+    end = j;
+    final dot = _skipTrivia(source, j);
+    if (dot >= source.length || source[dot] != '.') break;
+    final next = _skipTrivia(source, dot + 1);
+    if (next >= source.length || !_isIdentifierChar(source[next])) break;
+    j = next;
   }
-  return (end: j, segments: segments);
+  return (end: end, segments: segments);
 }
 
 /// Past an annotation at [i]: its type arguments, dotted continuations and
@@ -350,11 +359,12 @@ int _skipAnnotationTail(String source, int i) {
         return source.length;
       }
       j = _skipTrivia(source, j);
-    } else if (source[j] == '.' &&
-        j + 1 < source.length &&
-        _isIdentifierChar(source[j + 1])) {
-      // A dotted continuation after type arguments (`@C<T>.named(...)`).
-      j++;
+    } else if (source[j] == '.') {
+      // A dotted continuation after type arguments (`@C<T>.named(...)`),
+      // with trivia around the dot as the analyzer allows.
+      final next = _skipTrivia(source, j + 1);
+      if (next >= source.length || !_isIdentifierChar(source[next])) break;
+      j = next;
       while (j < source.length && _isIdentifierChar(source[j])) {
         j++;
       }

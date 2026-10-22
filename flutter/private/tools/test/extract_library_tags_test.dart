@@ -367,6 +367,213 @@ void main() {
       );
     });
 
+    test('a block comment between @ and the name still counts', () {
+      expect(
+        extractLibraryTags(
+          "@/*c*/Tags(['c12'])\n"
+          "import 'package:flutter_test/flutter_test.dart';\n"
+          'void main() {}\n',
+        ),
+        {'c12'},
+      );
+    });
+
+    test('a line comment between @ and the name still counts', () {
+      expect(
+        extractLibraryTags(
+          '@ // gap\n'
+          "Tags(['c12'])\n"
+          "import 'package:flutter_test/flutter_test.dart';\n"
+          'void main() {}\n',
+        ),
+        {'c12'},
+      );
+    });
+
+    test('a doc line comment between @ and the name still counts', () {
+      expect(
+        extractLibraryTags(
+          '@ /// documents the suite\n'
+          "Tags(['c12'])\n"
+          "import 'package:flutter_test/flutter_test.dart';\n"
+          'void main() {}\n',
+        ),
+        {'c12'},
+      );
+    });
+
+    test('a doc block comment between @ and the name still counts', () {
+      expect(
+        extractLibraryTags(
+          '@/** documents the suite */Tags('
+          "['c12'])\n"
+          "import 'package:flutter_test/flutter_test.dart';\n"
+          'void main() {}\n',
+        ),
+        {'c12'},
+      );
+    });
+
+    test('whitespace between @ and the name still counts', () {
+      expect(
+        extractLibraryTags(
+          "@ Tags(['c12'])\n"
+          "import 'package:flutter_test/flutter_test.dart';\n"
+          'void main() {}\n',
+        ),
+        {'c12'},
+      );
+      expect(
+        extractLibraryTags(
+          '@\n\tTags('
+          "['c12'])\n"
+          "import 'package:flutter_test/flutter_test.dart';\n"
+          'void main() {}\n',
+        ),
+        {'c12'},
+      );
+    });
+
+    test('gaps around the prefix dot still count', () {
+      expect(
+        extractLibraryTags(
+          "@t . Tags(['c12'])\n"
+          "import 'package:test/test.dart' as t;\n"
+          'void main() {}\n',
+        ),
+        {'c12'},
+      );
+      expect(
+        extractLibraryTags(
+          "@t/*c*/.Tags(['c12'])\n"
+          "import 'package:test/test.dart' as t;\n"
+          'void main() {}\n',
+        ),
+        {'c12'},
+      );
+      expect(
+        extractLibraryTags(
+          "@t./*c*/Tags(['c12'])\n"
+          "import 'package:test/test.dart' as t;\n"
+          'void main() {}\n',
+        ),
+        {'c12'},
+      );
+      expect(
+        extractLibraryTags(
+          "@/*c*/t/*c*/./*c*/Tags(['c12'])\n"
+          "import 'package:test/test.dart' as t;\n"
+          'void main() {}\n',
+        ),
+        {'c12'},
+      );
+      expect(
+        extractLibraryTags(
+          '@t // gap\n'
+          ".Tags(['c12'])\n"
+          "import 'package:test/test.dart' as t;\n"
+          'void main() {}\n',
+        ),
+        {'c12'},
+      );
+    });
+
+    test('a gap before the argument list still counts', () {
+      expect(
+        extractLibraryTags(
+          "@Tags (['c12'])\n"
+          "import 'package:flutter_test/flutter_test.dart';\n"
+          'void main() {}\n',
+        ),
+        {'c12'},
+      );
+      expect(
+        extractLibraryTags(
+          "@Tags/*c*/(['c12'])\n"
+          "import 'package:flutter_test/flutter_test.dart';\n"
+          'void main() {}\n',
+        ),
+        {'c12'},
+      );
+      expect(
+        extractLibraryTags(
+          '@Tags // gap\n'
+          "(['c12'])\n"
+          "import 'package:flutter_test/flutter_test.dart';\n"
+          'void main() {}\n',
+        ),
+        {'c12'},
+      );
+    });
+
+    test('a comment gap in a non-test prefix still does not count', () {
+      expect(
+        extractLibraryTags(
+          "@other/*c*/.Tags(['golden'])\n"
+          "import 'package:other/other.dart' as other;\n"
+          "import 'package:flutter_test/flutter_test.dart';\n"
+          'void main() {}\n',
+        ),
+        isEmpty,
+      );
+    });
+
+    test('similar annotation names still do not count', () {
+      expect(
+        extractLibraryTags(
+          "@Tagsx(['golden'])\n"
+          "import 'package:flutter_test/flutter_test.dart';\n"
+          'void main() {}\n',
+        ),
+        isEmpty,
+      );
+      expect(
+        extractLibraryTags(
+          "@Skip('skip it')\n"
+          "@Tags(['golden'])\n"
+          "import 'package:flutter_test/flutter_test.dart';\n"
+          'void main() {}\n',
+        ),
+        {'golden'},
+      );
+      expect(
+        extractLibraryTags(
+          "@Skip('skip it')\n"
+          "import 'package:flutter_test/flutter_test.dart';\n"
+          'void main() {}\n',
+        ),
+        isEmpty,
+      );
+    });
+
+    test('a comment-split identifier is not a Tags name', () {
+      expect(
+        extractLibraryTags(
+          "@Tag/*c*/s(['golden'])\n"
+          "import 'package:flutter_test/flutter_test.dart';\n"
+          'void main() {}\n',
+        ),
+        isEmpty,
+      );
+    });
+
+    test('a gapped duplicate Tags is still a duplicate', () {
+      expect(
+        () => extractLibraryTags(
+          "@/*c*/Tags(['a'])\n"
+          "@Tags(['b'])\n"
+          "import 'package:flutter_test/flutter_test.dart';\n"
+          'void main() {}\n',
+        ),
+        throwsA(
+          isA<TagsParseException>().having(
+            (e) => e.message,
+            'message',
+            'Only a single Tags may be used.',
+          ),
+        ),
+      );
+    });
     test('a Tags through another library prefix does not count', () {
       expect(
         extractLibraryTags(
