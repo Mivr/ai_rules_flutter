@@ -1203,7 +1203,7 @@ flutter_library(
 |---|---|
 | `srcs` | Dart source files. Required. |
 | `deps` | `dart_library` or `flutter_library` targets. |
-| `assets` | Asset files: images, fonts, and so on. Each file must live in the target's Bazel package; it is bundled at `packages/<package_name>/<path relative to the package>`. See [Asset keys](#asset-keys). |
+| `assets` | Asset files: images, fonts, and so on. Each file must sit under the target's package directory; it is bundled at `packages/<package_name>/<path relative to that directory>`. See [Asset keys](#asset-keys). |
 | `pkg_shaders` | The package's fragment shaders, as `{file: path}` mirroring `flutter: shaders:` in `pubspec.yaml`. Bundled at `packages/<package_name>/<path>`, where `FragmentProgram.fromAsset` looks for them. |
 | `shader_includes` | Files the `pkg_shaders` may `#include`, such as `glob(["shaders/**/*.glsl"])`. A shader compiles with only its declared inputs, so an include not listed here is not found. |
 | `shaders` | Shaders bundled at `shaders/<file name>`, as Flutter's own are. A package's own shaders go in `pkg_shaders`. |
@@ -1235,7 +1235,7 @@ flutter_application(
 | `package_name` | The Dart package name, the same as `pubspec.yaml`'s `name:`. Required. It keys the compiled libraries under stable `package:` URIs, which hot reload matches against, and resolves `package:<self>/...` imports. |
 | `srcs` | Other Dart sources in the app package, including generated ones. List here any file a `main` outside `lib/` imports by relative path. |
 | `deps` | `dart_library` or `flutter_library` targets. Add `@rules_flutter//flutter:material_icons` to bundle the Material icon font. |
-| `assets` | Asset files for the bundle. Each file must live in the target's Bazel package; it is bundled at its path relative to that package. See [Asset keys](#asset-keys). |
+| `assets` | Asset files for the bundle. Each file must sit under the target's package directory; it is bundled at its path relative to that directory. See [Asset keys](#asset-keys). |
 | `native_deps` | Shared libraries to bundle for `dart:ffi`. |
 | `defines` | Dart environment defines, the `-D` flags. |
 | `language_version` | The Dart language version, matching `pubspec.yaml`. |
@@ -1427,9 +1427,9 @@ A plugin's native code is its own target. Swift goes in a `flutter_apple_plugin_
 
 ### Asset keys
 
-Bundle keys follow the `flutter build` rule, keyed off the Bazel package of the target that lists the file. An app, test, or bundle target's own `assets` are keyed by their path relative to that package: `assets/logo.png` listed by `//apps/sub` loads as `assets/logo.png`, not `apps/sub/assets/logo.png`. A `flutter_library` or `flutter_plugin` asset is keyed `packages/<package_name>/<relative path>`, so `assets/brand.txt` on a library with `package_name = "brand"` loads as `packages/brand/assets/brand.txt`. Dependency keys travel untouched into every bundle on every platform, so app, `flutter_test` (`test_assets`), and `flutter_integration_test` bundles agree.
+Bundle keys follow the `flutter build` rule, keyed off the package directory of the target that lists the file. An app, test, or bundle target's own `assets` are keyed by their path relative to that directory: `assets/logo.png` listed by `//apps/sub` loads as `assets/logo.png`, not `apps/sub/assets/logo.png`. A `flutter_library` or `flutter_plugin` asset is keyed `packages/<package_name>/<relative path>`, so `assets/brand.txt` on a library with `package_name = "brand"` loads as `packages/brand/assets/brand.txt`. Generated files follow the same directory rule by their repository-relative path, so a genrule output `apps/foo/gen/x.json` listed by `//apps/foo` loads as `gen/x.json`. Dependency keys travel untouched into every bundle on every platform, so app, `flutter_test` (`test_assets`), and `flutter_integration_test` bundles agree.
 
-Two listings, one rule: every file in `assets` must live in the listing target's Bazel package. A file from another package — a nested subpackage's directory included — fails the build naming the file and the target: move it into a `flutter_library` with a `package_name` and depend on it instead. Two different files keyed to the same path fail the build naming both. `pkg_assets` keeps its own `packages/<package>/<path>` keying, unchanged.
+Two listings, one rule: every file in `assets` must sit under the listing target's package directory. A file from a nested subpackage's directory is still inside, so it keys relative to the listing directory. Only a file outside it — a sibling or parent directory, or another repository — fails the build naming the file and the target: move it into a `flutter_library` with a `package_name` and depend on it instead. Two different files keyed to the same path fail the build naming both. `pkg_assets` keeps its own `packages/<package>/<path>` keying, unchanged.
 
 Migration note: this is a behavior change. Bundles used to key `assets` by raw workspace-relative path, so a target outside the workspace root shipped `apps/sub/assets/logo.png` where `flutter build` ships `assets/logo.png`. If a lookup uses a prefixed key, drop the prefix; if it relied on reaching another package's file through `assets`, move the file into a library and use its `packages/<name>/...` key. Targets at the workspace root keep exactly their old keys.
 
