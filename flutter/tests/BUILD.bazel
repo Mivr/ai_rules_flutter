@@ -28,6 +28,7 @@ load(":linux_sysroot_link_test.bzl", "linux_sysroot_link_test_suite")
 load(":local_sdk_test.bzl", "local_sdk_test_suite")
 load(":macos_test.bzl", "macos_test_suite")
 load(":manifest_merge_test.bzl", "manifest_merge_test_suite")
+load(":modular_api_test.bzl", "modular_api_test_suite")
 load(":native_assets_test.bzl", "bridge_probe", "native_assets_test_suite")
 load(":native_hot_patch_test.bzl", "native_hot_patch_test_suite")
 load(":native_sources_test.bzl", "native_sources_test_suite")
@@ -166,6 +167,8 @@ native_assets_test_suite(name = "native_assets_test")
 native_hot_patch_test_suite(name = "native_hot_patch_test")
 
 native_sources_test_suite(name = "native_sources_test")
+
+modular_api_test_suite(name = "modular_api_test")
 
 bridge_probe(
     name = "dart_code_asset_bridge_probe",

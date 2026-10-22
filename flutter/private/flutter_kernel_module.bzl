@@ -17,7 +17,9 @@ load(
     "@rules_dart//dart:utils.bzl",
     "KERNEL_MODULE_ATTRS",
     "MODULAR_KERNEL_TOOLCHAINS",
+    "collect_packages",
     "collect_transitive_srcs",
+    "derive_lib_root",
     "duplicated_source",
     "first_per_package",
     "kernel_link_action",
@@ -29,6 +31,7 @@ load(
     "no_kernel_module",
     _DART_MODULAR_KERNEL_ATTRS = "MODULAR_KERNEL_ATTRS",
 )
+load("//flutter:providers.bzl", "FlutterInfo")
 load(
     "//flutter/private:app_entrypoint.bzl",
     "APP_SCHEME",
@@ -36,6 +39,11 @@ load(
     "app_scheme_location",
     "package_lib_prefix",
     "stage_generated_inputs",
+    "synthesize_app_package",
+)
+load(
+    "//flutter/private:flutter_test_common.bzl",
+    "flutter_test_bootstrap_action",
 )
 
 FlutterKernelModuleInfo = provider(
@@ -52,6 +60,31 @@ MODULAR_KERNEL_ATTRS = _DART_MODULAR_KERNEL_ATTRS | {
         providers = [BuildSettingInfo],
     ),
 }
+
+# Build setting read and cleared by `_modular_deps_transition`.
+_MODULAR_DEPS_DEFINES_SETTING = str(Label("//flutter:extra_dart_defines"))
+
+def _modular_deps_transition_impl(settings, _attr):
+    """Drops the global defines for one custom modular kernel's dependency closure.
+
+    `kernel_worker` parses defines with an ArgParser `splitCommas` converter, so
+    any global `--@rules_flutter//flutter:extra_dart_defines` value containing a
+    comma (e.g. `FOO=a,b`) aborts every modular action in the closure. The custom
+    entry compile below deliberately does not read the flag either, so the whole
+    custom closure builds without it; the rule-side `defines` attribute stays the
+    only source of `-D` flags. Returning `{}` when the flag is empty keeps the
+    configuration identical, so dependency modules built for a custom kernel
+    share their action keys with the same modules built for built-in rules.
+    """
+    if settings[_MODULAR_DEPS_DEFINES_SETTING]:
+        return {_MODULAR_DEPS_DEFINES_SETTING: []}
+    return {}
+
+_modular_deps_transition = transition(
+    implementation = _modular_deps_transition_impl,
+    inputs = [_MODULAR_DEPS_DEFINES_SETTING],
+    outputs = [_MODULAR_DEPS_DEFINES_SETTING],
+)
 
 def _no_flutter_kernel_module():
     empty = no_kernel_module()
@@ -698,6 +731,89 @@ flutter_kernel_module_aspect = aspect(
     doc = "Compiles each DartInfo library in a flutter_test closure into a modular .flutter.kmod directory.",
 )
 
+def _compile_flutter_entry_module(
+        ctx,
+        tools,
+        sources,
+        packages,
+        dep_kernels,
+        entry_name,
+        platform_dill):
+    """Compiles one Flutter entry module against dependency outlines.
+
+    Shared by the built-in test/app compiles below and the public custom-kernel
+    functions: the entry module sees only the dependency outlines (never their
+    sources), so a body-only edit to a library recompiles that library's module
+    plus the entry/link actions — never the whole program.
+    """
+    dep_outline_closure = depset(
+        order = "postorder",
+        transitive = [k.transitive_koutlines for k in dep_kernels],
+    )
+    cross_pkg_srcs = depset(
+        transitive = [k.cross_pkg_srcs for k in dep_kernels],
+    )
+    entry = ctx.actions.declare_directory(entry_name)
+    flutter_kernel_module_action(
+        ctx,
+        tools,
+        sources,
+        first_per_package(packages),
+        dep_outline_closure,
+        entry,
+        defines = _kernel_worker_defines(ctx),
+        exclude_non_sources = True,
+        droppable = False,
+        extra_inputs = cross_pkg_srcs,
+        closure_excluded = depset(
+            transitive = [k.closure_excluded for k in dep_kernels],
+        ),
+        target = "flutter",
+        platform_dill = platform_dill,
+        extra_libraries = ["ui", "nativewrappers"],
+        scheme = APP_SCHEME,
+        unused_inputs = True,
+    )
+    return entry
+
+def _link_flutter_test_entry_module(ctx, dep_kernels, entry, output):
+    """Links a test entry module, delta-linking against the flutter_test base dill.
+
+    Returns the base dill linked against, or `None` when no base dill applies.
+    Shared by the built-in test compile below and the public custom test kernel.
+    """
+    dep_closure = depset(
+        order = "postorder",
+        transitive = [k.transitive_kmods for k in dep_kernels],
+    )
+    base_dill = None
+    base_keys = None
+    base_kmods = depset()
+    for k in dep_kernels:
+        kd = getattr(k, "base_dill", None)
+        kk = getattr(k, "base_keys", None)
+        if kd != None and kk != None:
+            base_dill = kd
+            base_keys = kk
+            base_kmods = getattr(k, "base_kmods", depset())
+            break
+    link_dep_closure = dep_closure
+    if base_dill != None and base_keys != None:
+        base_kmod_paths = {f.path: True for f in base_kmods.to_list()}
+        if base_kmod_paths:
+            link_dep_closure = depset(
+                [f for f in dep_closure.to_list() if f.path not in base_kmod_paths],
+                order = "postorder",
+            )
+    kernel_link_action(
+        ctx,
+        link_dep_closure,
+        entry,
+        output,
+        base_keys = base_keys,
+    )
+    return base_dill
+
 def flutter_modular_test_tools(ctx, flutter_sdk_info, own_files, packages, native_assets_list, tools = None, product = False):
     """Decides whether a target compiles modularly, and with which tools.
 
@@ -804,57 +920,16 @@ def compile_flutter_modular_test_kernel(
         for dep in ctx.attr.deps
         if FlutterKernelModuleInfo in dep
     ]
-    dep_closure = depset(
-        order = "postorder",
-        transitive = [k.transitive_kmods for k in dep_kernels],
-    )
-    dep_outline_closure = depset(
-        order = "postorder",
-        transitive = [k.transitive_koutlines for k in dep_kernels],
-    )
-    cross_pkg_srcs = depset(
-        transitive = [k.cross_pkg_srcs for k in dep_kernels],
-    )
-    entry = ctx.actions.declare_directory(ctx.label.name + ".flutter_entry.kmod")
-    flutter_kernel_module_action(
+    entry = _compile_flutter_entry_module(
         ctx,
         tools,
         sources,
-        first_per_package(packages),
-        dep_outline_closure,
-        entry,
-        defines = _kernel_worker_defines(ctx),
-        exclude_non_sources = True,
-        droppable = False,
-        extra_inputs = cross_pkg_srcs,
-        closure_excluded = depset(transitive = [k.closure_excluded for k in dep_kernels]),
-        target = "flutter",
-        platform_dill = flutter_sdk_info.platform_kernel_dill,
-        extra_libraries = ["ui", "nativewrappers"],
-        scheme = APP_SCHEME,
-        unused_inputs = True,
+        packages,
+        dep_kernels,
+        ctx.label.name + ".flutter_entry.kmod",
+        flutter_sdk_info.platform_kernel_dill,
     )
-    base_dill = None
-    base_keys = None
-    base_kmods = depset()
-    for k in dep_kernels:
-        kd = getattr(k, "base_dill", None)
-        kk = getattr(k, "base_keys", None)
-        if kd != None and kk != None:
-            base_dill = kd
-            base_keys = kk
-            base_kmods = getattr(k, "base_kmods", depset())
-            break
-    link_dep_closure = dep_closure
-    if base_dill != None and base_keys != None:
-        base_kmod_paths = {f.path: True for f in base_kmods.to_list()}
-        if base_kmod_paths:
-            link_dep_closure = depset(
-                [f for f in dep_closure.to_list() if f.path not in base_kmod_paths],
-                order = "postorder",
-            )
-    kernel_link_action(ctx, link_dep_closure, entry, output, base_keys = base_keys)
-    return base_dill
+    return _link_flutter_test_entry_module(ctx, dep_kernels, entry, output)
 
 def compile_flutter_modular_web_kernel(
         ctx,
@@ -988,35 +1063,18 @@ def compile_flutter_modular_app_kernel(
         for dep in ctx.attr.deps
         if FlutterKernelModuleInfo in dep
     ]
-    dep_closure = depset(
-        order = "postorder",
-        transitive = [k.transitive_kmods for k in dep_kernels],
-    )
-    dep_outline_closure = depset(
-        order = "postorder",
-        transitive = [k.transitive_koutlines for k in dep_kernels],
-    )
-    cross_pkg_srcs = depset(
-        transitive = [k.cross_pkg_srcs for k in dep_kernels],
-    )
-    entry = ctx.actions.declare_directory(ctx.label.name + ".flutter_entry.kmod")
-    flutter_kernel_module_action(
+    entry = _compile_flutter_entry_module(
         ctx,
         tools,
         sources,
-        first_per_package(packages),
-        dep_outline_closure,
-        entry,
-        defines = _kernel_worker_defines(ctx),
-        exclude_non_sources = True,
-        droppable = False,
-        extra_inputs = cross_pkg_srcs,
-        closure_excluded = depset(transitive = [k.closure_excluded for k in dep_kernels]),
-        target = "flutter",
-        platform_dill = platform_dill,
-        extra_libraries = ["ui", "nativewrappers"],
-        scheme = APP_SCHEME,
-        unused_inputs = True,
+        packages,
+        dep_kernels,
+        ctx.label.name + ".flutter_entry.kmod",
+        platform_dill,
+    )
+    dep_closure = depset(
+        order = "postorder",
+        transitive = [k.transitive_kmods for k in dep_kernels],
     )
     kernel_link_action(
         ctx,
@@ -1024,4 +1082,196 @@ def compile_flutter_modular_app_kernel(
         entry,
         output,
         platform_dill = platform_dill,
+    )
+
+FLUTTER_MODULAR_KERNEL_ATTRS = {
+    "deps": attr.label_list(
+        doc = "DartInfo dependencies, compiled once each by `flutter_kernel_module_aspect`.",
+        providers = [DartInfo],
+        aspects = [flutter_kernel_module_aspect],
+        cfg = _modular_deps_transition,
+    ),
+    "defines": attr.string_list(
+        doc = "Extra `-D` defines for the entry compile. Must stay empty: unlike the built-in rules, a custom modular kernel has no whole-program fallback, so a non-empty list fails the build. The global `//flutter:extra_dart_defines` flag is not read either (the `deps` edge above resets it to keep the entry compile consistent with the dependency modules).",
+        default = [],
+    ),
+    "_allowlist_function_transition": attr.label(
+        default = "@bazel_tools//tools/allowlists/function_transition_allowlist",
+    ),
+} | KERNEL_MODULE_ATTRS
+
+FLUTTER_MODULAR_KERNEL_TOOLCHAINS = [
+    "@rules_flutter//flutter:toolchain_type",
+] + MODULAR_KERNEL_TOOLCHAINS
+
+def _flutter_modular_custom_tools(ctx, deps, own_files, packages, what):
+    """Resolves the debug SDK and kernel tools for a custom modular kernel, or fails.
+
+    Unlike the built-in rules, a custom kernel has no whole-program fallback, so
+    every ineligibility the built-in rules would route to `FlutterKernelCompile`
+    fails here with the reason instead.
+
+    Args:
+      ctx: The custom rule context. Must provide `defines` (see
+        `FLUTTER_MODULAR_KERNEL_ATTRS`).
+      deps: The custom rule's dependency Targets.
+      own_files: The entry's own `.dart` Files.
+      packages: The `DartPackageInfo` list for the entry compile.
+      what: The calling function name, for error messages.
+
+    Returns:
+      `(flutter_sdk_info, tools)` usable with `_compile_flutter_entry_module`.
+    """
+    flutter_toolchain = ctx.toolchains["@rules_flutter//flutter:toolchain_type"]
+    flutter_sdk_info = flutter_toolchain.flutter_sdk_info if flutter_toolchain else None
+    if flutter_sdk_info == None or flutter_sdk_info.platform_kernel_dill == None:
+        fail("%s: %s needs a Flutter SDK with a debug platform kernel dill" % (ctx.label, what))
+    if ctx.attr.defines:
+        fail("%s: %s does not accept defines (%s); the built-in rules fall back to a whole-program compile for targets with defines, but a custom modular kernel has no fallback" % (ctx.label, what, ctx.attr.defines))
+    native_assets = depset(transitive = [
+        dep[FlutterInfo].native_assets
+        for dep in deps
+        if FlutterInfo in dep
+    ]).to_list()
+    if native_assets:
+        fail("%s: %s does not support native assets (%s); the built-in rules fall back to a whole-program compile for targets with native assets, but a custom modular kernel has no fallback" % (ctx.label, what, native_assets))
+    tools = flutter_modular_test_tools(ctx, flutter_sdk_info, own_files, packages, [])
+    if tools == None:
+        fail("%s: %s is not eligible for modular compilation (duplicate sources or an unresolvable tool); the built-in rules fall back to a whole-program compile here, but a custom modular kernel has no fallback" % (ctx.label, what))
+    return flutter_sdk_info, tools
+
+def _custom_dep_kernels(ctx, deps, what):
+    """Returns the debug `DartKernelInfo` list for a custom kernel's deps, or fails."""
+    dep_kernels = [
+        dep[FlutterKernelModuleInfo].kernel_info
+        for dep in deps
+        if FlutterKernelModuleInfo in dep
+    ]
+    if len(dep_kernels) != len(deps):
+        fail("%s: %s needs every dep to carry FlutterKernelModuleInfo (put them under `deps` with `%s` applied); got %d of %d" % (ctx.label, what, "flutter_kernel_module_aspect", len(dep_kernels), len(deps)))
+    return dep_kernels
+
+def flutter_modular_test_kernel(ctx, *, test_uri, deps, output):
+    """Compiles a custom modular test kernel runnable by `flutter_prebuilt_test`.
+
+    Writes a `flutter_test`-compatible bootstrap importing `test_uri` (plus the
+    golden comparator when one is configured), compiles it as an entry module
+    against the dependency outlines, and delta-links it against the
+    `flutter_test` base dill when one applies — the same protocol the built-in
+    `flutter_test` rule's modular path uses. The test runs under the prebuilt
+    `flutter_tester` binary with no SDK source needed at runtime.
+
+    Args:
+      ctx: The custom rule context. Must merge `FLUTTER_MODULAR_KERNEL_ATTRS`
+        (and `FLUTTER_TEST_BOOTSTRAP_ATTRS` when the caller wants a configurable
+        golden comparator) and resolve `FLUTTER_MODULAR_KERNEL_TOOLCHAINS`.
+        Pass `ctx.attr.deps` as `deps` so the eligibility check sees the same
+        closure the aspect ran over.
+      test_uri: The `package:` URI of the test library the bootstrap imports.
+      deps: The custom rule's dependency Targets.
+      output: The linked test `.dill` File to produce.
+
+    Returns:
+      The `base_dill` File linked against (`flutter_prebuilt_test`'s
+      `base_dill`), or `None` when no base dill applies.
+    """
+    bootstrap = ctx.actions.declare_file(ctx.label.name + "_modular_bootstrap.dart")
+    staged_comparator = flutter_test_bootstrap_action(ctx, test_uri, bootstrap)
+    sources = [
+        struct(uri = app_scheme_location(bootstrap).uri, file = bootstrap),
+    ]
+    own_files = [bootstrap]
+    if staged_comparator != None:
+        sources.append(struct(uri = app_scheme_location(staged_comparator).uri, file = staged_comparator))
+        own_files.append(staged_comparator)
+    packages = collect_packages(deps)
+    dep_kernels = _custom_dep_kernels(ctx, deps, "flutter_modular_test_kernel")
+    flutter_sdk_info, tools = _flutter_modular_custom_tools(
+        ctx,
+        deps,
+        own_files,
+        packages,
+        "flutter_modular_test_kernel",
+    )
+    entry = _compile_flutter_entry_module(
+        ctx,
+        tools,
+        sources,
+        packages,
+        dep_kernels,
+        ctx.label.name + ".flutter_entry.kmod",
+        flutter_sdk_info.platform_kernel_dill,
+    )
+    return _link_flutter_test_entry_module(ctx, dep_kernels, entry, output)
+
+def flutter_modular_app_kernel(ctx, *, main, package_name, srcs, deps, output):
+    """Compiles a custom modular app kernel: the app's own sources plus dependency modules.
+
+    Synthesizes the `package:<package_name>/` mapping for `main`/`srcs` (the same
+    mapping the built-in app rules build), compiles them as the entry module
+    against the dependency outlines, and links everything with the debug
+    `platform_kernel_dill` prepended — the same protocol the built-in
+    `flutter_kernel_target` modular path uses.
+
+    Args:
+      ctx: The custom rule context. Must merge `FLUTTER_MODULAR_KERNEL_ATTRS`
+        and resolve `FLUTTER_MODULAR_KERNEL_TOOLCHAINS`. Pass `ctx.attr.deps`
+        as `deps` so the eligibility check sees the same closure the aspect ran
+        over.
+      main: The app's entry-point File.
+      package_name: The `package:` name `main`/`srcs` are reachable under.
+      srcs: The app's own `.dart` Files (may include `main`).
+      deps: The custom rule's dependency Targets.
+      output: The linked app `.dill` File to produce.
+    """
+    lib_root = derive_lib_root(ctx.label.workspace_root, ctx.label.package)
+    packages = synthesize_app_package(
+        ctx.label,
+        collect_packages(deps),
+        package_name,
+        lib_root,
+        "",
+    )
+    sources = [
+        struct(
+            uri = app_main_location(package_name, lib_root, main).uri,
+            file = main,
+        ),
+    ]
+    own_files = [main]
+    for f in srcs:
+        if f == main:
+            continue
+        sources.append(struct(
+            uri = app_main_location(package_name, lib_root, f).uri,
+            file = f,
+        ))
+        own_files.append(f)
+    dep_kernels = _custom_dep_kernels(ctx, deps, "flutter_modular_app_kernel")
+    flutter_sdk_info, tools = _flutter_modular_custom_tools(
+        ctx,
+        deps,
+        own_files,
+        packages,
+        "flutter_modular_app_kernel",
+    )
+    entry = _compile_flutter_entry_module(
+        ctx,
+        tools,
+        sources,
+        packages,
+        dep_kernels,
+        ctx.label.name + ".flutter_entry.kmod",
+        flutter_sdk_info.platform_kernel_dill,
+    )
+    dep_closure = depset(
+        order = "postorder",
+        transitive = [k.transitive_kmods for k in dep_kernels],
+    )
+    kernel_link_action(
+        ctx,
+        dep_closure,
+        entry,
+        output,
+        platform_dill = flutter_sdk_info.platform_kernel_dill,
     )
