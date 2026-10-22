@@ -27,6 +27,7 @@ load(
     "resolve_overlay_roots",
     "resolve_overlay_template",
 )
+
 # Verbatim shape of record_android 1.5.1's android/build.gradle (trimmed):
 # Groovy DSL, namespace assignment, no dependencies block at all.
 _RECORD_ANDROID_GRADLE = """\
