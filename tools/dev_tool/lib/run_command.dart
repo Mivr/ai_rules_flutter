@@ -320,9 +320,7 @@ class RunCommand {
     // that a run killed during its build or its install releases what it has
     // already taken. See SessionHost.listenForShutdownSignals.
     host.listenForShutdownSignals();
-    final sessions = host.sessions;
     final protocol = host.protocol;
-    final commandRunner = host.commandRunner;
 
     // The browser's session, once the launch loop has built it. The DWDS
     // `connectedApps` listener is attached before Chrome launches (a broadcast
@@ -469,8 +467,6 @@ class RunCommand {
     // wall clock's: see [fileClockNow].
     final builtBefore = await fileClockNow();
     final build = await plan.buildApp();
-    final appFile = build.appFile;
-    final outputFiles = build.outputFiles;
     return (
       builtBefore: builtBefore,
       appFile: build.appFile,

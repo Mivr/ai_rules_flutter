@@ -1051,6 +1051,9 @@ class VmServiceClient {
         codeAfterDelivery: codeAfterDelivery,
       );
     }
+    // No verdict: the step ran, so the caller continues to the frame wait —
+    // the fall-through main had after a successful post-delivery step.
+    return null;
   }
 
   /// Wait for the rebuilt frame, and say what the apply achieved.
