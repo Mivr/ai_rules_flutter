@@ -37,16 +37,16 @@ load("//flutter/private:common.bzl", "resolve_exec_dart_vm")
 _ANDROID_SDK_TOOLCHAIN_TYPE = Label("@rules_android//toolchains/android_sdk:toolchain_type")
 _ANDROID_TOOLCHAIN_TYPE = Label("@rules_android//toolchains/android:toolchain_type")
 
-def _flutter_android_apk_overlay_impl(ctx):
-    base = ctx.attr.binary
-    base_apk_info = base[ApkInfo]
-    base_unsigned = base_apk_info.unsigned_apk
-    sdk = ctx.toolchains[_ANDROID_SDK_TOOLCHAIN_TYPE].android_sdk_info
-    android_toolchain = ctx.toolchains[_ANDROID_TOOLCHAIN_TYPE]
+def _overlay_merged_manifest(ctx, base):
+    """Recovers the merged manifest from the base binary's deploy-info group.
 
-    # ApkInfo carries no merged manifest; recover it from the base binary's
-    # android_deploy_info output group, which pairs the base deploy_info.pb
-    # with the merged manifest (see rules_android's apk_packaging).
+    ApkInfo carries no merged manifest; the base binary's android_deploy_info
+    output group pairs the base deploy_info.pb with the merged manifest (see
+    rules_android's apk_packaging).
+
+    Returns:
+      A `(merged_manifest, base_groups)` tuple.
+    """
     base_groups = base[OutputGroupInfo] if OutputGroupInfo in base else None
     base_deploy_files = []
     if base_groups:
@@ -64,14 +64,11 @@ def _flutter_android_apk_overlay_impl(ctx):
             "manifest in the base android_deploy_info group, got %s" %
             [f.path for f in base_deploy_files],
         )
-    merged_manifest = merged_manifests[0]
+    return merged_manifests[0], base_groups
 
-    native_libs_jar = ctx.file.native_libs_jar
-    flutter_assets = ctx.file.flutter_assets
-
-    # 1. Splice the Flutter payload into a copy of the base unsigned APK.
+def _run_apk_overlay(ctx, dart_exe, dart_vm_files, base_unsigned, native_libs_jar, flutter_assets):
+    """Splices the Flutter payload into a copy of the base unsigned APK."""
     overlay_unsigned = ctx.actions.declare_file(ctx.label.name + "_overlay_unsigned.apk")
-    dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx)
     overlay_args = ctx.actions.args()
     overlay_args.add(ctx.executable._overlay_tool.path)
     overlay_args.add("apk-overlay")
@@ -92,8 +89,10 @@ def _flutter_android_apk_overlay_impl(ctx):
         mnemonic = "FlutterApkOverlay",
         progress_message = "Injecting Flutter payload into base APK %s" % ctx.label,
     )
+    return overlay_unsigned
 
-    # 2. Align, exactly as android_binary does (`-P 16`, same alignment).
+def _run_zipalign(ctx, sdk, overlay_unsigned):
+    """Aligns the overlaid APK, exactly as android_binary does (`-P 16`)."""
     aligned = ctx.actions.declare_file("zipaligned_" + ctx.label.name + ".apk")
     align_args = ctx.actions.args()
     align_args.add("-P", "16")
@@ -108,11 +107,22 @@ def _flutter_android_apk_overlay_impl(ctx):
         mnemonic = "AndroidZipAlign",
         progress_message = "Zipaligning APK with Flutter payload %s" % ctx.label,
     )
+    return aligned
 
-    # 3. Sign with the same keystore and scheme selection android_binary
-    # would have used. `signing` mirrors
-    # `@rules_android//flags:apk_signing_method` (wired by the macro via
-    # select); v4 (fs-verity) stays with android_binary — route it there.
+def _overlay_signing_keys(ctx):
+    """Collects the debug signing keys, falling back to the debug keystore."""
+    signing_keys = list(ctx.files.debug_signing_keys)
+    if not signing_keys and ctx.file.debug_key:
+        signing_keys.append(ctx.file.debug_key)
+    return signing_keys
+
+def _run_apksign(ctx, sdk, aligned, signing_keys, lineage, rotation_min_sdk):
+    """Signs the aligned APK with the keystore and scheme android_binary would use.
+
+    `signing` mirrors `@rules_android//flags:apk_signing_method` (wired by
+    the macro via select); v4 (fs-verity) stays with android_binary — route
+    it there.
+    """
     signing = ctx.attr.signing
     if signing == "v4":
         fail(
@@ -122,12 +132,6 @@ def _flutter_android_apk_overlay_impl(ctx):
         )
     v1_enabled = signing in ("v1", "v1_v2")
     v2_enabled = signing in ("v2", "v1_v2")
-
-    signing_keys = list(ctx.files.debug_signing_keys)
-    if not signing_keys and ctx.file.debug_key:
-        signing_keys.append(ctx.file.debug_key)
-    lineage = ctx.file.debug_signing_lineage_file
-    rotation_min_sdk = ctx.attr.key_rotation_min_sdk
 
     signed = ctx.actions.declare_file(ctx.label.name + ".apk")
     sign_args = ctx.actions.args()
@@ -160,12 +164,15 @@ def _flutter_android_apk_overlay_impl(ctx):
         mnemonic = "ApkSignerTool",
         progress_message = "Signing APK with Flutter payload %s" % ctx.label,
     )
+    return signed
 
-    # 4. Regenerate deploy info against the overlay's own signed APK and
-    # merged manifest, exactly as android_binary's WriteDeployInfo action
-    # does (deploy_info_writer from the android toolchain, --manifest/--apk/
-    # --deploy_info form), so mobile-install/deploy tooling sees the APK
-    # this rule actually produced.
+def _run_overlay_deploy_info(ctx, android_toolchain, merged_manifest, signed):
+    """Regenerates deploy info against the overlay's own signed APK and manifest.
+
+    Exactly as android_binary's WriteDeployInfo action does (deploy_info_writer
+    from the android toolchain, --manifest/--apk/--deploy_info form), so
+    mobile-install/deploy tooling sees the APK this rule actually produced.
+    """
     deploy_info = ctx.actions.declare_file(ctx.label.name + ".deploy_info.pb")
     ctx.actions.run(
         executable = android_toolchain.deploy_info_writer.files_to_run,
@@ -182,10 +189,14 @@ def _flutter_android_apk_overlay_impl(ctx):
         mnemonic = "WriteDeployInfo",
         progress_message = "Writing deploy info for overlay APK %s" % ctx.label,
     )
+    return deploy_info
 
-    # Forward the base output groups verbatim EXCEPT android_deploy_info,
-    # which becomes overlay-owned: the freshly written deploy_info pointing
-    # at the overlay signed APK, paired with the merged manifest.
+def _overlay_output_groups(base_groups, deploy_info, merged_manifest):
+    """Forwards the base output groups, replacing android_deploy_info.
+
+    The fresh group is overlay-owned: the freshly written deploy_info pointing
+    at the overlay signed APK, paired with the merged manifest.
+    """
     group_kwargs = {}
     if base_groups:
         for name in dir(base_groups):
@@ -198,6 +209,40 @@ def _flutter_android_apk_overlay_impl(ctx):
             if type(artifacts) == "depset":
                 group_kwargs[name] = artifacts
     group_kwargs["android_deploy_info"] = depset([deploy_info, merged_manifest])
+    return group_kwargs
+
+def _flutter_android_apk_overlay_impl(ctx):
+    base = ctx.attr.binary
+    base_apk_info = base[ApkInfo]
+    base_unsigned = base_apk_info.unsigned_apk
+    sdk = ctx.toolchains[_ANDROID_SDK_TOOLCHAIN_TYPE].android_sdk_info
+    android_toolchain = ctx.toolchains[_ANDROID_TOOLCHAIN_TYPE]
+
+    merged_manifest, base_groups = _overlay_merged_manifest(ctx, base)
+
+    native_libs_jar = ctx.file.native_libs_jar
+    flutter_assets = ctx.file.flutter_assets
+
+    # 1. Splice the Flutter payload into a copy of the base unsigned APK.
+    dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx)
+    overlay_unsigned = _run_apk_overlay(ctx, dart_exe, dart_vm_files, base_unsigned, native_libs_jar, flutter_assets)
+
+    # 2. Align, exactly as android_binary does (`-P 16`, same alignment).
+    aligned = _run_zipalign(ctx, sdk, overlay_unsigned)
+
+    # 3. Sign with the same keystore and scheme selection android_binary
+    # would have used.
+    signing_keys = _overlay_signing_keys(ctx)
+    lineage = ctx.file.debug_signing_lineage_file
+    rotation_min_sdk = ctx.attr.key_rotation_min_sdk
+    signed = _run_apksign(ctx, sdk, aligned, signing_keys, lineage, rotation_min_sdk)
+
+    # 4. Regenerate deploy info against the overlay's own signed APK and
+    # merged manifest.
+    deploy_info = _run_overlay_deploy_info(ctx, android_toolchain, merged_manifest, signed)
+
+    # Forward the base output groups verbatim EXCEPT android_deploy_info.
+    group_kwargs = _overlay_output_groups(base_groups, deploy_info, merged_manifest)
 
     keystore = signing_keys[0] if signing_keys else None
     providers = [
