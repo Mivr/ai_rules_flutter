@@ -2720,38 +2720,8 @@ class IOSDevice extends Device {
     _launchAbandoned = false;
     final info = await _resolveInfo();
 
-    // Extract .app from .ipa if needed — devicectl install requires .app.
-    String installPath = appPath;
-    if (appPath.endsWith('.ipa')) {
-      final extracted = await _extractAppFromIpa(appPath, _runProcess);
-      installPath = extracted.appPath;
-      _scratch.hold(extracted.dir);
-    }
-
-    // Install with JSON output to capture installationURL — the only handle on
-    // the process this launch goes on to attach a debugger to.
-    final installationUrl = await withTempDir('flutter_install_', (
-      installJsonDir,
-    ) async {
-      final installJsonPath = p.join(installJsonDir.path, 'install.json');
-
-      final installResult = await _runProcess('xcrun', [
-        'devicectl',
-        'device',
-        'install',
-        'app',
-        '--device',
-        info.udid,
-        '--json-output',
-        installJsonPath,
-        installPath,
-      ]);
-      if (installResult.exitCode != 0) {
-        throw StateError('devicectl install failed: ${installResult.stderr}');
-      }
-
-      return _readInstallationUrl(installJsonPath, installPath);
-    });
+    final installed = await _installAppOnDevice(appPath, info);
+    final installPath = installed.path;
 
     // Extract bundle ID from .app/Info.plist if not provided.
     final bundleId =
@@ -2778,37 +2748,129 @@ class IOSDevice extends Device {
     // devicectl it has a terminal attached in order to redirect stdout"
     // (`ios/core_devices.dart`). That is unnecessary here: devicectl writes
     // the app's console output to these pipes without a pty.
-    _consoleLauncherProcess = await _startHelper('xcrun', [
-      'devicectl',
-      'device',
-      'process',
-      'launch',
-      '--device',
-      info.udid,
-      if (debug) '--start-stopped',
-      '--console',
-      '--environment-variables',
-      '{"OS_ACTIVITY_DT_MODE": "enable"}',
+    _consoleLauncherProcess = await _startConsoleLauncher(
+      info,
       bundleId,
-      '--enable-dart-profiling',
-      // flutter_tools passes this whenever debugging is enabled, which is
-      // debug and profile (`getIOSLaunchArguments`).
-      if (buildMode != BuildMode.release) '--enable-checked-mode',
-      if (startPaused) '--start-paused',
-      // A wireless device is dialed at its own address, so the VM service must
-      // not bind to the device's loopback the way it does by default. Matches
-      // flutter_tools' `DebuggingOptions.buildLaunchArguments`, which adds this
-      // exactly when the connection interface is wireless.
-      if (info.transport == IOSDeviceTransport.wireless)
-        '--vm-service-host=0.0.0.0',
-    ]);
+      debug: debug,
+    );
+    final consolePump = await _awaitLaunchBanner(logs);
 
-    // devicectl sends its own progress banners on one channel and the app's
-    // console output on the other, so both feed the app log stream.
-    //
-    // stderr is deliberately *not* flagged as an error channel: devicectl
-    // routes the app's ordinary console output there, so treating that channel
-    // as errors would mark every `print()` as one.
+    // Step 2: Get PID from running process list. [stop] terminates the app by
+    // it, debugger or not.
+    final processId = await _findAppProcessId(installed.installationUrl);
+    _appPid = processId;
+
+    // Step 3: In debug, attach lldb. Otherwise devicectl, which runs until the
+    // app exits, is both the log source and the process the run watches.
+    final Process process;
+    if (debug) {
+      process = await _attachDebugger(
+        info: info,
+        processId: processId,
+        logs: logs,
+        consoleDone: consolePump.done,
+      );
+    } else {
+      logs.closeWhen([consolePump.done]);
+      process = _consoleLauncherProcess!;
+    }
+
+    // Step 4: Find the VM service by its mDNS advertisement.
+    final vmServiceUri = await _findVmService(
+      info: info,
+      bundleId: bundleId,
+      installPath: installPath,
+      logs: logs,
+    );
+
+    return AppInstance(
+      process: process,
+      vmServiceUri: vmServiceUri,
+      logs: logs,
+      scratchDirs: _scratch.handOver(),
+    );
+  }
+
+  /// Installed app paths: where to install from and the install's handle.
+  ///
+  /// Installs with JSON output to capture installationURL — the only handle on
+  /// the process this launch goes on to attach a debugger to.
+  Future<({String path, String installationUrl})> _installAppOnDevice(
+    String appPath,
+    IOSDeviceInfo info,
+  ) async {
+    // Extract .app from .ipa if needed — devicectl install requires .app.
+    String installPath = appPath;
+    if (appPath.endsWith('.ipa')) {
+      final extracted = await _extractAppFromIpa(appPath, _runProcess);
+      installPath = extracted.appPath;
+      _scratch.hold(extracted.dir);
+    }
+
+    final installationUrl = await withTempDir('flutter_install_', (
+      installJsonDir,
+    ) async {
+      final installJsonPath = p.join(installJsonDir.path, 'install.json');
+
+      final installResult = await _runProcess('xcrun', [
+        'devicectl',
+        'device',
+        'install',
+        'app',
+        '--device',
+        info.udid,
+        '--json-output',
+        installJsonPath,
+        installPath,
+      ]);
+      if (installResult.exitCode != 0) {
+        throw StateError('devicectl install failed: ${installResult.stderr}');
+      }
+
+      return _readInstallationUrl(installJsonPath, installPath);
+    });
+    return (path: installPath, installationUrl: installationUrl);
+  }
+
+  /// Launch devicectl `--console` for [bundleId], capturing app output.
+  Future<Process> _startConsoleLauncher(
+    IOSDeviceInfo info,
+    String bundleId, {
+    required bool debug,
+  }) => _startHelper('xcrun', [
+    'devicectl',
+    'device',
+    'process',
+    'launch',
+    '--device',
+    info.udid,
+    if (debug) '--start-stopped',
+    '--console',
+    '--environment-variables',
+    '{"OS_ACTIVITY_DT_MODE": "enable"}',
+    bundleId,
+    '--enable-dart-profiling',
+    // flutter_tools passes this whenever debugging is enabled, which is
+    // debug and profile (`getIOSLaunchArguments`).
+    if (buildMode != BuildMode.release) '--enable-checked-mode',
+    if (startPaused) '--start-paused',
+    // A wireless device is dialed at its own address, so the VM service must
+    // not bind to the device's loopback the way it does by default. Matches
+    // flutter_tools' `DebuggingOptions.buildLaunchArguments`, which adds this
+    // exactly when the connection interface is wireless.
+    if (info.transport == IOSDeviceTransport.wireless)
+      '--vm-service-host=0.0.0.0',
+  ]);
+
+  /// Pump the console launcher into [logs] and wait for its launch banner.
+  ///
+  /// devicectl sends its own progress banners on one channel and the app's
+  /// console output on the other, so both feed the app log stream.
+  ///
+  /// stderr is deliberately *not* flagged as an error channel: devicectl
+  /// routes the app's ordinary console output there, so treating that channel
+  /// as errors would mark every `print()` as one.
+  Future<AppLogPump> _awaitLaunchBanner(AppLogStream logs) async {
     final consolePump = pumpProcessLines(
       _consoleLauncherProcess!,
       logs,
@@ -2845,41 +2907,7 @@ class IOSDevice extends Device {
     await launchCompleter.future;
     launchTimeout.cancel();
     await bannerSub.cancel();
-
-    // Step 2: Get PID from running process list. [stop] terminates the app by
-    // it, debugger or not.
-    final processId = await _findAppProcessId(installationUrl);
-    _appPid = processId;
-
-    // Step 3: In debug, attach lldb. Otherwise devicectl, which runs until the
-    // app exits, is both the log source and the process the run watches.
-    final Process process;
-    if (debug) {
-      process = await _attachDebugger(
-        info: info,
-        processId: processId,
-        logs: logs,
-        consoleDone: consolePump.done,
-      );
-    } else {
-      logs.closeWhen([consolePump.done]);
-      process = _consoleLauncherProcess!;
-    }
-
-    // Step 4: Find the VM service by its mDNS advertisement.
-    final vmServiceUri = await _findVmService(
-      info: info,
-      bundleId: bundleId,
-      installPath: installPath,
-      logs: logs,
-    );
-
-    return AppInstance(
-      process: process,
-      vmServiceUri: vmServiceUri,
-      logs: logs,
-      scratchDirs: _scratch.handOver(),
-    );
+    return consolePump;
   }
 
   /// Attach lldb to the stopped app, set the JIT page breakpoint, and resume.
