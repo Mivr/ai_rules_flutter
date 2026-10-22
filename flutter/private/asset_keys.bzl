@@ -97,10 +97,11 @@ def _checked_relative_key(label, file):
     """
     if not file.is_source:
         return file.short_path
+    outside = "%s: asset %s is outside the target's package; move it into a flutter_library with a package_name and depend on it instead." % (label, file.short_path)
     if file.owner != None and file.owner.package != label.package:
-        fail("%s: asset %s is outside the target's package; move it into a flutter_library with a package_name and depend on it instead." % (label, file.short_path))
+        fail(outside)
     if not is_within_package(label.workspace_root, label.package, file.short_path):
-        fail("%s: asset %s is outside the target's package; move it into a flutter_library with a package_name and depend on it instead." % (label, file.short_path))
+        fail(outside)
     return relative_key(label.workspace_root, label.package, file.short_path)
 
 def app_asset_entries(label, files):
