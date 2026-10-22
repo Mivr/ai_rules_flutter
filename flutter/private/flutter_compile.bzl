@@ -161,6 +161,33 @@ def _apply_incr_worker(ctx, run_kwargs, args, manifest, direct_inputs, dartaotru
         "requires-worker-protocol": "json",
     }
 
+def _run_kernel_action(ctx, args, manifest, direct_inputs, outputs, env, dartaotruntime, kernel_filter_tool, frontend_server, resource_set, incr_worker):
+    """Runs the `FlutterKernelCompile` action, through `kernel_filter`.
+
+    `resource_set` stays out of the call unless set, so callers that leave it
+    unset keep byte-identical actions (same argv and action key). With the
+    incremental flag on a debug JIT compile, the action runs through the
+    persistent worker instead.
+    """
+    dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx)
+    run_kwargs = dict(
+        executable = dart_exe,
+        arguments = [kernel_filter_tool.path, "--declared-inputs", manifest.path, args],
+        inputs = depset(
+            direct = direct_inputs + [dartaotruntime, kernel_filter_tool, manifest],
+            transitive = [dart_vm_files],
+        ),
+        outputs = outputs,
+        mnemonic = "FlutterKernelCompile",
+        progress_message = "Compiling Flutter kernel %s" % ctx.label,
+        env = env,
+    )
+    if resource_set != None:
+        run_kwargs["resource_set"] = resource_set
+    if incr_worker:
+        _apply_incr_worker(ctx, run_kwargs, args, manifest, direct_inputs, dartaotruntime, frontend_server)
+    ctx.actions.run(**run_kwargs)
+
 # Private tool labels a downstream rule merges into its own `attrs` to call
 # `flutter_kernel_compile_action` — the Flutter half of what rules_dart
 # publishes as `KERNEL_MODULE_ATTRS`. Carries no user-facing attrs: the
@@ -500,24 +527,4 @@ def flutter_kernel_compile_action(
         ) + "\n",
     )
 
-    dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx)
-
-    # `resource_set` stays out of the call unless set, so callers that leave
-    # it unset keep byte-identical actions (same argv and action key).
-    run_kwargs = dict(
-        executable = dart_exe,
-        arguments = [kernel_filter_tool.path, "--declared-inputs", manifest.path, args],
-        inputs = depset(
-            direct = direct_inputs + [dartaotruntime, kernel_filter_tool, manifest],
-            transitive = [dart_vm_files],
-        ),
-        outputs = outputs,
-        mnemonic = "FlutterKernelCompile",
-        progress_message = "Compiling Flutter kernel %s" % ctx.label,
-        env = env,
-    )
-    if resource_set != None:
-        run_kwargs["resource_set"] = resource_set
-    if incr_worker:
-        _apply_incr_worker(ctx, run_kwargs, args, manifest, direct_inputs, dartaotruntime, frontend_server)
-    ctx.actions.run(**run_kwargs)
+    _run_kernel_action(ctx, args, manifest, direct_inputs, outputs, env, dartaotruntime, kernel_filter_tool, frontend_server, resource_set, incr_worker)
