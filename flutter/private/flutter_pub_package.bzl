@@ -517,10 +517,7 @@ def make_flutter_library_build_content(
     Returns:
         BUILD.bazel content as a string.
     """
-    deps_block = ""
-    if deps:
-        dep_lines = ['        "{}",'.format(dep) for dep in deps]
-        deps_block = "    deps = [\n{}\n    ],\n".format("\n".join(dep_lines))
+    deps_block = _spoke_deps_block(deps)
 
     pub_attrs = _format_pub_asset_attrs(fonts_json_str, font_files, pkg_assets, pkg_shaders)
 
@@ -543,6 +540,159 @@ flutter_library(
         asset_attrs = _format_code_asset_attrs(code_assets, has_unreplaced_hook),
         pub_attrs = pub_attrs,
     )
+
+def _spoke_deps_block(deps):
+    """The `deps` attribute block for a spoke, or nothing when it has none."""
+    if not deps:
+        return ""
+    dep_lines = ['        "{}",'.format(dep) for dep in deps]
+    return "    deps = [\n{}\n    ],\n".format("\n".join(dep_lines))
+
+def _apple_plugin_targets(name, srcs_dirs, include_dirs, platform):
+    """The `flutter_apple_plugin_library` pair (device + xtool) for one platform."""
+    return """
+flutter_apple_plugin_library(
+    name = "{name}_apple_{platform}",
+    srcs = {srcs},
+    includes = {includes},
+    module_name = "{name}",
+    platform = "{platform}",
+    visibility = ["//visibility:public"],
+)
+
+flutter_apple_plugin_library(
+    name = "{name}_apple_{platform}_xtool",
+    srcs = {srcs},
+    includes = {includes},
+    module_name = "{name}",
+    platform = "{platform}",
+    backend = "xtool",
+    visibility = ["//visibility:public"],
+)""".format(
+        name = name,
+        platform = platform,
+        srcs = _glob_block(srcs_dirs, _APPLE_SRC_EXTENSIONS),
+        includes = repr(include_dirs),
+    )
+
+def _desktop_plugin_target(name, src_dir, platform):
+    """The `flutter_<platform>_plugin_library` target for one desktop platform."""
+    srcs, hdrs = _split_glob_block([src_dir], _DESKTOP_C_EXTS, _DESKTOP_HDR_EXTS)
+    return """
+flutter_{platform}_plugin_library(
+    name = "{name}_{platform}",
+    srcs = {srcs},
+    hdrs = {hdrs},
+    includes = ["{platform}/include"],
+    visibility = ["//visibility:public"],
+)""".format(
+        name = name,
+        platform = platform,
+        srcs = srcs,
+        hdrs = hdrs,
+    )
+
+def _plugin_apple_libs_arg(name, apple_macos_srcs_dirs, apple_ios_srcs_dirs):
+    """The `apple_libs` select routing each OS to its device/xtool library."""
+    if not (apple_macos_srcs_dirs or apple_ios_srcs_dirs):
+        return ""
+    macos_branch = '            ":{name}_apple_macos",'.format(name = name) if apple_macos_srcs_dirs else ""
+    macos_xtool_branch = '            ":{name}_apple_macos_xtool",'.format(name = name) if apple_macos_srcs_dirs else ""
+    ios_branch = '            ":{name}_apple_ios",'.format(name = name) if apple_ios_srcs_dirs else ""
+    ios_xtool_branch = '            ":{name}_apple_ios_xtool",'.format(name = name) if apple_ios_srcs_dirs else ""
+    return """    apple_libs = select({{
+        "@rules_flutter//flutter/settings:macos_xtool_backend": [
+{macos_xtool_branch}
+        ],
+        "@platforms//os:macos": [
+{macos_branch}
+        ],
+        "@rules_flutter//flutter/settings:ios_xtool_backend": [
+{ios_xtool_branch}
+        ],
+        "@platforms//os:ios": [
+{ios_branch}
+        ],
+        "//conditions:default": [],
+    }}),
+""".format(
+        macos_branch = macos_branch,
+        macos_xtool_branch = macos_xtool_branch,
+        ios_branch = ios_branch,
+        ios_xtool_branch = ios_xtool_branch,
+    )
+
+def _plugin_privacy_files_arg(apple_macos_privacy_manifests, apple_ios_privacy_manifests):
+    """The `apple_privacy_files` select splitting manifests per platform.
+
+    Split per-platform via select() so the macOS bundle never picks up
+    iOS-only manifests (and vice versa) — different platforms can declare
+    different privacy uses, and Apple's submission validator aggregates
+    whatever it finds in the per-platform bundle.
+    """
+    if not (apple_macos_privacy_manifests or apple_ios_privacy_manifests):
+        return ""
+    macos_lines = "\n".join(['            "{}",'.format(p) for p in apple_macos_privacy_manifests])
+    ios_lines = "\n".join(['            "{}",'.format(p) for p in apple_ios_privacy_manifests])
+    return """    apple_privacy_files = select({{
+        "@platforms//os:macos": [
+{macos_lines}
+        ],
+        "@platforms//os:ios": [
+{ios_lines}
+        ],
+        "//conditions:default": [],
+    }}),
+""".format(
+        macos_lines = macos_lines,
+        ios_lines = ios_lines,
+    )
+
+def _plugin_extra_loads(apple_macos_srcs_dirs, apple_ios_srcs_dirs, linux_src_dir, windows_src_dir):
+    """The extra `load` lines a plugin spoke needs, joined for the template."""
+    extra_loads = []
+    if apple_macos_srcs_dirs or apple_ios_srcs_dirs:
+        extra_loads.append('load("@rules_flutter//flutter:macos.bzl", "flutter_apple_plugin_library")')
+    if linux_src_dir:
+        extra_loads.append('load("@rules_flutter//flutter:linux.bzl", "flutter_linux_plugin_library")')
+    if windows_src_dir:
+        extra_loads.append('load("@rules_flutter//flutter:windows.bzl", "flutter_windows_plugin_library")')
+    return "\n".join(extra_loads)
+
+def _plugin_extra_targets(name, apple_macos_srcs_dirs, apple_ios_srcs_dirs, apple_macos_include_dirs, apple_ios_include_dirs, linux_src_dir, windows_src_dir):
+    """The per-platform plugin library targets, joined for the template.
+
+    NOTE: Android Kotlin/Java sources are NOT compiled in the top-level
+    spoke BUILD. Instead, they're exposed via a sibling `android/`
+    sub-package (see make_android_subpackage_build_content) which loads
+    @rules_android + @rules_kotlin lazily — only when something queries
+    `@<spoke>//android:lib`. Mac-only / web-only workspaces never trigger
+    the parse and don't pay the @rules_android / @rules_kotlin cost.
+    The application-side `flutter_android_app` macro depends on the hub's
+    `android/all_android_plugin_libs` aggregator, which deps on every
+    spoke's `android:lib` — so Android-targeted builds pick up all
+    plugin libraries automatically.
+    """
+    extra_targets = []
+    if apple_macos_srcs_dirs:
+        extra_targets.append(_apple_plugin_targets(
+            name,
+            apple_macos_srcs_dirs,
+            apple_macos_include_dirs,
+            "macos",
+        ))
+    if apple_ios_srcs_dirs:
+        extra_targets.append(_apple_plugin_targets(
+            name,
+            apple_ios_srcs_dirs,
+            apple_ios_include_dirs,
+            "ios",
+        ))
+    if linux_src_dir:
+        extra_targets.append(_desktop_plugin_target(name, linux_src_dir, "linux"))
+    if windows_src_dir:
+        extra_targets.append(_desktop_plugin_target(name, windows_src_dir, "windows"))
+    return "\n".join(extra_targets)
 
 def make_flutter_plugin_build_content(
         name,
@@ -606,150 +756,36 @@ def make_flutter_plugin_build_content(
     Returns:
         BUILD.bazel content as a string.
     """
-    deps_block = ""
-    if deps:
-        dep_lines = ['        "{}",'.format(dep) for dep in deps]
-        deps_block = "    deps = [\n{}\n    ],\n".format("\n".join(dep_lines))
+    deps_block = _spoke_deps_block(deps)
 
-    extra_loads = []
-    extra_targets = []
-    apple_libs_arg = ""
-    linux_libs_arg = ""
-    windows_libs_arg = ""
-
-    if apple_macos_srcs_dirs or apple_ios_srcs_dirs:
-        extra_loads.append('load("@rules_flutter//flutter:macos.bzl", "flutter_apple_plugin_library")')
-    if linux_src_dir:
-        extra_loads.append('load("@rules_flutter//flutter:linux.bzl", "flutter_linux_plugin_library")')
-    if windows_src_dir:
-        extra_loads.append('load("@rules_flutter//flutter:windows.bzl", "flutter_windows_plugin_library")')
-
-    # NOTE: Android Kotlin/Java sources are NOT compiled in the top-level
-    # spoke BUILD. Instead, they're exposed via a sibling `android/`
-    # sub-package (see make_android_subpackage_build_content) which loads
-    # @rules_android + @rules_kotlin lazily — only when something queries
-    # `@<spoke>//android:lib`. Mac-only / web-only workspaces never trigger
-    # the parse and don't pay the @rules_android / @rules_kotlin cost.
-    # The application-side `flutter_android_app` macro depends on the hub's
-    # `android/all_android_plugin_libs` aggregator, which deps on every
-    # spoke's `android:lib` — so Android-targeted builds pick up all
-    # plugin libraries automatically.
-
-    if apple_macos_srcs_dirs:
-        extra_targets.append("""
-flutter_apple_plugin_library(
-    name = "{name}_apple_macos",
-    srcs = {srcs},
-    includes = {includes},
-    module_name = "{name}",
-    platform = "macos",
-    visibility = ["//visibility:public"],
-)
-
-flutter_apple_plugin_library(
-    name = "{name}_apple_macos_xtool",
-    srcs = {srcs},
-    includes = {includes},
-    module_name = "{name}",
-    platform = "macos",
-    backend = "xtool",
-    visibility = ["//visibility:public"],
-)""".format(
-            name = name,
-            srcs = _glob_block(apple_macos_srcs_dirs, _APPLE_SRC_EXTENSIONS),
-            includes = repr(apple_macos_include_dirs),
-        ))
-
-    if apple_ios_srcs_dirs:
-        extra_targets.append("""
-flutter_apple_plugin_library(
-    name = "{name}_apple_ios",
-    srcs = {srcs},
-    includes = {includes},
-    module_name = "{name}",
-    platform = "ios",
-    visibility = ["//visibility:public"],
-)
-
-flutter_apple_plugin_library(
-    name = "{name}_apple_ios_xtool",
-    srcs = {srcs},
-    includes = {includes},
-    module_name = "{name}",
-    platform = "ios",
-    backend = "xtool",
-    visibility = ["//visibility:public"],
-)""".format(
-            name = name,
-            srcs = _glob_block(apple_ios_srcs_dirs, _APPLE_SRC_EXTENSIONS),
-            includes = repr(apple_ios_include_dirs),
-        ))
-
-    if linux_src_dir:
-        linux_srcs, linux_hdrs = _split_glob_block([linux_src_dir], _DESKTOP_C_EXTS, _DESKTOP_HDR_EXTS)
-        extra_targets.append("""
-flutter_linux_plugin_library(
-    name = "{name}_linux",
-    srcs = {srcs},
-    hdrs = {hdrs},
-    includes = ["linux/include"],
-    visibility = ["//visibility:public"],
-)""".format(
-            name = name,
-            srcs = linux_srcs,
-            hdrs = linux_hdrs,
-        ))
-
-    if windows_src_dir:
-        win_srcs, win_hdrs = _split_glob_block([windows_src_dir], _DESKTOP_C_EXTS, _DESKTOP_HDR_EXTS)
-        extra_targets.append("""
-flutter_windows_plugin_library(
-    name = "{name}_windows",
-    srcs = {srcs},
-    hdrs = {hdrs},
-    includes = ["windows/include"],
-    visibility = ["//visibility:public"],
-)""".format(
-            name = name,
-            srcs = win_srcs,
-            hdrs = win_hdrs,
-        ))
+    extra_loads = _plugin_extra_loads(
+        apple_macos_srcs_dirs,
+        apple_ios_srcs_dirs,
+        linux_src_dir,
+        windows_src_dir,
+    )
+    extra_targets = _plugin_extra_targets(
+        name,
+        apple_macos_srcs_dirs,
+        apple_ios_srcs_dirs,
+        apple_macos_include_dirs,
+        apple_ios_include_dirs,
+        linux_src_dir,
+        windows_src_dir,
+    )
 
     # NB: Android sources are no longer surfaced via a top-level filegroup.
     # See `make_android_subpackage_build_content` — the spoke's `android/`
     # sub-package wraps them in a kt_android_library that the hub's
     # aggregator (`@<hub>//android:all_android_plugin_libs`) depends on.
 
-    if apple_macos_srcs_dirs or apple_ios_srcs_dirs:
-        macos_branch = '            ":{name}_apple_macos",'.format(name = name) if apple_macos_srcs_dirs else ""
-        macos_xtool_branch = '            ":{name}_apple_macos_xtool",'.format(name = name) if apple_macos_srcs_dirs else ""
-        ios_branch = '            ":{name}_apple_ios",'.format(name = name) if apple_ios_srcs_dirs else ""
-        ios_xtool_branch = '            ":{name}_apple_ios_xtool",'.format(name = name) if apple_ios_srcs_dirs else ""
-        apple_libs_arg = """    apple_libs = select({{
-        "@rules_flutter//flutter/settings:macos_xtool_backend": [
-{macos_xtool_branch}
-        ],
-        "@platforms//os:macos": [
-{macos_branch}
-        ],
-        "@rules_flutter//flutter/settings:ios_xtool_backend": [
-{ios_xtool_branch}
-        ],
-        "@platforms//os:ios": [
-{ios_branch}
-        ],
-        "//conditions:default": [],
-    }}),
-""".format(
-            macos_branch = macos_branch,
-            macos_xtool_branch = macos_xtool_branch,
-            ios_branch = ios_branch,
-            ios_xtool_branch = ios_xtool_branch,
-        )
+    apple_libs_arg = _plugin_apple_libs_arg(name, apple_macos_srcs_dirs, apple_ios_srcs_dirs)
 
+    linux_libs_arg = ""
     if linux_src_dir:
         linux_libs_arg = '    linux_libs = [":{name}_linux"],\n'.format(name = name)
 
+    windows_libs_arg = ""
     if windows_src_dir:
         windows_libs_arg = '    windows_libs = [":{name}_windows"],\n'.format(name = name)
 
@@ -761,28 +797,11 @@ flutter_windows_plugin_library(
 
     # Apple PrivacyInfo.xcprivacy files: thread through `apple_privacy_files`
     # on the flutter_plugin so they propagate via FlutterInfo to the platform
-    # application rule, which bundles them via Resources/. Split per-platform
-    # via select() so the macOS bundle never picks up iOS-only manifests
-    # (and vice versa) — different platforms can declare different privacy
-    # uses, and Apple's submission validator aggregates whatever it finds in
-    # the per-platform bundle.
-    apple_privacy_files_arg = ""
-    if apple_macos_privacy_manifests or apple_ios_privacy_manifests:
-        macos_lines = "\n".join(['            "{}",'.format(p) for p in apple_macos_privacy_manifests])
-        ios_lines = "\n".join(['            "{}",'.format(p) for p in apple_ios_privacy_manifests])
-        apple_privacy_files_arg = """    apple_privacy_files = select({{
-        "@platforms//os:macos": [
-{macos_lines}
-        ],
-        "@platforms//os:ios": [
-{ios_lines}
-        ],
-        "//conditions:default": [],
-    }}),
-""".format(
-            macos_lines = macos_lines,
-            ios_lines = ios_lines,
-        )
+    # application rule, which bundles them via Resources/.
+    apple_privacy_files_arg = _plugin_privacy_files_arg(
+        apple_macos_privacy_manifests,
+        apple_ios_privacy_manifests,
+    )
 
     pub_attrs = _format_pub_asset_attrs(fonts_json_str, font_files, pkg_assets, pkg_shaders)
 
@@ -806,8 +825,8 @@ flutter_plugin(
         deps = deps_block,
         language_version = language_version,
         plugin_platforms_json_literal = repr(plugin_platforms_json),
-        extra_loads = "\n".join(extra_loads),
-        extra_targets = "\n".join(extra_targets),
+        extra_loads = extra_loads,
+        extra_targets = extra_targets,
         apple_libs_arg = apple_libs_arg,
         linux_libs_arg = linux_libs_arg,
         windows_libs_arg = windows_libs_arg,
@@ -891,6 +910,147 @@ def _fail_on_invalid_android_namespace(package_name, java_package):
             pkg = package_name,
             ns = repr(java_package),
         ))
+
+def _android_srcs_attr(android_src_dir):
+    """The `srcs` attribute value for the spoke's `kt_android_library`.
+
+    The source dir is relative to the package root; the sub-package itself
+    lives at `android/`, so that prefix is stripped there.
+    """
+    if not android_src_dir:
+        return "[]"
+    if android_src_dir.startswith("android/"):
+        sub_src = android_src_dir[len("android/"):]
+    else:
+        sub_src = android_src_dir
+    return "glob([{kt}, {java}], allow_empty = True)".format(
+        kt = repr(sub_src + "/**/*.kt"),
+        java = repr(sub_src + "/**/*.java"),
+    )
+
+def _android_library_args(java_package, android_manifest, has_resources, consumer_proguard_specs):
+    """The manifest, resources and ProGuard fragments of the spoke library.
+
+    Returns `struct(custom_package, manifest, synthesized_manifest,
+    resource_files, proguard_specs)`. `manifest = "..."` lets
+    `android_binary`'s `ManifestMerger2` pick up the plugin's `<activity>` /
+    `<service>` / `<uses-permission>` / etc. entries transitively — same
+    shape AGP uses inside `flutter build apk`. Paths are relative to the
+    `android/` sub-package, so the prefix is stripped there. Resources are
+    compiled into the library so the plugin's `R` class resolves at compile
+    time and the resources merge into the consuming APK. `proguard_specs`
+    lets `android_binary`'s R8 step pick up the plugin's keep rules
+    transitively — same shape AGP uses for `consumerProguardFiles`.
+    """
+    custom_package_arg = ""
+    if java_package:
+        custom_package_arg = "    custom_package = %s,\n" % repr(java_package)
+
+    (manifest_arg, synthesized_manifest) = _android_manifest_build_args(
+        android_manifest,
+        java_package,
+        has_resources,
+    )
+
+    # `allow_empty = False` — resource detection already saw files here, so
+    # an empty glob means the layout assumption broke.
+    resource_files_arg = ""
+    if has_resources:
+        resource_files_arg = '    resource_files = glob(["src/main/res/**"], allow_empty = False),\n'
+
+    proguard_specs_arg = ""
+    if consumer_proguard_specs:
+        spec_lines = ", ".join([repr(path) for path in consumer_proguard_specs])
+        proguard_specs_arg = "    proguard_specs = [%s],\n" % spec_lines
+
+    return struct(
+        custom_package = custom_package_arg,
+        manifest = manifest_arg,
+        synthesized_manifest = synthesized_manifest,
+        resource_files = resource_files_arg,
+        proguard_specs = proguard_specs_arg,
+    )
+
+def _android_plugin_deps_block(extra_maven_labels):
+    """The `deps` block body: the engine and BuildConfig plus maven labels.
+
+    Base deps every plugin spoke gets: the engine (which carries the
+    FlutterPlugin SPI plus the embedding's androidx compile classpath via
+    its exports) and the BuildConfig stub. Plugin-specific maven deps from
+    `extra_maven_labels` are appended, de-duped.
+    """
+    base_labels = [
+        ":_engine",
+        ":_build_config",
+    ]
+    seen = {label: True for label in base_labels}
+    all_labels = list(base_labels)
+    for lbl in extra_maven_labels:
+        if lbl not in seen:
+            seen[lbl] = True
+            all_labels.append(lbl)
+    return "\n        ".join([repr(label) + "," for label in all_labels])
+
+def _android_engine_prelude(bc_out, bc_content):
+    """The engine + BuildConfig half of the Android sub-package content."""
+    return """\
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
+load("@rules_flutter//flutter:android.bzl", "flutter_android_engine")
+load("@rules_java//java:java_library.bzl", "java_library")
+load("@rules_kotlin//kotlin:android.bzl", "kt_android_library")
+
+# Private engine target — gives the plugin's Kotlin/Java the FlutterPlugin
+# SPI plus the embedding's androidx dependencies (via the engine's
+# exports) on the compile classpath. Always arm64; Java bytecode is
+# ABI-independent. neverlink, so the APK carries only the app's engine, of
+# the ABI flutter_android_app(android_abi=...) names.
+flutter_android_engine(
+    name = "_engine",
+    neverlink = True,
+    visibility = ["//visibility:private"],
+)
+
+# BuildConfig.java stub. Gradle synthesizes this per Android module
+# (matching `android.namespace`). rules_android doesn't, so we generate
+# a minimal one — `DEBUG = false`, which is correct for release builds
+# and harmless for debug (the engine ABI / mode is decided elsewhere).
+write_file(
+    name = "_build_config_src",
+    out = {bc_out},
+    content = [
+{bc_content}
+    ],
+    newline = "unix",
+)
+
+java_library(
+    name = "_build_config",
+    srcs = [":_build_config_src"],
+    visibility = ["//visibility:private"],
+)
+""".format(bc_out = bc_out, bc_content = bc_content)
+
+def _android_lib_target(srcs_attr, lib_args, deps_block):
+    """The `kt_android_library(name = "lib")` half, manifest included."""
+    return """\
+{synthesized_manifest}
+kt_android_library(
+    name = "lib",
+    srcs = {srcs},
+{custom_package}{manifest}{resource_files}{proguard_specs}    visibility = ["//visibility:public"],
+    deps = [
+        {deps}
+    ],
+)
+""".format(
+        srcs = srcs_attr,
+        custom_package = lib_args.custom_package,
+        manifest = lib_args.manifest,
+        resource_files = lib_args.resource_files,
+        proguard_specs = lib_args.proguard_specs,
+        deps = deps_block,
+        synthesized_manifest = lib_args.synthesized_manifest,
+    )
 
 def make_android_subpackage_build_content(
         android_src_dir,
@@ -1006,127 +1166,26 @@ kt_android_library(
             "generated, so the resources would not compile.",
         )
 
-    if android_src_dir:
-        # Source dir is relative to the package root; the sub-package
-        # itself lives at `android/`, so strip that prefix.
-        if android_src_dir.startswith("android/"):
-            sub_src = android_src_dir[len("android/"):]
-        else:
-            sub_src = android_src_dir
-        srcs_attr = "glob([{kt}, {java}], allow_empty = True)".format(
-            kt = repr(sub_src + "/**/*.kt"),
-            java = repr(sub_src + "/**/*.java"),
-        )
-    else:
-        srcs_attr = "[]"
+    srcs_attr = _android_srcs_attr(android_src_dir)
 
-    custom_package_arg = ""
-    if java_package:
-        custom_package_arg = "    custom_package = %s,\n" % repr(java_package)
-
-    # `manifest = "..."` lets `android_binary`'s `ManifestMerger2` pick
-    # up the plugin's `<activity>` / `<service>` / `<uses-permission>`
-    # / etc. entries transitively — same shape AGP uses inside
-    # `flutter build apk`. Paths are relative to the `android/`
-    # sub-package, so the prefix is stripped there.
-    (manifest_arg, synthesized_manifest) = _android_manifest_build_args(
-        android_manifest,
+    lib_args = _android_library_args(
         java_package,
+        android_manifest,
         has_resources,
+        consumer_proguard_specs,
     )
 
-    # Resources are compiled into the library so the plugin's `R` class
-    # resolves at compile time and the resources merge into the consuming
-    # APK. `allow_empty = False` — resource detection already saw files
-    # here, so an empty glob means the layout assumption broke.
-    resource_files_arg = ""
-    if has_resources:
-        resource_files_arg = '    resource_files = glob(["src/main/res/**"], allow_empty = False),\n'
-
-    # `proguard_specs = [...]` lets `android_binary`'s R8 step pick up
-    # the plugin's keep rules transitively — same shape AGP uses for
-    # `consumerProguardFiles`. The paths are relative to the `android/`
-    # sub-package, which is where the spoke lives in our layout.
-    proguard_specs_arg = ""
-    if consumer_proguard_specs:
-        spec_lines = ", ".join([repr(path) for path in consumer_proguard_specs])
-        proguard_specs_arg = "    proguard_specs = [%s],\n" % spec_lines
-
-    # Base deps every plugin spoke gets: the engine (which carries the
-    # FlutterPlugin SPI plus the embedding's androidx compile classpath
-    # via its exports) and the BuildConfig stub. Plugin-specific maven
-    # deps from `extra_maven_labels` are appended, de-duped.
-    base_labels = [
-        ":_engine",
-        ":_build_config",
-    ]
-    seen = {label: True for label in base_labels}
-    all_labels = list(base_labels)
-    for lbl in extra_maven_labels:
-        if lbl not in seen:
-            seen[lbl] = True
-            all_labels.append(lbl)
-    deps_block = "\n        ".join([repr(label) + "," for label in all_labels])
+    deps_block = _android_plugin_deps_block(extra_maven_labels)
 
     # BuildConfig.java stub — Gradle generates this implicitly per
     # plugin's namespace. rules_android does not, so we hand-emit one.
     bc_package = java_package if java_package else "_unknown"
     (bc_out, bc_content) = _android_build_config_block(bc_package)
 
-    return """\
-load("@bazel_skylib//rules:write_file.bzl", "write_file")
-load("@rules_flutter//flutter:android.bzl", "flutter_android_engine")
-load("@rules_java//java:java_library.bzl", "java_library")
-load("@rules_kotlin//kotlin:android.bzl", "kt_android_library")
-
-# Private engine target — gives the plugin's Kotlin/Java the FlutterPlugin
-# SPI plus the embedding's androidx dependencies (via the engine's
-# exports) on the compile classpath. Always arm64; Java bytecode is
-# ABI-independent. neverlink, so the APK carries only the app's engine, of
-# the ABI flutter_android_app(android_abi=...) names.
-flutter_android_engine(
-    name = "_engine",
-    neverlink = True,
-    visibility = ["//visibility:private"],
-)
-
-# BuildConfig.java stub. Gradle synthesizes this per Android module
-# (matching `android.namespace`). rules_android doesn't, so we generate
-# a minimal one — `DEBUG = false`, which is correct for release builds
-# and harmless for debug (the engine ABI / mode is decided elsewhere).
-write_file(
-    name = "_build_config_src",
-    out = {bc_out},
-    content = [
-{bc_content}
-    ],
-    newline = "unix",
-)
-
-java_library(
-    name = "_build_config",
-    srcs = [":_build_config_src"],
-    visibility = ["//visibility:private"],
-)
-{synthesized_manifest}
-kt_android_library(
-    name = "lib",
-    srcs = {srcs},
-{custom_package}{manifest}{resource_files}{proguard_specs}    visibility = ["//visibility:public"],
-    deps = [
-        {deps}
-    ],
-)
-""".format(
-        srcs = srcs_attr,
-        custom_package = custom_package_arg,
-        manifest = manifest_arg,
-        resource_files = resource_files_arg,
-        proguard_specs = proguard_specs_arg,
-        deps = deps_block,
-        bc_out = bc_out,
-        bc_content = bc_content,
-        synthesized_manifest = synthesized_manifest,
+    return _android_engine_prelude(bc_out, bc_content) + _android_lib_target(
+        srcs_attr,
+        lib_args,
+        deps_block,
     )
 
 # The hook entrypoints upstream Dart defines (`package:hooks` — `build` and
@@ -1503,16 +1562,17 @@ def resolve_overlay_roots(ctx, overlay_roots, package_name, version, language_ve
             break
     return overlay_content, overlay_android_content
 
-def _flutter_pub_package_impl(ctx):
+def _fetch_pub_archive(ctx):
+    """Downloads and extracts the package archive, like `pub_lock_package`.
+
+    Verifies sha256 on download, strips trailing NUL padding past the RFC
+    1952 gzip trailer, and unpacks with `ctx.extract`.
+    """
     url = "{base}/packages/{name}/versions/{version}.tar.gz".format(
         base = ctx.attr.base_url,
         name = ctx.attr.package_name,
         version = ctx.attr.version,
     )
-
-    # Match `pub_lock_package`'s download/extract semantics: verify sha256 on
-    # download, strip any trailing NUL padding past the RFC 1952 gzip trailer,
-    # and unpack with `ctx.extract`.
     pinned_download(
         ctx,
         url = url,
@@ -1527,6 +1587,14 @@ def _flutter_pub_package_impl(ctx):
     ctx.extract("_archive.tar.gz")
     ctx.delete("_archive.tar.gz")
 
+def _read_spoke_pubspec(ctx):
+    """Parses the extracted `pubspec.yaml` into spoke inputs.
+
+    Returns `struct(bazel_deps, language_version, plugin_block,
+    asset_block)`: the lock-filtered dependency names, the derived language
+    version, and the parsed `flutter.plugin` / `flutter` asset blocks
+    (absent-pubspec defaults when no pubspec was extracted).
+    """
     bazel_deps = []
     language_version = ""
     plugin_block = struct(
@@ -1552,30 +1620,309 @@ def _flutter_pub_package_impl(ctx):
         )
         plugin_block = parse_flutter_plugin_block(pubspec_content)
         asset_block = parse_flutter_assets_block(pubspec_content)
+    return struct(
+        bazel_deps = bazel_deps,
+        language_version = language_version,
+        plugin_block = plugin_block,
+        asset_block = asset_block,
+    )
 
-    # Build full label strings for sibling spoke repos.
+def _spoke_dep_labels(ctx, bazel_deps, asset_block):
+    """Sibling-spoke labels for the package's own pubspec dependencies.
+
+    If the pubspec declares `uses-material-design: true`, the spoke depends
+    on `@rules_flutter//flutter:material_icons` so the bundled font travels
+    through the deps graph automatically — same channel any other pub
+    package's font flows through. Cross-package mismatch (app says false,
+    pub dep says true) becomes structurally impossible.
+    """
     dep_labels = [
         "@{hub}__{dep}//:{dep}".format(hub = ctx.attr.hub_name, dep = dep)
         for dep in bazel_deps
     ]
-
-    # If the pubspec declares `uses-material-design: true`, the spoke
-    # depends on @rules_flutter//flutter:material_icons so the bundled
-    # font travels through the deps graph automatically — same channel
-    # any other pub package's font flows through. Cross-package mismatch
-    # (app says false, pub dep says true) becomes structurally impossible.
     if asset_block.uses_material_design:
         dep_labels = dep_labels + ["@rules_flutter//flutter:material_icons"]
+    return dep_labels
 
-    # Pre-compute the pub-asset attr inputs once. Used by either branch
-    # below (plugin vs library).
+def _spoke_asset_inputs(ctx, asset_block):
+    """Pre-computes the pub-asset generator inputs, used by either branch.
+
+    Returns `struct(fonts_json_str, font_files, pkg_assets, pkg_shaders,
+    has_contributions)`.
+    """
     fonts_json_str = _encode_fonts_json(asset_block.fonts)
     font_files = _build_font_files_dict(asset_block.fonts)
     pkg_assets_dict = _build_pkg_assets_dict(ctx, asset_block.assets)
     pkg_shaders_dict = _build_pkg_shaders_dict(asset_block.shaders)
-    has_asset_contributions = (
-        bool(asset_block.fonts) or bool(asset_block.assets) or bool(asset_block.shaders)
+    return struct(
+        fonts_json_str = fonts_json_str,
+        font_files = font_files,
+        pkg_assets = pkg_assets_dict,
+        pkg_shaders = pkg_shaders_dict,
+        has_contributions = (
+            bool(asset_block.fonts) or bool(asset_block.assets) or bool(asset_block.shaders)
+        ),
     )
+
+def _empty_android_spoke():
+    """Android sub-package inputs for a spoke with no Android side."""
+    return struct(
+        src_dir = "",
+        java_package = "",
+        extra_maven_labels = [],
+        manifest = "",
+        consumer_proguard_specs = [],
+        has_resources = False,
+        native_build = False,
+    )
+
+def _write_overlay_spoke(ctx, overlay_content, overlay_android_content):
+    """Emits an overlay's BUILD content, replacing auto-generation entirely.
+
+    When the overlay ships an `android/BUILD.bazel.tpl`, it is used
+    verbatim. Otherwise an empty stub is emitted so the hub's
+    `android/all_android_plugin_libs` aggregator can depend on
+    `@<spoke>//android:lib` uniformly across overlay-and-no-Android
+    plugins (audio_session declares Android sources and ships the full
+    sub-package; objective_c is pure Apple and gets the stub).
+    """
+    ctx.file("BUILD.bazel", overlay_content)
+    if overlay_android_content:
+        ctx.file("android/BUILD.bazel", overlay_android_content)
+    else:
+        ctx.file(
+            "android/BUILD.bazel",
+            make_android_subpackage_build_content(
+                android_src_dir = "",
+                java_package = "",
+                extra_maven_labels = [],
+            ),
+        )
+
+def _detect_apple_plugin_sources(ctx, package_name, plugin_block):
+    """Detects Apple sources per platform when pluginClass is set.
+
+    Returns `struct(macos_srcs, ios_srcs, macos_includes, ios_includes,
+    macos_manifests, ios_manifests)`.
+    """
+    apple_macos_srcs_dirs = []
+    apple_ios_srcs_dirs = []
+    apple_macos_include_dirs = []
+    apple_ios_include_dirs = []
+    apple_macos_privacy_manifests = []
+    apple_ios_privacy_manifests = []
+
+    macos_info = plugin_block.platforms.get("macos", {})
+    ios_info = plugin_block.platforms.get("ios", {})
+    macos_shared_darwin = macos_info.get("sharedDarwinSource", False) if macos_info else False
+    ios_shared_darwin = ios_info.get("sharedDarwinSource", False) if ios_info else False
+
+    if macos_info and macos_info.get("pluginClass", ""):
+        apple_macos_srcs_dirs = _detect_apple_source_dirs(
+            ctx,
+            package_name,
+            "macos",
+            macos_shared_darwin,
+        )
+        apple_macos_include_dirs = _detect_apple_include_dirs(
+            ctx,
+            apple_macos_srcs_dirs,
+            package_name,
+        )
+        apple_macos_privacy_manifests = _detect_apple_privacy_manifests(
+            ctx,
+            apple_macos_srcs_dirs,
+        )
+
+    if ios_info and ios_info.get("pluginClass", ""):
+        apple_ios_srcs_dirs = _detect_apple_source_dirs(
+            ctx,
+            package_name,
+            "ios",
+            ios_shared_darwin,
+        )
+        apple_ios_include_dirs = _detect_apple_include_dirs(
+            ctx,
+            apple_ios_srcs_dirs,
+            package_name,
+        )
+        apple_ios_privacy_manifests = _detect_apple_privacy_manifests(
+            ctx,
+            apple_ios_srcs_dirs,
+        )
+
+    return struct(
+        macos_srcs = apple_macos_srcs_dirs,
+        ios_srcs = apple_ios_srcs_dirs,
+        macos_includes = apple_macos_include_dirs,
+        ios_includes = apple_ios_include_dirs,
+        macos_manifests = apple_macos_privacy_manifests,
+        ios_manifests = apple_ios_privacy_manifests,
+    )
+
+def _detect_desktop_plugin_sources(ctx, plugin_block):
+    """Detects Linux/Windows sources when pluginClass is set on that platform.
+
+    The plugin's own `linux/`/`windows/` directory is the canonical
+    location. Returns `struct(linux, windows)`.
+    """
+    linux_info = plugin_block.platforms.get("linux", {})
+    windows_info = plugin_block.platforms.get("windows", {})
+    linux_src_dir = ""
+    windows_src_dir = ""
+    if linux_info and linux_info.get("pluginClass", ""):
+        linux_src_dir = _detect_desktop_source_dir(ctx, "linux")
+    if windows_info and windows_info.get("pluginClass", ""):
+        windows_src_dir = _detect_desktop_source_dir(ctx, "windows")
+    return struct(linux = linux_src_dir, windows = windows_src_dir)
+
+def _detect_android_plugin_sources(ctx, plugin_block):
+    """Detects the Android side when pluginClass is set on android.
+
+    The plugin's Android Gradle build is ONE consistent model: Gradle
+    evaluates exactly one build file per project directory, so every reader
+    below shares plugin_android_build's single choice (see
+    gradle_build_file_choice). Namespace resolution mirrors AGP (gradle
+    `android.namespace`, else the manifest `package` attribute). The
+    pubspec's `package` field locates the plugin class for the registrant;
+    it only stands in for the namespace when the plugin declares none of
+    its own.
+
+    Returns `struct(src_dir, java_package, extra_maven_labels, manifest,
+    consumer_proguard_specs, has_resources, native_build)`.
+    """
+    android_info = plugin_block.platforms.get("android", {})
+    android_build = struct(path = "", content = "")
+    android_native_build = False
+    if android_info:
+        android_build = plugin_android_build(ctx)
+        android_native_build = detect_android_native_build(ctx, android_build.path, android_build.content)
+
+    android_src_dir = ""
+    android_java_package = ""
+    android_extra_maven_labels = []
+    android_manifest = ""
+    android_consumer_proguard_specs = []
+    android_has_resources = False
+    if android_info and android_info.get("pluginClass", ""):
+        android_src_dir = _detect_android_source_dir(ctx)
+        android_has_resources = _detect_android_resources(ctx)
+        android_java_package = (
+            detect_android_namespace(ctx, android_build.path, android_build.content) or
+            android_info.get("package", "") or
+            ""
+        )
+        _fail_on_invalid_android_namespace(ctx.attr.package_name, android_java_package)
+        if android_src_dir or android_has_resources:
+            android_extra_maven_labels = resolve_plugin_maven_deps(ctx, android_build.path, android_build.content)
+            android_manifest = _detect_android_manifest(ctx)
+            android_consumer_proguard_specs = detect_consumer_proguard_specs(ctx, android_build.path, android_build.content)
+
+    return struct(
+        src_dir = android_src_dir,
+        java_package = android_java_package,
+        extra_maven_labels = android_extra_maven_labels,
+        manifest = android_manifest,
+        consumer_proguard_specs = android_consumer_proguard_specs,
+        has_resources = android_has_resources,
+        native_build = android_native_build,
+    )
+
+def _build_plugin_spoke_content(ctx, pubspec, dep_labels, assets, unreplaced_hook):
+    """Builds a `flutter_plugin` spoke and its Android sub-package inputs."""
+    package_name = ctx.attr.package_name
+    apple = _detect_apple_plugin_sources(ctx, package_name, pubspec.plugin_block)
+    desktop = _detect_desktop_plugin_sources(ctx, pubspec.plugin_block)
+    android = _detect_android_plugin_sources(ctx, pubspec.plugin_block)
+    plugin_platforms_json = json.encode(pubspec.plugin_block.platforms)
+    build_content = make_flutter_plugin_build_content(
+        name = package_name,
+        deps = dep_labels,
+        language_version = pubspec.language_version,
+        version = ctx.attr.version,
+        code_assets = ctx.attr.code_assets,
+        has_unreplaced_hook = unreplaced_hook,
+        plugin_platforms_json = plugin_platforms_json,
+        apple_macos_srcs_dirs = apple.macos_srcs,
+        apple_ios_srcs_dirs = apple.ios_srcs,
+        apple_macos_include_dirs = apple.macos_includes,
+        apple_ios_include_dirs = apple.ios_includes,
+        apple_macos_privacy_manifests = apple.macos_manifests,
+        apple_ios_privacy_manifests = apple.ios_manifests,
+        linux_src_dir = desktop.linux,
+        windows_src_dir = desktop.windows,
+        fonts_json_str = assets.fonts_json_str,
+        font_files = assets.font_files,
+        pkg_assets = assets.pkg_assets,
+        pkg_shaders = assets.pkg_shaders,
+    )
+    return struct(build_content = build_content, android = android)
+
+def _build_library_spoke_content(ctx, pubspec, dep_labels, assets, unreplaced_hook):
+    """Builds a `flutter_library` spoke for asset/font/shader contributions.
+
+    No plugin block, but the pubspec has flutter.fonts/assets/shaders:
+    a `flutter_library` (rather than `dart_library`) so the metadata
+    propagates via FlutterInfo.pub_fonts/pub_assets/pub_shaders to the
+    consuming app's bundle aggregator.
+    """
+    build_content = make_flutter_library_build_content(
+        name = ctx.attr.package_name,
+        deps = dep_labels,
+        language_version = pubspec.language_version,
+        version = ctx.attr.version,
+        code_assets = ctx.attr.code_assets,
+        has_unreplaced_hook = unreplaced_hook,
+        fonts_json_str = assets.fonts_json_str,
+        font_files = assets.font_files,
+        pkg_assets = assets.pkg_assets,
+        pkg_shaders = assets.pkg_shaders,
+    )
+    return struct(build_content = build_content, android = _empty_android_spoke())
+
+def _build_dart_spoke_content(ctx, pubspec, dep_labels, unreplaced_hook):
+    """Builds a plain `dart_library` spoke via rules_dart's generator."""
+    build_content = make_dart_library_build_content(
+        name = ctx.attr.package_name,
+        deps = dep_labels,
+        language_version = pubspec.language_version,
+        code_assets = ctx.attr.code_assets,
+        has_unreplaced_hook = unreplaced_hook,
+        version = ctx.attr.version,
+    )
+    if ctx.attr.package_name == "test":
+        ctx.file("flutter_test_package.bzl", _FLUTTER_TEST_PACKAGE_BZL_CONTENT)
+        build_content = build_content.replace(
+            '    "dart_test_package",\n',
+            "",
+        ).replace(
+            "dart_test_package(",
+            'load(":flutter_test_package.bzl", "flutter_test_package")\n\nflutter_test_package(',
+        )
+    return struct(build_content = build_content, android = _empty_android_spoke())
+
+def _build_spoke_content(ctx, pubspec, dep_labels, assets, unreplaced_hook):
+    """Builds the spoke BUILD content for whichever branch the pubspec selects.
+
+    Returns `struct(build_content, android)` where `android` carries the
+    Android sub-package inputs for the follow-up `android/BUILD.bazel`.
+    """
+    if pubspec.plugin_block.present:
+        return _build_plugin_spoke_content(ctx, pubspec, dep_labels, assets, unreplaced_hook)
+    if assets.has_contributions:
+        return _build_library_spoke_content(ctx, pubspec, dep_labels, assets, unreplaced_hook)
+    return _build_dart_spoke_content(ctx, pubspec, dep_labels, unreplaced_hook)
+
+def _flutter_pub_package_impl(ctx):
+    _fetch_pub_archive(ctx)
+    pubspec = _read_spoke_pubspec(ctx)
+
+    # Build full label strings for sibling spoke repos.
+    dep_labels = _spoke_dep_labels(ctx, pubspec.bazel_deps, pubspec.asset_block)
+
+    # Pre-compute the pub-asset attr inputs once. Used by either branch
+    # below (plugin vs library).
+    assets = _spoke_asset_inputs(ctx, pubspec.asset_block)
 
     # Computed once, before the branch: which generator runs depends on the
     # pubspec, but a build hook is a property of the package either way.
@@ -1590,206 +1937,16 @@ def _flutter_pub_package_impl(ctx):
         ctx.attr.overlay_roots,
         ctx.attr.package_name,
         ctx.attr.version,
-        language_version,
+        pubspec.language_version,
         dep_labels,
     )
 
     if overlay_content:
-        ctx.file("BUILD.bazel", overlay_content)
-
-        # When the overlay ships an `android/BUILD.bazel.tpl`, use it
-        # verbatim. Otherwise emit an empty stub so the hub's
-        # `android/all_android_plugin_libs` aggregator can depend on
-        # `@<spoke>//android:lib` uniformly across overlay-and-no-Android
-        # plugins (audio_session declares Android sources and ships the
-        # full sub-package; objective_c is pure Apple and gets the stub).
-        if overlay_android_content:
-            ctx.file("android/BUILD.bazel", overlay_android_content)
-        else:
-            ctx.file(
-                "android/BUILD.bazel",
-                make_android_subpackage_build_content(
-                    android_src_dir = "",
-                    java_package = "",
-                    extra_maven_labels = [],
-                ),
-            )
+        _write_overlay_spoke(ctx, overlay_content, overlay_android_content)
         return
 
-    if plugin_block.present:
-        # Detect Apple sources per platform when pluginClass is set.
-        apple_macos_srcs_dirs = []
-        apple_ios_srcs_dirs = []
-
-        macos_info = plugin_block.platforms.get("macos", {})
-        ios_info = plugin_block.platforms.get("ios", {})
-        linux_info = plugin_block.platforms.get("linux", {})
-        windows_info = plugin_block.platforms.get("windows", {})
-
-        macos_shared_darwin = macos_info.get("sharedDarwinSource", False) if macos_info else False
-        ios_shared_darwin = ios_info.get("sharedDarwinSource", False) if ios_info else False
-
-        apple_macos_include_dirs = []
-        apple_ios_include_dirs = []
-        apple_macos_privacy_manifests = []
-        apple_ios_privacy_manifests = []
-
-        if macos_info and macos_info.get("pluginClass", ""):
-            apple_macos_srcs_dirs = _detect_apple_source_dirs(
-                ctx,
-                ctx.attr.package_name,
-                "macos",
-                macos_shared_darwin,
-            )
-            apple_macos_include_dirs = _detect_apple_include_dirs(
-                ctx,
-                apple_macos_srcs_dirs,
-                ctx.attr.package_name,
-            )
-            apple_macos_privacy_manifests = _detect_apple_privacy_manifests(
-                ctx,
-                apple_macos_srcs_dirs,
-            )
-
-        if ios_info and ios_info.get("pluginClass", ""):
-            apple_ios_srcs_dirs = _detect_apple_source_dirs(
-                ctx,
-                ctx.attr.package_name,
-                "ios",
-                ios_shared_darwin,
-            )
-            apple_ios_include_dirs = _detect_apple_include_dirs(
-                ctx,
-                apple_ios_srcs_dirs,
-                ctx.attr.package_name,
-            )
-            apple_ios_privacy_manifests = _detect_apple_privacy_manifests(
-                ctx,
-                apple_ios_srcs_dirs,
-            )
-
-        # Linux/Windows desktop sources: scan whenever pluginClass is
-        # set on that platform. The plugin's own `linux/`/`windows/`
-        # directory is the canonical location.
-        linux_src_dir = ""
-        windows_src_dir = ""
-        if linux_info and linux_info.get("pluginClass", ""):
-            linux_src_dir = _detect_desktop_source_dir(ctx, "linux")
-        if windows_info and windows_info.get("pluginClass", ""):
-            windows_src_dir = _detect_desktop_source_dir(ctx, "windows")
-
-        # Android sources: scan when pluginClass is set on android.
-        android_info = plugin_block.platforms.get("android", {})
-        android_src_dir = ""
-        android_java_package = ""
-        android_extra_maven_labels = []
-        android_manifest = ""
-        android_consumer_proguard_specs = []
-        android_has_resources = False
-        android_native_build = False
-
-        # The plugin's Android Gradle build is ONE consistent model:
-        # Gradle evaluates exactly one build file per project directory,
-        # so every reader below shares plugin_android_build's single
-        # choice (see gradle_build_file_choice). Empty until android_info
-        # fills it in.
-        android_build = struct(path = "", content = "")
-        if android_info:
-            android_build = plugin_android_build(ctx)
-            android_native_build = detect_android_native_build(ctx, android_build.path, android_build.content)
-        if android_info and android_info.get("pluginClass", ""):
-            android_src_dir = _detect_android_source_dir(ctx)
-            android_has_resources = _detect_android_resources(ctx)
-
-            # Namespace resolution mirrors AGP (gradle `android.namespace`,
-            # else the manifest `package` attribute). The pubspec's
-            # `package` field locates the plugin class for the registrant;
-            # it only stands in for the namespace when the plugin declares
-            # none of its own.
-            android_java_package = (
-                detect_android_namespace(ctx, android_build.path, android_build.content) or
-                android_info.get("package", "") or
-                ""
-            )
-            _fail_on_invalid_android_namespace(ctx.attr.package_name, android_java_package)
-            if android_src_dir or android_has_resources:
-                android_extra_maven_labels = resolve_plugin_maven_deps(ctx, android_build.path, android_build.content)
-                android_manifest = _detect_android_manifest(ctx)
-                android_consumer_proguard_specs = detect_consumer_proguard_specs(ctx, android_build.path, android_build.content)
-
-        plugin_platforms_json = json.encode(plugin_block.platforms)
-        build_content = make_flutter_plugin_build_content(
-            name = ctx.attr.package_name,
-            deps = dep_labels,
-            language_version = language_version,
-            version = ctx.attr.version,
-            code_assets = ctx.attr.code_assets,
-            has_unreplaced_hook = unreplaced_hook,
-            plugin_platforms_json = plugin_platforms_json,
-            apple_macos_srcs_dirs = apple_macos_srcs_dirs,
-            apple_ios_srcs_dirs = apple_ios_srcs_dirs,
-            apple_macos_include_dirs = apple_macos_include_dirs,
-            apple_ios_include_dirs = apple_ios_include_dirs,
-            apple_macos_privacy_manifests = apple_macos_privacy_manifests,
-            apple_ios_privacy_manifests = apple_ios_privacy_manifests,
-            linux_src_dir = linux_src_dir,
-            windows_src_dir = windows_src_dir,
-            fonts_json_str = fonts_json_str,
-            font_files = font_files,
-            pkg_assets = pkg_assets_dict,
-            pkg_shaders = pkg_shaders_dict,
-        )
-    elif has_asset_contributions:
-        # No plugin block, but the pubspec has flutter.fonts/assets/shaders.
-        # Emit a flutter_library (rather than dart_library) so the metadata
-        # propagates via FlutterInfo.pub_fonts/pub_assets/pub_shaders to the
-        # consuming app's bundle aggregator.
-        build_content = make_flutter_library_build_content(
-            name = ctx.attr.package_name,
-            deps = dep_labels,
-            language_version = language_version,
-            version = ctx.attr.version,
-            code_assets = ctx.attr.code_assets,
-            has_unreplaced_hook = unreplaced_hook,
-            fonts_json_str = fonts_json_str,
-            font_files = font_files,
-            pkg_assets = pkg_assets_dict,
-            pkg_shaders = pkg_shaders_dict,
-        )
-        android_src_dir = ""
-        android_java_package = ""
-        android_extra_maven_labels = []
-        android_manifest = ""
-        android_consumer_proguard_specs = []
-        android_has_resources = False
-        android_native_build = False
-    else:
-        build_content = make_dart_library_build_content(
-            name = ctx.attr.package_name,
-            deps = dep_labels,
-            language_version = language_version,
-            code_assets = ctx.attr.code_assets,
-            has_unreplaced_hook = unreplaced_hook,
-            version = ctx.attr.version,
-        )
-        if ctx.attr.package_name == "test":
-            ctx.file("flutter_test_package.bzl", _FLUTTER_TEST_PACKAGE_BZL_CONTENT)
-            build_content = build_content.replace(
-                '    "dart_test_package",\n',
-                "",
-            ).replace(
-                "dart_test_package(",
-                'load(":flutter_test_package.bzl", "flutter_test_package")\n\nflutter_test_package(',
-            )
-        android_src_dir = ""
-        android_java_package = ""
-        android_extra_maven_labels = []
-        android_manifest = ""
-        android_consumer_proguard_specs = []
-        android_has_resources = False
-        android_native_build = False
-
-    ctx.file("BUILD.bazel", build_content)
+    spoke = _build_spoke_content(ctx, pubspec, dep_labels, assets, unreplaced_hook)
+    ctx.file("BUILD.bazel", spoke.build_content)
 
     # Always emit `android/BUILD.bazel`. Bazel only loads it when something
     # queries `@<spoke>//android:lib`, so non-Android workspaces don't pay
@@ -1797,19 +1954,19 @@ def _flutter_pub_package_impl(ctx):
     # compiles native Android code that autogen cannot translate get a
     # load-time fail() here instead — Android builds break loudly rather
     # than shipping an APK missing the library.
-    if android_native_build:
+    if spoke.android.native_build:
         android_build_content = _make_android_native_build_unsupported_content(
             ctx.attr.package_name,
             ctx.attr.version,
         )
     else:
         android_build_content = make_android_subpackage_build_content(
-            android_src_dir = android_src_dir,
-            java_package = android_java_package,
-            extra_maven_labels = android_extra_maven_labels,
-            android_manifest = android_manifest,
-            consumer_proguard_specs = android_consumer_proguard_specs,
-            has_resources = android_has_resources,
+            android_src_dir = spoke.android.src_dir,
+            java_package = spoke.android.java_package,
+            extra_maven_labels = spoke.android.extra_maven_labels,
+            android_manifest = spoke.android.manifest,
+            consumer_proguard_specs = spoke.android.consumer_proguard_specs,
+            has_resources = spoke.android.has_resources,
         )
     ctx.file("android/BUILD.bazel", android_build_content)
 
