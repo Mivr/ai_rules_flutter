@@ -195,8 +195,7 @@ List<String> _outputGroupRoots(
     return const [];
   }
   final groups =
-      (event['completed'] as Map<String, Object?>?)?['outputGroup']
-          as List? ??
+      (event['completed'] as Map<String, Object?>?)?['outputGroup'] as List? ??
       const [];
   final roots = <String>[];
   for (final group in groups.cast<Map<String, Object?>>()) {

@@ -500,10 +500,11 @@ Future<Map<String, dynamic>> _call(
   // Read again now the app is up: a breakpoint or an unhandled exception can
   // have stopped it since, and those hang the dispatch just the same.
   if (await _pauseError(
-    client,
-    extensionMethod,
-    pauseReadBound,
-  ) case final error?) {
+        client,
+        extensionMethod,
+        pauseReadBound,
+      )
+      case final error?) {
     throw error;
   }
   final args = <String, String>{
@@ -540,9 +541,10 @@ Future<CommandFailure?> _pauseError(
   VmServiceClient client,
   String extensionMethod,
   Duration pauseReadBound,
-) async => switch (await client
-    .pausedReason()
-    .timeout(pauseReadBound, onTimeout: () => null)) {
+) async => switch (await client.pausedReason().timeout(
+  pauseReadBound,
+  onTimeout: () => null,
+)) {
   final reason? => CommandFailure.failed(
     '$extensionMethod cannot run: $reason',
   ),
@@ -563,10 +565,11 @@ Future<void> _waitForAppReady(
 }) async {
   if (session.device.startPaused) {
     if (await _pauseError(
-      client,
-      extensionMethod,
-      pauseReadBound,
-    ) case final error?) {
+          client,
+          extensionMethod,
+          pauseReadBound,
+        )
+        case final error?) {
       throw error;
     }
     return;

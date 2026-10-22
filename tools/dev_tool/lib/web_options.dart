@@ -500,8 +500,8 @@ void checkExpressionEvaluation(
     'that is running, and only the DDC dev loop has a resident compiler '
     'and a debugger to do that with. '
     '${mode is WasmWebMode ? '--wasm builds with dart2wasm, which has '
-                'neither.' : 'This run serves a built bundle statically, with '
-                'no VM service.'}\n'
+              'neither.' : 'This run serves a built bundle statically, with '
+              'no VM service.'}\n'
     'Drop the flag, or run the DDC dev loop (no --wasm, no --profile, '
     'no --no-hot).',
   );

@@ -22,7 +22,6 @@ import 'session.dart';
 import 'session_host.dart';
 import 'vm_service_client.dart';
 
-
 /// What the VM-service connect produced: the client, the owned DDS, and why
 /// there is no client.
 typedef _VmConnection = ({
@@ -365,7 +364,10 @@ class DeviceLauncher {
   ///
   /// Skipped while start-paused: the extension is registered by the
   /// framework binding, which has not run yet.
-  Future<void> _applyLaunchOptions(Device device, VmServiceClient? vmClient) async {
+  Future<void> _applyLaunchOptions(
+    Device device,
+    VmServiceClient? vmClient,
+  ) async {
     // Push initial route if specified. Not while paused: the extension is
     // registered by the framework's binding, which has not run, so the call
     // would fail and the message would blame the route.
@@ -410,7 +412,10 @@ class DeviceLauncher {
   }
 
   /// Report whether --start-paused took, after seeing it paused.
-  Future<void> _verifyStartPaused(Device device, VmServiceClient? vmClient) async {
+  Future<void> _verifyStartPaused(
+    Device device,
+    VmServiceClient? vmClient,
+  ) async {
     // Say it is paused only after seeing it paused. The switch travels a
     // different way on every platform — an intent extra, an env variable, a
     // trailing argv entry — and a target that ignored it would otherwise
