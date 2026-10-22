@@ -302,23 +302,14 @@ class PlistEntry {
   const PlistEntry(this.key, this.rawValue);
 }
 
-/// Parses the top-level `<dict>` entries of an XML plist.
-List<PlistEntry> parsePlistEntries(String xml, {String source = '<memory>'}) {
-  final dictStart = xml.indexOf('<dict');
-  if (dictStart == -1) {
-    if (xml.contains('<dict/>')) return const [];
-    throw FormatException('Plist $source does not contain a root <dict>.');
-  }
-  final openEnd = xml.indexOf('>', dictStart);
-  if (openEnd == -1) {
-    throw FormatException('Malformed <dict> tag in $source.');
-  }
-  if (xml[openEnd - 1] == '/') {
-    return const [];
-  }
+/// Cursor over an XML plist string while its top-level `<dict>` entries are
+/// read. Holds the mutable scan position that the nested readers share.
+class _PlistReader {
+  final String xml;
+  final String source;
+  var pos = 0;
 
-  final entries = <PlistEntry>[];
-  var pos = openEnd + 1;
+  _PlistReader(this.xml, {required this.source});
 
   void skipTrivia() {
     while (pos < xml.length) {
@@ -347,11 +338,19 @@ List<PlistEntry> parsePlistEntries(String xml, {String source = '<memory>'}) {
       isEnd = true;
       pos++;
     }
+    final name = _readTagName();
+    return _readTagClose(name, isEnd);
+  }
+
+  String _readTagName() {
     final nameStart = pos;
     while (pos < xml.length && RegExp(r'[A-Za-z0-9_.:-]').hasMatch(xml[pos])) {
       pos++;
     }
-    final name = xml.substring(nameStart, pos);
+    return xml.substring(nameStart, pos);
+  }
+
+  (String, bool, bool) _readTagClose(String name, bool isEnd) {
     var inQuote = '';
     while (pos < xml.length) {
       final c = xml[pos];
@@ -388,30 +387,54 @@ List<PlistEntry> parsePlistEntries(String xml, {String source = '<memory>'}) {
         throw FormatException('Unterminated <$name> in $source.');
       }
       pos = next;
-      if (xml.startsWith('<!--', pos)) {
-        final end = xml.indexOf('-->', pos + 4);
-        if (end == -1) {
-          throw FormatException('Unterminated comment in $source.');
+      if (!_skipCommentOrStep()) {
+        final (_, nestedSelfClosing, nestedEnd) = readTag();
+        if (nestedEnd) {
+          depth--;
+        } else if (!nestedSelfClosing) {
+          depth++;
         }
-        pos = end + 3;
-        continue;
-      }
-      final (_, nestedSelfClosing, nestedEnd) = readTag();
-      if (nestedEnd) {
-        depth--;
-      } else if (!nestedSelfClosing) {
-        depth++;
       }
     }
     return xml.substring(start, pos);
   }
 
+  /// Skips an XML comment at the cursor; returns false when the cursor is on
+  /// a real tag that the caller must read.
+  bool _skipCommentOrStep() {
+    if (!xml.startsWith('<!--', pos)) return false;
+    final end = xml.indexOf('-->', pos + 4);
+    if (end == -1) {
+      throw FormatException('Unterminated comment in $source.');
+    }
+    pos = end + 3;
+    return true;
+  }
+}
+
+/// Parses the top-level `<dict>` entries of an XML plist.
+List<PlistEntry> parsePlistEntries(String xml, {String source = '<memory>'}) {
+  final dictStart = xml.indexOf('<dict');
+  if (dictStart == -1) {
+    if (xml.contains('<dict/>')) return const [];
+    throw FormatException('Plist $source does not contain a root <dict>.');
+  }
+  final openEnd = xml.indexOf('>', dictStart);
+  if (openEnd == -1) {
+    throw FormatException('Malformed <dict> tag in $source.');
+  }
+  if (xml[openEnd - 1] == '/') {
+    return const [];
+  }
+
+  final reader = _PlistReader(xml, source: source)..pos = openEnd + 1;
+  final entries = <PlistEntry>[];
   while (true) {
-    skipTrivia();
-    if (pos >= xml.length) {
+    reader.skipTrivia();
+    if (reader.pos >= xml.length) {
       throw FormatException('Root <dict> not closed in $source.');
     }
-    final (tagName, selfClosing, isEnd) = readTag();
+    final (tagName, selfClosing, isEnd) = reader.readTag();
     if (isEnd) {
       if (tagName != 'dict') {
         throw FormatException('Unexpected </$tagName> in $source.');
@@ -421,16 +444,20 @@ List<PlistEntry> parsePlistEntries(String xml, {String source = '<memory>'}) {
     if (tagName != 'key' || selfClosing) {
       throw FormatException('Expected <key> in $source, found <$tagName>.');
     }
-    final keyClose = xml.indexOf('</key>', pos);
-    if (keyClose == -1) {
-      throw FormatException('Unclosed <key> in $source.');
-    }
-    final keyName = xml.substring(pos, keyClose).trim();
-    pos = keyClose + '</key>'.length;
-    skipTrivia();
-    final valueXml = readElement();
-    entries.add(PlistEntry(keyName, valueXml));
+    entries.add(_readPlistEntry(xml, reader, source));
   }
+}
+
+PlistEntry _readPlistEntry(String xml, _PlistReader reader, String source) {
+  final keyClose = xml.indexOf('</key>', reader.pos);
+  if (keyClose == -1) {
+    throw FormatException('Unclosed <key> in $source.');
+  }
+  final keyName = xml.substring(reader.pos, keyClose).trim();
+  reader.pos = keyClose + '</key>'.length;
+  reader.skipTrivia();
+  final valueXml = reader.readElement();
+  return PlistEntry(keyName, valueXml);
 }
 
 /// Substitutes `$(VAR)` and `${VAR}` placeholders in [text] using [variables].
@@ -454,32 +481,14 @@ String _escapeXml(String text) => text
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;');
 
-/// Merges zero or more XML `Info.plist` sources, substitutes Xcode build
-/// variables, and injects standard Apple bundle keys required by iOS/macOS.
-String buildInfoPlist({
-  required List<String> plistXmls,
-  required String platform,
-  required String appName,
-  required String bundleId,
-  required String minimumOsVersion,
-  Map<String, String> extraVariables = const {},
-  List<String> families = const [],
-}) {
-  final variables = <String, String>{
-    'EXECUTABLE_NAME': appName,
-    'PRODUCT_NAME': appName,
-    'PRODUCT_BUNDLE_IDENTIFIER': bundleId,
-    'BUNDLE_IDENTIFIER': bundleId,
-    'DEVELOPMENT_LANGUAGE': 'en',
-    'MACOSX_DEPLOYMENT_TARGET': minimumOsVersion,
-    'IPHONEOS_DEPLOYMENT_TARGET': minimumOsVersion,
-    'FLUTTER_BUILD_NAME': '1.0.0',
-    'FLUTTER_BUILD_NUMBER': '1',
-    ...extraVariables,
-  };
-
+/// Merges plist sources with Xcode variable substitution, remembering key
+/// order and overwrite rules.
+class _PlistMerger {
+  final Map<String, String> variables;
   final merged = <String, String>{};
   final order = <String>[];
+
+  _PlistMerger(this.variables);
 
   void setEntry(String key, String rawValue, {bool overwriteNonEmpty = true}) {
     final substituted = substitutePlistVariables(rawValue.trim(), variables);
@@ -497,43 +506,74 @@ String buildInfoPlist({
     }
   }
 
+  void dropIfEmpty(String key) {
+    if (merged.containsKey(key) && _isEmptyPlistString(merged[key]!)) {
+      merged.remove(key);
+      order.remove(key);
+    }
+  }
+}
+
+Map<String, String> _basePlistVariables({
+  required String appName,
+  required String bundleId,
+  required String minimumOsVersion,
+  required Map<String, String> extraVariables,
+}) {
+  return {
+    'EXECUTABLE_NAME': appName,
+    'PRODUCT_NAME': appName,
+    'PRODUCT_BUNDLE_IDENTIFIER': bundleId,
+    'BUNDLE_IDENTIFIER': bundleId,
+    'DEVELOPMENT_LANGUAGE': 'en',
+    'MACOSX_DEPLOYMENT_TARGET': minimumOsVersion,
+    'IPHONEOS_DEPLOYMENT_TARGET': minimumOsVersion,
+    'FLUTTER_BUILD_NAME': '1.0.0',
+    'FLUTTER_BUILD_NUMBER': '1',
+    ...extraVariables,
+  };
+}
+
+void _mergePlistSources(_PlistMerger merger, List<String> plistXmls) {
   for (var i = 0; i < plistXmls.length; i++) {
     final entries = parsePlistEntries(plistXmls[i], source: 'plist[$i]');
     for (final entry in entries) {
-      setEntry(entry.key, entry.rawValue, overwriteNonEmpty: true);
+      merger.setEntry(entry.key, entry.rawValue, overwriteNonEmpty: true);
     }
   }
+}
 
-  // Drop empty CFBundleIconFile left by `flutter create` scaffolds if nothing
-  // populated it.
-  if (merged.containsKey('CFBundleIconFile') &&
-      _isEmptyPlistString(merged['CFBundleIconFile']!)) {
-    merged.remove('CFBundleIconFile');
-    order.remove('CFBundleIconFile');
-  }
-
+void _applyBuildVersionOverrides(
+  _PlistMerger merger,
+  Map<String, String> extraVariables,
+) {
   // If explicit build/short version variables were supplied, ensure they
   // populate CFBundleVersion / CFBundleShortVersionString even if the base
   // Info.plist had literal strings instead of $(FLUTTER_BUILD_*) placeholders.
-  if (extraVariables.containsKey('FLUTTER_BUILD_NAME') &&
-      extraVariables['FLUTTER_BUILD_NAME']!.isNotEmpty) {
-    setEntry(
+  final buildName = extraVariables['FLUTTER_BUILD_NAME'];
+  if (buildName != null && buildName.isNotEmpty) {
+    merger.setEntry(
       'CFBundleShortVersionString',
-      '<string>${_escapeXml(extraVariables['FLUTTER_BUILD_NAME']!)}</string>',
+      '<string>${_escapeXml(buildName)}</string>',
       overwriteNonEmpty: true,
     );
   }
-  if (extraVariables.containsKey('FLUTTER_BUILD_NUMBER') &&
-      extraVariables['FLUTTER_BUILD_NUMBER']!.isNotEmpty) {
-    setEntry(
+  final buildNumber = extraVariables['FLUTTER_BUILD_NUMBER'];
+  if (buildNumber != null && buildNumber.isNotEmpty) {
+    merger.setEntry(
       'CFBundleVersion',
-      '<string>${_escapeXml(extraVariables['FLUTTER_BUILD_NUMBER']!)}</string>',
+      '<string>${_escapeXml(buildNumber)}</string>',
       overwriteNonEmpty: true,
     );
   }
+}
 
-  // Standard Apple bundle defaults (only injected when missing or empty).
-  final defaults = <String, String>{
+Map<String, String> _standardPlistDefaults(
+  Map<String, String> variables,
+  String appName,
+  String bundleId,
+) {
+  return {
     'CFBundleDevelopmentRegion': '<string>en</string>',
     'CFBundleExecutable': '<string>${_escapeXml(appName)}</string>',
     'CFBundleIdentifier': '<string>${_escapeXml(bundleId)}</string>',
@@ -545,56 +585,112 @@ String buildInfoPlist({
     'CFBundleVersion':
         '<string>${_escapeXml(variables['FLUTTER_BUILD_NUMBER']!)}</string>',
   };
+}
 
-  if (platform == 'ios' || platform == 'ios_sim') {
-    final supportedPlatform = platform == 'ios_sim'
-        ? 'iPhoneSimulator'
-        : 'iPhoneOS';
-    final dtPlatform = platform == 'ios_sim' ? 'iphonesimulator' : 'iphoneos';
-    defaults['MinimumOSVersion'] =
-        '<string>${_escapeXml(minimumOsVersion)}</string>';
-    defaults['CFBundleSupportedPlatforms'] =
-        '<array>\n\t\t<string>$supportedPlatform</string>\n\t</array>';
-    defaults['DTPlatformName'] = '<string>$dtPlatform</string>';
-
-    final familyIds = <int>[];
-    if (families.isEmpty) {
-      familyIds.addAll([1, 2]);
-    } else {
-      for (final f in families) {
-        switch (f) {
-          case 'iphone':
-            if (!familyIds.contains(1)) familyIds.add(1);
-          case 'ipad':
-            if (!familyIds.contains(2)) familyIds.add(2);
-          default:
-            throw ArgumentError(
-              'Unsupported iOS device family "$f" in families. '
-              'Expected "iphone" or "ipad".',
-            );
-        }
+String _iosDeviceFamilyXml(List<String> families) {
+  final familyIds = <int>[];
+  if (families.isEmpty) {
+    familyIds.addAll([1, 2]);
+  } else {
+    for (final f in families) {
+      switch (f) {
+        case 'iphone':
+          if (!familyIds.contains(1)) familyIds.add(1);
+        case 'ipad':
+          if (!familyIds.contains(2)) familyIds.add(2);
+        default:
+          throw ArgumentError(
+            'Unsupported iOS device family "$f" in families. '
+            'Expected "iphone" or "ipad".',
+          );
       }
     }
-    final familyXml =
-        '<array>\n${familyIds.map((id) => '\t\t<integer>$id</integer>').join('\n')}\n\t</array>';
-    if (families.isNotEmpty) {
-      setEntry('UIDeviceFamily', familyXml, overwriteNonEmpty: true);
-    } else {
-      defaults['UIDeviceFamily'] = familyXml;
-    }
+  }
+  return '<array>\n${familyIds.map((id) => '\t\t<integer>$id</integer>').join('\n')}\n\t</array>';
+}
+
+void _addIosPlistDefaults(
+  Map<String, String> defaults,
+  String platform,
+  String minimumOsVersion,
+  List<String> families,
+  _PlistMerger merger,
+) {
+  final supportedPlatform = platform == 'ios_sim'
+      ? 'iPhoneSimulator'
+      : 'iPhoneOS';
+  final dtPlatform = platform == 'ios_sim' ? 'iphonesimulator' : 'iphoneos';
+  defaults['MinimumOSVersion'] =
+      '<string>${_escapeXml(minimumOsVersion)}</string>';
+  defaults['CFBundleSupportedPlatforms'] =
+      '<array>\n\t\t<string>$supportedPlatform</string>\n\t</array>';
+  defaults['DTPlatformName'] = '<string>$dtPlatform</string>';
+
+  final familyXml = _iosDeviceFamilyXml(families);
+  if (families.isNotEmpty) {
+    merger.setEntry('UIDeviceFamily', familyXml, overwriteNonEmpty: true);
+  } else {
+    defaults['UIDeviceFamily'] = familyXml;
+  }
+}
+
+void _addMacosPlistDefaults(
+  Map<String, String> defaults,
+  String minimumOsVersion,
+) {
+  defaults['LSMinimumSystemVersion'] =
+      '<string>${_escapeXml(minimumOsVersion)}</string>';
+  defaults['CFBundleSupportedPlatforms'] =
+      '<array>\n\t\t<string>MacOSX</string>\n\t</array>';
+  defaults['DTPlatformName'] = '<string>macosx</string>';
+  defaults['NSPrincipalClass'] = '<string>NSApplication</string>';
+}
+
+/// Merges zero or more XML `Info.plist` sources, substitutes Xcode build
+/// variables, and injects standard Apple bundle keys required by iOS/macOS.
+String buildInfoPlist({
+  required List<String> plistXmls,
+  required String platform,
+  required String appName,
+  required String bundleId,
+  required String minimumOsVersion,
+  Map<String, String> extraVariables = const {},
+  List<String> families = const [],
+}) {
+  final variables = _basePlistVariables(
+    appName: appName,
+    bundleId: bundleId,
+    minimumOsVersion: minimumOsVersion,
+    extraVariables: extraVariables,
+  );
+  final merger = _PlistMerger(variables);
+  _mergePlistSources(merger, plistXmls);
+
+  // Drop empty CFBundleIconFile left by `flutter create` scaffolds if nothing
+  // populated it.
+  merger.dropIfEmpty('CFBundleIconFile');
+  _applyBuildVersionOverrides(merger, extraVariables);
+
+  // Standard Apple bundle defaults (only injected when missing or empty).
+  final defaults = _standardPlistDefaults(variables, appName, bundleId);
+  if (platform == 'ios' || platform == 'ios_sim') {
+    _addIosPlistDefaults(
+      defaults,
+      platform,
+      minimumOsVersion,
+      families,
+      merger,
+    );
   } else if (platform == 'macos') {
-    defaults['LSMinimumSystemVersion'] =
-        '<string>${_escapeXml(minimumOsVersion)}</string>';
-    defaults['CFBundleSupportedPlatforms'] =
-        '<array>\n\t\t<string>MacOSX</string>\n\t</array>';
-    defaults['DTPlatformName'] = '<string>macosx</string>';
-    defaults['NSPrincipalClass'] = '<string>NSApplication</string>';
+    _addMacosPlistDefaults(defaults, minimumOsVersion);
   }
-
   for (final entry in defaults.entries) {
-    setEntry(entry.key, entry.value, overwriteNonEmpty: false);
+    merger.setEntry(entry.key, entry.value, overwriteNonEmpty: false);
   }
+  return _renderPlistXml(merger.order, merger.merged);
+}
 
+String _renderPlistXml(List<String> order, Map<String, String> merged) {
   final buffer = StringBuffer()
     ..writeln('<?xml version="1.0" encoding="UTF-8"?>')
     ..writeln(
@@ -620,20 +716,12 @@ String buildInfoPlist({
 // _CodeSignature/CodeResources generation
 // ---------------------------------------------------------------------------
 
-/// Generates the XML contents of `_CodeSignature/CodeResources` for [bundleDir].
-///
-/// For iOS bundles or `.framework` directories, [bundleDir] is the `.app` or
-/// `.framework` root. For macOS `.app` bundles, [bundleDir] is
-/// `<AppName>.app/Contents`.
-///
-/// [excludedRelativePaths] specifies paths relative to [bundleDir] (using `/`)
-/// that must not be listed in `CodeResources` (such as the main Mach-O
-/// executable and `_CodeSignature/CodeResources` itself).
-String generateCodeResources(
-  Directory bundleDir, {
-  Set<String> excludedRelativePaths = const {},
-}) {
-  final rootPath = bundleDir.path;
+/// Lists every file under [bundleDir] relative to it, skipping signature
+/// artifacts, excluded paths, and symbolic links.
+List<String> _collectBundleRelativeFiles(
+  Directory bundleDir,
+  Set<String> excludedRelativePaths,
+) {
   final relativeFiles = <String>[];
 
   void walk(Directory dir, String relPrefix) {
@@ -661,10 +749,18 @@ String generateCodeResources(
     walk(bundleDir, '');
   }
   relativeFiles.sort();
+  return relativeFiles;
+}
 
+/// Hashes [relativeFiles] (relative to [rootPath]) into the v1 (`files`) and
+/// v2 (`files2`) CodeResources maps, omitting `Info.plist` and `PkgInfo`.
+({
+  Map<String, String> files1,
+  Map<String, ({String sha1B64, String sha256B64})> files2,
+})
+_hashBundleFiles(String rootPath, List<String> relativeFiles) {
   final files1 = <String, String>{};
   final files2 = <String, ({String sha1B64, String sha256B64})>{};
-
   for (final relPath in relativeFiles) {
     final bytes = File('$rootPath/$relPath').readAsBytesSync();
     final sha1B64 = base64.encode(sha1Bytes(bytes));
@@ -678,7 +774,34 @@ String generateCodeResources(
       files2[relPath] = (sha1B64: sha1B64, sha256B64: sha256B64);
     }
   }
+  return (files1: files1, files2: files2);
+}
 
+/// Generates the XML contents of `_CodeSignature/CodeResources` for [bundleDir].
+///
+/// For iOS bundles or `.framework` directories, [bundleDir] is the `.app` or
+/// `.framework` root. For macOS `.app` bundles, [bundleDir] is
+/// `<AppName>.app/Contents`.
+///
+/// [excludedRelativePaths] specifies paths relative to [bundleDir] (using `/`)
+/// that must not be listed in `CodeResources` (such as the main Mach-O
+/// executable and `_CodeSignature/CodeResources` itself).
+String generateCodeResources(
+  Directory bundleDir, {
+  Set<String> excludedRelativePaths = const {},
+}) {
+  final relativeFiles = _collectBundleRelativeFiles(
+    bundleDir,
+    excludedRelativePaths,
+  );
+  final (:files1, :files2) = _hashBundleFiles(bundleDir.path, relativeFiles);
+  return _renderCodeResourcesXml(files1, files2);
+}
+
+String _renderCodeResourcesXml(
+  Map<String, String> files1,
+  Map<String, ({String sha1B64, String sha256B64})> files2,
+) {
   final buf = StringBuffer()
     ..writeln('<?xml version="1.0" encoding="UTF-8"?>')
     ..writeln(
@@ -888,80 +1011,85 @@ Uint8List createDeterministicZipFromDirectory(
   Set<String> executablePaths = const {},
 }) {
   final entries = <ZipEntry>[];
+  _collectZipEntries(entries, rootDir, '', executablePaths);
+  return encodeDeterministicZip(entries);
+}
 
-  void walk(Directory dir, String relPrefix) {
-    final children = dir.listSync(followLinks: false)
-      ..sort((a, b) => a.path.compareTo(b.path));
-    for (final entity in children) {
-      final name = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
-      final relPath = relPrefix.isEmpty ? name : '$relPrefix/$name';
-      if (entity is Link) {
-        final target = entity.targetSync();
+/// Reads [entity] as a streaming deflated ZIP entry, computing its CRC-32
+/// incrementally so files larger than [_streamingFileThreshold] never sit
+/// fully inflated in memory.
+ZipEntry _streamingZipEntry(File entity, String relPath, bool isExec) {
+  final fileSize = entity.lengthSync();
+  final raf = entity.openSync(mode: FileMode.read);
+  try {
+    final bytesSink = _BytesSink();
+    final deflateSink = ZLibEncoder(raw: true).startChunkedConversion(
+      bytesSink,
+    );
+    final chunkBuf = Uint8List(1024 * 1024);
+    var runningCrc = 0xFFFFFFFF;
+    while (true) {
+      final n = raf.readIntoSync(chunkBuf);
+      if (n <= 0) break;
+      runningCrc = _crc32Update(runningCrc, chunkBuf, n);
+      deflateSink.add(Uint8List.sublistView(chunkBuf, 0, n));
+    }
+    deflateSink.close();
+    return ZipEntry(
+      path: relPath,
+      data: Uint8List(0),
+      compressedData: bytesSink.builder.takeBytes(),
+      uncompressedSizeOverride: fileSize,
+      crc32Override: (runningCrc ^ 0xFFFFFFFF) & 0xFFFFFFFF,
+      isExecutable: isExec,
+    );
+  } finally {
+    raf.closeSync();
+  }
+}
+
+void _collectZipEntries(
+  List<ZipEntry> entries,
+  Directory dir,
+  String relPrefix,
+  Set<String> executablePaths,
+) {
+  final children = dir.listSync(followLinks: false)
+    ..sort((a, b) => a.path.compareTo(b.path));
+  for (final entity in children) {
+    final name = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
+    final relPath = relPrefix.isEmpty ? name : '$relPrefix/$name';
+    if (entity is Link) {
+      final target = entity.targetSync();
+      entries.add(
+        ZipEntry(
+          path: relPath,
+          data: Uint8List.fromList(utf8.encode(target)),
+          isSymlink: true,
+        ),
+      );
+    } else if (entity is Directory) {
+      entries.add(
+        ZipEntry(path: '$relPath/', data: Uint8List(0), isDirectory: true),
+      );
+      _collectZipEntries(entries, entity, relPath, executablePaths);
+    } else if (entity is File) {
+      // File modes are determined strictly from the entry role via
+      // executablePaths, never from host filesystem stat.mode bits.
+      final isExec = executablePaths.contains(relPath);
+      if (entity.lengthSync() > _streamingFileThreshold) {
+        entries.add(_streamingZipEntry(entity, relPath, isExec));
+      } else {
         entries.add(
           ZipEntry(
             path: relPath,
-            data: Uint8List.fromList(utf8.encode(target)),
-            isSymlink: true,
+            data: entity.readAsBytesSync(),
+            isExecutable: isExec,
           ),
         );
-      } else if (entity is Directory) {
-        entries.add(
-          ZipEntry(
-            path: '$relPath/',
-            data: Uint8List(0),
-            isDirectory: true,
-          ),
-        );
-        walk(entity, relPath);
-      } else if (entity is File) {
-        // File modes are determined strictly from the entry role via
-        // executablePaths, never from host filesystem stat.mode bits.
-        final isExec = executablePaths.contains(relPath);
-        final fileSize = entity.lengthSync();
-        if (fileSize > _streamingFileThreshold) {
-          final raf = entity.openSync(mode: FileMode.read);
-          try {
-            final bytesSink = _BytesSink();
-            final deflateSink = ZLibEncoder(
-              raw: true,
-            ).startChunkedConversion(bytesSink);
-            final chunkBuf = Uint8List(1024 * 1024);
-            var runningCrc = 0xFFFFFFFF;
-            while (true) {
-              final n = raf.readIntoSync(chunkBuf);
-              if (n <= 0) break;
-              runningCrc = _crc32Update(runningCrc, chunkBuf, n);
-              deflateSink.add(Uint8List.sublistView(chunkBuf, 0, n));
-            }
-            deflateSink.close();
-            entries.add(
-              ZipEntry(
-                path: relPath,
-                data: Uint8List(0),
-                compressedData: bytesSink.builder.takeBytes(),
-                uncompressedSizeOverride: fileSize,
-                crc32Override: (runningCrc ^ 0xFFFFFFFF) & 0xFFFFFFFF,
-                isExecutable: isExec,
-              ),
-            );
-          } finally {
-            raf.closeSync();
-          }
-        } else {
-          entries.add(
-            ZipEntry(
-              path: relPath,
-              data: entity.readAsBytesSync(),
-              isExecutable: isExec,
-            ),
-          );
-        }
       }
     }
   }
-
-  walk(rootDir, '');
-  return encodeDeterministicZip(entries);
 }
 
 /// Encodes [entries] into a deterministic ZIP (or ZIP64) byte buffer.
@@ -970,103 +1098,139 @@ Uint8List createDeterministicZipFromDirectory(
 /// ZIP64 End of Central Directory record (`0x06064b50`), and ZIP64 End of
 /// Central Directory Locator (`0x07064b50`) when entry count >= 65,535 or any
 /// entry size or offset >= 4 GiB (`0xFFFFFFFF`).
-Uint8List encodeDeterministicZip(List<ZipEntry> entries) {
-  final sorted = [...entries]..sort((a, b) => a.path.compareTo(b.path));
+/// A ZIP entry's chosen on-disk representation: compression method (0 for
+/// stored, 8 for deflate), payload bytes, uncompressed length, and CRC-32.
+typedef _ZipPayload = ({
+  int method,
+  Uint8List payload,
+  int uncompressedLen,
+  int crc,
+});
+
+/// Stateful writer for the local-file and central-directory sections of a
+/// deterministic ZIP archive. Tracks the running data offset and whether any
+/// entry needed ZIP64 extended information.
+class _DeterministicZipEncoder {
   final localParts = BytesBuilder(copy: false);
   final centralParts = BytesBuilder(copy: false);
   final rawDeflate = ZLibCodec(raw: true);
-
-  // Fixed DOS timestamp: 1980-01-01 00:00:00 (time = 0, date = 0x0021).
-  const dosTime = 0x0000;
-  const dosDate = 0x0021;
-  // Version made by: Unix (3) << 8 | ZIP 2.0 (20) or ZIP 4.5 (45) for ZIP64.
-  const versionMadeByStandard = (3 << 8) | 20;
-  const versionMadeByZip64 = (3 << 8) | 45;
-  const versionNeededStandard = 20;
-  const versionNeededZip64 = 45;
-
   var offset = 0;
   var anyEntryZip64 = false;
 
-  for (final entry in sorted) {
+  // Fixed DOS timestamp: 1980-01-01 00:00:00 (time = 0, date = 0x0021).
+  static const dosTime = 0x0000;
+  static const dosDate = 0x0021;
+  // Version made by: Unix (3) << 8 | ZIP 2.0 (20) or ZIP 4.5 (45) for ZIP64.
+  static const versionMadeByStandard = (3 << 8) | 20;
+  static const versionMadeByZip64 = (3 << 8) | 45;
+  static const versionNeededStandard = 20;
+  static const versionNeededZip64 = 45;
+
+  void writeEntry(ZipEntry entry) {
     final nameBytes = utf8.encode(entry.path);
+    final record = _chooseZipPayload(entry);
+    final externalAttrs = _zipExternalAttrs(entry);
+    final localExtra = _localZip64Extra(
+      record.uncompressedLen,
+      record.payload.length,
+    );
+    _writeLocalRecord(nameBytes, record, localExtra);
+    _writeCentralRecord(nameBytes, record, localExtra, externalAttrs);
+    offset += 30 + nameBytes.length + localExtra.length + record.payload.length;
+  }
+
+  _ZipPayload _chooseZipPayload(ZipEntry entry) {
     final uncompressed = entry.data;
     final uncompressedLen = entry.uncompressedSize;
     final crc = entry.isDirectory
         ? 0
         : (entry.crc32Override ?? crc32(uncompressed));
-
-    int compressionMethod = 0; // Stored
-    Uint8List payload = uncompressed;
     if (entry.storeOnly && entry.compressedData != null) {
       throw ArgumentError(
         'encodeDeterministicZip: entry ${entry.path} is storeOnly but '
         'carries compressedData.',
       );
     }
+    var compressionMethod = 0; // Stored
+    var payload = uncompressed;
     if (entry.compressedData != null) {
       compressionMethod = 8; // Deflate
       payload = entry.compressedData!;
-    } else if (!entry.storeOnly &&
-        !entry.isDirectory &&
-        !entry.isSymlink &&
-        uncompressed.isNotEmpty &&
-        entry.uncompressedSizeOverride == null) {
+    } else if (_shouldDeflate(entry, uncompressed)) {
       final deflated = Uint8List.fromList(rawDeflate.encode(uncompressed));
       if (deflated.length < uncompressed.length) {
         compressionMethod = 8; // Deflate
         payload = deflated;
       }
     }
-    final compressedLen = payload.length;
+    return (
+      method: compressionMethod,
+      payload: payload,
+      uncompressedLen: uncompressedLen,
+      crc: crc,
+    );
+  }
 
-    final int externalAttrs;
+  bool _shouldDeflate(ZipEntry entry, Uint8List uncompressed) {
+    return !entry.storeOnly &&
+        !entry.isDirectory &&
+        !entry.isSymlink &&
+        uncompressed.isNotEmpty &&
+        entry.uncompressedSizeOverride == null;
+  }
+
+  int _zipExternalAttrs(ZipEntry entry) {
     if (entry.isDirectory) {
-      externalAttrs = (0x41ED << 16) | 0x10; // drwxr-xr-x + DOS directory bit
+      return (0x41ED << 16) | 0x10; // drwxr-xr-x + DOS directory bit
     } else if (entry.isSymlink) {
-      externalAttrs = (0xA1FF << 16); // lrwxrwxrwx
+      return (0xA1FF << 16); // lrwxrwxrwx
     } else if (entry.isExecutable) {
-      externalAttrs = (0x81ED << 16); // -rwxr-xr-x
+      return (0x81ED << 16); // -rwxr-xr-x
     } else {
-      externalAttrs = (0x81A4 << 16); // -rw-r--r--
+      return (0x81A4 << 16); // -rw-r--r--
     }
+  }
 
-    final localNeedZip64 =
-        uncompressedLen >= _zip64Limit32 || compressedLen >= _zip64Limit32;
-    final Uint8List localExtra;
-    if (localNeedZip64) {
-      anyEntryZip64 = true;
-      localExtra = Uint8List(20);
-      final extraBd = ByteData.sublistView(localExtra);
-      extraBd.setUint16(0, _zip64HeaderId, Endian.little);
-      extraBd.setUint16(2, 16, Endian.little);
-      _setUint64LE(extraBd, 4, uncompressedLen);
-      _setUint64LE(extraBd, 12, compressedLen);
-    } else {
-      localExtra = Uint8List(0);
+  Uint8List _localZip64Extra(int uncompressedLen, int compressedLen) {
+    if (uncompressedLen < _zip64Limit32 && compressedLen < _zip64Limit32) {
+      return Uint8List(0);
     }
+    anyEntryZip64 = true;
+    final localExtra = Uint8List(20);
+    final extraBd = ByteData.sublistView(localExtra);
+    extraBd.setUint16(0, _zip64HeaderId, Endian.little);
+    extraBd.setUint16(2, 16, Endian.little);
+    _setUint64LE(extraBd, 4, uncompressedLen);
+    _setUint64LE(extraBd, 12, compressedLen);
+    return localExtra;
+  }
 
+  void _writeLocalRecord(
+    List<int> nameBytes,
+    _ZipPayload record,
+    Uint8List localExtra,
+  ) {
+    final localNeedZip64 = localExtra.isNotEmpty;
     final localVersionNeeded = localNeedZip64
         ? versionNeededZip64
         : versionNeededStandard;
-
     // Local file header (30 bytes + filename + extra + payload).
     final localHeader = ByteData(30 + nameBytes.length + localExtra.length);
     localHeader.setUint32(0, 0x04034b50, Endian.little);
     localHeader.setUint16(4, localVersionNeeded, Endian.little);
     localHeader.setUint16(6, 0x0800, Endian.little); // UTF-8 flag
-    localHeader.setUint16(8, compressionMethod, Endian.little);
+    localHeader.setUint16(8, record.method, Endian.little);
     localHeader.setUint16(10, dosTime, Endian.little);
     localHeader.setUint16(12, dosDate, Endian.little);
-    localHeader.setUint32(14, crc, Endian.little);
+    localHeader.setUint32(14, record.crc, Endian.little);
     localHeader.setUint32(
       18,
-      localNeedZip64 ? _zip64Limit32 : compressedLen,
+      localNeedZip64 ? _zip64Limit32 : record.payload.length,
       Endian.little,
     );
     localHeader.setUint32(
       22,
-      localNeedZip64 ? _zip64Limit32 : uncompressedLen,
+      localNeedZip64 ? _zip64Limit32 : record.uncompressedLen,
       Endian.little,
     );
     localHeader.setUint16(26, nameBytes.length, Endian.little);
@@ -1083,69 +1247,86 @@ Uint8List encodeDeterministicZip(List<ZipEntry> entries) {
         localExtra,
       );
     }
-
     localParts.add(localHeader.buffer.asUint8List());
-    localParts.add(payload);
+    localParts.add(record.payload);
+  }
 
+  Uint8List _centralZip64Extra(
+    int uncompressedLen,
+    int compressedLen,
+    int entryOffset,
+  ) {
     final needUncompressed64 = uncompressedLen >= _zip64Limit32;
     final needCompressed64 = compressedLen >= _zip64Limit32;
-    final needOffset64 = offset >= _zip64Limit32;
-    final cdNeedZip64 = needUncompressed64 || needCompressed64 || needOffset64;
-
-    final Uint8List cdExtra;
-    if (cdNeedZip64) {
-      anyEntryZip64 = true;
-      final fieldCount =
-          (needUncompressed64 ? 1 : 0) +
-          (needCompressed64 ? 1 : 0) +
-          (needOffset64 ? 1 : 0);
-      final dataSize = fieldCount * 8;
-      cdExtra = Uint8List(4 + dataSize);
-      final extraBd = ByteData.sublistView(cdExtra);
-      extraBd.setUint16(0, _zip64HeaderId, Endian.little);
-      extraBd.setUint16(2, dataSize, Endian.little);
-      var fieldPos = 4;
-      if (needUncompressed64) {
-        _setUint64LE(extraBd, fieldPos, uncompressedLen);
-        fieldPos += 8;
-      }
-      if (needCompressed64) {
-        _setUint64LE(extraBd, fieldPos, compressedLen);
-        fieldPos += 8;
-      }
-      if (needOffset64) {
-        _setUint64LE(extraBd, fieldPos, offset);
-        fieldPos += 8;
-      }
-    } else {
-      cdExtra = Uint8List(0);
+    final needOffset64 = entryOffset >= _zip64Limit32;
+    if (!needUncompressed64 && !needCompressed64 && !needOffset64) {
+      return Uint8List(0);
     }
+    anyEntryZip64 = true;
+    final fieldCount =
+        (needUncompressed64 ? 1 : 0) +
+        (needCompressed64 ? 1 : 0) +
+        (needOffset64 ? 1 : 0);
+    final cdExtra = Uint8List(4 + fieldCount * 8);
+    final extraBd = ByteData.sublistView(cdExtra);
+    extraBd.setUint16(0, _zip64HeaderId, Endian.little);
+    extraBd.setUint16(2, fieldCount * 8, Endian.little);
+    var fieldPos = 4;
+    if (needUncompressed64) {
+      _setUint64LE(extraBd, fieldPos, uncompressedLen);
+      fieldPos += 8;
+    }
+    if (needCompressed64) {
+      _setUint64LE(extraBd, fieldPos, compressedLen);
+      fieldPos += 8;
+    }
+    if (needOffset64) {
+      _setUint64LE(extraBd, fieldPos, entryOffset);
+      fieldPos += 8;
+    }
+    return cdExtra;
+  }
 
-    final cdVersionMadeBy = (cdNeedZip64 || localNeedZip64)
+  void _writeCentralRecord(
+    List<int> nameBytes,
+    _ZipPayload record,
+    Uint8List localExtra,
+    int externalAttrs,
+  ) {
+    final cdExtra = _centralZip64Extra(
+      record.uncompressedLen,
+      record.payload.length,
+      offset,
+    );
+    final cdNeedZip64 = cdExtra.isNotEmpty || localExtra.isNotEmpty;
+    final cdVersionMadeBy = cdNeedZip64
         ? versionMadeByZip64
         : versionMadeByStandard;
-    final cdVersionNeeded = (cdNeedZip64 || localNeedZip64)
+    final cdVersionNeeded = cdNeedZip64
         ? versionNeededZip64
         : versionNeededStandard;
-
     // Central directory header (46 bytes + filename + extra).
     final centralHeader = ByteData(46 + nameBytes.length + cdExtra.length);
     centralHeader.setUint32(0, 0x02014b50, Endian.little);
     centralHeader.setUint16(4, cdVersionMadeBy, Endian.little);
     centralHeader.setUint16(6, cdVersionNeeded, Endian.little);
     centralHeader.setUint16(8, 0x0800, Endian.little); // UTF-8 flag
-    centralHeader.setUint16(10, compressionMethod, Endian.little);
+    centralHeader.setUint16(10, record.method, Endian.little);
     centralHeader.setUint16(12, dosTime, Endian.little);
     centralHeader.setUint16(14, dosDate, Endian.little);
-    centralHeader.setUint32(16, crc, Endian.little);
+    centralHeader.setUint32(16, record.crc, Endian.little);
     centralHeader.setUint32(
       20,
-      needCompressed64 ? _zip64Limit32 : compressedLen,
+      record.payload.length >= _zip64Limit32
+          ? _zip64Limit32
+          : record.payload.length,
       Endian.little,
     );
     centralHeader.setUint32(
       24,
-      needUncompressed64 ? _zip64Limit32 : uncompressedLen,
+      record.uncompressedLen >= _zip64Limit32
+          ? _zip64Limit32
+          : record.uncompressedLen,
       Endian.little,
     );
     centralHeader.setUint16(28, nameBytes.length, Endian.little);
@@ -1156,7 +1337,7 @@ Uint8List encodeDeterministicZip(List<ZipEntry> entries) {
     centralHeader.setUint32(38, externalAttrs, Endian.little);
     centralHeader.setUint32(
       42,
-      needOffset64 ? _zip64Limit32 : offset,
+      offset >= _zip64Limit32 ? _zip64Limit32 : offset,
       Endian.little,
     );
     centralHeader.buffer.asUint8List().setRange(
@@ -1171,27 +1352,28 @@ Uint8List encodeDeterministicZip(List<ZipEntry> entries) {
         cdExtra,
       );
     }
-
     centralParts.add(centralHeader.buffer.asUint8List());
-    offset += 30 + nameBytes.length + localExtra.length + payload.length;
   }
 
-  final centralBytes = centralParts.takeBytes();
-  final entryCount = sorted.length;
-  final cdSize = centralBytes.length;
-  final cdOffset = offset;
+  Uint8List finish(int entryCount) {
+    final centralBytes = centralParts.takeBytes();
+    final cdSize = centralBytes.length;
+    final cdOffset = offset;
+    localParts.add(centralBytes);
+    final needZip64Eocd =
+        anyEntryZip64 ||
+        entryCount >= _zip64Limit16 ||
+        cdSize >= _zip64Limit32 ||
+        cdOffset >= _zip64Limit32;
+    if (needZip64Eocd) {
+      _writeZip64Eocd(cdOffset, cdSize, entryCount);
+    }
+    _writeEocd(entryCount, cdSize, cdOffset);
+    return localParts.takeBytes();
+  }
 
-  localParts.add(centralBytes);
-
-  final needZip64Eocd =
-      anyEntryZip64 ||
-      entryCount >= _zip64Limit16 ||
-      cdSize >= _zip64Limit32 ||
-      cdOffset >= _zip64Limit32;
-
-  if (needZip64Eocd) {
+  void _writeZip64Eocd(int cdOffset, int cdSize, int entryCount) {
     final zip64EocdOffset = cdOffset + cdSize;
-
     // ZIP64 End of Central Directory Record (56 bytes).
     final zip64Eocd = ByteData(56);
     zip64Eocd.setUint32(0, 0x06064b50, Endian.little);
@@ -1215,56 +1397,77 @@ Uint8List encodeDeterministicZip(List<ZipEntry> entries) {
     localParts.add(zip64Locator.buffer.asUint8List());
   }
 
-  final eocd = ByteData(22);
-  eocd.setUint32(0, 0x06054b50, Endian.little);
-  eocd.setUint16(4, 0, Endian.little);
-  eocd.setUint16(6, 0, Endian.little);
-  eocd.setUint16(
-    8,
-    entryCount >= _zip64Limit16 ? _zip64Limit16 : entryCount,
-    Endian.little,
-  );
-  eocd.setUint16(
-    10,
-    entryCount >= _zip64Limit16 ? _zip64Limit16 : entryCount,
-    Endian.little,
-  );
-  eocd.setUint32(
-    12,
-    cdSize >= _zip64Limit32 ? _zip64Limit32 : cdSize,
-    Endian.little,
-  );
-  eocd.setUint32(
-    16,
-    cdOffset >= _zip64Limit32 ? _zip64Limit32 : cdOffset,
-    Endian.little,
-  );
-  eocd.setUint16(20, 0, Endian.little);
-
-  localParts.add(eocd.buffer.asUint8List());
-  return localParts.takeBytes();
+  void _writeEocd(int entryCount, int cdSize, int cdOffset) {
+    final eocd = ByteData(22);
+    eocd.setUint32(0, 0x06054b50, Endian.little);
+    eocd.setUint16(4, 0, Endian.little);
+    eocd.setUint16(6, 0, Endian.little);
+    eocd.setUint16(
+      8,
+      entryCount >= _zip64Limit16 ? _zip64Limit16 : entryCount,
+      Endian.little,
+    );
+    eocd.setUint16(
+      10,
+      entryCount >= _zip64Limit16 ? _zip64Limit16 : entryCount,
+      Endian.little,
+    );
+    eocd.setUint32(
+      12,
+      cdSize >= _zip64Limit32 ? _zip64Limit32 : cdSize,
+      Endian.little,
+    );
+    eocd.setUint32(
+      16,
+      cdOffset >= _zip64Limit32 ? _zip64Limit32 : cdOffset,
+      Endian.little,
+    );
+    eocd.setUint16(20, 0, Endian.little);
+    localParts.add(eocd.buffer.asUint8List());
+  }
 }
 
-/// Decodes a ZIP or ZIP64 archive produced by [encodeDeterministicZip] (or
-/// standard ZIP writers) into a list of [ZipEntry] items for inspection and
-/// testing.
-List<ZipEntry> readZipEntries(Uint8List zipBytes) {
-  final bd = ByteData.sublistView(zipBytes);
+Uint8List encodeDeterministicZip(List<ZipEntry> entries) {
+  final sorted = [...entries]..sort((a, b) => a.path.compareTo(b.path));
+  final encoder = _DeterministicZipEncoder();
+  for (final entry in sorted) {
+    encoder.writeEntry(entry);
+  }
+  return encoder.finish(sorted.length);
+}
+
+/// Central-directory record fields shared by the ZIP readers.
+typedef _CentralRecord = ({
+  String path,
+  int method,
+  int flags,
+  int crc,
+  int compressedSize,
+  int uncompressedSize,
+  int externalAttrs,
+  int localOffset,
+  int nextPos,
+});
+
+int _findEocdOffset(ByteData bd, Uint8List zipBytes) {
   // Locate End of Central Directory (0x06054b50).
-  var eocdOffset = -1;
   for (var i = zipBytes.length - 22; i >= 0; i--) {
     if (bd.getUint32(i, Endian.little) == 0x06054b50) {
-      eocdOffset = i;
-      break;
+      return i;
     }
   }
-  if (eocdOffset == -1) {
-    throw FormatException('Invalid ZIP archive: EOCD signature not found.');
-  }
+  throw FormatException('Invalid ZIP archive: EOCD signature not found.');
+}
 
-  var entryCount = bd.getUint16(eocdOffset + 10, Endian.little);
-  var cdOffset = bd.getUint32(eocdOffset + 16, Endian.little);
-
+/// Applies the ZIP64 End of Central Directory locator when present,
+/// returning the authoritative entry count and central-directory offset.
+({int entryCount, int cdOffset}) _applyZip64Locator(
+  ByteData bd,
+  Uint8List zipBytes,
+  int eocdOffset,
+  int entryCount,
+  int cdOffset,
+) {
   // Check for ZIP64 End of Central Directory Locator (0x07064b50) immediately
   // preceding the standard EOCD record.
   if (eocdOffset >= 20 &&
@@ -1276,142 +1479,259 @@ List<ZipEntry> readZipEntries(Uint8List zipBytes) {
         'Invalid ZIP64 archive: ZIP64 EOCD signature not found at $zip64EocdOffset.',
       );
     }
-    entryCount = _getUint64LE(bd, zip64EocdOffset + 32);
-    cdOffset = _getUint64LE(bd, zip64EocdOffset + 48);
+    return (
+      entryCount: _getUint64LE(bd, zip64EocdOffset + 32),
+      cdOffset: _getUint64LE(bd, zip64EocdOffset + 48),
+    );
+  }
+  return (entryCount: entryCount, cdOffset: cdOffset);
+}
+
+/// Applies the ZIP64 extended information extra field (`0x0001`) to 32-bit
+/// size/offset markers, returning the resolved values and whether the field
+/// was present.
+({
+  int uncompressedSize,
+  int compressedSize,
+  int localOffset,
+  bool found,
+})
+_applyZip64ExtraField(
+  ByteData bd,
+  int extraStart,
+  int extraEnd,
+  int uncompressedSize,
+  int compressedSize,
+  int localOffset,
+) {
+  var extraPos = extraStart;
+  while (extraPos + 4 <= extraEnd) {
+    final headerId = bd.getUint16(extraPos, Endian.little);
+    final dataSize = bd.getUint16(extraPos + 2, Endian.little);
+    final fieldDataStart = extraPos + 4;
+    if (headerId == _zip64HeaderId) {
+      var fieldPos = fieldDataStart;
+      if (uncompressedSize == _zip64Limit32 &&
+          fieldPos + 8 <= fieldDataStart + dataSize) {
+        uncompressedSize = _getUint64LE(bd, fieldPos);
+        fieldPos += 8;
+      }
+      if (compressedSize == _zip64Limit32 &&
+          fieldPos + 8 <= fieldDataStart + dataSize) {
+        compressedSize = _getUint64LE(bd, fieldPos);
+        fieldPos += 8;
+      }
+      if (localOffset == _zip64Limit32 &&
+          fieldPos + 8 <= fieldDataStart + dataSize) {
+        localOffset = _getUint64LE(bd, fieldPos);
+        fieldPos += 8;
+      }
+      return (
+        uncompressedSize: uncompressedSize,
+        compressedSize: compressedSize,
+        localOffset: localOffset,
+        found: true,
+      );
+    }
+    extraPos += 4 + dataSize;
+  }
+  return (
+    uncompressedSize: uncompressedSize,
+    compressedSize: compressedSize,
+    localOffset: localOffset,
+    found: false,
+  );
+}
+
+_CentralRecord _parseInflatedCentralRecord(
+  ByteData bd,
+  Uint8List zipBytes,
+  int pos,
+) {
+  if (bd.getUint32(pos, Endian.little) != 0x02014b50) {
+    throw FormatException('Invalid central directory header at $pos.');
+  }
+  final method = bd.getUint16(pos + 10, Endian.little);
+  final crc = bd.getUint32(pos + 16, Endian.little);
+  var compressedSize = bd.getUint32(pos + 20, Endian.little);
+  var uncompressedSize = bd.getUint32(pos + 24, Endian.little);
+  final nameLen = bd.getUint16(pos + 28, Endian.little);
+  final extraLen = bd.getUint16(pos + 30, Endian.little);
+  final commentLen = bd.getUint16(pos + 32, Endian.little);
+  final externalAttrs = bd.getUint32(pos + 38, Endian.little);
+  var localOffset = bd.getUint32(pos + 42, Endian.little);
+
+  final path = utf8.decode(zipBytes.sublist(pos + 46, pos + 46 + nameLen));
+
+  if (uncompressedSize == _zip64Limit32 ||
+      compressedSize == _zip64Limit32 ||
+      localOffset == _zip64Limit32) {
+    final extraStart = pos + 46 + nameLen;
+    final resolved = _applyZip64ExtraField(
+      bd,
+      extraStart,
+      extraStart + extraLen,
+      uncompressedSize,
+      compressedSize,
+      localOffset,
+    );
+    uncompressedSize = resolved.uncompressedSize;
+    compressedSize = resolved.compressedSize;
+    localOffset = resolved.localOffset;
   }
 
+  return (
+    path: path,
+    method: method,
+    flags: 0,
+    crc: crc,
+    compressedSize: compressedSize,
+    uncompressedSize: uncompressedSize,
+    externalAttrs: externalAttrs,
+    localOffset: localOffset,
+    nextPos: pos + 46 + nameLen + extraLen + commentLen,
+  );
+}
+
+/// Inflates one entry's payload, verifying checksums for large streaming
+/// entries without holding them inflated in memory.
+({
+  Uint8List data,
+  int? uncompressedSizeOverride,
+  int? crc32Override,
+})
+_inflateZipPayload(
+  ByteData bd,
+  Uint8List zipBytes,
+  ZLibCodec rawInflate,
+  _CentralRecord central,
+) {
+  if (bd.getUint32(central.localOffset, Endian.little) != 0x04034b50) {
+    throw FormatException(
+      'Invalid local file header at ${central.localOffset}.',
+    );
+  }
+  final localNameLen = bd.getUint16(central.localOffset + 26, Endian.little);
+  final localExtraLen = bd.getUint16(central.localOffset + 28, Endian.little);
+  final dataStart = central.localOffset + 30 + localNameLen + localExtraLen;
+  final rawPayload = Uint8List.sublistView(
+    zipBytes,
+    dataStart,
+    dataStart + central.compressedSize,
+  );
+
+  if (central.method == 0) {
+    final data = Uint8List.fromList(rawPayload);
+    return (
+      data: data,
+      uncompressedSizeOverride: central.uncompressedSize != data.length
+          ? central.uncompressedSize
+          : null,
+      crc32Override: central.crc,
+    );
+  }
+  if (central.method == 8) {
+    if (central.uncompressedSize > _streamingFileThreshold) {
+      return _inflateStreamingZipPayload(central, rawPayload);
+    }
+    final data = Uint8List.fromList(rawInflate.decode(rawPayload));
+    return (
+      data: data,
+      uncompressedSizeOverride: central.uncompressedSize != data.length
+          ? central.uncompressedSize
+          : null,
+      crc32Override: central.crc,
+    );
+  }
+  throw UnsupportedError(
+    'Unsupported ZIP compression method: ${central.method}',
+  );
+}
+
+({
+  Uint8List data,
+  int? uncompressedSizeOverride,
+  int? crc32Override,
+})
+_inflateStreamingZipPayload(_CentralRecord central, Uint8List rawPayload) {
+  final crcSink = _CrcAndSizeSink();
+  final inflateSink = ZLibDecoder(
+    raw: true,
+  ).startChunkedConversion(crcSink);
+  const step = 1024 * 1024;
+  for (var off = 0; off < rawPayload.length; off += step) {
+    final end = (off + step < rawPayload.length)
+        ? off + step
+        : rawPayload.length;
+    inflateSink.add(Uint8List.sublistView(rawPayload, off, end));
+  }
+  inflateSink.close();
+  if (crcSink.totalLength != central.uncompressedSize) {
+    throw FormatException(
+      'ZIP64 inflated length mismatch for "${central.path}": '
+      'expected ${central.uncompressedSize}, got ${crcSink.totalLength}.',
+    );
+  }
+  if (crcSink.crc32Value != central.crc) {
+    throw FormatException(
+      'ZIP64 CRC-32 mismatch for "${central.path}": '
+      'expected 0x${central.crc.toRadixString(16)}, '
+      'got 0x${crcSink.crc32Value.toRadixString(16)}.',
+    );
+  }
+  return (
+    data: Uint8List(0),
+    uncompressedSizeOverride: crcSink.totalLength,
+    crc32Override: crcSink.crc32Value,
+  );
+}
+
+({bool isDir, bool isSymlink, bool isExec}) _zipModeFlags(
+  int externalAttrs,
+  String path,
+) {
+  final unixMode = (externalAttrs >>> 16) & 0xFFFF;
+  final fileType = unixMode & 0xF000;
+  final isDir = path.endsWith('/') || fileType == 0x4000;
+  final isSymlink = fileType == 0xA000;
+  return (
+    isDir: isDir,
+    isSymlink: isSymlink,
+    isExec: !isDir && !isSymlink && ((unixMode & 0x49) != 0),
+  );
+}
+
+/// Decodes a ZIP or ZIP64 archive produced by [encodeDeterministicZip] (or
+/// standard ZIP writers) into a list of [ZipEntry] items for inspection and
+/// testing.
+List<ZipEntry> readZipEntries(Uint8List zipBytes) {
+  final bd = ByteData.sublistView(zipBytes);
+  final eocdOffset = _findEocdOffset(bd, zipBytes);
+  final located = _applyZip64Locator(
+    bd,
+    zipBytes,
+    eocdOffset,
+    bd.getUint16(eocdOffset + 10, Endian.little),
+    bd.getUint32(eocdOffset + 16, Endian.little),
+  );
   final rawInflate = ZLibCodec(raw: true);
 
   final entries = <ZipEntry>[];
-  var pos = cdOffset;
-  for (var i = 0; i < entryCount; i++) {
-    if (bd.getUint32(pos, Endian.little) != 0x02014b50) {
-      throw FormatException('Invalid central directory header at $pos.');
-    }
-    final method = bd.getUint16(pos + 10, Endian.little);
-    final crc = bd.getUint32(pos + 16, Endian.little);
-    var compressedSize = bd.getUint32(pos + 20, Endian.little);
-    var uncompressedSize = bd.getUint32(pos + 24, Endian.little);
-    final nameLen = bd.getUint16(pos + 28, Endian.little);
-    final extraLen = bd.getUint16(pos + 30, Endian.little);
-    final commentLen = bd.getUint16(pos + 32, Endian.little);
-    final externalAttrs = bd.getUint32(pos + 38, Endian.little);
-    var localOffset = bd.getUint32(pos + 42, Endian.little);
-
-    final path = utf8.decode(
-      zipBytes.sublist(pos + 46, pos + 46 + nameLen),
-    );
-
-    if (uncompressedSize == _zip64Limit32 ||
-        compressedSize == _zip64Limit32 ||
-        localOffset == _zip64Limit32) {
-      final extraStart = pos + 46 + nameLen;
-      final extraEnd = extraStart + extraLen;
-      var extraPos = extraStart;
-      while (extraPos + 4 <= extraEnd) {
-        final headerId = bd.getUint16(extraPos, Endian.little);
-        final dataSize = bd.getUint16(extraPos + 2, Endian.little);
-        final fieldDataStart = extraPos + 4;
-        if (headerId == _zip64HeaderId) {
-          var fieldPos = fieldDataStart;
-          if (uncompressedSize == _zip64Limit32 &&
-              fieldPos + 8 <= fieldDataStart + dataSize) {
-            uncompressedSize = _getUint64LE(bd, fieldPos);
-            fieldPos += 8;
-          }
-          if (compressedSize == _zip64Limit32 &&
-              fieldPos + 8 <= fieldDataStart + dataSize) {
-            compressedSize = _getUint64LE(bd, fieldPos);
-            fieldPos += 8;
-          }
-          if (localOffset == _zip64Limit32 &&
-              fieldPos + 8 <= fieldDataStart + dataSize) {
-            localOffset = _getUint64LE(bd, fieldPos);
-            fieldPos += 8;
-          }
-          break;
-        }
-        extraPos += 4 + dataSize;
-      }
-    }
-
-    pos += 46 + nameLen + extraLen + commentLen;
-
-    if (bd.getUint32(localOffset, Endian.little) != 0x04034b50) {
-      throw FormatException('Invalid local file header at $localOffset.');
-    }
-    final localNameLen = bd.getUint16(localOffset + 26, Endian.little);
-    final localExtraLen = bd.getUint16(localOffset + 28, Endian.little);
-    final dataStart = localOffset + 30 + localNameLen + localExtraLen;
-    final rawPayload = Uint8List.sublistView(
-      zipBytes,
-      dataStart,
-      dataStart + compressedSize,
-    );
-
-    final Uint8List data;
-    int? uncompressedSizeOverride;
-    int? crc32Override = crc;
-    if (method == 0) {
-      data = Uint8List.fromList(rawPayload);
-      if (uncompressedSize != data.length) {
-        uncompressedSizeOverride = uncompressedSize;
-      }
-    } else if (method == 8) {
-      if (uncompressedSize > _streamingFileThreshold) {
-        final crcSink = _CrcAndSizeSink();
-        final inflateSink = ZLibDecoder(
-          raw: true,
-        ).startChunkedConversion(crcSink);
-        const step = 1024 * 1024;
-        for (var off = 0; off < rawPayload.length; off += step) {
-          final end = (off + step < rawPayload.length)
-              ? off + step
-              : rawPayload.length;
-          inflateSink.add(Uint8List.sublistView(rawPayload, off, end));
-        }
-        inflateSink.close();
-        if (crcSink.totalLength != uncompressedSize) {
-          throw FormatException(
-            'ZIP64 inflated length mismatch for "$path": '
-            'expected $uncompressedSize, got ${crcSink.totalLength}.',
-          );
-        }
-        if (crcSink.crc32Value != crc) {
-          throw FormatException(
-            'ZIP64 CRC-32 mismatch for "$path": '
-            'expected 0x${crc.toRadixString(16)}, '
-            'got 0x${crcSink.crc32Value.toRadixString(16)}.',
-          );
-        }
-        data = Uint8List(0);
-        uncompressedSizeOverride = crcSink.totalLength;
-        crc32Override = crcSink.crc32Value;
-      } else {
-        data = Uint8List.fromList(rawInflate.decode(rawPayload));
-        if (uncompressedSize != data.length) {
-          uncompressedSizeOverride = uncompressedSize;
-        }
-      }
-    } else {
-      throw UnsupportedError('Unsupported ZIP compression method: $method');
-    }
-
-    final unixMode = (externalAttrs >>> 16) & 0xFFFF;
-    final fileType = unixMode & 0xF000;
-    final isDir = path.endsWith('/') || fileType == 0x4000;
-    final isSymlink = fileType == 0xA000;
-    final isExec = !isDir && !isSymlink && ((unixMode & 0x49) != 0);
-
+  var pos = located.cdOffset;
+  for (var i = 0; i < located.entryCount; i++) {
+    final central = _parseInflatedCentralRecord(bd, zipBytes, pos);
+    pos = central.nextPos;
+    final payload = _inflateZipPayload(bd, zipBytes, rawInflate, central);
+    final flags = _zipModeFlags(central.externalAttrs, central.path);
     entries.add(
       ZipEntry(
-        path: path,
-        data: data,
-        uncompressedSizeOverride: uncompressedSizeOverride,
-        crc32Override: crc32Override,
-        isDirectory: isDir,
-        isExecutable: isExec,
-        isSymlink: isSymlink,
+        path: central.path,
+        data: payload.data,
+        uncompressedSizeOverride: payload.uncompressedSizeOverride,
+        crc32Override: payload.crc32Override,
+        isDirectory: flags.isDir,
+        isExecutable: flags.isExec,
+        isSymlink: flags.isSymlink,
       ),
     );
   }
@@ -1462,154 +1782,159 @@ class ZipRawEntry {
 /// compression methods. Entries with data descriptors (bit 3) read fine: the
 /// central record carries the authoritative sizes. Anything else below the
 /// ZIP32 limits reads, at any size.
-List<ZipRawEntry> readZipRawEntries(Uint8List zipBytes) {
-  final bd = ByteData.sublistView(zipBytes);
+int _findRawEocdOffset(ByteData bd, Uint8List zipBytes) {
   // Locate End of Central Directory (0x06054b50): the last occurrence that
   // exactly consumes the trailing bytes (signature + comment).
-  var eocdOffset = -1;
   for (var i = zipBytes.length - 22; i >= 0; i--) {
     if (bd.getUint32(i, Endian.little) == 0x06054b50 &&
         i + 22 + bd.getUint16(i + 20, Endian.little) == zipBytes.length) {
-      eocdOffset = i;
-      break;
+      return i;
     }
     // The EOCD must lie within the last 64 KiB + 22 bytes; stop early.
     if (i < zipBytes.length - 22 - 65536) break;
   }
-  if (eocdOffset == -1) {
-    throw FormatException('Invalid ZIP archive: EOCD signature not found.');
+  throw FormatException('Invalid ZIP archive: EOCD signature not found.');
+}
+
+_CentralRecord _parseRawCentralRecord(
+  ByteData bd,
+  Uint8List zipBytes,
+  int pos,
+) {
+  if (pos + 46 > zipBytes.length ||
+      bd.getUint32(pos, Endian.little) != 0x02014b50) {
+    throw FormatException('Invalid central directory header at $pos.');
   }
+  final flags = bd.getUint16(pos + 8, Endian.little);
+  final method = bd.getUint16(pos + 10, Endian.little);
+  final crc = bd.getUint32(pos + 16, Endian.little);
+  var compressedSize = bd.getUint32(pos + 20, Endian.little);
+  var uncompressedSize = bd.getUint32(pos + 24, Endian.little);
+  final nameLen = bd.getUint16(pos + 28, Endian.little);
+  final extraLen = bd.getUint16(pos + 30, Endian.little);
+  final commentLen = bd.getUint16(pos + 32, Endian.little);
+  final externalAttrs = bd.getUint32(pos + 38, Endian.little);
+  var localOffset = bd.getUint32(pos + 42, Endian.little);
 
-  var entryCount = bd.getUint16(eocdOffset + 10, Endian.little);
-  var cdOffset = bd.getUint32(eocdOffset + 16, Endian.little);
+  if (pos + 46 + nameLen > zipBytes.length) {
+    throw FormatException('Invalid central directory header at $pos.');
+  }
+  final path = utf8.decode(zipBytes.sublist(pos + 46, pos + 46 + nameLen));
 
-  // Check for ZIP64 End of Central Directory Locator (0x07064b50) immediately
-  // preceding the standard EOCD record.
-  if (eocdOffset >= 20 &&
-      bd.getUint32(eocdOffset - 20, Endian.little) == 0x07064b50) {
-    final zip64EocdOffset = _getUint64LE(bd, eocdOffset - 20 + 8);
-    if (zip64EocdOffset + 56 > zipBytes.length ||
-        bd.getUint32(zip64EocdOffset, Endian.little) != 0x06064b50) {
+  if (uncompressedSize == _zip64Limit32 ||
+      compressedSize == _zip64Limit32 ||
+      localOffset == _zip64Limit32) {
+    final extraStart = pos + 46 + nameLen;
+    final resolved = _applyZip64ExtraField(
+      bd,
+      extraStart,
+      extraStart + extraLen,
+      uncompressedSize,
+      compressedSize,
+      localOffset,
+    );
+    uncompressedSize = resolved.uncompressedSize;
+    compressedSize = resolved.compressedSize;
+    localOffset = resolved.localOffset;
+    if (!resolved.found &&
+        (uncompressedSize == _zip64Limit32 ||
+            compressedSize == _zip64Limit32 ||
+            localOffset == _zip64Limit32)) {
       throw FormatException(
-        'Invalid ZIP64 archive: ZIP64 EOCD signature not found at $zip64EocdOffset.',
+        'ZIP64 entry "$path" has no ZIP64 extra field; 64-bit sizes are '
+        'not supported here.',
       );
     }
-    entryCount = _getUint64LE(bd, zip64EocdOffset + 32);
-    cdOffset = _getUint64LE(bd, zip64EocdOffset + 48);
   }
+
+  return (
+    path: path,
+    method: method,
+    flags: flags,
+    crc: crc,
+    compressedSize: compressedSize,
+    uncompressedSize: uncompressedSize,
+    externalAttrs: externalAttrs,
+    localOffset: localOffset,
+    nextPos: pos + 46 + nameLen + extraLen + commentLen,
+  );
+}
+
+ZipRawEntry _materializeRawEntry(
+  ByteData bd,
+  Uint8List zipBytes,
+  _CentralRecord central,
+) {
+  if (central.method != 0 && central.method != 8) {
+    throw UnsupportedError(
+      'Unsupported ZIP compression method ${central.method} for "${central.path}".',
+    );
+  }
+  if ((central.flags & 0x01) != 0) {
+    throw FormatException(
+      'Encrypted ZIP entries are not supported: ${central.path}.',
+    );
+  }
+  if (central.localOffset + 30 > zipBytes.length ||
+      bd.getUint32(central.localOffset, Endian.little) != 0x04034b50) {
+    throw FormatException(
+      'Invalid local file header at ${central.localOffset}.',
+    );
+  }
+  final localNameLen = bd.getUint16(central.localOffset + 26, Endian.little);
+  final localExtraLen = bd.getUint16(central.localOffset + 28, Endian.little);
+  final dataStart = central.localOffset + 30 + localNameLen + localExtraLen;
+  if (dataStart + central.compressedSize > zipBytes.length) {
+    throw FormatException(
+      'ZIP entry "${central.path}" overruns the archive '
+      '(offset $dataStart, size ${central.compressedSize}).',
+    );
+  }
+  final rawPayload = Uint8List.sublistView(
+    zipBytes,
+    dataStart,
+    dataStart + central.compressedSize,
+  );
+
+  final unixMode = (central.externalAttrs >>> 16) & 0xFFFF;
+  final fileType = unixMode & 0xF000;
+  final isDir = central.path.endsWith('/') || fileType == 0x4000;
+  return ZipRawEntry(
+    path: central.path,
+    method: central.method,
+    crc: central.crc,
+    uncompressedSize: central.uncompressedSize,
+    rawData: rawPayload,
+    isDirectory: isDir,
+  );
+}
+
+/// Reads the central directory of [zipBytes], returning each entry's raw
+/// payload without inflating.
+///
+/// Refuses archives without a readable extra field where a 64-bit size marker
+/// appears (writers that need 64-bit sizes must emit the ZIP64 extra fields
+/// [encodeDeterministicZip] emits), encrypted entries, and unsupported
+/// compression methods. Entries with data descriptors (bit 3) read fine: the
+/// central record carries the authoritative sizes. Anything else below the
+/// ZIP32 limits reads, at any size.
+List<ZipRawEntry> readZipRawEntries(Uint8List zipBytes) {
+  final bd = ByteData.sublistView(zipBytes);
+  final eocdOffset = _findRawEocdOffset(bd, zipBytes);
+  final located = _applyZip64Locator(
+    bd,
+    zipBytes,
+    eocdOffset,
+    bd.getUint16(eocdOffset + 10, Endian.little),
+    bd.getUint32(eocdOffset + 16, Endian.little),
+  );
 
   final entries = <ZipRawEntry>[];
-  var pos = cdOffset;
-  for (var i = 0; i < entryCount; i++) {
-    if (pos + 46 > zipBytes.length ||
-        bd.getUint32(pos, Endian.little) != 0x02014b50) {
-      throw FormatException('Invalid central directory header at $pos.');
-    }
-    final flags = bd.getUint16(pos + 8, Endian.little);
-    final method = bd.getUint16(pos + 10, Endian.little);
-    final crc = bd.getUint32(pos + 16, Endian.little);
-    var compressedSize = bd.getUint32(pos + 20, Endian.little);
-    var uncompressedSize = bd.getUint32(pos + 24, Endian.little);
-    final nameLen = bd.getUint16(pos + 28, Endian.little);
-    final extraLen = bd.getUint16(pos + 30, Endian.little);
-    final commentLen = bd.getUint16(pos + 32, Endian.little);
-    final externalAttrs = bd.getUint32(pos + 38, Endian.little);
-    var localOffset = bd.getUint32(pos + 42, Endian.little);
-
-    if (pos + 46 + nameLen > zipBytes.length) {
-      throw FormatException('Invalid central directory header at $pos.');
-    }
-    final path = utf8.decode(
-      zipBytes.sublist(pos + 46, pos + 46 + nameLen),
-    );
-
-    if (uncompressedSize == _zip64Limit32 ||
-        compressedSize == _zip64Limit32 ||
-        localOffset == _zip64Limit32) {
-      final extraStart = pos + 46 + nameLen;
-      final extraEnd = extraStart + extraLen;
-      var found = false;
-      var extraPos = extraStart;
-      while (extraPos + 4 <= extraEnd) {
-        final headerId = bd.getUint16(extraPos, Endian.little);
-        final dataSize = bd.getUint16(extraPos + 2, Endian.little);
-        final fieldDataStart = extraPos + 4;
-        if (headerId == _zip64HeaderId) {
-          var fieldPos = fieldDataStart;
-          if (uncompressedSize == _zip64Limit32 &&
-              fieldPos + 8 <= fieldDataStart + dataSize) {
-            uncompressedSize = _getUint64LE(bd, fieldPos);
-            fieldPos += 8;
-          }
-          if (compressedSize == _zip64Limit32 &&
-              fieldPos + 8 <= fieldDataStart + dataSize) {
-            compressedSize = _getUint64LE(bd, fieldPos);
-            fieldPos += 8;
-          }
-          if (localOffset == _zip64Limit32 &&
-              fieldPos + 8 <= fieldDataStart + dataSize) {
-            localOffset = _getUint64LE(bd, fieldPos);
-            fieldPos += 8;
-          }
-          found = true;
-          break;
-        }
-        extraPos += 4 + dataSize;
-      }
-      if (!found &&
-          (uncompressedSize == _zip64Limit32 ||
-              compressedSize == _zip64Limit32 ||
-              localOffset == _zip64Limit32)) {
-        throw FormatException(
-          'ZIP64 entry "$path" has no ZIP64 extra field; 64-bit sizes are '
-          'not supported here.',
-        );
-      }
-    }
-
-    pos += 46 + nameLen + extraLen + commentLen;
-
-    if (method != 0 && method != 8) {
-      throw UnsupportedError(
-        'Unsupported ZIP compression method $method for "$path".',
-      );
-    }
-    if ((flags & 0x01) != 0) {
-      throw FormatException('Encrypted ZIP entries are not supported: $path.');
-    }
-    if (localOffset + 30 > zipBytes.length ||
-        bd.getUint32(localOffset, Endian.little) != 0x04034b50) {
-      throw FormatException('Invalid local file header at $localOffset.');
-    }
-    final localNameLen = bd.getUint16(localOffset + 26, Endian.little);
-    final localExtraLen = bd.getUint16(localOffset + 28, Endian.little);
-    final dataStart = localOffset + 30 + localNameLen + localExtraLen;
-    if (dataStart + compressedSize > zipBytes.length) {
-      throw FormatException(
-        'ZIP entry "$path" overruns the archive '
-        '(offset $dataStart, size $compressedSize).',
-      );
-    }
-    final rawPayload = Uint8List.sublistView(
-      zipBytes,
-      dataStart,
-      dataStart + compressedSize,
-    );
-
-    final unixMode = (externalAttrs >>> 16) & 0xFFFF;
-    final fileType = unixMode & 0xF000;
-    final isDir = path.endsWith('/') || fileType == 0x4000;
-
-    entries.add(
-      ZipRawEntry(
-        path: path,
-        method: method,
-        crc: crc,
-        uncompressedSize: uncompressedSize,
-        rawData: rawPayload,
-        isDirectory: isDir,
-      ),
-    );
+  var pos = located.cdOffset;
+  for (var i = 0; i < located.entryCount; i++) {
+    final central = _parseRawCentralRecord(bd, zipBytes, pos);
+    pos = central.nextPos;
+    entries.add(_materializeRawEntry(bd, zipBytes, central));
   }
   return entries;
 }
