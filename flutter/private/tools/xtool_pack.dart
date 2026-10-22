@@ -3126,36 +3126,29 @@ Uint8List _encodeMachOBuildVersionCommand({
   return bytes;
 }
 
-/// Synthesizes a 64-bit Mach-O `MH_EXECUTE` runner binary with
-/// `LC_BUILD_VERSION`, `__TEXT` / `__LINKEDIT` segments, `LC_SYMTAB`,
-/// `LC_DYSYMTAB`, `LC_UUID`, `LC_RPATH`, and `LC_LOAD_DYLIB` commands.
-Uint8List generateStubExecutableMachO({
-  required String platform,
-  String arch = 'arm64',
-  required String minimumOsVersion,
-  List<String> linkedFrameworkNames = const [],
-  List<String> sdkFrameworks = const [],
-  List<String> sdkDylibs = const [],
-  List<String> metadataEntries = const [],
-}) {
-  final int cpuType;
-  final int cpuSubtype;
+({int cpuType, int cpuSubtype, int pageSize}) _stubArchParams(String arch) {
   switch (arch) {
     case 'arm64':
-      cpuType = 0x0100000c; // CPU_TYPE_ARM64
-      cpuSubtype = 0; // CPU_SUBTYPE_ARM64_ALL
+      // CPU_TYPE_ARM64 / CPU_SUBTYPE_ARM64_ALL, 16 KiB pages.
+      return (cpuType: 0x0100000c, cpuSubtype: 0, pageSize: 0x4000);
     case 'x86_64':
-      cpuType = 0x01000007; // CPU_TYPE_X86_64
-      cpuSubtype = 3; // CPU_SUBTYPE_X86_64_ALL
+      // CPU_TYPE_X86_64 / CPU_SUBTYPE_X86_64_ALL, 4 KiB pages.
+      return (cpuType: 0x01000007, cpuSubtype: 3, pageSize: 0x1000);
     default:
       throw ArgumentError('Unsupported architecture "$arch".');
   }
+}
 
-  final pageSize = arch == 'arm64' ? 0x4000 : 0x1000;
-  const linkeditFileSize = 8;
-  final versionPacked = _packMachOVersion(minimumOsVersion);
-
-  final loadCommands = <Uint8List>[
+List<Uint8List> _stubLoadCommands({
+  required String platform,
+  required int versionPacked,
+  required int pageSize,
+  required int linkeditFileSize,
+  required List<String> linkedFrameworkNames,
+  required List<String> sdkFrameworks,
+  required List<String> sdkDylibs,
+}) {
+  return [
     _encodeMachOBuildVersionCommand(
       platform: _machOPlatformConstant(platform),
       minos: versionPacked,
@@ -3203,25 +3196,11 @@ Uint8List generateStubExecutableMachO({
         '/usr/lib/${dylib.startsWith('lib') ? dylib : 'lib$dylib'}.dylib',
       ),
   ];
+}
 
-  final sizeofcmds = loadCommands.fold<int>(0, (s, c) => s + c.length);
-  final metadataText = metadataEntries.isEmpty
-      ? ''
-      : '${metadataEntries.join('\n')}\n';
-  final metadataBytes = utf8.encode(metadataText);
-
-  final totalSize = pageSize + linkeditFileSize;
-  final out = Uint8List(totalSize);
-  final bd = ByteData.sublistView(out);
-  bd.setUint32(0, 0xfeedfacf, Endian.little); // MH_MAGIC_64
-  bd.setInt32(4, cpuType, Endian.little);
-  bd.setInt32(8, cpuSubtype, Endian.little);
-  bd.setUint32(12, 0x2, Endian.little); // MH_EXECUTE
-  bd.setUint32(16, loadCommands.length, Endian.little);
-  bd.setUint32(20, sizeofcmds, Endian.little);
-  bd.setUint32(24, 0x00200001, Endian.little); // MH_NOUNDEFS | MH_PIE
-  bd.setUint32(28, 0, Endian.little); // reserved
-
+/// Writes [loadCommands] after the Mach-O header, returning the file offset
+/// of the `LC_UUID` payload for later stamping.
+int _writeStubCommands(Uint8List out, List<Uint8List> loadCommands) {
   var offset = 32;
   var uuidDataOffset = -1;
   for (final cmd in loadCommands) {
@@ -3232,10 +3211,67 @@ Uint8List generateStubExecutableMachO({
     out.setRange(offset, offset + cmd.length, cmd);
     offset += cmd.length;
   }
+  return uuidDataOffset;
+}
+
+void _stampStubUuid(Uint8List out, int uuidDataOffset) {
+  if (uuidDataOffset < 0) return;
+  final digest = sha256Bytes(out);
+  final uuid = Uint8List.fromList(digest.sublist(0, 16));
+  uuid[6] = (uuid[6] & 0x0f) | 0x50;
+  uuid[8] = (uuid[8] & 0x3f) | 0x80;
+  out.setRange(uuidDataOffset, uuidDataOffset + 16, uuid);
+}
+
+/// Synthesizes a 64-bit Mach-O `MH_EXECUTE` runner binary with
+/// `LC_BUILD_VERSION`, `__TEXT` / `__LINKEDIT` segments, `LC_SYMTAB`,
+/// `LC_DYSYMTAB`, `LC_UUID`, `LC_RPATH`, and `LC_LOAD_DYLIB` commands.
+Uint8List generateStubExecutableMachO({
+  required String platform,
+  String arch = 'arm64',
+  required String minimumOsVersion,
+  List<String> linkedFrameworkNames = const [],
+  List<String> sdkFrameworks = const [],
+  List<String> sdkDylibs = const [],
+  List<String> metadataEntries = const [],
+}) {
+  final archParams = _stubArchParams(arch);
+  final pageSize = archParams.pageSize;
+  const linkeditFileSize = 8;
+  final versionPacked = _packMachOVersion(minimumOsVersion);
+
+  final loadCommands = _stubLoadCommands(
+    platform: platform,
+    versionPacked: versionPacked,
+    pageSize: pageSize,
+    linkeditFileSize: linkeditFileSize,
+    linkedFrameworkNames: linkedFrameworkNames,
+    sdkFrameworks: sdkFrameworks,
+    sdkDylibs: sdkDylibs,
+  );
+  final sizeofcmds = loadCommands.fold<int>(0, (s, c) => s + c.length);
+  final metadataText = metadataEntries.isEmpty
+      ? ''
+      : '${metadataEntries.join('\n')}\n';
+  final metadataBytes = utf8.encode(metadataText);
+
+  final totalSize = pageSize + linkeditFileSize;
+  final out = Uint8List(totalSize);
+  final bd = ByteData.sublistView(out);
+  bd.setUint32(0, 0xfeedfacf, Endian.little); // MH_MAGIC_64
+  bd.setInt32(4, archParams.cpuType, Endian.little);
+  bd.setInt32(8, archParams.cpuSubtype, Endian.little);
+  bd.setUint32(12, 0x2, Endian.little); // MH_EXECUTE
+  bd.setUint32(16, loadCommands.length, Endian.little);
+  bd.setUint32(20, sizeofcmds, Endian.little);
+  bd.setUint32(24, 0x00200001, Endian.little); // MH_NOUNDEFS | MH_PIE
+  bd.setUint32(28, 0, Endian.little); // reserved
+
+  final uuidDataOffset = _writeStubCommands(out, loadCommands);
 
   // Leave 64 bytes of zero padding after load commands before writing metadata
   // inside __TEXT so any subsequent load-command patching has room.
-  final metaStart = offset + 64;
+  final metaStart = 32 + sizeofcmds + 64;
   if (metadataBytes.isNotEmpty &&
       metaStart + metadataBytes.length <= pageSize) {
     out.setRange(metaStart, metaStart + metadataBytes.length, metadataBytes);
@@ -3245,15 +3281,73 @@ Uint8List generateStubExecutableMachO({
   out[pageSize] = 0x20;
   out[pageSize + 1] = 0x00;
 
-  if (uuidDataOffset >= 0) {
-    final digest = sha256Bytes(out);
-    final uuid = Uint8List.fromList(digest.sublist(0, 16));
-    uuid[6] = (uuid[6] & 0x0f) | 0x50;
-    uuid[8] = (uuid[8] & 0x3f) | 0x80;
-    out.setRange(uuidDataOffset, uuidDataOffset + 16, uuid);
-  }
-
+  _stampStubUuid(out, uuidDataOffset);
   return out;
+}
+
+({String sdkPrefix, String defaultDirName}) _sdkNamesForPlatform(
+  String platform,
+) {
+  switch (platform) {
+    case 'ios':
+      return (sdkPrefix: 'iphoneos', defaultDirName: 'iPhoneOS.sdk');
+    case 'ios_sim':
+      return (
+        sdkPrefix: 'iphonesimulator',
+        defaultDirName: 'iPhoneSimulator.sdk',
+      );
+    case 'macos':
+      return (sdkPrefix: 'macosx', defaultDirName: 'MacOSX.sdk');
+    default:
+      throw ArgumentError('Unsupported platform "$platform".');
+  }
+}
+
+/// Searches an `info.json` artifact bundle for a variant whose key or path
+/// names the [sdkPrefix], returning its directory when it exists.
+Directory? _findSdkInArtifactInfo(
+  Directory sdkRoot,
+  Object? decoded,
+  String sdkPrefix,
+) {
+  if (decoded is! Map<String, Object?>) return null;
+  final artifacts = decoded['artifacts'];
+  if (artifacts is! Map<String, Object?>) return null;
+  for (final entry in artifacts.entries) {
+    final candidate = _matchSdkVariant(
+      sdkRoot,
+      entry.key,
+      entry.value,
+      sdkPrefix,
+    );
+    if (candidate != null) return candidate;
+  }
+  return null;
+}
+
+Directory? _matchSdkVariant(
+  Directory sdkRoot,
+  String key,
+  Object? val,
+  String sdkPrefix,
+) {
+  if (val is! Map<String, Object?>) return null;
+  final variants = val['variants'];
+  if (variants is! List<Object?>) return null;
+  final keyLower = key.toLowerCase();
+  for (final v in variants) {
+    if (v is! Map<String, Object?>) continue;
+    final path = v['path'];
+    if (path is! String) continue;
+    if (keyLower.startsWith(sdkPrefix) ||
+        path.toLowerCase().contains(sdkPrefix)) {
+      final candidate = Directory('${sdkRoot.path}/$path');
+      if (candidate.existsSync()) {
+        return candidate;
+      }
+    }
+  }
+  return null;
 }
 
 /// Resolves the platform `.sdk` directory inside a `darwin.artifactbundle`
@@ -3265,56 +3359,16 @@ Directory resolveDarwinSdkPathFromArtifactBundle(
   if (!sdkRoot.existsSync()) {
     throw ArgumentError('SDK root directory does not exist: ${sdkRoot.path}');
   }
-
-  final String sdkPrefix;
-  final String defaultDirName;
-  switch (platform) {
-    case 'ios':
-      sdkPrefix = 'iphoneos';
-      defaultDirName = 'iPhoneOS.sdk';
-    case 'ios_sim':
-      sdkPrefix = 'iphonesimulator';
-      defaultDirName = 'iPhoneSimulator.sdk';
-    case 'macos':
-      sdkPrefix = 'macosx';
-      defaultDirName = 'MacOSX.sdk';
-    default:
-      throw ArgumentError('Unsupported platform "$platform".');
-  }
+  final names = _sdkNamesForPlatform(platform);
 
   final infoJsonFile = File('${sdkRoot.path}/info.json');
   if (infoJsonFile.existsSync()) {
     final decoded = jsonDecode(infoJsonFile.readAsStringSync());
-    if (decoded is Map<String, Object?>) {
-      final artifacts = decoded['artifacts'];
-      if (artifacts is Map<String, Object?>) {
-        for (final entry in artifacts.entries) {
-          final keyLower = entry.key.toLowerCase();
-          final val = entry.value;
-          if (val is Map<String, Object?>) {
-            final variants = val['variants'];
-            if (variants is List<Object?>) {
-              for (final v in variants) {
-                if (v is Map<String, Object?>) {
-                  final path = v['path'];
-                  if (path is String &&
-                      (keyLower.startsWith(sdkPrefix) ||
-                          path.toLowerCase().contains(sdkPrefix))) {
-                    final candidate = Directory('${sdkRoot.path}/$path');
-                    if (candidate.existsSync()) {
-                      return candidate;
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
+    final fromInfo = _findSdkInArtifactInfo(sdkRoot, decoded, names.sdkPrefix);
+    if (fromInfo != null) return fromInfo;
   }
 
-  final fallback = Directory('${sdkRoot.path}/$defaultDirName');
+  final fallback = Directory('${sdkRoot.path}/${names.defaultDirName}');
   if (fallback.existsSync()) {
     return fallback;
   }
@@ -3361,9 +3415,7 @@ class RunnerCompileConfig {
   });
 }
 
-/// Compiles or synthesizes a Mach-O `MH_EXECUTE` runner binary from
-/// [RunnerCompileConfig].
-void compileRunner(RunnerCompileConfig config) {
+void _checkRunnerPlatform(RunnerCompileConfig config) {
   if (config.platform != 'ios' &&
       config.platform != 'ios_sim' &&
       config.platform != 'macos') {
@@ -3371,23 +3423,23 @@ void compileRunner(RunnerCompileConfig config) {
       'Unsupported platform "${config.platform}". Expected ios, ios_sim, or macos.',
     );
   }
+}
 
-  for (final src in config.sourcePaths) {
-    if (!File(src).existsSync()) {
-      throw ArgumentError('Runner source file does not exist: $src');
+void _requireRunnerFilesExist(List<String> paths, String kind) {
+  for (final path in paths) {
+    if (!File(path).existsSync()) {
+      throw ArgumentError('Runner $kind file does not exist: $path');
     }
   }
-  for (final hdr in config.headerPaths) {
-    if (!File(hdr).existsSync()) {
-      throw ArgumentError('Runner header file does not exist: $hdr');
-    }
-  }
-  for (final mm in config.modulemapPaths) {
-    if (!File(mm).existsSync()) {
-      throw ArgumentError('Runner modulemap file does not exist: $mm');
-    }
-  }
+}
 
+/// Resolves `--framework` inputs to framework directories and their link
+/// names, extracting `.framework.zip` archives beside the runner output.
+({
+  List<Directory> dirs,
+  List<String> names,
+})
+_resolveRunnerFrameworks(RunnerCompileConfig config) {
   final resolvedFrameworkDirs = <Directory>[];
   final linkedFrameworkNames = <String>[];
   Directory? frameworksScratch;
@@ -3413,116 +3465,131 @@ void compileRunner(RunnerCompileConfig config) {
       }
     }
   }
+  return (dirs: resolvedFrameworkDirs, names: linkedFrameworkNames);
+}
 
-  final sdkFrameworks = <String>[];
-  for (final sdkFw in config.sdkFrameworks) {
-    if (sdkFw.isNotEmpty && !sdkFrameworks.contains(sdkFw)) {
-      sdkFrameworks.add(sdkFw);
+List<String> _dedupeNonEmpty(List<String> values) {
+  final deduped = <String>[];
+  for (final value in values) {
+    if (value.isNotEmpty && !deduped.contains(value)) {
+      deduped.add(value);
     }
   }
-  final sdkDylibs = <String>[];
-  for (final dylib in config.sdkDylibs) {
-    if (dylib.isNotEmpty && !sdkDylibs.contains(dylib)) {
-      sdkDylibs.add(dylib);
-    }
-  }
+  return deduped;
+}
 
-  Directory? resolvedSdkDir;
+Directory? _resolveRunnerSdkDir(RunnerCompileConfig config) {
   if (config.sdkAvailable &&
       config.sdkRootPath != null &&
       config.sdkRootPath!.isNotEmpty) {
-    resolvedSdkDir = resolveDarwinSdkPathFromArtifactBundle(
+    return resolveDarwinSdkPathFromArtifactBundle(
       Directory(config.sdkRootPath!),
       config.platform,
     );
   }
+  return null;
+}
 
-  if (config.sdkAvailable &&
-      config.swiftcPath != null &&
-      config.swiftcPath!.isNotEmpty) {
-    final String targetTriple;
-    switch (config.platform) {
-      case 'ios':
-        targetTriple = '${config.arch}-apple-ios${config.minimumOsVersion}';
-      case 'ios_sim':
-        targetTriple =
-            '${config.arch}-apple-ios${config.minimumOsVersion}-simulator';
-      case 'macos':
-        targetTriple = '${config.arch}-apple-macos${config.minimumOsVersion}';
-      default:
-        throw StateError('Unreachable');
-    }
+String _runnerTargetTriple(RunnerCompileConfig config) {
+  switch (config.platform) {
+    case 'ios':
+      return '${config.arch}-apple-ios${config.minimumOsVersion}';
+    case 'ios_sim':
+      return '${config.arch}-apple-ios${config.minimumOsVersion}-simulator';
+    case 'macos':
+      return '${config.arch}-apple-macos${config.minimumOsVersion}';
+    default:
+      throw StateError('Unreachable');
+  }
+}
 
-    final swiftcArgs = <String>[
-      '-target',
-      targetTriple,
-      if (resolvedSdkDir != null) ...['-sdk', resolvedSdkDir.path],
+List<String> _buildSwiftcArgs(
+  RunnerCompileConfig config,
+  Directory? resolvedSdkDir,
+  List<Directory> resolvedFrameworkDirs,
+  List<String> linkedFrameworkNames,
+  List<String> sdkFrameworks,
+  List<String> sdkDylibs,
+) {
+  final swiftcArgs = <String>[
+    '-target',
+    _runnerTargetTriple(config),
+    if (resolvedSdkDir != null) ...['-sdk', resolvedSdkDir.path],
+    '-Xlinker',
+    '-rpath',
+    '-Xlinker',
+    '@executable_path/Frameworks',
+    if (config.platform == 'macos') ...[
       '-Xlinker',
       '-rpath',
       '-Xlinker',
-      '@executable_path/Frameworks',
-      if (config.platform == 'macos') ...[
-        '-Xlinker',
-        '-rpath',
-        '-Xlinker',
-        '@executable_path/../Frameworks',
-      ],
-    ];
+      '@executable_path/../Frameworks',
+    ],
+  ];
 
-    final seenFwParents = <String>{};
-    for (final fwDir in resolvedFrameworkDirs) {
-      final parentPath = fwDir.parent.path;
-      if (seenFwParents.add(parentPath)) {
-        swiftcArgs.addAll(['-F', parentPath]);
-      }
+  final seenFwParents = <String>{};
+  for (final fwDir in resolvedFrameworkDirs) {
+    final parentPath = fwDir.parent.path;
+    if (seenFwParents.add(parentPath)) {
+      swiftcArgs.addAll(['-F', parentPath]);
     }
-    for (final fwName in linkedFrameworkNames) {
-      swiftcArgs.addAll(['-framework', fwName]);
-    }
-    for (final sdkFw in sdkFrameworks) {
-      swiftcArgs.addAll(['-framework', sdkFw]);
-    }
-    for (final dylib in sdkDylibs) {
-      final libArg = dylib.startsWith('lib') ? dylib.substring(3) : dylib;
-      swiftcArgs.add('-l$libArg');
-    }
-
-    final seenHeaderDirs = <String>{};
-    for (final hdr in config.headerPaths) {
-      final dirPath = File(hdr).parent.path;
-      if (seenHeaderDirs.add(dirPath)) {
-        swiftcArgs.addAll(['-I', dirPath]);
-      }
-    }
-    for (final mm in config.modulemapPaths) {
-      swiftcArgs.addAll(['-Xcc', '-fmodule-map-file=$mm']);
-    }
-
-    swiftcArgs.addAll([
-      ...config.sourcePaths,
-      '-emit-executable',
-      '-o',
-      config.outputPath,
-    ]);
-
-    File(config.outputPath).parent.createSync(recursive: true);
-    final result = Process.runSync(
-      config.swiftcPath!,
-      swiftcArgs,
-      environment: const {'PATH': '/usr/bin:/bin'},
-      includeParentEnvironment: false,
-    );
-    if (result.exitCode != 0) {
-      throw ProcessException(
-        config.swiftcPath!,
-        swiftcArgs,
-        'swiftc failed (exit ${result.exitCode}):\n${result.stderr}',
-        result.exitCode,
-      );
-    }
-    return;
+  }
+  for (final fwName in linkedFrameworkNames) {
+    swiftcArgs.addAll(['-framework', fwName]);
+  }
+  for (final sdkFw in sdkFrameworks) {
+    swiftcArgs.addAll(['-framework', sdkFw]);
+  }
+  for (final dylib in sdkDylibs) {
+    final libArg = dylib.startsWith('lib') ? dylib.substring(3) : dylib;
+    swiftcArgs.add('-l$libArg');
   }
 
+  final seenHeaderDirs = <String>{};
+  for (final hdr in config.headerPaths) {
+    final dirPath = File(hdr).parent.path;
+    if (seenHeaderDirs.add(dirPath)) {
+      swiftcArgs.addAll(['-I', dirPath]);
+    }
+  }
+  for (final mm in config.modulemapPaths) {
+    swiftcArgs.addAll(['-Xcc', '-fmodule-map-file=$mm']);
+  }
+
+  swiftcArgs.addAll([
+    ...config.sourcePaths,
+    '-emit-executable',
+    '-o',
+    config.outputPath,
+  ]);
+  return swiftcArgs;
+}
+
+void _runSwiftc(RunnerCompileConfig config, List<String> swiftcArgs) {
+  File(config.outputPath).parent.createSync(recursive: true);
+  final result = Process.runSync(
+    config.swiftcPath!,
+    swiftcArgs,
+    environment: const {'PATH': '/usr/bin:/bin'},
+    includeParentEnvironment: false,
+  );
+  if (result.exitCode != 0) {
+    throw ProcessException(
+      config.swiftcPath!,
+      swiftcArgs,
+      'swiftc failed (exit ${result.exitCode}):\n${result.stderr}',
+      result.exitCode,
+    );
+  }
+}
+
+void _synthesizeRunnerBinary(
+  RunnerCompileConfig config,
+  Directory? resolvedSdkDir,
+  List<String> linkedFrameworkNames,
+  List<String> sdkFrameworks,
+  List<String> sdkDylibs,
+) {
   final metadataEntries = <String>[
     'app=${config.appName}',
     'platform=${config.platform}',
@@ -3555,6 +3622,114 @@ void compileRunner(RunnerCompileConfig config) {
   outFile.writeAsBytesSync(machoBytes);
 }
 
+/// Compiles or synthesizes a Mach-O `MH_EXECUTE` runner binary from
+/// [RunnerCompileConfig].
+void compileRunner(RunnerCompileConfig config) {
+  _checkRunnerPlatform(config);
+  _requireRunnerFilesExist(config.sourcePaths, 'source');
+  _requireRunnerFilesExist(config.headerPaths, 'header');
+  _requireRunnerFilesExist(config.modulemapPaths, 'modulemap');
+
+  final resolved = _resolveRunnerFrameworks(config);
+  final sdkFrameworks = _dedupeNonEmpty(config.sdkFrameworks);
+  final sdkDylibs = _dedupeNonEmpty(config.sdkDylibs);
+  final resolvedSdkDir = _resolveRunnerSdkDir(config);
+
+  if (config.sdkAvailable &&
+      config.swiftcPath != null &&
+      config.swiftcPath!.isNotEmpty) {
+    _runSwiftc(
+      config,
+      _buildSwiftcArgs(
+        config,
+        resolvedSdkDir,
+        resolved.dirs,
+        resolved.names,
+        sdkFrameworks,
+        sdkDylibs,
+      ),
+    );
+    return;
+  }
+
+  _synthesizeRunnerBinary(
+    config,
+    resolvedSdkDir,
+    resolved.names,
+    sdkFrameworks,
+    sdkDylibs,
+  );
+}
+
+/// Reads the `BUILD_EMBED_LABEL` value from a Bazel `stable-status.txt` file,
+/// falling back to [fallbackBuildLabel] when absent.
+String? _readBuildEmbedLabel(
+  String? stableStatusPath,
+  String fallbackBuildLabel,
+) {
+  String? embedLabel;
+  if (stableStatusPath != null &&
+      stableStatusPath.isNotEmpty &&
+      File(stableStatusPath).existsSync()) {
+    for (final line in File(stableStatusPath).readAsLinesSync()) {
+      if (line.startsWith('BUILD_EMBED_LABEL ')) {
+        final val = line.substring('BUILD_EMBED_LABEL '.length).trim();
+        if (val.isNotEmpty) {
+          embedLabel = val;
+        }
+        break;
+      }
+    }
+  }
+  if ((embedLabel == null || embedLabel.isEmpty) &&
+      fallbackBuildLabel.isNotEmpty) {
+    embedLabel = fallbackBuildLabel;
+  }
+  return embedLabel;
+}
+
+/// Matches [embedLabel] against [buildLabelPattern]'s `{name}` placeholders,
+/// returning the captured group values.
+Map<String, String> _matchLabelGroups(
+  String buildLabelPattern,
+  Map<String, String> captureGroups,
+  String embedLabel,
+) {
+  final groupNames = <String>[];
+  final regexPattern = buildLabelPattern.replaceAllMapped(
+    RegExp(r'\{([A-Za-z0-9_]+)\}'),
+    (m) {
+      final name = m.group(1)!;
+      final groupRegex = captureGroups[name];
+      if (groupRegex == null) {
+        throw ArgumentError(
+          'Placeholder "{$name}" in build_label_pattern is not present in capture_groups.',
+        );
+      }
+      groupNames.add(name);
+      return '($groupRegex)';
+    },
+  );
+  final match = RegExp('^$regexPattern\$').firstMatch(embedLabel);
+  if (match == null) {
+    throw ArgumentError(
+      'Build label "$embedLabel" did not match build_label_pattern "$buildLabelPattern".',
+    );
+  }
+  final values = <String, String>{};
+  for (var i = 0; i < groupNames.length; i++) {
+    values[groupNames[i]] = match.group(i + 1) ?? '';
+  }
+  return values;
+}
+
+String _substituteLabelGroups(String template, Map<String, String> values) {
+  return template.replaceAllMapped(RegExp(r'\{([A-Za-z0-9_]+)\}'), (m) {
+    final name = m.group(1)!;
+    return values[name] ?? m.group(0)!;
+  });
+}
+
 /// Resolves `build_version` and `short_version_string` from a Bazel
 /// `stable-status.txt` `BUILD_EMBED_LABEL` (or [fallbackBuildLabel]) and
 /// [buildLabelPattern] / [captureGroups], writing JSON to [outputPath].
@@ -3573,58 +3748,18 @@ void resolveBundleVersion({
   var resolvedBuild = buildVersion;
 
   if (buildLabelPattern.isNotEmpty) {
-    String? embedLabel;
-    if (stableStatusPath != null &&
-        stableStatusPath.isNotEmpty &&
-        File(stableStatusPath).existsSync()) {
-      for (final line in File(stableStatusPath).readAsLinesSync()) {
-        if (line.startsWith('BUILD_EMBED_LABEL ')) {
-          final val = line.substring('BUILD_EMBED_LABEL '.length).trim();
-          if (val.isNotEmpty) {
-            embedLabel = val;
-          }
-          break;
-        }
-      }
-    }
-    if ((embedLabel == null || embedLabel.isEmpty) &&
-        fallbackBuildLabel.isNotEmpty) {
-      embedLabel = fallbackBuildLabel;
-    }
-
+    final embedLabel = _readBuildEmbedLabel(
+      stableStatusPath,
+      fallbackBuildLabel,
+    );
     if (embedLabel != null && embedLabel.isNotEmpty) {
-      final groupNames = <String>[];
-      final regexPattern = buildLabelPattern.replaceAllMapped(
-        RegExp(r'\{([A-Za-z0-9_]+)\}'),
-        (m) {
-          final name = m.group(1)!;
-          final groupRegex = captureGroups[name];
-          if (groupRegex == null) {
-            throw ArgumentError(
-              'Placeholder "{$name}" in build_label_pattern is not present in capture_groups.',
-            );
-          }
-          groupNames.add(name);
-          return '($groupRegex)';
-        },
+      final values = _matchLabelGroups(
+        buildLabelPattern,
+        captureGroups,
+        embedLabel,
       );
-      final match = RegExp('^$regexPattern\$').firstMatch(embedLabel);
-      if (match == null) {
-        throw ArgumentError(
-          'Build label "$embedLabel" did not match build_label_pattern "$buildLabelPattern".',
-        );
-      }
-      final values = <String, String>{};
-      for (var i = 0; i < groupNames.length; i++) {
-        values[groupNames[i]] = match.group(i + 1) ?? '';
-      }
-      String substituteGroups(String template) =>
-          template.replaceAllMapped(RegExp(r'\{([A-Za-z0-9_]+)\}'), (m) {
-            final name = m.group(1)!;
-            return values[name] ?? m.group(0)!;
-          });
-      resolvedBuild = substituteGroups(resolvedBuild);
-      resolvedShort = substituteGroups(resolvedShort);
+      resolvedBuild = _substituteLabelGroups(resolvedBuild, values);
+      resolvedShort = _substituteLabelGroups(resolvedShort, values);
     }
   }
 
@@ -3670,7 +3805,8 @@ Never _usageError(String message) {
   exit(1);
 }
 
-void _runResolveVersionCli(List<String> args) {
+/// Mutable parse state for `resolve-version` CLI arguments.
+class _ResolveVersionArgState {
   String buildVersion = '1.0';
   String shortVersionString = '';
   String buildLabelPattern = '';
@@ -3679,7 +3815,7 @@ void _runResolveVersionCli(List<String> args) {
   String? stableStatusPath;
   String? outputPath;
 
-  for (var i = 0; i < args.length; i++) {
+  int apply(List<String> args, int i) {
     final arg = args[i];
     String nextVal() {
       if (i + 1 >= args.length) {
@@ -3690,28 +3826,7 @@ void _runResolveVersionCli(List<String> args) {
 
     switch (arg) {
       case '--control':
-        final controlPath = nextVal();
-        final decoded = jsonDecode(File(controlPath).readAsStringSync());
-        if (decoded is! Map) {
-          _usageError('Control file $controlPath must contain a JSON object.');
-        }
-        buildVersion =
-            (decoded['build_version_pattern'] as String?) ?? buildVersion;
-        shortVersionString =
-            (decoded['short_version_string_pattern'] as String?) ??
-            shortVersionString;
-        buildLabelPattern =
-            (decoded['build_label_pattern'] as String?) ?? buildLabelPattern;
-        fallbackBuildLabel =
-            (decoded['fallback_build_label'] as String?) ?? fallbackBuildLabel;
-        stableStatusPath =
-            (decoded['build_info_path'] as String?) ?? stableStatusPath;
-        final cg = decoded['capture_groups'];
-        if (cg is Map) {
-          for (final entry in cg.entries) {
-            captureGroups[entry.key.toString()] = entry.value.toString();
-          }
-        }
+        _applyControlFile(nextVal());
       case '--build-version':
         buildVersion = nextVal();
       case '--short-version-string':
@@ -3721,12 +3836,7 @@ void _runResolveVersionCli(List<String> args) {
       case '--fallback-build-label':
         fallbackBuildLabel = nextVal();
       case '--capture-group':
-        final kv = nextVal();
-        final eq = kv.indexOf('=');
-        if (eq == -1) {
-          _usageError('Expected KEY=REGEX for --capture-group, got "$kv".');
-        }
-        captureGroups[kv.substring(0, eq)] = kv.substring(eq + 1);
+        _applyCaptureGroup(nextVal());
       case '--stable-status':
         stableStatusPath = nextVal();
       case '--output':
@@ -3734,20 +3844,60 @@ void _runResolveVersionCli(List<String> args) {
       default:
         _usageError('Unrecognized argument for resolve-version: $arg');
     }
+    return i;
   }
 
+  void _applyControlFile(String controlPath) {
+    final decoded = jsonDecode(File(controlPath).readAsStringSync());
+    if (decoded is! Map) {
+      _usageError('Control file $controlPath must contain a JSON object.');
+    }
+    buildVersion =
+        (decoded['build_version_pattern'] as String?) ?? buildVersion;
+    shortVersionString =
+        (decoded['short_version_string_pattern'] as String?) ??
+        shortVersionString;
+    buildLabelPattern =
+        (decoded['build_label_pattern'] as String?) ?? buildLabelPattern;
+    fallbackBuildLabel =
+        (decoded['fallback_build_label'] as String?) ?? fallbackBuildLabel;
+    stableStatusPath =
+        (decoded['build_info_path'] as String?) ?? stableStatusPath;
+    final cg = decoded['capture_groups'];
+    if (cg is Map) {
+      for (final entry in cg.entries) {
+        captureGroups[entry.key.toString()] = entry.value.toString();
+      }
+    }
+  }
+
+  void _applyCaptureGroup(String kv) {
+    final eq = kv.indexOf('=');
+    if (eq == -1) {
+      _usageError('Expected KEY=REGEX for --capture-group, got "$kv".');
+    }
+    captureGroups[kv.substring(0, eq)] = kv.substring(eq + 1);
+  }
+}
+
+void _runResolveVersionCli(List<String> args) {
+  final state = _ResolveVersionArgState();
+  for (var i = 0; i < args.length; i++) {
+    i = state.apply(args, i);
+  }
+  final outputPath = state.outputPath;
   if (outputPath == null) {
     _usageError('Required flag for resolve-version: --output.');
   }
 
   try {
     resolveBundleVersion(
-      buildVersion: buildVersion,
-      shortVersionString: shortVersionString,
-      buildLabelPattern: buildLabelPattern,
-      fallbackBuildLabel: fallbackBuildLabel,
-      captureGroups: captureGroups,
-      stableStatusPath: stableStatusPath,
+      buildVersion: state.buildVersion,
+      shortVersionString: state.shortVersionString,
+      buildLabelPattern: state.buildLabelPattern,
+      fallbackBuildLabel: state.fallbackBuildLabel,
+      captureGroups: state.captureGroups,
+      stableStatusPath: state.stableStatusPath,
       outputPath: outputPath,
     );
   } on Object catch (e) {
@@ -3756,7 +3906,8 @@ void _runResolveVersionCli(List<String> args) {
   }
 }
 
-void _runCompileRunnerCli(List<String> args) {
+/// Mutable parse state for `compile-runner` CLI arguments.
+class _CompileRunnerArgState {
   String? platform;
   String arch = 'arm64';
   String? appName;
@@ -3773,7 +3924,7 @@ void _runCompileRunnerCli(List<String> args) {
   final sdkDylibs = <String>[];
   String? outputPath;
 
-  for (var i = 0; i < args.length; i++) {
+  int apply(List<String> args, int i) {
     final arg = args[i];
     String nextVal() {
       if (i + 1 >= args.length) {
@@ -3816,34 +3967,43 @@ void _runCompileRunnerCli(List<String> args) {
       default:
         _usageError('Unrecognized argument for compile-runner: $arg');
     }
+    return i;
   }
 
-  if (platform == null || appName == null || outputPath == null) {
-    _usageError(
-      'Required flags for compile-runner: --platform, --app-name, --output.',
+  RunnerCompileConfig build() {
+    if (platform == null || appName == null || outputPath == null) {
+      _usageError(
+        'Required flags for compile-runner: --platform, --app-name, --output.',
+      );
+    }
+    return RunnerCompileConfig(
+      platform: platform!,
+      arch: arch,
+      appName: appName!,
+      minimumOsVersion: minimumOsVersion,
+      sdkAvailable: sdkAvailable,
+      sdkRootPath: sdkRootPath,
+      swiftcPath: swiftcPath,
+      clangPath: clangPath,
+      sourcePaths: sourcePaths,
+      headerPaths: headerPaths,
+      modulemapPaths: modulemapPaths,
+      frameworkPaths: frameworkPaths,
+      sdkFrameworks: sdkFrameworks,
+      sdkDylibs: sdkDylibs,
+      outputPath: outputPath!,
     );
+  }
+}
+
+void _runCompileRunnerCli(List<String> args) {
+  final state = _CompileRunnerArgState();
+  for (var i = 0; i < args.length; i++) {
+    i = state.apply(args, i);
   }
 
   try {
-    compileRunner(
-      RunnerCompileConfig(
-        platform: platform,
-        arch: arch,
-        appName: appName,
-        minimumOsVersion: minimumOsVersion,
-        sdkAvailable: sdkAvailable,
-        sdkRootPath: sdkRootPath,
-        swiftcPath: swiftcPath,
-        clangPath: clangPath,
-        sourcePaths: sourcePaths,
-        headerPaths: headerPaths,
-        modulemapPaths: modulemapPaths,
-        frameworkPaths: frameworkPaths,
-        sdkFrameworks: sdkFrameworks,
-        sdkDylibs: sdkDylibs,
-        outputPath: outputPath,
-      ),
-    );
+    compileRunner(state.build());
   } on Object catch (e) {
     stderr.writeln('xtool_pack compile-runner failed: $e');
     exit(1);
@@ -3863,9 +4023,8 @@ const Set<String> _ambientHostEnvVars = {
   '_',
 };
 
-/// Parses `bundle` CLI arguments into a [BundleConfig], throwing [ArgumentError]
-/// on invalid or forbidden flags (such as plain-text `--certificate-password`).
-BundleConfig parseBundleCliArgs(List<String> args) {
+/// Mutable parse state for `bundle` CLI arguments.
+class _BundleArgState {
   String? platform;
   String? appName;
   String? bundleId;
@@ -3891,7 +4050,7 @@ BundleConfig parseBundleCliArgs(List<String> args) {
   String? outputArchivePath;
   String? outputAppDirPath;
 
-  for (var i = 0; i < args.length; i++) {
+  int apply(List<String> args, int i) {
     final arg = args[i];
     if (arg == '--certificate-password' ||
         arg.startsWith('--certificate-password=')) {
@@ -3910,6 +4069,27 @@ BundleConfig parseBundleCliArgs(List<String> args) {
       return args[++i];
     }
 
+    if (_applyIdentityFlag(arg, nextVal)) return i;
+    if (_applySigningFlag(arg, nextVal)) return i;
+    switch (arg) {
+      case '--define':
+        final kv = nextVal();
+        final eq = kv.indexOf('=');
+        if (eq == -1) {
+          throw ArgumentError('Expected KEY=VALUE for --define, got "$kv".');
+        }
+        defines[kv.substring(0, eq)] = kv.substring(eq + 1);
+      case '--isolated-env':
+        isolatedEnv = true;
+      case '--declared-env':
+        declaredEnvVars.add(nextVal());
+      default:
+        throw ArgumentError('Unrecognized argument: $arg');
+    }
+    return i;
+  }
+
+  bool _applyIdentityFlag(String arg, String Function() nextVal) {
     switch (arg) {
       case '--platform':
         platform = nextVal();
@@ -3927,13 +4107,6 @@ BundleConfig parseBundleCliArgs(List<String> args) {
         versionFilePath = nextVal();
       case '--info-plist':
         infoPlistPaths.add(nextVal());
-      case '--define':
-        final kv = nextVal();
-        final eq = kv.indexOf('=');
-        if (eq == -1) {
-          throw ArgumentError('Expected KEY=VALUE for --define, got "$kv".');
-        }
-        defines[kv.substring(0, eq)] = kv.substring(eq + 1);
       case '--framework':
         frameworkPaths.add(nextVal());
       case '--native-lib':
@@ -3942,6 +4115,14 @@ BundleConfig parseBundleCliArgs(List<String> args) {
         resourceSpecs.add(nextVal());
       case '--additional-content':
         additionalContentSpecs.add(nextVal());
+      default:
+        return false;
+    }
+    return true;
+  }
+
+  bool _applySigningFlag(String arg, String Function() nextVal) {
+    switch (arg) {
       case '--provisioning-profile':
         provisioningProfilePath = nextVal();
       case '--entitlements':
@@ -3954,10 +4135,6 @@ BundleConfig parseBundleCliArgs(List<String> args) {
         certificatePasswordFilePath = nextVal();
       case '--certificate-password-env':
         certificatePasswordEnv = nextVal();
-      case '--isolated-env':
-        isolatedEnv = true;
-      case '--declared-env':
-        declaredEnvVars.add(nextVal());
       case '--temp-dir':
         tempDirPath = nextVal();
       case '--output-archive':
@@ -3965,34 +4142,27 @@ BundleConfig parseBundleCliArgs(List<String> args) {
       case '--output-app-dir':
         outputAppDirPath = nextVal();
       default:
-        throw ArgumentError('Unrecognized argument: $arg');
+        return false;
     }
+    return true;
   }
 
-  if (platform == null ||
-      appName == null ||
-      bundleId == null ||
-      executablePath == null ||
-      (outputArchivePath == null && outputAppDirPath == null)) {
-    throw ArgumentError(
-      'Required flags: --platform, --app-name, --bundle-id, --executable, '
-      'and at least one of --output-archive or --output-app-dir.',
-    );
-  }
-
-  final resolvedEnv = <String, String>{};
-  if (isolatedEnv) {
-    for (final key in declaredEnvVars) {
-      if (key == 'TMPDIR' || key == 'TEST_TMPDIR') continue;
-      final val = Platform.environment[key];
-      if (val != null) {
-        resolvedEnv[key] = val;
+  Map<String, String> _buildResolvedEnv() {
+    final resolvedEnv = <String, String>{};
+    if (isolatedEnv) {
+      for (final key in declaredEnvVars) {
+        if (key == 'TMPDIR' || key == 'TEST_TMPDIR') continue;
+        final val = Platform.environment[key];
+        if (val != null) {
+          resolvedEnv[key] = val;
+        }
       }
+      if (certificatePasswordEnv != null &&
+          certificatePasswordEnv!.isNotEmpty) {
+        resolvedEnv.putIfAbsent(certificatePasswordEnv!, () => '');
+      }
+      return resolvedEnv;
     }
-    if (certificatePasswordEnv != null && certificatePasswordEnv.isNotEmpty) {
-      resolvedEnv.putIfAbsent(certificatePasswordEnv, () => '');
-    }
-  } else {
     for (final entry in Platform.environment.entries) {
       if (_ambientHostEnvVars.contains(entry.key) &&
           !declaredEnvVars.contains(entry.key)) {
@@ -4007,33 +4177,56 @@ BundleConfig parseBundleCliArgs(List<String> args) {
         certificatePasswordEnv == 'TEST_TMPDIR') {
       resolvedEnv[certificatePasswordEnv!] = '';
     }
+    return resolvedEnv;
   }
 
-  return BundleConfig(
-    platform: platform,
-    appName: appName,
-    bundleId: bundleId,
-    executablePath: executablePath,
-    minimumOsVersion: minimumOsVersion,
-    families: families,
-    versionFilePath: versionFilePath,
-    infoPlistPaths: infoPlistPaths,
-    defines: defines,
-    frameworkPaths: frameworkPaths,
-    nativeLibPaths: nativeLibPaths,
-    resourceSpecs: resourceSpecs,
-    additionalContentSpecs: additionalContentSpecs,
-    provisioningProfilePath: provisioningProfilePath,
-    entitlementsPath: entitlementsPath,
-    zsignPath: zsignPath,
-    certificatePath: certificatePath,
-    certificatePasswordFilePath: certificatePasswordFilePath,
-    certificatePasswordEnv: certificatePasswordEnv,
-    tempDirPath: tempDirPath,
-    outputArchivePath: outputArchivePath,
-    outputAppDirPath: outputAppDirPath,
-    environment: resolvedEnv,
-  );
+  BundleConfig build() {
+    if (platform == null ||
+        appName == null ||
+        bundleId == null ||
+        executablePath == null ||
+        (outputArchivePath == null && outputAppDirPath == null)) {
+      throw ArgumentError(
+        'Required flags: --platform, --app-name, --bundle-id, --executable, '
+        'and at least one of --output-archive or --output-app-dir.',
+      );
+    }
+    return BundleConfig(
+      platform: platform!,
+      appName: appName!,
+      bundleId: bundleId!,
+      executablePath: executablePath!,
+      minimumOsVersion: minimumOsVersion,
+      families: families,
+      versionFilePath: versionFilePath,
+      infoPlistPaths: infoPlistPaths,
+      defines: defines,
+      frameworkPaths: frameworkPaths,
+      nativeLibPaths: nativeLibPaths,
+      resourceSpecs: resourceSpecs,
+      additionalContentSpecs: additionalContentSpecs,
+      provisioningProfilePath: provisioningProfilePath,
+      entitlementsPath: entitlementsPath,
+      zsignPath: zsignPath,
+      certificatePath: certificatePath,
+      certificatePasswordFilePath: certificatePasswordFilePath,
+      certificatePasswordEnv: certificatePasswordEnv,
+      tempDirPath: tempDirPath,
+      outputArchivePath: outputArchivePath,
+      outputAppDirPath: outputAppDirPath,
+      environment: _buildResolvedEnv(),
+    );
+  }
+}
+
+/// Parses `bundle` CLI arguments into a [BundleConfig], throwing [ArgumentError]
+/// on invalid or forbidden flags (such as plain-text `--certificate-password`).
+BundleConfig parseBundleCliArgs(List<String> args) {
+  final state = _BundleArgState();
+  for (var i = 0; i < args.length; i++) {
+    i = state.apply(args, i);
+  }
+  return state.build();
 }
 
 void main(List<String> args) {
