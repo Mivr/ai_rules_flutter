@@ -52,6 +52,41 @@ def _find_shader_lib_dir(shader_lib):
             return f.path[:idx + len("/shader_lib")]
     return None
 
+def _note_shader_include(ctx, seen_rels, rel, inc):
+    """Records an include path, failing on conflicting files at one path.
+
+    Returns:
+      True when the include was already staged and must be skipped.
+    """
+    prev = seen_rels.get(rel)
+    if prev == None:
+        seen_rels[rel] = inc
+        return False
+    if prev != inc:
+        fail("%s: conflicting shader_includes at %s: %s and %s" % (
+            ctx.label,
+            rel,
+            prev.path,
+            inc.path,
+        ))
+    return True
+
+def _stage_shader_self(ctx, output, stage_prefix, shader, stage_root, staged_files):
+    """Stages the shader itself beside its includes and returns its staged dir."""
+    shader_rel = _shader_rel_path(shader)
+    shader_rel_dir = shader_rel.rsplit("/", 1)[0] if "/" in shader_rel else ""
+    staged_shader_dir = (stage_root + "/" + shader_rel_dir) if shader_rel_dir else stage_root
+    has_shader_dir = False
+    for link in staged_files:
+        if link.dirname == staged_shader_dir or link.dirname.startswith(staged_shader_dir + "/"):
+            has_shader_dir = True
+            break
+    if not has_shader_dir:
+        shader_link = ctx.actions.declare_file(stage_prefix + "/" + shader_rel, sibling = output)
+        ctx.actions.symlink(output = shader_link, target_file = shader)
+        staged_files.append(shader_link)
+    return staged_shader_dir
+
 def _stage_shader_includes(ctx, output, shader, includes):
     """Stages declared include files into a per-action include tree.
 
@@ -71,17 +106,8 @@ def _stage_shader_includes(ctx, output, shader, includes):
         if inc == None or inc == shader:
             continue
         rel = _shader_rel_path(inc)
-        prev = seen_rels.get(rel)
-        if prev != None:
-            if prev != inc:
-                fail("%s: conflicting shader_includes at %s: %s and %s" % (
-                    ctx.label,
-                    rel,
-                    prev.path,
-                    inc.path,
-                ))
+        if _note_shader_include(ctx, seen_rels, rel, inc):
             continue
-        seen_rels[rel] = inc
         link = ctx.actions.declare_file(stage_prefix + "/" + rel, sibling = output)
         ctx.actions.symlink(output = link, target_file = inc)
         staged_files.append(link)
@@ -89,18 +115,7 @@ def _stage_shader_includes(ctx, output, shader, includes):
             stage_root = link.path[:len(link.path) - len(rel) - 1]
 
     if stage_root != None:
-        shader_rel = _shader_rel_path(shader)
-        shader_rel_dir = shader_rel.rsplit("/", 1)[0] if "/" in shader_rel else ""
-        staged_shader_dir = (stage_root + "/" + shader_rel_dir) if shader_rel_dir else stage_root
-        has_shader_dir = False
-        for link in staged_files:
-            if link.dirname == staged_shader_dir or link.dirname.startswith(staged_shader_dir + "/"):
-                has_shader_dir = True
-                break
-        if not has_shader_dir:
-            shader_link = ctx.actions.declare_file(stage_prefix + "/" + shader_rel, sibling = output)
-            ctx.actions.symlink(output = shader_link, target_file = shader)
-            staged_files.append(shader_link)
+        staged_shader_dir = _stage_shader_self(ctx, output, stage_prefix, shader, stage_root, staged_files)
         include_dirs.append(staged_shader_dir)
         for link in staged_files:
             if link.dirname not in include_dirs:
