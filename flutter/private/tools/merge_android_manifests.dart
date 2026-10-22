@@ -311,30 +311,13 @@ List<OverlayPermission> parseOverlayPermissions(
 
   Never rejectAt(String detail) => _reject(overlayPath, detail);
 
-  void checkNoPlaceholder(String value, String context) {
-    if (value.contains(r'${')) {
-      rejectAt(
-        '$context contains a Gradle placeholder token "$value"; '
-        'placeholders are not substituted by rules_flutter.',
-      );
-    }
-  }
-
   scanner.skipInsignificant();
   if (scanner.atEnd) rejectAt('the overlay has no root element.');
   final (rootName, rootAttrs, rootSelfClosing, rootIsEnd) = scanner.readTag();
   if (rootIsEnd || rootName != 'manifest') {
     rejectAt('the root element must be <manifest>, found <$rootName>.');
   }
-  for (final entry in rootAttrs.entries) {
-    if (entry.key != 'xmlns' && !entry.key.startsWith('xmlns:')) {
-      rejectAt(
-        'the <manifest> root carries attribute "${entry.key}"; only '
-        'xmlns:* namespace declarations are supported.',
-      );
-    }
-    checkNoPlaceholder(entry.value, 'the "${entry.key}" attribute');
-  }
+  _checkOverlayRootAttrs(rootAttrs, overlayPath);
 
   final permissions = <OverlayPermission>[];
   if (rootSelfClosing) {
@@ -369,67 +352,157 @@ List<OverlayPermission> parseOverlayPermissions(
         'and <uses-permission-sdk-23> may appear.',
       );
     }
-    final toolsNode = attrs['tools:node'];
-    if (toolsNode != null && !_supportedToolsNodes.contains(toolsNode)) {
-      rejectAt(
-        '<$name> carries unsupported tools:node="$toolsNode"; '
-        'expected remove, removeAll, replace, or merge.',
-      );
-    }
-    final isRemoveAll = toolsNode == 'removeAll';
-    if (!isRemoveAll && !attrs.containsKey('android:name')) {
-      rejectAt('<$name> is missing its android:name attribute.');
-    }
-    final allowsReplacementAndroidAttrs =
-        toolsNode == 'replace' ||
-        toolsNode == 'merge' ||
-        toolsNode == 'merge-only-attributes' ||
-        attrs.containsKey('tools:replace') ||
-        attrs.containsKey('tools:remove');
-    for (final entry in attrs.entries) {
-      final key = entry.key;
-      final val = entry.value;
-      checkNoPlaceholder(val, 'the $key attribute');
-      if (key == 'android:name') continue;
-      if (_supportedOverlayToolsAttrs.contains(key)) {
-        if ((key == 'tools:remove' || key == 'tools:replace') &&
-            _parseAttrList(val).isEmpty) {
-          rejectAt('<$name> has an empty $key attribute.');
-        }
-        continue;
-      }
-      if (key == 'android:maxSdkVersion') {
-        final parsed = int.tryParse(val);
-        if (parsed == null || parsed < 1) {
-          rejectAt(
-            '<$name> has invalid android:maxSdkVersion "$val": '
-            'expected a positive integer.',
-          );
-        }
-        if (allowsReplacementAndroidAttrs) continue;
-      } else if (key.startsWith('android:') && allowsReplacementAndroidAttrs) {
-        continue;
-      }
-      rejectAt(
-        '<$name> carries attribute "$key"; '
-        'only android:name and tools:* markers are supported.',
-      );
-    }
-    final value = attrs['android:name'] ?? '';
-    if (!isRemoveAll && value.isEmpty) {
-      rejectAt('<$name> has an empty android:name attribute.');
-    }
-    permissions.add(
-      OverlayPermission(name, value, attributes: Map.unmodifiable(attrs)),
+    _checkOverlayElement(name, attrs, overlayPath);
+    _finishOverlayElement(
+      scanner,
+      name,
+      attrs,
+      selfClosing,
+      permissions,
+      overlayPath,
     );
-    if (!selfClosing) {
-      // Allow only an immediately-following matching close tag (with
-      // insignificant content between) — permission elements have no body.
-      scanner.skipInsignificant();
-      final (closeName, closeAttrs, _, closeIsEnd) = scanner.readTag();
-      if (!closeIsEnd || closeName != name || closeAttrs.isNotEmpty) {
-        rejectAt('<$name> must be empty; found nested content.');
-      }
+  }
+}
+
+/// Rejects a Gradle `${...}` placeholder token in an overlay attribute value.
+void _checkNoOverlayPlaceholder(
+  String value,
+  String context,
+  String overlayPath,
+) {
+  if (value.contains(r'${')) {
+    _reject(
+      overlayPath,
+      '$context contains a Gradle placeholder token "$value"; '
+      'placeholders are not substituted by rules_flutter.',
+    );
+  }
+}
+
+/// Checks the overlay's `<manifest>` root carries only namespace declarations.
+void _checkOverlayRootAttrs(
+  Map<String, String> rootAttrs,
+  String overlayPath,
+) {
+  Never rejectAt(String detail) => _reject(overlayPath, detail);
+  for (final entry in rootAttrs.entries) {
+    if (entry.key != 'xmlns' && !entry.key.startsWith('xmlns:')) {
+      rejectAt(
+        'the <manifest> root carries attribute "${entry.key}"; only '
+        'xmlns:* namespace declarations are supported.',
+      );
+    }
+    _checkNoOverlayPlaceholder(
+      entry.value,
+      'the "${entry.key}" attribute',
+      overlayPath,
+    );
+  }
+}
+
+/// Checks one overlay permission element's attributes against the supported
+/// contract: `android:name`, a parseable `android:maxSdkVersion`, supported
+/// `tools:*` markers, and replacement `android:*` attributes only where a
+/// replace/remove directive allows them.
+void _checkOverlayAttr(
+  String name,
+  String key,
+  String val,
+  bool allowsReplacementAndroidAttrs,
+  String overlayPath,
+) {
+  _checkNoOverlayPlaceholder(val, 'the $key attribute', overlayPath);
+  if (key == 'android:name') return;
+  if (_supportedOverlayToolsAttrs.contains(key)) {
+    if ((key == 'tools:remove' || key == 'tools:replace') &&
+        _parseAttrList(val).isEmpty) {
+      _reject(overlayPath, '<$name> has an empty $key attribute.');
+    }
+    return;
+  }
+  if (key == 'android:maxSdkVersion') {
+    _checkMaxSdkValue(name, val, overlayPath);
+    if (allowsReplacementAndroidAttrs) return;
+  } else if (key.startsWith('android:') && allowsReplacementAndroidAttrs) {
+    return;
+  }
+  _reject(
+    overlayPath,
+    '<$name> carries attribute "$key"; '
+    'only android:name and tools:* markers are supported.',
+  );
+}
+
+void _checkMaxSdkValue(String name, String val, String overlayPath) {
+  final parsed = int.tryParse(val);
+  if (parsed == null || parsed < 1) {
+    _reject(
+      overlayPath,
+      '<$name> has invalid android:maxSdkVersion "$val": '
+      'expected a positive integer.',
+    );
+  }
+}
+
+void _checkOverlayElement(
+  String name,
+  Map<String, String> attrs,
+  String overlayPath,
+) {
+  Never rejectAt(String detail) => _reject(overlayPath, detail);
+  final toolsNode = attrs['tools:node'];
+  if (toolsNode != null && !_supportedToolsNodes.contains(toolsNode)) {
+    rejectAt(
+      '<$name> carries unsupported tools:node="$toolsNode"; '
+      'expected remove, removeAll, replace, or merge.',
+    );
+  }
+  final isRemoveAll = toolsNode == 'removeAll';
+  if (!isRemoveAll && !attrs.containsKey('android:name')) {
+    rejectAt('<$name> is missing its android:name attribute.');
+  }
+  final allowsReplacementAndroidAttrs =
+      toolsNode == 'replace' ||
+      toolsNode == 'merge' ||
+      toolsNode == 'merge-only-attributes' ||
+      attrs.containsKey('tools:replace') ||
+      attrs.containsKey('tools:remove');
+  for (final entry in attrs.entries) {
+    _checkOverlayAttr(
+      name,
+      entry.key,
+      entry.value,
+      allowsReplacementAndroidAttrs,
+      overlayPath,
+    );
+  }
+  final value = attrs['android:name'] ?? '';
+  if (!isRemoveAll && value.isEmpty) {
+    rejectAt('<$name> has an empty android:name attribute.');
+  }
+}
+
+/// Records one checked overlay permission element, consuming its matching
+/// close tag when it is not self-closing — permission elements have no body.
+void _finishOverlayElement(
+  _Scanner scanner,
+  String name,
+  Map<String, String> attrs,
+  bool selfClosing,
+  List<OverlayPermission> permissions,
+  String overlayPath,
+) {
+  Never rejectAt(String detail) => _reject(overlayPath, detail);
+  permissions.add(
+    OverlayPermission(name, attrs['android:name'] ?? '', attributes: Map.unmodifiable(attrs)),
+  );
+  if (!selfClosing) {
+    // Allow only an immediately-following matching close tag (with
+    // insignificant content between) — permission elements have no body.
+    scanner.skipInsignificant();
+    final (closeName, closeAttrs, _, closeIsEnd) = scanner.readTag();
+    if (!closeIsEnd || closeName != name || closeAttrs.isNotEmpty) {
+      rejectAt('<$name> must be empty; found nested content.');
     }
   }
 }
@@ -498,6 +571,64 @@ class _BasePermission {
 /// Scans root-level `<uses-permission>` and `<uses-permission-sdk-23>`
 /// declarations in [baseXml] starting at [insertAt] (just after the root
 /// `<manifest ...>` open tag).
+/// Skips non-tag scanner content (text, CDATA, PIs, comments/DOCTYPE).
+/// Returns true when the scanner advanced past noise and the caller should
+/// continue without reading a tag.
+bool _skipBaseNoise(_Scanner scanner, String text) {
+  if (text[scanner.pos] != '<') {
+    final next = text.indexOf('<', scanner.pos);
+    scanner.pos = next == -1 ? text.length : next;
+    return true;
+  }
+  if (text.startsWith('<![CDATA[', scanner.pos)) {
+    final end = text.indexOf(']]>', scanner.pos);
+    scanner.pos = end == -1 ? text.length : end + 3;
+    return true;
+  }
+  if (text.startsWith('<?', scanner.pos) ||
+      text.startsWith('<!', scanner.pos)) {
+    final end = text.indexOf('>', scanner.pos);
+    scanner.pos = end == -1 ? text.length : end + 1;
+    return true;
+  }
+  return false;
+}
+
+/// Records one top-level base permission tag. Returns true when the tag
+/// opens a nested element and the caller should descend instead.
+bool _foldBasePermissionTag(
+  _Scanner scanner,
+  String text,
+  String name,
+  Map<String, String> attrs,
+  bool selfClosing,
+  int insertAt,
+  int tagStart,
+  String basePath,
+  List<_BasePermission> permissions,
+) {
+  var tagEnd = scanner.pos;
+  var descend = false;
+  if (!selfClosing) {
+    final closed = _closeBaseOpenTag(scanner, text, name, tagEnd);
+    tagEnd = closed.tagEnd;
+    descend = closed.descend;
+  }
+  if (descend) return true;
+  final span = _basePermissionSpan(text, insertAt, tagStart, tagEnd);
+  _recordBasePermission(
+    name,
+    attrs,
+    tagStart,
+    tagEnd,
+    span.spanStart,
+    span.spanEnd,
+    basePath,
+    permissions,
+  );
+  return false;
+}
+
 List<_BasePermission> _scanBasePermissions(
   String baseXml,
   int insertAt,
@@ -505,27 +636,12 @@ List<_BasePermission> _scanBasePermissions(
 ) {
   final scanner = _Scanner(baseXml)..pos = insertAt;
   final permissions = <_BasePermission>[];
+  final text = scanner.text;
   var depth = 1;
   while (depth > 0) {
     scanner.skipInsignificant();
     if (scanner.atEnd) break;
-    final text = scanner.text;
-    if (text[scanner.pos] != '<') {
-      final next = text.indexOf('<', scanner.pos);
-      scanner.pos = next == -1 ? text.length : next;
-      continue;
-    }
-    if (text.startsWith('<![CDATA[', scanner.pos)) {
-      final end = text.indexOf(']]>', scanner.pos);
-      scanner.pos = end == -1 ? text.length : end + 3;
-      continue;
-    }
-    if (text.startsWith('<?', scanner.pos) ||
-        text.startsWith('<!', scanner.pos)) {
-      final end = text.indexOf('>', scanner.pos);
-      scanner.pos = end == -1 ? text.length : end + 1;
-      continue;
-    }
+    if (_skipBaseNoise(scanner, text)) continue;
     final tagStart = scanner.pos;
     final (name, attrs, selfClosing, isEnd) = scanner.readTag();
     if (isEnd) {
@@ -533,75 +649,114 @@ List<_BasePermission> _scanBasePermissions(
       continue;
     }
     if (depth == 1 && _permissionElements.contains(name)) {
-      var tagEnd = scanner.pos;
-      if (!selfClosing) {
-        final afterOpen = scanner.pos;
-        scanner.skipInsignificant();
-        if (!scanner.atEnd &&
-            text[scanner.pos] == '<' &&
-            !text.startsWith('<!', scanner.pos) &&
-            !text.startsWith('<?', scanner.pos)) {
-          final (closeName, _, _, closeIsEnd) = scanner.readTag();
-          if (closeIsEnd && closeName == name) {
-            tagEnd = scanner.pos;
-          } else {
-            scanner.pos = afterOpen;
-            depth++;
-          }
-        } else {
-          scanner.pos = afterOpen;
-          depth++;
-        }
-      }
-      var lineStart = tagStart;
-      while (lineStart > insertAt &&
-          (text[lineStart - 1] == ' ' || text[lineStart - 1] == '\t')) {
-        lineStart--;
-      }
-      final atLineStart = lineStart > 0 && text[lineStart - 1] == '\n';
-      var lineEnd = tagEnd;
-      if (lineEnd < text.length && text[lineEnd] == '\r') lineEnd++;
-      final hasTrailingNewline = lineEnd < text.length && text[lineEnd] == '\n';
-      if (hasTrailingNewline) lineEnd++;
-      final spanStart = (atLineStart && hasTrailingNewline)
-          ? lineStart
-          : tagStart;
-      final spanEnd = (atLineStart && hasTrailingNewline) ? lineEnd : tagEnd;
-
-      final toolsNode = attrs['tools:node'];
-      if (toolsNode != null && !_supportedToolsNodes.contains(toolsNode)) {
-        throw FormatException(
-          'Unsupported tools:node="$toolsNode" on <$name> in $basePath.',
-        );
-      }
-      final isRemoveAll = toolsNode == 'removeAll';
-      final permName = attrs['android:name'] ?? '';
-      final maxSdkVersion = _parseMaxSdkVersion(
+      if (_foldBasePermissionTag(
+        scanner,
+        text,
+        name,
         attrs,
-        element: name,
-        permissionName: permName,
-        manifestPath: basePath,
-      );
-      if (isRemoveAll || permName.isNotEmpty) {
-        permissions.add(
-          _BasePermission(
-            element: name,
-            name: permName,
-            attributes: attrs,
-            maxSdkVersion: maxSdkVersion,
-            toolsNode: toolsNode,
-            tagStart: tagStart,
-            tagEnd: tagEnd,
-            spanStart: spanStart,
-            spanEnd: spanEnd,
-          ),
-        );
+        selfClosing,
+        insertAt,
+        tagStart,
+        basePath,
+        permissions,
+      )) {
+        depth++;
       }
     } else if (!selfClosing) {
       depth++;
     }
   }
   return permissions;
+}
+
+/// Follows a non-self-closing root-level permission open tag ending at
+/// [tagEnd]: a matching close extends the span past it, anything else rewinds
+/// to just past the open tag and descends into the element.
+({int tagEnd, bool descend}) _closeBaseOpenTag(
+  _Scanner scanner,
+  String text,
+  String name,
+  int tagEnd,
+) {
+  final afterOpen = scanner.pos;
+  scanner.skipInsignificant();
+  if (!scanner.atEnd &&
+      text[scanner.pos] == '<' &&
+      !text.startsWith('<!', scanner.pos) &&
+      !text.startsWith('<?', scanner.pos)) {
+    final (closeName, _, _, closeIsEnd) = scanner.readTag();
+    if (closeIsEnd && closeName == name) {
+      return (tagEnd: scanner.pos, descend: false);
+    }
+  }
+  scanner.pos = afterOpen;
+  return (tagEnd: tagEnd, descend: true);
+}
+
+/// The source span a base permission edit covers: the whole line when the tag
+/// sits alone on its line, otherwise just the tag.
+({int spanStart, int spanEnd}) _basePermissionSpan(
+  String text,
+  int insertAt,
+  int tagStart,
+  int tagEnd,
+) {
+  var lineStart = tagStart;
+  while (lineStart > insertAt &&
+      (text[lineStart - 1] == ' ' || text[lineStart - 1] == '\t')) {
+    lineStart--;
+  }
+  final atLineStart = lineStart > 0 && text[lineStart - 1] == '\n';
+  var lineEnd = tagEnd;
+  if (lineEnd < text.length && text[lineEnd] == '\r') lineEnd++;
+  final hasTrailingNewline = lineEnd < text.length && text[lineEnd] == '\n';
+  if (hasTrailingNewline) lineEnd++;
+  final spanStart = (atLineStart && hasTrailingNewline) ? lineStart : tagStart;
+  final spanEnd = (atLineStart && hasTrailingNewline) ? lineEnd : tagEnd;
+  return (spanStart: spanStart, spanEnd: spanEnd);
+}
+
+/// Records one root-level base permission element, validating its
+/// `tools:node` and `android:maxSdkVersion`.
+void _recordBasePermission(
+  String name,
+  Map<String, String> attrs,
+  int tagStart,
+  int tagEnd,
+  int spanStart,
+  int spanEnd,
+  String basePath,
+  List<_BasePermission> permissions,
+) {
+  final toolsNode = attrs['tools:node'];
+  if (toolsNode != null && !_supportedToolsNodes.contains(toolsNode)) {
+    throw FormatException(
+      'Unsupported tools:node="$toolsNode" on <$name> in $basePath.',
+    );
+  }
+  final isRemoveAll = toolsNode == 'removeAll';
+  final permName = attrs['android:name'] ?? '';
+  final maxSdkVersion = _parseMaxSdkVersion(
+    attrs,
+    element: name,
+    permissionName: permName,
+    manifestPath: basePath,
+  );
+  if (isRemoveAll || permName.isNotEmpty) {
+    permissions.add(
+      _BasePermission(
+        element: name,
+        name: permName,
+        attributes: attrs,
+        maxSdkVersion: maxSdkVersion,
+        toolsNode: toolsNode,
+        tagStart: tagStart,
+        tagEnd: tagEnd,
+        spanStart: spanStart,
+        spanEnd: spanEnd,
+      ),
+    );
+  }
 }
 
 /// A `<uses-permission>` taken from a library manifest, with the `android:*`
@@ -662,6 +817,35 @@ class LibraryPermission {
 
 /// The permissions [libraryXml] declares directly under its `<manifest>`
 /// root, read as documented at the top of this file.
+/// Skips non-tag scanner content in a library manifest, rejecting
+/// unterminated markup. Returns true when the caller should continue
+/// without reading a tag.
+bool _skipLibraryNoise(
+  _Scanner scanner,
+  String text,
+  Never Function(String detail) reject,
+) {
+  if (text[scanner.pos] != '<') {
+    final next = text.indexOf('<', scanner.pos);
+    scanner.pos = next == -1 ? text.length : next;
+    return true;
+  }
+  if (text.startsWith('<![CDATA[', scanner.pos)) {
+    final end = text.indexOf(']]>', scanner.pos);
+    if (end == -1) reject('unterminated CDATA section.');
+    scanner.pos = end + 3;
+    return true;
+  }
+  if (text.startsWith('<?', scanner.pos) ||
+      text.startsWith('<!', scanner.pos)) {
+    final end = text.indexOf('>', scanner.pos);
+    if (end == -1) reject('unterminated markup at offset ${scanner.pos}.');
+    scanner.pos = end + 1;
+    return true;
+  }
+  return false;
+}
+
 List<LibraryPermission> parseLibraryPermissions(
   String libraryXml,
   String libraryPath, {
@@ -673,120 +857,150 @@ List<LibraryPermission> parseLibraryPermissions(
 
   final scanner = _Scanner(libraryXml);
   final permissions = <LibraryPermission>[];
+  final text = scanner.text;
   var depth = 0;
   while (true) {
     scanner.skipInsignificant();
     if (scanner.atEnd) break;
-    final text = scanner.text;
-    if (text[scanner.pos] != '<') {
-      final next = text.indexOf('<', scanner.pos);
-      scanner.pos = next == -1 ? text.length : next;
-      continue;
-    }
-    if (text.startsWith('<![CDATA[', scanner.pos)) {
-      final end = text.indexOf(']]>', scanner.pos);
-      if (end == -1) reject('unterminated CDATA section.');
-      scanner.pos = end + 3;
-      continue;
-    }
-    if (text.startsWith('<?', scanner.pos) ||
-        text.startsWith('<!', scanner.pos)) {
-      final end = text.indexOf('>', scanner.pos);
-      if (end == -1) reject('unterminated markup at offset ${scanner.pos}.');
-      scanner.pos = end + 1;
-      continue;
-    }
+    if (_skipLibraryNoise(scanner, text, reject)) continue;
     final (name, attrs, selfClosing, isEnd) = scanner.readTag();
     if (isEnd) {
       depth--;
       continue;
     }
     if (depth == 1 && _permissionElements.contains(name)) {
-      for (final e in attrs.entries) {
-        if (!e.key.startsWith('android:') && !e.key.startsWith('tools:')) {
-          reject(
-            '<$name> carries attribute "${e.key}", which is neither '
-            'android:* nor tools:*.',
-          );
-        }
-      }
-      final toolsNode = attrs['tools:node'];
-      if (toolsNode != null && !_supportedToolsNodes.contains(toolsNode)) {
-        reject('<$name> carries unsupported tools:node="$toolsNode".');
-      }
-      if (attrs.containsKey('android:maxSdkVersion')) {
-        final rawMaxSdk = attrs['android:maxSdkVersion']!;
-        final parsedMaxSdk = int.tryParse(rawMaxSdk);
-        if (parsedMaxSdk == null || parsedMaxSdk < 1) {
-          final permName = attrs['android:name'] ?? '';
-          final label = permName.isEmpty
-              ? '<$name>'
-              : '<$name android:name="$permName">';
-          reject(
-            '$label has invalid android:maxSdkVersion "$rawMaxSdk": '
-            'expected a positive integer.',
-          );
-        }
-      }
-      if (toolsNode == 'removeAll') {
-        permissions.add(
-          LibraryPermission(
-            name,
-            {'android:name': attrs['android:name'] ?? ''},
-            isRemoveAll: true,
-          ),
-        );
-      } else if (toolsNode == 'remove') {
-        final permissionName = attrs['android:name'];
-        if (permissionName == null || permissionName.isEmpty) {
-          reject('<$name> has no android:name attribute.');
-        }
-        permissions.add(
-          LibraryPermission(
-            name,
-            {'android:name': permissionName},
-            isRemove: true,
-          ),
-        );
-      } else {
-        final selfRemoved = _parseAttrList(attrs['tools:remove']);
-        final selfReplaced = _parseAttrList(attrs['tools:replace']);
-        final kept = <String, String>{
-          for (final e in attrs.entries)
-            if (e.key.startsWith('android:') && !selfRemoved.contains(e.key))
-              e.key: e.value,
-        };
-        final permissionName = kept['android:name'];
-        if (permissionName == null || permissionName.isEmpty) {
-          reject('<$name> has no android:name attribute.');
-        }
-        for (final value in kept.values) {
-          for (final match in RegExp(r'\$\{([^}]*)\}').allMatches(value)) {
-            if (!placeholders.contains(match[1])) {
-              reject(
-                '<$name android:name="$permissionName"> contains the Gradle '
-                'placeholder "\${${match[1]}}", which this build does not '
-                'substitute (it substitutes: ${placeholders.join(', ')}).',
-              );
-            }
-          }
-        }
-        permissions.add(
-          LibraryPermission(
-            name,
-            kept,
-            toolsNode: toolsNode == 'merge-only-attributes'
-                ? 'merge'
-                : toolsNode,
-            toolsRemove: selfRemoved,
-            toolsReplace: selfReplaced,
-          ),
-        );
-      }
+      _checkLibraryAttrs(name, attrs, libraryPath);
+      permissions.add(
+        _buildLibraryPermission(name, attrs, placeholders, libraryPath),
+      );
     }
     if (!selfClosing) depth++;
   }
   return permissions;
+}
+
+/// Checks one library permission element's attributes: only `android:*` and
+/// `tools:*`, a supported `tools:node`, and a parseable
+/// `android:maxSdkVersion`.
+void _checkLibraryAttrs(
+  String name,
+  Map<String, String> attrs,
+  String libraryPath,
+) {
+  Never reject(String detail) => throw FormatException(
+    'Cannot read the permissions of library manifest $libraryPath: $detail',
+  );
+  for (final e in attrs.entries) {
+    if (!e.key.startsWith('android:') && !e.key.startsWith('tools:')) {
+      reject(
+        '<$name> carries attribute "${e.key}", which is neither '
+        'android:* nor tools:*.',
+      );
+    }
+  }
+  final toolsNode = attrs['tools:node'];
+  if (toolsNode != null && !_supportedToolsNodes.contains(toolsNode)) {
+    reject('<$name> carries unsupported tools:node="$toolsNode".');
+  }
+  if (attrs.containsKey('android:maxSdkVersion')) {
+    final rawMaxSdk = attrs['android:maxSdkVersion']!;
+    final parsedMaxSdk = int.tryParse(rawMaxSdk);
+    if (parsedMaxSdk == null || parsedMaxSdk < 1) {
+      final permName = attrs['android:name'] ?? '';
+      final label = permName.isEmpty
+          ? '<$name>'
+          : '<$name android:name="$permName">';
+      reject(
+        '$label has invalid android:maxSdkVersion "$rawMaxSdk": '
+        'expected a positive integer.',
+      );
+    }
+  }
+}
+
+/// Builds the [LibraryPermission] for one checked library permission element.
+///
+/// `tools:node="remove"` and `"removeAll"` become removal directives over the
+/// permission's name; any other element keeps its `android:*` attributes minus
+/// `tools:remove`d ones, with unsubstituted Gradle placeholders refused.
+LibraryPermission _buildLibraryPermission(
+  String name,
+  Map<String, String> attrs,
+  Set<String> placeholders,
+  String libraryPath,
+) {
+  Never reject(String detail) => throw FormatException(
+    'Cannot read the permissions of library manifest $libraryPath: $detail',
+  );
+  final toolsNode = attrs['tools:node'];
+  if (toolsNode == 'removeAll') {
+    return LibraryPermission(
+      name,
+      {'android:name': attrs['android:name'] ?? ''},
+      isRemoveAll: true,
+    );
+  }
+  if (toolsNode == 'remove') {
+    final permissionName = attrs['android:name'];
+    if (permissionName == null || permissionName.isEmpty) {
+      reject('<$name> has no android:name attribute.');
+    }
+    return LibraryPermission(
+      name,
+      {'android:name': permissionName},
+      isRemove: true,
+    );
+  }
+  final selfRemoved = _parseAttrList(attrs['tools:remove']);
+  final selfReplaced = _parseAttrList(attrs['tools:replace']);
+  final kept = <String, String>{
+    for (final e in attrs.entries)
+      if (e.key.startsWith('android:') && !selfRemoved.contains(e.key))
+        e.key: e.value,
+  };
+  final permissionName = kept['android:name'];
+  if (permissionName == null || permissionName.isEmpty) {
+    reject('<$name> has no android:name attribute.');
+  }
+  _checkLibraryPlaceholders(
+    name,
+    kept,
+    permissionName,
+    placeholders,
+    libraryPath,
+  );
+  return LibraryPermission(
+    name,
+    kept,
+    toolsNode: toolsNode == 'merge-only-attributes' ? 'merge' : toolsNode,
+    toolsRemove: selfRemoved,
+    toolsReplace: selfReplaced,
+  );
+}
+
+/// Rejects a Gradle `${...}` placeholder in a kept library attribute value
+/// that the app's build does not substitute afterwards.
+void _checkLibraryPlaceholders(
+  String name,
+  Map<String, String> kept,
+  String? permissionName,
+  Set<String> placeholders,
+  String libraryPath,
+) {
+  Never reject(String detail) => throw FormatException(
+    'Cannot read the permissions of library manifest $libraryPath: $detail',
+  );
+  for (final value in kept.values) {
+    for (final match in RegExp(r'\$\{([^}]*)\}').allMatches(value)) {
+      if (!placeholders.contains(match[1])) {
+        reject(
+          '<$name android:name="$permissionName"> contains the Gradle '
+          'placeholder "\${${match[1]}}", which this build does not '
+          'substitute (it substitutes: ${placeholders.join(', ')}).',
+        );
+      }
+    }
+  }
 }
 
 bool _isNarrowerMaxSdk(int? existingMaxSdk, int? incomingMaxSdk) {
@@ -986,41 +1200,72 @@ class _AppPermission {
         : op.toolsNode;
 
     if (opNode == 'replace') {
-      androidAttributes
-        ..clear()
-        ..['android:name'] = name;
-      for (final e in op.attributes.entries) {
-        if (e.key != 'android:name' &&
-            e.key.startsWith('android:') &&
-            !opRemove.contains(e.key)) {
-          androidAttributes[e.key] = e.value;
-        }
-      }
-      toolsNode = 'replace';
-      toolsRemove
-        ..clear()
-        ..addAll(opRemove);
-      toolsReplace
-        ..clear()
-        ..addAll(opReplace);
-      otherToolsAttributes.clear();
-      for (final e in op.attributes.entries) {
-        if (e.key.startsWith('tools:') &&
-            e.key != 'tools:node' &&
-            e.key != 'tools:remove' &&
-            e.key != 'tools:replace') {
-          otherToolsAttributes[e.key] = e.value;
-        }
-      }
-      modified = true;
+      _applyReplaceOverlay(op, opRemove, opReplace);
       return;
     }
+    _mergeOverlayAttrs(op, opRemove, opReplace, opNode);
+  }
 
+  /// Applies a `tools:node="replace"` overlay element: the permission's
+  /// attributes become the overlay's, `android:name` aside.
+  void _applyReplaceOverlay(
+    OverlayPermission op,
+    Set<String> opRemove,
+    Set<String> opReplace,
+  ) {
+    androidAttributes
+      ..clear()
+      ..['android:name'] = name;
+    for (final e in op.attributes.entries) {
+      if (e.key != 'android:name' &&
+          e.key.startsWith('android:') &&
+          !opRemove.contains(e.key)) {
+        androidAttributes[e.key] = e.value;
+      }
+    }
+    toolsNode = 'replace';
+    toolsRemove
+      ..clear()
+      ..addAll(opRemove);
+    toolsReplace
+      ..clear()
+      ..addAll(opReplace);
+    otherToolsAttributes.clear();
+    for (final e in op.attributes.entries) {
+      if (e.key.startsWith('tools:') &&
+          e.key != 'tools:node' &&
+          e.key != 'tools:remove' &&
+          e.key != 'tools:replace') {
+        otherToolsAttributes[e.key] = e.value;
+      }
+    }
+    modified = true;
+  }
+
+  /// Merges a non-`replace` overlay element's attribute removals, replacements
+  /// and additions into this permission.
+  void _mergeOverlayAttrs(
+    OverlayPermission op,
+    Set<String> opRemove,
+    Set<String> opReplace,
+    String? opNode,
+  ) {
+    _dropOverlayRemoved(opRemove);
+    _dropOverlayReplaced(op, opReplace);
+    _takeOverlayAndroidAttrs(op, opRemove);
+    _takeOverlayToolsMarkers(opRemove, opReplace, opNode);
+    _takeOverlayOtherTools(op);
+  }
+
+  void _dropOverlayRemoved(Set<String> opRemove) {
     for (final rem in opRemove) {
       if (rem != 'android:name' && androidAttributes.remove(rem) != null) {
         modified = true;
       }
     }
+  }
+
+  void _dropOverlayReplaced(Set<String> opReplace, OverlayPermission op) {
     for (final rep in opReplace) {
       if (rep != 'android:name' &&
           !op.attributes.containsKey(rep) &&
@@ -1028,6 +1273,12 @@ class _AppPermission {
         modified = true;
       }
     }
+  }
+
+  void _takeOverlayAndroidAttrs(
+    OverlayPermission op,
+    Set<String> opRemove,
+  ) {
     for (final e in op.attributes.entries) {
       if (e.key == 'android:name') continue;
       if (e.key.startsWith('android:') && !opRemove.contains(e.key)) {
@@ -1038,6 +1289,13 @@ class _AppPermission {
         toolsRemove.remove(e.key);
       }
     }
+  }
+
+  void _takeOverlayToolsMarkers(
+    Set<String> opRemove,
+    Set<String> opReplace,
+    String? opNode,
+  ) {
     if (opRemove.isNotEmpty && !toolsRemove.containsAll(opRemove)) {
       toolsRemove.addAll(opRemove);
       modified = true;
@@ -1050,6 +1308,9 @@ class _AppPermission {
       toolsNode = opNode;
       modified = true;
     }
+  }
+
+  void _takeOverlayOtherTools(OverlayPermission op) {
     for (final e in op.attributes.entries) {
       if (e.key.startsWith('tools:') &&
           e.key != 'tools:node' &&
@@ -1118,6 +1379,320 @@ class _AppPermission {
 String _otherPermissionElement(String element) =>
     element == 'uses-permission' ? 'uses-permission-sdk-23' : 'uses-permission';
 
+/// Mutable accumulator for the app-tier permission fold in [mergeManifests].
+class _ManifestMerge {
+  final edits = <_SpanEdit>[];
+  final baseRemoveAll = <String, List<_BasePermission>>{};
+  final removedByBase = <(String, String), _BasePermission>{};
+  final activeBase = <(String, String), _AppPermission>{};
+  final removedAllByOverlay = <String>{};
+  final removedByOverlay = <(String, String)>{};
+  final overlayAdded = <(String, String), _AppPermission>{};
+
+  void foldBase(_BasePermission perm) {
+    if (perm.isRemoveAll) {
+      (baseRemoveAll[perm.element] ??= <_BasePermission>[]).add(perm);
+      return;
+    }
+    final key = (perm.element, perm.name);
+    if (perm.isRemove) {
+      _foldBaseRemove(key, perm);
+    } else if (removedByBase.containsKey(key)) {
+      edits.add(_SpanEdit(perm.spanStart, perm.spanEnd, ''));
+    } else {
+      _foldBaseActive(key, perm);
+    }
+  }
+
+  void _foldBaseRemove((String, String) key, _BasePermission perm) {
+    final prevRemove = removedByBase[key];
+    if (prevRemove != null) {
+      edits.add(_SpanEdit(prevRemove.spanStart, prevRemove.spanEnd, ''));
+    }
+    removedByBase[key] = perm;
+    final prevActive = activeBase.remove(key);
+    if (prevActive != null) {
+      edits.add(_SpanEdit(prevActive.spanStart!, prevActive.spanEnd!, ''));
+    }
+  }
+
+  void _foldBaseActive((String, String) key, _BasePermission perm) {
+    final existing = activeBase[key];
+    if (existing != null) {
+      edits.add(_SpanEdit(perm.spanStart, perm.spanEnd, ''));
+    } else {
+      activeBase[key] = _AppPermission.fromBase(perm);
+    }
+  }
+
+  void stripBaseKey((String, String) key) {
+    final active = activeBase.remove(key);
+    if (active != null) {
+      edits.add(_SpanEdit(active.spanStart!, active.spanEnd!, ''));
+    }
+    final rem = removedByBase.remove(key);
+    if (rem != null) {
+      edits.add(_SpanEdit(rem.spanStart, rem.spanEnd, ''));
+    }
+  }
+
+  void stripAllBaseForElement(String element) {
+    _stripActiveForElement(element);
+    _stripRemovedForElement(element);
+    final remAll = baseRemoveAll.remove(element);
+    if (remAll != null) {
+      for (final p in remAll) {
+        edits.add(_SpanEdit(p.spanStart, p.spanEnd, ''));
+      }
+    }
+  }
+
+  void _stripActiveForElement(String element) {
+    final activeKeys = activeBase.keys
+        .where((k) => k.$1 == element)
+        .toList(growable: false);
+    for (final k in activeKeys) {
+      final p = activeBase.remove(k)!;
+      edits.add(_SpanEdit(p.spanStart!, p.spanEnd!, ''));
+    }
+  }
+
+  void _stripRemovedForElement(String element) {
+    final remKeys = removedByBase.keys
+        .where((k) => k.$1 == element)
+        .toList(growable: false);
+    for (final k in remKeys) {
+      final p = removedByBase.remove(k)!;
+      edits.add(_SpanEdit(p.spanStart!, p.spanEnd!, ''));
+    }
+  }
+
+  void foldOverlay(OverlayPermission op) {
+    if (op.isRemoveAll) {
+      stripAllBaseForElement(op.element);
+      overlayAdded.removeWhere((k, _) => k.$1 == op.element);
+      removedByOverlay.removeWhere((k) => k.$1 == op.element);
+      removedAllByOverlay.add(op.element);
+      return;
+    }
+    final key = (op.element, op.name);
+    if (op.isRemove) {
+      stripBaseKey(key);
+      overlayAdded.remove(key);
+      removedByOverlay.add(key);
+      return;
+    }
+    _foldOverlayActive(key, op);
+  }
+
+  void _foldOverlayActive((String, String) key, OverlayPermission op) {
+    // Active permission in overlay cancels any prior removal of the same key.
+    removedByOverlay.remove(key);
+    final baseRem = removedByBase.remove(key);
+    if (baseRem != null) {
+      edits.add(_SpanEdit(baseRem.spanStart, baseRem.spanEnd, ''));
+    }
+    final existingBase = activeBase[key];
+    if (existingBase != null) {
+      existingBase.mergeOverlay(op);
+      return;
+    }
+    if (_dedupAgainstOtherElement(key, op)) return;
+    final earlierOverlay = overlayAdded[key];
+    if (earlierOverlay != null) {
+      earlierOverlay.mergeOverlay(op);
+    } else {
+      overlayAdded[key] = _AppPermission.fromOverlay(op);
+    }
+  }
+
+  /// Deduplicates a plain positive overlay declaration against an existing
+  /// base declaration of the other element kind. Returns true when consumed.
+  bool _dedupAgainstOtherElement(
+    (String, String) key,
+    OverlayPermission op,
+  ) {
+    // If neither base nor overlay uses tools:* directives on this permission,
+    // dedup a plain positive overlay declaration against an existing base
+    // declaration of the other element kind.
+    final otherKey = (_otherPermissionElement(op.element), op.name);
+    final otherBase = activeBase[otherKey];
+    if (otherBase != null &&
+        !op.hasToolsAttributes &&
+        !otherBase.hadInitialToolsAttributes &&
+        !removedByBase.containsKey(key) &&
+        !removedByOverlay.contains(key)) {
+      return true;
+    }
+    return false;
+  }
+}
+
+typedef _ResolvedLibraries = ({
+  Set<String> removedAll,
+  Set<(String, String)> removedBy,
+  Map<(String, String), LibraryPermission> resolved,
+});
+
+_ResolvedLibraries _resolveLibraries(
+  Map<String, String> libraries,
+  Set<String> placeholders,
+) {
+  final removedAllByLibraries = <String>{};
+  final removedByLibraries = <(String, String)>{};
+  final resolvedLibraries = <(String, String), LibraryPermission>{};
+  for (final MapEntry(key: path, value: xml) in libraries.entries) {
+    for (final permission in parseLibraryPermissions(
+      xml,
+      path,
+      placeholders: placeholders,
+    )) {
+      _foldLibraryPermission(
+        permission,
+        removedAllByLibraries,
+        removedByLibraries,
+        resolvedLibraries,
+      );
+    }
+  }
+  return (
+    removedAll: removedAllByLibraries,
+    removedBy: removedByLibraries,
+    resolved: resolvedLibraries,
+  );
+}
+
+void _foldLibraryPermission(
+  LibraryPermission permission,
+  Set<String> removedAllByLibraries,
+  Set<(String, String)> removedByLibraries,
+  Map<(String, String), LibraryPermission> resolvedLibraries,
+) {
+  if (permission.isRemoveAll) {
+    removedAllByLibraries.add(permission.element);
+    return;
+  }
+  final key = (permission.element, permission.name);
+  if (permission.isRemove) {
+    removedByLibraries.add(key);
+    return;
+  }
+  if (removedAllByLibraries.contains(permission.element) ||
+      removedByLibraries.contains(key)) {
+    return;
+  }
+  final earlier = resolvedLibraries[key];
+  if (earlier == null) {
+    resolvedLibraries[key] = permission;
+  } else {
+    resolvedLibraries[key] = _mergeLibraryPermissions(earlier, permission);
+  }
+}
+
+Map<(String, String), LibraryPermission> _applyLibrariesToApp(
+  Map<(String, String), LibraryPermission> resolvedLibraries,
+  _ManifestMerge merge,
+) {
+  final fromLibraries = <(String, String), LibraryPermission>{};
+  for (final MapEntry(key: key, value: permission)
+      in resolvedLibraries.entries) {
+    if (merge.removedAllByOverlay.contains(permission.element) ||
+        merge.baseRemoveAll.containsKey(permission.element) ||
+        merge.removedByOverlay.contains(key) ||
+        merge.removedByBase.containsKey(key)) {
+      continue;
+    }
+    final basePerm = merge.activeBase[key];
+    if (basePerm != null) {
+      basePerm.mergeLibrary(permission);
+      continue;
+    }
+    final overlayPerm = merge.overlayAdded[key];
+    if (overlayPerm != null) {
+      overlayPerm.mergeLibrary(permission);
+      continue;
+    }
+    fromLibraries[key] = permission;
+  }
+  return fromLibraries;
+}
+
+void _appendTierEdits(_ManifestMerge merge, bool isLibraryMerge) {
+  if (isLibraryMerge) {
+    _appendLibraryTierEdits(merge);
+  } else {
+    for (final p in merge.activeBase.values) {
+      if (p.modified) {
+        merge.edits.add(
+          _SpanEdit(p.tagStart!, p.tagEnd!, p.render(includeTools: true)),
+        );
+      }
+    }
+  }
+}
+
+void _appendLibraryTierEdits(_ManifestMerge merge) {
+  for (final remList in merge.baseRemoveAll.values) {
+    for (final p in remList) {
+      merge.edits.add(_SpanEdit(p.spanStart, p.spanEnd, ''));
+    }
+  }
+  for (final p in merge.removedByBase.values) {
+    merge.edits.add(_SpanEdit(p.spanStart, p.spanEnd, ''));
+  }
+  for (final p in merge.activeBase.values) {
+    if (p.modified || p.hadInitialToolsAttributes) {
+      merge.edits.add(
+        _SpanEdit(p.tagStart!, p.tagEnd!, p.render(includeTools: false)),
+      );
+    }
+  }
+}
+
+List<String> _mergedLines(
+  _ManifestMerge merge,
+  Map<(String, String), LibraryPermission> fromLibraries,
+  bool isOverlayOnly,
+) {
+  return <String>[
+    if (isOverlayOnly) ...[
+      for (final elem in merge.removedAllByOverlay)
+        '<$elem tools:node="removeAll"/>',
+      for (final (elem, name) in merge.removedByOverlay)
+        '<$elem android:name="$name" tools:node="remove"/>',
+    ],
+    for (final permission in merge.overlayAdded.values)
+      permission.render(includeTools: isOverlayOnly),
+    for (final permission in fromLibraries.values) permission.render(),
+  ];
+}
+
+String _insertMergedLines({
+  required String editedBaseXml,
+  required int insertAt,
+  required List<String> lines,
+  required String? overlayXml,
+  required String? overlayPath,
+  required Map<String, String> libraries,
+  required String basePath,
+}) {
+  final edited = editedBaseXml;
+  // An overlay always leaves its provenance, even when it adds nothing.
+  if (lines.isEmpty && overlayXml == null) return edited;
+  final sources = [?overlayPath, if (libraries.isNotEmpty) 'library manifests'];
+  final inserted = StringBuffer()
+    ..write(
+      '\n    <!-- Permissions merged by rules_flutter from '
+      '${sources.join(' and ')} into $basePath. -->',
+    );
+  for (final line in lines) {
+    inserted.write('\n    $line');
+  }
+  return edited.substring(0, insertAt) +
+      inserted.toString() +
+      edited.substring(insertAt);
+}
+
 /// Merges [overlayXml]'s permissions and [libraries]' permissions into
 /// [baseXml], returning the merged manifest text. Throws [FormatException]
 /// when an input violates the contract or [baseXml] has no `<manifest>` root.
@@ -1138,125 +1713,14 @@ String mergeManifests({
   final insertAt = _baseInsertionPoint(baseXml, basePath);
   final basePermissions = _scanBasePermissions(baseXml, insertAt, basePath);
 
-  final edits = <_SpanEdit>[];
-  final baseRemoveAll = <String, List<_BasePermission>>{};
-  final removedByBase = <(String, String), _BasePermission>{};
-  final activeBase = <(String, String), _AppPermission>{};
+  final merge = _ManifestMerge();
 
   for (final perm in basePermissions) {
-    if (perm.isRemoveAll) {
-      (baseRemoveAll[perm.element] ??= <_BasePermission>[]).add(perm);
-      continue;
-    }
-    final key = (perm.element, perm.name);
-    if (perm.isRemove) {
-      final prevRemove = removedByBase[key];
-      if (prevRemove != null) {
-        edits.add(_SpanEdit(prevRemove.spanStart, prevRemove.spanEnd, ''));
-      }
-      removedByBase[key] = perm;
-      final prevActive = activeBase.remove(key);
-      if (prevActive != null) {
-        edits.add(_SpanEdit(prevActive.spanStart!, prevActive.spanEnd!, ''));
-      }
-    } else if (removedByBase.containsKey(key)) {
-      edits.add(_SpanEdit(perm.spanStart, perm.spanEnd, ''));
-    } else {
-      final existing = activeBase[key];
-      if (existing != null) {
-        edits.add(_SpanEdit(perm.spanStart, perm.spanEnd, ''));
-      } else {
-        activeBase[key] = _AppPermission.fromBase(perm);
-      }
-    }
+    merge.foldBase(perm);
   }
-
-  void stripBaseKey((String, String) key) {
-    final active = activeBase.remove(key);
-    if (active != null) {
-      edits.add(_SpanEdit(active.spanStart!, active.spanEnd!, ''));
-    }
-    final rem = removedByBase.remove(key);
-    if (rem != null) {
-      edits.add(_SpanEdit(rem.spanStart, rem.spanEnd, ''));
-    }
-  }
-
-  void stripAllBaseForElement(String element) {
-    final activeKeys = activeBase.keys
-        .where((k) => k.$1 == element)
-        .toList(growable: false);
-    for (final k in activeKeys) {
-      final p = activeBase.remove(k)!;
-      edits.add(_SpanEdit(p.spanStart!, p.spanEnd!, ''));
-    }
-    final remKeys = removedByBase.keys
-        .where((k) => k.$1 == element)
-        .toList(growable: false);
-    for (final k in remKeys) {
-      final p = removedByBase.remove(k)!;
-      edits.add(_SpanEdit(p.spanStart, p.spanEnd, ''));
-    }
-    final remAll = baseRemoveAll.remove(element);
-    if (remAll != null) {
-      for (final p in remAll) {
-        edits.add(_SpanEdit(p.spanStart, p.spanEnd, ''));
-      }
-    }
-  }
-
-  final removedAllByOverlay = <String>{};
-  final removedByOverlay = <(String, String)>{};
-  final overlayAdded = <(String, String), _AppPermission>{};
 
   for (final op in overlayPermissions) {
-    if (op.isRemoveAll) {
-      stripAllBaseForElement(op.element);
-      overlayAdded.removeWhere((k, _) => k.$1 == op.element);
-      removedByOverlay.removeWhere((k) => k.$1 == op.element);
-      removedAllByOverlay.add(op.element);
-      continue;
-    }
-    final key = (op.element, op.name);
-    if (op.isRemove) {
-      stripBaseKey(key);
-      overlayAdded.remove(key);
-      removedByOverlay.add(key);
-      continue;
-    }
-
-    // Active permission in overlay cancels any prior removal of the same key.
-    removedByOverlay.remove(key);
-    final baseRem = removedByBase.remove(key);
-    if (baseRem != null) {
-      edits.add(_SpanEdit(baseRem.spanStart, baseRem.spanEnd, ''));
-    }
-
-    final existingBase = activeBase[key];
-    if (existingBase != null) {
-      existingBase.mergeOverlay(op);
-      continue;
-    }
-
-    // If neither base nor overlay uses tools:* directives on this permission,
-    // dedup a plain positive overlay declaration against an existing base
-    // declaration of the other element kind.
-    final otherKey = (_otherPermissionElement(op.element), op.name);
-    final otherBase = activeBase[otherKey];
-    if (otherBase != null &&
-        !op.hasToolsAttributes &&
-        !otherBase.hadInitialToolsAttributes &&
-        !removedByBase.containsKey(key) &&
-        !removedByOverlay.contains(key)) {
-      continue;
-    }
-
-    final earlierOverlay = overlayAdded[key];
-    if (earlierOverlay != null) {
-      earlierOverlay.mergeOverlay(op);
-    } else {
-      overlayAdded[key] = _AppPermission.fromOverlay(op);
-    }
+    merge.foldOverlay(op);
   }
 
   // Libraries in the order given (higher priority first). A library's
@@ -1264,114 +1728,25 @@ String mergeManifests({
   // libraries (later in `libraries`), never to higher-priority libraries
   // (already in `resolvedLibraries`) or to the app. Across libraries, a
   // broader maxSdkVersion (or unbounded) upgrades a narrower one.
-  final removedAllByLibraries = <String>{};
-  final removedByLibraries = <(String, String)>{};
-  final resolvedLibraries = <(String, String), LibraryPermission>{};
-  for (final MapEntry(key: path, value: xml) in libraries.entries) {
-    for (final permission in parseLibraryPermissions(
-      xml,
-      path,
-      placeholders: placeholders,
-    )) {
-      if (permission.isRemoveAll) {
-        removedAllByLibraries.add(permission.element);
-        continue;
-      }
-      final key = (permission.element, permission.name);
-      if (permission.isRemove) {
-        removedByLibraries.add(key);
-        continue;
-      }
-      if (removedAllByLibraries.contains(permission.element) ||
-          removedByLibraries.contains(key)) {
-        continue;
-      }
-      final earlier = resolvedLibraries[key];
-      if (earlier == null) {
-        resolvedLibraries[key] = permission;
-      } else {
-        resolvedLibraries[key] = _mergeLibraryPermissions(earlier, permission);
-      }
-    }
-  }
+  final resolved = _resolveLibraries(libraries, placeholders);
 
   // Apply app-tier priority over the resolved library permissions.
-  final fromLibraries = <(String, String), LibraryPermission>{};
-  for (final MapEntry(key: key, value: permission)
-      in resolvedLibraries.entries) {
-    if (removedAllByOverlay.contains(permission.element) ||
-        baseRemoveAll.containsKey(permission.element) ||
-        removedByOverlay.contains(key) ||
-        removedByBase.containsKey(key)) {
-      continue;
-    }
-    final basePerm = activeBase[key];
-    if (basePerm != null) {
-      basePerm.mergeLibrary(permission);
-      continue;
-    }
-    final overlayPerm = overlayAdded[key];
-    if (overlayPerm != null) {
-      overlayPerm.mergeLibrary(permission);
-      continue;
-    }
-    fromLibraries[key] = permission;
-  }
+  final fromLibraries = _applyLibrariesToApp(resolved.resolved, merge);
 
-  if (isLibraryMerge) {
-    for (final remList in baseRemoveAll.values) {
-      for (final p in remList) {
-        edits.add(_SpanEdit(p.spanStart, p.spanEnd, ''));
-      }
-    }
-    for (final p in removedByBase.values) {
-      edits.add(_SpanEdit(p.spanStart, p.spanEnd, ''));
-    }
-    for (final p in activeBase.values) {
-      if (p.modified || p.hadInitialToolsAttributes) {
-        edits.add(
-          _SpanEdit(p.tagStart!, p.tagEnd!, p.render(includeTools: false)),
-        );
-      }
-    }
-  } else {
-    for (final p in activeBase.values) {
-      if (p.modified) {
-        edits.add(
-          _SpanEdit(p.tagStart!, p.tagEnd!, p.render(includeTools: true)),
-        );
-      }
-    }
-  }
+  _appendTierEdits(merge, isLibraryMerge);
 
-  final lines = <String>[
-    if (isOverlayOnly) ...[
-      for (final elem in removedAllByOverlay) '<$elem tools:node="removeAll"/>',
-      for (final (elem, name) in removedByOverlay)
-        '<$elem android:name="$name" tools:node="remove"/>',
-    ],
-    for (final permission in overlayAdded.values)
-      permission.render(includeTools: isOverlayOnly),
-    for (final permission in fromLibraries.values) permission.render(),
-  ];
+  final lines = _mergedLines(merge, fromLibraries, isOverlayOnly);
 
-  final editedBaseXml = _applyEdits(baseXml, edits);
-  // An overlay always leaves its provenance, even when it adds nothing.
-  if (lines.isEmpty && overlayXml == null) return editedBaseXml;
-
-  final sources = [?overlayPath, if (libraries.isNotEmpty) 'library manifests'];
-  final inserted = StringBuffer()
-    ..write(
-      '\n    <!-- Permissions merged by rules_flutter from '
-      '${sources.join(' and ')} into $basePath. -->',
-    );
-  for (final line in lines) {
-    inserted.write('\n    $line');
-  }
-
-  return editedBaseXml.substring(0, insertAt) +
-      inserted.toString() +
-      editedBaseXml.substring(insertAt);
+  final editedBaseXml = _applyEdits(baseXml, merge.edits);
+  return _insertMergedLines(
+    editedBaseXml: editedBaseXml,
+    insertAt: insertAt,
+    lines: lines,
+    overlayXml: overlayXml,
+    overlayPath: overlayPath,
+    libraries: libraries,
+    basePath: basePath,
+  );
 }
 
 void main(List<String> args) {
