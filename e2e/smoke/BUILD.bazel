@@ -163,6 +163,21 @@ build_test(
     ],
 )
 
+# Local-path sky_engine stubs: the fixture's lib/internal/internal.dart names a
+# part file the fixture tree omits (as the real SDK's trimmed sources do), and
+# the sky_engine repo rule plants a directive-free stub for each such file in
+# repo-owned directories. File targets only: no Dart actions run in this
+# workspace (the fixture binaries are placeholders), so the labels prove the
+# local_path mirror plants the stubs — without the stubs the labels do not
+# even resolve — while the SDK tree stays untouched.
+build_test(
+    name = "local_sky_engine_trimmed_parts_test",
+    targets = [
+        "@local_sky_engine//sky_engine:lib/internal/internal.dart",
+        "@local_sky_engine//sky_engine:lib/internal/patch.dart",
+    ],
+)
+
 # Offline mode, mobile engines: Android flutter.jar per ABI (release at the
 # root, debug under debug/, profile apart) and the iOS xcframeworks. Only
 # file targets are built: the Android `stripped` rules would process the
