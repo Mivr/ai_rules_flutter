@@ -128,6 +128,13 @@ class Harness {
     'package:app/main.dart',
   ];
 
+  /// A copy of [argv] with the `--filesystem-root` value replaced by [root].
+  List<String> argvWithRoot(String root) {
+    final args = argv;
+    args[args.indexOf('--filesystem-root') + 1] = root;
+    return args;
+  }
+
   List<String> get inputs => [
     'manifest.txt',
     'lib/main.dart',
@@ -190,6 +197,18 @@ void main() {
   });
 
   group('splitWorkerArgv', () {
+    test('drops a leading tool path, keeps flags and flagfiles', () {
+      expect(stripWorkerArgv0(['--declared-inputs', 'm']), [
+        '--declared-inputs',
+        'm',
+      ]);
+      expect(stripWorkerArgv0(['@args']), ['@args']);
+      expect(stripWorkerArgv0(['/tool/worker', '--declared-inputs', 'm']), [
+        '--declared-inputs',
+        'm',
+      ]);
+      expect(stripWorkerArgv0([]), isEmpty);
+    });
     test('splits the manifest from the compiler command', () {
       final split = splitWorkerArgv([
         '--declared-inputs',
@@ -413,6 +432,32 @@ void main() {
       },
     );
 
+    test(
+      'each request lands in its own --output-dill, one warm server',
+      () async {
+        // The harness (and Bazel strategies) give every request a private
+        // output path: requests differing only there share the server, and each
+        // finished dill lands in the requesting file.
+        worker = IncrWorker(
+          cwd: h.cwd,
+          sessions: factoryFor(() => [h.ok(), h.ok(), h.ok(), h.ok()]),
+        );
+        var result = await worker.handleRequest(h.argv, h.inputs);
+        expect(result.exitCode, 0, reason: result.output);
+        final argv2 = [
+          for (final a in h.argv) a == 'out/app.dill' ? 'out/other.dill' : a,
+        ];
+        result = await worker.handleRequest(argv2, h.inputs);
+        expect(result.exitCode, 0, reason: result.output);
+        expect(sessions, hasLength(1));
+        expect(File('${h.cwd}/out/app.dill').readAsStringSync(), 'dill-bytes');
+        expect(
+          File('${h.cwd}/out/other.dill').readAsStringSync(),
+          'dill-bytes',
+        );
+      },
+    );
+
     test('content change with no digest input is still detected', () async {
       // The harness's --inject-digest-lie sends a stale digest for a changed
       // file. The worker never reads request digests — handleRequest takes
@@ -595,6 +640,56 @@ void main() {
       );
       expect(File('${h.cwd}/out/app.dill').existsSync(), isFalse);
     });
+
+    test(
+      'reads under a remapped request root map to the manifest root',
+      () async {
+        final mirrorDir = Directory.systemTemp.createTempSync('incr_mirror_');
+        addTearDown(() => mirrorDir.deleteSync(recursive: true));
+        final mirror = mirrorDir.path;
+        for (final rel in ['lib/main.dart', 'lib/a.dart', 'lib/new.dart']) {
+          File('$mirror/$rel')
+            ..createSync(recursive: true)
+            ..writeAsStringSync('int get fresh => 7;\n');
+        }
+        for (final rel in ['lib/main.dart', 'lib/a.dart']) {
+          File('$mirror/$rel').writeAsStringSync(
+            File('${h.cwd}/$rel').readAsStringSync(),
+          );
+        }
+        // lib/new.dart is a created library: mirrored like the build would
+        // stage it, but declared in no manifest section.
+        final mirrorReads = [
+          '+file://$mirror/lib/main.dart',
+          '+file://$mirror/lib/a.dart',
+          '+file://$mirror/lib/new.dart',
+          '+file://${h.cwd}/lib/main.dart',
+          '+file://${h.cwd}/lib/a.dart',
+          '+file://${h.cwd}/pkg_config.json',
+          '+file://${h.cwd}/platform.dill',
+        ];
+        worker = IncrWorker(
+          cwd: h.cwd,
+          sessions: (fs, full, inc, cwd) async {
+            final s = FakeSession(
+              fullDill: full,
+              dillBytes: utf8.encode('dill'),
+              script: [
+                (errors: 0, diagnostics: const [], depLines: mirrorReads),
+                (errors: 0, diagnostics: const [], depLines: mirrorReads),
+              ],
+            );
+            sessions.add(s);
+            return s;
+          },
+        );
+        final result = await worker.handleRequest(
+          h.argvWithRoot(mirror),
+          h.inputs,
+        );
+        expect(result.exitCode, 0, reason: result.output);
+      },
+    );
 
     test(
       'a rejected compile still contributes its reads to the refusal',

@@ -98,26 +98,96 @@ String? dependencyExecPath(String line) {
   return path.substring(cwd.length + 1);
 }
 
+/// The absolute normalized path a `+file://` dependency [line] names, or null
+/// when the line is not a `file:` URI. Relative spellings resolve against the
+/// compile's working directory. Percent escapes decode once and `.`/`..`
+/// segments resolve first (`toFilePath` normalizes both spellings), the way
+/// the front end spells them.
+String? dependencyAbsolutePath(String line) {
+  final text = line.substring(1).trim();
+  final Uri uri;
+  try {
+    uri = Uri.parse(text);
+  } on FormatException {
+    return null;
+  }
+  if (uri.scheme != 'file') return null;
+  var path = uri.toFilePath().replaceAll(r'\', '/');
+  if (!path.startsWith('/') && !RegExp(r'^[a-zA-Z]:').hasMatch(path)) {
+    path = '${Directory.current.path.replaceAll(r'\', '/')}/$path';
+  }
+  return path;
+}
+
 /// The subset of `frontend_server`'s `+uri` dependency [lines] that names no
 /// declared input: each entry is the offending line. [declared] holds the
 /// exec-root-relative paths from the `--declared-inputs` manifest's source
 /// and staged sections, and [extraAllowed] the manifest's `allowed-reads`
 /// section (the package config, the platform dill, the summary dills, the
 /// native-assets manifest) — never the compile argv.
+///
+/// A read spelt like a working-directory path is decided by the manifest
+/// alone, exactly like the batch path. [requestRoots] additionally excuses a
+/// read from outside the working directory when it sits strictly under one of
+/// the request's `--filesystem-root` values (see [_readUnderRoot]); callers
+/// that pass none see exactly the old behavior.
 List<String> findUndeclaredReads(
   List<String> lines,
   Set<String> declared,
-  Set<String> extraAllowed,
-) {
+  Set<String> extraAllowed, {
+  List<String> requestRoots = const [],
+}) {
   final undeclared = <String>[];
   for (final line in lines) {
-    final path = dependencyExecPath(line);
-    if (path == null ||
-        (!declared.contains(path) && !extraAllowed.contains(path))) {
+    final rel = dependencyExecPath(line);
+    if (rel != null) {
+      if (!declared.contains(rel) && !extraAllowed.contains(rel)) {
+        undeclared.add(line);
+      }
+      continue;
+    }
+    if (!_readUnderRoot(line, requestRoots)) {
       undeclared.add(line);
     }
   }
   return undeclared;
+}
+
+/// Whether a `+uri` dependency [line] from outside the working directory
+/// names a file strictly under one of the request-time compiler [roots].
+///
+/// The check is structural on purpose, matching the prototype: the roots
+/// stage exactly the declared inputs, so in production every read under a
+/// root is a declared file and this branch never fires (every production
+/// read sits under the working directory, where the manifest decides). It
+/// fires only when the roots are remapped elsewhere — the differential
+/// harness mirrors the staging root, linking created libraries in the way
+/// the build stages them — and there it accepts the mirrored tree the same
+/// way a re-analysis would declare and stage it. Reads outside every root
+/// (absolute `file:` imports, package-config escapes: the RT8/RT10 cases)
+/// are still refused, as are `..` escapes, which resolve before the prefix
+/// check and so name a path outside the root.
+bool _readUnderRoot(String line, List<String> requestRoots) {
+  if (requestRoots.isEmpty) return false;
+  final abs = dependencyAbsolutePath(line);
+  if (abs == null) return false;
+  final cwd = Directory.current.path.replaceAll(r'\', '/');
+  for (final rawRoot in requestRoots) {
+    if (abs.startsWith('${_absoluteRoot(rawRoot, cwd)}/')) return true;
+  }
+  return false;
+}
+
+/// [root] as an absolute slash path: a relative root resolves against [cwd].
+String _absoluteRoot(String root, String cwd) {
+  var path = root.replaceAll(r'\', '/');
+  while (path.endsWith('/') && path.length > 1) {
+    path = path.substring(0, path.length - 1);
+  }
+  if (!path.startsWith('/') && !RegExp(r'^[a-zA-Z]:').hasMatch(path)) {
+    path = '$cwd/$path';
+  }
+  return path;
 }
 
 /// The compile argv with the dependency report forced on.

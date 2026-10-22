@@ -217,14 +217,23 @@ class IncrWorker {
   }
 
   /// The refusal text for the cumulative read set, or null when clean. Uses
-  /// the same messages as the batch path.
+  /// the same messages as the batch path. [requestRoots] are the request's
+  /// `--filesystem-root` values: a read from outside the working directory is
+  /// excused only when it sits under one of them (the differential harness
+  /// mirrors the staging root elsewhere); every production read sits under
+  /// the working directory, where the manifest decides exactly like batch.
   String? _checkReads(
     Set<String> current,
-    Set<String> declared,
-    Set<String> extraAllowed,
+    KernelInputsManifest manifest,
+    List<String> requestRoots,
   ) {
     final lines = [for (final u in current.toList()..sort()) '+$u'];
-    final bad = findUndeclaredReads(lines, declared, extraAllowed);
+    final bad = findUndeclaredReads(
+      lines,
+      manifest.declared,
+      manifest.extraAllowed,
+      requestRoots: requestRoots,
+    );
     if (bad.isEmpty) return null;
     return bad.map(undeclaredReadMessage).join('\n');
   }
@@ -262,7 +271,12 @@ class IncrWorker {
     );
     final roots = plan.cold ? compilerFilesystemRoots(parts.fs) : state!.roots;
     final guard = plan.cold ? GuardCache() : state!.guard;
-    final guardError = _checkGuard(parts.manifest, roots, guard, hashes.current);
+    final guardError = _checkGuard(
+      parts.manifest,
+      roots,
+      guard,
+      hashes.current,
+    );
     if (guardError != null) {
       return (exitCode: 1, output: guardError);
     }
@@ -280,9 +294,9 @@ class IncrWorker {
         );
         if (failure != null) return failure;
       }
-      final resetFailure = await _runResetPhase(state!, key, parts.entry);
+      final resetFailure = await _runResetPhase(state, key, parts.entry);
       if (resetFailure != null) return resetFailure;
-      return await _publishOutput(state!, key, parts, hashes.current);
+      return await _publishOutput(state, key, parts, hashes.current);
     } catch (_) {
       // The server is not trusted after an unexpected error: drop it so the
       // next request starts cold.
@@ -420,8 +434,8 @@ class IncrWorker {
       await state.session.reject();
       final refusal = _checkReads(
         state.currentReads,
-        parts.manifest.declared,
-        parts.manifest.extraAllowed,
+        parts.manifest,
+        state.roots,
       );
       if (refusal != null) {
         await _drop(key);
@@ -462,8 +476,8 @@ class IncrWorker {
     await state.session.accept();
     final refusal = _checkReads(
       state.currentReads,
-      parts.manifest.declared,
-      parts.manifest.extraAllowed,
+      parts.manifest,
+      state.roots,
     );
     if (refusal != null) {
       await _drop(key);
@@ -488,7 +502,6 @@ class IncrWorker {
     }
     await File(state.fullDill).copy(dst);
     return (exitCode: 0, output: '');
-  }
   }
 }
 

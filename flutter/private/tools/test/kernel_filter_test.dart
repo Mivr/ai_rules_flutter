@@ -97,6 +97,93 @@ void main() {
     });
   });
 
+  group('findUndeclaredReads', () {
+    const declared = {
+      'app/lib/main.dart',
+      'bazel-out/k8-fastbuild/bin/app.dill.stage/app/lib/main.dart',
+    };
+    const allowed = {'.dart_tool/package_config.json'};
+
+    test('accepts declared and allowed reads spelt exec-root-relative', () {
+      final work = Directory.systemTemp.createTempSync('kernel_filter_ru_');
+      addTearDown(() => work.deleteSync(recursive: true));
+      final saved = Directory.current;
+      Directory.current = work.path;
+      addTearDown(() => Directory.current = saved.path);
+      expect(
+        findUndeclaredReads(
+          [
+            '+file://${work.path}/app/lib/main.dart',
+            '+file://${work.path}/.dart_tool/package_config.json',
+          ],
+          declared,
+          allowed,
+        ),
+        isEmpty,
+      );
+    });
+
+    test('refuses absolute reads outside the working directory by default', () {
+      final work = Directory.systemTemp.createTempSync('kernel_filter_ro_');
+      addTearDown(() => work.deleteSync(recursive: true));
+      final saved = Directory.current;
+      Directory.current = work.path;
+      addTearDown(() => Directory.current = saved.path);
+      expect(
+        findUndeclaredReads(
+          ['+file:///tmp/mirror/app/lib/main.dart'],
+          declared,
+          allowed,
+        ),
+        ['+file:///tmp/mirror/app/lib/main.dart'],
+      );
+    });
+
+    test('accepts a created library under a remapped request root', () {
+      final parent = Directory.systemTemp.createTempSync('kernel_filter_rm_');
+      addTearDown(() => parent.deleteSync(recursive: true));
+      final work = Directory('${parent.path}/work')..createSync();
+      final mirror = Directory('${parent.path}/mirror')..createSync();
+      final saved = Directory.current;
+      Directory.current = work.path;
+      addTearDown(() => Directory.current = saved.path);
+      expect(
+        findUndeclaredReads(
+          [
+            '+file://${mirror.path}/app/lib/main.dart',
+            '+file://${mirror.path}/app/lib/new.dart',
+            '+file://${work.path}/.dart_tool/package_config.json',
+          ],
+          declared,
+          allowed,
+          requestRoots: [mirror.path],
+        ),
+        isEmpty,
+      );
+    });
+
+    test('still refuses escapes and outside-root reads with roots given', () {
+      final parent = Directory.systemTemp.createTempSync('kernel_filter_rb_');
+      addTearDown(() => parent.deleteSync(recursive: true));
+      final work = Directory('${parent.path}/work')..createSync();
+      final mirror = Directory('${parent.path}/mirror')..createSync();
+      final saved = Directory.current;
+      Directory.current = work.path;
+      addTearDown(() => Directory.current = saved.path);
+      final escape = '+file://${mirror.path}/../evil.dart';
+      const outside = '+file:///tmp/other/evil.dart';
+      expect(
+        findUndeclaredReads(
+          [escape, outside, '+dart:async'],
+          declared,
+          allowed,
+          requestRoots: ['${mirror.path}/'],
+        ),
+        [escape, outside, '+dart:async'],
+      );
+    });
+  });
+
   group('findDisallowedFlutterDirectives', () {
     late Directory work;
     late Directory savedCwd;
