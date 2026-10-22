@@ -494,41 +494,11 @@ Uint8List createFrameworkZipBytes(
   required String archiveRootName,
   Set<String> executableRelPaths = const {},
 }) {
-  final entries = <FrameworkZipEntry>[];
-
-  void walk(Directory dir, String relPrefix) {
-    final children = dir.listSync(followLinks: false)
-      ..sort((a, b) => a.path.compareTo(b.path));
-    for (final entity in children) {
-      final name = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
-      final relPath = '$relPrefix/$name';
-      if (entity is Link) {
-        final target = entity.targetSync();
-        entries.add(
-          FrameworkZipEntry(
-            path: relPath,
-            data: Uint8List.fromList(utf8.encode(target)),
-            isSymlink: true,
-          ),
-        );
-      } else if (entity is Directory) {
-        walk(entity, relPath);
-      } else if (entity is File) {
-        final stat = entity.statSync();
-        final isExec =
-            executableRelPaths.contains(relPath) || ((stat.mode & 0x49) != 0);
-        entries.add(
-          FrameworkZipEntry(
-            path: relPath,
-            data: entity.readAsBytesSync(),
-            isExecutable: isExec,
-          ),
-        );
-      }
-    }
-  }
-
-  walk(frameworkDir, archiveRootName);
+  final entries = _collectFrameworkEntries(
+    frameworkDir,
+    archiveRootName,
+    executableRelPaths,
+  );
   entries.sort((a, b) => a.path.compareTo(b.path));
 
   final localParts = BytesBuilder(copy: false);
@@ -543,84 +513,211 @@ Uint8List createFrameworkZipBytes(
   var offset = 0;
   for (final entry in entries) {
     final nameBytes = utf8.encode(entry.path);
-    final uncompressed = entry.data;
-    final crc = _crc32(uncompressed);
-
-    var compressionMethod = 0;
-    var payload = uncompressed;
-    if (!entry.isSymlink && uncompressed.isNotEmpty) {
-      final deflated = Uint8List.fromList(rawDeflate.encode(uncompressed));
-      if (deflated.length < uncompressed.length) {
-        compressionMethod = 8;
-        payload = deflated;
-      }
-    }
-
-    final int externalAttrs;
-    if (entry.isSymlink) {
-      externalAttrs = 0xA1FF << 16; // lrwxrwxrwx (0120777)
-    } else if (entry.isExecutable) {
-      externalAttrs = 0x81ED << 16; // -rwxr-xr-x (0100755)
-    } else {
-      externalAttrs = 0x81A4 << 16; // -rw-r--r-- (0100644)
-    }
-
-    final localHeader = ByteData(30 + nameBytes.length);
-    localHeader.setUint32(0, 0x04034b50, Endian.little);
-    localHeader.setUint16(4, versionNeeded, Endian.little);
-    localHeader.setUint16(6, 0x0800, Endian.little);
-    localHeader.setUint16(8, compressionMethod, Endian.little);
-    localHeader.setUint16(10, dosTime, Endian.little);
-    localHeader.setUint16(12, dosDate, Endian.little);
-    localHeader.setUint32(14, crc, Endian.little);
-    localHeader.setUint32(18, payload.length, Endian.little);
-    localHeader.setUint32(22, uncompressed.length, Endian.little);
-    localHeader.setUint16(26, nameBytes.length, Endian.little);
-    localHeader.setUint16(28, 0, Endian.little);
-    localHeader.buffer.asUint8List().setRange(
-      30,
-      30 + nameBytes.length,
+    final crc = _crc32(entry.data);
+    final (:payload, :method) = _zipEntryPayload(entry, rawDeflate);
+    final externalAttrs = _zipExternalAttrs(entry);
+    _writeZipLocalEntry(
+      localParts,
       nameBytes,
+      payload,
+      method,
+      crc,
+      entry.data.length,
+      dosTime,
+      dosDate,
+      versionNeeded,
     );
-
-    localParts.add(localHeader.buffer.asUint8List());
-    localParts.add(payload);
-
-    final centralHeader = ByteData(46 + nameBytes.length);
-    centralHeader.setUint32(0, 0x02014b50, Endian.little);
-    centralHeader.setUint16(4, versionMadeBy, Endian.little);
-    centralHeader.setUint16(6, versionNeeded, Endian.little);
-    centralHeader.setUint16(8, 0x0800, Endian.little);
-    centralHeader.setUint16(10, compressionMethod, Endian.little);
-    centralHeader.setUint16(12, dosTime, Endian.little);
-    centralHeader.setUint16(14, dosDate, Endian.little);
-    centralHeader.setUint32(16, crc, Endian.little);
-    centralHeader.setUint32(20, payload.length, Endian.little);
-    centralHeader.setUint32(24, uncompressed.length, Endian.little);
-    centralHeader.setUint16(28, nameBytes.length, Endian.little);
-    centralHeader.setUint16(30, 0, Endian.little);
-    centralHeader.setUint16(32, 0, Endian.little);
-    centralHeader.setUint16(34, 0, Endian.little);
-    centralHeader.setUint16(36, 0, Endian.little);
-    centralHeader.setUint32(38, externalAttrs, Endian.little);
-    centralHeader.setUint32(42, offset, Endian.little);
-    centralHeader.buffer.asUint8List().setRange(
-      46,
-      46 + nameBytes.length,
+    _writeZipCentralEntry(
+      centralParts,
       nameBytes,
+      payload,
+      method,
+      crc,
+      entry.data.length,
+      externalAttrs,
+      offset,
+      dosTime,
+      dosDate,
+      versionMadeBy,
+      versionNeeded,
     );
-
-    centralParts.add(centralHeader.buffer.asUint8List());
     offset += 30 + nameBytes.length + payload.length;
   }
 
+  return _finishFrameworkZip(localParts, centralParts, entries.length, offset);
+}
+
+/// Collects the framework's file and symlink entries in sorted path order.
+List<FrameworkZipEntry> _collectFrameworkEntries(
+  Directory frameworkDir,
+  String archiveRootName,
+  Set<String> executableRelPaths,
+) {
+  final entries = <FrameworkZipEntry>[];
+  _walkFrameworkEntries(
+    frameworkDir,
+    archiveRootName,
+    entries,
+    executableRelPaths,
+  );
+  return entries;
+}
+
+/// Walks [dir] depth-first, appending file and symlink entries to [into].
+void _walkFrameworkEntries(
+  Directory dir,
+  String relPrefix,
+  List<FrameworkZipEntry> into,
+  Set<String> executableRelPaths,
+) {
+  final children = dir.listSync(followLinks: false)
+    ..sort((a, b) => a.path.compareTo(b.path));
+  for (final entity in children) {
+    final name = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
+    final relPath = '$relPrefix/$name';
+    if (entity is Link) {
+      final target = entity.targetSync();
+      into.add(
+        FrameworkZipEntry(
+          path: relPath,
+          data: Uint8List.fromList(utf8.encode(target)),
+          isSymlink: true,
+        ),
+      );
+    } else if (entity is Directory) {
+      _walkFrameworkEntries(entity, relPath, into, executableRelPaths);
+    } else if (entity is File) {
+      final stat = entity.statSync();
+      final isExec =
+          executableRelPaths.contains(relPath) || ((stat.mode & 0x49) != 0);
+      into.add(
+        FrameworkZipEntry(
+          path: relPath,
+          data: entity.readAsBytesSync(),
+          isExecutable: isExec,
+        ),
+      );
+    }
+  }
+}
+
+/// The stored payload for [entry]: deflated when that is smaller.
+({Uint8List payload, int method}) _zipEntryPayload(
+  FrameworkZipEntry entry,
+  ZLibCodec rawDeflate,
+) {
+  final uncompressed = entry.data;
+  if (entry.isSymlink || uncompressed.isEmpty) {
+    return (payload: uncompressed, method: 0);
+  }
+  final deflated = Uint8List.fromList(rawDeflate.encode(uncompressed));
+  if (deflated.length < uncompressed.length) {
+    return (payload: deflated, method: 8);
+  }
+  return (payload: uncompressed, method: 0);
+}
+
+/// The ZIP external-attributes word for [entry]'s file type and mode.
+int _zipExternalAttrs(FrameworkZipEntry entry) {
+  if (entry.isSymlink) {
+    return 0xA1FF << 16; // lrwxrwxrwx (0120777)
+  }
+  if (entry.isExecutable) {
+    return 0x81ED << 16; // -rwxr-xr-x (0100755)
+  }
+  return 0x81A4 << 16; // -rw-r--r-- (0100644)
+}
+
+/// Appends one local file header and payload to [into].
+void _writeZipLocalEntry(
+  BytesBuilder into,
+  List<int> nameBytes,
+  Uint8List payload,
+  int method,
+  int crc,
+  int uncompressedLength,
+  int dosTime,
+  int dosDate,
+  int versionNeeded,
+) {
+  final localHeader = ByteData(30 + nameBytes.length);
+  localHeader.setUint32(0, 0x04034b50, Endian.little);
+  localHeader.setUint16(4, versionNeeded, Endian.little);
+  localHeader.setUint16(6, 0x0800, Endian.little);
+  localHeader.setUint16(8, method, Endian.little);
+  localHeader.setUint16(10, dosTime, Endian.little);
+  localHeader.setUint16(12, dosDate, Endian.little);
+  localHeader.setUint32(14, crc, Endian.little);
+  localHeader.setUint32(18, payload.length, Endian.little);
+  localHeader.setUint32(22, uncompressedLength, Endian.little);
+  localHeader.setUint16(26, nameBytes.length, Endian.little);
+  localHeader.setUint16(28, 0, Endian.little);
+  localHeader.buffer.asUint8List().setRange(
+    30,
+    30 + nameBytes.length,
+    nameBytes,
+  );
+
+  into.add(localHeader.buffer.asUint8List());
+  into.add(payload);
+}
+
+/// Appends one central directory header to [into].
+void _writeZipCentralEntry(
+  BytesBuilder into,
+  List<int> nameBytes,
+  Uint8List payload,
+  int method,
+  int crc,
+  int uncompressedLength,
+  int externalAttrs,
+  int offset,
+  int dosTime,
+  int dosDate,
+  int versionMadeBy,
+  int versionNeeded,
+) {
+  final centralHeader = ByteData(46 + nameBytes.length);
+  centralHeader.setUint32(0, 0x02014b50, Endian.little);
+  centralHeader.setUint16(4, versionMadeBy, Endian.little);
+  centralHeader.setUint16(6, versionNeeded, Endian.little);
+  centralHeader.setUint16(8, 0x0800, Endian.little);
+  centralHeader.setUint16(10, method, Endian.little);
+  centralHeader.setUint16(12, dosTime, Endian.little);
+  centralHeader.setUint16(14, dosDate, Endian.little);
+  centralHeader.setUint32(16, crc, Endian.little);
+  centralHeader.setUint32(20, payload.length, Endian.little);
+  centralHeader.setUint32(24, uncompressedLength, Endian.little);
+  centralHeader.setUint16(28, nameBytes.length, Endian.little);
+  centralHeader.setUint16(30, 0, Endian.little);
+  centralHeader.setUint16(32, 0, Endian.little);
+  centralHeader.setUint16(34, 0, Endian.little);
+  centralHeader.setUint16(36, 0, Endian.little);
+  centralHeader.setUint32(38, externalAttrs, Endian.little);
+  centralHeader.setUint32(42, offset, Endian.little);
+  centralHeader.buffer.asUint8List().setRange(
+    46,
+    46 + nameBytes.length,
+    nameBytes,
+  );
+
+  into.add(centralHeader.buffer.asUint8List());
+}
+
+/// Appends the central directory and end-of-central-directory record.
+Uint8List _finishFrameworkZip(
+  BytesBuilder localParts,
+  BytesBuilder centralParts,
+  int entryCount,
+  int offset,
+) {
   final centralBytes = centralParts.takeBytes();
   final eocd = ByteData(22);
   eocd.setUint32(0, 0x06054b50, Endian.little);
   eocd.setUint16(4, 0, Endian.little);
   eocd.setUint16(6, 0, Endian.little);
-  eocd.setUint16(8, entries.length, Endian.little);
-  eocd.setUint16(10, entries.length, Endian.little);
+  eocd.setUint16(8, entryCount, Endian.little);
+  eocd.setUint16(10, entryCount, Endian.little);
   eocd.setUint32(12, centralBytes.length, Endian.little);
   eocd.setUint32(16, offset, Endian.little);
   eocd.setUint16(20, 0, Endian.little);
@@ -1968,60 +2065,79 @@ List<LoadCommand> parseLoadCommands(Uint8List bytes) {
 /// or linkedit table in the Mach-O binary. Load commands may grow up to this
 /// boundary without overwriting section/segment payload bytes.
 int _findFirstPayloadOffset(List<LoadCommand> commands, int totalLength) {
-  var minOffset = totalLength;
+  final floor = _PayloadFloor(totalLength);
+  for (final lc in commands) {
+    _considerCommandPayload(lc, floor);
+  }
+  return floor.value;
+}
+
+/// Tracks the lowest referenced file offset seen so far.
+class _PayloadFloor {
+  int value;
+
+  _PayloadFloor(this.value);
 
   void consider(int offset, int size) {
-    if (offset > 0 && size > 0 && offset < minOffset) {
-      minOffset = offset;
+    if (offset > 0 && size > 0 && offset < value) {
+      value = offset;
     }
   }
+}
 
-  for (final lc in commands) {
-    final bd = ByteData.sublistView(lc.bytes);
-    switch (lc.cmd) {
-      case lcSegment64:
-        if (lc.bytes.length >= 72) {
-          final fileoff = bd.getUint64(40, Endian.little);
-          final filesize = bd.getUint64(48, Endian.little);
-          final nsects = bd.getUint32(64, Endian.little);
-          if (fileoff > 0 && filesize > 0) {
-            consider(fileoff, filesize);
-          }
-          // Inspect each section_64 (80 bytes each starting at offset 72).
-          for (var s = 0; s < nsects; s++) {
-            final sectOff = 72 + s * 80;
-            if (sectOff + 80 <= lc.bytes.length) {
-              final sSize = bd.getUint64(sectOff + 40, Endian.little);
-              final sOffset = bd.getUint32(sectOff + 48, Endian.little);
-              consider(sOffset, sSize);
-            }
-          }
-        }
-      case lcSymtab:
-        if (lc.bytes.length >= 24) {
-          consider(
-            bd.getUint32(8, Endian.little),
-            bd.getUint32(12, Endian.little) * 16,
-          );
-          consider(
-            bd.getUint32(16, Endian.little),
-            bd.getUint32(20, Endian.little),
-          );
-        }
-      case lcFunctionStarts:
-      case lcDataInCode:
-      case lcCodeSignature:
-      case lcDyldExportsTrie:
-      case lcDyldChainedFixups:
-        if (lc.bytes.length >= 16) {
-          consider(
-            bd.getUint32(8, Endian.little),
-            bd.getUint32(12, Endian.little),
-          );
-        }
+/// Folds one load command's referenced file range into [floor].
+void _considerCommandPayload(LoadCommand lc, _PayloadFloor floor) {
+  final bd = ByteData.sublistView(lc.bytes);
+  switch (lc.cmd) {
+    case lcSegment64:
+      _considerSegmentPayload(lc, bd, floor);
+    case lcSymtab:
+      if (lc.bytes.length >= 24) {
+        floor.consider(
+          bd.getUint32(8, Endian.little),
+          bd.getUint32(12, Endian.little) * 16,
+        );
+        floor.consider(
+          bd.getUint32(16, Endian.little),
+          bd.getUint32(20, Endian.little),
+        );
+      }
+    case lcFunctionStarts:
+    case lcDataInCode:
+    case lcCodeSignature:
+    case lcDyldExportsTrie:
+    case lcDyldChainedFixups:
+      if (lc.bytes.length >= 16) {
+        floor.consider(
+          bd.getUint32(8, Endian.little),
+          bd.getUint32(12, Endian.little),
+        );
+      }
+  }
+}
+
+/// Folds a `LC_SEGMENT_64` command's file range and its sections into [floor].
+void _considerSegmentPayload(
+  LoadCommand lc,
+  ByteData bd,
+  _PayloadFloor floor,
+) {
+  if (lc.bytes.length < 72) return;
+  final fileoff = bd.getUint64(40, Endian.little);
+  final filesize = bd.getUint64(48, Endian.little);
+  final nsects = bd.getUint32(64, Endian.little);
+  if (fileoff > 0 && filesize > 0) {
+    floor.consider(fileoff, filesize);
+  }
+  // Inspect each section_64 (80 bytes each starting at offset 72).
+  for (var s = 0; s < nsects; s++) {
+    final sectOff = 72 + s * 80;
+    if (sectOff + 80 <= lc.bytes.length) {
+      final sSize = bd.getUint64(sectOff + 40, Endian.little);
+      final sOffset = bd.getUint32(sectOff + 48, Endian.little);
+      floor.consider(sOffset, sSize);
     }
   }
-  return minOffset;
 }
 
 /// Patches a 64-bit or universal (fat) Mach-O binary in memory and recomputes
@@ -2056,43 +2172,14 @@ Uint8List patchMachO(
         rpaths: rpaths,
       );
     }
-    final slices = extractFatSlices(inputBytes);
-    final bd = ByteData.sublistView(inputBytes);
-    final isFat64 =
-        bd.getUint32(0, Endian.big) == fatMagic64 ||
-        bd.getUint32(0, Endian.little) == fatMagic64;
-    final patchedSlices = <FatSlice>[];
-    for (var i = 0; i < slices.length; i++) {
-      final s = slices[i];
-      if (isMachO32(s.bytes) || (s.cputype & cpuArchAbi64) == 0) {
-        throw FormatException(
-          'Fat Mach-O slice $i (cputype 0x${s.cputype.toRadixString(16)}) is '
-          'an unsupported 32-bit Mach-O binary.',
-        );
-      }
-      if (!isMachO64(s.bytes)) {
-        throw FormatException(
-          'Fat Mach-O slice $i is not a valid 64-bit Mach-O binary.',
-        );
-      }
-      final patchedBytes = _patchSingleMachO64(
-        s.bytes,
-        platform: platform,
-        minOs: minOs,
-        sdkVersion: sdkVersion,
-        installName: installName,
-        rpaths: rpaths,
-      );
-      patchedSlices.add(
-        FatSlice(
-          cputype: s.cputype,
-          cpusubtype: s.cpusubtype,
-          align: s.align,
-          bytes: patchedBytes,
-        ),
-      );
-    }
-    return buildFatMachO(patchedSlices, fat64: isFat64);
+    return _patchFatMachO(
+      inputBytes,
+      platform: platform,
+      minOs: minOs,
+      sdkVersion: sdkVersion,
+      installName: installName,
+      rpaths: rpaths,
+    );
   }
 
   if (isMachO32(inputBytes)) {
@@ -2109,16 +2196,7 @@ Uint8List patchMachO(
   }
 
   if (arch != null) {
-    final targetCpu = _cpuTypeForArch(arch);
-    final actualCpu = ByteData.sublistView(
-      inputBytes,
-    ).getUint32(4, Endian.little);
-    if (actualCpu != targetCpu) {
-      throw FormatException(
-        'Mach-O cputype 0x${actualCpu.toRadixString(16)} does not match '
-        'requested architecture "$arch".',
-      );
-    }
+    _checkThinArch(inputBytes, arch);
   }
 
   return _patchSingleMachO64(
@@ -2129,6 +2207,69 @@ Uint8List patchMachO(
     installName: installName,
     rpaths: rpaths,
   );
+}
+
+/// Patches every slice of a universal (fat) Mach-O binary and reassembles it,
+/// preserving the fat32/fat64 header width.
+Uint8List _patchFatMachO(
+  Uint8List inputBytes, {
+  int? platform,
+  int? minOs,
+  int? sdkVersion,
+  String? installName,
+  List<String> rpaths = const [],
+}) {
+  final slices = extractFatSlices(inputBytes);
+  final bd = ByteData.sublistView(inputBytes);
+  final isFat64 =
+      bd.getUint32(0, Endian.big) == fatMagic64 ||
+      bd.getUint32(0, Endian.little) == fatMagic64;
+  final patchedSlices = <FatSlice>[];
+  for (var i = 0; i < slices.length; i++) {
+    final s = slices[i];
+    if (isMachO32(s.bytes) || (s.cputype & cpuArchAbi64) == 0) {
+      throw FormatException(
+        'Fat Mach-O slice $i (cputype 0x${s.cputype.toRadixString(16)}) is '
+        'an unsupported 32-bit Mach-O binary.',
+      );
+    }
+    if (!isMachO64(s.bytes)) {
+      throw FormatException(
+        'Fat Mach-O slice $i is not a valid 64-bit Mach-O binary.',
+      );
+    }
+    final patchedBytes = _patchSingleMachO64(
+      s.bytes,
+      platform: platform,
+      minOs: minOs,
+      sdkVersion: sdkVersion,
+      installName: installName,
+      rpaths: rpaths,
+    );
+    patchedSlices.add(
+      FatSlice(
+        cputype: s.cputype,
+        cpusubtype: s.cpusubtype,
+        align: s.align,
+        bytes: patchedBytes,
+      ),
+    );
+  }
+  return buildFatMachO(patchedSlices, fat64: isFat64);
+}
+
+/// Throws when a thin binary's cputype is not the requested [arch].
+void _checkThinArch(Uint8List inputBytes, String arch) {
+  final targetCpu = _cpuTypeForArch(arch);
+  final actualCpu = ByteData.sublistView(
+    inputBytes,
+  ).getUint32(4, Endian.little);
+  if (actualCpu != targetCpu) {
+    throw FormatException(
+      'Mach-O cputype 0x${actualCpu.toRadixString(16)} does not match '
+      'requested architecture "$arch".',
+    );
+  }
 }
 
 Uint8List _patchSingleMachO64(
@@ -2147,80 +2288,20 @@ Uint8List _patchSingleMachO64(
     inputBytes.length,
   );
 
-  final updatedCommands = <LoadCommand>[];
-  var wroteBuildVersion = false;
-  var wroteIdDylib = false;
-  final existingRpaths = <String>{};
-  LoadCommand? codeSigCommand;
-
+  final state = _PatchRewrite();
   for (final lc in originalCommands) {
-    // Strip legacy LC_VERSION_MIN_* commands when setting LC_BUILD_VERSION.
-    if (platform != null &&
-        (lc.cmd == lcVersionMinMacosx ||
-            lc.cmd == lcVersionMinIphoneos ||
-            lc.cmd == lcVersionMinTvos ||
-            lc.cmd == lcVersionMinWatchos)) {
-      continue;
-    }
-
-    if (lc.cmd == lcBuildVersion && platform != null && minOs != null) {
-      if (!wroteBuildVersion) {
-        updatedCommands.add(
-          buildLcBuildVersion(
-            platform: platform,
-            minos: minOs,
-            sdk: sdkVersion ?? minOs,
-          ),
-        );
-        wroteBuildVersion = true;
-      }
-      continue;
-    }
-
-    if (lc.cmd == lcIdDylib && installName != null) {
-      if (!wroteIdDylib) {
-        int timestamp = 2;
-        int currentVersion = 0x00010000;
-        int compatibilityVersion = 0x00010000;
-        if (lc.bytes.length >= 24) {
-          final lcBd = ByteData.sublistView(lc.bytes);
-          timestamp = lcBd.getUint32(12, Endian.little);
-          currentVersion = lcBd.getUint32(16, Endian.little);
-          compatibilityVersion = lcBd.getUint32(20, Endian.little);
-        }
-        updatedCommands.add(
-          buildLcIdDylib(
-            installName,
-            timestamp: timestamp,
-            currentVersion: currentVersion,
-            compatibilityVersion: compatibilityVersion,
-          ),
-        );
-        wroteIdDylib = true;
-      }
-      continue;
-    }
-
-    if (lc.cmd == lcRpath && lc.bytes.length >= 12) {
-      final lcBd = ByteData.sublistView(lc.bytes);
-      final pathOffset = lcBd.getUint32(8, Endian.little);
-      existingRpaths.add(_readLcString(lc.bytes, pathOffset));
-      updatedCommands.add(lc);
-      continue;
-    }
-
-    // Hold LC_CODE_SIGNATURE so any newly added load commands are placed
-    // before LC_CODE_SIGNATURE (matching ld64 / vtool conventions).
-    if (lc.cmd == lcCodeSignature && codeSigCommand == null) {
-      codeSigCommand = lc;
-      continue;
-    }
-
-    updatedCommands.add(lc);
+    _rewriteLoadCommand(
+      lc,
+      platform: platform,
+      minOs: minOs,
+      sdkVersion: sdkVersion,
+      installName: installName,
+      state: state,
+    );
   }
 
-  if (platform != null && minOs != null && !wroteBuildVersion) {
-    updatedCommands.add(
+  if (platform != null && minOs != null && !state.wroteBuildVersion) {
+    state.updatedCommands.add(
       buildLcBuildVersion(
         platform: platform,
         minos: minOs,
@@ -2229,20 +2310,132 @@ Uint8List _patchSingleMachO64(
     );
   }
 
-  if (installName != null && !wroteIdDylib) {
-    updatedCommands.add(buildLcIdDylib(installName));
+  if (installName != null && !state.wroteIdDylib) {
+    state.updatedCommands.add(buildLcIdDylib(installName));
   }
 
   for (final rpath in rpaths) {
-    if (existingRpaths.add(rpath)) {
-      updatedCommands.add(buildLcRpath(rpath));
+    if (state.existingRpaths.add(rpath)) {
+      state.updatedCommands.add(buildLcRpath(rpath));
     }
   }
 
-  if (codeSigCommand != null) {
-    updatedCommands.add(codeSigCommand);
+  if (state.codeSigCommand != null) {
+    state.updatedCommands.add(state.codeSigCommand!);
   }
 
+  return _emitPatchedMachO(
+    inputBytes,
+    oldSizeofcmds,
+    maxLoadCommandEnd,
+    state.updatedCommands,
+    state.codeSigCommand,
+  );
+}
+
+/// Mutable rewrite state for [_patchSingleMachO64].
+class _PatchRewrite {
+  final updatedCommands = <LoadCommand>[];
+  var wroteBuildVersion = false;
+  var wroteIdDylib = false;
+  final existingRpaths = <String>{};
+  LoadCommand? codeSigCommand;
+}
+
+/// Rewrites one load command into [state], stripping legacy version-minimum
+/// commands and holding `LC_CODE_SIGNATURE` last.
+void _rewriteLoadCommand(
+  LoadCommand lc, {
+  int? platform,
+  int? minOs,
+  int? sdkVersion,
+  String? installName,
+  required _PatchRewrite state,
+}) {
+  // Strip legacy LC_VERSION_MIN_* commands when setting LC_BUILD_VERSION.
+  if (platform != null &&
+      (lc.cmd == lcVersionMinMacosx ||
+          lc.cmd == lcVersionMinIphoneos ||
+          lc.cmd == lcVersionMinTvos ||
+          lc.cmd == lcVersionMinWatchos)) {
+    return;
+  }
+
+  if (lc.cmd == lcBuildVersion && platform != null && minOs != null) {
+    if (!state.wroteBuildVersion) {
+      state.updatedCommands.add(
+        buildLcBuildVersion(
+          platform: platform,
+          minos: minOs,
+          sdk: sdkVersion ?? minOs,
+        ),
+      );
+      state.wroteBuildVersion = true;
+    }
+    return;
+  }
+
+  if (lc.cmd == lcIdDylib && installName != null) {
+    if (!state.wroteIdDylib) {
+      final versions = _idDylibVersions(lc);
+      state.updatedCommands.add(
+        buildLcIdDylib(
+          installName,
+          timestamp: versions.timestamp,
+          currentVersion: versions.currentVersion,
+          compatibilityVersion: versions.compatibilityVersion,
+        ),
+      );
+      state.wroteIdDylib = true;
+    }
+    return;
+  }
+
+  if (lc.cmd == lcRpath && lc.bytes.length >= 12) {
+    final lcBd = ByteData.sublistView(lc.bytes);
+    final pathOffset = lcBd.getUint32(8, Endian.little);
+    state.existingRpaths.add(_readLcString(lc.bytes, pathOffset));
+    state.updatedCommands.add(lc);
+    return;
+  }
+
+  // Hold LC_CODE_SIGNATURE so any newly added load commands are placed
+  // before LC_CODE_SIGNATURE (matching ld64 / vtool conventions).
+  if (lc.cmd == lcCodeSignature && state.codeSigCommand == null) {
+    state.codeSigCommand = lc;
+    return;
+  }
+
+  state.updatedCommands.add(lc);
+}
+
+/// The version fields an `LC_ID_DYLIB` rewrite preserves, defaulting as new.
+({int timestamp, int currentVersion, int compatibilityVersion})
+_idDylibVersions(LoadCommand lc) {
+  if (lc.bytes.length < 24) {
+    return (
+      timestamp: 2,
+      currentVersion: 0x00010000,
+      compatibilityVersion: 0x00010000,
+    );
+  }
+  final lcBd = ByteData.sublistView(lc.bytes);
+  return (
+    timestamp: lcBd.getUint32(12, Endian.little),
+    currentVersion: lcBd.getUint32(16, Endian.little),
+    compatibilityVersion: lcBd.getUint32(20, Endian.little),
+  );
+}
+
+/// Serializes [updatedCommands] over [inputBytes], growing a header-only
+/// buffer or fitting before the first payload offset, then re-signs.
+Uint8List _emitPatchedMachO(
+  Uint8List inputBytes,
+  int oldSizeofcmds,
+  int maxLoadCommandEnd,
+  List<LoadCommand> updatedCommands,
+  LoadCommand? codeSigCommand,
+) {
   var newSizeofcmds = 0;
   for (final lc in updatedCommands) {
     newSizeofcmds += lc.cmdsize;
@@ -2371,76 +2564,19 @@ Uint8List generateStubMachO({
   required String installName,
   int fileType = mhDylib,
 }) {
-  final int cputype;
-  final int cpusubtype;
-  switch (arch) {
-    case 'arm64':
-      cputype = cpuTypeArm64;
-      cpusubtype = cpuSubtypeArm64All;
-    case 'x86_64':
-      cputype = cpuTypeX86_64;
-      cpusubtype = cpuSubtypeX86_64All;
-    default:
-      throw ArgumentError.value(arch, 'arch', 'Expected "arm64" or "x86_64".');
-  }
+  final (cputype, cpusubtype) = _stubCpuType(arch);
 
   // Page size: 16 KB (0x4000) for arm64, 4 KB (0x1000) for x86_64.
   final pageSize = arch == 'arm64' ? 0x4000 : 0x1000;
-  // 8-byte aligned empty string table (" \0" padded to 8 bytes) in __LINKEDIT.
-  const linkeditFileSize = 8;
 
-  // LC_SEGMENT_64 (__TEXT) - 72 bytes (0 sections).
-  final textSeg = buildLcSegment64(
-    segname: '__TEXT',
-    vmaddr: 0,
-    vmsize: pageSize,
-    fileoff: 0,
-    filesize: pageSize,
-    maxprot: 5, // VM_PROT_READ | VM_PROT_EXECUTE
-    initprot: 5, // VM_PROT_READ | VM_PROT_EXECUTE
-  );
-
-  // LC_SEGMENT_64 (__LINKEDIT) - 72 bytes (0 sections).
-  final linkeditSeg = buildLcSegment64(
-    segname: '__LINKEDIT',
-    vmaddr: pageSize,
-    vmsize: pageSize,
-    fileoff: pageSize,
-    filesize: linkeditFileSize,
-    maxprot: 1, // VM_PROT_READ
-    initprot: 1, // VM_PROT_READ
-  );
-
-  // LC_SYMTAB and LC_DYSYMTAB pointing into __LINKEDIT.
-  final symtab = buildLcSymtab(
-    symoff: pageSize,
-    nsyms: 0,
-    stroff: pageSize,
-    strsize: linkeditFileSize,
-  );
-  final dysymtab = buildLcDysymtab();
-  final placeholderUuid = buildLcUuid(Uint8List(16));
-  final buildVersion = buildLcBuildVersion(
+  final commands = _stubCommands(
     platform: platform,
-    minos: minOs,
-    sdk: sdkVersion,
+    minOs: minOs,
+    sdkVersion: sdkVersion,
+    installName: installName,
+    fileType: fileType,
+    pageSize: pageSize,
   );
-
-  final commands = <LoadCommand>[
-    textSeg,
-    linkeditSeg,
-    if (fileType == mhDylib && installName.isNotEmpty)
-      buildLcIdDylib(installName),
-    symtab,
-    dysymtab,
-    placeholderUuid,
-    buildVersion,
-    if (fileType == mhExecute) ...[
-      buildLcRpath('@executable_path/Frameworks'),
-      if (platform == platformMacos)
-        buildLcRpath('@executable_path/../Frameworks'),
-    ],
-  ];
 
   var sizeofcmds = 0;
   for (final lc in commands) {
@@ -2453,16 +2589,16 @@ Uint8List generateStubMachO({
       mhTwolevel |
       (fileType == mhExecute ? mhPie : mhNoReexportedDylibs);
 
-  final out = Uint8List(pageSize + linkeditFileSize);
-  final bd = ByteData.sublistView(out);
-  bd.setUint32(0, mhMagic64, Endian.little);
-  bd.setUint32(4, cputype, Endian.little);
-  bd.setUint32(8, cpusubtype, Endian.little);
-  bd.setUint32(12, fileType, Endian.little);
-  bd.setUint32(16, commands.length, Endian.little);
-  bd.setUint32(20, sizeofcmds, Endian.little);
-  bd.setUint32(24, flags, Endian.little);
-  bd.setUint32(28, 0, Endian.little);
+  final out = Uint8List(pageSize + _stubLinkeditFileSize);
+  _writeStubHeader(
+    out,
+    cputype: cputype,
+    cpusubtype: cpusubtype,
+    fileType: fileType,
+    commandCount: commands.length,
+    sizeofcmds: sizeofcmds,
+    flags: flags,
+  );
 
   var offset = mhHeaderSize64;
   var uuidDataOffset = -1;
@@ -2480,15 +2616,119 @@ Uint8List generateStubMachO({
 
   // Compute deterministic UUID from the binary content (with UUID bytes zeroed),
   // formatted as an RFC 4122 v5 UUID (matching ld64 / ld64.lld).
-  if (uuidDataOffset >= 0) {
-    final digest = sha256(out);
-    final uuid = Uint8List.fromList(digest.sublist(0, 16));
-    uuid[6] = (uuid[6] & 0x0f) | 0x50;
-    uuid[8] = (uuid[8] & 0x3f) | 0x80;
-    out.setRange(uuidDataOffset, uuidDataOffset + 16, uuid);
-  }
+  _stampStubUuid(out, uuidDataOffset);
 
   return out;
+}
+
+// 8-byte aligned empty string table (" \0" padded to 8 bytes) in the stub's
+// __LINKEDIT.
+const _stubLinkeditFileSize = 8;
+
+/// The cputype/cpusubtype pair for a stub [arch].
+(int, int) _stubCpuType(String arch) {
+  switch (arch) {
+    case 'arm64':
+      return (cpuTypeArm64, cpuSubtypeArm64All);
+    case 'x86_64':
+      return (cpuTypeX86_64, cpuSubtypeX86_64All);
+    default:
+      throw ArgumentError.value(arch, 'arch', 'Expected "arm64" or "x86_64".');
+  }
+}
+
+/// The stub's load commands: segments, symtabs, identity, UUID and version.
+List<LoadCommand> _stubCommands({
+  required int platform,
+  required int minOs,
+  required int sdkVersion,
+  required String installName,
+  required int fileType,
+  required int pageSize,
+}) {
+  // LC_SEGMENT_64 (__TEXT) - 72 bytes (0 sections).
+  final textSeg = buildLcSegment64(
+    segname: '__TEXT',
+    vmaddr: 0,
+    vmsize: pageSize,
+    fileoff: 0,
+    filesize: pageSize,
+    maxprot: 5, // VM_PROT_READ | VM_PROT_EXECUTE
+    initprot: 5, // VM_PROT_READ | VM_PROT_EXECUTE
+  );
+
+  // LC_SEGMENT_64 (__LINKEDIT) - 72 bytes (0 sections).
+  final linkeditSeg = buildLcSegment64(
+    segname: '__LINKEDIT',
+    vmaddr: pageSize,
+    vmsize: pageSize,
+    fileoff: pageSize,
+    filesize: _stubLinkeditFileSize,
+    maxprot: 1, // VM_PROT_READ
+    initprot: 1, // VM_PROT_READ
+  );
+
+  // LC_SYMTAB and LC_DYSYMTAB pointing into __LINKEDIT.
+  final symtab = buildLcSymtab(
+    symoff: pageSize,
+    nsyms: 0,
+    stroff: pageSize,
+    strsize: _stubLinkeditFileSize,
+  );
+  final dysymtab = buildLcDysymtab();
+  final placeholderUuid = buildLcUuid(Uint8List(16));
+  final buildVersion = buildLcBuildVersion(
+    platform: platform,
+    minos: minOs,
+    sdk: sdkVersion,
+  );
+
+  return <LoadCommand>[
+    textSeg,
+    linkeditSeg,
+    if (fileType == mhDylib && installName.isNotEmpty)
+      buildLcIdDylib(installName),
+    symtab,
+    dysymtab,
+    placeholderUuid,
+    buildVersion,
+    if (fileType == mhExecute) ...[
+      buildLcRpath('@executable_path/Frameworks'),
+      if (platform == platformMacos)
+        buildLcRpath('@executable_path/../Frameworks'),
+    ],
+  ];
+}
+
+/// Writes the 64-bit Mach-O header over [out].
+void _writeStubHeader(
+  Uint8List out, {
+  required int cputype,
+  required int cpusubtype,
+  required int fileType,
+  required int commandCount,
+  required int sizeofcmds,
+  required int flags,
+}) {
+  final bd = ByteData.sublistView(out);
+  bd.setUint32(0, mhMagic64, Endian.little);
+  bd.setUint32(4, cputype, Endian.little);
+  bd.setUint32(8, cpusubtype, Endian.little);
+  bd.setUint32(12, fileType, Endian.little);
+  bd.setUint32(16, commandCount, Endian.little);
+  bd.setUint32(20, sizeofcmds, Endian.little);
+  bd.setUint32(24, flags, Endian.little);
+  bd.setUint32(28, 0, Endian.little);
+}
+
+/// Stamps the content-derived UUID at [uuidDataOffset] (or skips when absent).
+void _stampStubUuid(Uint8List out, int uuidDataOffset) {
+  if (uuidDataOffset < 0) return;
+  final digest = sha256(out);
+  final uuid = Uint8List.fromList(digest.sublist(0, 16));
+  uuid[6] = (uuid[6] & 0x0f) | 0x50;
+  uuid[8] = (uuid[8] & 0x3f) | 0x80;
+  out.setRange(uuidDataOffset, uuidDataOffset + 16, uuid);
 }
 
 // Pure-Dart FIPS 180-4 SHA-256 implementation.
