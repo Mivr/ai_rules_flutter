@@ -90,118 +90,140 @@ PlatformLauncher createPlatformLauncher(
 ) {
   switch (platform) {
     case 'web':
-      final webDirKey = env['FLUTTER_INTEGRATION_TEST_WEB_DIR'];
-      final browserKey = env['FLUTTER_INTEGRATION_TEST_BROWSER'];
-      final fontconfigKey = env['FLUTTER_INTEGRATION_TEST_FONTCONFIG'];
-      if (webDirKey == null || webDirKey.isEmpty) {
-        throw const FormatException(
-          'FLUTTER_INTEGRATION_TEST_WEB_DIR must be set for platform="web".',
-        );
-      }
-      if (browserKey == null || browserKey.isEmpty) {
-        throw const FormatException(
-          'FLUTTER_INTEGRATION_TEST_BROWSER must be set for platform="web".',
-        );
-      }
-      final webDir = r.rlocation(webDirKey);
-      final browserBinary = r.rlocation(browserKey);
-      final fontconfigFile = (fontconfigKey == null || fontconfigKey.isEmpty)
-          ? null
-          : r.rlocation(fontconfigKey);
-      final robotoKey = env['FLUTTER_INTEGRATION_TEST_ROBOTO_FONT'];
-      final robotoFont = (robotoKey == null || robotoKey.isEmpty)
-          ? null
-          : r.rlocation(robotoKey);
-      return WebPlatformLauncher(
-        webDir: webDir,
-        browserBinary: browserBinary,
-        fontconfigFile: fontconfigFile,
-        robotoFontFile: robotoFont,
-        baseTempDir: env['TEST_TMPDIR'] ?? Directory.systemTemp.path,
-      );
+      return _webLauncherFromEnv(env, r);
     case 'linux':
-      final bundleDirKey = env['FLUTTER_INTEGRATION_TEST_LINUX_BUNDLE'];
-      final binaryName = env['FLUTTER_INTEGRATION_TEST_LINUX_BINARY'];
-      final xvfbKey = env['FLUTTER_INTEGRATION_TEST_XVFB'];
-      final xkbcompKey = env['FLUTTER_INTEGRATION_TEST_XKBCOMP'];
-      final fontconfigKey = env['FLUTTER_INTEGRATION_TEST_FONTCONFIG'];
-      if (bundleDirKey == null || bundleDirKey.isEmpty) {
-        throw const FormatException(
-          'FLUTTER_INTEGRATION_TEST_LINUX_BUNDLE must be set for platform="linux".',
-        );
-      }
-      if (binaryName == null || binaryName.isEmpty) {
-        throw const FormatException(
-          'FLUTTER_INTEGRATION_TEST_LINUX_BINARY must be set for platform="linux".',
-        );
-      }
-      if (xvfbKey == null || xvfbKey.isEmpty) {
-        throw const FormatException(
-          'FLUTTER_INTEGRATION_TEST_XVFB must be set for platform="linux".',
-        );
-      }
-      if (xkbcompKey == null || xkbcompKey.isEmpty) {
-        throw const FormatException(
-          'FLUTTER_INTEGRATION_TEST_XKBCOMP must be set for platform="linux".',
-        );
-      }
-      final bundleDir = r.rlocation(bundleDirKey);
-      final xvfbBinary = r.rlocation(xvfbKey);
-      final xkbcompBinary = r.rlocation(xkbcompKey);
-      final fontconfigFile = (fontconfigKey == null || fontconfigKey.isEmpty)
-          ? null
-          : r.rlocation(fontconfigKey);
-      return LinuxPlatformLauncher(
-        bundleDir: bundleDir,
-        binaryName: binaryName,
-        xvfbBinary: xvfbBinary,
-        xkbcompBinary: xkbcompBinary,
-        fontconfigFile: fontconfigFile,
-        baseTempDir: env['TEST_TMPDIR'] ?? Directory.systemTemp.path,
-      );
+      return _linuxLauncherFromEnv(env, r);
     case 'android':
-      final apkKey = env['FLUTTER_INTEGRATION_TEST_ANDROID_APK'];
-      final packageName = env['FLUTTER_INTEGRATION_TEST_ANDROID_PACKAGE'];
-      final emulatorKey = env['FLUTTER_INTEGRATION_TEST_ANDROID_EMULATOR'];
-      final adbKey = env['FLUTTER_INTEGRATION_TEST_ANDROID_ADB'];
-      if (apkKey == null || apkKey.isEmpty) {
-        throw const FormatException(
-          'FLUTTER_INTEGRATION_TEST_ANDROID_APK must be set for platform="android".',
-        );
-      }
-      if (packageName == null || packageName.isEmpty) {
-        throw const FormatException(
-          'FLUTTER_INTEGRATION_TEST_ANDROID_PACKAGE must be set for platform="android".',
-        );
-      }
-      if (emulatorKey == null || emulatorKey.isEmpty) {
-        throw const FormatException(
-          'FLUTTER_INTEGRATION_TEST_ANDROID_EMULATOR must be set for platform="android".',
-        );
-      }
-      if (adbKey == null || adbKey.isEmpty) {
-        throw const FormatException(
-          'FLUTTER_INTEGRATION_TEST_ANDROID_ADB must be set for platform="android".',
-        );
-      }
-      final apkPath = r.rlocation(apkKey);
-      final emulatorBinary = r.rlocation(emulatorKey);
-      final adbBinary = r.rlocation(adbKey);
-      final kvmPath = env['FLUTTER_INTEGRATION_TEST_KVM_PATH'] ?? '/dev/kvm';
-      return AndroidPlatformLauncher(
-        apkPath: apkPath,
-        packageName: packageName,
-        emulatorBinary: emulatorBinary,
-        adbBinary: adbBinary,
-        baseTempDir: env['TEST_TMPDIR'] ?? Directory.systemTemp.path,
-        kvmPath: kvmPath,
-      );
+      return _androidLauncherFromEnv(env, r);
     default:
       throw FormatException(
         'Unsupported integration test platform "$platform". '
         'Supported platforms: web, linux, android.',
       );
   }
+}
+
+/// Builds the web launcher: the built bundle served over localhost HTTP to
+/// the pinned `chrome-headless-shell`.
+WebPlatformLauncher _webLauncherFromEnv(Map<String, String> env, Runfiles r) {
+  final webDirKey = env['FLUTTER_INTEGRATION_TEST_WEB_DIR'];
+  final browserKey = env['FLUTTER_INTEGRATION_TEST_BROWSER'];
+  final fontconfigKey = env['FLUTTER_INTEGRATION_TEST_FONTCONFIG'];
+  if (webDirKey == null || webDirKey.isEmpty) {
+    throw const FormatException(
+      'FLUTTER_INTEGRATION_TEST_WEB_DIR must be set for platform="web".',
+    );
+  }
+  if (browserKey == null || browserKey.isEmpty) {
+    throw const FormatException(
+      'FLUTTER_INTEGRATION_TEST_BROWSER must be set for platform="web".',
+    );
+  }
+  final webDir = r.rlocation(webDirKey);
+  final browserBinary = r.rlocation(browserKey);
+  final fontconfigFile = (fontconfigKey == null || fontconfigKey.isEmpty)
+      ? null
+      : r.rlocation(fontconfigKey);
+  final robotoKey = env['FLUTTER_INTEGRATION_TEST_ROBOTO_FONT'];
+  final robotoFont = (robotoKey == null || robotoKey.isEmpty)
+      ? null
+      : r.rlocation(robotoKey);
+  return WebPlatformLauncher(
+    webDir: webDir,
+    browserBinary: browserBinary,
+    fontconfigFile: fontconfigFile,
+    robotoFontFile: robotoFont,
+    baseTempDir: env['TEST_TMPDIR'] ?? Directory.systemTemp.path,
+  );
+}
+
+/// Builds the Linux launcher: the desktop bundle under a hermetic `Xvfb`.
+LinuxPlatformLauncher _linuxLauncherFromEnv(
+  Map<String, String> env,
+  Runfiles r,
+) {
+  final bundleDirKey = env['FLUTTER_INTEGRATION_TEST_LINUX_BUNDLE'];
+  final binaryName = env['FLUTTER_INTEGRATION_TEST_LINUX_BINARY'];
+  final xvfbKey = env['FLUTTER_INTEGRATION_TEST_XVFB'];
+  final xkbcompKey = env['FLUTTER_INTEGRATION_TEST_XKBCOMP'];
+  final fontconfigKey = env['FLUTTER_INTEGRATION_TEST_FONTCONFIG'];
+  if (bundleDirKey == null || bundleDirKey.isEmpty) {
+    throw const FormatException(
+      'FLUTTER_INTEGRATION_TEST_LINUX_BUNDLE must be set for platform="linux".',
+    );
+  }
+  if (binaryName == null || binaryName.isEmpty) {
+    throw const FormatException(
+      'FLUTTER_INTEGRATION_TEST_LINUX_BINARY must be set for platform="linux".',
+    );
+  }
+  if (xvfbKey == null || xvfbKey.isEmpty) {
+    throw const FormatException(
+      'FLUTTER_INTEGRATION_TEST_XVFB must be set for platform="linux".',
+    );
+  }
+  if (xkbcompKey == null || xkbcompKey.isEmpty) {
+    throw const FormatException(
+      'FLUTTER_INTEGRATION_TEST_XKBCOMP must be set for platform="linux".',
+    );
+  }
+  final bundleDir = r.rlocation(bundleDirKey);
+  final xvfbBinary = r.rlocation(xvfbKey);
+  final xkbcompBinary = r.rlocation(xkbcompKey);
+  final fontconfigFile = (fontconfigKey == null || fontconfigKey.isEmpty)
+      ? null
+      : r.rlocation(fontconfigKey);
+  return LinuxPlatformLauncher(
+    bundleDir: bundleDir,
+    binaryName: binaryName,
+    xvfbBinary: xvfbBinary,
+    xkbcompBinary: xkbcompBinary,
+    fontconfigFile: fontconfigFile,
+    baseTempDir: env['TEST_TMPDIR'] ?? Directory.systemTemp.path,
+  );
+}
+
+/// Builds the Android launcher: the APK on a hermetic emulator via `adb`.
+AndroidPlatformLauncher _androidLauncherFromEnv(
+  Map<String, String> env,
+  Runfiles r,
+) {
+  final apkKey = env['FLUTTER_INTEGRATION_TEST_ANDROID_APK'];
+  final packageName = env['FLUTTER_INTEGRATION_TEST_ANDROID_PACKAGE'];
+  final emulatorKey = env['FLUTTER_INTEGRATION_TEST_ANDROID_EMULATOR'];
+  final adbKey = env['FLUTTER_INTEGRATION_TEST_ANDROID_ADB'];
+  if (apkKey == null || apkKey.isEmpty) {
+    throw const FormatException(
+      'FLUTTER_INTEGRATION_TEST_ANDROID_APK must be set for platform="android".',
+    );
+  }
+  if (packageName == null || packageName.isEmpty) {
+    throw const FormatException(
+      'FLUTTER_INTEGRATION_TEST_ANDROID_PACKAGE must be set for platform="android".',
+    );
+  }
+  if (emulatorKey == null || emulatorKey.isEmpty) {
+    throw const FormatException(
+      'FLUTTER_INTEGRATION_TEST_ANDROID_EMULATOR must be set for platform="android".',
+    );
+  }
+  if (adbKey == null || adbKey.isEmpty) {
+    throw const FormatException(
+      'FLUTTER_INTEGRATION_TEST_ANDROID_ADB must be set for platform="android".',
+    );
+  }
+  final apkPath = r.rlocation(apkKey);
+  final emulatorBinary = r.rlocation(emulatorKey);
+  final adbBinary = r.rlocation(adbKey);
+  final kvmPath = env['FLUTTER_INTEGRATION_TEST_KVM_PATH'] ?? '/dev/kvm';
+  return AndroidPlatformLauncher(
+    apkPath: apkPath,
+    packageName: packageName,
+    emulatorBinary: emulatorBinary,
+    adbBinary: adbBinary,
+    baseTempDir: env['TEST_TMPDIR'] ?? Directory.systemTemp.path,
+    kvmPath: kvmPath,
+  );
 }
 
 /// Decodes the JSON-encoded declared environment forwarded by
@@ -659,29 +681,9 @@ class LinuxPlatformLauncher implements PlatformLauncher {
   @override
   String get suiteCompiler => 'kernel';
 
-  @override
-  Future<Process> startTarget(int harnessPort) async {
-    if (!File(xvfbBinary).existsSync()) {
-      throw StateError('Pinned Xvfb binary not found at "$xvfbBinary".');
-    }
-    if (!File(xkbcompBinary).existsSync()) {
-      throw StateError('Pinned xkbcomp binary not found at "$xkbcompBinary".');
-    }
-    if (!Directory(bundleDir).existsSync()) {
-      throw StateError(
-        'Built Linux bundle directory not found at "$bundleDir".',
-      );
-    }
-    final appBinary = '$bundleDir/$binaryName';
-    if (!File(appBinary).existsSync()) {
-      throw StateError(
-        'Built Linux application binary not found at "$appBinary".',
-      );
-    }
-
-    // xvfbBinary is at <repoRoot>/sysroot/usr/bin/Xvfb.
-    final sysrootDir = File(xvfbBinary).parent.parent.parent.path;
-
+  /// Creates the scratch tree for a Linux run: config, cache, runtime and
+  /// fontconfig homes plus the empty GTK/GIO override directories.
+  Directory _prepareLinuxScratch() {
     final scratch = Directory(
       '$baseTempDir/linux_integration_${pid}_${DateTime.now().microsecondsSinceEpoch}',
     )..createSync(recursive: true);
@@ -692,33 +694,31 @@ class LinuxPlatformLauncher implements PlatformLauncher {
     Directory('${scratch.path}/fontconfig-cache').createSync(recursive: true);
     Directory('${scratch.path}/empty-gio-modules').createSync(recursive: true);
     Directory('${scratch.path}/empty-gtk-path').createSync(recursive: true);
+    return scratch;
+  }
 
-    String? effectiveFontconfig = fontconfigFile;
+  /// Points fontconfig at the sysroot's fonts when it ships any, falling
+  /// back to the pinned `fonts.conf`.
+  String? _writeScratchFontsConf(Directory scratch, String sysrootDir) {
     final sysrootFontsDir = Directory('$sysrootDir/usr/share/fonts');
-    if (sysrootFontsDir.existsSync()) {
-      final localFontsConf = File('${scratch.path}/fonts.conf');
-      localFontsConf.writeAsStringSync('''<?xml version="1.0"?>
+    if (!sysrootFontsDir.existsSync()) return fontconfigFile;
+    final localFontsConf = File('${scratch.path}/fonts.conf');
+    localFontsConf.writeAsStringSync('''<?xml version="1.0"?>
 <!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
 <fontconfig>
   <dir>${sysrootFontsDir.path}</dir>
   <cachedir>${scratch.path}/fontconfig-cache</cachedir>
 </fontconfig>
 ''');
-      effectiveFontconfig = localFontsConf.path;
-    }
+    return localFontsConf.path;
+  }
 
-    final patchedXvfb = prepareHermeticXvfbBinary(
-      sourceXvfbBinary: xvfbBinary,
-      scratchDir: scratch.path,
-    );
-    final xvfbArgs = buildXvfbArguments(
-      xkbDir: '$sysrootDir/usr/share/X11/xkb',
-    );
-    final xvfbEnv = buildXvfbEnvironment(
-      sysrootDir: sysrootDir,
-      scratchDir: scratch.path,
-    );
-
+  /// Starts the patched `Xvfb` and waits for its `-displayfd` number.
+  Future<String> _bootXvfb(
+    String patchedXvfb,
+    List<String> xvfbArgs,
+    Map<String, String> xvfbEnv,
+  ) async {
     final xvfb = await Process.start(
       patchedXvfb,
       xvfbArgs,
@@ -759,9 +759,8 @@ class LinuxPlatformLauncher implements PlatformLauncher {
           },
         );
 
-    final String displayNumber;
     try {
-      displayNumber = await displayCompleter.future.timeout(
+      return await displayCompleter.future.timeout(
         const Duration(seconds: 15),
         onTimeout: () => throw TimeoutException(
           'Timed out waiting for Xvfb to report a display number:\n'
@@ -771,6 +770,47 @@ class LinuxPlatformLauncher implements PlatformLauncher {
     } finally {
       await stdoutSub.cancel();
     }
+  }
+
+  @override
+  Future<Process> startTarget(int harnessPort) async {
+    if (!File(xvfbBinary).existsSync()) {
+      throw StateError('Pinned Xvfb binary not found at "$xvfbBinary".');
+    }
+    if (!File(xkbcompBinary).existsSync()) {
+      throw StateError('Pinned xkbcomp binary not found at "$xkbcompBinary".');
+    }
+    if (!Directory(bundleDir).existsSync()) {
+      throw StateError(
+        'Built Linux bundle directory not found at "$bundleDir".',
+      );
+    }
+    final appBinary = '$bundleDir/$binaryName';
+    if (!File(appBinary).existsSync()) {
+      throw StateError(
+        'Built Linux application binary not found at "$appBinary".',
+      );
+    }
+
+    // xvfbBinary is at <repoRoot>/sysroot/usr/bin/Xvfb.
+    final sysrootDir = File(xvfbBinary).parent.parent.parent.path;
+
+    final scratch = _prepareLinuxScratch();
+    final effectiveFontconfig = _writeScratchFontsConf(scratch, sysrootDir);
+
+    final patchedXvfb = prepareHermeticXvfbBinary(
+      sourceXvfbBinary: xvfbBinary,
+      scratchDir: scratch.path,
+    );
+    final xvfbArgs = buildXvfbArguments(
+      xkbDir: '$sysrootDir/usr/share/X11/xkb',
+    );
+    final xvfbEnv = buildXvfbEnvironment(
+      sysrootDir: sysrootDir,
+      scratchDir: scratch.path,
+    );
+
+    final displayNumber = await _bootXvfb(patchedXvfb, xvfbArgs, xvfbEnv);
     _displayNumber = displayNumber;
 
     final harnessUrl = 'ws://127.0.0.1:$harnessPort$integrationWebSocketPath';
@@ -1118,6 +1158,7 @@ class AndroidPlatformLauncher implements PlatformLauncher {
   Timer? _watchdogTimer;
   Map<String, String>? _runtimeEnv;
   bool _disposing = false;
+  int? _emulatorExitCode;
 
   @override
   String get platformName => 'android';
@@ -1128,27 +1169,8 @@ class AndroidPlatformLauncher implements PlatformLauncher {
   @override
   String get suiteCompiler => 'kernel';
 
-  @override
-  Future<Process> startTarget(int harnessPort) async {
-    verifyKvmAvailable(kvmPath);
-
-    if (!File(emulatorBinary).existsSync()) {
-      throw StateError(
-        'Pinned Android emulator binary not found at "$emulatorBinary".',
-      );
-    }
-    if (!File(adbBinary).existsSync()) {
-      throw StateError('Pinned Android adb binary not found at "$adbBinary".');
-    }
-    if (!File(apkPath).existsSync()) {
-      throw StateError('Built Android APK not found at "$apkPath".');
-    }
-
-    // emulatorBinary is at <repoRoot>/sdk/emulator/emulator.
-    final sdkRoot = File(emulatorBinary).parent.parent.path;
-    final repoRoot = Directory(sdkRoot).parent.path;
-    final sysrootDir = '$repoRoot/sysroot';
-
+  /// Creates the scratch tree and a fresh headless AVD for one run.
+  ({Directory scratch, Directory avdHomeDir}) _prepareAndroidScratch() {
     final scratch = Directory(
       '$baseTempDir/android_integration_${pid}_${DateTime.now().microsecondsSinceEpoch}',
     )..createSync(recursive: true);
@@ -1168,23 +1190,14 @@ class AndroidPlatformLauncher implements PlatformLauncher {
     File('${avdDir.path}/config.ini').writeAsStringSync(
       buildAndroidAvdConfigContent(),
     );
+    return (scratch: scratch, avdHomeDir: avdHomeDir);
+  }
 
-    final ports = await allocateAndroidEmulatorPorts();
-    final declaredEnv = _decodeDeclaredEnv(
-      Platform.environment['FLUTTER_INTEGRATION_TEST_DECLARED_ENV'],
-    );
-    final tz = Platform.environment['TZ'];
-    final runtimeEnv = buildAndroidRuntimeEnvironment(
-      sdkRoot: sdkRoot,
-      sysrootDir: sysrootDir,
-      scratchDir: scratch.path,
-      avdHomeDir: avdHomeDir.path,
-      adbServerPort: ports.adbServerPort,
-      env: declaredEnv,
-      tz: tz,
-    );
-    _runtimeEnv = runtimeEnv;
-
+  /// Starts the hermetic `adb` server on the allocated port.
+  Future<void> _startAdbServer(
+    Map<String, String> runtimeEnv,
+    int adbServerPort,
+  ) async {
     final startServerResult = await Process.run(
       adbBinary,
       const <String>['start-server'],
@@ -1193,26 +1206,29 @@ class AndroidPlatformLauncher implements PlatformLauncher {
     );
     if (startServerResult.exitCode != 0) {
       throw StateError(
-        'Failed to start hermetic adb server on port ${ports.adbServerPort}:\n'
+        'Failed to start hermetic adb server on port $adbServerPort:\n'
         '${startServerResult.stdout}\n${startServerResult.stderr}',
       );
     }
+  }
 
-    final emulatorArgs = buildAndroidEmulatorArguments(
-      avdName: 'test',
-      consolePort: ports.consolePort,
-      adbPort: ports.adbPort,
-    );
+  /// Launches the emulator, records its logs, and watches for a premature
+  /// exit so the boot wait can report it instead of timing out.
+  Future<Process> _launchEmulator(
+    List<String> emulatorArgs,
+    String scratchPath,
+    Map<String, String> runtimeEnv,
+    List<String> emulatorLogs,
+  ) async {
     final emulator = await Process.start(
       emulatorBinary,
       emulatorArgs,
-      workingDirectory: scratch.path,
+      workingDirectory: scratchPath,
       environment: runtimeEnv,
       includeParentEnvironment: false,
     );
     _emulatorProcess = emulator;
 
-    final emulatorLogs = <String>[];
     void recordEmulatorLine(String prefix, String line) {
       if (emulatorLogs.length < 150) {
         emulatorLogs.add('[$prefix] $line');
@@ -1228,23 +1244,29 @@ class AndroidPlatformLauncher implements PlatformLauncher {
         .transform(const LineSplitter())
         .listen((l) => recordEmulatorLine('emu-err', l));
 
-    int? emulatorExitCode;
     unawaited(
       emulator.exitCode.then((code) {
-        emulatorExitCode = code;
+        _emulatorExitCode = code;
         if (!_disposing) {
           _logcatProcess?.kill(ProcessSignal.sigkill);
         }
       }),
     );
+    return emulator;
+  }
 
-    final serial = 'emulator-${ports.consolePort}';
-    final bootDeadline = DateTime.now().add(bootTimeout);
+  /// Waits for `sys.boot_completed`, failing fast when the emulator already
+  /// exited instead of sitting out the whole boot timeout.
+  Future<void> _waitForEmulatorBoot(
+    String serial,
+    List<String> emulatorLogs,
+    DateTime bootDeadline,
+  ) async {
     var booted = false;
     while (DateTime.now().isBefore(bootDeadline)) {
-      if (emulatorExitCode != null) {
+      if (_emulatorExitCode != null) {
         throw StateError(
-          'Android emulator exited prematurely with code $emulatorExitCode '
+          'Android emulator exited prematurely with code $_emulatorExitCode '
           'before completing boot:\n${emulatorLogs.join("\n")}',
         );
       }
@@ -1264,10 +1286,11 @@ class AndroidPlatformLauncher implements PlatformLauncher {
         'emulator ($serial) to finish booting:\n${emulatorLogs.join("\n")}',
       );
     }
+  }
 
-    // Set up reverse port forwarding so the app inside the emulator can dial
-    // ws://127.0.0.1:<harnessPort>/__flutter_integration_ws__ (as well as the
-    // fallback port 38427).
+  /// Forwards the harness port into the emulator over `adb reverse`, so the
+  /// app can dial `ws://127.0.0.1:<harnessPort>/…` (and the fallback 38427).
+  Future<void> _forwardHarnessPorts(String serial, int harnessPort) async {
     for (final remotePort in <int>{harnessPort, 38427}) {
       final rev = await _runAdb(
         serial,
@@ -1280,8 +1303,10 @@ class AndroidPlatformLauncher implements PlatformLauncher {
         );
       }
     }
+  }
 
-    // Install the integration test APK.
+  /// Installs the built integration test APK on the booted emulator.
+  Future<void> _installApk(String serial) async {
     final installResult = await _runAdb(
       serial,
       <String>['install', '-r', apkPath],
@@ -1294,8 +1319,10 @@ class AndroidPlatformLauncher implements PlatformLauncher {
         '${installResult.stdout}\n${installResult.stderr}',
       );
     }
+  }
 
-    // Align the device timezone with the test's TZ so the app observes it.
+  /// Aligns the device timezone with the test's TZ so the app observes it.
+  Future<void> _configureDeviceTimezone(String serial) async {
     final deviceTz = Platform.environment['TZ'] ?? 'UTC';
     await _runAdb(serial, <String>[
       'shell',
@@ -1311,10 +1338,11 @@ class AndroidPlatformLauncher implements PlatformLauncher {
       'persist.sys.timezone',
       deviceTz,
     ]);
+  }
 
-    // Clear logcat buffers prior to launching the activity.
-    await _runAdb(serial, const <String>['logcat', '-b', 'all', '-c']);
-
+  /// Launches the app's `FlutterActivity` with the harness URL as its
+  /// entrypoint args. Returns the harness URL the app dials.
+  Future<String> _startFlutterActivity(String serial, int harnessPort) async {
     final harnessUrl = 'ws://127.0.0.1:$harnessPort$integrationWebSocketPath';
     final startResult = await _runAdb(
       serial,
@@ -1340,7 +1368,15 @@ class AndroidPlatformLauncher implements PlatformLauncher {
         '$startOutput',
       );
     }
+    return harnessUrl;
+  }
 
+  /// Tails the app's logcat and arms the crash watchdog. The returned
+  /// process stands in for the target: when it dies, the run ends.
+  Future<Process> _startLogcat(
+    String serial,
+    Map<String, String> runtimeEnv,
+  ) async {
     final logcat = await Process.start(
       adbBinary,
       <String>[
@@ -1364,6 +1400,76 @@ class AndroidPlatformLauncher implements PlatformLauncher {
 
     _startWatchdog(serial);
     return logcat;
+  }
+
+  @override
+  Future<Process> startTarget(int harnessPort) async {
+    verifyKvmAvailable(kvmPath);
+
+    if (!File(emulatorBinary).existsSync()) {
+      throw StateError(
+        'Pinned Android emulator binary not found at "$emulatorBinary".',
+      );
+    }
+    if (!File(adbBinary).existsSync()) {
+      throw StateError('Pinned Android adb binary not found at "$adbBinary".');
+    }
+    if (!File(apkPath).existsSync()) {
+      throw StateError('Built Android APK not found at "$apkPath".');
+    }
+
+    // emulatorBinary is at <repoRoot>/sdk/emulator/emulator.
+    final sdkRoot = File(emulatorBinary).parent.parent.path;
+    final repoRoot = Directory(sdkRoot).parent.path;
+    final sysrootDir = '$repoRoot/sysroot';
+
+    final prepared = _prepareAndroidScratch();
+    final scratch = prepared.scratch;
+
+    final ports = await allocateAndroidEmulatorPorts();
+    final declaredEnv = _decodeDeclaredEnv(
+      Platform.environment['FLUTTER_INTEGRATION_TEST_DECLARED_ENV'],
+    );
+    final tz = Platform.environment['TZ'];
+    final runtimeEnv = buildAndroidRuntimeEnvironment(
+      sdkRoot: sdkRoot,
+      sysrootDir: sysrootDir,
+      scratchDir: scratch.path,
+      avdHomeDir: prepared.avdHomeDir.path,
+      adbServerPort: ports.adbServerPort,
+      env: declaredEnv,
+      tz: tz,
+    );
+    _runtimeEnv = runtimeEnv;
+
+    await _startAdbServer(runtimeEnv, ports.adbServerPort);
+
+    final emulatorArgs = buildAndroidEmulatorArguments(
+      avdName: 'test',
+      consolePort: ports.consolePort,
+      adbPort: ports.adbPort,
+    );
+    final emulatorLogs = <String>[];
+    await _launchEmulator(
+      emulatorArgs,
+      scratch.path,
+      runtimeEnv,
+      emulatorLogs,
+    );
+
+    final serial = 'emulator-${ports.consolePort}';
+    final bootDeadline = DateTime.now().add(bootTimeout);
+    await _waitForEmulatorBoot(serial, emulatorLogs, bootDeadline);
+
+    await _forwardHarnessPorts(serial, harnessPort);
+    await _installApk(serial);
+    await _configureDeviceTimezone(serial);
+
+    // Clear logcat buffers prior to launching the activity.
+    await _runAdb(serial, const <String>['logcat', '-b', 'all', '-c']);
+
+    await _startFlutterActivity(serial, harnessPort);
+    return _startLogcat(serial, runtimeEnv);
   }
 
   void _startWatchdog(String serial) {
@@ -1533,55 +1639,14 @@ Future<void> serveWebBundleRequest(
       return;
     }
 
-    var relPath = Uri.decodeComponent(request.uri.path);
-    if (relPath == '/' || relPath.isEmpty) {
-      relPath = 'index.html';
-    } else if (relPath.startsWith('/')) {
-      relPath = relPath.substring(1);
-    }
-
-    final segments = relPath.split('/');
-    if (segments.contains('..') || segments.contains('.')) {
+    final relPath = _bundleRelativePath(request);
+    if (relPath == null) {
       response.statusCode = HttpStatus.forbidden;
       await response.close();
       return;
     }
 
-    if (relPath == 'assets/FontManifest.json' &&
-        robotoFontFile != null &&
-        File(robotoFontFile).existsSync()) {
-      final manifestFile = File('$webDir/assets/FontManifest.json');
-      List<dynamic> families = <dynamic>[];
-      if (manifestFile.existsSync()) {
-        final decoded = json.decode(manifestFile.readAsStringSync());
-        if (decoded is List) {
-          families = List<dynamic>.from(decoded);
-        }
-      }
-      final hasRoboto = families.any(
-        (entry) => entry is Map && entry['family'] == 'Roboto',
-      );
-      if (!hasRoboto) {
-        families.add(<String, Object>{
-          'family': 'Roboto',
-          'fonts': <Map<String, String>>[
-            <String, String>{'asset': 'fonts/Roboto-Regular.ttf'},
-          ],
-        });
-      }
-      final body = utf8.encode(json.encode(families));
-      response.statusCode = HttpStatus.ok;
-      response.headers.set(
-        HttpHeaders.contentTypeHeader,
-        'application/json; charset=utf-8',
-      );
-      response.headers.contentLength = body.length;
-      if (request.method != 'HEAD') {
-        response.add(body);
-      }
-      await response.close();
-      return;
-    }
+    if (await _serveFontManifest(request, webDir, robotoFontFile)) return;
 
     var file = File('$webDir/$relPath');
     if (!file.existsSync() &&
@@ -1596,24 +1661,98 @@ Future<void> serveWebBundleRequest(
       return;
     }
 
-    final bytes = file.readAsBytesSync();
-    response.statusCode = HttpStatus.ok;
-    response.headers.set(
-      HttpHeaders.contentTypeHeader,
-      contentTypeForPath(relPath),
-    );
-    response.headers.set(HttpHeaders.cacheControlHeader, 'no-store');
-    response.headers.contentLength = bytes.length;
-    if (request.method != 'HEAD') {
-      response.add(bytes);
-    }
-    await response.close();
+    await _serveBundleFile(request, file, relPath);
   } catch (_) {
     try {
       response.statusCode = HttpStatus.internalServerError;
       await response.close();
     } catch (_) {}
   }
+}
+
+/// Normalizes the request path to a bundle-relative path, or null when it
+/// tries to escape the bundle.
+String? _bundleRelativePath(HttpRequest request) {
+  var relPath = Uri.decodeComponent(request.uri.path);
+  if (relPath == '/' || relPath.isEmpty) {
+    return 'index.html';
+  }
+  if (relPath.startsWith('/')) {
+    relPath = relPath.substring(1);
+  }
+  final segments = relPath.split('/');
+  if (segments.contains('..') || segments.contains('.')) {
+    return null;
+  }
+  return relPath;
+}
+
+/// Serves `assets/FontManifest.json` with the local Roboto fallback injected,
+/// when the app needs one. Returns whether the request was answered.
+Future<bool> _serveFontManifest(
+  HttpRequest request,
+  String webDir,
+  String? robotoFontFile,
+) async {
+  final relPath = _bundleRelativePath(request);
+  final response = request.response;
+  if (relPath != 'assets/FontManifest.json' ||
+      robotoFontFile == null ||
+      !File(robotoFontFile).existsSync()) {
+    return false;
+  }
+  final manifestFile = File('$webDir/assets/FontManifest.json');
+  List<dynamic> families = <dynamic>[];
+  if (manifestFile.existsSync()) {
+    final decoded = json.decode(manifestFile.readAsStringSync());
+    if (decoded is List) {
+      families = List<dynamic>.from(decoded);
+    }
+  }
+  final hasRoboto = families.any(
+    (entry) => entry is Map && entry['family'] == 'Roboto',
+  );
+  if (!hasRoboto) {
+    families.add(<String, Object>{
+      'family': 'Roboto',
+      'fonts': <Map<String, String>>[
+        <String, String>{'asset': 'fonts/Roboto-Regular.ttf'},
+      ],
+    });
+  }
+  final body = utf8.encode(json.encode(families));
+  response.statusCode = HttpStatus.ok;
+  response.headers.set(
+    HttpHeaders.contentTypeHeader,
+    'application/json; charset=utf-8',
+  );
+  response.headers.contentLength = body.length;
+  if (request.method != 'HEAD') {
+    response.add(body);
+  }
+  await response.close();
+  return true;
+}
+
+/// Serves one bundle file with its MIME type and no caching.
+Future<void> _serveBundleFile(
+  HttpRequest request,
+  File file,
+  String relPath,
+) async {
+  final response = request.response;
+  final bytes = file.readAsBytesSync();
+  response.statusCode = HttpStatus.ok;
+  response.headers.set(
+    HttpHeaders.contentTypeHeader,
+    contentTypeForPath(relPath),
+  );
+  response.headers.set(HttpHeaders.cacheControlHeader, 'no-store');
+  response.headers.contentLength = bytes.length;
+  if (request.method != 'HEAD') {
+    response.add(bytes);
+  }
+  await response.close();
 }
 
 /// MIME type for a served bundle asset path.
@@ -1714,32 +1853,46 @@ class _IntegrationHarness {
     await _launcher.dispose();
   }
 
-  Future<int> run({
-    required String testPath,
-    required TestSelection selection,
-    Set<String> libraryTags = const {},
-    required String? xmlOutput,
-    required String? bazelTestTimeout,
-  }) async {
+  /// Serves the harness HTTP endpoint: upgrades the bootstrap's dial-back
+  /// to a WebSocket, and defers every other request to the launcher.
+  void _serveHttp() {
     _httpSub = _server.listen((HttpRequest request) async {
       if (request.uri.path == integrationWebSocketPath &&
           WebSocketTransformer.isUpgradeRequest(request)) {
-        try {
-          final socket = await WebSocketTransformer.upgrade(request);
-          if (!_wsConnected.isCompleted) {
-            _wsConnected.complete(socket);
-          } else {
-            await socket.close();
-          }
-        } catch (e) {
-          if (!_wsConnected.isCompleted) {
-            _wsConnected.completeError(e);
-          }
-        }
+        await _upgradeDialBack(request);
         return;
       }
       await _launcher.handleHttpRequest(request);
     });
+  }
+
+  /// Adopts the bootstrap's dial-back socket, keeping the first and
+  /// refusing any later one.
+  Future<void> _upgradeDialBack(HttpRequest request) async {
+    try {
+      final socket = await WebSocketTransformer.upgrade(request);
+      if (!_wsConnected.isCompleted) {
+        _wsConnected.complete(socket);
+      } else {
+        await socket.close();
+      }
+    } catch (e) {
+      if (!_wsConnected.isCompleted) {
+        _wsConnected.completeError(e);
+      }
+    }
+  }
+
+  /// Starts the target and tails its output into [processLogs].
+  ///
+  /// Returns the run's exit code when the target never started, or null
+  /// once it is running.
+  Future<int?> _launchTarget(List<String> processLogs) async {
+    void recordProcessLine(String streamName, String line) {
+      if (processLogs.length < 200) {
+        processLogs.add('[$streamName] $line');
+      }
+    }
 
     try {
       _process = await _launcher.startTarget(_server.port);
@@ -1751,13 +1904,6 @@ class _IntegrationHarness {
       return 1;
     }
 
-    final processLogs = <String>[];
-    void recordProcessLine(String streamName, String line) {
-      if (processLogs.length < 200) {
-        processLogs.add('[$streamName] $line');
-      }
-    }
-
     _process!.stdout
         .transform(utf8.decoder)
         .transform(const LineSplitter())
@@ -1766,7 +1912,14 @@ class _IntegrationHarness {
         .transform(utf8.decoder)
         .transform(const LineSplitter())
         .listen((line) => recordProcessLine('stderr', line));
+    return null;
+  }
 
+  /// Waits for the target's dial-back and adopts the suite socket.
+  ///
+  /// Returns the run's exit code when the suite will not run because the
+  /// target exited or stayed silent, or null once connected.
+  Future<int?> _settleTargetDialBack(List<String> processLogs) async {
     switch (await _awaitDialBack()) {
       case _TargetExited(:final exitCode):
         stderr.writeln(
@@ -1789,37 +1942,47 @@ class _IntegrationHarness {
         return 1;
       case _BootstrapConnected(:final socket):
         _ws = socket;
+        return null;
     }
+  }
 
-    final results = _Results();
-    final suiteReady = Completer<Map<String, dynamic>?>();
+  /// Handles one message on the default channel: the suite tree plus
+  /// print/error events. Resolves [suiteReady] once the in-app suite
+  /// finishes registering tests (or surfaces a load failure).
+  static void _onSuiteChannel(
+    Object? data,
+    _Results results,
+    Completer<Map<String, dynamic>?> suiteReady,
+  ) {
+    final msg = (data as Map).cast<String, dynamic>();
+    switch (msg['type']) {
+      case 'success':
+        if (!suiteReady.isCompleted) {
+          suiteReady.complete((msg['root'] as Map).cast<String, dynamic>());
+        }
+      case 'loadException':
+        results.recordError('load failure — ${msg['message']}');
+        if (!suiteReady.isCompleted) suiteReady.complete(null);
+      case 'error':
+        final err = (msg['error'] as Map).cast<String, dynamic>();
+        results.recordError(
+          'uncaught error — ${err['message']}\n${err['stackChain']}',
+        );
+        if (!suiteReady.isCompleted) suiteReady.complete(null);
+      case 'uncaughtError':
+        results.recordError(
+          'uncaught error — ${msg['message']}\n${msg['stack'] ?? ''}',
+        );
+        if (!suiteReady.isCompleted) suiteReady.complete(null);
+      case 'print':
+        stdout.writeln(msg['line']);
+    }
+  }
 
-    _inbound[0] = (data) {
-      final msg = (data as Map).cast<String, dynamic>();
-      switch (msg['type']) {
-        case 'success':
-          if (!suiteReady.isCompleted) {
-            suiteReady.complete((msg['root'] as Map).cast<String, dynamic>());
-          }
-        case 'loadException':
-          results.recordError('load failure — ${msg['message']}');
-          if (!suiteReady.isCompleted) suiteReady.complete(null);
-        case 'error':
-          final err = (msg['error'] as Map).cast<String, dynamic>();
-          results.recordError(
-            'uncaught error — ${err['message']}\n${err['stackChain']}',
-          );
-          if (!suiteReady.isCompleted) suiteReady.complete(null);
-        case 'uncaughtError':
-          results.recordError(
-            'uncaught error — ${msg['message']}\n${msg['stack'] ?? ''}',
-          );
-          if (!suiteReady.isCompleted) suiteReady.complete(null);
-        case 'print':
-          stdout.writeln(msg['line']);
-      }
-    };
-
+  /// Watches the suite socket: a close mid-suite surfaces as a failure on
+  /// every outstanding test so nothing hangs waiting on a `complete` event
+  /// that will never arrive.
+  void _watchTargetSocket(Completer<Map<String, dynamic>?> suiteReady) {
     _ws!.listen(
       _onSocketMessage,
       onDone: () {
@@ -1831,6 +1994,69 @@ class _IntegrationHarness {
         _pendingTests.clear();
       },
     );
+  }
+
+  /// Runs the registered suite under [selection], bounded by [ceiling].
+  Future<void> _driveSelectedTests(
+    Map<String, dynamic> root,
+    TestSelection selection,
+    _Results results,
+    Duration ceiling,
+  ) async {
+    Map<String, dynamic>? selected;
+    try {
+      selected = selection.select(root);
+    } on FormatException catch (e) {
+      // An `include_tags` attribute selection that matches no test: a tag
+      // name nobody carries is a typo, and passing an empty suite would
+      // hide it.
+      results.recordError(e.message);
+    }
+    if (selected != null) {
+      await _runGroup(selected, results, ceiling);
+    } else if (!results.hasFailure && selection.narrows) {
+      stdout.writeln(
+        'flutter_integration_test: no test case in this suite matches '
+        'this run\'s --test_filter, tags or shard.',
+      );
+    }
+  }
+
+  /// Tells the suite to close, closes the socket, and waits out the target.
+  Future<void> _shutdownTarget() async {
+    _send(0, {'type': 'close'});
+    try {
+      await _ws?.close();
+    } catch (_) {}
+
+    _process?.kill(ProcessSignal.sigkill);
+    await _process!.exitCode.timeout(
+      const Duration(seconds: 5),
+      onTimeout: () => 0,
+    );
+  }
+
+  Future<int> run({
+    required String testPath,
+    required TestSelection selection,
+    Set<String> libraryTags = const {},
+    required String? xmlOutput,
+    required String? bazelTestTimeout,
+  }) async {
+    _serveHttp();
+
+    final processLogs = <String>[];
+    final launchExit = await _launchTarget(processLogs);
+    if (launchExit != null) return launchExit;
+
+    final dialBackExit = await _settleTargetDialBack(processLogs);
+    if (dialBackExit != null) return dialBackExit;
+
+    final results = _Results();
+    final suiteReady = Completer<Map<String, dynamic>?>();
+
+    _inbound[0] = (data) => _onSuiteChannel(data, results, suiteReady);
+    _watchTargetSocket(suiteReady);
 
     _send(0, _initialMessage(testPath, bazelTestTimeout, libraryTags));
 
@@ -1841,23 +2067,7 @@ class _IntegrationHarness {
     );
 
     if (root != null) {
-      Map<String, dynamic>? selected;
-      try {
-        selected = selection.select(root);
-      } on FormatException catch (e) {
-        // An `include_tags` attribute selection that matches no test: a tag
-        // name nobody carries is a typo, and passing an empty suite would
-        // hide it.
-        results.recordError(e.message);
-      }
-      if (selected != null) {
-        await _runGroup(selected, results, ceiling);
-      } else if (!results.hasFailure && selection.narrows) {
-        stdout.writeln(
-          'flutter_integration_test: no test case in this suite matches '
-          'this run\'s --test_filter, tags or shard.',
-        );
-      }
+      await _driveSelectedTests(root, selection, results, ceiling);
     } else {
       results.recordError('suite did not load');
       for (final line in processLogs) {
@@ -1871,16 +2081,7 @@ class _IntegrationHarness {
       ).writeAsString(junitXml(results.cases, suiteName: testPath));
     }
 
-    _send(0, {'type': 'close'});
-    try {
-      await _ws?.close();
-    } catch (_) {}
-
-    _process?.kill(ProcessSignal.sigkill);
-    await _process!.exitCode.timeout(
-      const Duration(seconds: 5),
-      onTimeout: () => 0,
-    );
+    await _shutdownTarget();
 
     stdout.writeln(results.summary());
     return results.hasFailure ? 1 : 0;
@@ -1994,48 +2195,21 @@ class _IntegrationHarness {
     final output = StringBuffer();
     _pendingTests[ch.inputId] = completer;
     _TestFailureSummary? failure;
+    void noteFailure(_TestFailureSummary summary) => failure ??= summary;
 
-    _inbound[ch.inputId] = (data) {
-      final msg = (data as Map).cast<String, dynamic>();
-      switch (msg['type']) {
-        case 'state-change':
-          break;
-        case 'error':
-          final err = (msg['error'] as Map).cast<String, dynamic>();
-          failure ??= _TestFailureSummary(
-            message:
-                err['message'] as String? ?? err['toString'] as String? ?? '',
-            type: err['type'] as String? ?? 'TestFailure',
-            stackChain: err['stackChain'] as String? ?? '',
-          );
-        case 'message':
-          final mtype = msg['message-type'] as String? ?? 'print';
-          final text = msg['text'] as String? ?? '';
-          final line = mtype == 'print' ? text : '[$mtype] $text';
-          stdout.writeln(line);
-          output.writeln(line);
-        case 'complete':
-          if (!completer.isCompleted) completer.complete();
-      }
-    };
+    _inbound[ch.inputId] = _integrationTestMessageHandler(
+      completer: completer,
+      output: output,
+      noteFailure: noteFailure,
+    );
 
     _send(testChannelId + 1, {'command': 'run', 'channel': ch.outputId});
 
-    await completer.future.timeout(
-      ceiling,
-      onTimeout: () {
-        final msg =
-            'test "$reportName" timed out after ${ceiling.inSeconds}s; '
-            'killing ${_launcher.platformName} target.';
-        stderr.writeln('flutter_integration_test: $msg');
-        failure ??= _TestFailureSummary(
-          message: msg,
-          type: 'TimeoutException',
-          stackChain: '',
-        );
-        _socketClosed = true;
-        _process?.kill(ProcessSignal.sigkill);
-      },
+    await _awaitIntegrationTest(
+      completer: completer,
+      ceiling: ceiling,
+      reportName: reportName,
+      noteFailure: noteFailure,
     );
     _pendingTests.remove(ch.inputId);
     _inbound.remove(ch.inputId);
@@ -2061,6 +2235,69 @@ class _IntegrationHarness {
     } else if (!fixture) {
       results.recordSuccess(reportName, started.elapsed, output.toString());
     }
+  }
+
+  /// Builds the inbound dispatcher for one running test: explicit error
+  /// events become [noteFailure], prints go to stdout and the case log, and
+  /// `complete` releases the test's completer.
+  void Function(Object?) _integrationTestMessageHandler({
+    required Completer<void> completer,
+    required StringBuffer output,
+    required void Function(_TestFailureSummary) noteFailure,
+  }) {
+    return (data) {
+      final msg = (data as Map).cast<String, dynamic>();
+      switch (msg['type']) {
+        case 'state-change':
+          break;
+        case 'error':
+          final err = (msg['error'] as Map).cast<String, dynamic>();
+          noteFailure(
+            _TestFailureSummary(
+              message:
+                  err['message'] as String? ?? err['toString'] as String? ?? '',
+              type: err['type'] as String? ?? 'TestFailure',
+              stackChain: err['stackChain'] as String? ?? '',
+            ),
+          );
+        case 'message':
+          final mtype = msg['message-type'] as String? ?? 'print';
+          final text = msg['text'] as String? ?? '';
+          final line = mtype == 'print' ? text : '[$mtype] $text';
+          stdout.writeln(line);
+          output.writeln(line);
+        case 'complete':
+          if (!completer.isCompleted) completer.complete();
+      }
+    };
+  }
+
+  /// Waits out one test's [ceiling], killing the target when a wedged test
+  /// never yields so the remaining tests bail out fast.
+  Future<void> _awaitIntegrationTest({
+    required Completer<void> completer,
+    required Duration ceiling,
+    required String reportName,
+    required void Function(_TestFailureSummary) noteFailure,
+  }) async {
+    await completer.future.timeout(
+      ceiling,
+      onTimeout: () {
+        final msg =
+            'test "$reportName" timed out after ${ceiling.inSeconds}s; '
+            'killing ${_launcher.platformName} target.';
+        stderr.writeln('flutter_integration_test: $msg');
+        noteFailure(
+          _TestFailureSummary(
+            message: msg,
+            type: 'TimeoutException',
+            stackChain: '',
+          ),
+        );
+        _socketClosed = true;
+        _process?.kill(ProcessSignal.sigkill);
+      },
+    );
   }
 
   Map<String, dynamic> _initialMessage(
