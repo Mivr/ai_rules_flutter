@@ -333,7 +333,14 @@ class ReloadPipeline {
       // Assembly is documented never to throw. If one ever does, the gate it
       // reopened would otherwise never settle, and every later request would
       // wait out the full timeout above before answering "still starting up".
-      // The cause travels into the reason rather than being dropped.
+      // The cause travels into the reason rather than being dropped — and into
+      // the run's logs, so the failure is visible even before the first
+      // request reads the gate.
+      _logger.warning({
+        'message': 'pipeline_reassembly_failed',
+        'text': 'Reassembling the hot-reload pipeline failed unexpectedly: $e',
+        'error': '$e',
+      });
       ready.signalUnavailable(
         'Reassembling the hot-reload pipeline failed unexpectedly: $e',
       );
@@ -437,6 +444,7 @@ class ReloadPipeline {
       ),
     );
   }
+
   /// A native-libs refusal, answered as a report over the running code.
   ///
   /// The verdict travels with it: a refusal says the command failed and the
@@ -446,26 +454,26 @@ class ReloadPipeline {
     Map<String, dynamic>? refusal,
     NativeLibsVerdict? verdict,
     NativePatchOutcome? patch,
-  }) _refuseNativeLibs(
+  })
+  _refuseNativeLibs(
     String verb,
     List<String> addressed,
     NativeLibsVerdict? verdict,
     AssetOutcome assets, [
     NativePatchOutcome? patch,
-  ]) =>
-      (
-        refusal: toWire(
-          CommandReport(
-            verb: verb,
-            appIds: addressed,
-            nativeLibs: verdict,
-            nativePatch: patch,
-            assets: assets,
-          ),
-        ),
-        verdict: verdict,
-        patch: patch,
-      );
+  ]) => (
+    refusal: toWire(
+      CommandReport(
+        verb: verb,
+        appIds: addressed,
+        nativeLibs: verdict,
+        nativePatch: patch,
+        assets: assets,
+      ),
+    ),
+    verdict: verdict,
+    patch: patch,
+  );
 
   /// What the native libraries allow, and the reply when the answer is "nothing".
   ///
