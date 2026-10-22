@@ -231,6 +231,118 @@ def _write_web_guard_manifest(ctx, scope, compile_sources, stage):
     )
     return manifest
 
+def _web_stage_inputs(ctx, web_compile_tool, sources, scope, stage_salt):
+    """Stage generated sources for a web compile, or return an empty stage."""
+    if web_compile_tool != None:
+        return stage_generated_inputs(ctx, sources, scope, include_sources = True, salt = stage_salt)
+    return struct(root = None, files = [])
+
+def _web_base_args(ctx, web_compile_tool, stage, command):
+    """Start a web compiler argv: optional wrapper, `compile <command>`, multi-root."""
+    args = ctx.actions.args()
+    if web_compile_tool != None:
+        args.add(web_compile_tool)
+    args.add("compile")
+    args.add(command)
+    if stage.root != None:
+        args.add("--multi-root=" + stage.root)
+    return args
+
+def _web_libraries_spec(web_sdk_files, dart2js_platform_dill):
+    """Pick the exec-platform `libraries.<platform>.json`, else `web-sdk/libraries.json`.
+
+    Falls back to the kernel-side `libraries.json` one level above the
+    platform dill when no web SDK file matches.
+    """
+    libraries_spec = dart2js_platform_dill.dirname + "/../libraries.json"
+    for f in web_sdk_files:
+        if f.basename.startswith("libraries.") and f.basename != "libraries.json" and f.basename.endswith(".json"):
+            return f.path
+        elif f.basename == "libraries.json" and "/web-sdk/" in f.path:
+            libraries_spec = f.path
+    return libraries_spec
+
+def _web_guarded_run(
+        ctx,
+        dart,
+        args,
+        web_guard_tool,
+        guard_scope,
+        compile_sources,
+        stage,
+        direct_inputs,
+        transitive_inputs,
+        outputs,
+        mnemonic,
+        progress_message,
+        env_dir):
+    """Run a web compile behind the optional `web_guard` wrapper."""
+    executable = dart
+    arguments = [args]
+    if web_guard_tool != None:
+        manifest = _write_web_guard_manifest(ctx, guard_scope, compile_sources, stage)
+        executable = web_guard_tool
+        arguments = ["--declared-inputs", manifest.path, "--", dart.path, args]
+        direct_inputs = direct_inputs + [web_guard_tool, manifest]
+    ctx.actions.run(
+        executable = executable,
+        arguments = arguments,
+        inputs = depset(
+            direct = direct_inputs,
+            transitive = transitive_inputs,
+        ),
+        outputs = outputs,
+        mnemonic = mnemonic,
+        progress_message = progress_message,
+        env = _sandbox_env(dart, env_dir),
+    )
+
+def _dart2wasm_compiler_args(
+        args,
+        mode,
+        optimization_level,
+        minify,
+        strip_wasm,
+        dart2wasm_platform_dill,
+        package_config,
+        enable_experiments,
+        output_source_map,
+        renderer):
+    """Append the dart2wasm-only flags: platform, optimization, mode and renderer."""
+    args.add("--extra-compiler-option=--platform=" + dart2wasm_platform_dill.path)
+    args.add("--packages=" + package_config.path)
+    args.add_all(web_experiment_flags(enable_experiments))
+    args.add("-O%d" % resolve_web_optimization_level(
+        optimization_level,
+        default_dart2wasm_optimization_level(mode),
+    ))
+    args.add("--strip-wasm" if (mode == "release" and strip_wasm) else "--no-strip-wasm")
+    args.add("--minify" if resolve_web_minify(minify, mode) else "--no-minify")
+    if output_source_map == None:
+        args.add("--no-source-maps")
+
+    # SkWasm shared memory support.
+    if renderer == "skwasm":
+        args.add("--extra-compiler-option=--import-shared-memory")
+        args.add("--extra-compiler-option=--shared-memory-max-pages=32768")
+
+    # Mode defines and flags — matching `flutter build web` per build mode.
+    for d in web_mode_defines(mode):
+        args.add("-D" + d)
+    if mode == "debug":
+        args.add("--extra-compiler-option=--enable-asserts")
+    else:
+        # Upstream `Dart2WasmTarget.buildModeOptions` drops `toString()` bodies
+        # in every non-debug mode. It is a size optimization that also changes
+        # observable behaviour — `'$widget'` stops naming the type — so it must
+        # track the mode rather than be inferred from `-O`, and profile has to
+        # carry it or a profile build stops representing the release it is
+        # meant to measure.
+        for uri in ("dart:ui", "package:flutter"):
+            args.add("--extra-compiler-option=--delete-tostring-package-uri=" + uri)
+    for d in web_renderer_defines(renderer):
+        args.add("-D" + d)
+
 def flutter_dart2wasm_action(
         ctx,
         dart,
@@ -297,58 +409,21 @@ def flutter_dart2wasm_action(
              "(dart2wasm writes it there): got %s for %s" %
              (output_source_map.path, output_wasm.path))
 
-    stage = struct(root = None, files = [])
-    if web_compile_tool != None:
-        stage_scope = output_wasm.dirname.split("/")[-1] + "." + output_wasm.basename
-        stage = stage_generated_inputs(ctx, [main_dart] + srcs, stage_scope, include_sources = True, salt = stage_salt)
+    stage = _web_stage_inputs(ctx, web_compile_tool, [main_dart] + srcs, output_wasm.dirname.split("/")[-1] + "." + output_wasm.basename, stage_salt)
 
-    args = ctx.actions.args()
-    if web_compile_tool != None:
-        args.add(web_compile_tool)
-    args.add("compile")
-    args.add("wasm")
-    if stage.root != None:
-        args.add("--multi-root=" + stage.root)
-
-    # Platform dill.
-    args.add("--extra-compiler-option=--platform=" + dart2wasm_platform_dill.path)
-
-    # Package config.
-    args.add("--packages=" + package_config.path)
-
-    args.add_all(web_experiment_flags(enable_experiments))
-
-    # Optimization.
-    args.add("-O%d" % resolve_web_optimization_level(
+    args = _web_base_args(ctx, web_compile_tool, stage, "wasm")
+    _dart2wasm_compiler_args(
+        args,
+        mode,
         optimization_level,
-        default_dart2wasm_optimization_level(mode),
-    ))
-    args.add("--strip-wasm" if (mode == "release" and strip_wasm) else "--no-strip-wasm")
-    args.add("--minify" if resolve_web_minify(minify, mode) else "--no-minify")
-    if output_source_map == None:
-        args.add("--no-source-maps")
-
-    # SkWasm shared memory support.
-    if renderer == "skwasm":
-        args.add("--extra-compiler-option=--import-shared-memory")
-        args.add("--extra-compiler-option=--shared-memory-max-pages=32768")
-
-    # Mode defines and flags — matching `flutter build web` per build mode.
-    for d in web_mode_defines(mode):
-        args.add("-D" + d)
-    if mode == "debug":
-        args.add("--extra-compiler-option=--enable-asserts")
-    else:
-        # Upstream `Dart2WasmTarget.buildModeOptions` drops `toString()` bodies
-        # in every non-debug mode. It is a size optimization that also changes
-        # observable behaviour — `'$widget'` stops naming the type — so it must
-        # track the mode rather than be inferred from `-O`, and profile has to
-        # carry it or a profile build stops representing the release it is
-        # meant to measure.
-        for uri in ("dart:ui", "package:flutter"):
-            args.add("--extra-compiler-option=--delete-tostring-package-uri=" + uri)
-    for d in web_renderer_defines(renderer):
-        args.add("-D" + d)
+        minify,
+        strip_wasm,
+        dart2wasm_platform_dill,
+        package_config,
+        enable_experiments,
+        output_source_map,
+        renderer,
+    )
     for d in defines:
         args.add("-D" + d)
 
@@ -358,31 +433,54 @@ def flutter_dart2wasm_action(
     direct_inputs = [main_dart, package_config, dart2wasm_platform_dill] + srcs + stage.files + web_compile_inputs
     if web_compile_tool != None:
         direct_inputs.append(web_compile_tool)
-    executable = dart
-    arguments = [args]
-    transitive_inputs = [flutter_sdk_files]
-    if web_guard_tool != None:
-        manifest = _write_web_guard_manifest(
-            ctx,
-            output_wasm.dirname.split("/")[-1] + "." + output_wasm.basename,
-            [main_dart] + srcs,
-            stage,
-        )
-        executable = web_guard_tool
-        arguments = ["--declared-inputs", manifest.path, "--", dart.path, args]
-        direct_inputs = direct_inputs + [web_guard_tool, manifest]
-    ctx.actions.run(
-        executable = executable,
-        arguments = arguments,
-        inputs = depset(
-            direct = direct_inputs,
-            transitive = transitive_inputs,
-        ),
-        outputs = [output_wasm, output_mjs] + ([output_source_map] if output_source_map != None else []),
-        mnemonic = "FlutterDart2Wasm",
-        progress_message = "Compiling Flutter to WASM %s" % ctx.label,
-        env = _sandbox_env(dart, output_wasm.dirname),
+    _web_guarded_run(
+        ctx,
+        dart,
+        args,
+        web_guard_tool,
+        output_wasm.dirname.split("/")[-1] + "." + output_wasm.basename,
+        [main_dart] + srcs,
+        stage,
+        direct_inputs,
+        [flutter_sdk_files],
+        [output_wasm, output_mjs] + ([output_source_map] if output_source_map != None else []),
+        "FlutterDart2Wasm",
+        "Compiling Flutter to WASM %s" % ctx.label,
+        output_wasm.dirname,
     )
+
+def _dart2js_common_args(
+        args,
+        mode,
+        optimization_level,
+        minify,
+        native_null_assertions,
+        frequency_based_minification,
+        enable_experiments,
+        dart2js_platform_dill,
+        package_config,
+        web_sdk_files):
+    """Append the flags `dart2js` and its `--cfe-only` frontend share."""
+    args.add("--platform-binaries=" + dart2js_platform_dill.dirname)
+    args.add("--libraries-spec=" + _web_libraries_spec(web_sdk_files, dart2js_platform_dill))
+    args.add("--packages=" + package_config.path)
+    args.add_all(web_experiment_flags(enable_experiments))
+    args.add("-O%d" % resolve_web_optimization_level(
+        optimization_level,
+        default_dart2js_optimization_level(mode),
+    ))
+    if native_null_assertions:
+        args.add("--native-null-assertions")
+    args.add("--minify" if resolve_web_minify(minify, mode) else "--no-minify")
+    if not frequency_based_minification:
+        args.add("--no-frequency-based-minification")
+
+def _dart2js_mode_args(args, mode):
+    """Append the mode defines and debug asserts both dart2js entry points share."""
+    for d in web_mode_defines(mode):
+        args.add("-D" + d)
+    if mode == "debug":
+        args.add("--enable-asserts")
 
 def flutter_dart2js_action(
         ctx,
@@ -453,44 +551,24 @@ def flutter_dart2js_action(
         web_guard_tool: Optional `web_guard` executable `File`, as in
             `flutter_dart2wasm_action`.
     """
-    stage = struct(root = None, files = [])
-    if web_compile_tool != None:
-        stage = stage_generated_inputs(ctx, [main_dart] + srcs, output_dir.basename + ".dart2js", include_sources = True, salt = stage_salt)
+    stage = _web_stage_inputs(ctx, web_compile_tool, [main_dart] + srcs, output_dir.basename + ".dart2js", stage_salt)
 
-    args = ctx.actions.args()
-    if web_compile_tool != None:
-        args.add(web_compile_tool)
-    args.add("compile")
-    args.add("js")
-    if stage.root != None:
-        args.add("--multi-root=" + stage.root)
+    args = _web_base_args(ctx, web_compile_tool, stage, "js")
 
     # Prefer the exec-platform-specific libraries.<platform>.json from web_sdk_files
     # (falling back to web-sdk/libraries.json one level above kernel/).
-    libraries_spec = dart2js_platform_dill.dirname + "/../libraries.json"
-    for f in web_sdk_files:
-        if f.basename.startswith("libraries.") and f.basename != "libraries.json" and f.basename.endswith(".json"):
-            libraries_spec = f.path
-            break
-        elif f.basename == "libraries.json" and "/web-sdk/" in f.path:
-            libraries_spec = f.path
-    args.add("--platform-binaries=" + dart2js_platform_dill.dirname)
-    args.add("--libraries-spec=" + libraries_spec)
-
-    # Package config.
-    args.add("--packages=" + package_config.path)
-
-    args.add_all(web_experiment_flags(enable_experiments))
-
-    args.add("-O%d" % resolve_web_optimization_level(
+    _dart2js_common_args(
+        args,
+        mode,
         optimization_level,
-        default_dart2js_optimization_level(mode),
-    ))
-    if native_null_assertions:
-        args.add("--native-null-assertions")
-    args.add("--minify" if resolve_web_minify(minify, mode) else "--no-minify")
-    if not frequency_based_minification:
-        args.add("--no-frequency-based-minification")
+        minify,
+        native_null_assertions,
+        frequency_based_minification,
+        enable_experiments,
+        dart2js_platform_dill,
+        package_config,
+        web_sdk_files,
+    )
     if dump_info:
         # Upstream passes this exact stage rather than the older bare
         # `--dump-info`, which now writes a *binary* `.info.data` instead —
@@ -500,10 +578,7 @@ def flutter_dart2js_action(
         args.add("--no-source-maps")
 
     # Mode defines and flags — matching `flutter build web` per build mode.
-    for d in web_mode_defines(mode):
-        args.add("-D" + d)
-    if mode == "debug":
-        args.add("--enable-asserts")
+    _dart2js_mode_args(args, mode)
     if renderer == "canvaskit":
         args.add("-DFLUTTER_WEB_USE_SKIA=true")
         args.add("-DFLUTTER_WEB_USE_SKWASM=false")
@@ -517,30 +592,20 @@ def flutter_dart2js_action(
     direct_inputs = [main_dart, package_config, dart2js_platform_dill] + srcs + stage.files + web_compile_inputs
     if web_compile_tool != None:
         direct_inputs.append(web_compile_tool)
-    executable = dart
-    arguments = [args]
-    transitive_inputs = [flutter_sdk_files, depset(web_sdk_files)]
-    if web_guard_tool != None:
-        manifest = _write_web_guard_manifest(
-            ctx,
-            output_dir.dirname.split("/")[-1] + "." + output_dir.basename,
-            [main_dart] + srcs,
-            stage,
-        )
-        executable = web_guard_tool
-        arguments = ["--declared-inputs", manifest.path, "--", dart.path, args]
-        direct_inputs = direct_inputs + [web_guard_tool, manifest]
-    ctx.actions.run(
-        executable = executable,
-        arguments = arguments,
-        inputs = depset(
-            direct = direct_inputs,
-            transitive = transitive_inputs,
-        ),
-        outputs = [output_dir],
-        mnemonic = "FlutterDart2JS",
-        progress_message = "Compiling Flutter to JavaScript %s" % ctx.label,
-        env = _sandbox_env(dart, output_dir.path),
+    _web_guarded_run(
+        ctx,
+        dart,
+        args,
+        web_guard_tool,
+        output_dir.dirname.split("/")[-1] + "." + output_dir.basename,
+        [main_dart] + srcs,
+        stage,
+        direct_inputs,
+        [flutter_sdk_files, depset(web_sdk_files)],
+        [output_dir],
+        "FlutterDart2JS",
+        "Compiling Flutter to JavaScript %s" % ctx.label,
+        output_dir.path,
     )
 
 def flutter_dart2js_cfe_action(
@@ -606,46 +671,24 @@ def flutter_dart2js_cfe_action(
         web_guard_tool: Optional `web_guard` executable `File`, as in
             `flutter_dart2wasm_action`.
     """
-    stage = struct(root = None, files = [])
-    if web_compile_tool != None:
-        stage = stage_generated_inputs(ctx, [main_dart] + srcs, output_dill.basename + ".dart2js_cfe", include_sources = True, salt = stage_salt)
+    stage = _web_stage_inputs(ctx, web_compile_tool, [main_dart] + srcs, output_dill.basename + ".dart2js_cfe", stage_salt)
 
-    args = ctx.actions.args()
-    if web_compile_tool != None:
-        args.add(web_compile_tool)
-    args.add("compile")
-    args.add("js")
-    if stage.root != None:
-        args.add("--multi-root=" + stage.root)
+    args = _web_base_args(ctx, web_compile_tool, stage, "js")
 
-    libraries_spec = dart2js_platform_dill.dirname + "/../libraries.json"
-    for f in web_sdk_files:
-        if f.basename.startswith("libraries.") and f.basename != "libraries.json" and f.basename.endswith(".json"):
-            libraries_spec = f.path
-            break
-        elif f.basename == "libraries.json" and "/web-sdk/" in f.path:
-            libraries_spec = f.path
-    args.add("--platform-binaries=" + dart2js_platform_dill.dirname)
-    args.add("--libraries-spec=" + libraries_spec)
-
-    args.add("--packages=" + package_config.path)
-
-    args.add_all(web_experiment_flags(enable_experiments))
-
-    args.add("-O%d" % resolve_web_optimization_level(
+    _dart2js_common_args(
+        args,
+        mode,
         optimization_level,
-        default_dart2js_optimization_level(mode),
-    ))
-    if native_null_assertions:
-        args.add("--native-null-assertions")
-    args.add("--minify" if resolve_web_minify(minify, mode) else "--no-minify")
-    if not frequency_based_minification:
-        args.add("--no-frequency-based-minification")
+        minify,
+        native_null_assertions,
+        frequency_based_minification,
+        enable_experiments,
+        dart2js_platform_dill,
+        package_config,
+        web_sdk_files,
+    )
 
-    for d in web_mode_defines(mode):
-        args.add("-D" + d)
-    if mode == "debug":
-        args.add("--enable-asserts")
+    _dart2js_mode_args(args, mode)
     if renderer == "canvaskit":
         args.add("-DFLUTTER_WEB_USE_SKIA=true")
         args.add("-DFLUTTER_WEB_USE_SKWASM=false")
@@ -663,28 +706,18 @@ def flutter_dart2js_cfe_action(
     direct_inputs = [main_dart, package_config, dart2js_platform_dill] + srcs + stage.files + web_compile_inputs
     if web_compile_tool != None:
         direct_inputs.append(web_compile_tool)
-    executable = dart
-    arguments = [args]
-    transitive_inputs = [flutter_sdk_files, depset(web_sdk_files)]
-    if web_guard_tool != None:
-        manifest = _write_web_guard_manifest(
-            ctx,
-            output_dill.dirname.split("/")[-1] + "." + output_dill.basename,
-            [main_dart] + srcs,
-            stage,
-        )
-        executable = web_guard_tool
-        arguments = ["--declared-inputs", manifest.path, "--", dart.path, args]
-        direct_inputs = direct_inputs + [web_guard_tool, manifest]
-    ctx.actions.run(
-        executable = executable,
-        arguments = arguments,
-        inputs = depset(
-            direct = direct_inputs,
-            transitive = transitive_inputs,
-        ),
-        outputs = [output_dill, output_deps],
-        mnemonic = "FlutterDart2JSCFE",
-        progress_message = "Compiling Flutter web icon kernel %s" % ctx.label,
-        env = _sandbox_env(dart, output_dill.dirname),
+    _web_guarded_run(
+        ctx,
+        dart,
+        args,
+        web_guard_tool,
+        output_dill.dirname.split("/")[-1] + "." + output_dill.basename,
+        [main_dart] + srcs,
+        stage,
+        direct_inputs,
+        [flutter_sdk_files, depset(web_sdk_files)],
+        [output_dill, output_deps],
+        "FlutterDart2JSCFE",
+        "Compiling Flutter web icon kernel %s" % ctx.label,
+        output_dill.dirname,
     )
