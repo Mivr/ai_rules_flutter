@@ -375,6 +375,290 @@ def flutter_ios_runner_lib_gen(name, registrant, engine, application = None, mod
 
 # -- Convenience macro (Tier 1) -----------------------------------------------
 
+def _ios_resolve_entitlements(name, entitlements, additional_entitlements, internal_tags):
+    """Discovers the Runner entitlements and folds the app's additions in.
+
+    `base` may legitimately be None here: an iOS app without Xcode
+    capabilities ships no entitlements file, and then the additions are the
+    entitlements.
+    """
+    resolved = resolve_ios_entitlements(
+        entitlements,
+        discovered = "ios/Runner/Runner.entitlements" if native.glob(
+            ["ios/Runner/Runner.entitlements"],
+            allow_empty = True,
+        ) else None,
+    )
+    if additional_entitlements:
+        _flutter_entitlements_merge(
+            name = "__%s_entitlements" % name,
+            base = resolved,
+            additions = additional_entitlements,
+            tags = internal_tags,
+        )
+        resolved = "__%s_entitlements" % name
+    return resolved
+
+def _ios_discover_app_icons(app_icons, backend):
+    """Discovers the conventional asset catalog `flutter create` writes.
+
+    `None` means discover, `[]` means ship none: both states are sayable, and
+    an app with no catalog at all is the second without having to write it.
+    """
+    if app_icons == None and backend == "rules_apple":
+        return native.glob(
+            ["ios/Runner/Assets.xcassets/AppIcon.appiconset/**"],
+            allow_empty = True,
+        )
+    return app_icons
+
+def _ios_build_frameworks(name, application, minimum_os_version, allow_non_macho, backend, engine, exclude_plugins, internal_tags):
+    """Emits the registrant, intermediates, App.framework and engine targets.
+
+    Returns:
+      The engine target label to link the runner against.
+    """
+
+    # 1. Generate iOS Swift plugin registrant.
+    _flutter_ios_registrant_rule(
+        name = "__%s_registrant" % name,
+        application = application,
+        exclude_plugins = exclude_plugins,
+        tags = internal_tags,
+    )
+
+    # 2. Extract intermediates (AOT dylib + flutter_assets + native_libs).
+    _flutter_ios_application(
+        name = "__%s_intermediates" % name,
+        application = application,
+        tags = internal_tags,
+    )
+
+    # 3. Assemble App.framework from the AOT dylib (or debug stub + kernel).
+    _flutter_ios_framework_rule(
+        name = "__%s_app_framework" % name,
+        application = "__%s_intermediates" % name,
+        minimum_os_version = minimum_os_version,
+        allow_non_macho = allow_non_macho,
+        tags = internal_tags,
+    )
+
+    # 4. Wrap App.framework for rules_apple.
+    #    In debug mode, bundle_only=True embeds the framework without linking
+    #    (the stub binary only exists for rules_apple compatibility and isn't
+    #    loaded at runtime — Flutter uses the JIT kernel blob instead).
+    if backend == "rules_apple":
+        apple_dynamic_framework_import(
+            name = "__%s_app_bundle" % name,
+            framework_imports = ["__%s_app_framework" % name],
+            bundle_only = select({
+                Label("@rules_flutter//flutter/private:dbg"): True,
+                "//conditions:default": False,
+            }),
+            tags = internal_tags,
+        )
+
+    # 5. Import Flutter.xcframework engine — auto-selects debug/release and backend.
+    if engine:
+        return engine
+    flutter_ios_engine(
+        name = "__%s_engine" % name,
+        backend = backend,
+        tags = internal_tags,
+    )
+    return "__%s_engine" % name
+
+def _ios_build_native_frameworks(name, application, minimum_os_version, allow_non_macho, internal_tags):
+    """Wraps native plugin/native-asset dylibs in .frameworks for bundling."""
+
+    # 6. Wrap native plugin/native-asset dylibs in .frameworks for bundling.
+    _flutter_ios_native_frameworks_rule(
+        name = "__%s_native_frameworks" % name,
+        application = application,
+        minimum_os_version = minimum_os_version,
+        allow_non_macho = allow_non_macho,
+        tags = internal_tags,
+    )
+
+    # 6b. Expose plugin PrivacyInfo.xcprivacy files for bundling.
+    _flutter_ios_privacy_manifests_rule(
+        name = "__%s_privacy_manifests" % name,
+        application = application,
+        tags = internal_tags,
+    )
+
+def _ios_discover_runner_srcs(srcs):
+    """Discovers the runner Swift sources, failing when there are none."""
+    runner_srcs = srcs if srcs != None else native.glob(["ios/Runner/*.swift"])
+    if not runner_srcs:
+        fail("No Swift sources found in ios/Runner/. " +
+             "Run 'flutter create --platforms=ios .' to generate runner files.")
+    return runner_srcs
+
+def _ios_resolve_info_plist(name, info_plist, module_name, internal_tags):
+    """Preprocesses the Info.plist to resolve Xcode variables rules_apple misses."""
+    if info_plist:
+        return info_plist
+    expand_template(
+        name = "__%s_info_plist" % name,
+        template = "ios/Runner/Info.plist",
+        out = "__%s_Info.plist" % name,
+        substitutions = {
+            "$(DEVELOPMENT_LANGUAGE)": "en",
+            # UISceneDelegateClassName is <module>.SceneDelegate: the
+            # flutter create SceneDelegate carries no @objc, so its
+            # runtime name is module-qualified and must track module_name.
+            "$(PRODUCT_MODULE_NAME)": module_name,
+            "$(FLUTTER_BUILD_NAME)": "1.0",
+            "$(FLUTTER_BUILD_NUMBER)": "1",
+        },
+        tags = internal_tags,
+    )
+    return "__%s_info_plist" % name
+
+def _ios_resolve_version(name, backend, version, internal_tags, kwargs):
+    """Creates the default apple_bundle_version (rules_apple) or resolves it (xtool).
+
+    Returns:
+      A `(version, invalid_version_error)` tuple.
+    """
+    if backend == "rules_apple":
+        if not version:
+            apple_bundle_version(
+                name = "__%s_version" % name,
+                build_version = "1.0",
+                short_version_string = "1.0",
+                tags = internal_tags,
+            )
+            return ":%s" % ("__%s_version" % name), ""
+        return version, ""
+    version, version_bv, version_sv, invalid_version_error = _resolve_xtool_version(
+        name,
+        "flutter_ios_app",
+        version,
+        internal_tags,
+    )
+    if version_bv and "build_version" not in kwargs:
+        kwargs["build_version"] = version_bv
+    if version_sv and "short_version" not in kwargs:
+        kwargs["short_version"] = version_sv
+    return version, invalid_version_error
+
+def _ios_resolve_launch_storyboard(launch_storyboard, backend):
+    """Resolves the launch storyboard, discovering the conventional one."""
+    if launch_storyboard == False:
+        return None
+    if not launch_storyboard:
+        launch_candidates = native.glob(["ios/Runner/Base.lproj/LaunchScreen.storyboard"], allow_empty = True)
+        if launch_candidates:
+            return launch_candidates[0]
+        if backend == "rules_apple":
+            return IOS_DEFAULT_LAUNCH_STORYBOARD
+    return launch_storyboard
+
+def _ios_dev_infoplists(name, actual_info_plist, internal_tags):
+    """Merges the Dart VM service keys into a dev Info.plist and selects it.
+
+    The keys are *merged into* the app's Info.plist rather than passed
+    beside it. rules_apple's plisttool hard-fails when two plists
+    declare the same key with different values, so an app declaring
+    its own NSLocalNetworkUsageDescription — the documented way to
+    request iOS 14+ Local Network Privacy, and the key a LAN app
+    needs in release — could not build in `-c dbg` at all. The
+    supplement merge keeps the app's own values and unions its
+    NSBonjourServices with `_dartVmService._tcp`.
+    """
+    _flutter_plist_merge(
+        name = "__%s_info_plist_dev" % name,
+        base = actual_info_plist,
+        additions = [_DART_VM_SERVICE_PLIST],
+        mode = "supplement",
+        output_basename = "Info.plist",
+        tags = internal_tags,
+    )
+    return select({
+        "@rules_flutter//flutter:release": [actual_info_plist],
+        "//conditions:default": ["__%s_info_plist_dev" % name],
+    })
+
+def _ios_emit_rules_apple_bundle(name, display_name, bundle_id, families, minimum_os_version, version, selected_infoplists, actual_launch_storyboard, app_icons, resources, provisioning_profile, entitlements, engine_target, tags, visibility, kwargs):
+    """Emits the final rules_apple ios_application bundle target."""
+    ios_application(
+        name = name,
+        bundle_id = bundle_id,
+        bundle_name = display_name,
+        entitlements = entitlements,
+        families = families,
+        minimum_os_version = minimum_os_version,
+        infoplists = selected_infoplists,
+        version = version,
+        launch_storyboard = actual_launch_storyboard,
+        provisioning_profile = provisioning_profile,
+        app_icons = app_icons,
+        resources = resources + ["__%s_privacy_manifests" % name],
+        deps = [
+            "__%s_runner" % name,
+            "__%s_app_bundle" % name,
+            "__%s_native_frameworks" % name,
+        ],
+        tags = tags,
+        visibility = visibility,
+        **kwargs
+    )
+
+def _ios_emit_xtool_bundle(name, display_name, bundle_id, families, minimum_os_version, version, invalid_version_error, selected_infoplists, actual_launch_storyboard, app_icons, resources, discovered_main_storyboard, runner_srcs, runner_deps, engine_target, entitlements, provisioning_profile, tags, visibility, kwargs):
+    """Emits the final xtool iOS bundle target, forwarding only its kwargs."""
+    valid_xtool_kwargs = (
+        "additional_contents",
+        "build_version",
+        "certificate",
+        "certificate_password",
+        "certificate_password_env",
+        "certificate_password_file",
+        "compatible_with",
+        "defines",
+        "env",
+        "exec_compatible_with",
+        "executable",
+        "features",
+        "require_sdk",
+        "restricted_to",
+        "short_version",
+        "target_compatible_with",
+        "testonly",
+        "zsign",
+    )
+    forwarded_kwargs = {k: v for k, v in kwargs.items() if k in valid_xtool_kwargs}
+    unsupported_kwargs = [k for k in kwargs if k not in valid_xtool_kwargs]
+    _flutter_xtool_ios_bundle(
+        name = name,
+        app_name = display_name,
+        bundle_id = bundle_id,
+        families = families,
+        minimum_os_version = minimum_os_version,
+        version = version,
+        invalid_version_error = invalid_version_error,
+        infoplists = selected_infoplists,
+        launch_storyboard = actual_launch_storyboard,
+        app_icons = app_icons if app_icons != None else [],
+        srcs = runner_srcs,
+        registrant = ":__%s_registrant" % name,
+        plugins = [":__%s_apple_plugins" % name],
+        deps = runner_deps,
+        frameworks = [
+            ":__%s_app_framework" % name,
+            engine_target,
+            ":__%s_native_frameworks" % name,
+        ],
+        resources = resources + discovered_main_storyboard + ["__%s_privacy_manifests" % name],
+        provisioning_profile = provisioning_profile,
+        entitlements = entitlements if entitlements != False else None,
+        tags = tags,
+        visibility = visibility,
+        unsupported_kwargs = unsupported_kwargs,
+        **forwarded_kwargs
+    )
+
 def flutter_ios_app(
         name,
         application,
@@ -550,25 +834,7 @@ def flutter_ios_app(
     # pipeline still injects `get-task-allow=true` for debug builds.
     # `False` ships none although the file exists — see
     # `resolve_ios_entitlements` for the device build that needs it.
-    entitlements = resolve_ios_entitlements(
-        entitlements,
-        discovered = "ios/Runner/Runner.entitlements" if native.glob(
-            ["ios/Runner/Runner.entitlements"],
-            allow_empty = True,
-        ) else None,
-    )
-
-    # Fold the app's own entitlement additions in. `base` may legitimately be
-    # None here: an iOS app without Xcode capabilities ships no entitlements
-    # file, and then the additions are the entitlements.
-    if additional_entitlements:
-        _flutter_entitlements_merge(
-            name = "__%s_entitlements" % name,
-            base = entitlements,
-            additions = additional_entitlements,
-            tags = internal_tags,
-        )
-        entitlements = "__%s_entitlements" % name
+    entitlements = _ios_resolve_entitlements(name, entitlements, additional_entitlements, internal_tags)
 
     # The app icon: the conventional catalog `flutter create` writes, unless
     # the caller named something else. Discovered for the same reason the
@@ -579,85 +845,16 @@ def flutter_ios_app(
     #
     # `None` means discover, `[]` means ship none: both states are sayable, and
     # an app with no catalog at all is the second without having to write it.
-    if app_icons == None and backend == "rules_apple":
-        app_icons = native.glob(
-            ["ios/Runner/Assets.xcassets/AppIcon.appiconset/**"],
-            allow_empty = True,
-        )
+    app_icons = _ios_discover_app_icons(app_icons, backend)
 
     # -- Internal targets (all __{name}_ prefixed) --
 
-    # 1. Generate iOS Swift plugin registrant.
-    _flutter_ios_registrant_rule(
-        name = "__%s_registrant" % name,
-        application = application,
-        exclude_plugins = exclude_plugins,
-        tags = internal_tags,
-    )
+    engine_target = _ios_build_frameworks(name, application, minimum_os_version, allow_non_macho, backend, engine, exclude_plugins, internal_tags)
 
-    # 2. Extract intermediates (AOT dylib + flutter_assets + native_libs).
-    _flutter_ios_application(
-        name = "__%s_intermediates" % name,
-        application = application,
-        tags = internal_tags,
-    )
-
-    # 3. Assemble App.framework from the AOT dylib (or debug stub + kernel).
-    _flutter_ios_framework_rule(
-        name = "__%s_app_framework" % name,
-        application = "__%s_intermediates" % name,
-        minimum_os_version = minimum_os_version,
-        allow_non_macho = allow_non_macho,
-        tags = internal_tags,
-    )
-
-    # 4. Wrap App.framework for rules_apple.
-    #    In debug mode, bundle_only=True embeds the framework without linking
-    #    (the stub binary only exists for rules_apple compatibility and isn't
-    #    loaded at runtime — Flutter uses the JIT kernel blob instead).
-    if backend == "rules_apple":
-        apple_dynamic_framework_import(
-            name = "__%s_app_bundle" % name,
-            framework_imports = ["__%s_app_framework" % name],
-            bundle_only = select({
-                Label("@rules_flutter//flutter/private:dbg"): True,
-                "//conditions:default": False,
-            }),
-            tags = internal_tags,
-        )
-
-    # 5. Import Flutter.xcframework engine — auto-selects debug/release and backend.
-    if engine:
-        engine_target = engine
-    else:
-        flutter_ios_engine(
-            name = "__%s_engine" % name,
-            backend = backend,
-            tags = internal_tags,
-        )
-        engine_target = "__%s_engine" % name
-
-    # 6. Wrap native plugin/native-asset dylibs in .frameworks for bundling.
-    _flutter_ios_native_frameworks_rule(
-        name = "__%s_native_frameworks" % name,
-        application = application,
-        minimum_os_version = minimum_os_version,
-        allow_non_macho = allow_non_macho,
-        tags = internal_tags,
-    )
-
-    # 6b. Expose plugin PrivacyInfo.xcprivacy files for bundling.
-    _flutter_ios_privacy_manifests_rule(
-        name = "__%s_privacy_manifests" % name,
-        application = application,
-        tags = internal_tags,
-    )
+    _ios_build_native_frameworks(name, application, minimum_os_version, allow_non_macho, internal_tags)
 
     # 7. Discover runner Swift sources and build swift_library.
-    runner_srcs = srcs if srcs != None else native.glob(["ios/Runner/*.swift"])
-    if not runner_srcs:
-        fail("No Swift sources found in ios/Runner/. " +
-             "Run 'flutter create --platforms=ios .' to generate runner files.")
+    runner_srcs = _ios_discover_runner_srcs(srcs)
 
     # 7a. Aggregate Apple plugin libraries from the application's transitive
     # FlutterInfo so the runner's swift_library imports + links each pub
@@ -685,62 +882,16 @@ def flutter_ios_app(
 
     # 8. Info.plist — preprocess to resolve Xcode variables that rules_apple
     #    doesn't handle.
-    if not info_plist:
-        expand_template(
-            name = "__%s_info_plist" % name,
-            template = "ios/Runner/Info.plist",
-            out = "__%s_Info.plist" % name,
-            substitutions = {
-                "$(DEVELOPMENT_LANGUAGE)": "en",
-                # UISceneDelegateClassName is <module>.SceneDelegate: the
-                # flutter create SceneDelegate carries no @objc, so its
-                # runtime name is module-qualified and must track module_name.
-                "$(PRODUCT_MODULE_NAME)": module_name,
-                "$(FLUTTER_BUILD_NAME)": "1.0",
-                "$(FLUTTER_BUILD_NUMBER)": "1",
-            },
-            tags = internal_tags,
-        )
-        actual_info_plist = "__%s_info_plist" % name
-    else:
-        actual_info_plist = info_plist
+    actual_info_plist = _ios_resolve_info_plist(name, info_plist, module_name, internal_tags)
 
     # 9. Version — create default apple_bundle_version if not provided (rules_apple),
     #    or resolve/convert apple_bundle_version on xtool without Apple toolchains.
-    invalid_version_error = ""
-    if backend == "rules_apple":
-        if not version:
-            apple_bundle_version(
-                name = "__%s_version" % name,
-                build_version = "1.0",
-                short_version_string = "1.0",
-                tags = internal_tags,
-            )
-            version = ":%s" % ("__%s_version" % name)
-    else:
-        version, version_bv, version_sv, invalid_version_error = _resolve_xtool_version(
-            name,
-            "flutter_ios_app",
-            version,
-            internal_tags,
-        )
-        if version_bv and "build_version" not in kwargs:
-            kwargs["build_version"] = version_bv
-        if version_sv and "short_version" not in kwargs:
-            kwargs["short_version"] = version_sv
+    version, invalid_version_error = _ios_resolve_version(name, backend, version, internal_tags, kwargs)
 
     # 10. Resolve launch storyboard. On xtool, storyboards discovered in the
     #     conventional `flutter create` layout are forwarded so the rule
     #     reports a named ibtool error rather than silently dropping them.
-    actual_launch_storyboard = launch_storyboard
-    if actual_launch_storyboard == False:
-        actual_launch_storyboard = None
-    elif not actual_launch_storyboard:
-        launch_candidates = native.glob(["ios/Runner/Base.lproj/LaunchScreen.storyboard"], allow_empty = True)
-        if launch_candidates:
-            actual_launch_storyboard = launch_candidates[0]
-        elif backend == "rules_apple":
-            actual_launch_storyboard = IOS_DEFAULT_LAUNCH_STORYBOARD
+    actual_launch_storyboard = _ios_resolve_launch_storyboard(launch_storyboard, backend)
 
     # 10b. Dart VM service keys for debug/profile builds — required for the
     #      Flutter engine to register the VM service via mDNS. Matches
@@ -755,95 +906,17 @@ def flutter_ios_app(
     #      needs in release — could not build in `-c dbg` at all. The
     #      supplement merge keeps the app's own values and unions its
     #      NSBonjourServices with `_dartVmService._tcp`.
-    _flutter_plist_merge(
-        name = "__%s_info_plist_dev" % name,
-        base = actual_info_plist,
-        additions = [_DART_VM_SERVICE_PLIST],
-        mode = "supplement",
-        output_basename = "Info.plist",
-        tags = internal_tags,
-    )
-
-    selected_infoplists = select({
-        "@rules_flutter//flutter:release": [actual_info_plist],
-        "//conditions:default": ["__%s_info_plist_dev" % name],
-    })
+    # 10b. Dart VM service keys for debug/profile builds — required for the
+    #      Flutter engine to register the VM service via mDNS. Matches
+    #      flutter_tools' xcode_backend.dart, which only adds them for
+    #      non-release configurations.
+    selected_infoplists = _ios_dev_infoplists(name, actual_info_plist, internal_tags)
 
     # 11. Final bundle target — rules_apple (default) or explicit opt-in xtool.
     if backend == "rules_apple":
-        ios_application(
-            name = name,
-            bundle_id = bundle_id,
-            bundle_name = display_name,
-            entitlements = entitlements,
-            families = families,
-            minimum_os_version = minimum_os_version,
-            infoplists = selected_infoplists,
-            version = version,
-            launch_storyboard = actual_launch_storyboard,
-            provisioning_profile = provisioning_profile,
-            app_icons = app_icons,
-            resources = resources + ["__%s_privacy_manifests" % name],
-            deps = [
-                "__%s_runner" % name,
-                "__%s_app_bundle" % name,
-                "__%s_native_frameworks" % name,
-            ],
-            tags = tags,
-            visibility = visibility,
-            **kwargs
-        )
+        _ios_emit_rules_apple_bundle(name, display_name, bundle_id, families, minimum_os_version, version, selected_infoplists, actual_launch_storyboard, app_icons, resources, provisioning_profile, entitlements, engine_target, tags, visibility, kwargs)
     else:
-        valid_xtool_kwargs = (
-            "additional_contents",
-            "build_version",
-            "certificate",
-            "certificate_password",
-            "certificate_password_env",
-            "certificate_password_file",
-            "compatible_with",
-            "defines",
-            "env",
-            "exec_compatible_with",
-            "executable",
-            "features",
-            "require_sdk",
-            "restricted_to",
-            "short_version",
-            "target_compatible_with",
-            "testonly",
-            "zsign",
-        )
-        forwarded_kwargs = {k: v for k, v in kwargs.items() if k in valid_xtool_kwargs}
-        unsupported_kwargs = [k for k in kwargs if k not in valid_xtool_kwargs]
-        _flutter_xtool_ios_bundle(
-            name = name,
-            app_name = display_name,
-            bundle_id = bundle_id,
-            families = families,
-            minimum_os_version = minimum_os_version,
-            version = version,
-            invalid_version_error = invalid_version_error,
-            infoplists = selected_infoplists,
-            launch_storyboard = actual_launch_storyboard,
-            app_icons = app_icons if app_icons != None else [],
-            srcs = runner_srcs,
-            registrant = ":__%s_registrant" % name,
-            plugins = [":__%s_apple_plugins" % name],
-            deps = runner_deps,
-            frameworks = [
-                ":__%s_app_framework" % name,
-                engine_target,
-                ":__%s_native_frameworks" % name,
-            ],
-            resources = resources + discovered_main_storyboard + ["__%s_privacy_manifests" % name],
-            provisioning_profile = provisioning_profile,
-            entitlements = entitlements if entitlements != False else None,
-            tags = tags,
-            visibility = visibility,
-            unsupported_kwargs = unsupported_kwargs,
-            **forwarded_kwargs
-        )
+        _ios_emit_xtool_bundle(name, display_name, bundle_id, families, minimum_os_version, version, invalid_version_error, selected_infoplists, actual_launch_storyboard, app_icons, resources, discovered_main_storyboard, runner_srcs, runner_deps, engine_target, entitlements, provisioning_profile, tags, visibility, kwargs)
 
 def flutter_ios_simulator_build(name, targets, **kwargs):
     """Builds iOS apps for the simulator in debug mode, whatever `-c` says.
