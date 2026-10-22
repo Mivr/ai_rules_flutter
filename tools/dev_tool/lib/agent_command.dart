@@ -485,55 +485,127 @@ Future<Map<String, dynamic>> _call(
   }
   final client = vm;
 
-  /// The pause that will stop this command from ever being answered, if any.
-  ///
-  /// Asked rather than discovered by waiting: the extension runs *on* the
-  /// app's isolate, so a paused one never answers and the request hangs for as
-  /// long as the pause lasts, taking the whole HTTP control channel with it.
-  Future<CommandFailure?> pauseError() async => switch (await client
-      .pausedReason()
-      .timeout(pauseReadBound, onTimeout: () => null)) {
-    final reason? => CommandFailure.failed(
-      '$extensionMethod cannot run: $reason',
-    ),
-    _ => null,
-  };
+  await _waitForAppReady(
+    session,
+    client,
+    extensionMethod,
+    pauseReadBound: pauseReadBound,
+  );
+  await _waitForExtension(
+    client,
+    extensionMethod,
+    waitForBinding: waitForBinding,
+  );
 
-  // A run that was started paused is answered without waiting, because nothing
-  // is going to change until a human resumes it — including the first frame
-  // the branch below waits for, which is why these are alternatives rather
-  // than one after the other.
-  if (session.device.startPaused) {
-    if (await pauseError() case final error?) throw error;
-  } else {
-    // Otherwise the app is on its way to a first frame, and until it arrives
-    // there is nothing here to act on: no widget tree, and on a physical
-    // device a VM service that answers nothing at all for a minute or more
-    // after `app.started`, during which the reads below expire and report a
-    // quiet socket for an app that is merely still starting. See
-    // [DeviceSession.drivable].
-    //
-    // Unbounded on purpose. The gate always settles, and the budget that
-    // settles it belongs to the device rather than to this call: a wait capped
-    // here would abandon an iPhone that was starting exactly as fast as iPhones
-    // start.
-    await session.drivable.whenReady;
-    if (!session.drivable.isReady) {
-      throw CommandFailure.failed(session.drivable.unavailableReason!);
-    }
+  // Read again now the app is up: a breakpoint or an unhandled exception can
+  // have stopped it since, and those hang the dispatch just the same.
+  if (await _pauseError(
+    client,
+    extensionMethod,
+    pauseReadBound,
+  ) case final error?) {
+    throw error;
   }
+  final args = <String, String>{
+    for (final entry in params.entries)
+      if (entry.key != 'appId' && entry.value != null)
+        entry.key: entry.value.toString(),
+    ...extraArgs,
+  };
+  final bound = _dispatchBound(params, dispatchMargin);
+  final json = await _dispatchCall(
+    client,
+    extensionMethod,
+    args: args,
+    bound: bound,
+    pauseReadBound: pauseReadBound,
+  );
+  if (json == null) {
+    throw CommandFailure.failed('$extensionMethod returned no payload');
+  }
+  // The Dart VM service appends `type` and `method` to every extension
+  // response. Strip them so the AI sees only the agent's own fields and
+  // gets a consistent shape across agent extensions and inspector RPCs.
+  return Map<String, dynamic>.from(json)
+    ..remove('type')
+    ..remove('method');
+}
 
-  // `PauseStart` means two different things on web, and only one of them was
-  // just ruled out. DWDS reports the isolate as paused-at-start from the moment
-  // it exists until it releases `main()` — which it withholds until its
-  // injected client connects (`injector.dart:139-164`), seconds after
-  // `app.started`. That window is not a pause to report, it is a startup to
-  // wait out, and until it closes nothing is registered: not the agent surface,
-  // not the framework's own `ext.flutter.*`. A hot restart reopens it.
+/// The pause that will stop a command from ever being answered, if any.
+///
+/// Asked rather than discovered by waiting: the extension runs *on* the
+/// app's isolate, so a paused one never answers and the request hangs for as
+/// long as the pause lasts, taking the whole HTTP control channel with it.
+Future<CommandFailure?> _pauseError(
+  VmServiceClient client,
+  String extensionMethod,
+  Duration pauseReadBound,
+) async => switch (await client
+    .pausedReason()
+    .timeout(pauseReadBound, onTimeout: () => null)) {
+  final reason? => CommandFailure.failed(
+    '$extensionMethod cannot run: $reason',
+  ),
+  _ => null,
+};
+
+/// Wait until the app can answer [extensionMethod].
+///
+/// A run that was started paused is answered without waiting, because nothing
+/// is going to change until a human resumes it — including the first frame
+/// the branch below waits for, which is why these are alternatives rather
+/// than one after the other.
+Future<void> _waitForAppReady(
+  DeviceSession session,
+  VmServiceClient client,
+  String extensionMethod, {
+  required Duration pauseReadBound,
+}) async {
+  if (session.device.startPaused) {
+    if (await _pauseError(
+      client,
+      extensionMethod,
+      pauseReadBound,
+    ) case final error?) {
+      throw error;
+    }
+    return;
+  }
+  // Otherwise the app is on its way to a first frame, and until it arrives
+  // there is nothing here to act on: no widget tree, and on a physical
+  // device a VM service that answers nothing at all for a minute or more
+  // after `app.started`, during which the reads below expire and report a
+  // quiet socket for an app that is merely still starting. See
+  // [DeviceSession.drivable].
   //
-  // Both are waited for. The binding is what the handlers run against, and the
-  // named extension is what answers the call; on web those arrive in that order
-  // with app code in between, on native they are already there together.
+  // Unbounded on purpose. The gate always settles, and the budget that
+  // settles it belongs to the device rather than to this call: a wait capped
+  // here would abandon an iPhone that was starting exactly as fast as iPhones
+  // start.
+  await session.drivable.whenReady;
+  if (!session.drivable.isReady) {
+    throw CommandFailure.failed(session.drivable.unavailableReason!);
+  }
+}
+
+/// Wait for [extensionMethod] (and the Flutter binding) to be registered.
+///
+/// `PauseStart` means two different things on web, and only one of them was
+/// just ruled out. DWDS reports the isolate as paused-at-start from the moment
+/// it exists until it releases `main()` — which it withholds until its
+/// injected client connects (`injector.dart:139-164`), seconds after
+/// `app.started`. That window is not a pause to report, it is a startup to
+/// wait out, and until it closes nothing is registered: not the agent surface,
+/// not the framework's own `ext.flutter.*`. A hot restart reopens it.
+///
+/// Both are waited for. The binding is what the handlers run against, and the
+/// named extension is what answers the call; on web those arrive in that order
+/// with app code in between, on native they are already there together.
+Future<void> _waitForExtension(
+  VmServiceClient client,
+  String extensionMethod, {
+  required bool waitForBinding,
+}) async {
   for (final rpc in {
     extensionMethod,
     if (waitForBinding) _bindingExtension,
@@ -565,20 +637,18 @@ Future<Map<String, dynamic>> _call(
       );
     }
   }
+}
 
-  // Read again now the app is up: a breakpoint or an unhandled exception can
-  // have stopped it since, and those hang the dispatch just the same.
-  if (await pauseError() case final error?) throw error;
-  final args = <String, String>{
-    for (final entry in params.entries)
-      if (entry.key != 'appId' && entry.value != null)
-        entry.key: entry.value.toString(),
-    ...extraArgs,
-  };
-  final Map<String, dynamic>? json;
-  final bound = _dispatchBound(params, dispatchMargin);
+/// Dispatch [extensionMethod] with [args], bounded by [bound].
+Future<Map<String, dynamic>?> _dispatchCall(
+  VmServiceClient client,
+  String extensionMethod, {
+  required Map<String, String> args,
+  required Duration bound,
+  required Duration pauseReadBound,
+}) async {
   try {
-    json = await client
+    return await client
         .callServiceExtension(extensionMethod, args: args)
         .timeout(bound);
   } on TimeoutException {
@@ -619,13 +689,4 @@ Future<Map<String, dynamic>> _call(
     // was found, which is the property that matters.
     throw CommandFailure.failed(e.details ?? e.message);
   }
-  if (json == null) {
-    throw CommandFailure.failed('$extensionMethod returned no payload');
-  }
-  // The Dart VM service appends `type` and `method` to every extension
-  // response. Strip them so the AI sees only the agent's own fields and
-  // gets a consistent shape across agent extensions and inspector RPCs.
-  return Map<String, dynamic>.from(json)
-    ..remove('type')
-    ..remove('method');
 }
