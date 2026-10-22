@@ -320,17 +320,17 @@ Future<void> main(List<String> argv) async {
 /// verified against the manifest after it runs. Nothing is read from the
 /// compile argv: flags after `--` run the compiler unchanged, and never
 /// widen what it may read.
-Future<int> runFiltered(
-  List<String> argv,
-  StringSink out,
-  StringSink err,
-) async {
+/// The tool flags before `--`: the manifest path plus the compiler argv.
+///
+/// Returns null after describing the usage error on [err].
+({String manifestPath, String executable, List<String> cmdArgs})?
+_splitFilterArgv(List<String> argv, StringSink err) {
   final i = argv.indexOf('--');
   if (i < 0 || i + 1 >= argv.length) {
     err.writeln(
       'Usage: dart kernel_filter.dart --declared-inputs <manifest> -- <executable> <arguments>',
     );
-    return 2;
+    return null;
   }
   String? manifestPath;
   for (var j = 0; j < i; j++) {
@@ -338,17 +338,114 @@ Future<int> runFiltered(
       manifestPath = argv[++j];
     } else {
       err.writeln('kernel_filter: unexpected argument ${argv[j]}.');
-      return 2;
+      return null;
     }
   }
   if (manifestPath == null) {
     err.writeln(
       'kernel_filter: missing required --declared-inputs <manifest>.',
     );
-    return 2;
+    return null;
   }
-  final manifest = File(manifestPath);
-  if (!manifest.existsSync()) {
+  return (
+    manifestPath: manifestPath,
+    executable: argv[i + 1],
+    cmdArgs: argv.sublist(i + 2),
+  );
+}
+
+/// Refuses declared sources whose directives name no declared input.
+///
+/// Returns 1 after writing each refusal on [err], or null to keep going.
+int? _refuseDisallowedDirectives(
+  List<String> sources,
+  List<String> fsRoots,
+  StringSink err,
+) {
+  final guardErrors = findDisallowedFlutterDirectives(
+    sources,
+    fsRoots,
+    tool: 'flutter',
+  );
+  if (guardErrors.isEmpty) return null;
+  for (final error in guardErrors) {
+    err.writeln(error);
+  }
+  return 1;
+}
+
+/// Deletes a refused compile's output dill when it exists.
+void _deleteRefusedOutput(String? outputDill) {
+  if (outputDill == null) return;
+  try {
+    File(outputDill).deleteSync();
+  } on FileSystemException {
+    // Already gone; the nonzero exit fails the action either way.
+  }
+}
+
+/// Reports a failed compile: its dependency lines are dropped while every
+/// other line, both streams and the exit code pass through. A missing
+/// platform plugin gets the hint instead of a silent pass-through.
+int _reportCompilerFailure(
+  ProcessResult result,
+  StringSink out,
+  StringSink err,
+) {
+  final split = splitDependencyLines(result.stdout as String);
+  out.write(split.rest);
+  err.write(result.stderr as String);
+  if ('${result.stdout}${result.stderr}'.contains(
+    'is not available on this platform.',
+  )) {
+    err.writeln(
+      'flutter: this compile imports a plugin that is not available on the '
+      'compiled platform. Remove the dependency or add a platform '
+      "implementation; the build fails instead of shipping without the "
+      "plugin's registration.",
+    );
+  }
+  return result.exitCode;
+}
+
+/// Verifies a successful compile's dependency report against the manifest.
+///
+/// Returns 1 after writing each refusal on [err] — deleting only the
+/// manifest's output, never a path the argv names — or null when every read
+/// is declared and the caller should print the filtered output.
+int? _refuseUndeclaredReads(
+  ({List<String> reads, String rest}) split,
+  Set<String> declared,
+  Set<String> extraAllowed,
+  String? outputDill,
+  StringSink err,
+) {
+  if (split.reads.isEmpty) {
+    err.writeln(noDependencyReadsMessage());
+    _deleteRefusedOutput(outputDill);
+    return 1;
+  }
+  final undeclared = findUndeclaredReads(split.reads, declared, extraAllowed);
+  if (undeclared.isEmpty) return null;
+  for (final line in undeclared) {
+    err.writeln(undeclaredReadMessage(line));
+  }
+  // Delete only the manifest's output: an `--output-dill` smuggled into
+  // the argv names no file here, so the refusal cannot be redirected at
+  // (or away from) another path.
+  _deleteRefusedOutput(outputDill);
+  return 1;
+}
+
+Future<int> runFiltered(
+  List<String> argv,
+  StringSink out,
+  StringSink err,
+) async {
+  final parsed = _splitFilterArgv(argv, err);
+  if (parsed == null) return 2;
+  final manifestPath = parsed.manifestPath;
+  if (!File(manifestPath).existsSync()) {
     err.writeln(
       'kernel_filter: declared-inputs manifest $manifestPath does not exist.',
     );
@@ -361,80 +458,36 @@ Future<int> runFiltered(
   // same bytes), while the read set allows the source spellings, the staged
   // spellings, and the allowed reads — all of them manifest entries, never
   // argv values.
-  final parsed = readKernelInputsManifest(manifestPath);
-  final declared = parsed.declared;
-  final extraAllowed = parsed.extraAllowed;
-  final fsRoots = parsed.fsRoots;
-  final outputDill = parsed.outputDill;
+  final inputs = readKernelInputsManifest(manifestPath);
   final sources = [
-    for (final path in parsed.sources)
+    for (final path in inputs.sources)
       if (path.endsWith('.dart')) path,
   ];
-  final executable = argv[i + 1];
-  final cmdArgs = argv.sublist(i + 2);
 
-  final guardErrors = findDisallowedFlutterDirectives(
+  final directiveRefusal = _refuseDisallowedDirectives(
     sources,
-    fsRoots,
-    tool: 'flutter',
+    inputs.fsRoots,
+    err,
   );
-  if (guardErrors.isNotEmpty) {
-    for (final error in guardErrors) {
-      err.writeln(error);
-    }
-    return 1;
-  }
+  if (directiveRefusal != null) return directiveRefusal;
 
   final result = await Process.run(
-    executable,
-    withForcedDependencyReport(cmdArgs),
+    parsed.executable,
+    withForcedDependencyReport(parsed.cmdArgs),
   );
   if (result.exitCode != 0) {
-    final split = splitDependencyLines(result.stdout as String);
-    out.write(split.rest);
-    err.write(result.stderr as String);
-    if ('${result.stdout}${result.stderr}'.contains(
-      'is not available on this platform.',
-    )) {
-      err.writeln(
-        'flutter: this compile imports a plugin that is not available on the '
-        'compiled platform. Remove the dependency or add a platform '
-        'implementation; the build fails instead of shipping without the '
-        "plugin's registration.",
-      );
-    }
-    return result.exitCode;
+    return _reportCompilerFailure(result, out, err);
   }
 
   final split = splitDependencyLines(result.stdout as String);
-  if (split.reads.isEmpty) {
-    err.writeln(noDependencyReadsMessage());
-    if (outputDill != null) {
-      try {
-        File(outputDill).deleteSync();
-      } on FileSystemException {
-        // Already gone; the nonzero exit fails the action either way.
-      }
-    }
-    return 1;
-  }
-  final undeclared = findUndeclaredReads(split.reads, declared, extraAllowed);
-  if (undeclared.isNotEmpty) {
-    for (final line in undeclared) {
-      err.writeln(undeclaredReadMessage(line));
-    }
-    // Delete only the manifest's output: an `--output-dill` smuggled into
-    // the argv names no file here, so the refusal cannot be redirected at
-    // (or away from) another path.
-    if (outputDill != null) {
-      try {
-        File(outputDill).deleteSync();
-      } on FileSystemException {
-        // Already gone; the nonzero exit fails the action either way.
-      }
-    }
-    return 1;
-  }
+  final readsRefusal = _refuseUndeclaredReads(
+    split,
+    inputs.declared,
+    inputs.extraAllowed,
+    inputs.outputDill,
+    err,
+  );
+  if (readsRefusal != null) return readsRefusal;
   out.write(split.rest);
   err.write(result.stderr as String);
   return result.exitCode;
