@@ -379,6 +379,7 @@ def flutter_kernel_compile_action(
     # through the persistent worker. With the flag off every action below is
     # unchanged.
     incr_worker = _is_incr_worker(ctx, aot, target, from_dill, import_dill, recorded_uses)
+
     # Declared here so the worker's `--declared-inputs` prefix joins the same
     # args object the compiler argv is built into below: with `use_param_file`
     # a nested args object would stringify instead of flattening.
