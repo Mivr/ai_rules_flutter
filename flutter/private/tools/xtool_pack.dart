@@ -2387,83 +2387,116 @@ Directory _allocateDeterministicStageSubdir(Directory base, String prefix) {
   return (stage, existed ? null : fallbackBase);
 }
 
-void _ensureExecutableRpaths(File execFile, {required bool isMacOS}) {
-  final bytes = execFile.readAsBytesSync();
-  if (bytes.length < 32) return;
-  final bd = ByteData.sublistView(bytes);
-  if (bd.getUint32(0, Endian.little) != 0xfeedfacf) return;
-  final ncmds = bd.getUint32(16, Endian.little);
-  final sizeofcmds = bd.getUint32(20, Endian.little);
-  if (32 + sizeofcmds > bytes.length) return;
+void _collectRpathString(
+  Uint8List bytes,
+  ByteData bd,
+  int pos,
+  int cmdsize,
+  Set<String> out,
+) {
+  final strOff = bd.getUint32(pos + 8, Endian.little);
+  if (strOff >= cmdsize) return;
+  var end = pos + strOff;
+  while (end < pos + cmdsize && bytes[end] != 0) {
+    end++;
+  }
+  out.add(
+    utf8.decode(bytes.sublist(pos + strOff, end), allowMalformed: true),
+  );
+}
 
+int _sectionPayloadFloor(
+  ByteData bd,
+  int pos,
+  int cmdsize,
+  int nsects,
+  int floor,
+) {
+  var sectPos = pos + 72;
+  for (var s = 0; s < nsects; s++) {
+    if (sectPos + 80 > pos + cmdsize) break;
+    final sectSize = _getUint64LE(bd, sectPos + 40);
+    final sectOffset = bd.getUint32(sectPos + 48, Endian.little);
+    if (sectSize > 0 && sectOffset > 0 && sectOffset < floor) {
+      floor = sectOffset;
+    }
+    sectPos += 80;
+  }
+  return floor;
+}
+
+int _segmentPayloadFloor(
+  Uint8List bytes,
+  ByteData bd,
+  int pos,
+  int cmdsize,
+  int floor,
+) {
+  final segBytes = bytes.sublist(pos + 8, pos + 24);
+  final nul = segBytes.indexOf(0);
+  final segName = ascii.decode(
+    nul >= 0 ? segBytes.sublist(0, nul) : segBytes,
+    allowInvalid: true,
+  );
+  final fileoff = _getUint64LE(bd, pos + 40);
+  final filesize = _getUint64LE(bd, pos + 48);
+  final nsects = bd.getUint32(pos + 64, Endian.little);
+  if (segName != '__TEXT' &&
+      segName != '__PAGEZERO' &&
+      filesize > 0 &&
+      fileoff > 0 &&
+      fileoff < floor) {
+    floor = fileoff;
+  }
+  return _sectionPayloadFloor(bd, pos, cmdsize, nsects, floor);
+}
+
+/// Scans Mach-O load commands for existing `LC_RPATH` entries and the lowest
+/// payload file offset, returning null when the binary must be left alone.
+({Set<String> existingRpaths, int minPayloadOffset})? _scanMachOLoadCommands(
+  Uint8List bytes,
+  ByteData bd,
+  int ncmds,
+  int sizeofcmds,
+) {
   final existingRpaths = <String>{};
   var minPayloadOffset = bytes.length;
   var pos = 32;
   for (var i = 0; i < ncmds; i++) {
-    if (pos + 8 > 32 + sizeofcmds) return;
+    if (pos + 8 > 32 + sizeofcmds) return null;
     final cmd = bd.getUint32(pos, Endian.little);
     final cmdsize = bd.getUint32(pos + 4, Endian.little);
-    if (cmdsize < 8 || pos + cmdsize > 32 + sizeofcmds) return;
+    if (cmdsize < 8 || pos + cmdsize > 32 + sizeofcmds) return null;
     if (cmd == 0x8000001c && cmdsize >= 12) {
-      final strOff = bd.getUint32(pos + 8, Endian.little);
-      if (strOff < cmdsize) {
-        var end = pos + strOff;
-        while (end < pos + cmdsize && bytes[end] != 0) {
-          end++;
-        }
-        existingRpaths.add(
-          utf8.decode(bytes.sublist(pos + strOff, end), allowMalformed: true),
-        );
-      }
+      _collectRpathString(bytes, bd, pos, cmdsize, existingRpaths);
     } else if (cmd == 0x19 && cmdsize >= 72) {
-      final segBytes = bytes.sublist(pos + 8, pos + 24);
-      final nul = segBytes.indexOf(0);
-      final segName = ascii.decode(
-        nul >= 0 ? segBytes.sublist(0, nul) : segBytes,
-        allowInvalid: true,
+      minPayloadOffset = _segmentPayloadFloor(
+        bytes,
+        bd,
+        pos,
+        cmdsize,
+        minPayloadOffset,
       );
-      final fileoff = _getUint64LE(bd, pos + 40);
-      final filesize = _getUint64LE(bd, pos + 48);
-      final nsects = bd.getUint32(pos + 64, Endian.little);
-      if (segName != '__TEXT' &&
-          segName != '__PAGEZERO' &&
-          filesize > 0 &&
-          fileoff > 0 &&
-          fileoff < minPayloadOffset) {
-        minPayloadOffset = fileoff;
-      }
-      var sectPos = pos + 72;
-      for (var s = 0; s < nsects; s++) {
-        if (sectPos + 80 > pos + cmdsize) break;
-        final sectSize = _getUint64LE(bd, sectPos + 40);
-        final sectOffset = bd.getUint32(sectPos + 48, Endian.little);
-        if (sectSize > 0 && sectOffset > 0 && sectOffset < minPayloadOffset) {
-          minPayloadOffset = sectOffset;
-        }
-        sectPos += 80;
-      }
     }
     pos += cmdsize;
   }
+  return (existingRpaths: existingRpaths, minPayloadOffset: minPayloadOffset);
+}
 
-  final requiredRpaths = <String>[
-    '@executable_path/Frameworks',
-    if (isMacOS) '@executable_path/../Frameworks',
-  ];
-  final missingRpaths = [
-    for (final rp in requiredRpaths)
-      if (!existingRpaths.contains(rp)) _encodeMachORpathCommand(rp),
-  ];
-  if (missingRpaths.isEmpty) return;
-
+void _appendMissingRpaths(
+  File execFile,
+  Uint8List bytes,
+  int ncmds,
+  int sizeofcmds,
+  int minPayloadOffset,
+  List<Uint8List> missingRpaths,
+) {
   final addedSize = missingRpaths.fold<int>(0, (s, c) => s + c.length);
   final newLoadCmdEnd = 32 + sizeofcmds + addedSize;
   if (newLoadCmdEnd > minPayloadOffset) return;
-
   for (var i = 32 + sizeofcmds; i < newLoadCmdEnd; i++) {
     if (bytes[i] != 0) return;
   }
-
   final out = Uint8List.fromList(bytes);
   final outBd = ByteData.sublistView(out);
   outBd.setUint32(16, ncmds + missingRpaths.length, Endian.little);
@@ -2476,9 +2509,37 @@ void _ensureExecutableRpaths(File execFile, {required bool isMacOS}) {
   execFile.writeAsBytesSync(out);
 }
 
-/// Assembles an iOS `.ipa` or macOS `.app.zip` (and optional `.app` directory)
-/// according to [config].
-void assembleBundle(BundleConfig config) {
+void _ensureExecutableRpaths(File execFile, {required bool isMacOS}) {
+  final bytes = execFile.readAsBytesSync();
+  if (bytes.length < 32) return;
+  final bd = ByteData.sublistView(bytes);
+  if (bd.getUint32(0, Endian.little) != 0xfeedfacf) return;
+  final ncmds = bd.getUint32(16, Endian.little);
+  final sizeofcmds = bd.getUint32(20, Endian.little);
+  if (32 + sizeofcmds > bytes.length) return;
+
+  final scan = _scanMachOLoadCommands(bytes, bd, ncmds, sizeofcmds);
+  if (scan == null) return;
+  final requiredRpaths = <String>[
+    '@executable_path/Frameworks',
+    if (isMacOS) '@executable_path/../Frameworks',
+  ];
+  final missingRpaths = [
+    for (final rp in requiredRpaths)
+      if (!scan.existingRpaths.contains(rp)) _encodeMachORpathCommand(rp),
+  ];
+  if (missingRpaths.isEmpty) return;
+  _appendMissingRpaths(
+    execFile,
+    bytes,
+    ncmds,
+    sizeofcmds,
+    scan.minPayloadOffset,
+    missingRpaths,
+  );
+}
+
+void _checkBundlePlatform(BundleConfig config) {
   if (config.platform != 'ios' &&
       config.platform != 'ios_sim' &&
       config.platform != 'macos') {
@@ -2486,73 +2547,155 @@ void assembleBundle(BundleConfig config) {
       'Unsupported platform "${config.platform}". Expected ios, ios_sim, or macos.',
     );
   }
+}
 
+File _requireBundleExecutable(BundleConfig config) {
   final execFile = File(config.executablePath);
   if (!execFile.existsSync()) {
     throw ArgumentError(
       'Executable binary does not exist: ${config.executablePath}',
     );
   }
+  return execFile;
+}
 
+Map<String, String> _readBundleVersionDefines(BundleConfig config) {
   final effectiveDefines = <String, String>{...config.defines};
-  if (config.versionFilePath != null && config.versionFilePath!.isNotEmpty) {
-    final versionFile = File(config.versionFilePath!);
-    if (!versionFile.existsSync()) {
-      throw ArgumentError(
-        'Version file does not exist: ${config.versionFilePath}',
-      );
-    }
-    final decoded = jsonDecode(versionFile.readAsStringSync());
-    if (decoded is! Map) {
-      throw FormatException(
-        'Version file ${config.versionFilePath} must contain a JSON object.',
-      );
-    }
-    final buildVer = decoded['build_version'];
-    final shortVer = decoded['short_version_string'];
-    if (buildVer is String && buildVer.isNotEmpty) {
-      effectiveDefines.putIfAbsent('FLUTTER_BUILD_NUMBER', () => buildVer);
-    }
-    if (shortVer is String && shortVer.isNotEmpty) {
-      effectiveDefines.putIfAbsent('FLUTTER_BUILD_NAME', () => shortVer);
+  if (config.versionFilePath == null || config.versionFilePath!.isEmpty) {
+    return effectiveDefines;
+  }
+  final versionFile = File(config.versionFilePath!);
+  if (!versionFile.existsSync()) {
+    throw ArgumentError(
+      'Version file does not exist: ${config.versionFilePath}',
+    );
+  }
+  final decoded = jsonDecode(versionFile.readAsStringSync());
+  if (decoded is! Map) {
+    throw FormatException(
+      'Version file ${config.versionFilePath} must contain a JSON object.',
+    );
+  }
+  final buildVer = decoded['build_version'];
+  final shortVer = decoded['short_version_string'];
+  if (buildVer is String && buildVer.isNotEmpty) {
+    effectiveDefines.putIfAbsent('FLUTTER_BUILD_NUMBER', () => buildVer);
+  }
+  if (shortVer is String && shortVer.isNotEmpty) {
+    effectiveDefines.putIfAbsent('FLUTTER_BUILD_NAME', () => shortVer);
+  }
+  return effectiveDefines;
+}
+
+void _stripCodeSignatures(Directory dir) {
+  if (!dir.existsSync()) return;
+  for (final entity in dir.listSync(followLinks: false)) {
+    final name = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
+    if (name == '_CodeSignature') {
+      entity.deleteSync(recursive: true);
+    } else if (entity is Directory) {
+      _stripCodeSignatures(entity);
     }
   }
+}
 
-  final (tempDir, createdBaseDir) = _createStagingDirectory(config);
-  try {
-    final isMacOS = config.platform == 'macos';
-    final appRelPath = isMacOS
-        ? '${config.appName}.app'
-        : 'Payload/${config.appName}.app';
-    final appDir = Directory('${tempDir.path}/$appRelPath')
-      ..createSync(recursive: true);
+void _replaceWithSymlinkSync(String linkPath, String target) {
+  final type = FileSystemEntity.typeSync(linkPath, followLinks: false);
+  if (type == FileSystemEntityType.directory) {
+    Directory(linkPath).deleteSync(recursive: true);
+  } else if (type == FileSystemEntityType.link) {
+    Link(linkPath).deleteSync();
+  } else if (type != FileSystemEntityType.notFound) {
+    File(linkPath).deleteSync();
+  }
+  Link(linkPath).createSync(target);
+}
 
-    final contentsDir = isMacOS
-        ? (Directory('${appDir.path}/Contents')..createSync())
-        : appDir;
-    final contentsRelPrefix = isMacOS ? '$appRelPath/Contents' : appRelPath;
-    final execDir = isMacOS
-        ? (Directory('${contentsDir.path}/MacOS')..createSync())
-        : contentsDir;
-    final frameworksDir = Directory('${contentsDir.path}/Frameworks');
-    final resourcesDir = isMacOS
-        ? (Directory('${contentsDir.path}/Resources')..createSync())
-        : contentsDir;
+void _normalizeMacosVersionedFramework(Directory fwDir, String fwName) {
+  final versionADir = Directory('${fwDir.path}/Versions/A');
+  if (!versionADir.existsSync()) return;
 
-    final executablePaths = <String>{};
+  _replaceWithSymlinkSync('${fwDir.path}/Versions/Current', 'A');
+  if (File('${versionADir.path}/$fwName').existsSync()) {
+    _replaceWithSymlinkSync(
+      '${fwDir.path}/$fwName',
+      'Versions/Current/$fwName',
+    );
+  }
+  for (final sub in const ['Resources', 'Headers', 'Modules']) {
+    if (Directory('${versionADir.path}/$sub').existsSync()) {
+      _replaceWithSymlinkSync('${fwDir.path}/$sub', 'Versions/Current/$sub');
+    }
+  }
+}
 
+/// Assembles one application bundle inside a staging directory: copies the
+/// executable, metadata, resources, frameworks and native libraries, signs
+/// when configured, and emits the requested outputs.
+class _BundleAssembly {
+  final BundleConfig config;
+  final Directory tempDir;
+  final Map<String, String> effectiveDefines;
+
+  late final bool isMacOS = config.platform == 'macos';
+  late final String appRelPath = isMacOS
+      ? '${config.appName}.app'
+      : 'Payload/${config.appName}.app';
+  late final Directory appDir = Directory('${tempDir.path}/$appRelPath')
+    ..createSync(recursive: true);
+  late final Directory contentsDir = isMacOS
+      ? (Directory('${appDir.path}/Contents')..createSync())
+      : appDir;
+  late final String contentsRelPrefix = isMacOS
+      ? '$appRelPath/Contents'
+      : appRelPath;
+  late final Directory execDir = isMacOS
+      ? (Directory('${contentsDir.path}/MacOS')..createSync())
+      : contentsDir;
+  late final Directory frameworksDir = Directory(
+    '${contentsDir.path}/Frameworks',
+  );
+  late final Directory resourcesDir = isMacOS
+      ? (Directory('${contentsDir.path}/Resources')..createSync())
+      : contentsDir;
+  late final Directory frameworksScratch = Directory(
+    '${tempDir.path}/frameworks',
+  );
+
+  final executablePaths = <String>{};
+
+  bool get shouldSign =>
+      config.zsignPath != null && config.zsignPath!.isNotEmpty;
+
+  _BundleAssembly(this.config, this.tempDir, this.effectiveDefines);
+
+  void run() {
+    _copyMainExecutable();
+    _writeBundleMetadata();
+    _copyBundleResources();
+    _copyProvisioningProfile();
+    _embedFrameworks();
+    _embedNativeLibs();
+    _signOrStripBundle();
+    _emitAppDir();
+    _emitArchive();
+  }
+
+  void _copyMainExecutable() {
     // 1. Copy main executable and ensure @executable_path/Frameworks LC_RPATH.
     // Executable permissions (0755) are recorded directly in the ZIP central
     // directory via executablePaths without spawning an external chmod process.
     final destExecPath = '${execDir.path}/${config.appName}';
-    execFile.copySync(destExecPath);
+    File(config.executablePath).copySync(destExecPath);
     _ensureExecutableRpaths(File(destExecPath), isMacOS: isMacOS);
     executablePaths.add(
       isMacOS
           ? '$appRelPath/Contents/MacOS/${config.appName}'
           : '$appRelPath/${config.appName}',
     );
+  }
 
+  void _writeBundleMetadata() {
     // 2. Merge and write Info.plist + PkgInfo.
     final plistXmls = [
       for (final p in config.infoPlistPaths) File(p).readAsStringSync(),
@@ -2568,7 +2711,9 @@ void assembleBundle(BundleConfig config) {
     );
     File('${contentsDir.path}/Info.plist').writeAsStringSync(mergedPlist);
     File('${contentsDir.path}/PkgInfo').writeAsStringSync('APPL????');
+  }
 
+  void _copyBundleResources() {
     // 3. Copy resources.
     for (final spec in config.resourceSpecs) {
       _copyResourceSpec(spec, resourcesDir);
@@ -2583,7 +2728,9 @@ void assembleBundle(BundleConfig config) {
         executablePaths: executablePaths,
       );
     }
+  }
 
+  void _copyProvisioningProfile() {
     // 4. Copy provisioning profile (iOS device builds).
     if (config.provisioningProfilePath != null && !isMacOS) {
       final profileFile = File(config.provisioningProfilePath!);
@@ -2594,56 +2741,10 @@ void assembleBundle(BundleConfig config) {
       }
       profileFile.copySync('${appDir.path}/embedded.mobileprovision');
     }
+  }
 
-    final shouldSign = config.zsignPath != null && config.zsignPath!.isNotEmpty;
-
-    void stripCodeSignatures(Directory dir) {
-      if (!dir.existsSync()) return;
-      for (final entity in dir.listSync(followLinks: false)) {
-        final name = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
-        if (name == '_CodeSignature') {
-          entity.deleteSync(recursive: true);
-        } else if (entity is Directory) {
-          stripCodeSignatures(entity);
-        }
-      }
-    }
-
-    void replaceWithSymlinkSync(String linkPath, String target) {
-      final type = FileSystemEntity.typeSync(linkPath, followLinks: false);
-      if (type == FileSystemEntityType.directory) {
-        Directory(linkPath).deleteSync(recursive: true);
-      } else if (type == FileSystemEntityType.link) {
-        Link(linkPath).deleteSync();
-      } else if (type != FileSystemEntityType.notFound) {
-        File(linkPath).deleteSync();
-      }
-      Link(linkPath).createSync(target);
-    }
-
-    void normalizeMacosVersionedFramework(Directory fwDir, String fwName) {
-      final versionADir = Directory('${fwDir.path}/Versions/A');
-      if (!versionADir.existsSync()) return;
-
-      replaceWithSymlinkSync('${fwDir.path}/Versions/Current', 'A');
-      if (File('${versionADir.path}/$fwName').existsSync()) {
-        replaceWithSymlinkSync(
-          '${fwDir.path}/$fwName',
-          'Versions/Current/$fwName',
-        );
-      }
-      for (final sub in const ['Resources', 'Headers', 'Modules']) {
-        if (Directory('${versionADir.path}/$sub').existsSync()) {
-          replaceWithSymlinkSync(
-            '${fwDir.path}/$sub',
-            'Versions/Current/$sub',
-          );
-        }
-      }
-    }
-
+  void _embedFrameworks() {
     // 5. Resolve and embed frameworks and native dynamic libraries.
-    final frameworksScratch = Directory('${tempDir.path}/frameworks');
     for (final fwInput in config.frameworkPaths) {
       final List<Directory> fwDirs;
       if (fwInput.endsWith('.framework.zip')) {
@@ -2655,180 +2756,195 @@ void assembleBundle(BundleConfig config) {
         fwDirs = resolveFrameworkDirectories(fwInput, config.platform);
       }
       for (final fwDir in fwDirs) {
-        frameworksDir.createSync(recursive: true);
-        final fwFileName = fwDir.uri.pathSegments
-            .where((s) => s.isNotEmpty)
-            .last;
-        final fwName = fwFileName.substring(
-          0,
-          fwFileName.length - '.framework'.length,
-        );
-        final destFwDir = Directory('${frameworksDir.path}/$fwFileName');
-        _copyDirectorySync(fwDir, destFwDir, dereferenceSymlinks: false);
-        if (isMacOS) {
-          normalizeMacosVersionedFramework(destFwDir, fwName);
-        }
-
-        // Mark framework binary executable in ZIP metadata.
-        final fwRelPrefix = '$contentsRelPrefix/Frameworks/$fwFileName';
-        final topBinary = File('${destFwDir.path}/$fwName');
-        final versionedBinary = File('${destFwDir.path}/Versions/A/$fwName');
-        if (topBinary.existsSync()) {
-          executablePaths.add('$fwRelPrefix/$fwName');
-        }
-        if (versionedBinary.existsSync()) {
-          executablePaths.add('$fwRelPrefix/Versions/A/$fwName');
-        }
-
-        if (shouldSign) {
-          writeCodeResources(
-            destFwDir,
-            excludedRelativePaths: {
-              fwName,
-              'Versions/A/$fwName',
-              'Versions/Current/$fwName',
-            },
-          );
-        } else {
-          stripCodeSignatures(destFwDir);
-        }
+        _embedFrameworkDir(fwDir);
       }
     }
+  }
 
+  ({Directory dir, String fileName, String name}) _stageFrameworkDir(
+    Directory fwDir,
+  ) {
+    frameworksDir.createSync(recursive: true);
+    final fwFileName = fwDir.uri.pathSegments.where((s) => s.isNotEmpty).last;
+    final fwName = fwFileName.substring(
+      0,
+      fwFileName.length - '.framework'.length,
+    );
+    final destFwDir = Directory('${frameworksDir.path}/$fwFileName');
+    _copyDirectorySync(fwDir, destFwDir, dereferenceSymlinks: false);
+    return (dir: destFwDir, fileName: fwFileName, name: fwName);
+  }
+
+  void _embedFrameworkDir(Directory fwDir) {
+    final staged = _stageFrameworkDir(fwDir);
+    if (isMacOS) {
+      _normalizeMacosVersionedFramework(staged.dir, staged.name);
+    }
+
+    // Mark framework binary executable in ZIP metadata.
+    final fwRelPrefix = '$contentsRelPrefix/Frameworks/${staged.fileName}';
+    _markFrameworkExecutables(staged.dir, staged.name, fwRelPrefix);
+
+    if (shouldSign) {
+      writeCodeResources(
+        staged.dir,
+        excludedRelativePaths: {
+          staged.name,
+          'Versions/A/${staged.name}',
+          'Versions/Current/${staged.name}',
+        },
+      );
+    } else {
+      _stripCodeSignatures(staged.dir);
+    }
+  }
+
+  void _markFrameworkExecutables(
+    Directory destFwDir,
+    String fwName,
+    String fwRelPrefix,
+  ) {
+    final topBinary = File('${destFwDir.path}/$fwName');
+    final versionedBinary = File('${destFwDir.path}/Versions/A/$fwName');
+    if (topBinary.existsSync()) {
+      executablePaths.add('$fwRelPrefix/$fwName');
+    }
+    if (versionedBinary.existsSync()) {
+      executablePaths.add('$fwRelPrefix/Versions/A/$fwName');
+    }
+  }
+
+  void _embedNativeLibs() {
     for (final dylibPath in config.nativeLibPaths) {
       if (FileSystemEntity.isDirectorySync(dylibPath)) {
-        final children = Directory(dylibPath).listSync(followLinks: true)
-          ..sort((a, b) => a.path.compareTo(b.path));
-        for (final entity in children) {
-          if (entity is File) {
-            frameworksDir.createSync(recursive: true);
-            final baseName = entity.uri.pathSegments
-                .where((s) => s.isNotEmpty)
-                .last;
-            entity.copySync('${frameworksDir.path}/$baseName');
-            executablePaths.add('$contentsRelPrefix/Frameworks/$baseName');
-          } else if (entity is Directory &&
-              entity.path.endsWith('.framework')) {
-            frameworksDir.createSync(recursive: true);
-            final fwFileName = entity.uri.pathSegments
-                .where((s) => s.isNotEmpty)
-                .last;
-            final fwName = fwFileName.substring(
-              0,
-              fwFileName.length - '.framework'.length,
-            );
-            final destFwDir = Directory('${frameworksDir.path}/$fwFileName');
-            _copyDirectorySync(entity, destFwDir, dereferenceSymlinks: false);
-            final fwRelPrefix = '$contentsRelPrefix/Frameworks/$fwFileName';
-            if (File('${destFwDir.path}/$fwName').existsSync()) {
-              executablePaths.add('$fwRelPrefix/$fwName');
-            }
-            if (File('${destFwDir.path}/Versions/A/$fwName').existsSync()) {
-              executablePaths.add('$fwRelPrefix/Versions/A/$fwName');
-            }
-          }
-        }
+        _embedNativeLibDir(dylibPath);
       } else if (FileSystemEntity.isFileSync(dylibPath)) {
-        final dylibFile = File(dylibPath);
-        frameworksDir.createSync(recursive: true);
-        final baseName = dylibFile.uri.pathSegments
-            .where((s) => s.isNotEmpty)
-            .last;
-        dylibFile.copySync('${frameworksDir.path}/$baseName');
-        executablePaths.add('$contentsRelPrefix/Frameworks/$baseName');
+        _embedNativeLibFile(File(dylibPath));
       } else {
         throw ArgumentError('Native library does not exist: $dylibPath');
       }
     }
+  }
 
+  void _embedNativeLibDir(String dylibPath) {
+    final children = Directory(dylibPath).listSync(followLinks: true)
+      ..sort((a, b) => a.path.compareTo(b.path));
+    for (final entity in children) {
+      if (entity is File) {
+        _embedNativeLibFile(entity);
+      } else if (entity is Directory && entity.path.endsWith('.framework')) {
+        _embedNativeChildFramework(entity);
+      }
+    }
+  }
+
+  void _embedNativeLibFile(File dylibFile) {
+    frameworksDir.createSync(recursive: true);
+    final baseName = dylibFile.uri.pathSegments.where((s) => s.isNotEmpty).last;
+    dylibFile.copySync('${frameworksDir.path}/$baseName');
+    executablePaths.add('$contentsRelPrefix/Frameworks/$baseName');
+  }
+
+  void _embedNativeChildFramework(Directory entity) {
+    final staged = _stageFrameworkDir(entity);
+    final fwRelPrefix = '$contentsRelPrefix/Frameworks/${staged.fileName}';
+    _markFrameworkExecutables(staged.dir, staged.name, fwRelPrefix);
+  }
+
+  void _signOrStripBundle() {
     // 6. Sign bundle with _CodeSignature/CodeResources + zsign when configured,
     //    or ensure unsigned bundles contain no _CodeSignature/ artifacts.
-    if (shouldSign) {
-      writeCodeResources(
-        contentsDir,
-        excludedRelativePaths: {
-          if (isMacOS) 'MacOS/${config.appName}' else config.appName,
-        },
-      );
-      String? resolvedPassword;
-      if (config.certificatePasswordFilePath != null &&
-          config.certificatePasswordFilePath!.isNotEmpty) {
-        final pwFile = File(config.certificatePasswordFilePath!);
-        if (!pwFile.existsSync()) {
-          throw ArgumentError(
-            'Certificate password file does not exist: '
-            '${config.certificatePasswordFilePath}',
-          );
-        }
-        resolvedPassword = pwFile.readAsStringSync().replaceAll(
-          RegExp(r'[\r\n]+$'),
-          '',
-        );
-      } else if (config.certificatePasswordEnv != null &&
-          config.certificatePasswordEnv!.isNotEmpty) {
-        final pwEnvKey = config.certificatePasswordEnv!;
-        final String? envVal;
-        if (pwEnvKey == 'TMPDIR' || pwEnvKey == 'TEST_TMPDIR') {
-          envVal = config.environment != null
-              ? (config.environment![pwEnvKey] ?? '')
-              : '';
-        } else if (config.environment != null) {
-          envVal = config.environment![pwEnvKey];
-        } else if (_ambientHostEnvVars.contains(pwEnvKey)) {
-          envVal = null;
-        } else {
-          envVal = Platform.environment[pwEnvKey];
-        }
-        if (envVal == null) {
-          throw ArgumentError(
-            'Certificate password environment variable '
-            '"$pwEnvKey" is not set.',
-          );
-        }
-        resolvedPassword = envVal;
-      }
-
-      final zsignArgs = <String>[];
-      final redactedArgs = <String>[];
-      if (config.certificatePath != null &&
-          config.certificatePath!.isNotEmpty) {
-        zsignArgs.addAll(['-k', config.certificatePath!]);
-        redactedArgs.addAll(['-k', config.certificatePath!]);
-      }
-      if (resolvedPassword != null && resolvedPassword.isNotEmpty) {
-        zsignArgs.addAll(['-p', resolvedPassword]);
-        redactedArgs.addAll(['-p', '<redacted>']);
-      }
-      if (config.provisioningProfilePath != null &&
-          config.provisioningProfilePath!.isNotEmpty) {
-        zsignArgs.addAll(['-m', config.provisioningProfilePath!]);
-        redactedArgs.addAll(['-m', config.provisioningProfilePath!]);
-      }
-      if (config.entitlementsPath != null &&
-          config.entitlementsPath!.isNotEmpty) {
-        zsignArgs.addAll(['-e', config.entitlementsPath!]);
-        redactedArgs.addAll(['-e', config.entitlementsPath!]);
-      }
-      zsignArgs.add(appDir.path);
-      redactedArgs.add(appDir.path);
-      final result = Process.runSync(
-        config.zsignPath!,
-        zsignArgs,
-        environment: const {'PATH': '/usr/bin:/bin'},
-        includeParentEnvironment: false,
-      );
-      if (result.exitCode != 0) {
-        throw ProcessException(
-          config.zsignPath!,
-          redactedArgs,
-          'zsign failed (exit ${result.exitCode}):\n${result.stderr}',
-          result.exitCode,
-        );
-      }
-    } else {
-      stripCodeSignatures(appDir);
+    if (!shouldSign) {
+      _stripCodeSignatures(appDir);
+      return;
     }
+    writeCodeResources(
+      contentsDir,
+      excludedRelativePaths: {
+        if (isMacOS) 'MacOS/${config.appName}' else config.appName,
+      },
+    );
+    _runZsign(_resolveSigningPassword());
+  }
 
+  String? _resolveSigningPassword() {
+    if (config.certificatePasswordFilePath != null &&
+        config.certificatePasswordFilePath!.isNotEmpty) {
+      final pwFile = File(config.certificatePasswordFilePath!);
+      if (!pwFile.existsSync()) {
+        throw ArgumentError(
+          'Certificate password file does not exist: '
+          '${config.certificatePasswordFilePath}',
+        );
+      }
+      return pwFile.readAsStringSync().replaceAll(RegExp(r'[\r\n]+$'), '');
+    }
+    if (config.certificatePasswordEnv == null ||
+        config.certificatePasswordEnv!.isEmpty) {
+      return null;
+    }
+    final pwEnvKey = config.certificatePasswordEnv!;
+    final String? envVal;
+    if (pwEnvKey == 'TMPDIR' || pwEnvKey == 'TEST_TMPDIR') {
+      envVal = config.environment != null
+          ? (config.environment![pwEnvKey] ?? '')
+          : '';
+    } else if (config.environment != null) {
+      envVal = config.environment![pwEnvKey];
+    } else if (_ambientHostEnvVars.contains(pwEnvKey)) {
+      envVal = null;
+    } else {
+      envVal = Platform.environment[pwEnvKey];
+    }
+    if (envVal == null) {
+      throw ArgumentError(
+        'Certificate password environment variable '
+        '"$pwEnvKey" is not set.',
+      );
+    }
+    return envVal;
+  }
+
+  void _runZsign(String? resolvedPassword) {
+    final zsignArgs = <String>[];
+    final redactedArgs = <String>[];
+    if (config.certificatePath != null && config.certificatePath!.isNotEmpty) {
+      zsignArgs.addAll(['-k', config.certificatePath!]);
+      redactedArgs.addAll(['-k', config.certificatePath!]);
+    }
+    if (resolvedPassword != null && resolvedPassword.isNotEmpty) {
+      zsignArgs.addAll(['-p', resolvedPassword]);
+      redactedArgs.addAll(['-p', '<redacted>']);
+    }
+    if (config.provisioningProfilePath != null &&
+        config.provisioningProfilePath!.isNotEmpty) {
+      zsignArgs.addAll(['-m', config.provisioningProfilePath!]);
+      redactedArgs.addAll(['-m', config.provisioningProfilePath!]);
+    }
+    if (config.entitlementsPath != null &&
+        config.entitlementsPath!.isNotEmpty) {
+      zsignArgs.addAll(['-e', config.entitlementsPath!]);
+      redactedArgs.addAll(['-e', config.entitlementsPath!]);
+    }
+    zsignArgs.add(appDir.path);
+    redactedArgs.add(appDir.path);
+    final result = Process.runSync(
+      config.zsignPath!,
+      zsignArgs,
+      environment: const {'PATH': '/usr/bin:/bin'},
+      includeParentEnvironment: false,
+    );
+    if (result.exitCode != 0) {
+      throw ProcessException(
+        config.zsignPath!,
+        redactedArgs,
+        'zsign failed (exit ${result.exitCode}):\n${result.stderr}',
+        result.exitCode,
+      );
+    }
+  }
+
+  void _emitAppDir() {
     // 8. Emit --output-app-dir if requested.
     if (config.outputAppDirPath != null &&
         config.outputAppDirPath!.isNotEmpty) {
@@ -2838,7 +2954,9 @@ void assembleBundle(BundleConfig config) {
       }
       _copyDirectorySync(appDir, outAppDir, dereferenceSymlinks: false);
     }
+  }
 
+  void _emitArchive() {
     // 9. Emit --output-archive (.ipa or .app.zip) if requested.
     if (config.outputArchivePath != null &&
         config.outputArchivePath!.isNotEmpty) {
@@ -2850,6 +2968,18 @@ void assembleBundle(BundleConfig config) {
       outArchive.parent.createSync(recursive: true);
       outArchive.writeAsBytesSync(zipBytes);
     }
+  }
+}
+
+/// Assembles an iOS `.ipa` or macOS `.app.zip` (and optional `.app` directory)
+/// according to [config].
+void assembleBundle(BundleConfig config) {
+  _checkBundlePlatform(config);
+  _requireBundleExecutable(config);
+  final effectiveDefines = _readBundleVersionDefines(config);
+  final (tempDir, createdBaseDir) = _createStagingDirectory(config);
+  try {
+    _BundleAssembly(config, tempDir, effectiveDefines).run();
   } finally {
     if (tempDir.existsSync()) {
       tempDir.deleteSync(recursive: true);
