@@ -52,6 +52,106 @@ _APP_FRAMEWORK_INFO_PLIST = """\
 </plist>
 """
 
+def _prepare_macos_framework_binary(ctx, dart_exe, dart_vm_files, app_info, is_debug, stub_arch, minimum_os_version):
+    """Prepares the App binary: a stub dylib in debug, the retagged AOT dylib otherwise."""
+    prepared_binary = ctx.actions.declare_file("%s_macho/App" % ctx.label.name)
+    if is_debug:
+        ctx.actions.run(
+            executable = dart_exe,
+            arguments = [
+                ctx.executable._macho_edit.path,
+                "stub",
+                "--output",
+                prepared_binary.path,
+                "--arch",
+                stub_arch,
+                "--platform",
+                "macos",
+                "--min-os",
+                minimum_os_version,
+                "--sdk-version",
+                minimum_os_version,
+                "--install-name",
+                "@rpath/App.framework/Versions/A/App",
+            ],
+            inputs = depset(
+                direct = [ctx.executable._macho_edit],
+                transitive = [dart_vm_files],
+            ),
+            outputs = [prepared_binary],
+            mnemonic = "FlutterMacOSStubDylib",
+            progress_message = "Creating stub macOS App.framework binary for debug mode",
+        )
+        return prepared_binary
+    if not app_info.aot_output:
+        fail("flutter_macos_framework requires an AOT build (not debug mode) or a kernel_dill in debug mode.")
+    patch_args = [
+        ctx.executable._macho_edit.path,
+        "patch",
+        "--input",
+        app_info.aot_output.path,
+        "--output",
+        prepared_binary.path,
+        "--platform",
+        "macos",
+        "--min-os",
+        minimum_os_version,
+        "--sdk-version",
+        minimum_os_version,
+        "--install-name",
+        "@rpath/App.framework/Versions/A/App",
+    ]
+    for allowed in ctx.attr.allow_non_macho:
+        patch_args.extend(["--allow-non-macho", allowed])
+    ctx.actions.run(
+        executable = dart_exe,
+        arguments = patch_args,
+        inputs = depset(
+            direct = [app_info.aot_output, ctx.executable._macho_edit],
+            transitive = [dart_vm_files],
+        ),
+        outputs = [prepared_binary],
+        mnemonic = "FlutterMacOSRetagDylib",
+        progress_message = "Retagging App dylib for macos (min %s)" % minimum_os_version,
+    )
+    return prepared_binary
+
+def _macos_framework_assemble_inputs(ctx, flutter_sdk_info, app_info, is_debug, flutter_assets, prepared_binary, prepared_plist, stage_dir, framework_zip):
+    """Builds the assemble action's inputs and args, including debug kernel inputs.
+
+    In debug mode, places the kernel dill and VM snapshots into
+    flutter_assets/. The debug engine looks for kernel_blob.bin there. The
+    vm_snapshot_data and isolate_snapshot_data are needed for the kernel
+    service isolate (hot reload).
+    """
+    inputs = [flutter_assets, prepared_binary, prepared_plist, ctx.executable._macho_edit]
+    assemble_args = [
+        ctx.executable._macho_edit.path,
+        "assemble-macos-framework",
+        "--binary",
+        prepared_binary.path,
+        "--info-plist",
+        prepared_plist.path,
+        "--assets",
+        flutter_assets.path,
+        "--output-dir",
+        stage_dir,
+        "--output-zip",
+        framework_zip.path,
+    ]
+    if is_debug and app_info.kernel_dill:
+        inputs.append(app_info.kernel_dill)
+        assemble_args.extend(["--kernel-blob", app_info.kernel_dill.path])
+        vm_snapshot = flutter_sdk_info.vm_isolate_snapshot
+        iso_snapshot = flutter_sdk_info.isolate_snapshot
+        if vm_snapshot:
+            inputs.append(vm_snapshot)
+            assemble_args.extend(["--vm-snapshot-data", vm_snapshot.path])
+        if iso_snapshot:
+            inputs.append(iso_snapshot)
+            assemble_args.extend(["--isolate-snapshot-data", iso_snapshot.path])
+    return inputs, assemble_args
+
 def _flutter_macos_framework_impl(ctx):
     """Assembles App.framework as a versioned macOS framework bundle zip.
 
@@ -108,101 +208,12 @@ def _flutter_macos_framework_impl(ctx):
     # symlinks as real directories (see the rule docstring).
     framework_zip = ctx.actions.declare_file("%s/App.framework.zip" % ctx.label.name)
     stage_dir = framework_zip.path + ".stage"
-    prepared_binary = ctx.actions.declare_file("%s_macho/App" % ctx.label.name)
-
-    if is_debug:
-        ctx.actions.run(
-            executable = dart_exe,
-            arguments = [
-                ctx.executable._macho_edit.path,
-                "stub",
-                "--output",
-                prepared_binary.path,
-                "--arch",
-                stub_arch,
-                "--platform",
-                "macos",
-                "--min-os",
-                minimum_os_version,
-                "--sdk-version",
-                minimum_os_version,
-                "--install-name",
-                "@rpath/App.framework/Versions/A/App",
-            ],
-            inputs = depset(
-                direct = [ctx.executable._macho_edit],
-                transitive = [dart_vm_files],
-            ),
-            outputs = [prepared_binary],
-            mnemonic = "FlutterMacOSStubDylib",
-            progress_message = "Creating stub macOS App.framework binary for debug mode",
-        )
-    else:
-        if not app_info.aot_output:
-            fail("flutter_macos_framework requires an AOT build (not debug mode) or a kernel_dill in debug mode.")
-        patch_args = [
-            ctx.executable._macho_edit.path,
-            "patch",
-            "--input",
-            app_info.aot_output.path,
-            "--output",
-            prepared_binary.path,
-            "--platform",
-            "macos",
-            "--min-os",
-            minimum_os_version,
-            "--sdk-version",
-            minimum_os_version,
-            "--install-name",
-            "@rpath/App.framework/Versions/A/App",
-        ]
-        for allowed in ctx.attr.allow_non_macho:
-            patch_args.extend(["--allow-non-macho", allowed])
-        ctx.actions.run(
-            executable = dart_exe,
-            arguments = patch_args,
-            inputs = depset(
-                direct = [app_info.aot_output, ctx.executable._macho_edit],
-                transitive = [dart_vm_files],
-            ),
-            outputs = [prepared_binary],
-            mnemonic = "FlutterMacOSRetagDylib",
-            progress_message = "Retagging App dylib for macos (min %s)" % minimum_os_version,
-        )
+    prepared_binary = _prepare_macos_framework_binary(ctx, dart_exe, dart_vm_files, app_info, is_debug, stub_arch, minimum_os_version)
 
     prepared_plist = ctx.actions.declare_file("%s_macho/Info.plist" % ctx.label.name)
     ctx.actions.write(prepared_plist, _APP_FRAMEWORK_INFO_PLIST)
 
-    inputs = [flutter_assets, prepared_binary, prepared_plist, ctx.executable._macho_edit]
-    assemble_args = [
-        ctx.executable._macho_edit.path,
-        "assemble-macos-framework",
-        "--binary",
-        prepared_binary.path,
-        "--info-plist",
-        prepared_plist.path,
-        "--assets",
-        flutter_assets.path,
-        "--output-dir",
-        stage_dir,
-        "--output-zip",
-        framework_zip.path,
-    ]
-
-    # In debug mode, place the kernel dill and VM snapshots into flutter_assets/.
-    # The debug engine looks for kernel_blob.bin there. The vm_snapshot_data and
-    # isolate_snapshot_data are needed for the kernel service isolate (hot reload).
-    if is_debug and app_info.kernel_dill:
-        inputs.append(app_info.kernel_dill)
-        assemble_args.extend(["--kernel-blob", app_info.kernel_dill.path])
-        vm_snapshot = flutter_sdk_info.vm_isolate_snapshot
-        iso_snapshot = flutter_sdk_info.isolate_snapshot
-        if vm_snapshot:
-            inputs.append(vm_snapshot)
-            assemble_args.extend(["--vm-snapshot-data", vm_snapshot.path])
-        if iso_snapshot:
-            inputs.append(iso_snapshot)
-            assemble_args.extend(["--isolate-snapshot-data", iso_snapshot.path])
+    inputs, assemble_args = _macos_framework_assemble_inputs(ctx, flutter_sdk_info, app_info, is_debug, flutter_assets, prepared_binary, prepared_plist, stage_dir, framework_zip)
 
     ctx.actions.run(
         executable = dart_exe,
