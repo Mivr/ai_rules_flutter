@@ -2,14 +2,6 @@ load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_test")
 load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
 load(":flutter_sdk_kernel_binary.bzl", "flutter_sdk_kernel_binary")
 
-# Every `.bzl` file in this package, staged as data for
-# //flutter/tests:download_digest_guard_test.
-filegroup(
-    name = "download_guard_bzl",
-    srcs = glob(["*.bzl"]),
-    visibility = ["//flutter/tests:__pkg__"],
-)
-
 # The sources of tools built into standalone executables. Exported so their unit
 # tests below can import them via `srcs`. Build actions reach them through their
 # compiled `dart_binary` targets rather than by file label.

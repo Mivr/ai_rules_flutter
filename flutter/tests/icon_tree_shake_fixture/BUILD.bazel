@@ -182,11 +182,3 @@ dart_test(
     target_compatible_with = HOST_COMPATIBLE,
     deps = ["@dev_tool_deps//:test"],
 )
-
-# Every `.bzl` file in this package, staged as data for
-# //flutter/tests:download_digest_guard_test.
-filegroup(
-    name = "download_guard_bzl",
-    srcs = glob(["*.bzl"]),
-    visibility = ["//flutter/tests:__pkg__"],
-)

@@ -1,13 +1,5 @@
 load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
 
-# Every `.bzl` file in this package (not subpackages), staged as data for
-# //flutter/tests:download_digest_guard_test.
-filegroup(
-    name = "download_guard_bzl",
-    srcs = glob(["*.bzl"]),
-    visibility = ["//flutter/tests:__pkg__"],
-)
-
 # Compilation mode config_settings for select() in macros.
 # compilation_mode is preserved across platform transitions (e.g. iOS).
 config_setting(
