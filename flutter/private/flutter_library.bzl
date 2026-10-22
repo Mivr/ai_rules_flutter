@@ -3,6 +3,7 @@
 load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo")
 load("@rules_dart//dart:utils.bzl", "dart_analyzable_info_with_package", "dart_info", "derive_lib_root", "derive_package_name")
 load("//flutter:providers.bzl", "FlutterInfo")
+load("//flutter/private:asset_keys.bzl", "library_asset_entries")
 load("//flutter/private:flutter_info.bzl", "LINK_HOOK_ATTR", "flutter_info")
 
 def build_pub_contributions(package_name, fonts_json, font_files_dict, pkg_assets_dict, pkg_shaders_dict, shader_includes = []):
@@ -274,6 +275,7 @@ def _flutter_library_impl(ctx):
         flutter_info(
             deps = ctx.attr.deps,
             asset_dirs = ctx.files.assets,
+            assets = library_asset_entries(ctx.label, package_name, ctx.files.assets),
             shader_srcs = [
                 struct(
                     file = shader,

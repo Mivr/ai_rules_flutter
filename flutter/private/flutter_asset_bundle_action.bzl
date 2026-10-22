@@ -91,7 +91,10 @@ def flutter_asset_bundle_action(
         ctx: Rule context.
         dart: The `dart` executable File from the Flutter SDK (only required when icon tree shaking is enabled).
         flutter_sdk_files: SDK files needed to run dart (for action inputs when icon tree shaking is enabled).
-        assets: list of File objects to include in the bundle.
+        assets: list of asset entry structs (`struct(key, file, label)`) to
+            include in the bundle, each keyed once by the target that listed
+            it — relative to its Bazel package, or `packages/<name>/...` for
+            a library. The bundle keys every file by its carried `key`.
         fonts: list of font declaration dicts (FontManifest.json schema).
         notices: License text string to compress into NOTICES.Z.
         license_files: list of File objects containing license text to include in NOTICES.Z.
@@ -121,13 +124,14 @@ def flutter_asset_bundle_action(
         fail("flutter_asset_bundle_action: `output_dir` is required — declare it with ctx.actions.declare_directory().")
     tool = ctx.executable._asset_bundle_tool
 
-    # Build asset paths and copy map relative to the output directory.
+    # Build asset paths and copy map relative to the output directory. The key
+    # travels with the file — set once by the target that listed the asset —
+    # so this action keys every file by its carried key and computes none.
     asset_paths = []
     copies = {}
-    for f in assets:
-        # Use short_path as the logical key inside flutter_assets/.
-        asset_paths.append(f.short_path)
-        copies[f.short_path] = f.path
+    for entry in assets:
+        asset_paths.append(entry.key)
+        copies[entry.key] = entry.file.path
 
     # Add extra copies with custom destination paths.
     extra_files = []
@@ -183,7 +187,7 @@ def flutter_asset_bundle_action(
             output_dir.path,
         ],
         inputs = depset(
-            direct = [config_file] + assets + extra_files + license_files + extra_inputs,
+            direct = [config_file] + [entry.file for entry in assets] + extra_files + license_files + extra_inputs,
             transitive = transitive_inputs,
         ),
         outputs = [output_dir],

@@ -221,7 +221,8 @@ rules that produce `FlutterInfo`. Constructing it here means enumerating and \
 merging each field by hand, and a field left empty rather than forwarded \
 silently discards every dependency's contribution.""",
     fields = {
-        "asset_dirs": "depset[File]: Directories containing Flutter assets.",
+        "asset_dirs": "depset[File]: Directories containing Flutter assets. Kept populated with the same files `assets` keys, for compatibility; new consumers read `assets`.",
+        "assets": "depset[struct]: Keyed Flutter assets. Each struct has: key (str — the bundle-relative key, relative to the listing target's Bazel package, or `packages/<package_name>/...` for a library), file (File), label (str — the target that listed the asset). Set once by the target that lists `assets`; every bundle merges these without recomputing a key.",
         "shader_srcs": "depset[File]: Raw shader source files (.frag/.glsl) to compile per-platform.",
         "plugins": "list[struct]: Plugin metadata. Each struct has: name (str), platforms (dict of platform -> {pluginClass, dartPluginClass, package}).",
         "transitive_native_libs": "depset[File]: Shared libs from plugin native_deps, merged transitively.",

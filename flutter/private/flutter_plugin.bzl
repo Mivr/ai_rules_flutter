@@ -24,6 +24,7 @@ load("@rules_dart//dart:utils.bzl", "dart_info", "derive_lib_root", "derive_pack
 load("@rules_java//java/common:java_info.bzl", "JavaInfo")
 load("@rules_swift//swift:swift.bzl", "SwiftInfo")
 load("//flutter:providers.bzl", "FlutterApplePluginInfo", "FlutterDataAssetInfo", "FlutterInfo", "FlutterNativeAssetInfo")
+load("//flutter/private:asset_keys.bzl", "library_asset_entries")
 load("//flutter/private:common.bzl", "collect_binding_contracts", "collect_native_libs")
 load("//flutter/private:flutter_desktop_plugin_info.bzl", "FlutterLinuxPluginInfo", "FlutterWindowsPluginInfo")
 load("//flutter/private:flutter_info.bzl", "LINK_HOOK_ATTR", "flutter_info")
@@ -95,11 +96,7 @@ _apple_plugin_aspect = aspect(
 )
 
 def _flutter_plugin_impl(ctx):
-    package_name = derive_package_name(
-        ctx.attr.package_name,
-        ctx.label.package,
-        ctx.label.name,
-    )
+    package_name = derive_package_name(ctx.attr.package_name, ctx.label.package, ctx.label.name)
     lib_root = derive_lib_root(ctx.label.workspace_root, ctx.label.package)
 
     # Build plugin metadata.
@@ -319,6 +316,7 @@ def _flutter_plugin_impl(ctx):
         flutter_info(
             deps = ctx.attr.deps,
             asset_dirs = ctx.files.assets,
+            assets = library_asset_entries(ctx.label, package_name, ctx.files.assets),
             plugins = [plugin],
             native_libs = native_libs,
             binding_contracts = binding_contracts,

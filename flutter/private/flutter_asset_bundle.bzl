@@ -7,7 +7,7 @@ Produces a `flutter_assets/` tree artifact containing:
 - Copied asset files (images, etc.)
 """
 
-load("//flutter:providers.bzl", "FlutterInfo")
+load("//flutter/private:asset_keys.bzl", "bundle_asset_entries")
 load(
     "//flutter/private:common.bzl",
     "flutter_compile_shaders",
@@ -33,11 +33,10 @@ def _flutter_asset_bundle_impl(ctx):
     flutter_toolchain = ctx.toolchains["@rules_flutter//flutter:toolchain_type"]
     flutter_sdk_info = flutter_toolchain.flutter_sdk_info
 
-    # Collect assets from direct attr + transitive FlutterInfo deps.
-    all_assets = list(ctx.files.assets)
-    for dep in ctx.attr.deps:
-        if FlutterInfo in dep:
-            all_assets.extend(dep[FlutterInfo].asset_dirs.to_list())
+    # Collect keyed assets: the bundle's own, rooted at its Bazel package,
+    # plus every dependency's, each already keyed by the target that listed
+    # it and carried through `FlutterInfo.assets`.
+    all_entries = bundle_asset_entries(ctx.label, ctx.files.assets, ctx.attr.deps)
 
     # Walk pub-package font/asset contributions from FlutterInfo. To get
     # MaterialIcons in the bundle, list `@rules_flutter//flutter:material_icons`
@@ -55,7 +54,7 @@ def _flutter_asset_bundle_impl(ctx):
 
     output_dir = flutter_asset_bundle_action(
         ctx = ctx,
-        assets = all_assets,
+        assets = all_entries,
         fonts = fonts,
         notices = "",
         license_files = ctx.files.license_files,

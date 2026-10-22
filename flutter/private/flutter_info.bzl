@@ -19,6 +19,10 @@ ordinary call with no arguments, not a special one.
 
 load("//flutter:providers.bzl", "FlutterInfo")
 
+def _merge_depsets(dep_infos, direct, field):
+    """Merges one plain depset channel: this target's files over its dependencies'."""
+    return depset(direct = direct, transitive = [getattr(info, field) for info in dep_infos])
+
 def dedup_plugins(all_plugins):
     """Deduplicates plugin structs by name, keeping first occurrence.
 
@@ -42,6 +46,7 @@ def dedup_plugins(all_plugins):
 def flutter_info(
         deps = [],
         asset_dirs = [],
+        assets = [],
         shader_srcs = [],
         plugins = [],
         native_libs = [],
@@ -71,6 +76,8 @@ def flutter_info(
       deps: Targets whose `FlutterInfo` contributions are merged in. Entries
         without one are ignored.
       asset_dirs: Directories of Flutter assets this target ships.
+      assets: Keyed asset entries (`struct(key, file, label)`) this target
+        lists, each keyed once by its listing target; merged transitively.
       shader_srcs: Raw shader sources (`.frag`/`.glsl`) this target ships.
       plugins: Plugin metadata structs this target declares. Deduplicated by
         name against the dependencies' plugins, this target's first.
@@ -109,6 +116,7 @@ def flutter_info(
             direct = asset_dirs,
             transitive = [info.asset_dirs for info in dep_infos],
         ),
+        assets = _merge_depsets(dep_infos, assets, "assets"),
         shader_srcs = depset(
             direct = [
                 s if hasattr(s, "file") else struct(file = s, includes = ())
@@ -120,18 +128,9 @@ def flutter_info(
         # unhashable. Order is meaningful to the registrant generators, and
         # this target's own plugins come first.
         plugins = dedup_plugins(plugins + dep_plugins),
-        transitive_native_libs = depset(
-            direct = native_libs,
-            transitive = [info.transitive_native_libs for info in dep_infos],
-        ),
-        native_lib_sources = depset(
-            direct = native_lib_sources,
-            transitive = [info.native_lib_sources for info in dep_infos],
-        ),
-        binding_contracts = depset(
-            direct = binding_contracts,
-            transitive = [info.binding_contracts for info in dep_infos],
-        ),
+        transitive_native_libs = _merge_depsets(dep_infos, native_libs, "transitive_native_libs"),
+        native_lib_sources = _merge_depsets(dep_infos, native_lib_sources, "native_lib_sources"),
+        binding_contracts = _merge_depsets(dep_infos, binding_contracts, "binding_contracts"),
         # Per-platform channels rather than one tagged union, because the
         # integration mechanisms genuinely differ: Apple carries compiled
         # `CcInfo`/`SwiftInfo` to link against, Android carries `JavaInfo`
