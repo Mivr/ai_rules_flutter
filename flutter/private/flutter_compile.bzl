@@ -74,6 +74,20 @@ _EXTRA_FLAG_BLOCKED = [
     "dfe",
 ]
 
+# `extra_flags` entries that would switch off the dependency report
+# `kernel_filter` verifies after the compile. The report (`+file://` lines)
+# is what turns an undeclared read into a loud build error; switching it off
+# makes the check pass vacuously while the dill still embeds the undeclared
+# bytes. The compile passes its own `--print-incremental-dependencies` after
+# the caller's flags and fails closed on zero reads, but the spelling is
+# refused at analysis too so the failure names the flag early. Name matching
+# is the same as below (case-insensitive, `-` and `_` the same, one or two
+# leading dashes).
+_READ_SET_FLAGS = [
+    "print-incremental-dependencies",
+    "no-print-incremental-dependencies",
+]
+
 def _normalize_flag_name(name):
     return name.lower().replace("_", "-")
 
@@ -106,7 +120,10 @@ def _check_extra_flags(label, extra_flags):
             fail("%s: extra_flags entries must be frontend_server `--flag`s, got %r" % (label, flag))
         stripped = flag[2:] if flag.startswith("--") else flag[1:]
         name, _, _ = stripped.partition("=")
-        if _normalize_flag_name(name) in _EXTRA_FLAG_BLOCKED:
+        norm = _normalize_flag_name(name)
+        if norm in _READ_SET_FLAGS:
+            fail("%s: extra_flags %r controls the dependency report the compile verifies: the compile controls `--print-incremental-dependencies` itself, remove the flag" % (label, flag))
+        if norm in _EXTRA_FLAG_BLOCKED:
             fail("%s: extra_flags %r names a file the compile does not declare: pass inputs through `srcs`/`deps`/`import_dill`/`from_dill`/`native_assets_manifest` instead" % (label, flag))
 
 # Private tool labels a downstream rule merges into its own `attrs` to call
@@ -228,7 +245,9 @@ def flutter_kernel_compile_action(
             `--platform`, `--filesystem-root`, `--source`,
             `--native-assets`, `--recorded-uses`, `--from-dill`,
             `--import-dill`, `--output-dill` and similar) fails the build
-            at analysis.
+            at analysis, as does any spelling of
+            `--[no-]print-incremental-dependencies` (the compile controls
+            the dependency report it verifies).
         target: Frontend server target model ("flutter" or "dartdevc" for web).
         native_assets_manifest: Optional `native_assets.json` File. Passed
             to the frontend_server via `--native-assets`. The frontend

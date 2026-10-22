@@ -58,7 +58,9 @@ diagnostics (`--enable-asserts`, `--verbose-gc`, `--concurrent-mark`,
 `--concurrent-sweep`). Anything else — notably `--packages`, `--platform`,
 `--*-dill`, `--native-assets`, `--timeline-recorder`, `--snapshot*`,
 `--observe`, `--dfe` — fails the build at analysis, as does any
-`extra_flags` entry naming a file the compile does not declare. The compile
+`extra_flags` entry naming a file the compile does not declare, and any
+spelling of `--[no-]print-incremental-dependencies` (the compile controls
+the dependency report it verifies). The compile
 guard takes every allowed read from a manifest of declared files, never from
 the argv, so a smuggled flag cannot widen what the compile may read.
 """
@@ -97,7 +99,8 @@ flutter_kernel_compile_action = _flutter_kernel_compile_action
 # Co-locates packages and writes the matching `package_config.json`, including
 # `extra_roots` entries for packages with no sources in the closure. See
 # `compile_package_config` — the caller must also make those roots' files
-# action inputs.
+# action inputs (an undeclared root resolves nowhere sandboxed and is refused
+# as an undeclared read unsandboxed).
 compile_package_config = _compile_package_config
 
 # The attrs a calling rule merges into its own (`main`/`srcs`/`deps` stay the

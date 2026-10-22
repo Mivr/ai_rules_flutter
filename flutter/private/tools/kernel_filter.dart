@@ -19,6 +19,13 @@
 /// fails the build instead of caching bytes Bazel never reruns on.
 /// The lines are dropped either way, so a successful build stays silent.
 ///
+/// The report cannot be switched off: the tool appends its own
+/// `--print-incremental-dependencies` after the caller's flags (the last
+/// occurrence wins in `frontend_server`'s `package:args` parsing), and a
+/// compile that exits 0 while reporting no reads at all fails closed — a
+/// real compile reads at least its entrypoint, so zero reads means the
+/// report was silenced by other means.
+///
 /// The manifest is the only source of allowances: the tool derives nothing
 /// from the compile argv. A flag smuggled into the argv (`--packages`,
 /// `--import-dill`, `--platform` and the like, whether in `vm_flags` or
@@ -111,6 +118,21 @@ List<String> findUndeclaredReads(
     }
   }
   return undeclared;
+}
+
+/// The compile argv with the dependency report forced on.
+///
+/// Returns [cmdArgs] with `--print-incremental-dependencies` inserted after
+/// the caller's flags, immediately before the final entrypoint argument (the
+/// entrypoint closes the `frontend_server` argv, so a flag appended after it
+/// would not parse as a flag). `frontend_server` parses flags with
+/// `package:args`, where the last occurrence of a boolean flag wins, so the
+/// tool's occurrence overrides any caller spelling that analysis did not
+/// already refuse.
+List<String> withForcedDependencyReport(List<String> cmdArgs) {
+  const forced = '--print-incremental-dependencies';
+  if (cmdArgs.length < 2) return [...cmdArgs, forced];
+  return [...cmdArgs.sublist(0, cmdArgs.length - 1), forced, cmdArgs.last];
 }
 
 Future<void> main(List<String> argv) async {
@@ -224,7 +246,10 @@ Future<int> runFiltered(
     return 1;
   }
 
-  final result = await Process.run(executable, cmdArgs);
+  final result = await Process.run(
+    executable,
+    withForcedDependencyReport(cmdArgs),
+  );
   if (result.exitCode != 0) {
     final split = splitDependencyLines(result.stdout as String);
     out.write(split.rest);
@@ -243,6 +268,23 @@ Future<int> runFiltered(
   }
 
   final split = splitDependencyLines(result.stdout as String);
+  if (split.reads.isEmpty) {
+    err.writeln(
+      'flutter: the compiler reported no dependency reads, so the read-set '
+      'check has nothing to verify. A real compile reads at least its '
+      'entrypoint: the report was silenced, and the compile controls '
+      '`--print-incremental-dependencies` itself. Remove any silencer from '
+      '`extra_flags` and rebuild.',
+    );
+    if (outputDill != null) {
+      try {
+        File(outputDill).deleteSync();
+      } on FileSystemException {
+        // Already gone; the nonzero exit fails the action either way.
+      }
+    }
+    return 1;
+  }
   final undeclared = findUndeclaredReads(split.reads, declared, extraAllowed);
   if (undeclared.isNotEmpty) {
     for (final line in undeclared) {

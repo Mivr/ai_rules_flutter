@@ -412,7 +412,9 @@ def compile_package_config(ctx, packages, all_srcs, extra_roots = {}):
         `..`-escaping root fails the build naming the package and the value.
         The caller must also make those roots' files action inputs —
         an entry whose files the compile action did not declare resolves
-        nowhere at compile time.
+        nowhere at compile time under the sandbox (the compile fails
+        there); unsandboxed the compiler reads it off the exec root and
+        the post-compile read-set check refuses the undeclared read.
 
     Returns:
       `struct(config_file, srcs, packages)` — `srcs` and `packages` are
