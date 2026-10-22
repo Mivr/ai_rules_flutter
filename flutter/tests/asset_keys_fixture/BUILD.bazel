@@ -13,25 +13,25 @@ package(
 
 flutter_library(
     name = "brand",
+    package_name = "brand",
     srcs = ["lib.dart"],
     assets = ["assets/brand.txt"],
-    package_name = "brand",
     tags = ["manual"],
 )
 
 flutter_library(
     name = "brand_consumer",
-    srcs = ["lib.dart"],
     package_name = "consumer",
+    srcs = ["lib.dart"],
     tags = ["manual"],
     deps = [":brand"],
 )
 
 flutter_application(
     name = "colliding_bundle",
+    package_name = "colliding",
     srcs = ["lib.dart"],
     main = "lib.dart",
-    package_name = "colliding",
     tags = ["manual"],
     deps = [
         "//flutter/tests/asset_keys_fixture/coll:dup_b",
@@ -41,17 +41,17 @@ flutter_application(
 
 flutter_application(
     name = "outside_bundle",
-    srcs = ["lib.dart"],
-    main = "lib.dart",
-    assets = ["//flutter/tests/asset_keys_fixture/coll:assets/dup.txt"],
     package_name = "outside",
+    srcs = ["lib.dart"],
+    assets = ["//flutter/tests/asset_keys_fixture/coll:assets/dup.txt"],
+    main = "lib.dart",
     tags = ["manual"],
 )
 
 flutter_library(
     name = "outside_lib",
+    package_name = "outside",
     srcs = ["lib.dart"],
     assets = ["//flutter/tests/asset_keys_fixture/coll:assets/dup.txt"],
-    package_name = "outside",
     tags = ["manual"],
 )

@@ -13,8 +13,8 @@ exports_files(["assets/dup.txt"])
 
 flutter_library(
     name = "dup_b",
+    package_name = "dup",
     srcs = ["lib.dart"],
     assets = ["assets/dup.txt"],
-    package_name = "dup",
     tags = ["manual"],
 )

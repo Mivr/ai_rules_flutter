@@ -8,8 +8,8 @@ package(
 
 flutter_library(
     name = "dup_a",
+    package_name = "dup",
     srcs = ["lib.dart"],
     assets = ["assets/dup.txt"],
-    package_name = "dup",
     tags = ["manual"],
 )

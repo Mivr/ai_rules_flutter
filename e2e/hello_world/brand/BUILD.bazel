@@ -6,7 +6,7 @@ package(
 
 flutter_library(
     name = "brand",
+    package_name = "brand",
     srcs = ["lib/brand.dart"],
     assets = ["assets/brand.txt"],
-    package_name = "brand",
 )

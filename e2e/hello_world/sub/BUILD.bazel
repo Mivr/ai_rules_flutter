@@ -4,8 +4,8 @@ flutter_application(
     name = "sub_app",
     package_name = "sub_app",
     srcs = ["lib/main.dart"],
-    main = "lib/main.dart",
     assets = ["assets/notice.txt"],
+    main = "lib/main.dart",
     visibility = ["//visibility:public"],
     deps = [
         "//brand",
