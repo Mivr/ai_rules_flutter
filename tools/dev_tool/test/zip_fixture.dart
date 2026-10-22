@@ -1,13 +1,15 @@
 /// Hermetic zip fixtures for dev_tool tests.
 ///
-/// The host may not have a `zip` binary, so tests build their archives
-/// in-process instead of spawning one: [writeTestZip] walks a directory the
-/// test already laid out and writes a minimal deterministic zip (stored or
-/// deflated entries, fixed DOS timestamp) with `dart:io`'s raw deflate and a
-/// small CRC-32. Entry names, contents and compression methods match what
-/// `zip -r` would have written for the same tree.
+/// The host may not have `zip`/`unzip` binaries, so tests build and read their
+/// archives in-process instead of spawning them: [writeTestZip] walks a
+/// directory the test already laid out and writes a minimal deterministic zip
+/// (stored or deflated entries, fixed DOS timestamp) with `dart:io`'s raw
+/// deflate and a small CRC-32. Entry names, contents and compression methods
+/// match what `zip -r` would have written for the same tree. [extractZip]
+/// unpacks such an archive again, for tests that consume a zip file.
 library;
 
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -171,4 +173,224 @@ void _writeCentral(
     ..setUint32(42, localOffset, Endian.little);
   header.buffer.asUint8List().setRange(46, 46 + name.length, name);
   out.add(header.buffer.asUint8List());
+}
+
+// ---------------------------------------------------------------------------
+// Reader: extractZip.
+// ---------------------------------------------------------------------------
+
+/// A validated zip entry, fully read and CRC-checked before anything is
+/// written to disk.
+class _ReadEntry {
+  final String name;
+  final Uint8List data;
+  final int unixMode;
+  final bool isDirectory;
+  final bool isSymlink;
+
+  _ReadEntry(
+    this.name,
+    this.data,
+    this.unixMode,
+    this.isDirectory,
+    this.isSymlink,
+  );
+}
+
+/// Unpacks the zip at [zipPath] into [destDir], preserving Unix modes and
+/// symlinks.
+///
+/// Reads stored (method 0) and deflated (method 8) entries and checks every
+/// entry's CRC-32. Anything else — ZIP64, encryption, data descriptors, other
+/// methods or file types, absolute or `..` paths — fails with a
+/// [FormatException] before anything is written, so a rejected archive never
+/// extracts partially.
+Future<void> extractZip({
+  required String zipPath,
+  required Directory destDir,
+}) async {
+  final bytes = await File(zipPath).readAsBytes();
+  final entries = _readAllEntries(bytes, zipPath);
+  for (final entry in entries) {
+    final path = '${destDir.path}/${entry.name}';
+    if (entry.isDirectory) {
+      Directory(path).createSync(recursive: true);
+    } else if (entry.isSymlink) {
+      Directory(path).parent.createSync(recursive: true);
+      Link(path).createSync(utf8.decode(entry.data));
+    } else {
+      final file = File(path);
+      await file.parent.create(recursive: true);
+      await file.writeAsBytes(entry.data);
+    }
+  }
+  for (final entry in entries) {
+    await _restoreMode(destDir, entry);
+  }
+}
+
+/// Restores the archived Unix mode on [entry], unless it matches what the
+/// fresh file already has. `chmod` is not an archive tool, and the repo's
+/// tests already lean on it; Dart itself has no mode API.
+Future<void> _restoreMode(Directory destDir, _ReadEntry entry) async {
+  if (entry.isSymlink || (entry.unixMode & 0xF000) == 0) return;
+  final path = '${destDir.path}/${entry.name}';
+  final wanted = entry.unixMode & 0xFFF;
+  if ((FileStat.statSync(path).mode & 0xFFF) == wanted) return;
+  final r = await Process.run('chmod', [wanted.toRadixString(8), path]);
+  if (r.exitCode != 0) {
+    throw StateError('chmod $path failed: ${r.stderr}');
+  }
+}
+
+List<_ReadEntry> _readAllEntries(Uint8List bytes, String zipPath) {
+  final data = ByteData.sublistView(bytes);
+  final tailStart =
+      bytes.length - (bytes.length < 65558 ? bytes.length : 65558);
+  var eocd = -1;
+  for (var i = bytes.length - 22; i >= tailStart; i--) {
+    if (data.getUint32(i, Endian.little) == 0x06054b50) {
+      eocd = i;
+      break;
+    }
+  }
+  if (eocd < 0) {
+    throw FormatException('No zip end-of-central-directory in $zipPath');
+  }
+  if (data.getUint16(eocd + 4, Endian.little) != 0 ||
+      data.getUint16(eocd + 6, Endian.little) != 0) {
+    throw FormatException(
+      'Multi-disk zip archives are not supported: $zipPath',
+    );
+  }
+  final thisDisk = data.getUint16(eocd + 8, Endian.little);
+  final total = data.getUint16(eocd + 10, Endian.little);
+  final cdSize = data.getUint32(eocd + 12, Endian.little);
+  final cdOffset = data.getUint32(eocd + 16, Endian.little);
+  if (thisDisk == 0xFFFF ||
+      total == 0xFFFF ||
+      cdSize == 0xFFFFFFFF ||
+      cdOffset == 0xFFFFFFFF) {
+    throw FormatException('ZIP64 archives are not supported: $zipPath');
+  }
+  if (thisDisk != total) {
+    throw FormatException('Split zip archive: $zipPath');
+  }
+  final entries = <_ReadEntry>[];
+  var at = cdOffset;
+  for (var i = 0; i < total; i++) {
+    at = _readCentralEntry(bytes, data, at, zipPath, entries);
+  }
+  return entries;
+}
+
+int _readCentralEntry(
+  Uint8List bytes,
+  ByteData data,
+  int at,
+  String zipPath,
+  List<_ReadEntry> out,
+) {
+  if (data.getUint32(at, Endian.little) != 0x02014b50) {
+    throw FormatException('Corrupt zip central directory in $zipPath');
+  }
+  final flags = data.getUint16(at + 8, Endian.little);
+  final method = data.getUint16(at + 10, Endian.little);
+  final crc = data.getUint32(at + 16, Endian.little);
+  final compSize = data.getUint32(at + 20, Endian.little);
+  final uncompSize = data.getUint32(at + 24, Endian.little);
+  final nameLen = data.getUint16(at + 28, Endian.little);
+  final extraLen = data.getUint16(at + 30, Endian.little);
+  final commentLen = data.getUint16(at + 32, Endian.little);
+  final externalAttrs = data.getUint32(at + 38, Endian.little);
+  final localOffset = data.getUint32(at + 42, Endian.little);
+  final name = utf8.decode(bytes.sublist(at + 46, at + 46 + nameLen));
+  if (flags & 0x1 != 0) {
+    throw FormatException(
+      'Encrypted zip entries are not supported: $name in $zipPath',
+    );
+  }
+  if (flags & 0x8 != 0) {
+    throw FormatException(
+      'Zip data descriptors are not supported: $name in $zipPath',
+    );
+  }
+  if (method != 0 && method != 8) {
+    throw FormatException(
+      '$name in $zipPath uses zip compression method $method, '
+      'which is not supported',
+    );
+  }
+  if (compSize == 0xFFFFFFFF ||
+      uncompSize == 0xFFFFFFFF ||
+      localOffset == 0xFFFFFFFF) {
+    throw FormatException('ZIP64 archives are not supported: $zipPath');
+  }
+  if (name.isEmpty || name.startsWith('/') || name.split('/').contains('..')) {
+    throw FormatException(
+      'Refusing to extract absolute or parent path: $name in $zipPath',
+    );
+  }
+  final unixMode = (externalAttrs >> 16) & 0xFFFF;
+  final kind = unixMode & 0xF000;
+  final isDirectory = name.endsWith('/') || kind == 0x4000;
+  final isSymlink = kind == 0xA000;
+  if (!isDirectory && !isSymlink && kind != 0x8000 && kind != 0) {
+    throw FormatException('Unsupported file type for $name in $zipPath');
+  }
+  out.add(
+    _ReadEntry(
+      name,
+      _readEntryPayload(
+        bytes,
+        data,
+        localOffset,
+        method,
+        compSize,
+        uncompSize,
+        crc,
+        name,
+        zipPath,
+      ),
+      unixMode,
+      isDirectory,
+      isSymlink,
+    ),
+  );
+  return at + 46 + nameLen + extraLen + commentLen;
+}
+
+Uint8List _readEntryPayload(
+  Uint8List bytes,
+  ByteData data,
+  int localOffset,
+  int method,
+  int compSize,
+  int uncompSize,
+  int crc,
+  String name,
+  String zipPath,
+) {
+  if (data.getUint32(localOffset, Endian.little) != 0x04034b50) {
+    throw FormatException('Corrupt zip local header for $name in $zipPath');
+  }
+  if (data.getUint16(localOffset + 8, Endian.little) != method) {
+    throw FormatException('Corrupt zip local header for $name in $zipPath');
+  }
+  final skip =
+      data.getUint16(localOffset + 26, Endian.little) +
+      data.getUint16(localOffset + 28, Endian.little);
+  final start = localOffset + 30 + skip;
+  final stored = bytes.sublist(start, start + compSize);
+  final Uint8List out = switch (method) {
+    0 => stored,
+    _ => Uint8List.fromList(ZLibDecoder(raw: true).convert(stored)),
+  };
+  if (out.length != uncompSize) {
+    throw FormatException('Size mismatch for $name in $zipPath');
+  }
+  if (_crc32(out) != crc) {
+    throw FormatException('CRC mismatch for $name in $zipPath');
+  }
+  return out;
 }

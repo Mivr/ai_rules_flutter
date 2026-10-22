@@ -229,6 +229,7 @@ _UNIT_TESTS = {
     },
     "web_options_test": {"deps": ["@dev_tool_deps//:args"]},
     "wasm_pipeline_assembler_test": {},
+    "zip_fixture_test": {"zip_fixture": True},
 }
 
 [dart_test(
@@ -315,6 +316,7 @@ dart_binary(
     ) + [
         "test/test_lifetime.dart",
         "test/tls_fixture.dart",
+        "test/zip_fixture.dart",
     ],
     compile_mode = "kernel",
     main = "tool/e2e.dart",
