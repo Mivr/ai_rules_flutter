@@ -859,15 +859,50 @@ dart_test(
 )
 
 # Verifies package-relative asset keys for a subpackage app bundle:
-# `//sub:sub_app` keys its own `assets/notice.txt` relative to its Bazel
-# package (no `sub/` prefix), and the first-party `//brand` dependency's
-# asset lands at `packages/brand/assets/brand.txt`. Reads the bundle's
-# `flutter_assets/` tree and AssetManifest.bin.json like
-# `:verify_pub_assets_test` does for pub assets.
+# `//sub:sub_app` keys its own `assets/notice.txt` relative to its package
+# directory (no `sub/` prefix): the nested `//sub/nested` file arrives as
+# `nested/extra.txt` and the genrule output as `gen_notice.txt`. The
+# first-party `//brand` dependency's asset lands at
+# `packages/brand/assets/brand.txt`. Reads the bundle's `flutter_assets/`
+# tree and AssetManifest.bin.json like `:verify_pub_assets_test` does for
+# pub assets.
 dart_test(
     name = "verify_sub_assets_test",
     data = ["//sub:sub_app"],
     main = "test/verify_sub_assets_test.dart",
+    target_compatible_with = _HOST_COMPATIBLE,
+    deps = [
+        "@deps//:test",
+        "@rules_dart//dart/runfiles",
+    ],
+)
+
+# A workspace-root bundle holding a nested-package file and a generated
+# file. The root strips nothing: `//brand`'s asset keeps its
+# `brand/assets/brand.txt` key and the genrule output its `root_gen.txt`
+# key — exactly today's keys. `:verify_root_keys_test` asserts the tree.
+flutter_asset_bundle(
+    name = "root_keys_bundle",
+    assets = [
+        ":root_gen_asset",
+        "//brand:assets/brand.txt",
+    ],
+)
+
+genrule(
+    name = "root_gen_asset",
+    outs = ["root_gen.txt"],
+    cmd = "echo 'root generated' > $@",
+)
+
+# Verifies the workspace-root key rule: a root target keys every same-repo
+# file, nested or generated, by its repository-relative path — the bundle
+# stays byte-identical. Reads `:root_keys_bundle`'s `flutter_assets/` tree
+# and AssetManifest.bin.json.
+dart_test(
+    name = "verify_root_keys_test",
+    data = [":root_keys_bundle"],
+    main = "test/verify_root_keys_test.dart",
     target_compatible_with = _HOST_COMPATIBLE,
     deps = [
         "@deps//:test",

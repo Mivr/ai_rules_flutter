@@ -4,11 +4,21 @@ flutter_application(
     name = "sub_app",
     package_name = "sub_app",
     srcs = ["lib/main.dart"],
-    assets = ["assets/notice.txt"],
+    assets = [
+        ":gen_notice",
+        "assets/notice.txt",
+        "//sub/nested:extra.txt",
+    ],
     main = "lib/main.dart",
     visibility = ["//visibility:public"],
     deps = [
         "//brand",
         "@deps//:flutter",
     ],
+)
+
+genrule(
+    name = "gen_notice",
+    outs = ["gen_notice.txt"],
+    cmd = "echo 'generated notice' > $@",
 )

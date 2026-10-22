@@ -4,6 +4,11 @@ package(
     default_visibility = ["//sub:__pkg__"],
 )
 
+exports_files(
+    ["assets/brand.txt"],
+    visibility = ["//:__pkg__"],
+)
+
 flutter_library(
     name = "brand",
     package_name = "brand",

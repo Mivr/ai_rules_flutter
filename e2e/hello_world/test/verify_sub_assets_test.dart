@@ -1,8 +1,10 @@
 /// Asserts package-relative asset keys for a subpackage app bundle.
 ///
 /// `//sub:sub_app` lives in Bazel package `//sub`, so its own
-/// `assets/notice.txt` must be keyed relative to that package (not prefixed
-/// with `sub/`), while the first-party `//brand` dependency's asset is keyed
+/// `assets/notice.txt` must be keyed relative to that package directory (not
+/// prefixed with `sub/`): the nested `//sub/nested` package's `extra.txt`
+/// arrives as `nested/extra.txt`, and the genrule output as `gen_notice.txt`.
+/// The first-party `//brand` dependency's asset is keyed
 /// `packages/brand/assets/brand.txt` — the flutter_tools key rule.
 ///
 /// Backed by data files (the bundle's `flutter_assets/` tree, copied into
@@ -47,6 +49,18 @@ void main() {
     expect(asset.readAsStringSync(), equals('brand asset\n'));
   });
 
+  test('nested-package file is keyed under the directory', () {
+    final asset = File('${bundleDir.path}/nested/extra.txt');
+    expect(asset.existsSync(), isTrue);
+    expect(asset.readAsStringSync(), equals('nested extra\n'));
+  });
+
+  test('generated file is keyed by its repository-relative path', () {
+    final asset = File('${bundleDir.path}/gen_notice.txt');
+    expect(asset.existsSync(), isTrue);
+    expect(asset.readAsStringSync(), equals('generated notice\n'));
+  });
+
   test('AssetManifest.bin.json carries both package-relative keys', () {
     // Same decoding trick as verify_pub_assets_test.dart: the .bin.json
     // wrapper is base64-encoded StandardMessageCodec, whose string keys
@@ -56,8 +70,11 @@ void main() {
     ) as String;
     final asString = utf8.decode(base64Decode(wrapped), allowMalformed: true);
     expect(asString, contains('assets/notice.txt'));
+    expect(asString, contains('nested/extra.txt'));
+    expect(asString, contains('gen_notice.txt'));
     expect(asString, contains('packages/brand/assets/brand.txt'));
     expect(asString, isNot(contains('sub/assets/notice.txt')));
+    expect(asString, isNot(contains('bazel-out/')));
     expect(asString, isNot(contains('packages/sub_app/')));
   });
 }
