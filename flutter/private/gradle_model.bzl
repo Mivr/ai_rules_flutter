@@ -24,34 +24,36 @@ load(
 
 _GRADLE_APPLY_MAX_DEPTH = 10
 
-def _gradle_segment_literal_end(text, pos):
-    """End of the literal opening at `pos`, escapes and templates honoured."""
-    n = len(text)
-    if text[pos:pos + 2] == "$/":
-        i = pos + 2
-        for _ in range(n + 1):
-            if i >= n:
-                return n
-            if text[i:i + 2] == "/$":
-                return i + 2
-            if text[i:i + 2] == "$$":
-                i += 2
-            else:
-                i += 1
-        return n
-    q = text[pos:pos + 1]
-    if text[pos:pos + 3] == q + q + q:
-        i = pos + 3
-        for _ in range(n + 1):
-            if i >= n:
-                return n
-            if text[i:i + 3] == q + q + q:
-                return i + 3
-            if text[i:i + 1] == "\\" and i + 1 < n:
-                i += 2
-            else:
-                i += 1
-        return n
+def _gradle_dollar_slashy_end(text, pos, n):
+    """End of the `$/.../$` literal opening at `pos` (`$$` escapes)."""
+    i = pos + 2
+    for _ in range(n + 1):
+        if i >= n:
+            return n
+        if text[i:i + 2] == "/$":
+            return i + 2
+        if text[i:i + 2] == "$$":
+            i += 2
+        else:
+            i += 1
+    return n
+
+def _gradle_triple_end(text, pos, n, q):
+    """End of the triple-quoted literal opening at `pos` (escapes honoured)."""
+    i = pos + 3
+    for _ in range(n + 1):
+        if i >= n:
+            return n
+        if text[i:i + 3] == q + q + q:
+            return i + 3
+        if text[i:i + 1] == "\\" and i + 1 < n:
+            i += 2
+        else:
+            i += 1
+    return n
+
+def _gradle_quoted_end(text, pos, n, q):
+    """End of the short quoted literal opening at `pos`, templates honoured."""
     i = pos + 1
     for _ in range(n + 1):
         if i >= n:
@@ -66,6 +68,16 @@ def _gradle_segment_literal_end(text, pos):
         else:
             i += 1
     return n
+
+def _gradle_segment_literal_end(text, pos):
+    """End of the literal opening at `pos`, escapes and templates honoured."""
+    n = len(text)
+    if text[pos:pos + 2] == "$/":
+        return _gradle_dollar_slashy_end(text, pos, n)
+    q = text[pos:pos + 1]
+    if text[pos:pos + 3] == q + q + q:
+        return _gradle_triple_end(text, pos, n, q)
+    return _gradle_quoted_end(text, pos, n, q)
 
 def _gradle_template_end(text, i, n):
     """End of a `${...}` template body started before `i`; nested-aware."""
@@ -141,8 +153,19 @@ def gradle_segments(text, language):
     Literal spans (`'...'`, `"..."`, triple-quoted, `/.../`, `$/.../$`,
     each with the lexer's escapes, plus `${...}` templates which stay
     inside their literal) arrive with `code = False`; everything else is
-    code. Unterminated literals run to the end of the statement.
+    code. Unterminated literals run to the end of the statement. An
+    unknown dialect tag fails: without a known dialect the spans cannot
+    be classified, and guessing would silently misread the statement.
+
+    Args:
+      text: One statement from `gradle_lex`.
+      language: `"groovy"` or `"kotlin"`, from the file extension.
+
+    Returns:
+      A list of `struct(text, code)` spans.
     """
+    if language != "groovy" and language != "kotlin":
+        fail("gradle_segments: unknown Gradle dialect " + repr(language))
     spans = []
     cur = []
     n = len(text)
@@ -184,7 +207,16 @@ def gradle_code_text(text, language):
     return " ".join([s.text for s in gradle_segments(text, language) if s.code])
 
 def gradle_has_word(text, language, word):
-    """True when `word` stands in code (never in a comment or a string)."""
+    """True when `word` stands in code (never in a comment or a string).
+
+    Args:
+      text: One statement from `gradle_lex`.
+      language: `"groovy"` or `"kotlin"`, from the file extension.
+      word: The bare word to look for.
+
+    Returns:
+      True when `word` appears as a code token.
+    """
     for tok in gradle_code_text(text, language).replace("(", " ").replace(")", " ").replace(",", " ").replace(":", " ").replace("=", " ").split(" "):
         if tok.strip() == word:
             return True
@@ -197,6 +229,12 @@ def gradle_block_name(header):
     configure the Android extension under another spelling, so the
     namespace reader treats them as `android`; every other header keeps
     its leading word.
+
+    Args:
+      header: One `open`-event header from `gradle_lex`.
+
+    Returns:
+      The canonical receiver name of the block.
     """
     word = _parse_leading_word(header.strip())
     if word == "configure" or word == "android":

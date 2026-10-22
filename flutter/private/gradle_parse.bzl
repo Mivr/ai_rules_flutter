@@ -9,7 +9,14 @@ test suite pins keeps its exact statement text.
 """
 
 def gradle_leading_word(text):
-    """Return the leading `[A-Za-z0-9_]` word of `text` ("" when none)."""
+    """Return the leading `[A-Za-z0-9_]` word of `text` ("" when none).
+
+    Args:
+        text: The text to read.
+
+    Returns:
+        The leading word, or "" when `text` starts with no word char.
+    """
     out = []
     for i in range(len(text)):
         c = text[i:i + 1]
@@ -24,6 +31,12 @@ def gradle_stmt_token(stmt):
 
     `project.dependencies.add(...)` yields one dotted token so the `.`
     rule can tell a method path from a bare configuration name.
+
+    Args:
+        stmt: The statement text.
+
+    Returns:
+        The leading dotted identifier, or "" when there is none.
     """
     out = []
     for i in range(len(stmt)):
@@ -35,7 +48,15 @@ def gradle_stmt_token(stmt):
     return "".join(out)
 
 def gradle_skip_ws(text, pos):
-    """Return the first position at or after `pos` that is not blank."""
+    """Return the first position at or after `pos` that is not blank.
+
+    Args:
+        text: The text to scan.
+        pos: The position to start from.
+
+    Returns:
+        The first non-blank position at or after `pos`.
+    """
     n = len(text)
     for _ in range(n + 1):
         if pos >= n:
@@ -51,6 +72,14 @@ def gradle_quoted_at(text, pos):
 
     Only single- and double-quoted literals count; anything else (a
     variable, a catalog ref, string concatenation) is not a literal.
+
+    Args:
+        text: The text to read.
+        pos: The position of the opening quote.
+
+    Returns:
+        `(inner, end)` with the literal body and the end position, or
+        `(None, pos)` when no quoted literal opens at `pos`.
     """
     q = text[pos:pos + 1]
     if q != "'" and q != '"':
@@ -74,7 +103,15 @@ def gradle_quoted_at(text, pos):
     return (None, pos)
 
 def gradle_match_paren(text, open_pos):
-    """Return the index of the `)` matching the `(` at `open_pos`, or -1."""
+    """Return the index of the `)` matching the `(` at `open_pos`, or -1.
+
+    Args:
+        text: The text to scan.
+        open_pos: The position of the opening paren.
+
+    Returns:
+        The matching close-paren index, or -1 when unbalanced.
+    """
     depth = 0
     n = len(text)
     i = open_pos
@@ -104,7 +141,17 @@ def gradle_bad_add():
     return struct(kind = "bad", config = "", notation = "", project = False)
 
 def gradle_parse_add_tail(stmt, pos, paren, config):
-    """Parse the `(notation)` tail of an `add(config, ...)` statement."""
+    """Parse the `(notation)` tail of an `add(config, ...)` statement.
+
+    Args:
+        stmt: The statement text.
+        pos: The position where the notation starts.
+        paren: Whether the `add(` call opened a paren to close.
+        config: The already-parsed configuration name.
+
+    Returns:
+        A struct: `kind` `"dep"` or `"project"`, or `"bad"`.
+    """
     pos = gradle_skip_ws(stmt, pos)
     if stmt[pos:pos + 7] == "project" and stmt[pos + 7:pos + 8] == "(":
         end = gradle_match_paren(stmt, pos + 7)
@@ -158,7 +205,15 @@ def parse_gradle_add(stmt):
     return gradle_parse_add_tail(stmt, pos + 1, paren, config)
 
 def gradle_skip_arg_value(stmt, j):
-    """Skip one Kotlin arg value at `j` (a literal or a word); return new pos."""
+    """Skip one Kotlin arg value at `j` (a literal or a word); return new pos.
+
+    Args:
+        stmt: The statement text.
+        j: The position of the value.
+
+    Returns:
+        The position where scanning continues.
+    """
     c2 = stmt[j:j + 1]
     if c2 == "'" or c2 == '"':
         (_, end) = gradle_quoted_at(stmt, j)
@@ -212,7 +267,15 @@ def gradle_skip_call_arg(stmt, j, w):
     return j
 
 def parse_gradle_apply_kwargs(stmt, pos):
-    """Parse parenthesised `apply(...)` args; return the `from` path struct."""
+    """Parse parenthesised `apply(...)` args; return the `from` path struct.
+
+    Args:
+        stmt: The stripped statement text.
+        pos: The position after the opening paren.
+
+    Returns:
+        `struct(kind, path)`: `"path"`, `"bad"`, or `"none"`.
+    """
     n = len(stmt)
     j = pos
     for _ in range(n + 1):
@@ -314,6 +377,12 @@ def gradle_code_without_strings(text):
     Lets the `dependencies`-mention check see references
     (`project.dependencies.add`) while a prose string that merely names
     dependencies stays invisible.
+
+    Args:
+        text: The statement text.
+
+    Returns:
+        `text` with every quoted literal removed.
     """
     out = []
     n = len(text)

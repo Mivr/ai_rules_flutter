@@ -36,6 +36,7 @@ load(
 
 def _gradle_package_reader(ctx):
     """A `read_script` callback confined to the spoke's `android/` tree."""
+
     def _read_package_script(path):
         gradle_file = ctx.path("android/" + path)
         if not gradle_file.exists:
@@ -44,34 +45,35 @@ def _gradle_package_reader(ctx):
 
     return _read_package_script
 
-def _gradle_string_value(literal, language):
-    """Plain string value of one literal span; `(value, ok)`.
+def _gradle_dollar_slashy_value(literal):
+    """Plain value of a `$/.../$` span; `$` inside may interpolate."""
+    if len(literal) < 4 or literal[len(literal) - 2:] != "/$":
+        return (None, False)
+    inner = literal[2:len(literal) - 2]
+    if "$" in inner:
+        return (None, False)
+    return (inner, True)
 
-    Single-quoted Groovy holds its text raw (`$` never interpolates
-    there); every other quoted, slashy or dollar-slashy form with a `$`
-    may interpolate and is not plain. Kotlin single-quoted is a `Char`,
-    never a string. Anything less than a whole literal — a variable, a
-    catalog ref, concatenation residue — is not plain either.
-    """
-    if literal[:2] == "$/":
-        if len(literal) < 4 or literal[len(literal) - 2:] != "/$":
-            return (None, False)
-        inner = literal[2:len(literal) - 2]
-        if "$" in inner:
-            return (None, False)
-        return (inner, True)
-    if literal[:1] == "/":
-        if len(literal) < 2 or literal[len(literal) - 1:] != "/":
-            return (None, False)
-        inner = literal[1:len(literal) - 1]
-        if "$" in inner or "\\" in inner:
-            return (None, False)
-        return (inner, True)
+def _gradle_slashy_value(literal):
+    """Plain value of a `/.../` span; `$` and backslash refuse it."""
+    if len(literal) < 2 or literal[len(literal) - 1:] != "/":
+        return (None, False)
+    inner = literal[1:len(literal) - 1]
+    if "$" in inner or "\\" in inner:
+        return (None, False)
+    return (inner, True)
+
+def _gradle_quoted_value(literal, language):
+    """Plain value of a quoted span; Kotlin `Char` and `$` refuse it."""
     q = literal[:1]
     if q != "'" and q != '"':
         return (None, False)
     if q == "'" and language == "kotlin":
         return (None, False)
+    return _gradle_delimited_value(literal, q)
+
+def _gradle_delimited_value(literal, q):
+    """Plain value of a quote-delimited span; `$` in `"` may interpolate."""
     if literal[:3] == q + q + q:
         if len(literal) < 6 or literal[len(literal) - 3:] != q + q + q:
             return (None, False)
@@ -85,6 +87,21 @@ def _gradle_string_value(literal, language):
     if q == '"' and "$" in inner:
         return (None, False)
     return (inner, True)
+
+def _gradle_string_value(literal, language):
+    """Plain string value of one literal span; `(value, ok)`.
+
+    Single-quoted Groovy holds its text raw (`$` never interpolates
+    there); every other quoted, slashy or dollar-slashy form with a `$`
+    may interpolate and is not plain. Kotlin single-quoted is a `Char`,
+    never a string. Anything less than a whole literal — a variable, a
+    catalog ref, concatenation residue — is not plain either.
+    """
+    if literal[:2] == "$/":
+        return _gradle_dollar_slashy_value(literal)
+    if literal[:1] == "/":
+        return _gradle_slashy_value(literal)
+    return _gradle_quoted_value(literal, language)
 
 def _gradle_namespace_result(statement, value, literal):
     """One namespace declaration: `value` with its `literal` flag."""
@@ -183,6 +200,9 @@ def gradle_scan_namespaces(files):
 
     Args:
         files: Collected scripts (`struct(path, language, events)`).
+
+    Returns:
+        The `struct(statement, value, literal)` list in source order.
     """
     found = []
     for f in files:
@@ -309,6 +329,9 @@ def gradle_scan_native(files):
 
     Args:
         files: Collected scripts (`struct(path, language, events)`).
+
+    Returns:
+        The `(file, statement)` structs in source order.
     """
     found = []
     for f in files:

@@ -10,10 +10,6 @@ text; only lexing gained the dialect parameter.
 """
 
 load(
-    ":gradle_lex.bzl",
-    _lex_language_of = "gradle_language_of",
-)
-load(
     ":gradle_model.bzl",
     _model_collect_files = "gradle_collect_files",
 )

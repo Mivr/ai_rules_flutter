@@ -207,75 +207,126 @@ def _gradle_splice_commit(buf, splice):
     for _ in range(len(splice)):
         splice.pop()
 
+def _lex_run_code(ctx):
+    """Run one code-state step; record nested-comment entry in `ctx`."""
+    (state, ni, depth) = _gradle_code_step(ctx["content"], ctx["i"], ctx["buf"], ctx["events"], ctx["depth"], ctx["language"])
+    ctx["state"] = state
+    ctx["i"] = ni
+    ctx["depth"] = depth
+    if state == 11 or state == 12:
+        ctx["nest"] = 1
+        ctx["spaced"] = state == 12
+
+def _lex_run_line_comment(ctx):
+    """Run one `//`-comment step."""
+    if ctx["content"][ctx["i"]:ctx["i"] + 1] == "\n":
+        _gradle_flush(ctx["events"], ctx["buf"], "stmt")
+        ctx["state"] = 0
+    ctx["i"] = ctx["i"] + 1
+
+def _lex_run_block_comment(ctx):
+    """Run one Groovy block-comment step."""
+    if ctx["content"][ctx["i"]:ctx["i"] + 2] == "*/":
+        ctx["state"] = 0
+        ctx["i"] = ctx["i"] + 2
+    else:
+        ctx["i"] = ctx["i"] + 1
+
+def _lex_run_short_single(ctx):
+    """Run one single-quoted short-string step."""
+    (ctx["state"], ctx["i"]) = _gradle_short_string_step(ctx["content"], ctx["n"], ctx["i"], ctx["buf"], ctx["events"], "'")
+
+def _lex_run_short_double(ctx):
+    """Run one double-quoted short-string step."""
+    (ctx["state"], ctx["i"]) = _gradle_short_string_step(ctx["content"], ctx["n"], ctx["i"], ctx["buf"], ctx["events"], '"')
+
+def _lex_run_long_single(ctx):
+    """Run one triple-single-quoted string step."""
+    (ctx["state"], ctx["i"]) = _gradle_long_string_step(ctx["content"], ctx["n"], ctx["i"], ctx["buf"], "'''")
+
+def _lex_run_long_double(ctx):
+    """Run one triple-double-quoted string step."""
+    (ctx["state"], ctx["i"]) = _gradle_long_string_step(ctx["content"], ctx["n"], ctx["i"], ctx["buf"], '"""')
+
+def _lex_run_spaced_line(ctx):
+    """Run one in-bracket `//`-comment step (a space survives it)."""
+    if ctx["content"][ctx["i"]:ctx["i"] + 1] == "\n":
+        ctx["buf"].append(" ")
+        ctx["state"] = 0
+    ctx["i"] = ctx["i"] + 1
+
+def _lex_run_spaced_block(ctx):
+    """Run one in-bracket block-comment step (a space survives it)."""
+    if ctx["content"][ctx["i"]:ctx["i"] + 2] == "*/":
+        ctx["buf"].append(" ")
+        ctx["state"] = 0
+        ctx["i"] = ctx["i"] + 2
+    else:
+        ctx["i"] = ctx["i"] + 1
+
+def _lex_run_slashy(ctx):
+    """Run one slashy-string step; pour unterminated text back as code."""
+    (state, ni, pour) = _gradle_slashy_step(ctx["content"], ctx["n"], ctx["i"], ctx["splice"])
+    if pour or state == 0:
+        _gradle_splice_commit(ctx["buf"], ctx["splice"])
+    ctx["state"] = state
+    ctx["i"] = ni
+
+def _lex_run_dollar_slashy(ctx):
+    """Run one dollar-slashy step; commit the literal when it closes."""
+    (state, ni) = _gradle_dollar_slashy_step(ctx["content"], ctx["i"], ctx["splice"])
+    if state == 0:
+        _gradle_splice_commit(ctx["buf"], ctx["splice"])
+    ctx["state"] = state
+    ctx["i"] = ni
+
+def _lex_run_nested(ctx):
+    """Run one Kotlin nested-comment step (a space survives spaced ones)."""
+    (state, ni, nest) = _gradle_nested_comment_step(ctx["content"], ctx["i"], ctx["nest"], ctx["spaced"])
+    if state == 0 and ctx["spaced"]:
+        ctx["buf"].append(" ")
+    ctx["state"] = state
+    ctx["i"] = ni
+    ctx["nest"] = nest
+
 def _gradle_lex_events(content, language, events, buf, splice):
     """Run the lexer states over `content`; return the end-of-input state."""
     n = len(content)
-    state = 0
-    depth = 0
-    nest = 0
-    spaced = False
-    i = 0
+    ctx = {
+        "content": content,
+        "n": n,
+        "buf": buf,
+        "events": events,
+        "splice": splice,
+        "language": language,
+        "state": 0,
+        "depth": 0,
+        "nest": 0,
+        "spaced": False,
+        "i": 0,
+    }
+    handlers = {
+        0: _lex_run_code,
+        1: _lex_run_line_comment,
+        2: _lex_run_block_comment,
+        3: _lex_run_short_single,
+        4: _lex_run_short_double,
+        5: _lex_run_long_single,
+        6: _lex_run_long_double,
+        7: _lex_run_spaced_line,
+        8: _lex_run_spaced_block,
+        9: _lex_run_slashy,
+        10: _lex_run_dollar_slashy,
+        11: _lex_run_nested,
+        12: _lex_run_nested,
+    }
     for _ in range(n + 2):
-        if i >= n:
+        if ctx["i"] >= n:
             break
-        c = content[i:i + 1]
-        two = content[i:i + 2]
-        if state == 0:
-            (state, i, depth) = _gradle_code_step(content, i, buf, events, depth, language)
-            if state == 11 or state == 12:
-                nest = 1
-                spaced = state == 12
-        elif state == 1:
-            if c == "\n":
-                _gradle_flush(events, buf, "stmt")
-                state = 0
-            i += 1
-        elif state == 2:
-            if two == "*/":
-                state = 0
-                i += 2
-            else:
-                i += 1
-        elif state == 3:
-            (state, i) = _gradle_short_string_step(content, n, i, buf, events, "'")
-        elif state == 4:
-            (state, i) = _gradle_short_string_step(content, n, i, buf, events, '"')
-        elif state == 5:
-            (state, i) = _gradle_long_string_step(content, n, i, buf, "'''")
-        elif state == 6:
-            (state, i) = _gradle_long_string_step(content, n, i, buf, '"""')
-        elif state == 7:
-            if c == "\n":
-                buf.append(" ")
-                state = 0
-            i += 1
-        elif state == 8:
-            if two == "*/":
-                buf.append(" ")
-                state = 0
-                i += 2
-            else:
-                i += 1
-        elif state == 9:
-            (state, ni, pour) = _gradle_slashy_step(content, n, i, splice)
-            if pour:
-                _gradle_splice_commit(buf, splice)
-            elif state == 0:
-                _gradle_splice_commit(buf, splice)
-            i = ni
-        elif state == 10:
-            (state, ni) = _gradle_dollar_slashy_step(content, i, splice)
-            if state == 0:
-                _gradle_splice_commit(buf, splice)
-            i = ni
-        else:
-            (state, ni, nest) = _gradle_nested_comment_step(content, i, nest, spaced)
-            if state == 0 and spaced:
-                buf.append(" ")
-            i = ni
+        handlers[ctx["state"]](ctx)
     if splice:
         _gradle_splice_commit(buf, splice)
-    return (state, depth)
+    return (ctx["state"], ctx["depth"])
 
 def gradle_lex(content, language = "groovy"):
     """Split Gradle script text into statement and brace events.
