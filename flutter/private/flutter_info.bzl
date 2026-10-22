@@ -23,6 +23,13 @@ def _merge_depsets(dep_infos, direct, field):
     """Merges one plain depset channel: this target's files over its dependencies'."""
     return depset(direct = direct, transitive = [getattr(info, field) for info in dep_infos])
 
+def _normalize_shader_srcs(shader_srcs):
+    """Wraps bare shader Files as `struct(file, includes)` entries."""
+    return [
+        s if hasattr(s, "file") else struct(file = s, includes = ())
+        for s in shader_srcs
+    ]
+
 def dedup_plugins(all_plugins):
     """Deduplicates plugin structs by name, keeping first occurrence.
 
@@ -118,10 +125,7 @@ def flutter_info(
         ),
         assets = _merge_depsets(dep_infos, assets, "assets"),
         shader_srcs = depset(
-            direct = [
-                s if hasattr(s, "file") else struct(file = s, includes = ())
-                for s in shader_srcs
-            ],
+            direct = _normalize_shader_srcs(shader_srcs),
             transitive = [info.shader_srcs for info in dep_infos],
         ),
         # A list, not a depset: the structs carry a `platforms` dict, which is
