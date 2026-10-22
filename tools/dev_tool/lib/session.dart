@@ -657,25 +657,136 @@ Future<void> runInteractiveSession({
   void Function(bool lineMode)? setLineMode,
   Future<void>? shutdownSignal,
 }) async {
-  // In `--machine` mode stdout IS the JSON-RPC stream, so a human-facing line
-  // written there lands in the middle of what an editor is parsing. The
-  log ??= protocol.enabled
-      // `report` as well as `text`: the JSON log format strips `text` as
-      // human-only, which would otherwise leave every one of these records in
-      // machine mode with no payload at all — a line that says only that
-      // something was reported.
-      ? (msg) => _logger.info({
-          'message': 'session_report',
-          'text': msg,
-          'report': msg,
-        })
-      : (msg) => stdout.writeln(msg);
+  log = _defaultSessionLog(protocol, log);
 
   // The machine-readable half of the same report. A no-op outside `--machine`
   // mode, like every other event — the terminal reader has [log].
   void announce(Map<String, dynamic> params) =>
       protocol.sendEvent('app.reloadResult', params);
 
+  _wireDevTools(
+    sessions: sessions,
+    devToolsEnabled: devToolsEnabled,
+    dartExecutable: dartExecutable,
+    log: log,
+    protocol: protocol,
+  );
+
+  _printBanner(
+    protocol: protocol,
+    hotReloadUnavailable: hotReloadUnavailable,
+    watcher: watcher,
+    log: log,
+  );
+
+  // Attach the reload handler to the already-running watcher. Anything it
+  // recorded while the run was still wiring itself up arrives now.
+  StreamSubscription<SourceChange>? watcherSubscription;
+  // Gated on the reload command, not on a frontend server: native has one
+  // compiler per app and no single server to check, and the command is what
+  // the handler actually dispatches through.
+  if (watcher != null &&
+      hotReloadUnavailable == null &&
+      commandRunner.hasCommand('app.hotReload')) {
+    watcherSubscription = _watchAndReload(
+      watcher: watcher,
+      resolver: resolver ?? () => null,
+      awaitingAssembly: awaitingAssembly ?? () => false,
+      isAsset: isAsset,
+      commandRunner: commandRunner,
+      log: log,
+      announce: announce,
+    );
+  }
+
+  // What ends this run, whichever transport is driving it: a session's app
+  // gone for good, or a teardown asked for over a transport (`app.stop`,
+  // `daemon.shutdown`). The explicit signal lets the caller regain control to
+  // close its transports AFTER the command that requested the teardown has
+  // sent its response.
+  //
+  // Both signals are real on every mode. Attach's app is not a process this
+  // tool holds, so its "gone" is the VM service closing and not coming back —
+  // reported through the same `terminated` (see `_ExternalAppProcess`).
+  //
+  // `DeviceSession.terminated`, not `appInstance.process.exitCode`: the latter
+  // is sampled once, so a restart that relaunches the process (its native
+  // libraries changed) resolves it with the exit of the process it had just
+  // deliberately replaced. The run would then close its transports — the HTTP
+  // control channel included — leaving a driver with a healthy relaunched app
+  // it could no longer talk to.
+  //
+  // One list for both branches below, rather than a derivation per branch.
+  //
+  // Every session, not the first: `app.stop` stops one app, so a run driving
+  // two devices outlives the first of them ending — whether it was stopped or
+  // died. A single-device run is unchanged, its one app being both the first
+  // and the last.
+  final exitSignals = <Future<void>>[
+    if (sessions.isNotEmpty)
+      Future.wait([for (final s in sessions) s.terminated]),
+    if (shutdownSignal != null) shutdownSignal,
+  ];
+  final exited = exitSignals.isEmpty ? null : Future.any(exitSignals);
+
+  // In machine mode, stdin is consumed by MachineProtocol — skip the
+  // keyboard loop and wait for sessions to end via machine commands.
+  if (protocol.enabled) {
+    if (exited != null) await exited;
+    await watcherSubscription?.cancel();
+    return;
+  }
+
+  _configureTerminal(setEchoMode, setLineMode);
+
+  await _runKeyboardLoop(
+    sessions: sessions,
+    frontendServer: frontendServer,
+    commandRunner: commandRunner,
+    hotReloadUnavailable: hotReloadUnavailable,
+    log: log,
+    announce: announce,
+    protocol: protocol,
+    watcherSubscription: watcherSubscription,
+    exited: exited,
+    shutdownSignal: shutdownSignal,
+    keyboardReader: keyboardReader,
+  );
+  // The run is over — the app is gone, or a teardown was signalled and the
+  // sessions were torn down by whoever signalled it. Just release local
+  // resources. (The keyboard reader lives and is released inside the loop.)
+  await watcherSubscription?.cancel();
+}
+
+/// The human-facing line, in the stream a machine client is not parsing.
+void Function(String message) _defaultSessionLog(
+  MachineProtocol protocol,
+  void Function(String message)? log,
+) {
+  // In `--machine` mode stdout IS the JSON-RPC stream, so a human-facing line
+  // written there lands in the middle of what an editor is parsing. The
+  return log ??
+      // `report` as well as `text`: the JSON log format strips `text` as
+      // human-only, which would otherwise leave every one of these records in
+      // machine mode with no payload at all — a line that says only that
+      // something was reported.
+      (protocol.enabled
+          ? (msg) => _logger.info({
+              'message': 'session_report',
+              'text': msg,
+              'report': msg,
+            })
+          : (msg) => stdout.writeln(msg));
+}
+
+/// Launch DevTools once each session can serve it, without blocking the run.
+void _wireDevTools({
+  required List<DeviceSession> sessions,
+  required bool devToolsEnabled,
+  required String dartExecutable,
+  required void Function(String message) log,
+  required MachineProtocol protocol,
+}) {
   // Launch DevTools once each session can serve it. Native is ready
   // immediately; web resolves when the browser connects, so this is wired as a
   // continuation rather than a check — waiting here would block the terminal
@@ -738,7 +849,15 @@ Future<void> runInteractiveSession({
       );
     }
   }
+}
 
+/// The key menu, or why the reload keys are missing from it.
+void _printBanner({
+  required MachineProtocol protocol,
+  required String? hotReloadUnavailable,
+  required SourceWatcher? watcher,
+  required void Function(String message) log,
+}) {
   // The single-key shortcuts below are only wired up for an interactive
   // terminal. In `--machine` mode stdin is the JSON-RPC command channel (see
   // the `protocol.enabled` early-return after the watcher), so a keystroke like
@@ -766,65 +885,14 @@ Future<void> runInteractiveSession({
       );
     }
   }
+}
 
-  // Attach the reload handler to the already-running watcher. Anything it
-  // recorded while the run was still wiring itself up arrives now.
-  StreamSubscription<SourceChange>? watcherSubscription;
-  // Gated on the reload command, not on a frontend server: native has one
-  // compiler per app and no single server to check, and the command is what
-  // the handler actually dispatches through.
-  if (watcher != null &&
-      hotReloadUnavailable == null &&
-      commandRunner.hasCommand('app.hotReload')) {
-    watcherSubscription = _watchAndReload(
-      watcher: watcher,
-      resolver: resolver ?? () => null,
-      awaitingAssembly: awaitingAssembly ?? () => false,
-      isAsset: isAsset,
-      commandRunner: commandRunner,
-      log: log,
-      announce: announce,
-    );
-  }
-
-  // What ends this run, whichever transport is driving it: a session's app
-  // gone for good, or a teardown asked for over a transport (`app.stop`,
-  // `daemon.shutdown`). The explicit signal lets the caller regain control to
-  // close its transports AFTER the command that requested the teardown has
-  // sent its response.
-  //
-  // Both signals are real on every mode. Attach's app is not a process this
-  // tool holds, so its "gone" is the VM service closing and not coming back —
-  // reported through the same `terminated` (see `_ExternalAppProcess`).
-  //
-  // `DeviceSession.terminated`, not `appInstance.process.exitCode`: the latter
-  // is sampled once, so a restart that relaunches the process (its native
-  // libraries changed) resolves it with the exit of the process it had just
-  // deliberately replaced. The run would then close its transports — the HTTP
-  // control channel included — leaving a driver with a healthy relaunched app
-  // it could no longer talk to.
-  //
-  // One list for both branches below, rather than a derivation per branch.
-  //
-  // Every session, not the first: `app.stop` stops one app, so a run driving
-  // two devices outlives the first of them ending — whether it was stopped or
-  // died. A single-device run is unchanged, its one app being both the first
-  // and the last.
-  final exitSignals = <Future<void>>[
-    if (sessions.isNotEmpty)
-      Future.wait([for (final s in sessions) s.terminated]),
-    if (shutdownSignal != null) shutdownSignal,
-  ];
-  final exited = exitSignals.isEmpty ? null : Future.any(exitSignals);
-
-  // In machine mode, stdin is consumed by MachineProtocol — skip the
-  // keyboard loop and wait for sessions to end via machine commands.
-  if (protocol.enabled) {
-    if (exited != null) await exited;
-    await watcherSubscription?.cancel();
-    return;
-  }
-
+/// Put a terminal into key-reading mode. Nothing to undo: the process ends
+/// with the run, and machine mode never reaches here.
+void _configureTerminal(
+  void Function(bool echoMode)? setEchoMode,
+  void Function(bool lineMode)? setLineMode,
+) {
   // Keyboard loop (interactive terminal mode only).
   bool terminalConfigured = false;
   if (setEchoMode != null) {
@@ -843,7 +911,22 @@ Future<void> runInteractiveSession({
   } else if (terminalConfigured) {
     stdin.lineMode = false;
   }
+}
 
+/// Read keys until the run ends, the keyboard closes, or 'q' quits.
+Future<void> _runKeyboardLoop({
+  required List<DeviceSession> sessions,
+  required FrontendServer? frontendServer,
+  required CommandRunner commandRunner,
+  required String? hotReloadUnavailable,
+  required void Function(String message) log,
+  required void Function(Map<String, dynamic> params) announce,
+  required MachineProtocol protocol,
+  required StreamSubscription<SourceChange>? watcherSubscription,
+  required Future<void>? exited,
+  required Future<void>? shutdownSignal,
+  required KeyboardReader? keyboardReader,
+}) async {
   final inputStream = keyboardReader != null ? keyboardReader() : stdin;
 
   // Race each key read against [exited] — the same thing `--machine` waits on
@@ -892,72 +975,96 @@ Future<void> runInteractiveSession({
     }
     final input = keys.current;
     final char = String.fromCharCode(input.first);
-    switch (char) {
-      // Both keys are pure dispatch, with no private fallback behind them: the
-      // commands are always registered before this loop exists, and a fallback
-      // would only diverge — invalidating the entrypoint alone where the
-      // pipeline diffs a snapshot of the whole workspace, with nothing able to
-      // execute it and notice. A run with no way to reload still answers here,
-      // through the pipeline's readiness gate.
-      //
-      // Unconditional, including on a run that cannot reload: a keypress that
-      // produces nothing at all cannot be told from one the terminal never
-      // received. Refusing here instead would put a second answer to "can this
-      // run reload" beside the readiness gate's, and they can only drift; the
-      // gate already holds the reason, and it is the same reason the HTTP
-      // channel and the machine protocol get.
-      case 'r':
-        reportReloadCommand(
-          'Hot reload',
-          await commandRunner.run('app.hotReload', {}),
-          log,
-          method: 'app.hotReload',
-          announce: announce,
-        );
-      case 'R':
-        // Presentation, like the banner, so it is gated the way the banner is:
-        // announcing a restart and then refusing it reads worse than saying
-        // nothing. Through `log` rather than `stdout` so it is the same stream
-        // as the answer that follows.
-        if (hotReloadUnavailable == null) log('Performing hot restart...');
-        reportReloadCommand(
-          'Hot restart',
-          await commandRunner.run('app.restart', {}),
-          log,
-          method: 'app.restart',
-          announce: announce,
-        );
-      case 'p':
-        await _reportToggle(
-          sessions,
-          log,
-          'Performance overlay',
-          (client) => client.togglePerformanceOverlay(),
-        );
-      case 'i':
-        await _reportToggle(
-          sessions,
-          log,
-          'Widget inspector',
-          (client) => client.toggleWidgetInspector(),
-        );
-      case 'q':
-        await watcherSubscription?.cancel();
-        for (final session in sessions) {
-          await session.shutdown(protocol);
-        }
-        if (frontendServer != null) {
-          await frontendServer.shutdown();
-        }
-        await keys.cancel();
-        return;
+    if (await _handleKeyPress(
+      char: char,
+      sessions: sessions,
+      frontendServer: frontendServer,
+      commandRunner: commandRunner,
+      hotReloadUnavailable: hotReloadUnavailable,
+      log: log,
+      announce: announce,
+      protocol: protocol,
+      watcherSubscription: watcherSubscription,
+    )) {
+      await keys.cancel();
+      return;
     }
   }
-  // The run is over — the app is gone, or a teardown was signalled and the
-  // sessions were torn down by whoever signalled it. Just release local
-  // resources.
-  await watcherSubscription?.cancel();
   await keys.cancel();
+}
+
+/// Dispatch one keypress. True when it ends the run.
+Future<bool> _handleKeyPress({
+  required String char,
+  required List<DeviceSession> sessions,
+  required FrontendServer? frontendServer,
+  required CommandRunner commandRunner,
+  required String? hotReloadUnavailable,
+  required void Function(String message) log,
+  required void Function(Map<String, dynamic> params) announce,
+  required MachineProtocol protocol,
+  required StreamSubscription<SourceChange>? watcherSubscription,
+}) async {
+  switch (char) {
+    // Both keys are pure dispatch, with no private fallback behind them: the
+    // commands are always registered before this loop exists, and a fallback
+    // would only diverge — invalidating the entrypoint alone where the
+    // pipeline diffs a snapshot of the whole workspace, with nothing able to
+    // execute it and notice. A run with no way to reload still answers here,
+    // through the pipeline's readiness gate.
+    //
+    // Unconditional, including on a run that cannot reload: a keypress that
+    // produces nothing at all cannot be told from one the terminal never
+    // received. Refusing here instead would put a second answer to "can this
+    // run reload" beside the readiness gate's, and they can only drift; the
+    // gate already holds the reason, and it is the same reason the HTTP
+    // channel and the machine protocol get.
+    case 'r':
+      reportReloadCommand(
+        'Hot reload',
+        await commandRunner.run('app.hotReload', {}),
+        log,
+        method: 'app.hotReload',
+        announce: announce,
+      );
+    case 'R':
+      // Presentation, like the banner, so it is gated the way the banner is:
+      // announcing a restart and then refusing it reads worse than saying
+      // nothing. Through `log` rather than `stdout` so it is the same stream
+      // as the answer that follows.
+      if (hotReloadUnavailable == null) log('Performing hot restart...');
+      reportReloadCommand(
+        'Hot restart',
+        await commandRunner.run('app.restart', {}),
+        log,
+        method: 'app.restart',
+        announce: announce,
+      );
+    case 'p':
+      await _reportToggle(
+        sessions,
+        log,
+        'Performance overlay',
+        (client) => client.togglePerformanceOverlay(),
+      );
+    case 'i':
+      await _reportToggle(
+        sessions,
+        log,
+        'Widget inspector',
+        (client) => client.toggleWidgetInspector(),
+      );
+    case 'q':
+      await watcherSubscription?.cancel();
+      for (final session in sessions) {
+        await session.shutdown(protocol);
+      }
+      if (frontendServer != null) {
+        await frontendServer.shutdown();
+      }
+      return true;
+  }
+  return false;
 }
 
 /// Why the keyboard loop woke up.
