@@ -275,6 +275,7 @@ def asset_keys_test_suite(name):
         name = name + "_own_keys",
         target_under_test = ":" + name + "_probe",
     )
+
     # A nested subpackage's file, reached through its `exports_files`, is
     # still under this package's directory: keyed, never refused.
     entries_probe(
