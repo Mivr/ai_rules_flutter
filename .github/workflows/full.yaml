@@ -1,18 +1,25 @@
 # Full-matrix workflow for rules_flutter ("pre-release").
 #
-# Runs the complete macOS e2e coverage that push CI (ci.yaml) no longer runs:
-# every workspace's full `bazel test //...` on macOS, plus the Android example
-# (too heavy for push CI) on Linux. Linux and Windows coverage otherwise lives
-# in push CI. Triggered by release tags, nightly, or manually; the release
-# workflow waits for this workflow to pass on the tagged commit (see the gate
-# job in release.yaml) before publishing.
+# WHAT RUNS WHERE: the complete macOS e2e coverage that push CI (ci.yaml) no
+# longer runs — every workspace's full `bazel test //...` on macOS — plus the
+# Android example (too heavy for push CI) on Linux. Linux and Windows coverage
+# otherwise lives in push CI. Triggered by release tags, nightly, or manually;
+# the release workflow waits for this workflow AND ci.yaml to pass on the
+# tagged commit (see the gate job in release.yaml) before publishing.
 #
-# Nightly runs are uncached (no disk-cache restore, no save); tag and manual
-# runs restore the push-CI shard keys below. Saves are success-gated (no
-# `always()`): a failed run must not persist its half-populated cache.
+# WHAT IS CACHED: nightly schedule runs restore no disk cache (only the plugin
+# job re-saves its own key, on pushes and schedules). Release-tag pushes
+# (`v*`) run fully uncached — no disk-cache restore, no setup-bazel cache
+# save, no actions/cache save of any kind — so the release gate proves every
+# test actually executed on the tagged commit; only the content-addressed
+# repository cache (and the bazelisk cache) still restore, since every fetch
+# through them is sha256-pinned and they never replay test results. Manual
+# dispatches restore the push-CI shard keys below unless `uncached` is set.
+# Saves are success-gated (no `always()`): a failed run must not persist its
+# half-populated cache.
 # Disk caches are the push-CI shards' keys below, restored only (except the
-# plugin job, which owns its key and re-saves it on pushes and schedules so
-# tag runs hit it). See ci.yaml for why saves delete the key first.
+# plugin job, which owns its key and re-saves it on pushes and schedules, but
+# never on tags). See ci.yaml for why saves delete the key first.
 permissions:
   actions: write
   contents: read
@@ -44,7 +51,9 @@ jobs:
   e2e-macos:
     name: E2E full (${{ matrix.workspace }}, macos-latest)
     runs-on: macos-latest
-    timeout-minutes: 240
+    # Cold tag and nightly runs rebuild every workspace from scratch; the
+    # ceiling is GitHub's 6-hour per-job limit.
+    timeout-minutes: 360
     strategy:
       fail-fast: false
       # At most 2 of the 5 macOS slots shared with rules_dart, so a push run's
@@ -91,11 +100,11 @@ jobs:
       - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
         with:
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
-          cache-save: ${{ matrix['cache-save'] && (github.event_name == 'push' || github.event_name == 'schedule') && !inputs.uncached }}
+          cache-save: ${{ matrix['cache-save'] && (github.event_name == 'push' || github.event_name == 'schedule') && github.ref_type != 'tag' && !inputs.uncached }}
       # Workspaces with shard `none` have no push-CI macOS content and rebuild
       # from the repository cache; the rest restore their push shard's key.
       - name: Restore disk cache
-        if: matrix.shard != 'none' && github.event_name != 'schedule' && !inputs.uncached
+        if: matrix.shard != 'none' && github.event_name != 'schedule' && github.ref_type != 'tag' && !inputs.uncached
         continue-on-error: true
         uses: actions/cache/restore@v4
         with:
@@ -103,7 +112,7 @@ jobs:
           key: ${{ env.DISK_CACHE_KEY }}
           restore-keys: ff-disk-${{ runner.os }}-${{ matrix.shard }}-
       - name: Point Bazel at the disk cache
-        if: matrix.shard != 'none' && github.event_name != 'schedule' && !inputs.uncached
+        if: matrix.shard != 'none' && github.event_name != 'schedule' && github.ref_type != 'tag' && !inputs.uncached
         run: |
           dir="${{ env.DISK_CACHE_DIR }}"
           case "$dir" in "~"*) dir="$HOME${dir#\~}";; esac
@@ -119,7 +128,7 @@ jobs:
         if: always()
         run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true
       - name: Delete stale disk cache key
-        if: matrix['cache-save'] && (github.event_name == 'push' || github.event_name == 'schedule') && !inputs.uncached
+        if: matrix['cache-save'] && (github.event_name == 'push' || github.event_name == 'schedule') && github.ref_type != 'tag' && !inputs.uncached
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
@@ -129,7 +138,7 @@ jobs:
           ids=$(gh api "repos/$REPO/actions/caches?per_page=100" --jq '.actions_caches[] | select(.key == env.DISK_CACHE_KEY and .ref == env.REF) | .id' || true)
           for id in $ids; do gh api -X DELETE "repos/$REPO/actions/caches/$id" >/dev/null || true; done
       - name: Save disk cache
-        if: matrix['cache-save'] && (github.event_name == 'push' || github.event_name == 'schedule') && !inputs.uncached
+        if: matrix['cache-save'] && (github.event_name == 'push' || github.event_name == 'schedule') && github.ref_type != 'tag' && !inputs.uncached
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
@@ -142,7 +151,9 @@ jobs:
   e2e-linux-nightly:
     name: E2E nightly (android_example, ubuntu-latest)
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    # Cold tag and nightly runs rebuild the APK actions from scratch; the
+    # ceiling is GitHub's 6-hour per-job limit.
+    timeout-minutes: 360
     env:
       WORKSPACES: android_example
       DISK_CACHE_DIR: ~/.cache/bazel-disk
@@ -154,9 +165,9 @@ jobs:
       - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
         with:
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
-          cache-save: ${{ (github.event_name == 'push' || github.event_name == 'schedule') && !inputs.uncached }}
+          cache-save: ${{ (github.event_name == 'push' || github.event_name == 'schedule') && github.ref_type != 'tag' && !inputs.uncached }}
       - name: Restore disk cache
-        if: github.event_name != 'schedule' && !inputs.uncached
+        if: github.event_name != 'schedule' && github.ref_type != 'tag' && !inputs.uncached
         continue-on-error: true
         uses: actions/cache/restore@v4
         with:
@@ -164,7 +175,7 @@ jobs:
           key: ${{ env.DISK_CACHE_KEY }}
           restore-keys: ff-disk-${{ runner.os }}-${{ env.DISK_CACHE_SHARD }}-
       - name: Point Bazel at the disk cache
-        if: github.event_name != 'schedule' && !inputs.uncached
+        if: github.event_name != 'schedule' && github.ref_type != 'tag' && !inputs.uncached
         run: |
           dir="${{ env.DISK_CACHE_DIR }}"
           case "$dir" in "~"*) dir="$HOME${dir#\~}";; esac
@@ -204,7 +215,7 @@ jobs:
         if: always()
         run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true
       - name: Delete stale disk cache key
-        if: (github.event_name == 'push' || github.event_name == 'schedule') && !inputs.uncached
+        if: (github.event_name == 'push' || github.event_name == 'schedule') && github.ref_type != 'tag' && !inputs.uncached
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
@@ -214,7 +225,7 @@ jobs:
           ids=$(gh api "repos/$REPO/actions/caches?per_page=100" --jq '.actions_caches[] | select(.key == env.DISK_CACHE_KEY and .ref == env.REF) | .id' || true)
           for id in $ids; do gh api -X DELETE "repos/$REPO/actions/caches/$id" >/dev/null || true; done
       - name: Save disk cache
-        if: (github.event_name == 'push' || github.event_name == 'schedule') && !inputs.uncached
+        if: (github.event_name == 'push' || github.event_name == 'schedule') && github.ref_type != 'tag' && !inputs.uncached
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
