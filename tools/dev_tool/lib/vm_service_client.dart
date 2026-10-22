@@ -583,7 +583,16 @@ class VmServiceClient {
         } catch (e) {
           // The socket closed and it does not come back. The failure *is* the
           // answer, so it is not rethrown — nothing is awaiting this, and the one
-          // thing it has to do is tell whoever asked.
+          // thing it has to do is tell whoever asked. Said out loud as well as
+          // through [gone]: the cause is what a reader of the log needs, and
+          // the report itself carries no detail.
+          _logger.warning({
+            'message': 'vm_service_reconnect_failed',
+            'text':
+                'The connection to the app closed and the re-dial failed: $e. '
+                'Reporting the app gone.',
+            'error': '$e',
+          });
           _reportGone('$e');
         }
       }),
@@ -1657,9 +1666,16 @@ class VmServiceClient {
     final Isolate isolate;
     try {
       isolate = await _callService((s) => s.getIsolate(_mainIsolateId!));
-    } catch (_) {
+    } catch (e) {
       // Not answerable, so not an answer. Let the caller's own call fail with
       // whatever the real problem is rather than inventing a pause.
+      // Verbose: this probe runs before every agent command, and unanswerable
+      // here is a designed answer, not a dropped failure.
+      _logger.fine({
+        'message': 'pause_state_unreadable',
+        'text': 'Could not read the main isolate\'s pause state: $e.',
+        'error': '$e',
+      });
       return null;
     }
     return switch (isolate.pauseEvent?.kind) {
@@ -1716,10 +1732,16 @@ class VmServiceClient {
         if (isolate.pauseEvent?.kind == EventKind.kPauseStart) {
           return StartPausedState.pausedAtStart;
         }
-      } catch (_) {
+      } catch (e) {
         // A connection still settling; the deadline below is the bound, and
         // `everRead` is what keeps a poll that only ever failed from being
-        // reported as an isolate seen running.
+        // reported as an isolate seen running. Logged, not swallowed: a poll
+        // that only ever failed is how a dead connection reads here.
+        _logger.fine({
+          'message': 'start_paused_poll_unreadable',
+          'text': 'Could not read the main isolate\'s pause state: $e.',
+          'error': '$e',
+        });
       }
       if (!DateTime.now().isBefore(deadline)) {
         return everRead ? StartPausedState.running : StartPausedState.unknown;
