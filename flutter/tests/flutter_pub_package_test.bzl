@@ -29,7 +29,7 @@ load(
     "resolve_overlay_roots",
     "resolve_overlay_template",
 )
-load("//flutter/private:gradle.bzl", "gradle_android_namespaces", "gradle_build_file_choice")
+load("//flutter/private:gradle.bzl", "gradle_android_namespaces", "gradle_build_file_choice", "gradle_collect_files", "gradle_scan_namespaces", "gradle_scan_native", "gradle_scan_proguard")
 
 # Verbatim shape of record_android 1.5.1's android/build.gradle (trimmed):
 # Groovy DSL, namespace assignment, no dependencies block at all.
@@ -1832,6 +1832,312 @@ hostile_label_renders_inert_test = unittest.make(
     _hostile_label_renders_inert_test_impl,
 )
 
+def _maven_labels_dollar_slashy_test_impl(ctx):
+    """Dollar-slashy literals holding comment openers never split the model."""
+    env = unittest.begin(ctx)
+
+    block = maven_labels_for_gradle(
+        "def rx = $/a/*b/$\ndependencies {\n    implementation 'com.example:thing:1.0'\n}\n",
+        {},
+        [],
+    )
+    asserts.equals(env, ["com.example:thing"], block.unknown)
+    asserts.equals(env, [], block.unreadable)
+
+    line = maven_labels_for_gradle(
+        "def u = $/http://example.com/$; dependencies { implementation 'com.example:thing:1.0' }\n",
+        {},
+        [],
+    )
+    asserts.equals(env, ["com.example:thing"], line.unknown)
+    asserts.equals(env, [], line.unreadable)
+
+    return unittest.end(env)
+
+maven_labels_dollar_slashy_test = unittest.make(
+    _maven_labels_dollar_slashy_test_impl,
+)
+
+def _maven_labels_slashy_and_division_test_impl(ctx):
+    """Slashy strings splice whole; division stays code; neither is a dep."""
+    env = unittest.begin(ctx)
+
+    semicolon = maven_labels_for_gradle(
+        "def s = /a;b/\ndependencies {\n    implementation 'androidx.browser:browser:1.9.0'\n}\n",
+        {},
+        [],
+    )
+    asserts.equals(
+        env,
+        ["@rules_android_maven//:androidx_browser_browser"],
+        semicolon.labels,
+    )
+    asserts.equals(env, [], semicolon.unreadable)
+
+    division = maven_labels_for_gradle(
+        "def x = 6 / 2 // half\ndependencies {\n    implementation 'androidx.browser:browser:1.9.0'\n}\n",
+        {},
+        [],
+    )
+    asserts.equals(
+        env,
+        ["@rules_android_maven//:androidx_browser_browser"],
+        division.labels,
+    )
+    asserts.equals(env, [], division.unreadable)
+
+    slashy_dep = maven_labels_for_gradle(
+        "dependencies {\n    implementation(/com.example:thing:1.0/)\n}\n",
+        {},
+        [],
+    )
+    asserts.equals(env, [], slashy_dep.labels)
+    asserts.equals(
+        env,
+        ["implementation(/com.example:thing:1.0/)"],
+        slashy_dep.unreadable,
+    )
+
+    slashy_apply = maven_labels_for_gradle(
+        "apply from: /mobile.gradle/\n",
+        {},
+        [],
+        _gradle_reader({}),
+    )
+    asserts.equals(env, [], slashy_apply.labels)
+    asserts.equals(env, ["apply from: /mobile.gradle/"], slashy_apply.unreadable)
+
+    return unittest.end(env)
+
+maven_labels_slashy_and_division_test = unittest.make(
+    _maven_labels_slashy_and_division_test_impl,
+)
+
+def _maven_labels_kotlin_nesting_test_impl(ctx):
+    """Kotlin nested comments and raw-string templates never leak deps."""
+    env = unittest.begin(ctx)
+
+    nested = (
+        "dependencies {\n" +
+        "    /* a /* b */ implementation 'com.example:evil:1.0' */\n" +
+        "    implementation(\"androidx.browser:browser:1.9.0\")\n" +
+        "}\n"
+    )
+    kts = maven_labels_for_gradle(nested, {}, [], None, "kotlin")
+    asserts.equals(
+        env,
+        ["@rules_android_maven//:androidx_browser_browser"],
+        kts.labels,
+    )
+    asserts.equals(env, [], kts.unknown)
+    asserts.equals(env, [], kts.unreadable)
+
+    # Groovy block comments do not nest: the "commented" declaration lands.
+    groovy = maven_labels_for_gradle(nested, {}, [])
+    asserts.equals(env, ["com.example:evil"], groovy.unknown)
+
+    templated = (
+        "val notes = \"\"\"\n" +
+        "deps { implementation 'com.example:evil:1.0' }\n" +
+        "${foo(\"}\")}\n" +
+        "\"\"\"\n" +
+        "dependencies {\n" +
+        "    implementation(\"androidx.browser:browser:1.9.0\")\n" +
+        "}\n"
+    )
+    raw = maven_labels_for_gradle(templated, {}, [], None, "kotlin")
+    asserts.equals(
+        env,
+        ["@rules_android_maven//:androidx_browser_browser"],
+        raw.labels,
+    )
+    asserts.equals(env, [], raw.unknown)
+    asserts.equals(env, [], raw.unreadable)
+
+    return unittest.end(env)
+
+maven_labels_kotlin_nesting_test = unittest.make(
+    _maven_labels_kotlin_nesting_test_impl,
+)
+
+def _gradle_native_scan_test_impl(ctx):
+    """Native builds resolve inline, applied, and applied-by-applied; ghosts do not."""
+    env = unittest.begin(ctx)
+
+    inline = gradle_collect_files(
+        "android/build.gradle",
+        "android {\n    externalNativeBuild {\n        cmake {}\n    }\n}\n",
+        "groovy",
+        None,
+    )
+    found_inline = gradle_scan_native(inline.files)
+    asserts.equals(env, 1, len(found_inline))
+    asserts.equals(env, "android/build.gradle", found_inline[0].file)
+
+    applied = gradle_collect_files(
+        "android/build.gradle",
+        "apply from: 'native.gradle'\n",
+        "groovy",
+        _gradle_reader({"native.gradle": "android {\n    externalNativeBuild {\n        cmake {}\n    }\n}\n"}),
+    )
+    found_applied = gradle_scan_native(applied.files)
+    asserts.equals(env, 1, len(found_applied))
+    asserts.equals(env, "native.gradle", found_applied[0].file)
+
+    chained = gradle_collect_files(
+        "android/build.gradle",
+        "apply from: 'a.gradle'\n",
+        "groovy",
+        _gradle_reader({
+            "a.gradle": "apply from: 'b.gradle'\n",
+            "b.gradle": "android {\n    externalNativeBuild {\n        cmake {}\n    }\n}\n",
+        }),
+    )
+    found_chained = gradle_scan_native(chained.files)
+    asserts.equals(env, 1, len(found_chained))
+    asserts.equals(env, "b.gradle", found_chained[0].file)
+
+    ghosts = gradle_collect_files(
+        "android/build.gradle",
+        "// externalNativeBuild\ndef s = 'externalNativeBuild'\nandroid {}\n",
+        "groovy",
+        None,
+    )
+    asserts.equals(env, [], gradle_scan_native(ghosts.files))
+
+    return unittest.end(env)
+
+gradle_native_scan_test = unittest.make(
+    _gradle_native_scan_test_impl,
+)
+
+def _gradle_proguard_shapes_test_impl(ctx):
+    """Keep-rule declarations resolve multiline, multi-file and wrapped; variables refuse."""
+    env = unittest.begin(ctx)
+
+    multi = gradle_collect_files(
+        "android/build.gradle",
+        "android {\n    buildTypes {\n        release {\n            consumerProguardFiles(\n                'consumer-rules.pro'\n            )\n        }\n    }\n}\n",
+        "groovy",
+        None,
+    )
+    scanned_multi = gradle_scan_proguard(multi.files)
+    asserts.equals(env, ["consumer-rules.pro"], scanned_multi.paths)
+    asserts.equals(env, [], scanned_multi.bad)
+
+    several = gradle_collect_files(
+        "android/build.gradle",
+        "android {\n    consumerProguardFiles 'a.pro', 'b.pro'\n}\n",
+        "groovy",
+        None,
+    )
+    asserts.equals(env, ["a.pro", "b.pro"], gradle_scan_proguard(several.files).paths)
+
+    wrapped = gradle_collect_files(
+        "android/build.gradle",
+        "android {\n    consumerProguardFiles file('consumer-rules.pro')\n}\n",
+        "groovy",
+        None,
+    )
+    scanned_wrapped = gradle_scan_proguard(wrapped.files)
+    asserts.equals(env, ["consumer-rules.pro"], scanned_wrapped.paths)
+    asserts.equals(env, [], scanned_wrapped.bad)
+
+    var = gradle_collect_files(
+        "android/build.gradle",
+        "def rulesFile = 'consumer-rules.pro'\nandroid {\n    consumerProguardFiles rulesFile\n}\n",
+        "groovy",
+        None,
+    )
+    scanned_var = gradle_scan_proguard(var.files)
+    asserts.equals(env, [], scanned_var.paths)
+    asserts.equals(env, 1, len(scanned_var.bad))
+
+    empty = gradle_collect_files(
+        "android/build.gradle",
+        "android {\n    consumerProguardFiles()\n}\n",
+        "groovy",
+        None,
+    )
+    asserts.equals(env, 1, len(gradle_scan_proguard(empty.files).bad))
+
+    applied = gradle_collect_files(
+        "android/build.gradle",
+        "apply from: 'rules.gradle'\n",
+        "groovy",
+        _gradle_reader({"rules.gradle": "android {\n    consumerProguardFiles 'consumer-rules.pro'\n}\n"}),
+    )
+    scanned_applied = gradle_scan_proguard(applied.files)
+    asserts.equals(env, ["consumer-rules.pro"], scanned_applied.paths)
+    asserts.equals(env, [], scanned_applied.bad)
+
+    return unittest.end(env)
+
+gradle_proguard_shapes_test = unittest.make(
+    _gradle_proguard_shapes_test_impl,
+)
+
+def _gradle_namespace_qualified_test_impl(ctx):
+    """Qualified and deferred namespace shapes resolve; ghosts and variables do not."""
+    env = unittest.begin(ctx)
+
+    asserts.equals(
+        env,
+        "com.example.delegated",
+        parse_gradle_android_namespace("android {\n    android.namespace = 'com.example.delegated'\n}\n"),
+    )
+    asserts.equals(
+        env,
+        "com.example.after",
+        parse_gradle_android_namespace("android {\n    compileSdk = 34\n}\nafterEvaluate {\n    android.namespace = 'com.example.after'\n}\n"),
+    )
+    asserts.equals(
+        env,
+        "com.example.applied",
+        parse_gradle_android_namespace("android.apply {\n    namespace = 'com.example.applied'\n}\n"),
+    )
+    asserts.equals(
+        env,
+        "com.example.configured",
+        parse_gradle_android_namespace("configure<LibraryExtension> {\n    namespace = 'com.example.configured'\n}\n"),
+    )
+    asserts.equals(
+        env,
+        "com.example.slashy",
+        parse_gradle_android_namespace("android {\n    namespace = /com.example.slashy/\n}\n"),
+    )
+
+    ghosted = parse_gradle_android_namespace(
+        "def rx = $/namespace = 'com.example.evil'/$\nandroid {\n    namespace = 'com.example.real'\n}\n",
+    )
+    asserts.equals(env, "com.example.real", ghosted)
+
+    interpolated = gradle_android_namespaces("android {\n    namespace = \"com.exa$mple\"\n}\n")
+    asserts.equals(env, 1, len(interpolated))
+    asserts.false(env, interpolated[0].literal)
+
+    charred = gradle_android_namespaces(
+        "android {\n    namespace = 'com.example.c'\n}\n",
+        "kotlin",
+    )
+    asserts.equals(env, 1, len(charred))
+    asserts.false(env, charred[0].literal)
+
+    layered = gradle_collect_files(
+        "android/build.gradle",
+        "apply from: 'ns.gradle'\nandroid {\n    namespace = 'com.example.root'\n}\n",
+        "groovy",
+        _gradle_reader({"ns.gradle": "android {\n    namespace = 'com.example.applied'\n}\n"}),
+    )
+    ordered = [ns.value for ns in gradle_scan_namespaces(layered.files) if ns.literal]
+    asserts.equals(env, ["com.example.root", "com.example.applied"], ordered)
+
+    return unittest.end(env)
+
+gradle_namespace_qualified_test = unittest.make(
+    _gradle_namespace_qualified_test_impl,
+)
+
 def flutter_pub_package_test_suite(name):
     unittest.suite(
         name,
@@ -1873,6 +2179,12 @@ def flutter_pub_package_test_suite(name):
         maven_labels_map_and_interpolation_test,
         maven_labels_multiline_bracket_test,
         maven_labels_unbalanced_bracket_test,
+        maven_labels_dollar_slashy_test,
+        maven_labels_slashy_and_division_test,
+        maven_labels_kotlin_nesting_test,
+        gradle_native_scan_test,
+        gradle_proguard_shapes_test,
+        gradle_namespace_qualified_test,
         parse_gradle_namespace_model_test,
         gradle_namespace_refusal_test,
         gradle_build_file_choice_test,
