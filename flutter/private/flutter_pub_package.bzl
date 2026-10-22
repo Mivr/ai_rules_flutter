@@ -852,6 +852,15 @@ def _gradle_apply_result(kind, path):
     """Build the shared `apply`-parse result struct."""
     return struct(kind = kind, path = path)
 
+def _gradle_skip_arg_value(stmt, j):
+    """Skip one Kotlin arg value at `j` (a literal or a word); return new pos."""
+    c2 = stmt[j:j + 1]
+    if c2 == "'" or c2 == '"':
+        (_, end) = _gradle_quoted_at(stmt, j)
+        return end if end > j else (j + 1)
+    w2 = _gradle_leading_word(stmt[j:])
+    return j + len(w2) if w2 else (j + 1)
+
 def _parse_gradle_apply_kwargs(stmt, pos):
     """Parse Kotlin `apply(...)` args; return the `from` path struct."""
     n = len(stmt)
@@ -867,8 +876,7 @@ def _parse_gradle_apply_kwargs(stmt, pos):
             j += 1
         elif c == "'" or c == '"':
             # A positional string (a plugin id): not an applied script.
-            (_, end) = _gradle_quoted_at(stmt, j)
-            j = end if end > j else (j + 1)
+            j = _gradle_skip_arg_value(stmt, j)
         else:
             w = _gradle_leading_word(stmt[j:])
             if not w:
@@ -885,14 +893,7 @@ def _parse_gradle_apply_kwargs(stmt, pos):
             else:
                 j = _gradle_skip_ws(stmt, j + len(w))
                 if stmt[j:j + 1] == "=":
-                    j = _gradle_skip_ws(stmt, j + 1)
-                    c2 = stmt[j:j + 1]
-                    if c2 == "'" or c2 == '"':
-                        (_, end) = _gradle_quoted_at(stmt, j)
-                        j = end if end > j else (j + 1)
-                    else:
-                        w2 = _gradle_leading_word(stmt[j:])
-                        j = j + len(w2) if w2 else (j + 1)
+                    j = _gradle_skip_arg_value(stmt, _gradle_skip_ws(stmt, j + 1))
     return _gradle_apply_result("none", "")
 
 def _parse_gradle_apply(stmt):
@@ -1085,29 +1086,32 @@ def _maven_visit_gradle_stmt(text, stack, merged, ignored, labels, unknown, unre
     if "dependencies" in _gradle_code_without_strings(text).lower():
         unreadable[text] = True
 
+def _maven_visit_open(header, stack, unreadable):
+    """Push one block header, reporting nested and stray `dependencies`."""
+    in_deps = False
+    in_buildscript = False
+    for name in stack:
+        if name == "dependencies":
+            in_deps = True
+        if name == "buildscript":
+            in_buildscript = True
+    if in_deps and not in_buildscript:
+        # A block nested in a `dependencies` block (for example
+        # `constraints {}`) is unmodellable: report the header and taint
+        # the interior (pushed as "!") so nothing in it resolves either.
+        unreadable[header if header else "{"] = True
+        stack.append("!")
+    else:
+        if header and header != "dependencies" and "dependencies" in _gradle_code_without_strings(header).lower():
+            unreadable[header] = True
+        stack.append(_gradle_leading_word(header))
+
 def _maven_walk_gradle(content, merged, ignored, labels, unknown, unreadable, read_script, seen, depth, pending):
     """Walk one Gradle script's lexed events, filing deps and refusals."""
     stack = []
     for e in _gradle_lex(content):
         if e.kind == "open":
-            in_deps = False
-            in_buildscript = False
-            for name in stack:
-                if name == "dependencies":
-                    in_deps = True
-                if name == "buildscript":
-                    in_buildscript = True
-            if in_deps and not in_buildscript:
-                # A block nested in a `dependencies` block (for example
-                # `constraints {}`) is unmodellable: report the header and
-                # taint the interior (pushed as "!") so nothing in it
-                # resolves either.
-                unreadable[e.text if e.text else "{"] = True
-                stack.append("!")
-            else:
-                if e.text and e.text != "dependencies" and "dependencies" in _gradle_code_without_strings(e.text).lower():
-                    unreadable[e.text] = True
-                stack.append(_gradle_leading_word(e.text))
+            _maven_visit_open(e.text, stack, unreadable)
         elif e.kind == "close":
             if stack:
                 stack.pop()
@@ -1823,6 +1827,83 @@ flutter_plugin(
         pub_attrs = pub_attrs,
     )
 
+def _android_manifest_build_args(android_manifest, java_package, has_resources):
+    """Return the `(manifest_arg, synthesized_manifest)` BUILD fragments.
+
+    `manifest = "..."` lets `android_binary`'s `ManifestMerger2` pick up
+    the plugin's entries transitively; `exports_manifest = 1` opts into
+    the merger (rules_android defaults to no, AGP to yes). rules_android
+    requires *some* manifest whenever `resource_files` is set, so a
+    res-bearing plugin with no manifest gets a synthesized namespaced
+    empty one, the way AGP treats a missing library manifest.
+    """
+    if android_manifest:
+        sub_manifest = android_manifest
+        if sub_manifest.startswith("android/"):
+            sub_manifest = sub_manifest[len("android/"):]
+        return ("    manifest = %s,\n    exports_manifest = 1,\n" % repr(sub_manifest), "")
+    if not has_resources:
+        return ("", "")
+    manifest_lines = [
+        "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"",
+        "    package=\"" + java_package + "\">",
+        "</manifest>",
+        "",
+    ]
+    manifest_content = "\n".join(["        %s," % repr(line) for line in manifest_lines])
+    synthesized = """
+# Minimal manifest for resource processing. AGP treats a missing library
+# manifest as an empty one; rules_android requires an explicit file when
+# resource_files is set.
+write_file(
+    name = "_manifest",
+    out = "_manifest/AndroidManifest.xml",
+    content = [
+{content}
+    ],
+    newline = "unix",
+)
+""".format(content = manifest_content)
+    return ('    manifest = ":_manifest",\n', synthesized)
+
+def _android_build_config_block(bc_package):
+    """Return the `(out, content)` fragments of the BuildConfig stub.
+
+    Gradle synthesizes BuildConfig per Android module (matching
+    `android.namespace`); rules_android does not, so the spoke hand-emits
+    a minimal one. `DEBUG = false` is the safe default — the engine ABI /
+    mode is decided elsewhere.
+    """
+    bc_lines = [
+        "package " + bc_package + ";",
+        "public final class BuildConfig {",
+        "  public static final boolean DEBUG = false;",
+        "  public static final String LIBRARY_PACKAGE_NAME = \"" + bc_package + "\";",
+        "  public static final String BUILD_TYPE = \"release\";",
+        "}",
+        "",
+    ]
+    return (
+        repr("_build_config/" + bc_package.replace(".", "/") + "/BuildConfig.java"),
+        "\n".join(["        %s," % repr(line) for line in bc_lines]),
+    )
+
+def _fail_on_invalid_android_namespace(package_name, java_package):
+    """Fail the spoke fetch when the resolved namespace is not a package."""
+    if java_package and not is_java_package_name(java_package):
+        fail((
+            "flutter.pub spoke for \"{pkg}\": the Android namespace " +
+            "{ns} is not a valid Java package name (checked " +
+            "android.namespace in build.gradle(.kts), the " +
+            "AndroidManifest.xml package attribute, and " +
+            "flutter.plugin.platforms.android.package in " +
+            "pubspec.yaml). Refusing it rather than emitting it " +
+            "into the generated android/BUILD.bazel."
+        ).format(
+            pkg = package_name,
+            ns = repr(java_package),
+        ))
+
 def make_android_subpackage_build_content(
         android_src_dir,
         java_package,
@@ -1958,47 +2039,13 @@ kt_android_library(
     # `manifest = "..."` lets `android_binary`'s `ManifestMerger2` pick
     # up the plugin's `<activity>` / `<service>` / `<uses-permission>`
     # / etc. entries transitively — same shape AGP uses inside
-    # `flutter build apk`. `exports_manifest = 1` is required because
-    # rules_android's `android_library` defaults to `no` (AGP defaults
-    # to yes); without it, the library's manifest is parsed for itself
-    # but never contributed to the binary's merger inputs. Path is
-    # relative to the `android/` sub-package, so we strip the
-    # `android/` prefix the same way `sub_src` does.
-    #
-    # rules_android additionally requires *some* manifest whenever
-    # `resource_files` is set. AGP treats a missing library manifest as
-    # an empty one, so for a res-bearing plugin that ships no manifest
-    # we synthesize the equivalent (namespaced, contributing nothing to
-    # the merger — hence no `exports_manifest`).
-    manifest_arg = ""
-    synthesized_manifest = ""
-    if android_manifest:
-        sub_manifest = android_manifest
-        if sub_manifest.startswith("android/"):
-            sub_manifest = sub_manifest[len("android/"):]
-        manifest_arg = "    manifest = %s,\n    exports_manifest = 1,\n" % repr(sub_manifest)
-    elif has_resources:
-        manifest_arg = '    manifest = ":_manifest",\n'
-        manifest_lines = [
-            "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"",
-            "    package=\"" + java_package + "\">",
-            "</manifest>",
-            "",
-        ]
-        manifest_content = "\n".join(["        %s," % repr(line) for line in manifest_lines])
-        synthesized_manifest = """
-# Minimal manifest for resource processing. AGP treats a missing library
-# manifest as an empty one; rules_android requires an explicit file when
-# resource_files is set.
-write_file(
-    name = "_manifest",
-    out = "_manifest/AndroidManifest.xml",
-    content = [
-{content}
-    ],
-    newline = "unix",
-)
-""".format(content = manifest_content)
+    # `flutter build apk`. Paths are relative to the `android/`
+    # sub-package, so the prefix is stripped there.
+    (manifest_arg, synthesized_manifest) = _android_manifest_build_args(
+        android_manifest,
+        java_package,
+        has_resources,
+    )
 
     # Resources are compiled into the library so the plugin's `R` class
     # resolves at compile time and the resources merge into the consuming
@@ -2036,16 +2083,7 @@ write_file(
     # BuildConfig.java stub — Gradle generates this implicitly per
     # plugin's namespace. rules_android does not, so we hand-emit one.
     bc_package = java_package if java_package else "_unknown"
-    bc_lines = [
-        "package " + bc_package + ";",
-        "public final class BuildConfig {",
-        "  public static final boolean DEBUG = false;",
-        "  public static final String LIBRARY_PACKAGE_NAME = \"" + bc_package + "\";",
-        "  public static final String BUILD_TYPE = \"release\";",
-        "}",
-        "",
-    ]
-    bc_content = "\n".join(["        %s," % repr(line) for line in bc_lines])
+    (bc_out, bc_content) = _android_build_config_block(bc_package)
 
     return """\
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
@@ -2098,7 +2136,7 @@ kt_android_library(
         resource_files = resource_files_arg,
         proguard_specs = proguard_specs_arg,
         deps = deps_block,
-        bc_out = repr("_build_config/" + bc_package.replace(".", "/") + "/BuildConfig.java"),
+        bc_out = bc_out,
         bc_content = bc_content,
         synthesized_manifest = synthesized_manifest,
     )
@@ -2677,19 +2715,7 @@ def _flutter_pub_package_impl(ctx):
                 android_info.get("package", "") or
                 ""
             )
-            if android_java_package and not is_java_package_name(android_java_package):
-                fail((
-                    "flutter.pub spoke for \"{pkg}\": the Android namespace " +
-                    "{ns} is not a valid Java package name (checked " +
-                    "android.namespace in build.gradle(.kts), the " +
-                    "AndroidManifest.xml package attribute, and " +
-                    "flutter.plugin.platforms.android.package in " +
-                    "pubspec.yaml). Refusing it rather than emitting it " +
-                    "into the generated android/BUILD.bazel."
-                ).format(
-                    pkg = ctx.attr.package_name,
-                    ns = repr(android_java_package),
-                ))
+            _fail_on_invalid_android_namespace(ctx.attr.package_name, android_java_package)
             if android_src_dir or android_has_resources:
                 android_extra_maven_labels = _resolve_plugin_maven_deps(ctx)
                 android_manifest = _detect_android_manifest(ctx)

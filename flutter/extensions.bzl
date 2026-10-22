@@ -39,6 +39,28 @@ _DEFAULT_NAME = "flutter"
 # sky_engine is excluded — it provides dart:ui which is already in platform_strong.dill.
 _FLUTTER_SDK_PACKAGES = {"flutter": True, "flutter_test": True, "flutter_driver": True, "flutter_localizations": True, "flutter_web_plugins": True, "integration_test": True}
 
+def _fail_on_invalid_maven_deps(hub_name, android_maven_deps):
+    """Refuse an `android_maven_deps` value that is not a Bazel label.
+
+    Every value lands in a generated spoke deps list; a non-label is
+    refused here, naming the hub and key, rather than emitted into
+    BUILD text.
+    """
+    for _maven_key in android_maven_deps.keys():
+        _maven_label = android_maven_deps[_maven_key]
+        if not is_maven_dep_label(_maven_label):
+            fail((
+                "flutter.pub(name = \"{hub}\"): android_maven_deps[{key}] " +
+                "is not a valid Bazel label ({label}). Map the " +
+                "coordinate to a label in another repository " +
+                "(\"@...\") or an absolute label (\"//...\") with no " +
+                "quotes, backslashes or newlines."
+            ).format(
+                hub = hub_name,
+                key = _maven_key,
+                label = _maven_label,
+            ))
+
 flutter_toolchain = tag_class(attrs = {
     "name": attr.string(doc = """\
 Base name for generated repositories, allowing more than one Flutter toolchain to be registered.
@@ -356,23 +378,7 @@ def _toolchain_extension(module_ctx):
         for pub_tag in mod.tags.pub:
             hub_name = pub_tag.name
 
-            # Every android_maven_deps value lands in a generated spoke
-            # deps list; refuse a value that is not a label here, naming
-            # the key, rather than emitting it into BUILD text.
-            for _maven_key in pub_tag.android_maven_deps.keys():
-                _maven_label = pub_tag.android_maven_deps[_maven_key]
-                if not is_maven_dep_label(_maven_label):
-                    fail((
-                        "flutter.pub(name = \"{hub}\"): android_maven_deps[{key}] " +
-                        "is not a valid Bazel label ({label}). Map the " +
-                        "coordinate to a label in another repository " +
-                        "(\"@...\") or an absolute label (\"//...\") with no " +
-                        "quotes, backslashes or newlines."
-                    ).format(
-                        hub = hub_name,
-                        key = _maven_key,
-                        label = _maven_label,
-                    ))
+            _fail_on_invalid_maven_deps(hub_name, pub_tag.android_maven_deps)
             lock_content = module_ctx.read(pub_tag.lock)
             lock_pkgs = parse_pubspec_lock(lock_content)
             ignore_hooks = {pkg_name: True for pkg_name in pub_tag.ignore_hooks}
