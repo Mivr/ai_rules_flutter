@@ -93,6 +93,42 @@ def _fail_equal_rank(name, first, second, both_root):
         second = _describe_request(second),
     ))
 
+def _highest_request(requests, keys, name, both_root):
+    """Returns the highest-versioned request, failing on undecidable ties.
+
+    Args:
+      requests: Non-empty list of request structs with a `version` field.
+      keys: `version` string to `_parse_version` key.
+      name: The toolchain name, used in tie failures.
+      both_root: Whether the requests all came from the root module's tags.
+    """
+    selected = requests[0]
+    for request in requests[1:]:
+        if keys[request.version] > keys[selected.version]:
+            selected = request
+        elif keys[request.version] == keys[selected.version] and request.version != selected.version:
+            _fail_equal_rank(name, selected, request, both_root)
+    return selected
+
+def _newer_dep_note(name, selected, dep_requests, keys):
+    """Names the newest dependency request newer than the root's pin, if any."""
+    newer_dep_versions = [
+        r.version
+        for r in dep_requests
+        if keys[r.version] > keys[selected]
+    ]
+    if not newer_dep_versions:
+        return None
+    newest_dep = newer_dep_versions[0]
+    for v in newer_dep_versions[1:]:
+        if keys[v] > keys[newest_dep]:
+            newest_dep = v
+    return "Flutter toolchain {} uses {} requested by the root module, which is older than {} requested by a dependency".format(
+        name,
+        selected,
+        newest_dep,
+    )
+
 def select_toolchain_version(name, requests):
     """Selects the Flutter SDK version for one toolchain name.
 
@@ -128,41 +164,14 @@ def select_toolchain_version(name, requests):
     keys = {r.version: _parse_version(r.version) for r in requests}
 
     if root_requests:
-        selected = root_requests[0]
-        for request in root_requests[1:]:
-            if keys[request.version] > keys[selected.version]:
-                selected = request
-            elif keys[request.version] == keys[selected.version] and request.version != selected.version:
-                _fail_equal_rank(name, selected, request, True)
-        selected = selected.version
+        selected = _highest_request(root_requests, keys, name, True).version
 
         # The root pin wins even when it is older than a dependency's request;
         # surface that as an informational note naming both versions.
-        newer_dep_versions = [
-            r.version
-            for r in dep_requests
-            if keys[r.version] > keys[selected]
-        ]
-        note = None
-        if newer_dep_versions:
-            newest_dep = newer_dep_versions[0]
-            for v in newer_dep_versions[1:]:
-                if keys[v] > keys[newest_dep]:
-                    newest_dep = v
-            note = "Flutter toolchain {} uses {} requested by the root module, which is older than {} requested by a dependency".format(
-                name,
-                selected,
-                newest_dep,
-            )
-        return struct(version = selected, note = note)
+        return struct(version = selected, note = _newer_dep_note(name, selected, dep_requests, keys))
 
     # No root request: highest requested version wins.
-    selected = requests[0]
-    for request in requests[1:]:
-        if keys[request.version] > keys[selected.version]:
-            selected = request
-        elif keys[request.version] == keys[selected.version] and request.version != selected.version:
-            _fail_equal_rank(name, selected, request, False)
+    selected = _highest_request(requests, keys, name, False)
     return struct(version = selected.version, note = None)
 
 def select_toolchain_source(name, requests):
