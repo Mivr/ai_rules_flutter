@@ -96,7 +96,7 @@ use_repo(
 
 git_override(
     module_name = "rules_dart",
-    commit = "7a85d2b366646be830c7a2beaa699f6fab73b83e",
+    commit = "226a78fbb952623bffdfcee8dae5d5c8e11560cd",
     remote = "https://github.com/Mivr/rules_dart.git",
 )
 
