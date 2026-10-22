@@ -851,6 +851,7 @@ def _engine_artifacts_repo_names(user_repo_name, engine_target_platform, platfor
 
 def _engine_library_selects(profile_repo, os_name, engine_release_repo, engine_debug_repo):
     """The `engine_library` aliases and `flutter_toolchain` select attributes."""
+
     # :engine_library (release) and :engine_debug_library (debug) alias the lazy
     # desktop engine repos; flutter_toolchain selects between them by build mode.
     engine_aliases = """alias(
@@ -1391,6 +1392,7 @@ def _resolve_download_version(flutter_version, engine_revision, material_fonts_u
 
 def _register_download_shared_repos(name, flutter_version, engine_revision, source_sha256, material_fonts_url, source_url, source_strip_prefix, engine_base_url, checksums):
     """The dev-root, patched-SDK and fonts repos shared across host platforms."""
+
     # FLUTTER_ROOT-shaped tree behind `@rules_flutter//flutter:pub`. Lazily
     # fetched: nothing in a normal build references it.
     flutter_dev_root_repo(
@@ -1512,10 +1514,11 @@ def _register_sysroot_repos(name):
     Version-independent downloads, declared identically in both modes; only
     fetched when a Linux desktop build is attempted.
     """
+
     # Collect all Linux architectures from both host platforms and desktop cross targets.
     _ARCH_TO_DEB = {"x64": "amd64", "arm64": "arm64"}
     linux_sysroot_arches = {}
-    for platform, host_meta in HOST_PLATFORMS.items():
+    for _platform, host_meta in HOST_PLATFORMS.items():
         if host_meta.os == "linux":
             linux_sysroot_arches[host_meta.arch] = True
     for _hp, desktop_targets in DESKTOP_CROSS_PAIRS.items():
@@ -1660,7 +1663,6 @@ def flutter_register_toolchains(
     _register_download_android_repos(name, flutter_version, engine_revision, engine_base_url, checksums)
     _register_download_ios_macos_repos(name, engine_revision, flutter_version, engine_base_url, checksums)
 
-
     _register_shared_toolchains(
         name,
         darwin_sdk_path,
@@ -1735,6 +1737,7 @@ def _register_download_desktop_cross_repos(name, flutter_version, engine_revisio
 
 def _register_download_web_sky_repos(name, flutter_version, engine_revision, engine_base_url, checksums):
     """The lazy web SDK and sky_engine repos."""
+
     # Web SDK repo (lazy — only downloaded when web targets are built).
     flutter_web_sdk_repo(
         name = name + "_web_sdk",
@@ -1761,6 +1764,7 @@ def _register_download_web_sky_repos(name, flutter_version, engine_revision, eng
 
 def _register_download_android_repos(name, flutter_version, engine_revision, engine_base_url, checksums):
     """Android engine repos (lazy — one per ABI, release + debug + apart profile)."""
+
     # Each repo carries both the release engine (AOT) and the debug engine (JIT);
     # the flutter_android_engine macro select()s between its two jar targets, so
     # consumers only need a single `flutter_android_engine_<abi>` use_repo entry —
@@ -1801,6 +1805,7 @@ def _register_download_android_repos(name, flutter_version, engine_revision, eng
 
 def _register_download_ios_macos_repos(name, engine_revision, flutter_version, engine_base_url, checksums):
     """The iOS engine (release + debug + profile) and the macOS engine alias repos."""
+
     # iOS engine repo (lazy — only downloaded when iOS targets are built).
     # One repo carries both the release engine (device, AOT) and the debug
     # engine (simulator, JIT); the iOS macros select() between its two targets,
@@ -1902,6 +1907,7 @@ def _register_shared_toolchains(
 
 def _register_local_shared_repos(name, local_path):
     """The dev-root, patched-SDK and fonts repos sourced from the local SDK."""
+
     # FLUTTER_ROOT-shaped tree behind `@rules_flutter//flutter:pub`.
     flutter_dev_root_repo(
         name = name + "_dev_root",
@@ -1992,6 +1998,7 @@ exports_files(["{gen_snapshot}"], visibility = ["//visibility:public"])
 
 def _register_local_cross_repos(name, local_path):
     """Cross-compilation repos with gen_snapshot linked from the SDK engine cache."""
+
     # The local fetch links each target's gen_snapshot out of the SDK's
     # engine cache; iOS targets reference the iOS engine repo's binary
     # through labels, exactly as download mode does.
@@ -2047,6 +2054,7 @@ def _register_local_desktop_engine_repos(name, local_path, desktop_engine_target
 
 def _register_local_desktop_cross_repos(name, local_path):
     """Desktop cross-platform toolchain repos (download nothing)."""
+
     # The version stamps are read out of the local SDK at fetch time.
     for host_platform, desktop_targets in DESKTOP_CROSS_PAIRS.items():
         for target_platform in desktop_targets:

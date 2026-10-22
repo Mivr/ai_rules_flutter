@@ -304,6 +304,7 @@ def _web_plugins_typedef_lines():
         "typedef PopStateListener = void Function(Object? state);",
         "",
     ]
+
 def _web_plugins_strategy_tail_lines():
     """The `urlStrategy` accessors and path-strategy helpers closing the plugins stub."""
     return [
@@ -714,6 +715,7 @@ def _resolve_kernel_platform_dill(platform_dill, aot, mode, flutter_sdk_info):
 
 def _stage_agent_extensions(ctx, aot, mode):
     """Stage the debug-agent sources next to the registrant in debug builds."""
+
     # AI-agent service-extension injection: in debug builds (non-AOT), if the
     # rule carries an `_agent_extensions_src` attr, stage the agent source next
     # to the generated registrant, which registers the extensions from the
@@ -738,6 +740,7 @@ def _stage_agent_extensions(ctx, aot, mode):
 
 def _kernel_registrant(ctx, target_platform, agent, emit_dev_config):
     """Collect plugins and generate the registrant plus dev-loop registrants."""
+
     # Collect plugins from deps and generate the registrant. The registrant is
     # a side library (upstream _PluginRegistrant shape) the engine invokes
     # before main() on every root-isolate launch — including hot restart.
@@ -772,6 +775,7 @@ def _kernel_registrant(ctx, target_platform, agent, emit_dev_config):
 
 def _kernel_compile_flags(ctx, track_widget_creation, mode, aot, assets_dir, platform_build_args, target_platform):
     """Merge frontend flags and defines for a kernel compile."""
+
     # Collect extra frontend_server flags from build flag attrs.
     extra_frontend_flags = []
     if track_widget_creation:

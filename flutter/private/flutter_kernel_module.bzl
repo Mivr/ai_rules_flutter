@@ -499,7 +499,7 @@ def _modular_gate_inputs(ctx, target):
         rule_deps,
     )
 
-def _is_opaque_module(ctx, target, dart_info, package_name, lib_root, own_record, own_srcs, rule_deps):
+def _is_opaque_module(ctx, dart_info, package_name, lib_root, own_record, own_srcs, rule_deps):
     """Whether the target hides its sources, opting it out of modular kernel compilation."""
     srcs_dir = getattr(ctx.rule.attr, "srcs_dir", None)
     has_srcs_attr = hasattr(ctx.rule.attr, "srcs")
@@ -737,7 +737,7 @@ def _flutter_kernel_module_aspect_impl(target, ctx):
     same_sdk = is_same_sdk(tools, flutter_sdk_info)
 
     dart_info, package_name, lib_root, own_record, own_srcs, rule_deps = _modular_gate_inputs(ctx, target)
-    opaque = _is_opaque_module(ctx, target, dart_info, package_name, lib_root, own_record, own_srcs, rule_deps)
+    opaque = _is_opaque_module(ctx, dart_info, package_name, lib_root, own_record, own_srcs, rule_deps)
     if not _modular_gate_open(ctx, opaque, enabled, tools, same_sdk, flutter_sdk_info):
         return _no_flutter_kernel_module()
 
@@ -790,7 +790,6 @@ def _flutter_kernel_module_aspect_impl(target, ctx):
             product_kernel_info = product_kernel_info,
         ),
     ]
-
 
 flutter_kernel_module_aspect = aspect(
     implementation = _flutter_kernel_module_aspect_impl,
