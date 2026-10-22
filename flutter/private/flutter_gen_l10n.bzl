@@ -59,20 +59,20 @@ def _output_names(ctx, prefix, srcs):
     # Sorted so the declared set does not depend on `arbs` ordering.
     return [base] + ["%s_%s.dart" % (stem, s) for s in sorted(subtags)]
 
-def _flutter_gen_l10n_impl(ctx):
-    template = ctx.attr.template_arb_file
+def _template_prefix(ctx, template):
+    """Validates the template name and returns its `<prefix>_`."""
     underscore = template.rfind("_")
     if underscore < 0 or not template.endswith(".arb"):
         fail(
             ("%s: template_arb_file must look like `<prefix>_<locale>.arb` " +
              "(e.g. `app_en.arb`), got %r.") % (ctx.label, template),
         )
-    prefix = template[:underscore + 1]
+    return template[:underscore + 1]
 
-    raw_srcs = ctx.files.arbs
+def _dedupe_arb_srcs(ctx, raw_srcs):
+    """Dedupes arb inputs by basename, failing on same-name conflicts."""
     if not raw_srcs:
         fail("%s: `arbs` must not be empty." % ctx.label)
-
     seen_by_name = {}
     srcs = []
     for s in raw_srcs:
@@ -90,19 +90,18 @@ def _flutter_gen_l10n_impl(ctx):
             continue
         seen_by_name[s.basename] = s
         srcs.append(s)
-
-    templates = [s for s in srcs if s.basename == template]
+    templates = [s for s in srcs if s.basename == ctx.attr.template_arb_file]
     if not templates:
         fail(
             "%s: template_arb_file %r is not among `arbs`. The template " %
-            (ctx.label, template) +
+            (ctx.label, ctx.attr.template_arb_file) +
             "carries the messages every other locale is checked against, so " +
             "it must be one of the inputs.",
         )
+    return srcs
 
-    # Outputs land beside the arb files, matching how dart_codegen places its
-    # own output next to the source: the generated files import each other by
-    # bare filename, so they have to be siblings.
+def _check_single_arb_dir(ctx, srcs):
+    """Fails unless every arb sits in one directory; returns that directory."""
     arb_dir = _short_dirname(srcs[0])
     for s in srcs:
         s_dir = _short_dirname(s)
@@ -117,24 +116,14 @@ def _flutter_gen_l10n_impl(ctx):
                     s_dir,
                 ),
             )
+    return arb_dir
 
-    rel_dir = srcs[0].short_path[:-len(srcs[0].basename)]
-    if rel_dir.startswith(ctx.label.package + "/"):
-        rel_dir = rel_dir[len(ctx.label.package) + 1:]
-
-    outs = [
-        ctx.actions.declare_file(rel_dir + name)
-        for name in _output_names(ctx, prefix, srcs)
-    ]
-
-    # The entrypoint parses `--key=value`, so each flag is one argv entry.
-    # Everything here is known at analysis time, so a plain list is clearer
-    # than an Args builder. Each declared `.arb` is passed explicitly via
-    # `--arb-file=` so the generator never scans `--arb-dir` on disk.
+def _gen_l10n_argv(ctx, srcs, arb_dir, out_dir, template):
+    """Builds the generator argv; every flag is one `--key=value` entry."""
     argv = [
         "--project-dir=.",
         "--arb-dir=" + arb_dir,
-        "--output-dir=" + outs[0].dirname,
+        "--output-dir=" + out_dir,
         "--template-arb-file=" + template,
         "--output-localization-file=" + ctx.attr.output_localization_file,
         "--output-class=" + ctx.attr.output_class,
@@ -161,6 +150,33 @@ def _flutter_gen_l10n_impl(ctx):
         argv.append("--use-named-parameters")
     if ctx.attr.suppress_warnings:
         argv.append("--suppress-warnings")
+    return argv
+
+def _flutter_gen_l10n_impl(ctx):
+    template = ctx.attr.template_arb_file
+    prefix = _template_prefix(ctx, template)
+
+    srcs = _dedupe_arb_srcs(ctx, ctx.files.arbs)
+
+    # Outputs land beside the arb files, matching how dart_codegen places its
+    # own output next to the source: the generated files import each other by
+    # bare filename, so they have to be siblings.
+    arb_dir = _check_single_arb_dir(ctx, srcs)
+
+    rel_dir = srcs[0].short_path[:-len(srcs[0].basename)]
+    if rel_dir.startswith(ctx.label.package + "/"):
+        rel_dir = rel_dir[len(ctx.label.package) + 1:]
+
+    outs = [
+        ctx.actions.declare_file(rel_dir + name)
+        for name in _output_names(ctx, prefix, srcs)
+    ]
+
+    # The entrypoint parses `--key=value`, so each flag is one argv entry.
+    # Everything here is known at analysis time, so a plain list is clearer
+    # than an Args builder. Each declared `.arb` is passed explicitly via
+    # `--arb-file=` so the generator never scans `--arb-dir` on disk.
+    argv = _gen_l10n_argv(ctx, srcs, arb_dir, outs[0].dirname, template)
 
     exec_sdk = ctx.toolchains["@rules_dart//dart:exec_tools_toolchain_type"].dart_sdk_info
     ctx.actions.run(
