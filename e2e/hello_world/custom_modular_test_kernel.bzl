@@ -4,11 +4,12 @@ The `flutter_modular_test_kernel` / `flutter_modular_app_kernel` docstrings'
 examples as running targets: instead of `flutter_test` compiling the suite,
 `custom_modular_test_kernel` writes the bootstrap with the same protocol the
 built-in modular path uses, compiles it as one entry module against the
-dependency outlines, delta-links it against the `flutter_test` base dill, and
-exposes the products as the `test_kernel` / `test_base_kernel` output groups
-`flutter_prebuilt_test` feeds on. The base dill the function returns must reach
-`flutter_prebuilt_test`'s `base_dill`: the kernel is incomplete without it
-(`//:widget_modular_no_base_test` is that red run). `custom_modular_app_kernel` does the same
+dependency outlines, links it, and exposes the products as the `test_kernel` /
+`test_base_kernel` output groups `flutter_prebuilt_test` feeds on. By default
+the link is complete and the test runs with no `base_dill`; with
+`use_base_dill = True` the kernel delta-links against the `flutter_test` base
+dill, which must then reach `flutter_prebuilt_test`'s `base_dill`.
+`custom_modular_app_kernel` does the same
 for an app entry point: it synthesizes the `package:` mapping for its own
 sources, compiles them as the entry module, and links everything with the
 debug platform dill prepended.
@@ -36,12 +37,14 @@ def _custom_modular_test_kernel_impl(ctx):
         test_uri = "package:modular_suite/widget_test.dart",
         deps = ctx.attr.deps,
         output = kernel_dill,
+        use_base_dill = ctx.attr.use_base_dill,
     )
     return [
         DefaultInfo(files = depset([kernel_dill])),
-        # The kernel links no base dill when no dependency carries one, so
-        # `test_base_kernel` is empty rather than absent then — the same
-        # shape a `flutter_test` that linked no base dill exposes.
+        # The kernel links no base dill under the default complete link (or
+        # when no dependency carries one), so `test_base_kernel` is empty
+        # rather than absent then — the same shape a `flutter_test` that
+        # linked no base dill exposes.
         OutputGroupInfo(
             test_kernel = depset([kernel_dill]),
             test_base_kernel = depset([base_dill]) if base_dill else depset(),
@@ -50,7 +53,14 @@ def _custom_modular_test_kernel_impl(ctx):
 
 custom_modular_test_kernel = rule(
     implementation = _custom_modular_test_kernel_impl,
-    attrs = {} | FLUTTER_MODULAR_KERNEL_ATTRS | FLUTTER_TEST_BOOTSTRAP_ATTRS,
+    attrs = {
+        "use_base_dill": attr.bool(
+            doc = "Delta-link against the shared `flutter_test` base dill " +
+                  "instead of linking a complete kernel. The linked base " +
+                  "must then reach `flutter_prebuilt_test`'s `base_dill`.",
+            default = False,
+        ),
+    } | FLUTTER_MODULAR_KERNEL_ATTRS | FLUTTER_TEST_BOOTSTRAP_ATTRS,
     toolchains = FLUTTER_MODULAR_KERNEL_TOOLCHAINS,
 )
 

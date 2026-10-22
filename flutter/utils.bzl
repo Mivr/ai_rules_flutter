@@ -137,15 +137,24 @@ FLUTTER_MODULAR_KERNEL_ATTRS = _FLUTTER_MODULAR_KERNEL_ATTRS
 # `FLUTTER_MODULAR_KERNEL_TOOLCHAINS`.
 FLUTTER_MODULAR_KERNEL_TOOLCHAINS = _FLUTTER_MODULAR_KERNEL_TOOLCHAINS
 
-def flutter_modular_test_kernel(ctx, *, test_uri, deps, output):
+def flutter_modular_test_kernel(ctx, *, test_uri, deps, output, use_base_dill = False):
     """Compile a custom modular test kernel runnable by `flutter_prebuilt_test`.
 
     The modular sibling of `flutter_test_bootstrap` + `flutter_kernel_compile_action`:
     writes the same test bootstrap (plus the golden comparator when the closure
     carries `package:flutter_test`), compiles it as one entry module against the
-    dependency outlines, and delta-links it against the `flutter_test` base dill
-    when one applies. A body-only edit to a library then recompiles only that
-    library's module plus the entry/link actions — never the whole program.
+    dependency outlines, and links it. A body-only edit to a library then
+    recompiles only that library's module plus the entry/link actions — never
+    the whole program.
+
+    By default the link is complete: every reachable module lands in `output`,
+    which runs under `flutter_prebuilt_test(dill = ...)` with no `base_dill`.
+    With `use_base_dill = True` the kernel delta-links against the shared
+    `flutter_test` base dill instead — worthwhile when many test targets share
+    one SDK base, since each per-test dill stays small — and the returned base
+    dill must reach `flutter_prebuilt_test`'s `base_dill`: the delta is
+    incomplete without it and `flutter_tester` aborts before connecting when
+    it is missing.
 
     A complete calling rule (this exact shape is a built-and-run target in
     `e2e/hello_world` — see `custom_modular_test_kernel.bzl` there):
@@ -195,19 +204,18 @@ def flutter_modular_test_kernel(ctx, *, test_uri, deps, output):
         test_uri: The `package:` URI of the test library the bootstrap imports.
         deps: The calling target's dependency Targets (`ctx.attr.deps`).
         output: The already-declared linked test `.dill` File to produce.
+        use_base_dill: When True, delta-link against the shared `flutter_test`
+            base dill and return it; otherwise link a complete kernel and
+            return None.
 
     Returns:
-        The `base_dill` File linked against, or None. Feed it to
-        `flutter_prebuilt_test`'s `base_dill` whenever it is not None: the
-        kernel delta-linked against it and is incomplete without it — running
-        it base-less aborts in `flutter_tester` before the harness connects
-        (first on `LocalFileComparator`, installed at startup through the
-        staged golden comparator). When None, `test_base_kernel` is empty
-        rather than absent, so feed that group straight through.
+        The `base_dill` File linked against when `use_base_dill` is True and a
+        dependency provides one (feed it to `flutter_prebuilt_test`'s
+        `base_dill`), or `None` — always `None` with the default complete link.
     """
-    return _flutter_modular_test_kernel(ctx, test_uri = test_uri, deps = deps, output = output)
+    return _flutter_modular_test_kernel(ctx, test_uri = test_uri, deps = deps, output = output, use_base_dill = use_base_dill)
 
-def flutter_modular_app_kernel(ctx, *, main, package_name, srcs, deps, output):
+def flutter_modular_app_kernel(ctx, *, main, package_name, srcs, deps, output, use_base_dill = False):
     """Compile a custom modular app kernel: the app's own sources, then link.
 
     The modular sibling of the whole-program app compile: synthesizes the
@@ -215,6 +223,10 @@ def flutter_modular_app_kernel(ctx, *, main, package_name, srcs, deps, output):
     entry module against the dependency outlines, and links everything with the
     debug `platform_kernel_dill` prepended. A body-only edit to a library then
     recompiles only that library's module plus the entry/link actions.
+
+    By default the link is complete. With `use_base_dill = True` the kernel
+    delta-links against a shared base dill when a dependency provides one, and
+    the returned base dill must be kept alongside the kernel at run time.
 
     A complete calling rule (this exact shape is a built target in
     `e2e/hello_world` — see `custom_modular_test_kernel.bzl` there):
@@ -256,6 +268,12 @@ def flutter_modular_app_kernel(ctx, *, main, package_name, srcs, deps, output):
         srcs: The app's own `.dart` Files (may include `main`).
         deps: The calling target's dependency Targets (`ctx.attr.deps`).
         output: The already-declared linked app `.dill` File to produce.
+        use_base_dill: When True, delta-link against the shared base dill and
+            return it; otherwise link a complete kernel and return None.
+
+    Returns:
+        The shared `base_dill` File if `use_base_dill` is True and a dependency
+        provides one, or None.
     """
     return _flutter_modular_app_kernel(
         ctx,
@@ -264,6 +282,7 @@ def flutter_modular_app_kernel(ctx, *, main, package_name, srcs, deps, output):
         srcs = srcs,
         deps = deps,
         output = output,
+        use_base_dill = use_base_dill,
     )
 
 # The attrs a rule calling `flutter_test_bootstrap` merges into its own. Only

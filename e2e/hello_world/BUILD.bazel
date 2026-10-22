@@ -646,9 +646,10 @@ flutter_prebuilt_test(
 # `flutter_library` dependency once into a `.flutter.kmod` module and linking
 # the entry against the outlines — so a body-only edit to `modular_greeter`
 # recompiles only that module plus the entry/link actions, never the whole
-# program. The test kernel runs under `flutter_prebuilt_test` on its own
-# (empty) asset bundle; the app kernel is a build-only target proving the
-# custom app path links.
+# program. The default link is complete: `:widget_modular_prebuilt_test` runs
+# it with no `base_dill`. The `use_base_dill` twin delta-links against the
+# shared `flutter_test` base instead (the smaller per-test dill for many
+# tests sharing one SDK base) and feeds it to `base_dill`.
 
 custom_modular_test_kernel(
     name = "widget_modular_kernel",
@@ -668,13 +669,6 @@ filegroup(
     output_group = "test_kernel",
 )
 
-filegroup(
-    name = "widget_modular_base_kernel_files",
-    testonly = True,
-    srcs = [":widget_modular_kernel"],
-    output_group = "test_base_kernel",
-)
-
 flutter_asset_bundle(
     name = "modular_suite_assets",
     testonly = True,
@@ -683,25 +677,41 @@ flutter_asset_bundle(
 flutter_prebuilt_test(
     name = "widget_modular_prebuilt_test",
     assets = ":modular_suite_assets",
-    base_dill = [":widget_modular_base_kernel_files"],
     dill = ":widget_modular_kernel_files",
     target_compatible_with = _HOST_COMPATIBLE,
 )
 
-# The base-less twin: the same modular kernel run WITHOUT its base dill. A
-# kernel that delta-linked against a base dill is incomplete on its own — the
-# SDK libraries the link excluded (here `package:flutter_test`'s
-# `_goldens_io.dart`, first touched through the staged golden comparator) are
-# missing at startup and `flutter_tester` aborts before connecting. Tagged
-# `manual`: its red run proves a custom modular kernel that linked a base dill
-# must feed it to `flutter_prebuilt_test`'s `base_dill`, exactly as a
-# `flutter_test` kernel must. Run it explicitly:
-#   bazel test //:widget_modular_no_base_test --test_output=all
+custom_modular_test_kernel(
+    name = "widget_modular_based_kernel",
+    target_compatible_with = _HOST_COMPATIBLE,
+    use_base_dill = True,
+    deps = [
+        "//modular_greeter",
+        "//modular_suite",
+        "@deps//:flutter",
+        "@deps//:flutter_test",
+    ],
+)
+
+filegroup(
+    name = "widget_modular_based_kernel_files",
+    testonly = True,
+    srcs = [":widget_modular_based_kernel"],
+    output_group = "test_kernel",
+)
+
+filegroup(
+    name = "widget_modular_based_base_kernel_files",
+    testonly = True,
+    srcs = [":widget_modular_based_kernel"],
+    output_group = "test_base_kernel",
+)
+
 flutter_prebuilt_test(
-    name = "widget_modular_no_base_test",
+    name = "widget_modular_based_prebuilt_test",
     assets = ":modular_suite_assets",
-    dill = ":widget_modular_kernel_files",
-    tags = ["manual"],
+    base_dill = [":widget_modular_based_base_kernel_files"],
+    dill = ":widget_modular_based_kernel_files",
     target_compatible_with = _HOST_COMPATIBLE,
 )
 

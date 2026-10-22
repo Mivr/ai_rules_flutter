@@ -1151,15 +1151,24 @@ def _custom_dep_kernels(ctx, deps, what):
         fail("%s: %s needs every dep to carry FlutterKernelModuleInfo (put them under `deps` with `%s` applied); got %d of %d" % (ctx.label, what, "flutter_kernel_module_aspect", len(dep_kernels), len(deps)))
     return dep_kernels
 
-def flutter_modular_test_kernel(ctx, *, test_uri, deps, output):
+def flutter_modular_test_kernel(ctx, *, test_uri, deps, output, use_base_dill = False):
     """Compiles a custom modular test kernel runnable by `flutter_prebuilt_test`.
 
     Writes a `flutter_test`-compatible bootstrap importing `test_uri` (plus the
     golden comparator when one is configured), compiles it as an entry module
-    against the dependency outlines, and delta-links it against the
-    `flutter_test` base dill when one applies — the same protocol the built-in
-    `flutter_test` rule's modular path uses. The test runs under the prebuilt
-    `flutter_tester` binary with no SDK source needed at runtime.
+    against the dependency outlines, and links it — the same protocol the
+    built-in `flutter_test` rule's modular path uses. The test runs under the
+    prebuilt `flutter_tester` binary with no SDK source needed at runtime.
+
+    By default (`use_base_dill = False`, as in rules_dart's
+    `modular_executable_kernel`) the link is complete: every reachable
+    dependency module lands in `output`, which runs under
+    `flutter_prebuilt_test(dill = ...)` with no `base_dill`. With
+    `use_base_dill = True` the kernel delta-links against the `flutter_test`
+    base dill instead — a smaller per-test dill sharing one SDK base across
+    many tests — and the returned base dill must reach `flutter_prebuilt_test`'s
+    `base_dill`, exactly as a `flutter_test` kernel's `test_base_kernel` must:
+    the delta is incomplete without it.
 
     Args:
       ctx: The custom rule context. Must merge `FLUTTER_MODULAR_KERNEL_ATTRS`
@@ -1170,10 +1179,14 @@ def flutter_modular_test_kernel(ctx, *, test_uri, deps, output):
       test_uri: The `package:` URI of the test library the bootstrap imports.
       deps: The custom rule's dependency Targets.
       output: The linked test `.dill` File to produce.
+      use_base_dill: When True, delta-link against the shared `flutter_test`
+        base dill and return it; otherwise link a complete kernel and return
+        None.
 
     Returns:
-      The `base_dill` File linked against (`flutter_prebuilt_test`'s
-      `base_dill`), or `None` when no base dill applies.
+      The `base_dill` File linked against when `use_base_dill` is True and a
+      dependency provides one (`flutter_prebuilt_test`'s `base_dill`), or
+      `None` — always `None` with the default complete link.
     """
     bootstrap = ctx.actions.declare_file(ctx.label.name + "_modular_bootstrap.dart")
     staged_comparator = flutter_test_bootstrap_action(ctx, test_uri, bootstrap)
@@ -1202,9 +1215,16 @@ def flutter_modular_test_kernel(ctx, *, test_uri, deps, output):
         ctx.label.name + ".flutter_entry.kmod",
         flutter_sdk_info.platform_kernel_dill,
     )
-    return _link_flutter_test_entry_module(ctx, dep_kernels, entry, output)
+    if use_base_dill:
+        return _link_flutter_test_entry_module(ctx, dep_kernels, entry, output)
+    dep_closure = depset(
+        order = "postorder",
+        transitive = [k.transitive_kmods for k in dep_kernels],
+    )
+    kernel_link_action(ctx, dep_closure, entry, output)
+    return None
 
-def flutter_modular_app_kernel(ctx, *, main, package_name, srcs, deps, output):
+def flutter_modular_app_kernel(ctx, *, main, package_name, srcs, deps, output, use_base_dill = False):
     """Compiles a custom modular app kernel: the app's own sources plus dependency modules.
 
     Synthesizes the `package:<package_name>/` mapping for `main`/`srcs` (the same
@@ -1212,6 +1232,12 @@ def flutter_modular_app_kernel(ctx, *, main, package_name, srcs, deps, output):
     against the dependency outlines, and links everything with the debug
     `platform_kernel_dill` prepended — the same protocol the built-in
     `flutter_kernel_target` modular path uses.
+
+    By default (`use_base_dill = False`, as in rules_dart's
+    `modular_executable_kernel`) the link is complete. With `use_base_dill =
+    True` the kernel delta-links against a shared base dill when a dependency
+    provides one, and the returned base dill must be kept alongside the kernel
+    at run time.
 
     Args:
       ctx: The custom rule context. Must merge `FLUTTER_MODULAR_KERNEL_ATTRS`
@@ -1223,6 +1249,12 @@ def flutter_modular_app_kernel(ctx, *, main, package_name, srcs, deps, output):
       srcs: The app's own `.dart` Files (may include `main`).
       deps: The custom rule's dependency Targets.
       output: The linked app `.dill` File to produce.
+      use_base_dill: When True, delta-link against the shared base dill and
+        return it; otherwise link a complete kernel and return None.
+
+    Returns:
+      The shared `base_dill` File if `use_base_dill` is True and a dependency
+      provides one, or None.
     """
     lib_root = derive_lib_root(ctx.label.workspace_root, ctx.label.package)
     packages = synthesize_app_package(
@@ -1268,10 +1300,31 @@ def flutter_modular_app_kernel(ctx, *, main, package_name, srcs, deps, output):
         order = "postorder",
         transitive = [k.transitive_kmods for k in dep_kernels],
     )
+    base_dill = None
+    base_keys = None
+    if use_base_dill:
+        base_kmods = depset()
+        for k in dep_kernels:
+            kd = getattr(k, "base_dill", None)
+            kk = getattr(k, "base_keys", None)
+            if kd != None and kk != None:
+                base_dill = kd
+                base_keys = kk
+                base_kmods = getattr(k, "base_kmods", depset())
+                break
+        if base_dill != None and base_keys != None:
+            base_kmod_paths = {f.path: True for f in base_kmods.to_list()}
+            if base_kmod_paths:
+                dep_closure = depset(
+                    [f for f in dep_closure.to_list() if f.path not in base_kmod_paths],
+                    order = "postorder",
+                )
     kernel_link_action(
         ctx,
         dep_closure,
         entry,
         output,
         platform_dill = flutter_sdk_info.platform_kernel_dill,
+        base_keys = base_keys,
     )
+    return base_dill
