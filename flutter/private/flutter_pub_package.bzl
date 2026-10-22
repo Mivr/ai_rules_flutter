@@ -46,13 +46,13 @@ load(
     _gradle_parse_gradle_android_namespace = "parse_gradle_android_namespace",
 )
 
-def parse_gradle_android_namespace(content):
+def parse_gradle_android_namespace(content, language = "groovy"):
     """Extract `android.namespace` from a Gradle build script.
 
     Moved to `//flutter/private:gradle.bzl`; kept here with the same
     signature so existing loads keep working.
     """
-    return _gradle_parse_gradle_android_namespace(content)
+    return _gradle_parse_gradle_android_namespace(content, language)
 
 def parse_android_manifest_package(content):
     """Extract the `package` attribute from an AndroidManifest.xml.
@@ -62,13 +62,13 @@ def parse_android_manifest_package(content):
     """
     return _gradle_parse_android_manifest_package(content)
 
-def maven_labels_for_gradle(content, mapping, ignore, read_script = None):
+def maven_labels_for_gradle(content, mapping, ignore, read_script = None, language = "groovy"):
     """Translate a Gradle build file's runtime deps to Bazel labels.
 
     Moved to `//flutter/private:gradle.bzl`; kept here with the same
     signature so existing loads keep working.
     """
-    return _gradle_maven_labels_for_gradle(content, mapping, ignore, read_script)
+    return _gradle_maven_labels_for_gradle(content, mapping, ignore, read_script, language)
 
 def is_java_package_name(value):
     """True when `value` is a well-formed Java package name.
@@ -1696,7 +1696,7 @@ def _flutter_pub_package_impl(ctx):
         android_build = struct(path = "", content = "")
         if android_info:
             android_build = plugin_android_build(ctx)
-            android_native_build = detect_android_native_build(android_build.content)
+            android_native_build = detect_android_native_build(ctx, android_build.path, android_build.content)
         if android_info and android_info.get("pluginClass", ""):
             android_src_dir = _detect_android_source_dir(ctx)
             android_has_resources = _detect_android_resources(ctx)
@@ -1715,7 +1715,7 @@ def _flutter_pub_package_impl(ctx):
             if android_src_dir or android_has_resources:
                 android_extra_maven_labels = resolve_plugin_maven_deps(ctx, android_build.path, android_build.content)
                 android_manifest = _detect_android_manifest(ctx)
-                android_consumer_proguard_specs = detect_consumer_proguard_specs(ctx, android_build.content)
+                android_consumer_proguard_specs = detect_consumer_proguard_specs(ctx, android_build.path, android_build.content)
 
         plugin_platforms_json = json.encode(plugin_block.platforms)
         build_content = make_flutter_plugin_build_content(
