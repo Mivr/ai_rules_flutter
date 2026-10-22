@@ -565,78 +565,97 @@ class FrontendServer {
       if (newlineIndex < 0) break;
       final line = _lineBuffer.substring(0, newlineIndex);
       _lineBuffer = _lineBuffer.substring(newlineIndex + 1);
-
-      // A reject acknowledgement is consumed first and on its own keys, so it
-      // can never be mistaken for a compile result.
-      if (_pendingReject != null) {
-        if (_rejectBoundaryKey == null) {
-          if (line.startsWith('result ')) {
-            _rejectBoundaryKey = line.substring('result '.length);
-          }
-          continue;
-        }
-        if (line.trim() == _rejectBoundaryKey) {
-          _rejectBoundaryKey = null;
-          final done = _pendingReject;
-          _pendingReject = null;
-          if (done != null && !done.isCompleted) done.complete();
-        }
-        continue;
-      }
-
-      // `result <boundary_key>` — store the key.
-      if (_resultBoundaryKey == null && line.startsWith('result ')) {
-        _resultBoundaryKey = line.substring('result '.length);
-        continue;
-      }
-
-      // `<boundary_key> <output_path> <error_count>` — completion.
-      // The key also appears alone on a line before the `+file:///` dependency
-      // list — skip that echo and wait for the line with the dill path.
-      if (_resultBoundaryKey != null && line.startsWith(_resultBoundaryKey!)) {
-        final rest = line.substring(_resultBoundaryKey!.length).trim();
-
-        if (rest.isEmpty) {
-          // Key echo line — not yet complete, keep waiting.
-          continue;
-        }
-
-        _resultBoundaryKey = null;
-        {
-          final spaceIdx = rest.lastIndexOf(' ');
-          final outputPath = spaceIdx > 0 ? rest.substring(0, spaceIdx) : rest;
-          final errorCount = spaceIdx > 0
-              ? int.tryParse(rest.substring(spaceIdx + 1)) ?? 0
-              : 0;
-
-          _pendingResult?.complete(
-            CompileResult(
-              dillPath: errorCount > 0 ? '' : outputPath,
-              outputPath: outputPath,
-              success: errorCount == 0,
-              diagnostics: _diagnosticsBuffer.toString(),
-              errorCount: errorCount,
-            ),
-          );
-        }
-        _pendingResult = null;
-        // Only a compile leaves the compiler holding something to accept or
-        // reject. An expression compile does not change the program, and
-        // arming the verdict for one would make the next `accept()` send an
-        // unowed verdict the server has no state to interpret — and, worse,
-        // would let an expression compile that landed between a compile and
-        // its verdict swallow that verdict.
-        if (_pendingKind == _RequestKind.compile) _awaitingVerdict = true;
-        _pendingKind = null;
-        _diagnosticsBuffer.clear();
-        continue;
-      }
-
-      // Collect non-protocol lines as diagnostics (skip dependency lines).
-      if (line.isNotEmpty && !line.startsWith('+')) {
-        _diagnosticsBuffer.writeln(line);
-      }
+      _handleLine(line);
     }
+  }
+
+  /// Handles one stdout protocol line.
+  void _handleLine(String line) {
+    // A reject acknowledgement is consumed first and on its own keys, so it
+    // can never be mistaken for a compile result.
+    if (_pendingReject != null) {
+      _consumeRejectAck(line);
+      return;
+    }
+
+    // `result <boundary_key>` — store the key.
+    if (_resultBoundaryKey == null && line.startsWith('result ')) {
+      _resultBoundaryKey = line.substring('result '.length);
+      return;
+    }
+
+    // `<boundary_key> <output_path> <error_count>` — completion.
+    // The key also appears alone on a line before the `+file:///` dependency
+    // list — skip that echo and wait for the line with the dill path.
+    if (_resultBoundaryKey != null && line.startsWith(_resultBoundaryKey!)) {
+      _finishCompile(line);
+      return;
+    }
+
+    // Collect non-protocol lines as diagnostics (skip dependency lines).
+    if (line.isNotEmpty && !line.startsWith('+')) {
+      _diagnosticsBuffer.writeln(line);
+    }
+  }
+
+  /// Consumes one line of a reject acknowledgement on its own keys.
+  void _consumeRejectAck(String line) {
+    if (_rejectBoundaryKey == null) {
+      if (line.startsWith('result ')) {
+        _rejectBoundaryKey = line.substring('result '.length);
+      }
+      return;
+    }
+    if (line.trim() == _rejectBoundaryKey) {
+      _rejectBoundaryKey = null;
+      final done = _pendingReject;
+      _pendingReject = null;
+      if (done != null && !done.isCompleted) done.complete();
+    }
+  }
+
+  /// Completes the pending compile from its boundary result line.
+  ///
+  /// A bare key echo (no dill path yet) is not complete; keep waiting.
+  void _finishCompile(String line) {
+    final rest = line.substring(_resultBoundaryKey!.length).trim();
+
+    if (rest.isEmpty) {
+      // Key echo line — not yet complete, keep waiting.
+      return;
+    }
+
+    _resultBoundaryKey = null;
+    _completePendingResult(rest);
+    _pendingResult = null;
+    // Only a compile leaves the compiler holding something to accept or
+    // reject. An expression compile does not change the program, and
+    // arming the verdict for one would make the next `accept()` send an
+    // unowed verdict the server has no state to interpret — and, worse,
+    // would let an expression compile that landed between a compile and
+    // its verdict swallow that verdict.
+    if (_pendingKind == _RequestKind.compile) _awaitingVerdict = true;
+    _pendingKind = null;
+    _diagnosticsBuffer.clear();
+  }
+
+  /// Completes [_pendingResult] from `<output_path> <error_count>` text.
+  void _completePendingResult(String rest) {
+    final spaceIdx = rest.lastIndexOf(' ');
+    final outputPath = spaceIdx > 0 ? rest.substring(0, spaceIdx) : rest;
+    final errorCount = spaceIdx > 0
+        ? int.tryParse(rest.substring(spaceIdx + 1)) ?? 0
+        : 0;
+
+    _pendingResult?.complete(
+      CompileResult(
+        dillPath: errorCount > 0 ? '' : outputPath,
+        outputPath: outputPath,
+        success: errorCount == 0,
+        diagnostics: _diagnosticsBuffer.toString(),
+        errorCount: errorCount,
+      ),
+    );
   }
 }
 
