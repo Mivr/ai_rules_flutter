@@ -73,6 +73,101 @@ def _lookup_sub_toolchain(ctx, private_type, public_type):
         return ctx.toolchains[public_type]
     return None
 
+def _lookup_optional_toolchains(ctx):
+    """Collects the optional Flutter sub-toolchains declared on the rule.
+
+    Args:
+      ctx: Rule context declaring `@rules_flutter//flutter:toolchain_type`
+        and optional sub-toolchains.
+
+    Returns:
+      A struct with `product`, `aot`, `desktop`, `material`, and
+      `font_subset` toolchain values (each possibly None),
+      `has_font_subset_type` (whether the font-subset toolchain type is
+      declared at all), `primary_is_builtin` (whether the primary
+      toolchain is the builtin default), and `font_subset_is_builtin`.
+    """
+    flutter_toolchain = ctx.toolchains["@rules_flutter//flutter:toolchain_type"]
+    font_subset_tc = _lookup_sub_toolchain(
+        ctx,
+        "@rules_flutter//flutter/private:font_subset_toolchain_type",
+        "@rules_flutter//flutter:font_subset_toolchain_type",
+    )
+    return struct(
+        product = _lookup_sub_toolchain(
+            ctx,
+            "@rules_flutter//flutter/private:product_tools_toolchain_type",
+            "@rules_flutter//flutter:product_tools_toolchain_type",
+        ),
+        aot = _lookup_sub_toolchain(
+            ctx,
+            "@rules_flutter//flutter/private:aot_toolchain_type",
+            "@rules_flutter//flutter:aot_toolchain_type",
+        ),
+        desktop = _lookup_sub_toolchain(
+            ctx,
+            "@rules_flutter//flutter/private:desktop_engine_toolchain_type",
+            "@rules_flutter//flutter:desktop_engine_toolchain_type",
+        ),
+        material = _lookup_sub_toolchain(
+            ctx,
+            "@rules_flutter//flutter/private:material_icons_toolchain_type",
+            "@rules_flutter//flutter:material_icons_toolchain_type",
+        ),
+        font_subset = font_subset_tc,
+        has_font_subset_type = (
+            "@rules_flutter//flutter/private:font_subset_toolchain_type" in ctx.toolchains or
+            "@rules_flutter//flutter:font_subset_toolchain_type" in ctx.toolchains
+        ),
+        primary_is_builtin = getattr(flutter_toolchain, "_is_builtin_default", False),
+        font_subset_is_builtin = getattr(font_subset_tc, "_is_builtin_default", False) if font_subset_tc else False,
+    )
+
+def _snapshot_info_fields(info):
+    """Copies every set field off a `FlutterSdkInfo` into a plain dict."""
+    return {
+        k: getattr(info, k)
+        for k in dir(info)
+        if k not in ("to_json", "to_proto")
+    }
+
+def _overlay_product_fields(fields, product_tc):
+    """Fills release-tool fields from the product-tools sub-toolchain."""
+    if product_tc:
+        for k in ("platform_kernel_dill_product", "const_finder", "font_subset"):
+            if not fields.get(k):
+                fields[k] = getattr(product_tc, k, None)
+
+def _overlay_font_subset_fields(fields, font_subset_tc, has_font_subset_type, primary_is_builtin, font_subset_is_builtin):
+    """Overlays `const_finder`/`font_subset`, honouring the builtin default.
+
+    An explicitly declared font-subset toolchain wins over the product
+    tools; when the primary toolchain is the builtin default, a declared
+    (even builtin) font-subset toolchain still replaces the primary's
+    values so the default graph stays consistent.
+    """
+    if font_subset_tc and not font_subset_is_builtin:
+        for k in ("const_finder", "font_subset"):
+            fields[k] = getattr(font_subset_tc, k, None)
+    elif primary_is_builtin and has_font_subset_type:
+        for k in ("const_finder", "font_subset"):
+            fields[k] = getattr(font_subset_tc, k, None) if font_subset_tc else None
+    elif font_subset_tc:
+        for k in ("const_finder", "font_subset"):
+            if not fields.get(k):
+                fields[k] = getattr(font_subset_tc, k, None)
+
+def _overlay_aot_desktop_material_fields(fields, aot_tc, desktop_tc, material_tc):
+    """Fills AOT, desktop-engine, and Material-icon fields from sub-toolchains."""
+    if aot_tc and not fields.get("gen_snapshot"):
+        fields["gen_snapshot"] = getattr(aot_tc, "gen_snapshot", None)
+    if desktop_tc:
+        for k in ("engine_library", "linux_sysroot"):
+            if not fields.get(k):
+                fields[k] = getattr(desktop_tc, k, None)
+    if material_tc and not fields.get("material_icons_font"):
+        fields["material_icons_font"] = getattr(material_tc, "material_icons_font", None)
+
 def resolve_flutter_sdk_info(ctx):
     """Resolves `FlutterSdkInfo` from the primary toolchain and any optional sub-toolchains.
 
@@ -89,69 +184,15 @@ def resolve_flutter_sdk_info(ctx):
     """
     flutter_toolchain = ctx.toolchains["@rules_flutter//flutter:toolchain_type"]
     info = flutter_toolchain.flutter_sdk_info
+    optional = _lookup_optional_toolchains(ctx)
 
-    product_tc = _lookup_sub_toolchain(
-        ctx,
-        "@rules_flutter//flutter/private:product_tools_toolchain_type",
-        "@rules_flutter//flutter:product_tools_toolchain_type",
-    )
-    aot_tc = _lookup_sub_toolchain(
-        ctx,
-        "@rules_flutter//flutter/private:aot_toolchain_type",
-        "@rules_flutter//flutter:aot_toolchain_type",
-    )
-    desktop_tc = _lookup_sub_toolchain(
-        ctx,
-        "@rules_flutter//flutter/private:desktop_engine_toolchain_type",
-        "@rules_flutter//flutter:desktop_engine_toolchain_type",
-    )
-    material_tc = _lookup_sub_toolchain(
-        ctx,
-        "@rules_flutter//flutter/private:material_icons_toolchain_type",
-        "@rules_flutter//flutter:material_icons_toolchain_type",
-    )
-    font_subset_tc = _lookup_sub_toolchain(
-        ctx,
-        "@rules_flutter//flutter/private:font_subset_toolchain_type",
-        "@rules_flutter//flutter:font_subset_toolchain_type",
-    )
-    has_font_subset_tc_type = (
-        "@rules_flutter//flutter/private:font_subset_toolchain_type" in ctx.toolchains or
-        "@rules_flutter//flutter:font_subset_toolchain_type" in ctx.toolchains
-    )
-    primary_is_builtin = getattr(flutter_toolchain, "_is_builtin_default", False)
-    font_subset_is_builtin = getattr(font_subset_tc, "_is_builtin_default", False) if font_subset_tc else False
-
-    if not product_tc and not aot_tc and not desktop_tc and not material_tc and not font_subset_tc and not has_font_subset_tc_type:
+    if not optional.product and not optional.aot and not optional.desktop and not optional.material and not optional.font_subset and not optional.has_font_subset_type:
         return info
 
-    fields = {
-        k: getattr(info, k)
-        for k in dir(info)
-        if k not in ("to_json", "to_proto")
-    }
-    if product_tc:
-        for k in ("platform_kernel_dill_product", "const_finder", "font_subset"):
-            if not fields.get(k):
-                fields[k] = getattr(product_tc, k, None)
-    if font_subset_tc and not font_subset_is_builtin:
-        for k in ("const_finder", "font_subset"):
-            fields[k] = getattr(font_subset_tc, k, None)
-    elif primary_is_builtin and has_font_subset_tc_type:
-        for k in ("const_finder", "font_subset"):
-            fields[k] = getattr(font_subset_tc, k, None) if font_subset_tc else None
-    elif font_subset_tc:
-        for k in ("const_finder", "font_subset"):
-            if not fields.get(k):
-                fields[k] = getattr(font_subset_tc, k, None)
-    if aot_tc and not fields.get("gen_snapshot"):
-        fields["gen_snapshot"] = getattr(aot_tc, "gen_snapshot", None)
-    if desktop_tc:
-        for k in ("engine_library", "linux_sysroot"):
-            if not fields.get(k):
-                fields[k] = getattr(desktop_tc, k, None)
-    if material_tc and not fields.get("material_icons_font"):
-        fields["material_icons_font"] = getattr(material_tc, "material_icons_font", None)
+    fields = _snapshot_info_fields(info)
+    _overlay_product_fields(fields, optional.product)
+    _overlay_font_subset_fields(fields, optional.font_subset, optional.has_font_subset_type, optional.primary_is_builtin, optional.font_subset_is_builtin)
+    _overlay_aot_desktop_material_fields(fields, optional.aot, optional.desktop, optional.material)
 
     return FlutterSdkInfo(**fields)
 
