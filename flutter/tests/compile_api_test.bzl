@@ -22,6 +22,10 @@ hidden consumer checks rely on:
 - `extra_roots` entries appear in the emitted `package_config.json`, and an
   absolute, empty, or `..`-escaping root fails at analysis naming the
   package and the value;
+- the default compile is reproducible: the entrypoint closes the argv as an
+  `org-dartlang-app:///` URI (never the sandbox's `file://` exec path) and
+  every emitted `rootUri` uses the same scheme, so the dill carries no
+  absolute host path (`reproducible_default_test`);
 - the module docstring's minimal example is itself a caller target: the
   exact call shape from `//flutter:utils.bzl`'s docstring compiles and keeps
   the default argv (`docstring_example_test`, executed by `build_test`);
@@ -267,7 +271,7 @@ def _full_argv_test_impl(ctx):
                 stage_root,
                 "--filesystem-scheme",
                 "org-dartlang-app",
-                "flutter/tests/compile_api_main.dart",
+                "org-dartlang-app:///flutter/tests/compile_api_main.dart",
             ],
             argv,
         )
@@ -401,16 +405,17 @@ def _undeclared_staged_out_test_impl(ctx):
     return analysistest.end(env)
 
 def _extra_roots_test_impl(ctx):
-    """`extra_roots` gives a sourceless package its config entry."""
+    """`extra_roots` gives a sourceless package its config entry, under the stable scheme."""
     env = analysistest.begin(ctx)
     config = written_json(env, ".package_config.json")
     entry = package_entry(config, "compile_api_ghost")
     asserts.true(env, entry != None, "expected a `compile_api_ghost` entry in .package_config.json")
     if entry != None:
-        asserts.true(
+        asserts.equals(
             env,
-            entry.get("rootUri", "").endswith("flutter/tests"),
-            "the ghost rootUri must name the extra root, got %r" % (entry,),
+            "org-dartlang-app:///flutter/tests",
+            entry.get("rootUri"),
+            "the ghost rootUri must name the extra root under the stable scheme, got %r" % (entry,),
         )
         asserts.equals(env, "lib/", entry.get("packageUri"))
     return analysistest.end(env)
@@ -425,6 +430,39 @@ def _no_extra_roots_test_impl(ctx):
         package_entry(config, "compile_api_ghost"),
         "no entry without extra_roots",
     )
+    return analysistest.end(env)
+
+def _reproducible_default_test_impl(ctx):
+    """The default public compile uses `org-dartlang-app:///` throughout.
+
+    The entrypoint closes the argv as the stable app-scheme URI rather than
+    the sandbox's `file://` exec path, and every package config entry names
+    the same scheme, so the dill embeds no absolute host path and is
+    byte-identical across output bases and runs.
+    """
+    env = analysistest.begin(ctx)
+    action = _kernel_action(env)
+    argv = _compile_argv(env, action)
+    if argv:
+        asserts.equals(
+            env,
+            "org-dartlang-app:///flutter/tests/compile_api_extras_main.dart",
+            argv[-1],
+            "the entrypoint must be the stable app-scheme URI, got %r" % (argv[-1],),
+        )
+    config = written_json(env, ".package_config.json")
+    if config != None:
+        asserts.true(
+            env,
+            len(config["packages"]) > 0,
+            "expected package entries in .package_config.json",
+        )
+        for entry in config["packages"]:
+            asserts.true(
+                env,
+                entry.get("rootUri", "").startswith("org-dartlang-app:///"),
+                "every rootUri must use the stable scheme, got %r" % (entry,),
+            )
     return analysistest.end(env)
 
 _DBG = {
@@ -454,6 +492,7 @@ _extra_roots_reject_test = analysistest.make(
 _undeclared_staged_out_test = analysistest.make(_undeclared_staged_out_test_impl, config_settings = _DBG)
 _extra_roots_test = analysistest.make(_extra_roots_test_impl, config_settings = _DBG)
 _no_extra_roots_test = analysistest.make(_no_extra_roots_test_impl, config_settings = _DBG)
+_reproducible_default_test = analysistest.make(_reproducible_default_test_impl, config_settings = _DBG)
 
 def compile_api_test_suite(name):
     """Fixtures and tests for the public compile API.
@@ -821,6 +860,10 @@ def compile_api_test_suite(name):
         name = name + "_no_extra_roots",
         target_under_test = ":_compile_api_no_roots",
     )
+    _reproducible_default_test(
+        name = name + "_reproducible_default",
+        target_under_test = ":_compile_api_extras",
+    )
     _extra_roots_reject_test(
         name = name + "_extra_roots_abs",
         target_under_test = ":_compile_api_bad_roots_abs",
@@ -876,6 +919,7 @@ def compile_api_test_suite(name):
             ":" + name + "_undeclared_staged_out",
             ":" + name + "_extra_roots",
             ":" + name + "_no_extra_roots",
+            ":" + name + "_reproducible_default",
             ":" + name + "_extra_roots_abs",
             ":" + name + "_extra_roots_win",
             ":" + name + "_extra_roots_escape",

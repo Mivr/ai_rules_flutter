@@ -609,6 +609,25 @@ flutter_prebuilt_test(
     target_compatible_with = _HOST_COMPATIBLE,
 )
 
+# A hand-compiled kernel must be reproducible: `:widget_custom_kernel` is
+# built over the public `//flutter:utils.bzl` helpers only, and its dill must
+# carry no absolute host path — every source URI a stable
+# `org-dartlang-app:///` or `package:` URI, as in the stock `:widget_test`
+# kernel beside it. Reads the dill's bytes out of runfiles and fails on the
+# first sandbox `execroot` URI, so a regression that re-keys a library by
+# `file://` breaks `bazel test //...` here instead of silently busting remote
+# caches downstream.
+dart_test(
+    name = "verify_custom_kernel_reproducible_test",
+    data = [":widget_custom_kernel"],
+    main = "test/verify_custom_kernel_reproducible_test.dart",
+    target_compatible_with = _HOST_COMPATIBLE,
+    deps = [
+        "@deps//:test",
+        "@rules_dart//dart/runfiles",
+    ],
+)
+
 # The `@Tags(['golden'])` suite, compiled by hand: excluding `golden` prunes
 # it to empty, proving library tags extracted by a custom pipeline reach the
 # prebuilt run's root group exactly as through the stock one.
