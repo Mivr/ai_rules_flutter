@@ -319,9 +319,8 @@ class NativeHotPatcher {
   ///
   /// [movedLibraries] are file names a reload's own rebuild saw move — the
   /// other trigger besides the declared sources.
-  Future<NativePatchOutcome> patchIfMoved({
-    Set<String> movedLibraries = const {},
-  }) async {
+  /// The libraries whose sources moved since the last patch.
+  Future<List<_Patchable>> _movedLibraries(Set<String> movedLibraries) async {
     final moved = <_Patchable>[];
     for (final library in _libraries) {
       final stamps = await _stamps(library.tool.manifest.sources);
@@ -330,6 +329,124 @@ class NativeHotPatcher {
         moved.add(library);
       }
     }
+    return moved;
+  }
+
+  /// Per library, per app: what to load.
+  ///
+  /// A patch file, or null to go back to the launched code. [refused] carries
+  /// the verdict when an address cannot even be computed, which stops the
+  /// patch before anything is built for any app.
+  Future<
+    ({
+      Map<_Patchable, Map<NativePatchTarget, PatchBuilderAnswer>> plans,
+      Map<String, List<String>> restart,
+      List<String> failed,
+      NativePatchOutcome? refused,
+    })
+  >
+  _planLoads(
+    List<_Patchable> moved,
+    List<NativePatchTarget> apps,
+  ) async {
+    final plans = <_Patchable, Map<NativePatchTarget, PatchBuilderAnswer>>{};
+    final restart = <String, List<String>>{};
+    final failed = <String>[];
+    for (final library in moved) {
+      final perApp = plans[library] = {};
+      for (final app in apps) {
+        final delivery = app.delivery!;
+        final int address;
+        try {
+          address = await _applyAddress(app, delivery, library);
+        } on DevToolException catch (e) {
+          return (
+            plans: plans,
+            restart: restart,
+            failed: failed,
+            refused: NativePatchLoadFailed(
+              failures: {app.appId: e.message},
+              applied: const [],
+            ),
+          );
+        }
+        final out = Directory(
+          p.join(_scratch.path, 'out', app.appId, library.libraryFileName),
+        );
+        if (out.existsSync()) out.deleteSync(recursive: true);
+        out.createSync(recursive: true);
+        final result = await library.tool.patch(
+          stateDirectory: library.stateDirectory,
+          applyAddress: address,
+          outputDirectory: out.path,
+        );
+        switch (result) {
+          case PatchNeedsRestart(:final reasons):
+            restart[library.libraryFileName] = reasons;
+          case PatchFailed(:final message):
+            failed.add('${library.libraryFileName}: $message');
+          case PatchBuilt() || PatchUnchanged():
+            perApp[app] = result;
+        }
+      }
+    }
+    return (plans: plans, restart: restart, failed: failed, refused: null);
+  }
+
+  /// Load every planned patch or revert, and say what changed where.
+  Future<
+    ({
+      Map<String, List<String>> functions,
+      Set<String> reverted,
+      Map<String, String> failures,
+      Set<String> applied,
+    })
+  >
+  _applyPlans(
+    Map<_Patchable, Map<NativePatchTarget, PatchBuilderAnswer>> plans,
+  ) async {
+    final functions = <String, List<String>>{};
+    final reverted = <String>{};
+    final failures = <String, String>{};
+    final applied = <String>{};
+    for (final MapEntry(key: library, value: perApp) in plans.entries) {
+      for (final MapEntry(key: app, value: result) in perApp.entries) {
+        final live = _live.putIfAbsent(app.appId, () => {});
+        final name = library.libraryFileName;
+        try {
+          switch (result) {
+            case PatchBuilt(:final file, functions: final replaced):
+              await _load(app, library, file);
+              live.add(name);
+              functions[name] = replaced;
+              applied.add(app.appId);
+            case PatchUnchanged() when live.contains(name):
+              await _revert(app, library);
+              live.remove(name);
+              reverted.add(name);
+              applied.add(app.appId);
+            case _:
+              break;
+          }
+        } on DevToolException catch (e) {
+          failures[app.appId] = e.message;
+        } on NativePatchDeliveryException catch (e) {
+          failures[app.appId] = e.message;
+        }
+      }
+    }
+    return (
+      functions: functions,
+      reverted: reverted,
+      failures: failures,
+      applied: applied,
+    );
+  }
+
+  Future<NativePatchOutcome> patchIfMoved({
+    Set<String> movedLibraries = const {},
+  }) async {
+    final moved = await _movedLibraries(movedLibraries);
     if (moved.isEmpty) return const NativePatchNotNeeded();
 
     // Taken before the build: a source saved while bazel reads it is not in
@@ -363,84 +480,24 @@ class NativeHotPatcher {
         applied: const [],
       );
     }
-    final restart = <String, List<String>>{};
-    final failed = <String>[];
-    // Per library, per app: what to load (a patch file, or null to go back to
-    // the launched code).
-    final plans = <_Patchable, Map<NativePatchTarget, PatchBuilderAnswer>>{};
-    for (final library in moved) {
-      final perApp = plans[library] = {};
-      for (final app in apps) {
-        final delivery = app.delivery!;
-        final int address;
-        try {
-          address = await _applyAddress(app, delivery, library);
-        } on DevToolException catch (e) {
-          return NativePatchLoadFailed(
-            failures: {app.appId: e.message},
-            applied: const [],
-          );
-        }
-        final out = Directory(
-          p.join(_scratch.path, 'out', app.appId, library.libraryFileName),
-        );
-        if (out.existsSync()) out.deleteSync(recursive: true);
-        out.createSync(recursive: true);
-        final result = await library.tool.patch(
-          stateDirectory: library.stateDirectory,
-          applyAddress: address,
-          outputDirectory: out.path,
-        );
-        switch (result) {
-          case PatchNeedsRestart(:final reasons):
-            restart[library.libraryFileName] = reasons;
-          case PatchFailed(:final message):
-            failed.add('${library.libraryFileName}: $message');
-          case PatchBuilt() || PatchUnchanged():
-            perApp[app] = result;
-        }
-      }
+    final plan = await _planLoads(moved, apps);
+    final refused = plan.refused;
+    if (refused != null) return refused;
+    if (plan.restart.isNotEmpty) return NativePatchNeedsRestart(plan.restart);
+    if (plan.failed.isNotEmpty) {
+      return NativePatchBuildFailed(plan.failed.join('\n'));
     }
-    if (restart.isNotEmpty) return NativePatchNeedsRestart(restart);
-    if (failed.isNotEmpty) return NativePatchBuildFailed(failed.join('\n'));
 
-    final functions = <String, List<String>>{};
-    final reverted = <String>{};
-    final failures = <String, String>{};
-    final applied = <String>{};
+    // Cleared before the loads, as before: a concurrent reader mid-patch
+    // sees no changed apps rather than the previous patch's.
     _lastChanged = const [];
-    for (final MapEntry(key: library, value: perApp) in plans.entries) {
-      for (final MapEntry(key: app, value: result) in perApp.entries) {
-        final live = _live.putIfAbsent(app.appId, () => {});
-        final name = library.libraryFileName;
-        try {
-          switch (result) {
-            case PatchBuilt(:final file, functions: final replaced):
-              await _load(app, library, file);
-              live.add(name);
-              functions[name] = replaced;
-              applied.add(app.appId);
-            case PatchUnchanged() when live.contains(name):
-              await _revert(app, library);
-              live.remove(name);
-              reverted.add(name);
-              applied.add(app.appId);
-            case _:
-              break;
-          }
-        } on DevToolException catch (e) {
-          failures[app.appId] = e.message;
-        } on NativePatchDeliveryException catch (e) {
-          failures[app.appId] = e.message;
-        }
-      }
-    }
-    if (failures.isNotEmpty) {
+    final application = await _applyPlans(plan.plans);
+    if (application.failures.isNotEmpty) {
       return NativePatchLoadFailed(
-        failures: failures,
+        failures: application.failures,
         applied: [
-          for (final id in applied)
-            if (!failures.containsKey(id)) id,
+          for (final id in application.applied)
+            if (!application.failures.containsKey(id)) id,
         ],
       );
     }
@@ -449,12 +506,15 @@ class NativeHotPatcher {
     }
     _lastChanged = [
       for (final app in apps)
-        if (applied.contains(app.appId)) app,
+        if (application.applied.contains(app.appId)) app,
     ];
-    if (functions.isEmpty && reverted.isEmpty) {
+    if (application.functions.isEmpty && application.reverted.isEmpty) {
       return const NativePatchNotNeeded();
     }
-    return NativePatched(functions: functions, reverted: reverted.toList());
+    return NativePatched(
+      functions: application.functions,
+      reverted: application.reverted.toList(),
+    );
   }
 
   /// Rebuild the widget tree of every app the last [patchIfMoved] changed
