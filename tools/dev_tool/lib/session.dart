@@ -167,6 +167,16 @@ class DeviceSession {
       );
     } catch (e) {
       failure = '$e';
+      // The gate carries the reason, but a refused command only quotes it —
+      // without this nothing says the wait itself failed, or what it saw.
+      _logger.warning({
+        'message': 'first_frame_wait_failed',
+        'text':
+            'Waiting for $appId to render its first frame failed: $e. '
+            'Drivable commands will be refused until the app renders.',
+        'appId': appId,
+        'error': '$e',
+      });
     }
     waited.stop();
 
@@ -467,6 +477,14 @@ Future<ReloadResult> _compileAndApply({
     frontendServer.accept();
     compiled = result;
   } catch (e) {
+    // A throw is not a failed compile but it is still the compile's failure:
+    // the verdict says so, and so does the run's log, which is where a reader
+    // lands first when the diagnostics name no source error.
+    _logger.warning({
+      'message': 'reload_compile_threw',
+      'text': 'The reload compile threw instead of answering: $e',
+      'error': '$e',
+    });
     return compileFailed(e.toString());
   }
 
@@ -474,6 +492,13 @@ Future<ReloadResult> _compileAndApply({
   try {
     outcome = await apply(compiled);
   } catch (e) {
+    // Delivery's throw, so the outcome carries it — and so does the log, next
+    // to the compile lines above rather than only in the rendered report.
+    _logger.warning({
+      'message': 'reload_apply_threw',
+      'text': 'Applying the compiled reload threw instead of answering: $e',
+      'error': '$e',
+    });
     outcome = StrategyThrew(e);
   }
   stopwatch.stop();

@@ -961,6 +961,46 @@ void main() {
       },
     );
 
+    test('a strategy throw is logged next to the compile lines', () async {
+      final (:server, :process) = startedServer();
+      await server.start();
+      addTearDown(() async {
+        process.complete(0);
+        await server.shutdown();
+      });
+
+      final records = <LogRecord>[];
+      final rootLevel = Logger.root.level;
+      Logger.root.level = Level.ALL;
+      final sub = Logger.root.onRecord.listen(records.add);
+      ReloadResult result;
+      try {
+        final reload = recompileAndReload(
+          frontendServer: server,
+          entrypoint: 'lib/main.dart',
+          invalidatedFiles: const ['package:app/main.dart'],
+          sessions: const [],
+          reloadStrategy: _ThrowingReloadStrategy(
+            StateError('no DDC manifest to serve'),
+          ),
+        );
+        emitCleanCompile(process);
+
+        result = await reload.timeout(const Duration(seconds: 5));
+      } finally {
+        await sub.cancel();
+        Logger.root.level = rootLevel;
+      }
+
+      expect(result.outcome, isA<StrategyThrew>());
+      expect(
+        records
+            .where((r) => r.loggerName == 'dev_tool.session')
+            .map((r) => '${r.message}'),
+        contains(contains('reload_apply_threw')),
+      );
+    });
+
     test('a restart whose strategy throws blames the delivery too', () async {
       final (:server, :process) = startedServer();
       await server.start();
@@ -1009,6 +1049,37 @@ void main() {
         strategy.calls,
         isEmpty,
         reason: 'nothing compiled, so nothing may be applied',
+      );
+    });
+
+    test('a throw from the compile is logged, not only verdict', () async {
+      final server = startedServer().server;
+      final strategy = _RecordingReloadStrategy();
+
+      final records = <LogRecord>[];
+      final rootLevel = Logger.root.level;
+      Logger.root.level = Level.ALL;
+      final sub = Logger.root.onRecord.listen(records.add);
+      ReloadResult result;
+      try {
+        result = await recompileAndReload(
+          frontendServer: server,
+          entrypoint: 'lib/main.dart',
+          invalidatedFiles: const ['package:app/main.dart'],
+          sessions: const [],
+          reloadStrategy: strategy,
+        ).timeout(const Duration(seconds: 5));
+      } finally {
+        await sub.cancel();
+        Logger.root.level = rootLevel;
+      }
+
+      expect(result.compileSuccess, isFalse);
+      expect(
+        records
+            .where((r) => r.loggerName == 'dev_tool.session')
+            .map((r) => '${r.message}'),
+        contains(contains('reload_compile_threw')),
       );
     });
   });
@@ -1269,6 +1340,40 @@ void main() {
         );
       },
     );
+
+    test('a failed first-frame wait is logged, not only gated', () async {
+      final sink = BufferSink();
+      final protocol = MachineProtocol(enabled: true, output: sink);
+      final fake = newFake();
+      // A fault that is not -32601: the poll keeps it as the wait's failure
+      // and the wait throws it, instead of asking again.
+      fake.extensionErrors['ext.flutter.didSendFirstFrameEvent'] = StateError(
+        'connection reset',
+      );
+      final session = sessionOn(
+        _ImpatientDevice(),
+        await connected(fake),
+      );
+
+      final records = <LogRecord>[];
+      final rootLevel = Logger.root.level;
+      Logger.root.level = Level.ALL;
+      final sub = Logger.root.onRecord.listen(records.add);
+      try {
+        await session.waitUntilDrivable(protocol);
+      } finally {
+        await sub.cancel();
+        Logger.root.level = rootLevel;
+      }
+
+      expect(session.drivable.isReady, isFalse);
+      expect(
+        records
+            .where((r) => r.loggerName == 'dev_tool.session')
+            .map((r) => '${r.message}'),
+        contains(contains('first_frame_wait_failed')),
+      );
+    });
 
     test(
       // Web sessions exist before their VM service does: DWDS hands one over
