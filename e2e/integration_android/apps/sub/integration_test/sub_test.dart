@@ -16,22 +16,21 @@ import 'package:sub/main.dart';
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets(
-    'subpackage and brand assets resolve at package-relative keys',
-    (tester) async {
-      await tester.pumpWidget(const SubApp());
-      await tester.pumpAndSettle();
+  testWidgets('subpackage and brand assets resolve at package-relative keys', (
+    tester,
+  ) async {
+    await tester.pumpWidget(const SubApp());
+    await tester.pumpAndSettle();
 
-      expect(find.text('Sub Brand'), findsOneWidget);
+    expect(find.text('Sub Brand'), findsOneWidget);
 
-      expect(
-        await rootBundle.loadString('assets/sub.txt'),
-        equals('sub asset\n'),
-      );
-      expect(
-        await rootBundle.loadString('packages/brand/assets/brand.txt'),
-        equals('brand asset\n'),
-      );
-    },
-  );
+    expect(
+      await rootBundle.loadString('assets/sub.txt'),
+      equals('sub asset\n'),
+    );
+    expect(
+      await rootBundle.loadString('packages/brand/assets/brand.txt'),
+      equals('brand asset\n'),
+    );
+  });
 }

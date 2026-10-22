@@ -42,9 +42,7 @@ void main() {
   });
 
   test('dependency asset lands at packages/brand/...', () {
-    final asset = File(
-      '${bundleDir.path}/packages/brand/assets/brand.txt',
-    );
+    final asset = File('${bundleDir.path}/packages/brand/assets/brand.txt');
     expect(asset.existsSync(), isTrue);
     expect(asset.readAsStringSync(), equals('brand asset\n'));
   });
@@ -54,9 +52,7 @@ void main() {
     // wrapper is base64-encoded StandardMessageCodec, whose string keys
     // appear as UTF-8 bytes inline in the binary.
     final wrapped = jsonDecode(
-      File(
-        '${bundleDir.path}/AssetManifest.bin.json',
-      ).readAsStringSync(),
+      File('${bundleDir.path}/AssetManifest.bin.json').readAsStringSync(),
     ) as String;
     final asString = utf8.decode(base64Decode(wrapped), allowMalformed: true);
     expect(asString, contains('assets/notice.txt'));

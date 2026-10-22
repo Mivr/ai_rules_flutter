@@ -22,9 +22,6 @@ class SubApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const MaterialApp(
-      title: brandTitle,
-      home: Text(brandTitle),
-    );
+    return const MaterialApp(title: brandTitle, home: Text(brandTitle));
   }
 }
