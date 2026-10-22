@@ -259,6 +259,112 @@ Uint8List _buildMachO32({int cputype = macho.cpuTypeArm}) {
   return buf;
 }
 
+/// Builds a synthetic 64-bit Mach-O exercising every load-command kind the
+/// patcher rewrites or scans: a `__TEXT` segment with one section (file bytes
+/// at 0x1000), a `__LINKEDIT` segment, `LC_SYMTAB`/`LC_DYSYMTAB`, the four
+/// linkedit table commands (`LC_FUNCTION_STARTS`, `LC_DATA_IN_CODE`,
+/// `LC_DYLD_EXPORTS_TRIE`, `LC_DYLD_CHAINED_FIXUPS`), all four legacy
+/// `LC_VERSION_MIN_*` commands, and `LC_ID_DYLIB` (but no `LC_BUILD_VERSION`
+/// or `LC_RPATH`, so the patcher takes the add paths for those).
+Uint8List _buildFullCoverageMachO() {
+  Uint8List tableCommand(int cmd, int dataoff, int datasize) {
+    final buf = Uint8List(16);
+    final bd = ByteData.sublistView(buf);
+    bd.setUint32(0, cmd, Endian.little);
+    bd.setUint32(4, 16, Endian.little);
+    bd.setUint32(8, dataoff, Endian.little);
+    bd.setUint32(12, datasize, Endian.little);
+    return buf;
+  }
+
+  Uint8List versionMin(int cmd) {
+    final buf = Uint8List(16);
+    final bd = ByteData.sublistView(buf);
+    bd.setUint32(0, cmd, Endian.little);
+    bd.setUint32(4, 16, Endian.little);
+    bd.setUint32(8, 0x000b0000, Endian.little);
+    bd.setUint32(12, 0x000b0000, Endian.little);
+    return buf;
+  }
+
+  // `__TEXT` segment with one `section_64` (80 bytes at command offset 72).
+  final textSeg = Uint8List(72 + 80);
+  final textBd = ByteData.sublistView(textSeg);
+  textBd.setUint32(0, macho.lcSegment64, Endian.little);
+  textBd.setUint32(4, 152, Endian.little);
+  textSeg.setRange(8, 8 + '__TEXT'.length, ascii.encode('__TEXT'));
+  textBd.setUint64(24, 0, Endian.little);
+  textBd.setUint64(32, 0x4000, Endian.little);
+  textBd.setUint64(40, 0, Endian.little);
+  textBd.setUint64(48, 0x4000, Endian.little);
+  textBd.setUint32(56, 5, Endian.little);
+  textBd.setUint32(60, 5, Endian.little);
+  textBd.setUint32(64, 1, Endian.little);
+  textSeg.setRange(72, 72 + '__text'.length, ascii.encode('__text'));
+  textSeg.setRange(
+    72 + 16,
+    72 + 16 + '__TEXT'.length,
+    ascii.encode('__TEXT'),
+  );
+  textBd.setUint64(72 + 32, 0x100, Endian.little);
+  textBd.setUint64(72 + 40, 0x200, Endian.little);
+  textBd.setUint32(72 + 48, 0x1000, Endian.little);
+  textBd.setUint32(72 + 52, 2, Endian.little);
+
+  final commands = <Uint8List>[
+    textSeg,
+    macho
+        .buildLcSegment64(
+          segname: '__LINKEDIT',
+          vmaddr: 0x4000,
+          vmsize: 0x1000,
+          fileoff: 0x4000,
+          filesize: 0x1000,
+          maxprot: 1,
+          initprot: 1,
+        )
+        .bytes,
+    macho
+        .buildLcSymtab(symoff: 0x4000, nsyms: 2, stroff: 0x4020, strsize: 0x20)
+        .bytes,
+    macho.buildLcDysymtab().bytes,
+    tableCommand(macho.lcFunctionStarts, 0x4100, 0x10),
+    tableCommand(macho.lcDataInCode, 0x4110, 0x10),
+    tableCommand(macho.lcDyldExportsTrie, 0x4120, 0x10),
+    tableCommand(macho.lcDyldChainedFixups, 0x4130, 0x10),
+    versionMin(macho.lcVersionMinMacosx),
+    versionMin(macho.lcVersionMinIphoneos),
+    versionMin(macho.lcVersionMinTvos),
+    versionMin(macho.lcVersionMinWatchos),
+    macho.buildLcIdDylib('@rpath/Old.framework/Old').bytes,
+  ];
+
+  var sizeofcmds = 0;
+  for (final c in commands) {
+    sizeofcmds += c.length;
+  }
+  const fileSize = 0x5000;
+  final buf = Uint8List(fileSize);
+  for (var i = 0; i < fileSize; i++) {
+    buf[i] = (i * 31 + 7) & 0xff;
+  }
+  final bd = ByteData.sublistView(buf);
+  bd.setUint32(0, macho.mhMagic64, Endian.little);
+  bd.setUint32(4, macho.cpuTypeArm64, Endian.little);
+  bd.setUint32(8, macho.cpuSubtypeArm64All, Endian.little);
+  bd.setUint32(12, macho.mhDylib, Endian.little);
+  bd.setUint32(16, commands.length, Endian.little);
+  bd.setUint32(20, sizeofcmds, Endian.little);
+  bd.setUint32(24, macho.mhNoReexportedDylibs, Endian.little);
+  bd.setUint32(28, 0, Endian.little);
+  var off = macho.mhHeaderSize64;
+  for (final c in commands) {
+    buf.setRange(off, off + c.length, c);
+    off += c.length;
+  }
+  return buf;
+}
+
 void main() {
   group('sha256', () {
     test('matches FIPS 180-4 test vectors', () {
@@ -730,6 +836,157 @@ void main() {
         );
       },
     );
+
+    test(
+      'patches every load-command kind and pins the patched bytes',
+      () {
+        final input = _buildFullCoverageMachO();
+        final patched = macho.patchMachO(
+          input,
+          platform: macho.platformIos,
+          minOs: macho.parsePackedVersion('13.0'),
+          sdkVersion: macho.parsePackedVersion('16.0'),
+          installName: '@rpath/New.framework/New',
+          rpaths: ['@executable_path/Frameworks'],
+        );
+        expect(patched.length, input.length);
+
+        // All four legacy version-min commands are stripped; the linkedit
+        // table commands keep their offsets; build-version and rpath append.
+        expect(macho.parseLoadCommands(patched).map((c) => c.cmd), [
+          macho.lcSegment64,
+          macho.lcSegment64,
+          macho.lcSymtab,
+          macho.lcDysymtab,
+          macho.lcFunctionStarts,
+          macho.lcDataInCode,
+          macho.lcDyldExportsTrie,
+          macho.lcDyldChainedFixups,
+          macho.lcIdDylib,
+          macho.lcBuildVersion,
+          macho.lcRpath,
+        ]);
+
+        final idCmd = macho
+            .parseLoadCommands(patched)
+            .singleWhere((c) => c.cmd == macho.lcIdDylib);
+        expect(_readCString(idCmd.bytes, 24), '@rpath/New.framework/New');
+
+        // Section and linkedit payload bytes survive the rewrite untouched.
+        expect(patched.sublist(0x1000, 0x1200), input.sublist(0x1000, 0x1200));
+        expect(patched.sublist(0x4000, 0x5000), input.sublist(0x4000, 0x5000));
+
+        // Pins the patched bytes: any moved byte fails this digest.
+        expect(
+          _hex(macho.sha256(patched)),
+          'b6730c0ff3cdd07b52f2e122679a38b27865479eaee0db94ae49af27b5364fcc',
+        );
+      },
+    );
+
+    test('patches a fat64 binary and keeps the fat64 header', () {
+      final arm = macho.generateStubMachO(
+        arch: 'arm64',
+        platform: macho.platformMacos,
+        minOs: macho.parsePackedVersion('11.0'),
+        sdkVersion: macho.parsePackedVersion('11.0'),
+        installName: '@rpath/Old.dylib',
+      );
+      final fat64 = macho.buildFatMachO([
+        macho.FatSlice(
+          cputype: macho.cpuTypeArm64,
+          cpusubtype: macho.cpuSubtypeArm64All,
+          bytes: arm,
+        ),
+      ], fat64: true);
+      expect(macho.isFatMachO(fat64), isTrue);
+
+      final patched = macho.patchMachO(
+        fat64,
+        platform: macho.platformIos,
+        minOs: macho.parsePackedVersion('13.0'),
+        installName: '@rpath/New.dylib',
+      );
+      expect(
+        ByteData.sublistView(patched).getUint32(0, Endian.big),
+        macho.fatMagic64,
+      );
+      final slices = macho.extractFatSlices(patched);
+      expect(slices.length, 1);
+      final cmds = macho.parseLoadCommands(slices.single.bytes);
+      expect(
+        _readCString(
+          cmds.singleWhere((c) => c.cmd == macho.lcIdDylib).bytes,
+          24,
+        ),
+        '@rpath/New.dylib',
+      );
+      expect(
+        _hex(macho.sha256(patched)),
+        '36506d4d5d9e1190abc535e120d81b15cb5bb74f8f801412e159ef83428a7cc3',
+      );
+    });
+
+    test('checks the requested arch against a thin binary', () {
+      final stub = macho.generateStubMachO(
+        arch: 'arm64',
+        platform: macho.platformMacos,
+        minOs: macho.parsePackedVersion('11.0'),
+        sdkVersion: macho.parsePackedVersion('11.0'),
+        installName: '@rpath/Arch.dylib',
+      );
+      final matched = macho.patchMachO(
+        stub,
+        platform: macho.platformMacos,
+        minOs: macho.parsePackedVersion('12.0'),
+        arch: 'arm64',
+      );
+      expect(macho.isMachO64(matched), isTrue);
+      expect(
+        () => macho.patchMachO(
+          stub,
+          platform: macho.platformMacos,
+          minOs: macho.parsePackedVersion('12.0'),
+          arch: 'x86_64',
+        ),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            contains('does not match'),
+          ),
+        ),
+      );
+    });
+
+    test('adds LC_ID_DYLIB to an execute stub that has none', () {
+      final stub = macho.generateStubMachO(
+        arch: 'arm64',
+        platform: macho.platformIos,
+        minOs: macho.parsePackedVersion('14.0'),
+        sdkVersion: macho.parsePackedVersion('14.0'),
+        installName: '',
+        fileType: macho.mhExecute,
+      );
+      expect(
+        macho.parseLoadCommands(stub).where((c) => c.cmd == macho.lcIdDylib),
+        isEmpty,
+      );
+      final patched = macho.patchMachO(
+        stub,
+        platform: macho.platformIos,
+        minOs: macho.parsePackedVersion('14.0'),
+        installName: '@rpath/Runner',
+      );
+      final cmds = macho.parseLoadCommands(patched);
+      expect(
+        _readCString(
+          cmds.singleWhere((c) => c.cmd == macho.lcIdDylib).bytes,
+          24,
+        ),
+        '@rpath/Runner',
+      );
+    });
   });
 
   group('CLI', () {
@@ -1278,5 +1535,175 @@ void main() {
         expect(File('$patchedStaged/libadd.dylib').readAsStringSync(), 'add');
       },
     );
+
+    test('fat combines thin slices into a universal binary', () {
+      final armPath = '${tempDir.path}/arm.dylib';
+      final x86Path = '${tempDir.path}/x86.dylib';
+      final fatPath = '${tempDir.path}/fat.dylib';
+      File(armPath).writeAsBytesSync(
+        macho.generateStubMachO(
+          arch: 'arm64',
+          platform: macho.platformMacos,
+          minOs: macho.parsePackedVersion('11.0'),
+          sdkVersion: macho.parsePackedVersion('11.0'),
+          installName: '@rpath/Fat.dylib',
+        ),
+      );
+      File(x86Path).writeAsBytesSync(
+        macho.generateStubMachO(
+          arch: 'x86_64',
+          platform: macho.platformMacos,
+          minOs: macho.parsePackedVersion('11.0'),
+          sdkVersion: macho.parsePackedVersion('11.0'),
+          installName: '@rpath/Fat.dylib',
+        ),
+      );
+
+      macho.main(['fat', '--output', fatPath, armPath, x86Path]);
+
+      final fat = File(fatPath).readAsBytesSync();
+      expect(macho.isFatMachO(fat), isTrue);
+      expect(macho.extractFatSlices(fat).length, 2);
+    });
+
+    test('verify checks a thin dylib and writes the stamp file', () {
+      final libPath = '${tempDir.path}/libverify.dylib';
+      final stampPath = '${tempDir.path}/verified.stamp';
+      File(libPath).writeAsBytesSync(
+        macho.generateStubMachO(
+          arch: 'arm64',
+          platform: macho.platformMacos,
+          minOs: macho.parsePackedVersion('11.0'),
+          sdkVersion: macho.parsePackedVersion('11.0'),
+          installName: '@rpath/Verify.dylib',
+        ),
+      );
+
+      macho.main(['verify', '--input', libPath, '--output', stampPath]);
+
+      expect(File(stampPath).readAsStringSync(), 'verified\n');
+    });
+
+    test('verify checks a binary inside a zip archive', () {
+      final zipPath = '${tempDir.path}/app.zip';
+      File(zipPath).writeAsBytesSync(
+        _storedZip({
+          'Payload/App': macho.generateStubMachO(
+            arch: 'arm64',
+            platform: macho.platformMacos,
+            minOs: macho.parsePackedVersion('11.0'),
+            sdkVersion: macho.parsePackedVersion('11.0'),
+            installName: '@rpath/Verify.dylib',
+          ),
+        }),
+      );
+      final stampPath = '${tempDir.path}/zip.stamp';
+
+      macho.main([
+        'verify',
+        '--input',
+        zipPath,
+        '--binary-relpath',
+        'Payload/App',
+        '--expect-entry',
+        'Payload/App',
+        '--output',
+        stampPath,
+      ]);
+      expect(File(stampPath).readAsStringSync(), 'verified\n');
+
+      expect(
+        () => macho.main([
+          'verify',
+          '--input',
+          zipPath,
+          '--binary-relpath',
+          'Payload/App',
+          '--expect-entry',
+          'Payload/Missing',
+          '--output',
+          stampPath,
+        ]),
+        throwsA(isA<StateError>()),
+      );
+    });
+  });
+
+  group('thinFatMachO', () {
+    test('reports a missing arch and 32-bit-only binaries', () {
+      final arm = macho.generateStubMachO(
+        arch: 'arm64',
+        platform: macho.platformMacos,
+        minOs: macho.parsePackedVersion('11.0'),
+        sdkVersion: macho.parsePackedVersion('11.0'),
+        installName: '@rpath/Thin.dylib',
+      );
+      final fat = macho.buildFatMachO([
+        macho.FatSlice(
+          cputype: macho.cpuTypeArm64,
+          cpusubtype: macho.cpuSubtypeArm64All,
+          bytes: arm,
+        ),
+      ]);
+      expect(
+        () => macho.thinFatMachO(fat, 'x86_64'),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            contains('does not contain a slice'),
+          ),
+        ),
+      );
+
+      final fat32 = macho.buildFatMachO([
+        macho.FatSlice(
+          cputype: macho.cpuTypeArm,
+          cpusubtype: 9,
+          bytes: _buildMachO32(),
+        ),
+      ]);
+      expect(
+        () => macho.thinFatMachO(fat32, 'arm64'),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            contains('32-bit'),
+          ),
+        ),
+      );
+    });
+  });
+
+  group('frameworkZipDeflate', () {
+    test('compresses large payloads and pins the archive bytes', () {
+      final dir = Directory.systemTemp.createTempSync('macho_zip_');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final sliceDir = Directory('${dir.path}/App.framework/Versions/A')
+        ..createSync(recursive: true);
+      final big = Uint8List(8192);
+      for (var i = 0; i < big.length; i++) {
+        big[i] = (i ~/ 64) & 0xff;
+      }
+      File('${sliceDir.path}/App').writeAsBytesSync(big);
+      File('${sliceDir.path}/small.txt').writeAsStringSync('x');
+
+      final zip = macho.createFrameworkZipBytes(
+        Directory('${dir.path}/App.framework'),
+        archiveRootName: 'App.framework',
+        executableRelPaths: {'App.framework/Versions/A/App'},
+      );
+
+      // 8 KiB of repetitive payload must deflate well below its raw size.
+      expect(zip.length, lessThan(1024));
+      final entries = macho.readFrameworkZipEntries(zip);
+      expect(entries.length, 2);
+      expect(entries.singleWhere((e) => e.path.endsWith('/App')).data, big);
+      expect(
+        _hex(macho.sha256(zip)),
+        'f8c76bcd3d1d1ac19ab345a1043d3916f94ce22b188951762bb5f66dcd838ec4',
+      );
+    });
   });
 }
