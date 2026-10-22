@@ -139,6 +139,7 @@ def _link_staged_files(ctx, seen, stage_prefix):
         root = root,
         files = staged,
     )
+
 def stage_generated_inputs(ctx, files, scope, include_sources = False, salt = "", stable_root = False):
     """Stages declared `files` into a per-action multi-root directory.
 
