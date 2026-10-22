@@ -8,6 +8,7 @@ One repo per unique target platform, shared across hosts.
 """
 
 load(":artifact_urls.bzl", "desktop_engine_artifact_path", "engine_artifact_url", "require_sha256")
+load(":download.bzl", "pinned_download_and_extract")
 load(":engine_helpers.bzl", "engine_filegroup_for_os", "extract_macos_inner_framework")
 load(":local_sdk.bzl", "engine_cache_dir", "link_local_dir", "macos_framework_cache_path", "resolve_local_sdk_root")
 
@@ -64,7 +65,8 @@ def _flutter_desktop_engine_repo_impl(repository_ctx):
         artifact_path,
         getattr(repository_ctx.attr, "engine_base_url", ""),
     )
-    repository_ctx.download_and_extract(
+    pinned_download_and_extract(
+        repository_ctx,
         url = url,
         sha256 = require_sha256(repository_ctx.attr.sha256, url),
         output = "engine",
@@ -79,7 +81,8 @@ def _flutter_desktop_engine_repo_impl(repository_ctx):
             wrapper_path,
             getattr(repository_ctx.attr, "engine_base_url", ""),
         )
-        repository_ctx.download_and_extract(
+        pinned_download_and_extract(
+            repository_ctx,
             url = wrapper_url,
             sha256 = require_sha256(repository_ctx.attr.cpp_client_wrapper_sha256, wrapper_url),
             output = "cpp-client-wrapper",

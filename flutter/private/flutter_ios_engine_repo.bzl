@@ -11,6 +11,7 @@ This is lazy — only fetched when an iOS build target is used.
 """
 
 load(":artifact_urls.bzl", "engine_artifact_url", "ios_engine_artifact_path", "require_sha256")
+load(":download.bzl", "pinned_download_and_extract")
 load(":local_sdk.bzl", "engine_cache_dir", "link_local_dir", "link_local_file", "resolve_local_sdk_root")
 
 def _flutter_ios_engine_repo_impl(repository_ctx):
@@ -54,7 +55,8 @@ def _flutter_ios_engine_repo_impl(repository_ctx):
         ios_engine_artifact_path("release"),
         getattr(repository_ctx.attr, "engine_base_url", ""),
     )
-    repository_ctx.download_and_extract(
+    pinned_download_and_extract(
+        repository_ctx,
         url = release_url,
         sha256 = require_sha256(repository_ctx.attr.release_sha256, release_url),
     )
@@ -66,7 +68,8 @@ def _flutter_ios_engine_repo_impl(repository_ctx):
         ios_engine_artifact_path("debug"),
         getattr(repository_ctx.attr, "engine_base_url", ""),
     )
-    repository_ctx.download_and_extract(
+    pinned_download_and_extract(
+        repository_ctx,
         url = debug_url,
         sha256 = require_sha256(repository_ctx.attr.debug_sha256, debug_url),
         output = "debug",

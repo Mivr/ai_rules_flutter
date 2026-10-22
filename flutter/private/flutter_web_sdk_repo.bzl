@@ -7,6 +7,7 @@ shared host Dart SDK repositories via declared labels.
 """
 
 load(":artifact_urls.bzl", "engine_artifact_url", "require_sha256")
+load(":download.bzl", "pinned_download_and_extract")
 load(":local_sdk.bzl", "link_local_dir", "resolve_local_sdk_root")
 load(":toolchains_repo.bzl", "HOST_PLATFORMS")
 
@@ -332,7 +333,8 @@ def _flutter_web_sdk_repo_impl(repository_ctx):
             "flutter-web-sdk.zip",
             getattr(repository_ctx.attr, "engine_base_url", ""),
         )
-        repository_ctx.download_and_extract(
+        pinned_download_and_extract(
+            repository_ctx,
             url = web_url,
             sha256 = require_sha256(repository_ctx.attr.sha256, web_url),
             output = "web-sdk",

@@ -30,6 +30,7 @@ surface small).
 load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version", "make_dart_library_build_content", "trim_gzip_trailing_nulls")
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_deps", "parse_pubspec_sdk_constraint")
 load("//flutter/private:artifact_urls.bzl", "require_sha256")
+load("//flutter/private:download.bzl", "pinned_download")
 load("//flutter/private:flutter_pubspec.bzl", "parse_flutter_assets_block", "parse_flutter_plugin_block")
 
 # Apple source extensions we sweep into the per-platform plugin library.
@@ -1677,7 +1678,8 @@ def _flutter_pub_package_impl(ctx):
     # Match `pub_lock_package`'s download/extract semantics: verify sha256 on
     # download, strip any trailing NUL padding past the RFC 1952 gzip trailer,
     # and unpack with `ctx.extract`.
-    ctx.download(
+    pinned_download(
+        ctx,
         url = url,
         output = "_archive.tar.gz",
         sha256 = require_sha256(ctx.attr.sha256, url),

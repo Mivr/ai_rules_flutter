@@ -55,6 +55,7 @@ applies is a loud failure, where a rewrite would quietly drift.
 """
 
 load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url", "require_sha256")
+load("//flutter/private:download.bzl", "pinned_download_and_extract")
 load("//flutter/private:local_sdk.bzl", "copy_local_file", "read_local_sdk_version", "resolve_local_sdk_root")
 
 # The exact closure of `src/localizations/gen_l10n.dart` once the six import
@@ -120,7 +121,8 @@ def _flutter_gen_l10n_repo_impl(repository_ctx):
     else:
         tarball_url = getattr(repository_ctx.attr, "source_url", "") or flutter_source_tarball_url(version)
         strip_prefix = getattr(repository_ctx.attr, "source_strip_prefix", "") or "flutter-{}/".format(version)
-        repository_ctx.download_and_extract(
+        pinned_download_and_extract(
+            repository_ctx,
             url = tarball_url,
             sha256 = require_sha256(repository_ctx.attr.sha256, tarball_url),
             stripPrefix = strip_prefix + "packages/flutter_tools",

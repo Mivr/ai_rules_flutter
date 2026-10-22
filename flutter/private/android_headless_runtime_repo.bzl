@@ -14,6 +14,7 @@ or `xz` binaries.
 """
 
 load(":artifact_urls.bzl", "require_sha256")
+load(":download.bzl", "pinned_download_and_extract")
 
 ANDROID_EMULATOR_BUILD_ID = "16428233"
 
@@ -252,7 +253,8 @@ def _android_headless_runtime_repo_impl(repository_ctx):
         system_image_sha256 = repository_ctx.attr.system_image_sha256,
     )
 
-    repository_ctx.download_and_extract(
+    pinned_download_and_extract(
+        repository_ctx,
         url = spec.emulator_url,
         sha256 = spec.emulator_sha256,
         output = "sdk",
@@ -260,7 +262,8 @@ def _android_headless_runtime_repo_impl(repository_ctx):
     for prune_path in _EMULATOR_PRUNE_PATHS:
         repository_ctx.delete(prune_path)
 
-    repository_ctx.download_and_extract(
+    pinned_download_and_extract(
+        repository_ctx,
         url = spec.platform_tools_url,
         sha256 = spec.platform_tools_sha256,
         output = "sdk",
@@ -270,7 +273,8 @@ def _android_headless_runtime_repo_impl(repository_ctx):
         repository_ctx.attr.system_image_api_level,
         repository_ctx.attr.system_image_tag,
     )
-    repository_ctx.download_and_extract(
+    pinned_download_and_extract(
+        repository_ctx,
         url = spec.system_image_url,
         sha256 = spec.system_image_sha256,
         output = sysimg_output,
@@ -285,7 +289,8 @@ def _android_headless_runtime_repo_impl(repository_ctx):
 
     for deb in spec.runtime_debs:
         tmp_dir = "_deb_" + deb.name
-        repository_ctx.download_and_extract(
+        pinned_download_and_extract(
+            repository_ctx,
             url = deb.url,
             sha256 = deb.sha256,
             output = tmp_dir,

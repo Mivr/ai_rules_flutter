@@ -35,6 +35,7 @@ load(
 load("@rules_cc//cc:defs.bzl", "CcToolchainConfigInfo")
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load(":artifact_urls.bzl", "require_sha256")
+load(":download.bzl", "pinned_download_and_extract")
 
 XTOOL_DARWIN_TARGETS = {
     "ios_arm64": struct(
@@ -728,7 +729,8 @@ def _xtool_darwin_sdk_repo_impl(repository_ctx):
     swift_bin_dir = ""
 
     if cfg.url:
-        repository_ctx.download_and_extract(
+        pinned_download_and_extract(
+            repository_ctx,
             url = cfg.url,
             sha256 = require_sha256(cfg.sha256, cfg.url),
             output = "sdk",

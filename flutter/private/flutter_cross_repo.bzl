@@ -9,6 +9,7 @@ engine repo's gen_snapshot_arm64 instead of downloading a separate one.
 """
 
 load(":artifact_urls.bzl", "engine_artifact_url", "gen_snapshot_cross_artifact_path", "require_sha256")
+load(":download.bzl", "pinned_download_and_extract")
 load(":engine_helpers.bzl", "dart_binary_name", "dartaotruntime_binary_name", "gen_snapshot_host_platform", "platform_to_arch", "platform_to_os")
 load(":local_sdk.bzl", "link_local_file", "read_local_sdk_version", "resolve_local_sdk_root")
 
@@ -134,7 +135,8 @@ def _flutter_cross_compilation_repo_impl(repository_ctx):
             artifact_path,
             getattr(repository_ctx.attr, "engine_base_url", ""),
         )
-        repository_ctx.download_and_extract(
+        pinned_download_and_extract(
+            repository_ctx,
             url = url,
             sha256 = require_sha256(repository_ctx.attr.gen_snapshot_sha256, url),
         )

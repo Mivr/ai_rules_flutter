@@ -7,6 +7,7 @@ One repo per target architecture (amd64/arm64), shared across host platforms.
 """
 
 load(":artifact_urls.bzl", "require_sha256")
+load(":download.bzl", "pinned_download_and_extract")
 load(":engine_helpers.bzl", "linux_multiarch_triple")
 
 _SYSROOT_URL = "https://commondatastorage.googleapis.com/chrome-linux-sysroot/{sha256}"
@@ -27,7 +28,8 @@ def _flutter_linux_sysroot_repo_impl(repository_ctx):
         fail("Unsupported sysroot architecture: {}".format(target_arch))
 
     url = _SYSROOT_URL.format(sha256 = sha256)
-    repository_ctx.download_and_extract(
+    pinned_download_and_extract(
+        repository_ctx,
         url = url,
         sha256 = require_sha256(sha256, url),
         type = "tar.xz",

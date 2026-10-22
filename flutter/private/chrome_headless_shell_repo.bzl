@@ -14,6 +14,7 @@ without relying on any host `ar`, `xz`, or `unzip` binaries.
 """
 
 load(":artifact_urls.bzl", "require_sha256")
+load(":download.bzl", "pinned_download_and_extract")
 
 CHROME_HEADLESS_SHELL_VERSION = "155.0.8059.84"
 
@@ -167,7 +168,8 @@ def _chrome_headless_shell_repo_impl(repository_ctx):
         sha256 = repository_ctx.attr.sha256,
     )
 
-    repository_ctx.download_and_extract(
+    pinned_download_and_extract(
+        repository_ctx,
         url = spec.browser_url,
         sha256 = spec.browser_sha256,
         stripPrefix = "chrome-headless-shell-linux64",
@@ -176,7 +178,8 @@ def _chrome_headless_shell_repo_impl(repository_ctx):
 
     for deb in spec.runtime_debs:
         tmp_dir = "_deb_" + deb.name
-        repository_ctx.download_and_extract(
+        pinned_download_and_extract(
+            repository_ctx,
             url = deb.url,
             sha256 = deb.sha256,
             output = tmp_dir,

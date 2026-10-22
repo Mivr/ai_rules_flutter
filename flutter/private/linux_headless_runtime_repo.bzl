@@ -13,6 +13,7 @@ Extracted entirely via Bazel's built-in JVM archive extractors (`ar`/`.deb` +
 """
 
 load(":artifact_urls.bzl", "require_sha256")
+load(":download.bzl", "pinned_download_and_extract")
 
 _DEBIAN_POOL_BASE_URL = "https://deb.debian.org/debian/"
 
@@ -236,7 +237,8 @@ def _linux_headless_runtime_repo_impl(repository_ctx):
 
     for deb in spec.runtime_debs:
         tmp_dir = "_deb_" + deb.name
-        repository_ctx.download_and_extract(
+        pinned_download_and_extract(
+            repository_ctx,
             url = deb.url,
             sha256 = deb.sha256,
             output = tmp_dir,

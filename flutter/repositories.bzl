@@ -8,6 +8,7 @@ load("//flutter/private:android_headless_runtime_repo.bzl", "android_headless_ru
 load("//flutter/private:artifact_urls.bzl", "android_engine_artifact_path", "dart_sdk_artifact_path", "desktop_engine_artifact_path", "engine_artifact_url", "gen_snapshot_cross_artifact_path", "host_artifacts_path", "ios_engine_artifact_path", "require_sha256")
 load("//flutter/private:chrome_headless_shell_repo.bzl", "chrome_headless_shell_repo")
 load("//flutter/private:constants.bzl", "ANDROID_ABI_FOR_ARCH")
+load("//flutter/private:download.bzl", "pinned_download_and_extract")
 load("//flutter/private:engine_helpers.bzl", "PLATFORM_PREFIX_TO_OS", "dart_binary_name", "dartaotruntime_binary_name", "engine_arch_for_os", "engine_filegroup_for_os", "gen_snapshot_host_platform")
 load("//flutter/private:flutter_android_engine_repo.bzl", "flutter_android_engine_repo")
 load("//flutter/private:flutter_cross_repo.bzl", "flutter_cross_compilation_repo")
@@ -44,7 +45,8 @@ def _flutter_patched_sdk_product_repo_impl(repository_ctx):
         "flutter_patched_sdk_product.zip",
         getattr(repository_ctx.attr, "engine_base_url", ""),
     )
-    repository_ctx.download_and_extract(
+    pinned_download_and_extract(
+        repository_ctx,
         url = url,
         sha256 = require_sha256(repository_ctx.attr.sha256, url),
         output = "patched-sdk-product",
@@ -101,7 +103,8 @@ def _flutter_material_fonts_repo_impl(repository_ctx):
         _write_material_fonts_build(repository_ctx)
         return
     url = "https://storage.googleapis.com/" + repository_ctx.attr.material_fonts_url
-    repository_ctx.download_and_extract(
+    pinned_download_and_extract(
+        repository_ctx,
         url = url,
         sha256 = require_sha256(repository_ctx.attr.sha256, url),
         output = "material-fonts",
@@ -172,7 +175,8 @@ def _flutter_font_subset_repo_impl(repository_ctx):
         font_subset_path,
         getattr(repository_ctx.attr, "engine_base_url", ""),
     )
-    repository_ctx.download_and_extract(
+    pinned_download_and_extract(
+        repository_ctx,
         url = url,
         sha256 = require_sha256(repository_ctx.attr.sha256, url),
         output = "font-subset-tools",
@@ -229,7 +233,8 @@ def _flutter_host_tools_release_repo_impl(repository_ctx):
         release_tools_path,
         getattr(repository_ctx.attr, "engine_base_url", ""),
     )
-    repository_ctx.download_and_extract(
+    pinned_download_and_extract(
+        repository_ctx,
         url = url,
         sha256 = require_sha256(repository_ctx.attr.sha256, url),
         output = "host-tools-release",
@@ -742,7 +747,8 @@ def _flutter_engine_artifacts_impl(repository_ctx):
     dart_sdk_sha256 = repository_ctx.attr.dart_sdk_sha256
     if not dart_sdk_sha256:
         dart_sdk_sha256 = flutter_artifact_sha256(flutter_version, dart_sdk_path)
-    repository_ctx.download_and_extract(
+    pinned_download_and_extract(
+        repository_ctx,
         url = engine_artifact_url(engine_revision, dart_sdk_path, engine_base_url),
         sha256 = require_sha256(dart_sdk_sha256, dart_sdk_path),
         stripPrefix = "dart-sdk",
@@ -761,7 +767,8 @@ def _flutter_engine_artifacts_impl(repository_ctx):
     host_tools_sha256 = repository_ctx.attr.host_tools_sha256
     if not host_tools_sha256:
         host_tools_sha256 = flutter_artifact_sha256(flutter_version, host_tools_path)
-    repository_ctx.download_and_extract(
+    pinned_download_and_extract(
+        repository_ctx,
         url = engine_artifact_url(engine_revision, host_tools_path, engine_base_url),
         sha256 = require_sha256(host_tools_sha256, host_tools_path),
         output = "host-tools",
@@ -771,7 +778,8 @@ def _flutter_engine_artifacts_impl(repository_ctx):
     patched_sdk_sha256 = repository_ctx.attr.patched_sdk_sha256
     if not patched_sdk_sha256:
         patched_sdk_sha256 = flutter_artifact_sha256(flutter_version, "flutter_patched_sdk.zip")
-    repository_ctx.download_and_extract(
+    pinned_download_and_extract(
+        repository_ctx,
         url = engine_artifact_url(engine_revision, "flutter_patched_sdk.zip", engine_base_url),
         sha256 = require_sha256(patched_sdk_sha256, "flutter_patched_sdk.zip"),
         output = "patched-sdk",
