@@ -7,33 +7,213 @@ ProGuard detection) so every reader shares one consistent model.
 long-standing entry points (`maven_labels_for_gradle`,
 `parse_gradle_android_namespace`).
 """
+
+def _gradle_scan_quoted(stmt, n, i):
+    """Return the end index of the quoted literal opening at `i`.
+
+    Triple-quoted opens scan for the triple closer, single opens for the
+    matching quote; a backslash escapes the next character. An
+    unterminated quote scans to end of input, so broken quoting can never
+    read as structure.
+
+    Args:
+        stmt: One statement from `_gradle_lex`.
+        n: Length of `stmt`.
+        i: Index of the opening quote.
+
+    Returns:
+        The index just past the literal (or `n` when unterminated).
+    """
+    quote = stmt[i:i + 1]
+    if stmt[i:i + 3] == quote + quote + quote:
+        closer = quote + quote + quote
+        adv = 3
+        j = i + 3
+    else:
+        closer = quote
+        adv = 1
+        j = i + 1
+    for _ in range(n + 1):
+        if j >= n:
+            break
+        if stmt[j:j + 1] == "\\" and j + 1 < n:
+            j += 2
+        elif stmt[j:j + adv] == closer:
+            return j + adv
+        else:
+            j += 1
+    return j
+
+def _gradle_stmt_segments(stmt):
+    """Split one lexed statement into code/literal segments.
+
+    String literals (single-, double- and triple-quoted, backslash-aware)
+    become `struct(code = False, text)` spans; everything else accumulates
+    into `struct(code = True, text)` spans. An unterminated quote swallows
+    the rest of the statement as one literal span, so broken quoting can
+    never read as structure. Joining the spans reproduces the statement.
+
+    Args:
+        stmt: One statement from `_gradle_lex`.
+
+    Returns:
+        The segment list in source order.
+    """
+    segs = []
+    buf = []
+    n = len(stmt)
+    i = 0
+    for _ in range(n + 1):
+        if i >= n:
+            break
+        c = stmt[i:i + 1]
+        if c != "'" and c != '"':
+            buf.append(c)
+            i += 1
+            continue
+        segs.append(struct(code = True, text = "".join(buf)))
+        buf = []
+        j = _gradle_scan_quoted(stmt, n, i)
+        segs.append(struct(code = False, text = stmt[i:j]))
+        i = j
+    segs.append(struct(code = True, text = "".join(buf)))
+    return segs
+
+def _gradle_namespace_result(statement, value, literal):
+    """One namespace declaration: `value` with its `literal` flag."""
+    return struct(statement = statement, value = value, literal = literal)
+
+def _gradle_namespace_quoted_value(literal):
+    """Read one literal span's value; return `(inner, ok)`.
+
+    Single-, double- and triple-quoted spellings all count as one string
+    literal. Anything else — a variable, a catalog ref, concatenation
+    residue — is not a literal.
+    """
+    q = literal[0:1]
+    if q != "'" and q != '"':
+        return (None, False)
+    if literal[0:3] == q + q + q:
+        if len(literal) < 6 or literal[len(literal) - 3:] != q + q + q:
+            return (None, False)
+        return (literal[3:len(literal) - 3], True)
+    if len(literal) < 2 or literal[len(literal) - 1:] != q:
+        return (None, False)
+    return (literal[1:len(literal) - 1], True)
+
+def _gradle_namespace_forms(stmt, segs, compact, forms):
+    """File one namespace-shaped statement as good, bad or ignored."""
+    literals = [s.text for s in segs if not s.code]
+    if len(literals) == 0:
+        # A bare reference (`namespace`, `android.namespace`) reads
+        # nothing; any other declaration-shaped statement without a
+        # literal has a non-literal value.
+        if compact in ("namespace", "android.namespace"):
+            return None
+        return _gradle_namespace_result(stmt, "", False)
+    if len(literals) != 1 or compact not in forms:
+        return _gradle_namespace_result(stmt, "", False)
+    (inner, ok) = _gradle_namespace_quoted_value(literals[0])
+    if not ok:
+        return _gradle_namespace_result(stmt, "", False)
+    return _gradle_namespace_result(stmt, inner, True)
+
+def _gradle_parse_namespace_stmt(stmt, stack):
+    """Parse one lexed statement as an Android namespace declaration.
+
+    A declaration is a `namespace` assignment or call whose innermost
+    block is `android` (at any nesting depth), or a top-level
+    `android.namespace = ...`. Anything else — including a `namespace`
+    word inside a nested non-`android` block — declares nothing. Comments
+    never reach this function (the lexer drops them) and string contents
+    arrive as literal segments, so neither can count.
+
+    Args:
+        stmt: One statement from `_gradle_lex`.
+        stack: The block-name stack around the statement.
+
+    Returns:
+        None when the statement declares no namespace, else
+        `struct(statement, value, literal)`; `literal` is False when the
+        statement names a namespace but its value is not one string
+        literal.
+    """
+    segs = _gradle_stmt_segments(stmt)
+    code = "".join([s.text for s in segs if s.code])
+    compact = code.replace(" ", "").replace("\t", "").replace("\r", "").replace("\n", "")
+    word = _gradle_leading_word(code.strip())
+    if word == "namespace":
+        if not stack or stack[len(stack) - 1] != "android":
+            return None
+        return _gradle_namespace_forms(stmt, segs, compact, (
+            "namespace=",
+            "namespace",
+            "namespace()",
+            "namespace.set()",
+        ))
+    if word == "android" and len(stack) == 0:
+        if len(compact) < 17 or compact[:17] != "android.namespace":
+            return None
+        tail = compact[17:]
+        if tail != "" and tail[0] not in "=(.":
+            return None
+        return _gradle_namespace_forms(stmt, segs, compact, (
+            "android.namespace=",
+        ))
+    return None
+
+def gradle_android_namespaces(content):
+    """List every Android namespace declaration in one Gradle script.
+
+    Walks the same lexed statement model the dependency reader uses, so
+    layout is insignificant and comments and string contents never count.
+    Several assignments each appear; Gradle applies them in order, so the
+    last one wins.
+
+    Args:
+        content: The `build.gradle` / `build.gradle.kts` file content.
+
+    Returns:
+        The `struct(statement, value, literal)` list in source order.
+    """
+    found = []
+    stack = []
+    for e in _gradle_lex(content):
+        if e.kind == "open":
+            stack.append(_gradle_leading_word(e.text))
+        elif e.kind == "close":
+            if stack:
+                stack.pop()
+        elif e.kind == "stmt":
+            parsed = _gradle_parse_namespace_stmt(e.text, stack)
+            if parsed != None:
+                found.append(parsed)
+    return found
+
 def parse_gradle_android_namespace(content):
     """Extract `android.namespace` from a Gradle build script.
 
-    Handles the AGP-8 assignment forms
-    `namespace = 'com.example'` (Groovy) / `namespace = "com.example"`
-    (Kotlin DSL) and the Groovy method-call form `namespace 'com.example'`.
+    Reads the same lexed statement model as the dependency parser: a
+    `namespace` assignment or call whose innermost block is `android`
+    (even on one line, even nested inside other blocks), or a top-level
+    `android.namespace = ...`. Comments and string contents never count.
+    When several assignments exist the last one wins, the way Gradle
+    applies them.
 
     Args:
         content: The `build.gradle` / `build.gradle.kts` file content.
 
     Returns:
         The declared namespace, or empty string when the script
-        declares none.
+        declares none. A declaration whose value is not one string
+        literal is reported through `gradle_android_namespaces` and
+        refused by the repository rule; here it reads as no namespace.
     """
-    for raw_line in content.split("\n"):
-        line = raw_line.strip()
-        if not line.startswith("namespace"):
-            continue
-        rest = line[len("namespace"):].strip()
-        if rest.startswith("="):
-            rest = rest[1:].strip()
-        for quote in ("'", '"'):
-            if rest.startswith(quote):
-                end = rest.find(quote, 1)
-                if end > 0:
-                    return rest[1:end]
-    return ""
+    value = ""
+    for ns in gradle_android_namespaces(content):
+        if ns.literal and ns.value:
+            value = ns.value
+    return value
 
 def parse_android_manifest_package(content):
     """Extract the `package` attribute from an AndroidManifest.xml.
@@ -63,43 +243,126 @@ def parse_android_manifest_package(content):
                 return tag[idx + len(marker):close]
     return ""
 
-def detect_android_namespace(ctx):
+def gradle_build_file_choice(has_gradle, has_kts):
+    """Name the plugin Android build file Gradle would evaluate.
+
+    Gradle builds each project from a single build script (Gradle User
+    Manual, Writing Build Scripts): `build.gradle` and
+    `build.gradle.kts` are alternatives, never merged. When both files are
+    present the Groovy `build.gradle` wins — verified against Gradle
+    8.10.0, where a probe project carrying both files evaluated the
+    Groovy build and ignored the Kotlin one (the `whoGroovy` task ran,
+    the `whoKts` task did not exist).
+
+    Args:
+        has_gradle: True when `android/build.gradle` exists.
+        has_kts: True when `android/build.gradle.kts` exists.
+
+    Returns:
+        The chosen spoke-relative path, or "" when neither file exists.
+    """
+    if has_gradle:
+        return "android/build.gradle"
+    if has_kts:
+        return "android/build.gradle.kts"
+    return ""
+
+def plugin_android_build(ctx):
+    """Read the spoke's single Android Gradle build file.
+
+    Makes the one Gradle-consistent choice (see
+    `gradle_build_file_choice`) and returns `struct(path, content)`: the
+    spoke-relative path and its text, or `("", "")` when the plugin ships
+    neither file. Every reader of the plugin's Android build —
+    dependencies, namespace, native-build and ProGuard detection — shares
+    this one result, so the spoke can never merge `build.gradle`'s
+    namespace with `build.gradle.kts`'s dependencies the way Gradle never
+    does.
+
+    Args:
+        ctx: the spoke repository context (path, exists and read).
+
+    Returns:
+        `struct(path, content)`: the spoke-relative path and its text,
+        or `("", "")` when the plugin ships neither file.
+    """
+    gradle_path = ctx.path("android/build.gradle")
+    kts_path = ctx.path("android/build.gradle.kts")
+    choice = gradle_build_file_choice(gradle_path.exists, kts_path.exists)
+    if choice == "android/build.gradle":
+        return struct(path = choice, content = ctx.read(gradle_path))
+    if choice == "android/build.gradle.kts":
+        return struct(path = choice, content = ctx.read(kts_path))
+    return struct(path = "", content = "")
+
+def detect_android_namespace(ctx, build_file, build_content):
     """Resolve the plugin's Android namespace the way AGP does.
 
-    AGP determines a library's namespace from `android.namespace` in
-    `build.gradle(.kts)`, falling back to the manifest's `package`
-    attribute for pre-AGP-8 projects. The namespace is where the
+    AGP determines a library's namespace from `android.namespace` in the
+    project's single build script, falling back to the manifest's
+    `package` attribute for pre-AGP-8 projects. The namespace is where the
     generated `R` and `BuildConfig` classes live, so resource
     references like `R.drawable.ic_mic` only resolve when we use the
-    same one. Returns empty string when the plugin declares neither.
+    same one. `build_file` / `build_content` are the spoke's single
+    Gradle build (see `plugin_android_build`).
+
+    Several assignments resolve last-wins, the way Gradle applies them. A
+    declaration whose value is not one string literal fails the fetch,
+    naming the plugin and the statement. Returns empty string when the
+    plugin declares no namespace anywhere.
+
+    Args:
+        ctx: the spoke repository context (package name, manifest read).
+        build_file: the spoke-relative Gradle build path, for errors.
+        build_content: the text of the spoke's single Gradle build.
+
+    Returns:
+        The Android namespace, or "" when the plugin declares none.
     """
-    for filename in ("android/build.gradle", "android/build.gradle.kts"):
-        p = ctx.path(filename)
-        if p.exists:
-            namespace = parse_gradle_android_namespace(ctx.read(p))
-            if namespace:
-                return namespace
+    if build_content:
+        value = ""
+        for ns in gradle_android_namespaces(build_content):
+            if not ns.literal:
+                fail((
+                    "flutter.pub spoke for \"{pkg}\": {gradle} sets the Android " +
+                    "namespace to {stmt}, which is not one string literal " +
+                    "(expected namespace = 'com.example.plugin'). A namespace " +
+                    "read from a variable, a catalog or an expression cannot " +
+                    "be resolved to a Java package at fetch time."
+                ).format(
+                    pkg = ctx.attr.package_name,
+                    gradle = build_file,
+                    stmt = repr(ns.statement),
+                ))
+            if ns.value:
+                value = ns.value
+        if value:
+            return value
     manifest_path = ctx.path("android/src/main/AndroidManifest.xml")
     if manifest_path.exists:
         return parse_android_manifest_package(ctx.read(manifest_path))
     return ""
-def detect_android_native_build(ctx):
+
+def detect_android_native_build(build_content):
     """True when the plugin's Gradle build compiles native code with the NDK.
 
-    Gradle-built Flutter plugins declare `externalNativeBuild` in
-    `android/build.gradle*` to compile C/C++ sources (CMake / ndk-build)
-    into a shared library the APK must carry — e.g. package:jni's
-    libdartjni.so. rules_flutter has no generic translation for those
-    builds; packages that need one ship a curated overlay (bundled under
-    `@rules_flutter//ext/` or user-supplied via `flutter.plugin_overlays`).
-    Detection lets the generated android/ sub-package fail loudly instead
-    of silently producing an APK missing the library.
+    Gradle-built Flutter plugins declare `externalNativeBuild` in the
+    project's single build script to compile C/C++ sources (CMake /
+    ndk-build) into a shared library the APK must carry — e.g.
+    package:jni's libdartjni.so. rules_flutter has no generic translation
+    for those builds; packages that need one ship a curated overlay
+    (bundled under `@rules_flutter//ext/` or user-supplied via
+    `flutter.plugin_overlays`). Detection lets the generated android/
+    sub-package fail loudly instead of silently producing an APK missing
+    the library.
+
+    Args:
+        build_content: The spoke's single Gradle build text (see
+            `plugin_android_build`); "" when the plugin ships no build
+            file.
     """
-    for filename in ("android/build.gradle", "android/build.gradle.kts"):
-        p = ctx.path(filename)
-        if p.exists and "externalNativeBuild" in ctx.read(p):
-            return True
-    return False
+    return "externalNativeBuild" in build_content
+
 def _parse_consumer_proguard_files(content):
     """Extract `consumerProguardFiles` paths from a Gradle build script.
 
@@ -136,10 +399,10 @@ def _parse_consumer_proguard_files(content):
                 idx = end + 1
     return sorted(paths.keys())
 
-def detect_consumer_proguard_specs(ctx):
+def detect_consumer_proguard_specs(ctx, build_content):
     """Find the plugin's `consumer-rules.pro` files, declared via Gradle.
 
-    Reads `android/build.gradle` (or `android/build.gradle.kts`),
+    Reads the spoke's single Gradle build (see `plugin_android_build`),
     parses `consumerProguardFiles` declarations, and returns paths
     relative to the spoke's `android/` sub-package — only for files
     that actually exist on disk. Empty when the plugin doesn't ship
@@ -147,15 +410,21 @@ def detect_consumer_proguard_specs(ctx):
     invocation; rules_android does the same when they appear in
     `kt_android_library(proguard_specs = [...])` and the binary has
     R8 enabled.
+
+    Args:
+        ctx: the spoke repository context (file existence checks).
+        build_content: the text of the spoke's single Gradle build.
+
+    Returns:
+        Spoke-`android/`-relative paths of existing consumer rule files.
     """
     paths = []
-    for filename in ("build.gradle", "build.gradle.kts"):
-        gradle_path = ctx.path("android/" + filename)
-        if gradle_path.exists:
-            for relpath in _parse_consumer_proguard_files(ctx.read(gradle_path)):
-                if ctx.path("android/" + relpath).exists:
-                    paths.append(relpath)
+    if build_content:
+        for relpath in _parse_consumer_proguard_files(build_content):
+            if ctx.path("android/" + relpath).exists:
+                paths.append(relpath)
     return paths
+
 # Map well-known maven coordinates the plugin's `build.gradle` may pull
 # in to labels under `@rules_android_maven`. We translate
 # `implementation("group:artifact:version")` declarations into Bazel
@@ -321,7 +590,8 @@ def _gradle_flush_to(events, buf, kind):
     Args:
         events: The event list being built.
         buf: The character accumulator for the current segment.
-        kind: `"stmt"` for a statement, `"open"` for a block header.
+        kind: `"stmt"` for a statement, `"open"` for a block header,
+            `"unbalanced"` for a trailing unbalanced-bracket fragment.
     """
     s = "".join(buf)
     for _ in range(len(buf)):
@@ -330,11 +600,21 @@ def _gradle_flush_to(events, buf, kind):
     if s or kind == "open":
         events.append(struct(kind = kind, text = s))
 
-def _gradle_lex_comment(content, i, buf, events):
-    """Consume a `//` or `/* */` comment; return the `(state, next_i)` pair."""
+def _gradle_lex_comment(content, i, buf, events, depth):
+    """Enter a comment state; return the `(state, next_i)` pair.
+
+    At bracket depth 0 a comment ends the pending statement, as before.
+    Inside `(...)` / `[...]` the comment is layout: the statement being
+    built continues past it, so a commented line inside a parenthesised
+    call cannot split the call apart.
+    """
     if content[i:i + 2] == "//":
+        if depth > 0:
+            return (7, i + 2)
         _gradle_flush_to(events, buf, "stmt")
         return (1, i + 2)
+    if depth > 0:
+        return (8, i + 2)
     return (2, i + 2)
 
 def _gradle_lex_string_open(content, i, buf):
@@ -351,26 +631,45 @@ def _gradle_lex_string_open(content, i, buf):
         return (3, i + 1)
     return (4, i + 1)
 
-def _gradle_lex_code(content, i, buf, events):
-    """Lex one code-state character; return the `(state, next_i)` pair."""
+def _gradle_lex_code(content, i, buf, events, depth):
+    """Lex one code-state character; return `(state, next_i, depth)`.
+
+    Newlines, `;` and `\r` inside `(...)` / `[...]` are layout (one
+    space): a call spanning lines lexes as one statement, the way Gradle
+    parses it. Statements still end at a newline or `;` at bracket depth
+    0, and at `{` / `}`.
+    """
     two = content[i:i + 2]
     if two == "//" or two == "/*":
-        return _gradle_lex_comment(content, i, buf, events)
+        (state, next_i) = _gradle_lex_comment(content, i, buf, events, depth)
+        return (state, next_i, depth)
     c = content[i:i + 1]
     if c == "'" or c == '"':
-        return _gradle_lex_string_open(content, i, buf)
+        (state, next_i) = _gradle_lex_string_open(content, i, buf)
+        return (state, next_i, depth)
+    if c == "(" or c == "[":
+        buf.append(c)
+        return (0, i + 1, depth + 1)
+    if c == ")" or c == "]":
+        buf.append(c)
+        if depth > 0:
+            depth -= 1
+        return (0, i + 1, depth)
     if c == "\n" or c == ";" or c == "\r":
+        if depth > 0:
+            buf.append(" ")
+            return (0, i + 1, depth)
         _gradle_flush_to(events, buf, "stmt")
-        return (0, i + 1)
+        return (0, i + 1, depth)
     if c == "{":
         _gradle_flush_to(events, buf, "open")
-        return (0, i + 1)
+        return (0, i + 1, depth)
     if c == "}":
         _gradle_flush_to(events, buf, "stmt")
         events.append(struct(kind = "close", text = ""))
-        return (0, i + 1)
+        return (0, i + 1, depth)
     buf.append(c)
-    return (0, i + 1)
+    return (0, i + 1, depth)
 
 def _gradle_lex_short_string(content, n, i, buf, events, quote):
     """Lex one character inside a single-line string; return `(state, next_i)`."""
@@ -403,6 +702,45 @@ def _gradle_lex_long_string(content, n, i, buf, quote3):
         return (5, i + 1)
     return (6, i + 1)
 
+def _gradle_lex_bracket_line_comment(content, i, buf):
+    """Lex one char of a `//` comment inside brackets; return `(state, next_i)`.
+
+    The comment runs to the newline, which resumes the pending statement
+    after one layout space (the bracket depth is tracked separately, so
+    lexing continues as code).
+
+    Args:
+        content: The Gradle script text.
+        i: Index of the character to lex.
+        buf: The pending-statement buffer (mutated).
+
+    Returns:
+        `(state, next_i)` in the `_gradle_lex` numbering.
+    """
+    if content[i:i + 1] == "\n":
+        buf.append(" ")
+        return (0, i + 1)
+    return (7, i + 1)
+
+def _gradle_lex_bracket_block_comment(content, i, buf):
+    """Lex one char of a `/* */` comment inside brackets; return `(state, next_i)`.
+
+    The comment runs to the closer, which resumes the pending statement
+    after one layout space.
+
+    Args:
+        content: The Gradle script text.
+        i: Index of the character to lex.
+        buf: The pending-statement buffer (mutated).
+
+    Returns:
+        `(state, next_i)` in the `_gradle_lex` numbering.
+    """
+    if content[i:i + 2] == "*/":
+        buf.append(" ")
+        return (0, i + 2)
+    return (8, i + 1)
+
 def _gradle_lex(content):
     """Split Gradle script text into statement and brace events.
 
@@ -411,18 +749,27 @@ def _gradle_lex(content):
     `{` and `}` split statements only outside strings. A backslash escapes
     the next character inside a string.
 
+    Bracket-aware: newlines, `;` and `\r` inside `(...)` / `[...]` are
+    layout, so a parenthesised call spanning lines lexes as one statement.
+    Statements end at a newline or `;` at bracket depth 0, and at `{` /
+    `}`. An unbalanced bracket at end of input emits an `unbalanced`
+    event, reported unreadable downstream and never silently ignored.
+
     Args:
         content: The Gradle build-file or applied-script text.
 
     Returns:
         A list of structs: `struct(kind = "stmt", text)` for statements,
         `struct(kind = "open", text)` for a block header (the text before
-        `{`), and `struct(kind = "close", text = "")` for `}`.
+        `{`), `struct(kind = "close", text = "")` for `}`, and
+        `struct(kind = "unbalanced", text)` for a trailing unbalanced
+        bracket fragment.
     """
     events = []
     buf = []
     n = len(content)
     state = 0
+    depth = 0
     i = 0
     for _ in range(n + 2):
         if i >= n:
@@ -430,7 +777,7 @@ def _gradle_lex(content):
         c = content[i:i + 1]
         two = content[i:i + 2]
         if state == 0:
-            (state, i) = _gradle_lex_code(content, i, buf, events)
+            (state, i, depth) = _gradle_lex_code(content, i, buf, events, depth)
         elif state == 1:
             if c == "\n":
                 _gradle_flush_to(events, buf, "stmt")
@@ -448,9 +795,18 @@ def _gradle_lex(content):
             (state, i) = _gradle_lex_short_string(content, n, i, buf, events, '"')
         elif state == 5:
             (state, i) = _gradle_lex_long_string(content, n, i, buf, "'''")
-        else:
+        elif state == 6:
             (state, i) = _gradle_lex_long_string(content, n, i, buf, '"""')
-    _gradle_flush_to(events, buf, "stmt")
+        elif state == 7:
+            (state, i) = _gradle_lex_bracket_line_comment(content, i, buf)
+        else:
+            (state, i) = _gradle_lex_bracket_block_comment(content, i, buf)
+    if depth > 0:
+        _gradle_flush_to(events, buf, "unbalanced")
+        if len(events) == 0 or events[len(events) - 1].kind != "unbalanced":
+            events.append(struct(kind = "unbalanced", text = "unbalanced bracket"))
+    else:
+        _gradle_flush_to(events, buf, "stmt")
     return events
 
 def _gradle_leading_word(text):
@@ -634,8 +990,56 @@ def _gradle_skip_arg_value(stmt, j):
     w2 = _gradle_leading_word(stmt[j:])
     return j + len(w2) if w2 else (j + 1)
 
+def _gradle_apply_from_arg(stmt, j):
+    """Read the `from` value at word position `j`; return a kind/path struct.
+
+    Groovy map-entry (`from: 'x.gradle'`) and Kotlin assignment
+    (`from = "x.gradle.kts"`) spellings both count; a missing separator
+    or a non-literal value is `"bad"`.
+
+    Args:
+        stmt: The stripped statement text.
+        j: Index of the `from` word.
+
+    Returns:
+        `struct(kind, path)`: `"path"` with the literal, or `"bad"`.
+    """
+    j2 = _gradle_skip_ws(stmt, j + 4)
+    if stmt[j2:j2 + 1] == "=":
+        # Kotlin `apply(from = "x.gradle.kts")`.
+        j3 = _gradle_skip_ws(stmt, j2 + 1)
+    elif stmt[j2:j2 + 1] == ":":
+        # Groovy `apply(from: 'x.gradle')`: the same named argument
+        # with map-entry syntax.
+        j3 = _gradle_skip_ws(stmt, j2 + 1)
+    else:
+        return _gradle_apply_result("bad", "")
+    (path, _) = _gradle_quoted_at(stmt, j3)
+    if path == None:
+        return _gradle_apply_result("bad", "")
+    return _gradle_apply_result("path", path)
+
+def _gradle_skip_call_arg(stmt, j, w):
+    """Skip one named `name = value` call argument; return the next index.
+
+    A bare word without `=` (a positional plugin id, a flag) stays put
+    past its own end so the caller keeps scanning inside the call.
+
+    Args:
+        stmt: The stripped statement text.
+        j: Index of the argument's leading word.
+        w: The leading word.
+
+    Returns:
+        The index where scanning continues.
+    """
+    j = _gradle_skip_ws(stmt, j + len(w))
+    if stmt[j:j + 1] == "=":
+        j = _gradle_skip_arg_value(stmt, _gradle_skip_ws(stmt, j + 1))
+    return j
+
 def _parse_gradle_apply_kwargs(stmt, pos):
-    """Parse Kotlin `apply(...)` args; return the `from` path struct."""
+    """Parse parenthesised `apply(...)` args; return the `from` path struct."""
     n = len(stmt)
     j = pos
     for _ in range(n + 1):
@@ -655,28 +1059,20 @@ def _parse_gradle_apply_kwargs(stmt, pos):
             if not w:
                 j += 1
             elif w == "from":
-                j2 = _gradle_skip_ws(stmt, j + 4)
-                if stmt[j2:j2 + 1] != "=":
-                    return _gradle_apply_result("bad", "")
-                j3 = _gradle_skip_ws(stmt, j2 + 1)
-                (path, _) = _gradle_quoted_at(stmt, j3)
-                if path == None:
-                    return _gradle_apply_result("bad", "")
-                return _gradle_apply_result("path", path)
+                return _gradle_apply_from_arg(stmt, j)
             else:
-                j = _gradle_skip_ws(stmt, j + len(w))
-                if stmt[j:j + 1] == "=":
-                    j = _gradle_skip_arg_value(stmt, _gradle_skip_ws(stmt, j + 1))
+                j = _gradle_skip_call_arg(stmt, j, w)
     return _gradle_apply_result("none", "")
 
 def _parse_gradle_apply(stmt):
     """Parse an `apply from:` statement; return a kind/path struct.
 
     `kind` is `"path"` (with the literal script path) for the Groovy
-    `apply from: 'x.gradle'` and Kotlin `apply(from = "x.gradle.kts")`
-    spellings, `"bad"` for an `apply` whose `from` is missing or not a
-    plain quoted literal, and `"none"` for anything else (`apply plugin:`
-    and non-`apply` statements).
+    `apply from: 'x.gradle'`, the parenthesised Groovy
+    `apply(from: 'x.gradle')`, and Kotlin
+    `apply(from = "x.gradle.kts")` spellings, `"bad"` for an `apply`
+    whose `from` is missing or not a plain quoted literal, and `"none"`
+    for anything else (`apply plugin:` and non-`apply` statements).
 
     Args:
         stmt: The stripped statement text.
@@ -888,6 +1284,8 @@ def _maven_walk_gradle(content, merged, ignored, labels, unknown, unreadable, re
         elif e.kind == "close":
             if stack:
                 stack.pop()
+        elif e.kind == "unbalanced":
+            unreadable[e.text] = True
         else:
             _maven_visit_gradle_stmt(e.text, stack, merged, ignored, labels, unknown, unreadable, read_script, seen, depth, pending)
 
@@ -901,12 +1299,14 @@ def maven_labels_for_gradle(content, mapping, ignore, read_script = None):
     list of `group:artifact` coordinates that need no label.
 
     The script is lexed string-aware (`//` and `/* */` comments strip only
-    outside single-, double- and triple-quoted literals) and split into
-    statements on newlines, `;`, `{` and `}` outside strings, so layout is
-    insignificant: a single-line `dependencies { implementation 'g:a:1' }`,
-    two declarations on one line separated by `;`, and Gradle's public
-    `add('implementation', 'g:a:1')` (single- or double-quoted) resolve
-    exactly like one declaration per line. Only statements inside a
+    outside single-, double- and triple-quoted literals) and bracket-aware
+    (newlines, `;` and carriage returns inside `(...)` / `[...]` are
+    layout), and split into statements on newlines, `;`, `{` and `}` at
+    bracket depth 0, so layout is insignificant: a single-line
+    `dependencies { implementation 'g:a:1' }`, two declarations on one line
+    separated by `;`, a parenthesised call spanning lines, and Gradle's
+    public `add('implementation', 'g:a:1')` (single- or double-quoted)
+    resolve exactly like one declaration per line. Only statements inside a
     `dependencies` block that is not inside `buildscript` count
     (`buildscript` dependencies are build classpath, never packaged).
 
@@ -922,8 +1322,9 @@ def maven_labels_for_gradle(content, mapping, ignore, read_script = None):
     list rather than reported. `project()` references name a sibling Gradle
     module, not an external artifact, and are left out the same way.
 
-    `apply from:` scripts in both DSL spellings (`apply from: 'x.gradle'`
-    and `apply(from = "x.gradle.kts")`) resolve when the path stays inside
+    `apply from:` scripts in every DSL spelling (`apply from: 'x.gradle'`,
+    `apply(from: 'x.gradle')`, `apply(from = "x.gradle.kts")`, each even
+    spanning lines) resolve when the path stays inside
     the package: the script is read through `read_script` and parsed the
     same way, recursively, with cycle detection and a depth cap of 10.
 
@@ -931,10 +1332,11 @@ def maven_labels_for_gradle(content, mapping, ignore, read_script = None):
     statements in a `dependencies` block that are neither recognised
     runtime nor non-runtime declarations nor `project()` references
     (version-catalog `libs.*` refs, variables, local `files(...)` jars,
-    Gradle maps, interpolated coordinates, multi-line calls, nested blocks
+    Gradle maps, interpolated coordinates, nested blocks
     such as `constraints {}`); `dependencies` mentions outside the block
     form (`project.dependencies.add(...)`, `dependencies.implementation
-    ...`); `apply from:` with a URL, an absolute path, a path escaping the
+    ...`); an unbalanced bracket at end of input; `apply from:` with a URL,
+    an absolute path, a path escaping the
     package, a missing file, or a non-literal argument (or when no
     `read_script` is given).
 
@@ -981,11 +1383,12 @@ def maven_labels_for_gradle(content, mapping, ignore, read_script = None):
         unreadable = sorted(unreadable.keys()),
     )
 
-def resolve_plugin_maven_deps(ctx):
-    """Translate the spoke's `android/build.gradle*` deps to Bazel labels.
+def resolve_plugin_maven_deps(ctx, build_file, build_content):
+    """Translate the spoke's Android build deps to Bazel labels.
 
-    Reads the package's Gradle build file (Groovy `.gradle` or Kotlin
-    `.gradle.kts`) and reduces its runtime dependencies to Maven coordinates
+    Reads the spoke's single Gradle build (see `plugin_android_build`;
+    `build_file` is its path for messages, `build_content` its text) and
+    reduces its runtime dependencies to Maven coordinates
     with `maven_labels_for_gradle` — layering the user's
     `flutter.pub(android_maven_deps)` over the built-in table and honouring
     `flutter.pub(android_maven_ignore)` — then maps them to
@@ -998,21 +1401,15 @@ def resolve_plugin_maven_deps(ctx):
     still compile — a reflection-only or run-time-only dep — and then crash
     on the device, so dropping them silently is not an option.
 
-    Returns a sorted list of distinct labels.
+    Args:
+        ctx: the spoke repository context (attrs, path, exists and read).
+        build_file: the spoke-relative Gradle build path, for messages.
+        build_content: the text of the spoke's single Gradle build.
+
+    Returns:
+        A sorted list of distinct `@rules_android_maven//:...` labels.
     """
-    candidates = (
-        "android/build.gradle.kts",
-        "android/build.gradle",
-    )
-    build_file = ""
-    content = ""
-    for cand in candidates:
-        p = ctx.path(cand)
-        if p.exists:
-            build_file = cand
-            content = ctx.read(p)
-            break
-    if not content:
+    if not build_content:
         return []
 
     # The workspace owner's label mapping is trusted like hand-written
@@ -1040,7 +1437,7 @@ def resolve_plugin_maven_deps(ctx):
         return ctx.read(gradle_file)
 
     result = maven_labels_for_gradle(
-        content,
+        build_content,
         ctx.attr.android_maven_deps,
         ctx.attr.android_maven_ignore,
         _read_package_script,

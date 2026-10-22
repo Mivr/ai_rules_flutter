@@ -32,12 +32,12 @@ load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_deps", "parse_pubsp
 load("//flutter/private:artifact_urls.bzl", "require_sha256")
 load("//flutter/private:download.bzl", "pinned_download")
 load("//flutter/private:flutter_pubspec.bzl", "parse_flutter_assets_block", "parse_flutter_plugin_block")
-
 load(
     ":gradle.bzl",
     "detect_android_namespace",
     "detect_android_native_build",
     "detect_consumer_proguard_specs",
+    "plugin_android_build",
     "resolve_plugin_maven_deps",
     _gradle_is_java_package_name = "is_java_package_name",
     _gradle_is_maven_dep_label = "is_maven_dep_label",
@@ -245,7 +245,6 @@ def _detect_android_resources(ctx):
     """
     return _has_files_under(ctx, "android/src/main/res")
 
-
 def _detect_android_manifest(ctx):
     """Return the plugin's `android/src/main/AndroidManifest.xml` path if present.
 
@@ -263,7 +262,6 @@ def _detect_android_manifest(ctx):
     if ctx.path("android/src/main/AndroidManifest.xml").exists:
         return "android/src/main/AndroidManifest.xml"
     return ""
-
 
 def _make_android_native_build_unsupported_content(package_name, version):
     """Generate an `android/BUILD.bazel` that fails at load time.
@@ -285,8 +283,6 @@ def _make_android_native_build_unsupported_content(package_name, version):
         "@rules_flutter//ext/jni for the canonical example."
     ).format(pkg = package_name, version = version)
     return 'fail("' + message + '")\n'
-
-
 
 def _glob_block(srcs_dirs, extensions):
     """Format a `glob([...])` expression covering the given extensions.
@@ -1691,8 +1687,16 @@ def _flutter_pub_package_impl(ctx):
         android_consumer_proguard_specs = []
         android_has_resources = False
         android_native_build = False
+
+        # The plugin's Android Gradle build is ONE consistent model:
+        # Gradle evaluates exactly one build file per project directory,
+        # so every reader below shares plugin_android_build's single
+        # choice (see gradle_build_file_choice). Empty until android_info
+        # fills it in.
+        android_build = struct(path = "", content = "")
         if android_info:
-            android_native_build = detect_android_native_build(ctx)
+            android_build = plugin_android_build(ctx)
+            android_native_build = detect_android_native_build(android_build.content)
         if android_info and android_info.get("pluginClass", ""):
             android_src_dir = _detect_android_source_dir(ctx)
             android_has_resources = _detect_android_resources(ctx)
@@ -1703,15 +1707,15 @@ def _flutter_pub_package_impl(ctx):
             # it only stands in for the namespace when the plugin declares
             # none of its own.
             android_java_package = (
-                detect_android_namespace(ctx) or
+                detect_android_namespace(ctx, android_build.path, android_build.content) or
                 android_info.get("package", "") or
                 ""
             )
             _fail_on_invalid_android_namespace(ctx.attr.package_name, android_java_package)
             if android_src_dir or android_has_resources:
-                android_extra_maven_labels = resolve_plugin_maven_deps(ctx)
+                android_extra_maven_labels = resolve_plugin_maven_deps(ctx, android_build.path, android_build.content)
                 android_manifest = _detect_android_manifest(ctx)
-                android_consumer_proguard_specs = detect_consumer_proguard_specs(ctx)
+                android_consumer_proguard_specs = detect_consumer_proguard_specs(ctx, android_build.content)
 
         plugin_platforms_json = json.encode(plugin_block.platforms)
         build_content = make_flutter_plugin_build_content(

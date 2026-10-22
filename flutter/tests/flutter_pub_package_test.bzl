@@ -29,6 +29,7 @@ load(
     "resolve_overlay_roots",
     "resolve_overlay_template",
 )
+load("//flutter/private:gradle.bzl", "gradle_android_namespaces", "gradle_build_file_choice")
 
 # Verbatim shape of record_android 1.5.1's android/build.gradle (trimmed):
 # Groovy DSL, namespace assignment, no dependencies block at all.
@@ -1549,6 +1550,227 @@ maven_labels_map_and_interpolation_test = unittest.make(
     _maven_labels_map_and_interpolation_test_impl,
 )
 
+def _maven_labels_multiline_bracket_test_impl(ctx):
+    """Parenthesised calls spanning lines resolve like single-line ones."""
+    env = unittest.begin(ctx)
+
+    scripts = {
+        "extra.gradle": "dependencies {\n    implementation 'com.example:thing:1.0'\n}\n",
+    }
+
+    # Groovy multiline apply: the applied script's coord maps.
+    root = maven_labels_for_gradle(
+        "apply(\n    from: 'extra.gradle'\n)\n",
+        {"com.example:thing": "@rules_android_maven//:com_example_thing"},
+        [],
+        _gradle_reader(scripts),
+    )
+    asserts.equals(env, ["@rules_android_maven//:com_example_thing"], root.labels)
+    asserts.equals(env, [], root.unreadable)
+
+    # Kotlin multiline apply.
+    kts = maven_labels_for_gradle(
+        "apply(\n    from = \"extra.gradle.kts\"\n)\n",
+        {},
+        [],
+        _gradle_reader({
+            "extra.gradle.kts": "dependencies {\n    implementation(\"androidx.core:core:1.17.0\")\n}\n",
+        }),
+    )
+    asserts.equals(env, ["@rules_android_maven//:androidx_core_core"], kts.labels)
+    asserts.equals(env, [], kts.unreadable)
+
+    # Groovy map-in-parens on one line resolves too.
+    paren = maven_labels_for_gradle(
+        "apply(from: 'extra.gradle')\n",
+        {"com.example:thing": "@rules_android_maven//:com_example_thing"},
+        [],
+        _gradle_reader(scripts),
+    )
+    asserts.equals(env, ["@rules_android_maven//:com_example_thing"], paren.labels)
+    asserts.equals(env, [], paren.unreadable)
+
+    # Multiline implementation() and add() calls.
+    calls = maven_labels_for_gradle(
+        "dependencies {\n    implementation(\n        'androidx.browser:browser:1.9.0'\n    )\n    add(\n        'api',\n        \"androidx.core:core:1.17.0\"\n    )\n}\n",
+        {},
+        [],
+    )
+    asserts.equals(
+        env,
+        [
+            "@rules_android_maven//:androidx_browser_browser",
+            "@rules_android_maven//:androidx_core_core",
+        ],
+        calls.labels,
+    )
+    asserts.equals(env, [], calls.unreadable)
+
+    # A comment inside the parenthesised call is layout, not a boundary.
+    commented = maven_labels_for_gradle(
+        "apply( // shared deps\n    from: 'extra.gradle'\n)\n",
+        {"com.example:thing": "@rules_android_maven//:com_example_thing"},
+        [],
+        _gradle_reader(scripts),
+    )
+    asserts.equals(env, ["@rules_android_maven//:com_example_thing"], commented.labels)
+    asserts.equals(env, [], commented.unreadable)
+
+    return unittest.end(env)
+
+maven_labels_multiline_bracket_test = unittest.make(
+    _maven_labels_multiline_bracket_test_impl,
+)
+
+def _maven_labels_unbalanced_bracket_test_impl(ctx):
+    """An unbalanced bracket is reported unreadable, never silently ignored."""
+    env = unittest.begin(ctx)
+
+    missing_paren = maven_labels_for_gradle(
+        "dependencies {\n    implementation('androidx.browser:browser:1.9.0'\n}\n",
+        {},
+        [],
+    )
+    asserts.true(
+        env,
+        len(missing_paren.unreadable) > 0,
+        "expected the unbalanced bracket to be reported: %s" % missing_paren.unreadable,
+    )
+
+    dangling_list = maven_labels_for_gradle(
+        "dependencies {\n    implementation 'androidx.browser:browser:1.9.0'\n}\ndef extra = [\n",
+        {},
+        [],
+    )
+    asserts.equals(
+        env,
+        ["@rules_android_maven//:androidx_browser_browser"],
+        dangling_list.labels,
+    )
+    asserts.true(
+        env,
+        len(dangling_list.unreadable) > 0,
+        "expected the unbalanced bracket to be reported: %s" % dangling_list.unreadable,
+    )
+
+    return unittest.end(env)
+
+maven_labels_unbalanced_bracket_test = unittest.make(
+    _maven_labels_unbalanced_bracket_test_impl,
+)
+
+def _parse_gradle_namespace_model_test_impl(ctx):
+    """The namespace comes from the lexed model: layout-free, ghost-free, last-wins."""
+    env = unittest.begin(ctx)
+
+    asserts.equals(
+        env,
+        "com.example.single",
+        parse_gradle_android_namespace("android { namespace = 'com.example.single' }\n"),
+    )
+    asserts.equals(
+        env,
+        "com.example.call",
+        parse_gradle_android_namespace("android { namespace 'com.example.call' }\n"),
+    )
+    asserts.equals(
+        env,
+        "com.example.setcall",
+        parse_gradle_android_namespace("android {\n    namespace.set(\"com.example.setcall\")\n}\n"),
+    )
+    asserts.equals(
+        env,
+        "com.example.multi",
+        parse_gradle_android_namespace("android {\n    namespace(\n        'com.example.multi'\n    )\n}\n"),
+    )
+    asserts.equals(
+        env,
+        "com.example.nested",
+        parse_gradle_android_namespace("if (true) {\n    android {\n        namespace = 'com.example.nested'\n    }\n}\n"),
+    )
+    asserts.equals(
+        env,
+        "com.example.dotted",
+        parse_gradle_android_namespace("android.namespace = 'com.example.dotted'\n"),
+    )
+    asserts.equals(
+        env,
+        "com.example.second",
+        parse_gradle_android_namespace("android {\n    namespace = 'com.example.first'\n    namespace = 'com.example.second'\n}\n"),
+    )
+
+    # Ghosts: block comments, line comments and string literals never count.
+    asserts.equals(env, "", parse_gradle_android_namespace("/*\nnamespace = 'com.example.evil'\n*/\n"))
+    asserts.equals(env, "", parse_gradle_android_namespace("// namespace = 'com.example.evil'\n"))
+    asserts.equals(
+        env,
+        "",
+        parse_gradle_android_namespace("def notes = \"\"\"\nnamespace = 'com.example.str'\n\"\"\"\n"),
+    )
+
+    # A real declaration beside a ghost still resolves.
+    asserts.equals(
+        env,
+        "com.example.real",
+        parse_gradle_android_namespace("/*\nnamespace = 'com.example.evil'\n*/\nandroid {\n    namespace = 'com.example.real'\n}\n"),
+    )
+
+    # A namespace anywhere but innermost-android is not a declaration.
+    asserts.equals(
+        env,
+        "",
+        parse_gradle_android_namespace("android {\n    defaultConfig {\n        namespace = 'com.example.deep'\n    }\n}\n"),
+    )
+    asserts.equals(env, "", parse_gradle_android_namespace("namespace = 'com.example.top'\n"))
+
+    return unittest.end(env)
+
+parse_gradle_namespace_model_test = unittest.make(
+    _parse_gradle_namespace_model_test_impl,
+)
+
+def _gradle_namespace_refusal_test_impl(ctx):
+    """A namespace value that is not one string literal is reported for refusal."""
+    env = unittest.begin(ctx)
+
+    for bad in [
+        "android {\n    namespace = libs.foo\n}\n",
+        "android {\n    namespace = someVariable\n}\n",
+        "android {\n    namespace = 'com.example.a' + '.b'\n}\n",
+        "android {\n    namespace 'com.example.a', 'b'\n}\n",
+    ]:
+        found = gradle_android_namespaces(bad)
+        asserts.equals(env, 1, len(found), bad)
+        asserts.false(env, found[0].literal, bad)
+        asserts.true(env, len(found[0].statement) > 0, bad)
+
+    # ... while a literal beside them keeps parsing.
+    mixed = gradle_android_namespaces("android {\n    namespace = 'com.example.ok'\n}\n")
+    asserts.equals(env, 1, len(mixed))
+    asserts.true(env, mixed[0].literal)
+    asserts.equals(env, "com.example.ok", mixed[0].value)
+
+    return unittest.end(env)
+
+gradle_namespace_refusal_test = unittest.make(
+    _gradle_namespace_refusal_test_impl,
+)
+
+def _gradle_build_file_choice_test_impl(ctx):
+    """Gradle's build file wins the dual-file choice every reader shares."""
+    env = unittest.begin(ctx)
+
+    asserts.equals(env, "android/build.gradle", gradle_build_file_choice(True, True))
+    asserts.equals(env, "android/build.gradle", gradle_build_file_choice(True, False))
+    asserts.equals(env, "android/build.gradle.kts", gradle_build_file_choice(False, True))
+    asserts.equals(env, "", gradle_build_file_choice(False, False))
+
+    return unittest.end(env)
+
+gradle_build_file_choice_test = unittest.make(
+    _gradle_build_file_choice_test_impl,
+)
+
 def _java_package_name_validation_test_impl(ctx):
     """Plugin-controlled namespaces must be Java package names."""
     env = unittest.begin(ctx)
@@ -1649,6 +1871,11 @@ def flutter_pub_package_test_suite(name):
         maven_labels_apply_cycle_and_depth_test,
         maven_labels_kotlin_add_test,
         maven_labels_map_and_interpolation_test,
+        maven_labels_multiline_bracket_test,
+        maven_labels_unbalanced_bracket_test,
+        parse_gradle_namespace_model_test,
+        gradle_namespace_refusal_test,
+        gradle_build_file_choice_test,
         java_package_name_validation_test,
         maven_dep_label_validation_test,
         hostile_label_renders_inert_test,
