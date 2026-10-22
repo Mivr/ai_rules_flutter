@@ -201,6 +201,90 @@ _RESERVED_TEST_ENV_KEYS = [
     "FLUTTER_TEST_LIBRARY_TAGS",
 ]
 
+def _declare_test_executable(ctx):
+    """Symlinks the prebuilt runner as the test executable."""
+    tool = ctx.attr._tool
+    is_windows = ctx.target_platform_has_constraint(
+        ctx.attr._windows_constraint[platform_common.ConstraintValueInfo],
+    )
+    ext = ".exe" if is_windows else ""
+    executable = ctx.actions.declare_file(ctx.label.name + ext)
+    ctx.actions.symlink(
+        output = executable,
+        target_file = tool[DefaultInfo].files_to_run.executable,
+        is_executable = True,
+    )
+    return executable, tool
+
+def _base_runner_env(ctx, flutter_sdk_info, dill, assets_dir, base_dill, library_tags, test_path, enable_impeller, include_tags, exclude_tags):
+    """Builds the rule-owned `FLUTTER_TEST_*` environment (before user env)."""
+    workspace_name = ctx.workspace_name
+    env = {
+        "FLUTTER_TEST_TESTER": runfiles_path(flutter_sdk_info.flutter_tester, workspace_name),
+        "FLUTTER_TEST_ICU": runfiles_path(flutter_sdk_info.icu_data, workspace_name),
+        "FLUTTER_TEST_DILL": runfiles_path(dill, workspace_name),
+        # Display path for the suite. Used in package:test report output.
+        "FLUTTER_TEST_PATH": test_path if test_path else dill.basename,
+        "FLUTTER_TEST_IMPELLER": "1" if enable_impeller else "",
+    }
+    if assets_dir != None:
+        env["FLUTTER_TEST_ASSETS"] = runfiles_path(assets_dir, workspace_name)
+    if base_dill != None:
+        env["FLUTTER_TEST_BASE_DILL"] = runfiles_path(base_dill, workspace_name)
+
+    # Tag selection, as `flutter test --tags` / `--exclude-tags` resolve it.
+    # Forwarded under `_ATTR` keys: a `--test_env=FLUTTER_TEST_TAGS=...` (or
+    # `FLUTTER_TEST_EXCLUDE_TAGS`) value at run time overrides the attribute,
+    # and it can only do that when the rule leaves those keys alone — Bazel
+    # lets a rule-set variable win over `--test_env` for the same key. Set
+    # only when the attribute names tags.
+    if include_tags:
+        env["FLUTTER_TEST_TAGS_ATTR"] = ",".join(include_tags)
+    if exclude_tags:
+        env["FLUTTER_TEST_EXCLUDE_TAGS_ATTR"] = ",".join(exclude_tags)
+
+    # The entrypoint's own `@Tags`, extracted at build time: the runner injects
+    # them as the root group's metadata, so they inherit down to every test in
+    # the suite. Absent for a prebuilt kernel without library tags, which the
+    # runner reads as no tags.
+    if library_tags != None:
+        env["FLUTTER_TEST_LIBRARY_TAGS"] = runfiles_path(library_tags, workspace_name)
+    return env
+
+def _merge_user_env(ctx, env, user_env):
+    """Merges user env over the rule env, refusing the rule's own keys.
+
+    The rule's keys are the runner's start-up contract, and a test that
+    quietly replaced one would fail far from the cause. The tag keys the
+    rule leaves for `--test_env` to override are rejected too, so the flag
+    stays the one override channel: an `env` value would bake into the
+    target while looking like a run-time choice.
+    """
+    for key, value in user_env.items():
+        if key in env or key in _RESERVED_TEST_ENV_KEYS:
+            fail((
+                "{label}: env key {key} is set by the rule itself " +
+                "and cannot be overridden."
+            ).format(label = ctx.label, key = key))
+        env[key] = value
+
+def _assemble_test_runfiles(ctx, tool, runtime_files, data, extra_files):
+    """Merges kernel/tool/data runfiles for the test run."""
+    tool_runfiles = tool[DefaultInfo].default_runfiles
+    runfiles = ctx.runfiles(
+        files = runtime_files + ctx.files.data + extra_files,
+    )
+    runfiles = runfiles.merge(tool_runfiles)
+
+    # Merge the runfiles of any `data` targets so cc_library / cc_binary
+    # producers (e.g. shared dylibs that the test loads via dart:ffi) and
+    # transitively-needed files come along. Mirrors the behavior of
+    # rules_dart's dart_binary/dart_test and the standard cc_test/py_test
+    # `data` semantics.
+    for data_target in data:
+        runfiles = runfiles.merge(data_target[DefaultInfo].default_runfiles)
+    return runfiles
+
 def flutter_test_runner(
         ctx,
         dill,
@@ -264,64 +348,13 @@ def flutter_test_runner(
         )
 
     # Symlink the prebuilt runner as the test executable.
-    tool = ctx.attr._tool
-    is_windows = ctx.target_platform_has_constraint(
-        ctx.attr._windows_constraint[platform_common.ConstraintValueInfo],
-    )
-    ext = ".exe" if is_windows else ""
-    executable = ctx.actions.declare_file(ctx.label.name + ext)
-    ctx.actions.symlink(
-        output = executable,
-        target_file = tool[DefaultInfo].files_to_run.executable,
-        is_executable = True,
-    )
+    executable, tool = _declare_test_executable(ctx)
 
     # Runfiles-relative paths the runner reads from env at start-up.
-    workspace_name = ctx.workspace_name
-    env = {
-        "FLUTTER_TEST_TESTER": runfiles_path(flutter_sdk_info.flutter_tester, workspace_name),
-        "FLUTTER_TEST_ICU": runfiles_path(flutter_sdk_info.icu_data, workspace_name),
-        "FLUTTER_TEST_DILL": runfiles_path(dill, workspace_name),
-        # Display path for the suite. Used in package:test report output.
-        "FLUTTER_TEST_PATH": test_path if test_path else dill.basename,
-        "FLUTTER_TEST_IMPELLER": "1" if enable_impeller else "",
-    }
-    if assets_dir != None:
-        env["FLUTTER_TEST_ASSETS"] = runfiles_path(assets_dir, workspace_name)
-    if base_dill != None:
-        env["FLUTTER_TEST_BASE_DILL"] = runfiles_path(base_dill, workspace_name)
+    env = _base_runner_env(ctx, flutter_sdk_info, dill, assets_dir, base_dill, library_tags, test_path, enable_impeller, include_tags, exclude_tags)
 
-    # Tag selection, as `flutter test --tags` / `--exclude-tags` resolve it.
-    # Forwarded under `_ATTR` keys: a `--test_env=FLUTTER_TEST_TAGS=...` (or
-    # `FLUTTER_TEST_EXCLUDE_TAGS`) value at run time overrides the attribute,
-    # and it can only do that when the rule leaves those keys alone — Bazel
-    # lets a rule-set variable win over `--test_env` for the same key. Set
-    # only when the attribute names tags.
-    if include_tags:
-        env["FLUTTER_TEST_TAGS_ATTR"] = ",".join(include_tags)
-    if exclude_tags:
-        env["FLUTTER_TEST_EXCLUDE_TAGS_ATTR"] = ",".join(exclude_tags)
-
-    # The entrypoint's own `@Tags`, extracted at build time: the runner injects
-    # them as the root group's metadata, so they inherit down to every test in
-    # the suite. Absent for a prebuilt kernel without library tags, which the
-    # runner reads as no tags.
-    if library_tags != None:
-        env["FLUTTER_TEST_LIBRARY_TAGS"] = runfiles_path(library_tags, workspace_name)
-
-    # User-supplied variables, merged last but never over the rule's own keys:
-    # those are the runner's start-up contract, and a test that quietly
-    # replaced one would fail far from the cause. The tag keys the rule leaves
-    # for `--test_env` to override are rejected too, so the flag stays the one
-    # override channel: an `env` value would bake into the target while looking
-    # like a run-time choice.
-    for key, value in user_env.items():
-        if key in env or key in _RESERVED_TEST_ENV_KEYS:
-            fail((
-                "{label}: env key {key} is set by the rule itself " +
-                "and cannot be overridden."
-            ).format(label = ctx.label, key = key))
-        env[key] = value
+    # User-supplied variables, merged last but never over the rule's own keys.
+    _merge_user_env(ctx, env, user_env)
 
     runtime_files = [
         dill,
@@ -334,19 +367,7 @@ def flutter_test_runner(
         runtime_files.append(library_tags)
     if base_dill != None:
         runtime_files.append(base_dill)
-    tool_runfiles = tool[DefaultInfo].default_runfiles
-    runfiles = ctx.runfiles(
-        files = runtime_files + ctx.files.data + extra_files,
-    )
-    runfiles = runfiles.merge(tool_runfiles)
-
-    # Merge the runfiles of any `data` targets so cc_library / cc_binary
-    # producers (e.g. shared dylibs that the test loads via dart:ffi) and
-    # transitively-needed files come along. Mirrors the behavior of
-    # rules_dart's dart_binary/dart_test and the standard cc_test/py_test
-    # `data` semantics.
-    for data_target in data:
-        runfiles = runfiles.merge(data_target[DefaultInfo].default_runfiles)
+    runfiles = _assemble_test_runfiles(ctx, tool, runtime_files, data, extra_files)
 
     return struct(
         executable = executable,
