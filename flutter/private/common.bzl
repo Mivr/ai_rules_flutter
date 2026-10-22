@@ -609,25 +609,6 @@ def collect_binding_contracts(native_deps):
                     pairs.append(struct(library = f, contract = ()))
     return pairs
 
-def collect_assets(deps, direct_assets):
-    """Collect asset files from direct attrs and transitive FlutterInfo deps.
-
-    Args:
-        deps: List of targets, some of which may provide FlutterInfo.
-        direct_assets: List of directly specified asset Files.
-
-    Returns:
-        List of all asset Files.
-    """
-    transitive_depsets = [
-        dep[FlutterInfo].asset_dirs
-        for dep in deps
-        if FlutterInfo in dep
-    ]
-    if transitive_depsets:
-        return list(direct_assets) + depset(transitive = transitive_depsets).to_list()
-    return list(direct_assets)
-
 def flutter_compile_kernel(ctx, flutter_sdk_info, aot = None, platform_dill = None, target_platform = None, frontend_server_target = "flutter", native_assets_manifest = None, track_widget_creation = False, assets_dir = None, platform_build_args = [], recorded_uses = None):
     """Run the shared kernel compilation step.
 
