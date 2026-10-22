@@ -80,6 +80,65 @@ def _source_stage_prefix(scope, seen, salt, stable_root):
     manifest_hash = hash("\n".join(manifest_items)) & 0xffffffff
     return "%s.%x.stage" % (scope, manifest_hash)
 
+def _note_include_source(ctx, seen, rel, f):
+    """Records `f` under `rel` for the `include_sources` staging path.
+
+    A generated file wins over a source at the same path (the compiler
+    resolves it there); two generated files at one path fail, since no
+    staging can serve both.
+    """
+    prev = seen.get(rel)
+    if prev == None:
+        seen[rel] = f
+        return
+    if prev == f:
+        return
+    if not prev.is_source and not f.is_source:
+        fail("%s: conflicting generated inputs at %s: %s and %s" % (
+            ctx.label,
+            rel,
+            prev.path,
+            f.path,
+        ))
+    if prev.is_source and not f.is_source:
+        seen[rel] = f
+
+def _note_generated_only(ctx, seen, rel, f):
+    """Records `f` under `rel` for the generated-only staging path.
+
+    Two distinct files at one path fail, since no staging can serve both.
+    """
+    prev = seen.get(rel)
+    if prev == None:
+        seen[rel] = f
+        return
+    if prev != f:
+        fail("%s: conflicting generated inputs at %s: %s and %s" % (
+            ctx.label,
+            rel,
+            prev.path,
+            f.path,
+        ))
+
+def _link_staged_files(ctx, seen, stage_prefix):
+    """Symlinks every recorded input into the staging directory.
+
+    Returns `struct(root, files)` where `root` is the exec-root-relative
+    staging directory path and `files` the staged symlinks for the action
+    inputs.
+    """
+    staged = []
+    root = None
+    for rel, f in seen.items():
+        link = ctx.actions.declare_file(stage_prefix + "/" + rel)
+        ctx.actions.symlink(output = link, target_file = f)
+        staged.append(link)
+        if root == None:
+            root = link.path[:len(link.path) - len(rel) - 1]
+    return struct(
+        root = root,
+        files = staged,
+    )
 def stage_generated_inputs(ctx, files, scope, include_sources = False, salt = "", stable_root = False):
     """Stages declared `files` into a per-action multi-root directory.
 
@@ -114,68 +173,25 @@ def stage_generated_inputs(ctx, files, scope, include_sources = False, salt = ""
         directory path (or `None` when no files were staged) and `files` is the
         list of staged symlink `File`s to add to action inputs.
     """
-    staged = []
     seen = {}
-    root = None
     if include_sources:
         for f in files:
             if f == None or f.is_directory:
                 continue
-            rel = app_scheme_rel_path(f)
-            prev = seen.get(rel)
-            if prev != None:
-                if prev == f:
-                    continue
-                if not prev.is_source and not f.is_source:
-                    fail("%s: conflicting generated inputs at %s: %s and %s" % (
-                        ctx.label,
-                        rel,
-                        prev.path,
-                        f.path,
-                    ))
-                if prev.is_source and not f.is_source:
-                    seen[rel] = f
-                continue
-            seen[rel] = f
+            _note_include_source(ctx, seen, app_scheme_rel_path(f), f)
         if not seen:
             return struct(root = None, files = [])
-        stage_prefix = _source_stage_prefix(scope, seen, salt, stable_root)
-        for rel, f in seen.items():
-            link = ctx.actions.declare_file(stage_prefix + "/" + rel)
-            ctx.actions.symlink(output = link, target_file = f)
-            staged.append(link)
-            if root == None:
-                root = link.path[:len(link.path) - len(rel) - 1]
-        return struct(
-            root = root,
-            files = staged,
+        return _link_staged_files(
+            ctx,
+            seen,
+            _source_stage_prefix(scope, seen, salt, stable_root),
         )
 
-    stage_prefix = scope + ".stage"
     for f in files:
         if f == None or f.is_source or f.is_directory:
             continue
-        rel = app_scheme_rel_path(f)
-        prev = seen.get(rel)
-        if prev != None:
-            if prev != f:
-                fail("%s: conflicting generated inputs at %s: %s and %s" % (
-                    ctx.label,
-                    rel,
-                    prev.path,
-                    f.path,
-                ))
-            continue
-        seen[rel] = f
-        link = ctx.actions.declare_file(stage_prefix + "/" + rel)
-        ctx.actions.symlink(output = link, target_file = f)
-        staged.append(link)
-        if root == None:
-            root = link.path[:len(link.path) - len(rel) - 1]
-    return struct(
-        root = root,
-        files = staged,
-    )
+        _note_generated_only(ctx, seen, app_scheme_rel_path(f), f)
+    return _link_staged_files(ctx, seen, scope + ".stage")
 
 def with_root(roots, root):
     """`roots` with `root` appended unless it is None or already there.
