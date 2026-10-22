@@ -444,6 +444,7 @@ Future<int> runFiltered(
   StringSink err,
 ) async {
   final parsed = _splitFilterArgv(argv, err);
+  if (parsed == null) return 2;
   final manifestPath = parsed.manifestPath;
   if (!File(manifestPath).existsSync()) {
     err.writeln(
