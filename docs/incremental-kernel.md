@@ -2,10 +2,17 @@
 
 `rules_flutter` can keep the Dart `frontend_server` warm across debug
 compiles instead of starting a cold one per build. The finished kernel is
-byte-identical either way: the worker always ends with **rule F**, a `reset`
-followed by an empty `recompile`, so the output dill comes from a compile
-that compiled nothing and carries no history. Only the second and later
-builds go faster; the first compile of a configuration pays the cold cost.
+canonically equal either way: the worker always ends with **rule F**, a
+`reset` followed by an empty `recompile`, so the output dill comes from a
+compile that compiled nothing and carries no history. The worker output is
+the unlinked app component (no `dart:` platform link, no call-site metadata
+hint payloads); the stock batch output links the platform libraries and
+carries `vm.call-site-attributes.metadata`. Canonical check on
+`e2e/hello_world`: `canon(platform_strong.dill + F) ==
+canon_strip_md(batch)` is byte-equal (53,175,968 bytes both sides; all 739
+app libraries and all 1,051 sources identical, same `main`). Only the
+second and later builds go faster; the first compile of a configuration
+pays the cold cost.
 
 ## Turning it on
 
