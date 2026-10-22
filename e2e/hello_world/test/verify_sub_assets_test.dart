@@ -19,6 +19,14 @@ import 'dart:io';
 import 'package:runfiles/runfiles.dart';
 import 'package:test/test.dart';
 
+/// Reads an asset's text with checkout line endings normalized away.
+///
+/// Git on Windows checks text fixtures out with CRLF and the bundle carries
+/// bytes verbatim, so comparing raw bytes against an LF literal fails there.
+/// Normalizing here keeps the assertion exact on every runner.
+String _assetText(File file) =>
+    file.readAsStringSync().replaceAll('\r\n', '\n');
+
 void main() {
   late Directory bundleDir;
 
@@ -40,25 +48,25 @@ void main() {
   test('own asset is keyed relative to the sub package', () {
     final asset = File('${bundleDir.path}/assets/notice.txt');
     expect(asset.existsSync(), isTrue);
-    expect(asset.readAsStringSync(), equals('sub notice\n'));
+    expect(_assetText(asset), equals('sub notice\n'));
   });
 
   test('dependency asset lands at packages/brand/...', () {
     final asset = File('${bundleDir.path}/packages/brand/assets/brand.txt');
     expect(asset.existsSync(), isTrue);
-    expect(asset.readAsStringSync(), equals('brand asset\n'));
+    expect(_assetText(asset), equals('brand asset\n'));
   });
 
   test('nested-package file is keyed under the directory', () {
     final asset = File('${bundleDir.path}/nested/extra.txt');
     expect(asset.existsSync(), isTrue);
-    expect(asset.readAsStringSync(), equals('nested extra\n'));
+    expect(_assetText(asset), equals('nested extra\n'));
   });
 
   test('generated file is keyed by its repository-relative path', () {
     final asset = File('${bundleDir.path}/gen_notice.txt');
     expect(asset.existsSync(), isTrue);
-    expect(asset.readAsStringSync(), equals('generated notice\n'));
+    expect(_assetText(asset), equals('generated notice\n'));
   });
 
   test('AssetManifest.bin.json carries both package-relative keys', () {

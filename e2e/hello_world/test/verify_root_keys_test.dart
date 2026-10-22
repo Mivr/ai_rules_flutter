@@ -16,6 +16,14 @@ import 'dart:io';
 import 'package:runfiles/runfiles.dart';
 import 'package:test/test.dart';
 
+/// Reads an asset's text with checkout line endings normalized away.
+///
+/// Git on Windows checks text fixtures out with CRLF and the bundle carries
+/// bytes verbatim, so comparing raw bytes against an LF literal fails there.
+/// Normalizing here keeps the assertion exact on every runner.
+String _assetText(File file) =>
+    file.readAsStringSync().replaceAll('\r\n', '\n');
+
 void main() {
   late Directory bundleDir;
 
@@ -32,13 +40,13 @@ void main() {
   test('nested-package file keeps its repository-relative key', () {
     final asset = File('${bundleDir.path}/brand/assets/brand.txt');
     expect(asset.existsSync(), isTrue);
-    expect(asset.readAsStringSync(), equals('brand asset\n'));
+    expect(_assetText(asset), equals('brand asset\n'));
   });
 
   test('generated file keeps its repository-relative key', () {
     final asset = File('${bundleDir.path}/root_gen.txt');
     expect(asset.existsSync(), isTrue);
-    expect(asset.readAsStringSync(), equals('root generated\n'));
+    expect(_assetText(asset), equals('root generated\n'));
   });
 
   test('AssetManifest.bin.json carries both keys verbatim', () {

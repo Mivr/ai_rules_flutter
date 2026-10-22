@@ -13,6 +13,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:sub/main.dart';
 
+/// Loads an asset's text with checkout line endings normalized away.
+///
+/// Git on Windows checks text fixtures out with CRLF and the bundle carries
+/// bytes verbatim, so comparing raw bytes against an LF literal fails there.
+/// Normalizing here keeps the assertion exact on every runner.
+Future<String> _assetText(String key) async =>
+    (await rootBundle.loadString(key)).replaceAll('\r\n', '\n');
+
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
@@ -24,12 +32,9 @@ void main() {
 
     expect(find.text('Sub Brand'), findsOneWidget);
 
+    expect(await _assetText('assets/sub.txt'), equals('sub asset\n'));
     expect(
-      await rootBundle.loadString('assets/sub.txt'),
-      equals('sub asset\n'),
-    );
-    expect(
-      await rootBundle.loadString('packages/brand/assets/brand.txt'),
+      await _assetText('packages/brand/assets/brand.txt'),
       equals('brand asset\n'),
     );
   });
