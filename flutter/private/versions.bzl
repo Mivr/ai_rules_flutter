@@ -169,7 +169,9 @@ def flutter_artifact_sha256(flutter_version, artifact_path, checksums = None):
             "No sha256 recorded for {path} in Flutter {v}, so the download " +
             "cannot be verified and will not be fetched.\n" +
             "Add it to ARTIFACT_CHECKSUMS in flutter/private/versions.bzl " +
-            "under \"{v}\". `bazel run //tools/update_flutter_version -- {v}` " +
+            "under \"{v}\" (or, when {v} is a custom flutter.version " +
+            "registration, to that tag's artifact_sha256 in the root " +
+            "module). `bazel run //tools/update_flutter_version -- {v}` " +
             "downloads each artifact and prints its sha256."
         ).format(
             path = artifact_path,

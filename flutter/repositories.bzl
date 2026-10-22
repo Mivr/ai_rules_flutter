@@ -102,7 +102,11 @@ def _flutter_material_fonts_repo_impl(repository_ctx):
         )
         _write_material_fonts_build(repository_ctx)
         return
-    url = "https://storage.googleapis.com/" + repository_ctx.attr.material_fonts_url
+    fonts_path = repository_ctx.attr.material_fonts_url
+    if fonts_path.startswith("https://"):
+        url = fonts_path
+    else:
+        url = "https://storage.googleapis.com/" + fonts_path
     pinned_download_and_extract(
         repository_ctx,
         url = url,
@@ -129,7 +133,8 @@ flutter_material_fonts_repo = repository_rule(
     doc = "Lazily downloads the Flutter material design fonts (MaterialIcons-Regular.otf).",
     attrs = {
         "material_fonts_url": attr.string(
-            doc = "GCS path of the fonts archive. Empty means a local SDK (with `local_path`).",
+            doc = "GCS path of the fonts archive (a full https:// URL is " +
+                  "used as-is). Empty means a local SDK (with `local_path`).",
             default = "",
         ),
         "sha256": attr.string(
@@ -1391,10 +1396,10 @@ def flutter_register_toolchains(
             ("source_url", source_url),
         ):
             if value:
-                fail(
+                fail((
                     "flutter_register_toolchains: local_path is mutually " +
-                    "exclusive with downloading, but {label} is also set.".format(label = label),
-                )
+                    "exclusive with downloading, but {label} is also set."
+                ).format(label = label))
         if artifact_sha256s != None:
             fail("flutter_register_toolchains: local_path is mutually exclusive with downloading, but artifact_sha256s is also set.")
         _register_local_toolchains(name, local_path, flutter_constraints = flutter_constraints or {})

@@ -103,8 +103,10 @@ def gtk3_sysroot_link_inputs(sysroot_files, lib_dir):
 
     missing = [n for n in _GTK3_LIB_FILES if n not in by_name]
     if missing:
-        fail("Chromium sysroot is missing GTK3 libraries {} under {}. The " +
-             "sysroot archive may have changed its layout.".format(missing, lib_dir))
+        fail((
+            "Chromium sysroot is missing GTK3 libraries {} under {}. The " +
+            "sysroot archive may have changed its layout."
+        ).format(missing, lib_dir))
 
     return struct(
         libs = [by_name[n] for n in _GTK3_LIB_FILES],

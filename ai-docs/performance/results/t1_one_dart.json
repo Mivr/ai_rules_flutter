@@ -8,8 +8,8 @@
   "jobs": 4,
   "date": "2026-10-14T17:57:19",
   "output_base": {
-    "bench_analysis": "/tmp/claude-1000/-src-workspaces-rules-dart-flutter-Optimizing-the-dart-and-flutter-rules/58d28136-2f69-4567-b691-ba417f98bd05/scratchpad/bench/ob/t1_one_dart/bench_analysis",
-    "bench": "/tmp/claude-1000/-src-workspaces-rules-dart-flutter-Optimizing-the-dart-and-flutter-rules/58d28136-2f69-4567-b691-ba417f98bd05/scratchpad/bench/ob/t1_one_dart/bench"
+    "bench_analysis": "<bench-scratch>/t1_one_dart/bench_analysis",
+    "bench": "<bench-scratch>/t1_one_dart/bench"
   },
   "scenarios": {
     "reanalysis_80pkg_s": 7.41,

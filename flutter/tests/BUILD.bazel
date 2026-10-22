@@ -88,6 +88,25 @@ dart_test(
     ],
 )
 
+# Message-formatting guard: no `.format()` call binds to one literal of a
+# `+` string join (the placeholders in the other literals would print
+# literally). Same discovery mechanism as above.
+dart_test(
+    name = "format_string_guard_test",
+    size = "small",
+    data = ["format_string_guard_test.dart"],
+    env = {"GUARD_ROOT_ANCHOR": "$(rlocationpath :format_string_guard_test.dart)"},
+    env_inherit = ["BUILD_WORKSPACE_DIRECTORY"],
+    main = "format_string_guard_test.dart",
+    tags = [
+        "external",
+        "no-sandbox",
+    ],
+    deps = [
+        "@dev_tool_deps//:test",
+    ],
+)
+
 action_inputs_test_suite(name = "action_inputs_test")
 
 android_pure_go_test_suite(name = "android_pure_go_test")

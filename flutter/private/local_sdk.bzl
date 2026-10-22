@@ -26,7 +26,8 @@ def resolve_local_sdk_root(repository_ctx, local_path):
     A relative path resolves against the main workspace root (the directory
     holding the root `MODULE.bazel`), so `local_path = "third_party/flutter"`
     means the same thing on every machine the workspace checks out on. An
-    absolute path (POSIX, or a Windows drive path) is used as-is.
+    absolute path (POSIX, or a Windows drive path) is used as-is. `~` is not
+    expanded: a leading `~` resolves to a literal `~` directory.
 
     Args:
         repository_ctx: The repository rule context.

@@ -95,8 +95,9 @@ use_repo(
 register_toolchains("@flutter_toolchains//:all")
 
 # Override rules_android's Go SDK with sha256-pinned 1.26.2 archives. rules_go
-# stays at the 0.59.0 floor (same as rules_flutter's own MODULE.bazel), so
-# this workspace also proves the proxy's pure-Go transition against it.
+# declares only the 0.59.0 minimum here (same as rules_flutter's own
+# MODULE.bazel) — MVS still selects 0.64.2 through rules_dart, so the proxy's
+# pure-Go transition is proven against the resolved version, never the floor.
 bazel_dep(name = "rules_go", version = "0.59.0")
 
 go_sdk = use_extension("@rules_go//go:extensions.bzl", "go_sdk")

@@ -204,10 +204,10 @@ def _mirror_local_lib(repository_ctx, sdk_root, sdk_rel, repo_rel, what):
             )
         files.append(raw[len(src) + 1:])
     if not files:
-        fail(
+        fail((
             "flutter local SDK: listed no files under {what} ({src}); " +
-            "refusing to ship an empty package".format(what = what, src = src),
-        )
+            "refusing to ship an empty package"
+        ).format(what = what, src = src))
     for rel in files:
         repository_ctx.symlink(
             repository_ctx.path(src + "/" + rel),

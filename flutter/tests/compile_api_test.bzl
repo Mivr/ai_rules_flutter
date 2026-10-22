@@ -15,7 +15,15 @@ hidden consumer checks rely on:
 - `import_dill` is passed as `--import-dill=<path>` and is an action input,
   while an undeclared source beside it stays out of the inputs and the
   mounted roots (its refusal is pinned in `kernel_filter_test.dart`);
-- `extra_roots` entries appear in the emitted `package_config.json`;
+- `extra_roots` entries appear in the emitted `package_config.json`, and an
+  absolute, empty, or `..`-escaping root fails at analysis naming the
+  package and the value;
+- the module docstring's minimal example is itself a caller target: the
+  exact call shape from `//flutter:utils.bzl`'s docstring compiles and keeps
+  the default argv (`docstring_example_test`, executed by `build_test`);
+- the default compile's full post-`--` argv is pinned element for element
+  (`full_argv_test`): order, flags and values, with only host/toolchain
+  file paths discovered from the action's own inputs;
 - a caller that sets every new parameter still compiles (`build_test` —
   `resource_set` is not observable from analysis, so executing the action is
   the presence check), including a real `import_dill` chain: a whole-program
@@ -112,6 +120,51 @@ def _kernel_action(env):
     asserts.equals(env, 1, len(kernels), "expected one FlutterKernelCompile")
     return kernels[0] if kernels else None
 
+# The documented minimal call shape from `//flutter:utils.bzl`'s module
+# docstring, as a caller target: `compile_package_config` with no
+# `extra_roots`, `flutter_kernel_compile_action` with no optional parameter.
+# If the docstring drifts from the real signatures, this target stops
+# analyzing; if the minimal shape's argv drifts, the test below fails.
+def _docstring_example_impl(ctx):
+    """The `//flutter:utils.bzl` docstring example, verbatim."""
+    tools = flutter_kernel_compile_tools(ctx)
+    packages = collect_packages(ctx.attr.deps)
+    all_srcs = list(ctx.files.srcs) + collect_transitive_srcs(ctx.attr.deps).to_list() + [ctx.file.main]
+    pc = compile_package_config(ctx, packages, all_srcs)
+    output = ctx.actions.declare_file(ctx.label.name + ".dill")
+    flutter_kernel_compile_action(
+        ctx = ctx,
+        dartaotruntime = tools.dartaotruntime,
+        kernel_filter_tool = tools.kernel_filter_tool,
+        frontend_server = tools.frontend_server,
+        platform_dill = tools.platform_dill,
+        main = ctx.file.main,
+        srcs = pc.srcs,
+        package_config = pc.config_file,
+        output = output,
+    )
+    return [DefaultInfo(files = depset([output]))]
+
+_docstring_example = rule(
+    implementation = _docstring_example_impl,
+    attrs = {
+        "main": attr.label(
+            doc = "The entrypoint .dart source.",
+            mandatory = True,
+            allow_single_file = [".dart"],
+        ),
+        "srcs": attr.label_list(
+            doc = "Additional Dart sources.",
+            allow_files = [".dart"],
+        ),
+        "deps": attr.label_list(
+            doc = "DartInfo dependencies.",
+            providers = [DartInfo],
+        ),
+    } | FLUTTER_KERNEL_COMPILE_ATTRS,
+    toolchains = FLUTTER_KERNEL_COMPILE_TOOLCHAINS,
+)
+
 def _compile_argv(env, action):
     """The frontend_server argv: everything after the kernel_filter `--`."""
     argv = action.argv if action else []
@@ -120,13 +173,8 @@ def _compile_argv(env, action):
         return []
     return argv[argv.index("--") + 1:]
 
-def _default_argv_test_impl(ctx):
-    """Without the new parameters the action keeps its exact default shape."""
-    env = analysistest.begin(ctx)
-    action = _kernel_action(env)
-    argv = _compile_argv(env, action)
-
-    # `[dartaotruntime, frontend_server snapshot, ...]`: no `vm_flags` slot.
+def _assert_default_argv(env, argv, main_suffix):
+    """The default-shape argv: snapshot after dartaotruntime, entry last."""
     asserts.true(env, len(argv) > 2, "expected a full compile argv, got %r" % (argv,))
     if len(argv) > 2:
         asserts.true(
@@ -142,9 +190,83 @@ def _default_argv_test_impl(ctx):
     )
     asserts.true(
         env,
-        argv[-1].endswith("flutter/tests/compile_api_main.dart") if argv else False,
+        argv[-1].endswith(main_suffix) if argv else False,
         "the entrypoint source closes the argv, got %r" % (argv[-1] if argv else None,),
     )
+
+def _default_argv_test_impl(ctx):
+    """Without the new parameters the action keeps its exact default shape."""
+    env = analysistest.begin(ctx)
+    action = _kernel_action(env)
+    _assert_default_argv(env, _compile_argv(env, action), "flutter/tests/compile_api_main.dart")
+    return analysistest.end(env)
+
+def _docstring_example_test_impl(ctx):
+    """The docstring's minimal example compiles with the default argv shape."""
+    env = analysistest.begin(ctx)
+    action = _kernel_action(env)
+    _assert_default_argv(env, _compile_argv(env, action), "flutter/tests/compile_api_main.dart")
+    return analysistest.end(env)
+
+def _full_argv_test_impl(ctx):
+    """The default compile's full post-`--` argv, element for element.
+
+    Order, flags and values are pinned exactly; only host/toolchain file
+    paths are discovered from the action's own inputs (matched by basename,
+    each required to match exactly one input), and the staging root from the
+    staged symlink inputs. A reordered, added or dropped flag fails here even
+    when every fragment assertion above still passes.
+    """
+    env = analysistest.begin(ctx)
+    action = _kernel_action(env)
+    argv = _compile_argv(env, action)
+    if not argv:
+        return analysistest.end(env)
+    paths = [f.path for f in action.inputs.to_list()]
+    runtimes = [p for p in paths if p.rsplit("/", 1)[-1] in ("dartaotruntime", "dartaotruntime.exe")]
+    asserts.equals(env, 1, len(runtimes), "expected exactly one dartaotruntime input, got %r" % (paths,))
+    snapshots = [p for p in paths if p.endswith("frontend_server_aot.dart.snapshot")]
+    asserts.equals(env, 1, len(snapshots), "expected exactly one frontend_server snapshot input, got %r" % (paths,))
+    platforms = [p for p in paths if p.rsplit("/", 1)[-1].startswith("platform_strong") and p.endswith(".dill")]
+    asserts.equals(env, 1, len(platforms), "expected exactly one platform dill input, got %r" % (paths,))
+    configs = [p for p in paths if p.endswith(".package_config.json")]
+    asserts.equals(env, 1, len(configs), "expected exactly one package_config.json input, got %r" % (paths,))
+    staged = [p for p in paths if ".stage/" in p]
+    asserts.true(env, len(staged) > 0, "expected staged symlink inputs, got %r" % (paths,))
+    roots = {p[:p.index(".stage") + len(".stage")]: True for p in staged}
+    asserts.equals(env, 1, len(roots.keys()), "expected one staging root, got %r" % (staged,))
+    stage_root = roots.keys()[0] if len(roots.keys()) == 1 else ""
+    asserts.true(
+        env,
+        "_compile_api_default.dill." in stage_root and stage_root.endswith(".stage"),
+        "the staging root is the action-scoped hashed directory, got %r" % (stage_root,),
+    )
+    outputs = action.outputs.to_list()
+    asserts.equals(env, 1, len(outputs), "expected exactly one compile output")
+    if len(runtimes) == 1 and len(snapshots) == 1 and len(platforms) == 1 and len(configs) == 1 and len(outputs) == 1 and len(roots.keys()) == 1:
+        asserts.equals(
+            env,
+            [
+                runtimes[0],
+                snapshots[0],
+                "--sdk-root",
+                platforms[0].rsplit("/", 1)[0] + "/",
+                "--target",
+                "flutter",
+                "--packages",
+                configs[0],
+                "--output-dill",
+                outputs[0].path,
+                "--verbosity=error",
+                "--enable-asserts",
+                "--filesystem-root",
+                stage_root,
+                "--filesystem-scheme",
+                "org-dartlang-app",
+                "flutter/tests/compile_api_main.dart",
+            ],
+            argv,
+        )
     return analysistest.end(env)
 
 def _extras_argv_test_impl(ctx):
@@ -228,6 +350,12 @@ def _extra_flags_reject_test_impl(ctx):
     asserts.expect_failure(env, "extra_flags")
     return analysistest.end(env)
 
+def _extra_roots_reject_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    for expected in ctx.attr.expected_substrings:
+        asserts.expect_failure(env, expected)
+    return analysistest.end(env)
+
 def _undeclared_staged_out_test_impl(ctx):
     """An undeclared source beside an `import_dill` stays out of the compile.
 
@@ -295,10 +423,18 @@ _DBG = {
 }
 
 _default_argv_test = analysistest.make(_default_argv_test_impl, config_settings = _DBG)
+_docstring_example_test = analysistest.make(_docstring_example_test_impl, config_settings = _DBG)
+_full_argv_test = analysistest.make(_full_argv_test_impl, config_settings = _DBG)
 _extras_argv_test = analysistest.make(_extras_argv_test_impl, config_settings = _DBG)
 _vm_flags_reject_test = analysistest.make(_vm_flags_reject_test_impl, config_settings = _DBG, expect_failure = True)
 _vm_flags_allowed_test = analysistest.make(_vm_flags_allowed_test_impl, config_settings = _DBG)
 _extra_flags_reject_test = analysistest.make(_extra_flags_reject_test_impl, config_settings = _DBG, expect_failure = True)
+_extra_roots_reject_test = analysistest.make(
+    _extra_roots_reject_test_impl,
+    config_settings = _DBG,
+    expect_failure = True,
+    attrs = {"expected_substrings": attr.string_list(mandatory = True)},
+)
 _undeclared_staged_out_test = analysistest.make(_undeclared_staged_out_test_impl, config_settings = _DBG)
 _extra_roots_test = analysistest.make(_extra_roots_test_impl, config_settings = _DBG)
 _no_extra_roots_test = analysistest.make(_no_extra_roots_test_impl, config_settings = _DBG)
@@ -439,13 +575,52 @@ def compile_api_test_suite(name):
         tags = ["manual"],
     )
 
-    # Executed compiles: the default shape, the every-new-parameter shape, and
-    # the real `import_dill` chain all build. `resource_set` is invisible to
-    # analysis, so running the action is its presence check. The analysis-only
-    # `_compile_api_extras`/`_compile_api_undeclared` targets use the
-    # checked-in stub dill, which no executed compile reads as a dill.
+    # Analysis negatives for `extra_roots`: an absolute root (POSIX or
+    # Windows), a `..` escape, and an empty root each fail at analysis
+    # naming the package and the value — never after the read.
+    _compile_api_caller(
+        name = "_compile_api_bad_roots_abs",
+        main = "compile_api_main.dart",
+        deps = [":_compile_api_ghost"],
+        extra_roots = {"compile_api_ghost": "/abs/root"},
+        tags = ["manual"],
+    )
+    _compile_api_caller(
+        name = "_compile_api_bad_roots_win",
+        main = "compile_api_main.dart",
+        deps = [":_compile_api_ghost"],
+        extra_roots = {"compile_api_ghost": "C:/win/root"},
+        tags = ["manual"],
+    )
+    _compile_api_caller(
+        name = "_compile_api_bad_roots_escape",
+        main = "compile_api_main.dart",
+        deps = [":_compile_api_ghost"],
+        extra_roots = {"compile_api_ghost": "../escape"},
+        tags = ["manual"],
+    )
+    _compile_api_caller(
+        name = "_compile_api_bad_roots_empty",
+        main = "compile_api_main.dart",
+        deps = [":_compile_api_ghost"],
+        extra_roots = {"compile_api_ghost": ""},
+        tags = ["manual"],
+    )
+
+    # Executed compiles: the default shape, the docstring example shape, the
+    # every-new-parameter shape, and the real `import_dill` chain all build.
+    # `resource_set` is invisible to analysis, so running the action is its
+    # presence check. The analysis-only `_compile_api_extras`/
+    # `_compile_api_undeclared` targets use the checked-in stub dill, which no
+    # executed compile reads as a dill.
     _compile_api_caller(
         name = "_compile_api_build_default",
+        main = "compile_api_main.dart",
+        tags = ["manual"],
+        target_compatible_with = _HOST_COMPATIBLE,
+    )
+    _docstring_example(
+        name = "_compile_api_build_docstring",
         main = "compile_api_main.dart",
         tags = ["manual"],
         target_compatible_with = _HOST_COMPATIBLE,
@@ -470,8 +645,24 @@ def compile_api_test_suite(name):
         target_compatible_with = _HOST_COMPATIBLE,
     )
 
+    # Analysis target for the docstring example: the exact minimal call shape
+    # from the `//flutter:utils.bzl` module docstring.
+    _docstring_example(
+        name = "_compile_api_docstring",
+        main = "compile_api_main.dart",
+        tags = ["manual"],
+    )
+
     _default_argv_test(
         name = name + "_default_argv",
+        target_under_test = ":_compile_api_default",
+    )
+    _docstring_example_test(
+        name = name + "_docstring_example",
+        target_under_test = ":_compile_api_docstring",
+    )
+    _full_argv_test(
+        name = name + "_full_argv",
         target_under_test = ":_compile_api_default",
     )
     _extras_argv_test(
@@ -518,11 +709,32 @@ def compile_api_test_suite(name):
         name = name + "_no_extra_roots",
         target_under_test = ":_compile_api_no_roots",
     )
+    _extra_roots_reject_test(
+        name = name + "_extra_roots_abs",
+        target_under_test = ":_compile_api_bad_roots_abs",
+        expected_substrings = ["extra_roots", "compile_api_ghost", "/abs/root"],
+    )
+    _extra_roots_reject_test(
+        name = name + "_extra_roots_win",
+        target_under_test = ":_compile_api_bad_roots_win",
+        expected_substrings = ["extra_roots", "compile_api_ghost", "C:/win/root"],
+    )
+    _extra_roots_reject_test(
+        name = name + "_extra_roots_escape",
+        target_under_test = ":_compile_api_bad_roots_escape",
+        expected_substrings = ["extra_roots", "compile_api_ghost", "../escape"],
+    )
+    _extra_roots_reject_test(
+        name = name + "_extra_roots_empty",
+        target_under_test = ":_compile_api_bad_roots_empty",
+        expected_substrings = ["extra_roots", "compile_api_ghost"],
+    )
     build_test(
         name = name + "_build",
         target_compatible_with = _HOST_COMPATIBLE,
         targets = [
             ":_compile_api_build_default",
+            ":_compile_api_build_docstring",
             ":_compile_api_build_extras",
             ":_compile_api_dill_source",
             ":_compile_api_import",
@@ -533,6 +745,8 @@ def compile_api_test_suite(name):
         name = name,
         tests = [
             ":" + name + "_default_argv",
+            ":" + name + "_docstring_example",
+            ":" + name + "_full_argv",
             ":" + name + "_extras_argv",
             ":" + name + "_vm_flags_reject",
             ":" + name + "_vm_flags_allowed",
@@ -544,6 +758,10 @@ def compile_api_test_suite(name):
             ":" + name + "_undeclared_staged_out",
             ":" + name + "_extra_roots",
             ":" + name + "_no_extra_roots",
+            ":" + name + "_extra_roots_abs",
+            ":" + name + "_extra_roots_win",
+            ":" + name + "_extra_roots_escape",
+            ":" + name + "_extra_roots_empty",
             ":" + name + "_build",
         ],
     )

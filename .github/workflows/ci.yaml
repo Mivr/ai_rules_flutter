@@ -208,6 +208,19 @@ jobs:
       - name: bazel test //... (e2e/smoke)
         working-directory: e2e/smoke
         run: bazel test //... --test_output=errors
+      # Compile-soundness red path (cross-module): the entrypoint imports a
+      # sibling that is never declared, so executing the compile must fail
+      # on the guard's refusal. Manual so `//...` stays green; the grep pins
+      # the guard message so a crash or a skipped check cannot pass as red.
+      - name: Undeclared-import compile fails on the guard refusal
+        working-directory: e2e/smoke
+        run: |
+          if out=$(bazel build //:consumer_negative 2>&1); then
+            echo "$out"
+            echo "expected the undeclared-import compile to fail, but it succeeded"
+            exit 1
+          fi
+          echo "$out" | grep -F "is not a declared input"
       - name: Report cache sizes
         if: always()
         run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true
@@ -324,6 +337,20 @@ jobs:
             exit 1
           fi
           echo "$out" | grep -F "configured darwin.artifactbundle path '/nonexistent/darwin.artifactbundle' does not exist"
+      # Compile-soundness red path: the entrypoint imports a sibling that
+      # exists on disk but is never declared, so executing the compile must
+      # fail on the guard's refusal — never with a built dill. The target is
+      # manual so `//...` stays green; the grep pins the guard message so a
+      # frontend_server crash or a refactor that stops checking directives
+      # cannot pass as red.
+      - name: Undeclared-import compile fails on the guard refusal
+        run: |
+          if out=$(bazel build //flutter/tests:_compile_api_build_negative 2>&1); then
+            echo "$out"
+            echo "expected the undeclared-import compile to fail, but it succeeded"
+            exit 1
+          fi
+          echo "$out" | grep -F "is not a declared input"
       - name: Report cache sizes
         if: always()
         run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true

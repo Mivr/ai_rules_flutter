@@ -5,8 +5,8 @@ load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 # buildifier: disable=bzl-visibility
 load("//flutter/private:toolchain_selection.bzl", "select_toolchain_source", "select_toolchain_version")
 
-def _req(version, is_root = False):
-    return struct(version = version, is_root = is_root)
+def _req(version, is_root = False, module = ""):
+    return struct(version = version, is_root = is_root, module = module)
 
 def _src(version = "", local_path = "", is_root = False):
     return struct(version = version, local_path = local_path, is_root = is_root)
@@ -82,10 +82,17 @@ def _prerelease_core_decides_test_impl(ctx):
 
 def _build_metadata_ignored_test_impl(ctx):
     env = unittest.begin(ctx)
-    selection = select_toolchain_version("sdk", [_req("3.44.1"), _req("3.44.1+corp.7")])
-    asserts.equals(env, "3.44.1", selection.version)
+
+    # Build metadata never decides: a stamped version still loses to a
+    # higher core, and a lone stamped request selects as-is.
     selection = select_toolchain_version("sdk", [_req("3.44.1+corp.7"), _req("3.44.8")])
     asserts.equals(env, "3.44.8", selection.version)
+    selection = select_toolchain_version("sdk", [_req("3.44.1+corp.7")])
+    asserts.equals(env, "3.44.1+corp.7", selection.version)
+
+    # The same version spelled twice is one request, not a tie.
+    selection = select_toolchain_version("sdk", [_req("3.44.1"), _req("3.44.1")])
+    asserts.equals(env, "3.44.1", selection.version)
     return unittest.end(env)
 
 def _enterprise_prerelease_root_test_impl(ctx):
@@ -153,6 +160,28 @@ def _malformed_version_probe_impl(ctx):
 _malformed_version_probe = rule(
     implementation = _malformed_version_probe_impl,
     attrs = {"version": attr.string(mandatory = True)},
+)
+
+# L-11: two equal-rank requests spelled differently refuse to pick.
+def _tie_probe_impl(ctx):
+    select_toolchain_version("sdk", [
+        _req(ctx.attr.version, is_root = ctx.attr.is_root, module = ctx.attr.module),
+        _req(ctx.attr.version2, is_root = ctx.attr.is_root2, module = ctx.attr.module2),
+    ])
+    out = ctx.actions.declare_file(ctx.label.name + ".txt")
+    ctx.actions.write(out, "ok")
+    return [DefaultInfo(files = depset([out]))]
+
+_tie_probe = rule(
+    implementation = _tie_probe_impl,
+    attrs = {
+        "version": attr.string(mandatory = True),
+        "version2": attr.string(mandatory = True),
+        "is_root": attr.bool(default = False),
+        "is_root2": attr.bool(default = False),
+        "module": attr.string(default = ""),
+        "module2": attr.string(default = ""),
+    },
 )
 
 def _expect_failure_test_impl(ctx):
@@ -253,6 +282,34 @@ def toolchain_selection_test_suite(name):
         target_under_test = ":" + name + "_multi_local_probe",
         expected_substrings = ["multiple local SDKs"],
     )
+    _tie_probe(
+        name = name + "_dep_tie_probe",
+        version = "3.44.1",
+        module = "dep_a",
+        version2 = "3.44.1+corp.7",
+        module2 = "dep_b",
+        tags = ["manual"],
+    )
+    _expect_failure_test(
+        name = name + "_dep_tie_fails",
+        target_under_test = ":" + name + "_dep_tie_probe",
+        expected_substrings = ["equally-ranked", "dep_a", "dep_b", "3.44.1+corp.7"],
+    )
+    _tie_probe(
+        name = name + "_root_tie_probe",
+        version = "3.44.1",
+        is_root = True,
+        module = "my_root",
+        version2 = "3.44.1+corp.7",
+        is_root2 = True,
+        module2 = "my_root",
+        tags = ["manual"],
+    )
+    _expect_failure_test(
+        name = name + "_root_tie_fails",
+        target_under_test = ":" + name + "_root_tie_probe",
+        expected_substrings = ["equally-ranked", "Keep exactly one"],
+    )
     unittest.suite(
         name + "_unit",
         _single_request_test,
@@ -283,5 +340,7 @@ def toolchain_selection_test_suite(name):
             ":" + name + "_root_two_tag_mix_fails",
             ":" + name + "_dep_local_fails",
             ":" + name + "_multi_local_fails",
+            ":" + name + "_dep_tie_fails",
+            ":" + name + "_root_tie_fails",
         ],
     )

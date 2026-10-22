@@ -177,16 +177,16 @@ def _create_native_libs_jar(ctx, aot_output, native_libs, abi):
     seen_basenames = {}
     for basename, lib in entries:
         if basename in seen_basenames:
-            fail(
+            fail((
                 "flutter_android_bundle: two native libraries would both be " +
-                "packaged as lib/{abi}/{basename}: {first} and {second}. ".format(
-                    abi = abi,
-                    basename = basename,
-                    first = seen_basenames[basename].path,
-                    second = lib.path,
-                ) +
-                "Rename one of them — Android can only load one.",
-            )
+                "packaged as lib/{abi}/{basename}: {first} and {second}. " +
+                "Rename one of them — Android can only load one."
+            ).format(
+                abi = abi,
+                basename = basename,
+                first = seen_basenames[basename].path,
+                second = lib.path,
+            ))
         seen_basenames[basename] = lib
         zip_entries.append("lib/{abi}/{basename}={src}".format(
             abi = abi,

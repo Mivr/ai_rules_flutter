@@ -461,7 +461,7 @@ flutter_ios_app(
 | `provisioning_profile` | A `.mobileprovision` file, usually a `local_provisioning_profile` target. Required for device builds, unused by simulator builds. See [Running on an iOS device](#running-on-an-ios-device). |
 | `app_icons` | Defaults to the `AppIcon.appiconset` in `ios/Runner/Assets.xcassets`. See [App icons](#app-icons). |
 | `runner_deps` | `swift_library` targets linked into the runner. See [App Intents](#app-intents). |
-| `exclude_plugins` | Plugin module names left out of the registrant. See [iOS plugin registrant](#ios-plugin-registrant). |
+| `exclude_plugins` | Plugin module names left out of the registrant. iOS only: the Android, Linux, macOS and Windows registrants take no such attribute and always register every collected native plugin. See [iOS plugin registrant](#ios-plugin-registrant). |
 
 `rules_apple`'s `ios_application` handles the transition to iOS arm64.
 
@@ -624,7 +624,7 @@ objc_library(
 )
 ```
 
-`exclude_plugins` drops named plugin modules from the registrant — no import and no registration call, in either language — for plugins compiled conditionally or linked elsewhere. A name that is not a native iOS plugin of the application is an error listing the valid names, so a typo fails the build instead of silently shipping an unregistered plugin:
+`exclude_plugins` drops named plugin modules from the registrant — no import and no registration call, in either language — for plugins compiled conditionally or linked elsewhere. It is iOS-only: the other platforms' registrants always register every collected native plugin, so an Android or desktop build cannot drop one. A name that is not a native iOS plugin of the application is an error listing the valid names, so a typo fails the build instead of silently shipping an unregistered plugin:
 
 ```starlark
 flutter_ios_app(

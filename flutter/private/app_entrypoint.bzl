@@ -357,6 +357,34 @@ def resolve_wrapper_main_import(package_name, lib_root, main_short_path, main_pa
     """
     return app_main_package_uri(package_name, lib_root, main_short_path) or compute_wrapper_main_import(wrapper_depth, main_path)
 
+def _is_absolute_root(root):
+    """Whether an `extra_roots` value is an absolute path on any host OS."""
+    if root.startswith("/") or root.startswith("\\"):
+        return True
+    return len(root) >= 2 and root[1] == ":" and root[0].isalpha()
+
+def validate_extra_roots(extra_roots):
+    """Fails when an `extra_roots` entry is not an exec-root-relative path.
+
+    Roots become `rootUri` entries in the emitted `package_config.json` and
+    must name declared inputs below the exec root. An absolute root, a `..`
+    escape, or an empty root would instead resolve outside the declared
+    inputs; the compiler would fail only after reading there. Fail at
+    analysis naming the package and the value instead.
+
+    Args:
+        extra_roots: Dict of package name to exec-root-relative root.
+    """
+    for package in sorted(extra_roots.keys()):
+        root = extra_roots[package]
+        if not root or _is_absolute_root(root) or ".." in root.split("/") or ".." in root.split("\\"):
+            fail((
+                "compile_package_config: extra_roots[{package}] is {root}: " +
+                "extra_roots values must be exec-root-relative directories " +
+                "(e.g. \"flutter/tests\"), never absolute, empty, or " +
+                "escaping with \"..\""
+            ).format(package = repr(package), root = repr(root)))
+
 def compile_package_config(ctx, packages, all_srcs, extra_roots = {}):
     """Co-locate packages and write the matching `package_config.json`.
 
@@ -380,7 +408,9 @@ def compile_package_config(ctx, packages, all_srcs, extra_roots = {}):
         forwarded as `roots` to `generate_package_config`, for packages with
         no sources in `all_srcs` (flutter, flutter_test, sky_engine from the
         toolchain) so they still get entries. A root found from the files
-        wins. The caller must also make those roots' files action inputs —
+        wins. Every value is validated at analysis — an absolute, empty, or
+        `..`-escaping root fails the build naming the package and the value.
+        The caller must also make those roots' files action inputs —
         an entry whose files the compile action did not declare resolves
         nowhere at compile time.
 
@@ -388,6 +418,7 @@ def compile_package_config(ctx, packages, all_srcs, extra_roots = {}):
       `struct(config_file, srcs, packages)` — `srcs` and `packages` are
       the post-colocation values to feed the compile action.
     """
+    validate_extra_roots(extra_roots)
     packages2, srcs2 = colocate_packages(ctx, packages, all_srcs)
     config_file = ctx.actions.declare_file(ctx.label.name + ".package_config.json")
     ctx.actions.write(config_file, generate_package_config(packages2, srcs2, config_file, roots = extra_roots))

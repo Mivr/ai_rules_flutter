@@ -76,7 +76,8 @@ flutter_version = tag_class(attrs = {
         mandatory = True,
     ),
     "material_fonts_url": attr.string(
-        doc = "GCS path of the Material icon font bundle for the release.",
+        doc = "GCS path of the Material icon font bundle for the release " +
+              "(a full https:// URL is used as-is).",
         mandatory = True,
     ),
     "artifact_sha256": attr.string_dict(
@@ -254,6 +255,7 @@ def _toolchain_extension(module_ctx):
                 version = toolchain.flutter_version,
                 local_path = toolchain.local_path,
                 is_root = mod.is_root,
+                module = mod.name,
             ))
     for name, requests in registrations.items():
         source = select_toolchain_source(name, requests)

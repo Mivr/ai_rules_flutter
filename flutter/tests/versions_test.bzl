@@ -453,6 +453,7 @@ def versions_test_suite(name):
             "No sha256 recorded for missing/artifact.zip in Flutter 3.47.70",
             "missing/artifact.zip",
             "3.47.70",
+            "that tag's artifact_sha256 in the root module",
         ],
     )
 
@@ -469,6 +470,7 @@ def versions_test_suite(name):
             "No sha256 recorded for sky_engine.zip in Flutter 3.44.1-acme",
             "sky_engine.zip",
             "3.44.1-acme",
+            "that tag's artifact_sha256 in the root module",
         ],
     )
 

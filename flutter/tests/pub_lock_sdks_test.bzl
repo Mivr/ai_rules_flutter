@@ -40,6 +40,11 @@ def _reads_the_lower_bound_test_impl(ctx):
     asserts.equals(env, [3, 18, 0], constraint_lower_bound(">=3.18.0-18.0.pre.54"))
     asserts.equals(env, [3, 10, 0], constraint_lower_bound(">=3.10.0-0 <4.0.0"))
 
+    # Build metadata is not part of the floor: it is stripped from the
+    # constraint just like the prerelease is.
+    asserts.equals(env, [3, 47, 0], constraint_lower_bound(">=3.47.0+1"))
+    asserts.equals(env, [3, 47, 7], constraint_lower_bound(">=3.47.7-1.0.pre+x"))
+
     # No `>=` term, or one that cannot be read: no opinion rather than a guess.
     asserts.equals(env, None, constraint_lower_bound("<4.0.0"))
     asserts.equals(env, None, constraint_lower_bound("any"))
@@ -63,6 +68,13 @@ def _flags_only_a_toolchain_below_the_floor_test_impl(ctx):
     asserts.false(env, version_below_lower_bound("3.44.1", "any"))
     asserts.false(env, version_below_lower_bound("3.44.1", "<4.0.0"))
     asserts.false(env, version_below_lower_bound("stable", ">=3.44.0"))
+
+    # Build metadata decides nothing on either side: the toolchain version
+    # and the constraint floor both compare by release triple only.
+    asserts.true(env, version_below_lower_bound("3.0.0+abc", ">=3.47.0"))
+    asserts.false(env, version_below_lower_bound("3.47.7+hotfix.1", ">=3.47.0"))
+    asserts.true(env, version_below_lower_bound("3.40.0", ">=3.47.0+1"))
+    asserts.true(env, version_below_lower_bound("3.47.7-1.0.pre+x", ">=3.47.8"))
     return unittest.end(env)
 
 def _hosted_package_sha256_returns_recorded_value_test_impl(ctx):

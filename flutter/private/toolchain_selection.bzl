@@ -56,6 +56,43 @@ def _parse_version(v):
         fail("Invalid Flutter SDK version \"{v}\": the numeric core is empty.".format(v = v))
     return (core, release_rank, prerelease)
 
+def _request_module(request):
+    """The module name a toolchain request came from, or "" when unrecorded."""
+    return getattr(request, "module", "")
+
+def _describe_request(request):
+    """`version` plus its module, for tie-failure messages."""
+    module = _request_module(request)
+    if module:
+        return "{v} from module {m}".format(v = request.version, m = module)
+    return request.version
+
+def _fail_equal_rank(name, first, second, both_root):
+    """Fails on two equally-ranked but differently-spelled version requests.
+
+    Build metadata never decides ordering, so `3.44.1` and `3.44.1+corp.7`
+    compare equal — yet they name different releases. Picking by module order
+    would resolve different bytes depending on which module Bazel visits
+    first, so the tie fails naming both requests instead.
+
+    Args:
+      name: The toolchain name.
+      first: The first tied request struct.
+      second: The second tied request struct.
+      both_root: Whether both requests came from the root module's own tags.
+    """
+    if both_root:
+        fail("Flutter toolchain {name} has two equally-ranked version requests that differ only where ordering never decides (build metadata): {first} and {second}. Keep exactly one flutter.toolchain(flutter_version = ...) tag for {name} in the root module.".format(
+            name = name,
+            first = _describe_request(first),
+            second = _describe_request(second),
+        ))
+    fail("Flutter toolchain {name} has two equally-ranked version requests that differ only where ordering never decides (build metadata): {first} and {second}. Pin one with flutter.toolchain(flutter_version = ...) in the root module.".format(
+        name = name,
+        first = _describe_request(first),
+        second = _describe_request(second),
+    ))
+
 def select_toolchain_version(name, requests):
     """Selects the Flutter SDK version for one toolchain name.
 
@@ -66,9 +103,16 @@ def select_toolchain_version(name, requests):
     When several root tags request the same name, the highest of the root's own
     requests is used.
 
+    Requests that compare equally but spell different versions (they differ
+    only in build metadata, which never decides) fail naming both requests:
+    the choice would otherwise depend on module order. Either spell the same
+    version everywhere or pin one in the root module.
+
     Args:
       name: The toolchain name, used in the note.
       requests: Non-empty list of `struct(version, is_root)`, one per tag.
+        A `module` field naming the requesting module is used in tie
+        failures when present.
 
     Returns:
       `struct(version, note)`. `note` is a message for the user when the root
@@ -84,10 +128,13 @@ def select_toolchain_version(name, requests):
     keys = {r.version: _parse_version(r.version) for r in requests}
 
     if root_requests:
-        selected = root_requests[0].version
+        selected = root_requests[0]
         for request in root_requests[1:]:
-            if keys[request.version] > keys[selected]:
-                selected = request.version
+            if keys[request.version] > keys[selected.version]:
+                selected = request
+            elif keys[request.version] == keys[selected.version] and request.version != selected.version:
+                _fail_equal_rank(name, selected, request, True)
+        selected = selected.version
 
         # The root pin wins even when it is older than a dependency's request;
         # surface that as an informational note naming both versions.
@@ -110,11 +157,13 @@ def select_toolchain_version(name, requests):
         return struct(version = selected, note = note)
 
     # No root request: highest requested version wins.
-    selected = requests[0].version
+    selected = requests[0]
     for request in requests[1:]:
-        if keys[request.version] > keys[selected]:
-            selected = request.version
-    return struct(version = selected, note = None)
+        if keys[request.version] > keys[selected.version]:
+            selected = request
+        elif keys[request.version] == keys[selected.version] and request.version != selected.version:
+            _fail_equal_rank(name, selected, request, False)
+    return struct(version = selected.version, note = None)
 
 def select_toolchain_source(name, requests):
     """Selects the source (local SDK or downloaded version) for one toolchain name.
@@ -131,7 +180,9 @@ def select_toolchain_source(name, requests):
       requests: Non-empty list of `struct(version, local_path, is_root)`, one
         per tag. `version` is `""` for local requests, `local_path` is `""`
         for download requests. A request setting both counts as both, so it
-        trips the root-mix error below.
+        trips the root-mix error below. A `module` field naming the
+        requesting module is forwarded to version selection for tie failures
+        when present.
 
     Returns:
       `struct(local_path, version, note)`: exactly one of `local_path` and
@@ -161,6 +212,6 @@ def select_toolchain_source(name, requests):
         return struct(local_path = local_path, version = "", note = note)
     selection = select_toolchain_version(
         name,
-        [struct(version = r.version, is_root = r.is_root) for r in requests],
+        [struct(version = r.version, is_root = r.is_root, module = _request_module(r)) for r in requests],
     )
     return struct(local_path = "", version = selection.version, note = selection.note)

@@ -83,8 +83,9 @@ register_toolchains("@flutter_toolchains//:all")
 # No go_sdk block in this workspace: the pinned Go 1.26.2 comes from
 # rules_flutter's own MODULE.bazel (a regular dependency, so it is evaluated
 # here and sorts before rules_android's bundled unpinned 1.22.4). rules_go
-# stays at the 0.59.0 floor (same as rules_flutter's own MODULE.bazel), so
-# this workspace also proves the proxy's pure-Go transition against it.
+# declares only the 0.59.0 minimum here (same as rules_flutter's own
+# MODULE.bazel) — MVS still selects 0.64.2 through rules_dart, so the proxy's
+# pure-Go transition is proven against the resolved version, never the floor.
 bazel_dep(name = "rules_go", version = "0.59.0")
 
 # rules_android: download android build tools and discover local SDK.

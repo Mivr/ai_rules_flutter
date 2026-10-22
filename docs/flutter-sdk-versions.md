@@ -24,7 +24,12 @@ only the root module decides. Pins accept a numeric dotted core with an
 optional semver-style `-<prerelease>` and/or `+<build>` suffix
 (`3.44.1-acme`, `3.45.0-0.1.pre`, `3.44.1+corp.7`): ordering is numeric on
 the core, a prerelease sorts below its release, and build metadata never
-decides. Anything else fails naming the offending version.
+decides. Anything else fails naming the offending version. Two
+equal-rank requests spelled differently (`3.44.1` vs `3.44.1+corp.7`)
+are a hard error naming both requesting modules — neither spelling is
+deterministically "the same" SDK, so pin one with `flutter.toolchain(`
+`flutter_version = ...)` in the root module instead of letting tag
+order pick.
 
 The same root-wins rule applies to `local_path`: a root
 `flutter.toolchain(local_path = ...)` overrides same-name version requests
@@ -37,7 +42,11 @@ name. A `local_path` in a non-root module is always an error.
 ## Custom releases (`flutter.version`)
 
 Only the root module may register versions `versions.bzl` does not list — an
-older stable, a rebuild, an enterprise engine:
+older stable, a rebuild, an enterprise engine. Budget for it up front: every
+release needs its `engine_revision`, `source_sha256`, `material_fonts_url`,
+and one `artifact_sha256` entry per artifact the repositories fetch — 58 for
+a current release, the same set `ARTIFACT_CHECKSUMS` lists per stock version
+(`e2e/smoke`'s `3.47.70` tag copies 3.47.7's set verbatim):
 
 ```starlark
 flutter.version(
@@ -66,7 +75,9 @@ functions — now against the merged tables. The guards are:
 - `version`, `engine_revision`, `source_sha256`, and `material_fonts_url`
   are all mandatory.
 - A fetched artifact without a checksum in the merged table fails exactly
-  like a stock one does, naming the artifact and the version.
+  like a stock one does, naming the artifact and the version — and the
+  message points at the tag's own `artifact_sha256` for custom versions
+  rather than at `versions.bzl`.
 
 `engine_base_url` and `source_url` point a custom release at a replacement
 origin serving the same layout (an enterprise mirror of the engine revision
@@ -74,7 +85,8 @@ directory, a vendored source tarball). They are per-release origins, not
 general mirrors: plain host mirroring stays Bazel's job — see below.
 
 `e2e/smoke` registers release `3.47.70`, an enterprise-style rebuild label
-over 3.47.7's bytes, and resolves a toolchain from it.
+over 3.47.7's bytes, and resolves a toolchain from it. `material_fonts_url`
+takes a GCS path as above; a full `https://` URL is used as-is.
 
 ## Offline SDKs (`local_path`)
 
@@ -99,7 +111,9 @@ flutter precache --all-platforms
 ```
 
 A relative path resolves against the main workspace root; an absolute path is
-used as-is. Each repository symlinks the SDK subtree it needs out of the
+used as-is. `~` is not expanded: `local_path = "~/flutter"` resolves to a
+literal `~` directory under the workspace root, not the home directory —
+spell the home directory out. Each repository symlinks the SDK subtree it needs out of the
 `bin/cache` layout and fails — never falling back to the network — when a
 piece is absent:
 

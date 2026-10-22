@@ -1,6 +1,7 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@rules_dart//dart:defs.bzl", "dart_library")
 load(":consumer_compile.bzl", "consumer_caller")
+load(":consumer_extra_roots_test.bzl", "consumer_extra_roots_test_suite")
 
 # Verify that the Flutter toolchain resolves by building the toolchains repo.
 # This test passes if the toolchain alias targets can be analyzed.
@@ -19,8 +20,12 @@ build_test(
 # in this (other) module composes over `FLUTTER_KERNEL_COMPILE_ATTRS` /
 # `FLUTTER_KERNEL_COMPILE_TOOLCHAINS` and builds kernels — one with
 # `vm_flags` and `resource_set`, one without them, and one consuming a real
-# `import_dill` dill. `//...` (built by the consumer gate) covers all but the
-# manual negative, which must fail and is exercised explicitly.
+# `import_dill` dill. The `import_dill` target's `extra_roots` names the
+# sourceless `consumer_ghost` from `//ghost` (never `consumer_dep`, whose
+# sources already determine its root — that would be a no-op), and
+# `extra_roots_test` proves the ghost entry reaches the emitted config. `//...` (built by the consumer
+# gate) covers all but the manual negative, which must fail and is exercised
+# explicitly.
 dart_library(
     name = "consumer_dep",
     package_name = "consumer_dep",
@@ -49,13 +54,18 @@ consumer_caller(
 consumer_caller(
     name = "consumer_import",
     extra_flags = ["--incremental"],
-    extra_roots = {"consumer_dep": "e2e/smoke"},
+    extra_roots = {"consumer_ghost": "e2e/smoke"},
     import_dill = ":consumer_dill_source",
     main = "consumer_import_main.dart",
     use_resource_set = True,
     vm_flags = ["--old-gen-heap-size=2147483648"],
-    deps = [":consumer_dep"],
+    deps = [
+        ":consumer_dep",
+        "//ghost:consumer_ghost",
+    ],
 )
+
+consumer_extra_roots_test_suite(name = "extra_roots_test")
 
 # Negative: the sibling import is never declared, so the compile must fail.
 # Manual so `//...` stays green; run explicitly to see the refusal.

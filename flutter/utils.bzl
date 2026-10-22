@@ -45,7 +45,10 @@ my_compile = rule(
 Stability note: these helpers are stable for external use. New optional
 parameters may be added to `flutter_kernel_compile_action` (and matching
 fields to the `flutter_kernel_compile_tools` struct), but existing calls keep
-their argv and action keys.
+their argv and action keys. The minimal example above is itself a tested
+shape: `//flutter/tests:compile_api_test_docstring_example` instantiates this
+exact call, and `//flutter/tests:compile_api_test_full_argv` pins the resulting
+action's full argv element for element.
 
 Allowed `vm_flags` (Dart VM flags before the snapshot): heap/GC sizing, each
 spelled `--name=<bytes>` with a plain integer (`--old-gen-heap-size`,

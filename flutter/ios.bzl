@@ -130,7 +130,9 @@ def flutter_ios_registrant_gen(name, language = "swift", exclude_plugins = [], *
             `hdrs` and `srcs` output groups for an objc_library to consume.
         exclude_plugins: Plugin module names to leave out of the
             registrant. A name that is not a native iOS plugin of the
-            application is an error, listing the valid names.
+            application is an error, listing the valid names. iOS-only:
+            the Android, Linux, macOS and Windows registrants always
+            register every collected native plugin.
         **kwargs: Forwarded to the underlying rule. `tags` defaults to
             `["manual"]` — build via the consuming `ios_application`.
     """
@@ -496,7 +498,9 @@ def flutter_ios_app(
         engine: Override default `@flutter_ios_engine//:engine` target.
         exclude_plugins: Plugin module names to leave out of the
             registrant. A name that is not a native iOS plugin of the
-            application is an error, listing the valid names.
+            application is an error, listing the valid names. iOS-only:
+            the Android, Linux, macOS and Windows registrants always
+            register every collected native plugin.
         allow_non_macho: Explicit allow-list of binary or framework names
             permitted to bypass Mach-O validation.
         backend: Apple bundling backend: `"rules_apple"` (default) or

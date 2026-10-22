@@ -39,7 +39,11 @@ deps, which may be *older and heavier* than the current release's:
   (0.50.0 through 0.58.3 fail to load: `go/private/rules/cross.bzl` uses the
   native `CcInfo` symbol Bazel 9 removed; the `rules_cc` import landed in
   0.59.0). In practice `rules_android` already imposes the same floor, and
-  MVS usually selects much newer (0.64.2 in current graphs).
+  the floor never binds anyway: `rules_dart`, `rules_flutter` and
+  `rules_android` all require 0.64.2, so every graph selects that
+  (`bazel mod explain rules_go` — verified even in the workspaces that
+  declare only the 0.59.0 minimum). The floor is a Bazel 9 load minimum, not
+  a tested configuration.
 
 ## Heavy transitive repos, and who brings them
 
@@ -84,6 +88,19 @@ Concretely, a consumer that never opts into xtool pays:
 - the module-graph edge (`llvm` and its deps appear in `bazel mod deps`)
   and the small `llvm` ruleset-repo fetch (Bazel reads the extension `.bzl`
   during evaluation);
+- the version floors `llvm@0.8.19`'s own `MODULE.bazel` requires: without
+  the edge, MVS would select `bazel_lib@3.1.0` (highest other requesters:
+  `rules_kotlin`, `bazel_linux_packages`), `rules_python@1.7.0`
+  (`rules_apple`), and `rules_shell@0.6.1` (`rules_android`,
+  `rules_apple`, `rules_jvm_external`, `buildifier_prebuilt`,
+  `bazel_linux_packages`); with it they resolve to `3.2.2`, `1.8.0` and
+  `0.8.0`. Verify with `bazel mod explain bazel_lib rules_python
+  rules_shell` — `llvm@0.8.19` is the requester naming the top version of
+  each;
+- four graph-only modules nothing else requests: `tar.bzl`, `with_cfg.bzl`,
+  `zlib-ng` and `zstd` (no other resolved `MODULE.bazel` names them; only
+  `tar.bzl` even materializes a repo, since the rest fetch solely on
+  reference);
 - **no** toolchain-archive download (verified: `@flutter_xtool_darwin_sdk`
   contains no `llvm/` tree for plain consumers, and no
   `llvm-toolchain-minimal-*` repo is fetched);

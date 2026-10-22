@@ -17,6 +17,7 @@
 /.gitignore export-ignore
 /.pre-commit-config.yaml export-ignore
 /.typos.toml export-ignore
+/ai-docs/ export-ignore
 /dev/ export-ignore
 /references/ export-ignore
 /renovate.json export-ignore

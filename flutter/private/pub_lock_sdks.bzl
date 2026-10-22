@@ -46,12 +46,28 @@ def parse_lock_sdk_constraints(lock_content):
         constraints[parts[0].strip()] = parts[1].strip().strip('"')
     return constraints
 
+def _release_core(version):
+    """The numeric release triple of a version string, without prerelease or build.
+
+    A version is `<core>[-<prerelease>][+<build>]`, so the build suffix is
+    stripped first (it may itself contain `-`), then the prerelease. What
+    remains is the dotted numeric core the floor comparison reads.
+
+    Args:
+        version: A version string such as `"3.47.7-1.0.pre+x"`.
+
+    Returns:
+        The release-triple string, e.g. `"3.47.7"`.
+    """
+    return version.split("+")[0].split("-")[0]
+
 def constraint_lower_bound(constraint):
     """The `>=` floor of a pub version constraint, as a list of ints.
 
     Only the numeric release components are returned; a prerelease suffix
-    (`3.18.0-18.0.pre.54`) is dropped, which keeps the comparison sound: a
-    release version is always >= any prerelease of the same triple.
+    (`3.18.0-18.0.pre.54`) and build metadata (`3.47.0+1`) are dropped, which
+    keeps the comparison sound: a release version is always >= any prerelease
+    of the same triple, and build metadata never orders.
 
     Args:
         constraint: A pub constraint string such as `">=3.18.0 <4.0.0"`.
@@ -63,7 +79,7 @@ def constraint_lower_bound(constraint):
     for term in constraint.split(" "):
         if not term.startswith(">="):
             continue
-        release = term[2:].split("-")[0].split("+")[0]
+        release = _release_core(term[2:])
         components = []
         for part in release.split("."):
             if not part.isdigit():
@@ -90,7 +106,7 @@ def version_below_lower_bound(version, constraint):
         return False
 
     actual = []
-    for part in version.split("-")[0].split("."):
+    for part in _release_core(version).split("."):
         if not part.isdigit():
             return False
         actual.append(int(part))
