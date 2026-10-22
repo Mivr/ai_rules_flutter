@@ -247,13 +247,29 @@ def _aot_target_inputs_test_impl(ctx):
 def _aot_target_dbg_inputs_test_impl(ctx):
     """In `-c dbg`, `flutter_aot_target` skips `gen_snapshot` and returns the kernel `.dill`."""
     env = analysistest.begin(ctx)
-    _find_action(env, ["FlutterKernelCompile"])
+    compile_action = _find_action(env, ["FlutterKernelCompile"])
     aot_actions = [
         a
         for a in analysistest.target_actions(env)
         if a.mnemonic in ("FlutterAotElf", "FlutterAotMacho")
     ]
     asserts.equals(env, [], aot_actions, "debug flutter_aot_target must not run gen_snapshot")
+
+    # Whole-program fallback: with modular builds off, the debug compile
+    # consumes the app sources directly and never stages modular artifacts.
+    compile_inputs = _input_paths(compile_action)
+    _assert_some_path_contains(
+        env,
+        compile_inputs,
+        ["language_version_main.dart"],
+        "debug flutter_aot_target FlutterKernelCompile",
+    )
+    _assert_no_path_contains(
+        env,
+        compile_inputs,
+        [".kmod", ".koutline"],
+        "debug flutter_aot_target FlutterKernelCompile",
+    )
     outputs = [f.basename for f in analysistest.target_under_test(env)[DefaultInfo].files.to_list()]
     asserts.equals(env, ["_inputs_aot_target.dill"], outputs)
     return analysistest.end(env)
