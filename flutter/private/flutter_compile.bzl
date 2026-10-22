@@ -127,6 +127,40 @@ def _check_extra_flags(label, extra_flags):
         if norm in _EXTRA_FLAG_BLOCKED:
             fail("%s: extra_flags %r names a file the compile does not declare: pass inputs through `srcs`/`deps`/`import_dill`/`from_dill`/`native_assets_manifest` instead" % (label, flag))
 
+def _is_incr_worker(ctx, aot, target, from_dill, import_dill, recorded_uses):
+    """Whether the compile runs through the incremental worker.
+
+    Opt-in via `--@rules_flutter//flutter:incremental_kernel`: debug JIT
+    whole-program compiles only — never AOT, web (`dartdevc`), `from_dill`,
+    `import_dill` or `recorded_uses` compiles.
+    """
+    return (
+        ctx.attr._incremental_kernel[BuildSettingInfo].value and
+        not aot and target == "flutter" and
+        from_dill == None and import_dill == None and recorded_uses == None
+    )
+
+def _apply_incr_worker(ctx, run_kwargs, args, manifest, direct_inputs, dartaotruntime, frontend_server):
+    """Routes the compile through `incr_fkc_worker` instead of `kernel_filter`.
+
+    The worker takes exactly `kernel_filter`'s argv after argv[0]:
+    `--declared-inputs <manifest> -- <executable> <arguments>`, built into the
+    one args object so the action's argv reads the same. Sandboxed, local and
+    remote strategies run the worker's one-shot path (a fresh process per
+    action); the worker strategy keeps its `frontend_server` warm across
+    actions. The worker strategy keys the worker process on its tool files.
+    """
+    run_kwargs["executable"] = ctx.executable._incr_worker_tool
+    run_kwargs["arguments"] = [args]
+    run_kwargs["inputs"] = depset(
+        direct = direct_inputs + [dartaotruntime, ctx.executable._incr_worker_tool, manifest],
+    )
+    run_kwargs["tools"] = depset([dartaotruntime, frontend_server])
+    run_kwargs["execution_requirements"] = {
+        "supports-workers": "1",
+        "requires-worker-protocol": "json",
+    }
+
 # Private tool labels a downstream rule merges into its own `attrs` to call
 # `flutter_kernel_compile_action` — the Flutter half of what rules_dart
 # publishes as `KERNEL_MODULE_ATTRS`. Carries no user-facing attrs: the
@@ -139,11 +173,13 @@ FLUTTER_KERNEL_COMPILE_ATTRS = {
     ),
     "_incremental_kernel": attr.label(
         default = Label("//flutter:incremental_kernel"),
+        doc = "Opt-in incremental kernel worker flag (a BuildSettingInfo).",
     ),
     "_incr_worker_tool": attr.label(
         default = Label("//flutter/private/tools:incr_fkc_worker"),
         executable = True,
         cfg = "exec",
+        doc = "Persistent incremental kernel compile worker tool.",
     ),
 }
 
@@ -312,16 +348,10 @@ def flutter_kernel_compile_action(
     _check_vm_flags(ctx.label, vm_flags)
     _check_extra_flags(ctx.label, extra_flags)
 
-    # Opt-in incremental compiles (`--@rules_flutter//flutter:incremental_kernel`):
-    # debug JIT whole-program compiles run through the persistent worker.
-    # Never AOT, web (`dartdevc`), `from_dill`, `import_dill` or
-    # `recorded_uses` compiles. With the flag off every action below is
+    # Opt-in incremental compiles run the debug JIT whole-program compile
+    # through the persistent worker. With the flag off every action below is
     # unchanged.
-    incr_worker = (
-        ctx.attr._incremental_kernel[BuildSettingInfo].value and
-        not aot and target == "flutter" and
-        from_dill == None and import_dill == None and recorded_uses == None
-    )
+    incr_worker = _is_incr_worker(ctx, aot, target, from_dill, import_dill, recorded_uses)
     # Declared here so the worker's `--declared-inputs` prefix joins the same
     # args object the compiler argv is built into below: with `use_param_file`
     # a nested args object would stringify instead of flattening.
@@ -489,21 +519,5 @@ def flutter_kernel_compile_action(
     if resource_set != None:
         run_kwargs["resource_set"] = resource_set
     if incr_worker:
-        # The worker takes exactly `kernel_filter`'s argv after argv[0]:
-        # `--declared-inputs <manifest> -- <executable> <arguments>`, built
-        # into the one args object above so the action's argv reads the same.
-        # Sandboxed, local and remote strategies run the worker's one-shot
-        # path (a fresh process per action); the worker strategy keeps its
-        # `frontend_server` warm across actions.
-        run_kwargs["executable"] = ctx.executable._incr_worker_tool
-        run_kwargs["arguments"] = [args]
-        run_kwargs["inputs"] = depset(
-            direct = direct_inputs + [dartaotruntime, ctx.executable._incr_worker_tool, manifest],
-        )
-        # The worker strategy keys the worker process on its tool files.
-        run_kwargs["tools"] = depset([dartaotruntime, frontend_server])
-        run_kwargs["execution_requirements"] = {
-            "supports-workers": "1",
-            "requires-worker-protocol": "json",
-        }
+        _apply_incr_worker(ctx, run_kwargs, args, manifest, direct_inputs, dartaotruntime, frontend_server)
     ctx.actions.run(**run_kwargs)

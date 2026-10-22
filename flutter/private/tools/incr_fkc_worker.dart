@@ -34,6 +34,15 @@ import 'sha256.dart';
 /// The outcome of one worker request.
 typedef IncrResult = ({int exitCode, String output});
 
+/// One request's validated compiler command, private output, entrypoint and
+/// declared-inputs manifest.
+typedef RequestParts = ({
+  List<String> fs,
+  String outputRel,
+  String entry,
+  KernelInputsManifest manifest,
+});
+
 /// The directive guard with its result cached by content digest.
 ///
 /// The key mixes every declared source's content hash with the filesystem
@@ -236,163 +245,250 @@ class IncrWorker {
     List<String> argv,
     List<String> inputPaths,
   ) async {
-    final String manifestPath;
-    final List<String> fs;
+    final RequestParts parts;
     try {
-      final split = splitWorkerArgv(argv);
-      manifestPath = split.manifestPath;
-      fs = split.command;
-      if (fs.isEmpty) throw const FormatException('no compiler command.');
+      parts = _parseRequest(argv);
     } on FormatException catch (e) {
       return (exitCode: 2, output: e.message);
     }
-    if (!File(_abs(manifestPath)).existsSync()) {
-      return (
-        exitCode: 2,
-        output:
-            'incr_fkc_worker: declared-inputs manifest $manifestPath does not exist.',
-      );
-    }
-    final manifest = readKernelInputsManifest(_abs(manifestPath));
-    final outputRel = manifest.outputDill;
-    if (outputRel == null) {
-      return (
-        exitCode: 2,
-        output: 'incr_fkc_worker: manifest $manifestPath names no # output.',
-      );
-    }
-    final entry = fs.last;
-    final key = configurationKey(fs, sha256Hex);
+    final key = configurationKey(parts.fs, sha256Hex);
     var state = _servers[key];
     if (state != null) _touch(key);
-
-    final current = <String, String?>{};
-    for (final p in {...inputPaths, ...?state?.contentHashes.keys}) {
-      current[p] = _contentHash(p);
+    final hashes = _changeSet(inputPaths, state);
+    final plan = _planCompile(
+      state,
+      hashes.changed,
+      parts.manifest.sources.toSet(),
+    );
+    final roots = plan.cold ? compilerFilesystemRoots(parts.fs) : state!.roots;
+    final guard = plan.cold ? GuardCache() : state!.guard;
+    final guardError = _checkGuard(parts.manifest, roots, guard, hashes.current);
+    if (guardError != null) {
+      return (exitCode: 1, output: guardError);
     }
-    final stored = state?.contentHashes ?? {};
-    final changed = [
-      for (final p in current.keys)
-        if (current[p] != stored[p]) p,
-    ]..sort();
-
-    final bool cold;
-    var uris = <String>[];
-    if (state == null || !state.session.alive) {
-      cold = true;
-    } else {
-      final classified = classifyChanged(
-        changed,
-        state.roots,
-        manifest.sources.toSet(),
-      );
-      if (classified.restartReason != null) {
-        cold = true;
-      } else {
-        cold = false;
-        uris = classified.uris;
-      }
-    }
-
-    // The directive guard runs before the compiler, on every request: any
-    // changed `.dart` file invalidates its content-digest cache.
-    final roots = cold ? compilerFilesystemRoots(fs) : state!.roots;
-    final dartSources = [
-      for (final p in manifest.sources)
-        if (p.endsWith('.dart')) p,
-    ];
-    final guard = cold ? GuardCache() : state!.guard;
-    final guardErrors = guard.check(dartSources, roots, current);
-    if (guardErrors.isNotEmpty) {
-      return (exitCode: 1, output: guardErrors.join('\n'));
-    }
-
     try {
-      if (cold) {
-        state = await _startFresh(key, fs, roots);
-        state.guard = guard;
+      if (plan.cold) {
+        final cold = await _runCold(key, parts, roots, guard);
+        state = cold.state;
+        if (cold.failure != null) return cold.failure!;
       } else {
-        state = state!;
-      }
-      if (cold) {
-        final r = await state.session.compile(entry);
-        foldDepLines(state.currentReads, r.depLines);
-        if (r.errors != 0) {
-          await _drop(key);
-          return (exitCode: 1, output: r.diagnostics.join('\n'));
-        }
-        await state.session.accept();
-      } else {
-        final r = await state.session.recompile(
-          entry,
-          uris.toSet().toList()..sort(),
+        final failure = await _runWarm(
+          state!,
+          key,
+          parts,
+          plan.uris,
         );
-        foldDepLines(state.currentReads, r.depLines);
-        if (r.errors != 0) {
-          // Rejected: the server returns to the last accepted state, and the
-          // hashes stay at the last good request, so the next request
-          // re-invalidates the same files. The failed compile's reads stay
-          // in the cumulative set for the next check.
-          await state.session.reject();
-          final refusal = _checkReads(
-            state.currentReads,
-            manifest.declared,
-            manifest.extraAllowed,
-          );
-          if (refusal != null) {
-            await _drop(key);
-            _deleteOutput(manifest.outputDill);
-            return (exitCode: 1, output: refusal);
-          }
-          return (exitCode: 1, output: r.diagnostics.join('\n'));
-        }
-        await state.session.accept();
+        if (failure != null) return failure;
       }
-      // The second phase: `reset` plus an empty `recompile` writes the full
-      // dill from a compile that compiled nothing (rule F).
-      final fin = await state.session.recompile(entry, [], resetFirst: true);
-      foldDepLines(state.currentReads, fin.depLines);
-      if (fin.errors != 0) {
-        // Nothing was invalidated: an error here means the server is not
-        // trusted.
-        await _drop(key);
-        return (exitCode: 1, output: fin.diagnostics.join('\n'));
-      }
-      await state.session.accept();
-      final refusal = _checkReads(
-        state.currentReads,
-        manifest.declared,
-        manifest.extraAllowed,
-      );
-      if (refusal != null) {
-        await _drop(key);
-        _deleteOutput(manifest.outputDill);
-        return (exitCode: 1, output: refusal);
-      }
-      if (state.currentReads.isEmpty) {
-        // A real compile reads at least its entrypoint: zero reads means the
-        // dependency report was silenced, so the build fails instead of
-        // caching unverified bytes.
-        await _drop(key);
-        _deleteOutput(manifest.outputDill);
-        return (exitCode: 1, output: noDependencyReadsMessage());
-      }
-      state.contentHashes = current;
-      final dst = _abs(outputRel);
-      await Directory(File(dst).parent.path).create(recursive: true);
-      try {
-        File(dst).deleteSync();
-      } on FileSystemException {
-        // Absent; the copy below creates it.
-      }
-      await File(state.fullDill).copy(dst);
-      return (exitCode: 0, output: '');
+      final resetFailure = await _runResetPhase(state!, key, parts.entry);
+      if (resetFailure != null) return resetFailure;
+      return await _publishOutput(state!, key, parts, hashes.current);
     } catch (_) {
       // The server is not trusted after an unexpected error: drop it so the
       // next request starts cold.
       await _drop(key);
       rethrow;
     }
+  }
+
+  /// Validates one request's argv and manifest. Throws [FormatException] with
+  /// the action-failing message when malformed.
+  RequestParts _parseRequest(List<String> argv) {
+    final split = splitWorkerArgv(argv);
+    final fs = split.command;
+    if (fs.isEmpty) throw const FormatException('no compiler command.');
+    if (!File(_abs(split.manifestPath)).existsSync()) {
+      throw FormatException(
+        'incr_fkc_worker: declared-inputs manifest ${split.manifestPath} does not exist.',
+      );
+    }
+    final manifest = readKernelInputsManifest(_abs(split.manifestPath));
+    if (manifest.outputDill == null) {
+      throw FormatException(
+        'incr_fkc_worker: manifest ${split.manifestPath} names no # output.',
+      );
+    }
+    // The finished dill lands where THIS request's `--output-dill` points,
+    // not the manifest's `# output`: harnesses and Bazel strategies give each
+    // request a private output path while the manifest names the action's.
+    // The configuration key already excludes the output, so requests that
+    // differ only here share a warm server.
+    final outI = fs.indexOf('--output-dill');
+    if (outI < 0 || outI + 1 >= fs.length) {
+      throw const FormatException(
+        'incr_fkc_worker: compiler argv has no --output-dill.',
+      );
+    }
+    return (
+      fs: fs,
+      outputRel: fs[outI + 1],
+      entry: fs.last,
+      manifest: manifest,
+    );
+  }
+
+  /// Hashes every input's contents and diffs them against the last accepted
+  /// request's hashes. Contents — never request digests — decide.
+  ({Map<String, String?> current, List<String> changed}) _changeSet(
+    List<String> inputPaths,
+    IncrServerState? state,
+  ) {
+    final stored = state?.contentHashes ?? {};
+    final current = <String, String?>{};
+    for (final p in {...inputPaths, ...stored.keys}) {
+      current[p] = _contentHash(p);
+    }
+    final changed = [
+      for (final p in current.keys)
+        if (current[p] != stored[p]) p,
+    ]..sort();
+    return (current: current, changed: changed);
+  }
+
+  /// Decides cold start versus warm URIs for [changed] files.
+  ({bool cold, List<String> uris}) _planCompile(
+    IncrServerState? state,
+    List<String> changed,
+    Set<String> sources,
+  ) {
+    if (state == null || !state.session.alive) {
+      return (cold: true, uris: const []);
+    }
+    final classified = classifyChanged(changed, state.roots, sources);
+    if (classified.restartReason != null) {
+      return (cold: true, uris: const []);
+    }
+    return (cold: false, uris: classified.uris);
+  }
+
+  /// Runs the directive guard before the compiler on every request: any
+  /// changed `.dart` file invalidates its content-digest cache. Returns the
+  /// refusal text, or null when the sources are clean.
+  String? _checkGuard(
+    KernelInputsManifest manifest,
+    List<String> roots,
+    GuardCache guard,
+    Map<String, String?> current,
+  ) {
+    final dartSources = [
+      for (final p in manifest.sources)
+        if (p.endsWith('.dart')) p,
+    ];
+    final errors = guard.check(dartSources, roots, current);
+    if (errors.isEmpty) return null;
+    return errors.join('\n');
+  }
+
+  /// Starts a fresh server and runs its first compile plus `accept`.
+  Future<({IncrServerState state, IncrResult? failure})> _runCold(
+    String key,
+    RequestParts parts,
+    List<String> roots,
+    GuardCache guard,
+  ) async {
+    final state = await _startFresh(key, parts.fs, roots);
+    state.guard = guard;
+    final r = await state.session.compile(parts.entry);
+    foldDepLines(state.currentReads, r.depLines);
+    if (r.errors != 0) {
+      await _drop(key);
+      return (
+        state: state,
+        failure: (exitCode: 1, output: r.diagnostics.join('\n')),
+      );
+    }
+    await state.session.accept();
+    return (state: state, failure: null);
+  }
+
+  /// Recompiles the changed URIs on a warm server. A rejection returns the
+  /// server to the last accepted state: the hashes stay at the last good
+  /// request, so the next request re-invalidates the same files, while the
+  /// failed compile's reads stay in the cumulative set for the next check.
+  Future<IncrResult?> _runWarm(
+    IncrServerState state,
+    String key,
+    RequestParts parts,
+    List<String> uris,
+  ) async {
+    final r = await state.session.recompile(
+      parts.entry,
+      uris.toSet().toList()..sort(),
+    );
+    foldDepLines(state.currentReads, r.depLines);
+    if (r.errors != 0) {
+      await state.session.reject();
+      final refusal = _checkReads(
+        state.currentReads,
+        parts.manifest.declared,
+        parts.manifest.extraAllowed,
+      );
+      if (refusal != null) {
+        await _drop(key);
+        _deleteOutput(parts.outputRel);
+        return (exitCode: 1, output: refusal);
+      }
+      return (exitCode: 1, output: r.diagnostics.join('\n'));
+    }
+    await state.session.accept();
+    return null;
+  }
+
+  /// The second phase: `reset` plus an empty `recompile` writes the full dill
+  /// from a compile that compiled nothing (rule F). An error here means the
+  /// server is not trusted.
+  Future<IncrResult?> _runResetPhase(
+    IncrServerState state,
+    String key,
+    String entry,
+  ) async {
+    final fin = await state.session.recompile(entry, [], resetFirst: true);
+    foldDepLines(state.currentReads, fin.depLines);
+    if (fin.errors != 0) {
+      await _drop(key);
+      return (exitCode: 1, output: fin.diagnostics.join('\n'));
+    }
+    return null;
+  }
+
+  /// Accepts the reset phase, verifies the cumulative read set, and copies
+  /// the full dill to the request's output.
+  Future<IncrResult> _publishOutput(
+    IncrServerState state,
+    String key,
+    RequestParts parts,
+    Map<String, String?> current,
+  ) async {
+    await state.session.accept();
+    final refusal = _checkReads(
+      state.currentReads,
+      parts.manifest.declared,
+      parts.manifest.extraAllowed,
+    );
+    if (refusal != null) {
+      await _drop(key);
+      _deleteOutput(parts.outputRel);
+      return (exitCode: 1, output: refusal);
+    }
+    if (state.currentReads.isEmpty) {
+      // A real compile reads at least its entrypoint: zero reads means the
+      // dependency report was silenced, so the build fails instead of
+      // caching unverified bytes.
+      await _drop(key);
+      _deleteOutput(parts.outputRel);
+      return (exitCode: 1, output: noDependencyReadsMessage());
+    }
+    state.contentHashes = current;
+    final dst = _abs(parts.outputRel);
+    await Directory(File(dst).parent.path).create(recursive: true);
+    try {
+      File(dst).deleteSync();
+    } on FileSystemException {
+      // Absent; the copy below creates it.
+    }
+    await File(state.fullDill).copy(dst);
+    return (exitCode: 0, output: '');
+  }
   }
 }
 
@@ -437,16 +533,18 @@ Future<void> runPersistentWorker() async {
       // Request digests are only a hint: change detection reads file
       // contents, so a stale digest never hides a change.
       final result = await worker.handleRequest(
-        expandWorkerFlagfiles(rawArgs),
+        expandWorkerFlagfiles(stripWorkerArgv0(rawArgs)),
         inputs,
       );
       code = result.exitCode;
       out = result.output;
     } catch (e) {
-      // The servers are not trusted after an error: drop them all.
+      // The servers are not trusted after an error: drop them all. The
+      // message goes to stderr so the JSON protocol on stdout stays clean.
       await worker.closeAll();
       code = 1;
       out = 'incr_fkc_worker: worker error: $e';
+      stderr.writeln(out);
     }
     stdout.writeln(
       jsonEncode({'exitCode': code, 'output': out, 'requestId': rid}),
@@ -459,6 +557,6 @@ Future<void> main(List<String> argv) async {
   if (argv.contains('--persistent_worker')) {
     await runPersistentWorker();
   } else {
-    exit(await runOneShotWorker(expandWorkerFlagfiles(argv)));
+    exit(await runOneShotWorker(expandWorkerFlagfiles(stripWorkerArgv0(argv))));
   }
 }

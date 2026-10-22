@@ -1573,11 +1573,13 @@ KERNEL_COMPILE_ATTRS = {
     ),
     "_incremental_kernel": attr.label(
         default = Label("//flutter:incremental_kernel"),
+        doc = "Opt-in incremental kernel worker flag (a BuildSettingInfo).",
     ),
     "_incr_worker_tool": attr.label(
         default = Label("//flutter/private/tools:incr_fkc_worker"),
         executable = True,
         cfg = "exec",
+        doc = "Persistent incremental kernel compile worker tool.",
     ),
     "_web_guard_tool": attr.label(
         default = Label("//flutter/private/tools:web_guard"),

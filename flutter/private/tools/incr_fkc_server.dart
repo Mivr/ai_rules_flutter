@@ -45,6 +45,22 @@ abstract class CompilerSession {
   bool get alive;
 }
 
+/// Drops a leading tool path (`argv[0]`): `kernel_filter`'s argv after
+/// `argv[0]` starts with `--declared-inputs` or an `@flagfile`, so a first
+/// argument that is neither can only be the tool itself. The harness sends
+/// the full argv with the worker at `argv[0]`; Bazel's worker protocol and
+/// `main` omit it, so stripping is a no-op there.
+/// ([argv] is already flagfile-expanded or not; the tool path is never a
+/// flag or a flagfile, so this runs the same before or after expansion.)
+List<String> stripWorkerArgv0(List<String> argv) {
+  if (argv.isNotEmpty &&
+      !argv.first.startsWith('-') &&
+      !argv.first.startsWith('@')) {
+    return argv.sublist(1);
+  }
+  return argv;
+}
+
 /// Splits [argv] around `--`: the manifest flag and path before it, the
 /// compiler command after it. Throws [FormatException] when malformed.
 ({String manifestPath, List<String> command}) splitWorkerArgv(
@@ -351,8 +367,8 @@ class FrontendServerSession implements CompilerSession {
       await _process.exitCode.timeout(const Duration(seconds: 10));
     } on TimeoutException {
       _process.kill(ProcessSignal.sigkill);
-    } catch (_) {
-      // Already gone; the exit handler marks it.
+    } on StateError catch (_) {
+      // Already gone (stdin closed under us); the exit handler marks it.
     }
   }
 }

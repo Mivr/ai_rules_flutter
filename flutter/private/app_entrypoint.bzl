@@ -65,6 +65,21 @@ def app_scheme_location(file):
     root = file.path[:len(file.path) - len(rel)].rstrip("/")
     return struct(uri = "%s:///%s" % (APP_SCHEME, rel), root = root)
 
+def _source_stage_prefix(scope, seen, salt, stable_root):
+    """Staging directory prefix for the `include_sources` path.
+
+    A fixed `<scope>.incr.stage` name when `stable_root` is True, so adding or
+    removing a source file does not move the root a warm incremental compiler
+    sees; otherwise the manifest-hashed `<scope>.<hash>.stage` name.
+    """
+    if stable_root:
+        return "%s.incr.stage" % scope
+    manifest_items = sorted(seen.keys())
+    if salt:
+        manifest_items = manifest_items + [salt]
+    manifest_hash = hash("\n".join(manifest_items)) & 0xffffffff
+    return "%s.%x.stage" % (scope, manifest_hash)
+
 def stage_generated_inputs(ctx, files, scope, include_sources = False, salt = "", stable_root = False):
     """Stages declared `files` into a per-action multi-root directory.
 
@@ -124,14 +139,7 @@ def stage_generated_inputs(ctx, files, scope, include_sources = False, salt = ""
             seen[rel] = f
         if not seen:
             return struct(root = None, files = [])
-        if stable_root:
-            stage_prefix = "%s.incr.stage" % scope
-        else:
-            manifest_items = sorted(seen.keys())
-            if salt:
-                manifest_items = manifest_items + [salt]
-            manifest_hash = hash("\n".join(manifest_items)) & 0xffffffff
-            stage_prefix = "%s.%x.stage" % (scope, manifest_hash)
+        stage_prefix = _source_stage_prefix(scope, seen, salt, stable_root)
         for rel, f in seen.items():
             link = ctx.actions.declare_file(stage_prefix + "/" + rel)
             ctx.actions.symlink(output = link, target_file = f)
