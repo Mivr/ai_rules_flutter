@@ -3,8 +3,11 @@
 flutter_tools (`lib/src/asset.dart` at the pinned SDK) keys an asset of the
 application's own package by its path relative to that package's root, and an
 asset of a dependency package `p` by `packages/p/<path relative to p's root>`.
-In Bazel the package root is the Bazel package of the target that lists the
-asset. Every rule that lists `assets` keys its files here, exactly once, and
+In Bazel the package root is the package directory of the target that lists
+the asset: any file under it is keyed by its path relative to that directory,
+even when a nested BUILD file makes it another Bazel package. Generated files
+follow the same rule by their repository-relative path. Every rule that lists
+`assets` keys its files here, exactly once, and
 the key travels with the file through `FlutterInfo.assets` to the bundle
 action, so no consumer computes a key a second time and every platform bundle
 (test trees included) agrees.
@@ -87,28 +90,24 @@ def relative_key(workspace_root, package, short_path):
 def _checked_relative_key(label, file):
     """The package-relative key for one listed file, or a failure.
 
-    Membership is the file's owning Bazel package (`File.owner`), not a path
-    prefix: a nested subpackage's directory sits below the listing package but
-    its files belong to that subpackage, so listing them here is refused. The
-    path check additionally refuses sibling, parent and other-repository files.
-    Generated files have no package-relative meaning — their `short_path`
-    already is the key they ship under today — so they pass through untouched
-    and root bundles stay byte-identical for them too.
+    The rule is by directory: the file's repository-relative path (generated
+    files shed their `bazel-out/<config>/bin/` prefix first) must sit in the
+    listing target's package directory or below it, and the key is the path
+    relative to that directory. A nested BUILD file, filegroup or
+    `exports_files` changes nothing — those files are still under the
+    directory. Only a sibling or parent directory, or another repository, is
+    outside and refused. A target at the workspace root strips nothing, so
+    root bundles keep exactly today's keys.
     """
-    if not file.is_source:
-        return file.short_path
-    outside = "%s: asset %s is outside the target's package; move it into a flutter_library with a package_name and depend on it instead." % (label, file.short_path)
-    if file.owner != None and file.owner.package != label.package:
-        fail(outside)
     if not is_within_package(label.workspace_root, label.package, file.short_path):
-        fail(outside)
+        fail("%s: asset %s is outside the target's package; move it into a flutter_library with a package_name and depend on it instead." % (label, file.short_path))
     return relative_key(label.workspace_root, label.package, file.short_path)
 
 def app_asset_entries(label, files):
     """Key an application, test or bundle target's own `assets`.
 
     Args:
-      label: The listing target's label; its package is the key root.
+      label: The listing target's label; its package directory is the key root.
       files: The target's own asset `File`s.
 
     Returns:
@@ -123,7 +122,7 @@ def library_asset_entries(label, package_name, files):
     """Key a `flutter_library` or `flutter_plugin` target's own `assets`.
 
     Args:
-      label: The listing target's label; its package is the key root.
+      label: The listing target's label; its package directory is the key root.
       package_name: The library's effective Dart package name (the attribute,
         or its documented default). Always non-empty, so the key always takes
         the `packages/<name>/` form.

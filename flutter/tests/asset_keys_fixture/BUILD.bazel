@@ -39,11 +39,26 @@ flutter_application(
     ],
 )
 
+flutter_library(
+    name = "gen_lib",
+    package_name = "genlib",
+    srcs = ["lib.dart"],
+    assets = [":gen_asset"],
+    tags = ["manual"],
+)
+
+genrule(
+    name = "gen_asset",
+    outs = ["gen_asset.txt"],
+    cmd = "echo generated > $@",
+    tags = ["manual"],
+)
+
 flutter_application(
     name = "outside_bundle",
     package_name = "outside",
     srcs = ["lib.dart"],
-    assets = ["//flutter/tests/asset_keys_fixture/coll:assets/dup.txt"],
+    assets = ["//flutter/tests/asset_keys_sibling:asset.txt"],
     main = "lib.dart",
     tags = ["manual"],
 )
@@ -52,6 +67,6 @@ flutter_library(
     name = "outside_lib",
     package_name = "outside",
     srcs = ["lib.dart"],
-    assets = ["//flutter/tests/asset_keys_fixture/coll:assets/dup.txt"],
+    assets = ["//flutter/tests/asset_keys_sibling:asset.txt"],
     tags = ["manual"],
 )
