@@ -304,23 +304,8 @@ Future<void> main(List<String> argv) async {
   exit(await runFiltered(argv, stdout, stderr));
 }
 
-/// Runs the command [argv] names after `--`, writing its output to [out] and
-/// [err] without the protocol and dependency lines; returns its exit code.
-///
-/// The tool flags before `--` name the compile's declared inputs
-/// (`--declared-inputs <manifest>`): the manifest lists one exec-root-relative
-/// path per line in sections — the declared sources, then a `# staged`
-/// marker, then the staging root's symlinks to them, then `# allowed-reads`
-/// (the package config, the platform dill, the summary dills, the
-/// native-assets manifest), then `# filesystem-roots` (the mounted roots the
-/// directive guard resolves through), then `# output` with the output dill —
-/// written by `flutter_kernel_compile_action` from its Starlark `File`
-/// objects. The sources' directives are refused before the compiler runs
-/// when they name an undeclared file, and the compiler's own read set is
-/// verified against the manifest after it runs. Nothing is read from the
-/// compile argv: flags after `--` run the compiler unchanged, and never
-/// widen what it may read.
-/// The tool flags before `--`: the manifest path plus the compiler argv.
+/// Parses the tool flags before `--`: the manifest path plus the compiler
+/// argv.
 ///
 /// Returns null after describing the usage error on [err].
 ({String manifestPath, String executable, List<String> cmdArgs})?
@@ -437,13 +422,28 @@ int? _refuseUndeclaredReads(
   return 1;
 }
 
+/// Runs the command [argv] names after `--`, writing its output to [out] and
+/// [err] without the protocol and dependency lines; returns its exit code.
+///
+/// The tool flags before `--` name the compile's declared inputs
+/// (`--declared-inputs <manifest>`): the manifest lists one exec-root-relative
+/// path per line in sections — the declared sources, then a `# staged`
+/// marker, then the staging root's symlinks to them, then `# allowed-reads`
+/// (the package config, the platform dill, the summary dills, the
+/// native-assets manifest), then `# filesystem-roots` (the mounted roots the
+/// directive guard resolves through), then `# output` with the output dill —
+/// written by `flutter_kernel_compile_action` from its Starlark `File`
+/// objects. The sources' directives are refused before the compiler runs
+/// when they name an undeclared file, and the compiler's own read set is
+/// verified against the manifest after it runs. Nothing is read from the
+/// compile argv: flags after `--` run the compiler unchanged, and never
+/// widen what it may read.
 Future<int> runFiltered(
   List<String> argv,
   StringSink out,
   StringSink err,
 ) async {
   final parsed = _splitFilterArgv(argv, err);
-  if (parsed == null) return 2;
   final manifestPath = parsed.manifestPath;
   if (!File(manifestPath).existsSync()) {
     err.writeln(
