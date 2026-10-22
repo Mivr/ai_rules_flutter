@@ -14,8 +14,11 @@ import 'package:http_multi_server/http_multi_server.dart';
 import 'command_failure.dart';
 import 'command_runner.dart';
 import 'device.dart';
+import 'logging.dart';
 import 'machine_protocol.dart';
 import 'session.dart';
+
+final _logger = Logger('dev_tool.http_control_channel');
 
 /// HTTP server that exposes the dev tool's command dispatch and screenshot
 /// endpoints to external clients.
@@ -254,7 +257,15 @@ class HttpControlChannel {
       request.response.write(json.encode({'error': e.message}));
     } catch (e) {
       // Not a refusal — the tool broke. 500 is the honest answer, and the
-      // exception's own text is all there is to say.
+      // exception's own text is all there is to say. Said server-side too:
+      // the client sees the 500, but without this the run's own logs would
+      // show nothing at all.
+      _logger.warning({
+        'message': 'command_handler_failed',
+        'text': 'Command $method failed with an unexpected error: $e',
+        'method': method,
+        'error': '$e',
+      });
       request.response.statusCode = HttpStatus.internalServerError;
       request.response.headers.contentType = ContentType.json;
       request.response.write(json.encode({'error': e.toString()}));
