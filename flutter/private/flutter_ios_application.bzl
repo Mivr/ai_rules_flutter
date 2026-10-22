@@ -89,6 +89,165 @@ _APP_FRAMEWORK_INFO_PLIST = """\
 </plist>
 """
 
+def _check_ios_simulator_aot(ctx, app_info, is_device):
+    """Refuses an AOT bundle for the simulator, as `flutter build` does.
+
+    The simulator engine runs kernel under the JIT and cannot load an AOT
+    snapshot, so this bundle would launch to a white screen with the engine
+    reporting "Engine run configuration was invalid".
+    """
+    if app_info.aot_output and not is_device:
+        fail(
+            ("The iOS simulator runs debug builds only, and this is a %s " +
+             "build. Build it with -c dbg, or for a device with " +
+             "--ios_multi_cpus=arm64. A build test of a simulator app can " +
+             "use flutter_ios_simulator_build_test.") % ctx.var["COMPILATION_MODE"],
+        )
+
+def _patch_ios_app_binary(ctx, dart_exe, dart_vm_files, dylib, framework_binary, vtool_platform, minimum_os_version):
+    """Copies the AOT dylib and rewrites its LC_BUILD_VERSION with macho_edit."""
+    patch_args = [
+        ctx.executable._macho_edit.path,
+        "patch",
+        "--input",
+        dylib.path,
+        "--output",
+        framework_binary.path,
+        "--platform",
+        vtool_platform,
+        "--min-os",
+        minimum_os_version,
+        "--sdk-version",
+        minimum_os_version,
+        "--install-name",
+        "@rpath/App.framework/App",
+    ]
+    for allowed in ctx.attr.allow_non_macho:
+        patch_args.extend(["--allow-non-macho", allowed])
+    ctx.actions.run(
+        executable = dart_exe,
+        arguments = patch_args,
+        inputs = depset(
+            direct = [dylib, ctx.executable._macho_edit],
+            transitive = [dart_vm_files],
+        ),
+        outputs = [framework_binary],
+        mnemonic = "FlutterIOSRetagDylib",
+        progress_message = "Retagging App dylib for %s (min %s)" % (vtool_platform, minimum_os_version),
+    )
+
+def _copy_ios_framework_assets(ctx, dart_exe, dart_vm_files, flutter_assets, framework_assets):
+    """Copies flutter_assets into the framework."""
+    ctx.actions.run(
+        executable = dart_exe,
+        arguments = [
+            ctx.executable._macho_edit.path,
+            "copy-assets",
+            "--src",
+            flutter_assets.path,
+            "--dst",
+            framework_assets.path,
+        ],
+        inputs = depset(
+            direct = [flutter_assets, ctx.executable._macho_edit],
+            transitive = [dart_vm_files],
+        ),
+        outputs = [framework_assets],
+        mnemonic = "FlutterIOSCopyAssets",
+        progress_message = "Copying flutter_assets into App.framework",
+    )
+
+def _stub_ios_app_binary(ctx, dart_exe, dart_vm_files, framework_binary, stub_arch, vtool_platform, minimum_os_version):
+    """Creates a stub dylib — rules_apple's framework processor requires a binary file.
+
+    bundle_only=True prevents linking so it is never loaded.
+    """
+    ctx.actions.run(
+        executable = dart_exe,
+        arguments = [
+            ctx.executable._macho_edit.path,
+            "stub",
+            "--output",
+            framework_binary.path,
+            "--arch",
+            stub_arch,
+            "--platform",
+            vtool_platform,
+            "--min-os",
+            minimum_os_version,
+            "--sdk-version",
+            minimum_os_version,
+            "--install-name",
+            "@rpath/App.framework/App",
+        ],
+        inputs = depset(
+            direct = [ctx.executable._macho_edit],
+            transitive = [dart_vm_files],
+        ),
+        outputs = [framework_binary],
+        mnemonic = "FlutterIOSStubDylib",
+        progress_message = "Creating stub App.framework binary for debug mode",
+    )
+
+def _assemble_ios_debug_assets(ctx, dart_exe, dart_vm_files, flutter_sdk_info, flutter_assets, kernel_dill, framework_assets):
+    """Copies flutter_assets and adds kernel_blob.bin + VM snapshots.
+
+    The vm_isolate_snapshot.bin and isolate_snapshot.bin are required for
+    the Dart VM to bootstrap the kernel service isolate, which enables
+    hot reload (reloadSources) and expression evaluation.
+    """
+    vm_snapshot = flutter_sdk_info.vm_isolate_snapshot
+    iso_snapshot = flutter_sdk_info.isolate_snapshot
+
+    copy_args = [
+        ctx.executable._macho_edit.path,
+        "copy-assets",
+        "--src",
+        flutter_assets.path,
+        "--dst",
+        framework_assets.path,
+        "--kernel-blob",
+        kernel_dill.path,
+    ]
+    copy_inputs = [flutter_assets, kernel_dill, ctx.executable._macho_edit]
+
+    if vm_snapshot:
+        copy_args.extend(["--vm-snapshot-data", vm_snapshot.path])
+        copy_inputs.append(vm_snapshot)
+    if iso_snapshot:
+        copy_args.extend(["--isolate-snapshot-data", iso_snapshot.path])
+        copy_inputs.append(iso_snapshot)
+
+    ctx.actions.run(
+        executable = dart_exe,
+        arguments = copy_args,
+        inputs = depset(
+            direct = copy_inputs,
+            transitive = [dart_vm_files],
+        ),
+        outputs = [framework_assets],
+        mnemonic = "FlutterIOSDebugAssets",
+        progress_message = "Assembling debug App.framework with kernel and VM snapshots",
+    )
+
+def _ios_framework_result(ctx, framework_files, framework_binary):
+    """Builds the App.framework providers for the assembled files."""
+    return [
+        DefaultInfo(files = depset(framework_files)),
+        framework_import_support.framework_import_info_with_dependencies(
+            build_archs = [apple_support.target_arch_from_rule_ctx(ctx)],
+            deps = [],
+            framework_imports = framework_files,
+        ),
+        FlutterDarwinFrameworkInfo(
+            framework_name = "App",
+            framework_files = depset(framework_files),
+            framework_dir = framework_binary.dirname,
+            headers = depset(),
+            is_dynamic = True,
+        ),
+    ]
+
 def _flutter_ios_framework_impl(ctx):
     """Assembles Flutter artifacts into App.framework individual files.
 
@@ -131,17 +290,7 @@ def _flutter_ios_framework_impl(ctx):
     is_device = apple_support.target_environment_from_rule_ctx(ctx) == "device"
     vtool_platform = "ios" if is_device else "iossim"
 
-    # The simulator engine runs kernel under the JIT and cannot load an AOT
-    # snapshot, so this bundle would launch to a white screen with the engine
-    # reporting "Engine run configuration was invalid". Refused here, as
-    # `flutter build ios --simulator --release` refuses it, rather than built.
-    if app_info.aot_output and not is_device:
-        fail(
-            ("The iOS simulator runs debug builds only, and this is a %s " +
-             "build. Build it with -c dbg, or for a device with " +
-             "--ios_multi_cpus=arm64. A build test of a simulator app can " +
-             "use flutter_ios_simulator_build_test.") % ctx.var["COMPILATION_MODE"],
-        )
+    _check_ios_simulator_aot(ctx, app_info, is_device)
 
     ctx.actions.write(framework_plist, _APP_FRAMEWORK_INFO_PLIST.format(
         minimum_os_version = minimum_os_version,
@@ -151,165 +300,17 @@ def _flutter_ios_framework_impl(ctx):
 
     if app_info.aot_output:
         # Release mode: AOT binary + flutter_assets.
-        dylib = app_info.aot_output
-
-        # Copy the dylib and rewrite its LC_BUILD_VERSION with macho_edit.
-        patch_args = [
-            ctx.executable._macho_edit.path,
-            "patch",
-            "--input",
-            dylib.path,
-            "--output",
-            framework_binary.path,
-            "--platform",
-            vtool_platform,
-            "--min-os",
-            minimum_os_version,
-            "--sdk-version",
-            minimum_os_version,
-            "--install-name",
-            "@rpath/App.framework/App",
-        ]
-        for allowed in ctx.attr.allow_non_macho:
-            patch_args.extend(["--allow-non-macho", allowed])
-        ctx.actions.run(
-            executable = dart_exe,
-            arguments = patch_args,
-            inputs = depset(
-                direct = [dylib, ctx.executable._macho_edit],
-                transitive = [dart_vm_files],
-            ),
-            outputs = [framework_binary],
-            mnemonic = "FlutterIOSRetagDylib",
-            progress_message = "Retagging App dylib for %s (min %s)" % (vtool_platform, minimum_os_version),
-        )
-
-        # Copy flutter_assets into the framework.
-        ctx.actions.run(
-            executable = dart_exe,
-            arguments = [
-                ctx.executable._macho_edit.path,
-                "copy-assets",
-                "--src",
-                flutter_assets.path,
-                "--dst",
-                framework_assets.path,
-            ],
-            inputs = depset(
-                direct = [flutter_assets, ctx.executable._macho_edit],
-                transitive = [dart_vm_files],
-            ),
-            outputs = [framework_assets],
-            mnemonic = "FlutterIOSCopyAssets",
-            progress_message = "Copying flutter_assets into App.framework",
-        )
-
-        framework_files = [framework_binary, framework_plist, framework_assets]
-        return [
-            DefaultInfo(files = depset(framework_files)),
-            framework_import_support.framework_import_info_with_dependencies(
-                build_archs = [apple_support.target_arch_from_rule_ctx(ctx)],
-                deps = [],
-                framework_imports = framework_files,
-            ),
-            FlutterDarwinFrameworkInfo(
-                framework_name = "App",
-                framework_files = depset(framework_files),
-                framework_dir = framework_binary.dirname,
-                headers = depset(),
-                is_dynamic = True,
-            ),
-        ]
+        _patch_ios_app_binary(ctx, dart_exe, dart_vm_files, app_info.aot_output, framework_binary, vtool_platform, minimum_os_version)
+        _copy_ios_framework_assets(ctx, dart_exe, dart_vm_files, flutter_assets, framework_assets)
     else:
         # Debug mode: stub binary + flutter_assets with kernel_blob.bin.
-        kernel_dill = app_info.kernel_dill
-
         target_arch = apple_support.target_arch_from_rule_ctx(ctx)
         stub_arch = "arm64" if target_arch == "arm64" else "x86_64"
+        _stub_ios_app_binary(ctx, dart_exe, dart_vm_files, framework_binary, stub_arch, vtool_platform, minimum_os_version)
+        _assemble_ios_debug_assets(ctx, dart_exe, dart_vm_files, flutter_sdk_info, flutter_assets, app_info.kernel_dill, framework_assets)
 
-        # Create a stub dylib — rules_apple's framework processor requires a
-        # binary file. bundle_only=True prevents linking so it's never loaded.
-        ctx.actions.run(
-            executable = dart_exe,
-            arguments = [
-                ctx.executable._macho_edit.path,
-                "stub",
-                "--output",
-                framework_binary.path,
-                "--arch",
-                stub_arch,
-                "--platform",
-                vtool_platform,
-                "--min-os",
-                minimum_os_version,
-                "--sdk-version",
-                minimum_os_version,
-                "--install-name",
-                "@rpath/App.framework/App",
-            ],
-            inputs = depset(
-                direct = [ctx.executable._macho_edit],
-                transitive = [dart_vm_files],
-            ),
-            outputs = [framework_binary],
-            mnemonic = "FlutterIOSStubDylib",
-            progress_message = "Creating stub App.framework binary for debug mode",
-        )
-
-        # Copy flutter_assets and add kernel_blob.bin + VM snapshots.
-        # The vm_isolate_snapshot.bin and isolate_snapshot.bin are required for
-        # the Dart VM to bootstrap the kernel service isolate, which enables
-        # hot reload (reloadSources) and expression evaluation.
-        vm_snapshot = flutter_sdk_info.vm_isolate_snapshot
-        iso_snapshot = flutter_sdk_info.isolate_snapshot
-
-        copy_args = [
-            ctx.executable._macho_edit.path,
-            "copy-assets",
-            "--src",
-            flutter_assets.path,
-            "--dst",
-            framework_assets.path,
-            "--kernel-blob",
-            kernel_dill.path,
-        ]
-        copy_inputs = [flutter_assets, kernel_dill, ctx.executable._macho_edit]
-
-        if vm_snapshot:
-            copy_args.extend(["--vm-snapshot-data", vm_snapshot.path])
-            copy_inputs.append(vm_snapshot)
-        if iso_snapshot:
-            copy_args.extend(["--isolate-snapshot-data", iso_snapshot.path])
-            copy_inputs.append(iso_snapshot)
-
-        ctx.actions.run(
-            executable = dart_exe,
-            arguments = copy_args,
-            inputs = depset(
-                direct = copy_inputs,
-                transitive = [dart_vm_files],
-            ),
-            outputs = [framework_assets],
-            mnemonic = "FlutterIOSDebugAssets",
-            progress_message = "Assembling debug App.framework with kernel and VM snapshots",
-        )
-
-        framework_files = [framework_binary, framework_plist, framework_assets]
-        return [
-            DefaultInfo(files = depset(framework_files)),
-            framework_import_support.framework_import_info_with_dependencies(
-                build_archs = [apple_support.target_arch_from_rule_ctx(ctx)],
-                deps = [],
-                framework_imports = framework_files,
-            ),
-            FlutterDarwinFrameworkInfo(
-                framework_name = "App",
-                framework_files = depset(framework_files),
-                framework_dir = framework_binary.dirname,
-                headers = depset(),
-                is_dynamic = True,
-            ),
-        ]
+    framework_files = [framework_binary, framework_plist, framework_assets]
+    return _ios_framework_result(ctx, framework_files, framework_binary)
 
 flutter_ios_framework = rule(
     implementation = _flutter_ios_framework_impl,
