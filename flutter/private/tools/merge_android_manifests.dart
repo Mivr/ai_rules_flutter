@@ -1251,7 +1251,7 @@ class _AppPermission {
     String? opNode,
   ) {
     _dropOverlayRemoved(opRemove);
-    _dropOverlayReplaced(op, opReplace);
+    _dropOverlayReplaced(opReplace, op);
     _takeOverlayAndroidAttrs(op, opRemove);
     _takeOverlayToolsMarkers(opRemove, opReplace, opNode);
     _takeOverlayOtherTools(op);
