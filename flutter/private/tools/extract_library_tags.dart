@@ -145,16 +145,8 @@ List<String> _parseTagsAnnotation(String source, int at, int nameEnd) {
 /// upstream's wording where upstream has words for it (`Expected a List.`,
 /// `Expected only literal elements.`, `Expected a String literal.`).
 ({int end, List<String> tags}) _parseTagsArgument(String source, int i) {
-  var j = _skipTrivia(source, i + 1);
-  if (_readsKeyword(source, j, 'const')) j = _skipTrivia(source, j + 5);
-  if (j < source.length && source[j] == '<') {
-    j = _skipTypeArguments(source, j);
-  }
-  if (j >= source.length || source[j] != '[') {
-    throw TagsParseException(_lineOf(source, j), 'Expected a List.');
-  }
+  var j = _openTagList(source, i);
   final tags = <String>[];
-  j++;
   while (true) {
     j = _skipTrivia(source, j);
     if (j >= source.length) {
@@ -163,53 +155,88 @@ List<String> _parseTagsAnnotation(String source, int at, int nameEnd) {
         'Unterminated list in @Tags.',
       );
     }
-    if (source[j] == ']') {
-      j = _skipTrivia(source, j + 1);
-      if (j >= source.length || source[j] != ')') {
-        throw TagsParseException(
-          _lineOf(source, j),
-          'Expected ) to close @Tags.',
-        );
-      }
-      return (end: j + 1, tags: tags);
-    }
-    if (_readsKeyword(source, j, 'const')) j = _skipTrivia(source, j + 5);
-    final literalStart = j;
-    final literal = _parseString(source, j, strict: true);
-    if (literal == null) {
-      // Upstream distinguishes collection elements (spreads, `if` and `for`
-      // elements) from other non-strings; both are errors here.
-      if (source.startsWith('...', j) ||
-          _readsKeyword(source, j, 'if') ||
-          _readsKeyword(source, j, 'for')) {
-        throw TagsParseException(
-          _lineOf(source, j),
-          'Expected only literal elements.',
-        );
-      }
-      throw TagsParseException(
-        _lineOf(source, j),
-        'Expected a String literal.',
-      );
-    }
-    if (!_tagName.hasMatch(literal.value)) {
-      throw TagsParseException(
-        _lineOf(source, literalStart),
-        'Invalid tag name. Tags must be (optionally hyphenated) Dart '
-        'identifiers.',
-      );
-    }
-    tags.add(literal.value);
-    j = _skipTrivia(source, literal.end);
-    if (j < source.length && source[j] == ',') {
-      j++;
-    } else if (j >= source.length || source[j] != ']') {
-      throw TagsParseException(
-        _lineOf(source, j),
-        'Expected , or ] in @Tags.',
-      );
-    }
+    final closed = _closeTagList(source, j);
+    if (closed != null) return (end: closed, tags: tags);
+    final element = _readTagElement(source, j);
+    tags.add(element.value);
+    j = element.end;
   }
+}
+
+/// Past the `@Tags(` opener at [i] (the `(`): the optional `const`, the
+/// optional type arguments and the opening `[` of the tag list.
+///
+/// Anything but a `[` throws [TagsParseException] with upstream's wording
+/// (`Expected a List.`), as `@Tags(<String>['a'])` is still a `ListLiteral`
+/// upstream.
+int _openTagList(String source, int i) {
+  var j = _skipTrivia(source, i + 1);
+  if (_readsKeyword(source, j, 'const')) j = _skipTrivia(source, j + 5);
+  if (j < source.length && source[j] == '<') {
+    j = _skipTypeArguments(source, j);
+  }
+  if (j >= source.length || source[j] != '[') {
+    throw TagsParseException(_lineOf(source, j), 'Expected a List.');
+  }
+  return j + 1;
+}
+
+/// Past the `]` and `)` closing a `@Tags` list at [j], or null when [j] does
+/// not open the close.
+int? _closeTagList(String source, int j) {
+  if (source[j] != ']') return null;
+  final after = _skipTrivia(source, j + 1);
+  if (after >= source.length || source[after] != ')') {
+    throw TagsParseException(
+      _lineOf(source, after),
+      'Expected ) to close @Tags.',
+    );
+  }
+  return after + 1;
+}
+
+/// The one tag list element at [j], and the offset past its `,` separator —
+/// or at its `]` when it is the last element.
+///
+/// A non-string element throws [TagsParseException]: upstream distinguishes
+/// collection elements (spreads, `if` and `for` elements) from other
+/// non-strings, and both are errors here. A name no selector can name is
+/// refused with upstream's wording.
+({int end, String value}) _readTagElement(String source, int j) {
+  if (_readsKeyword(source, j, 'const')) j = _skipTrivia(source, j + 5);
+  final literalStart = j;
+  final literal = _parseString(source, j, strict: true);
+  if (literal == null) {
+    if (source.startsWith('...', j) ||
+        _readsKeyword(source, j, 'if') ||
+        _readsKeyword(source, j, 'for')) {
+      throw TagsParseException(
+        _lineOf(source, j),
+        'Expected only literal elements.',
+      );
+    }
+    throw TagsParseException(
+      _lineOf(source, j),
+      'Expected a String literal.',
+    );
+  }
+  if (!_tagName.hasMatch(literal.value)) {
+    throw TagsParseException(
+      _lineOf(source, literalStart),
+      'Invalid tag name. Tags must be (optionally hyphenated) Dart '
+      'identifiers.',
+    );
+  }
+  j = _skipTrivia(source, literal.end);
+  if (j < source.length && source[j] == ',') {
+    j++;
+  } else if (j >= source.length || source[j] != ']') {
+    throw TagsParseException(
+      _lineOf(source, j),
+      'Expected , or ] in @Tags.',
+    );
+  }
+  return (end: j, value: literal.value);
 }
 
 /// Past the `<...>` type arguments opening at [i]. Type arguments hold no
