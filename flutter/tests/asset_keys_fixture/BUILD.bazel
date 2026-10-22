@@ -1,0 +1,57 @@
+"""Fixture targets for the package-relative asset-key tests.
+
+Every target here exists only for `//flutter/tests:asset_keys_test`; all are
+`manual` so wildcard builds stay green (some fixtures fail analysis on
+purpose).
+"""
+
+load("//flutter:defs.bzl", "flutter_application", "flutter_library")
+
+package(
+    default_visibility = ["//flutter/tests:__pkg__"],
+)
+
+flutter_library(
+    name = "brand",
+    srcs = ["lib.dart"],
+    assets = ["assets/brand.txt"],
+    package_name = "brand",
+    tags = ["manual"],
+)
+
+flutter_library(
+    name = "brand_consumer",
+    srcs = ["lib.dart"],
+    package_name = "consumer",
+    tags = ["manual"],
+    deps = [":brand"],
+)
+
+flutter_application(
+    name = "colliding_bundle",
+    srcs = ["lib.dart"],
+    main = "lib.dart",
+    package_name = "colliding",
+    tags = ["manual"],
+    deps = [
+        "//flutter/tests/asset_keys_fixture/coll:dup_b",
+        "//flutter/tests/asset_keys_fixture/coll_a:dup_a",
+    ],
+)
+
+flutter_application(
+    name = "outside_bundle",
+    srcs = ["lib.dart"],
+    main = "lib.dart",
+    assets = ["//flutter/tests/asset_keys_fixture/coll:assets/dup.txt"],
+    package_name = "outside",
+    tags = ["manual"],
+)
+
+flutter_library(
+    name = "outside_lib",
+    srcs = ["lib.dart"],
+    assets = ["//flutter/tests/asset_keys_fixture/coll:assets/dup.txt"],
+    package_name = "outside",
+    tags = ["manual"],
+)
