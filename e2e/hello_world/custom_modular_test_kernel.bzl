@@ -6,7 +6,9 @@ examples as running targets: instead of `flutter_test` compiling the suite,
 built-in modular path uses, compiles it as one entry module against the
 dependency outlines, delta-links it against the `flutter_test` base dill, and
 exposes the products as the `test_kernel` / `test_base_kernel` output groups
-`flutter_prebuilt_test` feeds on. `custom_modular_app_kernel` does the same
+`flutter_prebuilt_test` feeds on. The base dill the function returns must reach
+`flutter_prebuilt_test`'s `base_dill`: the kernel is incomplete without it
+(`//:widget_modular_no_base_test` is that red run). `custom_modular_app_kernel` does the same
 for an app entry point: it synthesizes the `package:` mapping for its own
 sources, compiles them as the entry module, and links everything with the
 debug platform dill prepended.

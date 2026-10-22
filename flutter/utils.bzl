@@ -197,7 +197,13 @@ def flutter_modular_test_kernel(ctx, *, test_uri, deps, output):
         output: The already-declared linked test `.dill` File to produce.
 
     Returns:
-        The `base_dill` File linked against, or None.
+        The `base_dill` File linked against, or None. Feed it to
+        `flutter_prebuilt_test`'s `base_dill` whenever it is not None: the
+        kernel delta-linked against it and is incomplete without it — running
+        it base-less aborts in `flutter_tester` before the harness connects
+        (first on `LocalFileComparator`, installed at startup through the
+        staged golden comparator). When None, `test_base_kernel` is empty
+        rather than absent, so feed that group straight through.
     """
     return _flutter_modular_test_kernel(ctx, test_uri = test_uri, deps = deps, output = output)
 

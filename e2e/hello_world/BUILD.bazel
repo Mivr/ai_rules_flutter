@@ -688,6 +688,23 @@ flutter_prebuilt_test(
     target_compatible_with = _HOST_COMPATIBLE,
 )
 
+# The base-less twin: the same modular kernel run WITHOUT its base dill. A
+# kernel that delta-linked against a base dill is incomplete on its own — the
+# SDK libraries the link excluded (here `package:flutter_test`'s
+# `_goldens_io.dart`, first touched through the staged golden comparator) are
+# missing at startup and `flutter_tester` aborts before connecting. Tagged
+# `manual`: its red run proves a custom modular kernel that linked a base dill
+# must feed it to `flutter_prebuilt_test`'s `base_dill`, exactly as a
+# `flutter_test` kernel must. Run it explicitly:
+#   bazel test //:widget_modular_no_base_test --test_output=all
+flutter_prebuilt_test(
+    name = "widget_modular_no_base_test",
+    assets = ":modular_suite_assets",
+    dill = ":widget_modular_kernel_files",
+    tags = ["manual"],
+    target_compatible_with = _HOST_COMPATIBLE,
+)
+
 custom_modular_app_kernel(
     name = "hello_world_modular_app",
     srcs = ["lib/common_widgets.dart"],
