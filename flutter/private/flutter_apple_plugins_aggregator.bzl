@@ -7,16 +7,20 @@ load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("@rules_swift//swift:swift.bzl", "SwiftInfo")
 load("//flutter:providers.bzl", "FlutterApplePluginInfo", "FlutterApplicationInfo")
 
-def _flutter_apple_plugins_aggregator_impl(ctx):
-    flutter_info = ctx.attr.application[FlutterApplicationInfo]
-    target_platform = ctx.attr.platform
+def _append_unique(acc, values):
+    """Appends each value not already present, preserving first-seen order."""
+    for value in values:
+        if value not in acc:
+            acc.append(value)
 
+def _collect_apple_plugin_inputs(entries, target_platform):
+    """Collects CcInfo/SwiftInfo/files/SDK-link inputs for one platform."""
     cc_infos = []
     swift_infos = []
     files = []
     sdk_frameworks = []
     sdk_dylibs = []
-    for entry in flutter_info.apple_plugin_libraries.to_list():
+    for entry in entries:
         if entry.platform != target_platform:
             continue
         if entry.cc_info:
@@ -26,18 +30,27 @@ def _flutter_apple_plugins_aggregator_impl(ctx):
         if hasattr(entry, "files") and entry.files:
             files.append(entry.files)
         if hasattr(entry, "sdk_frameworks") and entry.sdk_frameworks:
-            for fw in entry.sdk_frameworks:
-                if fw not in sdk_frameworks:
-                    sdk_frameworks.append(fw)
+            _append_unique(sdk_frameworks, entry.sdk_frameworks)
         if hasattr(entry, "sdk_dylibs") and entry.sdk_dylibs:
-            for dylib in entry.sdk_dylibs:
-                if dylib not in sdk_dylibs:
-                    sdk_dylibs.append(dylib)
+            _append_unique(sdk_dylibs, entry.sdk_dylibs)
+    return struct(
+        cc_infos = cc_infos,
+        swift_infos = swift_infos,
+        files = files,
+        sdk_frameworks = sdk_frameworks,
+        sdk_dylibs = sdk_dylibs,
+    )
+
+def _flutter_apple_plugins_aggregator_impl(ctx):
+    flutter_info = ctx.attr.application[FlutterApplicationInfo]
+    target_platform = ctx.attr.platform
+
+    collected = _collect_apple_plugin_inputs(flutter_info.apple_plugin_libraries.to_list(), target_platform)
 
     return [
-        DefaultInfo(files = depset(transitive = files)),
-        cc_common.merge_cc_infos(cc_infos = cc_infos),
-        SwiftInfo(swift_infos = swift_infos),
+        DefaultInfo(files = depset(transitive = collected.files)),
+        cc_common.merge_cc_infos(cc_infos = collected.cc_infos),
+        SwiftInfo(swift_infos = collected.swift_infos),
         FlutterApplePluginInfo(
             module_name = "",
             platform = target_platform,
@@ -45,8 +58,8 @@ def _flutter_apple_plugins_aggregator_impl(ctx):
             objc_srcs = depset(),
             headers = depset(),
             modulemap = None,
-            sdk_frameworks = tuple(sdk_frameworks),
-            sdk_dylibs = tuple(sdk_dylibs),
+            sdk_frameworks = tuple(collected.sdk_frameworks),
+            sdk_dylibs = tuple(collected.sdk_dylibs),
         ),
     ]
 
