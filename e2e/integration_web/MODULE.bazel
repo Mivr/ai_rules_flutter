@@ -13,7 +13,7 @@ local_path_override(
 
 git_override(
     module_name = "rules_dart",
-    commit = "63355882a8ce14a66bec751ed3794e36ada8f289",
+    commit = "7a85d2b366646be830c7a2beaa699f6fab73b83e",
     remote = "https://github.com/Mivr/rules_dart.git",
 )
 
