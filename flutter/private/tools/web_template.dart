@@ -264,7 +264,46 @@ String _substituteFile({
   final checkConstructs = file['check_constructs'] as bool;
   final managesServiceWorker =
       (file['manages_service_worker'] as bool?) ?? false;
+  _refusedConstructErrors(
+    result,
+    label,
+    checkConstructs,
+    managesServiceWorker,
+    errors,
+  );
 
+  final builtins = _resolveBuiltins(
+    (file['builtins'] as Map<String, dynamic>?) ?? {},
+    priorOutputs,
+  );
+
+  if (devLoopGuard) {
+    _bootPathErrors(result, label, errors);
+  }
+
+  return result.replaceAllMapped(
+    _variablePattern,
+    (match) => _substituteVariable(
+      match,
+      result,
+      label,
+      webDefines,
+      builtins,
+      keepPlaceholders,
+      usedDefines,
+      errors,
+    ),
+  );
+}
+
+/// Records an error for every legacy construct in [result] these rules refuse.
+void _refusedConstructErrors(
+  String result,
+  String label,
+  bool checkConstructs,
+  bool managesServiceWorker,
+  List<String> errors,
+) {
   final refused = <RegExp, String>{
     if (checkConstructs) ..._legacyConstructs,
     if (checkConstructs && managesServiceWorker)
@@ -278,59 +317,72 @@ String _substituteFile({
       );
     }
   });
+}
 
-  final builtins = _resolveBuiltins(
-    (file['builtins'] as Map<String, dynamic>?) ?? {},
-    priorOutputs,
-  );
-
-  if (devLoopGuard) {
-    for (final match in _variablePattern.allMatches(result)) {
-      final name = match.group(1)!;
-      if (_bootPathBuiltins.contains(name)) {
-        errors.add(
-          '$label:${_lineOf(result, match.start)}: `{{$name}}` inlines the '
-          'engine boot path into the page, which the Bazel dev loop cannot '
-          'serve: it serves index.html as built, next to a flutter_bootstrap.js '
-          'substituted for DDC, so an inlined copy of this build config would '
-          'boot the built bundle and hot reload would do nothing. Use '
-          '`<script src="flutter_bootstrap.js" async>` instead, or build this '
-          'target in a non-debug configuration.',
-        );
-      }
+/// Records an error for every engine boot path inlined into a dev-loop page.
+///
+/// The Bazel dev loop serves `index.html` from the build output, and beside it
+/// a `flutter_bootstrap.js` substituted for DDC rather than the one the bundle
+/// ships. An index that inlines the loader or the bundle's bootstrap therefore
+/// never reaches the dev loop's: the page runs against the built bundle, so it
+/// renders and hot reload does nothing.
+void _bootPathErrors(String result, String label, List<String> errors) {
+  for (final match in _variablePattern.allMatches(result)) {
+    final name = match.group(1)!;
+    if (_bootPathBuiltins.contains(name)) {
+      errors.add(
+        '$label:${_lineOf(result, match.start)}: `{{$name}}` inlines the '
+        'engine boot path into the page, which the Bazel dev loop cannot '
+        'serve: it serves index.html as built, next to a flutter_bootstrap.js '
+        'substituted for DDC, so an inlined copy of this build config would '
+        'boot the built bundle and hot reload would do nothing. Use '
+        '`<script src="flutter_bootstrap.js" async>` instead, or build this '
+        'target in a non-debug configuration.',
+      );
     }
   }
+}
 
-  return result.replaceAllMapped(_variablePattern, (match) {
-    final name = match.group(1)!;
-    if (webDefines.containsKey(name)) {
-      usedDefines.add(name);
-      return webDefines[name]!;
-    }
-    if (builtins.containsKey(name)) {
-      return builtins[name]!;
-    }
-    if (keepPlaceholders.contains(name)) {
-      return match.group(0)!;
-    }
-    if (_builtinNames.contains(name)) {
-      // A build-supplied name, but not one this file is given. The only way
-      // that happens is `{{flutter_bootstrap_js}}` in the bootstrap itself,
-      // which would have to inline its own output. Naming web_defines here
-      // would send the reader to an error that refuses to shadow a built-in.
-      errors.add(
-        '$label:${_lineOf(result, match.start)}: `{{$name}}` is supplied by the '
-        'build, but not to this file. Only index.html can inline the bootstrap.',
-      );
-      return match.group(0)!;
-    }
+/// One `{{variable}}`'s substitution: a user define, a built-in, a kept
+/// placeholder, or an error naming the file and line.
+String _substituteVariable(
+  Match match,
+  String result,
+  String label,
+  Map<String, String> webDefines,
+  Map<String, String> builtins,
+  Set<String> keepPlaceholders,
+  Set<String> usedDefines,
+  List<String> errors,
+) {
+  final name = match.group(1)!;
+  if (webDefines.containsKey(name)) {
+    usedDefines.add(name);
+    return webDefines[name]!;
+  }
+  if (builtins.containsKey(name)) {
+    return builtins[name]!;
+  }
+  if (keepPlaceholders.contains(name)) {
+    return match.group(0)!;
+  }
+  if (_builtinNames.contains(name)) {
+    // A build-supplied name, but not one this file is given. The only way
+    // that happens is `{{flutter_bootstrap_js}}` in the bootstrap itself,
+    // which would have to inline its own output. Naming web_defines here
+    // would send the reader to an error that refuses to shadow a built-in.
     errors.add(
-      '$label:${_lineOf(result, match.start)}: `{{$name}}` has no value. Supply '
-      'one with `web_defines = {"$name": "..."}`, or list it in '
-      '`keep_placeholders` to ship the placeholder as written.',
+      '$label:${_lineOf(result, match.start)}: `{{$name}}` is supplied by the '
+      'build, but not to this file. Only index.html can inline the bootstrap.',
     );
     return match.group(0)!;
-  });
+  }
+  errors.add(
+    '$label:${_lineOf(result, match.start)}: `{{$name}}` has no value. Supply '
+    'one with `web_defines = {"$name": "..."}`, or list it in '
+    '`keep_placeholders` to ship the placeholder as written.',
+  );
+  return match.group(0)!;
 }
 
 /// Resolves each built-in to the text it substitutes to.
@@ -490,6 +542,41 @@ void _runDart2Wasm(List<String> args) {
   final sdkBin = File(Platform.resolvedExecutable).parent.path;
   final dartaotruntime = '$sdkBin/dartaotruntime$exeSuffix';
 
+  final parsed = _parseDart2WasmArgs(args);
+  final packagesPath = parsed.packagesPath;
+  final outputWasm = parsed.outputWasm;
+  final mainDart = parsed.mainDart;
+  if (packagesPath == null || outputWasm == null || mainDart == null) {
+    stderr.writeln(
+      'web_template compile wasm: --packages, -o, and entrypoint are required',
+    );
+    exit(64);
+  }
+
+  _compileWasm(
+    dartaotruntime: dartaotruntime,
+    sdkBin: sdkBin,
+    packagesPath: packagesPath,
+    outputWasm: outputWasm,
+    mainDart: mainDart,
+    multiRoot: parsed.multiRoot,
+    noSourceMaps: parsed.noSourceMaps,
+    extraOptions: parsed.extraOptions,
+    forwardArgs: parsed.forwardArgs,
+  );
+}
+
+/// The `compile wasm` flags in [args].
+({
+  String? packagesPath,
+  String? outputWasm,
+  String? mainDart,
+  String? multiRoot,
+  bool noSourceMaps,
+  List<String> extraOptions,
+  List<String> forwardArgs,
+})
+_parseDart2WasmArgs(List<String> args) {
   String? packagesPath;
   String? outputWasm;
   String? mainDart;
@@ -519,14 +606,31 @@ void _runDart2Wasm(List<String> args) {
       mainDart = arg;
     }
   }
+  return (
+    packagesPath: packagesPath,
+    outputWasm: outputWasm,
+    mainDart: mainDart,
+    multiRoot: multiRoot,
+    noSourceMaps: noSourceMaps,
+    extraOptions: extraOptions,
+    forwardArgs: forwardArgs,
+  );
+}
 
-  if (packagesPath == null || outputWasm == null || mainDart == null) {
-    stderr.writeln(
-      'web_template compile wasm: --packages, -o, and entrypoint are required',
-    );
-    exit(64);
-  }
-
+/// Compiles [mainDart] to [outputWasm] (plus its `.mjs` and optional source
+/// map) with the wasm compiler's staging root mounted.
+void _compileWasm({
+  required String dartaotruntime,
+  required String sdkBin,
+  required String packagesPath,
+  required String outputWasm,
+  required String mainDart,
+  required String? multiRoot,
+  required bool noSourceMaps,
+  required List<String> extraOptions,
+  required List<String> forwardArgs,
+}) {
+  final exeSuffix = Platform.isWindows ? '.exe' : '';
   final outWasmFile = File(outputWasm)..parent.createSync(recursive: true);
   final tmpDir = Directory('${outWasmFile.parent.path}/_wasm_tmp')
     ..createSync(recursive: true);
@@ -572,22 +676,33 @@ void _runDart2Wasm(List<String> args) {
       exit(res.exitCode);
     }
 
-    File(tmpWasm).copySync(outWasmFile.path);
-
-    final outputMjs = outputWasm.endsWith('.wasm')
-        ? '${outputWasm.substring(0, outputWasm.length - 5)}.mjs'
-        : '$outputWasm.mjs';
-    File('${tmpDir.path}/main.dart.mjs').copySync(outputMjs);
-
-    if (!noSourceMaps) {
-      final tmpMap = File('$tmpWasm.map');
-      if (tmpMap.existsSync()) {
-        tmpMap.copySync('$outputWasm.map');
-      }
-    }
+    _copyWasmOutputs(outputWasm, tmpDir, noSourceMaps, tmpWasm);
   } finally {
     if (tmpDir.existsSync()) {
       tmpDir.deleteSync(recursive: true);
+    }
+  }
+}
+
+/// Copies the compiled wasm, its `.mjs` loader and optional source map out of
+/// the scratch directory.
+void _copyWasmOutputs(
+  String outputWasm,
+  Directory tmpDir,
+  bool noSourceMaps,
+  String tmpWasm,
+) {
+  File(tmpWasm).copySync(outputWasm);
+
+  final outputMjs = outputWasm.endsWith('.wasm')
+      ? '${outputWasm.substring(0, outputWasm.length - 5)}.mjs'
+      : '$outputWasm.mjs';
+  File('${tmpDir.path}/main.dart.mjs').copySync(outputMjs);
+
+  if (!noSourceMaps) {
+    final tmpMap = File('$tmpWasm.map');
+    if (tmpMap.existsSync()) {
+      tmpMap.copySync('$outputWasm.map');
     }
   }
 }
@@ -659,131 +774,203 @@ void scrubDart2JsFile(
   String? packagesPath,
   String? rewrittenPkgPath,
 }) {
+  final prefixes = _scrubPrefixesFor(
+    cwdPath: cwdPath,
+    rootDirPath: rootDirPath,
+    tmpDirPath: tmpDirPath,
+    packagesPath: packagesPath,
+    rewrittenPkgPath: rewrittenPkgPath,
+  );
+  final state = _ScrubState(file.readAsStringSync());
+  _scrubPackageUris(state, prefixes);
+  _scrubDirectoryUris(state, prefixes);
+  _scrubSourcemapStageRefs(state, file, prefixes);
+  _scrubInfoJson(state, file, prefixes);
+  _scrubDepsFile(state, file);
+  if (state.changed) {
+    file.writeAsStringSync(state.content);
+  }
+}
+
+/// The host-specific spellings `scrubDart2JsFile` normalizes away.
+class _ScrubPrefixes {
+  final String? pkgAppUri;
+  final String? rewrittenPkgUri;
+  final String? origPkgUri;
+  final String? tmpDirUriPrefix;
+  final String? stageUriPrefix;
+  final String cwdUriPrefix;
+  final String? stageDirName;
+  final String? relStagePrefix;
+
+  _ScrubPrefixes({
+    required this.pkgAppUri,
+    required this.rewrittenPkgUri,
+    required this.origPkgUri,
+    required this.tmpDirUriPrefix,
+    required this.stageUriPrefix,
+    required this.cwdUriPrefix,
+    required this.stageDirName,
+    required this.relStagePrefix,
+  });
+}
+
+/// One compiler output file mid-scrub: its current [content] and whether any
+/// replacement has changed it yet.
+class _ScrubState {
+  String content;
+  bool changed = false;
+
+  _ScrubState(this.content);
+
+  /// Replaces every [from] with [to], recording the change.
+  void replace(Pattern from, String to) {
+    final next = content.replaceAll(from, to);
+    if (next != content) {
+      content = next;
+      changed = true;
+    }
+  }
+}
+
+/// Computes the host-specific spellings of the cwd, staging root, temp dir
+/// and package configs that compiler outputs may record.
+_ScrubPrefixes _scrubPrefixesFor({
+  required String cwdPath,
+  required String? rootDirPath,
+  required String? tmpDirPath,
+  required String? packagesPath,
+  required String? rewrittenPkgPath,
+}) {
   final normCwd = cwdPath.replaceAll(r'\', '/');
   final cwdPrefix = normCwd.endsWith('/') ? normCwd : '$normCwd/';
-  final cwdUriPrefix = Uri.directory(cwdPath).toString();
-  final stageUriPrefix = rootDirPath != null
-      ? Uri.directory(rootDirPath).toString()
-      : null;
-  final tmpDirUriPrefix = tmpDirPath != null
-      ? Uri.directory(tmpDirPath).toString()
-      : null;
-  final origPkgUri = packagesPath != null
-      ? Uri.file(File(packagesPath).absolute.path).toString()
-      : null;
-  final rewrittenPkgUri = rewrittenPkgPath != null
-      ? Uri.file(File(rewrittenPkgPath).absolute.path).toString()
-      : null;
-  final pkgAppUri = packagesPath != null
-      ? _toAppSchemeUri(packagesPath, cwdPrefix)
-      : null;
-  final stageSegments = rootDirPath != null
-      ? Directory(
-          rootDirPath,
-        ).uri.pathSegments.where((s) => s.isNotEmpty).toList()
-      : const <String>[];
-  final stageDirName = stageSegments.isNotEmpty ? stageSegments.last : null;
   final normRootDir = rootDirPath?.replaceAll(r'\', '/');
-  final relStagePrefix =
-      normRootDir != null && normRootDir.startsWith(cwdPrefix)
-      ? _toAppSchemeRelPath(normRootDir.substring(cwdPrefix.length))
-      : null;
-
-  var content = file.readAsStringSync();
-  var changed = false;
-  if (pkgAppUri != null) {
-    if (rewrittenPkgUri != null && content.contains(rewrittenPkgUri)) {
-      content = content.replaceAll(rewrittenPkgUri, pkgAppUri);
-      changed = true;
-    }
-    if (origPkgUri != null && content.contains(origPkgUri)) {
-      content = content.replaceAll(origPkgUri, pkgAppUri);
-      changed = true;
-    }
-  }
-  if (tmpDirUriPrefix != null && content.contains(tmpDirUriPrefix)) {
-    content = content.replaceAll(tmpDirUriPrefix, 'org-dartlang-app:///');
-    changed = true;
-  }
-  if (stageUriPrefix != null && content.contains(stageUriPrefix)) {
-    content = content.replaceAll(stageUriPrefix, 'org-dartlang-app:///');
-    changed = true;
-  }
-  if (content.contains(cwdUriPrefix)) {
-    content = content.replaceAll(cwdUriPrefix, 'org-dartlang-app:///');
-    changed = true;
-  }
-  final bazelOutAppUri = RegExp(
-    r'org-dartlang-app:///(?:\./)?bazel-out/[^/]+/(?:bin|genfiles)/',
+  return _ScrubPrefixes(
+    pkgAppUri: packagesPath != null
+        ? _toAppSchemeUri(packagesPath, cwdPrefix)
+        : null,
+    rewrittenPkgUri: rewrittenPkgPath != null
+        ? Uri.file(File(rewrittenPkgPath).absolute.path).toString()
+        : null,
+    origPkgUri: packagesPath != null
+        ? Uri.file(File(packagesPath).absolute.path).toString()
+        : null,
+    tmpDirUriPrefix: tmpDirPath != null
+        ? Uri.directory(tmpDirPath).toString()
+        : null,
+    stageUriPrefix: rootDirPath != null
+        ? Uri.directory(rootDirPath).toString()
+        : null,
+    cwdUriPrefix: Uri.directory(cwdPath).toString(),
+    stageDirName: rootDirPath != null ? _stageDirName(rootDirPath) : null,
+    relStagePrefix:
+        normRootDir != null && normRootDir.startsWith(cwdPrefix)
+        ? _toAppSchemeRelPath(normRootDir.substring(cwdPrefix.length))
+        : null,
   );
-  if (bazelOutAppUri.hasMatch(content)) {
-    content = content.replaceAll(bazelOutAppUri, 'org-dartlang-app:///');
-    changed = true;
+}
+
+/// The staging root's own directory name, for source-map relative spellings.
+String? _stageDirName(String rootDirPath) {
+  final segments = Directory(
+    rootDirPath,
+  ).uri.pathSegments.where((s) => s.isNotEmpty).toList();
+  return segments.isNotEmpty ? segments.last : null;
+}
+
+/// Rewrites recorded package-config URIs to their stable app-scheme spelling.
+void _scrubPackageUris(_ScrubState state, _ScrubPrefixes p) {
+  if (p.pkgAppUri != null) {
+    if (p.rewrittenPkgUri != null) {
+      state.replace(p.rewrittenPkgUri!, p.pkgAppUri!);
+    }
+    if (p.origPkgUri != null) {
+      state.replace(p.origPkgUri!, p.pkgAppUri!);
+    }
   }
+}
+
+/// Rewrites recorded temp, staging-root and working-directory URIs to the
+/// stable app-scheme root.
+void _scrubDirectoryUris(_ScrubState state, _ScrubPrefixes p) {
+  if (p.tmpDirUriPrefix != null) {
+    state.replace(p.tmpDirUriPrefix!, 'org-dartlang-app:///');
+  }
+  if (p.stageUriPrefix != null) {
+    state.replace(p.stageUriPrefix!, 'org-dartlang-app:///');
+  }
+  state.replace(p.cwdUriPrefix, 'org-dartlang-app:///');
+  state.replace(
+    RegExp(r'org-dartlang-app:///(?:\./)?bazel-out/[^/]+/(?:bin|genfiles)/'),
+    'org-dartlang-app:///',
+  );
   // A staged input is addressed as `<stage>/<rel>` under the same scheme,
   // so the same file is recorded with and without the `<stage>/` prefix
   // depending on which copy the frontend chose. Without this the depfile
   // differs per strategy even though every URI is already stable.
-  final stagedAppUri = RegExp(r'org-dartlang-app:///.*?\.stage/');
-  if (stagedAppUri.hasMatch(content)) {
-    content = content.replaceAll(stagedAppUri, 'org-dartlang-app:///');
-    changed = true;
-  }
+  state.replace(
+    RegExp(r'org-dartlang-app:///.*?\.stage/'),
+    'org-dartlang-app:///',
+  );
+}
+
+/// Rewrites the staging directory's relative spellings in a source map.
+void _scrubSourcemapStageRefs(
+  _ScrubState state,
+  File file,
+  _ScrubPrefixes p,
+) {
   if (file.path.endsWith('.map') &&
-      stageDirName != null &&
-      stageDirName.isNotEmpty) {
-    final relStageInMap = RegExp(
-      '(?:\\.\\./)+${RegExp.escape(stageDirName)}/',
+      p.stageDirName != null &&
+      p.stageDirName!.isNotEmpty) {
+    state.replace(
+      RegExp('(?:\\.\\./)+${RegExp.escape(p.stageDirName!)}/'),
+      'org-dartlang-app:///',
     );
-    if (relStageInMap.hasMatch(content)) {
-      content = content.replaceAll(relStageInMap, 'org-dartlang-app:///');
-      changed = true;
-    }
   }
-  if (file.path.endsWith('.info.json')) {
-    final bazelOutRel = RegExp(
-      r'(?:\./)?bazel-out/[^/]+/(?:bin|genfiles)/',
-    );
-    if (bazelOutRel.hasMatch(content)) {
-      content = content.replaceAll(bazelOutRel, '');
-      changed = true;
-    }
-    if (relStagePrefix != null &&
-        relStagePrefix.isNotEmpty &&
-        content.contains('$relStagePrefix/')) {
-      content = content.replaceAll('$relStagePrefix/', '');
-      changed = true;
-    }
-    content = content
-        .replaceAllMapped(
-          RegExp(r'"compilationMoment":\s*"[^"]*"'),
-          (_) => '"compilationMoment": "1970-01-01 00:00:00.000000"',
-        )
-        .replaceAllMapped(
-          RegExp(
-            r'"(compilationDuration|toJsonDuration|dumpInfoDuration)":\s*\d+',
-          ),
-          (m) => '"${m.group(1)}": 0',
-        );
-    changed = true;
+}
+
+/// Normalizes a `.info.json` dump: relative output paths and compilation
+/// timestamps.
+void _scrubInfoJson(_ScrubState state, File file, _ScrubPrefixes p) {
+  if (!file.path.endsWith('.info.json')) return;
+  state.replace(
+    RegExp(r'(?:\./)?bazel-out/[^/]+/(?:bin|genfiles)/'),
+    '',
+  );
+  if (p.relStagePrefix != null &&
+      p.relStagePrefix!.isNotEmpty &&
+      state.content.contains('${p.relStagePrefix!}/')) {
+    state.replace('${p.relStagePrefix!}/', '');
   }
-  if (file.path.endsWith('.deps')) {
-    final lines =
-        content
-            .split('\n')
-            .map((l) => l.trimRight())
-            .where((l) => l.isNotEmpty)
-            .toSet()
-            .toList()
-          ..sort();
-    final normalized = lines.isEmpty ? '' : '${lines.join('\n')}\n';
-    if (normalized != content) {
-      content = normalized;
-      changed = true;
-    }
-  }
-  if (changed) {
-    file.writeAsStringSync(content);
+  state.content = state.content
+      .replaceAllMapped(
+        RegExp(r'"compilationMoment":\s*"[^"]*"'),
+        (_) => '"compilationMoment": "1970-01-01 00:00:00.000000"',
+      )
+      .replaceAllMapped(
+        RegExp(
+          r'"(compilationDuration|toJsonDuration|dumpInfoDuration)":\s*\d+',
+        ),
+        (m) => '"${m.group(1)}": 0',
+      );
+  state.changed = true;
+}
+
+/// Sorts, trims and dedupes a `.deps` depfile.
+void _scrubDepsFile(_ScrubState state, File file) {
+  if (!file.path.endsWith('.deps')) return;
+  final lines = state.content
+      .split('\n')
+      .map((l) => l.trimRight())
+      .where((l) => l.isNotEmpty)
+      .toSet()
+      .toList()
+    ..sort();
+  final normalized = lines.isEmpty ? '' : '${lines.join('\n')}\n';
+  if (normalized != state.content) {
+    state.content = normalized;
+    state.changed = true;
   }
 }
 
@@ -830,6 +1017,68 @@ void _runDart2Js(List<String> args) {
   final sdkBin = File(Platform.resolvedExecutable).parent.path;
   final dartaotruntime = '$sdkBin/dartaotruntime$exeSuffix';
 
+  final parsed = _parseDart2JsArgs(args);
+
+  // `dart compile js --cfe-only` produces a kernel dill for const_finder
+  // (the `app.dill` upstream runs icon tree-shaking on) rather than
+  // JavaScript. Its `-o` names a file, not a directory, so the scratch
+  // directory is a uniquely-named sibling of the output (the compiler already
+  // writes `<dill>.deps` there, so the parent is the action's own output
+  // tree); two icon kernels compile concurrently into one `bin` dir, hence
+  // the timestamp/pid suffix. JS scrubbing is skipped: there is no JS to
+  // scrub, and the `.deps` sibling is normalized below.
+  final cfeOnly = parsed.forwardArgs.contains('--cfe-only');
+
+  final cwdPath = Directory.current.absolute.path;
+  final scratch = _dart2JsScratchDir(
+    outJs: parsed.outJs,
+    cfeOnly: cfeOnly,
+    cwdPath: cwdPath,
+  );
+  final tmpDir = scratch.tmpDir;
+  final tmpAbsPath = scratch.tmpAbsPath;
+  String? rootDirPath;
+  String? rewrittenPkgPath;
+  try {
+    final compiled = _compileDart2Js(
+      dartaotruntime: dartaotruntime,
+      sdkBin: sdkBin,
+      tmpPath: tmpDir.path,
+      tmpAbsPath: tmpAbsPath,
+      multiRoot: parsed.multiRoot,
+      packagesPath: parsed.packagesPath,
+      mainDart: parsed.mainDart,
+      forwardArgs: parsed.forwardArgs,
+      cwdPath: cwdPath,
+    );
+    rootDirPath = compiled.rootDirPath;
+    rewrittenPkgPath = compiled.rewrittenPkgPath;
+  } finally {
+    if (tmpDir.existsSync()) {
+      tmpDir.deleteSync(recursive: true);
+    }
+  }
+
+  _scrubDart2JsResults(
+    outJs: parsed.outJs,
+    cfeOnly: cfeOnly,
+    cwdPath: cwdPath,
+    rootDirPath: rootDirPath,
+    tmpAbsPath: tmpAbsPath,
+    packagesPath: parsed.packagesPath,
+    rewrittenPkgPath: rewrittenPkgPath,
+  );
+}
+
+/// The `compile js` flags in [args].
+({
+  String? outJs,
+  String? multiRoot,
+  String? packagesPath,
+  String? mainDart,
+  List<String> forwardArgs,
+})
+_parseDart2JsArgs(List<String> args) {
   String? outJs;
   String? multiRoot;
   String? packagesPath;
@@ -854,24 +1103,28 @@ void _runDart2Js(List<String> args) {
       mainDart = arg;
     }
   }
+  return (
+    outJs: outJs,
+    multiRoot: multiRoot,
+    packagesPath: packagesPath,
+    mainDart: mainDart,
+    forwardArgs: forwardArgs,
+  );
+}
 
-  // `dart compile js --cfe-only` produces a kernel dill for const_finder
-  // (the `app.dill` upstream runs icon tree-shaking on) rather than
-  // JavaScript. Its `-o` names a file, not a directory, so the scratch
-  // directory is a uniquely-named sibling of the output (the compiler already
-  // writes `<dill>.deps` there, so the parent is the action's own output
-  // tree); two icon kernels compile concurrently into one `bin` dir, hence
-  // the timestamp/pid suffix. JS scrubbing is skipped: there is no JS to
-  // scrub, and the `.deps` sibling is normalized below.
-  final cfeOnly = forwardArgs.contains('--cfe-only');
-
-  final cwdPath = Directory.current.absolute.path;
+/// The compile's scratch directory and its absolute path.
+///
+/// The icon-kernel scratch sits under the action's output directory when the
+/// output is known (never the shared system temp): for a tree-artifact
+/// output that is `outJs`'s own directory, for a dill output its parent dir.
+({Directory tmpDir, String tmpAbsPath}) _dart2JsScratchDir({
+  required String? outJs,
+  required bool cfeOnly,
+  required String cwdPath,
+}) {
   final baseTmpParent = (cfeOnly || outJs == null)
       ? cwdPath
       : (File(outJs).parent..createSync(recursive: true)).path;
-  // The icon-kernel scratch sits under the action's output directory when the
-  // output is known (never the shared system temp): for a tree-artifact
-  // output that is `outJs`'s own directory, for a dill output its parent dir.
   final cfeScratchParent = cfeOnly && outJs != null
       ? (File(outJs).parent..createSync(recursive: true)).path
       : baseTmpParent;
@@ -880,61 +1133,94 @@ void _runDart2Js(List<String> args) {
         ? '$cfeScratchParent/rules_flutter_dart2js_cfe_${DateTime.now().microsecondsSinceEpoch}_${pid}'
         : '$baseTmpParent/_dart2js_tmp',
   )..createSync(recursive: true);
-  final tmpAbsPath = tmpDir.absolute.path;
+  return (tmpDir: tmpDir, tmpAbsPath: tmpDir.absolute.path);
+}
+
+/// Runs the dart2js snapshot in [tmpPath]'s scratch, staging the package
+/// config first when the compile mounts a multi-root; answers the staging
+/// root and rewritten package config the output scrub needs.
+({String? rootDirPath, String? rewrittenPkgPath}) _compileDart2Js({
+  required String dartaotruntime,
+  required String sdkBin,
+  required String tmpPath,
+  required String tmpAbsPath,
+  required String? multiRoot,
+  required String? packagesPath,
+  required String? mainDart,
+  required List<String> forwardArgs,
+  required String cwdPath,
+}) {
   String? rootDirPath;
   String? rewrittenPkgPath;
-  try {
-    List<String> jsArgs;
-    if (multiRoot != null && packagesPath != null && mainDart != null) {
-      rootDirPath = Uri.parse(stageRootUri(multiRoot)).toFilePath();
-      final normCwd = cwdPath.replaceAll(r'\', '/');
-      final cwdPrefix = normCwd.endsWith('/') ? normCwd : '$normCwd/';
-      rewrittenPkgPath = '${tmpDir.path}/package_config.json';
-      _rewritePackageConfigForStage(
-        packagesPath,
-        normCwd,
-        cwdPrefix,
-        rewrittenPkgPath,
-      );
-      final relMain = _toAppSchemeRelPath(mainDart);
-      jsArgs = buildDart2JsSnapshotArgs(
-        forwardArgs: forwardArgs,
-        rewrittenPkgPath: rewrittenPkgPath,
-        stageRootUri: stageRootUri(multiRoot),
-        normMainDart: relMain,
-      );
-    } else {
-      jsArgs = <String>[
-        ...forwardArgs,
-        if (mainDart != null) mainDart,
-      ];
-    }
-
-    final res = Process.runSync(
-      dartaotruntime,
-      [
-        '$sdkBin/snapshots/dart2js_aot.dart.snapshot',
-        '--invoker=dart_cli',
-        ...jsArgs,
-      ],
-      environment: {
-        ...Platform.environment,
-        'TMPDIR': tmpAbsPath,
-        'TMP': tmpAbsPath,
-        'TEMP': tmpAbsPath,
-      },
+  List<String> jsArgs;
+  if (multiRoot != null && packagesPath != null && mainDart != null) {
+    rootDirPath = Uri.parse(stageRootUri(multiRoot)).toFilePath();
+    final normCwd = cwdPath.replaceAll(r'\', '/');
+    final cwdPrefix = normCwd.endsWith('/') ? normCwd : '$normCwd/';
+    rewrittenPkgPath = '$tmpPath/package_config.json';
+    _rewritePackageConfigForStage(
+      packagesPath,
+      normCwd,
+      cwdPrefix,
+      rewrittenPkgPath,
     );
-    if (res.exitCode != 0) {
-      stdout.write(res.stdout as String);
-      stderr.write(res.stderr as String);
-      exit(res.exitCode);
-    }
-  } finally {
-    if (tmpDir.existsSync()) {
-      tmpDir.deleteSync(recursive: true);
-    }
+    final relMain = _toAppSchemeRelPath(mainDart);
+    jsArgs = buildDart2JsSnapshotArgs(
+      forwardArgs: forwardArgs,
+      rewrittenPkgPath: rewrittenPkgPath,
+      stageRootUri: stageRootUri(multiRoot),
+      normMainDart: relMain,
+    );
+  } else {
+    jsArgs = <String>[
+      ...forwardArgs,
+      if (mainDart != null) mainDart,
+    ];
   }
 
+  final res = Process.runSync(
+    dartaotruntime,
+    [
+      '$sdkBin/snapshots/dart2js_aot.dart.snapshot',
+      '--invoker=dart_cli',
+      ...jsArgs,
+    ],
+    environment: {
+      ...Platform.environment,
+      'TMPDIR': tmpAbsPath,
+      'TMP': tmpAbsPath,
+      'TEMP': tmpAbsPath,
+    },
+  );
+  if (res.exitCode != 0) {
+    stdout.write(res.stdout as String);
+    stderr.write(res.stderr as String);
+    exit(res.exitCode);
+  }
+  return (rootDirPath: rootDirPath, rewrittenPkgPath: rewrittenPkgPath);
+}
+
+/// Normalizes this action's own compiler outputs.
+///
+/// A directory-wide scrub for a regular JS output; only the `<dill>.deps`
+/// sibling for a `--cfe-only` kernel, never the whole output directory: the
+/// base and canvaskit icon kernels compile concurrently into the same `bin`
+/// dir, and a directory-wide scrub is a read-modify-write of the sibling's
+/// depfile with only this action's temp paths known. A scrub that read the
+/// sibling's file while raw and writes it back after the sibling's own scrub
+/// overwrites the normalized file with a sorted-but-still-raw copy — a
+/// declared output that then differs per strategy (P-web-icon-dill-paths).
+/// The `.dill` itself needs no scrubbing: the kernel records
+/// workspace-relative library URIs.
+void _scrubDart2JsResults({
+  required String? outJs,
+  required bool cfeOnly,
+  required String cwdPath,
+  required String? rootDirPath,
+  required String tmpAbsPath,
+  required String? packagesPath,
+  required String? rewrittenPkgPath,
+}) {
   if (outJs != null && !cfeOnly) {
     scrubDart2JsOutputs(
       File(outJs).parent,
@@ -946,15 +1232,6 @@ void _runDart2Js(List<String> args) {
     );
   }
   if (outJs != null && cfeOnly) {
-    // Normalize only this action's own depfile sibling (`<dill>.deps`), never
-    // the whole output directory: the base and canvaskit icon kernels compile
-    // concurrently into the same `bin` dir, and a directory-wide scrub is a
-    // read-modify-write of the sibling's depfile with only this action's temp
-    // paths known. A scrub that read the sibling's file while raw and writes
-    // it back after the sibling's own scrub overwrites the normalized file
-    // with a sorted-but-still-raw copy — a declared output that then differs
-    // per strategy (P-web-icon-dill-paths). The `.dill` itself needs no
-    // scrubbing: the kernel records workspace-relative library URIs.
     final depsFile = File('$outJs.deps');
     if (depsFile.existsSync()) {
       scrubDart2JsFile(
