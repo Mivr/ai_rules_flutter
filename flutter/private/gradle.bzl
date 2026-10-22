@@ -9,7 +9,9 @@ consumer loads:
   script collector every reader folds;
 - `gradle_deps.bzl`: the Maven dependency reader;
 - `gradle_readers.bzl`: the namespace, native-build and ProGuard
-  readers plus the spoke-level resolvers.
+  readers;
+- `gradle_plugin.bzl`: the spoke-level resolvers (Maven deps, manifest
+  package, label validation).
 
 `flutter_pub_package.bzl` loads this file and re-exports the
 long-standing entry points (`maven_labels_for_gradle`,
@@ -25,6 +27,13 @@ load(
     _facade_gradle_collect_files = "gradle_collect_files",
 )
 load(
+    ":gradle_plugin.bzl",
+    _facade_is_java_package_name = "is_java_package_name",
+    _facade_is_maven_dep_label = "is_maven_dep_label",
+    _facade_parse_android_manifest_package = "parse_android_manifest_package",
+    _facade_resolve_plugin_maven_deps = "resolve_plugin_maven_deps",
+)
+load(
     ":gradle_readers.bzl",
     _facade_detect_android_namespace = "detect_android_namespace",
     _facade_detect_android_native_build = "detect_android_native_build",
@@ -33,11 +42,7 @@ load(
     _facade_gradle_scan_namespaces = "gradle_scan_namespaces",
     _facade_gradle_scan_native = "gradle_scan_native",
     _facade_gradle_scan_proguard = "gradle_scan_proguard",
-    _facade_is_java_package_name = "is_java_package_name",
-    _facade_is_maven_dep_label = "is_maven_dep_label",
-    _facade_parse_android_manifest_package = "parse_android_manifest_package",
     _facade_parse_gradle_android_namespace = "parse_gradle_android_namespace",
-    _facade_resolve_plugin_maven_deps = "resolve_plugin_maven_deps",
 )
 
 maven_labels_for_gradle = _facade_maven_labels_for_gradle

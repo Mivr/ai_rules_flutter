@@ -313,3 +313,22 @@ def gradle_collect_files(root_path, root_content, root_language, read_script):
             statement = "applied Gradle scripts exceed the parse budget",
         ))
     return struct(files = files, bad = bad)
+
+def gradle_package_reader(ctx):
+    """A `read_script` callback confined to the spoke's `android/` tree.
+
+    Args:
+        ctx: the spoke repository context (path, exists and read).
+
+    Returns:
+        A callable taking a package-relative applied-script path and
+        returning its text, or None when the script is missing.
+    """
+
+    def _read_package_script(path):
+        gradle_file = ctx.path("android/" + path)
+        if not gradle_file.exists:
+            return None
+        return ctx.read(gradle_file)
+
+    return _read_package_script
