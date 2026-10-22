@@ -15,6 +15,106 @@ EXPECTED_WEB_SDK_TARGETS = ("dartdevc", "dart2js", "wasm")
 EXPECTED_DART_SDK_INCLUDE = "../dart-sdk/lib/libraries.json"
 EXPECTED_WEB_SDK_LIBRARIES = ("ui", "ui_web")
 
+def _check_libraries_json_inputs(raw_json, dart_sdk_repo_name, source):
+    if not dart_sdk_repo_name or type(dart_sdk_repo_name) != "string":
+        fail("flutter_web_sdk_repo: invalid_host_sdk_repo: dart_sdk_repo_name must be a non-empty string")
+
+    if not raw_json or type(raw_json) != "string" or not raw_json.strip().startswith("{"):
+        fail("flutter_web_sdk_repo: invalid_libraries_json: %s must be a JSON object" % source)
+
+def _require_target_entry(parsed, target, source):
+    """Return a copy of the validated `target` entry from parsed libraries.json."""
+    if target not in parsed or type(parsed[target]) != "dict":
+        fail(
+            "flutter_web_sdk_repo: missing_target_entry: %s is missing expected target entry %r (expected targets: %s)" % (
+                source,
+                target,
+                ", ".join(EXPECTED_WEB_SDK_TARGETS),
+            ),
+        )
+
+    target_entry = dict(parsed[target])
+    libraries = target_entry.get("libraries")
+    if type(libraries) != "dict" or not libraries:
+        fail(
+            "flutter_web_sdk_repo: missing_libraries_entry: %s target %r is missing expected \"libraries\" object" % (
+                source,
+                target,
+            ),
+        )
+    for lib_name in EXPECTED_WEB_SDK_LIBRARIES:
+        lib_spec = libraries.get(lib_name)
+        if type(lib_spec) != "dict" or not lib_spec.get("uri"):
+            fail(
+                "flutter_web_sdk_repo: missing_library_entry: %s target %r is missing expected library %r" % (
+                    source,
+                    target,
+                    lib_name,
+                ),
+            )
+    return target_entry
+
+def _rewrite_include_entry(inc, target, source, replacement_path):
+    """Rewrite one include entry; return `(entry_copy, matched_sdk_include)`."""
+    if type(inc) != "dict":
+        fail(
+            "flutter_web_sdk_repo: invalid_include_entry: %s target %r has non-object include entry %r" % (
+                source,
+                target,
+                inc,
+            ),
+        )
+    inc_copy = dict(inc)
+    if inc_copy.get("path") == EXPECTED_DART_SDK_INCLUDE:
+        if inc_copy.get("target") != target:
+            fail(
+                "flutter_web_sdk_repo: mismatched_include_target: %s target %r include for %r has target %r (expected %r)" % (
+                    source,
+                    target,
+                    EXPECTED_DART_SDK_INCLUDE,
+                    inc_copy.get("target"),
+                    target,
+                ),
+            )
+        inc_copy["path"] = replacement_path
+        return inc_copy, True
+    return inc_copy, False
+
+def _rewrite_target_includes(target_entry, target, source, replacement_path):
+    """Rewrite the `include` list of one target entry."""
+    includes = target_entry.get("include")
+    if type(includes) != "list" or not includes:
+        fail(
+            "flutter_web_sdk_repo: missing_include_entry: %s target %r is missing expected \"include\" list" % (
+                source,
+                target,
+            ),
+        )
+
+    matched_include = False
+    new_includes = []
+    for inc in includes:
+        rewritten_inc, matched = _rewrite_include_entry(inc, target, source, replacement_path)
+        new_includes.append(rewritten_inc)
+        if matched:
+            matched_include = True
+
+    if not matched_include:
+        fail(
+            "flutter_web_sdk_repo: missing_dart_sdk_include: %s target %r is missing expected include path %r" % (
+                source,
+                target,
+                EXPECTED_DART_SDK_INCLUDE,
+            ),
+        )
+    return new_includes
+
+def _rewrite_target_entry(parsed, target, source, replacement_path):
+    """Validate and rewrite one target entry of parsed libraries.json."""
+    target_entry = _require_target_entry(parsed, target, source)
+    target_entry["include"] = _rewrite_target_includes(target_entry, target, source, replacement_path)
+    return target_entry
+
 def rewrite_web_sdk_libraries_json(
         raw_json,
         dart_sdk_repo_name,
@@ -36,11 +136,7 @@ def rewrite_web_sdk_libraries_json(
     Returns:
         Rewritten JSON string with trailing newline.
     """
-    if not dart_sdk_repo_name or type(dart_sdk_repo_name) != "string":
-        fail("flutter_web_sdk_repo: invalid_host_sdk_repo: dart_sdk_repo_name must be a non-empty string")
-
-    if not raw_json or type(raw_json) != "string" or not raw_json.strip().startswith("{"):
-        fail("flutter_web_sdk_repo: invalid_libraries_json: %s must be a JSON object" % source)
+    _check_libraries_json_inputs(raw_json, dart_sdk_repo_name, source)
 
     parsed = json.decode(raw_json)
     if type(parsed) != "dict":
@@ -50,82 +146,7 @@ def rewrite_web_sdk_libraries_json(
     replacement_path = "../../%s/dart-sdk/lib/libraries.json" % dart_sdk_repo_name
 
     for target in EXPECTED_WEB_SDK_TARGETS:
-        if target not in parsed or type(parsed[target]) != "dict":
-            fail(
-                "flutter_web_sdk_repo: missing_target_entry: %s is missing expected target entry %r (expected targets: %s)" % (
-                    source,
-                    target,
-                    ", ".join(EXPECTED_WEB_SDK_TARGETS),
-                ),
-            )
-
-        target_entry = dict(parsed[target])
-        libraries = target_entry.get("libraries")
-        if type(libraries) != "dict" or not libraries:
-            fail(
-                "flutter_web_sdk_repo: missing_libraries_entry: %s target %r is missing expected \"libraries\" object" % (
-                    source,
-                    target,
-                ),
-            )
-        for lib_name in EXPECTED_WEB_SDK_LIBRARIES:
-            lib_spec = libraries.get(lib_name)
-            if type(lib_spec) != "dict" or not lib_spec.get("uri"):
-                fail(
-                    "flutter_web_sdk_repo: missing_library_entry: %s target %r is missing expected library %r" % (
-                        source,
-                        target,
-                        lib_name,
-                    ),
-                )
-
-        includes = target_entry.get("include")
-        if type(includes) != "list" or not includes:
-            fail(
-                "flutter_web_sdk_repo: missing_include_entry: %s target %r is missing expected \"include\" list" % (
-                    source,
-                    target,
-                ),
-            )
-
-        matched_include = False
-        new_includes = []
-        for inc in includes:
-            if type(inc) != "dict":
-                fail(
-                    "flutter_web_sdk_repo: invalid_include_entry: %s target %r has non-object include entry %r" % (
-                        source,
-                        target,
-                        inc,
-                    ),
-                )
-            inc_copy = dict(inc)
-            if inc_copy.get("path") == EXPECTED_DART_SDK_INCLUDE:
-                if inc_copy.get("target") != target:
-                    fail(
-                        "flutter_web_sdk_repo: mismatched_include_target: %s target %r include for %r has target %r (expected %r)" % (
-                            source,
-                            target,
-                            EXPECTED_DART_SDK_INCLUDE,
-                            inc_copy.get("target"),
-                            target,
-                        ),
-                    )
-                inc_copy["path"] = replacement_path
-                matched_include = True
-            new_includes.append(inc_copy)
-
-        if not matched_include:
-            fail(
-                "flutter_web_sdk_repo: missing_dart_sdk_include: %s target %r is missing expected include path %r" % (
-                    source,
-                    target,
-                    EXPECTED_DART_SDK_INCLUDE,
-                ),
-            )
-
-        target_entry["include"] = new_includes
-        rewritten[target] = target_entry
+        rewritten[target] = _rewrite_target_entry(parsed, target, source, replacement_path)
 
     return json.encode_indent(rewritten, indent = "  ") + "\n"
 
@@ -189,52 +210,45 @@ def resolve_web_sdk_host_repos(host_sdks, user_repository_name = "flutter"):
             ordered[platform] = by_platform[platform]
     return ordered
 
-def generate_web_sdk_build(host_sdks = {}, user_repository_name = "flutter", rewritten_dir = "web-sdk"):
-    """Generate `BUILD.bazel` for `@flutter_web_sdk` selecting the SDK by exec platform.
-
-    Args:
-        host_sdks: Dict mapping declared host SDK `Label`s to `HOST_PLATFORMS` keys.
-        user_repository_name: Fallback repository base name when `host_sdks` is empty.
-        rewritten_dir: Directory holding the rewritten `libraries.<platform>.json`
-            files. Download mode rewrites them in place (`web-sdk`); local mode
-            keeps the symlinked SDK tree pristine and writes them alongside it.
-
-    Returns:
-        Generated `BUILD.bazel` content string.
-    """
-    resolved = resolve_web_sdk_host_repos(host_sdks, user_repository_name)
-
-    config_settings = []
-    libraries_select_entries = []
-    dart_sdk_libraries_select_entries = []
-    module_loader_select_entries = []
-    stack_mapper_select_entries = []
-
-    for platform, info in resolved.items():
-        meta = HOST_PLATFORMS[platform]
-        constraints = ",\n        ".join(['"%s"' % c for c in meta.compatible_with])
-        config_settings.append("""config_setting(
+def _web_sdk_config_setting_block(platform, meta):
+    constraints = ",\n        ".join(['"%s"' % c for c in meta.compatible_with])
+    return """config_setting(
     name = "{platform}",
     constraint_values = [
         {constraints},
     ],
-)""".format(platform = platform, constraints = constraints))
-        libraries_select_entries.append(
+)""".format(platform = platform, constraints = constraints)
+
+def _web_sdk_select_lines(resolved, rewritten_dir):
+    """Build the per-platform `select()` entry lines for the generated BUILD file."""
+    libraries = []
+    dart_sdk_libraries = []
+    module_loader = []
+    stack_mapper = []
+    for platform, info in resolved.items():
+        libraries.append(
             '        ":{platform}": ["{rewritten}/libraries.{platform}.json"],'.format(
                 platform = platform,
                 rewritten = rewritten_dir,
             ),
         )
-        dart_sdk_libraries_select_entries.append(
+        dart_sdk_libraries.append(
             '        ":{platform}": ["{label}"],'.format(platform = platform, label = info.libraries_json_label),
         )
-        module_loader_select_entries.append(
+        module_loader.append(
             '        ":{platform}": "{label}",'.format(platform = platform, label = info.ddc_module_loader_label),
         )
-        stack_mapper_select_entries.append(
+        stack_mapper.append(
             '        ":{platform}": "{label}",'.format(platform = platform, label = info.ddc_stack_trace_mapper_label),
         )
+    return struct(
+        libraries = libraries,
+        dart_sdk_libraries = dart_sdk_libraries,
+        module_loader = module_loader,
+        stack_mapper = stack_mapper,
+    )
 
+def _render_web_sdk_build(config_settings_text, selects, rewritten_dir):
     return """# Generated by flutter_web_sdk_repo.bzl
 
 {config_settings}
@@ -289,13 +303,31 @@ exports_files(
     visibility = ["//visibility:public"],
 )
 """.format(
-        config_settings = "\n\n".join(config_settings),
-        libraries_select = "\n".join(libraries_select_entries),
-        dart_sdk_libraries_select = "\n".join(dart_sdk_libraries_select_entries),
-        module_loader_select = "\n".join(module_loader_select_entries),
-        stack_mapper_select = "\n".join(stack_mapper_select_entries),
+        config_settings = config_settings_text,
+        libraries_select = "\n".join(selects.libraries),
+        dart_sdk_libraries_select = "\n".join(selects.dart_sdk_libraries),
+        module_loader_select = "\n".join(selects.module_loader),
+        stack_mapper_select = "\n".join(selects.stack_mapper),
         rewritten = rewritten_dir,
     )
+
+def generate_web_sdk_build(host_sdks = {}, user_repository_name = "flutter", rewritten_dir = "web-sdk"):
+    """Generate `BUILD.bazel` for `@flutter_web_sdk` selecting the SDK by exec platform.
+
+    Args:
+        host_sdks: Dict mapping declared host SDK `Label`s to `HOST_PLATFORMS` keys.
+        user_repository_name: Fallback repository base name when `host_sdks` is empty.
+        rewritten_dir: Directory holding the rewritten `libraries.<platform>.json`
+            files. Download mode rewrites them in place (`web-sdk`); local mode
+            keeps the symlinked SDK tree pristine and writes them alongside it.
+
+    Returns:
+        Generated `BUILD.bazel` content string.
+    """
+    resolved = resolve_web_sdk_host_repos(host_sdks, user_repository_name)
+    blocks = [_web_sdk_config_setting_block(platform, HOST_PLATFORMS[platform]) for platform in resolved.keys()]
+    selects = _web_sdk_select_lines(resolved, rewritten_dir)
+    return _render_web_sdk_build("\n\n".join(blocks), selects, rewritten_dir)
 
 def _detect_host_platform(repository_ctx):
     os_info = getattr(repository_ctx, "os", None)
