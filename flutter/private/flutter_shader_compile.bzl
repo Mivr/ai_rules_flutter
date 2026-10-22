@@ -44,53 +44,24 @@ def _shader_rel_path(file):
         return "external/" + rel[len("../"):]
     return rel
 
-def flutter_shader_compile_action(
-        ctx,
-        impellerc,
-        shader_lib,
-        shader,
-        output,
-        target_platform,
-        is_web = False,
-        includes = [],
-        compile_tool = None,
-        require_sksl = False):
-    """Compile a single shader file to .iplr format using impellerc.
-
-    Args:
-        ctx: Rule context.
-        impellerc: The impellerc executable File.
-        shader_lib: List of shader_lib include Files.
-        shader: The input .frag/.glsl shader File.
-        output: The output .iplr File.
-        target_platform: Target platform string ("ios", "macos", "android", "linux", "windows", "web").
-        is_web: If True, emit JSON format (for web targets).
-        includes: Files the shader may `#include` — inputs the sandbox
-            needs, staged into a per-action include tree so workspace
-            directories are never searched directly.
-        compile_tool: The compiled `compile_shader` executable File, which
-            retries a shader whose SkSL stage fails without it, as `flutter build`
-            does. Used only where the flags include SkSL beside other stages.
-        require_sksl: Make an SkSL failure an error instead of a warning.
-    """
-    platform_flags = get_shader_platform_flags(target_platform)
-
-    # Find the shader_lib root directory from any file in the filegroup.
-    shader_lib_dir = None
+def _find_shader_lib_dir(shader_lib):
+    """Finds the shader_lib root directory from any file in the filegroup."""
     for f in shader_lib:
         if "/shader_lib/" in f.path:
             idx = f.path.find("/shader_lib/")
-            shader_lib_dir = f.path[:idx + len("/shader_lib")]
-            break
+            return f.path[:idx + len("/shader_lib")]
+    return None
 
-    # impellerc requires a --spirv intermediate output alongside --sl when
-    # using runtime stages (not platform flags). Declare it as a secondary output.
-    spirv_output = ctx.actions.declare_file(output.basename + ".spirv", sibling = output)
+def _stage_shader_includes(ctx, output, shader, includes):
+    """Stages declared include files into a per-action include tree.
 
-    # Stage declared include files into a per-action directory under bazel-out
-    # so `--include` points only at the declared files' staged locations and
-    # never at a workspace directory (which in local execution is a directory
-    # symlink containing undeclared sibling files).
+    Points `--include` only at the staged locations, never at a workspace
+    directory (which in local execution is a directory symlink containing
+    undeclared sibling files).
+
+    Returns:
+      A `(staged_files, include_dirs)` tuple.
+    """
     staged_files = []
     include_dirs = []
     stage_prefix = output.basename + ".includes"
@@ -134,7 +105,10 @@ def flutter_shader_compile_action(
         for link in staged_files:
             if link.dirname not in include_dirs:
                 include_dirs.append(link.dirname)
+    return staged_files, include_dirs
 
+def _shader_compile_args(ctx, output, spirv_output, shader, platform_flags, is_web, include_dirs, shader_lib_dir):
+    """Builds the impellerc args for one shader compile."""
     args = ctx.actions.args()
     for flag in platform_flags:
         args.add(flag)
@@ -149,29 +123,12 @@ def flutter_shader_compile_action(
         args.add("--include=" + inc_dir)
     if shader_lib_dir:
         args.add("--include=" + shader_lib_dir)
+    return args
 
-    inputs = [shader] + shader_lib + list(includes) + staged_files
+def _run_shader_compile(ctx, impellerc, shader, output, spirv_output, target_platform, platform_flags, args, inputs, compile_tool, require_sksl):
+    """Runs impellerc directly, or via the retry wrapper where SkSL can fail soft."""
     retry_possible = "--sksl" in platform_flags and len(platform_flags) > 1
-    if retry_possible:
-        dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx)
-        wrapper_args = ctx.actions.args()
-        wrapper_args.add("--impellerc", impellerc)
-        wrapper_args.add("--shader", shader.short_path)
-        if require_sksl:
-            wrapper_args.add("--require-sksl")
-        wrapper_args.add("--")
-        ctx.actions.run(
-            executable = dart_exe,
-            arguments = [compile_tool.path, wrapper_args, args],
-            inputs = depset(
-                direct = inputs + [impellerc, compile_tool],
-                transitive = [dart_vm_files],
-            ),
-            outputs = [output, spirv_output],
-            mnemonic = "FlutterShaderCompile",
-            progress_message = "Compiling shader %s for %s" % (shader.short_path, target_platform),
-        )
-    else:
+    if not retry_possible:
         ctx.actions.run(
             executable = impellerc,
             arguments = [args],
@@ -180,3 +137,69 @@ def flutter_shader_compile_action(
             mnemonic = "FlutterShaderCompile",
             progress_message = "Compiling shader %s for %s" % (shader.short_path, target_platform),
         )
+        return
+    dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx)
+    wrapper_args = ctx.actions.args()
+    wrapper_args.add("--impellerc", impellerc)
+    wrapper_args.add("--shader", shader.short_path)
+    if require_sksl:
+        wrapper_args.add("--require-sksl")
+    wrapper_args.add("--")
+    ctx.actions.run(
+        executable = dart_exe,
+        arguments = [compile_tool.path, wrapper_args, args],
+        inputs = depset(
+            direct = inputs + [impellerc, compile_tool],
+            transitive = [dart_vm_files],
+        ),
+        outputs = [output, spirv_output],
+        mnemonic = "FlutterShaderCompile",
+        progress_message = "Compiling shader %s for %s" % (shader.short_path, target_platform),
+    )
+
+def flutter_shader_compile_action(
+        ctx,
+        impellerc,
+        shader_lib,
+        shader,
+        output,
+        target_platform,
+        is_web = False,
+        includes = [],
+        compile_tool = None,
+        require_sksl = False):
+    """Compile a single shader file to .iplr format using impellerc.
+
+    Args:
+        ctx: Rule context.
+        impellerc: The impellerc executable File.
+        shader_lib: List of shader_lib include Files.
+        shader: The input .frag/.glsl shader File.
+        output: The output .iplr File.
+        target_platform: Target platform string ("ios", "macos", "android", "linux", "windows", "web").
+        is_web: If True, emit JSON format (for web targets).
+        includes: Files the shader may `#include` — inputs the sandbox
+            needs, staged into a per-action include tree so workspace
+            directories are never searched directly.
+        compile_tool: The compiled `compile_shader` executable File, which
+            retries a shader whose SkSL stage fails without it, as `flutter build`
+            does. Used only where the flags include SkSL beside other stages.
+        require_sksl: Make an SkSL failure an error instead of a warning.
+    """
+    platform_flags = get_shader_platform_flags(target_platform)
+    shader_lib_dir = _find_shader_lib_dir(shader_lib)
+
+    # impellerc requires a --spirv intermediate output alongside --sl when
+    # using runtime stages (not platform flags). Declare it as a secondary output.
+    spirv_output = ctx.actions.declare_file(output.basename + ".spirv", sibling = output)
+
+    # Stage declared include files into a per-action directory under bazel-out
+    # so `--include` points only at the declared files' staged locations and
+    # never at a workspace directory (which in local execution is a directory
+    # symlink containing undeclared sibling files).
+    staged_files, include_dirs = _stage_shader_includes(ctx, output, shader, includes)
+
+    args = _shader_compile_args(ctx, output, spirv_output, shader, platform_flags, is_web, include_dirs, shader_lib_dir)
+
+    inputs = [shader] + shader_lib + list(includes) + staged_files
+    _run_shader_compile(ctx, impellerc, shader, output, spirv_output, target_platform, platform_flags, args, inputs, compile_tool, require_sksl)
