@@ -30,17 +30,9 @@ resolve_exec_dart = _resolve_exec_dart
 resolve_exec_dart_vm = _resolve_exec_dart_vm
 resolve_flutter_sdk_info = _resolve_flutter_sdk_info
 
-def make_web_ui_web_stub_content():
-    """Generate a VM-compatible stub for `dart:ui_web` used during icon tree-shaking kernel compilation.
-
-    Provides the `dart:ui_web` entrypoints referenced by the web bootstrap
-    wrapper (`bootstrapEngine`) and by the real `package:flutter_web_plugins`
-    sources (`setPluginHandler` and the URL strategy / platform location types
-    re-exported by `src/navigation/url_strategy.dart`) for compiles against a
-    platform without `dart:ui_web`, which select it through the wrapper's
-    conditional import.
-    """
-    return "\n".join([
+def _web_ui_web_head_lines():
+    """Imports, `bootstrapEngine` and handler stubs heading the `dart:ui_web` stub."""
+    return [
         "// GENERATED — do not edit.",
         "// ignore_for_file: type=lint",
         "import 'dart:async';",
@@ -59,6 +51,16 @@ def make_web_ui_web_stub_content():
         "typedef EventListener = dynamic Function(Object event);",
         "typedef PopStateListener = void Function(Object? state);",
         "",
+    ]
+
+def _web_shared_navigation_lines():
+    """`PlatformLocation`/`BrowserPlatformLocation`/`UrlStrategy` stubs.
+
+    Shared verbatim by the `dart:ui_web` and `flutter_web_plugins` stubs:
+    both stand in for web-only navigation types when compiling against a
+    platform without them.
+    """
+    return [
         "abstract interface class PlatformLocation {",
         "  void addPopStateListener(EventListener fn);",
         "  void removePopStateListener(EventListener fn);",
@@ -118,6 +120,11 @@ def make_web_ui_web_stub_content():
         "  Future<void> go(int count) async {}",
         "}",
         "",
+    ]
+
+def _web_ui_web_tail_lines():
+    """The default `urlStrategy` and `HashUrlStrategy` closing the `dart:ui_web` stub."""
+    return [
         "UrlStrategy? urlStrategy;",
         "",
         "class HashUrlStrategy extends UrlStrategy {",
@@ -131,19 +138,23 @@ def make_web_ui_web_stub_content():
         "  String getPath() => _platformLocation.hash;",
         "}",
         "",
-    ])
+    ]
 
-def make_web_plugins_stub_content(has_flutter_services = False):
-    """Generate a fallback `package:flutter_web_plugins/flutter_web_plugins.dart` for synthetic test targets without `@deps//:flutter_web_plugins`.
+def make_web_ui_web_stub_content():
+    """Generate a VM-compatible stub for `dart:ui_web` used during icon tree-shaking kernel compilation.
 
-    Args:
-        has_flutter_services: Whether `package:flutter/services.dart` is present
-            in the target's `flutter` package sources.
-
-    Returns:
-        String of Dart source code.
+    Provides the `dart:ui_web` entrypoints referenced by the web bootstrap
+    wrapper (`bootstrapEngine`) and by the real `package:flutter_web_plugins`
+    sources (`setPluginHandler` and the URL strategy / platform location types
+    re-exported by `src/navigation/url_strategy.dart`) for compiles against a
+    platform without `dart:ui_web`, which select it through the wrapper's
+    conditional import.
     """
-    header = [
+    return "\n".join(_web_ui_web_head_lines() + _web_shared_navigation_lines() + _web_ui_web_tail_lines())
+
+def _web_plugins_base_import_lines():
+    """The `library` and `dart:` imports heading the `flutter_web_plugins` stub."""
+    return [
         "// GENERATED — do not edit.",
         "// ignore_for_file: type=lint",
         "library flutter_web_plugins;",
@@ -152,72 +163,78 @@ def make_web_plugins_stub_content(has_flutter_services = False):
         "import 'dart:typed_data';",
         "import 'dart:ui' as ui;",
     ]
-    if has_flutter_services:
-        header.extend([
-            "",
-            "import 'package:flutter/foundation.dart';",
-            "import 'package:flutter/services.dart';",
-        ])
-    else:
-        header.extend([
-            "",
-            "typedef MessageHandler = Future<ByteData?> Function(ByteData? message);",
-            "",
-            "abstract class BinaryMessenger {",
-            "  const BinaryMessenger();",
-            "  Future<void> handlePlatformMessage(",
-            "    String channel,",
-            "    ByteData? data,",
-            "    ui.PlatformMessageResponseCallback? callback,",
-            "  );",
-            "  Future<ByteData?>? send(String channel, ByteData? message);",
-            "  void setMessageHandler(String channel, MessageHandler? handler);",
-            "}",
-            "",
-            "class MethodCall {",
-            "  const MethodCall(this.method, [this.arguments]);",
-            "  final String method;",
-            "  final dynamic arguments;",
-            "}",
-            "",
-            "abstract class MethodCodec {",
-            "  const MethodCodec();",
-            "  ByteData? encodeMethodCall(MethodCall methodCall);",
-            "  MethodCall decodeMethodCall(ByteData? methodCall);",
-            "  dynamic decodeEnvelope(ByteData envelope);",
-            "  ByteData encodeSuccessEnvelope(Object? result);",
-            "  ByteData encodeErrorEnvelope({",
-            "    required String code,",
-            "    String? message,",
-            "    Object? details,",
-            "  });",
-            "}",
-            "",
-            "class StandardMethodCodec implements MethodCodec {",
-            "  const StandardMethodCodec();",
-            "",
-            "  @override",
-            "  ByteData? encodeMethodCall(MethodCall methodCall) => null;",
-            "",
-            "  @override",
-            "  MethodCall decodeMethodCall(ByteData? methodCall) => const MethodCall('');",
-            "",
-            "  @override",
-            "  dynamic decodeEnvelope(ByteData envelope) => null;",
-            "",
-            "  @override",
-            "  ByteData encodeSuccessEnvelope(Object? result) => ByteData(0);",
-            "",
-            "  @override",
-            "  ByteData encodeErrorEnvelope({",
-            "    required String code,",
-            "    String? message,",
-            "    Object? details,",
-            "  }) => ByteData(0);",
-            "}",
-        ])
 
-    return "\n".join(header + [
+def _web_plugins_foundation_import_lines():
+    """`package:flutter` imports when `flutter/services.dart` is present."""
+    return [
+        "",
+        "import 'package:flutter/foundation.dart';",
+        "import 'package:flutter/services.dart';",
+    ]
+
+def _web_plugins_local_channel_lines():
+    """Local `BinaryMessenger`/`MethodCodec` stubs when `flutter/services.dart` is absent."""
+    return [
+        "",
+        "typedef MessageHandler = Future<ByteData?> Function(ByteData? message);",
+        "",
+        "abstract class BinaryMessenger {",
+        "  const BinaryMessenger();",
+        "  Future<void> handlePlatformMessage(",
+        "    String channel,",
+        "    ByteData? data,",
+        "    ui.PlatformMessageResponseCallback? callback,",
+        "  );",
+        "  Future<ByteData?>? send(String channel, ByteData? message);",
+        "  void setMessageHandler(String channel, MessageHandler? handler);",
+        "}",
+        "",
+        "class MethodCall {",
+        "  const MethodCall(this.method, [this.arguments]);",
+        "  final String method;",
+        "  final dynamic arguments;",
+        "}",
+        "",
+        "abstract class MethodCodec {",
+        "  const MethodCodec();",
+        "  ByteData? encodeMethodCall(MethodCall methodCall);",
+        "  MethodCall decodeMethodCall(ByteData? methodCall);",
+        "  dynamic decodeEnvelope(ByteData envelope);",
+        "  ByteData encodeSuccessEnvelope(Object? result);",
+        "  ByteData encodeErrorEnvelope({",
+        "    required String code,",
+        "    String? message,",
+        "    Object? details,",
+        "  });",
+        "}",
+        "",
+        "class StandardMethodCodec implements MethodCodec {",
+        "  const StandardMethodCodec();",
+        "",
+        "  @override",
+        "  ByteData? encodeMethodCall(MethodCall methodCall) => null;",
+        "",
+        "  @override",
+        "  MethodCall decodeMethodCall(ByteData? methodCall) => const MethodCall('');",
+        "",
+        "  @override",
+        "  dynamic decodeEnvelope(ByteData envelope) => null;",
+        "",
+        "  @override",
+        "  ByteData encodeSuccessEnvelope(Object? result) => ByteData(0);",
+        "",
+        "  @override",
+        "  ByteData encodeErrorEnvelope({",
+        "    required String code,",
+        "    String? message,",
+        "    Object? details,",
+        "  }) => ByteData(0);",
+        "}",
+    ]
+
+def _web_plugins_messenger_lines():
+    """The `Registrar`/`PluginRegistry`/`PluginEventChannel` section of the plugins stub."""
+    return [
         "",
         "class Registrar extends BinaryMessenger {",
         "  Registrar([BinaryMessenger? binaryMessenger]);",
@@ -278,68 +295,18 @@ def make_web_plugins_stub_content(has_flutter_services = False):
         "  void setController(StreamController<T>? controller) {}",
         "}",
         "",
+    ]
+
+def _web_plugins_typedef_lines():
+    """The navigation listener typedefs shared with the `dart:ui_web` stub header."""
+    return [
         "typedef EventListener = dynamic Function(Object event);",
         "typedef PopStateListener = void Function(Object? state);",
         "",
-        "abstract interface class PlatformLocation {",
-        "  void addPopStateListener(EventListener fn);",
-        "  void removePopStateListener(EventListener fn);",
-        "  String get pathname;",
-        "  String get search;",
-        "  String get hash;",
-        "  Object? get state;",
-        "  void pushState(Object? state, String title, String url);",
-        "  void replaceState(Object? state, String title, String url);",
-        "  void go(int count);",
-        "  String? getBaseHref();",
-        "}",
-        "",
-        "class BrowserPlatformLocation implements PlatformLocation {",
-        "  const BrowserPlatformLocation();",
-        "",
-        "  @override",
-        "  void addPopStateListener(EventListener fn) {}",
-        "",
-        "  @override",
-        "  void removePopStateListener(EventListener fn) {}",
-        "",
-        "  @override",
-        "  String get pathname => '';",
-        "",
-        "  @override",
-        "  String get search => '';",
-        "",
-        "  @override",
-        "  String get hash => '';",
-        "",
-        "  @override",
-        "  Object? get state => null;",
-        "",
-        "  @override",
-        "  void pushState(Object? state, String title, String url) {}",
-        "",
-        "  @override",
-        "  void replaceState(Object? state, String title, String url) {}",
-        "",
-        "  @override",
-        "  void go(int count) {}",
-        "",
-        "  @override",
-        "  String? getBaseHref() => null;",
-        "}",
-        "",
-        "abstract class UrlStrategy {",
-        "  const UrlStrategy();",
-        "",
-        "  ui.VoidCallback addPopStateListener(PopStateListener fn) => () {};",
-        "  String getPath() => '';",
-        "  Object? getState() => null;",
-        "  String prepareExternalUrl(String internalUrl) => '';",
-        "  void pushState(Object? state, String title, String url) {}",
-        "  void replaceState(Object? state, String title, String url) {}",
-        "  Future<void> go(int count) async {}",
-        "}",
-        "",
+    ]
+def _web_plugins_strategy_tail_lines():
+    """The `urlStrategy` accessors and path-strategy helpers closing the plugins stub."""
+    return [
         "UrlStrategy? get urlStrategy => null;",
         "void setUrlStrategy(UrlStrategy? strategy) {}",
         "void usePathUrlStrategy() {}",
@@ -370,7 +337,27 @@ def make_web_plugins_stub_content(has_flutter_services = False):
         "String stripTrailingSlash(String path) =>",
         "    path.endsWith('/') ? path.substring(0, path.length - 1) : path;",
         "",
-    ])
+    ]
+
+def make_web_plugins_stub_content(has_flutter_services = False):
+    """Generate a fallback `package:flutter_web_plugins/flutter_web_plugins.dart` for synthetic test targets without `@deps//:flutter_web_plugins`.
+
+    Args:
+        has_flutter_services: Whether `package:flutter/services.dart` is present
+            in the target's `flutter` package sources.
+
+    Returns:
+        String of Dart source code.
+    """
+    header = _web_plugins_base_import_lines()
+    if has_flutter_services:
+        header += _web_plugins_foundation_import_lines()
+    else:
+        header += _web_plugins_local_channel_lines()
+    return "\n".join(
+        header + _web_plugins_messenger_lines() + _web_plugins_typedef_lines() +
+        _web_shared_navigation_lines() + _web_plugins_strategy_tail_lines(),
+    )
 
 def make_web_wrapper_main_content(original_import, registrant_import = None, ui_web_stub_import = None):
     """Generate a web wrapper main.dart that uses ui_web.bootstrapEngine().
@@ -609,6 +596,304 @@ def collect_binding_contracts(native_deps):
                     pairs.append(struct(library = f, contract = ()))
     return pairs
 
+def _kernel_source_inputs(ctx):
+    """Collect the kernel compile's sources and synthesize the app package."""
+    all_srcs = list(ctx.files.srcs) + collect_transitive_srcs(ctx.attr.deps).to_list()
+    packages = collect_packages(ctx.attr.deps)
+
+    # Register the app itself as a package so the frontend_server keys the
+    # entrypoint as `package:<name>/main.dart` — the URI the dev tool's
+    # incremental compiler uses (without this, hot-reload deltas keyed via
+    # sandbox `file://` URIs can't be matched against the kernel's libraries).
+    app_pkg_name = ctx.attr.package_name
+
+    # The app's own library root, which is what `package:<name>/…` resolves
+    # against. Derived from the label rather than assumed to be the workspace
+    # root, so an app in a nested Bazel package registers a `rootUri` pointing
+    # at its own directory; assuming `""` pointed every nested app's
+    # `package:` URIs at whatever sits in the *workspace's* `lib/`.
+    app_lib_root = derive_lib_root(ctx.label.workspace_root, ctx.label.package)
+    packages = synthesize_app_package(
+        ctx.label,
+        packages,
+        app_pkg_name,
+        app_lib_root,
+        ctx.attr.language_version,
+    )
+
+    # Include the app's own `main` so the synthesized package keyed as
+    # `package:<name>/main.dart` (hot-reload URI parity) is co-located with
+    # its lib/ siblings when any of them are generated.
+    colocate_inputs = all_srcs + ([ctx.file.main] if ctx.file.main else [])
+    return struct(
+        all_srcs = all_srcs,
+        packages = packages,
+        app_pkg_name = app_pkg_name,
+        app_lib_root = app_lib_root,
+        colocate_inputs = colocate_inputs,
+    )
+
+def _kernel_dev_config(ctx, st, mode):
+    """Write the debug-only dev package config; return the hot-reload metadata."""
+    emit = mode == "debug"
+    dev_package_config = None
+    dev_filesystem_roots = []
+    dev_filesystem_scheme = ""
+    dev_generated_source_paths = []
+    dev_generated_source_uris = []
+    dev_generated_source_files = []
+    dev_source_packages = []
+    dev_app_sources = []
+    main_location = app_main_location(st.app_pkg_name, st.app_lib_root, ctx.file.main) if ctx.file.main else None
+    app_entrypoint_uri = main_location.uri if main_location else None
+    if emit:
+        dev_package_config = ctx.actions.declare_file(ctx.label.name + ".dev_package_config.json")
+        dev_pc = generate_dev_package_config(st.packages, st.colocate_inputs, dev_package_config, scheme = APP_SCHEME)
+        ctx.actions.write(dev_package_config, dev_pc.content)
+
+        # A `main` with no `package:` URI is compiled under the app scheme,
+        # and the dev loop's compiler has to mount the same root to name it
+        # the same way.
+        dev_filesystem_roots = with_root(dev_pc.filesystem_roots, main_location.root if main_location else None)
+        dev_filesystem_scheme = dev_pc.scheme
+        dev_app_sources = app_scheme_sources(st.app_pkg_name, st.app_lib_root, ctx.file.main, ctx.files.srcs) if ctx.file.main else []
+        dev_generated_source_paths = dev_pc.generated_source_paths
+        dev_generated_source_uris = dev_pc.generated_source_uris
+        dev_source_packages = dev_pc.source_packages
+
+        # Resolved from the same list the paths came from, so the two cannot
+        # drift — see [resolve_dev_generated_sources] for why declaring them is
+        # what makes the config's paths true.
+        dev_generated_source_files = resolve_dev_generated_sources(
+            dev_generated_source_paths,
+            st.colocate_inputs,
+        )
+    return struct(
+        emit = emit,
+        package_config = dev_package_config,
+        filesystem_roots = dev_filesystem_roots,
+        filesystem_scheme = dev_filesystem_scheme,
+        generated_source_paths = dev_generated_source_paths,
+        generated_source_uris = dev_generated_source_uris,
+        generated_source_files = dev_generated_source_files,
+        source_packages = dev_source_packages,
+        app_sources = dev_app_sources,
+        entrypoint_uri = app_entrypoint_uri,
+    )
+
+def _resolve_kernel_platform_dill(platform_dill, aot, mode, flutter_sdk_info):
+    """Resolve the platform dill for a kernel compile, failing when absent."""
+    if platform_dill != None:
+        return platform_dill
+
+    # Profile and debug compile against the non-product platform: the product
+    # one has the VM service and the profiling hooks compiled out, and is not
+    # fetched in `-c dbg`.
+    if aot and mode == "release":
+        platform_dill = flutter_sdk_info.platform_kernel_dill_product
+        if platform_dill == None:
+            fail(
+                "Unresolved @rules_flutter//flutter:product_tools_toolchain_type " +
+                "(@rules_flutter//flutter/private:product_tools_toolchain_type): " +
+                "Flutter toolchain does not provide platform_kernel_dill_product, " +
+                "which is required for release AOT kernel compilation. Register " +
+                "the Flutter toolchains (e.g. `flutter.toolchain()` in MODULE.bazel " +
+                "or `register_toolchains(\"@flutter_toolchains//:all\")`) or set " +
+                "`platform_kernel_dill_product` on `flutter_toolchain`.",
+            )
+        return platform_dill
+    platform_dill = flutter_sdk_info.platform_kernel_dill
+    if platform_dill == None:
+        fail(
+            "Unresolved @rules_flutter//flutter:toolchain_type: " +
+            "Flutter toolchain does not provide platform_kernel_dill. " +
+            "Register a Flutter toolchain (e.g. `flutter.toolchain()` in " +
+            "MODULE.bazel) or set `platform_kernel_dill` on `flutter_toolchain`.",
+        )
+    return platform_dill
+
+def _stage_agent_extensions(ctx, aot, mode):
+    """Stage the debug-agent sources next to the registrant in debug builds."""
+    # AI-agent service-extension injection: in debug builds (non-AOT), if the
+    # rule carries an `_agent_extensions_src` attr, stage the agent source next
+    # to the generated registrant, which registers the extensions from the
+    # engine's pre-main plugin-registrant hook. Release/AOT/profile builds skip
+    # this entirely — profile mode is for performance investigation where added
+    # instrumentation distorts measurements, so it must look the same as
+    # release on the agent surface.
+    agent_src_attr = getattr(ctx.attr, "_agent_extensions_src", None)
+    inject_agent = (not aot) and mode == "debug" and agent_src_attr != None
+    staged_agent = None
+    staged_native_agent = None
+    if inject_agent:
+        staged_agent = ctx.actions.declare_file(ctx.label.name + ".agent_extensions.dart")
+        ctx.actions.symlink(output = staged_agent, target_file = ctx.file._agent_extensions_src)
+
+        # The native-only half (`dart:ffi`): loading a native hot patch. A
+        # kernel compile is always native — web stages `agent.dart` alone, in
+        # its own rule.
+        staged_native_agent = ctx.actions.declare_file(ctx.label.name + ".native_agent_extensions.dart")
+        ctx.actions.symlink(output = staged_native_agent, target_file = ctx.file._native_agent_extensions_src)
+    return struct(agent = staged_agent, native_agent = staged_native_agent)
+
+def _kernel_registrant(ctx, target_platform, agent, emit_dev_config):
+    """Collect plugins and generate the registrant plus dev-loop registrants."""
+    # Collect plugins from deps and generate the registrant. The registrant is
+    # a side library (upstream _PluginRegistrant shape) the engine invokes
+    # before main() on every root-isolate launch — including hot restart.
+    all_dep_plugins = []
+    for dep in ctx.attr.deps:
+        if FlutterInfo in dep:
+            all_dep_plugins.extend(dep[FlutterInfo].plugins)
+    plugins = dedup_plugins(all_dep_plugins)
+    registrant = generate_dart_plugin_registrant(
+        ctx,
+        plugins,
+        target_platform = target_platform,
+        agent_import = agent.agent.basename if agent.agent else None,
+        native_agent_import = agent.native_agent.basename if agent.native_agent else None,
+    )
+    registrant_location = app_scheme_location(registrant) if registrant else None
+
+    # Dev-loop registrants, one per platform (debug only). The dev tool reads
+    # these from a HOST-configuration build while the app can be running on a
+    # different platform, so the host build emits every platform's filter and
+    # the dev tool selects by the platform the running app reports. See
+    # generate_dev_plugin_registrants.
+    dev_plugin_registrants = {}
+    if emit_dev_config:
+        dev_plugin_registrants = generate_dev_plugin_registrants(
+            ctx,
+            plugins,
+            agent_import = agent.agent.basename if agent.agent else None,
+            native_agent_import = agent.native_agent.basename if agent.native_agent else None,
+        )
+    return struct(registrant = registrant, location = registrant_location, dev_registrants = dev_plugin_registrants)
+
+def _kernel_compile_flags(ctx, track_widget_creation, mode, aot, assets_dir, platform_build_args, target_platform):
+    """Merge frontend flags and defines for a kernel compile."""
+    # Collect extra frontend_server flags from build flag attrs.
+    extra_frontend_flags = []
+    if track_widget_creation:
+        extra_frontend_flags.append("--track-widget-creation")
+
+    # Merge defines with mode-specific Dart VM flags. user_defines (attr +
+    # extra_dart_defines flag, no mode keys) is surfaced in the return struct
+    # so dev-config writers can replay it on the dev tool's frontend_server.
+    user_defines = merge_dart_defines(ctx)
+    all_defines = list(user_defines)
+    if mode == "profile":
+        all_defines.append("dart.vm.profile=true")
+    elif aot:
+        all_defines.append("dart.vm.product=true")
+
+    # A debug app describes its own build to itself. `ext.rules_flutter.buildInfo`
+    # hands this straight back to the dev tool, which needs it because
+    # `flutter_bazel attach` starts from nothing but a VM service URL: it has no
+    # `-d` device, no knowledge of the configuration, and no way to ask the user
+    # for flags they never typed. Debug only — profile mode must look like
+    # release on the agent surface, and there is no dev loop to serve in AOT.
+    #
+    # Deliberately NOT added to `user_defines`: that list is replayed by the dev
+    # tool's own frontend_server, which runs against the host-configured dev
+    # build. Replaying this one would have the app start reporting the dev
+    # pipeline's configuration as its launch truth. The dev tool re-injects the
+    # value it read from the running app instead.
+    if assets_dir != None and not aot and mode == "debug":
+        all_defines.append("rules_flutter.build_info=" + json.encode({
+            "label": str(ctx.label),
+            "compilationMode": ctx.var["COMPILATION_MODE"],
+            "platformBuildArgs": platform_build_args,
+            "dartDefines": user_defines,
+            "assetsDir": assets_dir.path,
+            # The platform this kernel was compiled for. The dev tool's own
+            # build runs in the host configuration, so only the app can say
+            # which platform-filtered plugin registrant its reloads need.
+            "targetPlatform": target_platform,
+        }))
+    return struct(extra_frontend = extra_frontend_flags, user_defines = user_defines, all_defines = all_defines)
+
+def _use_modular_kernel(mode, aot, frontend_server_target, registrant, staged_agent, native_assets_manifest, recorded_uses, extra_frontend_flags, all_defines):
+    return (
+        not aot and mode != "profile" and
+        frontend_server_target == "flutter" and
+        not registrant and not staged_agent and
+        not native_assets_manifest and not recorded_uses and
+        not extra_frontend_flags and not all_defines
+    )
+
+def _compile_modular_kernel(ctx, flutter_sdk_info, app_lib_root, packages, kernel_dill, platform_dill):
+    own_files = [ctx.file.main] + [f for f in ctx.files.srcs if f != ctx.file.main]
+    modular_tools = flutter_modular_test_tools(
+        ctx,
+        flutter_sdk_info,
+        own_files,
+        packages,
+        [],
+    )
+    compile_flutter_modular_app_kernel(
+        ctx,
+        modular_tools,
+        app_lib_root,
+        packages,
+        kernel_dill,
+        platform_dill,
+    )
+
+def _compile_full_kernel(ctx, flutter_sdk_info, kernel_dill, platform_dill, st, agent, reg, flags, opts):
+    pc = compile_kernel_package_config(
+        ctx,
+        st.packages,
+        st.colocate_inputs,
+        roots = {st.app_pkg_name: True} if st.app_pkg_name else None,
+    )
+    config_file = pc.config_file
+    all_srcs = pc.srcs
+    if reg.registrant:
+        all_srcs = all_srcs + [reg.registrant]
+    if agent.agent:
+        all_srcs = all_srcs + [agent.agent, agent.native_agent]
+
+    # Resolve the kernel entrypoint: the user's main, keyed by its package:
+    # URI for hot-reload parity with the dev tool.
+    entrypoint_info = resolve_kernel_entrypoint(ctx, st.app_pkg_name, st.app_lib_root)
+    flutter_kernel_compile_action(
+        ctx = ctx,
+        dartaotruntime = flutter_sdk_info.dartaotruntime,
+        kernel_filter_tool = ctx.executable._kernel_filter_tool,
+        frontend_server = flutter_sdk_info.frontend_server,
+        platform_dill = platform_dill,
+        main = entrypoint_info.file,
+        entrypoint_uri = entrypoint_info.uri,
+        srcs = all_srcs,
+        package_config = config_file,
+        output = kernel_dill,
+        aot = opts.aot,
+        defines = flags.all_defines,
+        target = opts.frontend_server_target,
+        extra_flags = flags.extra_frontend,
+        native_assets_manifest = opts.native_assets_manifest,
+        dart_plugin_registrant_uri = reg.location.uri if reg.location else None,
+        recorded_uses = opts.recorded_uses,
+    )
+    return config_file
+
+def _run_kernel_compile(ctx, flutter_sdk_info, kernel_dill, platform_dill, st, agent, reg, flags, opts):
+    if _use_modular_kernel(
+        opts.mode,
+        opts.aot,
+        opts.frontend_server_target,
+        reg.registrant,
+        agent.agent,
+        opts.native_assets_manifest,
+        opts.recorded_uses,
+        flags.extra_frontend,
+        flags.all_defines,
+    ):
+        _compile_modular_kernel(ctx, flutter_sdk_info, st.app_lib_root, st.packages, kernel_dill, platform_dill)
+        return None
+    return _compile_full_kernel(ctx, flutter_sdk_info, kernel_dill, platform_dill, st, agent, reg, flags, opts)
+
 def flutter_compile_kernel(ctx, flutter_sdk_info, aot = None, platform_dill = None, target_platform = None, frontend_server_target = "flutter", native_assets_manifest = None, track_widget_creation = False, assets_dir = None, platform_build_args = [], recorded_uses = None):
     """Run the shared kernel compilation step.
 
@@ -655,33 +940,7 @@ def flutter_compile_kernel(ctx, flutter_sdk_info, aot = None, platform_dill = No
     Returns:
         struct with kernel_dill (File) and package_config (File).
     """
-    all_srcs = list(ctx.files.srcs) + collect_transitive_srcs(ctx.attr.deps).to_list()
-    packages = collect_packages(ctx.attr.deps)
-
-    # Register the app itself as a package so the frontend_server keys the
-    # entrypoint as `package:<name>/main.dart` — the URI the dev tool's
-    # incremental compiler uses (without this, hot-reload deltas keyed via
-    # sandbox `file://` URIs can't be matched against the kernel's libraries).
-    app_pkg_name = ctx.attr.package_name
-
-    # The app's own library root, which is what `package:<name>/…` resolves
-    # against. Derived from the label rather than assumed to be the workspace
-    # root, so an app in a nested Bazel package registers a `rootUri` pointing
-    # at its own directory; assuming `""` pointed every nested app's
-    # `package:` URIs at whatever sits in the *workspace's* `lib/`.
-    app_lib_root = derive_lib_root(ctx.label.workspace_root, ctx.label.package)
-    packages = synthesize_app_package(
-        ctx.label,
-        packages,
-        app_pkg_name,
-        app_lib_root,
-        ctx.attr.language_version,
-    )
-
-    # Include the app's own `main` so the synthesized package keyed as
-    # `package:<name>/main.dart` (hot-reload URI parity) is co-located with
-    # its lib/ siblings when any of them are generated.
-    colocate_inputs = all_srcs + ([ctx.file.main] if ctx.file.main else [])
+    st = _kernel_source_inputs(ctx)
 
     # Dev hot-reload metadata (debug only): a *second* package_config that, for a
     # source-assembled app package, points its `rootUri` at the live source tree
@@ -692,223 +951,33 @@ def flutter_compile_kernel(ctx, flutter_sdk_info, aot = None, platform_dill = No
     # and `File.is_source` are still intact. See rules_dart
     # `generate_dev_package_config`.
     mode = flutter_build_mode(ctx)
-    emit_dev_config = mode == "debug"
-    dev_package_config = None
-    dev_filesystem_roots = []
-    dev_filesystem_scheme = ""
-    dev_generated_source_paths = []
-    dev_generated_source_uris = []
-    dev_generated_source_files = []
-    dev_source_packages = []
-    dev_app_sources = []
-    main_location = app_main_location(app_pkg_name, app_lib_root, ctx.file.main) if ctx.file.main else None
-    app_entrypoint_uri = main_location.uri if main_location else None
-    if emit_dev_config:
-        dev_package_config = ctx.actions.declare_file(ctx.label.name + ".dev_package_config.json")
-        dev_pc = generate_dev_package_config(packages, colocate_inputs, dev_package_config, scheme = APP_SCHEME)
-        ctx.actions.write(dev_package_config, dev_pc.content)
-
-        # A `main` with no `package:` URI is compiled under the app scheme,
-        # and the dev loop's compiler has to mount the same root to name it
-        # the same way.
-        dev_filesystem_roots = with_root(dev_pc.filesystem_roots, main_location.root if main_location else None)
-        dev_filesystem_scheme = dev_pc.scheme
-        dev_app_sources = app_scheme_sources(app_pkg_name, app_lib_root, ctx.file.main, ctx.files.srcs) if ctx.file.main else []
-        dev_generated_source_paths = dev_pc.generated_source_paths
-        dev_generated_source_uris = dev_pc.generated_source_uris
-        dev_source_packages = dev_pc.source_packages
-
-        # Resolved from the same list the paths came from, so the two cannot
-        # drift — see [resolve_dev_generated_sources] for why declaring them is
-        # what makes the config's paths true.
-        dev_generated_source_files = resolve_dev_generated_sources(
-            dev_generated_source_paths,
-            colocate_inputs,
-        )
+    dev = _kernel_dev_config(ctx, st, mode)
 
     if aot == None:
         aot = mode != "debug"
-
-    # Profile and debug compile against the non-product platform: the product
-    # one has the VM service and the profiling hooks compiled out, and is not
-    # fetched in `-c dbg`.
-    if platform_dill == None:
-        if aot and mode == "release":
-            platform_dill = flutter_sdk_info.platform_kernel_dill_product
-            if platform_dill == None:
-                fail(
-                    "Unresolved @rules_flutter//flutter:product_tools_toolchain_type " +
-                    "(@rules_flutter//flutter/private:product_tools_toolchain_type): " +
-                    "Flutter toolchain does not provide platform_kernel_dill_product, " +
-                    "which is required for release AOT kernel compilation. Register " +
-                    "the Flutter toolchains (e.g. `flutter.toolchain()` in MODULE.bazel " +
-                    "or `register_toolchains(\"@flutter_toolchains//:all\")`) or set " +
-                    "`platform_kernel_dill_product` on `flutter_toolchain`.",
-                )
-        else:
-            platform_dill = flutter_sdk_info.platform_kernel_dill
-            if platform_dill == None:
-                fail(
-                    "Unresolved @rules_flutter//flutter:toolchain_type: " +
-                    "Flutter toolchain does not provide platform_kernel_dill. " +
-                    "Register a Flutter toolchain (e.g. `flutter.toolchain()` in " +
-                    "MODULE.bazel) or set `platform_kernel_dill` on `flutter_toolchain`.",
-                )
-
-    # AI-agent service-extension injection: in debug builds (non-AOT), if the
-    # rule carries an `_agent_extensions_src` attr, stage the agent source next
-    # to the generated registrant, which registers the extensions from the
-    # engine's pre-main plugin-registrant hook. Release/AOT/profile builds skip
-    # this entirely — profile mode is for performance investigation where added
-    # instrumentation distorts measurements, so it must look the same as
-    # release on the agent surface.
-    agent_src_attr = getattr(ctx.attr, "_agent_extensions_src", None)
-    inject_agent = (not aot) and mode == "debug" and agent_src_attr != None
-    staged_agent = None
-    staged_native_agent = None
-    if inject_agent:
-        staged_agent = ctx.actions.declare_file(ctx.label.name + ".agent_extensions.dart")
-        ctx.actions.symlink(output = staged_agent, target_file = ctx.file._agent_extensions_src)
-
-        # The native-only half (`dart:ffi`): loading a native hot patch. A
-        # kernel compile is always native — web stages `agent.dart` alone, in
-        # its own rule.
-        staged_native_agent = ctx.actions.declare_file(ctx.label.name + ".native_agent_extensions.dart")
-        ctx.actions.symlink(output = staged_native_agent, target_file = ctx.file._native_agent_extensions_src)
-
-    # Collect plugins from deps and generate the registrant. The registrant is
-    # a side library (upstream _PluginRegistrant shape) the engine invokes
-    # before main() on every root-isolate launch — including hot restart.
-    all_dep_plugins = []
-    for dep in ctx.attr.deps:
-        if FlutterInfo in dep:
-            all_dep_plugins.extend(dep[FlutterInfo].plugins)
-    plugins = dedup_plugins(all_dep_plugins)
-    registrant = generate_dart_plugin_registrant(
-        ctx,
-        plugins,
-        target_platform = target_platform,
-        agent_import = staged_agent.basename if staged_agent else None,
-        native_agent_import = staged_native_agent.basename if staged_native_agent else None,
-    )
-    registrant_location = app_scheme_location(registrant) if registrant else None
-
-    # Dev-loop registrants, one per platform (debug only). The dev tool reads
-    # these from a HOST-configuration build while the app can be running on a
-    # different platform, so the host build emits every platform's filter and
-    # the dev tool selects by the platform the running app reports. See
-    # generate_dev_plugin_registrants.
-    dev_plugin_registrants = {}
-    if emit_dev_config:
-        dev_plugin_registrants = generate_dev_plugin_registrants(
-            ctx,
-            plugins,
-            agent_import = staged_agent.basename if staged_agent else None,
-            native_agent_import = staged_native_agent.basename if staged_native_agent else None,
-        )
-
-    # Collect extra frontend_server flags from build flag attrs.
-    extra_frontend_flags = []
-    if track_widget_creation:
-        extra_frontend_flags.append("--track-widget-creation")
-
-    # Merge defines with mode-specific Dart VM flags. user_defines (attr +
-    # extra_dart_defines flag, no mode keys) is surfaced in the return struct
-    # so dev-config writers can replay it on the dev tool's frontend_server.
-    user_defines = merge_dart_defines(ctx)
-    all_defines = list(user_defines)
-    if mode == "profile":
-        all_defines.append("dart.vm.profile=true")
-    elif aot:
-        all_defines.append("dart.vm.product=true")
-
-    # A debug app describes its own build to itself. `ext.rules_flutter.buildInfo`
-    # hands this straight back to the dev tool, which needs it because
-    # `flutter_bazel attach` starts from nothing but a VM service URL: it has no
-    # `-d` device, no knowledge of the configuration, and no way to ask the user
-    # for flags they never typed. Debug only — profile mode must look like
-    # release on the agent surface, and there is no dev loop to serve in AOT.
-    #
-    # Deliberately NOT added to `user_defines`: that list is replayed by the dev
-    # tool's own frontend_server, which runs against the host-configured dev
-    # build. Replaying this one would have the app start reporting the dev
-    # pipeline's configuration as its launch truth. The dev tool re-injects the
-    # value it read from the running app instead.
-    if assets_dir != None and not aot and mode == "debug":
-        all_defines.append("rules_flutter.build_info=" + json.encode({
-            "label": str(ctx.label),
-            "compilationMode": ctx.var["COMPILATION_MODE"],
-            "platformBuildArgs": platform_build_args,
-            "dartDefines": user_defines,
-            "assetsDir": assets_dir.path,
-            # The platform this kernel was compiled for. The dev tool's own
-            # build runs in the host configuration, so only the app can say
-            # which platform-filtered plugin registrant its reloads need.
-            "targetPlatform": target_platform,
-        }))
+    platform_dill = _resolve_kernel_platform_dill(platform_dill, aot, mode, flutter_sdk_info)
+    agent = _stage_agent_extensions(ctx, aot, mode)
+    reg = _kernel_registrant(ctx, target_platform, agent, dev.emit)
+    flags = _kernel_compile_flags(ctx, track_widget_creation, mode, aot, assets_dir, platform_build_args, target_platform)
 
     kernel_dill = ctx.actions.declare_file(ctx.label.name + ".dill")
-    modular_tools = None
-    if (not aot and mode != "profile" and
-        frontend_server_target == "flutter" and
-        not registrant and not staged_agent and
-        not native_assets_manifest and not recorded_uses and
-        not extra_frontend_flags and not all_defines):
-        own_files = [ctx.file.main] + [f for f in ctx.files.srcs if f != ctx.file.main]
-        modular_tools = flutter_modular_test_tools(
-            ctx,
-            flutter_sdk_info,
-            own_files,
-            packages,
-            [],
-        )
-
-    if modular_tools != None:
-        config_file = None
-        compile_flutter_modular_app_kernel(
-            ctx,
-            modular_tools,
-            app_lib_root,
-            packages,
-            kernel_dill,
-            platform_dill,
-        )
-    else:
-        pc = compile_kernel_package_config(
-            ctx,
-            packages,
-            colocate_inputs,
-            roots = {app_pkg_name: True} if app_pkg_name else None,
-        )
-        config_file = pc.config_file
-        all_srcs = pc.srcs
-        if registrant:
-            all_srcs = all_srcs + [registrant]
-        if staged_agent:
-            all_srcs = all_srcs + [staged_agent, staged_native_agent]
-
-        # Resolve the kernel entrypoint: the user's main, keyed by its package:
-        # URI for hot-reload parity with the dev tool.
-        entrypoint_info = resolve_kernel_entrypoint(ctx, app_pkg_name, app_lib_root)
-        flutter_kernel_compile_action(
-            ctx = ctx,
-            dartaotruntime = flutter_sdk_info.dartaotruntime,
-            kernel_filter_tool = ctx.executable._kernel_filter_tool,
-            frontend_server = flutter_sdk_info.frontend_server,
-            platform_dill = platform_dill,
-            main = entrypoint_info.file,
-            entrypoint_uri = entrypoint_info.uri,
-            srcs = all_srcs,
-            package_config = config_file,
-            output = kernel_dill,
+    config_file = _run_kernel_compile(
+        ctx,
+        flutter_sdk_info,
+        kernel_dill,
+        platform_dill,
+        st,
+        agent,
+        reg,
+        flags,
+        struct(
+            mode = mode,
             aot = aot,
-            defines = all_defines,
-            target = frontend_server_target,
-            extra_flags = extra_frontend_flags,
+            frontend_server_target = frontend_server_target,
             native_assets_manifest = native_assets_manifest,
-            dart_plugin_registrant_uri = registrant_location.uri if registrant_location else None,
             recorded_uses = recorded_uses,
-        )
+        ),
+    )
     return struct(
         kernel_dill = kernel_dill,
         package_config = config_file,
@@ -916,21 +985,21 @@ def flutter_compile_kernel(ctx, flutter_sdk_info, aot = None, platform_dill = No
         # debug). The dev tool replays the entry matching the running app's
         # platform on its resident frontend_server so the engine hook keeps
         # firing — with the right plugin set — after hot restart.
-        dev_plugin_registrants = dev_plugin_registrants,
+        dev_plugin_registrants = reg.dev_registrants,
         # Merged user defines (attr + flag), without the mode-specific
         # dart.vm.* keys — the dev tool replays these on its own compiler.
-        dart_defines = user_defines,
+        dart_defines = flags.user_defines,
         # Hot-reload dev metadata (None/empty outside debug). Consumed by the
         # rule impl to emit `_dev_config.json` for the dev tool.
-        app_entrypoint_uri = app_entrypoint_uri,
-        dev_package_config = dev_package_config,
-        dev_filesystem_roots = dev_filesystem_roots,
-        dev_filesystem_scheme = dev_filesystem_scheme,
-        dev_generated_source_paths = dev_generated_source_paths,
-        dev_generated_source_uris = dev_generated_source_uris,
-        dev_generated_source_files = dev_generated_source_files,
-        dev_source_packages = dev_source_packages,
-        dev_app_sources = dev_app_sources,
+        app_entrypoint_uri = dev.entrypoint_uri,
+        dev_package_config = dev.package_config,
+        dev_filesystem_roots = dev.filesystem_roots,
+        dev_filesystem_scheme = dev.filesystem_scheme,
+        dev_generated_source_paths = dev.generated_source_paths,
+        dev_generated_source_uris = dev.generated_source_uris,
+        dev_generated_source_files = dev.generated_source_files,
+        dev_source_packages = dev.source_packages,
+        dev_app_sources = dev.app_sources,
     )
 
 def collect_sdk_shader_srcs(deps):
@@ -1020,6 +1089,53 @@ def shader_sources(ctx):
         for job in _shader_jobs(ctx)
     }
 
+def _collect_dep_compiled_shaders(ctx, target_platform, compiled):
+    """Fold dep `FlutterCompiledShadersInfo` entries for the platform into `compiled`.
+
+    Returns the `require_sksl` flag: when true every shader is (re)compiled
+    locally, so dep entries are skipped.
+    """
+    require_sksl = getattr(ctx.attr, "require_sksl_shaders", False)
+    if not require_sksl:
+        for dep in getattr(ctx.attr, "deps", []):
+            if type(dep) == "Target" and FlutterCompiledShadersInfo in dep:
+                for entry in dep[FlutterCompiledShadersInfo].compiled_shaders.to_list():
+                    if getattr(entry, "target_platform", None) != target_platform:
+                        continue
+                    seen = compiled.get(entry.bundle_path)
+                    if seen == None:
+                        compiled[entry.bundle_path] = entry.file
+                    elif seen != entry.file:
+                        fail("%s: two shaders are bundled at %s: %s and %s." % (
+                            ctx.label,
+                            entry.bundle_path,
+                            seen.short_path,
+                            entry.file.short_path,
+                        ))
+    return require_sksl
+
+def _compile_missing_shaders(ctx, flutter_sdk_info, target_platform, require_sksl, compiled):
+    """Compile each `_shader_jobs` entry missing from `compiled`, in place."""
+    for job in _shader_jobs(ctx):
+        if job.bundle_path not in compiled:
+            # Named by the bundle path, which is unique, so no two outputs meet.
+            out_path = job.bundle_path.replace("../", "_external/")
+            output = ctx.actions.declare_file("_shaders_%s/%s/%s.iplr" % (target_platform, ctx.label.name, out_path))
+            flutter_shader_compile_action(
+                ctx = ctx,
+                impellerc = flutter_sdk_info.impellerc,
+                shader_lib = flutter_sdk_info.shader_lib,
+                shader = job.file,
+                output = output,
+                target_platform = target_platform,
+                is_web = target_platform == "web",
+                includes = job.includes,
+                # What compiles a shader whose SkSL stage fails without it.
+                compile_tool = ctx.executable._shader_compile_tool,
+                require_sksl = require_sksl,
+            )
+            compiled[job.bundle_path] = output
+
 def flutter_compile_shaders(ctx, flutter_sdk_info, target_platform):
     """Compile every shader this target bundles for the target platform.
 
@@ -1045,46 +1161,9 @@ def flutter_compile_shaders(ctx, flutter_sdk_info, target_platform):
     if not flutter_sdk_info or not flutter_sdk_info.impellerc:
         return {}
 
-    require_sksl = getattr(ctx.attr, "require_sksl_shaders", False)
     compiled = {}
-
-    if not require_sksl:
-        for dep in getattr(ctx.attr, "deps", []):
-            if type(dep) == "Target" and FlutterCompiledShadersInfo in dep:
-                for entry in dep[FlutterCompiledShadersInfo].compiled_shaders.to_list():
-                    if getattr(entry, "target_platform", None) != target_platform:
-                        continue
-                    seen = compiled.get(entry.bundle_path)
-                    if seen == None:
-                        compiled[entry.bundle_path] = entry.file
-                    elif seen != entry.file:
-                        fail("%s: two shaders are bundled at %s: %s and %s." % (
-                            ctx.label,
-                            entry.bundle_path,
-                            seen.short_path,
-                            entry.file.short_path,
-                        ))
-
-    jobs = _shader_jobs(ctx)
-    for job in jobs:
-        if job.bundle_path not in compiled:
-            # Named by the bundle path, which is unique, so no two outputs meet.
-            out_path = job.bundle_path.replace("../", "_external/")
-            output = ctx.actions.declare_file("_shaders_%s/%s/%s.iplr" % (target_platform, ctx.label.name, out_path))
-            flutter_shader_compile_action(
-                ctx = ctx,
-                impellerc = flutter_sdk_info.impellerc,
-                shader_lib = flutter_sdk_info.shader_lib,
-                shader = job.file,
-                output = output,
-                target_platform = target_platform,
-                is_web = target_platform == "web",
-                includes = job.includes,
-                # What compiles a shader whose SkSL stage fails without it.
-                compile_tool = ctx.executable._shader_compile_tool,
-                require_sksl = require_sksl,
-            )
-            compiled[job.bundle_path] = output
+    require_sksl = _collect_dep_compiled_shaders(ctx, target_platform, compiled)
+    _compile_missing_shaders(ctx, flutter_sdk_info, target_platform, require_sksl, compiled)
     return compiled
 
 def declare_flutter_assets_dir(ctx):
@@ -1642,29 +1721,30 @@ KERNEL_COMPILE_ATTRS = {
     ),
 } | EXTRA_DART_DEFINES_ATTR | BUILD_MODE_ATTR
 
-def _shader_aspect_impl(ctx, fixed_platform):
+def _aspect_target_platform(ctx, fixed_platform):
+    """The platform string the shader aspect compiles for."""
     if fixed_platform != None:
-        target_platform = fixed_platform
-    else:
-        is_macos = ctx.target_platform_has_constraint(
-            ctx.attr._macos_constraint[platform_common.ConstraintValueInfo],
-        )
-        is_ios = ctx.target_platform_has_constraint(
-            ctx.attr._ios_constraint[platform_common.ConstraintValueInfo],
-        )
-        is_linux = ctx.target_platform_has_constraint(
-            ctx.attr._linux_constraint[platform_common.ConstraintValueInfo],
-        )
-        is_windows = ctx.target_platform_has_constraint(
-            ctx.attr._windows_constraint[platform_common.ConstraintValueInfo],
-        )
-        is_android = ctx.target_platform_has_constraint(
-            ctx.attr._android_constraint[platform_common.ConstraintValueInfo],
-        )
-        target_platform = detect_target_platform(is_ios, is_macos, is_linux, is_windows, is_android)
+        return fixed_platform
+    is_macos = ctx.target_platform_has_constraint(
+        ctx.attr._macos_constraint[platform_common.ConstraintValueInfo],
+    )
+    is_ios = ctx.target_platform_has_constraint(
+        ctx.attr._ios_constraint[platform_common.ConstraintValueInfo],
+    )
+    is_linux = ctx.target_platform_has_constraint(
+        ctx.attr._linux_constraint[platform_common.ConstraintValueInfo],
+    )
+    is_windows = ctx.target_platform_has_constraint(
+        ctx.attr._windows_constraint[platform_common.ConstraintValueInfo],
+    )
+    is_android = ctx.target_platform_has_constraint(
+        ctx.attr._android_constraint[platform_common.ConstraintValueInfo],
+    )
+    return detect_target_platform(is_ios, is_macos, is_linux, is_windows, is_android)
 
+def _aspect_direct_jobs(ctx, shader_includes):
+    """The uncompiled shader jobs owned directly by the aspect's target."""
     direct_jobs = []
-    shader_includes = tuple(getattr(ctx.rule.files, "shader_includes", [])) if hasattr(ctx.rule.files, "shader_includes") else ()
 
     # 1. Direct shaders from `shaders` attribute (e.g. on @flutter_sdk//:flutter or a flutter_library)
     if hasattr(ctx.rule.files, "shaders"):
@@ -1693,11 +1773,11 @@ def _shader_aspect_impl(ctx, fixed_platform):
                 file = entry.file,
                 includes = entry.includes,
             ))
+    return direct_jobs
 
+def _compile_aspect_direct_jobs(ctx, flutter_sdk_info, target_platform, direct_jobs):
+    """Compile the aspect target's own shaders, deduplicated by bundle path."""
     direct_compiled = []
-    flutter_toolchain = ctx.toolchains["@rules_flutter//flutter:toolchain_type"] if "@rules_flutter//flutter:toolchain_type" in ctx.toolchains else None
-    flutter_sdk_info = flutter_toolchain.flutter_sdk_info if flutter_toolchain else None
-
     if direct_jobs and flutter_sdk_info and flutter_sdk_info.impellerc:
         by_path = {}
         for job in direct_jobs:
@@ -1738,14 +1818,26 @@ def _shader_aspect_impl(ctx, fixed_platform):
                 file = output,
                 target_platform = target_platform,
             ))
+    return direct_compiled
 
+def _aspect_transitive_shaders(ctx):
+    """The dep `compiled_shaders` sets propagated through the aspect."""
     transitive = []
     if hasattr(ctx.rule.attr, "deps"):
         deps = ctx.rule.attr.deps
         for dep in (deps if type(deps) == "list" else [deps]):
             if type(dep) == "Target" and FlutterCompiledShadersInfo in dep:
                 transitive.append(dep[FlutterCompiledShadersInfo].compiled_shaders)
+    return transitive
 
+def _shader_aspect_impl(ctx, fixed_platform):
+    target_platform = _aspect_target_platform(ctx, fixed_platform)
+    shader_includes = tuple(getattr(ctx.rule.files, "shader_includes", [])) if hasattr(ctx.rule.files, "shader_includes") else ()
+    direct_jobs = _aspect_direct_jobs(ctx, shader_includes)
+    flutter_toolchain = ctx.toolchains["@rules_flutter//flutter:toolchain_type"] if "@rules_flutter//flutter:toolchain_type" in ctx.toolchains else None
+    flutter_sdk_info = flutter_toolchain.flutter_sdk_info if flutter_toolchain else None
+    direct_compiled = _compile_aspect_direct_jobs(ctx, flutter_sdk_info, target_platform, direct_jobs)
+    transitive = _aspect_transitive_shaders(ctx)
     return [
         FlutterCompiledShadersInfo(
             compiled_shaders = depset(direct = direct_compiled, transitive = transitive),
