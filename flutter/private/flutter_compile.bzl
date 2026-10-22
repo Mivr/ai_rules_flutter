@@ -256,6 +256,150 @@ def flutter_kernel_compile_tools(ctx, product = False):
         platform_dill = platform_dill,
     )
 
+def _add_kernel_target_args(args, platform_dill, target, package_config, output):
+    """Appends the target-model argv: SDK root, target, packages and output.
+
+    `--sdk-root` points to the directory containing the platform dill;
+    `--platform` names the exact file only when it is not the default
+    `platform_strong.dill`. The compiler reports every file it reads as a
+    `+file://` line unless told not to; `kernel_filter` verifies those lines
+    against the declared inputs and drops them.
+    """
+    args.add("--sdk-root", platform_dill.dirname + "/")
+    if platform_dill.basename != "platform_strong.dill":
+        args.add("--platform", platform_dill.path)
+
+    args.add("--target", target)
+    args.add("--packages", package_config)
+    args.add("--output-dill", output)
+    args.add("--verbosity=error")
+
+def _add_kernel_mode_args(ctx, args, aot, defines):
+    """Appends the compilation-mode argv: AOT flags, asserts and defines."""
+    if aot:
+        args.add("--aot")
+        args.add("--tfa")
+        args.add("--no-embed-source-text")
+
+    # Compilation mode flags: enable assertions in `-c dbg` and in non-AOT
+    # compiles (such as `flutter_test` fallback compiles).
+    bazel_mode = ctx.var["COMPILATION_MODE"]
+    if bazel_mode == "dbg" or not aot:
+        args.add("--enable-asserts")
+
+    for d in defines:
+        args.add("-D" + d)
+
+def _mount_kernel_sources(ctx, args, compile_sources, output, filesystem_roots, incr_worker):
+    """Stages declared inputs and mounts the roots the compile resolves under.
+
+    Stage every declared input into a per-action staging root and mount only
+    it under APP_SCHEME — never the exec root (`.`) and never
+    `ctx.bin_dir.path`. Mounting either lets the compiler read files the
+    action did not declare: a `file:` directive reads them straight off the
+    host under every strategy, and Bazel caches the stale result. Behind the
+    staging root an undeclared file is not there to be read whatever its
+    spelling, and `kernel_filter` refuses disallowed directives and verifies
+    the compiler's read set on top. Staging by workspace path keeps every
+    `org-dartlang-app:///` URI (package roots, the entrypoint, the
+    registrant) resolving where it did under `.`.
+
+    Returns `struct(stage, mounted_roots)`: the staging result and the
+    exec-root-relative roots mounted via `--filesystem-root`.
+    """
+    stage = stage_generated_inputs(ctx, compile_sources, output.basename, include_sources = True, stable_root = incr_worker)
+    mounted_roots = []
+    if stage.root != None:
+        mounted_roots.append(stage.root)
+    for r in filesystem_roots:
+        if r != None and r != "" and r != "." and r not in mounted_roots:
+            mounted_roots.append(r)
+    if not mounted_roots:
+        fail("%s: no filesystem root to compile under: staging is empty and no filesystem_roots were given" % ctx.label)
+    for root in mounted_roots:
+        args.add("--filesystem-root", root)
+    args.add("--filesystem-scheme", APP_SCHEME)
+    return struct(stage = stage, mounted_roots = mounted_roots)
+
+def _add_kernel_input_args(args, dart_plugin_registrant_uri, extra_flags, native_assets_manifest, recorded_uses, from_dill, import_dill, entrypoint_uri, main):
+    """Appends the input argv: registrant, caller flags, manifests and entrypoint."""
+    if dart_plugin_registrant_uri:
+        args.add("--source", dart_plugin_registrant_uri)
+        args.add("--source", "package:flutter/src/dart_plugin_registrant.dart")
+        args.add("-Dflutter.dart_plugin_registrant=" + dart_plugin_registrant_uri)
+
+    args.add_all(extra_flags)
+
+    if native_assets_manifest != None:
+        args.add("--native-assets", native_assets_manifest.path)
+
+    if recorded_uses != None:
+        args.add("--recorded-uses", recorded_uses)
+
+    if from_dill != None:
+        args.add("--from-dill", from_dill.path)
+
+    if import_dill != None:
+        args.add("--import-dill=" + import_dill.path)
+
+    if entrypoint_uri:
+        args.add(entrypoint_uri)
+    else:
+        args.add(main)
+
+def _kernel_action_inputs(main, package_config, frontend_server, platform_dill, srcs, stage_files, from_dill, native_assets_manifest, import_dill, output, recorded_uses):
+    """Assembles the action's declared inputs and outputs.
+
+    Returns `struct(direct_inputs, outputs)`.
+    """
+    if from_dill != None:
+        direct_inputs = [main, package_config, frontend_server, platform_dill, from_dill] + stage_files
+    else:
+        direct_inputs = [main, package_config, frontend_server, platform_dill] + srcs + stage_files
+    if native_assets_manifest != None:
+        direct_inputs.append(native_assets_manifest)
+    if import_dill != None:
+        direct_inputs.append(import_dill)
+    outputs = [output]
+    if recorded_uses != None:
+        outputs.append(recorded_uses)
+    return struct(direct_inputs = direct_inputs, outputs = outputs)
+
+def _write_kernel_manifest(ctx, manifest, compile_sources, stage_files, package_config, platform_dill, from_dill, import_dill, native_assets_manifest, mounted_roots, output):
+    """Writes the declared-inputs manifest `kernel_filter` guards against.
+
+    The declared sources, then the staging root's symlinks to them, then
+    every other file the compiler may read (the package config, the platform
+    dill, the summary dills, the native-assets manifest), the mounted
+    filesystem roots the directive guard resolves through, and the output
+    dill the refusal path deletes. Every entry names a Starlark-declared
+    `File` (or an action-constructed root/output string): `kernel_filter`
+    derives nothing from the compile argv, so a flag smuggled into
+    `vm_flags` or `extra_flags` cannot widen what the compile may read.
+    Written by path so the tool reads the same files the compiler resolves
+    through the staging root.
+    """
+    allowed_reads = [package_config, platform_dill]
+    if from_dill != None:
+        allowed_reads.append(from_dill)
+    if import_dill != None:
+        allowed_reads.append(import_dill)
+    if native_assets_manifest != None:
+        allowed_reads.append(native_assets_manifest)
+    ctx.actions.write(
+        output = manifest,
+        content = "\n".join(
+            [f.path for f in compile_sources if f != None] +
+            ["# staged"] +
+            [f.path for f in stage_files] +
+            ["# allowed-reads"] +
+            [f.path for f in allowed_reads] +
+            ["# filesystem-roots"] +
+            mounted_roots +
+            ["# output", output.path],
+        ) + "\n",
+    )
+
 def flutter_kernel_compile_action(
         ctx,
         dartaotruntime,
@@ -394,85 +538,14 @@ def flutter_kernel_compile_action(
     args.add_all(vm_flags)
     args.add(frontend_server)
 
-    # --sdk-root points to the directory containing the platform dill.
-    # --platform-dill specifies the exact filename when it's not the
-    # default "platform_strong.dill" (e.g. web's dart2wasm_platform.dill).
-    args.add("--sdk-root", platform_dill.dirname + "/")
-    if platform_dill.basename != "platform_strong.dill":
-        args.add("--platform", platform_dill.path)
+    # The helpers below append contiguous argv runs in call order, so the
+    # action's argv reads exactly as before the split.
+    _add_kernel_target_args(args, platform_dill, target, package_config, output)
+    _add_kernel_mode_args(ctx, args, aot, defines)
 
-    args.add("--target", target)
-    args.add("--packages", package_config)
-    args.add("--output-dill", output)
-
-    # The compiler reports every file it reads as a `+file://` line unless
-    # told not to. `kernel_filter` verifies those lines against the declared
-    # inputs and drops them, so a successful compile still prints nothing (see
-    # below). The boundary-key framing has no flag; kernel_filter.dart drops
-    # it too.
-    args.add("--verbosity=error")
-
-    if aot:
-        args.add("--aot")
-        args.add("--tfa")
-        args.add("--no-embed-source-text")
-
-    # Compilation mode flags: enable assertions in `-c dbg` and in non-AOT
-    # compiles (such as `flutter_test` fallback compiles).
-    bazel_mode = ctx.var["COMPILATION_MODE"]
-    if bazel_mode == "dbg" or not aot:
-        args.add("--enable-asserts")
-
-    for d in defines:
-        args.add("-D" + d)
-
-    # Stage every declared input into a per-action staging root and mount only
-    # it under APP_SCHEME — never the exec root (`.`) and never
-    # `ctx.bin_dir.path`. Mounting either lets the compiler read files the
-    # action did not declare: a `file:` directive reads them straight off the
-    # host under every strategy, and Bazel caches the stale result. Behind the
-    # staging root an undeclared file is not there to be read whatever its
-    # spelling, and `kernel_filter` refuses disallowed directives and verifies
-    # the compiler's read set on top. Staging by workspace path keeps every
-    # `org-dartlang-app:///` URI (package roots, the entrypoint, the
-    # registrant) resolving where it did under `.`.
     compile_sources = [main] if from_dill != None else [main] + srcs
-    stage = stage_generated_inputs(ctx, compile_sources, output.basename, include_sources = True, stable_root = incr_worker)
-    mounted_roots = []
-    if stage.root != None:
-        mounted_roots.append(stage.root)
-    for r in filesystem_roots:
-        if r != None and r != "" and r != "." and r not in mounted_roots:
-            mounted_roots.append(r)
-    if not mounted_roots:
-        fail("%s: no filesystem root to compile under: staging is empty and no filesystem_roots were given" % ctx.label)
-    for root in mounted_roots:
-        args.add("--filesystem-root", root)
-    args.add("--filesystem-scheme", APP_SCHEME)
-
-    if dart_plugin_registrant_uri:
-        args.add("--source", dart_plugin_registrant_uri)
-        args.add("--source", "package:flutter/src/dart_plugin_registrant.dart")
-        args.add("-Dflutter.dart_plugin_registrant=" + dart_plugin_registrant_uri)
-
-    args.add_all(extra_flags)
-
-    if native_assets_manifest != None:
-        args.add("--native-assets", native_assets_manifest.path)
-
-    if recorded_uses != None:
-        args.add("--recorded-uses", recorded_uses)
-
-    if from_dill != None:
-        args.add("--from-dill", from_dill.path)
-
-    if import_dill != None:
-        args.add("--import-dill=" + import_dill.path)
-
-    if entrypoint_uri:
-        args.add(entrypoint_uri)
-    else:
-        args.add(main)
+    mount = _mount_kernel_sources(ctx, args, compile_sources, output, filesystem_roots, incr_worker)
+    _add_kernel_input_args(args, dart_plugin_registrant_uri, extra_flags, native_assets_manifest, recorded_uses, from_dill, import_dill, entrypoint_uri, main)
 
     # Suppress Dart/Flutter analytics (avoids writes to $HOME/.dart/ in sandbox).
     # Provide a writable HOME scoped to this action's output directory.
@@ -483,49 +556,7 @@ def flutter_kernel_compile_action(
     else:
         env["HOME"] = output.dirname
 
-    if from_dill != None:
-        direct_inputs = [main, package_config, frontend_server, platform_dill, from_dill] + stage.files
-    else:
-        direct_inputs = [main, package_config, frontend_server, platform_dill] + srcs + stage.files
-    if native_assets_manifest != None:
-        direct_inputs.append(native_assets_manifest)
-    if import_dill != None:
-        direct_inputs.append(import_dill)
-    outputs = [output]
-    if recorded_uses != None:
-        outputs.append(recorded_uses)
+    action_io = _kernel_action_inputs(main, package_config, frontend_server, platform_dill, srcs, mount.stage.files, from_dill, native_assets_manifest, import_dill, output, recorded_uses)
+    _write_kernel_manifest(ctx, manifest, compile_sources, mount.stage.files, package_config, platform_dill, from_dill, import_dill, native_assets_manifest, mount.mounted_roots, output)
 
-    # The declared-inputs manifest `kernel_filter` guards and verifies the
-    # compile against: the declared sources, then the staging root's symlinks
-    # to them, then every other file the compiler may read (the package
-    # config, the platform dill, the summary dills, the native-assets
-    # manifest), the mounted filesystem roots the directive guard resolves
-    # through, and the output dill the refusal path deletes (see
-    # kernel_filter.dart). Every entry names a Starlark-declared `File` (or
-    # an action-constructed root/output string): `kernel_filter` derives
-    # nothing from the compile argv, so a flag smuggled into `vm_flags` or
-    # `extra_flags` cannot widen what the compile may read. Written by path
-    # so the tool reads the same files the compiler resolves through the
-    # staging root.
-    allowed_reads = [package_config, platform_dill]
-    if from_dill != None:
-        allowed_reads.append(from_dill)
-    if import_dill != None:
-        allowed_reads.append(import_dill)
-    if native_assets_manifest != None:
-        allowed_reads.append(native_assets_manifest)
-    ctx.actions.write(
-        output = manifest,
-        content = "\n".join(
-            [f.path for f in compile_sources if f != None] +
-            ["# staged"] +
-            [f.path for f in stage.files] +
-            ["# allowed-reads"] +
-            [f.path for f in allowed_reads] +
-            ["# filesystem-roots"] +
-            mounted_roots +
-            ["# output", output.path],
-        ) + "\n",
-    )
-
-    _run_kernel_action(ctx, args, manifest, direct_inputs, outputs, env, dartaotruntime, kernel_filter_tool, frontend_server, resource_set, incr_worker)
+    _run_kernel_action(ctx, args, manifest, action_io.direct_inputs, action_io.outputs, env, dartaotruntime, kernel_filter_tool, frontend_server, resource_set, incr_worker)
