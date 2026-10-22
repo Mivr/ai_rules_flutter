@@ -118,6 +118,21 @@ _flutter_pub = tag_class(attrs = {
               "declaration you make deliberately; it is never a default.",
         default = [],
     ),
+    "android_maven_deps": attr.string_dict(
+        doc = "`group:artifact` -> Bazel label additions to the built-in " +
+              "mapping from a plugin's `android/build.gradle*` runtime " +
+              "dependencies to `@rules_android_maven` labels. A plugin dep " +
+              "found in neither table fails the spoke fetch; mapping it " +
+              "here is the fix for external artifacts. The label must " +
+              "resolve in the workspace's `rules_android_maven` install.",
+        default = {},
+    ),
+    "android_maven_ignore": attr.string_list(
+        doc = "`group:artifact` coordinates that need no Bazel label and " +
+              "must not fail the spoke fetch as unknown. This is a " +
+              "declaration you make deliberately; it is never a default.",
+        default = [],
+    ),
 })
 
 _flutter_plugin_overlays = tag_class(attrs = {
@@ -427,6 +442,8 @@ def _toolchain_extension(module_ctx):
                     # through the Dart graph exactly as pub's own would.
                     code_assets = curated_code_assets(name, version),
                     ignore_hook = name in ignore_hooks,
+                    android_maven_deps = pub_tag.android_maven_deps,
+                    android_maven_ignore = pub_tag.android_maven_ignore,
                 )
 
             # Create spoke repos for Flutter SDK packages. In download mode

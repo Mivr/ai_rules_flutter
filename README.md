@@ -212,6 +212,22 @@ Plugins need no special treatment. A pub package that is a Flutter plugin arrive
 
 Permissions a plugin declares in its own manifest, such as `record_android`'s `RECORD_AUDIO`, reach the app's manifest as they do under Gradle. You don't need `--merge_android_manifest_permissions`.
 
+### Android native (Gradle) dependencies
+
+A plugin's `android/build.gradle` (`build.gradle.kts`) runtime dependencies (`implementation`, `api`, `runtimeOnly`) are translated to `@rules_android_maven` labels automatically. Common AndroidX artifacts are built in; anything else must be mapped in `MODULE.bazel`:
+
+```starlark
+flutter.pub(
+    name = "deps",
+    lock = "//:pubspec.lock",
+    android_maven_deps = {
+        "com.example:thing": "@rules_android_maven//:com_example_thing_thing",
+    },
+)
+```
+
+A plugin dependency found in neither table fails the spoke fetch naming the package, the build file, and every offending entry — a missing native library would otherwise compile and crash on the device. A coordinate that genuinely needs no label goes in `android_maven_ignore`; declarations that are not Maven coordinates at all (version-catalog `libs.*` refs, variables, local jars) need a plugin overlay instead, via `flutter.plugin_overlays`.
+
 ### Regenerating pubspec.lock
 
 Bazel reads `pubspec.lock` and never writes it. To regenerate it, use the Flutter toolchain the rules pin rather than a Flutter installed on your machine:

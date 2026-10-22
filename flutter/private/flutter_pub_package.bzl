@@ -413,73 +413,192 @@ _MAVEN_COORDS_PROVIDED = {
     "org.jetbrains.kotlin:kotlin-stdlib-jdk8": True,
 }
 
-def _parse_gradle_deps(content):
-    """Extract `implementation("group:artifact:...")` coordinates from Gradle content.
+# Dependency configurations that land on the app's runtime classpath, in both
+# DSLs. Groovy spells them bare (`implementation 'group:artifact:version'`)
+# and Kotlin DSL parenthesised (`implementation("group:artifact:version")`);
+# both reduce to the same leading identifier, so one table covers both.
+# `compile` is the pre-Gradle-3.0 spelling of `implementation` / `api`, kept
+# so an old plugin still resolves. Variant-prefixed siblings
+# (`debugImplementation`, `releaseApi`, ...) share the `Implementation` /
+# `Api` / `RuntimeOnly` suffix and match the same way: a dep shipped in one
+# variant but not another is still a runtime dep of the APK.
+_MAVEN_RUNTIME_CONFIGS = ("implementation", "api", "runtimeOnly", "compile")
+_MAVEN_RUNTIME_SUFFIXES = ("Implementation", "Api", "RuntimeOnly")
 
-    Handles both Groovy DSL (single quotes) and Kotlin DSL (double
-    quotes / parens). Returns a list of `group:artifact` strings.
-    `api(...)` declarations are treated the same way.
+def _runtime_dep_rest(line):
+    """Return the dependency notation after a runtime configuration, or "".
+
+    `""` covers three different nothings: lines that are not dependency
+    declarations at all (`apply plugin:`, `classpath ...`,
+    `namespace = ...`), test-source-set configurations
+    (`testImplementation`, `androidTestImplementation`, ...), and
+    `compileOnly`. Test configurations exercise the plugin's own unit tests
+    and are never shipped in the APK; `compileOnly` is provided-scope —
+    Gradle never packages it, and the plugin's compile classpath already
+    carries the equivalent in the neverlink engine target. Neither can turn
+    into a Bazel label the APK needs, so both are left out rather than
+    reported.
     """
-    coords = []
+    stripped = line.strip().replace("\t", " ")
+    if not stripped:
+        return ""
+    if stripped.startswith("//") or stripped.startswith("#") or stripped.startswith("*") or stripped.startswith("/*"):
+        return ""
+    head = stripped.split("(")[0]
+    token = head.split(" ")[0]
+    if not token or "." in token:
+        return ""
+    if token.startswith("test") or "Test" in token:
+        return ""
+    if token == "compileOnly":
+        return ""
+    is_runtime = token in _MAVEN_RUNTIME_CONFIGS
+    if not is_runtime:
+        for suffix in _MAVEN_RUNTIME_SUFFIXES:
+            if token.endswith(suffix):
+                is_runtime = True
+                break
+    if not is_runtime:
+        return ""
+    rest = stripped[len(token):].strip()
+    if not rest:
+        return ""
+    return rest
+
+def _gradle_is_project_ref(rest):
+    """True when the dependency notation names a sibling Gradle module.
+
+    `project(':shared')` is an intra-build module reference, not an external
+    Maven artifact: there is no `group:artifact` to map to a label or to
+    ignore, so Maven resolution leaves it out. A plugin whose Android library
+    genuinely needs a sibling module cannot be translated automatically and
+    needs a plugin overlay (`flutter.plugin_overlays`), which replaces this
+    auto-detection wholesale.
+    """
+    return "project(" in rest
+
+def _gradle_coord_of(rest):
+    """Reduce dependency notation to `group:artifact`, or "" when it has none.
+
+    `implementation("androidx.browser:browser:1.9.0")` reduces to
+    `androidx.browser:browser`; anything without a quoted `group:artifact`
+    pair — a version-catalog ref (`libs.foo`), a variable, a local
+    `files(...)` / `fileTree(...)` jar, a Gradle map
+    (`group: ..., name: ...`) — yields "". The version part may carry Gradle
+    templates (`$kotlin_version`); only `group:artifact` is validated, so
+    those still reduce. Callers report "" as unreadable unless
+    `_gradle_is_project_ref`.
+    """
+    quote_idx = -1
+    quote_char = ""
+    for q in ('"', "'"):
+        idx = rest.find(q)
+        if idx >= 0 and (quote_idx < 0 or idx < quote_idx):
+            quote_idx = idx
+            quote_char = q
+    if quote_idx < 0:
+        return ""
+    end = rest.find(quote_char, quote_idx + 1)
+    if end < 0:
+        return ""
+    inner = rest[quote_idx + 1:end]
+    parts = inner.split(":")
+    if len(parts) < 2:
+        return ""
+    for part in (parts[0], parts[1]):
+        if not part:
+            return ""
+        for i in range(len(part)):
+            c = part[i:i + 1]
+            if c in " \t/$'\"{}()":
+                return ""
+    return parts[0] + ":" + parts[1]
+
+def _maven_add_coord(coord, merged, ignored, labels, unknown):
+    """File one coordinate into `labels` or `unknown` (provided coords pass)."""
+    if coord in _MAVEN_COORDS_PROVIDED:
+        return
+    label = merged.get(coord)
+    if label:
+        labels[label] = True
+    elif coord not in ignored:
+        unknown[coord] = True
+
+def maven_labels_for_gradle(content, mapping, ignore):
+    """Translate a Gradle build file's runtime deps to Bazel labels.
+
+    Pure and loadable from another .bzl: `content` is the `build.gradle` /
+    `build.gradle.kts` text, `mapping` is a caller-supplied
+    `{group:artifact: label}` dict layered over the built-in
+    `_MAVEN_COORD_TO_LABEL` (`mapping` wins on collision), and `ignore` is a
+    list of `group:artifact` coordinates that need no label.
+
+    Covers the configurations that put code on the app's runtime classpath —
+    `implementation`, `api` and `runtimeOnly` — in both Groovy (bare,
+    single-quoted) and Kotlin DSL (parenthesised, double-quoted) spellings,
+    including variant-prefixed siblings (`debugImplementation`, ...).
+    `compileOnly` is provided-scope (Gradle never packages it; the plugin's
+    compile classpath already carries the equivalent in the neverlink engine
+    target) and test-source-set configurations (`testImplementation`,
+    `androidTest...`, ...) exercise the plugin's own unit tests, never the
+    APK — both are left out of every list rather than reported. `project()`
+    references name a sibling Gradle module, not an external artifact (see
+    `_gradle_is_project_ref`), and are left out the same way.
+
+    Args:
+        content: The Gradle build-file text.
+        mapping: Dict from `group:artifact` to Bazel label string.
+        ignore: List of `group:artifact` coordinates that need no label.
+
+    Returns:
+        `struct(labels, unknown, unreadable)`: `labels` is the sorted,
+        distinct Bazel labels for recognised coordinates; `unknown` is the
+        sorted coordinates found in neither table and not in `ignore` (nor
+        already provided, e.g. `kotlin-stdlib`); `unreadable` is the sorted
+        dependency declarations no coordinate could be reduced from
+        (version-catalog `libs.*` refs, variables, local `files(...)`
+        jars, ...).
+    """
+    merged = dict(_MAVEN_COORD_TO_LABEL)
+    if mapping:
+        merged.update(mapping)
+    ignored = {}
+    for coord in (ignore or []):
+        ignored[coord] = True
+    labels = {}
+    unknown = {}
+    unreadable = {}
     for raw_line in content.split("\n"):
-        line = raw_line.strip()
-        if not line:
+        rest = _runtime_dep_rest(raw_line)
+        if not rest:
             continue
-
-        # Skip comments and gradle plugin classpaths.
-        if line.startswith("//") or line.startswith("#"):
-            continue
-
-        # Match `implementation(...)` or `api(...)` or
-        # `implementation "..."` (Groovy without parens).
-        for prefix in ("implementation", "api", "compile"):
-            if not line.startswith(prefix):
-                continue
-            rest = line[len(prefix):].strip()
-            if not rest:
-                continue
-            if rest[0] not in ("(", '"', "'"):
-                # Not a dep call — could be `implementations.add(...)` etc.
-                continue
-
-            # Pull out the first quoted string after the opening paren/quote.
-            quote_idx = -1
-            quote_char = ""
-            for q in ('"', "'"):
-                idx = rest.find(q)
-                if idx >= 0 and (quote_idx < 0 or idx < quote_idx):
-                    quote_idx = idx
-                    quote_char = q
-            if quote_idx < 0:
-                break
-            end = rest.find(quote_char, quote_idx + 1)
-            if end < 0:
-                break
-            inner = rest[quote_idx + 1:end]
-
-            # Strip Gradle template variables (`$kotlin_version`,
-            # `${kotlin_version}`). Versions only — group:artifact stays
-            # parseable. For our purposes the `group:artifact` is what we
-            # key off, so we just split on the first two colons.
-            parts = inner.split(":")
-            if len(parts) < 2:
-                break
-            coord = "%s:%s" % (parts[0], parts[1])
-            coords.append(coord)
-            break
-    return coords
+        coord = _gradle_coord_of(rest)
+        if coord:
+            _maven_add_coord(coord, merged, ignored, labels, unknown)
+        elif not _gradle_is_project_ref(rest):
+            unreadable[raw_line.strip()] = True
+    return struct(
+        labels = sorted(labels.keys()),
+        unknown = sorted(unknown.keys()),
+        unreadable = sorted(unreadable.keys()),
+    )
 
 def _resolve_plugin_maven_deps(ctx):
     """Translate the spoke's `android/build.gradle*` deps to Bazel labels.
 
     Reads the package's Gradle build file (Groovy `.gradle` or Kotlin
-    `.gradle.kts`), extracts `implementation("group:artifact:...")`
-    coordinates, and maps them via `_MAVEN_COORD_TO_LABEL` to
-    `@rules_android_maven//:...` labels. Coordinates we don't recognize
-    are silently dropped — the plugin's compile may still fail in that
-    case, but the path forward is to add the artifact to the user's
-    `maven.install` and update the table here. Coordinates we
-    deliberately provide elsewhere (`kotlin-stdlib`) are skipped.
+    `.gradle.kts`) and reduces its runtime dependencies to Maven coordinates
+    with `maven_labels_for_gradle` — layering the user's
+    `flutter.pub(android_maven_deps)` over the built-in table and honouring
+    `flutter.pub(android_maven_ignore)` — then maps them to
+    `@rules_android_maven//:...` labels.
+
+    Fail-closed: coordinates found in neither table, and declarations no
+    coordinate can be reduced from, fail the fetch with a message naming the
+    package, the build file, every offending entry, and both attributes with
+    an example. A plugin whose native dependency is missing can otherwise
+    still compile — a reflection-only or run-time-only dep — and then crash
+    on the device, so dropping them silently is not an option.
 
     Returns a sorted list of distinct labels.
     """
@@ -487,25 +606,44 @@ def _resolve_plugin_maven_deps(ctx):
         "android/build.gradle.kts",
         "android/build.gradle",
     )
+    build_file = ""
     content = ""
     for cand in candidates:
         p = ctx.path(cand)
         if p.exists:
+            build_file = cand
             content = ctx.read(p)
             break
     if not content:
         return []
-    coords = _parse_gradle_deps(content)
-    seen = {}
-    labels = []
-    for coord in coords:
-        if coord in _MAVEN_COORDS_PROVIDED:
-            continue
-        label = _MAVEN_COORD_TO_LABEL.get(coord)
-        if label and label not in seen:
-            seen[label] = True
-            labels.append(label)
-    return sorted(labels)
+    result = maven_labels_for_gradle(
+        content,
+        ctx.attr.android_maven_deps,
+        ctx.attr.android_maven_ignore,
+    )
+    if result.unknown or result.unreadable:
+        details = []
+        if result.unknown:
+            details.append("unknown Maven coordinates: " + ", ".join(result.unknown))
+        if result.unreadable:
+            details.append("unreadable dependency declarations: " + ", ".join(result.unreadable))
+        fail(
+            ('flutter.pub spoke for "{pkg}": {gradle} declares Android ' +
+             "dependencies rules_flutter cannot translate to Bazel labels " +
+             "({details}). Map each external artifact in MODULE.bazel, e.g. " +
+             'flutter.pub(android_maven_deps = {{"com.example:thing": ' +
+             '"@rules_android_maven//:com_example_thing_thing"}}), or silence ' +
+             "a coordinate that needs no label with " +
+             'flutter.pub(android_maven_ignore = ["com.example:thing"]). ' +
+             "Declarations that are not Maven coordinates (version-catalog " +
+             "`libs.*` refs, variables, local jars) need a plugin overlay " +
+             "instead - see flutter.plugin_overlays.").format(
+                pkg = ctx.attr.package_name,
+                gradle = build_file,
+                details = "; ".join(details),
+            ),
+        )
+    return result.labels
 
 def _glob_block(srcs_dirs, extensions):
     """Format a `glob([...])` expression covering the given extensions.
@@ -1091,7 +1229,8 @@ def make_android_subpackage_build_content(
             classes land in the package the plugin's sources expect.
         extra_maven_labels: Additional `@rules_android_maven//:...`
             labels parsed from the plugin's `build.gradle*` and translated
-            via `_MAVEN_COORD_TO_LABEL`.
+            via `maven_labels_for_gradle` (the built-in table plus
+            `flutter.pub(android_maven_deps)`).
         android_manifest: Path to the plugin's
             `android/src/main/AndroidManifest.xml` if it ships one, or
             empty. When set, the generated `kt_android_library` declares
@@ -2056,6 +2195,23 @@ flutter_pub_package = repository_rule(
                   "the application that reaches it fails, rather than building " +
                   "cleanly and dying at runtime on an unresolved native symbol.",
             default = False,
+        ),
+        "android_maven_deps": attr.string_dict(
+            doc = "`group:artifact` -> Bazel label additions to the built-in " +
+                  "Gradle-to-`@rules_android_maven` mapping, from " +
+                  "`flutter.pub(android_maven_deps)`. A plugin's " +
+                  "`android/build.gradle*` runtime dependency whose " +
+                  "coordinate is in neither table fails the fetch; mapping " +
+                  "it here is the fix for external artifacts.",
+            default = {},
+        ),
+        "android_maven_ignore": attr.string_list(
+            doc = "`group:artifact` coordinates that need no Bazel label, " +
+                  "from `flutter.pub(android_maven_ignore)`. A coordinate " +
+                  "listed here is left out of the spoke's deps instead of " +
+                  "failing the fetch as unknown. This is a declaration you " +
+                  "make deliberately; it is never a default.",
+            default = [],
         ),
         "overlay_roots": attr.label_list(
             doc = "BUILD.bazel anchors for overlay trees. Each label points at " +

@@ -19,6 +19,7 @@ load(
     "make_android_subpackage_build_content",
     "make_flutter_library_build_content",
     "make_flutter_plugin_build_content",
+    "maven_labels_for_gradle",
     "parse_android_manifest_package",
     "parse_gradle_android_namespace",
     "render_overlay_deps",
@@ -26,7 +27,6 @@ load(
     "resolve_overlay_roots",
     "resolve_overlay_template",
 )
-
 # Verbatim shape of record_android 1.5.1's android/build.gradle (trimmed):
 # Groovy DSL, namespace assignment, no dependencies block at all.
 _RECORD_ANDROID_GRADLE = """\
@@ -981,6 +981,184 @@ overlay_rewrites_cat_genrules_to_write_file_test = unittest.make(
     _overlay_rewrites_cat_genrules_to_write_file_test_impl,
 )
 
+def _maven_labels_known_and_unknown_test_impl(ctx):
+    """Groovy runtime configs resolve known coords and report unknown ones."""
+    env = unittest.begin(ctx)
+
+    content = """\
+dependencies {
+    implementation 'androidx.browser:browser:1.9.0'
+    api 'androidx.core:core:1.17.0'
+    runtimeOnly 'com.example:thing:2.0'
+    implementation 'com.example:thing:2.0'
+    implementation 'androidx.browser:browser:1.9.0'
+}
+"""
+    result = maven_labels_for_gradle(content, {}, [])
+    asserts.equals(
+        env,
+        [
+            "@rules_android_maven//:androidx_browser_browser",
+            "@rules_android_maven//:androidx_core_core",
+        ],
+        result.labels,
+    )
+    asserts.equals(env, ["com.example:thing"], result.unknown)
+    asserts.equals(env, [], result.unreadable)
+
+    return unittest.end(env)
+
+maven_labels_known_and_unknown_test = unittest.make(
+    _maven_labels_known_and_unknown_test_impl,
+)
+
+def _maven_labels_kotlin_dsl_test_impl(ctx):
+    """Kotlin DSL parenthesised forms resolve the same coordinates."""
+    env = unittest.begin(ctx)
+
+    content = """\
+dependencies {
+    implementation("androidx.annotation:annotation:1.9.1")
+    api("androidx.media:media:1.7.0")
+    runtimeOnly("com.example:native:3.1")
+}
+"""
+    result = maven_labels_for_gradle(content, {}, [])
+    asserts.equals(
+        env,
+        [
+            "@rules_android_maven//:androidx_annotation_annotation",
+            "@rules_android_maven//:androidx_media_media",
+        ],
+        result.labels,
+    )
+    asserts.equals(env, ["com.example:native"], result.unknown)
+    asserts.equals(env, [], result.unreadable)
+
+    return unittest.end(env)
+
+maven_labels_kotlin_dsl_test = unittest.make(
+    _maven_labels_kotlin_dsl_test_impl,
+)
+
+def _maven_labels_mapping_and_ignore_test_impl(ctx):
+    """Caller mapping adds labels and wins; ignore silences unknown coords."""
+    env = unittest.begin(ctx)
+
+    content = """\
+dependencies {
+    implementation 'androidx.browser:browser:1.9.0'
+    implementation 'com.example:thing:2.0'
+    implementation 'com.example:provided-elsewhere:1.0'
+}
+"""
+    result = maven_labels_for_gradle(
+        content,
+        {
+            # Mapping wins over the built-in table on collision.
+            "androidx.browser:browser": "//third_party:browser",
+            "com.example:thing": "@rules_android_maven//:com_example_thing",
+        },
+        ["com.example:provided-elsewhere"],
+    )
+    asserts.equals(
+        env,
+        [
+            "//third_party:browser",
+            "@rules_android_maven//:com_example_thing",
+        ],
+        result.labels,
+    )
+    asserts.equals(env, [], result.unknown)
+    asserts.equals(env, [], result.unreadable)
+
+    return unittest.end(env)
+
+maven_labels_mapping_and_ignore_test = unittest.make(
+    _maven_labels_mapping_and_ignore_test_impl,
+)
+
+def _maven_labels_scopes_test_impl(ctx):
+    """Non-runtime scopes never surface: kotlin-stdlib, compileOnly, tests, buildscript."""
+    env = unittest.begin(ctx)
+
+    content = """\
+buildscript {
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.3.1'
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:1.7.22")
+    }
+}
+
+android {
+    namespace = 'dev.example.plugin'
+
+    dependencies {
+        implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core:1.17.0'
+    compileOnly 'io.flutter:flutter_embedding_debug:1.0.0'
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation("org.mockito:mockito-core:5.23.0")
+    androidTestImplementation 'androidx.test:core:1.6.0'
+    debugImplementation 'com.example:debug-only:1.0'
+}
+"""
+    result = maven_labels_for_gradle(content, {}, [])
+    asserts.equals(
+        env,
+        ["@rules_android_maven//:androidx_core_core"],
+        result.labels,
+    )
+
+    # Only the variant-prefixed runtime dep is unknown: stdlib is provided,
+    # compileOnly / test scopes are left out, buildscript classpaths ignored.
+    asserts.equals(env, ["com.example:debug-only"], result.unknown)
+    asserts.equals(env, [], result.unreadable)
+
+    return unittest.end(env)
+
+maven_labels_scopes_test = unittest.make(
+    _maven_labels_scopes_test_impl,
+)
+
+def _maven_labels_unreadable_test_impl(ctx):
+    """Catalog refs, variables and file deps are unreadable; project refs pass."""
+    env = unittest.begin(ctx)
+
+    content = """\
+dependencies {
+    implementation(libs.browser)
+    implementation libs.annotation
+    api project(':shared')
+    implementation(project(":shared"))
+    runtimeOnly files('libs/bundled.jar')
+    implementation someVariable
+}
+"""
+    result = maven_labels_for_gradle(content, {}, [])
+    asserts.equals(env, [], result.labels)
+    asserts.equals(env, [], result.unknown)
+    asserts.equals(
+        env,
+        [
+            "implementation libs.annotation",
+            "implementation someVariable",
+            "implementation(libs.browser)",
+            "runtimeOnly files('libs/bundled.jar')",
+        ],
+        result.unreadable,
+    )
+
+    return unittest.end(env)
+
+maven_labels_unreadable_test = unittest.make(
+    _maven_labels_unreadable_test_impl,
+)
+
 def flutter_pub_package_test_suite(name):
     unittest.suite(
         name,
@@ -1005,4 +1183,9 @@ def flutter_pub_package_test_suite(name):
         plugin_spoke_carries_resources_test,
         library_spoke_carries_resources_test,
         spoke_with_shaders_declares_their_includes_test,
+        maven_labels_known_and_unknown_test,
+        maven_labels_kotlin_dsl_test,
+        maven_labels_mapping_and_ignore_test,
+        maven_labels_scopes_test,
+        maven_labels_unreadable_test,
     )
