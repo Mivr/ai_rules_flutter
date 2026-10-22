@@ -14,14 +14,16 @@
 ///   green while code that reaches them turns red;
 /// * any `http_archive` / `http_file` / `http_jar` instantiation, in a
 ///   `.bzl` file or a `MODULE.bazel`, without a non-empty literal `sha256`
-///   or `integrity`.
+///   or `integrity` — whether called by its canonical name or through a
+///   `use_repo_rule` proxy bound to any name, and whether the checksum is
+///   absent or an empty literal.
 ///
 /// The test discovers its inputs at runtime from the workspace root (the
 /// test's own source file in `data`, or `BUILD_WORKSPACE_DIRECTORY` when
-/// set): every `.bzl` file under `flutter/`, the root `MODULE.bazel`, and
-/// every `MODULE.bazel` under `e2e/`. There is no file list to maintain — a
-/// `.bzl` added in a new package is checked with no other change. Reading
-/// undeclared files means Bazel cannot know when to re-run, so the target
+/// set): every `.bzl` file under `flutter/` and every `MODULE.bazel` in the
+/// repo (root, e2e, anywhere else). There is no file list to maintain — a
+/// `.bzl` added in a new package, or a `MODULE.bazel` added anywhere, is
+/// checked with no other change. Reading undeclared files means Bazel cannot know when to re-run, so the target
 /// is tagged `external`: the guard re-runs on every invocation and is
 /// never served a stale pass.
 library;
@@ -65,9 +67,11 @@ String? _workspaceRoot() {
 }
 
 /// Relative paths of every file named [fileName] under [dir], recursively
-/// (never following symlinks, skipping `node_modules`), sorted.
+/// (never following symlinks, skipping `node_modules` and hidden
+/// directories such as `.git`), sorted. An empty [dir] walks the whole
+/// workspace root.
 List<String> _findNamed(String root, String dir, String fileName) {
-  final base = Directory('$root/$dir');
+  final base = dir.isEmpty ? Directory(root) : Directory('$root/$dir');
   if (!base.existsSync()) return <String>[];
   final found = <String>[];
   final stack = <Directory>[base];
@@ -80,13 +84,13 @@ List<String> _findNamed(String root, String dir, String fileName) {
       continue;
     }
     for (final child in children) {
+      final name = child.path.split(Platform.pathSeparator).last;
       if (child is Directory) {
-        if (child.path.split(Platform.pathSeparator).last == 'node_modules') {
+        if (name == 'node_modules' || name.startsWith('.')) {
           continue;
         }
         stack.add(child);
-      } else if (child is File &&
-          child.path.split(Platform.pathSeparator).last == fileName) {
+      } else if (child is File && name == fileName) {
         var rel = child.path;
         if (rel.startsWith('$root/')) rel = rel.substring(root.length + 1);
         found.add(rel);
@@ -202,9 +206,11 @@ final RegExp _rawDownloadUse = RegExp(
 final RegExp _getattrDownload = RegExp(
   r'''getattr\s*\([^()]*['"]download(_and_extract)?['"]''',
 );
-final RegExp _httpRule = RegExp(
-  r'(http_archive|http_file|http_jar)\s*\(',
+const _httpRuleNames = {'http_archive', 'http_file', 'http_jar'};
+final RegExp _useRepoRuleBinding = RegExp(
+  r'([A-Za-z_][A-Za-z0-9_]*)\s*=\s*use_repo_rule\s*\(',
 );
+final RegExp _stringLiteral = RegExp("\"([^\"]*)\"|'([^']*)'");
 final RegExp _literalChecksum = RegExp(
   '''(sha256|integrity)\\s*=\\s*(?:"([^"]*)"|'([^']*)')''',
 );
@@ -234,18 +240,47 @@ List<String> _checkNoRawDownload(String rel, String text) {
   return errors;
 }
 
+/// Names bound to an `http_*` rule through `use_repo_rule` in blanked
+/// [code], e.g. `dl` in `dl = use_repo_rule("...http.bzl", "http_archive")`.
+/// Maps the bound name to the canonical rule name. String values are read
+/// from the original [text] at the same offsets (blanking preserves every
+/// offset). A binding whose rule name is not a string literal cannot be
+/// resolved and is ignored.
+Map<String, String> _httpProxies(String code, String text) {
+  final proxies = <String, String>{};
+  for (final match in _useRepoRuleBinding.allMatches(code)) {
+    final openParen = code.indexOf('(', match.start);
+    final end = _callEnd(code, openParen);
+    if (end == null) continue;
+    final literals = _stringLiteral
+        .allMatches(text.substring(openParen, end))
+        .map((m) => m.group(1) ?? m.group(2) ?? '')
+        .toList();
+    if (literals.length >= 2 && _httpRuleNames.contains(literals[1])) {
+      proxies[match.group(1)!] = literals[1];
+    }
+  }
+  return proxies;
+}
+
 /// Error strings for `http_*` rules without a non-empty literal checksum.
+/// Matches the canonical `http_archive` / `http_file` / `http_jar` names
+/// and any name bound to one of them through `use_repo_rule`, whatever the
+/// binding is called.
 List<String> _checkHttpChecksums(String rel, String text) {
   final errors = <String>[];
   final code = _blankNonCode(text, blankStrings: true);
-  for (final match in _httpRule.allMatches(code)) {
-    final openParen = code.indexOf('(', match.start);
+  final proxies = _httpProxies(code, text);
+  final names = <String>{..._httpRuleNames, ...proxies.keys}.toList()
+    ..sort((a, b) => b.length.compareTo(a.length));
+  final callRule = RegExp('(^|[^A-Za-z0-9_.])(${names.join('|')})\\s*\\(');
+  for (final match in callRule.allMatches(code)) {
+    final name = match.group(2)!;
+    final nameStart = match.start + match.group(0)!.indexOf(name);
+    final openParen = code.indexOf('(', nameStart);
     final end = _callEnd(code, openParen);
     if (end == null) {
-      errors.add(
-        '$rel:${_lineOf(text, match.start)}: cannot parse '
-        '${match.group(1)} call',
-      );
+      errors.add('$rel:${_lineOf(text, nameStart)}: cannot parse $name call');
       continue;
     }
     final body = text.substring(openParen, end);
@@ -258,8 +293,11 @@ List<String> _checkHttpChecksums(String rel, String text) {
       }
     }
     if (!pinned) {
+      final via = proxies.containsKey(name)
+          ? ' (${proxies[name]} via use_repo_rule)'
+          : '';
       errors.add(
-        '$rel:${_lineOf(text, match.start)}: ${match.group(1)}() without a '
+        '$rel:${_lineOf(text, nameStart)}: $name()$via without a '
         'non-empty literal sha256 = or integrity =; pin the digest',
       );
     }
@@ -268,6 +306,110 @@ List<String> _checkHttpChecksums(String rel, String text) {
 }
 
 void main() {
+  group('http checksum parsing (unit)', () {
+    test('use_repo_rule proxy without checksum fails with file:line', () {
+      const probe = '''
+_dl = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+_dl(
+    name = "probe_unpinned",
+    urls = ["https://example.invalid/probe.zip"],
+)
+''';
+      final errors = _checkHttpChecksums('e2e/hello_world/MODULE.bazel', probe);
+      expect(errors, hasLength(1));
+      expect(errors.single, startsWith('e2e/hello_world/MODULE.bazel:3:'));
+      expect(errors.single, contains('http_archive via use_repo_rule'));
+    });
+
+    test('use_repo_rule proxy with empty integrity fails with file:line', () {
+      const probe = '''
+_f = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
+
+_f(
+    name = "probe_empty_integrity",
+    urls = ["https://example.invalid/probe.dat"],
+    integrity = "",
+)
+''';
+      final errors = _checkHttpChecksums('e2e/hello_world/MODULE.bazel', probe);
+      expect(errors, hasLength(1));
+      expect(errors.single, startsWith('e2e/hello_world/MODULE.bazel:3:'));
+      expect(errors.single, contains('integrity'));
+    });
+
+    test('use_repo_rule proxy with a pinned digest passes', () {
+      const probe = '''
+_dl = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+_dl(
+    name = "probe_pinned",
+    urls = ["https://example.invalid/probe.zip"],
+    sha256 = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+)
+''';
+      expect(
+        _checkHttpChecksums('e2e/hello_world/MODULE.bazel', probe),
+        isEmpty,
+      );
+    });
+
+    test('use_repo_rule proxy of another rule is ignored', () {
+      const probe = '''
+sky = use_repo_rule("@rules_flutter//flutter/private:flutter_sky_engine_repo.bzl", "flutter_sky_engine_repo")
+
+sky(
+    name = "sky_engine",
+    engine_revision = "deb287481e3ce9468f3434937ced4240a70539ca",
+    sha256 = "0000000000000000000000000000000000000000000000000000000000000000",
+)
+''';
+      expect(
+        _checkHttpChecksums('e2e/digest_mismatch/MODULE.bazel', probe),
+        isEmpty,
+      );
+    });
+
+    test('canonically named proxy rebinding is still checked', () {
+      const probe = '''
+http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
+
+http_archive(
+    name = "probe_rebound",
+    urls = ["https://example.invalid/probe.dat"],
+)
+''';
+      final errors = _checkHttpChecksums('MODULE.bazel', probe);
+      expect(errors, hasLength(1));
+      expect(errors.single, startsWith('MODULE.bazel:3:'));
+      expect(errors.single, contains('http_file via use_repo_rule'));
+    });
+
+    test('a longer identifier ending in a proxy name is ignored', () {
+      const probe = '''
+dl = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+def my_dl(name):
+    return name
+''';
+      expect(_checkHttpChecksums('MODULE.bazel', probe), isEmpty);
+    });
+
+    test('direct http_archive without checksum fails', () {
+      const probe = '''
+load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+http_archive(
+    name = "probe_direct",
+    urls = ["https://example.invalid/probe.zip"],
+)
+''';
+      final errors = _checkHttpChecksums('flutter/guardprobe.bzl', probe);
+      expect(errors, hasLength(1));
+      expect(errors.single, startsWith('flutter/guardprobe.bzl:3:'));
+    });
+  });
+
   final root = _workspaceRoot();
   if (root == null) {
     test('download guard discovers the workspace', () {
@@ -280,10 +422,8 @@ void main() {
     return;
   }
   final bzlFiles = _findBzl(root);
-  final moduleFiles = <String>[
-    'MODULE.bazel',
-    ..._findNamed(root, 'e2e', 'MODULE.bazel'),
-  ];
+  // Every MODULE.bazel in the repo: root, e2e, anywhere else.
+  final moduleFiles = _findNamed(root, '', 'MODULE.bazel');
 
   test('download guard discovers its inputs (no file list)', () {
     expect(

@@ -49,9 +49,9 @@ sky(
 
 # Offline helper red paths. Each repo fetches one committed fixture file
 # through a file:// URL; CI fetches every repo separately.
-_download = use_repo_rule("//:digest_cases.bzl", "digest_download")
+_download = use_repo_rule("@rules_flutter//flutter/private:digest_case_repos.bzl", "digest_download")
 
-_extract = use_repo_rule("//:digest_cases.bzl", "digest_extract")
+_extract = use_repo_rule("@rules_flutter//flutter/private:digest_case_repos.bzl", "digest_extract")
 
 _TXT_SHA256 = "7145333f2c1999f823e0ad287d979acf5c0db3337c2d79e9583c373df2ebc0a6"
 

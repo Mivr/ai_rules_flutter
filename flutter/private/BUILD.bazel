@@ -75,6 +75,12 @@ bzl_library(
 )
 
 bzl_library(
+    name = "digest_case_repos",
+    srcs = ["digest_case_repos.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+)
+
+bzl_library(
     name = "versions",
     srcs = ["versions.bzl"],
     visibility = ["//flutter:__subpackages__"],

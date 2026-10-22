@@ -1,13 +1,14 @@
 """Red-path repo rules exercising the pinned-download helpers offline.
 
 Each rule fetches one committed fixture file through a `file://` URL — no
-network — via `pinned_download` / `pinned_download_and_extract`. CI
-instantiates one repo per digest shape (correct, empty, malformed,
-conditionally blanked, wrong), fetches each separately, and greps the exact
-failure message (or the fetched bytes, for the correct digests).
+network — via `pinned_download` / `pinned_download_and_extract`. The
+offline digest red paths (e2e/digest_mismatch) instantiate one repo per
+digest shape (correct, empty, malformed, conditionally blanked, wrong);
+CI fetches each separately and greps the exact failure message (or the
+fetched bytes, for the correct digests).
 """
 
-load("@rules_flutter//flutter/private:download.bzl", "pinned_download", "pinned_download_and_extract")
+load(":download.bzl", "pinned_download", "pinned_download_and_extract")
 
 def _fixture_url(repository_ctx):
     return "file://" + str(repository_ctx.path(repository_ctx.attr.fixture))
