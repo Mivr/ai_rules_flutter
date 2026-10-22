@@ -43,23 +43,19 @@ def build_plugin_struct(name, plugin_platforms):
     """
     return struct(name = name, platforms = plugin_platforms)
 
-def _apple_plugin_aspect_impl(target, ctx):
-    if FlutterApplePluginInfo in target:
-        return []
-    if ctx.rule.kind != "swift_library":
-        return []
+def _apple_plugin_platform(ctx):
+    """Detect the Apple platform of a `swift_library` from its constraints."""
     macos_label = ctx.attr._macos_constraint.label
     ios_label = ctx.attr._ios_constraint.label
-    platform = None
     for constraint in getattr(ctx.rule.attr, "target_compatible_with", []):
         if constraint.label == macos_label:
-            platform = "macos"
-            break
-        elif constraint.label == ios_label:
-            platform = "ios"
-            break
-    if not platform:
-        return []
+            return "macos"
+        if constraint.label == ios_label:
+            return "ios"
+    return None
+
+def _apple_link_sdk_lists(target):
+    """Collect SDK frameworks and dylibs from a target's linker flags."""
     sdk_frameworks = []
     sdk_dylibs = []
     if CcInfo in target:
@@ -74,6 +70,17 @@ def _apple_plugin_aspect_impl(target, ctx):
                     dylib = flags[idx][2:]
                     if dylib not in sdk_dylibs:
                         sdk_dylibs.append(dylib)
+    return sdk_frameworks, sdk_dylibs
+
+def _apple_plugin_aspect_impl(target, ctx):
+    if FlutterApplePluginInfo in target:
+        return []
+    if ctx.rule.kind != "swift_library":
+        return []
+    platform = _apple_plugin_platform(ctx)
+    if not platform:
+        return []
+    sdk_frameworks, sdk_dylibs = _apple_link_sdk_lists(target)
     return [
         FlutterApplePluginInfo(
             module_name = getattr(ctx.rule.attr, "module_name", ""),
@@ -95,185 +102,163 @@ _apple_plugin_aspect = aspect(
     },
 )
 
-def _flutter_plugin_impl(ctx):
-    package_name = derive_package_name(ctx.attr.package_name, ctx.label.package, ctx.label.name)
-    lib_root = derive_lib_root(ctx.label.workspace_root, ctx.label.package)
-
-    # Build plugin metadata.
-    # If plugin_platforms_json is set, decode it directly.
-    # Otherwise construct from scalar attrs (for manual BUILD files).
+def _plugin_platforms_metadata(ctx):
+    """Decode the plugin's per-platform metadata from its attrs."""
     if ctx.attr.plugin_platforms_json:
-        plugin_platforms = json.decode(ctx.attr.plugin_platforms_json)
-    else:
-        plugin_platforms = {}
-        for p in ctx.attr.platforms:
-            info = {}
-            if ctx.attr.plugin_class:
-                info["pluginClass"] = ctx.attr.plugin_class
-            if ctx.attr.dart_plugin_class:
-                info["dartPluginClass"] = ctx.attr.dart_plugin_class
-            if p == "android" and ctx.attr.android_package:
-                info["package"] = ctx.attr.android_package
-            plugin_platforms[p] = info
+        return json.decode(ctx.attr.plugin_platforms_json)
+    plugin_platforms = {}
+    for p in ctx.attr.platforms:
+        info = {}
+        if ctx.attr.plugin_class:
+            info["pluginClass"] = ctx.attr.plugin_class
+        if ctx.attr.dart_plugin_class:
+            info["dartPluginClass"] = ctx.attr.dart_plugin_class
+        if p == "android" and ctx.attr.android_package:
+            info["package"] = ctx.attr.android_package
+        plugin_platforms[p] = info
+    return plugin_platforms
 
-    plugin = build_plugin_struct(
-        name = package_name,
-        plugin_platforms = plugin_platforms,
-    )
-
-    # Collect native libs from native_deps.
-    native_libs = collect_native_libs(ctx.attr.native_deps)
-
-    # And what their bindings were generated from, for the ones whose build said
-    # so. Carried to the app rather than used here: a plugin bundles nothing, and
-    # the app is where the dev config that a reload reads is written.
-    binding_contracts = collect_binding_contracts(ctx.attr.native_deps)
-
-    # `native_deps` and the Native Assets alike: an asset's own rule pairs the
-    # library it declares with its sources, on its `FlutterInfo`.
-    native_lib_sources = collect_native_source_pairs(ctx.attr.native_deps) + [
+def _collect_native_lib_sources(ctx):
+    """Pair native libraries with the sources their bindings were generated from."""
+    return collect_native_source_pairs(ctx.attr.native_deps) + [
         pair
         for dep in ctx.attr.native_assets
         if FlutterInfo in dep
         for pair in dep[FlutterInfo].native_lib_sources.to_list()
     ]
 
-    # Pull CcInfo + SwiftInfo from the per-platform Apple plugin libraries
-    # so the runner aggregator can merge them into the runner's
-    # swift_library compilation/link inputs. Targets in `apple_libs`
-    # declare their target platform via `FlutterApplePluginInfo.platform`
-    # (produced by `flutter_apple_plugin_library`), while `macos_libs` and
-    # `ios_libs` accept platform-specific `CcInfo`/`SwiftInfo` targets
-    # directly. Set `apple_libs` via `select()` on the target platform so
-    # only one platform's swift_library analyzes per build.
-    extra_apple_plugin_libraries = []
-    for lib in ctx.attr.apple_libs:
-        if FlutterApplePluginInfo not in lib:
-            fail(
-                "flutter_plugin: apple_libs entry %s must provide FlutterApplePluginInfo " % lib.label +
-                "(use flutter_apple_plugin_library, or pass platform libraries via macos_libs / ios_libs).",
-            )
-        platform_name = lib[FlutterApplePluginInfo].platform
-        if platform_name not in ("macos", "ios"):
-            fail(
-                "flutter_plugin: apple_libs entry %s has invalid FlutterApplePluginInfo.platform %r " % (
-                    lib.label,
-                    platform_name,
-                ) + "(expected 'macos' or 'ios').",
-            )
-        extra_apple_plugin_libraries.append(struct(
+def _collect_extra_apple_libraries(libs, platform, package_name, attr_name):
+    """Collect one `apple_libs`/`macos_libs`/`ios_libs` attr into extra-library structs."""
+    entries = []
+    for lib in libs:
+        info = lib[FlutterApplePluginInfo] if FlutterApplePluginInfo in lib else None
+        if attr_name == "apple_libs":
+            if info == None:
+                fail(
+                    "flutter_plugin: apple_libs entry %s must provide FlutterApplePluginInfo " % lib.label +
+                    "(use flutter_apple_plugin_library, or pass platform libraries via macos_libs / ios_libs).",
+                )
+            platform_name = info.platform
+            if platform_name not in ("macos", "ios"):
+                fail(
+                    "flutter_plugin: apple_libs entry %s has invalid FlutterApplePluginInfo.platform %r " % (
+                        lib.label,
+                        platform_name,
+                    ) + "(expected 'macos' or 'ios').",
+                )
+        else:
+            if info != None and info.platform not in ("", platform):
+                fail(
+                    "flutter_plugin: %s entry %s has FlutterApplePluginInfo.platform = %r, expected '%s'." % (
+                        attr_name,
+                        lib.label,
+                        info.platform,
+                        platform,
+                    ),
+                )
+            platform_name = platform
+        entries.append(struct(
             platform = platform_name,
             label = lib.label,
             cc_info = lib[CcInfo] if CcInfo in lib else None,
             swift_info = lib[SwiftInfo] if SwiftInfo in lib else None,
             files = lib[DefaultInfo].files,
-            sdk_frameworks = tuple(lib[FlutterApplePluginInfo].sdk_frameworks),
-            sdk_dylibs = tuple(lib[FlutterApplePluginInfo].sdk_dylibs),
+            sdk_frameworks = tuple(info.sdk_frameworks) if info != None else (),
+            sdk_dylibs = tuple(info.sdk_dylibs) if info != None else (),
             package = package_name,
         ))
-    for lib in ctx.attr.macos_libs:
-        if FlutterApplePluginInfo in lib and lib[FlutterApplePluginInfo].platform not in ("", "macos"):
-            fail(
-                "flutter_plugin: macos_libs entry %s has FlutterApplePluginInfo.platform = %r, expected 'macos'." % (
-                    lib.label,
-                    lib[FlutterApplePluginInfo].platform,
-                ),
-            )
-        extra_apple_plugin_libraries.append(struct(
-            platform = "macos",
-            label = lib.label,
-            cc_info = lib[CcInfo] if CcInfo in lib else None,
-            swift_info = lib[SwiftInfo] if SwiftInfo in lib else None,
-            files = lib[DefaultInfo].files,
-            sdk_frameworks = tuple(lib[FlutterApplePluginInfo].sdk_frameworks) if FlutterApplePluginInfo in lib else (),
-            sdk_dylibs = tuple(lib[FlutterApplePluginInfo].sdk_dylibs) if FlutterApplePluginInfo in lib else (),
-            package = package_name,
-        ))
-    for lib in ctx.attr.ios_libs:
-        if FlutterApplePluginInfo in lib and lib[FlutterApplePluginInfo].platform not in ("", "ios"):
-            fail(
-                "flutter_plugin: ios_libs entry %s has FlutterApplePluginInfo.platform = %r, expected 'ios'." % (
-                    lib.label,
-                    lib[FlutterApplePluginInfo].platform,
-                ),
-            )
-        extra_apple_plugin_libraries.append(struct(
-            platform = "ios",
-            label = lib.label,
-            cc_info = lib[CcInfo] if CcInfo in lib else None,
-            swift_info = lib[SwiftInfo] if SwiftInfo in lib else None,
-            files = lib[DefaultInfo].files,
-            sdk_frameworks = tuple(lib[FlutterApplePluginInfo].sdk_frameworks) if FlutterApplePluginInfo in lib else (),
-            sdk_dylibs = tuple(lib[FlutterApplePluginInfo].sdk_dylibs) if FlutterApplePluginInfo in lib else (),
-            package = package_name,
-        ))
+    return entries
 
-    # Pull source bundles from linux + windows plugin libraries so the
-    # corresponding runner can fold them into its compile.
-    extra_linux_plugin_libraries = []
-    for lib in ctx.attr.linux_libs:
-        if FlutterLinuxPluginInfo not in lib:
-            fail("flutter_plugin: linux_libs entry %s must provide FlutterLinuxPluginInfo (use flutter_linux_plugin_library)." % lib.label)
-        info = lib[FlutterLinuxPluginInfo]
-        extra_linux_plugin_libraries.append(struct(
+def _extra_apple_plugin_libraries(ctx, package_name):
+    """Collect the `apple_libs`, `macos_libs` and `ios_libs` channels."""
+    return (
+        _collect_extra_apple_libraries(ctx.attr.apple_libs, "", package_name, "apple_libs") +
+        _collect_extra_apple_libraries(ctx.attr.macos_libs, "macos", package_name, "macos_libs") +
+        _collect_extra_apple_libraries(ctx.attr.ios_libs, "ios", package_name, "ios_libs")
+    )
+
+def _collect_desktop_plugin_libraries(libs, provider, provider_name, rule_name, attr_name, package_name):
+    """Collect one `linux_libs`/`windows_libs` attr into source-bundle structs."""
+    entries = []
+    for lib in libs:
+        if provider not in lib:
+            fail("flutter_plugin: %s entry %s must provide %s (use %s)." % (attr_name, lib.label, provider_name, rule_name))
+        info = lib[provider]
+        entries.append(struct(
             label = lib.label,
             srcs = info.srcs,
             hdrs = info.hdrs,
             include_dirs = info.include_dirs,
             package = package_name,
         ))
+    return entries
 
-    extra_windows_plugin_libraries = []
-    for lib in ctx.attr.windows_libs:
-        if FlutterWindowsPluginInfo not in lib:
-            fail("flutter_plugin: windows_libs entry %s must provide FlutterWindowsPluginInfo (use flutter_windows_plugin_library)." % lib.label)
-        info = lib[FlutterWindowsPluginInfo]
-        extra_windows_plugin_libraries.append(struct(
-            label = lib.label,
-            srcs = info.srcs,
-            hdrs = info.hdrs,
-            include_dirs = info.include_dirs,
-            package = package_name,
-        ))
+def _extra_linux_plugin_libraries(ctx, package_name):
+    return _collect_desktop_plugin_libraries(
+        ctx.attr.linux_libs,
+        FlutterLinuxPluginInfo,
+        "FlutterLinuxPluginInfo",
+        "flutter_linux_plugin_library",
+        "linux_libs",
+        package_name,
+    )
 
-    extra_android_plugin_libraries = []
+def _extra_windows_plugin_libraries(ctx, package_name):
+    return _collect_desktop_plugin_libraries(
+        ctx.attr.windows_libs,
+        FlutterWindowsPluginInfo,
+        "FlutterWindowsPluginInfo",
+        "flutter_windows_plugin_library",
+        "windows_libs",
+        package_name,
+    )
+
+def _extra_android_plugin_libraries(ctx, package_name):
+    entries = []
     for lib in ctx.attr.android_libs:
-        extra_android_plugin_libraries.append(struct(
+        entries.append(struct(
             label = lib.label,
             java_info = lib[JavaInfo],
             resources_info = lib[StarlarkAndroidResourcesInfo] if StarlarkAndroidResourcesInfo in lib else None,
             resource_class_jars = lib[AndroidLibraryResourceClassJarProvider].jars if AndroidLibraryResourceClassJarProvider in lib else None,
             package = package_name,
         ))
+    return entries
 
-    # Native Assets contributed by this plugin (or its parent ext/ overlay).
-    extra_native_assets = []
-    for dep in ctx.attr.native_assets:
-        if FlutterNativeAssetInfo not in dep:
+def _collect_plugin_asset_infos(assets, provider, provider_name, rule_name, attr_name):
+    """Collect one `native_assets`/`data_assets` attr into provider structs."""
+    infos = []
+    for dep in assets:
+        if provider not in dep:
             fail(
-                "flutter_plugin: native_assets entry %s must provide " % dep.label +
-                "FlutterNativeAssetInfo (use flutter_native_asset).",
+                "flutter_plugin: %s entry %s must provide " % (attr_name, dep.label) +
+                "%s (use %s)." % (provider_name, rule_name),
             )
-        extra_native_assets.append(dep[FlutterNativeAssetInfo])
+        infos.append(dep[provider])
+    return infos
 
-    extra_data_assets = []
-    for dep in ctx.attr.data_assets:
-        if FlutterDataAssetInfo not in dep:
-            fail(
-                "flutter_plugin: data_assets entry %s must provide " % dep.label +
-                "FlutterDataAssetInfo (use flutter_data_asset).",
-            )
-        extra_data_assets.append(dep[FlutterDataAssetInfo])
+def _extra_native_assets(ctx):
+    return _collect_plugin_asset_infos(
+        ctx.attr.native_assets,
+        FlutterNativeAssetInfo,
+        "FlutterNativeAssetInfo",
+        "flutter_native_asset",
+        "native_assets",
+    )
 
-    extra_apple_privacy_manifests = list(ctx.files.apple_privacy_files)
+def _extra_data_assets(ctx):
+    return _collect_plugin_asset_infos(
+        ctx.attr.data_assets,
+        FlutterDataAssetInfo,
+        "FlutterDataAssetInfo",
+        "flutter_data_asset",
+        "data_assets",
+    )
 
-    # Pub-package asset contributions (fonts/assets/shaders from the parsed
-    # flutter:-block, applicable to plugins that also ship icon fonts or
-    # bundled assets — same shape as flutter_library). asset_pkg uses the
-    # rule's `package_name` attr verbatim (empty = bare paths).
-    asset_pkg = ctx.attr.package_name
-    extra_pub_fonts, extra_pub_assets, extra_pub_shaders = build_pub_contributions(
-        asset_pkg,
+def _plugin_pub_contributions(ctx):
+    """Build this plugin's pub-package asset contributions (fonts/assets/shaders)."""
+    return build_pub_contributions(
+        ctx.attr.package_name,
         ctx.attr.fonts_json,
         ctx.attr.font_files,
         ctx.attr.pkg_assets,
@@ -281,9 +266,8 @@ def _flutter_plugin_impl(ctx):
         ctx.files.shader_includes,
     )
 
-    # `resources` names the non-Dart remainder of `lib/`; a Dart source there
-    # is a mis-filed `srcs` entry, and identical paths with identical
-    # extensions would otherwise collide silently. Mirrors `dart_library`.
+def _check_plugin_resources(ctx):
+    """Reject Dart sources mis-filed under `resources` instead of `srcs`."""
     for f in ctx.files.resources:
         if f.extension == "dart":
             fail(
@@ -292,11 +276,8 @@ def _flutter_plugin_impl(ctx):
                  "`srcs`.") % (ctx.label, f.short_path),
             )
 
-    # A plugin contributes on more channels than a library does, but the shape
-    # is the same: name what this target adds, and let each constructor merge
-    # the dependencies. `shaders` is absent here — a plugin has no such
-    # attribute — which is a thing the caller simply does not say, rather than
-    # something the merge has to probe for.
+def _plugin_dart_infos(ctx, package_name, lib_root):
+    """The Dart-channel providers of a plugin: files, `dart_info`, analyzable info."""
     return [
         DefaultInfo(files = depset(ctx.files.srcs + ctx.files.resources)),
         dart_info(
@@ -313,26 +294,108 @@ def _flutter_plugin_impl(ctx):
             link_hook = ctx.file.link_hook,
         ),
         flutter_analyzable_info(ctx, package_name, lib_root),
-        flutter_info(
-            deps = ctx.attr.deps,
-            asset_dirs = ctx.files.assets,
-            assets = library_asset_entries(ctx.label, package_name, ctx.files.assets),
-            plugins = [plugin],
-            native_libs = native_libs,
-            binding_contracts = binding_contracts,
-            native_lib_sources = native_lib_sources,
-            apple_plugin_libraries = extra_apple_plugin_libraries,
-            android_plugin_libraries = extra_android_plugin_libraries,
-            linux_plugin_libraries = extra_linux_plugin_libraries,
-            windows_plugin_libraries = extra_windows_plugin_libraries,
-            apple_privacy_manifests = extra_apple_privacy_manifests,
-            native_assets = extra_native_assets,
-            data_assets = extra_data_assets,
-            pub_fonts = extra_pub_fonts,
-            pub_assets = extra_pub_assets,
-            pub_shaders = extra_pub_shaders,
-        ),
     ]
+
+def _plugin_flutter_info(ctx, package_name, plugin, extra):
+    """The `FlutterInfo` provider aggregating every channel the plugin adds to."""
+    return flutter_info(
+        deps = ctx.attr.deps,
+        asset_dirs = ctx.files.assets,
+        assets = library_asset_entries(ctx.label, package_name, ctx.files.assets),
+        plugins = [plugin],
+        native_libs = extra.native_libs,
+        binding_contracts = extra.binding_contracts,
+        native_lib_sources = extra.native_lib_sources,
+        apple_plugin_libraries = extra.apple,
+        android_plugin_libraries = extra.android,
+        linux_plugin_libraries = extra.linux,
+        windows_plugin_libraries = extra.windows,
+        apple_privacy_manifests = extra.privacy,
+        native_assets = extra.native_assets,
+        data_assets = extra.data_assets,
+        pub_fonts = extra.pub_fonts,
+        pub_assets = extra.pub_assets,
+        pub_shaders = extra.pub_shaders,
+    )
+
+def _flutter_plugin_impl(ctx):
+    package_name = derive_package_name(ctx.attr.package_name, ctx.label.package, ctx.label.name)
+    lib_root = derive_lib_root(ctx.label.workspace_root, ctx.label.package)
+
+    # Build plugin metadata.
+    # If plugin_platforms_json is set, decode it directly.
+    # Otherwise construct from scalar attrs (for manual BUILD files).
+    plugin = build_plugin_struct(
+        name = package_name,
+        plugin_platforms = _plugin_platforms_metadata(ctx),
+    )
+
+    # Collect native libs from native_deps.
+    native_libs = collect_native_libs(ctx.attr.native_deps)
+
+    # And what their bindings were generated from, for the ones whose build said
+    # so. Carried to the app rather than used here: a plugin bundles nothing, and
+    # the app is where the dev config that a reload reads is written.
+    binding_contracts = collect_binding_contracts(ctx.attr.native_deps)
+
+    # `native_deps` and the Native Assets alike: an asset's own rule pairs the
+    # library it declares with its sources, on its `FlutterInfo`.
+    native_lib_sources = _collect_native_lib_sources(ctx)
+
+    # Pull CcInfo + SwiftInfo from the per-platform Apple plugin libraries
+    # so the runner aggregator can merge them into the runner's
+    # swift_library compilation/link inputs. Targets in `apple_libs`
+    # declare their target platform via `FlutterApplePluginInfo.platform`
+    # (produced by `flutter_apple_plugin_library`), while `macos_libs` and
+    # `ios_libs` accept platform-specific `CcInfo`/`SwiftInfo` targets
+    # directly. Set `apple_libs` via `select()` on the target platform so
+    # only one platform's swift_library analyzes per build.
+    extra_apple_plugin_libraries = _extra_apple_plugin_libraries(ctx, package_name)
+
+    # Pull source bundles from linux + windows plugin libraries so the
+    # corresponding runner can fold them into its compile.
+    extra_linux_plugin_libraries = _extra_linux_plugin_libraries(ctx, package_name)
+    extra_windows_plugin_libraries = _extra_windows_plugin_libraries(ctx, package_name)
+    extra_android_plugin_libraries = _extra_android_plugin_libraries(ctx, package_name)
+
+    # Native Assets contributed by this plugin (or its parent ext/ overlay).
+    extra_native_assets = _extra_native_assets(ctx)
+    extra_data_assets = _extra_data_assets(ctx)
+
+    extra_apple_privacy_manifests = list(ctx.files.apple_privacy_files)
+
+    # Pub-package asset contributions (fonts/assets/shaders from the parsed
+    # flutter:-block, applicable to plugins that also ship icon fonts or
+    # bundled assets — same shape as flutter_library). asset_pkg uses the
+    # rule's `package_name` attr verbatim (empty = bare paths).
+    extra_pub_fonts, extra_pub_assets, extra_pub_shaders = _plugin_pub_contributions(ctx)
+
+    # `resources` names the non-Dart remainder of `lib/`; a Dart source there
+    # is a mis-filed `srcs` entry, and identical paths with identical
+    # extensions would otherwise collide silently. Mirrors `dart_library`.
+    _check_plugin_resources(ctx)
+
+    # A plugin contributes on more channels than a library does, but the shape
+    # is the same: name what this target adds, and let each constructor merge
+    # the dependencies. `shaders` is absent here — a plugin has no such
+    # attribute — which is a thing the caller simply does not say, rather than
+    # something the merge has to probe for.
+    extra = struct(
+        native_libs = native_libs,
+        binding_contracts = binding_contracts,
+        native_lib_sources = native_lib_sources,
+        apple = extra_apple_plugin_libraries,
+        android = extra_android_plugin_libraries,
+        linux = extra_linux_plugin_libraries,
+        windows = extra_windows_plugin_libraries,
+        privacy = extra_apple_privacy_manifests,
+        native_assets = extra_native_assets,
+        data_assets = extra_data_assets,
+        pub_fonts = extra_pub_fonts,
+        pub_assets = extra_pub_assets,
+        pub_shaders = extra_pub_shaders,
+    )
+    return _plugin_dart_infos(ctx, package_name, lib_root) + [_plugin_flutter_info(ctx, package_name, plugin, extra)]
 
 flutter_plugin = rule(
     implementation = _flutter_plugin_impl,
