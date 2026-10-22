@@ -648,7 +648,7 @@ def _web_compile_program(ctx, flutter_sdk_info, mode, entrypoint, all_srcs, conf
         dart2js_web_sdk_files = dart2js_web_sdk_files,
     )
 
-def _web_tree_shake_kernels(ctx, flutter_sdk_info, shipped_renderers, renderer, mode, user_defines, entrypoint, entrypoint_salt, all_srcs, config_file, dart, dart2js_web_sdk_files, web_compile_inputs):
+def _web_tree_shake_kernels(ctx, flutter_sdk_info, shipped_renderers, mode, user_defines, entrypoint, entrypoint_salt, all_srcs, config_file, dart, dart2js_web_sdk_files, web_compile_inputs):
     """Compiles one icon tree-shake kernel per shipped renderer.
 
     The icon tree-shake kernel must see the web program the dart2js and
@@ -737,7 +737,7 @@ def _web_bundle_assets(ctx, flutter_sdk_info, program, mode, is_debug, user_defi
     tree_shake_key_parts = []
     if ctx.attr.tree_shake_icons and not is_debug and (has_font_tree_shake or has_experiment_kernel):
         icon_renderers = shipped_renderers if has_font_tree_shake else [renderer]
-        kernel_dills, tree_shake_key_parts = _web_tree_shake_kernels(ctx, flutter_sdk_info, icon_renderers, renderer, mode, user_defines, entrypoint, entrypoint_salt, all_srcs, config_file, program.dart, program.dart2js_web_sdk_files, program.web_compile_inputs)
+        kernel_dills, tree_shake_key_parts = _web_tree_shake_kernels(ctx, flutter_sdk_info, icon_renderers, mode, user_defines, entrypoint, entrypoint_salt, all_srcs, config_file, program.dart, program.dart2js_web_sdk_files, program.web_compile_inputs)
 
     flutter_assets = declare_flutter_assets_dir(ctx)
     flutter_build_assets(
@@ -1492,7 +1492,7 @@ def _flutter_web_bundle_impl(ctx):
 
     # Step 7: Assemble into output directory using the Dart bundler tool.
     bundle = _web_assemble_copies(ctx, ctx.attr.web_dir, program, index_html, bootstrap_js, templates.manifest_json, templates.version_json, service_worker_file, flutter_js_file, renderer_files)
-    output_dir, dump_info_file, output_groups = _web_run_bundler(ctx, flutter_sdk_info, program, bundle, flutter_assets, index_html, bootstrap_js, templates.manifest_json, templates.version_json, service_worker_file)
+    output_dir, _dump_info_file, output_groups = _web_run_bundler(ctx, flutter_sdk_info, program, bundle, flutter_assets, index_html, bootstrap_js, templates.manifest_json, templates.version_json, service_worker_file)
 
     analyzable_info = _web_analyzable_info(ctx, lib_root)
 

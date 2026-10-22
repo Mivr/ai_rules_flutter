@@ -23,7 +23,7 @@ load("//flutter/private:flutter_info.bzl", "dedup_plugins")
 load("//flutter/private:flutter_native_assets.bzl", "bridge_dart_code_assets", "collect_bundled_code_asset_files", "write_native_assets_manifest")
 load("//flutter/private:native_sources.bzl", "collect_native_source_pairs")
 
-def _check_aot_supported(ctx, flutter_sdk_info, is_debug):
+def _check_aot_supported(flutter_sdk_info, is_debug):
     """Guards: AOT cross-compilation between desktop OSes is not supported.
 
     target_os is non-empty only for cross-compilation toolchains.
@@ -423,7 +423,7 @@ def _application_default_files(flutter_assets, package_config, native_assets_man
         default_files.append(kernel_dill)
     return default_files
 
-def _application_providers(ctx, flutter_sdk_info, is_debug, kernel_dill, package_config, native_assets_manifest_file, bundled_code_assets, transitive_data_assets, aot_output, debug_info_output, link_hook_validation, flutter_assets, native_libs, plugins, default_files):
+def _application_providers(flutter_sdk_info, is_debug, kernel_dill, package_config, native_assets_manifest_file, bundled_code_assets, transitive_data_assets, aot_output, debug_info_output, link_hook_validation, flutter_assets, native_libs, plugins, default_files):
     """Assembles the result providers for the compiled application."""
     output_groups = {
         "native_assets_manifest": depset([native_assets_manifest_file]),
@@ -470,7 +470,7 @@ def _flutter_application_impl(ctx):
     # profiler names Dart code from the snapshot, not from native symbols.
     strip = ctx.var["COMPILATION_MODE"] == "opt"
 
-    _check_aot_supported(ctx, flutter_sdk_info, is_debug)
+    _check_aot_supported(flutter_sdk_info, is_debug)
 
     platform = _detect_application_platform(ctx)
     target_platform = platform.target_platform
@@ -562,7 +562,7 @@ def _flutter_application_impl(ctx):
     if is_debug and compilation.dev_package_config != None:
         default_files.extend(_write_dev_config(ctx, flutter_sdk_info, compilation, bundled_native_libs, binding_contracts, native_lib_sources, contract_files))
 
-    return _application_providers(ctx, flutter_sdk_info, is_debug, kernel_dill, package_config, native_assets_manifest_file, bundled_code_assets, transitive_data_assets, aot_output, debug_info_output, link_hook_validation, flutter_assets, native_libs, plugins, default_files)
+    return _application_providers(flutter_sdk_info, is_debug, kernel_dill, package_config, native_assets_manifest_file, bundled_code_assets, transitive_data_assets, aot_output, debug_info_output, link_hook_validation, flutter_assets, native_libs, plugins, default_files)
 
 flutter_application = rule(
     implementation = _flutter_application_impl,

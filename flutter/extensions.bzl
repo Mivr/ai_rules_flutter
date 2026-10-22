@@ -493,7 +493,7 @@ def _create_sdk_spokes(hub_name, sdk_flutter, all_package_names, toolchain_info,
             source_strip_prefix = source_strip_prefix(flutter_version, sdk_source_url),
         )
 
-def _register_pub_hub(module_ctx, mod, pub_tag, selected_info, merged, user_overlay_roots):
+def _register_pub_hub(module_ctx, pub_tag, selected_info, merged, user_overlay_roots):
     """Resolves one `flutter.pub` tag into spoke repos plus the hub repo."""
     hub_name = pub_tag.name
 
@@ -567,7 +567,7 @@ def _toolchain_extension(module_ctx):
     # Handle flutter.pub() tags — resolve pubspec.lock with Flutter SDK support.
     for mod in module_ctx.modules:
         for pub_tag in mod.tags.pub:
-            _register_pub_hub(module_ctx, mod, pub_tag, selected_info, merged, user_overlay_roots)
+            _register_pub_hub(module_ctx, pub_tag, selected_info, merged, user_overlay_roots)
 
     # Don't declare root_module_direct_deps: flutter_register_toolchains creates
     # many repos (iOS, Android, web, desktop, cross-compile per platform) and

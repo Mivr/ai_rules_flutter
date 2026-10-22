@@ -581,7 +581,7 @@ def _ios_dev_infoplists(name, actual_info_plist, internal_tags):
         "//conditions:default": ["__%s_info_plist_dev" % name],
     })
 
-def _ios_emit_rules_apple_bundle(name, display_name, bundle_id, families, minimum_os_version, version, selected_infoplists, actual_launch_storyboard, app_icons, resources, provisioning_profile, entitlements, engine_target, tags, visibility, kwargs):
+def _ios_emit_rules_apple_bundle(name, display_name, bundle_id, families, minimum_os_version, version, selected_infoplists, actual_launch_storyboard, app_icons, resources, provisioning_profile, entitlements, tags, visibility, kwargs):
     """Emits the final rules_apple ios_application bundle target."""
     ios_application(
         name = name,
@@ -914,7 +914,7 @@ def flutter_ios_app(
 
     # 11. Final bundle target — rules_apple (default) or explicit opt-in xtool.
     if backend == "rules_apple":
-        _ios_emit_rules_apple_bundle(name, display_name, bundle_id, families, minimum_os_version, version, selected_infoplists, actual_launch_storyboard, app_icons, resources, provisioning_profile, entitlements, engine_target, tags, visibility, kwargs)
+        _ios_emit_rules_apple_bundle(name, display_name, bundle_id, families, minimum_os_version, version, selected_infoplists, actual_launch_storyboard, app_icons, resources, provisioning_profile, entitlements, tags, visibility, kwargs)
     else:
         _ios_emit_xtool_bundle(name, display_name, bundle_id, families, minimum_os_version, version, invalid_version_error, selected_infoplists, actual_launch_storyboard, app_icons, resources, discovered_main_storyboard, runner_srcs, runner_deps, engine_target, entitlements, provisioning_profile, tags, visibility, kwargs)
 
