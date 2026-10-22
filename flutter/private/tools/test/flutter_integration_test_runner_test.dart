@@ -354,6 +354,42 @@ void main() {
         }
       },
     );
+
+    test('answers 500 when FontManifest.json is corrupted', () async {
+      File(
+        '${tmpDir.path}/assets/FontManifest.json',
+      ).writeAsStringSync('{not json');
+      final client = HttpClient();
+      try {
+        final req = await client.getUrl(
+          Uri.parse(
+            'http://127.0.0.1:${server.port}/assets/FontManifest.json',
+          ),
+        );
+        final res = await req.close();
+        expect(res.statusCode, HttpStatus.internalServerError);
+        await res.drain<void>();
+      } finally {
+        client.close(force: true);
+      }
+    });
+
+    test('answers 500 when the bundle entry cannot be read', () async {
+      final secret = File('${tmpDir.path}/secret.txt')
+        ..writeAsStringSync('secret');
+      Process.runSync('chmod', ['000', secret.path]);
+      final client = HttpClient();
+      try {
+        final req = await client.getUrl(
+          Uri.parse('http://127.0.0.1:${server.port}/secret.txt'),
+        );
+        final res = await req.close();
+        expect(res.statusCode, HttpStatus.internalServerError);
+        await res.drain<void>();
+      } finally {
+        client.close(force: true);
+      }
+    });
   });
 
   group('runIntegrationSuite', () {
@@ -648,5 +684,105 @@ void main() {
         expect(androidEnv['TZ'], 'UTC');
       },
     );
+  });
+
+  group('decodeDeclaredEnv', () {
+    test('decodes a JSON object map and treats missing input as empty', () {
+      expect(
+        runner.decodeDeclaredEnv('{"MY_VAR": "declared", "N": 42}'),
+        {'MY_VAR': 'declared', 'N': '42'},
+      );
+      expect(runner.decodeDeclaredEnv(null), isEmpty);
+      expect(runner.decodeDeclaredEnv('  '), isEmpty);
+    });
+
+    test('treats malformed or non-object payloads as no declared env', () {
+      expect(runner.decodeDeclaredEnv('{not json'), isEmpty);
+      expect(runner.decodeDeclaredEnv('[1, 2]'), isEmpty);
+    });
+  });
+
+  group('cleanupQuietly', () {
+    test('runs the action and swallows a filesystem race', () {
+      var ran = false;
+      runner.cleanupQuietly(() {
+        ran = true;
+        throw const FileSystemException('gone', '/tmp/.X9-lock');
+      });
+      expect(ran, isTrue);
+    });
+
+    test('lets a bug in the cleanup itself propagate', () {
+      expect(
+        () => runner.cleanupQuietly(() => throw StateError('bug')),
+        throwsStateError,
+      );
+    });
+
+    test('deletes a real temp file', () {
+      final tmpDir = Directory.systemTemp.createTempSync('cleanup_test_');
+      try {
+        final file = File('${tmpDir.path}/scratch')..writeAsStringSync('x');
+        runner.cleanupQuietly(file.deleteSync);
+        expect(file.existsSync(), isFalse);
+      } finally {
+        if (tmpDir.existsSync()) {
+          tmpDir.deleteSync(recursive: true);
+        }
+      }
+    });
+  });
+
+  group('teardownQuietly', () {
+    test('swallows a peer-gone I/O race and an already-closed race', () async {
+      await runner.teardownQuietly(() async {
+        throw const FileSystemException('connection reset');
+      });
+      await runner.teardownQuietly(() async => throw StateError('closed'));
+    });
+
+    test('lets an unexpected teardown error propagate', () async {
+      await expectLater(
+        runner.teardownQuietly(() async => throw ArgumentError('bug')),
+        throwsArgumentError,
+      );
+    });
+  });
+
+  group('serveInternalError', () {
+    test('swallows answering an already-closed response', () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final handled = Completer<Object?>();
+      server.listen((req) async {
+        final response = req.response;
+        response.statusCode = HttpStatus.ok;
+        await response.close();
+        try {
+          await runner.serveInternalError(response);
+          if (!handled.isCompleted) handled.complete(null);
+        } catch (e) {
+          if (!handled.isCompleted) handled.complete(e);
+        }
+      });
+      try {
+        final client = HttpClient();
+        try {
+          final req = await client.getUrl(
+            Uri.parse('http://127.0.0.1:${server.port}/'),
+          );
+          final res = await req.close();
+          expect(res.statusCode, HttpStatus.ok);
+          await res.drain<void>();
+        } finally {
+          client.close(force: true);
+        }
+        expect(
+          await handled.future.timeout(const Duration(seconds: 10)),
+          isNull,
+        );
+      } finally {
+        await server.close(force: true);
+      }
+    });
   });
 }

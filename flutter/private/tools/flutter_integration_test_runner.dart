@@ -228,7 +228,14 @@ AndroidPlatformLauncher _androidLauncherFromEnv(
 
 /// Decodes the JSON-encoded declared environment forwarded by
 /// `flutter_integration_test.bzl` (`FLUTTER_INTEGRATION_TEST_DECLARED_ENV`).
-Map<String, String> _decodeDeclaredEnv(String? raw) {
+/// Decodes the JSON map stored in a `*_DECLARED_ENV` launcher variable.
+///
+/// Public, like [buildChromeArguments], because the test reaches it
+/// directly. A missing variable or a malformed payload decodes to an empty
+/// map: a build that received no usable declared environment falls back to
+/// inherited-environment-only resolution, and a missing variable surfaces
+/// later as a concrete lookup error instead.
+Map<String, String> decodeDeclaredEnv(String? raw) {
   if (raw == null || raw.trim().isEmpty) return const <String, String>{};
   try {
     final decoded = json.decode(raw);
@@ -237,8 +244,8 @@ Map<String, String> _decodeDeclaredEnv(String? raw) {
         (key, value) => MapEntry(key.toString(), value.toString()),
       );
     }
-  } catch (_) {
-    // Ignore malformed payloads; fall back to an empty map.
+  } on FormatException {
+    // Corrupted declared environment behaves like none at all.
   }
   return const <String, String>{};
 }
@@ -259,6 +266,40 @@ Object suiteTimeout(String? bazelTestTimeout) {
     'duration': Duration(seconds: seconds).inMicroseconds,
     'scaleFactor': null,
   };
+}
+
+/// Best-effort synchronous filesystem cleanup.
+///
+/// Swallows only [FileSystemException]: a file that vanished between the
+/// `existsSync` check and the deletion is a race with the platform, not a
+/// failure of the run. Anything else is a bug in the cleanup itself and
+/// propagates.
+///
+/// Public, like [buildChromeArguments], because the test reaches it directly.
+void cleanupQuietly(void Function() action) {
+  try {
+    action();
+  } on FileSystemException catch (_) {
+    // Best-effort cleanup only; anything else propagates by design.
+  }
+}
+
+/// Best-effort asynchronous teardown step.
+///
+/// Swallows only the races a closing resource reports — [IOException] when
+/// the peer went away first, [StateError] when the close already happened —
+/// so a bug in teardown itself still surfaces instead of masking the run's
+/// real result from a `finally` block.
+///
+/// Public, like [buildChromeArguments], because the test reaches it directly.
+Future<void> teardownQuietly(Future<void> Function() step) async {
+  try {
+    await step();
+  } on IOException catch (_) {
+    // Best-effort teardown only; anything else propagates by design.
+  } on StateError catch (_) {
+    // Best-effort teardown only; anything else propagates by design.
+  }
 }
 
 /// Builds the command-line flags passed to the hermetic `chrome-headless-shell`.
@@ -607,7 +648,7 @@ class WebPlatformLauncher implements PlatformLauncher {
       url: url,
       userDataDir: userDataDir.path,
     );
-    final declaredEnv = _decodeDeclaredEnv(
+    final declaredEnv = decodeDeclaredEnv(
       Platform.environment['FLUTTER_INTEGRATION_TEST_DECLARED_ENV'],
     );
     final tz = Platform.environment['TZ'];
@@ -641,9 +682,7 @@ class WebPlatformLauncher implements PlatformLauncher {
     final dir = _scratchDir;
     _scratchDir = null;
     if (dir != null && dir.existsSync()) {
-      try {
-        dir.deleteSync(recursive: true);
-      } catch (_) {}
+      cleanupQuietly(() => dir.deleteSync(recursive: true));
     }
   }
 }
@@ -814,7 +853,7 @@ class LinuxPlatformLauncher implements PlatformLauncher {
     _displayNumber = displayNumber;
 
     final harnessUrl = 'ws://127.0.0.1:$harnessPort$integrationWebSocketPath';
-    final declaredEnv = _decodeDeclaredEnv(
+    final declaredEnv = decodeDeclaredEnv(
       Platform.environment['FLUTTER_INTEGRATION_TEST_DECLARED_ENV'],
     );
     final tz = Platform.environment['TZ'];
@@ -850,33 +889,31 @@ class LinuxPlatformLauncher implements PlatformLauncher {
     _xvfbProcess = null;
     if (xvfb != null) {
       xvfb.kill(ProcessSignal.sigkill);
-      try {
-        await xvfb.exitCode.timeout(
+      await teardownQuietly(
+        () => xvfb.exitCode.timeout(
           const Duration(seconds: 2),
           onTimeout: () => 0,
-        );
-      } catch (_) {}
+        ),
+      );
     }
 
     final display = _displayNumber;
     _displayNumber = null;
     if (display != null) {
-      try {
+      cleanupQuietly(() {
         final lockFile = File('/tmp/.X$display-lock');
         if (lockFile.existsSync()) lockFile.deleteSync();
-      } catch (_) {}
-      try {
+      });
+      cleanupQuietly(() {
         final sockFile = File('/tmp/.X11-unix/X$display');
         if (sockFile.existsSync()) sockFile.deleteSync();
-      } catch (_) {}
+      });
     }
 
     final dir = _scratchDir;
     _scratchDir = null;
     if (dir != null && dir.existsSync()) {
-      try {
-        dir.deleteSync(recursive: true);
-      } catch (_) {}
+      cleanupQuietly(() => dir.deleteSync(recursive: true));
     }
   }
 }
@@ -910,12 +947,8 @@ void verifyKvmAvailable(String kvmPath) {
       '`/etc/udev/rules.d/99-kvm4all.rules` or membership in the `kvm` group).',
     );
   } finally {
-    try {
-      reader?.closeSync();
-    } catch (_) {}
-    try {
-      writer?.closeSync();
-    } catch (_) {}
+    cleanupQuietly(() => reader?.closeSync());
+    cleanupQuietly(() => writer?.closeSync());
   }
 }
 
@@ -1116,12 +1149,9 @@ allocateAndroidEmulatorPorts() async {
         adbPort: candidateAdb,
       );
     } on SocketException {
-      try {
-        await s1?.close();
-      } catch (_) {}
-      try {
-        await s2?.close();
-      } catch (_) {}
+      // A half-bound probe pair must not leak sockets into the next attempt.
+      await teardownQuietly(() async => await s1?.close());
+      await teardownQuietly(() async => await s2?.close());
     }
   }
   throw StateError(
@@ -1427,7 +1457,7 @@ class AndroidPlatformLauncher implements PlatformLauncher {
     final scratch = prepared.scratch;
 
     final ports = await allocateAndroidEmulatorPorts();
-    final declaredEnv = _decodeDeclaredEnv(
+    final declaredEnv = decodeDeclaredEnv(
       Platform.environment['FLUTTER_INTEGRATION_TEST_DECLARED_ENV'],
     );
     final tz = Platform.environment['TZ'];
@@ -1514,8 +1544,10 @@ class AndroidPlatformLauncher implements PlatformLauncher {
             _logcatProcess?.kill(ProcessSignal.sigkill);
           }
         }
-      } catch (_) {
+      } on IOException {
         // Ignore transient adb errors during teardown.
+      } on StateError {
+        // Ignore races with dispose() clearing the runtime environment.
       } finally {
         checkInFlight = false;
       }
@@ -1570,30 +1602,33 @@ class AndroidPlatformLauncher implements PlatformLauncher {
     _logcatProcess = null;
     if (logcat != null) {
       logcat.kill(ProcessSignal.sigkill);
-      try {
-        await logcat.exitCode.timeout(
+      await teardownQuietly(
+        () => logcat.exitCode.timeout(
           const Duration(seconds: 2),
           onTimeout: () => 0,
-        );
-      } catch (_) {}
+        ),
+      );
     }
 
     final emulator = _emulatorProcess;
     _emulatorProcess = null;
     if (emulator != null) {
       emulator.kill(ProcessSignal.sigkill);
-      try {
-        await emulator.exitCode.timeout(
+      await teardownQuietly(
+        () => emulator.exitCode.timeout(
           const Duration(seconds: 5),
           onTimeout: () => 0,
-        );
-      } catch (_) {}
+        ),
+      );
     }
 
     final env = _runtimeEnv;
     _runtimeEnv = null;
     if (env != null && File(adbBinary).existsSync()) {
-      try {
+      // Best-effort: a stuck daemon only costs the next run seconds of
+      // `adb start-server`; a teardown failure here must never mask the
+      // integration result the `finally` block is unwinding.
+      await teardownQuietly(() async {
         final killProc = await Process.start(
           adbBinary,
           const <String>['kill-server'],
@@ -1607,15 +1642,13 @@ class AndroidPlatformLauncher implements PlatformLauncher {
             return 0;
           },
         );
-      } catch (_) {}
+      });
     }
 
     final dir = _scratchDir;
     _scratchDir = null;
     if (dir != null && dir.existsSync()) {
-      try {
-        dir.deleteSync(recursive: true);
-      } catch (_) {}
+      cleanupQuietly(() => dir.deleteSync(recursive: true));
     }
   }
 }
@@ -1662,11 +1695,31 @@ Future<void> serveWebBundleRequest(
     }
 
     await _serveBundleFile(request, file, relPath);
-  } catch (_) {
-    try {
-      response.statusCode = HttpStatus.internalServerError;
-      await response.close();
-    } catch (_) {}
+  } on FileSystemException {
+    // The bundle file vanished or became unreadable mid-serve.
+    await serveInternalError(response);
+  } on FormatException {
+    // A corrupted FontManifest.json fails the request, not the server.
+    await serveInternalError(response);
+  } catch (e) {
+    // Containment for anything unexpected: answer 500 and keep serving so
+    // one bad request cannot wedge the whole integration run.
+    stderr.writeln('flutter_integration_test: web bundle serve failed: $e');
+    await serveInternalError(response);
+  }
+}
+
+/// Answers [response] with a 500, swallowing the races of answering a
+/// response the failed write already closed: the original failure is the one
+/// that matters.
+///
+/// Public, like [buildChromeArguments], because the test reaches it directly.
+Future<void> serveInternalError(HttpResponse response) async {
+  try {
+    response.statusCode = HttpStatus.internalServerError;
+    await response.close();
+  } on StateError {
+    // The failed write already answered or closed the response.
   }
 }
 
@@ -1840,16 +1893,10 @@ class _IntegrationHarness {
   }
 
   Future<void> dispose() async {
-    try {
-      await _ws?.close();
-    } catch (_) {}
-    try {
-      await _httpSub?.cancel();
-    } catch (_) {}
+    await teardownQuietly(() async => await _ws?.close());
+    await teardownQuietly(() async => await _httpSub?.cancel());
     _process?.kill(ProcessSignal.sigkill);
-    try {
-      await _server.close(force: true);
-    } catch (_) {}
+    await teardownQuietly(() => _server.close(force: true));
     await _launcher.dispose();
   }
 
@@ -2025,9 +2072,7 @@ class _IntegrationHarness {
   /// Tells the suite to close, closes the socket, and waits out the target.
   Future<void> _shutdownTarget() async {
     _send(0, {'type': 'close'});
-    try {
-      await _ws?.close();
-    } catch (_) {}
+    await teardownQuietly(() async => await _ws?.close());
 
     _process?.kill(ProcessSignal.sigkill);
     await _process!.exitCode.timeout(
