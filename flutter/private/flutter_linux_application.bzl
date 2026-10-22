@@ -199,6 +199,124 @@ def _flutter_linux_runner_lib_impl(ctx):
         executable = runner_binary,
     )]
 
+def _find_linux_engine_so(engine_files):
+    """Separates the engine shared library from its headers."""
+    engine_so = None
+    header_files = []
+    for f in engine_files:
+        if f.basename == "libflutter_linux_gtk.so":
+            engine_so = f
+        elif f.path.endswith(".h"):
+            header_files.append(f)
+
+    if not engine_so:
+        fail("libflutter_linux_gtk.so not found in engine files — the Flutter " +
+             "engine archive may have changed its layout.")
+    return engine_so, header_files
+
+def _linux_sysroot_flags(linux_sysroot, target_arch):
+    """Computes GTK3 include dirs, link flags, libraries and sysroot files.
+
+    The sysroot is mandatory — there is no fallback to system headers.
+    """
+    if not linux_sysroot:
+        fail("linux_sysroot is required for Linux runner compilation. " +
+             "The Flutter toolchain must provide a Chromium sysroot for " +
+             "hermetic GTK3 builds. Check that the toolchain is configured correctly.")
+
+    sysroot_files = linux_sysroot.files.to_list()
+
+    # Determine sysroot root path from the first file.
+    sysroot_root = ""
+    if sysroot_files:
+        # Files are at paths like <repo>/usr/include/...; find the root.
+        first = sysroot_files[0].path
+        usr_idx = first.find("/usr/")
+        if usr_idx >= 0:
+            sysroot_root = first[:usr_idx]
+
+    # Determine multiarch triple from target architecture.
+    # For native builds target_arch may be empty; infer from the sysroot paths.
+    arch = target_arch
+    if not arch:
+        # Infer from sysroot file paths: look for a multiarch lib dir.
+        for f in sysroot_files:
+            if "/x86_64-linux-gnu/" in f.path:
+                arch = "x64"
+                break
+            elif "/aarch64-linux-gnu/" in f.path:
+                arch = "arm64"
+                break
+    triple = linux_multiarch_triple(arch) if arch else "x86_64-linux-gnu"
+
+    system_include_dirs = []
+    for subdir in _GTK3_INCLUDE_SUBDIRS:
+        system_include_dirs.append(sysroot_root + "/" + subdir)
+
+    # Arch-specific include dirs (glib and dbus config headers).
+    system_include_dirs.append(sysroot_root + "/usr/lib/" + triple + "/glib-2.0/include")
+    system_include_dirs.append(sysroot_root + "/usr/lib/" + triple + "/dbus-1.0/include")
+
+    # GTK3 libraries, selected as files from the sysroot filegroup and handed to
+    # the linker as explicit inputs (see _GTK3_LIB_FILES for why not `-L`/`-l`).
+    gtk3 = gtk3_sysroot_link_inputs(sysroot_files, sysroot_root + "/usr/lib/" + triple)
+    return struct(
+        system_include_dirs = system_include_dirs,
+        sysroot_link_flags = gtk3.link_flags,
+        gtk_libs = gtk3.libs,
+        sysroot_files = sysroot_files,
+    )
+
+def _append_header_include_dirs(extra_compile, seen, headers):
+    """Appends one `-I` per new header directory."""
+    for h in headers:
+        d = h.path[:h.path.rfind("/")]
+        if d not in seen:
+            seen[d] = True
+            extra_compile.append("-I" + d)
+
+def _linux_runner_include_flags(runner_hdrs, registrant_hdrs, plugin_hdrs, plugin_srcs, plugin_include_dirs):
+    """Builds `-I` flags for registrant, runner and plugin headers.
+
+    Each plugin's package root is computed from one of its source files;
+    plugin-supplied include_dirs (e.g. "linux/include") are appended to it.
+    """
+    extra_compile = []
+    seen = {}
+    for h in registrant_hdrs:
+        d = h.path[:h.path.rfind("/")]
+        if d not in seen:
+            seen[d] = True
+            extra_compile.append("-I" + d)
+
+        # For flutter create registrant files at linux/flutter/generated_plugin_registrant.h,
+        # also add the grandparent dir so #include "flutter/generated_plugin_registrant.h" resolves.
+        if "/flutter/" in h.path:
+            grandparent = d[:d.rfind("/")]
+            if grandparent and grandparent not in seen:
+                seen[grandparent] = True
+                extra_compile.append("-I" + grandparent)
+    _append_header_include_dirs(extra_compile, seen, runner_hdrs)
+    _append_header_include_dirs(extra_compile, seen, plugin_hdrs)
+    plugin_pkg_roots = {}
+    for f in plugin_srcs:
+        path = f.path
+
+        # The package root is the dirname of the linux/<file> source —
+        # walk up until we strip the `/linux/...` suffix.
+        idx = path.rfind("/linux/")
+        if idx > 0:
+            pkg_root = path[:idx]
+            if pkg_root not in plugin_pkg_roots:
+                plugin_pkg_roots[pkg_root] = True
+    for include_dir in plugin_include_dirs:
+        for pkg_root in plugin_pkg_roots.keys():
+            full = pkg_root + "/" + include_dir
+            if full not in seen:
+                seen[full] = True
+                extra_compile.append("-I" + full)
+    return extra_compile
+
 def compile_linux_runner(ctx, runner_srcs, engine_files, defines, linux_sysroot, registrant_srcs = [], registrant_hdrs = [], runner_hdrs = [], target_arch = "", plugin_srcs = [], plugin_hdrs = [], plugin_include_dirs = []):
     """Compile the C++ GTK Linux runner binary.
 
@@ -229,117 +347,22 @@ def compile_linux_runner(ctx, runner_srcs, engine_files, defines, linux_sysroot,
     header_dir = find_engine_header_dir(engine_files, "flutter_linux/flutter_linux.h")
 
     # Find the engine shared library file for the linker.
-    engine_so = None
-    header_files = []
-    for f in engine_files:
-        if f.basename == "libflutter_linux_gtk.so":
-            engine_so = f
-        elif f.path.endswith(".h"):
-            header_files.append(f)
-
-    if not engine_so:
-        fail("libflutter_linux_gtk.so not found in engine files — the Flutter " +
-             "engine archive may have changed its layout.")
+    engine_so, header_files = _find_linux_engine_so(engine_files)
 
     additional_srcs = list(registrant_srcs)
 
     # Compute GTK3 include/link flags from the hermetic Chromium sysroot.
-    # The sysroot is mandatory — we never fall back to system headers.
-    if not linux_sysroot:
-        fail("linux_sysroot is required for Linux runner compilation. " +
-             "The Flutter toolchain must provide a Chromium sysroot for " +
-             "hermetic GTK3 builds. Check that the toolchain is configured correctly.")
-
-    system_include_dirs = []
-    sysroot_link_flags = []
-    sysroot_files = linux_sysroot.files.to_list()
-
-    # Determine sysroot root path from the first file.
-    sysroot_root = ""
-    if sysroot_files:
-        # Files are at paths like <repo>/usr/include/...; find the root.
-        first = sysroot_files[0].path
-        usr_idx = first.find("/usr/")
-        if usr_idx >= 0:
-            sysroot_root = first[:usr_idx]
-
-    # Determine multiarch triple from target architecture.
-    # For native builds target_arch may be empty; infer from the sysroot paths.
-    arch = target_arch
-    if not arch:
-        # Infer from sysroot file paths: look for a multiarch lib dir.
-        for f in sysroot_files:
-            if "/x86_64-linux-gnu/" in f.path:
-                arch = "x64"
-                break
-            elif "/aarch64-linux-gnu/" in f.path:
-                arch = "arm64"
-                break
-    triple = linux_multiarch_triple(arch) if arch else "x86_64-linux-gnu"
-
-    for subdir in _GTK3_INCLUDE_SUBDIRS:
-        system_include_dirs.append(sysroot_root + "/" + subdir)
-
-    # Arch-specific include dirs (glib and dbus config headers).
-    system_include_dirs.append(sysroot_root + "/usr/lib/" + triple + "/glib-2.0/include")
-    system_include_dirs.append(sysroot_root + "/usr/lib/" + triple + "/dbus-1.0/include")
-
-    # GTK3 libraries, selected as files from the sysroot filegroup and handed to
-    # the linker as explicit inputs (see _GTK3_LIB_FILES for why not `-L`/`-l`).
-    gtk3 = gtk3_sysroot_link_inputs(sysroot_files, sysroot_root + "/usr/lib/" + triple)
-    gtk_libs = gtk3.libs
-    sysroot_link_flags = gtk3.link_flags
+    sysroot = _linux_sysroot_flags(linux_sysroot, target_arch)
+    system_include_dirs = sysroot.system_include_dirs
+    sysroot_link_flags = sysroot.sysroot_link_flags
+    gtk_libs = sysroot.gtk_libs
+    sysroot_files = sysroot.sysroot_files
 
     # Include registrant headers and runner headers as additional inputs so
     # #include directives resolve.  Also add their directories to the include
     # path so runner code can do #include "flutter/generated_plugin_registrant.h".
     all_header_files = header_files + registrant_hdrs + runner_hdrs + plugin_hdrs
-    extra_compile = []
-    registrant_include_dirs = {}
-    for h in registrant_hdrs:
-        d = h.path[:h.path.rfind("/")]
-        if d not in registrant_include_dirs:
-            registrant_include_dirs[d] = True
-            extra_compile.append("-I" + d)
-
-        # For flutter create registrant files at linux/flutter/generated_plugin_registrant.h,
-        # also add the grandparent dir so #include "flutter/generated_plugin_registrant.h" resolves.
-        if "/flutter/" in h.path:
-            grandparent = d[:d.rfind("/")]
-            if grandparent and grandparent not in registrant_include_dirs:
-                registrant_include_dirs[grandparent] = True
-                extra_compile.append("-I" + grandparent)
-    for h in runner_hdrs:
-        d = h.path[:h.path.rfind("/")]
-        if d not in registrant_include_dirs:
-            registrant_include_dirs[d] = True
-            extra_compile.append("-I" + d)
-
-    # Plugin header parent dirs and plugin-relative include directories.
-    # Each plugin's package root is computed from one of its source files;
-    # plugin-supplied include_dirs (e.g. "linux/include") are appended to it.
-    plugin_pkg_roots = {}
-    for h in plugin_hdrs:
-        d = h.path[:h.path.rfind("/")]
-        if d not in registrant_include_dirs:
-            registrant_include_dirs[d] = True
-            extra_compile.append("-I" + d)
-    for f in plugin_srcs:
-        path = f.path
-
-        # The package root is the dirname of the linux/<file> source —
-        # walk up until we strip the `/linux/...` suffix.
-        idx = path.rfind("/linux/")
-        if idx > 0:
-            pkg_root = path[:idx]
-            if pkg_root not in plugin_pkg_roots:
-                plugin_pkg_roots[pkg_root] = True
-    for include_dir in plugin_include_dirs:
-        for pkg_root in plugin_pkg_roots.keys():
-            full = pkg_root + "/" + include_dir
-            if full not in registrant_include_dirs:
-                registrant_include_dirs[full] = True
-                extra_compile.append("-I" + full)
+    extra_compile = _linux_runner_include_flags(runner_hdrs, registrant_hdrs, plugin_hdrs, plugin_srcs, plugin_include_dirs)
 
     return compile_and_link_runner(
         ctx = ctx,
