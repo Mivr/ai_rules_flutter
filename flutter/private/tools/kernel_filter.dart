@@ -135,6 +135,101 @@ List<String> withForcedDependencyReport(List<String> cmdArgs) {
   return [...cmdArgs.sublist(0, cmdArgs.length - 1), forced, cmdArgs.last];
 }
 
+/// The compile's declared inputs, read from a `--declared-inputs` manifest.
+///
+/// The manifest lists one exec-root-relative path per line in sections: the
+/// declared sources, then a `# staged` marker with the staging root's
+/// symlinks to them, then `# allowed-reads` with every other file the
+/// compiler may read (the package config, the platform dill, the summary
+/// dills, the native-assets manifest), then `# filesystem-roots` with the
+/// mounted roots the directive guard resolves through, then `# output` with
+/// the output dill. Written by `flutter_kernel_compile_action` from its
+/// Starlark `File` objects. Shared with the incremental worker, which guards
+/// and verifies against the same manifest.
+typedef KernelInputsManifest = ({
+  /// Every path in the manifest's sources section, in order.
+  List<String> sources,
+
+  /// The sources plus the staged spellings: what the compiler may read as
+  /// program inputs.
+  Set<String> declared,
+
+  /// The manifest's `allowed-reads` section (never the compile argv).
+  Set<String> extraAllowed,
+
+  /// The manifest's `filesystem-roots` section.
+  List<String> fsRoots,
+
+  /// The manifest's `# output` entry, or null when absent.
+  String? outputDill,
+});
+
+/// Reads the `--declared-inputs` manifest at [manifestPath].
+KernelInputsManifest readKernelInputsManifest(String manifestPath) {
+  final sources = <String>[];
+  final declared = <String>{};
+  final extraAllowed = <String>{};
+  final fsRoots = <String>[];
+  String? outputDill;
+  var section = 'sources';
+  for (final line in File(manifestPath).readAsLinesSync()) {
+    final path = line.trim().replaceAll(r'\', '/');
+    if (path.isEmpty) continue;
+    if (path.startsWith('#')) {
+      section = switch (path) {
+        '# staged' => 'staged',
+        '# allowed-reads' => 'reads',
+        '# filesystem-roots' => 'roots',
+        '# output' => 'output',
+        _ => 'unknown',
+      };
+      continue;
+    }
+    switch (section) {
+      case 'sources':
+        sources.add(path);
+        declared.add(path);
+      case 'staged':
+        declared.add(path);
+      case 'reads':
+        extraAllowed.add(path);
+      case 'roots':
+        fsRoots.add(path);
+      case 'output':
+        outputDill ??= path;
+      case 'unknown':
+        break;
+    }
+  }
+  return (
+    sources: sources,
+    declared: declared,
+    extraAllowed: extraAllowed,
+    fsRoots: fsRoots,
+    outputDill: outputDill,
+  );
+}
+
+/// The refusal for a compiler read of a file the manifest does not name.
+/// Shared with the incremental worker so both paths refuse with the same
+/// message.
+String undeclaredReadMessage(String line) =>
+    'flutter: the compiler read $line, which is not a declared input of '
+    'this compile. Declare the file in `srcs` (typically '
+    '`glob(["lib/**/*.dart"])`) or stop importing it.';
+
+/// The failure when a successful compile reports no dependency reads at all:
+/// a real compile reads at least its entrypoint, so zero reads means the
+/// report was silenced and the read-set check has nothing to verify. Shared
+/// with the incremental worker so both paths fail closed with the same
+/// message.
+String noDependencyReadsMessage() =>
+    'flutter: the compiler reported no dependency reads, so the read-set '
+    'check has nothing to verify. A real compile reads at least its '
+    'entrypoint: the report was silenced, and the compile controls '
+    '`--print-incremental-dependencies` itself. Remove any silencer from '
+    '`extra_flags` and rebuild.';
+
 Future<void> main(List<String> argv) async {
   exit(await runFiltered(argv, stdout, stderr));
 }
@@ -196,41 +291,15 @@ Future<int> runFiltered(
   // same bytes), while the read set allows the source spellings, the staged
   // spellings, and the allowed reads — all of them manifest entries, never
   // argv values.
-  final sources = <String>[];
-  final declared = <String>{};
-  final extraAllowed = <String>{};
-  final fsRoots = <String>[];
-  String? outputDill;
-  var section = 'sources';
-  for (final line in manifest.readAsLinesSync()) {
-    final path = line.trim().replaceAll(r'\', '/');
-    if (path.isEmpty) continue;
-    if (path.startsWith('#')) {
-      section = switch (path) {
-        '# staged' => 'staged',
-        '# allowed-reads' => 'reads',
-        '# filesystem-roots' => 'roots',
-        '# output' => 'output',
-        _ => 'unknown',
-      };
-      continue;
-    }
-    switch (section) {
-      case 'sources':
-        declared.add(path);
-        if (path.endsWith('.dart')) sources.add(path);
-      case 'staged':
-        declared.add(path);
-      case 'reads':
-        extraAllowed.add(path);
-      case 'roots':
-        fsRoots.add(path);
-      case 'output':
-        outputDill ??= path;
-      case 'unknown':
-        break;
-    }
-  }
+  final parsed = readKernelInputsManifest(manifestPath);
+  final declared = parsed.declared;
+  final extraAllowed = parsed.extraAllowed;
+  final fsRoots = parsed.fsRoots;
+  final outputDill = parsed.outputDill;
+  final sources = [
+    for (final path in parsed.sources)
+      if (path.endsWith('.dart')) path,
+  ];
   final executable = argv[i + 1];
   final cmdArgs = argv.sublist(i + 2);
 
@@ -269,13 +338,7 @@ Future<int> runFiltered(
 
   final split = splitDependencyLines(result.stdout as String);
   if (split.reads.isEmpty) {
-    err.writeln(
-      'flutter: the compiler reported no dependency reads, so the read-set '
-      'check has nothing to verify. A real compile reads at least its '
-      'entrypoint: the report was silenced, and the compile controls '
-      '`--print-incremental-dependencies` itself. Remove any silencer from '
-      '`extra_flags` and rebuild.',
-    );
+    err.writeln(noDependencyReadsMessage());
     if (outputDill != null) {
       try {
         File(outputDill).deleteSync();
@@ -288,11 +351,7 @@ Future<int> runFiltered(
   final undeclared = findUndeclaredReads(split.reads, declared, extraAllowed);
   if (undeclared.isNotEmpty) {
     for (final line in undeclared) {
-      err.writeln(
-        'flutter: the compiler read $line, which is not a declared input of '
-        'this compile. Declare the file in `srcs` (typically '
-        '`glob(["lib/**/*.dart"])`) or stop importing it.',
-      );
+      err.writeln(undeclaredReadMessage(line));
     }
     // Delete only the manifest's output: an `--output-dill` smuggled into
     // the argv names no file here, so the refusal cannot be redirected at
