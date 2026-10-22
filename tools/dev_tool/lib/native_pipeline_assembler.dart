@@ -329,6 +329,38 @@ class NativePipelineAssembler {
     // reload compiles against defines the app does not have.
     _info = await _readBuildInfo(client);
 
+    final inputs = await _buildDevInputs();
+    final devConfig = inputs.devConfig;
+    final compilerConfig = _compilerConfigFor(devConfig);
+    // A device with no compiler config has no incremental compiler, so there is
+    // nothing to assemble. The gate fallback in the caller reports it.
+    if (compilerConfig == null) return;
+    final workspaceView = _seedAppliedState(devConfig);
+    // Null means the dev config named no entrypoint — reported inside, so the
+    // run keeps going without hot reload and 'r' answers with the reason.
+    if (workspaceView == null) return;
+    final units = await _startCompilerUnits(
+      compilerConfig,
+      inputs.packageConfig,
+    );
+    // Null means the compiler itself is gone — handled inside, by shutting
+    // every unit down and settling the gate unavailable.
+    if (units == null) return;
+    await _finishAssembly(
+      inputs.devAppLabel,
+      devConfig,
+      units,
+      workspaceView,
+    );
+  }
+
+  /// Build the dev app and read its hot-reload inputs.
+  ///
+  /// Builds the flutter_application target directly, then parses and validates
+  /// the `_dev_config.json` it materialized. Returns the dev app label, the
+  /// parsed dev config, and the package config that resolves to live sources.
+  Future<({String devAppLabel, DevConfig devConfig, String packageConfig})>
+  _buildDevInputs() async {
     // Build the flutter_application target directly to materialize its
     // DefaultInfo — the hot-reload `_dev_config.json` + dev
     // `package_config.json`. The platform wrapper (`:app_macos`) consumes the
@@ -418,7 +450,18 @@ class NativePipelineAssembler {
     final packageConfig = await _stablePackageConfig(
       devConfig.devPackageConfig,
     );
+    return (
+      devAppLabel: devAppLabel,
+      devConfig: devConfig,
+      packageConfig: packageConfig,
+    );
+  }
 
+  /// The incremental compiler config for the platform the app runs on.
+  ///
+  /// Null when the device has no incremental compiler, which the caller
+  /// reports through the gate fallback.
+  CompilerConfig? _compilerConfigFor(DevConfig devConfig) {
     // The registrant filtered for the platform the app is RUNNING on, not
     // for the host platform this dev build resolved in — the two differ on
     // an iOS run driven from a macOS host, and feeding the host's registers
@@ -469,10 +512,15 @@ class NativePipelineAssembler {
           : Uri.file(registrant).toString(),
       enableExperiments: devConfig.enableExperiments,
     );
-    // A device with no compiler config has no incremental compiler, so there is
-    // nothing to assemble. The gate's fallback in the caller reports it.
-    if (compilerConfig == null) return;
+    return compilerConfig;
+  }
 
+  /// Seed the per-file applied state from the running build.
+  ///
+  /// Returns the workspace view, or null when the dev config named no
+  /// entrypoint — reported, not thrown, so the run keeps going without hot
+  /// reload.
+  Workspace? _seedAppliedState(DevConfig devConfig) {
     pipeline.entrypoint = devConfig.appEntrypoint;
 
     // Seed the per-file applied state. The resolver keys every source file by
@@ -515,9 +563,20 @@ class NativePipelineAssembler {
         'The dev config named no entrypoint, so there is nothing to compile '
         'against.',
       );
-      return;
+      return null;
     }
+    return workspaceView;
+  }
 
+  /// Start one compiler per app, or null when the compiler itself is gone.
+  ///
+  /// A null return shuts every started unit down and settles the gate
+  /// unavailable. A source failure to compile is instead a state the unit
+  /// carries and recovers from.
+  Future<List<SessionReloader>?> _startCompilerUnits(
+    CompilerConfig compilerConfig,
+    String packageConfig,
+  ) async {
     // One compiler per app, never one shared between them.
     //
     // A `frontend_server` decides which *dependent* libraries to re-emit by
@@ -556,9 +615,18 @@ class NativePipelineAssembler {
         'launched with; restart the run to get hot reload back.',
       );
       pipeline.strategy = configDevice.createReloadStrategy();
-      return;
+      return null;
     }
+    return [for (final u in units) u!];
+  }
 
+  /// Wire assets, native-lib watches and the orchestrator, and open the gate.
+  Future<void> _finishAssembly(
+    String devAppLabel,
+    DevConfig devConfig,
+    List<SessionReloader> units,
+    Workspace workspaceView,
+  ) async {
     final assetsDir = await _wireAssets(shaders: devConfig.shaders);
 
     // For codegen apps, rebuild the flutter_application via bazel before each
@@ -595,7 +663,7 @@ class NativePipelineAssembler {
     // clears one.
     final orchestrator = pipeline.orchestrator = ReloadOrchestrator(
       workspace: workspaceView,
-      units: [for (final u in units) u!],
+      units: units,
       entrypoint: pipeline.entrypoint,
     );
     pipeline.nativeLibsVerdict = nativeLibs?.verdict;
@@ -609,7 +677,7 @@ class NativePipelineAssembler {
     // earlier is how a user concludes the failure was harmless.
     final unbaselined = [
       for (final u in units)
-        if (u!.baselineFailure != null) u,
+        if (u.baselineFailure != null) u,
     ];
     logger.info({
       'message': 'frontend_server_ready',
