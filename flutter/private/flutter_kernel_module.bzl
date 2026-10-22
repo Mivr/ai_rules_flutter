@@ -256,6 +256,123 @@ def _dedup_module_sources(sources):
             by_uri[s.uri] = s
     return [by_uri[u] for u in order]
 
+def _kernel_module_staged_inputs(ctx, sources, output, extra_inputs, packages, scheme):
+    """Dedup sources and stage every generated input; returns `(package_config, stage)`."""
+    sources = _dedup_module_sources(sources)
+    package_config = ctx.actions.declare_file(output.basename + ".package_config.json")
+    ctx.actions.write(
+        output = package_config,
+        content = kernel_package_config(packages, scheme = scheme),
+    )
+
+    stage_candidates = [s.file for s in sources]
+    if extra_inputs != None:
+        stage_candidates = stage_candidates + extra_inputs.to_list()
+
+    # Every source is staged and only the staging root is mounted: mounting
+    # the exec root (`.`) lets the compile read files the action did not
+    # declare, which Bazel then caches without rerunning on their change.
+    stage = stage_generated_inputs(ctx, stage_candidates, output.basename, include_sources = True)
+    return sources, package_config, stage
+
+def _kernel_module_base_args(ctx, target, platform, package_config, libraries, libraries_platform, extra_libraries, stage, scheme, defines, extra_frontend_flags, exclude_non_sources):
+    """The kernel worker flags naming the target, SDK summaries and compile mode."""
+    args = ctx.actions.args()
+    args.use_param_file("@%s", use_always = True)
+    args.set_param_file_format("multiline")
+
+    args.add("--target", target)
+    args.add("--dart-sdk-summary", platform)
+    args.add("--packages-file", package_config)
+    args.add("--libraries-json", libraries)
+    if libraries_platform:
+        args.add("--libraries-platform", libraries_platform)
+    args.add_all(extra_libraries, before_each = "--extra-library")
+    if stage.root != None:
+        args.add("--multi-root", stage.root)
+    args.add("--multi-root-scheme", scheme)
+    args.add_all([d for d in defines if "," not in d], format_each = "-D%s")
+    args.add_all(extra_frontend_flags)
+    args.add("--no-summary-only")
+    args.add("--reuse-compiler-result")
+    args.add("--use-incremental-compiler")
+    if exclude_non_sources:
+        args.add("--exclude-non-sources")
+    return args
+
+def _kernel_module_source_args(args, sources, dep_kmods, output, koutline, excluded, unused_inputs_list, droppable, closure_excluded, extra_inputs):
+    """Append the per-source, output and closure flags to the kernel worker args."""
+    args.add_all(dep_kmods, before_each = "--input-kmod", expand_directories = False)
+    for s in sources:
+        args.add("--source", s.uri)
+        args.add("--input-source", s.file)
+        if unused_inputs_list != None:
+            args.add("--own-source-file", s.file)
+    args.add("--output", output.path)
+    if koutline != None:
+        args.add("--output-outline", koutline.path)
+
+    args.add("--excluded-output", excluded)
+    if unused_inputs_list != None:
+        args.add("--unused-inputs-list", unused_inputs_list)
+    if not droppable:
+        args.add("--no-drop")
+    if closure_excluded:
+        args.add_all(closure_excluded, before_each = "--closure-excluded")
+    if extra_inputs:
+        args.add_all(extra_inputs, before_each = "--input-source")
+
+def _kernel_module_tool_inputs(ctx, tools, args, direct_inputs, action_tools):
+    """Pick the kernel worker executable and register its tool inputs.
+
+    Returns the `(executable, arguments)` pair for the compile action.
+    """
+    dart_exe = getattr(tools, "dart", None)
+    dartvm = getattr(tools, "dartvm", None)
+    tool_target = getattr(ctx.attr, "_kernel_module", None)
+    tool_compile_mode = (
+        tool_target[DartCompileInfo].compile_mode if tool_target != None and DartCompileInfo in tool_target else "kernel"
+    )
+    if tool_compile_mode == "aot-snapshot":
+        # The tool is an AOT snapshot: `dart` refuses to run `.aot` files, so
+        # `dartaotruntime` executes it directly. This also drops the `dart` and
+        # `dartvm` inputs: the snapshot needs only the runtime.
+        direct_inputs.append(ctx.executable._kernel_module)
+        executable = tools.dartaotruntime
+        arguments = [
+            ctx.executable._kernel_module.path,
+            "--kernel-worker",
+            tools.kernel_worker.path,
+            "--dartaotruntime",
+            tools.dartaotruntime.path,
+            args,
+        ]
+    elif dart_exe != None:
+        direct_inputs.extend([ctx.executable._kernel_module, dart_exe])
+        action_tools.append(dart_exe)
+        if dartvm != None:
+            direct_inputs.append(dartvm)
+            action_tools.append(dartvm)
+        executable = dart_exe
+        arguments = [
+            ctx.executable._kernel_module.path,
+            "--kernel-worker",
+            tools.kernel_worker.path,
+            "--dartaotruntime",
+            tools.dartaotruntime.path,
+            args,
+        ]
+    else:
+        executable = ctx.executable._kernel_module
+        arguments = [
+            "--kernel-worker",
+            tools.kernel_worker.path,
+            "--dartaotruntime",
+            tools.dartaotruntime.path,
+            args,
+        ]
+    return executable, arguments
+
 def flutter_kernel_module_action(
         ctx,
         tools,
@@ -310,14 +427,9 @@ def flutter_kernel_module_action(
     Returns:
       The declared VM exclusion report file.
     """
-    sources = _dedup_module_sources(sources)
+    sources, package_config, stage = _kernel_module_staged_inputs(ctx, sources, output, extra_inputs, packages, scheme)
     platform = platform_dill if platform_dill != None else tools.platform_dill
     libraries = libraries_json if libraries_json != None else tools.libraries_json
-    package_config = ctx.actions.declare_file(output.basename + ".package_config.json")
-    ctx.actions.write(
-        output = package_config,
-        content = kernel_package_config(packages, scheme = scheme),
-    )
     excluded = ctx.actions.declare_file(output.basename + ".vm_excluded.txt")
     if unused_inputs:
         # Written by `kernel_module` alongside the module. Declared here, where
@@ -327,59 +439,9 @@ def flutter_kernel_module_action(
     else:
         unused_inputs_list = None
 
-    stage_candidates = [s.file for s in sources]
-    if extra_inputs != None:
-        stage_candidates = stage_candidates + extra_inputs.to_list()
+    args = _kernel_module_base_args(ctx, target, platform, package_config, libraries, libraries_platform, extra_libraries, stage, scheme, defines, extra_frontend_flags, exclude_non_sources)
+    _kernel_module_source_args(args, sources, dep_kmods, output, koutline, excluded, unused_inputs_list, droppable, closure_excluded, extra_inputs)
 
-    # Every source is staged and only the staging root is mounted: mounting
-    # the exec root (`.`) lets the compile read files the action did not
-    # declare, which Bazel then caches without rerunning on their change.
-    stage = stage_generated_inputs(ctx, stage_candidates, output.basename, include_sources = True)
-
-    args = ctx.actions.args()
-    args.use_param_file("@%s", use_always = True)
-    args.set_param_file_format("multiline")
-
-    args.add("--target", target)
-    args.add("--dart-sdk-summary", platform)
-    args.add("--packages-file", package_config)
-    args.add("--libraries-json", libraries)
-    if libraries_platform:
-        args.add("--libraries-platform", libraries_platform)
-    args.add_all(extra_libraries, before_each = "--extra-library")
-    if stage.root != None:
-        args.add("--multi-root", stage.root)
-    args.add("--multi-root-scheme", scheme)
-    args.add_all([d for d in defines if "," not in d], format_each = "-D%s")
-    args.add_all(extra_frontend_flags)
-    args.add("--no-summary-only")
-    args.add("--reuse-compiler-result")
-    args.add("--use-incremental-compiler")
-    if exclude_non_sources:
-        args.add("--exclude-non-sources")
-
-    args.add_all(dep_kmods, before_each = "--input-kmod", expand_directories = False)
-    for s in sources:
-        args.add("--source", s.uri)
-        args.add("--input-source", s.file)
-        if unused_inputs_list != None:
-            args.add("--own-source-file", s.file)
-    args.add("--output", output.path)
-    if koutline != None:
-        args.add("--output-outline", koutline.path)
-
-    args.add("--excluded-output", excluded)
-    if unused_inputs_list != None:
-        args.add("--unused-inputs-list", unused_inputs_list)
-    if not droppable:
-        args.add("--no-drop")
-    if closure_excluded:
-        args.add_all(closure_excluded, before_each = "--closure-excluded")
-    if extra_inputs:
-        args.add_all(extra_inputs, before_each = "--input-source")
-
-    dart_exe = getattr(tools, "dart", None)
-    dartvm = getattr(tools, "dartvm", None)
     runtime_files = getattr(tools, "runtime_files", None)
     direct_inputs = [
         package_config,
@@ -394,48 +456,7 @@ def flutter_kernel_module_action(
         platform,
         ctx.executable._kernel_module,
     ]
-    tool_target = getattr(ctx.attr, "_kernel_module", None)
-    tool_compile_mode = (
-        tool_target[DartCompileInfo].compile_mode if tool_target != None and DartCompileInfo in tool_target else "kernel"
-    )
-    if tool_compile_mode == "aot-snapshot":
-        # The tool is an AOT snapshot: `dart` refuses to run `.aot` files, so
-        # `dartaotruntime` executes it directly. This also drops the `dart` and
-        # `dartvm` inputs: the snapshot needs only the runtime.
-        direct_inputs.append(ctx.executable._kernel_module)
-        executable = tools.dartaotruntime
-        arguments = [
-            ctx.executable._kernel_module.path,
-            "--kernel-worker",
-            tools.kernel_worker.path,
-            "--dartaotruntime",
-            tools.dartaotruntime.path,
-            args,
-        ]
-    elif dart_exe != None:
-        direct_inputs.extend([ctx.executable._kernel_module, dart_exe])
-        action_tools.append(dart_exe)
-        if dartvm != None:
-            direct_inputs.append(dartvm)
-            action_tools.append(dartvm)
-        executable = dart_exe
-        arguments = [
-            ctx.executable._kernel_module.path,
-            "--kernel-worker",
-            tools.kernel_worker.path,
-            "--dartaotruntime",
-            tools.dartaotruntime.path,
-            args,
-        ]
-    else:
-        executable = ctx.executable._kernel_module
-        arguments = [
-            "--kernel-worker",
-            tools.kernel_worker.path,
-            "--dartaotruntime",
-            tools.dartaotruntime.path,
-            args,
-        ]
+    executable, arguments = _kernel_module_tool_inputs(ctx, tools, args, direct_inputs, action_tools)
 
     ctx.actions.run(
         executable = executable,
@@ -463,48 +484,50 @@ def flutter_kernel_module_action(
     )
     return excluded
 
-def _flutter_kernel_module_aspect_impl(target, ctx):
-    if DartInfo not in target:
-        return _no_flutter_kernel_module()
-
-    enabled = ctx.attr._modular_kernel[BuildSettingInfo].value
-    flutter_toolchain = ctx.toolchains["@rules_flutter//flutter:toolchain_type"]
-    flutter_sdk_info = flutter_toolchain.flutter_sdk_info if flutter_toolchain else None
-    tools = flutter_kernel_tools_for(ctx, flutter_sdk_info)
-    same_sdk = is_same_sdk(tools, flutter_sdk_info)
-
+def _modular_gate_inputs(ctx, target):
+    """The target's Dart metadata and dependency list behind the modular-kernel gate."""
     dart_info = target[DartInfo]
-    package_name = dart_info.package_name
-    lib_root = dart_info.lib_root
-    own_record = _own_package_record(dart_info)
-    srcs_dir = getattr(ctx.rule.attr, "srcs_dir", None)
-    has_srcs_attr = hasattr(ctx.rule.attr, "srcs")
-    own_srcs = getattr(ctx.rule.files, "srcs", [])
     rule_deps = getattr(ctx.rule.attr, "deps", [])
     if type(rule_deps) != "list":
         rule_deps = [rule_deps]
+    return (
+        dart_info,
+        dart_info.package_name,
+        dart_info.lib_root,
+        _own_package_record(dart_info),
+        getattr(ctx.rule.files, "srcs", []),
+        rule_deps,
+    )
 
+def _is_opaque_module(ctx, target, dart_info, package_name, lib_root, own_record, own_srcs, rule_deps):
+    """Whether the target hides its sources, opting it out of modular kernel compilation."""
+    srcs_dir = getattr(ctx.rule.attr, "srcs_dir", None)
+    has_srcs_attr = hasattr(ctx.rule.attr, "srcs")
     opaque = bool(srcs_dir)
     if not has_srcs_attr and dart_info.transitive_srcs.to_list() != [] and len(rule_deps) == 0:
         opaque = True
     prefix = package_lib_prefix(lib_root)
     if own_srcs and (not package_name or own_record == None or any([not f.short_path.startswith(prefix) for f in own_srcs])):
         opaque = True
+    return opaque
 
-    if opaque or not enabled or _has_comma_defines(ctx) or tools == None or not same_sdk or flutter_sdk_info == None or flutter_sdk_info.platform_kernel_dill == None:
-        return _no_flutter_kernel_module()
+def _modular_gate_open(ctx, opaque, enabled, tools, same_sdk, flutter_sdk_info):
+    """Whether every modular-kernel precondition holds for this evaluation."""
+    return not opaque and enabled and not _has_comma_defines(ctx) and tools != None and same_sdk and flutter_sdk_info != None and flutter_sdk_info.platform_kernel_dill != None
 
+def _collect_dep_mod_infos(rule_deps):
+    """The dep `FlutterKernelModuleInfo` values, or None when a dep opted out."""
     dep_mod_infos = [
         dep[FlutterKernelModuleInfo]
         for dep in rule_deps
         if type(dep) == "Target" and FlutterKernelModuleInfo in dep
     ]
     if len(dep_mod_infos) != len(rule_deps):
-        return _no_flutter_kernel_module()
+        return None
+    return dep_mod_infos
 
-    dep_kernels = [m.kernel_info for m in dep_mod_infos]
-    dep_product_kernels = [m.product_kernel_info for m in dep_mod_infos]
-
+def _modular_consistency(own_record, rule_deps, dep_kernels):
+    """The package records and whether deps agree on one modular closure."""
     raw = depset(
         transitive = [
             dep[DartInfo].transitive_packages
@@ -515,15 +538,10 @@ def _flutter_kernel_module_aspect_impl(target, ctx):
     records = ([own_record] if own_record != None else []) + raw
     packages_ok = kernel_packages_consistent(records)
     modular = packages_ok and all([k.modular for k in dep_kernels])
-    if not modular:
-        return _no_flutter_kernel_module()
+    return records, packages_ok, modular
 
-    product_modular = (
-        packages_ok and
-        flutter_sdk_info.platform_kernel_dill_product != None and
-        all([k.modular for k in dep_product_kernels])
-    )
-
+def _modular_dep_closures(target, dep_kernels, rule_deps, own_srcs):
+    """The postorder dep closures and ownership graphs propagated by the aspect."""
     dep_closure = depset(
         order = "postorder",
         transitive = [k.transitive_kmods for k in dep_kernels],
@@ -545,6 +563,10 @@ def _flutter_kernel_module_aspect_impl(target, ctx):
         [(str(target.label), str(dep.label)) for dep in rule_deps],
         transitive = [k.edges for k in dep_kernels],
     )
+    return dep_closure, dep_outline_closure, upstream_excluded, cross_pkg_srcs, owned, edges
+
+def _find_dep_base_dill(dep_kernels):
+    """The first dep-seeded base dill triple, or empty defaults when no dep seeds one."""
     base_dill = None
     base_keys = None
     base_kmods = depset()
@@ -556,53 +578,58 @@ def _flutter_kernel_module_aspect_impl(target, ctx):
             base_keys = kk
             base_kmods = getattr(k, "base_kmods", depset())
             break
-    if not own_srcs:
-        product_kernel_info = (
-            DartKernelInfo(
+    return base_dill, base_keys, base_kmods
+
+def _header_only_module_info(product_modular, dep_product_kernels, dep_closure, dep_outline_closure, upstream_excluded, cross_pkg_srcs, owned, edges, base_dill, base_keys, base_kmods):
+    """The provider list for a target with no own sources: dep closures only."""
+    product_kernel_info = (
+        DartKernelInfo(
+            kmod = None,
+            koutline = None,
+            transitive_kmods = depset(
+                order = "postorder",
+                transitive = [k.transitive_kmods for k in dep_product_kernels],
+            ),
+            transitive_koutlines = depset(
+                order = "postorder",
+                transitive = [k.transitive_koutlines for k in dep_product_kernels],
+            ),
+            modular = True,
+            closure_excluded = depset(transitive = [k.closure_excluded for k in dep_product_kernels]),
+            cross_pkg_srcs = cross_pkg_srcs,
+            owned = owned,
+            edges = edges,
+            base_dill = None,
+            base_keys = None,
+            base_kmods = depset(),
+            unseeded_base_kmods = depset(),
+        ) if product_modular else no_kernel_module()
+    )
+    return [
+        FlutterKernelModuleInfo(
+            kernel_info = DartKernelInfo(
                 kmod = None,
                 koutline = None,
-                transitive_kmods = depset(
-                    order = "postorder",
-                    transitive = [k.transitive_kmods for k in dep_product_kernels],
-                ),
-                transitive_koutlines = depset(
-                    order = "postorder",
-                    transitive = [k.transitive_koutlines for k in dep_product_kernels],
-                ),
+                transitive_kmods = dep_closure,
+                transitive_koutlines = dep_outline_closure,
                 modular = True,
-                closure_excluded = depset(transitive = [k.closure_excluded for k in dep_product_kernels]),
+                closure_excluded = upstream_excluded,
                 cross_pkg_srcs = cross_pkg_srcs,
                 owned = owned,
                 edges = edges,
-                base_dill = None,
-                base_keys = None,
-                base_kmods = depset(),
+                base_dill = base_dill,
+                base_keys = base_keys,
+                base_kmods = base_kmods,
                 unseeded_base_kmods = depset(),
-            ) if product_modular else no_kernel_module()
-        )
-        return [
-            FlutterKernelModuleInfo(
-                kernel_info = DartKernelInfo(
-                    kmod = None,
-                    koutline = None,
-                    transitive_kmods = dep_closure,
-                    transitive_koutlines = dep_outline_closure,
-                    modular = True,
-                    closure_excluded = upstream_excluded,
-                    cross_pkg_srcs = cross_pkg_srcs,
-                    owned = owned,
-                    edges = edges,
-                    base_dill = base_dill,
-                    base_keys = base_keys,
-                    base_kmods = base_kmods,
-                    unseeded_base_kmods = depset(),
-                ),
-                product_kernel_info = product_kernel_info,
             ),
-        ]
+            product_kernel_info = product_kernel_info,
+        ),
+    ]
 
-    kmod = ctx.actions.declare_directory(target.label.name + ".flutter.kmod")
-    koutline = ctx.actions.declare_directory(target.label.name + ".flutter.koutline")
+def _compile_main_kmod(ctx, tools, target_name, package_name, lib_root, own_srcs, records, flutter_sdk_info, dep_outline_closure, upstream_excluded):
+    """Compile the target's own sources into the debug `.flutter.kmod` directory."""
+    kmod = ctx.actions.declare_directory(target_name + ".flutter.kmod")
+    koutline = ctx.actions.declare_directory(target_name + ".flutter.koutline")
     sources = [
         struct(uri = library_source_uri(package_name, lib_root, f.short_path), file = f)
         for f in own_srcs
@@ -627,9 +654,13 @@ def _flutter_kernel_module_aspect_impl(target, ctx):
         scheme = APP_SCHEME,
         unused_inputs = True,
     )
+    return kmod, koutline, sources, deduped_packages, worker_defines, excluded
+
+def _link_flutter_test_base(ctx, target_name, package_name, kmod, dep_closure, base_dill, base_keys, base_kmods):
+    """Seed the `flutter_test` base dill from the debug modules; returns the base triple."""
     if package_name == "flutter_test" and hasattr(ctx.executable, "_kernel_link"):
-        base_dill = ctx.actions.declare_file(target.label.name + ".flutter_base.dill")
-        base_keys = ctx.actions.declare_file(target.label.name + ".flutter_base.keys")
+        base_dill = ctx.actions.declare_file(target_name + ".flutter_base.dill")
+        base_keys = ctx.actions.declare_file(target_name + ".flutter_base.keys")
         seed_modules = [kmod] + dep_closure.to_list()
         kernel_link_action(
             ctx,
@@ -640,58 +671,102 @@ def _flutter_kernel_module_aspect_impl(target, ctx):
             write_keys = base_keys,
         )
         base_kmods = depset(direct = [kmod], transitive = [dep_closure])
+    return base_dill, base_keys, base_kmods
+
+def _compile_product_kmod(ctx, target_name, tools, sources, deduped_packages, worker_defines, flutter_sdk_info, dep_product_kernels, cross_pkg_srcs, owned, edges):
+    """Compile the product (AOT/profile) `.flutter_product.kmod` directory."""
+    product_dep_closure = depset(
+        order = "postorder",
+        transitive = [k.transitive_kmods for k in dep_product_kernels],
+    )
+    product_dep_outline_closure = depset(
+        order = "postorder",
+        transitive = [k.transitive_koutlines for k in dep_product_kernels],
+    )
+    product_upstream_excluded = depset(
+        transitive = [k.closure_excluded for k in dep_product_kernels],
+    )
+    product_kmod = ctx.actions.declare_directory(target_name + ".flutter_product.kmod")
+    product_koutline = ctx.actions.declare_directory(target_name + ".flutter_product.koutline")
+    product_excluded = flutter_kernel_module_action(
+        ctx,
+        tools,
+        sources,
+        deduped_packages,
+        product_dep_outline_closure,
+        product_kmod,
+        koutline = product_koutline,
+        defines = worker_defines + [
+            "dart.vm.product=true",
+            "FLUTTER_WEB_USE_SKIA=false",
+            "FLUTTER_WEB_USE_SKWASM=true",
+        ],
+        exclude_non_sources = True,
+        droppable = True,
+        closure_excluded = product_upstream_excluded,
+        target = "flutter",
+        platform_dill = flutter_sdk_info.platform_kernel_dill_product,
+        extra_libraries = ["ui", "nativewrappers"],
+        scheme = APP_SCHEME,
+        unused_inputs = True,
+    )
+    return DartKernelInfo(
+        kmod = product_kmod,
+        koutline = product_koutline,
+        transitive_kmods = depset(order = "postorder", direct = [product_kmod], transitive = [product_dep_closure]),
+        transitive_koutlines = depset(order = "postorder", direct = [product_koutline], transitive = [product_dep_outline_closure]),
+        modular = True,
+        closure_excluded = depset(direct = [product_excluded], transitive = [product_upstream_excluded]),
+        cross_pkg_srcs = cross_pkg_srcs,
+        owned = owned,
+        edges = edges,
+        base_dill = None,
+        base_keys = None,
+        base_kmods = depset(),
+        unseeded_base_kmods = depset(),
+    )
+
+def _flutter_kernel_module_aspect_impl(target, ctx):
+    if DartInfo not in target:
+        return _no_flutter_kernel_module()
+
+    enabled = ctx.attr._modular_kernel[BuildSettingInfo].value
+    flutter_toolchain = ctx.toolchains["@rules_flutter//flutter:toolchain_type"]
+    flutter_sdk_info = flutter_toolchain.flutter_sdk_info if flutter_toolchain else None
+    tools = flutter_kernel_tools_for(ctx, flutter_sdk_info)
+    same_sdk = is_same_sdk(tools, flutter_sdk_info)
+
+    dart_info, package_name, lib_root, own_record, own_srcs, rule_deps = _modular_gate_inputs(ctx, target)
+    opaque = _is_opaque_module(ctx, target, dart_info, package_name, lib_root, own_record, own_srcs, rule_deps)
+    if not _modular_gate_open(ctx, opaque, enabled, tools, same_sdk, flutter_sdk_info):
+        return _no_flutter_kernel_module()
+
+    dep_mod_infos = _collect_dep_mod_infos(rule_deps)
+    if dep_mod_infos == None:
+        return _no_flutter_kernel_module()
+    dep_kernels = [m.kernel_info for m in dep_mod_infos]
+    dep_product_kernels = [m.product_kernel_info for m in dep_mod_infos]
+
+    records, packages_ok, modular = _modular_consistency(own_record, rule_deps, dep_kernels)
+    if not modular:
+        return _no_flutter_kernel_module()
+    product_modular = (
+        packages_ok and
+        flutter_sdk_info.platform_kernel_dill_product != None and
+        all([k.modular for k in dep_product_kernels])
+    )
+
+    dep_closure, dep_outline_closure, upstream_excluded, cross_pkg_srcs, owned, edges = _modular_dep_closures(target, dep_kernels, rule_deps, own_srcs)
+    base_dill, base_keys, base_kmods = _find_dep_base_dill(dep_kernels)
+
+    if not own_srcs:
+        return _header_only_module_info(product_modular, dep_product_kernels, dep_closure, dep_outline_closure, upstream_excluded, cross_pkg_srcs, owned, edges, base_dill, base_keys, base_kmods)
+
+    kmod, koutline, sources, deduped_packages, worker_defines, excluded = _compile_main_kmod(ctx, tools, target.label.name, package_name, lib_root, own_srcs, records, flutter_sdk_info, dep_outline_closure, upstream_excluded)
+    base_dill, base_keys, base_kmods = _link_flutter_test_base(ctx, target.label.name, package_name, kmod, dep_closure, base_dill, base_keys, base_kmods)
 
     if product_modular:
-        product_dep_closure = depset(
-            order = "postorder",
-            transitive = [k.transitive_kmods for k in dep_product_kernels],
-        )
-        product_dep_outline_closure = depset(
-            order = "postorder",
-            transitive = [k.transitive_koutlines for k in dep_product_kernels],
-        )
-        product_upstream_excluded = depset(
-            transitive = [k.closure_excluded for k in dep_product_kernels],
-        )
-        product_kmod = ctx.actions.declare_directory(target.label.name + ".flutter_product.kmod")
-        product_koutline = ctx.actions.declare_directory(target.label.name + ".flutter_product.koutline")
-        product_excluded = flutter_kernel_module_action(
-            ctx,
-            tools,
-            sources,
-            deduped_packages,
-            product_dep_outline_closure,
-            product_kmod,
-            koutline = product_koutline,
-            defines = worker_defines + [
-                "dart.vm.product=true",
-                "FLUTTER_WEB_USE_SKIA=false",
-                "FLUTTER_WEB_USE_SKWASM=true",
-            ],
-            exclude_non_sources = True,
-            droppable = True,
-            closure_excluded = product_upstream_excluded,
-            target = "flutter",
-            platform_dill = flutter_sdk_info.platform_kernel_dill_product,
-            extra_libraries = ["ui", "nativewrappers"],
-            scheme = APP_SCHEME,
-            unused_inputs = True,
-        )
-        product_kernel_info = DartKernelInfo(
-            kmod = product_kmod,
-            koutline = product_koutline,
-            transitive_kmods = depset(order = "postorder", direct = [product_kmod], transitive = [product_dep_closure]),
-            transitive_koutlines = depset(order = "postorder", direct = [product_koutline], transitive = [product_dep_outline_closure]),
-            modular = True,
-            closure_excluded = depset(direct = [product_excluded], transitive = [product_upstream_excluded]),
-            cross_pkg_srcs = cross_pkg_srcs,
-            owned = owned,
-            edges = edges,
-            base_dill = None,
-            base_keys = None,
-            base_kmods = depset(),
-            unseeded_base_kmods = depset(),
-        )
+        product_kernel_info = _compile_product_kmod(ctx, target.label.name, tools, sources, deduped_packages, worker_defines, flutter_sdk_info, dep_product_kernels, cross_pkg_srcs, owned, edges)
     else:
         product_kernel_info = no_kernel_module()
 
@@ -715,6 +790,7 @@ def _flutter_kernel_module_aspect_impl(target, ctx):
             product_kernel_info = product_kernel_info,
         ),
     ]
+
 
 flutter_kernel_module_aspect = aspect(
     implementation = _flutter_kernel_module_aspect_impl,
