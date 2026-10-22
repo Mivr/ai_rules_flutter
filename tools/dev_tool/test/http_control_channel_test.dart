@@ -263,6 +263,42 @@ void main() {
         );
       });
 
+      // A body that is not JSON at all: still a 400 with the reason, and the
+      // run's log says so too — the client sending this may be the thing
+      // under test, so its own reading of the 400 is not guaranteed.
+      test(
+        'an unreadable body is logged server-side, not only answered',
+        () async {
+          final records = <LogRecord>[];
+          final rootLevel = Logger.root.level;
+          Logger.root.level = Level.ALL;
+          final sub = Logger.root.onRecord.listen(records.add);
+          try {
+            final request = await client.postUrl(_uri('/command'));
+            request.headers.contentType = ContentType.json;
+            request.write('this is not json{{{');
+            final response = await request.close();
+            final body = await utf8.decoder.bind(response).join();
+            expect(response.statusCode, HttpStatus.badRequest);
+            expect(
+              (json.decode(body) as Map<String, dynamic>)['error'],
+              contains('Invalid JSON'),
+            );
+          } finally {
+            await sub.cancel();
+            Logger.root.level = rootLevel;
+          }
+          expect(
+            records
+                .where(
+                  (r) => r.loggerName == 'dev_tool.http_control_channel',
+                )
+                .map((r) => '${r.message}'),
+            contains(contains('command_invalid_json')),
+          );
+        },
+      );
+
       test('defaults params to empty map', () async {
         final (response, body) = await _post('/command', {
           'method': 'test.echo',

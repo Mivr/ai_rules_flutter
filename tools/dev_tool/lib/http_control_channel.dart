@@ -226,6 +226,14 @@ class HttpControlChannel {
     try {
       parsed = json.decode(body) as Map<String, dynamic>;
     } catch (e) {
+      // Answered 400 below, and logged here: the response goes to a client
+      // that may itself be the thing under test, so the run's own log is the
+      // only place this failure is guaranteed to be seen.
+      _logger.fine({
+        'message': 'command_invalid_json',
+        'text': 'Ignoring a command request with an unreadable body: $e',
+        'error': '$e',
+      });
       request.response.statusCode = HttpStatus.badRequest;
       request.response.headers.contentType = ContentType.json;
       request.response.write(json.encode({'error': 'Invalid JSON: $e'}));
