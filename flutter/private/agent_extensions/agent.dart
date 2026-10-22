@@ -1214,6 +1214,16 @@ Future<ServiceExtensionResponse> _sendPressKeys(
   });
 }
 
+/// Press a key chord: `code` is the key's DOM `KeyboardEvent.code`,
+/// `modifiers` the comma-separated codes held while it is pressed, `text` what
+/// the key types (empty for a named key or a shortcut).
+///
+/// Each key goes through both halves of the path an embedder uses: a
+/// `ui.KeyData` through `PlatformDispatcher.onKeyData`, then the legacy
+/// `flutter/keyevent` message, whose reply says whether the framework handled
+/// it. The framework holds the first until the second arrives, so neither
+/// works alone. A key the framework left alone then goes where the platform's
+/// input method would take it — see [_deliverToTextInput].
 Future<ServiceExtensionResponse> _handlePressKey(
   String method,
   Map<String, String> params,
@@ -1456,13 +1466,7 @@ String? _keyLabel(LogicalKeyboardKey key) {
   return label.length == 1 ? label.toLowerCase() : null;
 }
 
-/// The legacy `flutter/keyevent` message for [key], in [keymap]'s shape —
-/// flutter_test's `KeyEventSimulator.getKeyData`.
-///
-/// Every field is what that function puts there, including its choice of the
-/// GLFW shape on Linux. The modifier flags are the framework's
-/// `RawKeyEventData*` constants written out: those classes are deprecated,
-/// and the values are what the embedders send regardless.
+/// The first key in [map] whose value matches, or null.
 int? _reverseKeyCode<T>(Map<int, T> map, bool Function(T) matches) {
   for (final entry in map.entries) {
     if (matches(entry.value)) return entry.key;
@@ -1634,6 +1638,13 @@ void _fillWindowsKeyMessage(
   message['modifiers'] = flags;
 }
 
+/// The legacy `flutter/keyevent` message for [key], in [keymap]'s shape —
+/// flutter_test's `KeyEventSimulator.getKeyData`.
+///
+/// Every field is what that function puts there, including its choice of the
+/// GLFW shape on Linux. The modifier flags are the framework's
+/// `RawKeyEventData*` constants written out: those classes are deprecated,
+/// and the values are what the embedders send regardless.
 Map<String, Object?> _rawKeyMessage(
   String keymap,
   _FlutterKey key, {

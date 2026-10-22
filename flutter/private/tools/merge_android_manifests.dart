@@ -400,10 +400,7 @@ void _checkOverlayRootAttrs(
   }
 }
 
-/// Checks one overlay permission element's attributes against the supported
-/// contract: `android:name`, a parseable `android:maxSdkVersion`, supported
-/// `tools:*` markers, and replacement `android:*` attributes only where a
-/// replace/remove directive allows them.
+/// Checks one overlay attribute against the supported contract.
 void _checkOverlayAttr(
   String name,
   String key,
@@ -444,6 +441,10 @@ void _checkMaxSdkValue(String name, String val, String overlayPath) {
   }
 }
 
+/// Checks one overlay permission element's attributes against the supported
+/// contract: `android:name`, a parseable `android:maxSdkVersion`, supported
+/// `tools:*` markers, and replacement `android:*` attributes only where a
+/// replace/remove directive allows them.
 void _checkOverlayElement(
   String name,
   Map<String, String> attrs,
@@ -568,9 +569,6 @@ class _BasePermission {
   bool get isRemoveAll => toolsNode == 'removeAll';
 }
 
-/// Scans root-level `<uses-permission>` and `<uses-permission-sdk-23>`
-/// declarations in [baseXml] starting at [insertAt] (just after the root
-/// `<manifest ...>` open tag).
 /// Skips non-tag scanner content (text, CDATA, PIs, comments/DOCTYPE).
 /// Returns true when the scanner advanced past noise and the caller should
 /// continue without reading a tag.
@@ -629,6 +627,9 @@ bool _foldBasePermissionTag(
   return false;
 }
 
+/// Scans root-level `<uses-permission>` and `<uses-permission-sdk-23>`
+/// declarations in [baseXml] starting at [insertAt] (just after the root
+/// `<manifest ...>` open tag).
 List<_BasePermission> _scanBasePermissions(
   String baseXml,
   int insertAt,
@@ -815,8 +816,6 @@ class LibraryPermission {
   }
 }
 
-/// The permissions [libraryXml] declares directly under its `<manifest>`
-/// root, read as documented at the top of this file.
 /// Skips non-tag scanner content in a library manifest, rejecting
 /// unterminated markup. Returns true when the caller should continue
 /// without reading a tag.
@@ -846,6 +845,8 @@ bool _skipLibraryNoise(
   return false;
 }
 
+/// The permissions [libraryXml] declares directly under its `<manifest>`
+/// root, read as documented at the top of this file.
 List<LibraryPermission> parseLibraryPermissions(
   String libraryXml,
   String libraryPath, {
