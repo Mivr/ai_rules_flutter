@@ -415,6 +415,8 @@ def _classify_lock_packages(lock_pkgs):
                 sdk_flutter[name] = info
                 all_package_names.append(name)
         else:
+            # Reason for print: warn the user that a locked package is
+            # silently unsupported (not an error; the build proceeds).
             # buildifier: disable=print
             print("flutter.pub: skipping package \"{}\" (source: {}). Only hosted and Flutter SDK packages are supported.".format(name, source))
     return hosted, sdk_flutter, all_package_names
