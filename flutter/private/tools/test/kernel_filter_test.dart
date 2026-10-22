@@ -1096,4 +1096,153 @@ void main() {}
       expect(r.err, contains('not a declared input'));
     });
   });
+
+  group('resolveFlutterKeyRelativeTarget', () {
+    test('resolves a sibling against the importing file', () {
+      expect(
+        resolveFlutterKeyRelativeTarget('b.dart', 'app/lib/main.dart'),
+        'app/lib/b.dart',
+      );
+    });
+
+    test('an empty reference names the importing file itself', () {
+      expect(
+        resolveFlutterKeyRelativeTarget('', 'app/lib/main.dart'),
+        'app/lib/main.dart',
+      );
+    });
+
+    test('a query resolves its path part', () {
+      expect(
+        resolveFlutterKeyRelativeTarget('b.dart?x=1', 'app/lib/main.dart'),
+        'app/lib/b.dart',
+      );
+    });
+
+    test('dot segments stay inside the key root', () {
+      expect(
+        resolveFlutterKeyRelativeTarget('sub/./b.dart', 'app/main.dart'),
+        'app/sub/b.dart',
+      );
+      expect(
+        resolveFlutterKeyRelativeTarget('../x.dart', 'app/lib/main.dart'),
+        'app/x.dart',
+      );
+      expect(
+        resolveFlutterKeyRelativeTarget('../../x.dart', 'main.dart'),
+        'x.dart',
+      );
+    });
+
+    test('backslashes separate like slashes', () {
+      expect(
+        resolveFlutterKeyRelativeTarget(r'sub\b.dart', 'app/main.dart'),
+        'app/sub/b.dart',
+      );
+    });
+
+    test('percent escapes decode once', () {
+      expect(
+        resolveFlutterKeyRelativeTarget('my%20lib.dart', 'app/main.dart'),
+        'app/my lib.dart',
+      );
+    });
+
+    test('refuses non-relative spellings', () {
+      expect(
+        resolveFlutterKeyRelativeTarget('dart:async', 'app/main.dart'),
+        isNull,
+      );
+      expect(
+        resolveFlutterKeyRelativeTarget('package:a/b.dart', 'app/main.dart'),
+        isNull,
+      );
+      expect(
+        resolveFlutterKeyRelativeTarget('//x/y.dart', 'app/main.dart'),
+        isNull,
+      );
+      expect(
+        resolveFlutterKeyRelativeTarget('/x.dart', 'app/main.dart'),
+        isNull,
+      );
+      expect(
+        resolveFlutterKeyRelativeTarget('a.dart#frag', 'app/main.dart'),
+        isNull,
+      );
+    });
+
+    test('refuses an empty path segment', () {
+      expect(
+        resolveFlutterKeyRelativeTarget('a//b.dart', 'app/main.dart'),
+        isNull,
+      );
+    });
+
+    test('refuses an escape that decodes to a slash', () {
+      expect(
+        resolveFlutterKeyRelativeTarget('a%2Fb.dart', 'app/main.dart'),
+        isNull,
+      );
+    });
+  });
+
+  group('flutterSourceKey', () {
+    late Directory savedCwd;
+
+    setUp(() => savedCwd = Directory.current);
+    tearDown(() => Directory.current = savedCwd.path);
+
+    test('strips the working directory', () {
+      final work = Directory.systemTemp.createTempSync('kernel_filter_key_');
+      addTearDown(() => work.deleteSync(recursive: true));
+      Directory.current = work.path;
+      expect(
+        flutterSourceKey('${work.path}/app/lib/main.dart', []),
+        'app/lib/main.dart',
+      );
+    });
+
+    test('strips the longest filesystem root', () {
+      expect(
+        flutterSourceKey('out.stage/app/lib/main.dart', ['out.stage']),
+        'app/lib/main.dart',
+      );
+      expect(
+        flutterSourceKey('a/b/c.dart', ['a', 'a/b']),
+        'c.dart',
+      );
+    });
+
+    test('strips the bazel-out bin prefix', () {
+      expect(
+        flutterSourceKey('bazel-out/k8-fastbuild/bin/app/lib/main.dart', []),
+        'app/lib/main.dart',
+      );
+    });
+
+    test('a bare root without the slash is not a prefix', () {
+      expect(flutterSourceKey('ab/c.dart', ['a']), 'ab/c.dart');
+    });
+
+    test('dot roots never strip', () {
+      expect(flutterSourceKey('a/b.dart', ['.', '']), 'a/b.dart');
+    });
+  });
+
+  group('stripFsRootPrefix', () {
+    test('strips the longest root with the slash', () {
+      expect(stripFsRootPrefix('a/b/c.dart', ['a']), 'b/c.dart');
+      expect(stripFsRootPrefix('a/b/c.dart', ['a', 'a/b']), 'c.dart');
+    });
+
+    test('keeps paths under no root', () {
+      expect(stripFsRootPrefix('ab/c.dart', ['a']), 'ab/c.dart');
+      expect(stripFsRootPrefix('a/b.dart', ['.', '']), 'a/b.dart');
+    });
+
+    test('strips leading dot-slash and trailing root slashes', () {
+      expect(stripFsRootPrefix('./a/b.dart', []), 'a/b.dart');
+      expect(stripFsRootPrefix('a/b.dart', ['a/']), 'b.dart');
+    });
+  });
 }
