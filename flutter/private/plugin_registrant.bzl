@@ -5,6 +5,66 @@ at application startup, and native registrant source files for method channel
 plugins (pluginClass) on desktop platforms.
 """
 
+def _dart_plugin_entry(plugin, info):
+    """Builds the registrant entry for one plugin's Dart class info."""
+    return struct(
+        package = plugin.name,
+        dart_plugin_class = info.get("dartPluginClass", ""),
+        dart_file_name = info.get("fileName", info.get("dartFileName", plugin.name + ".dart")),
+    )
+
+def _collect_platform_dart_plugins(plugins, target_platform):
+    """Collects `dartPluginClass` entries for one platform."""
+    dart_plugins = []
+    for plugin in plugins:
+        info = plugin.platforms.get(target_platform, {})
+        if not info:
+            continue
+        entry = _dart_plugin_entry(plugin, info)
+        if entry.dart_plugin_class:
+            dart_plugins.append(entry)
+    return dart_plugins
+
+def _collect_legacy_dart_plugins(plugins):
+    """Collects entries by first platform with a `dartPluginClass`."""
+    dart_plugins = []
+    for plugin in plugins:
+        for _platform, info in plugin.platforms.items():
+            entry = _dart_plugin_entry(plugin, info)
+            if entry.dart_plugin_class:
+                dart_plugins.append(entry)
+                break
+    return dart_plugins
+
+def _render_plugin_registrant(dart_plugins, agent_import, native_agent_import):
+    """Renders the `_PluginRegistrant` Dart source for collected entries."""
+    lines = ["// GENERATED — do not edit.", "// ignore_for_file: depend_on_referenced_packages"]
+    if agent_import:
+        lines.append("import '%s' as agent;" % agent_import)
+    if native_agent_import:
+        lines.append("import '%s' as native_agent;" % native_agent_import)
+    for p in dart_plugins:
+        lines.append("import 'package:%s/%s';" % (p.package, p.dart_file_name))
+    lines.append("")
+    lines.append("@pragma('vm:entry-point')")
+    lines.append("class _PluginRegistrant {")
+    lines.append("  @pragma('vm:entry-point')")
+    lines.append("  static void register() {")
+    if agent_import:
+        lines.append("    agent.registerRulesFlutterAgentExtensions();")
+    if native_agent_import:
+        lines.append("    native_agent.registerRulesFlutterNativeAgentExtensions();")
+    for p in dart_plugins:
+        # Non-web Dart plugins use the no-arg `registerWith()` signature
+        # (e.g. PathProviderFoundation, UrlLauncherMacOS). Web plugins use
+        # the registrar-passing signature; that path is handled by
+        # _make_web_registrant_content.
+        lines.append("    %s.registerWith();" % p.dart_plugin_class)
+    lines.append("  }")
+    lines.append("}")
+    lines.append("")
+    return "\n".join(lines)
+
 def make_registrant_content(plugins, target_platform = None, agent_import = None, native_agent_import = None):
     """Generate Dart source content for plugin registration.
 
@@ -50,62 +110,16 @@ def make_registrant_content(plugins, target_platform = None, agent_import = None
     if target_platform == "web":
         return _make_web_registrant_content(plugins)
 
-    dart_plugins = []
-    for plugin in plugins:
-        if target_platform:
-            info = plugin.platforms.get(target_platform, {})
-            if not info:
-                continue
-            dart_class = info.get("dartPluginClass", "")
-            if dart_class:
-                dart_file_name = info.get("fileName", info.get("dartFileName", plugin.name + ".dart"))
-                dart_plugins.append(struct(
-                    package = plugin.name,
-                    dart_plugin_class = dart_class,
-                    dart_file_name = dart_file_name,
-                ))
-        else:
-            # Legacy: pick first platform with dartPluginClass.
-            for _platform, info in plugin.platforms.items():
-                dart_class = info.get("dartPluginClass", "")
-                if dart_class:
-                    dart_file_name = info.get("fileName", info.get("dartFileName", plugin.name + ".dart"))
-                    dart_plugins.append(struct(
-                        package = plugin.name,
-                        dart_plugin_class = dart_class,
-                        dart_file_name = dart_file_name,
-                    ))
-                    break
+    if target_platform:
+        dart_plugins = _collect_platform_dart_plugins(plugins, target_platform)
+    else:
+        # Legacy: pick first platform with dartPluginClass.
+        dart_plugins = _collect_legacy_dart_plugins(plugins)
 
     if not dart_plugins and not agent_import and not native_agent_import:
         return ""
 
-    lines = ["// GENERATED — do not edit.", "// ignore_for_file: depend_on_referenced_packages"]
-    if agent_import:
-        lines.append("import '%s' as agent;" % agent_import)
-    if native_agent_import:
-        lines.append("import '%s' as native_agent;" % native_agent_import)
-    for p in dart_plugins:
-        lines.append("import 'package:%s/%s';" % (p.package, p.dart_file_name))
-    lines.append("")
-    lines.append("@pragma('vm:entry-point')")
-    lines.append("class _PluginRegistrant {")
-    lines.append("  @pragma('vm:entry-point')")
-    lines.append("  static void register() {")
-    if agent_import:
-        lines.append("    agent.registerRulesFlutterAgentExtensions();")
-    if native_agent_import:
-        lines.append("    native_agent.registerRulesFlutterNativeAgentExtensions();")
-    for p in dart_plugins:
-        # Non-web Dart plugins use the no-arg `registerWith()` signature
-        # (e.g. PathProviderFoundation, UrlLauncherMacOS). Web plugins use
-        # the registrar-passing signature; that path is handled by
-        # _make_web_registrant_content.
-        lines.append("    %s.registerWith();" % p.dart_plugin_class)
-    lines.append("  }")
-    lines.append("}")
-    lines.append("")
-    return "\n".join(lines)
+    return _render_plugin_registrant(dart_plugins, agent_import, native_agent_import)
 
 def _make_web_registrant_content(plugins):
     """Generate the Dart registrant source for Flutter web.
