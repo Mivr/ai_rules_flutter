@@ -1,0 +1,14 @@
+load("@rules_flutter//flutter:defs.bzl", "flutter_application")
+
+flutter_application(
+    name = "sub_app",
+    package_name = "sub_app",
+    srcs = ["lib/main.dart"],
+    main = "lib/main.dart",
+    assets = ["assets/notice.txt"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//brand",
+        "@deps//:flutter",
+    ],
+)

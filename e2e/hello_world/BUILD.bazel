@@ -858,6 +858,23 @@ dart_test(
     ],
 )
 
+# Verifies package-relative asset keys for a subpackage app bundle:
+# `//sub:sub_app` keys its own `assets/notice.txt` relative to its Bazel
+# package (no `sub/` prefix), and the first-party `//brand` dependency's
+# asset lands at `packages/brand/assets/brand.txt`. Reads the bundle's
+# `flutter_assets/` tree and AssetManifest.bin.json like
+# `:verify_pub_assets_test` does for pub assets.
+dart_test(
+    name = "verify_sub_assets_test",
+    data = ["//sub:sub_app"],
+    main = "test/verify_sub_assets_test.dart",
+    target_compatible_with = _HOST_COMPATIBLE,
+    deps = [
+        "@deps//:test",
+        "@rules_dart//dart/runfiles",
+    ],
+)
+
 # Verifies that the entitlements blob applied at codesign time on the
 # macOS bundle declares the App Sandbox capability — proves
 # flutter_macos_app threaded macos/Runner/{DebugProfile,Release}.entitlements
