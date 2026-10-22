@@ -241,6 +241,38 @@ Future<bool> _runFontSubset(
 // -- Main --------------------------------------------------------------------
 
 Future<void> main(List<String> args) async {
+  final parsed = _parseManifestArgs(args);
+  final outputDir = parsed.outputDir;
+
+  final config =
+      json.decode(File(parsed.configPath).readAsStringSync())
+          as Map<String, dynamic>;
+
+  // Create output directory.
+  Directory(outputDir).createSync(recursive: true);
+
+  _writeManifestFiles(config, outputDir);
+
+  final fonts = config['fonts'] as List<dynamic>? ?? [];
+  final iconTreeShaking = config['icon_tree_shaking'] as Map<String, dynamic>?;
+  final codePoints = await _collectIconCodePoints(iconTreeShaking, fonts);
+
+  final copies = config['copies'] as Map<String, dynamic>? ?? {};
+  for (final entry in copies.entries) {
+    await _copyOneAsset(
+      entry,
+      outputDir,
+      iconTreeShaking,
+      codePoints.used,
+      codePoints.families,
+    );
+  }
+
+  _writeNotices(config, outputDir);
+}
+
+/// The `--config` and `--output-dir` flags in [args], or usage and exit.
+({String configPath, String outputDir}) _parseManifestArgs(List<String> args) {
   String? configPath;
   String? outputDir;
 
@@ -258,13 +290,12 @@ Future<void> main(List<String> args) async {
     );
     exit(1);
   }
+  return (configPath: configPath, outputDir: outputDir);
+}
 
-  final config =
-      json.decode(File(configPath).readAsStringSync()) as Map<String, dynamic>;
-
-  // Create output directory.
-  Directory(outputDir).createSync(recursive: true);
-
+/// Writes `AssetManifest.bin`, its web `AssetManifest.bin.json` wrapper and
+/// `FontManifest.json` for [config] into [outputDir].
+void _writeManifestFiles(Map<String, dynamic> config, String outputDir) {
   // -- AssetManifest.bin -----------------------------------------------------
   final assets = config['assets'] as Map<String, dynamic>? ?? {};
   final manifestMap = <String, Object>{};
@@ -290,120 +321,151 @@ Future<void> main(List<String> args) async {
   // -- FontManifest.json -----------------------------------------------------
   final fonts = config['fonts'] as List<dynamic>? ?? [];
   File('$outputDir/FontManifest.json').writeAsStringSync(json.encode(fonts));
+}
 
-  // -- Icon tree shaking (optional) ------------------------------------------
-  final iconTreeShaking = config['icon_tree_shaking'] as Map<String, dynamic>?;
-  Map<String, Set<int>>? usedCodePoints;
-  Map<String, Set<String>>? fontFamilyToAssets;
+/// The icon code points `const_finder` reports for [fonts], for subsetting.
+///
+/// Runs `const_finder` over each kernel [iconTreeShaking] names and merges the
+/// outputs; a null [iconTreeShaking], no fonts or no kernels mean no
+/// subsetting. A kernel reporting non-constant `IconData` locations disables
+/// icon tree shaking, as does a null merge.
+Future<({Map<String, Set<int>>? used, Map<String, Set<String>>? families})>
+_collectIconCodePoints(
+  Map<String, dynamic>? iconTreeShaking,
+  List<dynamic> fonts,
+) async {
+  if (iconTreeShaking == null || fonts.isEmpty) {
+    return (used: null, families: null);
+  }
+  final dart = iconTreeShaking['dart'] as String;
+  final constFinder = iconTreeShaking['const_finder'] as String;
+  final rawKernelDills = iconTreeShaking['kernel_dills'] as List<dynamic>?;
+  final kernelDills = rawKernelDills != null
+      ? rawKernelDills.cast<String>()
+      : <String>[
+          if (iconTreeShaking['kernel_dill'] != null)
+            iconTreeShaking['kernel_dill'] as String,
+        ];
 
-  if (iconTreeShaking != null && fonts.isNotEmpty) {
-    final dart = iconTreeShaking['dart'] as String;
-    final constFinder = iconTreeShaking['const_finder'] as String;
-    final rawKernelDills = iconTreeShaking['kernel_dills'] as List<dynamic>?;
-    final kernelDills = rawKernelDills != null
-        ? rawKernelDills.cast<String>()
-        : <String>[
-            if (iconTreeShaking['kernel_dill'] != null)
-              iconTreeShaking['kernel_dill'] as String,
-          ];
+  if (kernelDills.isEmpty) return (used: null, families: null);
 
-    if (kernelDills.isNotEmpty) {
-      // Step 1: Run const_finder on each kernel to discover used icon code points.
-      // Async (not runSync): a child that never exits must surface as a test
-      // timeout or an action timeout, never as a wedged isolate that no
-      // timeout can interrupt.
-      final outputs = <Map<String, dynamic>>[];
-      for (final kernelDill in kernelDills) {
-        final constFinderResult = await Process.run(dart, [
-          constFinder,
-          '--kernel-file',
-          kernelDill,
-          '--class-library-uri',
-          'package:flutter/src/widgets/icon_data.dart',
-          '--class-name',
-          'IconData',
-          '--annotation-class-name',
-          '_StaticIconProvider',
-          '--annotation-class-library-uri',
-          'package:flutter/src/widgets/icon_data.dart',
-        ]);
+  // Step 1: Run const_finder on each kernel to discover used icon code points.
+  // Async (not runSync): a child that never exits must surface as a test
+  // timeout or an action timeout, never as a wedged isolate that no
+  // timeout can interrupt.
+  final outputs = <Map<String, dynamic>>[];
+  for (final kernelDill in kernelDills) {
+    final constFinderResult = await Process.run(dart, [
+      constFinder,
+      '--kernel-file',
+      kernelDill,
+      '--class-library-uri',
+      'package:flutter/src/widgets/icon_data.dart',
+      '--class-name',
+      'IconData',
+      '--annotation-class-name',
+      '_StaticIconProvider',
+      '--annotation-class-library-uri',
+      'package:flutter/src/widgets/icon_data.dart',
+    ]);
 
-        if (constFinderResult.exitCode != 0) {
-          stderr.writeln(
-            'const_finder failed (exit ${constFinderResult.exitCode}):',
-          );
-          stderr.writeln(constFinderResult.stderr);
-          exit(1);
-        }
+    if (constFinderResult.exitCode != 0) {
+      stderr.writeln(
+        'const_finder failed (exit ${constFinderResult.exitCode}):',
+      );
+      stderr.writeln(constFinderResult.stderr);
+      exit(1);
+    }
 
-        outputs.add(
-          json.decode(constFinderResult.stdout as String)
-              as Map<String, dynamic>,
-        );
-      }
+    outputs.add(
+      json.decode(constFinderResult.stdout as String) as Map<String, dynamic>,
+    );
+  }
 
-      usedCodePoints = mergeConstFinderCodePoints(outputs);
-      if (usedCodePoints != null) {
-        // Build fontFamily → Set<asset> map from FontManifest.
-        fontFamilyToAssets = buildFontFamilyToAssets(fonts);
-      }
+  final usedCodePoints = mergeConstFinderCodePoints(outputs);
+  if (usedCodePoints == null) return (used: null, families: null);
+  // Build fontFamily → Set<asset> map from FontManifest.
+  return (used: usedCodePoints, families: buildFontFamilyToAssets(fonts));
+}
+
+/// Copies one [entry] of the config `copies` map into [outputDir], subsetting
+/// the font when [usedCodePoints] covers its family.
+Future<void> _copyOneAsset(
+  MapEntry<String, dynamic> entry,
+  String outputDir,
+  Map<String, dynamic>? iconTreeShaking,
+  Map<String, Set<int>>? usedCodePoints,
+  Map<String, Set<String>>? fontFamilyToAssets,
+) async {
+  final dest = '$outputDir/${entry.key}';
+  Directory(File(dest).parent.path).createSync(recursive: true);
+
+  // Check if this asset should be subsetted.
+  if (usedCodePoints != null &&
+      fontFamilyToAssets != null &&
+      iconTreeShaking != null) {
+    final subsetted = await _subsetFontAsset(
+      entry,
+      dest,
+      iconTreeShaking,
+      usedCodePoints,
+      fontFamilyToAssets,
+    );
+    if (subsetted) return;
+  }
+
+  File(entry.value as String).copySync(dest);
+}
+
+/// Subsets the font [entry] into [dest] when its family has used code points.
+///
+/// Returns whether the asset was subsetted (a subsetting failure exits).
+Future<bool> _subsetFontAsset(
+  MapEntry<String, dynamic> entry,
+  String dest,
+  Map<String, dynamic> iconTreeShaking,
+  Map<String, Set<int>> usedCodePoints,
+  Map<String, Set<String>> fontFamilyToAssets,
+) async {
+  final fontSubsetBin = iconTreeShaking['font_subset'] as String;
+  String? matchedFamily;
+  for (final famEntry in fontFamilyToAssets.entries) {
+    if (famEntry.value.any(
+      (assetPath) => matchesFontAssetPath(entry.key, assetPath),
+    )) {
+      matchedFamily = famEntry.key;
+      break;
     }
   }
 
-  // -- Copy asset files (with optional font subsetting) ----------------------
-  final copies = config['copies'] as Map<String, dynamic>? ?? {};
-  for (final entry in copies.entries) {
-    final dest = '$outputDir/${entry.key}';
-    Directory(File(dest).parent.path).createSync(recursive: true);
-
-    // Check if this asset should be subsetted.
-    if (usedCodePoints != null &&
-        fontFamilyToAssets != null &&
-        iconTreeShaking != null) {
-      final fontSubsetBin = iconTreeShaking['font_subset'] as String;
-      String? matchedFamily;
-      for (final famEntry in fontFamilyToAssets.entries) {
-        if (famEntry.value.any(
-          (assetPath) => matchesFontAssetPath(entry.key, assetPath),
-        )) {
-          matchedFamily = famEntry.key;
-          break;
-        }
-      }
-
-      if (matchedFamily != null) {
-        final codePoints = usedCodePoints[matchedFamily];
-        if (codePoints != null && codePoints.isNotEmpty) {
-          // Run font-subset: code points are piped via stdin.
-          final sortedCodePoints = codePoints.toList()..sort();
-          final codePointStr = sortedCodePoints
-              .map((cp) => cp.toString())
-              .join(' ');
-          final success = await _runFontSubset(
-            fontSubsetBin,
-            dest,
-            entry.value as String,
-            codePointStr,
-          );
-          if (!success) {
-            exit(1);
-          }
-          final inputSize = File(entry.value as String).lengthSync();
-          final outputSize = File(dest).lengthSync();
-          final reduction = ((inputSize - outputSize) / inputSize * 100)
-              .toStringAsFixed(1);
-          stderr.writeln(
-            'Font "${entry.key}" tree-shaken: $inputSize -> $outputSize bytes ($reduction% reduction).',
-          );
-          continue;
-        }
-      }
-    }
-
-    File(entry.value as String).copySync(dest);
+  if (matchedFamily == null) return false;
+  final codePoints = usedCodePoints[matchedFamily];
+  if (codePoints == null || codePoints.isEmpty) return false;
+  // Run font-subset: code points are piped via stdin.
+  final sortedCodePoints = codePoints.toList()..sort();
+  final codePointStr = sortedCodePoints.map((cp) => cp.toString()).join(' ');
+  final success = await _runFontSubset(
+    fontSubsetBin,
+    dest,
+    entry.value as String,
+    codePointStr,
+  );
+  if (!success) {
+    exit(1);
   }
+  final inputSize = File(entry.value as String).lengthSync();
+  final outputSize = File(dest).lengthSync();
+  final reduction = ((inputSize - outputSize) / inputSize * 100)
+      .toStringAsFixed(1);
+  stderr.writeln(
+    'Font "${entry.key}" tree-shaken: $inputSize -> $outputSize bytes ($reduction% reduction).',
+  );
+  return true;
+}
 
-  // -- NOTICES.Z -------------------------------------------------------------
+/// Writes `NOTICES.Z`: the inline license text plus every license file that
+/// exists, gzipped.
+void _writeNotices(Map<String, dynamic> config, String outputDir) {
   // Collect license text from inline string and/or license file paths.
   final noticesBuf = StringBuffer();
   final notices = config['notices'] as String? ?? '';
