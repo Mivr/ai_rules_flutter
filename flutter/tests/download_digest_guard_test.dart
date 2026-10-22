@@ -14,9 +14,10 @@
 ///   green while code that reaches them turns red;
 /// * any `http_archive` / `http_file` / `http_jar` instantiation, in a
 ///   `.bzl` file or a `MODULE.bazel`, without a non-empty literal `sha256`
-///   or `integrity` — whether called by its canonical name or through a
-///   `use_repo_rule` proxy bound to any name, and whether the checksum is
-///   absent or an empty literal.
+///   or `integrity` — whether called by its canonical name, through a
+///   `use_repo_rule` proxy or `load` alias bound to any name, or through a
+///   plain rebinding — and whether the checksum is absent or an empty
+///   literal.
 ///
 /// The test discovers its inputs at runtime from the workspace root (the
 /// test's own source file in `data`, or `BUILD_WORKSPACE_DIRECTORY` when
@@ -210,6 +211,15 @@ const _httpRuleNames = {'http_archive', 'http_file', 'http_jar'};
 final RegExp _useRepoRuleBinding = RegExp(
   r'([A-Za-z_][A-Za-z0-9_]*)\s*=\s*use_repo_rule\s*\(',
 );
+final RegExp _loadCall = RegExp(
+  r'(^|[^A-Za-z0-9_.])load\s*\(',
+);
+final RegExp _loadAliasArg = RegExp(
+  r'^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*',
+);
+final RegExp _plainRebinding = RegExp(
+  r'(?:^|[\n;:])[ \t]*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([A-Za-z_][A-Za-z0-9_]*)(?![A-Za-z0-9_])',
+);
 final RegExp _stringLiteral = RegExp("\"([^\"]*)\"|'([^']*)'");
 final RegExp _literalChecksum = RegExp(
   '''(sha256|integrity)\\s*=\\s*(?:"([^"]*)"|'([^']*)')''',
@@ -240,14 +250,18 @@ List<String> _checkNoRawDownload(String rel, String text) {
   return errors;
 }
 
-/// Names bound to an `http_*` rule through `use_repo_rule` in blanked
-/// [code], e.g. `dl` in `dl = use_repo_rule("...http.bzl", "http_archive")`.
-/// Maps the bound name to the canonical rule name. String values are read
-/// from the original [text] at the same offsets (blanking preserves every
-/// offset). A binding whose rule name is not a string literal cannot be
-/// resolved and is ignored.
-Map<String, String> _httpProxies(String code, String text) {
-  final proxies = <String, String>{};
+/// Names bound to an `http_*` rule in blanked [code], mapped to
+/// `(rule, kind)` where `kind` is how the name was bound: `use_repo_rule`,
+/// `load` (a `load(..., alias = "http_archive")` alias), or `alias` (a
+/// plain `name = http_archive` rebinding, chained through other proxies).
+/// String values are read from the original [text] at the same offsets
+/// (blanking preserves every offset). A binding whose rule name is not a
+/// string literal cannot be resolved and is ignored.
+Map<String, ({String rule, String kind})> _httpProxies(
+  String code,
+  String text,
+) {
+  final proxies = <String, ({String rule, String kind})>{};
   for (final match in _useRepoRuleBinding.allMatches(code)) {
     final openParen = code.indexOf('(', match.start);
     final end = _callEnd(code, openParen);
@@ -257,16 +271,71 @@ Map<String, String> _httpProxies(String code, String text) {
         .map((m) => m.group(1) ?? m.group(2) ?? '')
         .toList();
     if (literals.length >= 2 && _httpRuleNames.contains(literals[1])) {
-      proxies[match.group(1)!] = literals[1];
+      proxies[match.group(1)!] = (rule: literals[1], kind: 'use_repo_rule');
     }
+  }
+  for (final match in _loadCall.allMatches(code)) {
+    final openParen = code.indexOf('(', match.start);
+    final end = _callEnd(code, openParen);
+    if (end == null) continue;
+    // Top-level comma-separated args; the first is the label.
+    final args = <String>[];
+    var depth = 0;
+    var argStart = openParen + 1;
+    for (var i = openParen + 1; i < end; i++) {
+      if (code[i] == '(') {
+        depth++;
+      } else if (code[i] == ')') {
+        depth--;
+      } else if (code[i] == ',' && depth == 0) {
+        args.add(text.substring(argStart, i));
+        argStart = i + 1;
+      }
+    }
+    args.add(text.substring(argStart, end));
+    for (final arg in args.skip(1)) {
+      final aliasMatch = _loadAliasArg.firstMatch(arg);
+      final literal = _stringLiteral.firstMatch(
+        aliasMatch == null ? arg : arg.substring(aliasMatch.end),
+      );
+      final orig = literal == null
+          ? ''
+          : (literal.group(1) ?? literal.group(2) ?? '');
+      if (!_httpRuleNames.contains(orig)) continue;
+      final alias = aliasMatch?.group(1) ?? orig;
+      if (alias == orig) continue; // Canonical name; matched directly.
+      proxies[alias] = (rule: orig, kind: 'load');
+    }
+  }
+  // Plain `name = http_archive` rebindings at statement level (never a
+  // keyword argument: those sit inside a call, after `(` or `,`). Chains
+  // through known proxies resolve to a fixpoint.
+  final rebindingArgs = _plainRebinding
+      .allMatches(code)
+      .map((m) => (lhs: m.group(1)!, rhs: m.group(2)!))
+      .toList();
+  for (var i = 0; i <= rebindingArgs.length; i++) {
+    var changed = false;
+    for (final binding in rebindingArgs) {
+      if (proxies.containsKey(binding.lhs)) continue;
+      if (_httpRuleNames.contains(binding.rhs)) {
+        proxies[binding.lhs] = (rule: binding.rhs, kind: 'alias');
+        changed = true;
+      } else if (proxies.containsKey(binding.rhs)) {
+        proxies[binding.lhs] = proxies[binding.rhs]!;
+        changed = true;
+      }
+    }
+    if (!changed) break;
   }
   return proxies;
 }
 
 /// Error strings for `http_*` rules without a non-empty literal checksum.
 /// Matches the canonical `http_archive` / `http_file` / `http_jar` names
-/// and any name bound to one of them through `use_repo_rule`, whatever the
-/// binding is called.
+/// and any name bound to one of them — through `use_repo_rule`, through a
+/// `load(..., alias = "...")` alias, or through a plain `name = ...`
+/// rebinding — whatever the binding is called.
 List<String> _checkHttpChecksums(String rel, String text) {
   final errors = <String>[];
   final code = _blankNonCode(text, blankStrings: true);
@@ -293,9 +362,8 @@ List<String> _checkHttpChecksums(String rel, String text) {
       }
     }
     if (!pinned) {
-      final via = proxies.containsKey(name)
-          ? ' (${proxies[name]} via use_repo_rule)'
-          : '';
+      final proxy = proxies[name];
+      final via = proxy == null ? '' : ' (${proxy.rule} via ${proxy.kind})';
       errors.add(
         '$rel:${_lineOf(text, nameStart)}: $name()$via without a '
         'non-empty literal sha256 = or integrity =; pin the digest',
@@ -407,6 +475,59 @@ http_archive(
       final errors = _checkHttpChecksums('flutter/guardprobe.bzl', probe);
       expect(errors, hasLength(1));
       expect(errors.single, startsWith('flutter/guardprobe.bzl:3:'));
+    });
+
+    test(
+      'load alias of http_archive without checksum fails with file:line',
+      () {
+        const probe = '''
+load("@bazel_tools//tools/build_defs/repo:http.bzl", _zz_http_archive = "http_archive")
+
+def zz_unpinned():
+    _zz_http_archive(name = "zz_unpinned", urls = ["https://example.invalid/x.tgz"])
+''';
+        final errors = _checkHttpChecksums(
+          'flutter/private/zz_unpinned_http.bzl',
+          probe,
+        );
+        expect(errors, hasLength(1));
+        expect(
+          errors.single,
+          startsWith('flutter/private/zz_unpinned_http.bzl:4:'),
+        );
+        expect(errors.single, contains('http_archive via load'));
+      },
+    );
+
+    test('plain rebinding of http_archive without checksum fails', () {
+      const probe = '''
+load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+x = http_archive
+
+x(name = "rebound", urls = ["https://example.invalid/x.tgz"])
+''';
+      final errors = _checkHttpChecksums('flutter/guardprobe.bzl', probe);
+      expect(errors, hasLength(1));
+      expect(errors.single, startsWith('flutter/guardprobe.bzl:5:'));
+      expect(errors.single, contains('http_archive via alias'));
+    });
+
+    test('load alias with a pinned digest passes', () {
+      const probe = '''
+load("@bazel_tools//tools/build_defs/repo:http.bzl", _zz_http_archive = "http_archive")
+
+def zz_pinned():
+    _zz_http_archive(
+        name = "zz_pinned",
+        urls = ["https://example.invalid/x.tgz"],
+        sha256 = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+    )
+''';
+      expect(
+        _checkHttpChecksums('flutter/private/zz_unpinned_http.bzl', probe),
+        isEmpty,
+      );
     });
   });
 
