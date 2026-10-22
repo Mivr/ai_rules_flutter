@@ -244,9 +244,9 @@ Future<void> main(List<String> args) async {
   final parsed = _parseManifestArgs(args);
   final outputDir = parsed.outputDir;
 
-  final config =
-      json.decode(File(parsed.configPath).readAsStringSync())
-          as Map<String, dynamic>;
+  final config = json.decode(
+    File(parsed.configPath).readAsStringSync(),
+  ) as Map<String, dynamic>;
 
   // Create output directory.
   Directory(outputDir).createSync(recursive: true);

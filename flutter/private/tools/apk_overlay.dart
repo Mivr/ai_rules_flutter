@@ -337,11 +337,25 @@ const int _zip32Limit = 0xFFFFFFFF;
   final checksum = crc ?? crc32(data);
 
   final localBytes = BytesBuilder(copy: false)
-    ..add(_localFileHeader(nameBytes, method, checksum, payload.length, data.length))
+    ..add(
+      _localFileHeader(
+        nameBytes,
+        method,
+        checksum,
+        payload.length,
+        data.length,
+      ),
+    )
     ..add(payload);
   return (
     local: localBytes.takeBytes(),
-    central: _centralRecord(nameBytes, method, checksum, payload.length, data.length),
+    central: _centralRecord(
+      nameBytes,
+      method,
+      checksum,
+      payload.length,
+      data.length,
+    ),
   );
 }
 

@@ -495,7 +495,11 @@ void _finishOverlayElement(
 ) {
   Never rejectAt(String detail) => _reject(overlayPath, detail);
   permissions.add(
-    OverlayPermission(name, attrs['android:name'] ?? '', attributes: Map.unmodifiable(attrs)),
+    OverlayPermission(
+      name,
+      attrs['android:name'] ?? '',
+      attributes: Map.unmodifiable(attrs),
+    ),
   );
   if (!selfClosing) {
     // Allow only an immediately-following matching close tag (with

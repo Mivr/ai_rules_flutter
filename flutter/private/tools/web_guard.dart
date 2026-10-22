@@ -88,8 +88,7 @@ Future<int> runGuarded(
     return (
       separator: -1,
       manifestPath: null,
-      error:
-          'Usage: web_guard --declared-inputs <manifest> -- <executable> <arguments>',
+      error: 'Usage: web_guard --declared-inputs <manifest> -- <executable> <arguments>',
     );
   }
   String? manifestPath;

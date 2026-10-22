@@ -1662,7 +1662,15 @@ Map<String, Object?> _rawKeyMessage(
   };
   switch (keymap) {
     case 'macos' || 'ios':
-      _fillMacOsKeyMessage(message, keymap, key, physical, chars, pressed, held);
+      _fillMacOsKeyMessage(
+        message,
+        keymap,
+        key,
+        physical,
+        chars,
+        pressed,
+        held,
+      );
     case 'android':
       _fillAndroidKeyMessage(message, keymap, key, physical, chars, held);
     case 'linux':

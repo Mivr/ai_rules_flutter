@@ -109,8 +109,8 @@ const _staticAssetsUrlPlaceholder = r'$FLUTTER_STATIC_ASSETS_URL';
 final _legacyConstructs = <RegExp, String>{
   RegExp(r'_flutter\.loader\.loadEntrypoint\('):
       'Use _flutter.loader.load() instead. loadEntrypoint only ever loads a '
-          'JavaScript entrypoint, so on a dart2wasm bundle it silently boots the '
-          'dart2js fallback and the WASM build never runs.',
+      'JavaScript entrypoint, so on a dart2wasm bundle it silently boots the '
+      'dart2js fallback and the WASM build never runs.',
 };
 
 /// Constructs refused only when the build manages a service worker of its own.
@@ -124,13 +124,13 @@ final _legacyConstructs = <RegExp, String>{
 final _managedServiceWorkerConstructs = <RegExp, String>{
   RegExp('(const|var) serviceWorkerVersion = null'):
       'Remove it. The service worker version reaches flutter.js through '
-          '{{flutter_service_worker_version}} in flutter_bootstrap.js, which '
-          'these rules generate.',
+      '{{flutter_service_worker_version}} in flutter_bootstrap.js, which '
+      'these rules generate.',
   RegExp(r"navigator\.serviceWorker\.register\('flutter_service_worker\.js'\)"):
       'Remove it and let flutter.js register the worker, or set `pwa = False` '
-          'to take over service worker duty entirely. A hand-rolled registration '
-          'alongside the built-in one installs a worker for every visitor and '
-          'waits for neither.',
+      'to take over service worker duty entirely. A hand-rolled registration '
+      'alongside the built-in one installs a worker for every visitor and '
+      'waits for neither.',
 };
 
 Future<void> main(List<String> args) async {
@@ -454,8 +454,8 @@ void _rewritePackageConfigForStage(
   final pkgFile = File(packagesPath).absolute;
   final pkgJson =
       json.decode(pkgFile.readAsStringSync()) as Map<String, dynamic>;
-  final pkgs =
-      (pkgJson['packages'] as List<dynamic>).cast<Map<String, dynamic>>();
+  final pkgs = (pkgJson['packages'] as List<dynamic>)
+      .cast<Map<String, dynamic>>();
   for (final p in pkgs) {
     final rootUri = p['rootUri'] as String;
     String rel = '';
@@ -506,8 +506,8 @@ void _rewritePackageConfig(
   final pkgFile = File(packagesPath).absolute;
   final pkgJson =
       json.decode(pkgFile.readAsStringSync()) as Map<String, dynamic>;
-  final pkgs =
-      (pkgJson['packages'] as List<dynamic>).cast<Map<String, dynamic>>();
+  final pkgs = (pkgJson['packages'] as List<dynamic>)
+      .cast<Map<String, dynamic>>();
   for (final p in pkgs) {
     final rootUri = p['rootUri'] as String;
     if (rootUri.startsWith('org-dartlang-app:///')) {
@@ -575,7 +575,8 @@ void _runDart2Wasm(List<String> args) {
   bool noSourceMaps,
   List<String> extraOptions,
   List<String> forwardArgs,
-}) _parseDart2WasmArgs(List<String> args) {
+})
+_parseDart2WasmArgs(List<String> args) {
   String? packagesPath;
   String? outputWasm;
   String? mainDart;
@@ -636,8 +637,9 @@ void _compileWasm({
   final tmpAbsPath = tmpDir.absolute.path;
   try {
     final cwdPath = Directory.current.absolute.path;
-    final rootDirPath =
-        multiRoot != null ? Directory(multiRoot).absolute.path : cwdPath;
+    final rootDirPath = multiRoot != null
+        ? Directory(multiRoot).absolute.path
+        : cwdPath;
     final normCwd = cwdPath.replaceAll(r'\', '/');
     final cwdPrefix = normCwd.endsWith('/') ? normCwd : '$normCwd/';
     final rewrittenPkgPath = '${tmpDir.path}/package_config.json';
@@ -844,18 +846,21 @@ _ScrubPrefixes _scrubPrefixesFor({
   final cwdPrefix = normCwd.endsWith('/') ? normCwd : '$normCwd/';
   final normRootDir = rootDirPath?.replaceAll(r'\', '/');
   return _ScrubPrefixes(
-    pkgAppUri:
-        packagesPath != null ? _toAppSchemeUri(packagesPath, cwdPrefix) : null,
+    pkgAppUri: packagesPath != null
+        ? _toAppSchemeUri(packagesPath, cwdPrefix)
+        : null,
     rewrittenPkgUri: rewrittenPkgPath != null
         ? Uri.file(File(rewrittenPkgPath).absolute.path).toString()
         : null,
     origPkgUri: packagesPath != null
         ? Uri.file(File(packagesPath).absolute.path).toString()
         : null,
-    tmpDirUriPrefix:
-        tmpDirPath != null ? Uri.directory(tmpDirPath).toString() : null,
-    stageUriPrefix:
-        rootDirPath != null ? Uri.directory(rootDirPath).toString() : null,
+    tmpDirUriPrefix: tmpDirPath != null
+        ? Uri.directory(tmpDirPath).toString()
+        : null,
+    stageUriPrefix: rootDirPath != null
+        ? Uri.directory(rootDirPath).toString()
+        : null,
     cwdUriPrefix: Uri.directory(cwdPath).toString(),
     stageDirName: rootDirPath != null ? _stageDirName(rootDirPath) : null,
     relStagePrefix: normRootDir != null && normRootDir.startsWith(cwdPrefix)
@@ -954,13 +959,14 @@ void _scrubInfoJson(_ScrubState state, File file, _ScrubPrefixes p) {
 /// Sorts, trims and dedupes a `.deps` depfile.
 void _scrubDepsFile(_ScrubState state, File file) {
   if (!file.path.endsWith('.deps')) return;
-  final lines = state.content
-      .split('\n')
-      .map((l) => l.trimRight())
-      .where((l) => l.isNotEmpty)
-      .toSet()
-      .toList()
-    ..sort();
+  final lines =
+      state.content
+          .split('\n')
+          .map((l) => l.trimRight())
+          .where((l) => l.isNotEmpty)
+          .toSet()
+          .toList()
+        ..sort();
   final normalized = lines.isEmpty ? '' : '${lines.join('\n')}\n';
   if (normalized != state.content) {
     state.content = normalized;
@@ -1071,7 +1077,8 @@ void _runDart2Js(List<String> args) {
   String? packagesPath,
   String? mainDart,
   List<String> forwardArgs,
-}) _parseDart2JsArgs(List<String> args) {
+})
+_parseDart2JsArgs(List<String> args) {
   String? outJs;
   String? multiRoot;
   String? packagesPath;
