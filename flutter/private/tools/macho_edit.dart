@@ -152,7 +152,119 @@ bool _isAllowedNonMacho(
   return candidates.any(allowList.contains);
 }
 
-void _runPatch(List<String> args) {
+/// Cursor over CLI flag words with take/peek helpers for `--flag value` pairs.
+class _FlagCursor {
+  _FlagCursor(this.args);
+
+  final List<String> args;
+  int _index = -1;
+
+  /// Advances to the next flag word; false when the words are exhausted.
+  bool moveNext() {
+    _index++;
+    return _index < args.length;
+  }
+
+  /// The current flag word.
+  String get current => args[_index];
+
+  /// The next word without consuming it, or null when exhausted.
+  String? peek() => _index + 1 < args.length ? args[_index + 1] : null;
+
+  /// Consumes the next word as [flag]'s value, failing usage when absent.
+  String take(String flag) {
+    if (++_index >= args.length) _usageError('$flag requires a value');
+    return args[_index];
+  }
+}
+
+/// Appends the comma-separated parts of [value] to [into], skipping empties.
+void _addCommaParts(Set<String> into, String value) {
+  for (final part in value.split(',')) {
+    if (part.isNotEmpty) into.add(part);
+  }
+}
+
+/// Parses the `--platform`/`--min-os`/`--sdk-version` triple shared by the
+/// `patch`, `stub` and `copy-files` subcommands. Returns nulls when neither
+/// `--platform` nor `--min-os` was given; `--sdk-version` defaults to the
+/// minimum OS version.
+({int? platform, int? minOs, int? sdkVersion}) _parsePlatformVersions(
+  String? platformName,
+  String? minOsStr,
+  String? sdkVersionStr,
+) {
+  if (platformName == null && minOsStr == null) {
+    return (platform: null, minOs: null, sdkVersion: null);
+  }
+  if (platformName == null || minOsStr == null) {
+    _usageError('--platform and --min-os must be provided together');
+  }
+  final platform = parsePlatform(platformName);
+  final minOs = parsePackedVersion(minOsStr);
+  return (
+    platform: platform,
+    minOs: minOs,
+    sdkVersion: sdkVersionStr != null
+        ? parsePackedVersion(sdkVersionStr)
+        : minOs,
+  );
+}
+
+/// Writes [bytes] to [outputPath], creating parent directories as needed.
+void _writePatchedOutput(Uint8List bytes, String outputPath) {
+  final outFile = File(outputPath);
+  outFile.parent.createSync(recursive: true);
+  outFile.writeAsBytesSync(bytes);
+}
+
+/// Copies optional kernel/snapshot blobs into [destDirPath], skipping blanks.
+void _copySnapshotBlobs(
+  String? kernelBlobPath,
+  String? vmSnapshotPath,
+  String? isolateSnapshotPath,
+  String destDirPath,
+) {
+  if (kernelBlobPath != null && kernelBlobPath.isNotEmpty) {
+    File(kernelBlobPath).copySync('$destDirPath/kernel_blob.bin');
+  }
+  if (vmSnapshotPath != null && vmSnapshotPath.isNotEmpty) {
+    File(vmSnapshotPath).copySync('$destDirPath/vm_snapshot_data');
+  }
+  if (isolateSnapshotPath != null && isolateSnapshotPath.isNotEmpty) {
+    File(
+      isolateSnapshotPath,
+    ).copySync('$destDirPath/isolate_snapshot_data');
+  }
+}
+
+/// Parsed `patch` subcommand flags.
+class _PatchArgs {
+  _PatchArgs({
+    required this.inputPath,
+    required this.outputPath,
+    required this.platformName,
+    required this.minOsStr,
+    required this.sdkVersionStr,
+    required this.installName,
+    required this.arch,
+    required this.rpaths,
+    required this.allowNonMacho,
+  });
+
+  final String? inputPath;
+  final String? outputPath;
+  final String? platformName;
+  final String? minOsStr;
+  final String? sdkVersionStr;
+  final String? installName;
+  final String? arch;
+  final List<String> rpaths;
+  final Set<String> allowNonMacho;
+}
+
+/// Parses `patch` flags; unknown flags fail usage.
+_PatchArgs _parsePatchArgs(List<String> args) {
   String? inputPath;
   String? outputPath;
   String? platformName;
@@ -162,132 +274,163 @@ void _runPatch(List<String> args) {
   String? arch;
   final rpaths = <String>[];
   final allowNonMacho = <String>{};
-
-  for (var i = 0; i < args.length; i++) {
-    final arg = args[i];
+  final flags = _FlagCursor(args);
+  while (flags.moveNext()) {
+    final arg = flags.current;
     if (arg.startsWith('--allow-non-macho=')) {
-      final value = arg.substring('--allow-non-macho='.length);
-      for (final part in value.split(',')) {
-        if (part.isNotEmpty) allowNonMacho.add(part);
-      }
+      _addCommaParts(
+        allowNonMacho,
+        arg.substring('--allow-non-macho='.length),
+      );
       continue;
     }
     switch (arg) {
       case '--input':
-        if (++i >= args.length) _usageError('--input requires a value');
-        inputPath = args[i];
+        inputPath = flags.take('--input');
       case '--output':
-        if (++i >= args.length) _usageError('--output requires a value');
-        outputPath = args[i];
+        outputPath = flags.take('--output');
       case '--platform':
-        if (++i >= args.length) _usageError('--platform requires a value');
-        platformName = args[i];
+        platformName = flags.take('--platform');
       case '--min-os':
-        if (++i >= args.length) _usageError('--min-os requires a value');
-        minOsStr = args[i];
+        minOsStr = flags.take('--min-os');
       case '--sdk-version':
-        if (++i >= args.length) _usageError('--sdk-version requires a value');
-        sdkVersionStr = args[i];
+        sdkVersionStr = flags.take('--sdk-version');
       case '--install-name':
-        if (++i >= args.length) _usageError('--install-name requires a value');
-        installName = args[i];
+        installName = flags.take('--install-name');
       case '--arch':
-        if (++i >= args.length) _usageError('--arch requires a value');
-        arch = args[i];
+        arch = flags.take('--arch');
       case '--rpath':
-        if (++i >= args.length) _usageError('--rpath requires a value');
-        for (final part in args[i].split(',')) {
+        for (final part in flags.take('--rpath').split(',')) {
           if (part.isNotEmpty) rpaths.add(part);
         }
       case '--allow-non-macho':
-        if (i + 1 >= args.length || args[i + 1].startsWith('--')) {
+        final next = flags.peek();
+        if (next == null || next.startsWith('--')) {
           _usageError(
             '--allow-non-macho requires an explicit binary or framework name',
           );
         }
-        i++;
-        for (final part in args[i].split(',')) {
-          if (part.isNotEmpty) allowNonMacho.add(part);
-        }
+        _addCommaParts(allowNonMacho, flags.take('--allow-non-macho'));
       default:
         _usageError('Unknown flag for patch: $arg');
     }
   }
+  return _PatchArgs(
+    inputPath: inputPath,
+    outputPath: outputPath,
+    platformName: platformName,
+    minOsStr: minOsStr,
+    sdkVersionStr: sdkVersionStr,
+    installName: installName,
+    arch: arch,
+    rpaths: rpaths,
+    allowNonMacho: allowNonMacho,
+  );
+}
 
+void _runPatch(List<String> args) {
+  final parsed = _parsePatchArgs(args);
+  final inputPath = parsed.inputPath;
+  final outputPath = parsed.outputPath;
   if (inputPath == null || outputPath == null) {
     _usageError('patch requires --input and --output');
   }
 
-  int? platform;
-  int? minOs;
-  int? sdkVersion;
-  if (platformName != null || minOsStr != null) {
-    if (platformName == null || minOsStr == null) {
-      _usageError('--platform and --min-os must be provided together');
-    }
-    platform = parsePlatform(platformName);
-    minOs = parsePackedVersion(minOsStr);
-    sdkVersion = sdkVersionStr != null
-        ? parsePackedVersion(sdkVersionStr)
-        : minOs;
-  }
+  final versions = _parsePlatformVersions(
+    parsed.platformName,
+    parsed.minOsStr,
+    parsed.sdkVersionStr,
+  );
 
   final inputBytes = File(inputPath).readAsBytesSync();
   final isAllowed = _isAllowedNonMacho(
-    allowNonMacho,
+    parsed.allowNonMacho,
     inputPath: inputPath,
     outputPath: outputPath,
-    installName: installName,
+    installName: parsed.installName,
   );
 
   if (!isMachO64(inputBytes) && !isFatMachO(inputBytes)) {
-    if (isAllowed) {
-      final outFile = File(outputPath);
-      outFile.parent.createSync(recursive: true);
-      outFile.writeAsBytesSync(inputBytes);
-      return;
-    }
-    if (isMachO32(inputBytes)) {
-      throw FormatException(
-        'Input file "$inputPath" is an unsupported 32-bit Mach-O binary '
-        '(0xfeedface). Only 64-bit Mach-O binaries are supported unless '
-        'explicitly listed in allow_non_macho.',
-      );
-    }
-    throw FormatException(
-      'Input file "$inputPath" is a non-Mach-O file (not a 64-bit or '
-      'universal Mach-O binary). Only Mach-O binaries are permitted unless '
-      'explicitly listed in allow_non_macho.',
+    _passThroughOrRejectPatchInput(
+      inputBytes,
+      inputPath,
+      outputPath,
+      isAllowed,
     );
+    return;
   }
 
   final Uint8List patched;
   try {
     patched = patchMachO(
       inputBytes,
-      platform: platform,
-      minOs: minOs,
-      sdkVersion: sdkVersion,
-      installName: installName,
-      rpaths: rpaths,
-      arch: arch,
+      platform: versions.platform,
+      minOs: versions.minOs,
+      sdkVersion: versions.sdkVersion,
+      installName: parsed.installName,
+      rpaths: parsed.rpaths,
+      arch: parsed.arch,
     );
   } on FormatException catch (e) {
     if (isAllowed) {
-      final outFile = File(outputPath);
-      outFile.parent.createSync(recursive: true);
-      outFile.writeAsBytesSync(inputBytes);
+      _writePatchedOutput(inputBytes, outputPath);
       return;
     }
     throw FormatException('Input file "$inputPath": ${e.message}');
   }
 
-  final outFile = File(outputPath);
-  outFile.parent.createSync(recursive: true);
-  outFile.writeAsBytesSync(patched);
+  _writePatchedOutput(patched, outputPath);
 }
 
-void _runStub(List<String> args) {
+/// Handles a non-64-bit `patch` input: passes it through when explicitly
+/// allowed, otherwise throws the 32-bit or non-Mach-O error.
+void _passThroughOrRejectPatchInput(
+  Uint8List inputBytes,
+  String inputPath,
+  String outputPath,
+  bool isAllowed,
+) {
+  if (isAllowed) {
+    _writePatchedOutput(inputBytes, outputPath);
+    return;
+  }
+  if (isMachO32(inputBytes)) {
+    throw FormatException(
+      'Input file "$inputPath" is an unsupported 32-bit Mach-O binary '
+      '(0xfeedface). Only 64-bit Mach-O binaries are supported unless '
+      'explicitly listed in allow_non_macho.',
+    );
+  }
+  throw FormatException(
+    'Input file "$inputPath" is a non-Mach-O file (not a 64-bit or '
+    'universal Mach-O binary). Only Mach-O binaries are permitted unless '
+    'explicitly listed in allow_non_macho.',
+  );
+}
+
+/// Parsed `stub` subcommand flags.
+class _StubArgs {
+  _StubArgs({
+    required this.outputPath,
+    required this.arch,
+    required this.platformName,
+    required this.minOsStr,
+    required this.sdkVersionStr,
+    required this.installName,
+    required this.typeStr,
+  });
+
+  final String? outputPath;
+  final String? arch;
+  final String? platformName;
+  final String? minOsStr;
+  final String? sdkVersionStr;
+  final String? installName;
+  final String typeStr;
+}
+
+/// Parses `stub` flags; unknown flags fail usage.
+_StubArgs _parseStubArgs(List<String> args) {
   String? outputPath;
   String? arch;
   String? platformName;
@@ -295,45 +438,54 @@ void _runStub(List<String> args) {
   String? sdkVersionStr;
   String? installName;
   var typeStr = 'dylib';
-
-  for (var i = 0; i < args.length; i++) {
-    final arg = args[i];
+  final flags = _FlagCursor(args);
+  while (flags.moveNext()) {
+    final arg = flags.current;
     switch (arg) {
       case '--output':
-        if (++i >= args.length) _usageError('--output requires a value');
-        outputPath = args[i];
+        outputPath = flags.take('--output');
       case '--arch':
-        if (++i >= args.length) _usageError('--arch requires a value');
-        arch = args[i];
+        arch = flags.take('--arch');
       case '--platform':
-        if (++i >= args.length) _usageError('--platform requires a value');
-        platformName = args[i];
+        platformName = flags.take('--platform');
       case '--min-os':
-        if (++i >= args.length) _usageError('--min-os requires a value');
-        minOsStr = args[i];
+        minOsStr = flags.take('--min-os');
       case '--sdk-version':
-        if (++i >= args.length) _usageError('--sdk-version requires a value');
-        sdkVersionStr = args[i];
+        sdkVersionStr = flags.take('--sdk-version');
       case '--install-name':
-        if (++i >= args.length) _usageError('--install-name requires a value');
-        installName = args[i];
+        installName = flags.take('--install-name');
       case '--type':
-        if (++i >= args.length) _usageError('--type requires a value');
-        typeStr = args[i];
+        typeStr = flags.take('--type');
       default:
         _usageError('Unknown flag for stub: $arg');
     }
   }
+  return _StubArgs(
+    outputPath: outputPath,
+    arch: arch,
+    platformName: platformName,
+    minOsStr: minOsStr,
+    sdkVersionStr: sdkVersionStr,
+    installName: installName,
+    typeStr: typeStr,
+  );
+}
 
-  if (typeStr != 'dylib' && typeStr != 'execute') {
-    _usageError('--type must be "dylib" or "execute", got "$typeStr"');
+void _runStub(List<String> args) {
+  final parsed = _parseStubArgs(args);
+  final outputPath = parsed.outputPath;
+  final arch = parsed.arch;
+  final platformName = parsed.platformName;
+  final minOsStr = parsed.minOsStr;
+  if (parsed.typeStr != 'dylib' && parsed.typeStr != 'execute') {
+    _usageError('--type must be "dylib" or "execute", got "${parsed.typeStr}"');
   }
 
   if (outputPath == null ||
       arch == null ||
       platformName == null ||
       minOsStr == null ||
-      (typeStr == 'dylib' && installName == null)) {
+      (parsed.typeStr == 'dylib' && parsed.installName == null)) {
     _usageError(
       'stub requires --output, --arch, --platform, --min-os, and --install-name',
     );
@@ -341,6 +493,7 @@ void _runStub(List<String> args) {
 
   final platform = parsePlatform(platformName);
   final minOs = parsePackedVersion(minOsStr);
+  final sdkVersionStr = parsed.sdkVersionStr;
   final sdkVersion = sdkVersionStr != null
       ? parsePackedVersion(sdkVersionStr)
       : minOs;
@@ -350,8 +503,8 @@ void _runStub(List<String> args) {
     platform: platform,
     minOs: minOs,
     sdkVersion: sdkVersion,
-    installName: installName ?? '',
-    fileType: typeStr == 'execute' ? mhExecute : mhDylib,
+    installName: parsed.installName ?? '',
+    fileType: parsed.typeStr == 'execute' ? mhExecute : mhDylib,
   );
 
   final outFile = File(outputPath);
@@ -382,56 +535,73 @@ void _copyDirDereferencingSync(Directory src, Directory dst) {
   }
 }
 
-void _runCopyAssets(List<String> args) {
+/// Parsed `copy-assets` subcommand flags.
+class _CopyAssetsArgs {
+  _CopyAssetsArgs({
+    required this.srcPath,
+    required this.dstPath,
+    required this.kernelBlobPath,
+    required this.vmSnapshotPath,
+    required this.isolateSnapshotPath,
+  });
+
+  final String? srcPath;
+  final String? dstPath;
+  final String? kernelBlobPath;
+  final String? vmSnapshotPath;
+  final String? isolateSnapshotPath;
+}
+
+/// Parses `copy-assets` flags; unknown flags fail usage.
+_CopyAssetsArgs _parseCopyAssetsArgs(List<String> args) {
   String? srcPath;
   String? dstPath;
   String? kernelBlobPath;
   String? vmSnapshotPath;
   String? isolateSnapshotPath;
-
-  for (var i = 0; i < args.length; i++) {
-    final arg = args[i];
+  final flags = _FlagCursor(args);
+  while (flags.moveNext()) {
+    final arg = flags.current;
     switch (arg) {
       case '--src':
-        if (++i >= args.length) _usageError('--src requires a value');
-        srcPath = args[i];
+        srcPath = flags.take('--src');
       case '--dst':
-        if (++i >= args.length) _usageError('--dst requires a value');
-        dstPath = args[i];
+        dstPath = flags.take('--dst');
       case '--kernel-blob':
-        if (++i >= args.length) _usageError('--kernel-blob requires a value');
-        kernelBlobPath = args[i];
+        kernelBlobPath = flags.take('--kernel-blob');
       case '--vm-snapshot-data':
-        if (++i >= args.length) {
-          _usageError('--vm-snapshot-data requires a value');
-        }
-        vmSnapshotPath = args[i];
+        vmSnapshotPath = flags.take('--vm-snapshot-data');
       case '--isolate-snapshot-data':
-        if (++i >= args.length) {
-          _usageError('--isolate-snapshot-data requires a value');
-        }
-        isolateSnapshotPath = args[i];
+        isolateSnapshotPath = flags.take('--isolate-snapshot-data');
       default:
         _usageError('Unknown flag for copy-assets: $arg');
     }
   }
+  return _CopyAssetsArgs(
+    srcPath: srcPath,
+    dstPath: dstPath,
+    kernelBlobPath: kernelBlobPath,
+    vmSnapshotPath: vmSnapshotPath,
+    isolateSnapshotPath: isolateSnapshotPath,
+  );
+}
 
+void _runCopyAssets(List<String> args) {
+  final parsed = _parseCopyAssetsArgs(args);
+  final srcPath = parsed.srcPath;
+  final dstPath = parsed.dstPath;
   if (srcPath == null || dstPath == null) {
     _usageError('copy-assets requires --src and --dst');
   }
 
   final dstDir = Directory(dstPath);
   _copyDirDereferencingSync(Directory(srcPath), dstDir);
-
-  if (kernelBlobPath != null && kernelBlobPath.isNotEmpty) {
-    File(kernelBlobPath).copySync('${dstDir.path}/kernel_blob.bin');
-  }
-  if (vmSnapshotPath != null && vmSnapshotPath.isNotEmpty) {
-    File(vmSnapshotPath).copySync('${dstDir.path}/vm_snapshot_data');
-  }
-  if (isolateSnapshotPath != null && isolateSnapshotPath.isNotEmpty) {
-    File(isolateSnapshotPath).copySync('${dstDir.path}/isolate_snapshot_data');
-  }
+  _copySnapshotBlobs(
+    parsed.kernelBlobPath,
+    parsed.vmSnapshotPath,
+    parsed.isolateSnapshotPath,
+    dstDir.path,
+  );
 }
 
 void _createSymlinkReplacingSync(String linkPath, String target) {
@@ -840,7 +1010,31 @@ void extractFrameworkZip(Uint8List zipBytes, Directory destDir) {
   }
 }
 
-void _runAssembleMacosFramework(List<String> args) {
+/// Parsed `assemble-macos-framework` subcommand flags.
+class _AssembleArgs {
+  _AssembleArgs({
+    required this.binaryPath,
+    required this.infoPlistPath,
+    required this.assetsPath,
+    required this.outputDirPath,
+    required this.outputZipPath,
+    required this.kernelBlobPath,
+    required this.vmSnapshotPath,
+    required this.isolateSnapshotPath,
+  });
+
+  final String? binaryPath;
+  final String? infoPlistPath;
+  final String? assetsPath;
+  final String? outputDirPath;
+  final String? outputZipPath;
+  final String? kernelBlobPath;
+  final String? vmSnapshotPath;
+  final String? isolateSnapshotPath;
+}
+
+/// Parses `assemble-macos-framework` flags; unknown flags fail usage.
+_AssembleArgs _parseAssembleArgs(List<String> args) {
   String? binaryPath;
   String? infoPlistPath;
   String? assetsPath;
@@ -849,43 +1043,48 @@ void _runAssembleMacosFramework(List<String> args) {
   String? kernelBlobPath;
   String? vmSnapshotPath;
   String? isolateSnapshotPath;
-
-  for (var i = 0; i < args.length; i++) {
-    final arg = args[i];
+  final flags = _FlagCursor(args);
+  while (flags.moveNext()) {
+    final arg = flags.current;
     switch (arg) {
       case '--binary':
-        if (++i >= args.length) _usageError('--binary requires a value');
-        binaryPath = args[i];
+        binaryPath = flags.take('--binary');
       case '--info-plist':
-        if (++i >= args.length) _usageError('--info-plist requires a value');
-        infoPlistPath = args[i];
+        infoPlistPath = flags.take('--info-plist');
       case '--assets':
-        if (++i >= args.length) _usageError('--assets requires a value');
-        assetsPath = args[i];
+        assetsPath = flags.take('--assets');
       case '--output-dir':
-        if (++i >= args.length) _usageError('--output-dir requires a value');
-        outputDirPath = args[i];
+        outputDirPath = flags.take('--output-dir');
       case '--output-zip':
-        if (++i >= args.length) _usageError('--output-zip requires a value');
-        outputZipPath = args[i];
+        outputZipPath = flags.take('--output-zip');
       case '--kernel-blob':
-        if (++i >= args.length) _usageError('--kernel-blob requires a value');
-        kernelBlobPath = args[i];
+        kernelBlobPath = flags.take('--kernel-blob');
       case '--vm-snapshot-data':
-        if (++i >= args.length) {
-          _usageError('--vm-snapshot-data requires a value');
-        }
-        vmSnapshotPath = args[i];
+        vmSnapshotPath = flags.take('--vm-snapshot-data');
       case '--isolate-snapshot-data':
-        if (++i >= args.length) {
-          _usageError('--isolate-snapshot-data requires a value');
-        }
-        isolateSnapshotPath = args[i];
+        isolateSnapshotPath = flags.take('--isolate-snapshot-data');
       default:
         _usageError('Unknown flag for assemble-macos-framework: $arg');
     }
   }
+  return _AssembleArgs(
+    binaryPath: binaryPath,
+    infoPlistPath: infoPlistPath,
+    assetsPath: assetsPath,
+    outputDirPath: outputDirPath,
+    outputZipPath: outputZipPath,
+    kernelBlobPath: kernelBlobPath,
+    vmSnapshotPath: vmSnapshotPath,
+    isolateSnapshotPath: isolateSnapshotPath,
+  );
+}
 
+void _runAssembleMacosFramework(List<String> args) {
+  final parsed = _parseAssembleArgs(args);
+  final binaryPath = parsed.binaryPath;
+  final infoPlistPath = parsed.infoPlistPath;
+  final assetsPath = parsed.assetsPath;
+  final outputDirPath = parsed.outputDirPath;
   if (binaryPath == null ||
       infoPlistPath == null ||
       assetsPath == null ||
@@ -909,18 +1108,12 @@ void _runAssembleMacosFramework(List<String> args) {
   File(binaryPath).copySync('${versionADir.path}/$fwName');
   File(infoPlistPath).copySync('${resourcesDir.path}/Info.plist');
   _copyDirDereferencingSync(Directory(assetsPath), assetsDestDir);
-
-  if (kernelBlobPath != null && kernelBlobPath.isNotEmpty) {
-    File(kernelBlobPath).copySync('${assetsDestDir.path}/kernel_blob.bin');
-  }
-  if (vmSnapshotPath != null && vmSnapshotPath.isNotEmpty) {
-    File(vmSnapshotPath).copySync('${assetsDestDir.path}/vm_snapshot_data');
-  }
-  if (isolateSnapshotPath != null && isolateSnapshotPath.isNotEmpty) {
-    File(
-      isolateSnapshotPath,
-    ).copySync('${assetsDestDir.path}/isolate_snapshot_data');
-  }
+  _copySnapshotBlobs(
+    parsed.kernelBlobPath,
+    parsed.vmSnapshotPath,
+    parsed.isolateSnapshotPath,
+    assetsDestDir.path,
+  );
 
   _createSymlinkReplacingSync('${fwDir.path}/Versions/Current', 'A');
   _createSymlinkReplacingSync(
@@ -932,6 +1125,7 @@ void _runAssembleMacosFramework(List<String> args) {
     'Versions/Current/Resources',
   );
 
+  final outputZipPath = parsed.outputZipPath;
   if (outputZipPath != null && outputZipPath.isNotEmpty) {
     final zipBytes = createFrameworkZipBytes(
       fwDir,
@@ -944,7 +1138,29 @@ void _runAssembleMacosFramework(List<String> args) {
   }
 }
 
-void _runCopyFiles(List<String> args) {
+/// Parsed `copy-files` subcommand flags.
+class _CopyFilesArgs {
+  _CopyFilesArgs({
+    required this.outputDirPath,
+    required this.platformName,
+    required this.minOsStr,
+    required this.sdkVersionStr,
+    required this.arch,
+    required this.allowNonMacho,
+    required this.positional,
+  });
+
+  final String outputDirPath;
+  final String? platformName;
+  final String? minOsStr;
+  final String? sdkVersionStr;
+  final String? arch;
+  final Set<String> allowNonMacho;
+  final List<String> positional;
+}
+
+/// Parses `copy-files` flags; unknown flags fail usage.
+_CopyFilesArgs _parseCopyFilesArgs(List<String> args) {
   String? outputDirPath;
   String? platformName;
   String? minOsStr;
@@ -952,39 +1168,32 @@ void _runCopyFiles(List<String> args) {
   String? arch;
   final allowNonMacho = <String>{};
   final positional = <String>[];
-
-  for (var i = 0; i < args.length; i++) {
-    final arg = args[i];
+  final flags = _FlagCursor(args);
+  while (flags.moveNext()) {
+    final arg = flags.current;
     if (arg.startsWith('--allow-non-macho=')) {
-      final value = arg.substring('--allow-non-macho='.length);
-      for (final part in value.split(',')) {
-        if (part.isNotEmpty) allowNonMacho.add(part);
-      }
+      _addCommaParts(
+        allowNonMacho,
+        arg.substring('--allow-non-macho='.length),
+      );
     } else if (arg == '--output-dir') {
-      if (++i >= args.length) _usageError('--output-dir requires a value');
-      outputDirPath = args[i];
+      outputDirPath = flags.take('--output-dir');
     } else if (arg == '--platform') {
-      if (++i >= args.length) _usageError('--platform requires a value');
-      platformName = args[i];
+      platformName = flags.take('--platform');
     } else if (arg == '--min-os') {
-      if (++i >= args.length) _usageError('--min-os requires a value');
-      minOsStr = args[i];
+      minOsStr = flags.take('--min-os');
     } else if (arg == '--sdk-version') {
-      if (++i >= args.length) _usageError('--sdk-version requires a value');
-      sdkVersionStr = args[i];
+      sdkVersionStr = flags.take('--sdk-version');
     } else if (arg == '--arch') {
-      if (++i >= args.length) _usageError('--arch requires a value');
-      arch = args[i];
+      arch = flags.take('--arch');
     } else if (arg == '--allow-non-macho') {
-      if (i + 1 >= args.length || args[i + 1].startsWith('--')) {
+      final next = flags.peek();
+      if (next == null || next.startsWith('--')) {
         _usageError(
           '--allow-non-macho requires an explicit binary or framework name',
         );
       }
-      i++;
-      for (final part in args[i].split(',')) {
-        if (part.isNotEmpty) allowNonMacho.add(part);
-      }
+      _addCommaParts(allowNonMacho, flags.take('--allow-non-macho'));
     } else if (arg.startsWith('--')) {
       _usageError('Unknown flag for copy-files: $arg');
     } else {
@@ -992,25 +1201,52 @@ void _runCopyFiles(List<String> args) {
     }
   }
 
-  if (outputDirPath == null) {
+  final checked = outputDirPath;
+  if (checked == null) {
     _usageError('copy-files requires --output-dir');
   }
+  return _CopyFilesArgs(
+    outputDirPath: checked,
+    platformName: platformName,
+    minOsStr: minOsStr,
+    sdkVersionStr: sdkVersionStr,
+    arch: arch,
+    allowNonMacho: allowNonMacho,
+    positional: positional,
+  );
+}
 
-  int? platform;
-  int? minOs;
-  int? sdkVersion;
-  if (platformName != null || minOsStr != null) {
-    if (platformName == null || minOsStr == null) {
-      _usageError('--platform and --min-os must be provided together');
-    }
-    platform = parsePlatform(platformName);
-    minOs = parsePackedVersion(minOsStr);
-    sdkVersion = sdkVersionStr != null
-        ? parsePackedVersion(sdkVersionStr)
-        : minOs;
-  }
+void _runCopyFiles(List<String> args) {
+  final parsed = _parseCopyFilesArgs(args);
+  final versions = _parsePlatformVersions(
+    parsed.platformName,
+    parsed.minOsStr,
+    parsed.sdkVersionStr,
+  );
 
-  final outDir = Directory(outputDirPath)..createSync(recursive: true);
+  Directory(parsed.outputDirPath).createSync(recursive: true);
+  _stageCopyFilesEntries(
+    parsed.positional,
+    outDirPath: parsed.outputDirPath,
+    platform: versions.platform,
+    minOs: versions.minOs,
+    sdkVersion: versions.sdkVersion,
+    arch: parsed.arch,
+    allowNonMacho: parsed.allowNonMacho,
+  );
+}
+
+/// Stages each `copy-files` positional (a source path with an optional
+/// explicit destination name) under [outDirPath].
+void _stageCopyFilesEntries(
+  List<String> positional, {
+  required String outDirPath,
+  required int? platform,
+  required int? minOs,
+  required int? sdkVersion,
+  required String? arch,
+  required Set<String> allowNonMacho,
+}) {
   var i = 0;
   while (i < positional.length) {
     final srcPath = positional[i];
@@ -1026,53 +1262,77 @@ void _runCopyFiles(List<String> args) {
       ).pathSegments.where((s) => s.isNotEmpty).last;
       i += 1;
     }
-    final destPath = '${outDir.path}/$destName';
-    if (platform != null && minOs != null) {
-      final inputBytes = File(srcPath).readAsBytesSync();
-      final isAllowed = _isAllowedNonMacho(
-        allowNonMacho,
-        inputPath: srcPath,
-        outputPath: destName,
-      );
-      if (!isMachO64(inputBytes) && !isFatMachO(inputBytes)) {
-        if (isAllowed) {
-          File(destPath).writeAsBytesSync(inputBytes);
-          continue;
-        }
-        if (isMachO32(inputBytes)) {
-          throw FormatException(
-            'Input file "$srcPath" ("$destName") is an unsupported 32-bit '
-            'Mach-O binary (0xfeedface). Only 64-bit Mach-O binaries are '
-            'supported unless explicitly listed in allow_non_macho.',
-          );
-        }
-        throw FormatException(
-          'Input file "$srcPath" ("$destName") is a non-Mach-O file (not a '
-          '64-bit or universal Mach-O binary). Only Mach-O binaries are '
-          'permitted unless explicitly listed in allow_non_macho.',
-        );
-      }
-      try {
-        final patched = patchMachO(
-          inputBytes,
-          platform: platform,
-          minOs: minOs,
-          sdkVersion: sdkVersion,
-          arch: arch,
-        );
-        File(destPath).writeAsBytesSync(patched);
-      } on FormatException catch (e) {
-        if (isAllowed) {
-          File(destPath).writeAsBytesSync(inputBytes);
-          continue;
-        }
-        throw FormatException(
-          'Input file "$srcPath" ("$destName"): ${e.message}',
-        );
-      }
-    } else {
-      File(srcPath).copySync(destPath);
+    _stageCopyFilesEntry(
+      srcPath,
+      destName,
+      outDirPath: outDirPath,
+      platform: platform,
+      minOs: minOs,
+      sdkVersion: sdkVersion,
+      arch: arch,
+      allowNonMacho: allowNonMacho,
+    );
+  }
+}
+
+/// Stages one `copy-files` entry, patching Mach-O binaries when a platform
+/// was requested and copying anything else verbatim.
+void _stageCopyFilesEntry(
+  String srcPath,
+  String destName, {
+  required String outDirPath,
+  required int? platform,
+  required int? minOs,
+  required int? sdkVersion,
+  required String? arch,
+  required Set<String> allowNonMacho,
+}) {
+  final destPath = '$outDirPath/$destName';
+  if (platform == null || minOs == null) {
+    File(srcPath).copySync(destPath);
+    return;
+  }
+  final inputBytes = File(srcPath).readAsBytesSync();
+  final isAllowed = _isAllowedNonMacho(
+    allowNonMacho,
+    inputPath: srcPath,
+    outputPath: destName,
+  );
+  if (!isMachO64(inputBytes) && !isFatMachO(inputBytes)) {
+    if (isAllowed) {
+      File(destPath).writeAsBytesSync(inputBytes);
+      return;
     }
+    if (isMachO32(inputBytes)) {
+      throw FormatException(
+        'Input file "$srcPath" ("$destName") is an unsupported 32-bit '
+        'Mach-O binary (0xfeedface). Only 64-bit Mach-O binaries are '
+        'supported unless explicitly listed in allow_non_macho.',
+      );
+    }
+    throw FormatException(
+      'Input file "$srcPath" ("$destName") is a non-Mach-O file (not a '
+      '64-bit or universal Mach-O binary). Only Mach-O binaries are '
+      'permitted unless explicitly listed in allow_non_macho.',
+    );
+  }
+  try {
+    final patched = patchMachO(
+      inputBytes,
+      platform: platform,
+      minOs: minOs,
+      sdkVersion: sdkVersion,
+      arch: arch,
+    );
+    File(destPath).writeAsBytesSync(patched);
+  } on FormatException catch (e) {
+    if (isAllowed) {
+      File(destPath).writeAsBytesSync(inputBytes);
+      return;
+    }
+    throw FormatException(
+      'Input file "$srcPath" ("$destName"): ${e.message}',
+    );
   }
 }
 
@@ -1177,6 +1437,64 @@ void verifyMacosFramework(
   String frameworkName = 'App',
   String? frameworkZipPath,
 }) {
+  final fwDir = _resolveFrameworkDir(frameworkOrWrapperPath, frameworkName);
+
+  final versionABinary = File('${fwDir.path}/Versions/A/$frameworkName');
+  final versionAPlist = File('${fwDir.path}/Versions/A/Resources/Info.plist');
+  _expectFrameworkFile(versionABinary.path);
+  _expectFrameworkFile(versionAPlist.path);
+
+  final currentLinkPath = '${fwDir.path}/Versions/Current';
+  _expectFrameworkSymlink(currentLinkPath, 'A', 'symlink');
+
+  final topBinaryLinkPath = '${fwDir.path}/$frameworkName';
+  _expectFrameworkSymlink(
+    topBinaryLinkPath,
+    'Versions/Current/$frameworkName',
+    'top-level symlink',
+  );
+
+  final topResourcesLinkPath = '${fwDir.path}/Resources';
+  _expectFrameworkSymlink(
+    topResourcesLinkPath,
+    'Versions/Current/Resources',
+    'top-level symlink',
+  );
+
+  _checkFrameworkTopEntries(fwDir, frameworkName);
+
+  if (File(topBinaryLinkPath).resolveSymbolicLinksSync() !=
+      versionABinary.resolveSymbolicLinksSync()) {
+    throw StateError(
+      '$topBinaryLinkPath does not resolve to ${versionABinary.path}.',
+    );
+  }
+  if (File('$topResourcesLinkPath/Info.plist').resolveSymbolicLinksSync() !=
+      versionAPlist.resolveSymbolicLinksSync()) {
+    throw StateError(
+      '$topResourcesLinkPath/Info.plist does not resolve to ${versionAPlist.path}.',
+    );
+  }
+
+  final binaryBytes = versionABinary.readAsBytesSync();
+  _verifyMachODylibBytes(binaryBytes, versionABinary.path);
+  _verifyFrameworkInfoPlistXml(
+    versionAPlist.readAsStringSync(),
+    frameworkName,
+    versionAPlist.path,
+  );
+
+  if (frameworkZipPath != null && frameworkZipPath.isNotEmpty) {
+    _verifyFrameworkZipEntries(frameworkZipPath, frameworkName);
+  }
+}
+
+/// Resolves [frameworkOrWrapperPath] to the framework directory, unwrapping
+/// Bazel's symlinked tree-artifact staging when present.
+Directory _resolveFrameworkDir(
+  String frameworkOrWrapperPath,
+  String frameworkName,
+) {
   var fwDir = frameworkOrWrapperPath.endsWith('.framework')
       ? Directory(frameworkOrWrapperPath)
       : Directory('$frameworkOrWrapperPath/$frameworkName.framework');
@@ -1201,71 +1519,40 @@ void verifyMacosFramework(
       );
     }
   }
+  return fwDir;
+}
 
-  final versionABinary = File('${fwDir.path}/Versions/A/$frameworkName');
-  final versionAPlist = File('${fwDir.path}/Versions/A/Resources/Info.plist');
-  if (FileSystemEntity.typeSync(versionABinary.path, followLinks: false) !=
-      FileSystemEntityType.file) {
-    throw StateError(
-      'Expected regular file at ${versionABinary.path}, found '
-      '${FileSystemEntity.typeSync(versionABinary.path, followLinks: false)}',
-    );
+/// Throws unless [path] is a regular file.
+void _expectFrameworkFile(String path) {
+  final type = FileSystemEntity.typeSync(path, followLinks: false);
+  if (type != FileSystemEntityType.file) {
+    throw StateError('Expected regular file at $path, found $type');
   }
-  if (FileSystemEntity.typeSync(versionAPlist.path, followLinks: false) !=
-      FileSystemEntityType.file) {
-    throw StateError(
-      'Expected regular file at ${versionAPlist.path}, found '
-      '${FileSystemEntity.typeSync(versionAPlist.path, followLinks: false)}',
-    );
-  }
+}
 
-  final currentLinkPath = '${fwDir.path}/Versions/Current';
-  if (FileSystemEntity.typeSync(currentLinkPath, followLinks: false) !=
+/// Throws unless [linkPath] is a symlink pointing at [expectedTarget].
+/// [noun] names the link kind in the error ('symlink', 'top-level symlink').
+void _expectFrameworkSymlink(
+  String linkPath,
+  String expectedTarget,
+  String noun,
+) {
+  if (FileSystemEntity.typeSync(linkPath, followLinks: false) !=
       FileSystemEntityType.link) {
     throw StateError(
-      'Expected symlink at $currentLinkPath, found '
-      '${FileSystemEntity.typeSync(currentLinkPath, followLinks: false)}',
+      'Expected $noun at $linkPath, found '
+      '${FileSystemEntity.typeSync(linkPath, followLinks: false)}',
     );
   }
-  final currentTarget = Link(currentLinkPath).targetSync();
-  if (currentTarget != 'A') {
-    throw StateError(
-      'Expected $currentLinkPath -> "A", got "$currentTarget"',
-    );
+  final target = Link(linkPath).targetSync();
+  if (target != expectedTarget) {
+    throw StateError('Expected $linkPath -> "$expectedTarget", got "$target"');
   }
+}
 
-  final topBinaryLinkPath = '${fwDir.path}/$frameworkName';
-  if (FileSystemEntity.typeSync(topBinaryLinkPath, followLinks: false) !=
-      FileSystemEntityType.link) {
-    throw StateError(
-      'Expected top-level symlink at $topBinaryLinkPath, found '
-      '${FileSystemEntity.typeSync(topBinaryLinkPath, followLinks: false)}',
-    );
-  }
-  final topBinaryTarget = Link(topBinaryLinkPath).targetSync();
-  if (topBinaryTarget != 'Versions/Current/$frameworkName') {
-    throw StateError(
-      'Expected $topBinaryLinkPath -> "Versions/Current/$frameworkName", '
-      'got "$topBinaryTarget"',
-    );
-  }
-
-  final topResourcesLinkPath = '${fwDir.path}/Resources';
-  if (FileSystemEntity.typeSync(topResourcesLinkPath, followLinks: false) !=
-      FileSystemEntityType.link) {
-    throw StateError(
-      'Expected top-level symlink at $topResourcesLinkPath, found '
-      '${FileSystemEntity.typeSync(topResourcesLinkPath, followLinks: false)}',
-    );
-  }
-  final topResourcesTarget = Link(topResourcesLinkPath).targetSync();
-  if (topResourcesTarget != 'Versions/Current/Resources') {
-    throw StateError(
-      'Expected $topResourcesLinkPath -> "Versions/Current/Resources", '
-      'got "$topResourcesTarget"',
-    );
-  }
-
+/// Checks the framework root holds only `Versions/` and approved symlinks,
+/// and that `Versions/` holds only `A` and `Current`.
+void _checkFrameworkTopEntries(Directory fwDir, String frameworkName) {
   // Ensure no unsealed files or non-Versions directories exist at framework root.
   final allowedTopSymlinks = <String>{
     frameworkName,
@@ -1300,83 +1587,76 @@ void verifyMacosFramework(
       );
     }
   }
+}
 
-  if (File(topBinaryLinkPath).resolveSymbolicLinksSync() !=
-      versionABinary.resolveSymbolicLinksSync()) {
+/// Verifies the framework ZIP archive entries for [frameworkName].
+void _verifyFrameworkZipEntries(
+  String frameworkZipPath,
+  String frameworkName,
+) {
+  final zipFile = File(frameworkZipPath);
+  if (!zipFile.existsSync()) {
+    throw StateError('Framework zip archive not found: $frameworkZipPath');
+  }
+  final entries = {
+    for (final e in readFrameworkZipEntries(zipFile.readAsBytesSync()))
+      e.path: e,
+  };
+  final prefix = '$frameworkName.framework';
+  final binEntry = entries['$prefix/Versions/A/$frameworkName'];
+  if (binEntry == null || binEntry.isSymlink || !binEntry.isExecutable) {
     throw StateError(
-      '$topBinaryLinkPath does not resolve to ${versionABinary.path}.',
+      'Expected executable Mach-O entry "$prefix/Versions/A/$frameworkName" '
+      'in $frameworkZipPath, got: $binEntry',
     );
   }
-  if (File('$topResourcesLinkPath/Info.plist').resolveSymbolicLinksSync() !=
-      versionAPlist.resolveSymbolicLinksSync()) {
-    throw StateError(
-      '$topResourcesLinkPath/Info.plist does not resolve to ${versionAPlist.path}.',
-    );
-  }
-
-  final binaryBytes = versionABinary.readAsBytesSync();
-  _verifyMachODylibBytes(binaryBytes, versionABinary.path);
-  _verifyFrameworkInfoPlistXml(
-    versionAPlist.readAsStringSync(),
-    frameworkName,
-    versionAPlist.path,
+  _verifyMachODylibBytes(
+    binEntry.data,
+    '$frameworkZipPath:$prefix/Versions/A/$frameworkName',
   );
 
-  if (frameworkZipPath != null && frameworkZipPath.isNotEmpty) {
-    final zipFile = File(frameworkZipPath);
-    if (!zipFile.existsSync()) {
-      throw StateError('Framework zip archive not found: $frameworkZipPath');
-    }
-    final entries = {
-      for (final e in readFrameworkZipEntries(zipFile.readAsBytesSync()))
-        e.path: e,
-    };
-    final prefix = '$frameworkName.framework';
-    final binEntry = entries['$prefix/Versions/A/$frameworkName'];
-    if (binEntry == null || binEntry.isSymlink || !binEntry.isExecutable) {
+  final plistEntry = entries['$prefix/Versions/A/Resources/Info.plist'];
+  if (plistEntry == null || plistEntry.isSymlink) {
+    throw StateError(
+      'Expected regular file entry "$prefix/Versions/A/Resources/Info.plist" '
+      'in $frameworkZipPath',
+    );
+  }
+  _verifyFrameworkInfoPlistXml(
+    utf8.decode(plistEntry.data),
+    frameworkName,
+    '$frameworkZipPath:$prefix/Versions/A/Resources/Info.plist',
+  );
+
+  _checkFrameworkZipSymlinks(entries, frameworkZipPath, prefix, frameworkName);
+}
+
+/// Checks the expected symlink entries of a framework ZIP archive.
+void _checkFrameworkZipSymlinks(
+  Map<String, FrameworkZipEntry> entries,
+  String frameworkZipPath,
+  String prefix,
+  String frameworkName,
+) {
+  final expectedLinks = <String, String>{
+    '$prefix/Versions/Current': 'A',
+    '$prefix/$frameworkName': 'Versions/Current/$frameworkName',
+    '$prefix/Resources': 'Versions/Current/Resources',
+  };
+  for (final expected in expectedLinks.entries) {
+    final entry = entries[expected.key];
+    if (entry == null || !entry.isSymlink) {
       throw StateError(
-        'Expected executable Mach-O entry "$prefix/Versions/A/$frameworkName" '
-        'in $frameworkZipPath, got: $binEntry',
+        'Expected symlink entry "${expected.key}" in $frameworkZipPath, '
+        'found: ${entry == null ? "missing" : "regular file"}',
       );
     }
-    _verifyMachODylibBytes(
-      binEntry.data,
-      '$frameworkZipPath:$prefix/Versions/A/$frameworkName',
-    );
-
-    final plistEntry = entries['$prefix/Versions/A/Resources/Info.plist'];
-    if (plistEntry == null || plistEntry.isSymlink) {
+    final target = utf8.decode(entry.data);
+    if (target != expected.value) {
       throw StateError(
-        'Expected regular file entry "$prefix/Versions/A/Resources/Info.plist" '
-        'in $frameworkZipPath',
+        'Expected symlink "${expected.key}" -> "${expected.value}" in '
+        '$frameworkZipPath, got "$target"',
       );
-    }
-    _verifyFrameworkInfoPlistXml(
-      utf8.decode(plistEntry.data),
-      frameworkName,
-      '$frameworkZipPath:$prefix/Versions/A/Resources/Info.plist',
-    );
-
-    final expectedLinks = <String, String>{
-      '$prefix/Versions/Current': 'A',
-      '$prefix/$frameworkName': 'Versions/Current/$frameworkName',
-      '$prefix/Resources': 'Versions/Current/Resources',
-    };
-    for (final expected in expectedLinks.entries) {
-      final entry = entries[expected.key];
-      if (entry == null || !entry.isSymlink) {
-        throw StateError(
-          'Expected symlink entry "${expected.key}" in $frameworkZipPath, '
-          'found: ${entry == null ? "missing" : "regular file"}',
-        );
-      }
-      final target = utf8.decode(entry.data);
-      if (target != expected.value) {
-        throw StateError(
-          'Expected symlink "${expected.key}" -> "${expected.value}" in '
-          '$frameworkZipPath, got "$target"',
-        );
-      }
     }
   }
 }
@@ -1430,7 +1710,31 @@ Map<String, Uint8List> _readZipArchiveEntries(Uint8List zipBytes) {
   return result;
 }
 
-void _runVerify(List<String> args) {
+/// Parsed `verify` subcommand flags.
+class _VerifyArgs {
+  _VerifyArgs({
+    required this.inputPath,
+    required this.binaryRelpath,
+    required this.frameworkZipPath,
+    required this.objdumpPath,
+    required this.outputPath,
+    required this.expectedSubstrings,
+    required this.expectedEntries,
+    required this.forbiddenEntries,
+  });
+
+  final String? inputPath;
+  final String? binaryRelpath;
+  final String? frameworkZipPath;
+  final String? objdumpPath;
+  final String? outputPath;
+  final List<String> expectedSubstrings;
+  final List<String> expectedEntries;
+  final List<String> forbiddenEntries;
+}
+
+/// Parses `verify` flags; unknown flags fail usage.
+_VerifyArgs _parseVerifyArgs(List<String> args) {
   String? inputPath;
   String? binaryRelpath;
   String? frameworkZipPath;
@@ -1439,47 +1743,52 @@ void _runVerify(List<String> args) {
   final expectedSubstrings = <String>[];
   final expectedEntries = <String>[];
   final forbiddenEntries = <String>[];
-
-  for (var i = 0; i < args.length; i++) {
-    final arg = args[i];
+  final flags = _FlagCursor(args);
+  while (flags.moveNext()) {
+    final arg = flags.current;
     switch (arg) {
       case '--input':
-        if (++i >= args.length) _usageError('--input requires a value');
-        inputPath = args[i];
+        inputPath = flags.take('--input');
       case '--binary-relpath':
-        if (++i >= args.length) {
-          _usageError('--binary-relpath requires a value');
-        }
-        binaryRelpath = args[i];
+        binaryRelpath = flags.take('--binary-relpath');
       case '--framework-zip':
-        if (++i >= args.length) {
-          _usageError('--framework-zip requires a value');
-        }
-        frameworkZipPath = args[i];
+        frameworkZipPath = flags.take('--framework-zip');
       case '--objdump':
-        if (++i >= args.length) _usageError('--objdump requires a value');
-        objdumpPath = args[i];
+        objdumpPath = flags.take('--objdump');
       case '--expect':
-        if (++i >= args.length) _usageError('--expect requires a value');
-        expectedSubstrings.add(args[i]);
+        expectedSubstrings.add(flags.take('--expect'));
       case '--expect-entry':
-        if (++i >= args.length) _usageError('--expect-entry requires a value');
-        expectedEntries.add(args[i]);
+        expectedEntries.add(flags.take('--expect-entry'));
       case '--forbid-entry':
-        if (++i >= args.length) _usageError('--forbid-entry requires a value');
-        forbiddenEntries.add(args[i]);
+        forbiddenEntries.add(flags.take('--forbid-entry'));
       case '--output':
-        if (++i >= args.length) _usageError('--output requires a value');
-        outputPath = args[i];
+        outputPath = flags.take('--output');
       default:
         _usageError('Unknown flag for verify: $arg');
     }
   }
+  return _VerifyArgs(
+    inputPath: inputPath,
+    binaryRelpath: binaryRelpath,
+    frameworkZipPath: frameworkZipPath,
+    objdumpPath: objdumpPath,
+    outputPath: outputPath,
+    expectedSubstrings: expectedSubstrings,
+    expectedEntries: expectedEntries,
+    forbiddenEntries: forbiddenEntries,
+  );
+}
 
+void _runVerify(List<String> args) {
+  final parsed = _parseVerifyArgs(args);
+  final inputPath = parsed.inputPath;
+  final outputPath = parsed.outputPath;
   if (inputPath == null || outputPath == null) {
     _usageError('verify requires --input and --output');
   }
 
+  final binaryRelpath = parsed.binaryRelpath;
+  final frameworkZipPath = parsed.frameworkZipPath;
   final isZipArchive =
       FileSystemEntity.isFileSync(inputPath) &&
       (inputPath.endsWith('.ipa') || inputPath.endsWith('.zip'));
@@ -1504,120 +1813,26 @@ void _runVerify(List<String> args) {
 
   String? tempExtractedBinaryPath;
   try {
-    late final String targetPath;
-    late final Uint8List bytes;
-
+    final String targetPath;
+    final Uint8List bytes;
     if (isZipArchive) {
-      final zipEntries = _readZipArchiveEntries(
-        File(inputPath).readAsBytesSync(),
-      );
-      for (final expectedEntry in expectedEntries) {
-        if (!zipEntries.containsKey(expectedEntry) &&
-            !zipEntries.containsKey('$expectedEntry/')) {
-          throw StateError(
-            'Expected archive entry "$expectedEntry" not found in "$inputPath". '
-            'Entries: ${zipEntries.keys.toList()}',
-          );
-        }
-      }
-      for (final forbiddenEntry in forbiddenEntries) {
-        final matching = zipEntries.keys.where(
-          (k) =>
-              k == forbiddenEntry ||
-              k.startsWith('$forbiddenEntry/') ||
-              k.contains(forbiddenEntry),
-        );
-        if (matching.isNotEmpty) {
-          throw StateError(
-            'Forbidden archive entry "$forbiddenEntry" found in "$inputPath": '
-            '${matching.toList()}',
-          );
-        }
-      }
-      if (binaryRelpath == null || binaryRelpath.isEmpty) {
-        throw ArgumentError(
-          '--binary-relpath is required when verifying a ZIP/IPA archive.',
-        );
-      }
-      final entryBytes = zipEntries[binaryRelpath];
-      if (entryBytes == null) {
-        throw StateError(
-          'Binary "$binaryRelpath" not found in archive "$inputPath". '
-          'Entries: ${zipEntries.keys.toList()}',
-        );
-      }
-      bytes = entryBytes;
-      tempExtractedBinaryPath = '$outputPath.extracted_macho';
-      final tempFile = File(tempExtractedBinaryPath);
-      tempFile.parent.createSync(recursive: true);
-      tempFile.writeAsBytesSync(bytes);
-      targetPath = tempExtractedBinaryPath;
+      final loaded = _loadZipVerifyTarget(parsed, inputPath, outputPath);
+      targetPath = loaded.targetPath;
+      bytes = loaded.bytes;
+      tempExtractedBinaryPath = loaded.tempPath;
     } else {
-      for (final expectedEntry in expectedEntries) {
-        final candidate = '$inputPath/$expectedEntry';
-        if (FileSystemEntity.typeSync(candidate, followLinks: false) ==
-            FileSystemEntityType.notFound) {
-          throw StateError(
-            'Expected bundle entry "$expectedEntry" not found under "$inputPath".',
-          );
-        }
-      }
-      for (final forbiddenEntry in forbiddenEntries) {
-        final candidate = '$inputPath/$forbiddenEntry';
-        if (FileSystemEntity.typeSync(candidate, followLinks: false) !=
-            FileSystemEntityType.notFound) {
-          throw StateError(
-            'Forbidden bundle entry "$forbiddenEntry" found under "$inputPath".',
-          );
-        }
-      }
-      targetPath = binaryRelpath != null && binaryRelpath.isNotEmpty
-          ? '$inputPath/$binaryRelpath'
-          : inputPath;
-      bytes = File(targetPath).readAsBytesSync();
+      final loaded = _loadBundleVerifyTarget(parsed, inputPath);
+      targetPath = loaded.targetPath;
+      bytes = loaded.bytes;
     }
 
-    if (!isMachO64(bytes) && !isFatMachO(bytes)) {
-      throw FormatException(
-        'File "$targetPath" is not a 64-bit or universal Mach-O binary.',
-      );
-    }
-    if (isFatMachO(bytes)) {
-      for (final s in extractFatSlices(bytes)) {
-        parseLoadCommands(s.bytes);
-      }
-    } else {
-      parseLoadCommands(bytes);
-    }
-
-    if (objdumpPath != null && objdumpPath.isNotEmpty) {
-      final res = Process.runSync(objdumpPath, [
-        '--macho',
-        '--private-headers',
-        '--dylib-id',
-        '--arch=all',
-        targetPath,
-      ]);
-      if (res.exitCode != 0) {
-        throw StateError(
-          'llvm-objdump failed on "$targetPath" (exit ${res.exitCode}):\n'
-          '${res.stderr}',
-        );
-      }
-      final stdoutStr = res.stdout as String;
-      for (final expected in expectedSubstrings) {
-        if (!stdoutStr.contains(expected)) {
-          throw StateError(
-            'Expected substring "$expected" not found in llvm-objdump output for '
-            '"$targetPath":\n$stdoutStr',
-          );
-        }
-      }
-    }
-
-    final outFile = File(outputPath);
-    outFile.parent.createSync(recursive: true);
-    outFile.writeAsStringSync('verified\n');
+    _checkParsedMachO(targetPath, bytes);
+    _checkObjdumpOutput(
+      parsed.objdumpPath,
+      targetPath,
+      parsed.expectedSubstrings,
+    );
+    _writeVerifyStamp(outputPath);
   } finally {
     if (tempExtractedBinaryPath != null) {
       final f = File(tempExtractedBinaryPath);
@@ -1626,6 +1841,174 @@ void _runVerify(List<String> args) {
       }
     }
   }
+}
+
+/// Loads the verified binary from a ZIP/IPA archive, staging it at a
+/// temporary path next to the stamp output.
+({String targetPath, Uint8List bytes, String tempPath}) _loadZipVerifyTarget(
+  _VerifyArgs parsed,
+  String inputPath,
+  String outputPath,
+) {
+  final zipEntries = _readZipArchiveEntries(
+    File(inputPath).readAsBytesSync(),
+  );
+  _checkZipVerifyEntries(
+    zipEntries,
+    inputPath,
+    parsed.expectedEntries,
+    parsed.forbiddenEntries,
+  );
+  final binaryRelpath = parsed.binaryRelpath;
+  if (binaryRelpath == null || binaryRelpath.isEmpty) {
+    throw ArgumentError(
+      '--binary-relpath is required when verifying a ZIP/IPA archive.',
+    );
+  }
+  final entryBytes = zipEntries[binaryRelpath];
+  if (entryBytes == null) {
+    throw StateError(
+      'Binary "$binaryRelpath" not found in archive "$inputPath". '
+      'Entries: ${zipEntries.keys.toList()}',
+    );
+  }
+  final tempPath = '$outputPath.extracted_macho';
+  final tempFile = File(tempPath);
+  tempFile.parent.createSync(recursive: true);
+  tempFile.writeAsBytesSync(entryBytes);
+  return (targetPath: tempPath, bytes: entryBytes, tempPath: tempPath);
+}
+
+/// Loads the verified binary from a staged bundle directory or file.
+({String targetPath, Uint8List bytes}) _loadBundleVerifyTarget(
+  _VerifyArgs parsed,
+  String inputPath,
+) {
+  _checkBundleVerifyEntries(
+    inputPath,
+    parsed.expectedEntries,
+    parsed.forbiddenEntries,
+  );
+  final binaryRelpath = parsed.binaryRelpath;
+  final targetPath = binaryRelpath != null && binaryRelpath.isNotEmpty
+      ? '$inputPath/$binaryRelpath'
+      : inputPath;
+  return (
+    targetPath: targetPath,
+    bytes: File(targetPath).readAsBytesSync(),
+  );
+}
+
+/// Throws when an expected archive entry is missing or a forbidden one hits.
+void _checkZipVerifyEntries(
+  Map<String, Uint8List> zipEntries,
+  String inputPath,
+  List<String> expectedEntries,
+  List<String> forbiddenEntries,
+) {
+  for (final expectedEntry in expectedEntries) {
+    if (!zipEntries.containsKey(expectedEntry) &&
+        !zipEntries.containsKey('$expectedEntry/')) {
+      throw StateError(
+        'Expected archive entry "$expectedEntry" not found in "$inputPath". '
+        'Entries: ${zipEntries.keys.toList()}',
+      );
+    }
+  }
+  for (final forbiddenEntry in forbiddenEntries) {
+    final matching = zipEntries.keys.where(
+      (k) =>
+          k == forbiddenEntry ||
+          k.startsWith('$forbiddenEntry/') ||
+          k.contains(forbiddenEntry),
+    );
+    if (matching.isNotEmpty) {
+      throw StateError(
+        'Forbidden archive entry "$forbiddenEntry" found in "$inputPath": '
+        '${matching.toList()}',
+      );
+    }
+  }
+}
+
+/// Throws when an expected bundle entry is missing or a forbidden one hits.
+void _checkBundleVerifyEntries(
+  String inputPath,
+  List<String> expectedEntries,
+  List<String> forbiddenEntries,
+) {
+  for (final expectedEntry in expectedEntries) {
+    final candidate = '$inputPath/$expectedEntry';
+    if (FileSystemEntity.typeSync(candidate, followLinks: false) ==
+        FileSystemEntityType.notFound) {
+      throw StateError(
+        'Expected bundle entry "$expectedEntry" not found under "$inputPath".',
+      );
+    }
+  }
+  for (final forbiddenEntry in forbiddenEntries) {
+    final candidate = '$inputPath/$forbiddenEntry';
+    if (FileSystemEntity.typeSync(candidate, followLinks: false) !=
+        FileSystemEntityType.notFound) {
+      throw StateError(
+        'Forbidden bundle entry "$forbiddenEntry" found under "$inputPath".',
+      );
+    }
+  }
+}
+
+/// Parses the loaded binary's load commands, failing unless it is Mach-O.
+void _checkParsedMachO(String targetPath, Uint8List bytes) {
+  if (!isMachO64(bytes) && !isFatMachO(bytes)) {
+    throw FormatException(
+      'File "$targetPath" is not a 64-bit or universal Mach-O binary.',
+    );
+  }
+  if (isFatMachO(bytes)) {
+    for (final s in extractFatSlices(bytes)) {
+      parseLoadCommands(s.bytes);
+    }
+  } else {
+    parseLoadCommands(bytes);
+  }
+}
+
+/// Runs llvm-objdump on [targetPath] and checks the expected substrings.
+void _checkObjdumpOutput(
+  String? objdumpPath,
+  String targetPath,
+  List<String> expectedSubstrings,
+) {
+  if (objdumpPath == null || objdumpPath.isEmpty) return;
+  final res = Process.runSync(objdumpPath, [
+    '--macho',
+    '--private-headers',
+    '--dylib-id',
+    '--arch=all',
+    targetPath,
+  ]);
+  if (res.exitCode != 0) {
+    throw StateError(
+      'llvm-objdump failed on "$targetPath" (exit ${res.exitCode}):\n'
+      '${res.stderr}',
+    );
+  }
+  final stdoutStr = res.stdout as String;
+  for (final expected in expectedSubstrings) {
+    if (!stdoutStr.contains(expected)) {
+      throw StateError(
+        'Expected substring "$expected" not found in llvm-objdump output for '
+        '"$targetPath":\n$stdoutStr',
+      );
+    }
+  }
+}
+
+/// Writes the `verified` stamp file for a successful `verify` run.
+void _writeVerifyStamp(String outputPath) {
+  final outFile = File(outputPath);
+  outFile.parent.createSync(recursive: true);
+  outFile.writeAsStringSync('verified\n');
 }
 
 /// Returns true if [bytes] begins with a 64-bit little-endian Mach-O header.
