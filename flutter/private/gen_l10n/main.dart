@@ -125,11 +125,84 @@ Future<void> main(List<String> argv) async {
   final logger = BufferLogger.test();
 
   final projectDirPath = args['project-dir'] ?? '.';
+  final setup = _localizationSetup(
+    args: args,
+    arbFiles: arbFiles,
+    localFs: localFs,
+  );
+  final options = setup.options;
+  final arbDir = setup.arbDir;
+
+  try {
+    final memProjectDir = memFs.directory(projectDirPath)
+      ..createSync(recursive: true);
+    final memInputDir = memFs.directory(
+      memFs.path.join(memProjectDir.path, arbDir),
+    )..createSync(recursive: true);
+
+    _stageArbInputs(
+      arbFiles: arbFiles,
+      projectDirPath: projectDirPath,
+      localFs: localFs,
+      memFs: memFs,
+      memInputPath: memInputDir.path,
+    );
+    _stageHeaderFile(
+      headerFile: args['header-file'],
+      projectDirPath: projectDirPath,
+      arbDir: arbDir,
+      localFs: localFs,
+      memFs: memFs,
+      memInputPath: memInputDir.path,
+    );
+
+    final generator = await generateLocalizations(
+      projectDir: memProjectDir,
+      options: options,
+      logger: logger,
+      fileSystem: memFs,
+    );
+
+    _writeGeneratorOutputs(
+      outputFileList: generator.outputFileList,
+      projectDirPath: projectDirPath,
+      outputDir: outputDir,
+      localFs: localFs,
+      memFs: memFs,
+    );
+  } on Object catch (e) {
+    _reportGeneratorOutput(logger);
+    _fail('$e');
+  }
+
+  // Succeeded — still surface warnings, which are not failures but are the
+  // only report of untranslated messages.
+  _reportGeneratorOutput(logger);
+}
+
+/// Surfaces everything the generator printed on stderr.
+void _reportGeneratorOutput(BufferLogger logger) {
+  final output = _drain(logger);
+  if (output.isNotEmpty) {
+    io.stderr.write(output);
+  }
+}
+
+/// The generator options for [args] and the logical `.arb` directory.
+///
+/// [arbDir] defaults to the first `--arb-file`'s directory, as the rule
+/// passes each declared input explicitly rather than a directory to scan.
+({LocalizationOptions options, String arbDir}) _localizationSetup({
+  required Map<String, String> args,
+  required List<String> arbFiles,
+  required LocalFileSystem localFs,
+}) {
   final rawArbDir = args['arb-dir'];
   final arbDir = (rawArbDir != null && rawArbDir.isNotEmpty)
       ? rawArbDir
       : localFs.path.dirname(arbFiles.first);
 
+  final outputDir = args['output-dir']!;
   final options = LocalizationOptions(
     arbDir: arbDir,
     outputDir: outputDir,
@@ -157,85 +230,86 @@ Future<void> main(List<String> argv) async {
     // either: rules_dart's format check covers hand-written files only.
     format: false,
   );
+  return (options: options, arbDir: arbDir);
+}
 
-  try {
-    final memProjectDir = memFs.directory(projectDirPath)
-      ..createSync(recursive: true);
-    final memInputDir = memFs.directory(
-      memFs.path.join(memProjectDir.path, arbDir),
-    )..createSync(recursive: true);
-
-    final stagedSources = <String, String>{};
-    for (final arbPath in arbFiles) {
-      var srcFile = localFs.file(arbPath);
-      if (!srcFile.existsSync() && projectDirPath != '.') {
-        srcFile = localFs.file(localFs.path.join(projectDirPath, arbPath));
-      }
-      if (!srcFile.existsSync()) {
-        _fail('arb file "$arbPath" does not exist.');
-      }
-      final basename = localFs.path.basename(arbPath);
-      final resolvedPath = localFs.path.normalize(srcFile.path);
-      final previous = stagedSources[basename];
-      if (previous != null && previous != resolvedPath) {
-        _fail(
-          'multiple --arb-file inputs share basename "$basename": '
-          '"$previous" and "$arbPath".',
-        );
-      }
-      stagedSources[basename] = resolvedPath;
-      memInputDir
-          .childFile(basename)
-          .writeAsBytesSync(srcFile.readAsBytesSync());
+/// Copies the generator's in-memory outputs into the real [outputDir].
+void _writeGeneratorOutputs({
+  required List<String> outputFileList,
+  required String projectDirPath,
+  required String outputDir,
+  required LocalFileSystem localFs,
+  required MemoryFileSystem memFs,
+}) {
+  final localOutputDir = localFs.directory(
+    localFs.path.join(projectDirPath, outputDir),
+  )..createSync(recursive: true);
+  for (final outPath in outputFileList) {
+    final memFile = memFs.file(outPath);
+    final dstFile = localOutputDir.childFile(memFile.basename);
+    if (dstFile.existsSync()) {
+      dstFile.deleteSync();
     }
-
-    final headerFile = args['header-file'];
-    if (headerFile != null) {
-      var localHeader = localFs.file(
-        localFs.path.join(projectDirPath, arbDir, headerFile),
-      );
-      if (!localHeader.existsSync()) {
-        localHeader = localFs.file(
-          localFs.path.join(projectDirPath, headerFile),
-        );
-      }
-      if (localHeader.existsSync()) {
-        final memHeader = memInputDir.childFile(headerFile);
-        memHeader.parent.createSync(recursive: true);
-        memHeader.writeAsBytesSync(localHeader.readAsBytesSync());
-      }
-    }
-
-    final generator = await generateLocalizations(
-      projectDir: memProjectDir,
-      options: options,
-      logger: logger,
-      fileSystem: memFs,
-    );
-
-    final localOutputDir = localFs.directory(
-      localFs.path.join(projectDirPath, outputDir),
-    )..createSync(recursive: true);
-    for (final outPath in generator.outputFileList) {
-      final memFile = memFs.file(outPath);
-      final dstFile = localOutputDir.childFile(memFile.basename);
-      if (dstFile.existsSync()) {
-        dstFile.deleteSync();
-      }
-      dstFile.writeAsBytesSync(memFile.readAsBytesSync());
-    }
-  } on Object catch (e) {
-    final output = _drain(logger);
-    if (output.isNotEmpty) {
-      io.stderr.write(output);
-    }
-    _fail('$e');
+    dstFile.writeAsBytesSync(memFile.readAsBytesSync());
   }
+}
 
-  // Succeeded — still surface warnings, which are not failures but are the
-  // only report of untranslated messages.
-  final output = _drain(logger);
-  if (output.isNotEmpty) {
-    io.stderr.write(output);
+/// Stages the declared `--arb-file` inputs into the in-memory [memInputPath].
+///
+/// Only the declared inputs are staged, so `AppResourceBundleCollection` never
+/// scans `--arb-dir` on the host file system or ingests undeclared `.arb`
+/// files sitting in the same directory.
+void _stageArbInputs({
+  required List<String> arbFiles,
+  required String projectDirPath,
+  required LocalFileSystem localFs,
+  required MemoryFileSystem memFs,
+  required String memInputPath,
+}) {
+  final memInputDir = memFs.directory(memInputPath);
+  final stagedSources = <String, String>{};
+  for (final arbPath in arbFiles) {
+    var srcFile = localFs.file(arbPath);
+    if (!srcFile.existsSync() && projectDirPath != '.') {
+      srcFile = localFs.file(localFs.path.join(projectDirPath, arbPath));
+    }
+    if (!srcFile.existsSync()) {
+      _fail('arb file "$arbPath" does not exist.');
+    }
+    final basename = localFs.path.basename(arbPath);
+    final resolvedPath = localFs.path.normalize(srcFile.path);
+    final previous = stagedSources[basename];
+    if (previous != null && previous != resolvedPath) {
+      _fail(
+        'multiple --arb-file inputs share basename "$basename": '
+        '"$previous" and "$arbPath".',
+      );
+    }
+    stagedSources[basename] = resolvedPath;
+    memInputDir.childFile(basename).writeAsBytesSync(srcFile.readAsBytesSync());
+  }
+}
+
+/// Stages the `--header-file` input next to the staged `.arb` files, when it
+/// names a file that exists.
+void _stageHeaderFile({
+  required String? headerFile,
+  required String projectDirPath,
+  required String arbDir,
+  required LocalFileSystem localFs,
+  required MemoryFileSystem memFs,
+  required String memInputPath,
+}) {
+  if (headerFile == null) return;
+  var localHeader = localFs.file(
+    localFs.path.join(projectDirPath, arbDir, headerFile),
+  );
+  if (!localHeader.existsSync()) {
+    localHeader = localFs.file(localFs.path.join(projectDirPath, headerFile));
+  }
+  if (localHeader.existsSync()) {
+    final memHeader = memFs.directory(memInputPath).childFile(headerFile);
+    memHeader.parent.createSync(recursive: true);
+    memHeader.writeAsBytesSync(localHeader.readAsBytesSync());
   }
 }
