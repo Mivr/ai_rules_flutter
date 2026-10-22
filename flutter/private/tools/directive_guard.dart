@@ -169,6 +169,83 @@ String? resolveFlutterKeyRelativeTarget(String uri, String fromKey) {
   return stack.join('/');
 }
 
+/// Reads every existing source in [sources] for the directive scan.
+///
+/// The front end decodes malformed UTF-8 instead of reporting it, so the
+/// guard scans what it can rather than skipping the file. Missing or
+/// unreadable files stay out of the map; the compiler reports those itself.
+Map<String, String> _readDeclaredSourceContents(List<String> sources) {
+  final contents = <String, String>{};
+  for (final path in sources) {
+    try {
+      contents[path] = utf8.decode(
+        File(path).readAsBytesSync(),
+        allowMalformed: true,
+      );
+    } on FileSystemException {
+      // Missing or unreadable here; the compiler reports it.
+    }
+  }
+  return contents;
+}
+
+/// The refusal diagnostic for a directive that names no declared input.
+/// Every refusal in [findDisallowedFlutterDirectives] shares this shape so
+/// each names the file, the directive and the URI the same way.
+String _refuseFlutterDirective(
+  String tool,
+  String path,
+  String kind,
+  String uri,
+) => "$tool: $path $kind '$uri' is not a declared input.";
+
+/// Whether the directive [uri] in the declared source with staged path [from]
+/// and multi-root key [fromKey] names a file the compile may read.
+///
+/// A URI spanning lines is refused however it spells its target: the front
+/// end drops a whitespace-only first line of a multi-line string literal and
+/// reads a different file than the resolvers see. An empty path segment is
+/// refused before resolving: the front end resolves some such spellings
+/// absolutely. Otherwise `dart:` is always allowed, the app scheme must name
+/// a declared key, `package:` must not climb above its package, `file:` and
+/// other unexpected schemes are refused, and a relative URI must resolve to a
+/// declared source beside the importing file or to a declared multi-root key.
+bool _isAllowedFlutterDirective(
+  String uri,
+  String from,
+  String fromKey,
+  Set<String> declared,
+  Set<String> declaredKeys, {
+  required String multiRootPrefix,
+}) {
+  if (uri.contains('\n') || uri.contains('\r')) return false;
+  if (hasEmptyPathSegment(uri)) return false;
+  if (uri.startsWith('dart:')) return true;
+  if (uri.startsWith(multiRootPrefix)) {
+    // The app scheme resolves only across the compile's `--filesystem-root`
+    // values, which name nothing but staged declared inputs: a URI that
+    // names no declared key fails the build here instead of at the front
+    // end, where the message would name the URI but not the file that
+    // reads it.
+    final key = resolveDirectiveUri(
+      uri,
+      '',
+      const {},
+      multiRootPrefix: multiRootPrefix,
+    );
+    return key != null && declaredKeys.contains(key);
+  }
+  if (uri.startsWith('package:')) return !isEscapingPackageUri(uri);
+  if (isFileSchemeDirectiveUri(uri) ||
+      isDisallowedDirectiveUri(uri, multiRootPrefix: multiRootPrefix)) {
+    return false;
+  }
+  final target = resolveStagedRelativeTarget(uri, from);
+  if (target != null && declared.contains(target)) return true;
+  final keyTarget = resolveFlutterKeyRelativeTarget(uri, fromKey);
+  return keyTarget != null && declaredKeys.contains(keyTarget);
+}
+
 /// A diagnostic for every input source with a directive URI that names no
 /// file the action can read through its declared inputs: a `file:` URI in any
 /// spelling, any other scheme but `dart:`, `package:` and the app scheme, a
@@ -177,10 +254,8 @@ String? resolveFlutterKeyRelativeTarget(String uri, String fromKey) {
 /// URI resolving to no declared input source. The front end reads such a URI
 /// off the host, outside every `--filesystem-root`, so the wrapper refuses
 /// before compiling. Climbing `..` segments are followed past the declared
-/// inputs, never clamped: enough segments name any host path. Every `if`
-/// alternative is checked, since the wrapper has no configuration to select
-/// by. Empty when clean. Each diagnostic names the file, the directive and
-/// the URI.
+/// inputs, never clamped: enough segments name any host path. Empty when
+/// clean. Each diagnostic names the file, the directive and the URI.
 ///
 /// A relative URI is accepted when it resolves to a declared source beside the
 /// importing file, or when it resolves to a declared source's multi-root key
@@ -191,7 +266,7 @@ String? resolveFlutterKeyRelativeTarget(String uri, String fromKey) {
 /// [sources] are filesystem paths of the declared Dart sources (read in the
 /// compile's working directory; missing or unreadable files are skipped — the
 /// compiler reports those itself — while every source that exists is decoded
-/// with `allowMalformed` so malformed bytes never skip the check.
+/// with `allowMalformed` so malformed bytes never skip the check).
 /// [fsRoots] are the `--filesystem-root`
 /// values the compile forwards to the front end.
 List<String> findDisallowedFlutterDirectives(
@@ -200,19 +275,7 @@ List<String> findDisallowedFlutterDirectives(
   String tool = 'flutter',
   String multiRootPrefix = flutterMultiRootPrefix,
 }) {
-  final contents = <String, String>{};
-  for (final path in sources) {
-    try {
-      // The front end decodes malformed UTF-8 instead of reporting it, so the
-      // guard scans what it can rather than skipping the file.
-      contents[path] = utf8.decode(
-        File(path).readAsBytesSync(),
-        allowMalformed: true,
-      );
-    } on FileSystemException {
-      // Missing or unreadable here; the compiler reports it.
-    }
-  }
+  final contents = _readDeclaredSourceContents(sources);
   final declared = <String>{
     for (final path in contents.keys) normalizeStagedPath(path),
   };
@@ -227,70 +290,17 @@ List<String> findDisallowedFlutterDirectives(
     final from = normalizeStagedPath(path);
     final fromKey = flutterSourceKey(path, fsRoots);
     for (final ref in scanAllDirectiveUris(content)) {
-      final uri = ref.uri;
-      // A URI spanning lines is refused however it spells its target: the
-      // front end drops a whitespace-only first line of a multi-line string
-      // literal and reads a different file than the resolvers below see, so
-      // multi-line directive URIs are refused outright rather than resolved
-      // (mirrors `hasLineBreak` in rules_dart's guard library).
-      if (uri.contains('\n') || uri.contains('\r')) {
-        errors.add(
-          "$tool: $path ${ref.kind} '$uri' is not a declared input.",
-        );
+      if (_isAllowedFlutterDirective(
+        ref.uri,
+        from,
+        fromKey,
+        declared,
+        declaredKeys,
+        multiRootPrefix: multiRootPrefix,
+      )) {
         continue;
       }
-      // The resolvers below skip empty segments, but the front end resolves
-      // some such spellings absolutely: refuse them before resolving.
-      if (hasEmptyPathSegment(uri)) {
-        errors.add(
-          "$tool: $path ${ref.kind} '$uri' is not a declared input.",
-        );
-        continue;
-      }
-      if (uri.startsWith('dart:')) {
-        continue;
-      }
-      if (uri.startsWith(multiRootPrefix)) {
-        // The app scheme resolves only across the compile's `--filesystem-root`
-        // values, which name nothing but staged declared inputs: a URI that
-        // names no declared key fails the build here instead of at the front
-        // end, where the message would name the URI but not the file that
-        // reads it.
-        final key = resolveDirectiveUri(
-          uri,
-          '',
-          const {},
-          multiRootPrefix: multiRootPrefix,
-        );
-        if (key == null || !declaredKeys.contains(key)) {
-          errors.add(
-            "$tool: $path ${ref.kind} '$uri' is not a declared input.",
-          );
-        }
-        continue;
-      }
-      if (uri.startsWith('package:')) {
-        if (isEscapingPackageUri(uri)) {
-          errors.add(
-            "$tool: $path ${ref.kind} '$uri' is not a declared input.",
-          );
-        }
-        continue;
-      }
-      if (isFileSchemeDirectiveUri(uri) ||
-          isDisallowedDirectiveUri(uri, multiRootPrefix: multiRootPrefix)) {
-        errors.add(
-          "$tool: $path ${ref.kind} '$uri' is not a declared input.",
-        );
-        continue;
-      }
-      final target = resolveStagedRelativeTarget(uri, from);
-      if (target != null && declared.contains(target)) continue;
-      final keyTarget = resolveFlutterKeyRelativeTarget(uri, fromKey);
-      if (keyTarget != null && declaredKeys.contains(keyTarget)) continue;
-      errors.add(
-        "$tool: $path ${ref.kind} '$uri' is not a declared input.",
-      );
+      errors.add(_refuseFlutterDirective(tool, path, ref.kind, ref.uri));
     }
   }
   return errors;
