@@ -1468,7 +1468,7 @@ class _ManifestMerge {
         .toList(growable: false);
     for (final k in remKeys) {
       final p = removedByBase.remove(k)!;
-      edits.add(_SpanEdit(p.spanStart!, p.spanEnd!, ''));
+      edits.add(_SpanEdit(p.spanStart, p.spanEnd, ''));
     }
   }
 
