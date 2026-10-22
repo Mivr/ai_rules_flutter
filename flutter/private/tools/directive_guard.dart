@@ -22,6 +22,7 @@
 // skipping the segment would (a `package:` doubled slash resolves as an
 // absolute path), so such URIs fail before the compiler runs.
 
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:rules_dart_guard/directive_guard.dart';
@@ -188,8 +189,10 @@ String? resolveFlutterKeyRelativeTarget(String uri, String fromKey) {
 /// beside a source-tree importer reads a declared input, not the host.
 ///
 /// [sources] are filesystem paths of the declared Dart sources (read in the
-/// compile's working directory; missing or undecodable files are skipped — the
-/// compiler reports those itself). [fsRoots] are the `--filesystem-root`
+/// compile's working directory; missing or unreadable files are skipped — the
+/// compiler reports those itself — while every source that exists is decoded
+/// with `allowMalformed` so malformed bytes never skip the check.
+/// [fsRoots] are the `--filesystem-root`
 /// values the compile forwards to the front end.
 List<String> findDisallowedFlutterDirectives(
   List<String> sources,
@@ -200,11 +203,14 @@ List<String> findDisallowedFlutterDirectives(
   final contents = <String, String>{};
   for (final path in sources) {
     try {
-      contents[path] = File(path).readAsStringSync();
+      // The front end decodes malformed UTF-8 instead of reporting it, so the
+      // guard scans what it can rather than skipping the file.
+      contents[path] = utf8.decode(
+        File(path).readAsBytesSync(),
+        allowMalformed: true,
+      );
     } on FileSystemException {
       // Missing or unreadable here; the compiler reports it.
-    } on FormatException {
-      // Not decodable text; the compiler reports it.
     }
   }
   final declared = <String>{

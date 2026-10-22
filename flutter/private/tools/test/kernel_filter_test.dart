@@ -335,6 +335,58 @@ void main() {}
       expect(errors, hasLength(1));
       expect(errors.single, contains("part 'user.g.dart'"));
     });
+
+    test('refuses a disallowed directive after an invalid byte', () {
+      // The front end decodes malformed UTF-8 instead of reporting it, so the
+      // guard scans what it can rather than skipping the file.
+      final file = File('${work.path}/lib/main.dart')
+        ..createSync(recursive: true)
+        ..writeAsBytesSync([
+          ...'// comment '.codeUnits,
+          0xff,
+          ...'\nimport \'file:///etc/hostname\';\nvoid main() {}\n'.codeUnits,
+        ]);
+      final errors = findDisallowedFlutterDirectives([
+        'lib/main.dart',
+      ], const []);
+      expect(errors, hasLength(1));
+      expect(errors.single, contains('lib/main.dart'));
+      expect(errors.single, contains('is not a declared input'));
+      expect(file.existsSync(), isTrue);
+    });
+
+    test('accepts a malformed source with no disallowed directive', () {
+      // The compiler accepts malformed sources, so a clean one is not refused.
+      File('${work.path}/lib/main.dart')
+        ..createSync(recursive: true)
+        ..writeAsBytesSync([
+          ...'// comment '.codeUnits,
+          0xff,
+          ...'\nvoid main() {}\n'.codeUnits,
+        ]);
+      final errors = findDisallowedFlutterDirectives([
+        'lib/main.dart',
+      ], const []);
+      expect(errors, isEmpty);
+    });
+
+    test('accepts a valid source importing a malformed declared sibling', () {
+      // A skipped file would be missing from the declared set, so a valid
+      // importer of a malformed sibling would be refused as undeclared.
+      File('${work.path}/lib/sibling.dart')
+        ..createSync(recursive: true)
+        ..writeAsBytesSync([
+          ...'// comment '.codeUnits,
+          0xff,
+          ...'\nint get answer => 42;\n'.codeUnits,
+        ]);
+      write('lib/main.dart', "import 'sibling.dart';\nvoid main() {}\n");
+      final errors = findDisallowedFlutterDirectives([
+        'lib/main.dart',
+        'lib/sibling.dart',
+      ], const []);
+      expect(errors, isEmpty);
+    });
   });
 
   group('runFiltered', () {
