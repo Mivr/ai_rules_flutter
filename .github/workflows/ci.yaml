@@ -273,6 +273,42 @@ jobs:
             exit 1
           fi
           echo "$out" | grep -F "but wanted 0000000000000000000000000000000000000000000000000000000000000000"
+      # Pinned-helper red paths: e2e/digest_mismatch fetches committed
+      # fixture files through file:// URLs (no network) with one repo per
+      # digest shape. Bad digests must fail on the helper's message (which
+      # names the URL) or on the checksum comparison; correct digests must
+      # succeed and produce the fixture bytes.
+      - name: Pinned-helper digests fail closed on file fixtures
+        working-directory: e2e/digest_mismatch
+        run: |
+          expect_fail() {
+            if out=$(bazel fetch "@$1//..." 2>&1); then
+              echo "$out"
+              echo "expected @$1 fetch to fail, but it succeeded"
+              exit 1
+            fi
+            echo "$out" | grep -F "$2" || {
+              echo "$out"
+              echo "expected @$1 failure to mention [$2]"
+              exit 1
+            }
+          }
+          expect_fail digest_empty "sha256 must be exactly 64 lowercase hex characters"
+          expect_fail digest_short "sha256 must be exactly 64 lowercase hex characters"
+          expect_fail digest_upper "sha256 must be exactly 64 lowercase hex characters"
+          expect_fail digest_sri "sha256 must be exactly 64 lowercase hex characters"
+          expect_fail digest_conditional "sha256 must be exactly 64 lowercase hex characters"
+          expect_fail digest_wrong_download "but wanted 0000000000000000000000000000000000000000000000000000000000000000"
+          expect_fail digest_wrong_extract "but wanted 0000000000000000000000000000000000000000000000000000000000000000"
+          bazel fetch @digest_ok_download//... || {
+            echo "expected the correct-digest download fetch to succeed"
+            exit 1
+          }
+          bazel fetch @digest_ok_extract//... || {
+            echo "expected the correct-digest extract fetch to succeed"
+            exit 1
+          }
+          bazel build @digest_ok_download//:fetched.bin @digest_ok_extract//:hello.txt
       # Xtool red path: e2e/xtool_sdk_invalid opts into `flutter.darwin_sdk`
       # with a bundle path that does not exist. The fetch must fail on that
       # path — before any LLVM download starts — so an opting-in consumer
