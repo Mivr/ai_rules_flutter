@@ -336,6 +336,24 @@ const int _zip32Limit = 0xFFFFFFFF;
   }
   final checksum = crc ?? crc32(data);
 
+  final localBytes = BytesBuilder(copy: false)
+    ..add(_localFileHeader(nameBytes, method, checksum, payload.length, data.length))
+    ..add(payload);
+  return (
+    local: localBytes.takeBytes(),
+    central: _centralRecord(nameBytes, method, checksum, payload.length, data.length),
+  );
+}
+
+/// The local file header for an entry with [nameBytes] holding [payloadLen]
+/// of [dataLen] bytes with [checksum], before its payload.
+Uint8List _localFileHeader(
+  List<int> nameBytes,
+  int method,
+  int checksum,
+  int payloadLen,
+  int dataLen,
+) {
   final local = ByteData(30 + nameBytes.length);
   _setUint32LE(local, 0, 0x04034b50);
   _setUint16LE(local, 4, 20);
@@ -344,12 +362,25 @@ const int _zip32Limit = 0xFFFFFFFF;
   _setUint16LE(local, 10, _overlayDosTime);
   _setUint16LE(local, 12, _overlayDosDate);
   _setUint32LE(local, 14, checksum);
-  _setUint32LE(local, 18, payload.length);
-  _setUint32LE(local, 22, data.length);
+  _setUint32LE(local, 18, payloadLen);
+  _setUint32LE(local, 22, dataLen);
   _setUint16LE(local, 26, nameBytes.length);
   _setUint16LE(local, 28, 0);
   local.buffer.asUint8List().setRange(30, 30 + nameBytes.length, nameBytes);
+  return local.buffer.asUint8List();
+}
 
+/// The central directory record for an entry with [nameBytes] holding
+/// [payloadLen] of [dataLen] bytes with [checksum].
+///
+/// The local header offset is patched by the caller.
+Uint8List _centralRecord(
+  List<int> nameBytes,
+  int method,
+  int checksum,
+  int payloadLen,
+  int dataLen,
+) {
   final central = ByteData(46 + nameBytes.length);
   _setUint32LE(central, 0, 0x02014b50);
   _setUint16LE(central, 4, (3 << 8) | 20);
@@ -359,21 +390,16 @@ const int _zip32Limit = 0xFFFFFFFF;
   _setUint16LE(central, 12, _overlayDosTime);
   _setUint16LE(central, 14, _overlayDosDate);
   _setUint32LE(central, 16, checksum);
-  _setUint32LE(central, 20, payload.length);
-  _setUint32LE(central, 24, data.length);
+  _setUint32LE(central, 20, payloadLen);
+  _setUint32LE(central, 24, dataLen);
   _setUint16LE(central, 28, nameBytes.length);
   _setUint16LE(central, 30, 0);
   _setUint16LE(central, 32, 0);
   _setUint16LE(central, 34, 0);
   _setUint16LE(central, 36, 0);
   _setUint32LE(central, 38, (_overlayFileMode << 16));
-  // Local header offset is patched by the caller.
   central.buffer.asUint8List().setRange(46, 46 + nameBytes.length, nameBytes);
-
-  final localBytes = BytesBuilder(copy: false)
-    ..add(local.buffer.asUint8List())
-    ..add(payload);
-  return (local: localBytes.takeBytes(), central: central.buffer.asUint8List());
+  return central.buffer.asUint8List();
 }
 
 /// Injects the Flutter payload into a copy of the unsigned base APK.
@@ -409,6 +435,58 @@ void spliceApkOverlay({
       );
     }
   }
+  _refuseSignedBase(base, central);
+
+  final out = BytesBuilder(copy: false)
+    ..add(Uint8List.sublistView(base, 0, central.cdOffset));
+  final newCentral = BytesBuilder(copy: false);
+  final offset = _appendPayloadEntries(
+    out: out,
+    newCentral: newCentral,
+    offset: central.cdOffset,
+    payload: payload,
+    nocompressExtensions: nocompressExtensions,
+  );
+
+  final totalCount = central.count + payload.length;
+  if (totalCount >= 0xFFFF) {
+    throw ArgumentError('apk-overlay: too many entries for a ZIP archive.');
+  }
+  final newCentralBytes = newCentral.takeBytes();
+  out.add(central.records);
+  out.add(newCentralBytes);
+
+  final cdOffset = offset;
+  final cdSize = central.records.length + newCentralBytes.length;
+  if (cdOffset >= _zip32Limit) {
+    throw FormatException(
+      'apk-overlay: central directory offset $cdOffset exceeds the ZIP32 '
+      'limit; ZIP64 archives are not supported.',
+    );
+  }
+  if (cdSize >= _zip32Limit) {
+    throw FormatException(
+      'apk-overlay: central directory size $cdSize exceeds the ZIP32 '
+      'limit; ZIP64 archives are not supported.',
+    );
+  }
+  out.add(_encodeEndOfCentralDirectory(totalCount, cdSize, cdOffset));
+
+  final output = File(outputApkPath);
+  output.parent.createSync(recursive: true);
+  output.writeAsBytesSync(out.takeBytes(), flush: true);
+}
+
+/// Refuses a [base] APK that already carries signatures.
+///
+/// Injecting into a signed APK would silently invalidate its signatures: a
+/// bare `META-INF/MANIFEST.MF` is fine — singlejar adds one to every unsigned
+/// APK — but the signature files apksigner adds (`.SF`/`.RSA`/`.DSA`/`.EC`)
+/// and the APK Signing Block prove signing.
+void _refuseSignedBase(
+  Uint8List base,
+  ({Set<String> names, Uint8List records, int cdOffset, int count}) central,
+) {
   for (final signedMarker in [
     // NB: META-INF/MANIFEST.MF alone is NOT a signature marker — singlejar
     // adds a bare manifest to every unsigned APK it builds. Only the
@@ -450,15 +528,23 @@ void spliceApkOverlay({
       );
     }
   }
+}
 
-  final out = BytesBuilder(copy: false)
-    ..add(Uint8List.sublistView(base, 0, central.cdOffset));
-  final newCentral = BytesBuilder(copy: false);
-  var offset = central.cdOffset;
+/// Appends [payload] entries to [out] and their records to [newCentral],
+/// patching each record's local header offset; returns the offset past the
+/// last entry written.
+int _appendPayloadEntries({
+  required BytesBuilder out,
+  required BytesBuilder newCentral,
+  required int offset,
+  required List<_PayloadEntry> payload,
+  required Set<String> nocompressExtensions,
+}) {
+  var cursor = offset;
   for (final entry in payload) {
-    if (offset >= _zip32Limit) {
+    if (cursor >= _zip32Limit) {
       throw FormatException(
-        'apk-overlay: local header offset $offset for ${entry.path} '
+        'apk-overlay: local header offset $cursor for ${entry.path} '
         'exceeds the ZIP32 limit; ZIP64 archives are not supported.',
       );
     }
@@ -469,48 +555,31 @@ void spliceApkOverlay({
       extraNoCompress: nocompressExtensions,
     );
     final centralBd = ByteData.sublistView(encoded.central);
-    _setUint32LE(centralBd, 42, offset);
+    _setUint32LE(centralBd, 42, cursor);
     out.add(encoded.local);
     newCentral.add(encoded.central);
-    offset += encoded.local.length;
+    cursor += encoded.local.length;
   }
+  return cursor;
+}
 
-  final totalCount = central.count + payload.length;
-  if (totalCount >= 0xFFFF) {
-    throw ArgumentError('apk-overlay: too many entries for a ZIP archive.');
-  }
-  final newCentralBytes = newCentral.takeBytes();
-  out.add(central.records);
-  out.add(newCentralBytes);
-
-  final cdOffset = offset;
-  final cdSize = central.records.length + newCentralBytes.length;
-  if (cdOffset >= _zip32Limit) {
-    throw FormatException(
-      'apk-overlay: central directory offset $cdOffset exceeds the ZIP32 '
-      'limit; ZIP64 archives are not supported.',
-    );
-  }
-  if (cdSize >= _zip32Limit) {
-    throw FormatException(
-      'apk-overlay: central directory size $cdSize exceeds the ZIP32 '
-      'limit; ZIP64 archives are not supported.',
-    );
-  }
+/// The End of Central Directory record for [totalCount] entries whose central
+/// directory holds [cdSize] bytes at [cdOffset].
+Uint8List _encodeEndOfCentralDirectory(
+  int totalCount,
+  int cdSize,
+  int cdOffset,
+) {
   final eocd = ByteData(22);
   _setUint32LE(eocd, 0, 0x06054b50);
   _setUint16LE(eocd, 4, 0);
   _setUint16LE(eocd, 6, 0);
   _setUint16LE(eocd, 8, totalCount);
   _setUint16LE(eocd, 10, totalCount);
-  _setUint32LE(eocd, 12, central.records.length + newCentralBytes.length);
+  _setUint32LE(eocd, 12, cdSize);
   _setUint32LE(eocd, 16, cdOffset);
   _setUint16LE(eocd, 20, 0);
-  out.add(eocd.buffer.asUint8List());
-
-  final output = File(outputApkPath);
-  output.parent.createSync(recursive: true);
-  output.writeAsBytesSync(out.takeBytes(), flush: true);
+  return eocd.buffer.asUint8List();
 }
 
 /// Dispatches the CLI arguments for the `apk-overlay` subcommand.
