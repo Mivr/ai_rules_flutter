@@ -826,15 +826,18 @@ def _use_modular_kernel(mode, aot, frontend_server_target, registrant, staged_ag
         not extra_frontend_flags and not all_defines
     )
 
-def _compile_modular_kernel(ctx, flutter_sdk_info, app_lib_root, packages, kernel_dill, platform_dill):
+def _modular_tools_or_none(ctx, flutter_sdk_info, packages):
+    """The modular kernel tools, or None when the target needs a whole-program compile."""
     own_files = [ctx.file.main] + [f for f in ctx.files.srcs if f != ctx.file.main]
-    modular_tools = flutter_modular_test_tools(
+    return flutter_modular_test_tools(
         ctx,
         flutter_sdk_info,
         own_files,
         packages,
         [],
     )
+
+def _compile_modular_kernel(ctx, app_lib_root, packages, kernel_dill, platform_dill, modular_tools):
     compile_flutter_modular_app_kernel(
         ctx,
         modular_tools,
@@ -894,8 +897,10 @@ def _run_kernel_compile(ctx, flutter_sdk_info, kernel_dill, platform_dill, st, a
         flags.extra_frontend,
         flags.all_defines,
     ):
-        _compile_modular_kernel(ctx, flutter_sdk_info, st.app_lib_root, st.packages, kernel_dill, platform_dill)
-        return None
+        modular_tools = _modular_tools_or_none(ctx, flutter_sdk_info, st.packages)
+        if modular_tools != None:
+            _compile_modular_kernel(ctx, st.app_lib_root, st.packages, kernel_dill, platform_dill, modular_tools)
+            return None
     return _compile_full_kernel(ctx, flutter_sdk_info, kernel_dill, platform_dill, st, agent, reg, flags, opts)
 
 def flutter_compile_kernel(ctx, flutter_sdk_info, aot = None, platform_dill = None, target_platform = None, frontend_server_target = "flutter", native_assets_manifest = None, track_widget_creation = False, assets_dir = None, platform_build_args = [], recorded_uses = None):
