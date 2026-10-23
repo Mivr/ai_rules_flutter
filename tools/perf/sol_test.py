@@ -16,6 +16,7 @@ import sol
 from sol import (
     app_dir_hashes,
     bazel_info,
+    build_profile,
     capture_bazel_output,
     chain_replayed,
     check_under_base,
@@ -27,6 +28,7 @@ from sol import (
     flow_id,
     flow_reason,
     hashes_match,
+    host_tool_spawns,
     ipa_entry_hashes,
     load_sol_records,
     measure_process_tree,
@@ -37,10 +39,13 @@ from sol import (
     pick_unit,
     plan_verify_snapshot,
     read_chain_report,
+    read_jvm_cpu,
     read_verify_snapshot,
     rep_sort_key,
+    replay_host_spawns,
     restore_tree,
     run_chain,
+    save_gzipped,
     select_sol_spawns,
     sha256_file,
     sim_bundle_archives,
@@ -48,6 +53,9 @@ from sol import (
     snapshot_hashes,
     snapshot_tree,
     summarize_flow,
+    summarize_host_tools,
+    summarize_jvm,
+    summarize_profile,
     summarize_sol,
     sweep_chain_side_effects,
     verify_differences,
@@ -697,6 +705,181 @@ class ChainRecordTest(unittest.TestCase):
                          ["rep1", "rep2", "rep10", "other"])
 
 
+class ProfileTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="sol-profile-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def host_spawn(self, mnemonic="Genrule", target="//tools:host_tool",
+                   rel="bazel-out/darwin-opt-exec-ABCD/bin/tool"):
+        return {
+            "commandArgs": ["sh", "-c", "exit 0"],
+            "environmentVariables": [],
+            "listedOutputs": [rel],
+            "mnemonic": mnemonic,
+            "exitCode": 0,
+            "targetLabel": target,
+        }
+
+    def write_host_output(self, rel, data=b"host-bytes"):
+        path = os.path.join(self.tmp, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as fh:
+            fh.write(data)
+        return path
+
+    def runner(self, cpu=0.5, exit_code=0):
+        def run(spawn):
+            del spawn
+            return {"mnemonic": "", "target": "", "instructions": None,
+                    "real_s": 0.1, "user_s": cpu - 0.1, "sys_s": 0.1,
+                    "exit_code": exit_code,
+                    "stderr_tail": "boom" if exit_code else None,
+                    "command": []}
+        return run
+
+    def test_host_tool_spawns_filters(self):
+        cached = dict(self.host_spawn(), cacheHit=True)
+        failed = dict(self.host_spawn(), exitCode=2)
+        bare = dict(self.host_spawn(), commandArgs=[])
+        runnable, skipped = host_tool_spawns(
+            [aot_spawn(), cached, failed, bare, self.host_spawn()])
+        self.assertEqual(len(runnable), 1)
+        self.assertEqual(skipped, {"cache hit": 1, "bazel exit 2": 1,
+                                   "no command": 1})
+
+    def test_replay_host_tools_aggregates(self):
+        rel = "bazel-out/darwin-opt-exec-ABCD/bin/tool"
+        dst = self.write_host_output(rel)
+        host = replay_host_spawns(
+            [aot_spawn(), self.host_spawn()], self.tmp, 60.0,
+            os.path.join(self.tmp, "backup"), runner=self.runner(cpu=0.5))
+        self.assertEqual(host["total"], 0.5)
+        self.assertEqual(host["by_mnemonic"], {"Genrule": 0.5})
+        self.assertEqual(host["top_targets"], [["//tools:host_tool", 0.5]])
+        self.assertEqual(host["failed"], [])
+        self.assertEqual(host["count"], 1)
+        self.assertNotIn("command", json.dumps(host))
+        with open(dst, "rb") as fh:
+            self.assertEqual(fh.read(), b"host-bytes")
+
+    def test_replay_continues_past_failure(self):
+        first = self.host_spawn(
+            rel="bazel-out/darwin-opt-exec-ABCD/bin/first")
+        second = self.host_spawn(
+            rel="bazel-out/darwin-opt-exec-ABCD/bin/second")
+        self.write_host_output(
+            "bazel-out/darwin-opt-exec-ABCD/bin/first")
+        self.write_host_output(
+            "bazel-out/darwin-opt-exec-ABCD/bin/second")
+        calls = []
+
+        def run(spawn):
+            calls.append(spawn["listedOutputs"])
+            if "first" in spawn["listedOutputs"][0]:
+                return {"mnemonic": "", "target": "", "instructions": None,
+                        "real_s": 0.1, "user_s": 0.1, "sys_s": 0.1,
+                        "exit_code": 3, "stderr_tail": "boom", "command": []}
+            return self.runner(cpu=0.5)(spawn)
+
+        host = replay_host_spawns(
+            [first, second], self.tmp, 60.0,
+            os.path.join(self.tmp, "backup"), runner=run)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(host["failed"]), 1)
+        self.assertEqual(host["failed"][0]["exit"], 3)
+        self.assertEqual(host["total"], 0.2 + 0.5)
+
+    def test_replay_without_hosts_is_zero(self):
+        host = replay_host_spawns(
+            [aot_spawn()], self.tmp, 60.0,
+            os.path.join(self.tmp, "backup"), runner=self.runner())
+        self.assertEqual(host["total"], 0.0)
+        self.assertEqual(host["top_targets"], [])
+
+    def test_move_aside_failure_recorded(self):
+        host = replay_host_spawns(
+            [self.host_spawn()], self.tmp, 60.0,
+            os.path.join(self.tmp, "backup"), runner=self.runner())
+        self.assertIsNone(host["total"])
+        self.assertIn("move-aside", host["error"])
+
+    def test_build_profile_sol_and_residual(self):
+        jvm = {"total": 5.0, "phases": {"Initialize command": 3.0}}
+        host = {"total": 1.0, "by_mnemonic": {}, "top_targets": []}
+        profile = build_profile(10.0, jvm, host, {"cpu_s": 2.5}, {})
+        self.assertEqual(profile["sol_source"], "sol")
+        self.assertEqual(profile["sol_cpu_s"], 2.5)
+        self.assertAlmostEqual(profile["residual"], 1.5)
+
+    def test_build_profile_chain_cpu_substitution(self):
+        jvm = {"total": 5.0, "phases": {}}
+        host = {"total": 1.0, "by_mnemonic": {}, "top_targets": []}
+        profile = build_profile(
+            10.0, jvm, host, None, {"sol_cpu_s": 2.0})
+        self.assertEqual(profile["sol_source"], "chain-cpu")
+        self.assertEqual(profile["sol_cpu_s"], 2.0)
+        self.assertAlmostEqual(profile["residual"], 2.0)
+
+    def test_build_profile_missing_part_is_none(self):
+        profile = build_profile(
+            10.0, {"total": None, "phases": {}},
+            {"total": 1.0}, None, {"sol_cpu_s": None})
+        self.assertIsNone(profile["residual"])
+        self.assertIsNone(profile["sol_cpu_s"])
+
+    def test_summarize_jvm_medians(self):
+        jvms = [{"total": 1.0, "phases": {"A": 1.0}},
+                {"total": 3.0, "phases": {"A": 2.0, "B": 1.0}},
+                {"total": 2.0, "phases": {"A": 3.0}}]
+        self.assertEqual(summarize_jvm(jvms),
+                         {"total": 2.0, "phases": {"A": 2.0, "B": 1.0}})
+
+    def test_summarize_host_tools_medians(self):
+        hosts = [{"total": 1.0, "by_mnemonic": {"G": 1.0},
+                  "by_target": {"//t:x": 1.0}, "failed": []},
+                 {"total": 3.0, "by_mnemonic": {"G": 3.0},
+                  "by_target": {"//t:x": 2.0, "//t:y": 1.0},
+                  "failed": [{"mnemonic": "G", "exit": 1}]},
+                 {"total": 2.0, "by_mnemonic": {"G": 2.0},
+                  "by_target": {"//t:x": 3.0, "//t:y": 2.0}, "failed": []}]
+        summary = summarize_host_tools(hosts)
+        self.assertEqual(summary["total"], 2.0)
+        self.assertEqual(summary["by_mnemonic"], {"G": 2.0})
+        self.assertEqual(summary["top_targets"],
+                         [["//t:x", 2.0], ["//t:y", 2.0]])
+        self.assertEqual(len(summary["failed"]), 1)
+
+    def test_summarize_profile_sums(self):
+        records = [{
+            "profile": {
+                "jvm": {"total": 5.0, "phases": {}},
+                "host_tools": {"total": 1.0, "by_mnemonic": {},
+                               "by_target": {}, "failed": []},
+                "sol_cpu_s": 2.0}}]
+        profile = summarize_profile(records, 10.0, 2.0, True)
+        self.assertEqual(profile["sol_source"], "sol")
+        self.assertAlmostEqual(profile["residual"], 2.0)
+        profile = summarize_profile(records, 10.0, None, False)
+        self.assertEqual(profile["sol_source"], "chain-cpu")
+        self.assertAlmostEqual(profile["residual"], 2.0)
+
+    def test_read_jvm_cpu_missing_records(self):
+        jvm = read_jvm_cpu(os.path.join(self.tmp, "absent.json"))
+        self.assertIsNone(jvm["total"])
+        self.assertIn("error", jvm)
+
+    def test_save_gzipped_roundtrip(self):
+        src = os.path.join(self.tmp, "a.json")
+        with open(src, "w", encoding="utf-8") as fh:
+            fh.write('{"traceEvents": []}')
+        dst = os.path.join(self.tmp, "a.json.gz")
+        save_gzipped(src, dst)
+        import gzip
+        with gzip.open(dst, "rt", encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), '{"traceEvents": []}')
+
+
 JVM_WARNING = (
     "OpenJDK 64-Bit Server VM warning: Options -Xverify:none and "
     "-noverify were deprecated in JDK 13 and will likely be removed in "
@@ -988,12 +1171,15 @@ import zipfile
 
 out_base = ""
 log = ""
+profile = ""
 mode = ""
 for arg in sys.argv[1:]:
     if arg.startswith("--output_base="):
         out_base = arg.split("=", 1)[1]
     elif arg.startswith("--execution_log_json_file="):
         log = arg.split("=", 1)[1]
+    elif arg.startswith("--profile="):
+        profile = arg.split("=", 1)[1]
     elif arg == "info":
         mode = "info"
     elif arg == "cquery":
@@ -1006,6 +1192,31 @@ def actual(rel, dst):
     with open(dst, "rb") as fh:
         digest = hashlib.sha256(fh.read()).hexdigest()
     return [{"path": rel, "digest": {"hash": digest}}]
+
+
+def write_profile():
+    # A Bazel JSON trace profile in the shape sol.py parses: the CPU
+    # usage counter (2.0 cores for 1 s, 1.0 for 1 s, 2.0 for 1 s) split
+    # by two build phase markers, so jvm.total is 5.0 with
+    # Initialize command 3.0 and Complete build 2.0.
+    if not profile:
+        return
+    events = [
+        {"name": "Initialize command", "ph": "X", "ts": 0, "dur": 10,
+         "pid": 1, "cat": "build phase marker"},
+        {"name": "CPU usage (Bazel)", "ph": "C", "ts": 0, "pid": 1,
+         "args": {"cpu": 2.0}},
+        {"name": "CPU usage (Bazel)", "ph": "C", "ts": 1000000, "pid": 1,
+         "args": {"cpu": 1.0}},
+        {"name": "Complete build", "ph": "X", "ts": 2000000, "dur": 10,
+         "pid": 1, "cat": "build phase marker"},
+        {"name": "CPU usage (Bazel)", "ph": "C", "ts": 2000000, "pid": 1,
+         "args": {"cpu": 2.0}},
+        {"name": "CPU usage (Bazel)", "ph": "C", "ts": 3000000, "pid": 1,
+         "args": {"cpu": 2.0}},
+    ]
+    with open(profile, "w", encoding="utf-8") as fh:
+        json.dump({"traceEvents": events}, fh)
 
 
 IPA_ENTRIES = ("Payload/Bench.app/App",
@@ -1066,6 +1277,47 @@ elif mode == "build":
     if fail_config and fail_config in out_base:
         sys.stderr.write("fake bazel: simulated build failure\\n")
         sys.exit(1)
+    if case == "hosttools" and not is_sim:
+        # One target spawn plus one host-tool build (outputs under an
+        # -exec- directory): the chain runs the first, the host-tools
+        # replay the second, both with a working copy command.
+        dst = os.path.join(execroot, rel)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        src = os.environ["SOL_SRC"]
+        shutil.copyfile(src, dst)
+        host_rel = "bazel-out/darwin_arm64-opt-exec-ABCD/bin/host-tool"
+        host_dst = os.path.join(execroot, host_rel)
+        os.makedirs(os.path.dirname(host_dst), exist_ok=True)
+        shutil.copyfile(src, host_dst)
+        target = {
+            "commandArgs": ["sh", "-c", 'cp "$SOL_SRC" "$SOL_DST"'],
+            "environmentVariables": [
+                {"name": "SOL_SRC", "value": src},
+                {"name": "SOL_DST", "value": dst},
+            ],
+            "listedOutputs": [rel],
+            "actualOutputs": actual(rel, dst),
+            "mnemonic": "Genrule",
+            "exitCode": 0,
+            "targetLabel": "//app:app",
+        }
+        host = {
+            "commandArgs": ["sh", "-c", 'cp "$SOL_SRC" "$SOL_DST"'],
+            "environmentVariables": [
+                {"name": "SOL_SRC", "value": src},
+                {"name": "SOL_DST", "value": host_dst},
+            ],
+            "listedOutputs": [host_rel],
+            "actualOutputs": actual(host_rel, host_dst),
+            "mnemonic": "Genrule",
+            "exitCode": 0,
+            "targetLabel": "//tools:host_tool",
+        }
+        with open(log, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(host) + "\\n")
+            fh.write(json.dumps(target) + "\\n")
+        write_profile()
+        sys.exit(0)
     if is_sim and case != "dirfail":
         dst = os.path.join(execroot, sim_rel)
         os.makedirs(os.path.dirname(dst), exist_ok=True)
@@ -1112,6 +1364,7 @@ elif mode == "build":
             with open(log, "w", encoding="utf-8") as fh:
                 fh.write(json.dumps(fail) + "\\n")
                 fh.write(json.dumps(bundle) + "\\n")
+            write_profile()
             sys.exit(0)
     elif case == "dirfail":
         # The verify file lives inside a directory the step declares:
@@ -1174,6 +1427,7 @@ elif mode == "build":
         }
     with open(log, "w", encoding="utf-8") as fh:
         fh.write(json.dumps(spawn) + "\\n")
+    write_profile()
 else:
     sys.stderr.write("fake bazel: unknown mode\\n")
     sys.exit(1)
@@ -1288,6 +1542,98 @@ class SolEndToEndTest(unittest.TestCase):
                            "bazel-out", "x", "App.framework", "App")
         with open(dst, encoding="utf-8") as fh:
             self.assertTrue(fh.read().startswith("v1\nedit:apply-app-edit"))
+
+    def test_profile_parts_sum_to_bazel(self):
+        # Every flow carries a profile whose parts are present and sum
+        # to the Bazel number; the fake profile integrates to 5.0 with
+        # Initialize command 3.0 and Complete build 2.0.
+        out = os.path.join(self.tmp, "ios-sol.json")
+        with mock.patch.dict(os.environ, self.env):
+            self.assertEqual(
+                sol.main(self.run_argv(["device_release", "sim_debug"])), 0)
+            self.assertEqual(sol.main(self.summarize_argv(out)), 0)
+        with open(out, encoding="utf-8") as fh:
+            summary = json.load(fh)
+        for flow in sorted(summary["flows"]):
+            entry = summary["flows"][flow]
+            profile = entry["profile"]
+            jvm = profile["jvm"]
+            self.assertAlmostEqual(jvm["total"], 5.0, msg=flow)
+            self.assertAlmostEqual(jvm["phases"]["Initialize command"],
+                                   3.0, msg=flow)
+            self.assertAlmostEqual(jvm["phases"]["Complete build"],
+                                   2.0, msg=flow)
+            host = profile["host_tools"]
+            self.assertEqual(host["total"], 0.0, flow)
+            self.assertEqual(host["by_mnemonic"], {}, flow)
+            self.assertEqual(host["top_targets"], [], flow)
+            self.assertEqual(profile["sol_source"], "sol", flow)
+            self.assertAlmostEqual(profile["sol_cpu_s"], entry["sol"],
+                                   msg=flow)
+            self.assertAlmostEqual(
+                jvm["total"] + profile["sol_cpu_s"] + host["total"]
+                + profile["residual"], entry["bazel"], msg=flow)
+            self.assertNotIn('"command":', json.dumps(profile))
+        # The trace profile and execution log travel gzipped per build.
+        record_dir = os.path.join(self.results, "sol", "device_release",
+                                  "clean", "rep1")
+        for name in ["trace.json.gz", "execlog.json.gz"]:
+            path = os.path.join(record_dir, name)
+            self.assertTrue(os.path.isfile(path), name)
+            import gzip
+            with gzip.open(path, "rb") as fh:
+                self.assertTrue(fh.read(), name)
+
+    def test_host_tools_replayed_and_summed(self):
+        # A host-tool build leaves the chain out, runs under the same
+        # CPU method, and lands in the profile with its target label.
+        out = os.path.join(self.tmp, "ios-sol.json")
+        env = dict(self.env, SOL_CASE="hosttools")
+        with mock.patch.dict(os.environ, env):
+            self.assertEqual(sol.main(self.run_argv(["device_release"])), 0)
+            self.assertEqual(sol.main(self.summarize_argv(out)), 0)
+        with open(out, encoding="utf-8") as fh:
+            summary = json.load(fh)
+        entry = summary["flows"]["ios-release-clean"]
+        self.assertTrue(entry["identical"])
+        self.assertEqual(entry["chain"]["skipped"], {"host-tool build": 1})
+        host = entry["profile"]["host_tools"]
+        self.assertGreaterEqual(host["total"], 0.0)
+        self.assertGreaterEqual(host["by_mnemonic"]["Genrule"], 0.0)
+        self.assertEqual(host["top_targets"][0][0], "//tools:host_tool")
+        self.assertEqual(entry["profile"]["sol_source"], "sol")
+        profile = entry["profile"]
+        self.assertAlmostEqual(
+            profile["jvm"]["total"] + profile["sol_cpu_s"]
+            + host["total"] + profile["residual"], entry["bazel"])
+        # Bazel's host-tool output is back with its own bytes.
+        dst = os.path.join(self.out_base, "device_release", "execroot",
+                           "bazel-out", "darwin_arm64-opt-exec-ABCD", "bin",
+                           "host-tool")
+        with open(dst, encoding="utf-8") as fh:
+            self.assertTrue(fh.read().startswith("v1\nedit:apply-app-edit"))
+
+    def test_failed_chain_uses_chain_cpu(self):
+        # Without a SOL number the profile uses the chain's measured CPU
+        # in its place and says so; the parts still sum to Bazel.
+        out = os.path.join(self.tmp, "ios-sol.json")
+        env = dict(self.env, SOL_FAIL="1")
+        with mock.patch.dict(os.environ, env):
+            self.assertEqual(
+                sol.main(self.run_argv(["device_release"])), 0)
+            self.assertEqual(sol.main(self.summarize_argv(out)), 0)
+        with open(out, encoding="utf-8") as fh:
+            summary = json.load(fh)
+        entry = summary["flows"]["ios-release-clean"]
+        self.assertFalse(entry["identical"])
+        self.assertIsNone(entry["sol"])
+        profile = entry["profile"]
+        self.assertEqual(profile["sol_source"], "chain-cpu")
+        self.assertGreaterEqual(profile["sol_cpu_s"], 0.0)
+        self.assertAlmostEqual(
+            profile["jvm"]["total"] + profile["sol_cpu_s"]
+            + profile["host_tools"]["total"] + profile["residual"],
+            entry["bazel"])
 
     def test_failed_chain_is_not_identical(self):
         out = os.path.join(self.tmp, "ios-sol.json")

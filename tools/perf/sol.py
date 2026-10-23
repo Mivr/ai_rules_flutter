@@ -42,12 +42,26 @@ false with no SOL number. Bazel's outputs are moved back afterwards
 and chain-created files no step declares are removed, so a chain can
 never perturb the next incremental build's action cache.
 
+Every flow also carries a small ``profile`` record, always on, with no
+command lines: ``jvm`` is Bazel's own CPU from the build's ``--profile``
+JSON trace (the "CPU usage (Bazel)" counter integrated over time and
+split at the build-phase markers; the counter starts after JVM launch,
+so launch CPU lands in ``residual``), ``host_tools`` replays the
+chain-excluded host-tool builds under the same wait4 method after the
+chain restores Bazel's outputs (a host build that fails to replay is
+recorded, not fatal), and ``residual`` is ``bazel - jvm - sol -
+host_tools``, never clamped — a failed chain has no SOL number, and
+the record says so and substitutes the chain CPU instead. The gzipped
+trace profiles and execution logs behind each record are uploaded as
+the ``ios-profile`` artifact (no build outputs).
+
 Subcommands: ``run`` measures repeats, ``chain`` runs one chain (an
 unmeasured child process), ``summarize`` writes medians into
 ios-sol.json.
 """
 
 import argparse
+import gzip
 import hashlib
 import json
 import os
@@ -61,7 +75,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from execlog import load_spawns  # noqa: E402
 from replay import (  # noqa: E402
     TIME_BIN,
+    builds_host_tool,
     chain_all,
+    order_chain_spawns,
+    run_chain_step,
     select_chain_spawns,
     spawn_output_paths,
     spawn_recorded_digests,
@@ -79,6 +96,7 @@ from run_rep import (  # noqa: E402
     reset_work,
 )
 from summarize import summarize_values  # noqa: E402
+from traceprofile import parse_jvm_profile  # noqa: E402
 
 _FLOW_PREFIX = {"device_release": "ios-release", "sim_debug": "ios-debug"}
 _FLOW_SUFFIX = {"clean": "clean", "app_edit": "app", "core_edit": "body"}
@@ -529,12 +547,17 @@ def measure_with_time(argv, cwd, time_bin=TIME_BIN):
     return measure_process_tree(argv, cwd)
 
 
-def bazel_batch_build(args, config, log_path):
-    """Builds one scenario with `bazel --batch`, measured as one unit."""
+def bazel_batch_build(args, config, log_path, profile_path):
+    """Builds one scenario with `bazel --batch`, measured as one unit.
+
+    The JSON trace profile (--profile) feeds the flow's jvm record; the
+    execution log feeds the SOL chain and the host-tools replay.
+    """
     spec = CONFIGS[config]
     argv = (["bazel", "--batch", "--output_base=" + out_base_of(args, config),
              "build"] + list(spec["build_flags"]) + [spec["target"],
              "--execution_log_json_file=" + log_path,
+             "--profile=" + profile_path,
              "--materialize_param_files"])
     cost = args.measure(argv, args.work)
     if cost["returncode"] != 0:
@@ -703,14 +726,144 @@ def chain_replayed(report_path):
     return report["n_replayed"]
 
 
-def run_sol_scenario(args, config, scenario):
-    """Builds one scenario, runs its SOL chain, proves the outputs."""
+def save_gzipped(src, dst):
+    """Gzips src to dst for the ios-profile artifact; fails loudly."""
+    with open(src, "rb") as fin:
+        data = fin.read()
+    with open(dst, "wb") as fout:
+        fout.write(gzip.compress(data, mtime=0))
+
+
+def host_tool_spawns(spawns):
+    """Splits host-tool builds into (runnable, skipped).
+
+    The spawns the SOL chain leaves out as host-tool builds (declared
+    outputs under an exec configuration); only executed spawns with a
+    command replay, like the chain's own buckets.
+    """
+    runnable = []
+    skipped = {}
+    for spawn in spawns:
+        if not builds_host_tool(spawn):
+            continue
+        if spawn.get("cacheHit"):
+            skipped["cache hit"] = skipped.get("cache hit", 0) + 1
+            continue
+        if spawn.get("exitCode", 0) != 0:
+            key = "bazel exit %s" % (spawn.get("exitCode"),)
+            skipped[key] = skipped.get(key, 0) + 1
+            continue
+        if not spawn.get("commandArgs"):
+            skipped["no command"] = skipped.get("no command", 0) + 1
+            continue
+        runnable.append(spawn)
+    return (runnable, skipped)
+
+
+def replay_host_spawns(spawns, execroot, timeout, backup_dir, runner=None):
+    """Replays host-tool builds under the chain's CPU method.
+
+    The spawns the SOL chain leaves out as host-tool builds run by hand
+    (ordered as the chain orders them), every host-step output moved
+    aside before the replay and Bazel's originals moved back after, as
+    for the chain. A failed replay is recorded with its step, never
+    fatal: the replay continues with the next spawn. Returns the
+    ios-sol.json host_tools record (no command lines): the total and
+    per-mnemonic CPU, the top 10 target labels by CPU (plus the per-target
+    map summarize medians over), and any failed replays.
+    """
+    runnable, skipped = host_tool_spawns(spawns)
+    if not runnable:
+        return {"total": 0.0, "by_mnemonic": {}, "top_targets": [],
+                "by_target": {}, "failed": [], "count": 0,
+                "skipped": skipped}
+    ordered = order_chain_spawns(runnable, execroot)
+    if runner is None:
+        runner = (lambda spawn: run_chain_step(spawn, execroot, timeout))
+    step_outputs = []
+    for spawn in ordered:
+        step_outputs.extend(spawn_output_paths(spawn, execroot))
+    bazel_out = os.path.join(execroot, "bazel-out")
+    before_tree = snapshot_tree(bazel_out)
+    try:
+        aside = move_aside_chain(step_outputs, backup_dir)
+    except (OSError, RuntimeError) as exc:
+        return {"total": None, "by_mnemonic": {}, "top_targets": [],
+                "by_target": {}, "failed": [], "count": len(ordered),
+                "skipped": skipped,
+                "error": "host-tools move-aside failed (%s)" % exc}
+    by_mnemonic = {}
+    by_target = {}
+    failed = []
+    try:
+        for spawn in ordered:
+            record = runner(spawn)
+            mnemonic = spawn.get("mnemonic", "")
+            target = spawn.get("targetLabel", "")
+            if (record.get("user_s") is not None
+                    and record.get("sys_s") is not None):
+                cpu = record["user_s"] + record["sys_s"]
+                by_mnemonic[mnemonic] = by_mnemonic.get(mnemonic, 0.0) + cpu
+                by_target[target] = by_target.get(target, 0.0) + cpu
+            if record.get("exit_code") != 0:
+                failed.append({"mnemonic": mnemonic, "target": target,
+                               "exit": record.get("exit_code"),
+                               "stderr_tail": record.get("stderr_tail")})
+    finally:
+        swept = sweep_chain_side_effects(bazel_out, step_outputs,
+                                         before_tree)
+        restore_tree(aside)
+    top = sorted(by_target.items(),
+                 key=lambda item: (-item[1], item[0]))[:10]
+    return {"total": (sum(by_mnemonic.values()) if by_mnemonic else None),
+            "by_mnemonic": by_mnemonic,
+            "top_targets": [[label, cpu] for label, cpu in top],
+            "by_target": by_target, "failed": failed,
+            "count": len(ordered), "skipped": skipped,
+            "side_effects_removed": swept}
+
+
+def read_jvm_cpu(profile_path):
+    """Jvm record of a build trace profile; failures stay null, recorded."""
+    try:
+        return parse_jvm_profile(profile_path)
+    except (OSError, ValueError) as exc:
+        return {"total": None, "phases": {}, "error": str(exc)}
+
+
+def build_profile(bazel_cpu, jvm, host, sol, chain):
+    """Per-repeat profile: gap SOL (chain CPU when SOL missing), residual.
+
+    A flow without a SOL number uses the chain's measured CPU in its
+    place (sol_source says which: "sol" or "chain-cpu"). residual is the
+    raw bazel - jvm - sol - host_tools value, never clamped; None while
+    any part is missing.
+    """
+    if sol is not None:
+        gap, source = sol["cpu_s"], "sol"
+    else:
+        gap, source = chain.get("sol_cpu_s"), "chain-cpu"
+    parts = [bazel_cpu, jvm.get("total"), gap, host.get("total")]
+    residual = None
+    if all(part is not None for part in parts):
+        residual = parts[0] - parts[1] - parts[2] - parts[3]
+    return {"jvm": jvm, "host_tools": host, "sol_cpu_s": gap,
+            "sol_source": source, "residual": residual}
+
+
+def measure_scenario_build(args, config, scenario):
+    """Builds one scenario; returns its costs, paths and verify plan.
+
+    The execution log and the JSON trace profile (--profile) are gzipped
+    into the scenario's record directory for the ios-profile artifact.
+    """
     spec = CONFIGS[config]
     edit = _EDITS[scenario]
     if edit is not None:
         apply_edit(args.run, args.tools, args.work, edit)
     log_path = os.path.join(args.work, "execlog-sol-%s.json" % scenario)
-    bazel_cost = bazel_batch_build(args, config, log_path)
+    profile_path = os.path.join(args.work, "trace-sol-%s.json" % scenario)
+    bazel_cost = bazel_batch_build(args, config, log_path, profile_path)
     if scenario == "clean":
         check_clean_actions(log_path, spec["target"],
                             args.min_clean_actions)
@@ -725,21 +878,34 @@ def run_sol_scenario(args, config, scenario):
     record_dir = os.path.join(args.results, "sol", config, scenario,
                               "rep%d" % args.rep)
     os.makedirs(record_dir, exist_ok=True)
-    report_path = os.path.join(record_dir, _CHAIN_REPORT)
-    before = read_verify_snapshot(plan)
-    chainable, _ = select_sol_spawns(load_spawns(log_path))
+    save_gzipped(log_path, os.path.join(record_dir, "execlog.json.gz"))
+    save_gzipped(profile_path, os.path.join(record_dir, "trace.json.gz"))
+    return argparse.Namespace(
+        bazel_cost=bazel_cost, log_path=log_path,
+        profile_path=profile_path, execroot=execroot, bazel_out=bazel_out,
+        plan=plan, record_dir=record_dir,
+        report_path=os.path.join(record_dir, _CHAIN_REPORT))
+
+
+def prove_chain_outputs(args, built, chainable, before, backup_dir):
+    """Runs the SOL chain with outputs moved aside; returns the proof.
+
+    Returns (chain, after, exit_code, report): the ios-sol.json chain
+    record, the after-chain verify snapshot, the chain exit code and its
+    report (None when the chain never wrote one).
+    """
     step_outputs = []
     for spawn in chainable:
-        step_outputs.extend(spawn_output_paths(spawn, execroot))
-    before_tree = snapshot_tree(bazel_out)
-    aside = move_aside_chain(step_outputs, os.path.join(
-        args.work, "sol-backup-" + scenario))
+        step_outputs.extend(spawn_output_paths(spawn, built.execroot))
+    before_tree = snapshot_tree(built.bazel_out)
+    aside = move_aside_chain(step_outputs, backup_dir)
     try:
-        exit_code = run_chain_proc(args, log_path, execroot, report_path)
-        report = read_chain_report(report_path)
-        drift = output_drift(chainable, execroot)
+        exit_code = run_chain_proc(args, built.log_path, built.execroot,
+                                   built.report_path)
+        report = read_chain_report(built.report_path)
+        drift = output_drift(chainable, built.execroot)
         try:
-            after = read_verify_snapshot(plan)
+            after = read_verify_snapshot(built.plan)
             read_error = None
         except RuntimeError as exc:
             # A missing or unreadable verify file or bundle after the
@@ -752,19 +918,31 @@ def run_sol_scenario(args, config, scenario):
             after = {}
             read_error = str(exc)
     finally:
-        swept = sweep_chain_side_effects(bazel_out, step_outputs,
+        swept = sweep_chain_side_effects(built.bazel_out, step_outputs,
                                          before_tree)
         restore_tree(aside)
-    differ = verify_differences(before, after, execroot)
+    differ = verify_differences(before, after, built.execroot)
     if read_error is not None and differ["n"] == 0:
         differ = {"n": 1, "differ": [
             {"path": "(unreadable verify set)", "before": None,
              "after": read_error}]}
     chain = describe_chain(report, differ, drift)
     chain["side_effects_removed"] = swept
+    return (chain, after, exit_code, report)
+
+
+def run_sol_scenario(args, config, scenario):
+    """Builds one scenario, runs its SOL chain, proves the outputs."""
+    built = measure_scenario_build(args, config, scenario)
+    before = read_verify_snapshot(built.plan)
+    spawns = load_spawns(built.log_path)
+    chainable, _ = select_sol_spawns(spawns)
+    chain, after, exit_code, report = prove_chain_outputs(
+        args, built, chainable, before,
+        os.path.join(args.work, "sol-backup-" + scenario))
     failed = bool(chain["failed"]) or chain["status"] != "ok"
     identical = (hashes_match(before, after) and not failed
-                 and not differ["n"])
+                 and not chain["verify_differ"]["n"])
     if identical:
         sol = {"cpu_s": chain["sol_cpu_s"],
                "real_s": (report or {}).get("sol_real_s")}
@@ -773,17 +951,24 @@ def run_sol_scenario(args, config, scenario):
     if sol is not None and sol["cpu_s"] is None:
         identical = False
         sol = None
+    host = replay_host_spawns(
+        spawns, built.execroot, args.timeout,
+        os.path.join(args.work, "sol-host-backup-" + scenario))
+    bazel_cpu = cpu_seconds(built.bazel_cost)
+    profile = build_profile(bazel_cpu, read_jvm_cpu(built.profile_path),
+                            host, sol, chain)
     record = {"flow": flow_id(config, scenario), "config": config,
               "scenario": scenario,
-              "bazel": {"cpu_s": cpu_seconds(bazel_cost),
-                        "real_s": bazel_cost["real_s"]},
+              "bazel": {"cpu_s": bazel_cpu,
+                        "real_s": built.bazel_cost["real_s"]},
               "sol": sol,
               "identical": identical,
               "reason": flow_reason(chain, exit_code),
               "n_sol_actions": (report or {}).get("n_replayed", 0),
               "verify": {"before": before, "after": after},
-              "chain": chain}
-    with open(os.path.join(record_dir, _RECORD), "w", encoding="utf-8",
+              "chain": chain,
+              "profile": profile}
+    with open(os.path.join(built.record_dir, _RECORD), "w", encoding="utf-8",
               newline="\n") as fh:
         fh.write(json.dumps(record, indent=2, sort_keys=True) + "\n")
     return record
@@ -799,6 +984,11 @@ def error_record(config, scenario, reason):
             "reason": reason,
             "n_sol_actions": 0,
             "verify": {"before": {}, "after": {}},
+            "profile": {"jvm": {"total": None, "phases": {}},
+                        "host_tools": {"total": None, "by_mnemonic": {},
+                                       "top_targets": [], "failed": []},
+                        "sol_cpu_s": None, "sol_source": "none",
+                        "residual": None},
             "chain": {"steps": {}, "skipped": {}, "failed": [],
                       "ordering_failed": None,
                       "verify_differ": {"n": 0, "differ": []},
@@ -887,6 +1077,92 @@ def pick_unit(collected):
     return "cpu_seconds"
 
 
+def summarize_jvm(rep_jvms):
+    """Median jvm record over repeats: total and per-phase CPU."""
+    totals = [jvm.get("total") for jvm in rep_jvms
+              if jvm.get("total") is not None]
+    names = set()
+    for jvm in rep_jvms:
+        names.update((jvm.get("phases") or {}).keys())
+    phases = {}
+    for name in sorted(names):
+        vals = [jvm["phases"][name] for jvm in rep_jvms
+                if name in (jvm.get("phases") or {})]
+        phases[name] = summarize_values(vals)["median"]
+    return {"total": summarize_values(totals)["median"], "phases": phases}
+
+
+def summarize_host_tools(rep_hosts):
+    """Median host_tools record over repeats (no command lines)."""
+    totals = [host.get("total") for host in rep_hosts
+              if host.get("total") is not None]
+    names = set()
+    for host in rep_hosts:
+        names.update((host.get("by_mnemonic") or {}).keys())
+    by_mnemonic = {}
+    for name in sorted(names):
+        vals = [host["by_mnemonic"][name] for host in rep_hosts
+                if name in (host.get("by_mnemonic") or {})]
+        by_mnemonic[name] = summarize_values(vals)["median"]
+    labels = set()
+    for host in rep_hosts:
+        labels.update((host.get("by_target") or {}).keys())
+    medians = {}
+    for label in labels:
+        vals = [host["by_target"][label] for host in rep_hosts
+                if label in (host.get("by_target") or {})]
+        medians[label] = summarize_values(vals)["median"]
+    top = sorted(medians.items(),
+                 key=lambda item: (-item[1], item[0]))[:10]
+    failed = []
+    for host in rep_hosts:
+        for entry in host.get("failed") or []:
+            if entry not in failed and len(failed) < 10:
+                failed.append(entry)
+    return {"total": summarize_values(totals)["median"],
+            "by_mnemonic": by_mnemonic,
+            "top_targets": [[label, cpu] for label, cpu in top],
+            "failed": failed}
+
+
+def summarize_profile(records, bazel_median, sol_median, identical):
+    """Per-flow profile: jvm/host medians, gap SOL, raw residual.
+
+    The gap SOL is the flow SOL number; a flow without one uses the
+    chain's measured CPU in its place (sol_source says which). residual
+    is the raw bazel - jvm - sol - host_tools value, never clamped, so
+    the parts always sum to the Bazel number; None while any part is
+    missing.
+    """
+    jvms = []
+    hosts = []
+    chain_cpus = []
+    for record in records:
+        profile = record.get("profile") or {}
+        jvm = profile.get("jvm") or {}
+        jvms.append({"total": jvm.get("total"),
+                     "phases": jvm.get("phases") or {}})
+        host = profile.get("host_tools") or {}
+        hosts.append({"total": host.get("total"),
+                      "by_mnemonic": host.get("by_mnemonic") or {},
+                      "by_target": host.get("by_target") or {},
+                      "failed": host.get("failed") or []})
+        if profile.get("sol_cpu_s") is not None:
+            chain_cpus.append(profile["sol_cpu_s"])
+    if identical and sol_median is not None:
+        gap, source = sol_median, "sol"
+    else:
+        gap, source = summarize_values(chain_cpus)["median"], "chain-cpu"
+    parts = [bazel_median, summarize_jvm(jvms)["total"], gap,
+             summarize_host_tools(hosts)["total"]]
+    residual = None
+    if all(part is not None for part in parts):
+        residual = parts[0] - parts[1] - parts[2] - parts[3]
+    return {"jvm": summarize_jvm(jvms), "host_tools": summarize_host_tools(
+        hosts), "sol_cpu_s": gap, "sol_source": source,
+        "residual": residual}
+
+
 def summarize_flow(records, unit):
     """Median costs over repeats; no SOL number unless all repeats match."""
     del unit
@@ -906,6 +1182,9 @@ def summarize_flow(records, unit):
             "identical": identical,
             "reason": "ok" if identical else "; ".join(reasons),
             "chain": records[0].get("chain"),
+            "profile": summarize_profile(records, bazel["median"],
+                                         sol["median"] if identical else None,
+                                         identical),
             "spread": {"n": len(records),
                        "bazel": [bazel["min"], bazel["max"]],
                        "sol": [sol["min"], sol["max"]] if identical else None}}
