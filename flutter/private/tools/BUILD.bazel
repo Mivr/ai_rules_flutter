@@ -28,6 +28,7 @@ exports_files(
         "strip_native_libs.dart",
         "web_guard.dart",
         "web_template.dart",
+        "xtool_framework.dart",
         "xtool_hash.dart",
         "xtool_pack.dart",
         "zip_reader.dart",
@@ -251,6 +252,7 @@ dart_binary(
         "plist_info.dart",
         "plist_parse.dart",
         "sha256.dart",
+        "xtool_framework.dart",
         "xtool_hash.dart",
         "zip_reader.dart",
         "zip_writer.dart",
@@ -353,6 +355,7 @@ _TOOL_SRCS = {
     ],
     "xtool_pack.dart": [
         "crc32.dart",
+        "xtool_framework.dart",
         "zip_reader.dart",
         "zip_writer.dart",
         "code_resources.dart",
