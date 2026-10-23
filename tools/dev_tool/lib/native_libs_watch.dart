@@ -316,6 +316,8 @@ class NativeLibsWatch {
   static bool _provesUnchanged(int mtimeMicros, int readAtMicros) =>
       readAtMicros - mtimeMicros > _racyWindow.inMicroseconds;
 
+  static Future<FileStat> _statFile(String path) => File(path).stat();
+
   /// A file's size and mtime as one token. A path that is not there answers a
   /// stamp of its own rather than throwing: the throw belongs to the content read,
   /// which says which file the build declared and did not write.
@@ -324,10 +326,6 @@ class NativeLibsWatch {
   /// older than the moment its content was last read by more than [_racyWindow]
   /// (see [_provesUnchanged]): a same-size rewrite within that tick leaves the
   /// stamp exactly as it was.
-  static Future<String> _stamp(String path) async =>
-      _stampFor(await _statFile(path));
-
-  static Future<FileStat> _statFile(String path) => File(path).stat();
 
   static String _stampFor(FileStat stat) =>
       '${stat.size}:${stat.modified.microsecondsSinceEpoch}';
