@@ -10,7 +10,9 @@ untouched and stay covered by `shader_compile_test`.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
+load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("//flutter/private:asset_keys.bzl", "is_within_package", "relative_key")
+load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
 load(":action_content.bzl", "written_json")
 
 _FIXTURE = "//flutter/tests/shader_keys_fixture"
@@ -101,11 +103,21 @@ def shader_keys_test_suite(name):
         target_under_test = _FIXTURE + ":outside_shaders",
     )
 
+    # A bundle with a shader compiles it for `flutter_tester` through the
+    # retry wrapper's exec Dart VM: this build proves the rule declares that
+    # toolchain instead of failing analysis.
+    build_test(
+        name = name + "_bundle_build_test",
+        target_compatible_with = HOST_COMPATIBLE,
+        targets = [_FIXTURE + ":bundle"],
+    )
+
     native.test_suite(
         name = name,
         tests = [
             ":" + name + "_keys_pure",
             ":" + name + "_subpackage_bundle_key",
             ":" + name + "_outside_shaders_fails",
+            ":" + name + "_bundle_build_test",
         ],
     )

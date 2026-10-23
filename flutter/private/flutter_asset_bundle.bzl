@@ -116,6 +116,7 @@ flutter_asset_bundle = rule(
     },
     toolchains = [
         "@rules_flutter//flutter:toolchain_type",
+        config_common.toolchain_type("@rules_dart//dart:exec_tools_toolchain_type", mandatory = False),
     ],
     doc = "Generates a flutter_assets/ tree artifact with manifests and asset files.",
 )
