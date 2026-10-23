@@ -445,7 +445,7 @@ class VerifyFilesTest(unittest.TestCase):
         capture = FakeCapture(root, ["bazel-out/x/app.dill"])
         with self.assertRaisesRegex(RuntimeError, "no app bundle"):
             plan_verify_snapshot(capture, self.tmp, self.tmp, root,
-                                 "sim_debug")
+                                 "sim_debug", True)
 
     def test_plan_device_lists_framework_binary(self):
         rel = ("bazel-out/x/bin/app/__app_framework_framework/"
@@ -457,7 +457,7 @@ class VerifyFilesTest(unittest.TestCase):
             fh.write(b"app")
         capture = FakeCapture(root, [rel])
         plan = plan_verify_snapshot(capture, self.tmp, self.tmp, root,
-                                    "device_release")
+                                    "device_release", True)
         self.assertEqual(plan[0], "files")
         self.assertEqual(read_verify_snapshot(plan),
                          snapshot_hashes([target]))
@@ -469,7 +469,7 @@ class VerifyFilesTest(unittest.TestCase):
         self.write_ipa(ipa)
         capture = FakeCapture(root, [ipa])
         plan = plan_verify_snapshot(capture, self.tmp, self.tmp, root,
-                                    "sim_debug")
+                                    "sim_debug", True)
         snapshot = read_verify_snapshot(plan)
         self.assertEqual(len(snapshot), 2)
         self.assertTrue(all("::Payload/Bench.app/" in key
@@ -923,7 +923,7 @@ class QueryTest(unittest.TestCase):
         fake = FakeCapture(self.execroot, [self.rel])
         files = sol_mod.query_target_files(
             fake, self.tmp, self.out_base, "//app:__app_framework_framework",
-            ["-c", "opt"])
+            ["-c", "opt"], True)
         self.assertEqual(files, [self.abs_path])
 
     def test_absolute_paths_accepted(self):
@@ -931,7 +931,7 @@ class QueryTest(unittest.TestCase):
         fake = FakeCapture(self.execroot, [self.abs_path])
         self.assertEqual(
             sol_mod.query_target_files(fake, self.tmp, self.out_base,
-                                       "//app:x", []),
+                                       "//app:x", [], True),
             [self.abs_path])
 
     def test_cquery_failure_propagates(self):
@@ -942,14 +942,14 @@ class QueryTest(unittest.TestCase):
 
         with self.assertRaises(RuntimeError):
             sol_mod.query_target_files(fail, self.tmp, self.out_base,
-                                       "//app:x", [])
+                                       "//app:x", [], True)
 
     def test_warning_line_in_stdout_rejected(self):
         import sol as sol_mod
         fake = FakeCapture(self.execroot, [JVM_WARNING, self.rel])
         with self.assertRaises(RuntimeError):
             sol_mod.query_target_files(fake, self.tmp, self.out_base,
-                                       "//app:x", [])
+                                       "//app:x", [], True)
 
     def test_missing_path_rejected(self):
         import sol as sol_mod
@@ -957,30 +957,30 @@ class QueryTest(unittest.TestCase):
             self.execroot, ["bazel-out/x/absent.o"])
         with self.assertRaisesRegex(RuntimeError, "does not exist"):
             sol_mod.query_target_files(fake, self.tmp, self.out_base,
-                                       "//app:x", [])
+                                       "//app:x", [], True)
 
     def test_path_outside_base_rejected(self):
         import sol as sol_mod
         fake = FakeCapture(self.execroot, ["/etc/hostname"])
         with self.assertRaisesRegex(RuntimeError, "not under output base"):
             sol_mod.query_target_files(fake, self.tmp, self.out_base,
-                                       "//app:x", [])
+                                       "//app:x", [], True)
 
     def test_empty_listing_rejected(self):
         import sol as sol_mod
         fake = FakeCapture(self.execroot, [])
         with self.assertRaisesRegex(RuntimeError, "no files"):
             sol_mod.query_target_files(fake, self.tmp, self.out_base,
-                                       "//app:x", [])
+                                       "//app:x", [], True)
 
     def test_info_validates_single_line(self):
         self.assertEqual(
             bazel_info(FakeCapture(self.execroot, []), self.tmp,
-                       self.out_base, "execution_root"),
+                       self.out_base, "execution_root", True),
             self.execroot)
         with self.assertRaises(RuntimeError):
             bazel_info(FakeCapture(self.execroot + "\n" + self.execroot, []),
-                       self.tmp, self.out_base, "execution_root")
+                       self.tmp, self.out_base, "execution_root", True)
 
     def test_check_under_base(self):
         self.assertEqual(
@@ -1045,7 +1045,7 @@ class NoisyStderrTest(unittest.TestCase):
         with mock.patch.dict(os.environ, {"SOL_INFO_OUT": self.execroot,
                                            "SOL_CQUERY_OUT": self.rel}):
             files = sol_mod.query_target_files(
-                self.swap, self.tmp, self.out_base, "//app:x", [])
+                self.swap, self.tmp, self.out_base, "//app:x", [], True)
         self.assertEqual(files, [os.path.join(self.execroot, self.rel)])
 
     def test_failure_shows_stderr(self):
@@ -1197,6 +1197,15 @@ for arg in sys.argv[1:]:
     elif seen_info and not key and not arg.startswith("--"):
         key = arg
 batch = "--batch" in sys.argv[1:]
+
+# Every client-side Bazel argv, in order, for the no-batch-while-up
+# test: SOL_ARGV_LOG names an append-only file of one JSON argv per
+# line. The daemon re-execution (`_daemon`) is not a Bazel command and
+# stays out of the log.
+argv_log = os.environ.get("SOL_ARGV_LOG", "")
+if argv_log and not (len(sys.argv) > 1 and sys.argv[1] == "_daemon"):
+    with open(argv_log, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(sys.argv[1:]) + "\\n")
 
 
 # Server mode: a non-`--batch` invocation starts or reuses a stand-in
@@ -1877,6 +1886,41 @@ class SolEndToEndTest(unittest.TestCase):
                               "server_self"], flow)
             for part in entry["bazel_parts"].values():
                 self.assertGreaterEqual(part, 0.0, flow)
+        self.assertEqual(self.live_server_pids(), [])
+
+    def test_no_batch_while_server_up(self):
+        # The fake bazel logs every client argv in order. The server
+        # starts at the first argv without --batch (info server_pid)
+        # and stops at the shutdown argv: nothing in between may carry
+        # --batch, while the clean build before it must. The window must
+        # also hold warm build, info and cquery commands, so the test
+        # cannot pass vacuously.
+        log = os.path.join(self.tmp, "argv.log")
+        env = dict(self.env, SOL_ARGV_LOG=log)
+        with mock.patch.dict(os.environ, env):
+            self.assertEqual(
+                sol.main(self.run_argv(["device_release"])), 0)
+        with open(log, encoding="utf-8") as fh:
+            invocations = [json.loads(line) for line in fh
+                           if line.strip()]
+        start = next(i for i, argv in enumerate(invocations)
+                     if "--batch" not in argv)
+        stop = next(i for i, argv in enumerate(invocations)
+                    if "shutdown" in argv)
+        self.assertGreater(stop, start)
+        pre = invocations[:start]
+        self.assertTrue(
+            any("build" in argv and "--batch" in argv for argv in pre),
+            "clean build runs --batch before the server starts")
+        window = invocations[start:stop + 1]
+        for argv in window:
+            self.assertNotIn("--batch", argv, argv)
+        kinds = {("build" if "build" in argv
+                  else "info" if "info" in argv
+                  else "cquery" if "cquery" in argv
+                  else "shutdown" if "shutdown" in argv
+                  else "?") for argv in window}
+        self.assertTrue({"build", "info", "cquery"} <= kinds, kinds)
         self.assertEqual(self.live_server_pids(), [])
 
     def test_warmup_actions_fail_the_config(self):

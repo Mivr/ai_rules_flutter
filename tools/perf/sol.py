@@ -306,8 +306,12 @@ def check_under_base(path, out_base, what):
     return abs_path
 
 
-def bazel_info(capture, work, out_base, key, batch=True):
-    """One `bazel info` path (execroot, ...), validated."""
+def bazel_info(capture, work, out_base, key, batch):
+    """One `bazel info` path (execroot, ...), validated.
+
+    The mode has no default: callers must pass the flow's mode, so a
+    warm flow can never send a `--batch` command at a running server.
+    """
     out = capture(info_argv(out_base, key, batch), cwd=work)
     lines = [line.strip() for line in out.splitlines() if line.strip()]
     if len(lines) != 1:
@@ -317,16 +321,19 @@ def bazel_info(capture, work, out_base, key, batch=True):
 
 
 def query_target_files(capture, work, out_base, target, build_flags,
-                         batch=True):
+                         batch):
     """Absolute output paths of a target via `cquery --output=files`.
 
     Every non-blank line must resolve to an existing path under the
     output base; anything else (a warning leaked into stdout, a format
-    change) fails loudly instead of becoming a bogus verify path.
+    change) fails loudly instead of becoming a bogus verify path. The
+    mode has no default and covers the execution-root lookup too: both
+    commands run in the flow's mode, never `--batch` against a server.
     """
     out = capture(cquery_argv(out_base, target, build_flags, batch),
                   cwd=work)
-    execroot = bazel_info(capture, work, out_base, "execution_root")
+    execroot = bazel_info(capture, work, out_base, "execution_root",
+                          batch)
     files = []
     for line in out.splitlines():
         line = line.strip()
@@ -429,7 +436,7 @@ def app_dir_hashes(app_dir):
 
 
 def plan_verify_snapshot(capture, work, out_base, execroot, config,
-                           batch=True):
+                           batch):
     """Discovers the verify set from declared outputs only, never a glob.
 
     device_release hashes the App.framework binary among the framework
@@ -983,13 +990,14 @@ def build_profile(bazel_cpu, jvm, host, sol, chain):
             "sol_source": source, "residual": residual}
 
 
-def measure_scenario_build(args, config, scenario, batch=True,
+def measure_scenario_build(args, config, scenario, batch,
                              server_pid=None):
     """Builds one scenario; returns its costs, paths and verify plan.
 
-    The clean flow stays a `bazel --batch` build; edit flows build
-    against the config's warm server. The execution log and the JSON
-    trace profile (--profile) are gzipped into the scenario's record
+    The mode has no default: the clean flow passes batch, edit flows
+    pass the server pid. The clean flow stays a `bazel --batch` build;
+    edit flows build against the config's warm server. The execution
+    log and the JSON trace profile (--profile) are gzipped into the scenario's record
     directory for the ios-profile artifact.
     """
     spec = CONFIGS[config]
@@ -1072,9 +1080,11 @@ def prove_chain_outputs(args, built, chainable, before, backup_dir):
     return (chain, after, exit_code, report)
 
 
-def run_sol_scenario(args, config, scenario, batch=True,
+def run_sol_scenario(args, config, scenario, batch,
                        server_pid=None):
-    """Builds one scenario, runs its SOL chain, proves the outputs."""
+    """Builds one scenario, runs its SOL chain, proves the outputs.
+
+    The mode has no default: callers pass the flow's mode explicitly."""
     built = measure_scenario_build(args, config, scenario, batch,
                                    server_pid)
     before = read_verify_snapshot(built.plan)
@@ -1185,7 +1195,8 @@ def run_sol_rep(args, rep, configs):
         flows = {}
         server_started = False
         try:
-            flows["clean"] = run_sol_scenario(args, config, "clean")
+            flows["clean"] = run_sol_scenario(args, config, "clean",
+                                                  batch=True)
             server_pid = server_pid_of(args.capture_server, args.work,
                                        out_base)
             server_started = True
