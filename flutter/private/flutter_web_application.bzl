@@ -1568,6 +1568,7 @@ _WEB_APPLICATION_ATTRS.update(MODULAR_KERNEL_ATTRS)
 # Reaches the analysis closure only — see `analyzable_info` in the impl. No
 # BUILD file names it and no compile action's inputs change.
 _WEB_APPLICATION_ATTRS["_sky_engine"] = attr.label(
+    doc = "Sky engine library in the analyzer closure so `dart:ui` resolves; the compilers use the web SDK instead.",
     default = Label("@flutter_sky_engine//:sky_engine"),
     providers = [DartInfo],
 )
@@ -1849,50 +1850,60 @@ build knows which served file is a native module.
             default = False,
         ),
         "_dart2wasm_platform_dill": attr.label(
+            doc = "Platform dill the dart2wasm compile builds against.",
             default = Label("@flutter_web_sdk//:web-sdk/kernel/dart2wasm_platform.dill"),
             allow_single_file = True,
             cfg = "exec",
         ),
         "_dart2js_platform_dill": attr.label(
+            doc = "Platform dill the dart2js compile builds against.",
             default = Label("@flutter_web_sdk//:web-sdk/kernel/dart2js_platform.dill"),
             allow_single_file = True,
             cfg = "exec",
         ),
         "_ddc_outline_dill": attr.label(
+            doc = "DDC outline dill staged as a debug output for the dev loop.",
             default = Label("@flutter_web_sdk//:web-sdk/kernel/ddc_outline.dill"),
             allow_single_file = True,
             cfg = "exec",
         ),
         "_ddc_libraries_spec": attr.label(
+            doc = "Libraries spec symlinked next to the staged DDC outputs.",
             default = Label("@flutter_web_sdk//:libraries_json"),
             allow_single_file = True,
             cfg = "exec",
         ),
         "_ddc_dart_sdk_js": attr.label(
+            doc = "Prebuilt `dart_sdk.js` staged as a debug output for the DDC dev loop.",
             default = Label("@flutter_web_sdk//:web-sdk/kernel/ddcLibraryBundle-canvaskit/dart_sdk.js"),
             allow_single_file = True,
             cfg = "exec",
         ),
         "_ddc_module_loader_js": attr.label(
+            doc = "Prebuilt DDC module loader staged for the dev loop; also anchors the Dart SDK root lookup.",
             default = Label("@flutter_web_sdk//:dart-sdk/lib/dev_compiler/ddc/ddc_module_loader.js"),
             allow_single_file = True,
             cfg = "exec",
         ),
         "_ddc_stack_trace_mapper_js": attr.label(
+            doc = "Prebuilt DDC stack-trace mapper staged as a debug output for the dev loop.",
             default = Label("@flutter_web_sdk//:dart-sdk/lib/dev_compiler/web/dart_stack_trace_mapper.js"),
             allow_single_file = True,
             cfg = "exec",
         ),
         "_web_sdk": attr.label(
+            doc = "Web SDK filegroup that `flutter.js` and the renderer files are collected from.",
             default = Label("@flutter_web_sdk//:web_sdk"),
             cfg = "exec",
         ),
         "_bundle_tool": attr.label(
+            doc = "Tool that assembles the compiled output and templates into the web app directory.",
             default = Label("//flutter/private/tools:bundle_app"),
             executable = True,
             cfg = "exec",
         ),
         "_web_template_tool": attr.label(
+            doc = "Tool that renders `index.html` and the bootstrap JS from the app templates.",
             default = Label("//flutter/private/tools:web_template"),
             executable = True,
             cfg = "exec",
