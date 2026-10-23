@@ -115,11 +115,11 @@ def flutter_aot_gen_snapshot_flags(ctx, strip):
 def flutter_aot_elf_action(ctx, gen_snapshot, kernel_dill, output, strip = True, extra_flags = [], extra_outputs = []):
     """AOT compile to ELF shared library. Used for Android, Linux, Windows."""
     _flutter_aot_action(
-        ctx,
-        gen_snapshot,
-        kernel_dill,
-        output,
-        struct(
+        ctx = ctx,
+        gen_snapshot = gen_snapshot,
+        kernel_dill = kernel_dill,
+        output = output,
+        spec = struct(
             snapshot_kind = "app-aot-elf",
             output_flag = "--elf",
             strip = strip,
@@ -177,11 +177,11 @@ def flutter_aot_macho_action(
     if macho.rpath:
         macho_flags.append("--macho-rpath=" + macho.rpath)
     _flutter_aot_action(
-        ctx,
-        gen_snapshot,
-        kernel_dill,
-        output,
-        struct(
+        ctx = ctx,
+        gen_snapshot = gen_snapshot,
+        kernel_dill = kernel_dill,
+        output = output,
+        spec = struct(
             snapshot_kind = "app-aot-macho-dylib",
             output_flag = "--macho",
             strip = strip,

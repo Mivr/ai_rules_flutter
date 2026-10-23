@@ -243,8 +243,8 @@ def flutter_shader_compile_action(
 
     inputs = [job.file] + tools.shader_lib + list(job.includes) + staged_files
     _run_shader_compile(
-        ctx,
-        struct(
+        ctx = ctx,
+        compile = struct(
             shader = job.file,
             output = output,
             spirv_output = spirv_output,
@@ -253,7 +253,7 @@ def flutter_shader_compile_action(
             args = args,
             inputs = inputs,
         ),
-        struct(
+        tools = struct(
             impellerc = tools.impellerc,
             compile_tool = tools.compile_tool,
             require_sksl = require_sksl,

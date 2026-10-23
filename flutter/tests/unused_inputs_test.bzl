@@ -128,7 +128,7 @@ def _compile(added, runs, **kw):
         extra_frontend_flags = [],
         unused_inputs = kwargs["unused_inputs"],
     )
-    flutter_kernel_module_action(fake_ctx, fake_tools, module, options)
+    flutter_kernel_module_action(ctx = fake_ctx, tools = fake_tools, module = module, options = options)
 
 def _library_unused_inputs_test_impl(ctx):
     env = unittest.begin(ctx)

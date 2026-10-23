@@ -1135,9 +1135,9 @@ def _collect_dep_compiled_shaders(ctx, target_platform, compiled):
 def _compile_missing_shaders(ctx, flutter_sdk_info, target_platform, require_sksl, compiled):
     """Compile each `_shader_jobs` entry missing from `compiled`, in place."""
     tools = shader_compile_tools(
-        flutter_sdk_info.impellerc,
-        flutter_sdk_info.shader_lib,
-        ctx.executable._shader_compile_tool,
+        impellerc = flutter_sdk_info.impellerc,
+        shader_lib = flutter_sdk_info.shader_lib,
+        compile_tool = ctx.executable._shader_compile_tool,
     )
     for job in _shader_jobs(ctx):
         if job.bundle_path not in compiled:
@@ -1145,11 +1145,11 @@ def _compile_missing_shaders(ctx, flutter_sdk_info, target_platform, require_sks
             out_path = job.bundle_path.replace("../", "_external/")
             output = ctx.actions.declare_file("_shaders_%s/%s/%s.iplr" % (target_platform, ctx.label.name, out_path))
             flutter_shader_compile_action(
-                ctx,
-                job,
-                output,
-                tools,
-                target_platform,
+                ctx = ctx,
+                job = job,
+                output = output,
+                tools = tools,
+                target_platform = target_platform,
                 is_web = target_platform == "web",
                 # What compiles a shader whose SkSL stage fails without it.
                 require_sksl = require_sksl,
@@ -1809,9 +1809,9 @@ def _compile_aspect_direct_jobs(ctx, flutter_sdk_info, target_platform, direct_j
     direct_compiled = []
     if direct_jobs and flutter_sdk_info and flutter_sdk_info.impellerc:
         tools = shader_compile_tools(
-            flutter_sdk_info.impellerc,
-            flutter_sdk_info.shader_lib,
-            ctx.executable._shader_compile_tool,
+            impellerc = flutter_sdk_info.impellerc,
+            shader_lib = flutter_sdk_info.shader_lib,
+            compile_tool = ctx.executable._shader_compile_tool,
         )
         by_path = {}
         for job in direct_jobs:
@@ -1836,11 +1836,11 @@ def _compile_aspect_direct_jobs(ctx, flutter_sdk_info, target_platform, direct_j
             out_path = job.bundle_path.replace("../", "_external/")
             output = ctx.actions.declare_file("_shaders_%s/%s/%s.iplr" % (target_platform, ctx.label.name, out_path))
             flutter_shader_compile_action(
-                ctx,
-                job,
-                output,
-                tools,
-                target_platform,
+                ctx = ctx,
+                job = job,
+                output = output,
+                tools = tools,
+                target_platform = target_platform,
                 is_web = target_platform == "web",
                 require_sksl = False,
             )

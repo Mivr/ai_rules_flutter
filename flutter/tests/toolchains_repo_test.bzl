@@ -619,12 +619,12 @@ _apple_backend_default_test = analysistest.make(_apple_backend_rules_apple_test_
 def _macho_aot_probe_impl(ctx):
     out = ctx.actions.declare_file(ctx.label.name + ".dylib")
     flutter_aot_macho_action(
-        ctx,
-        ctx.file.gen_snapshot,
-        ctx.file.kernel_dill,
-        out,
-        macho_snapshot_options(min_os_version = ctx.attr.min_os_version if ctx.attr.min_os_version else None),
-        True,
+        ctx = ctx,
+        gen_snapshot = ctx.file.gen_snapshot,
+        kernel_dill = ctx.file.kernel_dill,
+        output = out,
+        macho = macho_snapshot_options(min_os_version = ctx.attr.min_os_version if ctx.attr.min_os_version else None),
+        strip = True,
     )
     return [DefaultInfo(files = depset([out]))]
 

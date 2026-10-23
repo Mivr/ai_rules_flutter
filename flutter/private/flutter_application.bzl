@@ -160,14 +160,14 @@ def _compile_application_aot(ctx, flutter_sdk_info, is_debug, is_ios, is_macos, 
     if is_ios or is_macos:
         aot_output = ctx.actions.declare_file(ctx.label.name + ".dylib")
         flutter_aot_macho_action(
-            ctx,
-            flutter_sdk_info.gen_snapshot,
-            kernel_dill,
-            aot_output,
-            macho_snapshot_options(min_os_version = ctx.attr.min_os_version if ctx.attr.min_os_version else None),
-            strip,
-            extra_flags,
-            extra_outputs,
+            ctx = ctx,
+            gen_snapshot = flutter_sdk_info.gen_snapshot,
+            kernel_dill = kernel_dill,
+            output = aot_output,
+            macho = macho_snapshot_options(min_os_version = ctx.attr.min_os_version if ctx.attr.min_os_version else None),
+            strip = strip,
+            extra_flags = extra_flags,
+            extra_outputs = extra_outputs,
         )
     else:
         aot_output = ctx.actions.declare_file(ctx.label.name + ".so")

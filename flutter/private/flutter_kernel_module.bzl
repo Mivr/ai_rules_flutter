@@ -443,7 +443,7 @@ def flutter_kernel_module_action(ctx, tools, module, options):
       The declared VM exclusion report file.
     """
     sources, package_config, stage = _kernel_module_staged_inputs(ctx, module.sources, module.output, module.extra_inputs, module.packages, options.scheme)
-    sdk = _resolve_module_sdk(tools, options)
+    sdk = _resolve_module_sdk(tools = tools, options = options)
     excluded = ctx.actions.declare_file(module.output.basename + ".vm_excluded.txt")
     if options.unused_inputs:
         # Written by `kernel_module` alongside the module. Declared here, where
@@ -453,8 +453,8 @@ def flutter_kernel_module_action(ctx, tools, module, options):
     else:
         unused_inputs_list = None
 
-    args = _kernel_module_base_args(ctx, package_config, stage, sdk, options)
-    _kernel_module_source_args(args, module, excluded, unused_inputs_list, options)
+    args = _kernel_module_base_args(ctx = ctx, package_config = package_config, stage = stage, sdk = sdk, options = options)
+    _kernel_module_source_args(args = args, module = module, excluded = excluded, unused_inputs_list = unused_inputs_list, options = options)
 
     runtime_files = getattr(tools, "runtime_files", None)
     direct_inputs = [
@@ -671,9 +671,9 @@ def _compile_main_kmod(ctx, tools, flutter_sdk_info, spec):
     deduped_packages = first_per_package(spec.records)
     worker_defines = _kernel_worker_defines(ctx)
     excluded = flutter_kernel_module_action(
-        ctx,
-        tools,
-        struct(
+        ctx = ctx,
+        tools = tools,
+        module = struct(
             sources = sources,
             packages = deduped_packages,
             dep_kmods = spec.dep_outline_closure,
@@ -682,7 +682,7 @@ def _compile_main_kmod(ctx, tools, flutter_sdk_info, spec):
             extra_inputs = None,
             closure_excluded = spec.upstream_excluded,
         ),
-        struct(
+        options = struct(
             defines = worker_defines,
             exclude_non_sources = True,
             droppable = True,
@@ -741,9 +741,9 @@ def _compile_product_kmod(ctx, tools, flutter_sdk_info, spec):
     product_kmod = ctx.actions.declare_directory(spec.target_name + ".flutter_product.kmod")
     product_koutline = ctx.actions.declare_directory(spec.target_name + ".flutter_product.koutline")
     product_excluded = flutter_kernel_module_action(
-        ctx,
-        tools,
-        struct(
+        ctx = ctx,
+        tools = tools,
+        module = struct(
             sources = spec.sources,
             packages = spec.deduped_packages,
             dep_kmods = product_dep_outline_closure,
@@ -752,7 +752,7 @@ def _compile_product_kmod(ctx, tools, flutter_sdk_info, spec):
             extra_inputs = None,
             closure_excluded = product_upstream_excluded,
         ),
-        struct(
+        options = struct(
             defines = spec.worker_defines + [
                 "dart.vm.product=true",
                 "FLUTTER_WEB_USE_SKIA=false",
@@ -838,10 +838,10 @@ def _compile_target_kernels(ctx, tools, flutter_sdk_info, target_name, package_n
             `base_dill`, `base_keys`, `base_kmods` and `product_modular`.
     """
     kmod, koutline, sources, deduped_packages, worker_defines, excluded = _compile_main_kmod(
-        ctx,
-        tools,
-        flutter_sdk_info,
-        struct(
+        ctx = ctx,
+        tools = tools,
+        flutter_sdk_info = flutter_sdk_info,
+        spec = struct(
             target_name = target_name,
             package_name = package_name,
             lib_root = job.lib_root,
@@ -855,10 +855,10 @@ def _compile_target_kernels(ctx, tools, flutter_sdk_info, target_name, package_n
 
     if job.product_modular:
         product_kernel_info = _compile_product_kmod(
-            ctx,
-            tools,
-            flutter_sdk_info,
-            struct(
+            ctx = ctx,
+            tools = tools,
+            flutter_sdk_info = flutter_sdk_info,
+            spec = struct(
                 target_name = target_name,
                 sources = sources,
                 deduped_packages = deduped_packages,
@@ -908,7 +908,7 @@ def _flutter_kernel_module_aspect_impl(target, ctx):
     if not _modular_gate_open(ctx, opaque, enabled, tools, same_sdk, flutter_sdk_info):
         return _no_flutter_kernel_module()
 
-    dep = _modular_dep_state(rule_deps, own_record, flutter_sdk_info)
+    dep = _modular_dep_state(rule_deps = rule_deps, own_record = own_record, flutter_sdk_info = flutter_sdk_info)
     if dep == None:
         return _no_flutter_kernel_module()
 
@@ -917,9 +917,9 @@ def _flutter_kernel_module_aspect_impl(target, ctx):
 
     if not own_srcs:
         return _header_only_module_info(
-            dep.product_modular,
-            dep.dep_product_kernels,
-            struct(
+            product_modular = dep.product_modular,
+            dep_product_kernels = dep.dep_product_kernels,
+            closures = struct(
                 dep_closure = dep_closure,
                 dep_outline_closure = dep_outline_closure,
                 upstream_excluded = upstream_excluded,
@@ -927,7 +927,7 @@ def _flutter_kernel_module_aspect_impl(target, ctx):
                 owned = owned,
                 edges = edges,
             ),
-            struct(
+            base = struct(
                 base_dill = base_dill,
                 base_keys = base_keys,
                 base_kmods = base_kmods,
@@ -935,12 +935,12 @@ def _flutter_kernel_module_aspect_impl(target, ctx):
         )
 
     return _compile_target_kernels(
-        ctx,
-        tools,
-        flutter_sdk_info,
-        target.label.name,
-        package_name,
-        struct(
+        ctx = ctx,
+        tools = tools,
+        flutter_sdk_info = flutter_sdk_info,
+        target_name = target.label.name,
+        package_name = package_name,
+        job = struct(
             lib_root = lib_root,
             own_srcs = own_srcs,
             records = dep.records,
@@ -997,9 +997,9 @@ def _compile_flutter_entry_module(
     )
     entry = ctx.actions.declare_directory(entry_name)
     flutter_kernel_module_action(
-        ctx,
-        tools,
-        struct(
+        ctx = ctx,
+        tools = tools,
+        module = struct(
             sources = sources,
             packages = first_per_package(packages),
             dep_kmods = dep_outline_closure,
@@ -1010,7 +1010,7 @@ def _compile_flutter_entry_module(
                 transitive = [k.closure_excluded for k in dep_kernels],
             ),
         ),
-        struct(
+        options = struct(
             defines = _kernel_worker_defines(ctx),
             exclude_non_sources = True,
             droppable = False,
@@ -1242,7 +1242,7 @@ def compile_flutter_modular_web_kernel(ctx, output, sdk, inputs, config):
         (optional platform `.dill` File to compile against) and `target`
         (frontend/kernel target model).
     """
-    sources = _web_kernel_entry_sources(ctx, inputs.lib_root, inputs.entrypoint, inputs.ui_web_stub)
+    sources = _web_kernel_entry_sources(ctx = ctx, lib_root = inputs.lib_root, entrypoint = inputs.entrypoint, ui_web_stub = inputs.ui_web_stub)
 
     dep_kernels = [
         dep[FlutterKernelModuleInfo].product_kernel_info
@@ -1253,9 +1253,9 @@ def compile_flutter_modular_web_kernel(ctx, output, sdk, inputs, config):
     product_dill = config.platform_dill if config.platform_dill != None else sdk.flutter_sdk_info.platform_kernel_dill_product
     entry = ctx.actions.declare_directory(ctx.label.name + "_icon_tree_shaking.flutter_entry.kmod")
     flutter_kernel_module_action(
-        ctx,
-        sdk.tools,
-        struct(
+        ctx = ctx,
+        tools = sdk.tools,
+        module = struct(
             sources = sources,
             packages = first_per_package(inputs.packages),
             dep_kmods = closures.dep_outline_closure,
@@ -1264,7 +1264,7 @@ def compile_flutter_modular_web_kernel(ctx, output, sdk, inputs, config):
             extra_inputs = closures.cross_pkg_srcs,
             closure_excluded = depset(transitive = [k.closure_excluded for k in dep_kernels]),
         ),
-        struct(
+        options = struct(
             defines = _kernel_worker_defines(ctx) + ["dart.vm.product=true"] + list(config.renderer_defines),
             exclude_non_sources = True,
             droppable = False,

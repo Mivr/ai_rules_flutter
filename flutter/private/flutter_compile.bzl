@@ -583,7 +583,7 @@ def flutter_kernel_compile_action(
     # `compile_sources` below), so the URI resolves through the staging
     # root. Callers passing an explicit URI — every stock rule — are
     # unaffected.
-    entrypoint_uri = _default_entrypoint_uri(entrypoint_uri, main)
+    entrypoint_uri = _default_entrypoint_uri(entrypoint_uri = entrypoint_uri, main = main)
 
     # Opt-in incremental compiles run the debug JIT whole-program compile
     # through the persistent worker. With the flag off every action below is
@@ -627,14 +627,14 @@ def flutter_kernel_compile_action(
         recorded_uses = recorded_uses,
         srcs = srcs,
     )
-    _add_kernel_input_args(args, inputs)
+    _add_kernel_input_args(args = args, inputs = inputs)
 
-    env = _kernel_action_env(output, dartaotruntime)
+    env = _kernel_action_env(output = output, dartaotruntime = dartaotruntime)
 
-    action_io = _kernel_action_inputs(inputs, mount)
-    _write_kernel_manifest(ctx, manifest, inputs, mount)
+    action_io = _kernel_action_inputs(inputs = inputs, mount = mount)
+    _write_kernel_manifest(ctx = ctx, manifest = manifest, inputs = inputs, mount = mount)
 
-    _run_kernel_action(ctx, struct(
+    _run_kernel_action(ctx = ctx, run = struct(
         args = args,
         manifest = manifest,
         direct_inputs = action_io.direct_inputs,
