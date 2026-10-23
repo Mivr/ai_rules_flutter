@@ -31,7 +31,7 @@ load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version", "m
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_deps", "parse_pubspec_sdk_constraint")
 load("//flutter/private:artifact_urls.bzl", "require_sha256")
 load("//flutter/private:download.bzl", "pinned_download")
-load("//flutter/private:flutter_pubspec.bzl", "asset_platform_error", "invalid_asset_platforms", "parse_flutter_assets_block", "parse_flutter_plugin_block")
+load("//flutter/private:flutter_pubspec.bzl", "asset_flavor_error", "asset_platform_error", "invalid_asset_platforms", "parse_flutter_assets_block", "parse_flutter_plugin_block")
 load(
     ":gradle.bzl",
     "detect_android_namespace",
@@ -420,27 +420,98 @@ def _build_pkg_assets_dict(expanded):
     """
     return {":" + entry.path: entry.path for entry in expanded}
 
-def _build_pkg_asset_conditions(expanded):
+def _sorted_flavor_set(flavors):
+    """The deduplicated, sorted flavor names, for order-insensitive comparison."""
+    seen = {}
+    for flavor in flavors:
+        seen[flavor] = True
+    return sorted(seen.keys())
+
+def merge_pub_asset_conditions(expanded, package_name):
+    """Merge per-file `flutter.assets` entries the way flutter_tools does.
+
+    flutter_tools keeps one entry per declaration and bundles a file when ANY
+    of its entries survives filtering, so every entry for one file merges:
+    any entry without `platforms` makes the file unconditional, otherwise the
+    file's platforms are the union of its entries' lists. Entries for one
+    file whose flavor sets differ conflict (compared as sets, so order does
+    not matter); the caller fails the fetch with the returned message.
+
+    Args:
+        expanded: Per-file entries from `expand_pub_asset_entries`.
+        package_name: The pub package the entries come from, for the conflict
+            message.
+
+    Returns:
+        A `struct(platforms, flavors, conflict)`: the merged condition dicts
+        (same shapes `_build_pkg_asset_conditions` returns) and the fetch
+        failure naming the package, the file and both flavor lists, or `""`
+        when the entries agree. A file with one entry keeps its declared
+        order, so single-entry spokes render byte-identically to before.
+    """
+    by_path = {}
+    order = []
+    for entry in expanded:
+        key = ":" + entry.path
+        if key not in by_path:
+            by_path[key] = []
+            order.append(key)
+        by_path[key].append(entry)
+    platforms = {}
+    flavors = {}
+    for key in order:
+        entries = by_path[key]
+        first = entries[0]
+        for other in entries[1:]:
+            if _sorted_flavor_set(other.flavors) != _sorted_flavor_set(first.flavors):
+                return struct(
+                    platforms = {},
+                    flavors = {},
+                    conflict = asset_flavor_error(
+                        package_name,
+                        first.path,
+                        first.flavors,
+                        other.flavors,
+                    ),
+                )
+        if first.flavors:
+            flavors[key] = list(first.flavors)
+        union = {}
+        unconditional = False
+        for entry in entries:
+            if not entry.platforms:
+                unconditional = True
+                break
+            for platform in entry.platforms:
+                union[platform] = True
+        if unconditional:
+            continue
+        if len(entries) == 1:
+            platforms[key] = list(first.platforms)
+        else:
+            platforms[key] = sorted(union.keys())
+    return struct(platforms = platforms, flavors = flavors, conflict = "")
+
+def _build_pkg_asset_conditions(expanded, package_name):
     """Build the `pkg_asset_platforms` / `pkg_asset_flavors` dicts.
 
     Same keys as `pkg_assets` (`":" + path`), but only for entries that
     actually restrict: unconditional files stay out of both dicts, so the
-    emitted attrs stay empty for packages without conditions.
+    emitted attrs stay empty for packages without conditions. Entries for
+    one file merge (see `merge_pub_asset_conditions`); conflicting flavors
+    fail the spoke fetch.
 
     Args:
         expanded: Per-file entries from `expand_pub_asset_entries`.
+        package_name: The pub package the entries come from.
 
     Returns:
         A `(platforms, flavors)` tuple of dicts.
     """
-    platforms = {}
-    flavors = {}
-    for entry in expanded:
-        if entry.platforms:
-            platforms[":" + entry.path] = list(entry.platforms)
-        if entry.flavors:
-            flavors[":" + entry.path] = list(entry.flavors)
-    return (platforms, flavors)
+    merged = merge_pub_asset_conditions(expanded, package_name)
+    if merged.conflict:
+        fail(merged.conflict)
+    return (merged.platforms, merged.flavors)
 
 def _build_pkg_shaders_dict(parsed_shaders):
     """Build the `pkg_shaders` dict — same shape as pkg_assets, no directories."""
@@ -1872,7 +1943,7 @@ def _spoke_asset_inputs(ctx, package_name, asset_block):
     )
     check_spoke_file_names(package_name, asset_block, expanded)
     pkg_assets_dict = _build_pkg_assets_dict(expanded)
-    pkg_asset_platforms, pkg_asset_flavors = _build_pkg_asset_conditions(expanded)
+    pkg_asset_platforms, pkg_asset_flavors = _build_pkg_asset_conditions(expanded, package_name)
     pkg_shaders_dict = _build_pkg_shaders_dict(asset_block.shaders)
     return struct(
         fonts_json_str = fonts_json_str,

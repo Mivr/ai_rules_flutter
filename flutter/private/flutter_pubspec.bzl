@@ -211,6 +211,37 @@ def asset_platform_error(package_name, asset_path, invalid):
         valid = ", ".join(["\"%s\"" % p for p in VALID_ASSET_PLATFORMS]),
     )
 
+def _format_flavor_list(flavors):
+    """Render a `flavors` list as `["a", "b"]`, or `[]` when it is empty."""
+    return "[" + ", ".join(["\"%s\"" % f for f in flavors]) + "]"
+
+def asset_flavor_error(package_name, asset_path, flavors_a, flavors_b):
+    """The fetch failure for entries for one file with different flavors.
+
+    Mirrors flutter_tools' `_checkForFlavorConflicts`: flavor lists compare
+    as sets, so an entry without flavors conflicts with one that has some.
+    Names the package, the file and both flavor lists.
+
+    Args:
+        package_name: The pub package the entries come from.
+        asset_path: The file both entries expand to.
+        flavors_a: The first entry's `flavors` list.
+        flavors_b: The conflicting entry's `flavors` list.
+
+    Returns:
+        The error string; the caller `fail()`s with it.
+    """
+    return (
+        "flutter.pub spoke for \"{pkg}\": asset \"{path}\" lists conflicting " +
+        "flavors {first} vs {second}. Entries for one file must agree on " +
+        "flavors (compared as sets)."
+    ).format(
+        pkg = package_name,
+        path = asset_path,
+        first = _format_flavor_list(flavors_a),
+        second = _format_flavor_list(flavors_b),
+    )
+
 def _parse_shaders(raw):
     if type(raw) != "list":
         return []
