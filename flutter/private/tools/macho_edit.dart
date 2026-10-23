@@ -14,13 +14,15 @@ import 'dart:typed_data';
 import 'crc32.dart' as crc32lib;
 import 'sha256.dart' as sha256lib;
 
+import 'macho_cli.dart';
 import 'macho_constants.dart';
 
+export 'macho_cli.dart';
 export 'macho_constants.dart';
 
 void main(List<String> args) {
   if (args.isEmpty) {
-    _usageError(
+    usageError(
       'Expected subcommand: "patch", "stub", "fat", "verify", "copy-assets", '
       '"assemble-macos-framework", or "copy-files".',
     );
@@ -43,121 +45,11 @@ void main(List<String> args) {
     case 'copy-files':
       _runCopyFiles(rest);
     default:
-      _usageError(
+      usageError(
         'Unknown subcommand "$subcommand". Expected "patch", "stub", "fat", '
         '"verify", "copy-assets", "assemble-macos-framework", or "copy-files".',
       );
   }
-}
-
-Never _usageError(String message) {
-  stderr.writeln('macho_edit: $message');
-  exit(64);
-}
-
-String _basename(String path) {
-  final normalized = path.replaceAll(r'\', '/');
-  final parts = normalized.split('/').where((s) => s.isNotEmpty);
-  return parts.isEmpty ? path : parts.last;
-}
-
-String _stripExtension(String name) {
-  final dot = name.lastIndexOf('.');
-  return dot > 0 ? name.substring(0, dot) : name;
-}
-
-/// Checks whether a non-Mach-O or 32-bit binary is explicitly named in [allowList].
-bool _isAllowedNonMacho(
-  Set<String> allowList, {
-  required String inputPath,
-  String? outputPath,
-  String? installName,
-}) {
-  if (allowList.isEmpty) return false;
-  if (allowList.contains('*')) return true;
-
-  final candidates = <String>{};
-  void addPathCandidates(String? p) {
-    if (p == null || p.isEmpty) return;
-    candidates.add(p);
-    final base = _basename(p);
-    candidates.add(base);
-    final stem = _stripExtension(base);
-    candidates.add(stem);
-    if (stem.startsWith('lib') && stem.length > 3) {
-      candidates.add(stem.substring(3));
-    }
-    for (final seg in p.replaceAll(r'\', '/').split('/')) {
-      if (seg.endsWith('.framework')) {
-        candidates.add(seg);
-        candidates.add(seg.substring(0, seg.length - '.framework'.length));
-      }
-    }
-  }
-
-  addPathCandidates(inputPath);
-  addPathCandidates(outputPath);
-  addPathCandidates(installName);
-  return candidates.any(allowList.contains);
-}
-
-/// Cursor over CLI flag words with take/peek helpers for `--flag value` pairs.
-class _FlagCursor {
-  _FlagCursor(this.args);
-
-  final List<String> args;
-  int _index = -1;
-
-  /// Advances to the next flag word; false when the words are exhausted.
-  bool moveNext() {
-    _index++;
-    return _index < args.length;
-  }
-
-  /// The current flag word.
-  String get current => args[_index];
-
-  /// The next word without consuming it, or null when exhausted.
-  String? peek() => _index + 1 < args.length ? args[_index + 1] : null;
-
-  /// Consumes the next word as [flag]'s value, failing usage when absent.
-  String take(String flag) {
-    if (++_index >= args.length) _usageError('$flag requires a value');
-    return args[_index];
-  }
-}
-
-/// Appends the comma-separated parts of [value] to [into], skipping empties.
-void _addCommaParts(Set<String> into, String value) {
-  for (final part in value.split(',')) {
-    if (part.isNotEmpty) into.add(part);
-  }
-}
-
-/// Parses the `--platform`/`--min-os`/`--sdk-version` triple shared by the
-/// `patch`, `stub` and `copy-files` subcommands. Returns nulls when neither
-/// `--platform` nor `--min-os` was given; `--sdk-version` defaults to the
-/// minimum OS version.
-({int? platform, int? minOs, int? sdkVersion}) _parsePlatformVersions(
-  String? platformName,
-  String? minOsStr,
-  String? sdkVersionStr,
-) {
-  if (platformName == null && minOsStr == null) {
-    return (platform: null, minOs: null, sdkVersion: null);
-  }
-  if (platformName == null || minOsStr == null) {
-    _usageError('--platform and --min-os must be provided together');
-  }
-  final platform = parsePlatform(platformName);
-  final minOs = parsePackedVersion(minOsStr);
-  return (
-    platform: platform,
-    minOs: minOs,
-    sdkVersion: sdkVersionStr != null
-        ? parsePackedVersion(sdkVersionStr)
-        : minOs,
-  );
 }
 
 /// Writes [bytes] to [outputPath], creating parent directories as needed.
@@ -223,11 +115,11 @@ _PatchArgs _parsePatchArgs(List<String> args) {
   String? arch;
   final rpaths = <String>[];
   final allowNonMacho = <String>{};
-  final flags = _FlagCursor(args);
+  final flags = FlagCursor(args);
   while (flags.moveNext()) {
     final arg = flags.current;
     if (arg.startsWith('--allow-non-macho=')) {
-      _addCommaParts(
+      addCommaParts(
         allowNonMacho,
         arg.substring('--allow-non-macho='.length),
       );
@@ -255,13 +147,13 @@ _PatchArgs _parsePatchArgs(List<String> args) {
       case '--allow-non-macho':
         final next = flags.peek();
         if (next == null || next.startsWith('--')) {
-          _usageError(
+          usageError(
             '--allow-non-macho requires an explicit binary or framework name',
           );
         }
-        _addCommaParts(allowNonMacho, flags.take('--allow-non-macho'));
+        addCommaParts(allowNonMacho, flags.take('--allow-non-macho'));
       default:
-        _usageError('Unknown flag for patch: $arg');
+        usageError('Unknown flag for patch: $arg');
     }
   }
   return _PatchArgs(
@@ -282,17 +174,17 @@ void _runPatch(List<String> args) {
   final inputPath = parsed.inputPath;
   final outputPath = parsed.outputPath;
   if (inputPath == null || outputPath == null) {
-    _usageError('patch requires --input and --output');
+    usageError('patch requires --input and --output');
   }
 
-  final versions = _parsePlatformVersions(
+  final versions = parsePlatformVersions(
     parsed.platformName,
     parsed.minOsStr,
     parsed.sdkVersionStr,
   );
 
   final inputBytes = File(inputPath).readAsBytesSync();
-  final isAllowed = _isAllowedNonMacho(
+  final isAllowed = isAllowedNonMacho(
     parsed.allowNonMacho,
     inputPath: inputPath,
     outputPath: outputPath,
@@ -389,7 +281,7 @@ _StubArgs _parseStubArgs(List<String> args) {
   String? sdkVersionStr;
   String? installName;
   var typeStr = 'dylib';
-  final flags = _FlagCursor(args);
+  final flags = FlagCursor(args);
   while (flags.moveNext()) {
     final arg = flags.current;
     switch (arg) {
@@ -408,7 +300,7 @@ _StubArgs _parseStubArgs(List<String> args) {
       case '--type':
         typeStr = flags.take('--type');
       default:
-        _usageError('Unknown flag for stub: $arg');
+        usageError('Unknown flag for stub: $arg');
     }
   }
   return _StubArgs(
@@ -429,7 +321,7 @@ void _runStub(List<String> args) {
   final platformName = parsed.platformName;
   final minOsStr = parsed.minOsStr;
   if (parsed.typeStr != 'dylib' && parsed.typeStr != 'execute') {
-    _usageError('--type must be "dylib" or "execute", got "${parsed.typeStr}"');
+    usageError('--type must be "dylib" or "execute", got "${parsed.typeStr}"');
   }
 
   if (outputPath == null ||
@@ -437,7 +329,7 @@ void _runStub(List<String> args) {
       platformName == null ||
       minOsStr == null ||
       (parsed.typeStr == 'dylib' && parsed.installName == null)) {
-    _usageError(
+    usageError(
       'stub requires --output, --arch, --platform, --min-os, and --install-name',
     );
   }
@@ -510,7 +402,7 @@ _CopyAssetsArgs _parseCopyAssetsArgs(List<String> args) {
   String? kernelBlobPath;
   String? vmSnapshotPath;
   String? isolateSnapshotPath;
-  final flags = _FlagCursor(args);
+  final flags = FlagCursor(args);
   while (flags.moveNext()) {
     final arg = flags.current;
     switch (arg) {
@@ -525,7 +417,7 @@ _CopyAssetsArgs _parseCopyAssetsArgs(List<String> args) {
       case '--isolate-snapshot-data':
         isolateSnapshotPath = flags.take('--isolate-snapshot-data');
       default:
-        _usageError('Unknown flag for copy-assets: $arg');
+        usageError('Unknown flag for copy-assets: $arg');
     }
   }
   return _CopyAssetsArgs(
@@ -542,7 +434,7 @@ void _runCopyAssets(List<String> args) {
   final srcPath = parsed.srcPath;
   final dstPath = parsed.dstPath;
   if (srcPath == null || dstPath == null) {
-    _usageError('copy-assets requires --src and --dst');
+    usageError('copy-assets requires --src and --dst');
   }
 
   final dstDir = Directory(dstPath);
@@ -971,7 +863,7 @@ _AssembleArgs _parseAssembleArgs(List<String> args) {
   String? kernelBlobPath;
   String? vmSnapshotPath;
   String? isolateSnapshotPath;
-  final flags = _FlagCursor(args);
+  final flags = FlagCursor(args);
   while (flags.moveNext()) {
     final arg = flags.current;
     switch (arg) {
@@ -992,7 +884,7 @@ _AssembleArgs _parseAssembleArgs(List<String> args) {
       case '--isolate-snapshot-data':
         isolateSnapshotPath = flags.take('--isolate-snapshot-data');
       default:
-        _usageError('Unknown flag for assemble-macos-framework: $arg');
+        usageError('Unknown flag for assemble-macos-framework: $arg');
     }
   }
   return _AssembleArgs(
@@ -1017,7 +909,7 @@ void _runAssembleMacosFramework(List<String> args) {
       infoPlistPath == null ||
       assetsPath == null ||
       outputDirPath == null) {
-    _usageError(
+    usageError(
       'assemble-macos-framework requires --binary, --info-plist, --assets, '
       'and --output-dir',
     );
@@ -1096,11 +988,11 @@ _CopyFilesArgs _parseCopyFilesArgs(List<String> args) {
   String? arch;
   final allowNonMacho = <String>{};
   final positional = <String>[];
-  final flags = _FlagCursor(args);
+  final flags = FlagCursor(args);
   while (flags.moveNext()) {
     final arg = flags.current;
     if (arg.startsWith('--allow-non-macho=')) {
-      _addCommaParts(
+      addCommaParts(
         allowNonMacho,
         arg.substring('--allow-non-macho='.length),
       );
@@ -1117,13 +1009,13 @@ _CopyFilesArgs _parseCopyFilesArgs(List<String> args) {
     } else if (arg == '--allow-non-macho') {
       final next = flags.peek();
       if (next == null || next.startsWith('--')) {
-        _usageError(
+        usageError(
           '--allow-non-macho requires an explicit binary or framework name',
         );
       }
-      _addCommaParts(allowNonMacho, flags.take('--allow-non-macho'));
+      addCommaParts(allowNonMacho, flags.take('--allow-non-macho'));
     } else if (arg.startsWith('--')) {
-      _usageError('Unknown flag for copy-files: $arg');
+      usageError('Unknown flag for copy-files: $arg');
     } else {
       positional.add(arg);
     }
@@ -1131,7 +1023,7 @@ _CopyFilesArgs _parseCopyFilesArgs(List<String> args) {
 
   final checked = outputDirPath;
   if (checked == null) {
-    _usageError('copy-files requires --output-dir');
+    usageError('copy-files requires --output-dir');
   }
   return _CopyFilesArgs(
     outputDirPath: checked,
@@ -1146,7 +1038,7 @@ _CopyFilesArgs _parseCopyFilesArgs(List<String> args) {
 
 void _runCopyFiles(List<String> args) {
   final parsed = _parseCopyFilesArgs(args);
-  final versions = _parsePlatformVersions(
+  final versions = parsePlatformVersions(
     parsed.platformName,
     parsed.minOsStr,
     parsed.sdkVersionStr,
@@ -1217,7 +1109,7 @@ void _stageCopyFilesEntry(
     return;
   }
   final inputBytes = File(srcPath).readAsBytesSync();
-  final isAllowed = _isAllowedNonMacho(
+  final isAllowed = isAllowedNonMacho(
     staging.allowNonMacho,
     inputPath: srcPath,
     outputPath: destName,
@@ -1269,17 +1161,17 @@ void _runFat(List<String> args) {
   for (var i = 0; i < args.length; i++) {
     final arg = args[i];
     if (arg == '--output') {
-      if (++i >= args.length) _usageError('--output requires a value');
+      if (++i >= args.length) usageError('--output requires a value');
       outputPath = args[i];
     } else if (arg.startsWith('--')) {
-      _usageError('Unknown flag for fat: $arg');
+      usageError('Unknown flag for fat: $arg');
     } else {
       slicePaths.add(arg);
     }
   }
 
   if (outputPath == null || slicePaths.isEmpty) {
-    _usageError('fat requires --output and at least one input slice path');
+    usageError('fat requires --output and at least one input slice path');
   }
 
   final slices = <FatSlice>[];
@@ -1647,7 +1539,7 @@ _VerifyArgs _parseVerifyArgs(List<String> args) {
   final expectedSubstrings = <String>[];
   final expectedEntries = <String>[];
   final forbiddenEntries = <String>[];
-  final flags = _FlagCursor(args);
+  final flags = FlagCursor(args);
   while (flags.moveNext()) {
     final arg = flags.current;
     switch (arg) {
@@ -1668,7 +1560,7 @@ _VerifyArgs _parseVerifyArgs(List<String> args) {
       case '--output':
         outputPath = flags.take('--output');
       default:
-        _usageError('Unknown flag for verify: $arg');
+        usageError('Unknown flag for verify: $arg');
     }
   }
   return _VerifyArgs(
@@ -1688,7 +1580,7 @@ void _runVerify(List<String> args) {
   final inputPath = parsed.inputPath;
   final outputPath = parsed.outputPath;
   if (inputPath == null || outputPath == null) {
-    _usageError('verify requires --input and --output');
+    usageError('verify requires --input and --output');
   }
 
   final binaryRelpath = parsed.binaryRelpath;
