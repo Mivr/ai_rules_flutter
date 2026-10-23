@@ -16,6 +16,8 @@ load(
 load(
     "//flutter/private:flutter_asset_bundle_action.bzl",
     "flutter_asset_bundle_action",
+    "make_bundle_content",
+    "make_tree_shake",
     _build_asset_manifest = "build_asset_manifest",
     _detect_dpr = "detect_dpr",
 )
@@ -57,12 +59,14 @@ def _flutter_asset_bundle_impl(ctx):
 
     output_dir = flutter_asset_bundle_action(
         ctx = ctx,
-        assets = all_entries,
-        fonts = fonts,
-        notices = "",
-        license_files = ctx.files.license_files,
+        content = make_bundle_content(
+            assets = all_entries,
+            fonts = fonts,
+            license_files = ctx.files.license_files,
+            extra_asset_copies = extra_asset_copies,
+        ),
+        shaking = make_tree_shake(),
         output_dir = ctx.actions.declare_directory(ctx.label.name),
-        extra_asset_copies = extra_asset_copies,
     )
 
     return [DefaultInfo(files = depset([output_dir]))]

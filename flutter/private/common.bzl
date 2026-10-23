@@ -11,7 +11,7 @@ load("@rules_dart//dart:utils.bzl", "collect_packages", "collect_transitive_srcs
 load("//flutter:providers.bzl", "FlutterCompiledShadersInfo", "FlutterInfo", "FlutterNativeLibraryInfo", _resolve_exec_dart = "resolve_exec_dart", _resolve_exec_dart_vm = "resolve_exec_dart_vm", _resolve_flutter_sdk_info = "resolve_flutter_sdk_info")
 load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "app_main_location", "app_scheme_location", "app_scheme_sources", "compile_kernel_package_config", "resolve_kernel_entrypoint", "synthesize_app_package", "with_root")
 load("//flutter/private:asset_keys.bzl", "bundle_asset_entries", "is_within_package", "relative_key")
-load("//flutter/private:flutter_asset_bundle_action.bzl", "flutter_asset_bundle_action")
+load("//flutter/private:flutter_asset_bundle_action.bzl", "flutter_asset_bundle_action", "make_bundle_content", "make_tree_shake")
 load("//flutter/private:flutter_compile.bzl", "flutter_kernel_compile_action")
 load("//flutter/private:flutter_info.bzl", "dedup_plugins")
 load(
@@ -1351,18 +1351,22 @@ def flutter_build_assets(ctx, flutter_sdk_info, output_dir, bundle):
     # `flutter_sdk_info.dart_vm_files` rather than `@rules_dart`'s exec-tools SDK.
     return flutter_asset_bundle_action(
         ctx = ctx,
-        dart = flutter_sdk_info.dart if tree_shake_icons else None,
-        flutter_sdk_files = flutter_sdk_info.dart_vm_files if tree_shake_icons else None,
-        assets = all_entries,
-        fonts = fonts,
-        license_files = license_files,
+        content = make_bundle_content(
+            assets = all_entries,
+            fonts = fonts,
+            license_files = license_files,
+            extra_asset_copies = extra_asset_copies,
+        ),
+        shaking = make_tree_shake(
+            dart = flutter_sdk_info.dart if tree_shake_icons else None,
+            flutter_sdk_files = flutter_sdk_info.dart_vm_files if tree_shake_icons else None,
+            const_finder = const_finder if tree_shake_icons else None,
+            font_subset = font_subset if tree_shake_icons else None,
+            kernel_dill = all_kernel_dills[0] if tree_shake_icons else None,
+            kernel_dills = all_kernel_dills if tree_shake_icons else [],
+            tree_shake_key = bundle.tree_shake_key if tree_shake_icons else "",
+        ),
         output_dir = output_dir,
-        const_finder = const_finder if tree_shake_icons else None,
-        font_subset = font_subset if tree_shake_icons else None,
-        kernel_dill = all_kernel_dills[0] if tree_shake_icons else None,
-        kernel_dills = all_kernel_dills if tree_shake_icons else [],
-        tree_shake_key = bundle.tree_shake_key if tree_shake_icons else "",
-        extra_asset_copies = extra_asset_copies,
     )
 
 def make_desktop_bundle_artifacts(is_debug, kernel_dill_path, aot_output_path, aot_dst, icu_data_path):
