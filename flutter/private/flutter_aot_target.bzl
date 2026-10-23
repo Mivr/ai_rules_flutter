@@ -8,7 +8,7 @@ platforms (ELF .so).
 """
 
 load("//flutter/private:common.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "FLUTTER_APPLICATION_ATTRS", "KERNEL_COMPILE_ATTRS", "PLATFORM_CONSTRAINT_ATTRS", "detect_target_platform", "flutter_build_mode", "flutter_compile_kernel", "resolve_flutter_sdk_info")
-load("//flutter/private:flutter_aot_compile.bzl", "flutter_aot_elf_action", "flutter_aot_gen_snapshot_flags", "flutter_aot_macho_action")
+load("//flutter/private:flutter_aot_compile.bzl", "flutter_aot_elf_action", "flutter_aot_gen_snapshot_flags", "flutter_aot_macho_action", "macho_snapshot_options")
 
 def _flutter_aot_target_impl(ctx):
     flutter_sdk_info = resolve_flutter_sdk_info(ctx)
@@ -76,14 +76,14 @@ def _flutter_aot_target_impl(ctx):
     if is_ios or is_macos:
         output = ctx.actions.declare_file(ctx.label.name + ".dylib")
         flutter_aot_macho_action(
-            ctx = ctx,
-            gen_snapshot = flutter_sdk_info.gen_snapshot,
-            kernel_dill = kernel_dill,
-            output = output,
-            strip = strip,
-            extra_flags = extra_flags,
-            extra_outputs = extra_outputs,
-            min_os_version = ctx.attr.min_os_version if ctx.attr.min_os_version else None,
+            ctx,
+            flutter_sdk_info.gen_snapshot,
+            kernel_dill,
+            output,
+            macho_snapshot_options(min_os_version = ctx.attr.min_os_version if ctx.attr.min_os_version else None),
+            strip,
+            extra_flags,
+            extra_outputs,
         )
     else:
         output = ctx.actions.declare_file(ctx.label.name + ".so")

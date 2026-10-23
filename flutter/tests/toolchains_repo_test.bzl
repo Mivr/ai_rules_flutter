@@ -4,7 +4,7 @@ load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("//flutter:repositories.bzl", "resolve_aot_gen_snapshot")
-load("//flutter/private:flutter_aot_compile.bzl", "flutter_aot_macho_action")
+load("//flutter/private:flutter_aot_compile.bzl", "flutter_aot_macho_action", "macho_snapshot_options")
 load("//flutter/private:flutter_aot_target.bzl", "flutter_aot_target")
 load("//flutter/private:flutter_application.bzl", "flutter_application")
 load("//flutter/private:flutter_cross_repo.bzl", "generate_cross_repo_build")
@@ -619,12 +619,12 @@ _apple_backend_default_test = analysistest.make(_apple_backend_rules_apple_test_
 def _macho_aot_probe_impl(ctx):
     out = ctx.actions.declare_file(ctx.label.name + ".dylib")
     flutter_aot_macho_action(
-        ctx = ctx,
-        gen_snapshot = ctx.file.gen_snapshot,
-        kernel_dill = ctx.file.kernel_dill,
-        output = out,
-        strip = True,
-        min_os_version = ctx.attr.min_os_version if ctx.attr.min_os_version else None,
+        ctx,
+        ctx.file.gen_snapshot,
+        ctx.file.kernel_dill,
+        out,
+        macho_snapshot_options(min_os_version = ctx.attr.min_os_version if ctx.attr.min_os_version else None),
+        True,
     )
     return [DefaultInfo(files = depset([out]))]
 
