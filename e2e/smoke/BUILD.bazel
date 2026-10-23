@@ -2,6 +2,7 @@ load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@rules_dart//dart:defs.bzl", "dart_library")
 load(":consumer_compile.bzl", "consumer_caller")
 load(":consumer_extra_roots_test.bzl", "consumer_extra_roots_test_suite")
+load(":consumer_hermetic_test.bzl", "consumer_hermetic_test_suite")
 
 # Verify that the Flutter toolchain resolves by building the toolchains repo.
 # This test passes if the toolchain alias targets can be analyzed.
@@ -66,6 +67,69 @@ consumer_caller(
 )
 
 consumer_extra_roots_test_suite(name = "extra_roots_test")
+
+# Analysis negatives for the hermetic compile checks (manual, each must fail;
+# `hermetic_test` below asserts the failures): an absolute `filesystem_roots`
+# value, a `..` escape, an empty root, a line break smuggled into an
+# argv-bound string, a dill-loading `extra_flags` entry, a host-writing one,
+# and an unknown flag.
+consumer_caller(
+    name = "consumer_bad_roots_abs",
+    filesystem_roots = ["/abs/root"],
+    main = "consumer_main.dart",
+    tags = ["manual"],
+)
+
+consumer_caller(
+    name = "consumer_bad_roots_escape",
+    filesystem_roots = ["../escape"],
+    main = "consumer_main.dart",
+    tags = ["manual"],
+)
+
+consumer_caller(
+    name = "consumer_bad_roots_empty",
+    filesystem_roots = [""],
+    main = "consumer_main.dart",
+    tags = ["manual"],
+)
+
+consumer_caller(
+    name = "consumer_bad_extra_flags_newline",
+    extra_flags = ["--verbosity=error\n--filesystem-root\n/abs"],
+    main = "consumer_main.dart",
+    tags = ["manual"],
+)
+
+consumer_caller(
+    name = "consumer_bad_defines_newline",
+    defines = ["FOO=bar\nbaz"],
+    main = "consumer_main.dart",
+    tags = ["manual"],
+)
+
+consumer_caller(
+    name = "consumer_bad_initialize_from_dill",
+    extra_flags = ["--initialize-from-dill=/abs/evil.dill"],
+    main = "consumer_main.dart",
+    tags = ["manual"],
+)
+
+consumer_caller(
+    name = "consumer_bad_far_manifest",
+    extra_flags = ["--far-manifest=/abs/out"],
+    main = "consumer_main.dart",
+    tags = ["manual"],
+)
+
+consumer_caller(
+    name = "consumer_bad_unknown_flag",
+    extra_flags = ["--frobnicate"],
+    main = "consumer_main.dart",
+    tags = ["manual"],
+)
+
+consumer_hermetic_test_suite(name = "hermetic_test")
 
 # Negative: the sibling import is never declared, so the compile must fail.
 # Manual so `//...` stays green; run explicitly to see the refusal.

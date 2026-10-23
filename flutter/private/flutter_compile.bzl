@@ -7,7 +7,7 @@ Flutter compilation differs from vanilla Dart in that it uses:
 
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("//flutter:providers.bzl", "resolve_exec_dart_vm", "resolve_flutter_sdk_info")
-load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "app_scheme_location", "stage_generated_inputs")
+load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "app_scheme_location", "stage_generated_inputs", "validate_filesystem_roots")
 
 # `vm_flags` entries analysis accepts, as flag names without the leading
 # `--`. The Dart VM interprets every flag before the snapshot, so only flags
@@ -42,15 +42,30 @@ _VM_FLAGS_BARE = [
     "concurrent-sweep",
 ]
 
-# `extra_flags` entries analysis refuses, as flag names without leading
-# dashes: `frontend_server` flags that name a file (or a host side effect)
-# the action does not declare. The action passes its own inputs
+# `extra_flags` entries analysis accepts, as flag names without the leading
+# dashes: only `frontend_server` boolean flags that read no file, write no
+# file and cannot change which files the compile reads. Everything else —
+# notably every flag naming a file the compile does not declare, and any
+# unknown flag — fails the build at analysis, so a smuggled flag can widen
+# neither the read set nor the dill. Name matching ignores case and treats
+# `-` and `_` as the same, the way the VM parses them.
+_EXTRA_FLAGS_ALLOWED = {
+    # Deltas recompile only changed libraries; names no file.
+    "incremental": True,
+    # Emits widget-creation metadata into the dill; names no file.
+    "track-widget-creation": True,
+}
+
+# `extra_flags` entries refused with the file-naming message, as flag names
+# without leading dashes: `frontend_server` flags that name a file (or a host
+# side effect) the action does not declare. The action passes its own inputs
 # (`--packages`, `--platform`, `--filesystem-root`, `--source`,
 # `--native-assets`, `--recorded-uses`, `--from-dill`, `--import-dill`,
 # `--output-dill`) from Starlark `File` objects and records them in the
 # `kernel_filter` manifest; a caller spelling any of them in `extra_flags`
-# fails the build at analysis instead. Name matching ignores case and treats
-# `-` and `_` as the same.
+# fails the build at analysis with this message instead of the generic
+# allow-list one. Name matching ignores case and treats `-` and `_` as the
+# same.
 _EXTRA_FLAG_BLOCKED = [
     "packages",
     "package-config",
@@ -100,8 +115,49 @@ def _is_uint(value):
             return False
     return True
 
+def _reject_line_break(label, param, value):
+    """Fails when an argv-bound caller string holds a line break.
+
+    The compile's argv reaches the worker through a `multiline` param file,
+    where one entry containing `\\n` becomes several argv elements — a
+    `_check_extra_flags` refusal the check never saw. Every caller-supplied
+    string on that path (flags, defines, roots, URIs, the target) must be
+    single-line, on the stock path and the worker path alike.
+
+    Args:
+        label: The calling target's label, for the message.
+        param: The parameter name, for the message.
+        value: The string to check.
+    """
+    if "\n" in value or "\r" in value:
+        fail("%s: %s entry %r contains a line break: argv-bound strings must be single-line" % (label, param, value))
+
+def _check_kernel_strings(label, defines, filesystem_roots, entrypoint_uri, registrant_uri, target):
+    """Fails when an argv-bound caller string holds a line break.
+
+    Args:
+        label: The calling target's label, for the message.
+        defines: The `defines` entries (each becomes a `-D` flag).
+        filesystem_roots: The `filesystem_roots` entries (each becomes a
+            `--filesystem-root` value).
+        entrypoint_uri: The explicit `entrypoint_uri`, or None for the default.
+        registrant_uri: The `dart_plugin_registrant_uri`, or None when absent.
+        target: The frontend-server `--target` model.
+    """
+    for d in defines:
+        _reject_line_break(label, "defines", d)
+    for r in filesystem_roots:
+        _reject_line_break(label, "filesystem_roots", r)
+    if entrypoint_uri != None:
+        _reject_line_break(label, "entrypoint_uri", entrypoint_uri)
+    if registrant_uri != None:
+        _reject_line_break(label, "dart_plugin_registrant_uri", registrant_uri)
+    if target != None:
+        _reject_line_break(label, "target", target)
+
 def _check_vm_flags(label, vm_flags):
     for flag in vm_flags:
+        _reject_line_break(label, "vm_flags", flag)
         if not flag.startswith("--") or flag == "--":
             fail("%s: vm_flags entries must be `--flag` passed to dartaotruntime, got %r" % (label, flag))
         name, eq, value = flag[2:].partition("=")
@@ -117,25 +173,32 @@ def _check_vm_flags(label, vm_flags):
 
 def _check_extra_flags(label, extra_flags):
     for flag in extra_flags:
+        _reject_line_break(label, "extra_flags", flag)
         if not flag.startswith("-") or flag == "-" or flag == "--":
             fail("%s: extra_flags entries must be frontend_server `--flag`s, got %r" % (label, flag))
         stripped = flag[2:] if flag.startswith("--") else flag[1:]
-        name, _, _ = stripped.partition("=")
+        name, eq, _value = stripped.partition("=")
         norm = _normalize_flag_name(name)
         if norm in _READ_SET_FLAGS:
             fail("%s: extra_flags %r controls the dependency report the compile verifies: the compile controls `--print-incremental-dependencies` itself, remove the flag" % (label, flag))
         if norm in _EXTRA_FLAG_BLOCKED:
             fail("%s: extra_flags %r names a file the compile does not declare: pass inputs through `srcs`/`deps`/`import_dill`/`from_dill`/`native_assets_manifest` instead" % (label, flag))
+        if norm in _EXTRA_FLAGS_ALLOWED:
+            if eq:
+                fail("%s: extra_flags %r takes no value: `%s` is a bare flag" % (label, flag, flag))
+        else:
+            fail("%s: extra_flags %r is not allowed: only %s may be passed; flags naming files or side effects (`--packages`, `--*-dill`, `--platform`, `--filesystem-root`, `--initialize-from-dill`, `--far-manifest` and similar) are refused" % (label, flag, ", ".join(["--" + f for f in sorted(_EXTRA_FLAGS_ALLOWED.keys())])))
 
 def _is_incr_worker(ctx, aot, target, from_dill, import_dill, recorded_uses):
     """Whether the compile runs through the incremental worker.
 
-    Opt-in via `--@rules_flutter//flutter:incremental_kernel`: debug JIT
-    whole-program compiles only — never AOT, web (`dartdevc`), `from_dill`,
-    `import_dill` or `recorded_uses` compiles.
+    Opt-in via `--@rules_flutter//flutter:incremental_kernel`: debug (`-c
+    dbg`) JIT whole-program compiles only — never AOT, web (`dartdevc`),
+    `from_dill`, `import_dill` or `recorded_uses` compiles.
     """
     return (
         ctx.attr._incremental_kernel[BuildSettingInfo].value and
+        ctx.var["COMPILATION_MODE"] == "dbg" and
         not aot and target == "flutter" and
         from_dill == None and import_dill == None and recorded_uses == None
     )
@@ -512,15 +575,20 @@ def flutter_kernel_compile_action(
             concrete value for application builds.
         aot: If True, compile for AOT (adds --aot --tfa flags).
         defines: Environment declarations; each entry becomes a -D flag.
-        extra_flags: Additional frontend_server flags (e.g. `--incremental`,
-            `--track-widget-creation`). Each entry must be a `--flag`; a
-            flag naming a file the compile does not declare (`--packages`,
-            `--platform`, `--filesystem-root`, `--source`,
-            `--native-assets`, `--recorded-uses`, `--from-dill`,
-            `--import-dill`, `--output-dill` and similar) fails the build
-            at analysis, as does any spelling of
+            Each entry must be single-line: a line break would split the
+            worker's param file into extra argv elements.
+        extra_flags: Additional frontend_server flags: only `--incremental`
+            and `--track-widget-creation`, which read no file and cannot
+            change which files the compile reads. Each entry must be a bare
+            `--flag` from that list; any other flag fails the build at
+            analysis — with a more specific message for a flag naming a file
+            the compile does not declare (`--packages`, `--platform`,
+            `--filesystem-root`, `--source`, `--native-assets`,
+            `--recorded-uses`, `--from-dill`, `--import-dill`,
+            `--output-dill` and similar) and for any spelling of
             `--[no-]print-incremental-dependencies` (the compile controls
-            the dependency report it verifies).
+            the dependency report it verifies). Each entry must be
+            single-line, like every other argv-bound string.
         target: Frontend server target model ("flutter" or "dartdevc" for web).
         native_assets_manifest: Optional `native_assets.json` File. Passed
             to the frontend_server via `--native-assets`. The frontend
@@ -539,7 +607,10 @@ def flutter_kernel_compile_action(
             `APP_SCHEME` alongside the staging root. The exec root itself is
             never mounted: only declared inputs are staged, so an undeclared
             file is not there for the compiler to read whatever its spelling.
-            (`""` and `"."` entries are dropped.)
+            Every entry is validated at analysis like `extra_roots` — an
+            absolute, empty, or `..`-escaping root fails the build naming the
+            target, the parameter and the value — and must be single-line.
+            (`"."` entries are dropped.)
         recorded_uses: Optional declared File the compiler writes the
             `@RecordUse` uses that survive tree-shaking to (`--recorded-uses`),
             the input of package link hooks. Only an AOT compile records; a
@@ -575,6 +646,8 @@ def flutter_kernel_compile_action(
     """
     _check_vm_flags(ctx.label, vm_flags)
     _check_extra_flags(ctx.label, extra_flags)
+    validate_filesystem_roots(ctx.label, filesystem_roots)
+    _check_kernel_strings(ctx.label, defines, filesystem_roots, entrypoint_uri, dart_plugin_registrant_uri, target)
 
     # The default entrypoint is the stable app-scheme URI, not `main`'s
     # exec path: compiling the exec path keys the root library by a

@@ -34,6 +34,8 @@ def _consumer_caller_impl(ctx):
         import_dill = ctx.file.import_dill if ctx.attr.import_dill else None,
         resource_set = _CONSUMER_RESOURCE_SET if ctx.attr.use_resource_set else None,
         extra_flags = ctx.attr.extra_flags,
+        defines = ctx.attr.defines,
+        filesystem_roots = ctx.attr.filesystem_roots,
     )
     return [DefaultInfo(files = depset([output]))]
 
@@ -58,6 +60,12 @@ consumer_caller = rule(
         ),
         "extra_flags": attr.string_list(
             doc = "Additional frontend_server flags.",
+        ),
+        "defines": attr.string_list(
+            doc = "Dart environment defines (-D flags).",
+        ),
+        "filesystem_roots": attr.string_list(
+            doc = "Extra exec-root-relative directories mounted under APP_SCHEME.",
         ),
         "import_dill": attr.label(
             doc = "Pre-compiled summary dill.",

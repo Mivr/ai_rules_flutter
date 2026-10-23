@@ -74,7 +74,8 @@ diagnostics (`--enable-asserts`, `--verbose-gc`, `--concurrent-mark`,
 `--concurrent-sweep`). Anything else — notably `--packages`, `--platform`,
 `--*-dill`, `--native-assets`, `--timeline-recorder`, `--snapshot*`,
 `--observe`, `--dfe` — fails the build at analysis, as does any
-`extra_flags` entry naming a file the compile does not declare, and any
+`extra_flags` entry outside the allow-list (`--incremental` and
+`--track-widget-creation`, which read no file), and any
 spelling of `--[no-]print-incremental-dependencies` (the compile controls
 the dependency report it verifies). The compile
 guard takes every allowed read from a manifest of declared files, never from

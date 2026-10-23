@@ -397,6 +397,29 @@ def _is_absolute_root(root):
         return True
     return len(root) >= 2 and root[1] == ":" and root[0].isalpha()
 
+def _refuse_bad_root(prefix, kind, key, root):
+    """Fails when a root `value` is not an exec-root-relative directory.
+
+    Shared by `validate_extra_roots` and `validate_filesystem_roots` so the
+    two parameters accept exactly the same spellings. Roots become `rootUri`
+    entries or `--filesystem-root` mounts the compiler resolves: an absolute
+    root, a `..` escape, or an empty root would resolve outside the declared
+    inputs, so the build fails at analysis instead of after the read.
+
+    Args:
+        prefix: The message prefix naming the caller or target.
+        kind: The parameter name (`extra_roots` or `filesystem_roots`).
+        key: The entry key for the message (the package name or list index).
+        root: The root value to check.
+    """
+    if not root or _is_absolute_root(root) or ".." in root.split("/") or ".." in root.split("\\"):
+        fail((
+            "{prefix}: {kind}[{key}] is {root}: " +
+            "{kind} values must be exec-root-relative directories " +
+            "(e.g. \"flutter/tests\"), never absolute, empty, or " +
+            "escaping with \"..\""
+        ).format(prefix = prefix, kind = kind, key = repr(key), root = repr(root)))
+
 def validate_extra_roots(extra_roots):
     """Fails when an `extra_roots` entry is not an exec-root-relative path.
 
@@ -410,14 +433,23 @@ def validate_extra_roots(extra_roots):
         extra_roots: Dict of package name to exec-root-relative root.
     """
     for package in sorted(extra_roots.keys()):
-        root = extra_roots[package]
-        if not root or _is_absolute_root(root) or ".." in root.split("/") or ".." in root.split("\\"):
-            fail((
-                "compile_package_config: extra_roots[{package}] is {root}: " +
-                "extra_roots values must be exec-root-relative directories " +
-                "(e.g. \"flutter/tests\"), never absolute, empty, or " +
-                "escaping with \"..\""
-            ).format(package = repr(package), root = repr(root)))
+        _refuse_bad_root("compile_package_config", "extra_roots", package, extra_roots[package])
+
+def validate_filesystem_roots(label, filesystem_roots):
+    """Fails when a `filesystem_roots` entry is not an exec-root-relative path.
+
+    The same check as `validate_extra_roots`: roots are mounted via
+    `--filesystem-root` for the compile to resolve under, so an absolute
+    root would mount a host directory as a compiler root, and a `..` escape
+    or an empty root would resolve outside the declared inputs. Each failure
+    names the target, the parameter and the value.
+
+    Args:
+        label: The calling target's label, for the message.
+        filesystem_roots: List of exec-root-relative directories.
+    """
+    for i, root in enumerate(filesystem_roots):
+        _refuse_bad_root(label, "filesystem_roots", i, root)
 
 def _sourced_package_names(packages, all_srcs):
     """Names of `packages` owning a file in `all_srcs`, via `package_of_source`.
