@@ -233,3 +233,25 @@ TestReadiness testReadiness({
   }
   return const TestReady();
 }
+
+/// Ambient values a launcher forwards into a hermetic child environment.
+///
+/// Built once where the values are gathered (the platform launchers'
+/// `startTarget`, from the decoded `FLUTTER_INTEGRATION_TEST_DECLARED_ENV`,
+/// `TZ` and the pinned fontconfig file) and passed down to the
+/// `build*Environment` helpers, so the forwarding those helpers used to
+/// repeat as long alias lists stays in one place.
+class EnvForwarding {
+  const EnvForwarding({this.env, this.tz, this.fontconfigFile});
+
+  /// Declared environment entries, merged over the hermetic base map.
+  /// A declared `TZ` entry wins over [tz].
+  final Map<String, String>? env;
+
+  /// Explicit timezone, used when the declared environment names none.
+  final String? tz;
+
+  /// When non-null, materializes as `FONTCONFIG_FILE`/`FONTCONFIG_PATH`.
+  /// The Android runtime needs no fontconfig and leaves it unread.
+  final String? fontconfigFile;
+}

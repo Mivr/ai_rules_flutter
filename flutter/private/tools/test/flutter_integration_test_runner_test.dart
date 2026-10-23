@@ -56,8 +56,10 @@ void main() {
       final env = runner.buildChromeEnvironment(
         browserBinary: '/runfiles/flutter_chrome_headless_shell/browser/chrome-headless-shell',
         scratchDir: '/tmp/scratch',
-        fontconfigFile:
-            '/runfiles/flutter_chrome_headless_shell/fonts/fonts.conf',
+        forwarding: const support.EnvForwarding(
+          fontconfigFile:
+              '/runfiles/flutter_chrome_headless_shell/fonts/fonts.conf',
+        ),
       );
       expect(env['PATH'], isEmpty);
       expect(
@@ -107,7 +109,9 @@ void main() {
         scratchDir: '/tmp/scratch',
         display: ':0',
         harnessUrl: 'ws://127.0.0.1:43210/__flutter_integration_ws__',
-        fontconfigFile: '/tmp/scratch/fonts.conf',
+        forwarding: const support.EnvForwarding(
+          fontconfigFile: '/tmp/scratch/fonts.conf',
+        ),
       );
       expect(appEnv['DISPLAY'], ':0');
       expect(appEnv['GDK_BACKEND'], 'x11');
@@ -655,7 +659,9 @@ void main() {
         final chromeEnv = runner.buildChromeEnvironment(
           browserBinary: '/runfiles/flutter_chrome_headless_shell/browser/chrome-headless-shell',
           scratchDir: '/tmp/scratch',
-          env: {'MY_VAR': 'declared'},
+          forwarding: const support.EnvForwarding(
+            env: {'MY_VAR': 'declared'},
+          ),
         );
         expect(chromeEnv['MY_VAR'], 'declared');
         expect(chromeEnv['TZ'], 'UTC');
@@ -666,8 +672,10 @@ void main() {
           scratchDir: '/tmp/scratch',
           display: ':0',
           harnessUrl: 'ws://127.0.0.1:43210/__flutter_integration_ws__',
-          env: {'MY_VAR': 'declared'},
-          timeZone: 'UTC',
+          forwarding: const support.EnvForwarding(
+            env: {'MY_VAR': 'declared'},
+            tz: 'UTC',
+          ),
         );
         expect(appEnv['MY_VAR'], 'declared');
         expect(appEnv['TZ'], 'UTC');
@@ -678,8 +686,10 @@ void main() {
           scratchDir: '/tmp/android_scratch',
           avdHomeDir: '/tmp/android_scratch/.android/avd',
           adbServerPort: 15037,
-          env: {'MY_VAR': 'declared'},
-          tz: 'UTC',
+          forwarding: const support.EnvForwarding(
+            env: {'MY_VAR': 'declared'},
+            tz: 'UTC',
+          ),
         );
         expect(androidEnv['MY_VAR'], 'declared');
         expect(androidEnv['TZ'], 'UTC');

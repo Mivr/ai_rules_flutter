@@ -251,6 +251,22 @@ Map<String, String> decodeDeclaredEnv(String? raw) {
   return const <String, String>{};
 }
 
+/// Resolves the forwarded ambient values for the `build*Environment`
+/// helpers: the declared entries (empty when nothing was forwarded) and the
+/// effective timezone, where a declared `TZ` entry wins.
+///
+/// One helper for all three builders, so the resolution they used to copy
+/// stays identical everywhere.
+({Map<String, String> declared, String timeZone, String? fontconfigFile})
+_resolveForwarding(EnvForwarding forwarding) {
+  final declared = forwarding.env ?? const <String, String>{};
+  return (
+    declared: declared,
+    timeZone: declared['TZ'] ?? forwarding.tz ?? 'UTC',
+    fontconfigFile: forwarding.fontconfigFile,
+  );
+}
+
 /// Builds the command-line flags passed to the hermetic `chrome-headless-shell`.
 List<String> buildChromeArguments({
   required String url,
@@ -283,21 +299,7 @@ List<String> buildChromeArguments({
 Map<String, String> buildChromeEnvironment({
   required String browserBinary,
   required String scratchDir,
-  String? fontconfigFile,
-  Map<String, String>? env,
-  Map<String, String>? environment,
-  Map<String, String>? declaredEnv,
-  Map<String, String>? userEnv,
-  Map<String, String>? extraEnv,
-  Map<String, String>? extraEnvironment,
-  Map<String, String>? forwardedEnv,
-  Map<String, String>? userEnvironment,
-  String? tz,
-  String? timeZone,
-  String? timezone,
-  String? timeZoneName,
-  String? timeZoneId,
-  String? tzName,
+  EnvForwarding forwarding = const EnvForwarding(),
 }) {
   final browserFile = File(browserBinary);
   final browserDir = browserFile.parent.path;
@@ -308,19 +310,8 @@ Map<String, String> buildChromeEnvironment({
     '$repoRoot/sysroot/lib/x86_64-linux-gnu',
   ];
 
-  final resolvedEnv =
-      env ??
-      environment ??
-      declaredEnv ??
-      userEnv ??
-      extraEnv ??
-      extraEnvironment ??
-      forwardedEnv ??
-      userEnvironment;
-  final resolvedTz =
-      tz ?? timeZone ?? timezone ?? timeZoneName ?? timeZoneId ?? tzName;
-  final mergedDeclared = resolvedEnv ?? const <String, String>{};
-  final tzValue = mergedDeclared['TZ'] ?? resolvedTz ?? 'UTC';
+  final resolved = _resolveForwarding(forwarding);
+  final fontconfigFile = resolved.fontconfigFile;
 
   final result = <String, String>{
     'PATH': '',
@@ -329,14 +320,14 @@ Map<String, String> buildChromeEnvironment({
     'TMPDIR': scratchDir,
     'XDG_CONFIG_HOME': '$scratchDir/.config',
     'XDG_CACHE_HOME': '$scratchDir/.cache',
-    'TZ': tzValue,
+    'TZ': resolved.timeZone,
     if (fontconfigFile != null) ...{
       'FONTCONFIG_FILE': fontconfigFile,
       'FONTCONFIG_PATH': File(fontconfigFile).parent.path,
     },
   };
-  result.addAll(mergedDeclared);
-  result.putIfAbsent('TZ', () => resolvedTz ?? 'UTC');
+  result.addAll(resolved.declared);
+  result['TZ'] = resolved.timeZone;
   return result;
 }
 
@@ -391,21 +382,7 @@ Map<String, String> buildLinuxAppEnvironment({
   required String scratchDir,
   required String display,
   required String harnessUrl,
-  String? fontconfigFile,
-  Map<String, String>? env,
-  Map<String, String>? environment,
-  Map<String, String>? declaredEnv,
-  Map<String, String>? userEnv,
-  Map<String, String>? extraEnv,
-  Map<String, String>? extraEnvironment,
-  Map<String, String>? forwardedEnv,
-  Map<String, String>? userEnvironment,
-  String? tz,
-  String? timeZone,
-  String? timezone,
-  String? timeZoneName,
-  String? timeZoneId,
-  String? tzName,
+  EnvForwarding forwarding = const EnvForwarding(),
 }) {
   final libDirs = <String>[
     '$bundleDir/lib',
@@ -414,19 +391,8 @@ Map<String, String> buildLinuxAppEnvironment({
   ];
   final driDir = '$sysrootDir/usr/lib/x86_64-linux-gnu/dri';
 
-  final resolvedEnv =
-      env ??
-      environment ??
-      declaredEnv ??
-      userEnv ??
-      extraEnv ??
-      extraEnvironment ??
-      forwardedEnv ??
-      userEnvironment;
-  final resolvedTz =
-      tz ?? timeZone ?? timezone ?? timeZoneName ?? timeZoneId ?? tzName;
-  final mergedDeclared = resolvedEnv ?? const <String, String>{};
-  final tzValue = mergedDeclared['TZ'] ?? resolvedTz ?? 'UTC';
+  final resolved = _resolveForwarding(forwarding);
+  final fontconfigFile = resolved.fontconfigFile;
 
   final result = <String, String>{
     'PATH': '$sysrootDir/usr/bin',
@@ -450,14 +416,14 @@ Map<String, String> buildLinuxAppEnvironment({
     'XDG_CACHE_HOME': '$scratchDir/.cache',
     'XDG_RUNTIME_DIR': '$scratchDir/xdg-runtime',
     'FLUTTER_INTEGRATION_TEST_HARNESS_URL': harnessUrl,
-    'TZ': tzValue,
+    'TZ': resolved.timeZone,
     if (fontconfigFile != null) ...{
       'FONTCONFIG_FILE': fontconfigFile,
       'FONTCONFIG_PATH': File(fontconfigFile).parent.path,
     },
   };
-  result.addAll(mergedDeclared);
-  result.putIfAbsent('TZ', () => resolvedTz ?? 'UTC');
+  result.addAll(resolved.declared);
+  result['TZ'] = resolved.timeZone;
   return result;
 }
 
@@ -604,9 +570,11 @@ class WebPlatformLauncher implements PlatformLauncher {
     final env = buildChromeEnvironment(
       browserBinary: browserBinary,
       scratchDir: scratch.path,
-      fontconfigFile: fontconfigFile,
-      env: declaredEnv,
-      tz: tz,
+      forwarding: EnvForwarding(
+        env: declaredEnv,
+        tz: tz,
+        fontconfigFile: fontconfigFile,
+      ),
     );
 
     return Process.start(
@@ -812,9 +780,11 @@ class LinuxPlatformLauncher implements PlatformLauncher {
       scratchDir: scratch.path,
       display: ':$displayNumber',
       harnessUrl: harnessUrl,
-      fontconfigFile: effectiveFontconfig,
-      env: declaredEnv,
-      tz: tz,
+      forwarding: EnvForwarding(
+        env: declaredEnv,
+        tz: tz,
+        fontconfigFile: effectiveFontconfig,
+      ),
     );
 
     return Process.start(
@@ -914,20 +884,7 @@ Map<String, String> buildAndroidRuntimeEnvironment({
   required String scratchDir,
   required String avdHomeDir,
   required int adbServerPort,
-  Map<String, String>? env,
-  Map<String, String>? environment,
-  Map<String, String>? declaredEnv,
-  Map<String, String>? userEnv,
-  Map<String, String>? extraEnv,
-  Map<String, String>? extraEnvironment,
-  Map<String, String>? forwardedEnv,
-  Map<String, String>? userEnvironment,
-  String? tz,
-  String? timeZone,
-  String? timezone,
-  String? timeZoneName,
-  String? timeZoneId,
-  String? tzName,
+  EnvForwarding forwarding = const EnvForwarding(),
 }) {
   final libDirs = <String>[
     '$sdkRoot/emulator/lib64',
@@ -936,19 +893,7 @@ Map<String, String> buildAndroidRuntimeEnvironment({
     '$sysrootDir/lib/x86_64-linux-gnu',
   ];
 
-  final resolvedEnv =
-      env ??
-      environment ??
-      declaredEnv ??
-      userEnv ??
-      extraEnv ??
-      extraEnvironment ??
-      forwardedEnv ??
-      userEnvironment;
-  final resolvedTz =
-      tz ?? timeZone ?? timezone ?? timeZoneName ?? timeZoneId ?? tzName;
-  final mergedDeclared = resolvedEnv ?? const <String, String>{};
-  final tzValue = mergedDeclared['TZ'] ?? resolvedTz ?? 'UTC';
+  final resolved = _resolveForwarding(forwarding);
 
   final result = <String, String>{
     'PATH': '$sdkRoot/platform-tools:$sdkRoot/emulator',
@@ -967,10 +912,10 @@ Map<String, String> buildAndroidRuntimeEnvironment({
     'XDG_CONFIG_HOME': '$scratchDir/.config',
     'XDG_CACHE_HOME': '$scratchDir/.cache',
     'XDG_RUNTIME_DIR': '$scratchDir/xdg-runtime',
-    'TZ': tzValue,
+    'TZ': resolved.timeZone,
   };
-  result.addAll(mergedDeclared);
-  result.putIfAbsent('TZ', () => resolvedTz ?? 'UTC');
+  result.addAll(resolved.declared);
+  result['TZ'] = resolved.timeZone;
   return result;
 }
 
@@ -1416,8 +1361,7 @@ class AndroidPlatformLauncher implements PlatformLauncher {
       scratchDir: scratch.path,
       avdHomeDir: prepared.avdHomeDir.path,
       adbServerPort: ports.adbServerPort,
-      env: declaredEnv,
-      tz: tz,
+      forwarding: EnvForwarding(env: declaredEnv, tz: tz),
     );
     _runtimeEnv = runtimeEnv;
 
