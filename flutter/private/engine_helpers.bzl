@@ -50,64 +50,6 @@ filegroup(
 )
 """
 
-LINUX_ENGINE_DEBUG_FILEGROUP = """
-filegroup(
-    name = "engine_debug_library",
-    srcs = glob(
-        ["engine-debug/libflutter_linux_gtk.so", "engine-debug/flutter_linux/*.h"],
-        allow_empty = True,
-    ),
-    visibility = ["//visibility:public"],
-)
-"""
-
-WINDOWS_ENGINE_DEBUG_FILEGROUP = """
-filegroup(
-    name = "engine_debug_library",
-    srcs = glob(
-        [
-            "engine-debug/flutter_windows.dll",
-            "engine-debug/flutter_windows.dll.lib",
-            "engine-debug/flutter_windows.h",
-            "engine-debug/flutter_export.h",
-            "engine-debug/flutter_messenger.h",
-            "engine-debug/flutter_plugin_registrar.h",
-            "engine-debug/flutter_texture_registrar.h",
-            "cpp-client-wrapper/cpp_client_wrapper/include/flutter/*.h",
-            "cpp-client-wrapper/cpp_client_wrapper/*.h",
-            "cpp-client-wrapper/cpp_client_wrapper/*.cc",
-        ],
-        allow_empty = True,
-    ),
-    visibility = ["//visibility:public"],
-)
-"""
-
-MACOS_ENGINE_DEBUG_FILEGROUP = """
-filegroup(
-    name = "engine_debug_library",
-    srcs = glob(["engine-debug/FlutterMacOS.framework/**"], allow_empty = True),
-    visibility = ["//visibility:public"],
-)
-"""
-
-def engine_debug_filegroup_for_os(target_os):
-    """Return the debug engine filegroup template string for the given OS.
-
-    Args:
-        target_os: One of "macos", "linux", or "windows".
-
-    Returns:
-        A BUILD file snippet defining the engine_debug_library filegroup, or empty string.
-    """
-    if target_os == "macos":
-        return MACOS_ENGINE_DEBUG_FILEGROUP
-    elif target_os == "linux":
-        return LINUX_ENGINE_DEBUG_FILEGROUP
-    elif target_os == "windows":
-        return WINDOWS_ENGINE_DEBUG_FILEGROUP
-    return ""
-
 def engine_filegroup_for_os(target_os):
     """Return the engine filegroup template string for the given OS.
 
@@ -242,43 +184,6 @@ def extract_macos_inner_framework(repository_ctx, base_dir = "engine"):
         output = base_dir + "/FlutterMacOS.framework",
     )
     repository_ctx.delete(base_dir + "/FlutterMacOS.framework.zip")
-
-# -- Engine file discovery helpers for desktop rules --------------------------
-
-def find_macos_framework_dir(engine_files):
-    """Find the -F search path for FlutterMacOS.framework.
-
-    Scans engine files for the framework binary and returns the parent
-    directory of FlutterMacOS.framework/ (i.e. the -F flag value).
-
-    Args:
-        engine_files: List of Files from the engine_library filegroup.
-
-    Returns:
-        The directory path to pass to -F, or fails if not found.
-    """
-    for f in engine_files:
-        if f.path.endswith("FlutterMacOS.framework/FlutterMacOS") or \
-           f.path.endswith("FlutterMacOS.framework/Versions/A/FlutterMacOS"):
-            parts = f.path.split("FlutterMacOS.framework")[0]
-            return parts.rstrip("/")
-    fail("Could not find FlutterMacOS.framework in engine files. " +
-         "Expected a file matching FlutterMacOS.framework/FlutterMacOS or FlutterMacOS.framework/Versions/A/FlutterMacOS.")
-
-def find_engine_lib_dir(engine_files, basename):
-    """Find the directory containing a named engine library.
-
-    Args:
-        engine_files: List of Files from the engine_library filegroup.
-        basename: The filename to search for (e.g. "libflutter_linux_gtk.so").
-
-    Returns:
-        The dirname of the matching file, or fails if not found.
-    """
-    for f in engine_files:
-        if f.basename == basename:
-            return f.dirname
-    fail("Could not find {} in engine files.".format(basename))
 
 # -- Linux multiarch triple mapping -------------------------------------------
 

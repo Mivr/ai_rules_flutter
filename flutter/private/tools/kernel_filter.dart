@@ -54,15 +54,6 @@ final _boundary = RegExp('^(result $_uuid|$_uuid|$_uuid \\S.* \\d+)\$');
 /// Whether [line] is one of `frontend_server`'s batch-protocol lines.
 bool isBoundaryLine(String line) => _boundary.hasMatch(line);
 
-/// [output] without its batch-protocol lines.
-String withoutBoundaryLines(String output) {
-  final kept = [
-    for (final line in output.split('\n'))
-      if (!isBoundaryLine(line)) line,
-  ];
-  return kept.join('\n');
-}
-
 /// Splits [stdoutText] into the `+uri` dependency lines the compiler printed
 /// and everything else (without its batch-protocol lines).
 ({List<String> reads, String rest}) splitDependencyLines(String stdoutText) {
