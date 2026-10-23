@@ -159,7 +159,7 @@ def _consumer_with_own_shader_compiles_own_impl(ctx):
     if config != None:
         asserts.true(env, "shaders/test_shader.frag" in config["copies"])
         asserts.true(env, "packages/shared_shader_fixture/shaders/pkg_shader.frag" in config["copies"])
-        asserts.true(env, "flutter/tests/shared_shader_fixture/shaders/test_shader.frag" in config["copies"])
+        asserts.true(env, "shared_shader_fixture/shaders/test_shader.frag" in config["copies"])
     return analysistest.end(env)
 
 def _consumer_sksl_required_compiles_locally_impl(ctx):

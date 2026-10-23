@@ -10,7 +10,7 @@ load("@rules_dart//dart:providers.bzl", "DartInfo")
 load("@rules_dart//dart:utils.bzl", "collect_packages", "collect_transitive_srcs", "derive_lib_root", "generate_dev_package_config", _COPY_TO_DIRECTORY_TOOLCHAINS = "COPY_TO_DIRECTORY_TOOLCHAINS")
 load("//flutter:providers.bzl", "FlutterCompiledShadersInfo", "FlutterInfo", "FlutterNativeLibraryInfo", _resolve_exec_dart = "resolve_exec_dart", _resolve_exec_dart_vm = "resolve_exec_dart_vm", _resolve_flutter_sdk_info = "resolve_flutter_sdk_info")
 load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "app_main_location", "app_scheme_location", "app_scheme_sources", "compile_kernel_package_config", "resolve_kernel_entrypoint", "synthesize_app_package", "with_root")
-load("//flutter/private:asset_keys.bzl", "bundle_asset_entries")
+load("//flutter/private:asset_keys.bzl", "bundle_asset_entries", "is_within_package", "relative_key")
 load("//flutter/private:flutter_asset_bundle_action.bzl", "flutter_asset_bundle_action")
 load("//flutter/private:flutter_compile.bzl", "flutter_kernel_compile_action")
 load("//flutter/private:flutter_info.bzl", "dedup_plugins")
@@ -1035,16 +1035,25 @@ def collect_sdk_shader_srcs(deps):
 def _shader_jobs(ctx):
     """Every shader this target bundles, as struct(bundle_path, file, includes).
 
-    User shaders keep their workspace-relative path ("shaders/my_effect.frag"),
-    SDK shaders go under "shaders/<basename>" (Flutter's convention), and a
-    package's under "packages/<pkg>/<path>" (bare "<path>" when it has no
-    package name). Two shaders claiming one bundle path fail here: one would
-    otherwise overwrite the other.
+    The target's own shaders are keyed like its assets: relative to the
+    listing target's package directory, which is where
+    `FragmentProgram.fromAsset` looks for them. SDK shaders go under
+    "shaders/<basename>" (Flutter's convention), and a package's under
+    "packages/<pkg>/<path>" (bare "<path>" when it has no package name). A
+    shader outside the listing target's package fails here rather than
+    guessing a key, and two shaders claiming one bundle path fail here: one
+    would otherwise overwrite the other.
     """
     jobs = []
     user_includes = tuple(getattr(ctx.files, "shader_includes", []))
     for shader in ctx.files.shaders:
-        jobs.append(struct(bundle_path = shader.short_path, file = shader, includes = user_includes))
+        if not is_within_package(ctx.label.workspace_root, ctx.label.package, shader.short_path):
+            fail("%s: shader %s is outside the target's package; move it into a flutter_library with a package_name and depend on it instead." % (ctx.label, shader.short_path))
+        jobs.append(struct(
+            bundle_path = relative_key(ctx.label.workspace_root, ctx.label.package, shader.short_path),
+            file = shader,
+            includes = user_includes,
+        ))
     for entry in collect_sdk_shader_srcs(ctx.attr.deps):
         shader = entry.file if hasattr(entry, "file") else entry
         includes = entry.includes if hasattr(entry, "includes") else ()

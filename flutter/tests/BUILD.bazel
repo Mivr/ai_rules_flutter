@@ -43,6 +43,7 @@ load(":plugin_registrant_test.bzl", "plugin_registrant_test_suite")
 load(":profile_mode_test.bzl", "profile_mode_test_suite")
 load(":pub_lock_sdks_test.bzl", "pub_lock_sdks_test_suite")
 load(":shader_compile_test.bzl", "shader_compile_test_suite")
+load(":shader_keys_test.bzl", "shader_keys_test_suite")
 load(":toolchain_selection_test.bzl", "toolchain_selection_test_suite")
 load(":toolchain_test.bzl", "toolchain_test_suite")
 load(":toolchains_repo_test.bzl", "toolchains_repo_test_suite")
@@ -188,6 +189,8 @@ app_entrypoint_test_suite(name = "app_entrypoint_test")
 pub_lock_sdks_test_suite(name = "pub_lock_sdks_test")
 
 shader_compile_test_suite(name = "shader_compile_test")
+
+shader_keys_test_suite(name = "shader_keys_test")
 
 toolchains_repo_test_suite(name = "toolchains_repo_test")
 
