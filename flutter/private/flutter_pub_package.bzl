@@ -2151,8 +2151,8 @@ def _link_scoped_symlink(ctx, node, repo_rel, package_name, package_realpath):
     package and the link. Any other link replicates as-is and is watched,
     so outside targets stay outside and the walk always terminates.
     """
-    if path_spoke_is_ancestor_cycle(package_realpath, node.realpath):
-        fail(ancestor_link_refusal(package_name, repo_rel, node.realpath))
+    if path_spoke_is_ancestor_cycle(package_realpath, str(node.realpath)):
+        fail(ancestor_link_refusal(package_name, repo_rel, str(node.realpath)))
     ctx.symlink(node, repo_rel)
     ctx.watch(node)
 
@@ -2179,7 +2179,7 @@ def _link_scoped_tree(ctx, node, repo_rel, package_name, package_realpath):
             if is_path_spoke_skipped_dir(name):
                 continue
             child_rel = parent_rel + "/" + name
-            if child.realpath != package_realpath + "/" + child_rel:
+            if str(child.realpath) != package_realpath + "/" + child_rel:
                 _link_scoped_symlink(ctx, node = child, repo_rel = child_rel, package_name = package_name, package_realpath = package_realpath)
                 continue
             if child.is_dir:
@@ -2215,7 +2215,7 @@ def _link_top_level_shader_includes(ctx, src, package_name, package_realpath):
             continue
         if name.rpartition(".")[2] not in _PATH_SPOKE_SHADER_INCLUDE_EXTS:
             continue
-        if child.realpath != package_realpath + "/" + name:
+        if str(child.realpath) != package_realpath + "/" + name:
             _link_scoped_symlink(ctx, node = child, repo_rel = name, package_name = package_name, package_realpath = package_realpath)
             continue
         ctx.symlink(child, name)
@@ -2233,7 +2233,7 @@ def _link_scoped_dir_entry(ctx, src, entry_path, package_name, package_realpath)
     if not node.exists:
         return
     repo_rel = "/".join(parts)
-    if node.realpath != package_realpath + "/" + repo_rel:
+    if str(node.realpath) != package_realpath + "/" + repo_rel:
         _link_scoped_symlink(ctx, node = node, repo_rel = repo_rel, package_name = package_name, package_realpath = package_realpath)
         return
     if node.is_dir:
@@ -2254,7 +2254,7 @@ def _link_scoped_file_entry(ctx, src, entry_path, package_name, package_realpath
     if not node.exists:
         return
     repo_rel = "/".join(parts)
-    if node.realpath != package_realpath + "/" + repo_rel:
+    if str(node.realpath) != package_realpath + "/" + repo_rel:
         _link_scoped_symlink(ctx, node = node, repo_rel = repo_rel, package_name = package_name, package_realpath = package_realpath)
         return
     if node.is_dir:
@@ -2340,7 +2340,7 @@ def link_path_package(ctx):
             path = repr(rel),
         ))
     package_name = ctx.attr.package_name
-    package_realpath = src.realpath
+    package_realpath = str(src.realpath)
 
     # The pubspec leads: link it first, then parse the spoke-side copy for
     # the link plan, so the spoke links only what the generator reads or
