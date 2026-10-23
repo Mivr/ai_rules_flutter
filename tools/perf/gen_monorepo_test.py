@@ -379,6 +379,13 @@ class GenerationTest(unittest.TestCase):
         self.assertIn("name = \"app_framework\"", app_build)
         self.assertNotIn("android", app_build.lower())
 
+    def test_generated_workspace_has_default_lockfile_mode(self):
+        out, _ = self.generate("nolock")
+        with open(os.path.join(out, ".bazelrc"), encoding="utf-8") as fh:
+            self.assertNotIn("--lockfile_mode", fh.read())
+        self.assertFalse(
+            os.path.exists(os.path.join(out, "MODULE.bazel.lock")))
+
     def test_options_validation(self):
         with self.assertRaises(ValueError):
             Options(target_loc=0)
@@ -635,18 +642,135 @@ class ModuleTextTest(unittest.TestCase):
         self.assertIn("module(name = \"bench_monorepo\")", text)
 
     def test_bazelrc_filtering(self):
-        self.assertIn("common --lockfile_mode=off\n",
-                      bazelrc_text("/nonexistent"))
+        self.assertNotIn("--lockfile_mode",
+                         bazelrc_text("/nonexistent"))
         rules = self.write_fake_fixture()
         hello = os.path.join(rules, "e2e", "hello_world")
         with open(os.path.join(hello, ".bazelrc"), "w",
                   encoding="utf-8", newline="\n") as fh:
-            fh.write("common --lockfile_mode=off\n"
+            fh.write("common --lockfile_mode=update\n"
                      "common --@rules_flutter//flutter:extra_dart_defines=X\n"
                      "test --aspects=@rules_dart//dart:analyze.bzl%dart_analyze\n")
         text = bazelrc_text(rules)
         self.assertNotIn("extra_dart_defines", text)
-        self.assertIn("common --lockfile_mode=off\n", text)
+        self.assertNotIn("--lockfile_mode", text)
+        self.assertIn("test --aspects=", text)
+
+    def write_dev_fixture(self, subdir, module_text, bazelrc=None):
+        rules = os.path.join(self.tmp, subdir)
+        hello = os.path.join(rules, "e2e", "hello_world")
+        os.makedirs(hello)
+        with open(os.path.join(hello, "MODULE.bazel"), "w",
+                  encoding="utf-8", newline="\n") as fh:
+            fh.write(module_text)
+        if bazelrc is not None:
+            with open(os.path.join(hello, ".bazelrc"), "w",
+                      encoding="utf-8", newline="\n") as fh:
+                fh.write(bazelrc)
+        return rules
+
+    DEV_MODULE = (
+        "module(name = \"rules_flutter_hello_world\")\n"
+        "\n"
+        "bazel_dep(name = \"rules_flutter\", version = \"0.0.0\")\n"
+        "bazel_dep(name = \"rules_dart\", version = \"0.7.3\")\n"
+        "\n"
+        "bazel_dep(name = \"llvm\", version = \"0.8.19\", dev_dependency = True)\n"
+        "\n"
+        "local_path_override(\n"
+        "    module_name = \"rules_flutter\",\n"
+        "    path = \"../..\",\n"
+        ")\n"
+        "\n"
+        "git_override(\n"
+        "    module_name = \"rules_dart\",\n"
+        "    commit = \"FIXTURE999\",\n"
+        "    remote = \"https://github.com/Mivr/rules_dart.git\",\n"
+        ")\n"
+        "\n"
+        "register_toolchains(\n"
+        "    \"@llvm//toolchain:linux_x86_64_to_linux_x86_64\",\n"
+        "    \"@llvm//toolchain:macos_x86_64_to_linux_x86_64\",\n"
+        "    dev_dependency = True,\n"
+        ")\n"
+    )
+
+    DEV_MODULE_DROPPED = (
+        "module(name = \"bench_monorepo\")\n"
+        "\n"
+        "bazel_dep(name = \"rules_flutter\", version = \"0.0.0\")\n"
+        "bazel_dep(name = \"rules_dart\", version = \"0.7.3\")\n"
+        "\n"
+        "local_path_override(\n"
+        "    module_name = \"rules_flutter\",\n"
+        "    path = \"%s\",\n"
+        ")\n"
+        "\n"
+        "git_override(\n"
+        "    module_name = \"rules_dart\",\n"
+        "    commit = \"FIXTURE999\",\n"
+        "    remote = \"https://github.com/Mivr/rules_dart.git\",\n"
+        ")\n"
+        "\n"
+    )
+
+    def test_dev_dependencies_dropped_byte_exact(self):
+        rules = self.write_dev_fixture("dev-rules", self.DEV_MODULE)
+        text = module_bazel_text(rules, [])
+        self.assertEqual(text, self.DEV_MODULE_DROPPED % rules)
+        self.assertNotIn("llvm", text)
+        self.assertNotIn("register_toolchains", text)
+        self.assertNotIn("dev_dependency", text)
+
+    def test_dev_use_extension_fails_naming_call(self):
+        module = (
+            "module(name = \"rules_flutter_hello_world\")\n"
+            "bazel_dep(name = \"rules_flutter\", version = \"0.0.0\")\n"
+            "local_path_override(\n"
+            "    module_name = \"rules_flutter\",\n"
+            "    path = \"../..\",\n"
+            ")\n"
+            "my_ext = use_extension(\"@rules_foo//:ext.bzl\", \"my_ext\",\n"
+            "    dev_dependency = True)\n"
+            "use_repo(my_ext, \"my_repo\")\n"
+        )
+        rules = self.write_dev_fixture("devext-rules", module)
+        with self.assertRaises(ValueError) as ctx:
+            module_bazel_text(rules, [])
+        self.assertIn("use_extension", str(ctx.exception))
+
+    def test_dev_comment_mention_drops_nothing(self):
+        module = (
+            "module(name = \"rules_flutter_hello_world\")\n"
+            "# bazel_dep(name = \"llvm\", version = \"0.8.19\","
+            " dev_dependency = True)\n"
+            "bazel_dep(name = \"rules_flutter\", version = \"0.0.0\")\n"
+            "local_path_override(\n"
+            "    module_name = \"rules_flutter\",\n"
+            "    path = \"../..\",\n"
+            ")\n"
+        )
+        rules = self.write_dev_fixture("devcomment-rules", module)
+        text = module_bazel_text(rules, [])
+        self.assertIn("# bazel_dep(name = \"llvm\"", text)
+        self.assertIn("module(name = \"bench_monorepo\")", text)
+
+    def test_dropped_module_reference_still_named_fails(self):
+        module = (
+            "module(name = \"rules_flutter_hello_world\")\n"
+            "bazel_dep(name = \"rules_flutter\", version = \"0.0.0\")\n"
+            "bazel_dep(name = \"llvm\", version = \"0.8.19\","
+            " dev_dependency = True)\n"
+            "local_path_override(\n"
+            "    module_name = \"rules_flutter\",\n"
+            "    path = \"../..\",\n"
+            ")\n"
+            "register_toolchains(\"@llvm//toolchain:linux_x86_64_to_linux_x86_64\")\n"
+        )
+        rules = self.write_dev_fixture("devref-rules", module)
+        with self.assertRaises(ValueError) as ctx:
+            module_bazel_text(rules, [])
+        self.assertIn("llvm", str(ctx.exception))
 
 
 class EditTest(unittest.TestCase):
