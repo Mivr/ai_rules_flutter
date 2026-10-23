@@ -421,7 +421,10 @@ def _spoke_with_shaders_declares_their_includes_test_impl(ctx):
     """A spoke with shaders lists its GLSL as what they may `#include`.
 
     The compile runs sandboxed with only declared inputs, so a shader that
-    includes a sibling `.glsl` fails unless the spoke declares it.
+    includes a sibling `.glsl` fails unless the spoke declares it. The globs
+    stay scoped to the declared shaders' own directories: a package-wide
+    `**` glob would also match `example/build/` output when a path package
+    is symlinked into its spoke.
     """
     env = unittest.begin(ctx)
 
@@ -440,7 +443,12 @@ def _spoke_with_shaders_declares_their_includes_test_impl(ctx):
 
     with_shaders = content({":shaders/glow.frag": "shaders/glow.frag"})
     asserts.true(env, "shader_includes = glob(" in with_shaders, with_shaders)
-    asserts.true(env, '"**/*.glsl"' in with_shaders, with_shaders)
+    asserts.true(env, '"shaders/**/*.glsl"' in with_shaders, with_shaders)
+    asserts.true(env, '"shaders/**/*.frag"' in with_shaders, with_shaders)
+    asserts.true(env, '"shaders/**/*.vert"' in with_shaders, with_shaders)
+    asserts.false(env, '"**/*.glsl"' in with_shaders, with_shaders)
+    top_level = content({":ripple.frag": "ripple.frag"})
+    asserts.true(env, '"*.glsl"' in top_level, top_level)
     asserts.false(env, "shader_includes" in content({}))
 
     return unittest.end(env)
