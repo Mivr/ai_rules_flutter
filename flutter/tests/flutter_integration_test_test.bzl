@@ -87,6 +87,19 @@ def _android_headless_runtime_pins_test_impl(ctx):
     asserts.equals(env, len(ANDROID_HEADLESS_RUNTIME_DEB_PACKAGES), len(validated.runtime_debs))
     for entry in validated.runtime_debs:
         asserts.equals(env, 64, len(entry.sha256))
+    custom = validate_android_headless_runtime_downloads(
+        system_image = struct(
+            tag = "aosp_atd",
+            abi = "x86_64",
+            api_level = "35",
+            revision = "r02",
+            sha256 = ANDROID_SYSTEM_IMAGE_SHA256,
+        ),
+    )
+    asserts.true(env, "x86_64-35_r02.zip" in custom.system_image_url)
+    asserts.equals(env, validated.emulator_url, custom.emulator_url)
+    asserts.equals(env, validated.platform_tools_url, custom.platform_tools_url)
+    asserts.equals(env, validated.system_image_sha256, custom.system_image_sha256)
     return unittest.end(env)
 
 def _bootstrap_with_integration_test_pkg_test_impl(ctx):

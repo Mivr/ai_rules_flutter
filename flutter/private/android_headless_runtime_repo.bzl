@@ -106,15 +106,15 @@ def android_system_image_url(
     )
 
 def validate_android_headless_runtime_downloads(
-        emulator_build_id = ANDROID_EMULATOR_BUILD_ID,
-        emulator_sha256 = ANDROID_EMULATOR_SHA256,
-        platform_tools_version = ANDROID_PLATFORM_TOOLS_VERSION,
-        platform_tools_sha256 = ANDROID_PLATFORM_TOOLS_SHA256,
-        system_image_tag = ANDROID_SYSTEM_IMAGE_TAG,
-        system_image_abi = ANDROID_SYSTEM_IMAGE_ABI,
-        system_image_api_level = ANDROID_SYSTEM_IMAGE_API_LEVEL,
-        system_image_revision = ANDROID_SYSTEM_IMAGE_REVISION,
-        system_image_sha256 = ANDROID_SYSTEM_IMAGE_SHA256,
+        emulator = struct(build_id = ANDROID_EMULATOR_BUILD_ID, sha256 = ANDROID_EMULATOR_SHA256),
+        platform_tools = struct(version = ANDROID_PLATFORM_TOOLS_VERSION, sha256 = ANDROID_PLATFORM_TOOLS_SHA256),
+        system_image = struct(
+            tag = ANDROID_SYSTEM_IMAGE_TAG,
+            abi = ANDROID_SYSTEM_IMAGE_ABI,
+            api_level = ANDROID_SYSTEM_IMAGE_API_LEVEL,
+            revision = ANDROID_SYSTEM_IMAGE_REVISION,
+            sha256 = ANDROID_SYSTEM_IMAGE_SHA256,
+        ),
         runtime_debs = ANDROID_HEADLESS_RUNTIME_DEB_PACKAGES):
     """Validates and returns the pinned download descriptors for the Android headless runtime.
 
@@ -122,15 +122,9 @@ def validate_android_headless_runtime_downloads(
     immediately rather than performing an unverified fetch.
 
     Args:
-        emulator_build_id: Android emulator build ID (e.g. '16428233').
-        emulator_sha256: Expected SHA-256 of the emulator archive.
-        platform_tools_version: Platform-tools version (e.g. 'r37.0.1').
-        platform_tools_sha256: Expected SHA-256 of the platform-tools archive.
-        system_image_tag: System image tag (e.g. 'aosp_atd').
-        system_image_abi: System image ABI (e.g. 'x86_64').
-        system_image_api_level: System image Android API level (e.g. '35').
-        system_image_revision: System image revision (e.g. 'r01').
-        system_image_sha256: Expected SHA-256 of the system image archive.
+        emulator: Struct with `build_id` and `sha256` for the emulator archive.
+        platform_tools: Struct with `version` and `sha256` for platform-tools.
+        system_image: Struct with `tag`, `abi`, `api_level`, `revision`, and `sha256`.
         runtime_debs: Sequence of `(pkg_name, pool_path, sha256)` tuples.
 
     Returns:
@@ -139,19 +133,19 @@ def validate_android_headless_runtime_downloads(
     if not runtime_debs:
         fail("Android headless runtime requires at least one pinned .deb package.")
 
-    emu_url = android_emulator_url(emulator_build_id)
-    verified_emu_sha256 = require_sha256(emulator_sha256, emu_url)
+    emu_url = android_emulator_url(emulator.build_id)
+    verified_emu_sha256 = require_sha256(emulator.sha256, emu_url)
 
-    pt_url = android_platform_tools_url(platform_tools_version)
-    verified_pt_sha256 = require_sha256(platform_tools_sha256, pt_url)
+    pt_url = android_platform_tools_url(platform_tools.version)
+    verified_pt_sha256 = require_sha256(platform_tools.sha256, pt_url)
 
     sysimg_url = android_system_image_url(
-        tag = system_image_tag,
-        abi = system_image_abi,
-        api_level = system_image_api_level,
-        revision = system_image_revision,
+        tag = system_image.tag,
+        abi = system_image.abi,
+        api_level = system_image.api_level,
+        revision = system_image.revision,
     )
-    verified_sysimg_sha256 = require_sha256(system_image_sha256, sysimg_url)
+    verified_sysimg_sha256 = require_sha256(system_image.sha256, sysimg_url)
 
     verified_debs = []
     for pkg_name, pool_path, deb_sha256 in runtime_debs:
@@ -242,15 +236,21 @@ filegroup(
 
 def _android_headless_runtime_repo_impl(repository_ctx):
     spec = validate_android_headless_runtime_downloads(
-        emulator_build_id = repository_ctx.attr.emulator_build_id,
-        emulator_sha256 = repository_ctx.attr.emulator_sha256,
-        platform_tools_version = repository_ctx.attr.platform_tools_version,
-        platform_tools_sha256 = repository_ctx.attr.platform_tools_sha256,
-        system_image_tag = repository_ctx.attr.system_image_tag,
-        system_image_abi = repository_ctx.attr.system_image_abi,
-        system_image_api_level = repository_ctx.attr.system_image_api_level,
-        system_image_revision = repository_ctx.attr.system_image_revision,
-        system_image_sha256 = repository_ctx.attr.system_image_sha256,
+        emulator = struct(
+            build_id = repository_ctx.attr.emulator_build_id,
+            sha256 = repository_ctx.attr.emulator_sha256,
+        ),
+        platform_tools = struct(
+            version = repository_ctx.attr.platform_tools_version,
+            sha256 = repository_ctx.attr.platform_tools_sha256,
+        ),
+        system_image = struct(
+            tag = repository_ctx.attr.system_image_tag,
+            abi = repository_ctx.attr.system_image_abi,
+            api_level = repository_ctx.attr.system_image_api_level,
+            revision = repository_ctx.attr.system_image_revision,
+            sha256 = repository_ctx.attr.system_image_sha256,
+        ),
     )
 
     pinned_download_and_extract(
