@@ -91,8 +91,13 @@ class TestFailureSummary {
     required this.stackChain,
   });
 
+  /// Human-readable failure message, as the harness reported it.
   final String message;
+
+  /// Dotted error type name (`TestFailure`, `TestDeviceException`, ...).
   final String type;
+
+  /// Trailing stack chain text, empty when the harness sent none.
   final String stackChain;
 
   @override
@@ -198,10 +203,19 @@ class RunningTest {
     required this.started,
   });
 
+  /// Channel the run loop sends `run` on to start this test.
   final int outputId;
+
+  /// Channel whose inbound dispatch ([trackTestRun] wires it) feeds this test.
   final int inputId;
+
+  /// Released when the harness posts this test's `complete` event.
   final Completer<void> completer;
+
+  /// Case log: every `message` event the harness posted for this test.
   final StringBuffer output;
+
+  /// Started at channel allocation; stopped when the outcome is filed.
   final Stopwatch started;
 }
 
@@ -324,6 +338,7 @@ final class TestReady extends TestReadiness {
 final class TestSkipped extends TestReadiness {
   const TestSkipped(this.reason);
 
+  /// Skip reason from the test's metadata, null when it gave none.
   final String? reason;
 }
 
@@ -331,6 +346,7 @@ final class TestSkipped extends TestReadiness {
 final class TestTargetGone extends TestReadiness {
   const TestTargetGone(this.message);
 
+  /// Failure message naming the disconnect, filed for the unstarted test.
   final String message;
 }
 

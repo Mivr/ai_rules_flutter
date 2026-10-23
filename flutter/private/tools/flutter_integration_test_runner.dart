@@ -522,10 +522,19 @@ class WebPlatformLauncher implements PlatformLauncher {
     this.robotoFontFile,
   });
 
+  /// Built web bundle directory served over localhost HTTP.
   final String webDir;
+
+  /// Pinned `chrome-headless-shell` binary running the bundle.
   final String browserBinary;
+
+  /// Scratch parent for the browser profile and XDG homes.
   final String baseTempDir;
+
+  /// Pinned `fonts.conf`, used when the bundle ships no sysroot fonts.
   final String? fontconfigFile;
+
+  /// Pinned Roboto font served to the bundle, when the target needs one.
   final String? robotoFontFile;
 
   Directory? _scratchDir;
@@ -619,11 +628,22 @@ class LinuxPlatformLauncher implements PlatformLauncher {
     this.fontconfigFile,
   });
 
+  /// Built Linux desktop bundle directory.
   final String bundleDir;
+
+  /// Bundle executable name inside [bundleDir].
   final String binaryName;
+
+  /// Pinned `Xvfb` binary providing the virtual display.
   final String xvfbBinary;
+
+  /// Pinned `xkbcomp` binary, verified present for `Xvfb`'s keyboard maps.
   final String xkbcompBinary;
+
+  /// Scratch parent for the run's config, cache and runtime homes.
   final String baseTempDir;
+
+  /// Pinned `fonts.conf`, used when the sysroot ships no fonts.
   final String? fontconfigFile;
 
   Directory? _scratchDir;
@@ -1070,12 +1090,25 @@ class AndroidPlatformLauncher implements PlatformLauncher {
     this.bootTimeout = const Duration(seconds: 120),
   });
 
+  /// APK installed on the emulator for the run.
   final String apkPath;
+
+  /// Application ID the APK is installed and launched under.
   final String packageName;
+
+  /// Pinned emulator binary backing the headless AVD.
   final String emulatorBinary;
+
+  /// Pinned `adb` binary driving the emulator.
   final String adbBinary;
+
+  /// Scratch parent for the AVD home and XDG homes.
   final String baseTempDir;
+
+  /// KVM device passed through to the emulator.
   final String kvmPath;
+
+  /// How long the emulator may take to boot before the run fails.
   final Duration bootTimeout;
 
   Directory? _scratchDir;
@@ -1739,12 +1772,27 @@ class IntegrationSuiteRun {
     this.dialBackBound = const Duration(seconds: 45),
   });
 
+  /// Target launcher (web, Linux desktop or Android emulator) the suite
+  /// runs against.
   final PlatformLauncher launcher;
+
+  /// Integration test file the target executes.
   final String testPath;
+
+  /// Name filter selecting which cases run.
   final TestSelection selection;
+
+  /// The suite's library-level `@Tags`, sent in the handshake so the test
+  /// isolate's root group carries them.
   final Set<String> libraryTags;
+
+  /// JUnit XML output file, null when Bazel asked for none.
   final String? xmlOutput;
+
+  /// Raw `TEST_TIMEOUT` seconds naming the per-test ceiling.
   final String? bazelTestTimeout;
+
+  /// How long the harness waits for the target to dial back before failing.
   final Duration dialBackBound;
 }
 

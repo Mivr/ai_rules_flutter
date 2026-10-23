@@ -174,17 +174,42 @@ class FlutterTestRun {
     required this.impeller,
   });
 
+  /// `flutter_tester` binary this run executes.
   final String tester;
+
+  /// ICU data file the tester loads.
   final String icu;
+
+  /// Kernel dill of the test bundle.
   final String dill;
+
+  /// Optional base dill appended after [dill] into one combined bundle.
   final String? baseDill;
+
+  /// Flutter assets directory handed to the tester, null when the bundle
+  /// ships none.
   final String? assetsDir;
+
+  /// Test file this run executes.
   final String testPath;
+
+  /// LCOV output file; null disables coverage (and the VM service).
   final String? coverageOutput;
+
+  /// Whether to update golden files instead of comparing against them.
   final bool updateGoldens;
+
+  /// Name filter selecting which cases run.
   final TestSelection selection;
+
+  /// The suite's library-level `@Tags`, sent in the handshake so the test
+  /// isolate's root group carries them.
   final Set<String> libraryTags;
+
+  /// JUnit XML output file, null when Bazel asked for none.
   final String? xmlOutput;
+
+  /// Whether to run with the Impeller backend.
   final bool impeller;
 }
 
