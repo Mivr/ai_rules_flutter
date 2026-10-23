@@ -401,6 +401,26 @@ def _check_pub_flutter_floor(lock_content, toolchain_info, pub_tag):
             version = flutter_version,
         ))
 
+def _fail_on_odd_package_name(hub_name, package_name):
+    """Refuse a lock package name that cannot survive BUILD emission.
+
+    Pub package names are lowercase letters, digits and underscores, but a
+    hand-edited lock can say anything; the name lands in spoke repository
+    names, hub aliases and generated target names. Anything holding a quote,
+    a backslash, a newline, whitespace or a label separator fails here,
+    naming the hub and the package, rather than emitting it into BUILD text.
+    """
+    for ch in ['"', "\\", "\n", "\r", " ", "\t", ":", "/"]:
+        if ch in package_name:
+            fail((
+                "flutter.pub hub \"{hub}\": package name {name} cannot be " +
+                "a Bazel target name. Rename the package rather than " +
+                "emitting a hub that cannot name it."
+            ).format(
+                hub = hub_name,
+                name = repr(package_name),
+            ))
+
 def _classify_lock_packages(hub_name, lock_label, lock_pkgs):
     """Splits lock packages into hosted, path, Flutter-SDK, and all names."""
     hosted = {}
@@ -408,6 +428,7 @@ def _classify_lock_packages(hub_name, lock_label, lock_pkgs):
     sdk_flutter = {}
     all_package_names = []
     for name, info in lock_pkgs.items():
+        _fail_on_odd_package_name(hub_name, name)
         source = info.get("source", "unknown")
         if source == "hosted":
             hosted[name] = info

@@ -44,6 +44,7 @@ load(":profile_mode_test.bzl", "profile_mode_test_suite")
 load(":pub_lock_sdks_test.bzl", "pub_lock_sdks_test_suite")
 load(":shader_compile_test.bzl", "shader_compile_test_suite")
 load(":shader_keys_test.bzl", "shader_keys_test_suite")
+load(":starlark_literal_test.bzl", "starlark_literal_test_suite")
 load(":toolchain_selection_test.bzl", "toolchain_selection_test_suite")
 load(":toolchain_test.bzl", "toolchain_test_suite")
 load(":toolchains_repo_test.bzl", "toolchains_repo_test_suite")
@@ -218,6 +219,8 @@ build_test(
 )
 
 validation_test_suite(name = "validation_test")
+
+starlark_literal_test_suite(name = "starlark_literal_test")
 
 gen_l10n_test_suite(name = "gen_l10n_test")
 
