@@ -100,7 +100,11 @@ on:
         default: false
         type: boolean
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  # Runs on main never share a group: each gets its own run-id suffix, so a
+  # push cannot cancel the nightly uncached run (or the reverse) and manual
+  # dispatches never queue behind each other. Branch pushes and PR runs still
+  # share one group per branch or PR and cancel the superseded run.
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}${{ github.ref == 'refs/heads/main' && format('::{0}', github.run_id) || '' }}
   # Tag pushes gate releases: never cancel them, so a newer trigger cannot
   # leave the release gate waiting on a cancelled run. Branch and PR pushes
   # still cancel superseded runs.

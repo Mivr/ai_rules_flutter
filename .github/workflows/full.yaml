@@ -38,9 +38,12 @@ on:
     # Nightly at 06:00 UTC.
     - cron: "0 6 * * *"
 concurrency:
-  # No cancel-in-progress: a run gating a release must not be cancelled by a
-  # newer trigger.
-  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  # Runs on main never share a group: each gets its own run-id suffix, so the
+  # nightly run, a manual dispatch and a push never cancel or queue behind
+  # each other. Tag runs are never cancelled (they gate releases); runs on the
+  # same non-main branch or PR still share a group and cancel superseded runs.
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}${{ github.ref == 'refs/heads/main' && format('::{0}', github.run_id) || '' }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
 env:
   BAZEL_REPOSITORY_CACHE_KEY_FILES: |
     - MODULE.bazel
