@@ -267,6 +267,7 @@ _UNIT_TESTS = {
         ["@rules_dart//dart/guard:directive_guard"],
     ),
     "macho_edit_test": ("macho_edit.dart", []),
+    "sha256_test": ("sha256.dart", []),
     "generate_asset_manifest_test": ("generate_asset_manifest.dart", []),
     "merge_android_manifests_test": ("merge_android_manifests.dart", []),
     "merge_plists_test": ("merge_plists.dart", []),
