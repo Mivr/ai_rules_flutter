@@ -140,36 +140,49 @@ def _shader_compile_args(ctx, output, spirv_output, shader, platform_flags, is_w
         args.add("--include=" + shader_lib_dir)
     return args
 
-def _run_shader_compile(ctx, impellerc, shader, output, spirv_output, target_platform, platform_flags, args, inputs, compile_tool, require_sksl):
-    """Runs impellerc directly, or via the retry wrapper where SkSL can fail soft."""
-    retry_possible = "--sksl" in platform_flags and len(platform_flags) > 1
+def _run_shader_compile(ctx, compile, tools):
+    """Runs impellerc directly, or via the retry wrapper where SkSL can fail soft.
+
+    Args:
+        ctx: Rule context.
+        compile: struct describing the shader compile: `shader` (the input
+            file), `output` (the `.iplr` file), `spirv_output` (the
+            intermediate file), `target_platform`, `platform_flags` (the
+            impellerc flags for the platform), `args` (the impellerc args
+            object), `inputs` (the action input files).
+        tools: struct with the executables: `impellerc`, `compile_tool` (the
+            retry wrapper, used only where the flags include SkSL beside
+            other stages), `require_sksl` (whether an SkSL failure is an
+            error instead of a warning).
+    """
+    retry_possible = "--sksl" in compile.platform_flags and len(compile.platform_flags) > 1
     if not retry_possible:
         ctx.actions.run(
-            executable = impellerc,
-            arguments = [args],
-            inputs = inputs,
-            outputs = [output, spirv_output],
+            executable = tools.impellerc,
+            arguments = [compile.args],
+            inputs = compile.inputs,
+            outputs = [compile.output, compile.spirv_output],
             mnemonic = "FlutterShaderCompile",
-            progress_message = "Compiling shader %s for %s" % (shader.short_path, target_platform),
+            progress_message = "Compiling shader %s for %s" % (compile.shader.short_path, compile.target_platform),
         )
         return
     dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx)
     wrapper_args = ctx.actions.args()
-    wrapper_args.add("--impellerc", impellerc)
-    wrapper_args.add("--shader", shader.short_path)
-    if require_sksl:
+    wrapper_args.add("--impellerc", tools.impellerc)
+    wrapper_args.add("--shader", compile.shader.short_path)
+    if tools.require_sksl:
         wrapper_args.add("--require-sksl")
     wrapper_args.add("--")
     ctx.actions.run(
         executable = dart_exe,
-        arguments = [compile_tool.path, wrapper_args, args],
+        arguments = [tools.compile_tool.path, wrapper_args, compile.args],
         inputs = depset(
-            direct = inputs + [impellerc, compile_tool],
+            direct = compile.inputs + [tools.impellerc, tools.compile_tool],
             transitive = [dart_vm_files],
         ),
-        outputs = [output, spirv_output],
+        outputs = [compile.output, compile.spirv_output],
         mnemonic = "FlutterShaderCompile",
-        progress_message = "Compiling shader %s for %s" % (shader.short_path, target_platform),
+        progress_message = "Compiling shader %s for %s" % (compile.shader.short_path, compile.target_platform),
     )
 
 def flutter_shader_compile_action(
@@ -217,4 +230,20 @@ def flutter_shader_compile_action(
     args = _shader_compile_args(ctx, output, spirv_output, shader, platform_flags, is_web, include_dirs, shader_lib_dir)
 
     inputs = [shader] + shader_lib + list(includes) + staged_files
-    _run_shader_compile(ctx, impellerc, shader, output, spirv_output, target_platform, platform_flags, args, inputs, compile_tool, require_sksl)
+    _run_shader_compile(
+        ctx,
+        struct(
+            shader = shader,
+            output = output,
+            spirv_output = spirv_output,
+            target_platform = target_platform,
+            platform_flags = platform_flags,
+            args = args,
+            inputs = inputs,
+        ),
+        struct(
+            impellerc = impellerc,
+            compile_tool = compile_tool,
+            require_sksl = require_sksl,
+        ),
+    )
