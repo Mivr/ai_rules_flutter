@@ -1372,14 +1372,38 @@ _applyZip64ExtraField(
   );
 }
 
-_CentralRecord _parseInflatedCentralRecord(
+/// How strictly a central-directory record is validated while parsing.
+///
+/// The inflating reader is lenient (archives with trailing data descriptors
+/// and 64-bit sizes it never needs still read); the raw reader is strict
+/// (it refuses anything below the ZIP32 limits it cannot represent).
+class _CentralParseOptions {
+  const _CentralParseOptions({
+    required this.checkBounds,
+    required this.flagsOverride,
+    required this.strictZip64,
+  });
+
+  final bool checkBounds;
+  final int? flagsOverride;
+  final bool strictZip64;
+}
+
+/// Parses one central-directory record at [pos] with ZIP64 size resolution.
+///
+/// [options] selects the header checks, the flags value, and the ZIP64 policy
+/// of the caller; everything else is shared.
+_CentralRecord _parseCentralRecord(
   ByteData bd,
   Uint8List zipBytes,
   int pos,
+  _CentralParseOptions options,
 ) {
-  if (bd.getUint32(pos, Endian.little) != 0x02014b50) {
+  if ((options.checkBounds && pos + 46 > zipBytes.length) ||
+      bd.getUint32(pos, Endian.little) != 0x02014b50) {
     throw FormatException('Invalid central directory header at $pos.');
   }
+  final flags = options.flagsOverride ?? bd.getUint16(pos + 8, Endian.little);
   final method = bd.getUint16(pos + 10, Endian.little);
   final crc = bd.getUint32(pos + 16, Endian.little);
   var compressedSize = bd.getUint32(pos + 20, Endian.little);
@@ -1390,6 +1414,9 @@ _CentralRecord _parseInflatedCentralRecord(
   final externalAttrs = bd.getUint32(pos + 38, Endian.little);
   var localOffset = bd.getUint32(pos + 42, Endian.little);
 
+  if (options.checkBounds && pos + 46 + nameLen > zipBytes.length) {
+    throw FormatException('Invalid central directory header at $pos.');
+  }
   final path = utf8.decode(zipBytes.sublist(pos + 46, pos + 46 + nameLen));
 
   if (uncompressedSize == _zip64Limit32 ||
@@ -1407,12 +1434,22 @@ _CentralRecord _parseInflatedCentralRecord(
     uncompressedSize = resolved.uncompressedSize;
     compressedSize = resolved.compressedSize;
     localOffset = resolved.localOffset;
+    if (options.strictZip64 &&
+        !resolved.found &&
+        (uncompressedSize == _zip64Limit32 ||
+            compressedSize == _zip64Limit32 ||
+            localOffset == _zip64Limit32)) {
+      throw FormatException(
+        'ZIP64 entry "$path" has no ZIP64 extra field; 64-bit sizes are '
+        'not supported here.',
+      );
+    }
   }
 
   return (
     path: path,
     method: method,
-    flags: 0,
+    flags: flags,
     crc: crc,
     compressedSize: compressedSize,
     uncompressedSize: uncompressedSize,
@@ -1421,6 +1458,22 @@ _CentralRecord _parseInflatedCentralRecord(
     nextPos: pos + 46 + nameLen + extraLen + commentLen,
   );
 }
+
+_CentralRecord _parseInflatedCentralRecord(
+  ByteData bd,
+  Uint8List zipBytes,
+  int pos,
+) =>
+    _parseCentralRecord(
+      bd,
+      zipBytes,
+      pos,
+      const _CentralParseOptions(
+        checkBounds: false,
+        flagsOverride: 0,
+        strictZip64: false,
+      ),
+    );
 
 /// Inflates one entry's payload, verifying checksums for large streaming
 /// entries without holding them inflated in memory.
@@ -1629,65 +1682,17 @@ _CentralRecord _parseRawCentralRecord(
   ByteData bd,
   Uint8List zipBytes,
   int pos,
-) {
-  if (pos + 46 > zipBytes.length ||
-      bd.getUint32(pos, Endian.little) != 0x02014b50) {
-    throw FormatException('Invalid central directory header at $pos.');
-  }
-  final flags = bd.getUint16(pos + 8, Endian.little);
-  final method = bd.getUint16(pos + 10, Endian.little);
-  final crc = bd.getUint32(pos + 16, Endian.little);
-  var compressedSize = bd.getUint32(pos + 20, Endian.little);
-  var uncompressedSize = bd.getUint32(pos + 24, Endian.little);
-  final nameLen = bd.getUint16(pos + 28, Endian.little);
-  final extraLen = bd.getUint16(pos + 30, Endian.little);
-  final commentLen = bd.getUint16(pos + 32, Endian.little);
-  final externalAttrs = bd.getUint32(pos + 38, Endian.little);
-  var localOffset = bd.getUint32(pos + 42, Endian.little);
-
-  if (pos + 46 + nameLen > zipBytes.length) {
-    throw FormatException('Invalid central directory header at $pos.');
-  }
-  final path = utf8.decode(zipBytes.sublist(pos + 46, pos + 46 + nameLen));
-
-  if (uncompressedSize == _zip64Limit32 ||
-      compressedSize == _zip64Limit32 ||
-      localOffset == _zip64Limit32) {
-    final extraStart = pos + 46 + nameLen;
-    final resolved = _applyZip64ExtraField(
+) =>
+    _parseCentralRecord(
       bd,
-      extraStart,
-      extraStart + extraLen,
-      uncompressedSize,
-      compressedSize,
-      localOffset,
+      zipBytes,
+      pos,
+      const _CentralParseOptions(
+        checkBounds: true,
+        flagsOverride: null,
+        strictZip64: true,
+      ),
     );
-    uncompressedSize = resolved.uncompressedSize;
-    compressedSize = resolved.compressedSize;
-    localOffset = resolved.localOffset;
-    if (!resolved.found &&
-        (uncompressedSize == _zip64Limit32 ||
-            compressedSize == _zip64Limit32 ||
-            localOffset == _zip64Limit32)) {
-      throw FormatException(
-        'ZIP64 entry "$path" has no ZIP64 extra field; 64-bit sizes are '
-        'not supported here.',
-      );
-    }
-  }
-
-  return (
-    path: path,
-    method: method,
-    flags: flags,
-    crc: crc,
-    compressedSize: compressedSize,
-    uncompressedSize: uncompressedSize,
-    externalAttrs: externalAttrs,
-    localOffset: localOffset,
-    nextPos: pos + 46 + nameLen + extraLen + commentLen,
-  );
-}
 
 ZipRawEntry _materializeRawEntry(
   ByteData bd,
