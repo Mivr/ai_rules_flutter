@@ -94,6 +94,7 @@ flutter_plist_merge = rule(
             default = _TOOL,
             executable = True,
             cfg = "exec",
+            doc = "The `merge_plists` host tool performing the merge.",
         ),
     },
     toolchains = [
