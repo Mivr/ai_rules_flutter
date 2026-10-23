@@ -772,27 +772,78 @@ OVERRIDE_KINDS = ("git_override", "archive_override",
                   "single_version_override")
 
 
+def _strip_comments(text):
+    """MODULE.bazel text with # comments removed, strings intact."""
+    out = []
+    in_string = False
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if in_string:
+            out.append(ch)
+            if ch == "\\" and i + 1 < len(text):
+                out.append(text[i + 1])
+                i += 1
+            elif ch == '"':
+                in_string = False
+        elif ch == '"':
+            in_string = True
+            out.append(ch)
+        elif ch == "#":
+            while i < len(text) and text[i] != "\n":
+                i += 1
+            continue
+        else:
+            out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def _call_spans(text, kind):
+    """(start, end) spans of each top-level kind(...) call in text."""
+    spans = []
+    for match in re.finditer(r"%s\(" % kind, text):
+        depth = 0
+        for i in range(match.end() - 1, len(text)):
+            if text[i] == "(":
+                depth += 1
+            elif text[i] == ")":
+                depth -= 1
+                if depth == 0:
+                    spans.append((match.start(), i + 1))
+                    break
+    return spans
+
+
+def _call_bodies(text, kind):
+    """The argument bodies of each top-level kind(...) call in text."""
+    bodies = []
+    for (start, end) in _call_spans(text, kind):
+        open_paren = text.index("(", start)
+        bodies.append(text[open_paren + 1:end - 1])
+    return bodies
+
+
+def _string_attrs(body):
+    """{attribute: value} for the name = "value" attributes in a body."""
+    return dict(re.findall(r"([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\"([^\"]*)\"",
+                           body))
+
+
 def extract_pin_block(module_bazel_text, module_name):
     """The git/archive/single_version override block for module_name.
 
-    Matches by the quoted module name, so "rules_dart" never matches
-    "ai_rules_dart". Returns None when the module has no pin block.
+    Matches the module_name attribute inside the call, so neither
+    "ai_rules_dart" nor a repo_name fools the comparison. Returns the
+    block's original text, or None when the module has no pin block.
     """
-    wanted = '"%s"' % module_name
     for kind in OVERRIDE_KINDS:
-        in_block = False
-        block_lines = []
-        for line in module_bazel_text.split("\n"):
-            trimmed = line.strip()
-            if not in_block and trimmed.startswith(kind + "("):
-                in_block = True
-                block_lines = []
-            if in_block:
-                block_lines.append(line)
-                if trimmed == ")":
-                    if any(wanted in text for text in block_lines):
-                        return "\n".join(block_lines) + "\n"
-                    in_block = False
+        for (start, end) in _call_spans(module_bazel_text, kind):
+            attrs = _string_attrs(module_bazel_text[start:end])
+            if attrs.get("module_name") == module_name:
+                if module_bazel_text[end:end + 1] == "\n":
+                    end += 1
+                return module_bazel_text[start:end]
     return None
 
 
@@ -811,22 +862,25 @@ def read_tree_modules(rules_flutter_dir):
     """(flutter_name, dart_name, dart_pin) the rules_flutter tree declares.
 
     The flutter name comes from the tree MODULE.bazel's module(name =
-    ...); the dart name and its pin (git/archive/single_version
-    override matched by that name) from the same file. Without a tree
-    MODULE.bazel (unit tests) the names stay None and the caller falls
-    back to the fixture's names; every name written otherwise comes
-    from the trees, never from a constant.
+    ...); the dart name is the name attribute of the bazel_dep call whose
+    repo is rules_dart (repo_name when present, else the name itself),
+    so a repo_name = "rules_dart" is never mistaken for the module name;
+    the pin is that module's override block in the same file. Without a
+    tree MODULE.bazel (unit tests) the names stay None and the caller
+    falls back to the fixture's names; every name written otherwise
+    comes from the trees, never from a constant.
     """
     try:
         with open(os.path.join(rules_flutter_dir, "MODULE.bazel"),
                   encoding="utf-8") as fh:
-            root = fh.read()
+            root = _strip_comments(fh.read())
     except OSError:
         return (None, None, None)
     dart_name = None
-    for candidate in DART_MODULE_NAMES:
-        if 'name = "%s"' % candidate in root:
-            dart_name = candidate
+    for body in _call_bodies(root, "bazel_dep"):
+        attrs = _string_attrs(body)
+        if attrs.get("repo_name", attrs.get("name")) == "rules_dart":
+            dart_name = attrs.get("name")
             break
     return (parse_module_name(root), dart_name,
             extract_pin_block(root, dart_name) if dart_name else None)
@@ -840,27 +894,15 @@ def read_fixture_modules(fixture_text):
     own override block, in either naming scheme.
     """
     flutter_name = None
-    in_block = False
-    block_lines = []
-    for line in fixture_text.split("\n"):
-        trimmed = line.strip()
-        if not in_block and trimmed.startswith("local_path_override("):
-            in_block = True
-            block_lines = []
-        if in_block:
-            block_lines.append(line)
-            if trimmed == ")":
-                in_block = False
-                if any('path = "../.."' in text for text in block_lines):
-                    for text in block_lines:
-                        match = re.search(
-                            r'module_name\s*=\s*"([^"]+)"', text)
-                        if match:
-                            flutter_name = match.group(1)
+    stripped = _strip_comments(fixture_text)
+    for body in _call_bodies(stripped, "local_path_override"):
+        attrs = _string_attrs(body)
+        if attrs.get("path") == "../.." and "module_name" in attrs:
+            flutter_name = attrs["module_name"]
     dart_name = None
     dart_pin = None
     for candidate in DART_MODULE_NAMES:
-        dart_pin = extract_pin_block(fixture_text, candidate)
+        dart_pin = extract_pin_block(stripped, candidate)
         if dart_pin is not None:
             dart_name = candidate
             break

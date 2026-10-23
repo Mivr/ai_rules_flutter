@@ -4,6 +4,7 @@
 import hashlib
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -435,28 +436,99 @@ class ModuleTextTest(unittest.TestCase):
         self.assertIn("module(name = \"bench_monorepo\")", text)
         self.assertIn("path = \"%s\"," % rules, text)
 
-    def write_tree_module(self, rules, flutter_name, dart_name, pin):
+    def dep_line(self, module_name, repo_name=None):
+        line = "bazel_dep(name = \"%s\", version = \"0.0.0\"" % module_name
+        if repo_name is not None:
+            line += ", repo_name = \"%s\"" % repo_name
+        return line + ")\n"
+
+    def write_tree_module(self, rules, flutter_name, dart_name, pin,
+                          dart_repo=None):
         with open(os.path.join(rules, "MODULE.bazel"), "w",
                   encoding="utf-8", newline="\n") as fh:
-            fh.write("module(name = \"%s\")\n"
-                     "bazel_dep(name = \"%s\", version = \"0.0.0\")\n"
-                     "%s" % (flutter_name, dart_name, pin))
+            fh.write("module(name = \"%s\")\n" % flutter_name
+                     + self.dep_line(dart_name, dart_repo)
+                     + pin)
 
-    def write_full_fixture(self, rules, flutter_name, dart_name, pin):
+    def write_full_fixture(self, rules, flutter_name, dart_name, pin,
+                           flutter_repo=None, dart_repo=None):
         hello = os.path.join(rules, "e2e", "hello_world")
         os.makedirs(hello, exist_ok=True)
         with open(os.path.join(hello, "MODULE.bazel"), "w",
                   encoding="utf-8", newline="\n") as fh:
             fh.write("module(name = \"rules_flutter_hello_world\")\n"
-                     "bazel_dep(name = \"%s\", version = \"0.0.0\")\n"
-                     "bazel_dep(name = \"%s\", version = \"0.0.0\")\n"
-                     "# labels keep repo names: @rules_dart//dart:defs.bzl\n"
-                     "local_path_override(\n"
+                     + self.dep_line(flutter_name, flutter_repo)
+                     + self.dep_line(dart_name, dart_repo)
+                     + "# labels keep repo names: @rules_dart//dart:defs.bzl\n"
+                     + "local_path_override(\n"
                      "    module_name = \"%s\",\n"
                      "    path = \"../..\",\n"
                      ")\n"
-                     "%s" % (flutter_name, dart_name, flutter_name, pin))
+                     "%s" % (flutter_name, pin))
         return rules
+
+    def write_renamed_pair(self, subdir, comment=None):
+        """Tree + fixture in the full renamed shape (bazel_deps carry
+        repo_name, the pin lives under the ai_ module name)."""
+        rules = os.path.join(self.tmp, subdir)
+        os.makedirs(rules)
+        tree_text = ("module(name = \"ai_rules_flutter\")\n"
+                     + self.dep_line("ai_rules_dart", "rules_dart")
+                     + self.GIT_PIN % ("ai_rules_dart", "TREE123"))
+        if comment is not None:
+            tree_text = comment + tree_text
+        with open(os.path.join(rules, "MODULE.bazel"), "w",
+                  encoding="utf-8", newline="\n") as fh:
+            fh.write(tree_text)
+        self.write_full_fixture(
+            rules, "ai_rules_flutter", "ai_rules_dart",
+            self.GIT_PIN % ("ai_rules_dart", "TREE123"),
+            flutter_repo="rules_flutter", dart_repo="rules_dart")
+        return rules
+
+    def assert_renamed_output(self, text, rules):
+        self.assertIn("module(name = \"bench_monorepo\")", text)
+        self.assertIn("module_name = \"ai_rules_flutter\"", text)
+        self.assertIn("module_name = \"ai_rules_dart\"", text)
+        self.assertIn("path = \"%s\"," % rules, text)
+        self.assertNotIn("module_name = \"rules_flutter\"", text)
+        self.assertNotIn("module_name = \"rules_dart\"", text)
+        for repo in ("rules_flutter", "rules_dart"):
+            bare = re.findall(r"(?<![A-Za-z_])name\s*=\s*\"%s\"" % repo,
+                              text)
+            self.assertEqual([], bare)
+        self.assertIn("@rules_dart//dart:defs.bzl", text)
+
+    def test_renamed_shape_resolves_dart_dep(self):
+        rules = self.write_renamed_pair("rz-rules")
+        text = module_bazel_text(rules, [])
+        self.assert_renamed_output(text, rules)
+        self.assertIn("TREE123", text)
+
+    def test_renamed_shape_repo_name_override(self):
+        rules = self.write_renamed_pair("rz-rules-repo")
+        text = module_bazel_text(
+            rules, [("rules_dart", "/elsewhere/rules_dart")])
+        self.assert_renamed_output(text, rules)
+        self.assertIn("/elsewhere/rules_dart", text)
+        self.assertNotIn("TREE123", text)
+
+    def test_renamed_shape_module_name_override(self):
+        rules = self.write_renamed_pair("rz-rules-mod")
+        text = module_bazel_text(
+            rules, [("ai_rules_dart", "/elsewhere/rules_dart")])
+        self.assert_renamed_output(text, rules)
+        self.assertIn("/elsewhere/rules_dart", text)
+        self.assertNotIn("TREE123", text)
+
+    def test_comment_mentioning_dep_is_ignored(self):
+        rules = self.write_renamed_pair(
+            "rz-rules-comment",
+            comment="# bazel_dep(name = \"rules_dart\", version = \"0.0.0\")\n"
+                    "# module(name = \"rules_flutter\")\n")
+        text = module_bazel_text(rules, [])
+        self.assert_renamed_output(text, rules)
+        self.assertIn("TREE123", text)
 
     GIT_PIN = ("git_override(\n"
                "    module_name = \"%s\",\n"
