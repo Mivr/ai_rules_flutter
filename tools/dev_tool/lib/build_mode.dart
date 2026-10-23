@@ -18,9 +18,6 @@ enum BuildMode {
   /// Any other build: AOT, on the release engine.
   release;
 
-  /// Whether the app runs Dart compiled ahead of time.
-  bool get isAot => this != debug;
-
   /// Whether the app serves a Dart VM service, so a launch waits for one.
   /// Release is the only mode that never does.
   bool get servesVmService => this != release;

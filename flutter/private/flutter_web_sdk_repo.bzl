@@ -150,9 +150,6 @@ def rewrite_web_sdk_libraries_json(
 
     return json.encode_indent(rewritten, indent = "  ") + "\n"
 
-rewrite_libraries_json = rewrite_web_sdk_libraries_json
-edit_libraries_json = rewrite_web_sdk_libraries_json
-
 def resolve_web_sdk_host_repos(host_sdks, user_repository_name = "flutter"):
     """Resolve declared host SDK `Label`s into per-platform repo metadata.
 

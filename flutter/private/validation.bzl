@@ -1,20 +1,5 @@
 """Shared validation and sanitization helpers for Flutter rules."""
 
-def validate_bundle_id(bundle_id):
-    """Validate that a bundle_id is a well-formed reverse-DNS identifier.
-
-    Requires at least 2 dot-separated segments, no leading/trailing dots,
-    no consecutive dots, and only alphanumeric, '.', and '-' characters.
-
-    Args:
-        bundle_id: The bundle identifier string to validate.
-    """
-    if not is_valid_bundle_id(bundle_id):
-        fail(
-            ("Invalid bundle_id %r: must have ≥2 dot-separated segments, " +
-             "no leading/trailing/consecutive dots, and only alphanumeric, '.', '-' characters") % bundle_id,
-        )
-
 def is_valid_bundle_id(bundle_id):
     """Check if a bundle_id is a well-formed reverse-DNS identifier.
 

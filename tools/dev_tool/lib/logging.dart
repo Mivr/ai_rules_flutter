@@ -35,9 +35,6 @@ export 'package:logging/logging.dart' show Logger, Level;
 
 bool _isJsonMode = false;
 
-/// Whether JSON logging is active.
-bool get isJsonLogging => _isJsonMode;
-
 /// Initialize the logging system.
 ///
 /// Call once at startup before any Logger usage. Reads `LOG_FORMAT` and

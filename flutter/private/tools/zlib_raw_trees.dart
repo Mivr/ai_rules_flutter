@@ -272,19 +272,6 @@ void zlibSendCode(ZlibRawState s, int c, List<int> codes, List<int> lens) {
   zlibSendBits(s, codes[c], lens[c]);
 }
 
-/// Flushes the bit buffer, keeping at most 7 bits (`bi_flush`).
-void zlibBiFlush(ZlibRawState s) {
-  if (s.biValid == 16) {
-    zlibPutShort(s, s.biBuf);
-    s.biBuf = 0;
-    s.biValid = 0;
-  } else if (s.biValid >= 8) {
-    zlibPutByte(s, s.biBuf);
-    s.biBuf >>= 8;
-    s.biValid -= 8;
-  }
-}
-
 /// Aligns the output on a byte boundary (`bi_windup`).
 void zlibBiWindup(ZlibRawState s) {
   if (s.biValid > 8) {

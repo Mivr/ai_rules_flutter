@@ -164,13 +164,6 @@ class OverlayPermission {
   /// Whether this element carries `tools:node="removeAll"`.
   bool get isRemoveAll => toolsNode == 'removeAll';
 
-  /// Whether this element carries `tools:node="replace"`.
-  bool get isReplace => toolsNode == 'replace';
-
-  /// Whether this element carries `tools:node="merge"`.
-  bool get isMerge =>
-      toolsNode == 'merge' || toolsNode == 'merge-only-attributes';
-
   /// Normalized attribute names listed in `tools:remove`.
   Set<String> get toolsRemove => _parseAttrList(attributes['tools:remove']);
 
@@ -817,18 +810,6 @@ class LibraryPermission {
     final value = attributes['android:maxSdkVersion'];
     return value == null ? null : int.parse(value);
   }
-
-  LibraryPermission withElement(String newElement) => newElement == element
-      ? this
-      : LibraryPermission(
-          newElement,
-          attributes,
-          isRemove: isRemove,
-          isRemoveAll: isRemoveAll,
-          toolsNode: toolsNode,
-          toolsRemove: toolsRemove,
-          toolsReplace: toolsReplace,
-        );
 
   String render() {
     final attrs = attributes.entries
