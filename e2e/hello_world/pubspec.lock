@@ -274,6 +274,20 @@ packages:
       relative: true
     source: path
     version: "0.1.0"
+  path_probe:
+    dependency: "direct main"
+    description:
+      path: "path_probe"
+      relative: true
+    source: path
+    version: "0.1.0"
+  path_probe_no_build:
+    dependency: "direct main"
+    description:
+      path: "path_probe_no_build"
+      relative: true
+    source: path
+    version: "0.1.0"
   path:
     dependency: transitive
     description:

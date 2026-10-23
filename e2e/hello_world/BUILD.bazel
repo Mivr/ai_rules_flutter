@@ -1002,6 +1002,37 @@ dart_test(
     ],
 )
 
+# Path-spoke hermeticity: fetching the `path_probe` / `path_probe_no_build`
+# `path:` spokes must leave the source tree untouched. The fixture packages
+# carry an android/ directory (with and without a user BUILD.bazel), a
+# declared shader, an example/build/ shader and a .plugin_symlinks cycle.
+# The data deps force both spokes to fetch and load before the test runs;
+# the test then pins the user BUILD's sentinel intact and no BUILD created
+# where the user had none. Reads files Bazel does not track as inputs, so
+# like the repo's static guards it is tagged `external` (re-run every
+# invocation, never a replayed cached pass) and `no-sandbox` (the unsandboxed
+# runfiles tree resolves the workspace root).
+dart_test(
+    name = "verify_path_spoke_hermeticity_test",
+    size = "small",
+    data = [
+        "@deps//:path_probe",
+        "@deps//:path_probe_no_build",
+        "test/verify_path_spoke_hermeticity_test.dart",
+    ],
+    env = {"GUARD_ROOT_ANCHOR": "$(rlocationpath :test/verify_path_spoke_hermeticity_test.dart)"},
+    env_inherit = ["BUILD_WORKSPACE_DIRECTORY"],
+    main = "test/verify_path_spoke_hermeticity_test.dart",
+    tags = [
+        "external",
+        "no-sandbox",
+    ],
+    target_compatible_with = _HOST_COMPATIBLE,
+    deps = [
+        "@deps//:test",
+    ],
+)
+
 # Verifies that the entitlements blob applied at codesign time on the
 # macOS bundle declares the App Sandbox capability — proves
 # flutter_macos_app threaded macos/Runner/{DebugProfile,Release}.entitlements
