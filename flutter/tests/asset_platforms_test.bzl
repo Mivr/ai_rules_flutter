@@ -26,10 +26,12 @@ load("//flutter/private:flutter_plugin.bzl", "flutter_plugin")
 load(
     "//flutter/private:flutter_pub_package.bzl",
     "expand_pub_asset_entries",
+    "merge_pub_asset_conditions",
 )
 load(
     "//flutter/private:flutter_pubspec.bzl",
     "VALID_ASSET_PLATFORMS",
+    "asset_flavor_error",
     "asset_platform_error",
     "invalid_asset_platforms",
 )
@@ -197,6 +199,116 @@ def _expand_unconditional_directory_stays_unconditional_test_impl(ctx):
         asserts.equals(env, [], entry.flavors)
     return unittest.end(env)
 
+# -- per-file merge ---------------------------------------------------------------
+#
+# flutter_tools keeps one entry per declaration and bundles a file when ANY
+# of its entries survives filtering, so the spoke merges every entry for one
+# file: any unconditional entry makes the file unconditional, otherwise the
+# file's platforms are the union of its entries' lists, and entries whose
+# flavor sets differ fail the fetch.
+
+def _merge_directory_plus_conditional_is_unconditional_test_impl(ctx):
+    """`assets/` plus a conditioned entry still ships everywhere."""
+    env = unittest.begin(ctx)
+    expanded = [
+        struct(path = "assets/web_only.txt", flavors = [], platforms = []),
+        struct(path = "assets/web_only.txt", flavors = [], platforms = ["web"]),
+    ]
+    merged = merge_pub_asset_conditions(expanded, "review_pkg")
+    asserts.equals(env, "", merged.conflict)
+    asserts.false(
+        env,
+        ":assets/web_only.txt" in merged.platforms,
+        "an unconditional entry makes the file unconditional",
+    )
+    return unittest.end(env)
+
+def _merge_same_file_unions_platforms_test_impl(ctx):
+    """`dup/x.txt` for [android] and [linux] ships on both, nowhere else."""
+    env = unittest.begin(ctx)
+    expanded = [
+        struct(path = "dup/x.txt", flavors = [], platforms = ["android"]),
+        struct(path = "dup/x.txt", flavors = [], platforms = ["linux"]),
+    ]
+    merged = merge_pub_asset_conditions(expanded, "review_pkg")
+    asserts.equals(env, "", merged.conflict)
+    asserts.equals(
+        env,
+        ["android", "linux"],
+        merged.platforms[":dup/x.txt"],
+    )
+    asserts.false(
+        env,
+        "web" in merged.platforms[":dup/x.txt"],
+        "the union still excludes unlisted platforms",
+    )
+    return unittest.end(env)
+
+def _merge_unconditional_entry_clears_conditions_test_impl(ctx):
+    """An unconditional entry wins whichever side of the conditional it is on."""
+    env = unittest.begin(ctx)
+    conditional = struct(path = "dup/x.txt", flavors = [], platforms = ["android"])
+    unconditional = struct(path = "dup/x.txt", flavors = [], platforms = [])
+    for expanded in [[conditional, unconditional], [unconditional, conditional]]:
+        merged = merge_pub_asset_conditions(expanded, "review_pkg")
+        asserts.equals(env, "", merged.conflict)
+        asserts.false(
+            env,
+            ":dup/x.txt" in merged.platforms,
+            "an unconditional entry makes the file unconditional",
+        )
+    return unittest.end(env)
+
+def _merge_single_entry_keeps_declared_order_test_impl(ctx):
+    """One entry keeps its declared order, so single-entry spokes are unchanged."""
+    env = unittest.begin(ctx)
+    expanded = [
+        struct(path = "assets/multi.txt", flavors = [], platforms = ["web", "android"]),
+    ]
+    merged = merge_pub_asset_conditions(expanded, "review_pkg")
+    asserts.equals(env, "", merged.conflict)
+    asserts.equals(env, ["web", "android"], merged.platforms[":assets/multi.txt"])
+    return unittest.end(env)
+
+def _fake_dup_list_dir(directory):
+    if directory == "dup":
+        return ["dup/x.txt"]
+    return []
+
+def _merge_flavor_conflict_fails_test_impl(ctx):
+    """A file entry and a directory entry with different flavors conflict."""
+    env = unittest.begin(ctx)
+    entries = [
+        struct(path = "dup/x.txt", flavors = ["paid"], platforms = []),
+        struct(path = "dup/", flavors = ["free"], platforms = []),
+    ]
+    expanded = expand_pub_asset_entries(entries, _fake_dup_list_dir)
+    merged = merge_pub_asset_conditions(expanded, "review_pkg")
+    asserts.true(env, merged.conflict != "", "differing flavor sets must conflict")
+    for want in ["review_pkg", "dup/x.txt", "paid", "free"]:
+        asserts.true(env, want in merged.conflict, merged.conflict)
+    return unittest.end(env)
+
+def _merge_equal_flavors_different_order_ok_test_impl(ctx):
+    """Equal flavor sets in a different order agree and union their platforms."""
+    env = unittest.begin(ctx)
+    expanded = [
+        struct(path = "dup/x.txt", flavors = ["paid", "free"], platforms = ["android"]),
+        struct(path = "dup/x.txt", flavors = ["free", "paid"], platforms = ["linux"]),
+    ]
+    merged = merge_pub_asset_conditions(expanded, "review_pkg")
+    asserts.equals(env, "", merged.conflict)
+    asserts.equals(env, ["android", "linux"], merged.platforms[":dup/x.txt"])
+    asserts.equals(env, ["free", "paid"], sorted(merged.flavors[":dup/x.txt"]))
+    return unittest.end(env)
+
+def _asset_flavor_error_names_package_file_lists_test_impl(ctx):
+    env = unittest.begin(ctx)
+    message = asset_flavor_error("my_pkg", "dup/x.txt", ["paid"], ["free"])
+    for want in ["my_pkg", "dup/x.txt", "paid", "free"]:
+        asserts.true(env, want in message, message)
+    return unittest.end(env)
+
 # -- rule-level plumbing ------------------------------------------------------------
 
 def _pub_assets_plumbing_test_impl(ctx):
@@ -260,6 +372,13 @@ _t8_test = unittest.make(_asset_platform_error_names_package_entry_valid_test_im
 _t9_test = unittest.make(_expand_files_pass_through_test_impl)
 _t10_test = unittest.make(_expand_directory_inherits_conditions_test_impl)
 _t11_test = unittest.make(_expand_unconditional_directory_stays_unconditional_test_impl)
+_t12_test = unittest.make(_merge_directory_plus_conditional_is_unconditional_test_impl)
+_t13_test = unittest.make(_merge_same_file_unions_platforms_test_impl)
+_t14_test = unittest.make(_merge_unconditional_entry_clears_conditions_test_impl)
+_t15_test = unittest.make(_merge_single_entry_keeps_declared_order_test_impl)
+_t16_test = unittest.make(_merge_flavor_conflict_fails_test_impl)
+_t17_test = unittest.make(_merge_equal_flavors_different_order_ok_test_impl)
+_t18_test = unittest.make(_asset_flavor_error_names_package_file_lists_test_impl)
 
 _pub_assets_plumbing_test = analysistest.make(_pub_assets_plumbing_test_impl)
 
@@ -399,6 +518,13 @@ def asset_platforms_test_suite(name):
         _t9_test,
         _t10_test,
         _t11_test,
+        _t12_test,
+        _t13_test,
+        _t14_test,
+        _t15_test,
+        _t16_test,
+        _t17_test,
+        _t18_test,
     )
 
     native.test_suite(
