@@ -923,7 +923,11 @@ def flutter_android_app(
     `//flutter:android_release_keystore_password_file` and
     `//flutter:android_release_key_alias` flags supply the same three
     values, so CI can inject a secret without editing BUILD files; an
-    explicit attribute always wins over its flag. See the README's Android
+    explicit attribute always wins over its flag. Every secret setting must
+    name a target with exactly one file — an empty or multi-file target
+    fails analysis instead of silently debug-signing — and the release
+    signing action runs locally only (`no-remote`), so the secrets never
+    reach remote execution or caches. See the README's Android
     section.
 
     Args:

@@ -38,6 +38,101 @@ load("//flutter/private:common.bzl", "resolve_exec_dart_vm")
 _ANDROID_SDK_TOOLCHAIN_TYPE = Label("@rules_android//toolchains/android_sdk:toolchain_type")
 _ANDROID_TOOLCHAIN_TYPE = Label("@rules_android//toolchains/android:toolchain_type")
 
+# The flags' default targets: "unset" is label identity with these, never an
+# empty file list, so a flag pointing at an empty or multi-file target fails
+# analysis instead of silently falling back to debug signing.
+_RELEASE_KEYSTORE_UNSET = Label("//flutter:_android_release_keystore_none")
+_RELEASE_KEYSTORE_PASSWORD_FILE_UNSET = Label("//flutter:_android_release_keystore_password_file_none")
+
+def release_execution_requirements(release):
+    """Execution requirements for the `ApkSignerTool` action.
+
+    Public (no leading underscore) so the analysis suite can pin it:
+    `analysistest` actions expose argv, inputs, env and outputs but not
+    execution requirements.
+
+    The release signer reads the keystore and the password files. Under a
+    remote executor Bazel would upload those secrets, and under any remote or
+    disk cache their digests would land in the shared action cache — an
+    offline brute-force oracle for a human-chosen password. Release signing
+    therefore always runs locally. The debug keystore is public, so debug
+    signing keeps the default requirements.
+
+    Args:
+      release: The resolved release-signing struct, or None for debug signing.
+
+    Returns:
+      `{"no-remote": "1"}` when the signer reads release secrets, else `{}`.
+    """
+    if release == None:
+        return {}
+    return {"no-remote": "1"}
+
+def _single_secret_file(ctx, files, setting, source):
+    """Returns the one file a release-signing setting must name, failing closed.
+
+    Args:
+      ctx: Rule context, for the label in the error.
+      files: The resolved files behind the setting.
+      setting: The user-facing name of the setting (attribute or flag).
+      source: The label the setting names.
+
+    Returns:
+      The single File.
+    """
+    if len(files) == 1:
+        return files[0]
+    fail(
+        "flutter_android_apk_overlay %s: %s names %s with %s files; " % (ctx.label, setting, source, len(files)) +
+        "it must name a target with exactly one file — never an `allow_empty` glob.",
+    )
+
+def _resolve_release_keystore(ctx):
+    """Resolves the release keystore file, or None to keep debug signing.
+
+    An explicit `keystore` attribute always wins over the flag. The flag
+    counts as unset only while it still names its default target.
+    """
+    if ctx.attr.keystore != None:
+        return _single_secret_file(ctx, ctx.files.keystore, "`keystore`", ctx.attr.keystore.label)
+    if ctx.attr._release_keystore.label == _RELEASE_KEYSTORE_UNSET:
+        return None
+    return _single_secret_file(
+        ctx,
+        ctx.files._release_keystore,
+        "`//flutter:android_release_keystore`",
+        ctx.attr._release_keystore.label,
+    )
+
+def _resolve_release_keystore_password(ctx):
+    """Resolves the keystore password file, or None when neither source names one."""
+    if ctx.attr.keystore_password_file != None:
+        return _single_secret_file(
+            ctx,
+            ctx.files.keystore_password_file,
+            "`keystore_password_file`",
+            ctx.attr.keystore_password_file.label,
+        )
+    if ctx.attr._release_keystore_password_file.label == _RELEASE_KEYSTORE_PASSWORD_FILE_UNSET:
+        return None
+    return _single_secret_file(
+        ctx,
+        ctx.files._release_keystore_password_file,
+        "`//flutter:android_release_keystore_password_file`",
+        ctx.attr._release_keystore_password_file.label,
+    )
+
+def _resolve_release_key_password(ctx):
+    """Resolves the key password file, or None when the attribute is unset."""
+    if ctx.attr.key_password_file == None:
+        return None
+    return _single_secret_file(
+        ctx,
+        ctx.files.key_password_file,
+        "`key_password_file`",
+        ctx.attr.key_password_file.label,
+    )
+
 def _overlay_merged_manifest(ctx, base):
     """Recovers the merged manifest from the base binary's deploy-info group.
 
@@ -123,20 +218,16 @@ def _resolve_release_signing(ctx):
     An explicit attribute always wins over its `//flutter:android_release_*`
     flag, so a target that names its keystore signs with it while a target
     that names none takes the secret from the command line (or the debug key
-    when no flag is set either). The label flags default to empty filegroups,
-    which read back as "unset". A resolved keystore without its password
-    file or alias fails, naming the missing attribute.
+    when no flag is set either). "Unset" is label identity with the flag's
+    default target — never an empty file list — so a flag pointing at an
+    empty or multi-file target fails analysis naming the flag, the label and
+    the file count instead of silently debug-signing. A resolved keystore
+    without its password file or alias fails, naming the missing attribute.
     """
-    keystore = ctx.file.keystore
-    if keystore == None:
-        flag_keystores = ctx.files._release_keystore
-        keystore = flag_keystores[0] if flag_keystores else None
+    keystore = _resolve_release_keystore(ctx)
     if keystore == None:
         return None
-    ks_pass = ctx.file.keystore_password_file
-    if ks_pass == None:
-        flag_passes = ctx.files._release_keystore_password_file
-        ks_pass = flag_passes[0] if flag_passes else None
+    ks_pass = _resolve_release_keystore_password(ctx)
     if ks_pass == None:
         fail(
             "flutter_android_apk_overlay %s: `keystore` is set but " % ctx.label +
@@ -158,7 +249,7 @@ def _resolve_release_signing(ctx):
         keystore = keystore,
         ks_pass = ks_pass,
         alias = alias,
-        key_pass = ctx.file.key_password_file,
+        key_pass = _resolve_release_key_password(ctx),
     )
 
 def _release_sign_args(sign_args, release):
@@ -233,6 +324,7 @@ def _run_apksign(ctx, sdk, aligned, signing_keys, lineage, rotation_min_sdk, rel
         outputs = [signed],
         mnemonic = "ApkSignerTool",
         progress_message = "Signing APK with Flutter payload %s" % ctx.label,
+        execution_requirements = release_execution_requirements(release),
     )
     return signed
 
@@ -398,16 +490,19 @@ flutter_android_apk_overlay = rule(
         "keystore": attr.label(
             doc = "Release keystore (.jks or PKCS#12 .p12) signing this APK instead of the debug keystore. " +
                   "Needs `keystore_password_file` and `key_alias`; without them analysis fails. " +
+                  "Must name a target with exactly one file: an empty or multi-file target fails analysis " +
+                  "instead of falling back to debug signing. " +
                   "When unset (with the `//flutter:android_release_keystore` flag unset) the APK signs " +
                   "with the debug keystore exactly as before. An explicit keystore always wins over the flag.",
-            allow_single_file = True,
+            allow_files = True,
         ),
         "keystore_password_file": attr.label(
             doc = "File holding the release keystore's password, read by apksigner at execution time " +
                   "through `--ks-pass file:<path>`. Mandatory with `keystore`; the password text never " +
                   "appears on the command line. Only the first line is read; end the file with a newline. " +
+                  "Must name a target with exactly one file. " +
                   "Falls back to the `//flutter:android_release_keystore_password_file` flag.",
-            allow_single_file = True,
+            allow_files = True,
         ),
         "key_alias": attr.string(
             doc = "Alias of the signing key inside `keystore`. Mandatory with `keystore`. " +
@@ -417,8 +512,9 @@ flutter_android_apk_overlay = rule(
         "key_password_file": attr.label(
             doc = "File holding the signing key's own password, read through `--key-pass file:<path>`. " +
                   "When unset `--key-pass` is omitted and apksigner unlocks the key with the keystore " +
-                  "password. Only the first line is read; end the file with a newline.",
-            allow_single_file = True,
+                  "password. Only the first line is read; end the file with a newline. " +
+                  "When set it must name a target with exactly one file.",
+            allow_files = True,
         ),
         "_release_keystore": attr.label(
             default = Label("//flutter:android_release_keystore"),

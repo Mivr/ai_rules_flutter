@@ -107,6 +107,10 @@ config_setting(
 #     --@rules_flutter//flutter:android_release_keystore_password_file=//secret:store_pass
 #     --@rules_flutter//flutter:android_release_key_alias=upload
 #
+# A flag counts as set as soon as it names any target but its default below:
+# that target must hold exactly one file, or analysis fails naming the flag,
+# the target and the file count. Never point a flag at an `allow_empty` glob.
+#
 # With neither the attribute nor the flag set, the overlay signs with the
 # debug keystore exactly as before.
 filegroup(
