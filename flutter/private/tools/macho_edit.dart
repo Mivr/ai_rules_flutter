@@ -938,8 +938,12 @@ List<FrameworkZipEntry> readFrameworkZipEntries(Uint8List zipBytes) {
   final cdOffset = bd.getUint32(eocdOffset + 16, Endian.little);
 
   final entries = <FrameworkZipEntry>[];
-  for (final raw
-      in _readRawFrameworkZipEntries(bd, zipBytes, entryCount, cdOffset)) {
+  for (final raw in _readRawFrameworkZipEntries(
+    bd,
+    zipBytes,
+    entryCount,
+    cdOffset,
+  )) {
     final unixMode = (raw.externalAttrs >>> 16) & 0xFFFF;
     final fileType = unixMode & 0xF000;
     final isSymlink = fileType == 0xA000;
@@ -1671,8 +1675,12 @@ Map<String, Uint8List> _readZipArchiveEntries(Uint8List zipBytes) {
   final entryCount = bd.getUint16(eocdOffset + 10, Endian.little);
   final cdOffset = bd.getUint32(eocdOffset + 16, Endian.little);
   return {
-    for (final entry
-        in _readRawFrameworkZipEntries(bd, zipBytes, entryCount, cdOffset))
+    for (final entry in _readRawFrameworkZipEntries(
+      bd,
+      zipBytes,
+      entryCount,
+      cdOffset,
+    ))
       entry.path: entry.data,
   };
 }
@@ -3082,5 +3090,4 @@ void _stampStubUuid(Uint8List out, int uuidDataOffset) {
 }
 
 /// Computes the 32-byte SHA-256 digest of [data].
-Uint8List sha256(Uint8List data) =>
-    Uint8List.fromList(sha256lib.sha256(data));
+Uint8List sha256(Uint8List data) => Uint8List.fromList(sha256lib.sha256(data));

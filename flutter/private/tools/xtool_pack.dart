@@ -1463,17 +1463,16 @@ _CentralRecord _parseInflatedCentralRecord(
   ByteData bd,
   Uint8List zipBytes,
   int pos,
-) =>
-    _parseCentralRecord(
-      bd,
-      zipBytes,
-      pos,
-      const _CentralParseOptions(
-        checkBounds: false,
-        flagsOverride: 0,
-        strictZip64: false,
-      ),
-    );
+) => _parseCentralRecord(
+  bd,
+  zipBytes,
+  pos,
+  const _CentralParseOptions(
+    checkBounds: false,
+    flagsOverride: 0,
+    strictZip64: false,
+  ),
+);
 
 /// Inflates one entry's payload, verifying checksums for large streaming
 /// entries without holding them inflated in memory.
@@ -1682,17 +1681,16 @@ _CentralRecord _parseRawCentralRecord(
   ByteData bd,
   Uint8List zipBytes,
   int pos,
-) =>
-    _parseCentralRecord(
-      bd,
-      zipBytes,
-      pos,
-      const _CentralParseOptions(
-        checkBounds: true,
-        flagsOverride: null,
-        strictZip64: true,
-      ),
-    );
+) => _parseCentralRecord(
+  bd,
+  zipBytes,
+  pos,
+  const _CentralParseOptions(
+    checkBounds: true,
+    flagsOverride: null,
+    strictZip64: true,
+  ),
+);
 
 ZipRawEntry _materializeRawEntry(
   ByteData bd,
