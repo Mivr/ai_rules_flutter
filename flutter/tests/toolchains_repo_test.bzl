@@ -922,7 +922,7 @@ def toolchains_repo_test_suite(name):
     _expect_analysis_failure_test(
         name = name + "_darwin_sdk_multiple_tags_rejected",
         target_under_test = ":" + name + "_probe_multiple_tags",
-        expected_error = "flutter.darwin_sdk may be specified at most once in the root module",
+        expected_error = "flutter.darwin_sdk may be specified at most once in the root module (duplicate `darwin_sdk` tag). Declared by: root_mod (/sdk1), root_mod (/sdk2)",
     )
 
     _xtool_hermetic_llvm_probe(

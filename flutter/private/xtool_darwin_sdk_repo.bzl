@@ -301,6 +301,7 @@ def resolve_darwin_sdk_from_modules(modules):
         struct(url, sha256, path, swift_toolchain_path, configured)
     """
     found = None
+    declarations = []
     for mod in modules:
         tags = getattr(mod.tags, "darwin_sdk", [])
         if not tags:
@@ -311,8 +312,15 @@ def resolve_darwin_sdk_from_modules(modules):
                 "Only the root module may set the flutter.darwin_sdk tag " +
                 "(found in non-root module '%s')." % mod_name,
             )
+        mod_name = getattr(mod, "name", "") or "<root>"
+        for sdk_tag in tags:
+            locator = getattr(sdk_tag, "path", "") or getattr(sdk_tag, "url", "")
+            declarations.append(mod_name if not locator else "%s (%s)" % (mod_name, locator))
         if len(tags) > 1 or found != None:
-            fail("flutter.darwin_sdk may be specified at most once in the root module.")
+            fail(
+                "flutter.darwin_sdk may be specified at most once in the root module " +
+                "(duplicate `darwin_sdk` tag). Declared by: %s." % ", ".join(declarations),
+            )
         sdk_tag = tags[0]
         found = validate_darwin_sdk_config(
             url = getattr(sdk_tag, "url", ""),
