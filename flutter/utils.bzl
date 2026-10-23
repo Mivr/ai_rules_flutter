@@ -315,6 +315,9 @@ def flutter_modular_app_kernel(ctx, *, main, package_name, srcs, deps, output, u
 # the comparator `flutter_test` installs — see `flutter_test_bootstrap`.
 FLUTTER_TEST_BOOTSTRAP_ATTRS = {
     "_golden_comparator_src": attr.label(
+        doc = "The golden comparator `flutter_test_bootstrap` stages next " +
+              "to the output when the closure carries `package:flutter_test`. " +
+              "Defaults to the comparator `flutter_test` installs.",
         default = Label("//flutter/private/goldens:comparator.dart"),
         allow_single_file = [".dart"],
     ),

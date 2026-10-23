@@ -291,6 +291,8 @@ def _run_kernel_action(ctx, run):
 # caller's rule declares its own `main`, `srcs` and `deps`.
 FLUTTER_KERNEL_COMPILE_ATTRS = {
     "_kernel_filter_tool": attr.label(
+        doc = "The kernel-filter guard the compile runs through (checks " +
+              "directives before, verifies the read set after).",
         default = Label("//flutter/private/tools:kernel_filter"),
         executable = True,
         cfg = "exec",
