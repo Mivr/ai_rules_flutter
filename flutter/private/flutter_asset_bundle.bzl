@@ -108,11 +108,13 @@ flutter_asset_bundle = rule(
             allow_files = True,
         ),
         "_asset_bundle_tool": attr.label(
+            doc = "Tool that renders the asset manifest for the bundle.",
             default = _TOOL,
             executable = True,
             cfg = "exec",
         ),
         "_shader_compile_tool": attr.label(
+            doc = "Shader compiler for the bundle's shaders.",
             default = Label("//flutter/private/tools:compile_shader"),
             executable = True,
             cfg = "exec",

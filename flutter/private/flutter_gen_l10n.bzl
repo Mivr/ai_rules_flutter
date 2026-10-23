@@ -253,6 +253,7 @@ flutter_gen_l10n = rule(
             default = False,
         ),
         "_generator": attr.label(
+            doc = "Generator binary that produces the localizations Dart from the `.arb` files.",
             default = "//flutter/private/gen_l10n:gen_l10n",
             executable = True,
             cfg = "exec",

@@ -56,6 +56,7 @@ FlutterKernelModuleInfo = provider(
 
 MODULAR_KERNEL_ATTRS = _DART_MODULAR_KERNEL_ATTRS | {
     "_extra_dart_defines": attr.label(
+        doc = "The //flutter:extra_dart_defines build setting, appended after the target's own `defines`.",
         default = Label("//flutter:extra_dart_defines"),
         providers = [BuildSettingInfo],
     ),
@@ -963,6 +964,7 @@ flutter_kernel_module_aspect = aspect(
     attr_aspects = ["deps"],
     attrs = KERNEL_MODULE_ATTRS | {
         "_extra_dart_defines": attr.label(
+            doc = "The //flutter:extra_dart_defines build setting, read for the aspect's module compiles.",
             default = Label("//flutter:extra_dart_defines"),
             providers = [BuildSettingInfo],
         ),
@@ -1250,6 +1252,7 @@ FLUTTER_MODULAR_KERNEL_ATTRS = {
         default = [],
     ),
     "_allowlist_function_transition": attr.label(
+        doc = "Function-transition allowlist the `deps` edge's platform transition requires.",
         default = "@bazel_tools//tools/allowlists/function_transition_allowlist",
     ),
 } | KERNEL_MODULE_ATTRS

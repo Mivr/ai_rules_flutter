@@ -88,9 +88,11 @@ flutter_sdk_binary = rule(
     implementation = _flutter_sdk_binary_impl,
     attrs = {
         "_runfiles_lib": attr.label(
+            doc = "Bazel runfiles library merged into the binary's runfiles.",
             default = "@bazel_tools//tools/bash/runfiles",
         ),
         "_windows_constraint": attr.label(
+            doc = "Windows platform constraint value, selecting the `.bat` launcher.",
             default = "@platforms//os:windows",
         ),
     },

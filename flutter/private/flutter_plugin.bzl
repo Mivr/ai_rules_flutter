@@ -97,9 +97,16 @@ def _apple_plugin_aspect_impl(target, ctx):
 _apple_plugin_aspect = aspect(
     implementation = _apple_plugin_aspect_impl,
     attrs = {
-        "_ios_constraint": attr.label(default = "@platforms//os:ios"),
-        "_macos_constraint": attr.label(default = "@platforms//os:macos"),
+        "_ios_constraint": attr.label(
+            doc = "iOS platform constraint value, matched against the owning target to detect its Apple platform.",
+            default = "@platforms//os:ios",
+        ),
+        "_macos_constraint": attr.label(
+            doc = "macOS platform constraint value, matched against the owning target to detect its Apple platform.",
+            default = "@platforms//os:macos",
+        ),
     },
+    doc = "Collects Apple plugin info from the `swift_library` targets a plugin owns.",
 )
 
 def _plugin_platforms_metadata(ctx):

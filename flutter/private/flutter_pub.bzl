@@ -82,11 +82,15 @@ flutter_pub = rule(
             allow_single_file = True,
         ),
         "_tool": attr.label(
+            doc = "Runner binary symlinked as the rule's executable to run `dart pub`.",
             default = Label("//flutter/private/tools:pub_runner"),
             executable = True,
             cfg = "exec",
         ),
-        "_windows_constraint": attr.label(default = "@platforms//os:windows"),
+        "_windows_constraint": attr.label(
+            doc = "Windows platform constraint value, selecting the `.exe` runner output.",
+            default = "@platforms//os:windows",
+        ),
     },
     doc = "Runs `dart pub` from the pinned Flutter toolchain against the " +
           "current workspace. See `@rules_flutter//flutter:pub`.",

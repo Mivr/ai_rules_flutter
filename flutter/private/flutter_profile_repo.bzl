@@ -155,6 +155,9 @@ flutter_profile_repo = repository_rule(
             doc = "Directories holding a double-zipped FlutterMacOS.framework to unpack.",
             default = [],
         ),
-        "build_file_content": attr.string(mandatory = True),
+        "build_file_content": attr.string(
+            doc = "BUILD file text written into the generated repository. Has no default; always set it.",
+            mandatory = True,
+        ),
     },
 )
