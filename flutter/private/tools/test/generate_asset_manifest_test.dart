@@ -398,4 +398,78 @@ cat > "\$out"
       },
     );
   });
+
+  group('NOTICES.Z', () {
+    late Directory tempDir;
+
+    setUp(() {
+      tempDir = Directory.systemTemp.createTempSync('notices_test_');
+    });
+
+    tearDown(() {
+      tempDir.deleteSync(recursive: true);
+    });
+
+    test('header is host-independent (OS 255, MTIME 0, no flags)', () async {
+      final bytes = await _buildNotices(tempDir, notices: 'inline license');
+      _expectHostIndependentHeader(bytes);
+      expect(gzip.decode(bytes), equals(utf8.encode('inline license')));
+    });
+
+    test('round-trips inline notices', () async {
+      const text = 'Copyright 2026 Example\nAll rights reserved.';
+      final bytes = await _buildNotices(tempDir, notices: text);
+      _expectHostIndependentHeader(bytes);
+      expect(utf8.decode(gzip.decode(bytes)), equals(text));
+    });
+
+    test('concatenates license files that exist, skips missing ones', () async {
+      final first = File('${tempDir.path}/LICENSE_A')..writeAsStringSync('AAA');
+      final second = File('${tempDir.path}/LICENSE_B')
+        ..writeAsStringSync('BBB');
+      final bytes = await _buildNotices(
+        tempDir,
+        licenseFiles: [first.path, '${tempDir.path}/MISSING', second.path],
+      );
+      _expectHostIndependentHeader(bytes);
+      expect(utf8.decode(gzip.decode(bytes)), equals('AAA\n\n---\n\nBBB'));
+    });
+
+    test('empty notices still decode to empty text', () async {
+      final bytes = await _buildNotices(tempDir);
+      _expectHostIndependentHeader(bytes);
+      expect(gzip.decode(bytes), isEmpty);
+    });
+  });
+}
+
+/// Runs the tool with [notices] and [licenseFiles] and returns NOTICES.Z.
+Future<Uint8List> _buildNotices(
+  Directory tempDir, {
+  String notices = '',
+  List<String> licenseFiles = const [],
+}) async {
+  final configFile = File('${tempDir.path}/config.json')
+    ..writeAsStringSync(
+      json.encode({
+        if (notices.isNotEmpty) 'notices': notices,
+        if (licenseFiles.isNotEmpty) 'license_files': licenseFiles,
+      }),
+    );
+  final outDir = Directory('${tempDir.path}/out')..createSync();
+  await manifest.main([
+    '--config',
+    configFile.path,
+    '--output-dir',
+    outDir.path,
+  ]);
+  return File('${outDir.path}/NOTICES.Z').readAsBytesSync();
+}
+
+/// Checks the 10-byte gzip header: magic, deflate, no flags, MTIME 0, and
+/// OS 255 ("unknown") instead of the executor's platform.
+void _expectHostIndependentHeader(List<int> bytes) {
+  expect(bytes.length, greaterThanOrEqualTo(10));
+  expect(bytes.sublist(0, 8), equals([0x1f, 0x8b, 8, 0, 0, 0, 0, 0]));
+  expect(bytes[9], equals(255));
 }

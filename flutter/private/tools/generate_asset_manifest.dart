@@ -463,6 +463,20 @@ Future<bool> _subsetFontAsset(
   return true;
 }
 
+/// Encodes [bytes] as one gzip member with a host-independent header.
+///
+/// `dart:convert`'s `gzip` fills the header's OS byte from the platform the
+/// Dart SDK was built for (3 on Linux, 19 on macOS, 10 on Windows), so the
+/// same input compresses to different bytes on different executors. The
+/// compressed payload and the trailer stay as written; only byte 9 becomes
+/// 255 ("unknown", RFC 1952 section 2.3.1). MTIME stays 0 with no optional
+/// fields, as the encoder already writes them.
+Uint8List encodeNoticesGzip(List<int> bytes) {
+  final encoded = Uint8List.fromList(gzip.encode(bytes));
+  encoded[9] = 255;
+  return encoded;
+}
+
 /// Writes `NOTICES.Z`: the inline license text plus every license file that
 /// exists, gzipped.
 void _writeNotices(Map<String, dynamic> config, String outputDir) {
@@ -481,6 +495,6 @@ void _writeNotices(Map<String, dynamic> config, String outputDir) {
     }
   }
   File('$outputDir/NOTICES.Z').writeAsBytesSync(
-    gzip.encode(utf8.encode(noticesBuf.toString())),
+    encodeNoticesGzip(utf8.encode(noticesBuf.toString())),
   );
 }
