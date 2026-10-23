@@ -14,13 +14,20 @@ configure, so this suite injects stub toolchains through
 `android_binary` carrying a hand-built `ApkInfo`. Actions are created but
 never executed under `analysistest`, so the stubs only have to exist as
 files.
+
+A flag that names any target but its default sentinel must resolve to exactly
+one file: an empty flag target (for example an `allow_empty` glob over a CI
+secret that was never written) or a multi-file one fails analysis instead of
+silently debug-signing. The release `ApkSignerTool` action always runs with
+`no-remote` so the keystore and password files never reach a remote executor
+or cache; the debug action keeps no execution requirements.
 """
 
-load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
+load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_android//providers:providers.bzl", "ApkInfo")
 load("@rules_java//java/common:java_info.bzl", "JavaInfo")
-load("//flutter/private:flutter_android_apk_overlay.bzl", "flutter_android_apk_overlay")
+load("//flutter/private:flutter_android_apk_overlay.bzl", "flutter_android_apk_overlay", "release_execution_requirements")
 
 _STORE_PASS = "release-test-store-pass"
 _KEY_PASS = "release-test-key-pass"
@@ -98,6 +105,30 @@ def _flag_value(argv, flag):
         if arg == flag and i + 1 < len(argv):
             return argv[i + 1]
     return None
+
+def _release_requirements_test_impl(ctx):
+    """`no-remote` engages exactly when the signer reads release secrets.
+
+    `analysistest` actions expose argv, inputs, env and outputs but not
+    execution requirements, so the requirement mapping itself is pinned here
+    while the analysistest suites above pin that each path (attribute and flag)
+    reaches release signing: both flow through the one `_run_apksign` call
+    site, which applies this mapping to the `ApkSignerTool` action.
+    """
+    env = unittest.begin(ctx)
+    asserts.equals(
+        env,
+        {"no-remote": "1"},
+        release_execution_requirements(struct(keystore = "k")),
+        "release signing must run locally so secrets never reach remote execution",
+    )
+    asserts.equals(
+        env,
+        {},
+        release_execution_requirements(None),
+        "debug signing keeps the default execution requirements",
+    )
+    return unittest.end(env)
 
 def _release_signing_argv_test_impl(ctx):
     """The release signing action names the keystore and `file:` passwords."""
@@ -235,6 +266,7 @@ _release_signing_argv_test = analysistest.make(
     _release_signing_argv_test_impl,
     config_settings = {"//command_line_option:extra_toolchains": _EXTRA_TOOLCHAINS},
 )
+_release_requirements_test = unittest.make(_release_requirements_test_impl)
 _default_key_pass_test = analysistest.make(
     _default_key_pass_test_impl,
     config_settings = {"//command_line_option:extra_toolchains": _EXTRA_TOOLCHAINS},
@@ -264,6 +296,35 @@ _expect_failure_test = analysistest.make(
     expect_failure = True,
     attrs = {"expected_substrings": attr.string_list(mandatory = True)},
     config_settings = {"//command_line_option:extra_toolchains": _EXTRA_TOOLCHAINS},
+)
+_empty_flag_keystore_test = analysistest.make(
+    _expect_failure_test_impl,
+    expect_failure = True,
+    attrs = {"expected_substrings": attr.string_list(mandatory = True)},
+    config_settings = {
+        "//command_line_option:extra_toolchains": _EXTRA_TOOLCHAINS,
+        str(Label("//flutter:android_release_keystore")): str(Label("//flutter/tests:android_release_signing_test_empty_keystore")),
+    },
+)
+_two_flag_keystore_test = analysistest.make(
+    _expect_failure_test_impl,
+    expect_failure = True,
+    attrs = {"expected_substrings": attr.string_list(mandatory = True)},
+    config_settings = {
+        "//command_line_option:extra_toolchains": _EXTRA_TOOLCHAINS,
+        str(Label("//flutter:android_release_keystore")): str(Label("//flutter/tests:android_release_signing_test_two_keystores")),
+    },
+)
+_two_flag_store_pass_test = analysistest.make(
+    _expect_failure_test_impl,
+    expect_failure = True,
+    attrs = {"expected_substrings": attr.string_list(mandatory = True)},
+    config_settings = {
+        "//command_line_option:extra_toolchains": _EXTRA_TOOLCHAINS,
+        str(Label("//flutter:android_release_keystore")): str(Label("//flutter/tests:android_release_signing_test_release_flag_keystore")),
+        str(Label("//flutter:android_release_keystore_password_file")): str(Label("//flutter/tests:android_release_signing_test_two_store_passes")),
+        str(Label("//flutter:android_release_key_alias")): "flag-alias",
+    },
 )
 
 def _setup_fixtures(name):
@@ -313,6 +374,51 @@ def _setup_fixtures(name):
         name = name + "_release_flag_store_pass",
         out = name + "_release_flag_store_pass.txt",
         content = ["flag-store-pass"],
+        tags = ["manual"],
+    )
+    write_file(
+        name = name + "_two_keystores_a",
+        out = name + "_two_keystores_a.p12",
+        content = ["fake pkcs12 keystore a"],
+        tags = ["manual"],
+    )
+    write_file(
+        name = name + "_two_keystores_b",
+        out = name + "_two_keystores_b.p12",
+        content = ["fake pkcs12 keystore b"],
+        tags = ["manual"],
+    )
+    native.filegroup(
+        name = name + "_empty_keystore",
+        srcs = [],
+        tags = ["manual"],
+    )
+    native.filegroup(
+        name = name + "_two_keystores",
+        srcs = [
+            ":" + name + "_two_keystores_a",
+            ":" + name + "_two_keystores_b",
+        ],
+        tags = ["manual"],
+    )
+    write_file(
+        name = name + "_two_store_pass_a",
+        out = name + "_two_store_pass_a.txt",
+        content = ["flag-store-pass-a"],
+        tags = ["manual"],
+    )
+    write_file(
+        name = name + "_two_store_pass_b",
+        out = name + "_two_store_pass_b.txt",
+        content = ["flag-store-pass-b"],
+        tags = ["manual"],
+    )
+    native.filegroup(
+        name = name + "_two_store_passes",
+        srcs = [
+            ":" + name + "_two_store_pass_a",
+            ":" + name + "_two_store_pass_b",
+        ],
         tags = ["manual"],
     )
     write_file(
@@ -384,6 +490,36 @@ def _setup_fixtures(name):
         flutter_assets = ":" + name + "_release_flutter_assets",
         tags = ["manual"],
     )
+    flutter_android_apk_overlay(
+        name = name + "_release_empty_attr_keystore_overlay",
+        binary = ":" + name + "_release_fake_binary",
+        native_libs_jar = ":" + name + "_release_native_libs",
+        flutter_assets = ":" + name + "_release_flutter_assets",
+        keystore = ":" + name + "_empty_keystore",
+        keystore_password_file = ":" + name + "_release_store_pass",
+        key_alias = _ALIAS,
+        tags = ["manual"],
+    )
+    flutter_android_apk_overlay(
+        name = name + "_release_two_attr_keystore_overlay",
+        binary = ":" + name + "_release_fake_binary",
+        native_libs_jar = ":" + name + "_release_native_libs",
+        flutter_assets = ":" + name + "_release_flutter_assets",
+        keystore = ":" + name + "_two_keystores",
+        keystore_password_file = ":" + name + "_release_store_pass",
+        key_alias = _ALIAS,
+        tags = ["manual"],
+    )
+    flutter_android_apk_overlay(
+        name = name + "_release_two_attr_pass_overlay",
+        binary = ":" + name + "_release_fake_binary",
+        native_libs_jar = ":" + name + "_release_native_libs",
+        flutter_assets = ":" + name + "_release_flutter_assets",
+        keystore = ":" + name + "_release_keystore",
+        keystore_password_file = ":" + name + "_two_store_passes",
+        key_alias = _ALIAS,
+        tags = ["manual"],
+    )
 
 def android_release_signing_test_suite(name):
     """Defines analysis tests for release-keystore APK signing.
@@ -397,6 +533,7 @@ def android_release_signing_test_suite(name):
         name = name + "_argv",
         target_under_test = ":" + name + "_release_overlay",
     )
+    _release_requirements_test(name = name + "_release_requirements")
     _default_key_pass_test(
         name = name + "_default_key_pass",
         target_under_test = ":" + name + "_release_default_key_pass_overlay",
@@ -423,16 +560,53 @@ def android_release_signing_test_suite(name):
         target_under_test = ":" + name + "_release_missing_alias_overlay",
         expected_substrings = ["key_alias"],
     )
+    _empty_flag_keystore_test(
+        name = name + "_empty_flag_keystore_fails",
+        target_under_test = ":" + name + "_release_flag_only_overlay",
+        expected_substrings = ["android_release_keystore", "0 files"],
+    )
+    _two_flag_keystore_test(
+        name = name + "_two_flag_keystore_fails",
+        target_under_test = ":" + name + "_release_flag_only_overlay",
+        expected_substrings = ["android_release_keystore", "2 files"],
+    )
+    _two_flag_store_pass_test(
+        name = name + "_two_flag_store_pass_fails",
+        target_under_test = ":" + name + "_release_flag_only_overlay",
+        expected_substrings = ["android_release_keystore_password_file", "2 files"],
+    )
+    _expect_failure_test(
+        name = name + "_empty_attr_keystore_fails",
+        target_under_test = ":" + name + "_release_empty_attr_keystore_overlay",
+        expected_substrings = ["`keystore`", "0 files"],
+    )
+    _expect_failure_test(
+        name = name + "_two_attr_keystore_fails",
+        target_under_test = ":" + name + "_release_two_attr_keystore_overlay",
+        expected_substrings = ["`keystore`", "2 files"],
+    )
+    _expect_failure_test(
+        name = name + "_two_attr_pass_fails",
+        target_under_test = ":" + name + "_release_two_attr_pass_overlay",
+        expected_substrings = ["keystore_password_file", "2 files"],
+    )
 
     native.test_suite(
         name = name,
         tests = [
             ":" + name + "_argv",
+            ":" + name + "_release_requirements",
             ":" + name + "_default_key_pass",
             ":" + name + "_debug_argv",
             ":" + name + "_attr_beats_flag",
             ":" + name + "_flag_only",
             ":" + name + "_missing_pass_fails",
             ":" + name + "_missing_alias_fails",
+            ":" + name + "_empty_flag_keystore_fails",
+            ":" + name + "_two_flag_keystore_fails",
+            ":" + name + "_two_flag_store_pass_fails",
+            ":" + name + "_empty_attr_keystore_fails",
+            ":" + name + "_two_attr_keystore_fails",
+            ":" + name + "_two_attr_pass_fails",
         ],
     )
