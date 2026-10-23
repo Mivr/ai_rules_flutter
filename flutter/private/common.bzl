@@ -1032,6 +1032,35 @@ def collect_sdk_shader_srcs(deps):
         return depset(transitive = transitive_depsets).to_list()
     return []
 
+def _dedupe_shader_jobs(ctx, jobs):
+    """Fold shader jobs by bundle path, merging duplicate `#include` sets.
+
+    One package can reach a target along several paths; the same file at
+    the same bundle path is one shader. Two different files claiming one
+    bundle path fail here: one would otherwise overwrite the other. A job
+    that only adds includes widens the survivor's set, so no compilation
+    misses a header it may `#include`.
+    """
+    by_path = {}
+    for job in jobs:
+        seen = by_path.get(job.bundle_path)
+        if seen == None:
+            by_path[job.bundle_path] = job
+        elif seen.file != job.file:
+            fail("%s: two shaders are bundled at %s: %s and %s." % (
+                ctx.label,
+                job.bundle_path,
+                seen.file.short_path,
+                job.file.short_path,
+            ))
+        elif job.includes and tuple(job.includes) != tuple(seen.includes):
+            by_path[job.bundle_path] = struct(
+                bundle_path = seen.bundle_path,
+                file = seen.file,
+                includes = tuple(depset(list(seen.includes) + list(job.includes)).to_list()),
+            )
+    return by_path
+
 def _shader_jobs(ctx):
     """Every shader this target bundles, as struct(bundle_path, file, includes).
 
@@ -1070,25 +1099,7 @@ def _shader_jobs(ctx):
 
     # One package can reach a target along several paths; the same file at
     # the same bundle path is one shader.
-    by_path = {}
-    for job in jobs:
-        seen = by_path.get(job.bundle_path)
-        if seen == None:
-            by_path[job.bundle_path] = job
-        elif seen.file != job.file:
-            fail("%s: two shaders are bundled at %s: %s and %s." % (
-                ctx.label,
-                job.bundle_path,
-                seen.file.short_path,
-                job.file.short_path,
-            ))
-        elif job.includes and tuple(job.includes) != tuple(seen.includes):
-            by_path[job.bundle_path] = struct(
-                bundle_path = seen.bundle_path,
-                file = seen.file,
-                includes = tuple(depset(list(seen.includes) + list(job.includes)).to_list()),
-            )
-    return by_path.values()
+    return _dedupe_shader_jobs(ctx, jobs).values()
 
 def shader_sources(ctx):
     """The workspace files behind each bundled shader, for the dev tool.
@@ -1813,24 +1824,7 @@ def _compile_aspect_direct_jobs(ctx, flutter_sdk_info, target_platform, direct_j
             shader_lib = flutter_sdk_info.shader_lib,
             compile_tool = ctx.executable._shader_compile_tool,
         )
-        by_path = {}
-        for job in direct_jobs:
-            seen = by_path.get(job.bundle_path)
-            if seen == None:
-                by_path[job.bundle_path] = job
-            elif seen.file != job.file:
-                fail("%s: two shaders are bundled at %s: %s and %s." % (
-                    ctx.label,
-                    job.bundle_path,
-                    seen.file.short_path,
-                    job.file.short_path,
-                ))
-            elif job.includes and tuple(job.includes) != tuple(seen.includes):
-                by_path[job.bundle_path] = struct(
-                    bundle_path = seen.bundle_path,
-                    file = seen.file,
-                    includes = tuple(depset(list(seen.includes) + list(job.includes)).to_list()),
-                )
+        by_path = _dedupe_shader_jobs(ctx, direct_jobs)
 
         for job in by_path.values():
             out_path = job.bundle_path.replace("../", "_external/")
