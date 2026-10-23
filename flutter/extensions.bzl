@@ -63,119 +63,142 @@ def _fail_on_invalid_maven_deps(hub_name, android_maven_deps):
                 label = _maven_label,
             ))
 
-flutter_toolchain = tag_class(attrs = {
-    "name": attr.string(doc = """\
+flutter_toolchain = tag_class(
+    attrs = {
+        "name": attr.string(doc = """\
 Base name for generated repositories, allowing more than one Flutter toolchain to be registered.
 Overriding the default is only permitted in the root module.
 """, default = _DEFAULT_NAME),
-    "flutter_version": attr.string(
-        doc = "Version of the Flutter SDK. Either this or `local_path` is " +
-              "required, never both. May name a stock release from " +
-              "flutter/private/versions.bzl or a custom version registered " +
-              "with `flutter.version` in the root module.",
-        default = "",
-    ),
-    "local_path": attr.string(
-        doc = "Path to a pre-extracted Flutter SDK (bin/cache layout) to " +
-              "source the toolchain from instead of downloading. Root-only, " +
-              "and mutually exclusive with `flutter_version`. A relative " +
-              "path resolves against the main workspace root.",
-        default = "",
-    ),
-})
+        "flutter_version": attr.string(
+            doc = "Version of the Flutter SDK. Either this or `local_path` is " +
+                  "required, never both. May name a stock release from " +
+                  "flutter/private/versions.bzl or a custom version registered " +
+                  "with `flutter.version` in the root module.",
+            default = "",
+        ),
+        "local_path": attr.string(
+            doc = "Path to a pre-extracted Flutter SDK (bin/cache layout) to " +
+                  "source the toolchain from instead of downloading. Root-only, " +
+                  "and mutually exclusive with `flutter_version`. A relative " +
+                  "path resolves against the main workspace root.",
+            default = "",
+        ),
+    },
+    doc = "Requests a Flutter SDK toolchain: either a downloadable release " +
+          "via `flutter_version` or a pre-extracted local SDK via " +
+          "`local_path` (exactly one of the two). `name` defaults to the " +
+          "shared toolchain; the root module may register more under other names.",
+)
 
-flutter_version = tag_class(attrs = {
-    "version": attr.string(
-        doc = "Flutter release tag to register (e.g. `\"3.44.8\"`). Must " +
-              "not already be listed in flutter/private/versions.bzl.",
-        mandatory = True,
-    ),
-    "engine_revision": attr.string(
-        doc = "Engine commit hash the release's artifacts are published under.",
-        mandatory = True,
-    ),
-    "source_sha256": attr.string(
-        doc = "SHA-256 of the framework source tarball (`source_url`, by " +
-              "default the GitHub tag tarball of `version`).",
-        mandatory = True,
-    ),
-    "material_fonts_url": attr.string(
-        doc = "GCS path of the Material icon font bundle for the release " +
-              "(a full https:// URL is used as-is).",
-        mandatory = True,
-    ),
-    "artifact_sha256": attr.string_dict(
-        doc = "Engine artifact path → SHA-256, keyed exactly like " +
-              "ARTIFACT_CHECKSUMS. Every artifact the repositories fetch " +
-              "needs an entry; a needed artifact without one fails the " +
-              "fetch naming the artifact and the version.",
-        default = {},
-    ),
-    "engine_base_url": attr.string(
-        doc = "Replacement origin serving the engine revision directory " +
-              "(an enterprise build). Empty means the default GCS base. " +
-              "Plain mirrors stay Bazel's job (`--downloader_config`).",
-        default = "",
-    ),
-    "source_url": attr.string(
-        doc = "Replacement framework source tarball URL. Empty means the " +
-              "default GitHub tag tarball of `version`. Plain mirrors stay " +
-              "Bazel's job (`--downloader_config`).",
-        default = "",
-    ),
-})
+flutter_version = tag_class(
+    attrs = {
+        "version": attr.string(
+            doc = "Flutter release tag to register (e.g. `\"3.44.8\"`). Must " +
+                  "not already be listed in flutter/private/versions.bzl.",
+            mandatory = True,
+        ),
+        "engine_revision": attr.string(
+            doc = "Engine commit hash the release's artifacts are published under.",
+            mandatory = True,
+        ),
+        "source_sha256": attr.string(
+            doc = "SHA-256 of the framework source tarball (`source_url`, by " +
+                  "default the GitHub tag tarball of `version`).",
+            mandatory = True,
+        ),
+        "material_fonts_url": attr.string(
+            doc = "GCS path of the Material icon font bundle for the release " +
+                  "(a full https:// URL is used as-is).",
+            mandatory = True,
+        ),
+        "artifact_sha256": attr.string_dict(
+            doc = "Engine artifact path → SHA-256, keyed exactly like " +
+                  "ARTIFACT_CHECKSUMS. Every artifact the repositories fetch " +
+                  "needs an entry; a needed artifact without one fails the " +
+                  "fetch naming the artifact and the version.",
+            default = {},
+        ),
+        "engine_base_url": attr.string(
+            doc = "Replacement origin serving the engine revision directory " +
+                  "(an enterprise build). Empty means the default GCS base. " +
+                  "Plain mirrors stay Bazel's job (`--downloader_config`).",
+            default = "",
+        ),
+        "source_url": attr.string(
+            doc = "Replacement framework source tarball URL. Empty means the " +
+                  "default GitHub tag tarball of `version`. Plain mirrors stay " +
+                  "Bazel's job (`--downloader_config`).",
+            default = "",
+        ),
+    },
+    doc = "Registers a custom Flutter release missing from the built-in " +
+          "version table, so `flutter.toolchain` can download it by tag. " +
+          "Root-module-only.",
+)
 
-_flutter_pub = tag_class(attrs = {
-    "name": attr.string(
-        doc = "Repository name for the resolved packages hub.",
-        mandatory = True,
-    ),
-    "lock": attr.label(
-        doc = "The pubspec.lock file to parse.",
-        mandatory = True,
-        allow_single_file = True,
-    ),
-    "ignore_hooks": attr.string_list(
-        doc = "Pub package names whose `hook/build.dart` is knowingly " +
-              "irrelevant to this build (its native code is never reached). " +
-              "Suppresses the unreplaced-hook error for them. This is a " +
-              "declaration you make deliberately; it is never a default.",
-        default = [],
-    ),
-    "android_maven_deps": attr.string_dict(
-        doc = "`group:artifact` -> Bazel label additions to the built-in " +
-              "mapping from a plugin's `android/build.gradle*` runtime " +
-              "dependencies to `@rules_android_maven` labels. A plugin dep " +
-              "found in neither table fails the spoke fetch; mapping it " +
-              "here is the fix for external artifacts. The label must " +
-              "resolve in the workspace's `rules_android_maven` install.",
-        default = {},
-    ),
-    "android_maven_ignore": attr.string_list(
-        doc = "`group:artifact` coordinates that need no Bazel label and " +
-              "must not fail the spoke fetch as unknown. This is a " +
-              "declaration you make deliberately; it is never a default.",
-        default = [],
-    ),
-})
+_flutter_pub = tag_class(
+    attrs = {
+        "name": attr.string(
+            doc = "Repository name for the resolved packages hub.",
+            mandatory = True,
+        ),
+        "lock": attr.label(
+            doc = "The pubspec.lock file to parse.",
+            mandatory = True,
+            allow_single_file = True,
+        ),
+        "ignore_hooks": attr.string_list(
+            doc = "Pub package names whose `hook/build.dart` is knowingly " +
+                  "irrelevant to this build (its native code is never reached). " +
+                  "Suppresses the unreplaced-hook error for them. This is a " +
+                  "declaration you make deliberately; it is never a default.",
+            default = [],
+        ),
+        "android_maven_deps": attr.string_dict(
+            doc = "`group:artifact` -> Bazel label additions to the built-in " +
+                  "mapping from a plugin's `android/build.gradle*` runtime " +
+                  "dependencies to `@rules_android_maven` labels. A plugin dep " +
+                  "found in neither table fails the spoke fetch; mapping it " +
+                  "here is the fix for external artifacts. The label must " +
+                  "resolve in the workspace's `rules_android_maven` install.",
+            default = {},
+        ),
+        "android_maven_ignore": attr.string_list(
+            doc = "`group:artifact` coordinates that need no Bazel label and " +
+                  "must not fail the spoke fetch as unknown. This is a " +
+                  "declaration you make deliberately; it is never a default.",
+            default = [],
+        ),
+    },
+    doc = "Resolves a `pubspec.lock` into one spoke repository per package " +
+          "plus a hub alias. Requires a `flutter.toolchain` for the Flutter " +
+          "SDK packages in the lock.",
+)
 
-_flutter_plugin_overlays = tag_class(attrs = {
-    "roots": attr.label_list(
-        doc = "BUILD.bazel anchors for user-supplied overlay trees. Each " +
-              "label points at an `ext/BUILD.bazel` (or equivalent) that " +
-              "anchors a directory tree of `<package>/<version>/BUILD.bazel.tpl` " +
-              "overrides. A hub consults the root module's roots first, " +
-              "then its own module's roots (when that module is not the " +
-              "root), then the bundled `@rules_flutter//ext:BUILD.bazel`; " +
-              "a dependency's roots never reach the root's hubs or another " +
-              "module's hubs. A template declares " +
-              "its language version and its dependencies by placeholder " +
-              "(`{LANGUAGE_VERSION}`, `{DEPS}`), never by hand; see " +
-              "docs/TESTING.md \"Native Assets overlay authoring\".",
-        allow_files = True,
-        default = [],
-    ),
-})
+_flutter_plugin_overlays = tag_class(
+    attrs = {
+        "roots": attr.label_list(
+            doc = "BUILD.bazel anchors for user-supplied overlay trees. Each " +
+                  "label points at an `ext/BUILD.bazel` (or equivalent) that " +
+                  "anchors a directory tree of `<package>/<version>/BUILD.bazel.tpl` " +
+                  "overrides. A hub consults the root module's roots first, " +
+                  "then its own module's roots (when that module is not the " +
+                  "root), then the bundled `@rules_flutter//ext:BUILD.bazel`; " +
+                  "a dependency's roots never reach the root's hubs or another " +
+                  "module's hubs. A template declares " +
+                  "its language version and its dependencies by placeholder " +
+                  "(`{LANGUAGE_VERSION}`, `{DEPS}`), never by hand; see " +
+                  "docs/TESTING.md \"Native Assets overlay authoring\".",
+            allow_files = True,
+            default = [],
+        ),
+    },
+    doc = "Names overlay BUILD trees whose plugin templates replace the " +
+          "generated ones for matching packages. Every hub reads the root " +
+          "module's roots first, then its own module's roots; a " +
+          "dependency's roots never reach the root's hubs or another " +
+          "module's hubs.",
+)
 
 _flutter_darwin_sdk = tag_class(
     doc = (
