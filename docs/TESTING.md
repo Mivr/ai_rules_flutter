@@ -774,6 +774,8 @@ Pub packages that ship a `hooks/build.dart` Dart-Native-Assets build hook (e.g. 
 
 Template substitutions: `{HUB_NAME}` (the user's `flutter.pub(name = ...)`), `{PKG}` (the package name), `{VERSION}` (the resolved version), `{LANGUAGE_VERSION}` (derived from the package's own `environment.sdk`), and `{DEPS}` (the package's dependencies, as spoke labels, intersected with the lock).
 
+A hub consults the root module's `flutter.plugin_overlays` roots first, then its own module's roots: an overlay a dependency registers never replaces the BUILD files of the root's packages (or another module's hubs). Put an app-local fix in the root module.
+
 Substitution rewrites comment text too, so a comment that names a placeholder gets rewritten along with the code — write `HUB_NAME`, not `{HUB_NAME}`, in prose.
 
 Two of those are mandatory, and the repo rule fails the fetch if a template writes the value out by hand instead:

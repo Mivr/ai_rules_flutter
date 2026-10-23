@@ -13,9 +13,14 @@ and links only what the spoke generator reads or exposes:
   and user BUILD files stay unlinked — skipped subtrees are not even
   watched, so machine-local output cannot affect the fetch.
 * Source links replicate without descending and fail closed, naming the
-  package and the link, when they resolve to the package or an ancestor.
+  package and the link, when they resolve to the package or an ancestor,
+  or outside the workspace's real root — as do the package directory
+  itself and any of its parent components.
 * A `path:` entry resolves against the lock file's own directory, and only
   the root module's workspace is reachable from a spoke.
+* The lock entry needs a true `relative` marker and a non-absolute path,
+  and the package's pubspec `name` and `version` must match the lock entry
+  (overlays and code assets are selected by lock name and version).
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
@@ -24,11 +29,17 @@ load(
     "ancestor_link_refusal",
     "is_path_spoke_skipped_dir",
     "link_path_package",
+    "missing_pubspec_refusal",
+    "outside_workspace_refusal",
+    "parse_pubspec_identity",
     "path_spoke_is_ancestor_cycle",
     "path_spoke_platform_dirs",
+    "path_spoke_resolves_outside",
+    "pubspec_name_refusal",
+    "pubspec_version_refusal",
     "scoped_shader_includes_block",
 )
-load("//flutter/private:flutter_pub_path.bzl", "foreign_lock_path_error", "workspace_relative_lock_path")
+load("//flutter/private:flutter_pub_path.bzl", "foreign_lock_path_error", "is_absolute_lock_path", "is_relative_path_dependency", "workspace_relative_lock_path")
 load("//flutter/private:flutter_pubspec.bzl", "parse_flutter_plugin_block")
 
 def _tree_node(tree, rel):
@@ -42,7 +53,7 @@ def _tree_node(tree, rel):
         node = node[seg]
     return node
 
-def _make_mock_link_ctx(tree, path_value = "platform_assets", package_name = "platform_assets"):
+def _make_mock_link_ctx(tree, path_value = "platform_assets", package_name = "platform_assets", version = "", hub_name = "test_hub"):
     """Fake repository_ctx for `link_path_package` over an in-memory tree.
 
     Tree leaves: None is an empty file, a string is a file with that
@@ -53,6 +64,8 @@ def _make_mock_link_ctx(tree, path_value = "platform_assets", package_name = "pl
         tree: Nested dicts relative to a fake `/workspace` root.
         path_value: Value for `ctx.attr.path`.
         package_name: Value for `ctx.attr.package_name`.
+        version: Value for `ctx.attr.version` (the lock's version).
+        hub_name: Value for `ctx.attr.hub_name`.
 
     Returns:
         struct(ctx, watched, linked): the fake ctx, the watched path
@@ -113,7 +126,7 @@ def _make_mock_link_ctx(tree, path_value = "platform_assets", package_name = "pl
 
     return struct(
         ctx = struct(
-            attr = struct(path = path_value, package_name = package_name),
+            attr = struct(path = path_value, package_name = package_name, version = version, hub_name = hub_name),
             workspace_root = _make_path(""),
             watch = _watch,
             symlink = _symlink,
@@ -291,27 +304,36 @@ def _non_plugin_package_links_no_android_test_impl(ctx):
 
 non_plugin_package_links_no_android_test = unittest.make(_non_plugin_package_links_no_android_test_impl)
 
-def _outside_link_replicates_without_descending_test_impl(ctx):
-    """A link leaving the package replicates as-is; its target stays outside."""
+def _workspace_sibling_link_replicates_without_descending_test_impl(ctx):
+    """A link leaving the package for a workspace sibling replicates as-is.
+
+    Links that resolve inside the workspace keep working exactly as today,
+    including links that leave the package but stay in the workspace; only
+    targets outside the workspace's real root are refused (see
+    `path_spoke_resolves_outside` — `fail()` itself is untestable here).
+    """
     env = unittest.begin(ctx)
     mock = _make_mock_link_ctx({
         "mypkg": {
             "pubspec.yaml": "name: mypkg\n",
             "lib": {
                 "mypkg.dart": None,
-                "ext.so": struct(symlink_to = "/usr/lib/ext.so"),
+                "ext.so": struct(symlink_to = "/workspace/shared/ext.so"),
             },
+        },
+        "shared": {
+            "ext.so": None,
         },
     }, path_value = "mypkg", package_name = "mypkg")
     link_path_package(mock.ctx)
     by_name = {link.name: link.target for link in mock.linked}
-    asserts.equals(env, "/usr/lib/ext.so", by_name.get("lib/ext.so", "missing"))
+    asserts.equals(env, "/workspace/shared/ext.so", by_name.get("lib/ext.so", "missing"))
     asserts.true(env, "/workspace/mypkg/lib/ext.so" in mock.watched, "the replicated link must be watched, got {}".format(sorted(mock.watched)))
     for seen in mock.watched:
-        asserts.false(env, seen.startswith("/usr/"), "the walk must never descend outside, saw {}".format(seen))
+        asserts.false(env, seen.startswith("/workspace/shared"), "the walk must never descend into the target, saw {}".format(seen))
     return unittest.end(env)
 
-outside_link_replicates_without_descending_test = unittest.make(_outside_link_replicates_without_descending_test_impl)
+workspace_sibling_link_replicates_without_descending_test = unittest.make(_workspace_sibling_link_replicates_without_descending_test_impl)
 
 _OVERLAP_PUBSPEC = """name: mypkg
 flutter:
@@ -369,6 +391,134 @@ def _ancestor_link_is_refused_test_impl(ctx):
     return unittest.end(env)
 
 ancestor_link_is_refused_test = unittest.make(_ancestor_link_is_refused_test_impl)
+
+def _outside_workspace_is_refused_test_impl(ctx):
+    """A node outside the workspace's real root fails naming package and paths.
+
+    `link_path_package` itself `fail()`s on this shape (untestable here),
+    so these pin the predicate and the message it fails with: the
+    workspace itself and everything under it passes (including a
+    lookalike prefix without the slash), while host paths and the root
+    refuse.
+    """
+    env = unittest.begin(ctx)
+    asserts.false(env, path_spoke_resolves_outside("/workspace", "/workspace"))
+    asserts.false(env, path_spoke_resolves_outside("/workspace", "/workspace/pkg"))
+    asserts.false(env, path_spoke_resolves_outside("/workspace", "/workspace/pkg/lib/x"))
+    asserts.true(env, path_spoke_resolves_outside("/workspace", "/host/dir"))
+    asserts.true(env, path_spoke_resolves_outside("/workspace", "/"))
+    asserts.true(env, path_spoke_resolves_outside("/workspace", "/workspace2"))
+    asserts.true(env, path_spoke_resolves_outside("/workspace", "/other"))
+    message = outside_workspace_refusal("mypkg", "assets", "/host/dir")
+    asserts.true(env, "mypkg" in message, "refusal must name the package: {}".format(message))
+    asserts.true(env, "assets" in message, "refusal must name the offending path: {}".format(message))
+    asserts.true(env, "/host/dir" in message, "refusal must name the real path: {}".format(message))
+    return unittest.end(env)
+
+outside_workspace_is_refused_test = unittest.make(_outside_workspace_is_refused_test_impl)
+
+def _relative_marker_decides_test_impl(ctx):
+    """Only a true `relative` marker accepts a path entry.
+
+    The lock parser stringifies every description value, so YAML
+    `relative: false` arrives as `"False"`; only the parsed string
+    `"true"` (any case) or a real boolean `True` passes. Anything else —
+    false, missing, empty — refuses the entry.
+    """
+    env = unittest.begin(ctx)
+    asserts.true(env, is_relative_path_dependency(True))
+    asserts.true(env, is_relative_path_dependency("true"))
+    asserts.true(env, is_relative_path_dependency("True"))
+    asserts.true(env, is_relative_path_dependency("TRUE"))
+    asserts.false(env, is_relative_path_dependency(False))
+    asserts.false(env, is_relative_path_dependency("False"))
+    asserts.false(env, is_relative_path_dependency("false"))
+    asserts.false(env, is_relative_path_dependency(""))
+    asserts.false(env, is_relative_path_dependency(None))
+    asserts.false(env, is_relative_path_dependency("yes"))
+    asserts.false(env, is_relative_path_dependency("1"))
+    return unittest.end(env)
+
+relative_marker_decides_test = unittest.make(_relative_marker_decides_test_impl)
+
+def _absolute_lock_path_decides_test_impl(ctx):
+    """An absolute lock path fails in every spelling; relative paths pass."""
+    env = unittest.begin(ctx)
+    asserts.true(env, is_absolute_lock_path("/x"))
+    asserts.true(env, is_absolute_lock_path("C:/x"))
+    asserts.true(env, is_absolute_lock_path("C:\\x"))
+    asserts.true(env, is_absolute_lock_path("\\\\server\\x"))
+    asserts.true(env, is_absolute_lock_path("//server/x"))
+    asserts.true(env, is_absolute_lock_path("C:drive"))
+    asserts.false(env, is_absolute_lock_path("pkg"))
+    asserts.false(env, is_absolute_lock_path("a/b"))
+    asserts.false(env, is_absolute_lock_path("../shared/x"))
+    asserts.false(env, is_absolute_lock_path(""))
+    return unittest.end(env)
+
+absolute_lock_path_decides_test = unittest.make(_absolute_lock_path_decides_test_impl)
+
+def _pubspec_identity_parses_test_impl(ctx):
+    """The spoke reads the package's pubspec name and version as strings."""
+    env = unittest.begin(ctx)
+    identity = parse_pubspec_identity("name: mypkg\nversion: 0.1.0\n")
+    asserts.equals(env, "mypkg", identity.name)
+    asserts.equals(env, "0.1.0", identity.version)
+    quoted = parse_pubspec_identity("name: \"mypkg\"\nversion: '1.2.3'\n")
+    asserts.equals(env, "mypkg", quoted.name)
+    asserts.equals(env, "1.2.3", quoted.version)
+    unversioned = parse_pubspec_identity("name: mypkg\n")
+    asserts.equals(env, "mypkg", unversioned.name)
+    asserts.equals(env, "", unversioned.version)
+    missing = parse_pubspec_identity("")
+    asserts.equals(env, "", missing.name)
+    asserts.equals(env, "", missing.version)
+    return unittest.end(env)
+
+pubspec_identity_parses_test = unittest.make(_pubspec_identity_parses_test_impl)
+
+def _pubspec_mismatch_is_refused_test_impl(ctx):
+    """A pubspec disagreeing with the lock fails naming hub, key, and values.
+
+    `link_path_package` itself `fail()`s on these shapes (untestable
+    here), so these pin the messages: the name refusal names the hub, the
+    lock key, and both names; the version refusal names the hub, the key,
+    and both versions; the missing-pubspec refusal names the hub and key.
+    Each tells the user to re-resolve.
+    """
+    env = unittest.begin(ctx)
+    name_message = pubspec_name_refusal("deps", "foo", "bar")
+    asserts.true(env, "deps" in name_message, "refusal must name the hub: {}".format(name_message))
+    asserts.true(env, "foo" in name_message, "refusal must name the lock key: {}".format(name_message))
+    asserts.true(env, "bar" in name_message, "refusal must name the pubspec name: {}".format(name_message))
+    asserts.true(env, "re-resolve" in name_message, "refusal must tell the user to re-resolve: {}".format(name_message))
+    version_message = pubspec_version_refusal("deps", "foo", "1.0.0", "2.0.0")
+    asserts.true(env, "deps" in version_message, "refusal must name the hub: {}".format(version_message))
+    asserts.true(env, "foo" in version_message, "refusal must name the lock key: {}".format(version_message))
+    asserts.true(env, "1.0.0" in version_message, "refusal must name the lock version: {}".format(version_message))
+    asserts.true(env, "2.0.0" in version_message, "refusal must name the pubspec version: {}".format(version_message))
+    asserts.true(env, "re-resolve" in version_message, "refusal must tell the user to re-resolve: {}".format(version_message))
+    missing_message = missing_pubspec_refusal("deps", "foo")
+    asserts.true(env, "deps" in missing_message, "refusal must name the hub: {}".format(missing_message))
+    asserts.true(env, "foo" in missing_message, "refusal must name the lock key: {}".format(missing_message))
+    return unittest.end(env)
+
+pubspec_mismatch_is_refused_test = unittest.make(_pubspec_mismatch_is_refused_test_impl)
+
+def _matching_identity_links_test_impl(ctx):
+    """A pubspec agreeing with the lock on name and version links normally."""
+    env = unittest.begin(ctx)
+    mock = _make_mock_link_ctx({
+        "mypkg": {
+            "pubspec.yaml": "name: mypkg\nversion: 0.1.0\n",
+            "lib": {"mypkg.dart": None},
+        },
+    }, path_value = "mypkg", package_name = "mypkg", version = "0.1.0", hub_name = "deps")
+    link_path_package(mock.ctx)
+    asserts.equals(env, ["lib/mypkg.dart", "pubspec.yaml"], sorted([link.name for link in mock.linked]))
+    return unittest.end(env)
+
+matching_identity_links_test = unittest.make(_matching_identity_links_test_impl)
 
 def _path_spoke_platform_dirs_test_impl(ctx):
     """Only declared platforms resolve sources, so only they link."""
@@ -537,18 +687,24 @@ def path_package_test_suite(name):
     """
     unittest.suite(
         name,
+        absolute_lock_path_decides_test,
         ancestor_link_is_refused_test,
         foreign_lock_path_dep_is_refused_test,
         link_scopes_to_the_pubspec_plan_test,
         lock_path_joins_the_lock_dir_test,
         lock_path_stays_inside_the_workspace_test,
         lock_path_uses_the_lock_files_own_directory_test,
+        matching_identity_links_test,
         non_plugin_package_links_no_android_test,
-        outside_link_replicates_without_descending_test,
+        outside_workspace_is_refused_test,
         overlapping_entries_link_once_test,
         path_spoke_platform_dirs_test,
         plugin_platform_dir_is_mirrored_not_symlinked_test,
+        pubspec_identity_parses_test,
+        pubspec_mismatch_is_refused_test,
+        relative_marker_decides_test,
         root_lock_needs_no_refusal_test,
         scoped_shader_includes_block_test,
         skipped_dirs_test,
+        workspace_sibling_link_replicates_without_descending_test,
     )

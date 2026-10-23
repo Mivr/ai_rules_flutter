@@ -25,8 +25,9 @@ load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_lock")
 load("//flutter/private:artifact_urls.bzl", "source_strip_prefix")
 load("//flutter/private:flutter_gen_l10n_repo.bzl", "flutter_gen_l10n_repo")
 load("//flutter/private:flutter_pub_lock_hub.bzl", "flutter_pub_lock_hub")
+load("//flutter/private:flutter_pub_overlays.bzl", "hub_overlay_roots")
 load("//flutter/private:flutter_pub_package.bzl", "flutter_pub_package", "flutter_pub_path_package", "is_maven_dep_label")
-load("//flutter/private:flutter_pub_path.bzl", "foreign_lock_path_error", "workspace_relative_lock_path")
+load("//flutter/private:flutter_pub_path.bzl", "foreign_lock_path_error", "is_absolute_lock_path", "is_relative_path_dependency", "workspace_relative_lock_path")
 load("//flutter/private:flutter_sdk_package.bzl", "flutter_sdk_package")
 load("//flutter/private:pub_lock_sdks.bzl", "hosted_package_sha256", "parse_lock_sdk_constraints", "version_below_lower_bound")
 load("//flutter/private:toolchain_selection.bzl", "select_toolchain_source")
@@ -163,8 +164,11 @@ _flutter_plugin_overlays = tag_class(attrs = {
         doc = "BUILD.bazel anchors for user-supplied overlay trees. Each " +
               "label points at an `ext/BUILD.bazel` (or equivalent) that " +
               "anchors a directory tree of `<package>/<version>/BUILD.bazel.tpl` " +
-              "overrides. flutter_pub_package walks user roots first, then the " +
-              "bundled `@rules_flutter//ext:BUILD.bazel`. A template declares " +
+              "overrides. A hub consults the root module's roots first, " +
+              "then its own module's roots (when that module is not the " +
+              "root), then the bundled `@rules_flutter//ext:BUILD.bazel`; " +
+              "a dependency's roots never reach the root's hubs or another " +
+              "module's hubs. A template declares " +
               "its language version and its dependencies by placeholder " +
               "(`{LANGUAGE_VERSION}`, `{DEPS}`), never by hand; see " +
               "docs/TESTING.md \"Native Assets overlay authoring\".",
@@ -436,10 +440,17 @@ def _classify_lock_packages(hub_name, lock_label, lock_pkgs):
         elif source == "path":
             desc = info.get("description", {})
             entry_path = desc.get("path", "") if type(desc) == "dict" else ""
-            if not entry_path or (type(desc) == "dict" and not desc.get("relative", False)):
+            relative_value = desc.get("relative", False) if type(desc) == "dict" else False
+            if type(entry_path) != "string" or not entry_path or not is_relative_path_dependency(relative_value):
                 fail("flutter.pub hub \"{hub}\": path dependency \"{pkg}\" has no workspace-relative path in the lock. Re-resolve the lock with a relative `path:` dependency.".format(
                     hub = hub_name,
                     pkg = name,
+                ))
+            if is_absolute_lock_path(entry_path):
+                fail("flutter.pub hub \"{hub}\": path dependency \"{pkg}\" has absolute path {path} in the lock. Re-resolve the lock with a relative `path:` dependency inside the workspace.".format(
+                    hub = hub_name,
+                    pkg = name,
+                    path = repr(entry_path),
                 ))
             refusal = foreign_lock_path_error(hub_name, name, lock_label)
             if refusal:
@@ -593,20 +604,12 @@ def _register_pub_hub(module_ctx, pub_tag, selected_info, merged, user_overlay_r
         packages = sorted(all_package_names),
     )
 
-def _collect_overlay_roots(modules):
-    """Collects user-supplied plugin overlay roots from tags.
-
-    Applied to every flutter_pub_package invocation in the order seen,
-    then the bundled `@rules_flutter//ext` root. This makes any pub
-    plugin user-fixable locally — drop a
-    `<workspace>/plugin_overlays/<pkg>/<major>/BUILD.bazel.tpl` and
-    register the root in MODULE.bazel; the next build picks it up.
-    """
-    user_overlay_roots = []
-    for mod in modules:
-        for tag in mod.tags.plugin_overlays:
-            user_overlay_roots.extend(tag.roots)
-    return user_overlay_roots
+def _overlay_roots_of_module(mod):
+    """Overlay roots one module declares, in tag order."""
+    roots = []
+    for tag in mod.tags.plugin_overlays:
+        roots.extend(tag.roots)
+    return roots
 
 def _toolchain_extension(module_ctx):
     darwin_sdk = resolve_darwin_sdk_from_modules(module_ctx.modules)
@@ -625,14 +628,18 @@ def _toolchain_extension(module_ctx):
     selected_info = _register_all_toolchains(module_ctx, registrations, merged, lock_flutter_constraints, darwin_sdk)
 
     # Collect user-supplied overlay roots from `flutter.plugin_overlays(...)`
-    # tags. They're applied to every flutter_pub_package invocation in
-    # the order seen, then the bundled `@rules_flutter//ext` root.
-    user_overlay_roots = _collect_overlay_roots(module_ctx.modules)
+    # tags. Each hub consults the root module's roots first, then its own
+    # module's roots (see `hub_overlay_roots`): a dependency's overlays
+    # never reach the root's hubs or another module's hubs.
+    root_overlay_roots = []
+    for mod in module_ctx.modules:
+        if mod.is_root:
+            root_overlay_roots.extend(_overlay_roots_of_module(mod))
 
     # Handle flutter.pub() tags — resolve pubspec.lock with Flutter SDK support.
     for mod in module_ctx.modules:
         for pub_tag in mod.tags.pub:
-            _register_pub_hub(module_ctx, pub_tag, selected_info, merged, user_overlay_roots)
+            _register_pub_hub(module_ctx, pub_tag, selected_info, merged, hub_overlay_roots(root_overlay_roots, _overlay_roots_of_module(mod), mod.is_root))
 
     # Don't declare root_module_direct_deps: flutter_register_toolchains creates
     # many repos (iOS, Android, web, desktop, cross-compile per platform) and

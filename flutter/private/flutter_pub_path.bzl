@@ -4,6 +4,56 @@ Lives apart from `extensions.bzl` so the extension file stays under the
 quality floor's per-file size cap; the extension `load()`s both helpers.
 """
 
+def is_relative_path_dependency(relative_value):
+    """Whether a lock `description.relative` value counts as `relative: true`.
+
+    The lock parser stringifies every description value, so a YAML
+    `relative: false` arrives as the string `"False"` — which is truthy in
+    Starlark, and the old truthiness test never refused it. Only the
+    parsed string `"true"` (any case) or a real boolean `True` accepts
+    the entry; `False`, a missing or empty value, or anything else
+    refuses it. Returning a boolean instead of failing keeps the rule
+    testable: `unittest` cannot assert on `fail()`.
+
+    Args:
+        relative_value: The lock entry's `relative` description value.
+
+    Returns:
+        True only for a true relative marker.
+    """
+    if type(relative_value) == "bool":
+        return relative_value
+    if type(relative_value) == "string":
+        return relative_value.lower() == "true"
+    return False
+
+def is_absolute_lock_path(entry_path):
+    """Whether a lock path value is absolute in any spelling.
+
+    Catches POSIX (`/x`), drive-letter (`C:/x`, `C:\\x`, and bare `C:`
+    drive-relative, which resolves against the fetch host's drive), and
+    UNC (`\\\\server\\x`, via its leading backslash; `//server/x` via its
+    leading slash) spellings. Anything else — including `..` segments,
+    which `workspace_relative_lock_path` still normalizes lexically and
+    refuses when they leave the workspace — is not absolute.
+
+    Args:
+        entry_path: The lock entry's path value.
+
+    Returns:
+        True when the path is absolute and must be refused.
+    """
+    if type(entry_path) != "string" or not entry_path:
+        return False
+    first = entry_path[0]
+    if first == "/" or first == "\\":
+        return True
+    if len(entry_path) >= 2 and entry_path[1] == ":":
+        drive = entry_path[0]
+        if (drive >= "A" and drive <= "Z") or (drive >= "a" and drive <= "z"):
+            return True
+    return False
+
 def foreign_lock_path_error(hub_name, package_name, lock_label):
     """Refuse a `relative: true` path dependency under a non-root lock.
 
@@ -61,6 +111,12 @@ def workspace_relative_lock_path(hub_name, package_name, lock_label, entry_path)
     Returns:
         The workspace-relative package directory.
     """
+    if is_absolute_lock_path(entry_path):
+        fail("flutter.pub hub \"{hub}\": path dependency \"{pkg}\" has absolute path {path} in the lock. Re-resolve the lock with a relative `path:` dependency inside the workspace.".format(
+            hub = hub_name,
+            pkg = package_name,
+            path = repr(entry_path),
+        ))
     parts = []
     if lock_label.package:
         parts.extend(lock_label.package.split("/"))

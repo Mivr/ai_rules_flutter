@@ -31,7 +31,7 @@ load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version", "m
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_deps", "parse_pubspec_sdk_constraint")
 load("//flutter/private:artifact_urls.bzl", "require_sha256")
 load("//flutter/private:download.bzl", "pinned_download")
-load("//flutter/private:flutter_pubspec.bzl", "asset_flavor_error", "asset_platform_error", "invalid_asset_platforms", "parse_flutter_assets_block", "parse_flutter_plugin_block")
+load("//flutter/private:flutter_pubspec.bzl", "asset_flavor_error", "asset_platform_error", "invalid_asset_platforms", "parse_flutter_assets_block", "parse_flutter_plugin_block", "parse_pubspec")
 load(
     ":gradle.bzl",
     "detect_android_namespace",
@@ -2335,6 +2335,45 @@ def ancestor_link_refusal(package_name, link_rel, link_real):
         "directory itself."
     )
 
+def path_spoke_resolves_outside(workspace_realpath, target_realpath):
+    """Whether a resolved path lies outside the main workspace's real root.
+
+    Pure testable core of the workspace-confinement refusal: every source
+    symlink the spoke replicates, and every directory component of the
+    package path itself, must resolve inside the workspace. A link such
+    as `assets -> /host/dir` would otherwise bundle host bytes, and a
+    package below a link out of the workspace (`third_party -> /host`)
+    would be accepted — while the rule claims workspace-relative-only,
+    fail-closed fetching.
+
+    Args:
+        workspace_realpath: The resolved main workspace root.
+        target_realpath: The resolved path to check.
+
+    Returns:
+        True when the target is neither the workspace root nor under it.
+    """
+    return (
+        target_realpath != workspace_realpath and
+        not target_realpath.startswith(workspace_realpath + "/")
+    )
+
+def outside_workspace_refusal(package_name, link_rel, link_real):
+    """The fetch refusal for a node resolving outside the workspace.
+
+    Returns the message instead of failing so unit tests can assert it; the
+    caller `fail()`s with it. Names the package, the offending path, and
+    its real path, so the fix (move the package or the link target inside
+    the workspace) is evident.
+    """
+    return (
+        "flutter.pub repo rule: path dependency \"" + package_name + "\" " +
+        "links \"" + link_rel + "\" which resolves outside the workspace " +
+        "(" + link_real + "); linking it would bundle host bytes into a " +
+        "hermetic fetch. Keep the package and everything it links inside " +
+        "the workspace."
+    )
+
 def path_spoke_platform_dirs(plugin_block):
     """The platform directories the spoke generator reads for a plugin.
 
@@ -2403,19 +2442,24 @@ def _link_new_symlink(ctx, node, repo_rel, linked):
     ctx.watch(node)
     linked[repo_rel] = True
 
-def _link_scoped_symlink(ctx, node, repo_rel, package_name, package_realpath, linked):
+def _link_scoped_symlink(ctx, node, repo_rel, package_name, package_realpath, workspace_realpath, linked):
     """Replicate one source symlink inside the spoke without descending.
 
     A link resolving to the package or an ancestor would cycle the
-    fetch-time walks (the `.plugin_symlinks` shape); it fails naming the
-    package and the link. Any other link replicates as-is and is watched,
-    so outside targets stay outside and the walk always terminates.
+    fetch-time walks (the `.plugin_symlinks` shape); a link resolving
+    outside the workspace would bundle host bytes into a hermetic fetch.
+    Both fail naming the package and the link. Any other link replicates
+    as-is and is watched, so in-workspace targets stay reachable and the
+    walk always terminates.
     """
-    if path_spoke_is_ancestor_cycle(package_realpath, str(node.realpath)):
-        fail(ancestor_link_refusal(package_name, repo_rel, str(node.realpath)))
+    target_realpath = str(node.realpath)
+    if path_spoke_is_ancestor_cycle(package_realpath, target_realpath):
+        fail(ancestor_link_refusal(package_name, repo_rel, target_realpath))
+    if path_spoke_resolves_outside(workspace_realpath, target_realpath):
+        fail(outside_workspace_refusal(package_name, repo_rel, target_realpath))
     _link_new_symlink(ctx, node, repo_rel, linked)
 
-def _link_scoped_tree(ctx, node, repo_rel, package_name, package_realpath, linked):
+def _link_scoped_tree(ctx, node, repo_rel, package_name, package_realpath, workspace_realpath, linked):
     """Mirror one real source directory into the spoke file by file.
 
     Real directories become real repository directories holding one symlink
@@ -2439,7 +2483,7 @@ def _link_scoped_tree(ctx, node, repo_rel, package_name, package_realpath, linke
                 continue
             child_rel = parent_rel + "/" + name
             if str(child.realpath) != package_realpath + "/" + child_rel:
-                _link_scoped_symlink(ctx, node = child, repo_rel = child_rel, package_name = package_name, package_realpath = package_realpath, linked = linked)
+                _link_scoped_symlink(ctx, node = child, repo_rel = child_rel, package_name = package_name, package_realpath = package_realpath, workspace_realpath = workspace_realpath, linked = linked)
                 continue
             if child.is_dir:
                 ctx.watch(child)
@@ -2454,7 +2498,7 @@ def _link_scoped_tree(ctx, node, repo_rel, package_name, package_realpath, linke
              "\" holds more than 10000 directories under its linked " +
              "entries. Refusing it rather than fetching part of the tree.")
 
-def _link_top_level_shader_includes(ctx, src, package_name, package_realpath, linked):
+def _link_top_level_shader_includes(ctx, src, package_name, package_realpath, workspace_realpath, linked):
     """Link top-level include siblings for a top-level declared shader.
 
     A declared `ripple.frag` at the package root resolves `#include`s
@@ -2474,16 +2518,17 @@ def _link_top_level_shader_includes(ctx, src, package_name, package_realpath, li
         if name.rpartition(".")[2] not in _PATH_SPOKE_SHADER_INCLUDE_EXTS:
             continue
         if str(child.realpath) != package_realpath + "/" + name:
-            _link_scoped_symlink(ctx, node = child, repo_rel = name, package_name = package_name, package_realpath = package_realpath, linked = linked)
+            _link_scoped_symlink(ctx, node = child, repo_rel = name, package_name = package_name, package_realpath = package_realpath, workspace_realpath = workspace_realpath, linked = linked)
             continue
         _link_new_symlink(ctx, child, name, linked)
 
-def _link_scoped_dir_entry(ctx, src, entry_path, package_name, package_realpath, linked):
+def _link_scoped_dir_entry(ctx, src, entry_path, package_name, package_realpath, workspace_realpath, linked):
     """Link one declared directory entry (asset, shader, or platform dir).
 
     Missing entries stay unlinked (a declared-but-absent directory is not
     an error); real directories mirror file by file; anything else
-    replicates as a single symlink, refusing package-ancestor cycles.
+    replicates as a single symlink, refusing package-ancestor cycles and
+    targets outside the workspace.
     """
     parts = _spoke_entry_parts(package_name, entry_path)
     node = src.get_child(*parts)
@@ -2491,20 +2536,21 @@ def _link_scoped_dir_entry(ctx, src, entry_path, package_name, package_realpath,
         return
     repo_rel = "/".join(parts)
     if str(node.realpath) != package_realpath + "/" + repo_rel:
-        _link_scoped_symlink(ctx, node = node, repo_rel = repo_rel, package_name = package_name, package_realpath = package_realpath, linked = linked)
+        _link_scoped_symlink(ctx, node = node, repo_rel = repo_rel, package_name = package_name, package_realpath = package_realpath, workspace_realpath = workspace_realpath, linked = linked)
         return
     if node.is_dir:
-        _link_scoped_tree(ctx, node, repo_rel, package_name, package_realpath, linked)
+        _link_scoped_tree(ctx, node, repo_rel, package_name, package_realpath, workspace_realpath, linked)
         return
     ctx.symlink(node, repo_rel)
     ctx.watch(node)
 
-def _link_scoped_file_entry(ctx, src, entry_path, package_name, package_realpath, linked):
+def _link_scoped_file_entry(ctx, src, entry_path, package_name, package_realpath, workspace_realpath, linked):
     """Link one declared file entry (pubspec, hook, asset, font, shader).
 
     Missing entries stay unlinked; a directory at the entry mirrors file
     by file; a user BUILD file is watched but not linked; anything else
-    becomes a single symlink, refusing package-ancestor cycles.
+    becomes a single symlink, refusing package-ancestor cycles and targets
+    outside the workspace.
     """
     parts = _spoke_entry_parts(package_name, entry_path)
     node = src.get_child(*parts)
@@ -2512,17 +2558,17 @@ def _link_scoped_file_entry(ctx, src, entry_path, package_name, package_realpath
         return
     repo_rel = "/".join(parts)
     if str(node.realpath) != package_realpath + "/" + repo_rel:
-        _link_scoped_symlink(ctx, node = node, repo_rel = repo_rel, package_name = package_name, package_realpath = package_realpath, linked = linked)
+        _link_scoped_symlink(ctx, node = node, repo_rel = repo_rel, package_name = package_name, package_realpath = package_realpath, workspace_realpath = workspace_realpath, linked = linked)
         return
     if node.is_dir:
-        _link_scoped_tree(ctx, node, repo_rel, package_name, package_realpath, linked)
+        _link_scoped_tree(ctx, node, repo_rel, package_name, package_realpath, workspace_realpath, linked)
         return
     if node.basename in _PATH_SPOKE_SKIP_FILES:
         ctx.watch(node)
         return
     _link_new_symlink(ctx, node, repo_rel, linked)
 
-def _link_spoke_contents(ctx, src, asset_block, plugin_block, package_name, package_realpath, linked):
+def _link_spoke_contents(ctx, src, asset_block, plugin_block, package_name, package_realpath, workspace_realpath, linked):
     """Link everything the spoke generator reads or exposes — nothing else.
 
     The pubspec leads: `lib/`, hook scripts, declared assets, fonts, and
@@ -2537,24 +2583,129 @@ def _link_spoke_contents(ctx, src, asset_block, plugin_block, package_name, pack
     once: `linked` records every created symlink.
     """
     for entry in ["lib", "hook/build.dart", "hook/link.dart"]:
-        _link_scoped_file_entry(ctx, src, entry, package_name, package_realpath, linked)
+        _link_scoped_file_entry(ctx, src, entry, package_name, package_realpath, workspace_realpath, linked)
     for asset in asset_block.assets:
         if asset.path.endswith("/"):
-            _link_scoped_dir_entry(ctx, src, asset.path[:-1], package_name, package_realpath, linked)
+            _link_scoped_dir_entry(ctx, src, asset.path[:-1], package_name, package_realpath, workspace_realpath, linked)
         else:
-            _link_scoped_file_entry(ctx, src, asset.path, package_name, package_realpath, linked)
+            _link_scoped_file_entry(ctx, src, asset.path, package_name, package_realpath, workspace_realpath, linked)
     for family in asset_block.fonts:
         for font in family.fonts:
-            _link_scoped_file_entry(ctx, src, font.asset, package_name, package_realpath, linked)
+            _link_scoped_file_entry(ctx, src, font.asset, package_name, package_realpath, workspace_realpath, linked)
     for shader in asset_block.shaders:
-        _link_scoped_file_entry(ctx, src, shader.path, package_name, package_realpath, linked)
+        _link_scoped_file_entry(ctx, src, shader.path, package_name, package_realpath, workspace_realpath, linked)
         shader_dir = shader.path.rpartition("/")[0]
         if shader_dir:
-            _link_scoped_dir_entry(ctx, src, shader_dir, package_name, package_realpath, linked)
+            _link_scoped_dir_entry(ctx, src, shader_dir, package_name, package_realpath, workspace_realpath, linked)
         else:
-            _link_top_level_shader_includes(ctx, src, package_name, package_realpath, linked)
+            _link_top_level_shader_includes(ctx, src, package_name, package_realpath, workspace_realpath, linked)
     for platform_dir in path_spoke_platform_dirs(plugin_block):
-        _link_scoped_dir_entry(ctx, src, platform_dir, package_name, package_realpath, linked)
+        _link_scoped_dir_entry(ctx, src, platform_dir, package_name, package_realpath, workspace_realpath, linked)
+
+def _fail_on_outside_package_path(ctx, package_name, segments, workspace_realpath):
+    """Fail when the package dir or any parent component leaves the workspace.
+
+    A path whose intermediate directory is a link out of the workspace
+    (`third_party -> /host`) would otherwise be accepted: lexically the
+    entry stays inside, but the resolved tree is host bytes. Each prefix
+    of the workspace-relative path is resolved and refused, naming the
+    package, the offending prefix, and its real path, when it lands
+    outside the main workspace's real root. Missing prefixes stop the
+    walk: the caller reports the missing directory itself.
+    """
+    prefix = []
+    for segment in segments:
+        prefix.append(segment)
+        node = ctx.workspace_root.get_child(*prefix)
+        if not node.exists:
+            break
+        target_realpath = str(node.realpath)
+        if path_spoke_resolves_outside(workspace_realpath, target_realpath):
+            fail(outside_workspace_refusal(package_name, "/".join(prefix), target_realpath))
+
+def parse_pubspec_identity(content):
+    """The `(name, version)` identity a path spoke verifies against its lock entry.
+
+    A path package's overlays and curated code assets are selected by the
+    lock key and the lock's version, so the spoke must check that the
+    package's own pubspec.yaml agrees — otherwise a directory whose
+    pubspec names another package, or whose version moved since the lock
+    was resolved, gets another package's overlay and native code assets.
+
+    Args:
+        content: Full pubspec.yaml content as a string.
+
+    Returns:
+        A `struct(name, version)` of strings; each is `""` when absent,
+        unparsable, or not a scalar. A missing pubspec therefore never
+        matches a lock key and fails closed at the caller's comparison.
+    """
+    pubspec = parse_pubspec(content)
+    name = pubspec.get("name", "")
+    version = pubspec.get("version", "")
+    return struct(
+        name = "" if name == None else str(name),
+        version = "" if version == None else str(version),
+    )
+
+def missing_pubspec_refusal(hub_name, package_name):
+    """The fetch refusal for a path package with no readable pubspec name.
+
+    Returns the message instead of failing so unit tests can assert it; the
+    caller `fail()`s with it. Names the hub and the lock key.
+    """
+    return (
+        "flutter.pub hub \"" + hub_name + "\": path dependency \"" +
+        package_name + "\" has no readable pubspec.yaml naming the " +
+        "package. Overlays and code assets are selected by lock name; " +
+        "re-resolve the lock so the package carries a pubspec that " +
+        "agrees with it."
+    )
+
+def pubspec_name_refusal(hub_name, package_name, actual):
+    """The fetch refusal for a path package whose pubspec names another package.
+
+    Returns the message instead of failing so unit tests can assert it; the
+    caller `fail()`s with it. Names the hub, the lock key, and both values.
+    """
+    return (
+        "flutter.pub hub \"" + hub_name + "\": path dependency \"" +
+        package_name + "\" names itself \"" + actual + "\" in its " +
+        "pubspec.yaml but the lock calls it \"" + package_name + "\". " +
+        "Overlays and code assets are selected by lock name; re-resolve " +
+        "the lock (or rename the package) so the two agree."
+    )
+
+def pubspec_version_refusal(hub_name, package_name, locked, actual):
+    """The fetch refusal for a path package whose version moved since the lock.
+
+    Returns the message instead of failing so unit tests can assert it; the
+    caller `fail()`s with it. Names the hub, the lock key, and both values.
+    """
+    return (
+        "flutter.pub hub \"" + hub_name + "\": path dependency \"" +
+        package_name + "\" locks version \"" + locked + "\" but its " +
+        "pubspec.yaml says \"" + actual + "\". Overlays and code assets " +
+        "are selected by lock version; re-resolve the lock so the two agree."
+    )
+
+def _fail_on_pubspec_identity_mismatch(hub_name, package_name, lock_version, pubspec_text):
+    """Fail when the package's pubspec name or version disagrees with the lock.
+
+    Overlays and curated code assets are selected by the lock key and the
+    lock's version, so a directory whose pubspec names another package, or
+    whose version moved since the lock was resolved, must not silently get
+    another package's overlay and native code assets. Each mismatch fails
+    naming the hub, the lock key, and both values, telling the user to
+    re-resolve.
+    """
+    identity = parse_pubspec_identity(pubspec_text)
+    if not pubspec_text.strip() or not identity.name:
+        fail(missing_pubspec_refusal(hub_name, package_name))
+    if identity.name != package_name:
+        fail(pubspec_name_refusal(hub_name, package_name, identity.name))
+    if identity.version != lock_version:
+        fail(pubspec_version_refusal(hub_name, package_name, lock_version, identity.version))
 
 def link_path_package(ctx):
     """Symlinks a workspace-local `path:` package into the spoke, hermetically.
@@ -2566,15 +2717,20 @@ def link_path_package(ctx):
     whole-directory symlinks — so the generator's `ctx.file` writes land in
     the spoke, never in the user tree. `example/`, `build/`, `.dart_tool/`,
     dot-directories, undeclared files, and user BUILD files stay unlinked
-    (skipped subtrees are not even watched); source links replicate without
-    descending and fail closed, naming the package and the link, when they
-    resolve to the package or an ancestor. Fails closed: an absolute path,
-    a `..` escape, or a missing directory fails the fetch rather than
-    emitting an empty spoke or reaching outside the workspace.
+    (skipped subtrees are not even watched). Refused, naming the package
+    and the offending node, because each would break the hermetic fetch:
+    source links resolving to the package or an ancestor (fetch-time walk
+    cycles), and the package directory itself, any of its parent
+    components, or any replicated symlink resolving outside the
+    workspace's real root (host bytes in the bundle). The pubspec's own
+    `name` and `version` must match the lock entry, since overlays and
+    code assets are selected by lock name and version. Fails closed: an
+    absolute path, a `..` escape, or a missing directory fails the fetch
+    rather than emitting an empty spoke or reaching outside the workspace.
 
     Args:
-        ctx: The path-package spoke's repository context. Reads `path` and
-            `package_name` from its attrs.
+        ctx: The path-package spoke's repository context. Reads `path`,
+            `package_name`, `version`, and `hub_name` from its attrs.
 
     Returns:
         None.
@@ -2598,6 +2754,8 @@ def link_path_package(ctx):
             path = repr(rel),
         ))
     package_name = ctx.attr.package_name
+    workspace_realpath = str(ctx.workspace_root.realpath)
+    _fail_on_outside_package_path(ctx, package_name, segments, workspace_realpath)
     package_realpath = str(src.realpath)
     linked = {}
 
@@ -2605,9 +2763,10 @@ def link_path_package(ctx):
     # the link plan, so the spoke links only what the generator reads or
     # exposes. A missing pubspec parses as empty rather than failing: the
     # spoke pipeline reports the real problem.
-    _link_scoped_file_entry(ctx, src, "pubspec.yaml", package_name, package_realpath, linked)
+    _link_scoped_file_entry(ctx, src, "pubspec.yaml", package_name, package_realpath, workspace_realpath, linked)
     pubspec_node = ctx.path("pubspec.yaml")
     pubspec_text = ctx.read(pubspec_node) if pubspec_node.exists else ""
+    _fail_on_pubspec_identity_mismatch(ctx.attr.hub_name, package_name, ctx.attr.version, pubspec_text)
     _link_spoke_contents(
         ctx,
         src,
@@ -2615,6 +2774,7 @@ def link_path_package(ctx):
         parse_flutter_plugin_block(pubspec_text),
         package_name,
         package_realpath,
+        workspace_realpath,
         linked,
     )
     ctx.watch(src)
@@ -2807,7 +2967,7 @@ flutter_pub_path_package = repository_rule(
             mandatory = True,
         ),
         "path": attr.string(
-            doc = "Workspace-relative directory of the package (the lock's `path:` value, relative to the lock file). Symlinked in; absolute paths and `..` escapes fail the fetch.",
+            doc = "Workspace-relative directory of the package (the lock's `path:` value, relative to the lock file). Symlinked in; absolute paths and `..` escapes fail the fetch, as does anything — the package directory, its parent components, or a replicated symlink — resolving outside the workspace's real root.",
             mandatory = True,
         ),
         "version": attr.string(
@@ -2840,5 +3000,5 @@ flutter_pub_path_package = repository_rule(
             default = [],
         ),
     },
-    doc = "Symlinks a workspace-local `path:` pub package into a spoke and emits the same `flutter_plugin` / `flutter_library` / `dart_library` the hosted rule would. The `flutter pub get` analog for path dependencies: hermetic (workspace-relative only, watched for changes) and fail-closed on anything outside the workspace.",
+    doc = "Symlinks a workspace-local `path:` pub package into a spoke and emits the same `flutter_plugin` / `flutter_library` / `dart_library` the hosted rule would. The `flutter pub get` analog for path dependencies: hermetic (workspace-relative only, watched for changes) and fail-closed on anything resolving outside the workspace's real root; the package's pubspec `name` and `version` must match the lock entry, since overlays and code assets are selected by lock name and version.",
 )
