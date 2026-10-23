@@ -30,8 +30,11 @@ flag, so remote and local caches keep hitting.
 Debug JIT whole-program compiles only (`target == "flutter"`, `-c dbg`
 without AOT). The flag never applies to AOT, web (`dartdevc`), `from_dill`,
 `import_dill` or `recorded_uses` compiles — those always run the stock
-action. The guard and read-set checks are the same code as the stock
-`kernel_filter` path, with identical refusal messages.
+action. The guard and read-set checks enforce the same manifest-only policy
+as the stock `kernel_filter` path — allowances come only from the
+`--declared-inputs` manifest, never from the compiler argv — with identical
+refusal messages. The worker deletes its `incr_fkc_*` temp directories on
+every exit path, so no state survives a finished build.
 
 ## Strategies
 
