@@ -811,6 +811,16 @@ build_test(
     targets = [":hello_world_app"],
 )
 
+# Escape fixture: the `quote_assets` path package declares an asset file
+# whose name holds a double quote. Fetching its spoke must either round-trip
+# the name as a Starlark literal or fail the fetch naming the file; the
+# pre-fix generator pastes it raw, so the emitted BUILD does not parse and
+# this fails. The target forces the spoke to fetch and load.
+build_test(
+    name = "quote_assets_spoke_build_test",
+    targets = ["@deps//:quote_assets"],
+)
+
 build_test(
     name = "macos_bundle_build_test",
     target_compatible_with = ["@platforms//os:macos"],
