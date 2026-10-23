@@ -1016,9 +1016,9 @@ dart_test(
     name = "verify_path_spoke_hermeticity_test",
     size = "small",
     data = [
+        "test/verify_path_spoke_hermeticity_test.dart",
         "@deps//:path_probe",
         "@deps//:path_probe_no_build",
-        "test/verify_path_spoke_hermeticity_test.dart",
     ],
     env = {"GUARD_ROOT_ANCHOR": "$(rlocationpath :test/verify_path_spoke_hermeticity_test.dart)"},
     env_inherit = ["BUILD_WORKSPACE_DIRECTORY"],
