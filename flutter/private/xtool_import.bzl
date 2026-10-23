@@ -69,6 +69,16 @@ xtool_macos_transition = transition(
 )
 
 def xtool_target_arch(ctx):
+    """Returns the Darwin target architecture (`"arm64"` or `"x86_64"`).
+
+    Prefers the platform constraint, falling back to `TARGET_CPU`.
+
+    Args:
+        ctx: Rule context carrying the platform constraint and `TARGET_CPU`.
+
+    Returns:
+        `"arm64"` or `"x86_64"`.
+    """
     if ctx.target_platform_has_constraint(
         ctx.attr._x86_64_constraint[platform_common.ConstraintValueInfo],
     ):

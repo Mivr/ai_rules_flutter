@@ -407,6 +407,23 @@ def run_xtool_pack_bundle(
         mnemonic,
         families = [],
         native_libs = []):
+    """Assembles one Apple bundle with the `xtool_pack` host tool.
+
+    Validates the rule attributes, compiles the runner when needed, then
+    packs the `.app` bundle under the given mnemonic.
+
+    Args:
+        ctx: Rule context of the calling bundle rule.
+        platform: Apple platform (`"ios"` or `"macos"`).
+        archive_ext: Bundle archive extension (e.g. `".app.zip"`).
+        mnemonic: Action mnemonic for the bundle step.
+        families: Device families for iOS bundles.
+        native_libs: Native libraries embedded via `additional_contents`.
+
+    Returns:
+        The bundle action's providers (`DefaultInfo` with the archive, plus
+        `OutputGroupInfo`).
+    """
     _fail_on_xtool_unsupported_attrs(ctx)
     ib_errors = _collect_xtool_ib_errors(ctx)
     additional_content_pairs, additional_content_files = _collect_xtool_additional_contents(ctx, ib_errors)
