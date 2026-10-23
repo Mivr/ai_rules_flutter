@@ -11,6 +11,7 @@ exports_files(
         "apk_overlay.dart",
         "generate_asset_manifest.dart",
         "bundle_app.dart",
+        "chmod.dart",
         "compile_shader.dart",
         "crc32.dart",
         "directive_guard.dart",
@@ -94,6 +95,7 @@ dart_binary(
 
 dart_binary(
     name = "bundle_app",
+    srcs = ["chmod.dart"],
     compile_mode = "kernel",
     main = "bundle_app.dart",
     modular_kernel = False,
@@ -195,6 +197,7 @@ dart_binary(
 
 dart_binary(
     name = "strip_native_libs",
+    srcs = ["chmod.dart"],
     compile_mode = "kernel",
     main = "strip_native_libs.dart",
     modular_kernel = False,
@@ -273,6 +276,7 @@ _UNIT_TESTS = {
     "merge_android_manifests_test": ("merge_android_manifests.dart", []),
     "merge_plists_test": ("merge_plists.dart", []),
     "strip_native_libs_test": ("strip_native_libs.dart", []),
+    "chmod_test": ("chmod.dart", []),
     "web_guard_test": (
         "web_guard.dart",
         ["@rules_dart//dart/guard:directive_guard"],
@@ -350,6 +354,8 @@ _TOOL_SRCS = {
         "sha256.dart",
     ],
     "web_guard.dart": ["directive_guard.dart"],
+    "bundle_app.dart": ["chmod.dart"],
+    "strip_native_libs.dart": ["chmod.dart"],
 }
 
 _TEST_DATA = {
