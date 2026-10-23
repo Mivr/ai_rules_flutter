@@ -490,6 +490,7 @@ def check_unreplaced_hooks(label, deps):
 # entrypoint — so every test rule extracts the tags at build time and ships
 # the JSON to the runner, which injects them as the root group's metadata.
 LIBRARY_TAGS_TOOL_ATTR = attr.label(
+    doc = "Build-time tool that extracts the test entrypoint's `@Tags` into JSON for the runner.",
     default = Label("//flutter/private/tools:extract_library_tags"),
     executable = True,
     cfg = "exec",
@@ -1591,18 +1592,23 @@ def detect_target_platform(is_ios, is_macos, is_linux, is_windows, is_android):
 # Shared platform constraint attrs used by rules that need to check target platform.
 PLATFORM_CONSTRAINT_ATTRS = {
     "_macos_constraint": attr.label(
+        doc = "macOS platform constraint value, matched against the target platform.",
         default = "@platforms//os:macos",
     ),
     "_ios_constraint": attr.label(
+        doc = "iOS platform constraint value, matched against the target platform.",
         default = "@platforms//os:ios",
     ),
     "_linux_constraint": attr.label(
+        doc = "Linux platform constraint value, matched against the target platform.",
         default = "@platforms//os:linux",
     ),
     "_windows_constraint": attr.label(
+        doc = "Windows platform constraint value, matched against the target platform.",
         default = "@platforms//os:windows",
     ),
     "_android_constraint": attr.label(
+        doc = "Android platform constraint value, matched against the target platform.",
         default = "@platforms//os:android",
     ),
     # CPU alongside OS, because Android's ABI selects a whole platform label
@@ -1611,9 +1617,11 @@ PLATFORM_CONSTRAINT_ATTRS = {
     # value the dev tool builds against has to be right or absent, not
     # guessed.
     "_arm64_constraint": attr.label(
+        doc = "ARM64 CPU constraint value, matched against the target platform alongside the OS.",
         default = "@platforms//cpu:arm64",
     ),
     "_x86_64_constraint": attr.label(
+        doc = "x86_64 CPU constraint value, matched against the target platform alongside the OS.",
         default = "@platforms//cpu:x86_64",
     ),
 }
@@ -1774,6 +1782,7 @@ def merge_dart_defines(ctx):
 # not by every kernel compile.
 KERNEL_COMPILE_ATTRS = {
     "_kernel_filter_tool": attr.label(
+        doc = "Guard tool that runs the kernel compile only after its sources pass the declared-inputs check.",
         default = Label("//flutter/private/tools:kernel_filter"),
         executable = True,
         cfg = "exec",
@@ -1789,6 +1798,7 @@ KERNEL_COMPILE_ATTRS = {
         doc = "Persistent incremental kernel compile worker tool.",
     ),
     "_web_guard_tool": attr.label(
+        doc = "Guard tool that runs the web compile confined to its staged sources.",
         default = Label("//flutter/private/tools:web_guard"),
         executable = True,
         cfg = "exec",
@@ -1968,6 +1978,7 @@ def _app_shader_aspect_impl(_target, ctx):
 
 _SHADER_ASPECT_BASE_ATTRS = {
     "_shader_compile_tool": attr.label(
+        doc = "Shader compiler the aspect runs over the target's transitive shaders.",
         default = Label("//flutter/private/tools:compile_shader"),
         executable = True,
         cfg = "exec",
@@ -2060,6 +2071,7 @@ FLUTTER_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {
         default = False,
     ),
     "_shader_compile_tool": attr.label(
+        doc = "Shader compiler for the app's `shaders`, run before the asset bundle is assembled.",
         default = Label("//flutter/private/tools:compile_shader"),
         executable = True,
         cfg = "exec",
@@ -2092,6 +2104,7 @@ FLUTTER_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {
               "Platform-specific bundle rules set appropriate defaults.",
     ),
     "_asset_bundle_tool": attr.label(
+        doc = "Tool that renders the asset manifest bundled as `flutter_assets`.",
         default = Label("//flutter/private/tools:generate_asset_manifest"),
         executable = True,
         cfg = "exec",
