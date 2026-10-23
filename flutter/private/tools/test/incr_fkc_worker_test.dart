@@ -158,6 +158,12 @@ class Harness {
       (errors: 0, diagnostics: const [], depLines: depLines());
 }
 
+/// Whether [parent] holds a surviving `incr_fkc_*` worker temp directory.
+bool hasWorkerTemp(Directory parent) =>
+    parent.listSync().whereType<Directory>().any(
+      (d) => d.path.split(Platform.pathSeparator).last.startsWith('incr_fkc_'),
+    );
+
 void main() {
   group('sha256Hex', () {
     test('matches the standard vectors', () {
@@ -390,6 +396,7 @@ void main() {
     test('cold: compile, accept, then reset plus an empty recompile', () async {
       worker = IncrWorker(
         cwd: h.cwd,
+        tempParent: h.cwd,
         sessions: factoryFor(() => [h.ok(), h.ok()]),
       );
       final result = await worker.handleRequest(h.argv, h.inputs);
@@ -464,6 +471,7 @@ void main() {
       // only paths — so the lie has nothing to hold onto.
       worker = IncrWorker(
         cwd: h.cwd,
+        tempParent: h.cwd,
         sessions: factoryFor(() => [h.ok(), h.ok(), h.ok(), h.ok()]),
       );
       var result = await worker.handleRequest(h.argv, h.inputs);
@@ -481,6 +489,7 @@ void main() {
     test('a changed package config restarts the server cold', () async {
       worker = IncrWorker(
         cwd: h.cwd,
+        tempParent: h.cwd,
         sessions: factoryFor(() => [h.ok(), h.ok(), h.ok(), h.ok()]),
       );
       var result = await worker.handleRequest(h.argv, h.inputs);
@@ -537,6 +546,7 @@ void main() {
     test('a reset-phase error drops the server', () async {
       worker = IncrWorker(
         cwd: h.cwd,
+        tempParent: h.cwd,
         sessions: factoryFor(
           () => [
             h.ok(),
@@ -558,6 +568,7 @@ void main() {
     test('a dead server restarts cold', () async {
       worker = IncrWorker(
         cwd: h.cwd,
+        tempParent: h.cwd,
         sessions: factoryFor(() => [h.ok(), h.ok(), h.ok(), h.ok()]),
       );
       var result = await worker.handleRequest(h.argv, h.inputs);
@@ -585,6 +596,7 @@ void main() {
       sessions = [];
       worker = IncrWorker(
         cwd: h.cwd,
+        tempParent: h.cwd,
         sessions: (fs, full, inc, cwd) async {
           final s = FakeSession(
             fullDill: full,
@@ -615,6 +627,7 @@ void main() {
     test('an undeclared read is refused with the batch message', () async {
       worker = IncrWorker(
         cwd: h.cwd,
+        tempParent: h.cwd,
         sessions: (fs, full, inc, cwd) async {
           final s = FakeSession(
             fullDill: full,
@@ -642,8 +655,11 @@ void main() {
     });
 
     test(
-      'reads under a remapped request root map to the manifest root',
+      'a read under a root that only the argv names is refused',
       () async {
+        // The argv mounts the mirror via `--filesystem-root`, but the
+        // manifest names no such read: allowances come only from the
+        // manifest, so the mount buys the compile no read.
         final mirrorDir = Directory.systemTemp.createTempSync('incr_mirror_');
         addTearDown(() => mirrorDir.deleteSync(recursive: true));
         final mirror = mirrorDir.path;
@@ -670,6 +686,7 @@ void main() {
         ];
         worker = IncrWorker(
           cwd: h.cwd,
+          tempParent: h.cwd,
           sessions: (fs, full, inc, cwd) async {
             final s = FakeSession(
               fullDill: full,
@@ -687,7 +704,12 @@ void main() {
           h.argvWithRoot(mirror),
           h.inputs,
         );
-        expect(result.exitCode, 0, reason: result.output);
+        expect(result.exitCode, 1);
+        expect(
+          result.output,
+          contains(undeclaredReadMessage('+file://$mirror/lib/new.dart')),
+        );
+        expect(File('${h.cwd}/out/app.dill').existsSync(), isFalse);
       },
     );
 
@@ -730,6 +752,7 @@ void main() {
     test('zero reads fail closed with the batch message', () async {
       worker = IncrWorker(
         cwd: h.cwd,
+        tempParent: h.cwd,
         sessions: (fs, full, inc, cwd) async {
           final s = FakeSession(
             fullDill: full,
@@ -760,6 +783,7 @@ void main() {
       final sessions = <FakeSession>[];
       final worker = IncrWorker(
         cwd: h.cwd,
+        tempParent: h.cwd,
         maxServers: 1,
         sessions: (fs, full, inc, cwd) async {
           final s = FakeSession(
@@ -790,6 +814,131 @@ void main() {
       expect(sessions[0].closed, isTrue);
       expect(sessions[1].closed, isFalse);
       Directory.current = savedCwd.path;
+    });
+  });
+
+  group('worker temp cleanup on every exit path', () {
+    late Harness h;
+    late Directory savedCwd;
+
+    SessionFactory oneScript(List<CompileResult> Function() scriptOf) {
+      return (fs, full, inc, cwd) async => FakeSession(
+        fullDill: full,
+        dillBytes: utf8.encode('dill-bytes'),
+        script: scriptOf(),
+      );
+    }
+
+    setUp(() {
+      savedCwd = Directory.current;
+      h = Harness(Directory.systemTemp.createTempSync('incr_exit_'));
+      Directory.current = h.cwd;
+      h.writeManifest();
+      h.writeCleanSources();
+    });
+
+    tearDown(() {
+      Directory.current = savedCwd.path;
+      h.dir.deleteSync(recursive: true);
+    });
+
+    test('a one-shot success leaves no incr_fkc_ dir', () async {
+      final code = await runOneShotWorker(
+        h.argv,
+        createWorker: () => IncrWorker(
+          cwd: h.cwd,
+          tempParent: h.cwd,
+          sessions: oneScript(() => [h.ok(), h.ok()]),
+        ),
+      );
+      expect(code, 0);
+      expect(File('${h.cwd}/out/app.dill').readAsStringSync(), 'dill-bytes');
+      expect(hasWorkerTemp(h.dir), isFalse);
+    });
+
+    test('a one-shot failure leaves no incr_fkc_ dir', () async {
+      const error = 'lib/a.dart:1:5: Error: Expected `;`.';
+      final code = await runOneShotWorker(
+        h.argv,
+        createWorker: () => IncrWorker(
+          cwd: h.cwd,
+          tempParent: h.cwd,
+          sessions: oneScript(
+            () => [
+              (
+                errors: 1,
+                diagnostics: [error],
+                depLines: const [],
+              ),
+            ],
+          ),
+        ),
+      );
+      expect(code, 1);
+      expect(File('${h.cwd}/out/app.dill').existsSync(), isFalse);
+      expect(hasWorkerTemp(h.dir), isFalse);
+    });
+
+    test('persistent stdin EOF deletes the temp dir', () async {
+      final request = jsonEncode({
+        'requestId': 7,
+        'arguments': h.argv,
+        'inputs': [
+          for (final i in h.inputs) {'path': i},
+        ],
+      });
+      final responses = StringBuffer();
+      await runPersistentWorker(
+        createWorker: () => IncrWorker(
+          cwd: h.cwd,
+          tempParent: h.cwd,
+          sessions: oneScript(() => [h.ok(), h.ok()]),
+        ),
+        stdinBytes: Stream.value(utf8.encode('$request\n')),
+        responseSink: responses,
+      );
+      final lines = responses
+          .toString()
+          .split('\n')
+          .where((l) => l.trim().isNotEmpty)
+          .toList();
+      expect(lines, hasLength(1));
+      final reply = jsonDecode(lines.single) as Map<String, dynamic>;
+      expect(reply['exitCode'], 0);
+      expect(reply['requestId'], 7);
+      expect(hasWorkerTemp(h.dir), isFalse);
+    });
+
+    test('a signal closes the worker and deletes the temp dir', () async {
+      // The watcher is wired to a real process signal: delivering the test
+      // runner its own SIGUSR1 exercises the listener, the `closeAll` and
+      // the status report through the production path. SIGTERM/SIGINT are
+      // spoken for by the test runner (a self-sent SIGTERM aborts the run
+      // whichever listener is attached), so the test watches SIGUSR1, whose
+      // signum travels with the pair exactly like the production SIGTERM
+      // (143) and SIGINT (130) pairs it stands in for. Attaching a listener
+      // suppresses the default kill-the-process action, and `onSignal`
+      // records the status instead of exiting, so the runner survives. The
+      // worker serves no requests here: construction alone creates the temp
+      // dir to delete.
+      final worker = IncrWorker(cwd: h.cwd, tempParent: h.cwd);
+      final statuses = <int>[];
+      final subs = watchWorkerSignals(
+        worker,
+        onSignal: statuses.add,
+        signals: [(signal: ProcessSignal.sigusr1, status: 999)],
+      );
+      if (subs.isEmpty) {
+        markTestSkipped('this platform delivers no watched signal');
+      }
+      addTearDown(() => cancelWorkerSignals(subs));
+      expect(hasWorkerTemp(h.dir), isTrue);
+      expect(Process.killPid(pid, ProcessSignal.sigusr1), isTrue);
+      for (var i = 0; i < 200 && statuses.isEmpty; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+      expect(statuses, [999]);
+      expect(hasWorkerTemp(h.dir), isFalse);
     });
   });
 

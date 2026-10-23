@@ -139,7 +139,9 @@ void main() {
       );
     });
 
-    test('accepts a created library under a remapped request root', () {
+    test('refuses a read under a root that only the argv names', () {
+      // No manifest entry allows it: the argv `--filesystem-root` alone
+      // widens nothing, so the mirrored read is undeclared.
       final parent = Directory.systemTemp.createTempSync('kernel_filter_rm_');
       addTearDown(() => parent.deleteSync(recursive: true));
       final work = Directory('${parent.path}/work')..createSync();
@@ -152,17 +154,41 @@ void main() {
           [
             '+file://${mirror.path}/app/lib/main.dart',
             '+file://${mirror.path}/app/lib/new.dart',
+          ],
+          declared,
+          allowed,
+        ),
+        [
+          '+file://${mirror.path}/app/lib/main.dart',
+          '+file://${mirror.path}/app/lib/new.dart',
+        ],
+      );
+    });
+
+    test('the test-only mirror excuse accepts a mirrored created library', () {
+      final parent = Directory.systemTemp.createTempSync('kernel_filter_rm_');
+      addTearDown(() => parent.deleteSync(recursive: true));
+      final work = Directory('${parent.path}/work')..createSync();
+      final mirror = Directory('${parent.path}/mirror')..createSync();
+      final saved = Directory.current;
+      Directory.current = work.path;
+      addTearDown(() => Directory.current = saved.path);
+      expect(
+        findUndeclaredReadsWithMirrorRoots(
+          [
+            '+file://${mirror.path}/app/lib/main.dart',
+            '+file://${mirror.path}/app/lib/new.dart',
             '+file://${work.path}/.dart_tool/package_config.json',
           ],
           declared,
           allowed,
-          requestRoots: [mirror.path],
+          [mirror.path],
         ),
         isEmpty,
       );
     });
 
-    test('still refuses escapes and outside-root reads with roots given', () {
+    test('the mirror excuse still refuses escapes and outside reads', () {
       final parent = Directory.systemTemp.createTempSync('kernel_filter_rb_');
       addTearDown(() => parent.deleteSync(recursive: true));
       final work = Directory('${parent.path}/work')..createSync();
@@ -173,11 +199,11 @@ void main() {
       final escape = '+file://${mirror.path}/../evil.dart';
       const outside = '+file:///tmp/other/evil.dart';
       expect(
-        findUndeclaredReads(
+        findUndeclaredReadsWithMirrorRoots(
           [escape, outside, '+dart:async'],
           declared,
           allowed,
-          requestRoots: ['${mirror.path}/'],
+          ['${mirror.path}/'],
         ),
         [escape, outside, '+dart:async'],
       );
@@ -791,6 +817,43 @@ void main() {}
       ]);
       expect(r.code, 1);
       expect(r.err, contains('+file://${sneak.path}'));
+      expect(r.err, contains('not a declared input'));
+      expect(output.existsSync(), isFalse);
+    });
+
+    test('a read under an argv-only root is refused', () async {
+      // The argv mounts the mirror via `--filesystem-root`, but the manifest
+      // names no such read: allowances come only from the manifest, so the
+      // mount buys the compile no read.
+      writeWork('lib/main.dart', 'void main() {}\n');
+      final mirror = Directory('${dir.path}/mirror')
+        ..createSync(recursive: true);
+      final output = File('${work.path}/app.dill')
+        ..writeAsStringSync('stale bytes');
+      final script = fakeCompiler(
+        'mirror_reader',
+        'import "dart:io";\n'
+            'void main() {\n'
+            '  stdout.writeln("result $_id");\n'
+            '  stdout.writeln("$_id");\n'
+            '  stdout.writeln("+file://${work.path}/lib/main.dart");\n'
+            '  stdout.writeln("+file://${mirror.path}/evil.dart");\n'
+            '  stdout.writeln("$_id app.dill 0");\n'
+            '}\n',
+      );
+      final r = await run([
+        '--declared-inputs',
+        writeManifest(['lib/main.dart'], [], [], [], 'app.dill'),
+        '--',
+        Platform.resolvedExecutable,
+        script.path,
+        '--filesystem-root',
+        mirror.path,
+        '--output-dill',
+        output.path,
+      ]);
+      expect(r.code, 1);
+      expect(r.err, contains('+file://${mirror.path}/evil.dart'));
       expect(r.err, contains('not a declared input'));
       expect(output.existsSync(), isFalse);
     });

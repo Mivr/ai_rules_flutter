@@ -127,16 +127,39 @@ String? dependencyAbsolutePath(String line) {
 /// native-assets manifest) — never the compile argv.
 ///
 /// A read spelt like a working-directory path is decided by the manifest
-/// alone, exactly like the batch path. [requestRoots] additionally excuses a
-/// read from outside the working directory when it sits strictly under one of
-/// the request's `--filesystem-root` values (see [_readUnderRoot]); callers
-/// that pass none see exactly the old behavior.
+/// alone. Any other read — including one under a `--filesystem-root` the
+/// compile argv names — is undeclared: the manifest is the only source of
+/// allowances, so a smuggled argv root widens nothing.
 List<String> findUndeclaredReads(
   List<String> lines,
   Set<String> declared,
-  Set<String> extraAllowed, {
-  List<String> requestRoots = const [],
-}) {
+  Set<String> extraAllowed,
+) => findUndeclaredReadsWithMirrorRoots(
+  lines,
+  declared,
+  extraAllowed,
+  const [],
+);
+
+/// [findUndeclaredReads] with an additional test-only allowance: a read from
+/// outside the working directory is excused when it sits strictly under one
+/// of [mirrorRoots].
+///
+/// Only the differential test harness calls this, to accept the mirrored tree
+/// it links the way the build stages created libraries — a re-analysis would
+/// declare and stage the same files. Production ([runFiltered] and the
+/// incremental worker) never passes anything but `const []`: allowances come
+/// only from the manifest, so no argv flag, environment variable or manifest
+/// field a build can set reaches [mirrorRoots]. Reads outside every mirror
+/// root (absolute `file:` imports, package-config escapes) are still refused,
+/// as are `..` escapes, which resolve before the prefix check and so name a
+/// path outside the root.
+List<String> findUndeclaredReadsWithMirrorRoots(
+  List<String> lines,
+  Set<String> declared,
+  Set<String> extraAllowed,
+  List<String> mirrorRoots,
+) {
   final undeclared = <String>[];
   for (final line in lines) {
     final rel = dependencyExecPath(line);
@@ -146,7 +169,7 @@ List<String> findUndeclaredReads(
       }
       continue;
     }
-    if (!_readUnderRoot(line, requestRoots)) {
+    if (!_readUnderRoot(line, mirrorRoots)) {
       undeclared.add(line);
     }
   }
@@ -154,25 +177,23 @@ List<String> findUndeclaredReads(
 }
 
 /// Whether a `+uri` dependency [line] from outside the working directory
-/// names a file strictly under one of the request-time compiler [roots].
+/// names a file strictly under one of the test-harness [mirrorRoots].
 ///
-/// The check is structural on purpose, matching the prototype: the roots
-/// stage exactly the declared inputs, so in production every read under a
-/// root is a declared file and this branch never fires (every production
-/// read sits under the working directory, where the manifest decides). It
-/// fires only when the roots are remapped elsewhere — the differential
-/// harness mirrors the staging root, linking created libraries in the way
-/// the build stages them — and there it accepts the mirrored tree the same
-/// way a re-analysis would declare and stage it. Reads outside every root
-/// (absolute `file:` imports, package-config escapes: the RT8/RT10 cases)
-/// are still refused, as are `..` escapes, which resolve before the prefix
-/// check and so name a path outside the root.
-bool _readUnderRoot(String line, List<String> requestRoots) {
-  if (requestRoots.isEmpty) return false;
+/// The check is structural on purpose: the mirrored roots stage exactly the
+/// declared inputs, so a read under a root is a declared file re-spelt at
+/// its mirrored location. Production never reaches this branch — it calls
+/// [findUndeclaredReads], which passes no roots — and the differential
+/// harness reaches it only through [findUndeclaredReadsWithMirrorRoots].
+/// Reads outside every root (absolute `file:` imports, package-config
+/// escapes: the RT8/RT10 cases) are still refused, as are `..` escapes,
+/// which resolve before the prefix check and so name a path outside the
+/// root.
+bool _readUnderRoot(String line, List<String> mirrorRoots) {
+  if (mirrorRoots.isEmpty) return false;
   final abs = dependencyAbsolutePath(line);
   if (abs == null) return false;
   final cwd = Directory.current.path.replaceAll(r'\', '/');
-  for (final rawRoot in requestRoots) {
+  for (final rawRoot in mirrorRoots) {
     if (abs.startsWith('${_absoluteRoot(rawRoot, cwd)}/')) return true;
   }
   return false;

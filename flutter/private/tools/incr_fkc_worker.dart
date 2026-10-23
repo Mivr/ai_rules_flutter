@@ -23,6 +23,7 @@
 /// stale digest never hides a change.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -121,24 +122,77 @@ Future<CompilerSession> _startRealSession(
   String cwd,
 ) => FrontendServerSession.start(fs, fullDill, incrementalDill, cwd: cwd);
 
-/// The `--filesystem-root` values in the compiler command [fs].
-List<String> compilerFilesystemRoots(List<String> fs) {
-  final roots = <String>[];
-  final flags = fs.sublist(0, fs.length - 1);
-  for (var k = 0; k < flags.length - 1; k++) {
-    if (flags[k] == '--filesystem-root') roots.add(flags[k + 1]);
+/// Installs SIGTERM/SIGINT cleanup for [worker]: the signal closes the worker
+/// (stopping its servers and deleting its temp directory) before the process
+/// exits with the signal's conventional status.
+///
+/// One-shot actions and persistent workers die on signals without running
+/// `finally`, so without this every signalled build leaks an `incr_fkc_*`
+/// directory under the temp directory.
+///
+/// [onSignal] overrides the process exit for tests, which deliver the process
+/// its own signal: the default [exit] would end the test runner, so tests
+/// record the status instead and let the test end normally.
+///
+/// [signals] overrides the watched signals for tests: the suite delivers the
+/// process its own signal, and SIGTERM/SIGINT are spoken for by the test
+/// runner, so tests watch SIGUSR1 through the same subscription, cleanup
+/// and status path. Production always passes nothing, watching SIGTERM
+/// (status 143) and SIGINT (status 130).
+List<StreamSubscription<ProcessSignal>> watchWorkerSignals(
+  IncrWorker worker, {
+  void Function(int status)? onSignal,
+  List<({ProcessSignal signal, int status})>? signals,
+}) {
+  final subs = <StreamSubscription<ProcessSignal>>[];
+  // The conventional 128-plus-signum statuses: SIGTERM is 15, SIGINT is 2.
+  // (`ProcessSignal` exposes no number getter on every SDK this builds with,
+  // so the statuses travel with the watched signals.)
+  final watchedSignals =
+      signals ??
+      [
+        (signal: ProcessSignal.sigterm, status: 143),
+        (signal: ProcessSignal.sigint, status: 130),
+      ];
+  for (final watched in watchedSignals) {
+    try {
+      subs.add(
+        watched.signal.watch().listen((_) async {
+          await worker.closeAll();
+          (onSignal ?? exit)(watched.status);
+        }),
+      );
+    } on UnsupportedError {
+      // The platform delivers no such signal; the `finally` paths still clean
+      // up on normal exits, failures and stdin EOF.
+    }
   }
-  return roots;
+  return subs;
+}
+
+/// Cancels the subscriptions installed by [watchWorkerSignals].
+Future<void> cancelWorkerSignals(
+  List<StreamSubscription<ProcessSignal>> subs,
+) async {
+  for (final sub in subs) {
+    await sub.cancel();
+  }
 }
 
 /// The incremental worker: one [IncrServerState] per configuration key with
 /// an LRU cap on live servers (a warm server holds about 1.75 GiB).
 class IncrWorker {
-  IncrWorker({String? cwd, int? maxServers, SessionFactory? sessions})
-    : cwd = cwd ?? Directory.current.path,
-      maxServers = maxServers ?? _maxServersFromEnv(),
-      _sessions = sessions ?? _startRealSession,
-      _tmp = Directory.systemTemp.createTempSync('incr_fkc_');
+  IncrWorker({
+    String? cwd,
+    int? maxServers,
+    SessionFactory? sessions,
+    String? tempParent,
+  }) : cwd = cwd ?? Directory.current.path,
+       maxServers = maxServers ?? _maxServersFromEnv(),
+       _sessions = sessions ?? _startRealSession,
+       _tmp =
+           (tempParent == null ? Directory.systemTemp : Directory(tempParent))
+               .createTempSync('incr_fkc_');
 
   final String cwd;
   final int maxServers;
@@ -153,14 +207,31 @@ class IncrWorker {
     return parsed > 0 ? parsed : 1;
   }
 
-  /// Stops every server. Used when the worker itself is done, and after an
-  /// unexpected error the server state cannot be trusted.
+  /// Stops every server and deletes the worker's temp directory. Used when
+  /// the worker itself is done, and after an unexpected error the server
+  /// state cannot be trusted. Runs on every exit path — one-shot success and
+  /// failure, persistent-worker stdin EOF, exceptions, and signals — so no
+  /// `incr_fkc_*` directory survives the worker.
   Future<void> closeAll() async {
-    for (final state in _servers.values) {
-      await state.session.close();
+    try {
+      for (final state in _servers.values) {
+        await state.session.close();
+      }
+    } finally {
+      _servers.clear();
+      _order.clear();
+      _deleteTempDir();
     }
-    _servers.clear();
-    _order.clear();
+  }
+
+  /// Best-effort deletion of [_tmp]: the exit code already reports the
+  /// compile result, so a failed delete must not fail the build.
+  void _deleteTempDir() {
+    try {
+      if (_tmp.existsSync()) _tmp.deleteSync(recursive: true);
+    } on FileSystemException {
+      // Lost a race with an outer cleanup; nothing left to report.
+    }
   }
 
   void _touch(String key) {
@@ -217,22 +288,15 @@ class IncrWorker {
   }
 
   /// The refusal text for the cumulative read set, or null when clean. Uses
-  /// the same messages as the batch path. [requestRoots] are the request's
-  /// `--filesystem-root` values: a read from outside the working directory is
-  /// excused only when it sits under one of them (the differential harness
-  /// mirrors the staging root elsewhere); every production read sits under
-  /// the working directory, where the manifest decides exactly like batch.
-  String? _checkReads(
-    Set<String> current,
-    KernelInputsManifest manifest,
-    List<String> requestRoots,
-  ) {
+  /// the same messages as the batch path, decided by the manifest alone: a
+  /// read under a `--filesystem-root` the argv names but the manifest does
+  /// not is refused, exactly like batch.
+  String? _checkReads(Set<String> current, KernelInputsManifest manifest) {
     final lines = [for (final u in current.toList()..sort()) '+$u'];
     final bad = findUndeclaredReads(
       lines,
       manifest.declared,
       manifest.extraAllowed,
-      requestRoots: requestRoots,
     );
     if (bad.isEmpty) return null;
     return bad.map(undeclaredReadMessage).join('\n');
@@ -269,7 +333,10 @@ class IncrWorker {
       hashes.changed,
       parts.manifest.sources.toSet(),
     );
-    final roots = plan.cold ? compilerFilesystemRoots(parts.fs) : state!.roots;
+    // The guard and the read check take their allowances only from the
+    // manifest: argv `--filesystem-root` values never widen what either
+    // accepts, so a smuggled root buys no read.
+    final roots = parts.manifest.fsRoots;
     final guard = plan.cold ? GuardCache() : state!.guard;
     final guardError = _checkGuard(
       parts.manifest,
@@ -432,11 +499,7 @@ class IncrWorker {
     foldDepLines(state.currentReads, r.depLines);
     if (r.errors != 0) {
       await state.session.reject();
-      final refusal = _checkReads(
-        state.currentReads,
-        parts.manifest,
-        state.roots,
-      );
+      final refusal = _checkReads(state.currentReads, parts.manifest);
       if (refusal != null) {
         await _drop(key);
         _deleteOutput(parts.outputRel);
@@ -474,11 +537,7 @@ class IncrWorker {
     Map<String, String?> current,
   ) async {
     await state.session.accept();
-    final refusal = _checkReads(
-      state.currentReads,
-      parts.manifest,
-      state.roots,
-    );
+    final refusal = _checkReads(state.currentReads, parts.manifest);
     if (refusal != null) {
       await _drop(key);
       _deleteOutput(parts.outputRel);
@@ -507,9 +566,14 @@ class IncrWorker {
 
 /// Runs one fresh-process request: the same protocol a warm worker runs, so
 /// the bytes are identical. This is what sandboxed, local and remote
-/// strategies run.
-Future<int> runOneShotWorker(List<String> argv) async {
-  final worker = IncrWorker();
+/// strategies run. The worker's temp directory is deleted on every exit path
+/// — success, failure and exception alike — via [IncrWorker.closeAll].
+Future<int> runOneShotWorker(
+  List<String> argv, {
+  IncrWorker Function()? createWorker,
+}) async {
+  final worker = (createWorker ?? IncrWorker.new)();
+  final signals = watchWorkerSignals(worker);
   try {
     final result = await worker.handleRequest(argv, const []);
     if (result.output.isNotEmpty) stderr.writeln(result.output);
@@ -521,48 +585,64 @@ Future<int> runOneShotWorker(List<String> argv) async {
     stderr.writeln('incr_fkc_worker: worker error: $e');
     return 1;
   } finally {
+    await cancelWorkerSignals(signals);
     await worker.closeAll();
   }
 }
 
-/// Serves Bazel JSON persistent-worker requests on stdin/stdout.
-Future<void> runPersistentWorker() async {
-  final worker = IncrWorker();
-  final lines = stdin.transform(utf8.decoder).transform(const LineSplitter());
-  await for (final line in lines) {
-    if (line.trim().isEmpty) continue;
-    final req = jsonDecode(line) as Map<String, dynamic>;
-    final rid = req['requestId'] ?? 0;
-    final rawArgs = [
-      for (final a in (req['arguments'] as List<dynamic>? ?? [])) a as String,
-    ];
-    final inputs = [
-      for (final i in (req['inputs'] as List<dynamic>? ?? []))
-        (i as Map<String, dynamic>)['path'] as String,
-    ];
-    int code;
-    String out;
-    try {
-      // Request digests are only a hint: change detection reads file
-      // contents, so a stale digest never hides a change.
-      final result = await worker.handleRequest(
-        expandWorkerFlagfiles(stripWorkerArgv0(rawArgs)),
-        inputs,
+/// Serves Bazel JSON persistent-worker requests on stdin/stdout. Returns when
+/// stdin closes, after closing every server and deleting the worker's temp
+/// directory, so no `incr_fkc_*` directory survives the worker.
+Future<void> runPersistentWorker({
+  IncrWorker Function()? createWorker,
+  Stream<List<int>>? stdinBytes,
+  StringSink? responseSink,
+}) async {
+  final worker = (createWorker ?? IncrWorker.new)();
+  final signals = watchWorkerSignals(worker);
+  try {
+    final out = responseSink ?? stdout;
+    final lines = (stdinBytes ?? stdin)
+        .transform(utf8.decoder)
+        .transform(const LineSplitter());
+    await for (final line in lines) {
+      if (line.trim().isEmpty) continue;
+      final req = jsonDecode(line) as Map<String, dynamic>;
+      final rid = req['requestId'] ?? 0;
+      final rawArgs = [
+        for (final a in (req['arguments'] as List<dynamic>? ?? [])) a as String,
+      ];
+      final inputs = [
+        for (final i in (req['inputs'] as List<dynamic>? ?? []))
+          (i as Map<String, dynamic>)['path'] as String,
+      ];
+      int code;
+      String response;
+      try {
+        // Request digests are only a hint: change detection reads file
+        // contents, so a stale digest never hides a change.
+        final result = await worker.handleRequest(
+          expandWorkerFlagfiles(stripWorkerArgv0(rawArgs)),
+          inputs,
+        );
+        code = result.exitCode;
+        response = result.output;
+      } catch (e) {
+        // The servers are not trusted after an error: drop them all. The
+        // message goes to stderr so the JSON protocol on stdout stays clean.
+        await worker.closeAll();
+        code = 1;
+        response = 'incr_fkc_worker: worker error: $e';
+        stderr.writeln(response);
+      }
+      out.writeln(
+        jsonEncode({'exitCode': code, 'output': response, 'requestId': rid}),
       );
-      code = result.exitCode;
-      out = result.output;
-    } catch (e) {
-      // The servers are not trusted after an error: drop them all. The
-      // message goes to stderr so the JSON protocol on stdout stays clean.
-      await worker.closeAll();
-      code = 1;
-      out = 'incr_fkc_worker: worker error: $e';
-      stderr.writeln(out);
+      await stdout.flush();
     }
-    stdout.writeln(
-      jsonEncode({'exitCode': code, 'output': out, 'requestId': rid}),
-    );
-    await stdout.flush();
+  } finally {
+    await cancelWorkerSignals(signals);
+    await worker.closeAll();
   }
 }
 
