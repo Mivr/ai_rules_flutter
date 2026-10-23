@@ -30,13 +30,21 @@ void main() {
 
   test('a library bazel did not rewrite is never read', () async {
     // The fast path, pinned by defeating it. A `stat` costs 33µs and hashing a
-    // 20MB debug library costs 126ms (both measured), so a command reads only the
-    // files whose size or mtime moved. Here the bytes change while the stamp is
-    // put back exactly as it was: the watch answers current, which is the
+    // 20MB debug library costs 126ms (both measured), so a command reads only
+    // the files whose stamp moved or whose stamp cannot prove the bytes
+    // unchanged. Here the bytes change while the stamp is put back exactly as
+    // it was: the watch answers current without reading, which is the
     // documented limit of the prefilter and the reason it is safe — bazel
     // advances an output's mtime whenever it re-runs the action that writes it,
     // so the case constructed here is one no build produces.
+    //
+    // The file's mtime is set into the past, past the racy window, before the
+    // baseline is read: only then does a matching stamp prove the bytes
+    // unchanged. A file written in the baseline's own tick stays on the read
+    // path instead (see the same-tick group below).
     final lib = file('liba.dylib', [1, 2, 3]);
+    final past = DateTime.now().subtract(const Duration(seconds: 10));
+    lib.setLastModifiedSync(past);
     final stamp = lib.statSync();
     final watch = await NativeLibsWatch.of({lib.path: const []});
 
@@ -48,6 +56,79 @@ void main() {
     // read and the change is reported.
     lib.setLastModifiedSync(stamp.modified.add(const Duration(seconds: 1)));
     expect(await watch.verdict(), isA<NativeLibsUnverifiable>());
+  });
+
+  group('a same-size rewrite in the baseline tick', () {
+    // What a coarse filesystem clock leaves: the rewrite lands in the same tick
+    // the baseline was read in, so size and mtime come back exactly as they
+    // were and the stamp matches. The watch must read the content anyway —
+    // the file's mtime is not older than its last read by more than the window
+    // — and report the changed bytes.
+    test('of a library is reported', () async {
+      final lib = file('liba.dylib', [1, 2, 3]);
+      final stamp = lib.statSync();
+      final watch = await NativeLibsWatch.of({lib.path: const []});
+
+      lib.writeAsBytesSync([4, 5, 6]);
+      lib.setLastModifiedSync(stamp.modified);
+      expect(await watch.verdict(), isA<NativeLibsUnverifiable>());
+    });
+
+    test('of a contract is reported', () async {
+      final bridge = file('libbridge.dylib', [1]);
+      final contract = file('codegen.ir', [10, 11]);
+      final stamp = contract.statSync();
+      final watch = await NativeLibsWatch.of({
+        bridge.path: [contract.path],
+      });
+
+      contract.writeAsBytesSync([12, 13]);
+      contract.setLastModifiedSync(stamp.modified);
+      expect(await watch.verdict(), isA<NativeBindingsMoved>());
+    });
+
+    test('of a source is reported', () async {
+      final lib = file('libbridge.dylib', [1]);
+      final contract = file('bridge.h', [10]);
+      final source = file('bridge.c', [20, 21]);
+      final stamp = source.statSync();
+      final watch = await NativeLibsWatch.of(
+        {
+          lib.path: [contract.path],
+        },
+        sources: {
+          lib.path: [source.path],
+        },
+      );
+
+      source.writeAsBytesSync([22, 23]);
+      source.setLastModifiedSync(stamp.modified);
+      expect(await watch.verdict(), isA<NativeCodeStale>());
+    });
+  });
+
+  test('a confirming read beyond the window returns to stat-only', () async {
+    final lib = file('liba.dylib', [1, 2, 3]);
+    final stamp = lib.statSync();
+    final watch = await NativeLibsWatch.of({lib.path: const []});
+
+    // The baseline tick is racy, so this verdict reads the content and
+    // confirms it unchanged — and stays on the read path, since the file was
+    // written moments ago.
+    expect(await watch.verdict(), isA<NativeLibsCurrent>());
+
+    // The only sleep in this file: the clock must advance past the window so
+    // the next confirming read finds the file's mtime older than its own read
+    // by more than the window.
+    await Future<void>.delayed(const Duration(seconds: 3));
+    expect(await watch.verdict(), isA<NativeLibsCurrent>());
+
+    // Now the watch is back on the stat-only path: changed bytes under a
+    // matching stamp go unread, the way files written before the window always
+    // have. A verdict that still read would report the change below.
+    lib.writeAsBytesSync([4, 5, 6]);
+    lib.setLastModifiedSync(stamp.modified);
+    expect(await watch.verdict(), isA<NativeLibsCurrent>());
   });
 
   group('a library with no declared contract', () {
