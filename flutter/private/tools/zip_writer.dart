@@ -32,8 +32,11 @@ class _BytesSink implements Sink<List<int>> {
 /// Counts bytes and accumulates their CRC-32 while a ZIP payload streams through.
 class CrcAndSizeSink implements Sink<List<int>> {
   int _crc = 0xFFFFFFFF;
+
+  /// Total payload bytes streamed through this sink so far.
   int totalLength = 0;
 
+  /// The CRC-32 of the bytes streamed so far, post-conditioned.
   int get crc32Value => (_crc ^ 0xFFFFFFFF) & 0xFFFFFFFF;
 
   @override

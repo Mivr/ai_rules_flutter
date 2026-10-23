@@ -63,6 +63,7 @@ bool isAllowedNonMacho(
 class FlagCursor {
   FlagCursor(this.args);
 
+  /// The flag words being scanned.
   final List<String> args;
   int _index = -1;
 
