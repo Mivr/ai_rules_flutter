@@ -29,6 +29,7 @@ const int kMachineX86_64 = 62;
 /// Failure carrying the fetch-facing message. Only this type is caught in
 /// [runPatch]; anything else is a bug and must surface with a stack trace.
 class PatchFailure implements Exception {
+  /// Fetch-facing failure detail, naming what to update.
   final String message;
 
   const PatchFailure(this.message);
@@ -332,6 +333,7 @@ int runPatch(List<String> args) {
   return 0;
 }
 
+/// Runs [runPatch] and uses its return as the process exit code.
 void main(List<String> args) {
   exitCode = runPatch(args);
 }
