@@ -22,7 +22,7 @@ load("//flutter/private:flutter_profile_repo.bzl", "flutter_profile_repo")
 load("//flutter/private:flutter_sky_engine_repo.bzl", "flutter_sky_engine_repo")
 load("//flutter/private:flutter_web_sdk_repo.bzl", "flutter_web_sdk_repo")
 load("//flutter/private:linux_headless_runtime_repo.bzl", "linux_headless_runtime_repo")
-load("//flutter/private:local_sdk.bzl", "copy_local_file", "host_engine_cache_dir", "link_local_dir", "link_local_file", "read_local_sdk_version", "resolve_local_sdk_root")
+load("//flutter/private:local_sdk.bzl", "host_engine_cache_dir", "link_local_dir", "link_local_file", "read_local_sdk_version", "resolve_local_sdk_root", "stage_local_dart_sdk")
 load("//flutter/private:pub_lock_sdks.bzl", "version_below_lower_bound")
 load("//flutter/private:toolchains_repo.bzl", "CROSS_COMPILATION_PAIRS", "DESKTOP_CROSS_PAIRS", "HOST_PLATFORMS", "flutter_toolchains_repo")
 load("//flutter/private:versions.bzl", "FLUTTER_VERSIONS", "LINUX_SYSROOT_CHECKSUMS", "flutter_artifact_sha256", "flutter_source_sha256", "unknown_version_message")
@@ -516,108 +516,6 @@ flutter_android_engine_jar(
 )
 """
 
-_PATCH_DARTDEV_DART = """\
-import 'dart:io';
-import 'dart:typed_data';
-
-void main(List<String> args) {
-  final snapFile = File(args[0]);
-  if (!snapFile.existsSync()) return;
-  final bytes = snapFile.readAsBytesSync();
-  if (bytes.length < 64 ||
-      bytes[0] != 0x7f ||
-      bytes[1] != 0x45 ||
-      bytes[2] != 0x4c ||
-      bytes[3] != 0x46 ||
-      bytes[4] != 2) {
-    return;
-  }
-  final bd = ByteData.sublistView(bytes);
-  if (bd.getUint16(18, Endian.little) != 62) return;
-
-  final phoff = bd.getUint64(32, Endian.little);
-  final phentsize = bd.getUint16(54, Endian.little);
-  final phnum = bd.getUint16(56, Endian.little);
-  final shoff = bd.getUint64(40, Endian.little);
-  final shentsize = bd.getUint16(58, Endian.little);
-  final shnum = bd.getUint16(60, Endian.little);
-
-  int? vaddrToOffset(int vaddr) {
-    for (var i = 0; i < phnum; i++) {
-      final off = phoff + i * phentsize;
-      if (bd.getUint32(off, Endian.little) == 1) {
-        final pOffset = bd.getUint64(off + 8, Endian.little);
-        final pVaddr = bd.getUint64(off + 16, Endian.little);
-        final pFilesz = bd.getUint64(off + 32, Endian.little);
-        if (vaddr >= pVaddr && vaddr < pVaddr + pFilesz) {
-          return pOffset + (vaddr - pVaddr);
-        }
-      }
-    }
-    return null;
-  }
-
-  for (var i = 0; i < shnum; i++) {
-    final sh = shoff + i * shentsize;
-    final shType = bd.getUint32(sh + 4, Endian.little);
-    if (shType == 2 || shType == 11) {
-      final dynsymOff = bd.getUint64(sh + 24, Endian.little);
-      final dynsymSize = bd.getUint64(sh + 32, Endian.little);
-      final strLink = bd.getUint32(sh + 40, Endian.little);
-      final strSh = shoff + strLink * shentsize;
-      final dynstrOff = bd.getUint64(strSh + 24, Endian.little);
-
-      String readStr(int nameOff) {
-        var end = dynstrOff + nameOff;
-        while (bytes[end] != 0) end++;
-        return String.fromCharCodes(bytes.sublist(dynstrOff + nameOff, end));
-      }
-
-      for (var symOff = dynsymOff; symOff < dynsymOff + dynsymSize; symOff += 24) {
-        final stName = bd.getUint32(symOff, Endian.little);
-        if (readStr(stName) == 'DartNativeAssetsBuilder.findPubspec') {
-          final stValue = bd.getUint64(symOff + 8, Endian.little);
-          final stSize = bd.getUint64(symOff + 16, Endian.little);
-          final fnOff = vaddrToOffset(stValue);
-          if (fnOff == null) return;
-
-          int? patchAt;
-          for (var j = 0; j < 80 && j + 8 < stSize; j++) {
-            if (bytes[fnOff + j] == 0xe8 &&
-                bytes[fnOff + j + 5] == 0x48 &&
-                bytes[fnOff + j + 6] == 0x8b &&
-                bytes[fnOff + j + 7] == 0x45) {
-              patchAt = fnOff + j + 5;
-              break;
-            }
-          }
-          int? retNullAt;
-          for (var j = stSize - 80; j < stSize - 12; j++) {
-            if (j >= 0 &&
-                bytes[fnOff + j] == 0x49 &&
-                bytes[fnOff + j + 1] == 0x8b &&
-                bytes[fnOff + j + 2] == 0x86 &&
-                bytes[fnOff + j + 5] == 0x00 &&
-                bytes[fnOff + j + 6] == 0x00 &&
-                bytes[fnOff + j + 7] == 0xe9) {
-              retNullAt = fnOff + j;
-              break;
-            }
-          }
-          if (patchAt != null && retNullAt != null) {
-            final rel32 = retNullAt - (patchAt + 5);
-            bytes[patchAt] = 0xe9;
-            bd.setInt32(patchAt + 1, rel32, Endian.little);
-            snapFile.writeAsBytesSync(bytes);
-            return;
-          }
-        }
-      }
-    }
-  }
-}
-"""
-
 def _flutter_engine_artifacts_local_impl(repository_ctx):
     """Sources the core host artifacts out of a pre-extracted local SDK.
 
@@ -654,14 +552,14 @@ def _flutter_engine_artifacts_local_impl(repository_ctx):
                 version = flutter_version,
             ))
 
-    # The whole bundled Dart SDK, exactly as `flutter precache` left it.
-    link_local_dir(
-        repository_ctx,
-        sdk_root,
-        "bin/cache/dart-sdk",
-        "dart-sdk",
-        "the Flutter-bundled Dart SDK",
-    )
+    # The bundled Dart SDK as a hybrid tree: every entry is a symlink into
+    # the SDK except `bin/dart` and `bin/snapshots/dartdev_aot.dart.snapshot`,
+    # which are repo-owned copies so the `dart` actions run loads the
+    # declared, patched snapshot next to its own real path and the fetch can
+    # patch it without writing through into the user's tree. When the SDK has
+    # no AOT snapshot (a trimmed tree), the staging skips it and so does the
+    # patch step. See stage_local_dart_sdk.
+    stage_local_dart_sdk(repository_ctx, sdk_root)
 
     # Host tools and the debug desktop engine share one cache directory in a
     # real install (flutter_tool extracts both archives into it), which is
@@ -697,25 +595,6 @@ def _flutter_engine_artifacts_local_impl(repository_ctx):
         ))
     dart_version = repository_ctx.read(dart_version_path).strip()
 
-    # The dartdev patch below rewrites `dartdev_aot.dart.snapshot` in place,
-    # which must never touch the user's SDK tree through the `dart-sdk`
-    # symlink. Stage a repo-owned copy and patch that instead; the BUILD
-    # filegroups name the copy, so consumers are unaffected. When the SDK has
-    # no AOT snapshot (a trimmed tree), there is nothing to stage and the
-    # patch step skips itself via its exists check.
-    dartdev_aot_snapshot = "dart-sdk/bin/snapshots/dartdev_aot.dart.snapshot"
-    sdk_aot_snapshot = sdk_root.get_child("bin/cache/dart-sdk/bin/snapshots/dartdev_aot.dart.snapshot")
-    if sdk_aot_snapshot.exists:
-        dartdev_aot_snapshot = "dartdev-patched/dartdev_aot.dart.snapshot"
-        repository_ctx.file("dartdev-patched/.keep", "")
-        repository_ctx.delete("dartdev-patched/.keep")
-        copy_local_file(
-            repository_ctx,
-            str(sdk_aot_snapshot),
-            str(repository_ctx.path(dartdev_aot_snapshot)),
-            "the dartdev AOT snapshot",
-        )
-
     _write_engine_artifacts_build(
         repository_ctx,
         flutter_version = flutter_version,
@@ -723,7 +602,6 @@ def _flutter_engine_artifacts_local_impl(repository_ctx):
         platform = platform,
         user_repo_name = user_repo_name,
         dart_version = dart_version,
-        dartdev_aot_snapshot = dartdev_aot_snapshot,
     )
 
 def _flutter_engine_artifacts_impl(repository_ctx):
@@ -801,45 +679,118 @@ def _flutter_engine_artifacts_impl(repository_ctx):
         dart_version = dart_version,
     )
 
-def _patch_dartdev_snapshot(repository_ctx, platform, dartdev_aot_snapshot, exe_suffix):
-    """Patch the host `dartdev_aot` snapshot so `dart compile exe` stays hermetic.
+def _fetching_host_platform(repository_ctx):
+    """The `HOST_PLATFORMS` key of the machine running this fetch.
 
-    Neutralizes `DartNativeAssetsBuilder.findPubspec` so it does not walk
-    parent directories into `execroot/_main/pubspec.yaml` on Windows (where
-    Bazel uses a SymlinkForest without sandboxing) and run `pub get` without
-    `FLUTTER_ROOT`. Skipped when the host differs or the SDK ships no
-    runnable host `dartvm` or AOT snapshot.
+    Reads the same OS name and architecture fields Bazel uses for repository
+    platform detection. An unknown OS or CPU here is a hard fetch error naming
+    the machine's values: guessing would run a `dartvm` that cannot execute.
+
+    Args:
+        repository_ctx: The repository rule context.
+
+    Returns:
+        The `"<os>-<arch>"` key (e.g. `"linux-x64"`).
     """
-    os_part = platform.split("-")[0]  # "darwin", "linux", "windows"
-    arch_part = platform.split("-")[1]  # "x64", "arm64"
-    host_os_name = repository_ctx.os.name.lower()
-    host_arch = repository_ctx.os.arch.lower()
-    host_arch_part = "arm64" if host_arch in ("aarch64", "arm64") else "x64"
-    host_is_this_platform = (
-        arch_part == host_arch_part and (
-            (os_part == "linux" and "linux" in host_os_name) or
-            (os_part == "darwin" and ("mac" in host_os_name or "darwin" in host_os_name)) or
-            (os_part == "windows" and "windows" in host_os_name)
-        )
-    )
-    if host_is_this_platform:
-        # A local SDK may not ship a runnable host `dartvm` (a minimal or
-        # trimmed tree); without it there is nothing to patch, so the patch
-        # is skipped rather than failing the fetch. The snapshot exists check
-        # covers trimmed SDKs that ship no AOT snapshot at all.
-        dartvm_path = repository_ctx.path("dart-sdk/bin/dartvm" + exe_suffix)
-        snapshot_path = repository_ctx.path(dartdev_aot_snapshot)
-        if dartvm_path.exists and snapshot_path.exists:
-            repository_ctx.file("_empty_packages.json", '{"configVersion": 2, "packages": []}\n')
-            repository_ctx.file("_patch_dartdev.dart", _PATCH_DARTDEV_DART)
-            repository_ctx.execute([
-                dartvm_path,
-                "--packages=" + str(repository_ctx.path("_empty_packages.json")),
-                str(repository_ctx.path("_patch_dartdev.dart")),
-                str(snapshot_path),
-            ])
-            repository_ctx.delete("_empty_packages.json")
-            repository_ctx.delete("_patch_dartdev.dart")
+    name = repository_ctx.os.name.lower()
+    if "windows" in name:
+        host_os = "windows"
+    elif "linux" in name:
+        host_os = "linux"
+    elif "mac" in name or "darwin" in name:
+        host_os = "darwin"
+    else:
+        fail("dartdev snapshot patch: unknown fetching host OS {!r}; update _fetching_host_platform for this machine".format(repository_ctx.os.name))
+    arch = repository_ctx.os.arch.lower()
+    if arch in ("aarch64", "arm64"):
+        host_arch = "arm64"
+    elif "64" in arch:
+        host_arch = "x64"
+    else:
+        fail("dartdev snapshot patch: unknown fetching host CPU {!r}; update _fetching_host_platform for this machine".format(repository_ctx.os.arch))
+    return "{}-{}".format(host_os, host_arch)
+
+def _dartdev_patch_vm(repository_ctx, platform, patch_vm_files):
+    """The `dartvm` that patches this repo's snapshot: a path or label.
+
+    `platform`'s own repo runs its own `dartvm` (a same-repo relative path,
+    no fetch beyond this repo). A foreign repo runs the fetching host's own
+    `flutter_engine_artifacts` repo VM, by label — the label's repo is fetched
+    on demand, so the four non-fetching host repos pay one extra download
+    each, and nothing else fetches anything new.
+
+    Args:
+        repository_ctx: The repository rule context.
+        platform: The repo's own host platform string.
+        patch_vm_files: `dartvm` label → fetching-host platform dict.
+
+    Returns:
+        A same-repo relative path string, or the fetching host's `dartvm`
+        label from `patch_vm_files`.
+    """
+    host = _fetching_host_platform(repository_ctx)
+    if platform == host:
+        return "dart-sdk/bin/" + dart_binary_name(platform).replace("dart", "dartvm", 1)
+    for vm, vm_host in patch_vm_files.items():
+        if vm_host == host:
+            return vm
+    fail((
+        "dartdev snapshot patch: no patch VM registered for fetching " +
+        "host {host} while fetching {platform}; register the host's " +
+        "dartvm label in patch_vm_files"
+    ).format(host = host, platform = platform))
+
+def _patch_dartdev_snapshot(repository_ctx, platform, flutter_version):
+    """Patch every x86-64 ELF `dartdev_aot` snapshot; fail closed otherwise.
+
+    Runs `//flutter/private/dartdev_patch:patch.dart` — read by label through
+    the `_dartdev_patch` attribute so the fetcher never embeds the program's
+    bytes — on the snapshot with a sha256-pinned VM (never the host PATH) and
+    no host Python. The patch program neutralizes
+    `DartNativeAssetsBuilder.findPubspec` so it does not walk parent
+    directories into `execroot/_main/pubspec.yaml` on Windows (where Bazel
+    uses a SymlinkForest without sandboxing) and run `pub get` without
+    `FLUTTER_ROOT`. Every x86-64 ELF snapshot is patched on every fetching
+    host with byte-identical results, so all five SDK repos carry identical
+    bytes; non-ELF or non-x86-64 snapshots (macOS Mach-O, arm64) are left
+    untouched. A missing snapshot in download mode is a layout change and
+    fails; in local mode a trimmed tree stages nothing, so the same absence
+    is skipped. Any patch failure fails the fetch naming the platform, the
+    Flutter version, the file, and what to update. No result is ignored.
+
+    Args:
+        repository_ctx: The repository rule context.
+        platform: The repo's own host platform string.
+        flutter_version: Flutter release tag, named in failure messages.
+    """
+    snapshot = "dart-sdk/bin/snapshots/dartdev_aot.dart.snapshot"
+    snapshot_path = repository_ctx.path(snapshot)
+    if not snapshot_path.exists:
+        if getattr(repository_ctx.attr, "local_path", ""):
+            return
+        fail((
+            "dartdev snapshot patch: {snapshot} is missing from the {platform} " +
+            "Dart SDK archive for Flutter {version}; the archive layout " +
+            "changed, update the dartdev patch for the new layout"
+        ).format(snapshot = snapshot, platform = platform, version = flutter_version))
+    vm_ref = _dartdev_patch_vm(repository_ctx, platform, repository_ctx.attr.patch_vm_files)
+    patch = repository_ctx.path(repository_ctx.attr._dartdev_patch)
+    vm = repository_ctx.path(vm_ref)
+    packages = repository_ctx.path(Label("//flutter/private/dartdev_patch:empty.json"))
+    result = repository_ctx.execute([str(vm), "--packages=" + str(packages), str(patch), str(snapshot_path)])
+    if result.return_code == 1:
+        fail((
+            "dartdev snapshot patch: failed to patch {snapshot} for Flutter " +
+            "{version} ({platform}): {stderr}\nUpdate " +
+            "//flutter/private/dartdev_patch/patch.dart for the new " +
+            "snapshot bytes"
+        ).format(snapshot = snapshot, platform = platform, version = flutter_version, stderr = result.stderr.strip()))
+    if result.return_code != 0:
+        fail((
+            "dartdev snapshot patch: the patch VM failed to start while " +
+            "patching {snapshot} for Flutter {version} ({platform}): " +
+            "{stderr}\nCheck the {vm} binary in the fetching host's SDK repo"
+        ).format(snapshot = snapshot, platform = platform, version = flutter_version, stderr = result.stderr.strip(), vm = vm_ref))
 
 def _engine_artifacts_repo_names(user_repo_name, engine_target_platform, platform):
     """The lazy engine/font repo names derived from the user repo name."""
@@ -850,6 +801,26 @@ def _engine_artifacts_repo_names(user_repo_name, engine_target_platform, platfor
         "{}_font_subset_{}".format(user_repo_name, platform),
         "{}_material_fonts".format(user_repo_name),
     )
+
+def _dartdev_patch_vm_files(name):
+    """`dartvm` label → fetching-host platform for the dartdev snapshot patch.
+
+    The fetch runs the fetching host's own repo VM on every repo's snapshot;
+    these labels hand each repo's `dartvm` to the other four. Each label's
+    repo is fetched on demand, so only non-fetching host repos pay one extra
+    download each.
+
+    Args:
+        name: Base name for Flutter repositories.
+
+    Returns:
+        A dict of `dartvm` label string → host platform string.
+    """
+    vm_files = {}
+    for platform, host_meta in HOST_PLATFORMS.items():
+        exe = ".exe" if host_meta.os == "windows" else ""
+        vm_files["@{}//:dart-sdk/bin/dartvm{}".format(name + "_" + platform, exe)] = platform
+    return vm_files
 
 def _engine_library_selects(profile_repo, os_name, engine_release_repo, engine_debug_repo):
     """The `engine_library` aliases and `flutter_toolchain` select attributes."""
@@ -920,13 +891,15 @@ def _write_engine_artifacts_build(
         engine_revision,
         platform,
         user_repo_name,
-        dart_version,
-        dartdev_aot_snapshot = "dart-sdk/bin/snapshots/dartdev_aot.dart.snapshot"):
+        dart_version):
     """Writes the host artifacts repo's BUILD file (shared download/local tail).
 
     Everything both modes need once their files are in place — the dartdev
     patch, the lazy-repo aliases, and the `flutter_toolchain` declaration —
-    lives here so the two modes cannot drift apart.
+    lives here so the two modes cannot drift apart. The patched snapshot is
+    always `dart-sdk/bin/snapshots/dartdev_aot.dart.snapshot`: download mode
+    patches the fetched file in place, and local mode stages a repo-owned
+    copy at that path so the user's SDK tree is never written through.
 
     Args:
         repository_ctx: The repository rule context.
@@ -935,10 +908,6 @@ def _write_engine_artifacts_build(
         platform: Host platform string (e.g. `"linux-x64"`).
         user_repo_name: Base name for Flutter repositories.
         dart_version: Dart SDK version string, read from the SDK's bits.
-        dartdev_aot_snapshot: Repo-relative path of the `dartdev_aot` snapshot
-            the patch rewrites and the `dart_*_files` filegroups name. Download
-            mode patches the fetched file in place; local mode stages a
-            repo-owned copy so the user's SDK tree is never written through.
     """
     os_part = platform.split("-")[0]  # "darwin", "linux", "windows"
     arch_part = platform.split("-")[1]  # "x64", "arm64"
@@ -950,7 +919,7 @@ def _write_engine_artifacts_build(
     dartaotruntime_bin = dartaotruntime_binary_name(platform)
     exe_suffix = ".exe" if os_part == "windows" else ""
 
-    _patch_dartdev_snapshot(repository_ctx, platform, dartdev_aot_snapshot, exe_suffix)
+    _patch_dartdev_snapshot(repository_ctx, platform, flutter_version)
 
     engine_release_repo, engine_debug_repo, patched_sdk_product_repo, font_subset_repo, material_fonts_repo = _engine_artifacts_repo_names(
         user_repo_name,
@@ -996,7 +965,7 @@ def _write_engine_artifacts_build(
         engine_revision = engine_revision,
         dart_bin = dart_bin,
         dart_version = dart_version,
-        dartdev_aot_snapshot = dartdev_aot_snapshot,
+        dartdev_aot_snapshot = "dart-sdk/bin/snapshots/dartdev_aot.dart.snapshot",
         dartaotruntime_bin = dartaotruntime_bin,
         engine_aliases = engine_aliases,
         engine_library_attr = engine_library_attr,
@@ -1271,6 +1240,21 @@ flutter_engine_artifacts = repository_rule(
                   "`local_path`.",
             default = {},
         ),
+        "_dartdev_patch": attr.label(
+            doc = "The dartdev snapshot patcher source, read by label at " +
+                  "fetch time. A private dependency of the fetch, not a " +
+                  "consumer input.",
+            default = "//flutter/private/dartdev_patch:patch.dart",
+        ),
+        "patch_vm_files": attr.label_keyed_string_dict(
+            doc = "`dartvm` label → fetching-host platform for the dartdev " +
+                  "patch. The fetch runs the fetching host's own VM on this " +
+                  "repo's snapshot; the label's repo is fetched on demand, " +
+                  "so non-fetching host repos pay one extra download each. " +
+                  "The fetching host itself runs its own repo's `dartvm` " +
+                  "and needs no entry.",
+            default = {},
+        ),
     },
 )
 
@@ -1448,6 +1432,7 @@ def _register_download_host_repos(name, flutter_version, engine_revision, engine
             sysroot_repo_name = sysroot_repo_name,
             user_repository_name = name,
             profile_repo_name = name + "_" + platform + "_profile",
+            patch_vm_files = _dartdev_patch_vm_files(name),
         )
         _host_profile_repo(
             name = name + "_" + platform + "_profile",
@@ -2003,6 +1988,7 @@ def _register_local_host_repos(name, local_path, flutter_constraints):
             profile_repo_name = name + "_" + platform + "_profile",
             local_path = local_path,
             flutter_constraints = flutter_constraints,
+            patch_vm_files = _dartdev_patch_vm_files(name),
         )
 
         host_profile_downloads, host_profile_framework_dirs, host_os_name = _local_host_profile_downloads(platform)

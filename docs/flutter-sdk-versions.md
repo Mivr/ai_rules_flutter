@@ -146,6 +146,38 @@ tree this way; the tree mirrors the real cache layout above with placeholder
 files (see `flutter precache --all-platforms` on a real install for the
 reference), so the offline fetch paths run in CI without a 7 GB SDK.
 
+## The dartdev snapshot patch
+
+`flutter_engine_artifacts` rewrites one call site in
+`dart-sdk/bin/snapshots/dartdev_aot.dart.snapshot` at fetch time, neutralizing
+`DartNativeAssetsBuilder.findPubspec` so `dart compile exe` cannot walk parent
+directories into `execroot/_main/pubspec.yaml` on Windows (where Bazel uses a
+SymlinkForest without sandboxing) and run `pub get` without `FLUTTER_ROOT`.
+The patch program is `flutter/private/dartdev_patch/patch.dart`, read by label
+and run on a sha256-pinned `dartvm` — never the host PATH, never host Python.
+
+Which snapshots get patched: every x86-64 ELF snapshot is patched on every
+fetching host with byte-identical results, so all five SDK repos carry
+identical bytes whichever host fetched them. Non-ELF snapshots (macOS Mach-O)
+and non-x86-64 ELF snapshots (arm64 Linux) are left untouched: `dartvm`
+cannot execute a foreign-OS Mach-O binary, and the arm64 snapshot's
+machine code differs from the x86-64 pattern the patch matches, so patching
+it would corrupt the file.
+
+Failure is always closed, never silent: a missing snapshot fails in download
+mode (the archive layout changed — update the patch for the new layout) but
+is skipped in local mode (a trimmed tree stages nothing, so there is nothing
+to rewrite); a snapshot whose bytes no longer match fails naming the
+platform, the file, and `patch.dart` as what to update; an unknown fetching
+host OS or CPU fails naming the machine's values. No patch result is ignored.
+
+Local mode stages the SDK as symlinks plus two repo-owned copies —
+`bin/dart` and `bin/snapshots/dartdev_aot.dart.snapshot` — and nothing else is
+copied, so the whole SDK is never duplicated and the user's tree is never
+written. The `dart` copy matters: `dart` finds its snapshots next to its own
+real path, so a symlinked launcher would resolve through to the user's SDK
+and run its unpatched snapshot instead of the declared, patched one.
+
 ## Mirrors
 
 To serve stock bytes from a local mirror, keep the stock version and point

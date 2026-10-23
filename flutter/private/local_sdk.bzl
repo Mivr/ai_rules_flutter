@@ -301,3 +301,99 @@ def copy_local_file(repository_ctx, src, dst, what):
         result = repository_ctx.execute(["cp", src, dst])
     if result.return_code != 0:
         fail(copy_failed_message(src, what, result.stderr.strip()))
+
+def _stage_sdk_snapshots(repository_ctx, sdk_snapshots):
+    """Stages the Dart `bin/snapshots` directory: symlinks plus one copy.
+
+    Every snapshot is a symlink into the SDK except
+    `dartdev_aot.dart.snapshot`, which the fetch patches and so stages as a
+    repo-owned copy. A trimmed tree without that snapshot stages nothing for
+    it; the patch step then has nothing to rewrite.
+
+    Args:
+        repository_ctx: The repository rule context.
+        sdk_snapshots: The SDK's `bin/snapshots` directory path.
+    """
+    for entry in sdk_snapshots.readdir():
+        name = entry.basename
+        if name == "dartdev_aot.dart.snapshot":
+            copy_local_file(
+                repository_ctx,
+                str(entry),
+                str(repository_ctx.path("dart-sdk/bin/snapshots/" + name)),
+                "the dartdev AOT snapshot",
+            )
+        else:
+            repository_ctx.symlink(entry, "dart-sdk/bin/snapshots/" + name)
+
+def _stage_sdk_bin(repository_ctx, sdk_bin):
+    """Stages the Dart `bin` directory: symlinks, a copied launcher, snapshots.
+
+    `bin/dart` is a repo-owned copy, not a symlink: `dart` finds its
+    snapshots next to its own real path, so a symlinked launcher would run
+    the user's unpatched snapshot instead of the declared, patched one. A
+    copied launcher keeps snapshot resolution inside the repository. Every
+    other entry is a symlink; `snapshots` is staged by
+    [_stage_sdk_snapshots](#_stage_sdk_snapshots).
+
+    Args:
+        repository_ctx: The repository rule context.
+        sdk_bin: The SDK's `bin` directory path.
+    """
+    for entry in sdk_bin.readdir():
+        name = entry.basename
+        if name == "snapshots":
+            _stage_sdk_snapshots(repository_ctx, entry)
+        elif name == "dart" or name == "dart.exe":
+            copy_local_file(
+                repository_ctx,
+                str(entry),
+                str(repository_ctx.path("dart-sdk/bin/" + name)),
+                "the Dart launcher",
+            )
+        else:
+            repository_ctx.symlink(entry, "dart-sdk/bin/" + name)
+
+def stage_local_dart_sdk(repository_ctx, sdk_root):
+    """Stages the bundled Dart SDK as a hybrid tree of symlinks and copies.
+
+    `dart-sdk/bin/dart` and `dart-sdk/bin/snapshots/dartdev_aot.dart.snapshot`
+    are repo-owned copies; every other entry is a symlink into the SDK. The
+    copies exist so the `dart` that actions run loads the declared, patched
+    snapshot next to its own real path (a symlinked launcher would resolve
+    through to the user's SDK and run its unpatched snapshot), and so the
+    fetch can patch the snapshot without writing through into the user's
+    tree. The whole SDK is never copied. The SDK tree is watched, so an SDK
+    edit refetches the repository.
+
+    Args:
+        repository_ctx: The repository rule context.
+        sdk_root: The SDK root path, from `resolve_local_sdk_root`.
+    """
+    sdk_dart = sdk_root.get_child("bin/cache/dart-sdk")
+    if not sdk_dart.exists:
+        fail(missing_local_source_message(
+            "bin/cache/dart-sdk",
+            "the Flutter-bundled Dart SDK",
+            str(repository_ctx.attr.local_path),
+        ))
+    repository_ctx.watch_tree(sdk_dart)
+    repository_ctx.file("dart-sdk/bin/snapshots/.keep", "")
+    repository_ctx.delete("dart-sdk/bin/snapshots/.keep")
+    for entry in sdk_dart.readdir():
+        if entry.basename == "bin":
+            _stage_sdk_bin(repository_ctx, entry)
+        else:
+            repository_ctx.symlink(entry, "dart-sdk/" + entry.basename)
+
+    # A trimmed tree (the smoke fixture's placeholder SDK) has no `bin/`
+    # directory at all and stages nothing; the patch step then skips itself.
+    # But a `bin/` directory without a launcher is a broken SDK, and staging
+    # it silently would fail later with an action that cannot find `dart` —
+    # so the fetch fails here instead, naming the missing file.
+    if sdk_dart.get_child("bin").exists and not repository_ctx.path("dart-sdk/bin/dart").exists and not repository_ctx.path("dart-sdk/bin/dart.exe").exists:
+        fail(missing_local_source_message(
+            "bin/cache/dart-sdk/bin/dart",
+            "the Dart launcher",
+            str(repository_ctx.attr.local_path),
+        ))
