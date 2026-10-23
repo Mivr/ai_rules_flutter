@@ -126,16 +126,24 @@ Future<void> preflightDevices(List<Device> devices) async {
   }
 }
 
+/// How [prepareDevicesForLaunch] tunes resolved devices for launch.
+///
+/// One object for the launch-time engine arguments and web settings that all
+/// travel from [RunPlan.resolve] to the devices together.
+typedef LaunchPreparation = ({
+  BuildMode buildMode,
+  bool startPaused,
+  WebOptions? webOptions,
+  String? initialRoute,
+  bool traceStartup,
+  bool allowNoVmService,
+});
+
 /// Prepare resolved devices for launch: VM-service, pause and web settings.
 void prepareDevicesForLaunch(
   List<Device> devices,
   Logger logger, {
-  required BuildMode buildMode,
-  required bool startPaused,
-  required WebOptions? webOptions,
-  required String? initialRoute,
-  required bool traceStartup,
-  required bool allowNoVmService,
+  required LaunchPreparation preparation,
 }) {
   // Debug and profile launches await the app's Dart VM service. On Android that
   // service can only bind if the APK holds android.permission.INTERNET —
@@ -143,7 +151,7 @@ void prepareDevicesForLaunch(
   // 127.0.0.1 — so tell Android devices to preflight the installed package.
   // --allow-no-vm-service opts out of requiring a VM service, so it also skips
   // the preflight (mirroring the post-launch no-VM-service abort).
-  if (buildMode.servesVmService && !allowNoVmService) {
+  if (preparation.buildMode.servesVmService && !preparation.allowNoVmService) {
     for (final device in devices.whereType<AndroidDevice>()) {
       device.expectsVmService = true;
     }
@@ -153,18 +161,23 @@ void prepareDevicesForLaunch(
   // engine argument — an intent extra, an env switch, a trailing argv entry.
   // There is no way to pause an app that has already started.
   for (final device in devices) {
-    device.startPaused = startPaused;
+    device.startPaused = preparation.startPaused;
   }
   // Same reason, same moment: a browser's static-bundle server is built
   // inside `launch`, so this is the last point at which it can be told how
   // to serve. The DDC path's server is built by the assembler from the same
   // options, so the two cannot disagree.
-  if (webOptions != null) {
+  if (preparation.webOptions != null) {
     for (final device in devices.whereType<WebDevice>()) {
-      device.webOptions = webOptions;
+      device.webOptions = preparation.webOptions;
     }
   }
-  warnStartPausedSkipsStartup(logger, initialRoute, traceStartup, startPaused);
+  warnStartPausedSkipsStartup(
+    logger,
+    preparation.initialRoute,
+    preparation.traceStartup,
+    preparation.startPaused,
+  );
 }
 
 /// Warn that startup calls are skipped on a start-paused run.
@@ -183,6 +196,27 @@ void warnStartPausedSkipsStartup(
         'cannot be applied at launch and are skipped for this run.',
   });
 }
+
+/// The resolved values [RunPlan._assemblePlan] stores in a plan.
+///
+/// One object for everything [RunPlan.resolve] computes before assembling:
+/// the build inputs, the flags, the devices, and the run's bazel.
+typedef AssembledPlan = ({
+  Bazel bazel,
+  String target,
+  _RunBuildInputs resolved,
+  String? compilationMode,
+  List<Device> devices,
+  bool hotReloadEnabled,
+  bool profileMode,
+  String? initialRoute,
+  bool traceStartup,
+  bool startPaused,
+  bool isMachine,
+  bool allowNoVmService,
+  WebMode? webMode,
+  WebOptions? webOptions,
+});
 
 class RunPlan {
   final String target;
@@ -455,46 +489,33 @@ class RunPlan {
   static RunPlan _assemblePlan(
     ArgResults results,
     Logger logger, {
-    required Bazel bazel,
-    required String target,
-    required _RunBuildInputs resolved,
-    required String? compilationMode,
-    required List<Device> devices,
-    required bool hotReloadEnabled,
-    required bool profileMode,
-    required String? initialRoute,
-    required bool traceStartup,
-    required bool startPaused,
-    required bool isMachine,
-    required bool allowNoVmService,
-    required WebMode? webMode,
-    required WebOptions? webOptions,
+    required AssembledPlan plan,
   }) {
     return RunPlan._(
-      target: target,
-      extraArgs: resolved.extraArgs,
+      target: plan.target,
+      extraArgs: plan.resolved.extraArgs,
       userBuildArgs: results['build-arg'] as List<String>,
-      compilationMode: compilationMode,
-      devices: devices,
-      workspace: resolved.workspace,
-      toolchain: resolved.toolchain,
-      hotReloadEnabled: hotReloadEnabled,
-      profileMode: profileMode,
-      initialRoute: initialRoute,
-      traceStartup: traceStartup,
-      startPaused: startPaused,
-      isMachine: isMachine,
+      compilationMode: plan.compilationMode,
+      devices: plan.devices,
+      workspace: plan.resolved.workspace,
+      toolchain: plan.resolved.toolchain,
+      hotReloadEnabled: plan.hotReloadEnabled,
+      profileMode: plan.profileMode,
+      initialRoute: plan.initialRoute,
+      traceStartup: plan.traceStartup,
+      startPaused: plan.startPaused,
+      isMachine: plan.isMachine,
       // Terminal: watch by default. Machine: don't — a client that drives
       // reloads itself does not want the filesystem doing it too.
-      watchEnabled: watchEnabledFor(results, isMachine: isMachine),
+      watchEnabled: watchEnabledFor(results, isMachine: plan.isMachine),
       wasmMode: results['wasm'] as bool,
       devToolsEnabled: results['devtools'] as bool,
       httpChannelEnabled: results['http-control-channel'] as bool,
-      allowNoVmService: allowNoVmService,
-      webMode: webMode,
-      webOptions: webOptions,
+      allowNoVmService: plan.allowNoVmService,
+      webMode: plan.webMode,
+      webOptions: plan.webOptions,
       logger: logger,
-      bazel: bazel,
+      bazel: plan.bazel,
     );
   }
 
@@ -566,31 +587,35 @@ class RunPlan {
     prepareDevicesForLaunch(
       devices,
       logger,
-      buildMode: buildMode,
-      startPaused: startPaused,
-      webOptions: webOptions,
-      initialRoute: initialRoute,
-      traceStartup: traceStartup,
-      allowNoVmService: allowNoVmService,
+      preparation: (
+        buildMode: buildMode,
+        startPaused: startPaused,
+        webOptions: webOptions,
+        initialRoute: initialRoute,
+        traceStartup: traceStartup,
+        allowNoVmService: allowNoVmService,
+      ),
     );
 
     return _assemblePlan(
       results,
       logger,
-      bazel: bazel,
-      target: target,
-      resolved: resolved,
-      compilationMode: compilationMode,
-      devices: devices,
-      hotReloadEnabled: hotReloadEnabled,
-      profileMode: profileMode,
-      initialRoute: initialRoute,
-      traceStartup: traceStartup,
-      startPaused: startPaused,
-      isMachine: isMachine,
-      allowNoVmService: allowNoVmService,
-      webMode: webMode,
-      webOptions: webOptions,
+      plan: (
+        bazel: bazel,
+        target: target,
+        resolved: resolved,
+        compilationMode: compilationMode,
+        devices: devices,
+        hotReloadEnabled: hotReloadEnabled,
+        profileMode: profileMode,
+        initialRoute: initialRoute,
+        traceStartup: traceStartup,
+        startPaused: startPaused,
+        isMachine: isMachine,
+        allowNoVmService: allowNoVmService,
+        webMode: webMode,
+        webOptions: webOptions,
+      ),
     );
   }
 
