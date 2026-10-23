@@ -8,6 +8,9 @@ environment:
 flutter:
   assets:
     - assets/any.txt
+    - assets/marginal_small.txt
+    - assets/marginal_pair.txt
+    - assets/marginal_boundary.txt
     - path: assets/android_only.txt
       platforms:
         - android
