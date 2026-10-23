@@ -210,13 +210,15 @@ Map<String, String> substituteTemplates(
     final content = File(file['template'] as String).readAsStringSync();
     final result = _substituteFile(
       content: content,
-      label: label,
       file: file,
-      webDefines: webDefines,
-      keepPlaceholders: keepPlaceholders,
       priorOutputs: substituted,
-      usedDefines: usedDefines,
-      errors: errors,
+      sub: _TemplateSubstitution(
+        label: label,
+        webDefines: webDefines,
+        keepPlaceholders: keepPlaceholders,
+        usedDefines: usedDefines,
+        errors: errors,
+      ),
     );
     substituted.add(result);
     outputs[file['output'] as String] = result;
@@ -236,16 +238,31 @@ Map<String, String> substituteTemplates(
   return outputs;
 }
 
+/// The substitution state [_substituteFile] and [_substituteVariable] share:
+/// the file label errors name, the user defines and kept placeholders, and
+/// the accumulators ([usedDefines], [errors]) the whole invocation shares.
+class _TemplateSubstitution {
+  final String label;
+  final Map<String, String> webDefines;
+  final Set<String> keepPlaceholders;
+  final Set<String> usedDefines;
+  final List<String> errors;
+
+  const _TemplateSubstitution({
+    required this.label,
+    required this.webDefines,
+    required this.keepPlaceholders,
+    required this.usedDefines,
+    required this.errors,
+  });
+}
+
 /// One file's substitutions, in upstream's order.
 String _substituteFile({
   required String content,
-  required String label,
   required Map<String, dynamic> file,
-  required Map<String, String> webDefines,
-  required Set<String> keepPlaceholders,
   required List<String> priorOutputs,
-  required Set<String> usedDefines,
-  required List<String> errors,
+  required _TemplateSubstitution sub,
 }) {
   final baseHref = file['base_href'] as String?;
   final staticAssetsUrl = file['static_assets_url'] as String?;
@@ -266,10 +283,10 @@ String _substituteFile({
       (file['manages_service_worker'] as bool?) ?? false;
   _refusedConstructErrors(
     result,
-    label,
+    sub.label,
     checkConstructs,
     managesServiceWorker,
-    errors,
+    sub.errors,
   );
 
   final builtins = _resolveBuiltins(
@@ -278,21 +295,12 @@ String _substituteFile({
   );
 
   if (devLoopGuard) {
-    _bootPathErrors(result, label, errors);
+    _bootPathErrors(result, sub.label, sub.errors);
   }
 
   return result.replaceAllMapped(
     _variablePattern,
-    (match) => _substituteVariable(
-      match,
-      result,
-      label,
-      webDefines,
-      builtins,
-      keepPlaceholders,
-      usedDefines,
-      errors,
-    ),
+    (match) => _substituteVariable(match, result, builtins, sub),
   );
 }
 
@@ -348,22 +356,18 @@ void _bootPathErrors(String result, String label, List<String> errors) {
 String _substituteVariable(
   Match match,
   String result,
-  String label,
-  Map<String, String> webDefines,
   Map<String, String> builtins,
-  Set<String> keepPlaceholders,
-  Set<String> usedDefines,
-  List<String> errors,
+  _TemplateSubstitution sub,
 ) {
   final name = match.group(1)!;
-  if (webDefines.containsKey(name)) {
-    usedDefines.add(name);
-    return webDefines[name]!;
+  if (sub.webDefines.containsKey(name)) {
+    sub.usedDefines.add(name);
+    return sub.webDefines[name]!;
   }
   if (builtins.containsKey(name)) {
     return builtins[name]!;
   }
-  if (keepPlaceholders.contains(name)) {
+  if (sub.keepPlaceholders.contains(name)) {
     return match.group(0)!;
   }
   if (_builtinNames.contains(name)) {
@@ -371,15 +375,16 @@ String _substituteVariable(
     // that happens is `{{flutter_bootstrap_js}}` in the bootstrap itself,
     // which would have to inline its own output. Naming web_defines here
     // would send the reader to an error that refuses to shadow a built-in.
-    errors.add(
-      '$label:${_lineOf(result, match.start)}: `{{$name}}` is supplied by the '
-      'build, but not to this file. Only index.html can inline the bootstrap.',
+    sub.errors.add(
+      '${sub.label}:${_lineOf(result, match.start)}: `{{$name}}` is supplied '
+      'by the build, but not to this file. Only index.html can inline the '
+      'bootstrap.',
     );
     return match.group(0)!;
   }
-  errors.add(
-    '$label:${_lineOf(result, match.start)}: `{{$name}}` has no value. Supply '
-    'one with `web_defines = {"$name": "..."}`, or list it in '
+  sub.errors.add(
+    '${sub.label}:${_lineOf(result, match.start)}: `{{$name}}` has no value. '
+    'Supply one with `web_defines = {"$name": "..."}`, or list it in '
     '`keep_placeholders` to ship the placeholder as written.',
   );
   return match.group(0)!;
@@ -554,15 +559,17 @@ void _runDart2Wasm(List<String> args) {
   }
 
   _compileWasm(
-    dartaotruntime: dartaotruntime,
-    sdkBin: sdkBin,
-    packagesPath: packagesPath,
-    outputWasm: outputWasm,
-    mainDart: mainDart,
-    multiRoot: parsed.multiRoot,
-    noSourceMaps: parsed.noSourceMaps,
-    extraOptions: parsed.extraOptions,
-    forwardArgs: parsed.forwardArgs,
+    _WebCompileRequest(
+      dartaotruntime: dartaotruntime,
+      sdkBin: sdkBin,
+      packagesPath: packagesPath,
+      outputWasm: outputWasm,
+      mainDart: mainDart,
+      multiRoot: parsed.multiRoot,
+      noSourceMaps: parsed.noSourceMaps,
+      extraOptions: parsed.extraOptions,
+      forwardArgs: parsed.forwardArgs,
+    ),
   );
 }
 
@@ -617,51 +624,89 @@ _parseDart2WasmArgs(List<String> args) {
   );
 }
 
+/// The inputs for one `compile wasm` or `compile js` invocation.
+///
+/// [_compileWasm] and [_compileDart2Js] share the tool, SDK, entrypoint,
+/// package, multi-root and forwarded-flag inputs; each reads only the half it
+/// needs (the scratch paths for dart2js, the output and wasm options for
+/// dart2wasm), so one request type serves both without a Map bag.
+class _WebCompileRequest {
+  final String dartaotruntime;
+  final String sdkBin;
+  final String? packagesPath;
+  final String? mainDart;
+  final String? multiRoot;
+  final List<String> forwardArgs;
+
+  /// The dart2js scratch directory and its absolute path (null for wasm).
+  final String? tmpPath;
+  final String? tmpAbsPath;
+
+  /// The working directory the dart2js compile runs in (null for wasm).
+  final String? cwdPath;
+
+  /// The wasm output, source-map flag and extra compiler options (wasm only).
+  final String? outputWasm;
+  final bool noSourceMaps;
+  final List<String> extraOptions;
+
+  const _WebCompileRequest({
+    required this.dartaotruntime,
+    required this.sdkBin,
+    required this.packagesPath,
+    required this.mainDart,
+    required this.multiRoot,
+    required this.forwardArgs,
+    this.tmpPath,
+    this.tmpAbsPath,
+    this.cwdPath,
+    this.outputWasm,
+    this.noSourceMaps = false,
+    this.extraOptions = const [],
+  });
+}
+
 /// Compiles [mainDart] to [outputWasm] (plus its `.mjs` and optional source
 /// map) with the wasm compiler's staging root mounted.
-void _compileWasm({
-  required String dartaotruntime,
-  required String sdkBin,
-  required String packagesPath,
-  required String outputWasm,
-  required String mainDart,
-  required String? multiRoot,
-  required bool noSourceMaps,
-  required List<String> extraOptions,
-  required List<String> forwardArgs,
-}) {
+void _compileWasm(_WebCompileRequest req) {
   final exeSuffix = Platform.isWindows ? '.exe' : '';
-  final outWasmFile = File(outputWasm)..parent.createSync(recursive: true);
+  final outWasmFile =
+      File(req.outputWasm!)..parent.createSync(recursive: true);
   final tmpDir = Directory('${outWasmFile.parent.path}/_wasm_tmp')
     ..createSync(recursive: true);
   final tmpAbsPath = tmpDir.absolute.path;
   try {
     final cwdPath = Directory.current.absolute.path;
-    final rootDirPath = multiRoot != null
-        ? Directory(multiRoot).absolute.path
+    final rootDirPath = req.multiRoot != null
+        ? Directory(req.multiRoot!).absolute.path
         : cwdPath;
     final normCwd = cwdPath.replaceAll(r'\', '/');
     final cwdPrefix = normCwd.endsWith('/') ? normCwd : '$normCwd/';
     final rewrittenPkgPath = '${tmpDir.path}/package_config.json';
-    _rewritePackageConfig(packagesPath, normCwd, cwdPrefix, rewrittenPkgPath);
+    _rewritePackageConfig(
+      req.packagesPath!,
+      normCwd,
+      cwdPrefix,
+      rewrittenPkgPath,
+    );
 
     final tmpWasm = '${tmpDir.path}/main.dart.wasm';
-    final normMainDart = multiRoot != null
-        ? _toAppSchemeRelPath(mainDart)
-        : mainDart.replaceAll(r'\', '/');
+    final normMainDart = req.multiRoot != null
+        ? _toAppSchemeRelPath(req.mainDart!)
+        : req.mainDart!.replaceAll(r'\', '/');
     final wasmArgs = <String>[
-      '$sdkBin/snapshots/dart2wasm_product.snapshot',
-      ...extraOptions,
+      '${req.sdkBin}/snapshots/dart2wasm_product.snapshot',
+      ...req.extraOptions,
       '--packages=$rewrittenPkgPath',
       '--multi-root-scheme=org-dartlang-app',
       '--multi-root=$rootDirPath',
-      '--wasm-opt=$sdkBin/utils/wasm-opt$exeSuffix',
-      ...forwardArgs,
+      '--wasm-opt=${req.sdkBin}/utils/wasm-opt$exeSuffix',
+      ...req.forwardArgs,
       'org-dartlang-app:///$normMainDart',
       tmpWasm,
     ];
     final res = Process.runSync(
-      dartaotruntime,
+      req.dartaotruntime,
       wasmArgs,
       environment: {
         ...Platform.environment,
@@ -676,7 +721,7 @@ void _compileWasm({
       exit(res.exitCode);
     }
 
-    _copyWasmOutputs(outputWasm, tmpDir, noSourceMaps, tmpWasm);
+    _copyWasmOutputs(req.outputWasm!, tmpDir, req.noSourceMaps, tmpWasm);
   } finally {
     if (tmpDir.existsSync()) {
       tmpDir.deleteSync(recursive: true);
@@ -1041,15 +1086,17 @@ void _runDart2Js(List<String> args) {
   String? rewrittenPkgPath;
   try {
     final compiled = _compileDart2Js(
-      dartaotruntime: dartaotruntime,
-      sdkBin: sdkBin,
-      tmpPath: tmpDir.path,
-      tmpAbsPath: tmpAbsPath,
-      multiRoot: parsed.multiRoot,
-      packagesPath: parsed.packagesPath,
-      mainDart: parsed.mainDart,
-      forwardArgs: parsed.forwardArgs,
-      cwdPath: cwdPath,
+      _WebCompileRequest(
+        dartaotruntime: dartaotruntime,
+        sdkBin: sdkBin,
+        tmpPath: tmpDir.path,
+        tmpAbsPath: tmpAbsPath,
+        multiRoot: parsed.multiRoot,
+        packagesPath: parsed.packagesPath,
+        mainDart: parsed.mainDart,
+        forwardArgs: parsed.forwardArgs,
+        cwdPath: cwdPath,
+      ),
     );
     rootDirPath = compiled.rootDirPath;
     rewrittenPkgPath = compiled.rewrittenPkgPath;
@@ -1060,13 +1107,15 @@ void _runDart2Js(List<String> args) {
   }
 
   _scrubDart2JsResults(
-    outJs: parsed.outJs,
-    cfeOnly: cfeOnly,
-    cwdPath: cwdPath,
-    rootDirPath: rootDirPath,
-    tmpAbsPath: tmpAbsPath,
-    packagesPath: parsed.packagesPath,
-    rewrittenPkgPath: rewrittenPkgPath,
+    _Dart2JsScrubRequest(
+      outJs: parsed.outJs,
+      cfeOnly: cfeOnly,
+      cwdPath: cwdPath,
+      rootDirPath: rootDirPath,
+      tmpAbsPath: tmpAbsPath,
+      packagesPath: parsed.packagesPath,
+      rewrittenPkgPath: rewrittenPkgPath,
+    ),
   );
 }
 
@@ -1139,57 +1188,51 @@ _parseDart2JsArgs(List<String> args) {
 /// Runs the dart2js snapshot in [tmpPath]'s scratch, staging the package
 /// config first when the compile mounts a multi-root; answers the staging
 /// root and rewritten package config the output scrub needs.
-({String? rootDirPath, String? rewrittenPkgPath}) _compileDart2Js({
-  required String dartaotruntime,
-  required String sdkBin,
-  required String tmpPath,
-  required String tmpAbsPath,
-  required String? multiRoot,
-  required String? packagesPath,
-  required String? mainDart,
-  required List<String> forwardArgs,
-  required String cwdPath,
-}) {
+({String? rootDirPath, String? rewrittenPkgPath}) _compileDart2Js(
+  _WebCompileRequest req,
+) {
   String? rootDirPath;
   String? rewrittenPkgPath;
   List<String> jsArgs;
-  if (multiRoot != null && packagesPath != null && mainDart != null) {
-    rootDirPath = Uri.parse(stageRootUri(multiRoot)).toFilePath();
-    final normCwd = cwdPath.replaceAll(r'\', '/');
+  if (req.multiRoot != null &&
+      req.packagesPath != null &&
+      req.mainDart != null) {
+    rootDirPath = Uri.parse(stageRootUri(req.multiRoot!)).toFilePath();
+    final normCwd = req.cwdPath!.replaceAll(r'\', '/');
     final cwdPrefix = normCwd.endsWith('/') ? normCwd : '$normCwd/';
-    rewrittenPkgPath = '$tmpPath/package_config.json';
+    rewrittenPkgPath = '${req.tmpPath!}/package_config.json';
     _rewritePackageConfigForStage(
-      packagesPath,
+      req.packagesPath!,
       normCwd,
       cwdPrefix,
       rewrittenPkgPath,
     );
-    final relMain = _toAppSchemeRelPath(mainDart);
+    final relMain = _toAppSchemeRelPath(req.mainDart!);
     jsArgs = buildDart2JsSnapshotArgs(
-      forwardArgs: forwardArgs,
+      forwardArgs: req.forwardArgs,
       rewrittenPkgPath: rewrittenPkgPath,
-      stageRootUri: stageRootUri(multiRoot),
+      stageRootUri: stageRootUri(req.multiRoot!),
       normMainDart: relMain,
     );
   } else {
     jsArgs = <String>[
-      ...forwardArgs,
-      if (mainDart != null) mainDart,
+      ...req.forwardArgs,
+      if (req.mainDart != null) req.mainDart!,
     ];
   }
 
   final res = Process.runSync(
-    dartaotruntime,
+    req.dartaotruntime,
     [
-      '$sdkBin/snapshots/dart2js_aot.dart.snapshot',
+      '${req.sdkBin}/snapshots/dart2js_aot.dart.snapshot',
       '--invoker=dart_cli',
       ...jsArgs,
     ],
     environment: {
       ...Platform.environment,
-      'TMPDIR': tmpAbsPath,
-      'TMP': tmpAbsPath,
-      'TEMP': tmpAbsPath,
+      'TMPDIR': req.tmpAbsPath!,
+      'TMP': req.tmpAbsPath!,
+      'TEMP': req.tmpAbsPath!,
     },
   );
   if (res.exitCode != 0) {
@@ -1198,6 +1241,28 @@ _parseDart2JsArgs(List<String> args) {
     exit(res.exitCode);
   }
   return (rootDirPath: rootDirPath, rewrittenPkgPath: rewrittenPkgPath);
+}
+
+/// What [_scrubDart2JsResults] normalizes: this action's own compiler outputs
+/// plus the host-specific paths the scrub rewrites to stable spellings.
+class _Dart2JsScrubRequest {
+  final String? outJs;
+  final bool cfeOnly;
+  final String cwdPath;
+  final String? rootDirPath;
+  final String tmpAbsPath;
+  final String? packagesPath;
+  final String? rewrittenPkgPath;
+
+  const _Dart2JsScrubRequest({
+    required this.outJs,
+    required this.cfeOnly,
+    required this.cwdPath,
+    required this.rootDirPath,
+    required this.tmpAbsPath,
+    required this.packagesPath,
+    required this.rewrittenPkgPath,
+  });
 }
 
 /// Normalizes this action's own compiler outputs.
@@ -1212,35 +1277,27 @@ _parseDart2JsArgs(List<String> args) {
 /// declared output that then differs per strategy (P-web-icon-dill-paths).
 /// The `.dill` itself needs no scrubbing: the kernel records
 /// workspace-relative library URIs.
-void _scrubDart2JsResults({
-  required String? outJs,
-  required bool cfeOnly,
-  required String cwdPath,
-  required String? rootDirPath,
-  required String tmpAbsPath,
-  required String? packagesPath,
-  required String? rewrittenPkgPath,
-}) {
-  if (outJs != null && !cfeOnly) {
+void _scrubDart2JsResults(_Dart2JsScrubRequest scrub) {
+  if (scrub.outJs != null && !scrub.cfeOnly) {
     scrubDart2JsOutputs(
-      File(outJs).parent,
-      cwdPath: cwdPath,
-      rootDirPath: rootDirPath,
-      tmpDirPath: tmpAbsPath,
-      packagesPath: packagesPath,
-      rewrittenPkgPath: rewrittenPkgPath,
+      File(scrub.outJs!).parent,
+      cwdPath: scrub.cwdPath,
+      rootDirPath: scrub.rootDirPath,
+      tmpDirPath: scrub.tmpAbsPath,
+      packagesPath: scrub.packagesPath,
+      rewrittenPkgPath: scrub.rewrittenPkgPath,
     );
   }
-  if (outJs != null && cfeOnly) {
-    final depsFile = File('$outJs.deps');
+  if (scrub.outJs != null && scrub.cfeOnly) {
+    final depsFile = File('${scrub.outJs!}.deps');
     if (depsFile.existsSync()) {
       scrubDart2JsFile(
         depsFile,
-        cwdPath: cwdPath,
-        rootDirPath: rootDirPath,
-        tmpDirPath: tmpAbsPath,
-        packagesPath: packagesPath,
-        rewrittenPkgPath: rewrittenPkgPath,
+        cwdPath: scrub.cwdPath,
+        rootDirPath: scrub.rootDirPath,
+        tmpDirPath: scrub.tmpAbsPath,
+        packagesPath: scrub.packagesPath,
+        rewrittenPkgPath: scrub.rewrittenPkgPath,
       );
     }
   }
