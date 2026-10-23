@@ -474,47 +474,47 @@ class NativePipelineAssembler {
         // answers null for the same input — see `createCompilerConfig`.
         webToolchain: null,
         fileSystemRoots: devConfig.filesystemRoots,
-      fileSystemScheme: devConfig.filesystemScheme,
-      // The app's own record travels with them. `flutter_compile_kernel` bakes
-      // it into the launch build only, and this compiler produces every dill
-      // the app runs after a hot restart — so without it a restart is where the
-      // app stops being able to say which build it came from. It comes from the
-      // running app rather than from `devConfig.dartDefines`, which the
-      // host-configured dev build wrote: replaying that value would have the app
-      // report the dev pipeline's configuration as its launch truth.
-      dartDefines: [...devConfig.dartDefines, _info.defineAssignment],
-      // A `file://` URI, deliberately, where the build's own kernel compile
-      // names its registrant `org-dartlang-app:///<workspace path>`, mounted
-      // at its output directory (`app_scheme_location`). The two never have to agree. The engine reads
-      // `flutter.dart_plugin_registrant` out of whichever dill is *running* and
-      // looks that exact string up as a library, so each kernel only has to be
-      // internally consistent — and after a hot restart the running dill is
-      // always one this compiler produced.
-      //
-      // `file://` is the one spelling valid in every configuration this
-      // compiler starts in. A source-assembled (codegen) app, or one whose
-      // `main` sits outside its package's `lib/`, mounts `filesystemRoots`
-      // under the `org-dartlang-app` scheme; a plain app has none —
-      // `e2e/macos_example`'s `:app_flutter` dev config carries
-      // `filesystemRoots: []`, and `NativeCompilerConfig` gates the scheme flag
-      // on that list — so a scheme URI would resolve to nothing there. The
-      // build's registrant lives under the output directory of the app's own
-      // configuration, which this host-configured compiler never mounts, so
-      // matching the build is not an option either.
-      //
-      // The front end does not rewrite a `--source` URI into the mounted
-      // scheme, so `--source` and the `-D` stay one string and the engine's
-      // lookup matches. Upstream converts here (`flutter_tools`'
-      // `toMultiRootPath`), trying a `package:` URI first, which keeps every
-      // reference to a file under a single URI identity in the incremental
-      // compiler's state. Nothing else refers to the registrant — no import, no
-      // invalidation, and it sits outside every package's `libRoot`, so it is
-      // not reachable as a `package:` URI — leaving no second identity to
-      // collide with.
-      dartPluginRegistrantUri: registrant.isEmpty
-          ? ''
-          : Uri.file(registrant).toString(),
-      enableExperiments: devConfig.enableExperiments,
+        fileSystemScheme: devConfig.filesystemScheme,
+        // The app's own record travels with them. `flutter_compile_kernel` bakes
+        // it into the launch build only, and this compiler produces every dill
+        // the app runs after a hot restart — so without it a restart is where the
+        // app stops being able to say which build it came from. It comes from the
+        // running app rather than from `devConfig.dartDefines`, which the
+        // host-configured dev build wrote: replaying that value would have the app
+        // report the dev pipeline's configuration as its launch truth.
+        dartDefines: [...devConfig.dartDefines, _info.defineAssignment],
+        // A `file://` URI, deliberately, where the build's own kernel compile
+        // names its registrant `org-dartlang-app:///<workspace path>`, mounted
+        // at its output directory (`app_scheme_location`). The two never have to agree. The engine reads
+        // `flutter.dart_plugin_registrant` out of whichever dill is *running* and
+        // looks that exact string up as a library, so each kernel only has to be
+        // internally consistent — and after a hot restart the running dill is
+        // always one this compiler produced.
+        //
+        // `file://` is the one spelling valid in every configuration this
+        // compiler starts in. A source-assembled (codegen) app, or one whose
+        // `main` sits outside its package's `lib/`, mounts `filesystemRoots`
+        // under the `org-dartlang-app` scheme; a plain app has none —
+        // `e2e/macos_example`'s `:app_flutter` dev config carries
+        // `filesystemRoots: []`, and `NativeCompilerConfig` gates the scheme flag
+        // on that list — so a scheme URI would resolve to nothing there. The
+        // build's registrant lives under the output directory of the app's own
+        // configuration, which this host-configured compiler never mounts, so
+        // matching the build is not an option either.
+        //
+        // The front end does not rewrite a `--source` URI into the mounted
+        // scheme, so `--source` and the `-D` stay one string and the engine's
+        // lookup matches. Upstream converts here (`flutter_tools`'
+        // `toMultiRootPath`), trying a `package:` URI first, which keeps every
+        // reference to a file under a single URI identity in the incremental
+        // compiler's state. Nothing else refers to the registrant — no import, no
+        // invalidation, and it sits outside every package's `libRoot`, so it is
+        // not reachable as a `package:` URI — leaving no second identity to
+        // collide with.
+        dartPluginRegistrantUri: registrant.isEmpty
+            ? ''
+            : Uri.file(registrant).toString(),
+        enableExperiments: devConfig.enableExperiments,
       ),
     );
     return compilerConfig;

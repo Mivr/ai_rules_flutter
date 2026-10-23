@@ -300,8 +300,7 @@ class FrontendServer {
   /// the program the compiler is holding.
   Future<CompileResult> compileExpressionToJs(
     ExpressionCompileRequest request,
-  ) =>
-      _requests.withResource(() async {
+  ) => _requests.withResource(() async {
     if (_closing) return _shuttingDown;
     if (_timedOut) return _timedOutResult;
     if (_process == null) throw StateError('Frontend server not started');
