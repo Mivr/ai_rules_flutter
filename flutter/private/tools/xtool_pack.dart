@@ -2647,26 +2647,22 @@ class _BundleAssembly {
   late final String appRelPath = isMacOS
       ? '${config.appName}.app'
       : 'Payload/${config.appName}.app';
-  late final Directory appDir = Directory('${tempDir.path}/$appRelPath')
-    ..createSync(recursive: true);
-  late final Directory contentsDir = isMacOS
-      ? (Directory('${appDir.path}/Contents')..createSync())
-      : appDir;
   late final String contentsRelPrefix = isMacOS
       ? '$appRelPath/Contents'
       : appRelPath;
-  late final Directory execDir = isMacOS
-      ? (Directory('${contentsDir.path}/MacOS')..createSync())
-      : contentsDir;
-  late final Directory frameworksDir = Directory(
-    '${contentsDir.path}/Frameworks',
-  );
-  late final Directory resourcesDir = isMacOS
-      ? (Directory('${contentsDir.path}/Resources')..createSync())
-      : contentsDir;
   late final Directory frameworksScratch = Directory(
     '${tempDir.path}/frameworks',
   );
+
+  // Bundle staging directories. Assigned eagerly by [_createLayout] (called
+  // first by [run]) in the fixed order below. Directory creation must never
+  // depend on a lazy initializer's side effect: a resourceless macOS bundle
+  // still stages an (empty) Contents/Resources/.
+  late Directory appDir;
+  late Directory contentsDir;
+  late Directory execDir;
+  late Directory frameworksDir;
+  late Directory resourcesDir;
 
   final executablePaths = <String>{};
 
@@ -2676,6 +2672,7 @@ class _BundleAssembly {
   _BundleAssembly(this.config, this.tempDir, this.effectiveDefines);
 
   void run() {
+    _createLayout();
     _copyMainExecutable();
     _writeBundleMetadata();
     _copyBundleResources();
@@ -2685,6 +2682,25 @@ class _BundleAssembly {
     _signOrStripBundle();
     _emitAppDir();
     _emitArchive();
+  }
+
+  /// Creates every bundle staging directory up front, in the same order the
+  /// pre-refactor [assembleBundle] created them. In particular the macOS
+  /// Contents/Resources/ directory always exists, even when the bundle packs
+  /// no resources.
+  void _createLayout() {
+    appDir = Directory('${tempDir.path}/$appRelPath')
+      ..createSync(recursive: true);
+    contentsDir = isMacOS
+        ? (Directory('${appDir.path}/Contents')..createSync())
+        : appDir;
+    execDir = isMacOS
+        ? (Directory('${contentsDir.path}/MacOS')..createSync())
+        : contentsDir;
+    frameworksDir = Directory('${contentsDir.path}/Frameworks');
+    resourcesDir = isMacOS
+        ? (Directory('${contentsDir.path}/Resources')..createSync())
+        : contentsDir;
   }
 
   void _copyMainExecutable() {

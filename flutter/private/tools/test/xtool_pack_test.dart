@@ -409,6 +409,79 @@ void main() {
       },
     );
 
+    test(
+      'macOS bundle always contains Contents/Resources with and without resources',
+      () {
+        final execFile = File('${tempDir.path}/ResRunner_bin')
+          ..writeAsBytesSync([0xCF, 0xFA, 0xED, 0xFE, 10, 20]);
+
+        // Resourceless bundle: Contents/Resources/ must exist both in the
+        // app dir and as an explicit zip entry.
+        const emptyApp = 'EmptyResRunner';
+        final emptyAppDir = '${tempDir.path}/out/$emptyApp.app';
+        final emptyZip = '$emptyAppDir.zip';
+        assembleBundle(
+          BundleConfig(
+            platform: 'macos',
+            appName: emptyApp,
+            bundleId: 'com.example.emptyres',
+            executablePath: execFile.path,
+            minimumOsVersion: '10.15',
+            outputArchivePath: emptyZip,
+            outputAppDirPath: emptyAppDir,
+          ),
+        );
+        expect(
+          Directory('$emptyAppDir/Contents/Resources').existsSync(),
+          isTrue,
+        );
+        final emptyEntries = {
+          for (final e in readZipEntries(File(emptyZip).readAsBytesSync()))
+            e.path: e,
+        };
+        expect(
+          emptyEntries.keys,
+          contains('$emptyApp.app/Contents/Resources/'),
+        );
+
+        // Bundle with one resource: the same directory plus the copied file.
+        final greeting = File('${tempDir.path}/greeting.txt')
+          ..writeAsStringSync('hello');
+        const resApp = 'ResRunner';
+        final resAppDir = '${tempDir.path}/out/$resApp.app';
+        final resZip = '$resAppDir.zip';
+        assembleBundle(
+          BundleConfig(
+            platform: 'macos',
+            appName: resApp,
+            bundleId: 'com.example.withres',
+            executablePath: execFile.path,
+            minimumOsVersion: '10.15',
+            resourceSpecs: [greeting.path],
+            outputArchivePath: resZip,
+            outputAppDirPath: resAppDir,
+          ),
+        );
+        expect(
+          Directory('$resAppDir/Contents/Resources').existsSync(),
+          isTrue,
+        );
+        expect(
+          File('$resAppDir/Contents/Resources/greeting.txt').existsSync(),
+          isTrue,
+        );
+        final resEntries = {
+          for (final e in readZipEntries(File(resZip).readAsBytesSync()))
+            e.path: e,
+        };
+        expect(resEntries.keys, contains('$resApp.app/Contents/Resources/'));
+        expect(
+          resEntries.keys,
+          contains('$resApp.app/Contents/Resources/greeting.txt'),
+        );
+      },
+    );
+
     test('compileRunner synthesizes valid MH_EXECUTE Mach-O binary and records sources/frameworks', () {
       final srcFile = File('${tempDir.path}/AppDelegate.swift')
         ..writeAsStringSync('import Flutter\n');
