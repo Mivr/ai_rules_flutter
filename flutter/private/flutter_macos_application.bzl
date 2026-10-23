@@ -278,6 +278,7 @@ flutter_macos_framework = rule(
                 default = Label("//flutter/private/tools:macho_edit"),
                 executable = True,
                 cfg = "exec",
+                doc = "The `macho_edit` host tool validating and patching Mach-O binaries.",
             ),
         },
     ),
@@ -400,6 +401,7 @@ flutter_macos_native_libs = rule(
             default = Label("//flutter/private/tools:macho_edit"),
             executable = True,
             cfg = "exec",
+            doc = "The `macho_edit` host tool validating and patching Mach-O binaries.",
         ),
     },
     toolchains = [
