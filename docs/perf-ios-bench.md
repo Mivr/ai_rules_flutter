@@ -294,6 +294,29 @@ a flow is not identical. The driver is `tools/perf/sol.py` (`run` / `chain` /
 fixtures, including a `run` -> `chain` -> `summarize` end-to-end pass
 against a fake `bazel`, with no time binary present).
 
+Each flow also carries a small `profile` record, always on, with no
+command lines:
+
+- `jvm`: Bazel's own CPU, from the build's `--profile` JSON trace: the
+  "CPU usage (Bazel)" counter (`ph: "C"`, `args.cpu` cores, about one
+  sample a second) integrated over time and split at the build-phase
+  markers, so `phases` names analysis, execution and the rest. The
+  counter starts after JVM launch, so launch CPU lands in `residual`,
+  not `jvm`.
+- `host_tools`: the chain-excluded host-tool builds, replayed by hand
+  under the same wait4 method after the chain restores Bazel's outputs
+  (total, per mnemonic, top 10 targets). A host build that fails to
+  replay is recorded, not fatal.
+- `residual`: `bazel - jvm - sol - host_tools`, never clamped, so the
+  parts always sum to the flow's Bazel number. A failed chain has no
+  SOL number, and the record says so and substitutes the chain CPU
+  instead.
+
+The gzipped trace profiles and execution logs behind each record go to
+a second small artifact, `ios-profile` (same 3-day retention, no build
+outputs). Medians across repeats recompute the residual from the
+medians, so the parts still sum exactly.
+
 ## Cost rules (binding)
 
 `workflow_dispatch` only; `macos-15`; job timeout 300 minutes; artifact
