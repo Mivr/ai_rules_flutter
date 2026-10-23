@@ -70,7 +70,10 @@ dart_binary(
 
 dart_binary(
     name = "flutter_test_runner",
-    srcs = ["bazel_test_protocol.dart", "test_support.dart"],
+    srcs = [
+        "bazel_test_protocol.dart",
+        "test_support.dart",
+    ],
     compile_mode = "exe",
     main = "flutter_test_runner.dart",
     target_compatible_with = HOST_COMPATIBLE,
@@ -83,7 +86,10 @@ dart_binary(
 
 dart_binary(
     name = "flutter_integration_test_runner",
-    srcs = ["bazel_test_protocol.dart", "test_support.dart"],
+    srcs = [
+        "bazel_test_protocol.dart",
+        "test_support.dart",
+    ],
     compile_mode = "exe",
     main = "flutter_integration_test_runner.dart",
     target_compatible_with = HOST_COMPATIBLE,
@@ -341,7 +347,10 @@ _TOOL_SRCS = {
         "macho_edit.dart",
         "sha256.dart",
     ],
-    "flutter_test_runner.dart": ["bazel_test_protocol.dart", "test_support.dart"],
+    "flutter_test_runner.dart": [
+        "bazel_test_protocol.dart",
+        "test_support.dart",
+    ],
     "flutter_integration_test_runner.dart": [
         "bazel_test_protocol.dart",
         "test_support.dart",
