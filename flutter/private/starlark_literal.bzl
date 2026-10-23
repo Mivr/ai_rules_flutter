@@ -89,6 +89,7 @@ def spoke_file_name_problem(path):
             return "it holds a `..` segment"
         if segment == "." and path != ".":
             return "it holds a `.` segment"
+
     # No ord() in Starlark: a one-char string orders by code point, so
     # `c < " "` catches every C0 control, and "\177" (octal escape, which
     # the lexer accepts) is DEL.

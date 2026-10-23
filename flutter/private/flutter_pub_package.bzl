@@ -1836,6 +1836,14 @@ def check_spoke_file_names(package_name, asset_block, expanded):
     spoke that cannot name them. Trailing-slash directory declarations are
     covering entries, never emitted target names, so only the files walked
     out of them are checked (with the declaration in the message).
+
+    Args:
+        package_name: The pub package the entries come from.
+        asset_block: The parsed `flutter` block (assets, fonts, shaders).
+        expanded: The walked asset files, each with a `path` field.
+
+    Returns:
+        None; fails the fetch on the first unemittable name.
     """
     for entry in asset_block.assets:
         if not entry.path.endswith("/"):
