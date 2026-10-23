@@ -6,7 +6,13 @@
 /// `packages/brand/assets/brand.txt`. On the pre-fix keying (raw
 /// `File.short_path`) both lookups throw because the bundle carries
 /// `apps/sub/assets/sub.txt` and `libs/brand/assets/brand.txt` instead.
+///
+/// The same package-relative rule covers the target's own `shaders`:
+/// `shaders/sub.frag` must load as `shaders/sub.frag`, which is where
+/// `FragmentProgram.fromAsset` looks for it.
 library;
+
+import 'dart:ui';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -37,5 +43,15 @@ void main() {
       await _assetText('packages/brand/assets/brand.txt'),
       equals('brand asset\n'),
     );
+  });
+
+  testWidgets('subpackage shader loads at its package-relative key', (
+    tester,
+  ) async {
+    await tester.pumpWidget(const SubApp());
+    await tester.pumpAndSettle();
+
+    final program = await FragmentProgram.fromAsset('shaders/sub.frag');
+    expect(program.fragmentShader(), isNotNull);
   });
 }
