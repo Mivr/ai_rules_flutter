@@ -102,6 +102,7 @@ flutter_android_binary_proxy = rule(
             cfg = flutter_android_pure_go_transition,
         ),
         "_allowlist_function_transition": attr.label(
+            doc = "Function-transition allowlist the rule's platform transition requires.",
             default = "@bazel_tools//tools/allowlists/function_transition_allowlist",
         ),
     },

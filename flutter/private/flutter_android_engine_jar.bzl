@@ -96,16 +96,19 @@ flutter_android_engine_jar = rule(
             values = ANDROID_ABIS.keys(),
         ),
         "_tool": attr.label(
+            doc = "Tool that strips the engine's native libraries and repacks the jar.",
             default = _TOOL,
             executable = True,
             cfg = "exec",
         ),
         "_zipper": attr.label(
+            doc = "Bazel zipper used to repack the stripped engine jar.",
             default = "@bazel_tools//tools/zip:zipper",
             executable = True,
             cfg = "exec",
         ),
         "_allowlist_function_transition": attr.label(
+            doc = "Function-transition allowlist the rule's platform transition requires.",
             default = "@bazel_tools//tools/allowlists/function_transition_allowlist",
         ),
     },

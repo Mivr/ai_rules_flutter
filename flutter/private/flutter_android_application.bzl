@@ -367,11 +367,13 @@ agree.""",
             values = ANDROID_ABIS.keys(),
         ),
         "_android_bundle_tool": attr.label(
+            doc = "Tool that builds the Android application bundle from the compiled outputs.",
             default = Label("//flutter/private/tools:android_bundle"),
             executable = True,
             cfg = "exec",
         ),
         "_allowlist_function_transition": attr.label(
+            doc = "Function-transition allowlist the rule's platform transition requires.",
             default = "@bazel_tools//tools/allowlists/function_transition_allowlist",
         ),
     },

@@ -104,6 +104,7 @@ flutter_android_manifest_merge = rule(
                   "passes through verbatim; any other is an error.",
         ),
         "_merge_tool": attr.label(
+            doc = "Tool that merges the overlay and library manifests into the base manifest.",
             default = _TOOL,
             executable = True,
             cfg = "exec",

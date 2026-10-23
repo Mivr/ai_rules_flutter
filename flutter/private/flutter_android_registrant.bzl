@@ -51,6 +51,7 @@ transitions to Android while keeping the caller's architecture and
             values = [""] + ANDROID_ABIS.keys(),
         ),
         "_allowlist_function_transition": attr.label(
+            doc = "Function-transition allowlist the rule's platform transition requires.",
             default = "@bazel_tools//tools/allowlists/function_transition_allowlist",
         ),
     },
@@ -111,6 +112,7 @@ flutter_android_plugins_aggregator = rule(
             values = [""] + ANDROID_ABIS.keys(),
         ),
         "_allowlist_function_transition": attr.label(
+            doc = "Function-transition allowlist the rule's platform transition requires.",
             default = "@bazel_tools//tools/allowlists/function_transition_allowlist",
         ),
     },

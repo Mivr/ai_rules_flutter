@@ -529,6 +529,7 @@ flutter_android_apk_overlay = rule(
             doc = "Release key alias flag (a string BuildSettingInfo).",
         ),
         "_overlay_tool": attr.label(
+            doc = "Tool that splices the Flutter payload into a copy of the base unsigned APK.",
             default = Label("//flutter/private/tools:android_bundle"),
             executable = True,
             cfg = "exec",
