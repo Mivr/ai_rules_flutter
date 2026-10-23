@@ -27,6 +27,164 @@ def starlark_string_literal(value):
     """
     return repr(value)
 
+# Escape letters the Starlark lexer decodes to one fixed character.
+_SIMPLE_STARLARK_ESCAPES = {
+    "n": "\n",
+    "r": "\r",
+    "t": "\t",
+    "\\": "\\",
+    '"': '"',
+    "'": "'",
+}
+
+# Hex digit characters, lower- then upper-case, for `\xHH` value lookup.
+_HEX_DIGIT_CHARS = "0123456789abcdefABCDEF"
+
+# Octal digit characters, for `\ooo` value lookup.
+_OCTAL_DIGIT_CHARS = "01234567"
+
+# Printable ASCII (code points 32-126) in code-point order, for octal and
+# `\x` escape value lookup. Tab, newline and carriage return decode without
+# it; anything else outside this range fails the fetch at the call site.
+_PRINTABLE_ASCII_CHARS = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
+
+def _escape_code_point_char(code):
+    """The character an octal or `\\x` escape value names, or "" when odd.
+
+    Only printable ASCII passes through, plus tab, newline and carriage
+    return; anything else (NUL, DEL, values past a byte) has no business in
+    an overlay heredoc body and fails the fetch at the call site instead of
+    guessing.
+
+    Args:
+        code: The escape's numeric value.
+
+    Returns:
+        The one-character string, or "" when `code` names nothing emittable.
+    """
+    if code == 9:
+        return "\t"
+    if code == 10:
+        return "\n"
+    if code == 13:
+        return "\r"
+    if code < 32 or code > 126:
+        return ""
+    return _PRINTABLE_ASCII_CHARS[code - 32]
+
+def _decode_hex_escape(source, i, n):
+    """Decode the two hex digits of a `\\xHH` escape starting at `source[i]`.
+
+    Args:
+        source: The still-encoded literal body.
+        i: Index of the first hex digit (the character after the `x`).
+        n: Length of `source`.
+
+    Returns:
+        A struct with the decoded `char`, the `next` index past the escape,
+        and an `error` reason ("" on success).
+    """
+    if i + 2 > n:
+        return struct(char = "", next = i, error = "a `\\x` escape needs two hex digits")
+    hi = _HEX_DIGIT_CHARS.find(source[i])
+    lo = _HEX_DIGIT_CHARS.find(source[i + 1])
+    if hi < 0 or lo < 0:
+        return struct(char = "", next = i, error = "a `\\x` escape needs two hex digits")
+    if hi >= 16:
+        hi -= 6
+    if lo >= 16:
+        lo -= 6
+    char = _escape_code_point_char(hi * 16 + lo)
+    if char == "":
+        return struct(char = "", next = i, error = "a `\\x` escape names a character outside printable ASCII")
+    return struct(char = char, next = i + 2, error = "")
+
+def _decode_octal_escape(source, i, n):
+    """Decode the one-to-three octal digits of an escape at `source[i]`.
+
+    Args:
+        source: The still-encoded literal body.
+        i: Index of the first octal digit (the character after the backslash).
+        n: Length of `source`.
+
+    Returns:
+        A struct with the decoded `char`, the `next` index past the escape,
+        and an `error` reason ("" on success).
+    """
+    value = 0
+    next = i
+    for _ in range(3):
+        if next >= n:
+            break
+        digit = _OCTAL_DIGIT_CHARS.find(source[next])
+        if digit < 0:
+            break
+        value = value * 8 + digit
+        next += 1
+    char = _escape_code_point_char(value)
+    if char == "":
+        return struct(char = "", next = next, error = "an octal escape names a character outside printable ASCII")
+    return struct(char = char, next = next, error = "")
+
+def _decode_one_escape(source, i, n):
+    """Decode the escape whose letter sits at `source[i]`, past its backslash.
+
+    Args:
+        source: The still-encoded literal body.
+        i: Index of the escape letter (the character after the backslash).
+        n: Length of `source`.
+
+    Returns:
+        A struct with the decoded `char`, the `next` index past the escape,
+        and an `error` reason ("" on success).
+    """
+    if i >= n:
+        return struct(char = "", next = i, error = "a backslash with nothing after it")
+    letter = source[i]
+    if letter in _SIMPLE_STARLARK_ESCAPES:
+        return struct(char = _SIMPLE_STARLARK_ESCAPES[letter], next = i + 1, error = "")
+    if letter == "x":
+        return _decode_hex_escape(source, i + 1, n)
+    if letter in _OCTAL_DIGIT_CHARS:
+        return _decode_octal_escape(source, i, n)
+    return struct(char = "", next = i, error = "an unknown escape \"\\" + letter + "\"")
+
+def decode_starlark_escapes(source):
+    """Decode Starlark string-literal escapes in `source` to the actual text.
+
+    `source` is literal body text cut out of a quoted Starlark string — an
+    overlay heredoc body, or a parsed `name`/`outs` line — where backslash
+    sequences are still encoded. Every escape the Starlark lexer accepts
+    (`\\\\`, `\\"`, `\\'`, `\\n`, `\\t`, `\\r`, one-to-three octal digits,
+    `\\x` plus two hex digits) decodes to the character it names; anything
+    else fails closed through `error` instead of guessing.
+
+    Args:
+        source: The still-encoded literal body.
+
+    Returns:
+        A struct with the decoded `text` and an `error` reason ("" on
+        success). The caller fails the fetch with the package and the
+        template in the message.
+    """
+    chars = []
+    i = 0
+    n = len(source)
+    error = ""
+    for _ in range(n):
+        if i >= n or error != "":
+            break
+        if source[i] != "\\":
+            chars.append(source[i])
+            i += 1
+            continue
+        decoded = _decode_one_escape(source, i + 1, n)
+        error = decoded.error
+        if error == "":
+            chars.append(decoded.char)
+            i = decoded.next
+    return struct(text = "".join(chars), error = error)
+
 def spoke_file_name_error(package_name, entry, path):
     """The fetch failure for a declared or walked name no target can name.
 

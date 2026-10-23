@@ -45,7 +45,7 @@ load(
     _gradle_parse_android_manifest_package = "parse_android_manifest_package",
     _gradle_parse_gradle_android_namespace = "parse_gradle_android_namespace",
 )
-load(":starlark_literal.bzl", "check_spoke_file_name", "starlark_string_literal")
+load(":starlark_literal.bzl", "check_spoke_file_name", "decode_starlark_escapes", "starlark_string_literal")
 
 def parse_gradle_android_namespace(content, language = "groovy"):
     """Extract `android.namespace` from a Gradle build script.
@@ -1522,8 +1522,55 @@ _WRITE_FILE_LOAD = 'load("@bazel_skylib//rules:write_file.bzl", "write_file")\n'
 _CAT_HEREDOC_PREFIX = "    cmd = \"cat > $@ <<'EOF'\\n"
 _CAT_HEREDOC_SUFFIX = "\\nEOF\\n\",\n)"
 
-def _rewrite_cat_genrules(content):
-    """Rewrite heredoc `cat` `genrule` targets in overlay templates to `write_file`."""
+def _decode_heredoc_field(source, package_name, template, genrule_name, field):
+    """Decode one source-encoded heredoc field, failing the fetch closed.
+
+    Args:
+        source: The still-encoded field text cut out of the template.
+        package_name: The pub package the overlay belongs to, for the failure.
+        template: The overlay template path, for the failure.
+        genrule_name: The raw `name` line, naming the genrule in the failure.
+        field: Which field failed to decode (`name`, `outs`, or the body).
+
+    Returns:
+        The decoded text; fails the fetch naming the package, the template
+        and the genrule when the field holds an undecodable escape.
+    """
+    decoded = decode_starlark_escapes(source)
+    if decoded.error != "":
+        fail((
+            "flutter.pub overlay for \"{pkg}\" ({tpl}): genrule {name} holds " +
+            "{error} in its {field}; refusing it rather than emitting " +
+            "bytes the heredoc `cat` never wrote."
+        ).format(
+            pkg = package_name,
+            tpl = template,
+            name = repr(genrule_name),
+            error = decoded.error,
+            field = field,
+        ))
+    return decoded.text
+
+def _rewrite_cat_genrules(content, package_name = "", template = ""):
+    """Rewrite heredoc `cat` `genrule` targets in overlay templates to `write_file`.
+
+    The cut-out heredoc body (and the parsed `name`/`outs` lines) is
+    Starlark source text: its escapes are still encoded. Each decodes to
+    the actual text before rendering, so the `write_file` output equals the
+    bytes the original genrule's `cat` heredoc would have written. An
+    undecodable escape fails the fetch, naming the package and the
+    template. Every decoded line still renders through
+    `starlark_string_literal`; the build-escape fix stays intact.
+
+    Args:
+        content: The substituted overlay template text.
+        package_name: The pub package the overlay belongs to, for failures.
+        template: The overlay template path, for failures.
+
+    Returns:
+        The template with each heredoc `cat` genrule replaced by an
+        equivalent `write_file`, plus the `write_file` load when missing.
+    """
     if _CAT_HEREDOC_PREFIX not in content:
         return content
     out_chunks = []
@@ -1555,19 +1602,30 @@ def _rewrite_cat_genrules(content):
             out_chunks.append(rest[:idx + len("genrule(\n")])
             rest = rest[idx + len("genrule(\n"):]
             continue
-        body_lines = body.split("\\n") + [""]
+        # The cut-out body (and the parsed `name`/`outs` lines) is Starlark
+        # source text: its escapes are still encoded. Decode each to the
+        # actual text first, or the escaping helper below escapes the
+        # already-escaped text a second time.
+        name = _decode_heredoc_field(name_val, package_name, template, name_val, "name")
+        out = _decode_heredoc_field(out_val, package_name, template, name_val, "outs")
+        body_text = _decode_heredoc_field(body, package_name, template, name_val, "heredoc body")
+        body_lines = body_text.split("\n") + [""]
 
-        # Overlay bodies are user-authored template text; every line still
-        # renders through the escaping helper on its way into `content`.
+        # Decoded lines are plain values now; every line still renders
+        # through the escaping helper on its way into `content`.
         content_entries = "\n".join(["        " + starlark_string_literal(line) + "," for line in body_lines])
         replacement = (
             "write_file(\n" +
-            "    name = " + starlark_string_literal(name_val) + ",\n" +
-            "    out = " + starlark_string_literal(out_val) + ",\n" +
+            "    name = " + starlark_string_literal(name) + ",\n" +
+            "    out = " + starlark_string_literal(out) + ",\n" +
             "    content = [\n" +
             content_entries + "\n" +
             "    ],\n" +
             '    newline = "unix",\n' +
+            # Public so consumers can read the output through runfiles: the
+            # e2e BuildConfig verifier holds a `data` dependency on it, and
+            # `bazel build` of the label needs no visibility at all.
+            '    visibility = ["//visibility:public"],\n' +
             ")"
         )
         out_chunks.append(rest[:idx])
@@ -1583,7 +1641,7 @@ def _rewrite_cat_genrules(content):
             rewritten = _WRITE_FILE_LOAD + rewritten
     return rewritten
 
-def apply_overlay_substitutions(content, hub_name, package_name, version, language_version, deps):
+def apply_overlay_substitutions(content, hub_name, package_name, version, language_version, deps, template = ""):
     """Fill an overlay template's placeholders.
 
     Args:
@@ -1596,6 +1654,8 @@ def apply_overlay_substitutions(content, hub_name, package_name, version, langua
         deps: Rendered list body for `{DEPS}` (see `render_overlay_deps`),
             derived from the same pubspec-and-lock intersection a generated
             spoke uses.
+        template: The overlay template path, naming it in heredoc decode
+            failures (see `_rewrite_cat_genrules`).
 
     Returns:
         The substituted content.
@@ -1616,7 +1676,7 @@ def apply_overlay_substitutions(content, hub_name, package_name, version, langua
         _DEPS_PLACEHOLDER,
         deps,
     )
-    return _rewrite_cat_genrules(substituted)
+    return _rewrite_cat_genrules(substituted, package_name, template)
 
 def _resolve_overlay_template(ctx, overlay_root_label, package_name, version, language_version, dep_labels, relpath, guard_hub_deps = False):
     """Look up an overlay template at `<root>/<package>/<version-ladder>/<relpath>`.
@@ -1717,6 +1777,7 @@ def _resolve_overlay_template(ctx, overlay_root_label, package_name, version, la
                 version = version,
                 language_version = language_version,
                 deps = render_overlay_deps(dep_labels),
+                template = str(tpl),
             )
     return ""
 
