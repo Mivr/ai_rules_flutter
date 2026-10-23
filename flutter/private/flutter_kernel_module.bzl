@@ -786,7 +786,7 @@ def _compile_product_kmod(ctx, tools, flutter_sdk_info, spec):
         unseeded_base_kmods = depset(),
     )
 
-def _modular_dep_state(ctx, rule_deps, own_record, flutter_sdk_info):
+def _modular_dep_state(rule_deps, own_record, flutter_sdk_info):
     """The validated dependency kernel state, or None when the target falls back.
 
     Collects the deps' `FlutterKernelModuleInfo` values and checks the closure
@@ -794,7 +794,6 @@ def _modular_dep_state(ctx, rule_deps, own_record, flutter_sdk_info):
     whole-program `frontend_server` compile when they fail.
 
     Args:
-        ctx: The aspect context.
         rule_deps: The target's dependency Targets.
         own_record: The `DartPackageInfo` for the target's own package.
         flutter_sdk_info: `FlutterSdkInfo` from the active Flutter toolchain.
@@ -909,7 +908,7 @@ def _flutter_kernel_module_aspect_impl(target, ctx):
     if not _modular_gate_open(ctx, opaque, enabled, tools, same_sdk, flutter_sdk_info):
         return _no_flutter_kernel_module()
 
-    dep = _modular_dep_state(ctx, rule_deps, own_record, flutter_sdk_info)
+    dep = _modular_dep_state(rule_deps, own_record, flutter_sdk_info)
     if dep == None:
         return _no_flutter_kernel_module()
 
