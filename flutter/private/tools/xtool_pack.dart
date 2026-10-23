@@ -509,12 +509,25 @@ class InfoPlistRequest {
     this.families = const [],
   });
 
+  /// The raw `Info.plist` XML sources to merge.
   final List<String> plistXmls;
+
+  /// The target platform (`ios`, `ios_sim`, or `macos`).
   final String platform;
+
+  /// The `CFBundleName` / executable name.
   final String appName;
+
+  /// The `CFBundleIdentifier` value.
   final String bundleId;
+
+  /// The minimum-OS version string.
   final String minimumOsVersion;
+
+  /// Extra Xcode build-variable substitutions.
   final Map<String, String> extraVariables;
+
+  /// The requested iOS device families.
   final List<String> families;
 }
 
@@ -3103,12 +3116,25 @@ class StubRunnerSpec {
     this.metadataEntries = const [],
   });
 
+  /// The target platform (`ios`, `ios_sim`, or `macos`).
   final String platform;
+
+  /// The target architecture (`arm64` or `x86_64`).
   final String arch;
+
+  /// The minimum-OS version string.
   final String minimumOsVersion;
+
+  /// The embedded frameworks to `LC_LOAD_DYLIB`.
   final List<String> linkedFrameworkNames;
+
+  /// The system frameworks to `LC_LOAD_DYLIB`.
   final List<String> sdkFrameworks;
+
+  /// The `/usr/lib` libraries to `LC_LOAD_DYLIB`.
   final List<String> sdkDylibs;
+
+  /// The metadata lines embedded in `__TEXT`.
   final List<String> metadataEntries;
 }
 
@@ -3624,12 +3650,25 @@ class BundleVersionRequest {
     required this.outputPath,
   });
 
+  /// The `build_version` template.
   final String buildVersion;
+
+  /// The `short_version_string` template (defaults to [buildVersion]).
   final String shortVersionString;
+
+  /// The regex the `BUILD_EMBED_LABEL` must match, if any.
   final String buildLabelPattern;
+
+  /// The label used when no `stable-status.txt` entry exists.
   final String fallbackBuildLabel;
+
+  /// The named capture-group patterns for label substitution.
   final Map<String, String> captureGroups;
+
+  /// The `stable-status.txt` path, if any.
   final String? stableStatusPath;
+
+  /// Where to write the resolved version JSON.
   final String outputPath;
 }
 

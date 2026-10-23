@@ -2498,11 +2498,22 @@ class PatchOptions {
     this.arch,
   });
 
+  /// The `LC_BUILD_VERSION` platform constant, if any.
   final int? platform;
+
+  /// The packed minimum-OS version, if any.
   final int? minOs;
+
+  /// The packed SDK version, if any.
   final int? sdkVersion;
+
+  /// The new `LC_ID_DYLIB` install name, if any.
   final String? installName;
+
+  /// The `LC_RPATH` entries to add.
   final List<String> rpaths;
+
+  /// The fat slice to thin (`"arm64"` or `"x86_64"`), if any.
   final String? arch;
 }
 
