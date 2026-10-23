@@ -29,6 +29,7 @@ load(
     "resolve_overlay_roots",
     "resolve_overlay_template",
 )
+load("//flutter/private:starlark_literal.bzl", "starlark_string_literal")
 load("//flutter/private:gradle.bzl", "gradle_android_namespaces", "gradle_build_file_choice", "gradle_collect_files", "gradle_scan_namespaces", "gradle_scan_native", "gradle_scan_proguard")
 
 # Verbatim shape of record_android 1.5.1's android/build.gradle (trimmed):
@@ -952,11 +953,9 @@ overlay_multi_root_watches_higher_priority_root_test = unittest.make(
     _overlay_multi_root_watches_higher_priority_root_test_impl,
 )
 
-def _overlay_rewrites_cat_genrules_to_write_file_test_impl(ctx):
-    """Overlay templates using `cat > $@ <<'EOF'` genrules are rewritten to `write_file`."""
-    env = unittest.begin(ctx)
-
-    tpl = """\
+def _audio_session_heredoc_tpl():
+    """The audio_session BuildConfig heredoc genrule, as its overlay spells it."""
+    return """\
 load("@rules_flutter//flutter:android.bzl", "flutter_android_engine")
 load("@rules_java//java:java_library.bzl", "java_library")
 
@@ -966,6 +965,12 @@ genrule(
     cmd = "cat > $@ <<'EOF'\\npackage com.ryanheise.audio_session;\\npublic final class BuildConfig {\\n  public static final boolean DEBUG = false;\\n  public static final String LIBRARY_PACKAGE_NAME = \\"com.ryanheise.audio_session\\";\\n  public static final String BUILD_TYPE = \\"release\\";\\n}\\nEOF\\n",
 )
 """
+
+def _overlay_rewrites_cat_genrules_to_write_file_test_impl(ctx):
+    """Overlay templates using `cat > $@ <<'EOF'` genrules are rewritten to `write_file`."""
+    env = unittest.begin(ctx)
+
+    tpl = _audio_session_heredoc_tpl()
     rendered = apply_overlay_substitutions(
         content = tpl,
         hub_name = "deps",
@@ -991,6 +996,81 @@ genrule(
 
 overlay_rewrites_cat_genrules_to_write_file_test = unittest.make(
     _overlay_rewrites_cat_genrules_to_write_file_test_impl,
+)
+
+def _overlay_heredoc_content_matches_cat_bytes_test_impl(ctx):
+    """The rewritten `content` holds the bytes the heredoc `cat` would write.
+
+    The heredoc body the rewrite cuts out is still Starlark-encoded source
+    text; each rendered `content` entry must parse back to the exact file
+    line, so the `write_file` output equals the `cat` output byte for byte.
+    """
+    env = unittest.begin(ctx)
+
+    rendered = apply_overlay_substitutions(
+        content = _audio_session_heredoc_tpl(),
+        hub_name = "deps",
+        package_name = "audio_session",
+        version = "0.1.21",
+        language_version = "3.4",
+        deps = "",
+    )
+    want_lines = [
+        "package com.ryanheise.audio_session;",
+        "public final class BuildConfig {",
+        "  public static final boolean DEBUG = false;",
+        '  public static final String LIBRARY_PACKAGE_NAME = "com.ryanheise.audio_session";',
+        '  public static final String BUILD_TYPE = "release";',
+        "}",
+        "",
+    ]
+    want_entries = "\n".join(["        " + starlark_string_literal(line) + "," for line in want_lines])
+    asserts.true(env, want_entries in rendered, rendered)
+
+    return unittest.end(env)
+
+overlay_heredoc_content_matches_cat_bytes_test = unittest.make(
+    _overlay_heredoc_content_matches_cat_bytes_test_impl,
+)
+
+def _overlay_heredoc_decodes_mixed_escapes_test_impl(ctx):
+    """A body holding a quote, a backslash, a tab and a single quote decodes.
+
+    Each escape in the cut-out source text must reach the rendered `content`
+    as the character it names, not re-escaped: the `write_file` output must
+    equal the `cat` heredoc bytes for every escape a Starlark literal holds.
+    """
+    env = unittest.begin(ctx)
+
+    tpl = """\
+genrule(
+    name = "mixed_src",
+    outs = ["mixed/out.txt"],
+    cmd = "cat > $@ <<'EOF'\\nquote \\"here\\"\\nback\\\\slash\\ncol\\there\\nit\\'s fine\\nEOF\\n",
+)
+"""
+    rendered = apply_overlay_substitutions(
+        content = tpl,
+        hub_name = "deps",
+        package_name = "mixed_pkg",
+        version = "1.0.0",
+        language_version = "3.4",
+        deps = "",
+    )
+    want_lines = [
+        'quote "here"',
+        "back\\slash",
+        "col\there",
+        "it's fine",
+        "",
+    ]
+    want_entries = "\n".join(["        " + starlark_string_literal(line) + "," for line in want_lines])
+    asserts.true(env, want_entries in rendered, rendered)
+
+    return unittest.end(env)
+
+overlay_heredoc_decodes_mixed_escapes_test = unittest.make(
+    _overlay_heredoc_decodes_mixed_escapes_test_impl,
 )
 
 def _maven_labels_known_and_unknown_test_impl(ctx):
@@ -2161,6 +2241,8 @@ def flutter_pub_package_test_suite(name):
         overlay_watches_android_subpackage_candidates_test,
         overlay_multi_root_watches_higher_priority_root_test,
         overlay_rewrites_cat_genrules_to_write_file_test,
+        overlay_heredoc_content_matches_cat_bytes_test,
+        overlay_heredoc_decodes_mixed_escapes_test,
         parse_gradle_android_namespace_test,
         parse_android_manifest_package_test,
         record_android_subpackage_test,

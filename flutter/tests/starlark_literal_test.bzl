@@ -21,6 +21,7 @@ load(
 load(
     "//flutter/private:starlark_literal.bzl",
     "check_spoke_file_name",
+    "decode_starlark_escapes",
     "spoke_file_name_error",
     "spoke_file_name_problem",
     "starlark_string_literal",
@@ -201,6 +202,77 @@ odd_names_render_escaped_test = unittest.make(
     _odd_names_render_escaped_test_impl,
 )
 
+def _decode_simple_escapes_test_impl(ctx):
+    """Every one-letter Starlark escape decodes to the character it names."""
+    env = unittest.begin(ctx)
+
+    cases = [
+        ("plain", "plain"),
+        ("a\\nb", "a\nb"),
+        ("a\\tb", "a\tb"),
+        ("a\\rb", "a\rb"),
+        ("a\\\\b", "a\\b"),
+        ("a\\\"b", "a\"b"),
+        ("a\\'b", "a'b"),
+    ]
+    for source, want in cases:
+        decoded = decode_starlark_escapes(source)
+        asserts.equals(env, "", decoded.error, source)
+        asserts.equals(env, want, decoded.text, source)
+
+    return unittest.end(env)
+
+decode_simple_escapes_test = unittest.make(_decode_simple_escapes_test_impl)
+
+def _decode_code_point_escapes_test_impl(ctx):
+    """`\\xHH` and octal escapes decode through the printable-ASCII lookup."""
+    env = unittest.begin(ctx)
+
+    cases = [
+        ("\\x41", "A"),
+        ("\\x4A", "J"),
+        ("\\x0a", "\n"),
+        ("\\x09", "\t"),
+        ("\\x22", "\""),
+        ("\\x5c", "\\"),
+        ("\\101", "A"),
+        ("\\141", "a"),
+        ("\\12", "\n"),
+        ("\\40", " "),
+    ]
+    for source, want in cases:
+        decoded = decode_starlark_escapes(source)
+        asserts.equals(env, "", decoded.error, source)
+        asserts.equals(env, want, decoded.text, source)
+
+    return unittest.end(env)
+
+decode_code_point_escapes_test = unittest.make(
+    _decode_code_point_escapes_test_impl,
+)
+
+def _decode_rejects_undecodable_test_impl(ctx):
+    """Unknown escapes, a trailing backslash and odd code points fail closed."""
+    env = unittest.begin(ctx)
+
+    for bad in [
+        "a\\qb",
+        "a\\",
+        "\\x00",
+        "\\x7f",
+        "\\777",
+        "\\x4",
+        "\\xg1",
+    ]:
+        decoded = decode_starlark_escapes(bad)
+        asserts.true(env, decoded.error != "", bad)
+
+    return unittest.end(env)
+
+decode_rejects_undecodable_test = unittest.make(
+    _decode_rejects_undecodable_test_impl,
+)
+
 def starlark_literal_test_suite(name):
     unittest.suite(
         name,
@@ -210,4 +282,7 @@ def starlark_literal_test_suite(name):
         dir_declaration_passes_test,
         ordinary_name_passes_test,
         odd_names_render_escaped_test,
+        decode_simple_escapes_test,
+        decode_code_point_escapes_test,
+        decode_rejects_undecodable_test,
     )
