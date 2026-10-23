@@ -133,7 +133,11 @@ load(
     "//flutter/private:flutter_web_compile.bzl",
     "flutter_dart2js_action",
     "flutter_dart2wasm_action",
+    "make_dart2js_request",
+    "make_dart2wasm_request",
     "web_build_mode",
+    "web_compile_tool_inputs",
+    "web_sdk_files_for_dart2js",
 )
 load("//flutter/private:native_sources.bzl", "native_sources_aspect")
 load(
@@ -1090,6 +1094,10 @@ def _build_analyzable_and_coverage_infos(ctx, package_name, lib_root, main_file,
     )
     return instrumented_files_info, analyzable_info
 
+def _web_sdk_file_list(ctx):
+    """All files the web SDK target carries (renderer/template lookup)."""
+    return ctx.attr._web_sdk.files.to_list() if ctx.attr._web_sdk else []
+
 def _flutter_integration_test_impl(ctx):
     if ctx.attr.platform != "web":
         fail(
@@ -1179,52 +1187,48 @@ def _flutter_integration_test_impl(ctx):
         extra_wrapper_srcs.append(registrant)
     all_srcs = all_srcs + extra_wrapper_srcs
 
-    # Step 2: Compile to JS or WASM.
-    web_sdk_file_list = ctx.attr._web_sdk.files.to_list() if ctx.attr._web_sdk else []
-    dart2js_web_sdk_files = [
-        f
-        for f in web_sdk_file_list
-        if f.path.endswith("/libraries.json") or (
-            "/web-sdk/libraries." in f.path and f.path.endswith(".json")
-        )
-    ]
+    # Step 2: Compile to JS or WASM. The request struct is gathered once here
+    # and each compiler builds its own request from it (see
+    # `flutter_web_compile.bzl`).
+    compile = struct(
+        dart = flutter_sdk_info.dart,
+        flutter_sdk_info = flutter_sdk_info,
+        dart2wasm_platform_dill = ctx.file._dart2wasm_platform_dill,
+        dart2js_platform_dill = ctx.file._dart2js_platform_dill,
+        web_sdk_files = web_sdk_files_for_dart2js(ctx.attr._web_sdk),
+        main_dart = entrypoint,
+        srcs = all_srcs,
+        package_config = config_file,
+        mode = mode,
+        defines = user_defines,
+        renderer = renderer,
+        stage_salt = "",
+        web_compile_tool = ctx.executable._web_template_tool,
+        web_compile_inputs = web_compile_tool_inputs(flutter_sdk_info.dart_vm_files),
+        web_guard_tool = ctx.executable._web_guard_tool,
+        enable_experiments = ctx.attr.enable_experiments,
+    )
     compile_outputs = []
     compile_copies = []
     dart2js_dirs = []
 
-    web_compile_inputs = [
-        f
-        for f in flutter_sdk_info.dart_vm_files.to_list()
-        if f.basename in ("dartvm", "dartvm.exe")
-    ]
     if ctx.attr.compiler == "dart2wasm":
         output_wasm = ctx.actions.declare_file(ctx.label.name + "_wasm/main.dart.wasm")
         output_mjs = ctx.actions.declare_file(ctx.label.name + "_wasm/main.dart.mjs")
         output_wasm_map = None
         if ctx.attr.source_maps:
             output_wasm_map = ctx.actions.declare_file(ctx.label.name + "_wasm/main.dart.wasm.map")
-        flutter_dart2wasm_action(
-            ctx = ctx,
-            dart = flutter_sdk_info.dart,
-            flutter_sdk_files = flutter_sdk_info.dart2wasm_files,
-            dart2wasm_platform_dill = ctx.file._dart2wasm_platform_dill,
-            main_dart = entrypoint,
-            srcs = all_srcs,
-            package_config = config_file,
-            output_wasm = output_wasm,
-            output_mjs = output_mjs,
-            mode = mode,
-            output_source_map = output_wasm_map,
-            optimization_level = ctx.attr.optimization_level_wasm,
-            strip_wasm = ctx.attr.strip_wasm,
-            minify = ctx.attr.minify_wasm,
-            enable_experiments = ctx.attr.enable_experiments,
-            defines = user_defines,
-            renderer = renderer,
-            web_compile_tool = ctx.executable._web_template_tool,
-            web_guard_tool = ctx.executable._web_guard_tool,
-            web_compile_inputs = web_compile_inputs,
-        )
+        flutter_dart2wasm_action(ctx, make_dart2wasm_request(
+            compile,
+            struct(
+                optimization_level = ctx.attr.optimization_level_wasm,
+                minify = ctx.attr.minify_wasm,
+                strip_wasm = ctx.attr.strip_wasm,
+            ),
+            output_wasm,
+            output_mjs,
+            output_wasm_map,
+        ))
         compile_outputs = [output_wasm, output_mjs]
         compile_copies = [
             {"src": output_wasm.path, "dst": "main.dart.wasm"},
@@ -1236,30 +1240,19 @@ def _flutter_integration_test_impl(ctx):
         builds = [_wasm_build(renderer)]
     else:
         output_js_dir = ctx.actions.declare_directory(ctx.label.name + "_dart2js")
-        flutter_dart2js_action(
-            ctx = ctx,
-            dart = flutter_sdk_info.dart,
-            flutter_sdk_files = flutter_sdk_info.dart2js_files,
-            web_sdk_files = dart2js_web_sdk_files,
-            dart2js_platform_dill = ctx.file._dart2js_platform_dill,
-            main_dart = entrypoint,
-            srcs = all_srcs,
-            package_config = config_file,
-            output_dir = output_js_dir,
-            mode = mode,
-            optimization_level = ctx.attr.optimization_level_js,
-            minify = ctx.attr.minify_js,
-            native_null_assertions = ctx.attr.native_null_assertions,
-            frequency_based_minification = ctx.attr.frequency_based_minification,
-            enable_experiments = ctx.attr.enable_experiments,
-            dump_info = False,
-            source_maps = ctx.attr.source_maps,
-            defines = user_defines,
-            renderer = renderer,
-            web_compile_tool = ctx.executable._web_template_tool,
-            web_guard_tool = ctx.executable._web_guard_tool,
-            web_compile_inputs = web_compile_inputs,
-        )
+        flutter_dart2js_action(ctx, make_dart2js_request(
+            compile,
+            struct(
+                optimization_level = ctx.attr.optimization_level_js,
+                minify = ctx.attr.minify_js,
+                native_null_assertions = ctx.attr.native_null_assertions,
+                frequency_based_minification = ctx.attr.frequency_based_minification,
+                dump_info = False,
+                source_maps = ctx.attr.source_maps,
+            ),
+            renderer,
+            output_js_dir,
+        ))
         dart2js_dirs = [output_js_dir]
         builds = [_JS_BUILD]
 
@@ -1292,7 +1285,7 @@ def _flutter_integration_test_impl(ctx):
 
     flutter_js_file = None
     renderer_files = []
-    for f in web_sdk_file_list:
+    for f in _web_sdk_file_list(ctx):
         if f.path.endswith("/flutter_js/flutter.js"):
             flutter_js_file = f
         if "/web-sdk/canvaskit/" in f.path:
