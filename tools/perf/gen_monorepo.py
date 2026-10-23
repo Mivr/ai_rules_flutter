@@ -38,6 +38,15 @@ Scaffolding (MODULE.bazel, pub files, .bazelrc, the ``ios/Runner/`` scaffold
 the Tier-1 ``flutter_ios_app`` discovers) is derived from the
 ``e2e/hello_world`` fixture of the ``--rules-flutter`` checkout, so hermetic
 pins can never drift from what ``rules_flutter`` main verifies.
+
+The generated workspace models a consumer's iOS workspace, not this repo's
+own checkout: its ``.bazelrc`` carries no ``--lockfile_mode`` flag at all
+(Bazel's default applies; any such line the fixture carries is dropped) and
+its ``MODULE.bazel`` carries none of the fixture's dev-only dependencies
+(top-level ``bazel_dep``, ``register_toolchains`` and
+``register_execution_platforms`` calls marked ``dev_dependency = True``
+are removed with one following blank line; any other dev-marked call fails
+generation, as does any leftover reference to a dropped module).
 """
 
 import argparse
@@ -937,6 +946,179 @@ def split_overrides(overrides, rules_flutter_dir):
     return (flutter_path, dart_path, extra_overrides)
 
 
+DEV_DROPPABLE_KINDS = ("bazel_dep", "register_toolchains",
+                       "register_execution_platforms")
+
+
+def _scan_code(text):
+    """Per-char code mask and paren depth of MODULE.bazel text.
+
+    Returns (is_code, depth_before): is_code[i] is False inside strings
+    and # comments, depth_before[i] is the paren depth before text[i].
+    Only double-quoted strings exist in these files.
+    """
+    is_code = [True] * len(text)
+    depth_before = [0] * len(text)
+    depth = 0
+    in_str = False
+    in_comment = False
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if in_comment:
+            is_code[i] = False
+            if ch == "\n":
+                in_comment = False
+        elif in_str:
+            is_code[i] = False
+            if ch == "\\" and i + 1 < len(text):
+                is_code[i + 1] = False
+                depth_before[i + 1] = depth
+                i += 1
+            elif ch == '"':
+                in_str = False
+        elif ch == "#":
+            is_code[i] = False
+            in_comment = True
+        elif ch == '"':
+            is_code[i] = False
+            in_str = True
+        elif ch == "(":
+            depth_before[i] = depth
+            depth += 1
+        elif ch == ")":
+            depth = max(0, depth - 1)
+            depth_before[i] = depth
+        else:
+            depth_before[i] = depth
+        i += 1
+    return (is_code, depth_before)
+
+
+def _find_matching_paren(text, open_idx):
+    """Index of the close paren matching the open paren at open_idx."""
+    depth = 0
+    i = open_idx
+    in_str = False
+    while i < len(text):
+        ch = text[i]
+        if in_str:
+            if ch == "\\" and i + 1 < len(text):
+                i += 2
+                continue
+            if ch == '"':
+                in_str = False
+        elif ch == "#":
+            while i < len(text) and text[i] != "\n":
+                i += 1
+            continue
+        elif ch == '"':
+            in_str = True
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    raise ValueError("unbalanced parentheses in MODULE.bazel text")
+
+
+def _top_level_calls(text):
+    """(kind, start, close, body) of each top-level kind(...) call.
+
+    Only calls at paren depth zero in real code: comments, strings and
+    method calls (`.download(`, `.install(`) never match.
+    """
+    is_code, depth_before = _scan_code(text)
+    calls = []
+    for match in re.finditer(r"([A-Za-z_][A-Za-z0-9_]*)[ \t]*\(", text):
+        kind = match.group(1)
+        open_idx = match.end() - 1
+        if not all(is_code[k] for k in range(match.start(), match.end())):
+            continue
+        if depth_before[open_idx] != 0:
+            continue
+        prev = match.start() - 1
+        while prev >= 0 and text[prev] in " \t":
+            prev -= 1
+        if prev >= 0 and (text[prev] == "." or text[prev] == "_"
+                          or text[prev].isalnum()):
+            continue
+        close_idx = _find_matching_paren(text, open_idx)
+        calls.append((kind, match.start(), close_idx,
+                      text[open_idx + 1:close_idx]))
+    return calls
+
+
+def _has_dev_dependency(body):
+    """Whether a call body sets dev_dependency = True (comments ignored)."""
+    stripped = _strip_comments(body)
+    return re.search(r"\bdev_dependency\s*=\s*True\b", stripped) is not None
+
+
+def _dropped_module_names(calls):
+    """Module/repo names a dropped dev call provided."""
+    names = set()
+    for (kind, _, _, body) in calls:
+        if kind == "bazel_dep":
+            attrs = _string_attrs(body)
+            if "name" in attrs:
+                names.add(attrs["name"])
+            if "repo_name" in attrs:
+                names.add(attrs["repo_name"])
+        else:
+            names.update(re.findall(r'"@([^"/\s]+)//', body))
+    return names
+
+
+def drop_dev_dependency_blocks(text, label):
+    """(text, names): fixture MODULE.bazel without dev-only dependencies.
+
+    Removes every top-level bazel_dep, register_toolchains and
+    register_execution_platforms call marked dev_dependency = True: each
+    call's full text (first line through closing-paren line) plus exactly
+    one directly following blank line, if there is one. Any other call
+    kind marked dev_dependency = True fails with an error naming the
+    call. The attribute is read from the call itself, so a comment that
+    mentions dev_dependency drops nothing.
+    """
+    dev_calls = [c for c in _top_level_calls(text) if _has_dev_dependency(c[3])]
+    for (kind, _, _, _) in dev_calls:
+        if kind not in DEV_DROPPABLE_KINDS:
+            raise ValueError(
+                "fixture '%s' marks '%s' dev_dependency = True, which the "
+                "bench workspace cannot drop" % (label, kind))
+    names = _dropped_module_names(dev_calls)
+    trailing = text.endswith("\n")
+    lines = text.split("\n")
+    if trailing:
+        lines.pop()
+    spans = []
+    for (_, start, close, _) in dev_calls:
+        spans.append((text.count("\n", 0, start), text.count("\n", 0, close)))
+    for (first, last) in sorted(spans, reverse=True):
+        del lines[first:last + 1]
+        if first < len(lines) and lines[first].strip() == "":
+            del lines[first]
+    out = "\n".join(lines)
+    if trailing:
+        out += "\n"
+    return (out, names)
+
+
+def check_dropped_names_absent(out, names, label):
+    """Fails when the generated text still names a dropped module."""
+    for name in sorted(names):
+        if ("@%s//" % name in out
+                or re.search(r'module_name\s*=\s*"%s"' % re.escape(name),
+                             out)
+                or re.search(r'repo_name\s*=\s*"%s"' % re.escape(name), out)):
+            raise ValueError(
+                "fixture '%s' still references dropped dev dependency '%s'"
+                % (label, name))
+
+
 def fallback_module_text(flutter_name, dart_name, flutter_path,
                          dart_override, extra_overrides):
     """Embedded minimal MODULE.bazel when the fixture is absent.
@@ -1000,6 +1182,7 @@ def module_bazel_text(rules_flutter_dir, overrides):
             raise ValueError(
                 "fixture '%s' lacks the single rules_flutter path override"
                 % fixture)
+        text, dropped = drop_dev_dependency_blocks(text, fixture)
         fixture_flutter, fixture_dart, fixture_pin = read_fixture_modules(
             text)
         if (tree_flutter is not None and fixture_flutter is not None
@@ -1037,6 +1220,7 @@ def module_bazel_text(rules_flutter_dir, overrides):
             else:
                 extra_overrides += tree_pin
         out += extra_overrides
+        check_dropped_names_absent(out, dropped, fixture)
         return out
 
     dart_override = None
@@ -1061,8 +1245,14 @@ def copy_pub_file(out_dir, rules_flutter_dir, file_name, fallback):
 
 
 def bazelrc_text(rules_flutter_dir):
+    """Generated .bazelrc: the fixture's without extra defines or lockfile.
+
+    The bench workspace models a consumer workspace, so the generated
+    file carries no --lockfile_mode flag at all and Bazel's default
+    applies: any such line the fixture carries is dropped, and none is
+    ever inserted. Every other line stays byte-identical to the fixture.
+    """
     fallback = (
-        "common --lockfile_mode=off\n"
         "test --aspects=@rules_dart//dart:analyze.bzl%dart_analyze\n"
         "test --output_groups=+dart_analyze\n"
         "test --output_groups=+dart_format\n"
@@ -1080,14 +1270,8 @@ def bazelrc_text(rules_flutter_dir):
         if not line.startswith("@rules_flutter//flutter:extra_dart_defines")
         and not line.startswith(
             "common --@rules_flutter//flutter:extra_dart_defines")
+        and "--lockfile_mode" not in line
     ]
-    if "common --lockfile_mode=off" not in [l.strip() for l in kept]:
-        at = next(
-            (i for i, l in enumerate(kept)
-             if not l.strip() or l.strip().startswith("try-import")),
-            len(kept),
-        )
-        kept.insert(at, "common --lockfile_mode=off")
     return "\n".join(kept) + "\n"
 
 
