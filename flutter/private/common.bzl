@@ -20,7 +20,7 @@ load(
     "flutter_modular_test_tools",
 )
 load("//flutter/private:flutter_library.bzl", "aggregate_pub_contributions", "build_pub_contributions", "resolve_font_subset_tools")
-load("//flutter/private:flutter_shader_compile.bzl", "flutter_shader_compile_action")
+load("//flutter/private:flutter_shader_compile.bzl", "flutter_shader_compile_action", "shader_compile_tools")
 load("//flutter/private:native_sources.bzl", "native_sources_aspect")
 load("//flutter/private:plugin_registrant.bzl", "generate_dart_plugin_registrant", "generate_dev_plugin_registrants")
 load("//flutter/private:validation.bzl", "validate_dart_defines")
@@ -1134,22 +1134,24 @@ def _collect_dep_compiled_shaders(ctx, target_platform, compiled):
 
 def _compile_missing_shaders(ctx, flutter_sdk_info, target_platform, require_sksl, compiled):
     """Compile each `_shader_jobs` entry missing from `compiled`, in place."""
+    tools = shader_compile_tools(
+        flutter_sdk_info.impellerc,
+        flutter_sdk_info.shader_lib,
+        ctx.executable._shader_compile_tool,
+    )
     for job in _shader_jobs(ctx):
         if job.bundle_path not in compiled:
             # Named by the bundle path, which is unique, so no two outputs meet.
             out_path = job.bundle_path.replace("../", "_external/")
             output = ctx.actions.declare_file("_shaders_%s/%s/%s.iplr" % (target_platform, ctx.label.name, out_path))
             flutter_shader_compile_action(
-                ctx = ctx,
-                impellerc = flutter_sdk_info.impellerc,
-                shader_lib = flutter_sdk_info.shader_lib,
-                shader = job.file,
-                output = output,
-                target_platform = target_platform,
+                ctx,
+                job,
+                output,
+                tools,
+                target_platform,
                 is_web = target_platform == "web",
-                includes = job.includes,
                 # What compiles a shader whose SkSL stage fails without it.
-                compile_tool = ctx.executable._shader_compile_tool,
                 require_sksl = require_sksl,
             )
             compiled[job.bundle_path] = output
@@ -1806,6 +1808,11 @@ def _compile_aspect_direct_jobs(ctx, flutter_sdk_info, target_platform, direct_j
     """Compile the aspect target's own shaders, deduplicated by bundle path."""
     direct_compiled = []
     if direct_jobs and flutter_sdk_info and flutter_sdk_info.impellerc:
+        tools = shader_compile_tools(
+            flutter_sdk_info.impellerc,
+            flutter_sdk_info.shader_lib,
+            ctx.executable._shader_compile_tool,
+        )
         by_path = {}
         for job in direct_jobs:
             seen = by_path.get(job.bundle_path)
@@ -1829,15 +1836,12 @@ def _compile_aspect_direct_jobs(ctx, flutter_sdk_info, target_platform, direct_j
             out_path = job.bundle_path.replace("../", "_external/")
             output = ctx.actions.declare_file("_shaders_%s/%s/%s.iplr" % (target_platform, ctx.label.name, out_path))
             flutter_shader_compile_action(
-                ctx = ctx,
-                impellerc = flutter_sdk_info.impellerc,
-                shader_lib = flutter_sdk_info.shader_lib,
-                shader = job.file,
-                output = output,
-                target_platform = target_platform,
+                ctx,
+                job,
+                output,
+                tools,
+                target_platform,
                 is_web = target_platform == "web",
-                includes = job.includes,
-                compile_tool = ctx.executable._shader_compile_tool,
                 require_sksl = False,
             )
             direct_compiled.append(struct(

@@ -185,37 +185,49 @@ def _run_shader_compile(ctx, compile, tools):
         progress_message = "Compiling shader %s for %s" % (compile.shader.short_path, compile.target_platform),
     )
 
+def shader_compile_tools(impellerc, shader_lib, compile_tool):
+    """The executables behind one `flutter_shader_compile_action` call.
+
+    Args:
+        impellerc: The impellerc executable File.
+        shader_lib: List of shader_lib include Files.
+        compile_tool: The compiled `compile_shader` executable File, which
+            retries a shader whose SkSL stage fails without it. Used only
+            where the flags include SkSL beside other stages.
+
+    Returns:
+        A struct with `impellerc`, `shader_lib` and `compile_tool`.
+    """
+    return struct(
+        impellerc = impellerc,
+        shader_lib = shader_lib,
+        compile_tool = compile_tool,
+    )
+
 def flutter_shader_compile_action(
         ctx,
-        impellerc,
-        shader_lib,
-        shader,
+        job,
         output,
+        tools,
         target_platform,
         is_web = False,
-        includes = [],
-        compile_tool = None,
         require_sksl = False):
     """Compile a single shader file to .iplr format using impellerc.
 
     Args:
         ctx: Rule context.
-        impellerc: The impellerc executable File.
-        shader_lib: List of shader_lib include Files.
-        shader: The input .frag/.glsl shader File.
+        job: The shader job struct: `file` (the input .frag/.glsl shader
+            File) and `includes` (Files the shader may `#include` — inputs
+            the sandbox needs, staged into a per-action include tree so
+            workspace directories are never searched directly).
         output: The output .iplr File.
+        tools: The executables from `shader_compile_tools`.
         target_platform: Target platform string ("ios", "macos", "android", "linux", "windows", "web").
         is_web: If True, emit JSON format (for web targets).
-        includes: Files the shader may `#include` — inputs the sandbox
-            needs, staged into a per-action include tree so workspace
-            directories are never searched directly.
-        compile_tool: The compiled `compile_shader` executable File, which
-            retries a shader whose SkSL stage fails without it, as `flutter build`
-            does. Used only where the flags include SkSL beside other stages.
         require_sksl: Make an SkSL failure an error instead of a warning.
     """
     platform_flags = get_shader_platform_flags(target_platform)
-    shader_lib_dir = _find_shader_lib_dir(shader_lib)
+    shader_lib_dir = _find_shader_lib_dir(tools.shader_lib)
 
     # impellerc requires a --spirv intermediate output alongside --sl when
     # using runtime stages (not platform flags). Declare it as a secondary output.
@@ -225,15 +237,15 @@ def flutter_shader_compile_action(
     # so `--include` points only at the declared files' staged locations and
     # never at a workspace directory (which in local execution is a directory
     # symlink containing undeclared sibling files).
-    staged_files, include_dirs = _stage_shader_includes(ctx, output, shader, includes)
+    staged_files, include_dirs = _stage_shader_includes(ctx, output, job.file, job.includes)
 
-    args = _shader_compile_args(ctx, output, spirv_output, shader, platform_flags, is_web, include_dirs, shader_lib_dir)
+    args = _shader_compile_args(ctx, output, spirv_output, job.file, platform_flags, is_web, include_dirs, shader_lib_dir)
 
-    inputs = [shader] + shader_lib + list(includes) + staged_files
+    inputs = [job.file] + tools.shader_lib + list(job.includes) + staged_files
     _run_shader_compile(
         ctx,
         struct(
-            shader = shader,
+            shader = job.file,
             output = output,
             spirv_output = spirv_output,
             target_platform = target_platform,
@@ -242,8 +254,8 @@ def flutter_shader_compile_action(
             inputs = inputs,
         ),
         struct(
-            impellerc = impellerc,
-            compile_tool = compile_tool,
+            impellerc = tools.impellerc,
+            compile_tool = tools.compile_tool,
             require_sksl = require_sksl,
         ),
     )
