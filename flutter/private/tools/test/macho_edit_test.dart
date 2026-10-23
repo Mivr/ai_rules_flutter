@@ -313,17 +313,17 @@ Uint8List _buildFullCoverageMachO() {
 
   final commands = <Uint8List>[
     textSeg,
-    macho
-        .buildLcSegment64(
-          segname: '__LINKEDIT',
-          vmaddr: 0x4000,
-          vmsize: 0x1000,
-          fileoff: 0x4000,
-          filesize: 0x1000,
-          maxprot: 1,
-          initprot: 1,
-        )
-        .bytes,
+    macho.buildLcSegment64((
+      segname: '__LINKEDIT',
+      vmaddr: 0x4000,
+      vmsize: 0x1000,
+      fileoff: 0x4000,
+      filesize: 0x1000,
+      maxprot: 1,
+      initprot: 1,
+      nsects: 0,
+      flags: 0,
+    )).bytes,
     macho
         .buildLcSymtab(symoff: 0x4000, nsyms: 2, stroff: 0x4020, strsize: 0x20)
         .bytes,
@@ -594,11 +594,13 @@ void main() {
       final input = _buildSignedMachO(includeLegacyVersionMin: true);
       final patched = macho.patchMachO(
         input,
-        platform: macho.platformIos,
-        minOs: macho.parsePackedVersion('13.0'),
-        sdkVersion: macho.parsePackedVersion('16.0'),
-        installName: '@rpath/MyPlugin.framework/MyPlugin',
-        rpaths: ['@executable_path/Frameworks', '@loader_path/Frameworks'],
+        macho.PatchOptions(
+          platform: macho.platformIos,
+          minOs: macho.parsePackedVersion('13.0'),
+          sdkVersion: macho.parsePackedVersion('16.0'),
+          installName: '@rpath/MyPlugin.framework/MyPlugin',
+          rpaths: ['@executable_path/Frameworks', '@loader_path/Frameworks'],
+        ),
       );
 
       final cmds = macho.parseLoadCommands(patched);
@@ -654,10 +656,12 @@ void main() {
       // LC_BUILD_VERSION in place without duplicating rpaths.
       final repatched = macho.patchMachO(
         patched,
-        platform: macho.platformMacos,
-        minOs: macho.parsePackedVersion('11.0'),
-        sdkVersion: macho.parsePackedVersion('14.0'),
-        rpaths: ['@executable_path/Frameworks'],
+        macho.PatchOptions(
+          platform: macho.platformMacos,
+          minOs: macho.parsePackedVersion('11.0'),
+          sdkVersion: macho.parsePackedVersion('14.0'),
+          rpaths: ['@executable_path/Frameworks'],
+        ),
       );
       final cmds2 = macho.parseLoadCommands(repatched);
       expect(cmds2.where((c) => c.cmd == macho.lcBuildVersion).length, 1);
@@ -703,10 +707,12 @@ void main() {
       // Patch all slices in fat binary.
       final patchedFat = macho.patchMachO(
         fatInput,
-        platform: macho.platformIosSimulator,
-        minOs: macho.parsePackedVersion('15.4'),
-        sdkVersion: macho.parsePackedVersion('17.0'),
-        installName: '@rpath/MyFat.framework/MyFat',
+        macho.PatchOptions(
+          platform: macho.platformIosSimulator,
+          minOs: macho.parsePackedVersion('15.4'),
+          sdkVersion: macho.parsePackedVersion('17.0'),
+          installName: '@rpath/MyFat.framework/MyFat',
+        ),
       );
       expect(macho.isFatMachO(patchedFat), isTrue);
       final slices = macho.extractFatSlices(patchedFat);
@@ -725,11 +731,13 @@ void main() {
       // Thin fat binary to arm64 slice while patching.
       final thinnedArm64 = macho.patchMachO(
         fatInput,
-        platform: macho.platformIos,
-        minOs: macho.parsePackedVersion('16.1'),
-        sdkVersion: macho.parsePackedVersion('17.0'),
-        installName: '@rpath/Thinned.framework/Thinned',
-        arch: 'arm64',
+        macho.PatchOptions(
+          platform: macho.platformIos,
+          minOs: macho.parsePackedVersion('16.1'),
+          sdkVersion: macho.parsePackedVersion('17.0'),
+          installName: '@rpath/Thinned.framework/Thinned',
+          arch: 'arm64',
+        ),
       );
       expect(macho.isFatMachO(thinnedArm64), isFalse);
       expect(macho.isMachO64(thinnedArm64), isTrue);
@@ -780,8 +788,10 @@ void main() {
         expect(
           () => macho.patchMachO(
             macho32,
-            platform: macho.platformIos,
-            minOs: macho.parsePackedVersion('13.0'),
+            macho.PatchOptions(
+              platform: macho.platformIos,
+              minOs: macho.parsePackedVersion('13.0'),
+            ),
           ),
           throwsA(
             isA<FormatException>().having(
@@ -804,8 +814,10 @@ void main() {
         expect(
           () => macho.patchMachO(
             fatWith32,
-            platform: macho.platformIos,
-            minOs: macho.parsePackedVersion('13.0'),
+            macho.PatchOptions(
+              platform: macho.platformIos,
+              minOs: macho.parsePackedVersion('13.0'),
+            ),
           ),
           throwsA(
             isA<FormatException>().having(
@@ -823,8 +835,10 @@ void main() {
         expect(
           () => macho.patchMachO(
             plainBytes,
-            platform: macho.platformMacos,
-            minOs: macho.parsePackedVersion('11.0'),
+            macho.PatchOptions(
+              platform: macho.platformMacos,
+              minOs: macho.parsePackedVersion('11.0'),
+            ),
           ),
           throwsA(
             isA<FormatException>().having(
@@ -843,11 +857,13 @@ void main() {
         final input = _buildFullCoverageMachO();
         final patched = macho.patchMachO(
           input,
-          platform: macho.platformIos,
-          minOs: macho.parsePackedVersion('13.0'),
-          sdkVersion: macho.parsePackedVersion('16.0'),
-          installName: '@rpath/New.framework/New',
-          rpaths: ['@executable_path/Frameworks'],
+          macho.PatchOptions(
+            platform: macho.platformIos,
+            minOs: macho.parsePackedVersion('13.0'),
+            sdkVersion: macho.parsePackedVersion('16.0'),
+            installName: '@rpath/New.framework/New',
+            rpaths: ['@executable_path/Frameworks'],
+          ),
         );
         expect(patched.length, input.length);
 
@@ -903,9 +919,11 @@ void main() {
 
       final patched = macho.patchMachO(
         fat64,
-        platform: macho.platformIos,
-        minOs: macho.parsePackedVersion('13.0'),
-        installName: '@rpath/New.dylib',
+        macho.PatchOptions(
+          platform: macho.platformIos,
+          minOs: macho.parsePackedVersion('13.0'),
+          installName: '@rpath/New.dylib',
+        ),
       );
       expect(
         ByteData.sublistView(patched).getUint32(0, Endian.big),
@@ -937,17 +955,21 @@ void main() {
       );
       final matched = macho.patchMachO(
         stub,
-        platform: macho.platformMacos,
-        minOs: macho.parsePackedVersion('12.0'),
-        arch: 'arm64',
+        macho.PatchOptions(
+          platform: macho.platformMacos,
+          minOs: macho.parsePackedVersion('12.0'),
+          arch: 'arm64',
+        ),
       );
       expect(macho.isMachO64(matched), isTrue);
       expect(
         () => macho.patchMachO(
           stub,
-          platform: macho.platformMacos,
-          minOs: macho.parsePackedVersion('12.0'),
-          arch: 'x86_64',
+          macho.PatchOptions(
+            platform: macho.platformMacos,
+            minOs: macho.parsePackedVersion('12.0'),
+            arch: 'x86_64',
+          ),
         ),
         throwsA(
           isA<FormatException>().having(
@@ -974,9 +996,11 @@ void main() {
       );
       final patched = macho.patchMachO(
         stub,
-        platform: macho.platformIos,
-        minOs: macho.parsePackedVersion('14.0'),
-        installName: '@rpath/Runner',
+        macho.PatchOptions(
+          platform: macho.platformIos,
+          minOs: macho.parsePackedVersion('14.0'),
+          installName: '@rpath/Runner',
+        ),
       );
       final cmds = macho.parseLoadCommands(patched);
       expect(

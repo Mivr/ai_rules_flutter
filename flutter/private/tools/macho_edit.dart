@@ -367,12 +367,14 @@ void _runPatch(List<String> args) {
   try {
     patched = patchMachO(
       inputBytes,
-      platform: versions.platform,
-      minOs: versions.minOs,
-      sdkVersion: versions.sdkVersion,
-      installName: parsed.installName,
-      rpaths: parsed.rpaths,
-      arch: parsed.arch,
+      PatchOptions(
+        platform: versions.platform,
+        minOs: versions.minOs,
+        sdkVersion: versions.sdkVersion,
+        installName: parsed.installName,
+        rpaths: parsed.rpaths,
+        arch: parsed.arch,
+      ),
     );
   } on FormatException catch (e) {
     if (isAllowed) {
@@ -665,31 +667,21 @@ Uint8List createFrameworkZipBytes(
     final crc = crc32lib.crc32(entry.data);
     final (:payload, :method) = _zipEntryPayload(entry, rawDeflate);
     final externalAttrs = _zipExternalAttrs(entry);
-    _writeZipLocalEntry(
-      localParts,
-      nameBytes,
-      payload,
-      method,
-      crc,
-      entry.data.length,
-      dosTime,
-      dosDate,
-      versionNeeded,
+    final header = (
+      nameBytes: nameBytes,
+      payload: payload,
+      method: method,
+      crc: crc,
+      uncompressedLength: entry.data.length,
+      dosTime: dosTime,
+      dosDate: dosDate,
+      versionNeeded: versionNeeded,
+      externalAttrs: externalAttrs,
+      offset: offset,
+      versionMadeBy: versionMadeBy,
     );
-    _writeZipCentralEntry(
-      centralParts,
-      nameBytes,
-      payload,
-      method,
-      crc,
-      entry.data.length,
-      externalAttrs,
-      offset,
-      dosTime,
-      dosDate,
-      versionMadeBy,
-      versionNeeded,
-    );
+    _writeZipLocalEntry(localParts, header);
+    _writeZipCentralEntry(centralParts, header);
     offset += 30 + nameBytes.length + payload.length;
   }
 
@@ -777,9 +769,9 @@ int _zipExternalAttrs(FrameworkZipEntry entry) {
   return 0x81A4 << 16; // -rw-r--r-- (0100644)
 }
 
-/// Appends one local file header and payload to [into].
-void _writeZipLocalEntry(
-  BytesBuilder into,
+/// The header fields shared by one ZIP local file header and its central
+/// directory entry. Grouped into a record so the ZIP writers stay small.
+typedef _ZipEntryHeader = ({
   List<int> nameBytes,
   Uint8List payload,
   int method,
@@ -788,66 +780,59 @@ void _writeZipLocalEntry(
   int dosTime,
   int dosDate,
   int versionNeeded,
-) {
-  final localHeader = ByteData(30 + nameBytes.length);
+  int externalAttrs,
+  int offset,
+  int versionMadeBy,
+});
+
+/// Appends one local file header and payload to [into].
+void _writeZipLocalEntry(BytesBuilder into, _ZipEntryHeader header) {
+  final localHeader = ByteData(30 + header.nameBytes.length);
   localHeader.setUint32(0, 0x04034b50, Endian.little);
-  localHeader.setUint16(4, versionNeeded, Endian.little);
+  localHeader.setUint16(4, header.versionNeeded, Endian.little);
   localHeader.setUint16(6, 0x0800, Endian.little);
-  localHeader.setUint16(8, method, Endian.little);
-  localHeader.setUint16(10, dosTime, Endian.little);
-  localHeader.setUint16(12, dosDate, Endian.little);
-  localHeader.setUint32(14, crc, Endian.little);
-  localHeader.setUint32(18, payload.length, Endian.little);
-  localHeader.setUint32(22, uncompressedLength, Endian.little);
-  localHeader.setUint16(26, nameBytes.length, Endian.little);
+  localHeader.setUint16(8, header.method, Endian.little);
+  localHeader.setUint16(10, header.dosTime, Endian.little);
+  localHeader.setUint16(12, header.dosDate, Endian.little);
+  localHeader.setUint32(14, header.crc, Endian.little);
+  localHeader.setUint32(18, header.payload.length, Endian.little);
+  localHeader.setUint32(22, header.uncompressedLength, Endian.little);
+  localHeader.setUint16(26, header.nameBytes.length, Endian.little);
   localHeader.setUint16(28, 0, Endian.little);
   localHeader.buffer.asUint8List().setRange(
     30,
-    30 + nameBytes.length,
-    nameBytes,
+    30 + header.nameBytes.length,
+    header.nameBytes,
   );
 
   into.add(localHeader.buffer.asUint8List());
-  into.add(payload);
+  into.add(header.payload);
 }
 
 /// Appends one central directory header to [into].
-void _writeZipCentralEntry(
-  BytesBuilder into,
-  List<int> nameBytes,
-  Uint8List payload,
-  int method,
-  int crc,
-  int uncompressedLength,
-  int externalAttrs,
-  int offset,
-  int dosTime,
-  int dosDate,
-  int versionMadeBy,
-  int versionNeeded,
-) {
-  final centralHeader = ByteData(46 + nameBytes.length);
+void _writeZipCentralEntry(BytesBuilder into, _ZipEntryHeader header) {
+  final centralHeader = ByteData(46 + header.nameBytes.length);
   centralHeader.setUint32(0, 0x02014b50, Endian.little);
-  centralHeader.setUint16(4, versionMadeBy, Endian.little);
-  centralHeader.setUint16(6, versionNeeded, Endian.little);
+  centralHeader.setUint16(4, header.versionMadeBy, Endian.little);
+  centralHeader.setUint16(6, header.versionNeeded, Endian.little);
   centralHeader.setUint16(8, 0x0800, Endian.little);
-  centralHeader.setUint16(10, method, Endian.little);
-  centralHeader.setUint16(12, dosTime, Endian.little);
-  centralHeader.setUint16(14, dosDate, Endian.little);
-  centralHeader.setUint32(16, crc, Endian.little);
-  centralHeader.setUint32(20, payload.length, Endian.little);
-  centralHeader.setUint32(24, uncompressedLength, Endian.little);
-  centralHeader.setUint16(28, nameBytes.length, Endian.little);
+  centralHeader.setUint16(10, header.method, Endian.little);
+  centralHeader.setUint16(12, header.dosTime, Endian.little);
+  centralHeader.setUint16(14, header.dosDate, Endian.little);
+  centralHeader.setUint32(16, header.crc, Endian.little);
+  centralHeader.setUint32(20, header.payload.length, Endian.little);
+  centralHeader.setUint32(24, header.uncompressedLength, Endian.little);
+  centralHeader.setUint16(28, header.nameBytes.length, Endian.little);
   centralHeader.setUint16(30, 0, Endian.little);
   centralHeader.setUint16(32, 0, Endian.little);
   centralHeader.setUint16(34, 0, Endian.little);
   centralHeader.setUint16(36, 0, Endian.little);
-  centralHeader.setUint32(38, externalAttrs, Endian.little);
-  centralHeader.setUint32(42, offset, Endian.little);
+  centralHeader.setUint32(38, header.externalAttrs, Endian.little);
+  centralHeader.setUint32(42, header.offset, Endian.little);
   centralHeader.buffer.asUint8List().setRange(
     46,
-    46 + nameBytes.length,
-    nameBytes,
+    46 + header.nameBytes.length,
+    header.nameBytes,
   );
 
   into.add(centralHeader.buffer.asUint8List());
@@ -1224,26 +1209,34 @@ void _runCopyFiles(List<String> args) {
   Directory(parsed.outputDirPath).createSync(recursive: true);
   _stageCopyFilesEntries(
     parsed.positional,
-    outDirPath: parsed.outputDirPath,
-    platform: versions.platform,
-    minOs: versions.minOs,
-    sdkVersion: versions.sdkVersion,
-    arch: parsed.arch,
-    allowNonMacho: parsed.allowNonMacho,
+    (
+      outDirPath: parsed.outputDirPath,
+      platform: versions.platform,
+      minOs: versions.minOs,
+      sdkVersion: versions.sdkVersion,
+      arch: parsed.arch,
+      allowNonMacho: parsed.allowNonMacho,
+    ),
   );
 }
 
+/// Staging options shared by the `copy-files` entry walkers: destination and
+/// patch settings applied to every entry. Grouped so the walkers stay small.
+typedef _CopyFilesStaging = ({
+  String outDirPath,
+  int? platform,
+  int? minOs,
+  int? sdkVersion,
+  String? arch,
+  Set<String> allowNonMacho,
+});
+
 /// Stages each `copy-files` positional (a source path with an optional
-/// explicit destination name) under [outDirPath].
+/// explicit destination name) under [staging.outDirPath].
 void _stageCopyFilesEntries(
-  List<String> positional, {
-  required String outDirPath,
-  required int? platform,
-  required int? minOs,
-  required int? sdkVersion,
-  required String? arch,
-  required Set<String> allowNonMacho,
-}) {
+  List<String> positional,
+  _CopyFilesStaging staging,
+) {
   var i = 0;
   while (i < positional.length) {
     final srcPath = positional[i];
@@ -1259,16 +1252,7 @@ void _stageCopyFilesEntries(
       ).pathSegments.where((s) => s.isNotEmpty).last;
       i += 1;
     }
-    _stageCopyFilesEntry(
-      srcPath,
-      destName,
-      outDirPath: outDirPath,
-      platform: platform,
-      minOs: minOs,
-      sdkVersion: sdkVersion,
-      arch: arch,
-      allowNonMacho: allowNonMacho,
-    );
+    _stageCopyFilesEntry(srcPath, destName, staging);
   }
 }
 
@@ -1276,22 +1260,19 @@ void _stageCopyFilesEntries(
 /// was requested and copying anything else verbatim.
 void _stageCopyFilesEntry(
   String srcPath,
-  String destName, {
-  required String outDirPath,
-  required int? platform,
-  required int? minOs,
-  required int? sdkVersion,
-  required String? arch,
-  required Set<String> allowNonMacho,
-}) {
-  final destPath = '$outDirPath/$destName';
+  String destName,
+  _CopyFilesStaging staging,
+) {
+  final destPath = '${staging.outDirPath}/$destName';
+  final platform = staging.platform;
+  final minOs = staging.minOs;
   if (platform == null || minOs == null) {
     File(srcPath).copySync(destPath);
     return;
   }
   final inputBytes = File(srcPath).readAsBytesSync();
   final isAllowed = _isAllowedNonMacho(
-    allowNonMacho,
+    staging.allowNonMacho,
     inputPath: srcPath,
     outputPath: destName,
   );
@@ -1316,10 +1297,12 @@ void _stageCopyFilesEntry(
   try {
     final patched = patchMachO(
       inputBytes,
-      platform: platform,
-      minOs: minOs,
-      sdkVersion: sdkVersion,
-      arch: arch,
+      PatchOptions(
+        platform: platform,
+        minOs: minOs,
+        sdkVersion: staging.sdkVersion,
+        arch: staging.arch,
+      ),
     );
     File(destPath).writeAsBytesSync(patched);
   } on FormatException catch (e) {
@@ -2245,32 +2228,37 @@ class LoadCommand {
   int get cmdsize => bytes.length;
 }
 
+/// The fields of a 72-byte `LC_SEGMENT_64` load command with 0 sections.
+/// Shared by [buildLcSegment64] and xtool_pack's stub synthesizer so a segment
+/// command is described once.
+typedef Segment64Spec = ({
+  String segname,
+  int vmaddr,
+  int vmsize,
+  int fileoff,
+  int filesize,
+  int maxprot,
+  int initprot,
+  int nsects,
+  int flags,
+});
+
 /// Builds a 72-byte `LC_SEGMENT_64` load command with 0 sections.
-LoadCommand buildLcSegment64({
-  required String segname,
-  required int vmaddr,
-  required int vmsize,
-  required int fileoff,
-  required int filesize,
-  required int maxprot,
-  required int initprot,
-  int nsects = 0,
-  int flags = 0,
-}) {
+LoadCommand buildLcSegment64(Segment64Spec spec) {
   final buf = Uint8List(72);
   final bd = ByteData.sublistView(buf);
   bd.setUint32(0, lcSegment64, Endian.little);
   bd.setUint32(4, 72, Endian.little);
-  final nameBytes = ascii.encode(segname);
+  final nameBytes = ascii.encode(spec.segname);
   buf.setRange(8, 8 + math.min<int>(16, nameBytes.length), nameBytes);
-  bd.setUint64(24, vmaddr, Endian.little);
-  bd.setUint64(32, vmsize, Endian.little);
-  bd.setUint64(40, fileoff, Endian.little);
-  bd.setUint64(48, filesize, Endian.little);
-  bd.setUint32(56, maxprot, Endian.little);
-  bd.setUint32(60, initprot, Endian.little);
-  bd.setUint32(64, nsects, Endian.little);
-  bd.setUint32(68, flags, Endian.little);
+  bd.setUint64(24, spec.vmaddr, Endian.little);
+  bd.setUint64(32, spec.vmsize, Endian.little);
+  bd.setUint64(40, spec.fileoff, Endian.little);
+  bd.setUint64(48, spec.filesize, Endian.little);
+  bd.setUint32(56, spec.maxprot, Endian.little);
+  bd.setUint32(60, spec.initprot, Endian.little);
+  bd.setUint32(64, spec.nsects, Endian.little);
+  bd.setUint32(68, spec.flags, Endian.little);
   return LoadCommand(lcSegment64, buf);
 }
 
@@ -2498,6 +2486,26 @@ void _considerSegmentPayload(
   }
 }
 
+/// Resolved `patchMachO` options: platform versions, identity, and search
+/// paths applied to the binary. Grouped so the patch entry points stay small.
+class PatchOptions {
+  const PatchOptions({
+    this.platform,
+    this.minOs,
+    this.sdkVersion,
+    this.installName,
+    this.rpaths = const [],
+    this.arch,
+  });
+
+  final int? platform;
+  final int? minOs;
+  final int? sdkVersion;
+  final String? installName;
+  final List<String> rpaths;
+  final String? arch;
+}
+
 /// Patches a 64-bit or universal (fat) Mach-O binary in memory and recomputes
 /// its embedded `LC_CODE_SIGNATURE` SHA-256 page hashes if present.
 ///
@@ -2510,33 +2518,29 @@ void _considerSegmentPayload(
 /// Throws [FormatException] if [inputBytes] (or any slice being patched) is a
 /// 32-bit Mach-O binary or non-Mach-O data.
 Uint8List patchMachO(
-  Uint8List inputBytes, {
-  int? platform,
-  int? minOs,
-  int? sdkVersion,
-  String? installName,
-  List<String> rpaths = const [],
-  String? arch,
-}) {
+  Uint8List inputBytes, [
+  PatchOptions options = const PatchOptions(),
+]) {
+  final arch = options.arch;
   if (isFatMachO(inputBytes)) {
     if (arch != null) {
       final thinSlice = thinFatMachO(inputBytes, arch);
       return _patchSingleMachO64(
         thinSlice,
-        platform: platform,
-        minOs: minOs,
-        sdkVersion: sdkVersion,
-        installName: installName,
-        rpaths: rpaths,
+        platform: options.platform,
+        minOs: options.minOs,
+        sdkVersion: options.sdkVersion,
+        installName: options.installName,
+        rpaths: options.rpaths,
       );
     }
     return _patchFatMachO(
       inputBytes,
-      platform: platform,
-      minOs: minOs,
-      sdkVersion: sdkVersion,
-      installName: installName,
-      rpaths: rpaths,
+      platform: options.platform,
+      minOs: options.minOs,
+      sdkVersion: options.sdkVersion,
+      installName: options.installName,
+      rpaths: options.rpaths,
     );
   }
 
@@ -2559,11 +2563,11 @@ Uint8List patchMachO(
 
   return _patchSingleMachO64(
     inputBytes,
-    platform: platform,
-    minOs: minOs,
-    sdkVersion: sdkVersion,
-    installName: installName,
-    rpaths: rpaths,
+    platform: options.platform,
+    minOs: options.minOs,
+    sdkVersion: options.sdkVersion,
+    installName: options.installName,
+    rpaths: options.rpaths,
   );
 }
 
@@ -2950,12 +2954,14 @@ Uint8List generateStubMachO({
   final out = Uint8List(pageSize + _stubLinkeditFileSize);
   _writeStubHeader(
     out,
-    cputype: cputype,
-    cpusubtype: cpusubtype,
-    fileType: fileType,
-    commandCount: commands.length,
-    sizeofcmds: sizeofcmds,
-    flags: flags,
+    (
+      cputype: cputype,
+      cpusubtype: cpusubtype,
+      fileType: fileType,
+      commandCount: commands.length,
+      sizeofcmds: sizeofcmds,
+      flags: flags,
+    ),
   );
 
   var offset = mhHeaderSize64;
@@ -3005,7 +3011,7 @@ List<LoadCommand> _stubCommands({
   required int pageSize,
 }) {
   // LC_SEGMENT_64 (__TEXT) - 72 bytes (0 sections).
-  final textSeg = buildLcSegment64(
+  final textSeg = buildLcSegment64((
     segname: '__TEXT',
     vmaddr: 0,
     vmsize: pageSize,
@@ -3013,10 +3019,12 @@ List<LoadCommand> _stubCommands({
     filesize: pageSize,
     maxprot: 5, // VM_PROT_READ | VM_PROT_EXECUTE
     initprot: 5, // VM_PROT_READ | VM_PROT_EXECUTE
-  );
+    nsects: 0,
+    flags: 0,
+  ));
 
   // LC_SEGMENT_64 (__LINKEDIT) - 72 bytes (0 sections).
-  final linkeditSeg = buildLcSegment64(
+  final linkeditSeg = buildLcSegment64((
     segname: '__LINKEDIT',
     vmaddr: pageSize,
     vmsize: pageSize,
@@ -3024,7 +3032,9 @@ List<LoadCommand> _stubCommands({
     filesize: _stubLinkeditFileSize,
     maxprot: 1, // VM_PROT_READ
     initprot: 1, // VM_PROT_READ
-  );
+    nsects: 0,
+    flags: 0,
+  ));
 
   // LC_SYMTAB and LC_DYSYMTAB pointing into __LINKEDIT.
   final symtab = buildLcSymtab(
@@ -3058,24 +3068,27 @@ List<LoadCommand> _stubCommands({
   ];
 }
 
+/// The Mach-O header fields written over a synthesized stub binary. Grouped
+/// into a record so the header writer stays small.
+typedef _StubHeader = ({
+  int cputype,
+  int cpusubtype,
+  int fileType,
+  int commandCount,
+  int sizeofcmds,
+  int flags,
+});
+
 /// Writes the 64-bit Mach-O header over [out].
-void _writeStubHeader(
-  Uint8List out, {
-  required int cputype,
-  required int cpusubtype,
-  required int fileType,
-  required int commandCount,
-  required int sizeofcmds,
-  required int flags,
-}) {
+void _writeStubHeader(Uint8List out, _StubHeader header) {
   final bd = ByteData.sublistView(out);
   bd.setUint32(0, mhMagic64, Endian.little);
-  bd.setUint32(4, cputype, Endian.little);
-  bd.setUint32(8, cpusubtype, Endian.little);
-  bd.setUint32(12, fileType, Endian.little);
-  bd.setUint32(16, commandCount, Endian.little);
-  bd.setUint32(20, sizeofcmds, Endian.little);
-  bd.setUint32(24, flags, Endian.little);
+  bd.setUint32(4, header.cputype, Endian.little);
+  bd.setUint32(8, header.cpusubtype, Endian.little);
+  bd.setUint32(12, header.fileType, Endian.little);
+  bd.setUint32(16, header.commandCount, Endian.little);
+  bd.setUint32(20, header.sizeofcmds, Endian.little);
+  bd.setUint32(24, header.flags, Endian.little);
   bd.setUint32(28, 0, Endian.little);
 }
 
