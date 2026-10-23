@@ -112,9 +112,6 @@ const Map<String, String> _droppedPythonVariables = {
   // Replaces the platform library directory name under the prefix (`lib`
   // by default), steering the platform standard library the same way.
   'PYTHONPLATLIBDIR': 'relocates the platform standard library directory',
-  // Would hide `pip install --user` packages such as the `pymobiledevice3`
-  // the helpers need; the guard keeps user-site installs working.
-  'PYTHONNOUSERSITE': 'disables the user site the helpers run from',
   // Startup file for interactive sessions. Neither launch form below is
   // interactive (`python -` reads from a pipe, `python -c` takes an
   // argument), so nothing the helpers run can need it.
@@ -129,7 +126,9 @@ const Map<String, String> _droppedPythonVariables = {
 /// (honoured from Python 3.11, ignored before, where the preamble above does
 /// the work). User-site installs and virtualenvs keep working: nothing here
 /// touches `site`, `PYTHONUSERBASE`, or the interpreter's own prefix, and the
-/// macOS `__PYVENV_LAUNCHER__` lookup stays in place. Pass with
+/// macOS `__PYVENV_LAUNCHER__` lookup stays in place. `PYTHONNOUSERSITE` is
+/// forwarded untouched: the guard never widens what loads, so a user who
+/// switched the user site off keeps it off. Pass with
 /// `includeParentEnvironment: false` so the dropped variables stay dropped.
 Map<String, String> guardedPythonEnvironment([
   Map<String, String>? overrides,

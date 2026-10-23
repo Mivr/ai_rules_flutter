@@ -36,11 +36,6 @@ dart_test(
     env = {
         "IOS_SCREENSHOT_PYTHON_HOST_RLOCATION": "$(rlocationpath lib/python_host.dart)",
     },
-    # The tests drive the real host `python3` (a documented host
-    # prerequisite, like the Android SDK or Xcode): without the invoking
-    # PATH the lookup would search a sandbox PATH and skip even when the
-    # host has an interpreter.
-    env_inherit = ["PATH"],
     main = "test/python_host_test.dart",
     deps = [
         "@dev_tool_deps//:test",

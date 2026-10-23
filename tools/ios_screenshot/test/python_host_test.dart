@@ -238,7 +238,6 @@ void main() {
         'PYTHONPATH': '/attacker',
         'PYTHONHOME': '/attacker/home',
         'PYTHONPLATLIBDIR': '/attacker/plat',
-        'PYTHONNOUSERSITE': '1',
         'PYTHONSTARTUP': '/attacker/startup.py',
         'PYTHONUSERBASE': '/user/base',
         'EXTRA': 'kept',
@@ -246,7 +245,6 @@ void main() {
       expect(env['PYTHONPATH'], isNull);
       expect(env['PYTHONHOME'], isNull);
       expect(env['PYTHONPLATLIBDIR'], isNull);
-      expect(env['PYTHONNOUSERSITE'], isNull);
       expect(env['PYTHONSTARTUP'], isNull);
       expect(env['PYTHONSAFEPATH'], equals('1'));
       expect(env['PYTHONUSERBASE'], equals('/user/base'));
@@ -256,6 +254,15 @@ void main() {
         guardPythonProgram('import planted'),
         contains('_flutter_bazel_guard_sys_path'),
       );
+    });
+
+    test('guard forwards a user-disabled user site', () {
+      final env = guardedPythonEnvironment({
+        'PYTHONNOUSERSITE': '1',
+        'PYTHONUSERBASE': '/user/base',
+      });
+      expect(env['PYTHONNOUSERSITE'], equals('1'));
+      expect(env['PYTHONUSERBASE'], equals('/user/base'));
     });
 
     test('one launch helper serves both carriers', () {
