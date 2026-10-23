@@ -640,7 +640,7 @@ def _android_discover_runner(name, package_name, resources, binary_deps, base_ma
         binary_deps.append("__%s_runner" % name)
     return "__%s_manifest" % name, resources
 
-def _android_resolve_manifest(name, base_manifest, debug_manifest, profile_manifest, package_name, display_name, min_sdk_version, target_sdk_version, permissions, binary_deps, deps, internal_tags):
+def _android_resolve_manifest(name, base_manifest, debug_manifest, profile_manifest, binary_deps, deps, manifest):
     """Resolves the effective manifest: variants, template, permissions.
 
     Folds each variant's permissions into its own mode's APKs, the merge
@@ -660,11 +660,11 @@ def _android_resolve_manifest(name, base_manifest, debug_manifest, profile_manif
         # permission itself (see flutter_android_manifest_gen).
         flutter_android_manifest_gen(
             name = "__%s_manifest" % name,
-            package_name = package_name,
-            app_name = display_name,
-            min_sdk_version = min_sdk_version,
-            target_sdk_version = target_sdk_version,
-            tags = internal_tags,
+            package_name = manifest.package_name,
+            app_name = manifest.display_name,
+            min_sdk_version = manifest.min_sdk_version,
+            target_sdk_version = manifest.target_sdk_version,
+            tags = manifest.internal_tags,
         )
         actual_manifest = "__%s_manifest" % name
     elif debug_overlay != None or profile_overlay != None:
@@ -676,24 +676,24 @@ def _android_resolve_manifest(name, base_manifest, debug_manifest, profile_manif
                 name = "__%s_manifest_merged_%s" % (name, mode),
                 base = base_manifest,
                 overlay = overlay,
-                tags = internal_tags,
+                tags = manifest.internal_tags,
             )
             variants["@rules_flutter//flutter/private:" + mode] = "__%s_manifest_merged_%s" % (name, mode)
         actual_manifest = select(variants | {"//conditions:default": base_manifest})
     else:
         actual_manifest = base_manifest
 
-    if permissions:
+    if manifest.permissions:
         flutter_android_permissions_manifest(
             name = "__%s_permissions" % name,
-            permissions = permissions,
-            tags = internal_tags,
+            permissions = manifest.permissions,
+            tags = manifest.internal_tags,
         )
         flutter_android_manifest_merge(
             name = "__%s_manifest_with_permissions" % name,
             base = actual_manifest,
             overlay = "__%s_permissions" % name,
-            tags = internal_tags,
+            tags = manifest.internal_tags,
         )
         actual_manifest = "__%s_manifest_with_permissions" % name
 
@@ -702,11 +702,11 @@ def _android_resolve_manifest(name, base_manifest, debug_manifest, profile_manif
         base = actual_manifest,
         libraries = ["__%s_native_libs" % name] + binary_deps + deps,
         placeholders = ["applicationId", "minSdkVersion", "targetSdkVersion"],
-        tags = internal_tags,
+        tags = manifest.internal_tags,
     )
     return "__%s_manifest_with_library_permissions" % name
 
-def _android_binary_and_overlay(name, package_name, min_sdk_version, target_sdk_version, actual_manifest, resources, binary_deps, deps, nocompress_extensions, tags, internal_tags, kwargs, keystore = None, keystore_password_file = None, key_alias = None, key_password_file = None):
+def _android_binary_and_overlay(name, binary_deps, deps, apk):
     """Emits the payload-free android_binary, the payload overlay and the proxy.
 
     The android_binary builds a payload-free base APK: neither the
@@ -715,6 +715,17 @@ def _android_binary_and_overlay(name, package_name, min_sdk_version, target_sdk_
     APK) are its inputs, so Dart edits re-run neither resource linking nor
     dexing. The overlay injects both after resource linking, then aligns
     and signs — the same steps android_binary would have run.
+
+    Args:
+        name: The app name; internal targets derive from it.
+        binary_deps: Binary dependency labels for the android_binary.
+        deps: Extra dependency labels for the android_binary.
+        apk: Struct with `package_name`, `min_sdk_version`,
+            `target_sdk_version`, `actual_manifest`, `resources`,
+            `nocompress_extensions`, `tags`, `internal_tags`, `kwargs` (the
+            passthrough keyword args for the binary), and `signing` (a struct
+            with `keystore`, `keystore_password_file`, `key_alias`, and
+            `key_password_file`).
     """
 
     # 9. Final android_binary, behind a proxy that scopes rules_go pure mode
@@ -723,7 +734,7 @@ def _android_binary_and_overlay(name, package_name, min_sdk_version, target_sdk_
     # configuration before transitioning to Android, so it can be analyzed on
     # host or Android platforms (both of which register a CC toolchain) but not
     # when the top-level `--platforms` is iOS.
-    kwargs.setdefault(
+    apk.kwargs.setdefault(
         "target_compatible_with",
         select({
             Label("@platforms//os:ios"): [Label("@platforms//:incompatible")],
@@ -737,26 +748,26 @@ def _android_binary_and_overlay(name, package_name, min_sdk_version, target_sdk_
     # binary alone.
     passthrough = {}
     for key in ("compatible_with", "deprecation", "restricted_to", "target_compatible_with", "testonly", "visibility"):
-        if key in kwargs:
-            passthrough[key] = kwargs.pop(key)
-    binary_kwargs = dict(kwargs)
+        if key in apk.kwargs:
+            passthrough[key] = apk.kwargs.pop(key)
+    binary_kwargs = dict(apk.kwargs)
     binary_kwargs.update(passthrough)
-    if nocompress_extensions != None:
-        binary_kwargs["nocompress_extensions"] = nocompress_extensions
+    if apk.nocompress_extensions != None:
+        binary_kwargs["nocompress_extensions"] = apk.nocompress_extensions
 
     # Like every other internal target, the binary stays out of wildcard
     # builds (see internal_tags above): the proxy is the only entry point.
     _android_binary(
         name = "__%s_binary" % name,
-        manifest = actual_manifest,
+        manifest = apk.actual_manifest,
         manifest_values = {
-            "applicationId": package_name,
-            "minSdkVersion": min_sdk_version,
-            "targetSdkVersion": target_sdk_version,
+            "applicationId": apk.package_name,
+            "minSdkVersion": apk.min_sdk_version,
+            "targetSdkVersion": apk.target_sdk_version,
         },
-        resource_files = resources if resources else None,
+        resource_files = apk.resources if apk.resources else None,
         deps = binary_deps + deps,
-        tags = internal_tags,
+        tags = apk.internal_tags,
         **binary_kwargs
     )
 
@@ -767,15 +778,15 @@ def _android_binary_and_overlay(name, package_name, min_sdk_version, target_sdk_
     # binary apply to the overlay too.
     overlay_kwargs = {}
     for key in ("debug_key", "debug_signing_keys", "debug_signing_lineage_file", "key_rotation_min_sdk", "zipalign_alignment"):
-        if key in kwargs:
-            overlay_kwargs[key] = kwargs[key]
-    if nocompress_extensions != None:
-        overlay_kwargs["nocompress_extensions"] = nocompress_extensions
+        if key in apk.kwargs:
+            overlay_kwargs[key] = apk.kwargs[key]
+    if apk.nocompress_extensions != None:
+        overlay_kwargs["nocompress_extensions"] = apk.nocompress_extensions
     for key, value in (
-        ("keystore", keystore),
-        ("keystore_password_file", keystore_password_file),
-        ("key_alias", key_alias),
-        ("key_password_file", key_password_file),
+        ("keystore", apk.signing.keystore),
+        ("keystore_password_file", apk.signing.keystore_password_file),
+        ("key_alias", apk.signing.key_alias),
+        ("key_password_file", apk.signing.key_password_file),
     ):
         if value != None:
             overlay_kwargs[key] = value
@@ -798,7 +809,7 @@ def _android_binary_and_overlay(name, package_name, min_sdk_version, target_sdk_
             "@rules_flutter//flutter:apk_signing_v4": "v4",
             "//conditions:default": "v1_v2",
         }),
-        tags = internal_tags,
+        tags = apk.internal_tags,
         **overlay_kwargs
     )
 
@@ -807,7 +818,7 @@ def _android_binary_and_overlay(name, package_name, min_sdk_version, target_sdk_
     _flutter_android_binary_proxy(
         name = name,
         binary = ":__%s_overlay" % name,
-        tags = tags,
+        tags = apk.tags,
         **passthrough
     )
 
@@ -1054,12 +1065,37 @@ def flutter_android_app(
     # here, they reach the APK whatever the flags. The merger sees the full
     # library list including the native libs java_import, exactly as before
     # the payload-free split: native_libs first, then every binary dep.
-    actual_manifest = _android_resolve_manifest(name, base_manifest, debug_manifest, profile_manifest, package_name, display_name, min_sdk_version, target_sdk_version, permissions, binary_deps, deps, internal_tags)
+    manifest = struct(
+        package_name = package_name,
+        display_name = display_name,
+        min_sdk_version = min_sdk_version,
+        target_sdk_version = target_sdk_version,
+        permissions = permissions,
+        internal_tags = internal_tags,
+    )
+    actual_manifest = _android_resolve_manifest(name, base_manifest, debug_manifest, profile_manifest, binary_deps, deps, manifest)
 
     # 9. Final android_binary, behind a proxy that scopes rules_go pure mode
     # to this app, and 10. the payload overlay. The overlay is the target
     # users actually build; the proxy is the only entry point.
-    _android_binary_and_overlay(name, package_name, min_sdk_version, target_sdk_version, actual_manifest, resources, binary_deps, deps, nocompress_extensions, tags, internal_tags, kwargs, keystore = keystore, keystore_password_file = keystore_password_file, key_alias = key_alias, key_password_file = key_password_file)
+    apk = struct(
+        package_name = package_name,
+        min_sdk_version = min_sdk_version,
+        target_sdk_version = target_sdk_version,
+        actual_manifest = actual_manifest,
+        resources = resources,
+        nocompress_extensions = nocompress_extensions,
+        tags = tags,
+        internal_tags = internal_tags,
+        kwargs = kwargs,
+        signing = struct(
+            keystore = keystore,
+            keystore_password_file = keystore_password_file,
+            key_alias = key_alias,
+            key_password_file = key_password_file,
+        ),
+    )
+    _android_binary_and_overlay(name, binary_deps, deps, apk)
 
 def _short_abi_to_full(abi):
     """Convert short ABI name to full ABI string for flutter_android_bundle."""
