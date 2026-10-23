@@ -591,116 +591,128 @@ String _keptItsOldCode(Map<String, dynamic> result) =>
 /// Signature for reading keyboard input (allows test injection).
 typedef KeyboardReader = Stream<List<int>> Function();
 
-/// Run the shared interactive session loop for one or more device sessions.
+/// What one interactive session drives: the sessions, the compiler, the
+/// protocol they report on, and the dispatcher every transport shares.
 ///
-/// Handles file watching, keyboard input, and broadcasting hot reload/restart
-/// across all sessions. Returns when the user quits or all sessions end.
+/// The dispatcher is required because both reload commands are registered
+/// before the loop can be reached: a runner without them is not a state to
+/// degrade gracefully into, and a keypress is where the resulting
+/// 'Unknown command' throw is actually visible.
+typedef InteractiveTargets = ({
+  List<DeviceSession> sessions,
+  FrontendServer? frontendServer,
+  MachineProtocol protocol,
+  CommandRunner commandRunner,
+});
+
+/// How one interactive session behaves: whether DevTools is served, which
+/// `dart` serves it, and why reload is off.
 ///
-/// When [hotReloadUnavailable] is non-null, hot reload ('r') and the [watcher]
-/// that drives it are inert, but DevTools, perf overlay, inspector, and quit
-/// still work.
-Future<void> runInteractiveSession({
-  required List<DeviceSession> sessions,
-  required FrontendServer? frontendServer,
-  required MachineProtocol protocol,
+/// The Dart binary is required even when DevTools is disabled so the caller
+/// resolves it once rather than each launch site re-deriving it. The reload
+/// reason is required — rather than defaulted — so a call site cannot forget
+/// it, and it is a reason rather than a bool so the banner can say why the
+/// keys are gone.
+typedef InteractiveOptions = ({
+  bool devToolsEnabled,
+  String dartExecutable,
+  String? hotReloadUnavailable,
+});
 
-  /// The dispatcher every transport shares. Required, and the keyboard
-  /// dispatches through it unconditionally: both reload commands are
-  /// registered before this loop can be reached, so a runner without them is
-  /// not a state to degrade gracefully into — [CommandRunner.run] throwing
-  /// 'Unknown command' is the honest answer to a broken invariant, and a
-  /// keypress is where such a throw is actually visible. The watcher below
-  /// still asks first, for the reason given there: the same throw inside a
-  /// stream listener is an unhandled async error nobody sees.
-  required CommandRunner commandRunner,
-  required bool devToolsEnabled,
-
-  /// Dart binary from the Flutter toolchain, used to serve DevTools. Required
-  /// even when [devToolsEnabled] is false so the caller resolves it once,
-  /// rather than each launch site re-deriving it.
-  required String dartExecutable,
-
-  /// Why this run will not hot reload, or null when it intends to.
-  ///
-  /// What the banner is written from, and nothing else — the keys dispatch
-  /// unconditionally and the readiness gate answers them, so this is not a
-  /// second place the question is decided. Both this and the gate's reason
-  /// come from the one `RunPlan.hotReloadOff`.
-  ///
-  /// Required, and deliberately without a default: a call site that cannot omit
-  /// it cannot forget it. Left defaulted, `--no-hot` reaches the watcher and the
-  /// protocol's `supportsRestart` and stops there, because the run's main call
-  /// site simply omits this and takes `true`.
-  ///
-  /// A reason rather than a bool so the banner can say why the keys are gone.
-  /// Their absence is only informative to someone who knew to expect them.
-  required String? hotReloadUnavailable,
-
-  /// A filesystem watcher the caller has already started, or null when this
-  /// run does not watch.
-  ///
-  /// Started by the caller and not here on purpose. A watcher created at this
-  /// point — after the app has launched and, on native, after the compiler's
-  /// first full compile — reports nothing until its initial scan finishes, so
-  /// every edit made in that window is dropped with no reload and no message.
-  /// Starting it before launch makes `app.started` mean what a client assumes
-  /// it means: edit now and the run will see it.
+/// What one interactive session watches: an already-started filesystem
+/// watcher, how its paths resolve, and whether an assembly is still owed.
+///
+/// The watcher is started by the caller and not here on purpose: one created
+/// after the app has launched reports nothing until its initial scan
+/// finishes, dropping every edit in that window. The resolver is asked per
+/// event rather than captured, because it can arrive later still — a pipeline
+/// whose build failed assembles on a subsequent reload.
+typedef InteractiveWatch = ({
   SourceWatcher? watcher,
-
-  /// The live resolver, asked per event rather than captured.
-  ///
-  /// It is built during assembly, which runs after this loop's caller has
-  /// already wired the watcher, and it can arrive *later still* — a pipeline
-  /// whose build failed assembles on a subsequent reload. A captured value
-  /// would stay null in that case, so every save after the recovery maps to no
-  /// package and the watcher goes on silently doing nothing.
   SourceUriResolver? Function()? resolver,
-
-  /// Whether the pipeline still owes an assembly attempt.
-  ///
-  /// The one case where a watched Dart file is worth a reload request even
-  /// though it maps to nothing: with no [resolver] yet, every path resolves to
-  /// null, including the path of the file whose fix is what the pending attempt
-  /// is waiting for. Asked rather than assumed from a null resolver, so the
-  /// runs that will never assemble — a device with no compiler, an app that
-  /// died — do not answer every save with a refusal.
   bool Function()? awaitingAssembly,
-
-  /// Whether a watched path feeds the asset bundle rather than the Dart
-  /// program.
-  ///
-  /// Needed because the two are told apart by different authorities: a `.dart`
-  /// file only matters if [resolver] maps it to a package the app compiles,
-  /// while an asset matters because the last build put it in the bundle.
-  /// Without this an asset-only edit reaches the reload handler, resolves to
-  /// no package URI, and is dropped one line before the pipeline that would
-  /// have delivered it.
   PathFilter? isAsset,
+});
+
+/// Where one interactive session reads keys from and reports to.
+///
+/// All null in machine mode, where stdin is the JSON-RPC command channel
+/// rather than a keyboard.
+typedef InteractiveTerminal = ({
   void Function(String message)? log,
   KeyboardReader? keyboardReader,
   void Function(bool echoMode)? setEchoMode,
   void Function(bool lineMode)? setLineMode,
   Future<void>? shutdownSignal,
+});
+
+/// The state one interactive session's keyboard loop dispatches through.
+///
+/// One object for the values [_runKeyboardLoop] and [_handleKeyPress] thread
+/// one argument at a time: the sessions, the compiler, the dispatcher, why
+/// reload is off, and where reports go.
+typedef SessionLoop = ({
+  List<DeviceSession> sessions,
+  FrontendServer? frontendServer,
+  CommandRunner commandRunner,
+  String? hotReloadUnavailable,
+  void Function(String message) log,
+  MachineProtocol protocol,
+});
+
+/// What [_watchAndReload] subscribes: the started watcher, how its paths
+/// resolve, and what its events reload through.
+typedef WatchReloadPlan = ({
+  SourceWatcher watcher,
+  SourceUriResolver? Function() resolver,
+  bool Function() awaitingAssembly,
+  PathFilter? isAsset,
+});
+
+/// Run the shared interactive session loop for one or more device sessions.
+///
+/// Handles file watching, keyboard input, and broadcasting hot reload/restart
+/// across all sessions. Returns when the user quits or all sessions end.
+///
+/// When [InteractiveOptions.hotReloadUnavailable] is non-null, hot reload ('r')
+/// and the [InteractiveWatch.watcher] that drives it are inert, but DevTools,
+/// perf overlay, inspector, and quit still work.
+Future<void> runInteractiveSession({
+  required InteractiveTargets targets,
+  required InteractiveOptions options,
+  InteractiveWatch watch = const (
+    watcher: null,
+    resolver: null,
+    awaitingAssembly: null,
+    isAsset: null,
+  ),
+  InteractiveTerminal terminal = const (
+    log: null,
+    keyboardReader: null,
+    setEchoMode: null,
+    setLineMode: null,
+    shutdownSignal: null,
+  ),
 }) async {
-  log = _defaultSessionLog(protocol, log);
+  final log = _defaultSessionLog(targets.protocol, terminal.log);
 
   // The machine-readable half of the same report. A no-op outside `--machine`
   // mode, like every other event — the terminal reader has [log].
   void announce(Map<String, dynamic> params) =>
-      protocol.sendEvent('app.reloadResult', params);
+      targets.protocol.sendEvent('app.reloadResult', params);
 
   _wireDevTools(
-    sessions: sessions,
-    devToolsEnabled: devToolsEnabled,
-    dartExecutable: dartExecutable,
+    sessions: targets.sessions,
+    devToolsEnabled: options.devToolsEnabled,
+    dartExecutable: options.dartExecutable,
     log: log,
-    protocol: protocol,
+    protocol: targets.protocol,
   );
 
   _printBanner(
-    protocol: protocol,
-    hotReloadUnavailable: hotReloadUnavailable,
-    watcher: watcher,
+    protocol: targets.protocol,
+    hotReloadUnavailable: options.hotReloadUnavailable,
+    watcher: watch.watcher,
     log: log,
   );
 
@@ -710,15 +722,18 @@ Future<void> runInteractiveSession({
   // Gated on the reload command, not on a frontend server: native has one
   // compiler per app and no single server to check, and the command is what
   // the handler actually dispatches through.
+  final watcher = watch.watcher;
   if (watcher != null &&
-      hotReloadUnavailable == null &&
-      commandRunner.hasCommand('app.hotReload')) {
+      options.hotReloadUnavailable == null &&
+      targets.commandRunner.hasCommand('app.hotReload')) {
     watcherSubscription = _watchAndReload(
-      watcher: watcher,
-      resolver: resolver ?? () => null,
-      awaitingAssembly: awaitingAssembly ?? () => false,
-      isAsset: isAsset,
-      commandRunner: commandRunner,
+      plan: (
+        watcher: watcher,
+        resolver: watch.resolver ?? () => null,
+        awaitingAssembly: watch.awaitingAssembly ?? () => false,
+        isAsset: watch.isAsset,
+      ),
+      commandRunner: targets.commandRunner,
       log: log,
       announce: announce,
     );
@@ -747,35 +762,31 @@ Future<void> runInteractiveSession({
   // two devices outlives the first of them ending — whether it was stopped or
   // died. A single-device run is unchanged, its one app being both the first
   // and the last.
+  final shutdownSignal = terminal.shutdownSignal;
   final exitSignals = <Future<void>>[
-    if (sessions.isNotEmpty)
-      Future.wait([for (final s in sessions) s.terminated]),
+    if (targets.sessions.isNotEmpty)
+      Future.wait([for (final s in targets.sessions) s.terminated]),
     if (shutdownSignal != null) shutdownSignal,
   ];
   final exited = exitSignals.isEmpty ? null : Future.any(exitSignals);
 
   // In machine mode, stdin is consumed by MachineProtocol — skip the
   // keyboard loop and wait for sessions to end via machine commands.
-  if (protocol.enabled) {
+  if (targets.protocol.enabled) {
     if (exited != null) await exited;
     await watcherSubscription?.cancel();
     return;
   }
 
-  _configureTerminal(setEchoMode, setLineMode);
+  _configureTerminal(terminal.setEchoMode, terminal.setLineMode);
 
   await _runKeyboardLoop(
-    sessions: sessions,
-    frontendServer: frontendServer,
-    commandRunner: commandRunner,
-    hotReloadUnavailable: hotReloadUnavailable,
-    log: log,
+    loop: _loopFor(targets, options, log),
     announce: announce,
-    protocol: protocol,
     watcherSubscription: watcherSubscription,
     exited: exited,
-    shutdownSignal: shutdownSignal,
-    keyboardReader: keyboardReader,
+    shutdownSignal: terminal.shutdownSignal,
+    keyboardReader: terminal.keyboardReader,
   );
   // The run is over — the app is gone, or a teardown was signalled and the
   // sessions were torn down by whoever signalled it. Just release local
@@ -938,15 +949,27 @@ void _configureTerminal(
   }
 }
 
+/// The keyboard loop's dispatch state for one interactive session.
+///
+/// Built once from the entry-point objects where the loop is entered, so the
+/// loop and the key dispatch take one object rather than six arguments.
+SessionLoop _loopFor(
+  InteractiveTargets targets,
+  InteractiveOptions options,
+  void Function(String message) log,
+) => (
+  sessions: targets.sessions,
+  frontendServer: targets.frontendServer,
+  commandRunner: targets.commandRunner,
+  hotReloadUnavailable: options.hotReloadUnavailable,
+  log: log,
+  protocol: targets.protocol,
+);
+
 /// Read keys until the run ends, the keyboard closes, or 'q' quits.
 Future<void> _runKeyboardLoop({
-  required List<DeviceSession> sessions,
-  required FrontendServer? frontendServer,
-  required CommandRunner commandRunner,
-  required String? hotReloadUnavailable,
-  required void Function(String message) log,
+  required SessionLoop loop,
   required void Function(Map<String, dynamic> params) announce,
-  required MachineProtocol protocol,
   required StreamSubscription<SourceChange>? watcherSubscription,
   required Future<void>? exited,
   required Future<void>? shutdownSignal,
@@ -988,10 +1011,10 @@ Future<void> _runKeyboardLoop({
       keyboardOpen = false;
       if (exited == null) break;
       final ways = <String>[
-        if (sessions.isNotEmpty) 'the app exiting',
+        if (loop.sessions.isNotEmpty) 'the app exiting',
         if (shutdownSignal != null) 'an `app.stop` on a control transport',
       ];
-      log(
+      loop.log(
         'stdin closed, so the keys above no longer do anything. The run '
         'continues, and everything it advertised — the HTTP control channel '
         'included — stays up. It ends on ${ways.join(' or ')}.',
@@ -1002,13 +1025,8 @@ Future<void> _runKeyboardLoop({
     final char = String.fromCharCode(input.first);
     if (await _handleKeyPress(
       char: char,
-      sessions: sessions,
-      frontendServer: frontendServer,
-      commandRunner: commandRunner,
-      hotReloadUnavailable: hotReloadUnavailable,
-      log: log,
+      loop: loop,
       announce: announce,
-      protocol: protocol,
       watcherSubscription: watcherSubscription,
     )) {
       await keys.cancel();
@@ -1021,13 +1039,8 @@ Future<void> _runKeyboardLoop({
 /// Dispatch one keypress. True when it ends the run.
 Future<bool> _handleKeyPress({
   required String char,
-  required List<DeviceSession> sessions,
-  required FrontendServer? frontendServer,
-  required CommandRunner commandRunner,
-  required String? hotReloadUnavailable,
-  required void Function(String message) log,
+  required SessionLoop loop,
   required void Function(Map<String, dynamic> params) announce,
-  required MachineProtocol protocol,
   required StreamSubscription<SourceChange>? watcherSubscription,
 }) async {
   switch (char) {
@@ -1047,8 +1060,8 @@ Future<bool> _handleKeyPress({
     case 'r':
       reportReloadCommand(
         'Hot reload',
-        await commandRunner.run('app.hotReload', {}),
-        log,
+        await loop.commandRunner.run('app.hotReload', {}),
+        loop.log,
         method: 'app.hotReload',
         announce: announce,
       );
@@ -1057,35 +1070,37 @@ Future<bool> _handleKeyPress({
       // announcing a restart and then refusing it reads worse than saying
       // nothing. Through `log` rather than `stdout` so it is the same stream
       // as the answer that follows.
-      if (hotReloadUnavailable == null) log('Performing hot restart...');
+      if (loop.hotReloadUnavailable == null) {
+        loop.log('Performing hot restart...');
+      }
       reportReloadCommand(
         'Hot restart',
-        await commandRunner.run('app.restart', {}),
-        log,
+        await loop.commandRunner.run('app.restart', {}),
+        loop.log,
         method: 'app.restart',
         announce: announce,
       );
     case 'p':
       await _reportToggle(
-        sessions,
-        log,
+        loop.sessions,
+        loop.log,
         'Performance overlay',
         (client) => client.togglePerformanceOverlay(),
       );
     case 'i':
       await _reportToggle(
-        sessions,
-        log,
+        loop.sessions,
+        loop.log,
         'Widget inspector',
         (client) => client.toggleWidgetInspector(),
       );
     case 'q':
       await watcherSubscription?.cancel();
-      for (final session in sessions) {
-        await session.shutdown(protocol);
+      for (final session in loop.sessions) {
+        await session.shutdown(loop.protocol);
       }
-      if (frontendServer != null) {
-        await frontendServer.shutdown();
+      if (loop.frontendServer != null) {
+        await loop.frontendServer!.shutdown();
       }
       return true;
   }
@@ -1098,17 +1113,14 @@ Future<bool> _handleKeyPress({
 /// the keyboard going away.
 enum _Wake { key, keyboardClosed, exit }
 
-/// Subscribe [watcher] to the reload pipeline.
+/// Subscribe [WatchReloadPlan.watcher] to the reload pipeline.
 ///
 /// The watcher is started by the caller, before the app launches, so that a
 /// run is already listening by the time it reports `app.started`; this only
 /// attaches the handler, which cannot exist until the pipeline it drives does.
 /// [SourceWatcher.changes] buffers whatever landed in between.
 StreamSubscription<SourceChange> _watchAndReload({
-  required SourceWatcher watcher,
-  required SourceUriResolver? Function() resolver,
-  required bool Function() awaitingAssembly,
-  PathFilter? isAsset,
+  required WatchReloadPlan plan,
 
   /// The dispatcher a watched edit reloads through. Non-null and holding
   /// `app.hotReload`: both callers register the pair before anything can
@@ -1122,14 +1134,14 @@ StreamSubscription<SourceChange> _watchAndReload({
   /// whole view of watch-driven reloads is what this emits.
   required void Function(Map<String, dynamic> params) announce,
 }) {
-  return watcher.changes.listen((change) async {
+  return plan.watcher.changes.listen((change) async {
     // Map each changed source path to the URI the frontend_server keys it by,
     // via the authoritative build-emitted resolver — `package:` for a file in
     // a first-party package, the app scheme for the app's declared sources
     // outside every package. A path the app compiles nothing from (e.g. a
     // tool script) resolves to null and is skipped — never invalidated with a
     // bogus file:// URI.
-    final map = resolver();
+    final map = plan.resolver();
     final invalidated = [
       for (final f in change.paths)
         if (map?.uriFor(f) case final uri?) uri,
@@ -1137,14 +1149,18 @@ StreamSubscription<SourceChange> _watchAndReload({
     // An asset carries no package URI and never will, so an empty
     // `invalidated` does not mean there is nothing to do. The reload command
     // rebuilds the bundle and delivers it; the Dart half is simply a no-op.
-    final assetsChanged = change.paths.any((f) => isAsset?.call(f) ?? false);
+    final assetsChanged = change.paths.any(
+      (f) => plan.isAsset?.call(f) ?? false,
+    );
     // Nor does it when there is no resolver yet, which is the state a pipeline
     // whose build failed sits in: the file that would cure it maps to nothing,
     // because what would have mapped it is what the failed build was supposed
     // to produce. Dropping the edit here is what would leave the fix unseen —
     // the reload derives its own work from the disk snapshot once the pipeline
     // exists, so an empty `invalidatedFiles` costs nothing.
-    if (invalidated.isEmpty && !assetsChanged && !awaitingAssembly()) return;
+    if (invalidated.isEmpty && !assetsChanged && !plan.awaitingAssembly()) {
+      return;
+    }
 
     reportReloadCommand(
       'Hot reload',

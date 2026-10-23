@@ -697,14 +697,24 @@ class RunCommand {
     if (plan.profileMode) {
       if (host.sessions.isNotEmpty) {
         await runInteractiveSession(
-          sessions: host.sessions,
-          frontendServer: pipeline.frontendServer,
-          protocol: host.protocol,
-          commandRunner: host.commandRunner,
-          devToolsEnabled: plan.devToolsEnabled,
-          dartExecutable: plan.toolchain.dart,
-          hotReloadUnavailable: plan.hotReloadOff,
-          shutdownSignal: host.shutdownRequested.future,
+          targets: (
+            sessions: host.sessions,
+            frontendServer: pipeline.frontendServer,
+            protocol: host.protocol,
+            commandRunner: host.commandRunner,
+          ),
+          options: (
+            devToolsEnabled: plan.devToolsEnabled,
+            dartExecutable: plan.toolchain.dart,
+            hotReloadUnavailable: plan.hotReloadOff,
+          ),
+          terminal: (
+            log: null,
+            keyboardReader: null,
+            setEchoMode: null,
+            setLineMode: null,
+            shutdownSignal: host.shutdownRequested.future,
+          ),
         );
       }
     }
@@ -720,22 +730,34 @@ class RunCommand {
     // service is what those need; 'r' answers from the gate.
     else if (host.sessions.any((s) => s.vmClient != null) || plan.isWebDevice) {
       await runInteractiveSession(
-        sessions: host.sessions,
-        frontendServer: pipeline.frontendServer,
-        protocol: host.protocol,
-        commandRunner: host.commandRunner,
-        devToolsEnabled: plan.devToolsEnabled,
-        dartExecutable: plan.toolchain.dart,
-        hotReloadUnavailable: plan.hotReloadOff,
-        watcher: sourceWatcher,
-        // Read per event, never captured: a pipeline whose build failed
-        // assembles on a later reload, and a resolver captured here would
-        // stay null past the recovery — leaving the watcher awake and
-        // silently mapping every save to nothing.
-        resolver: () => pipeline.resolver,
-        awaitingAssembly: () => pipeline.awaitingAssembly,
-        isAsset: (path) => pipeline.watchesAsset(path),
-        shutdownSignal: host.shutdownRequested.future,
+        targets: (
+          sessions: host.sessions,
+          frontendServer: pipeline.frontendServer,
+          protocol: host.protocol,
+          commandRunner: host.commandRunner,
+        ),
+        options: (
+          devToolsEnabled: plan.devToolsEnabled,
+          dartExecutable: plan.toolchain.dart,
+          hotReloadUnavailable: plan.hotReloadOff,
+        ),
+        watch: (
+          watcher: sourceWatcher,
+          // Read per event, never captured: a pipeline whose build failed
+          // assembles on a later reload, and a resolver captured here would
+          // stay null past the recovery — leaving the watcher awake and
+          // silently mapping every save to nothing.
+          resolver: () => pipeline.resolver,
+          awaitingAssembly: () => pipeline.awaitingAssembly,
+          isAsset: (path) => pipeline.watchesAsset(path),
+        ),
+        terminal: (
+          log: null,
+          keyboardReader: null,
+          setEchoMode: null,
+          setLineMode: null,
+          shutdownSignal: host.shutdownRequested.future,
+        ),
       );
     } else {
       // No hot reload possible — wait for the first device's app to end
