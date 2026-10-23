@@ -12,6 +12,7 @@ exports_files(
         "generate_asset_manifest.dart",
         "bundle_app.dart",
         "chmod.dart",
+        "code_resources.dart",
         "compile_shader.dart",
         "crc32.dart",
         "directive_guard.dart",
@@ -46,6 +47,7 @@ dart_binary(
     name = "android_bundle",
     srcs = [
         "apk_overlay.dart",
+        "code_resources.dart",
         "crc32.dart",
         "macho_edit.dart",
         "plist_info.dart",
@@ -246,6 +248,7 @@ dart_binary(
 dart_binary(
     name = "xtool_pack",
     srcs = [
+        "code_resources.dart",
         "crc32.dart",
         "macho_edit.dart",
         "plist_info.dart",
@@ -332,6 +335,7 @@ _TOOL_SRCS = {
         "xtool_pack.dart",
         "apk_overlay.dart",
         "crc32.dart",
+        "code_resources.dart",
         "macho_edit.dart",
         "sha256.dart",
         "zlib_raw_match.dart",
@@ -345,6 +349,7 @@ _TOOL_SRCS = {
         "xtool_hash.dart",
         "xtool_pack.dart",
         "crc32.dart",
+        "code_resources.dart",
         "macho_edit.dart",
         "sha256.dart",
         "zlib_raw_match.dart",
@@ -359,6 +364,7 @@ _TOOL_SRCS = {
     ],
     "xtool_pack.dart": [
         "crc32.dart",
+        "code_resources.dart",
         "macho_edit.dart",
         "plist_info.dart",
         "plist_parse.dart",
