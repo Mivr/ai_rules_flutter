@@ -270,6 +270,7 @@ def _flutter_test_impl(ctx):
         flutter_sdk_info,
         flutter_assets,
         compiled_shaders,
+        target_platform = "tester",
         kernel_dill = kernel_dill,
         is_debug = True,
     )

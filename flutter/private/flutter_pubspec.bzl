@@ -171,6 +171,46 @@ def _parse_assets(raw):
         ))
     return out
 
+# The platforms a `flutter.assets` entry may name, mirroring flutter_tools'
+# `_kValidPluginPlatforms` (`packages/flutter_tools/lib/src/flutter_manifest.dart`):
+# an entry naming anything else fails the spoke fetch.
+VALID_ASSET_PLATFORMS = ("android", "ios", "linux", "macos", "web", "windows")
+
+def invalid_asset_platforms(platforms):
+    """The entries of `platforms` flutter_tools would reject, in order.
+
+    Args:
+        platforms: The `platforms` list of one parsed asset entry.
+
+    Returns:
+        The platform names not in `VALID_ASSET_PLATFORMS`.
+    """
+    return [p for p in platforms if p not in VALID_ASSET_PLATFORMS]
+
+def asset_platform_error(package_name, asset_path, invalid):
+    """The fetch failure for an asset entry naming unknown platforms.
+
+    Names the package, the asset entry, and every valid name, so the fix
+    (a typo or a platform flutter does not know) is in the message.
+
+    Args:
+        package_name: The pub package the entry comes from.
+        asset_path: The entry's `path`, as declared in pubspec.yaml.
+        invalid: The unknown platform names (`invalid_asset_platforms`).
+
+    Returns:
+        The error string; the caller `fail()`s with it.
+    """
+    return (
+        "flutter.pub spoke for \"{pkg}\": asset \"{path}\" lists unknown " +
+        "platform(s) {invalid}. Supported platforms are: {valid}."
+    ).format(
+        pkg = package_name,
+        path = asset_path,
+        invalid = ", ".join(["\"%s\"" % p for p in invalid]),
+        valid = ", ".join(["\"%s\"" % p for p in VALID_ASSET_PLATFORMS]),
+    )
+
 def _parse_shaders(raw):
     if type(raw) != "list":
         return []
@@ -200,8 +240,10 @@ def parse_flutter_assets_block(content):
         )
 
     `weight` and `style` on a font are None when unset. `flavors`/`platforms`
-    are captured from modern-shape asset entries but are not yet acted on by
-    the asset bundler — they are out-of-scope for v1.
+    are the modern-shape asset conditions the bundler filters on
+    (`pub_asset_matches_target` checks flavor first, then platform, with the
+    `tester` exception, exactly like flutter_tools' `matchesFlavor` /
+    `matchesPlatform`); an unknown platform fails the spoke fetch.
     """
     flutter = parse_flutter_block(content)
     umd_raw = flutter.get("uses-material-design", False)

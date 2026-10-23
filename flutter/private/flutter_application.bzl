@@ -523,6 +523,7 @@ def _flutter_application_impl(ctx):
         flutter_sdk_info,
         flutter_assets,
         compiled_shaders,
+        target_platform = target_platform,
         kernel_dill = kernel_dill,
         is_debug = is_debug,
         data_assets = transitive_data_assets,

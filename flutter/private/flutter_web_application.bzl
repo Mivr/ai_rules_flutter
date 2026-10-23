@@ -717,7 +717,7 @@ def _web_bundle_assets(ctx, flutter_sdk_info, program, mode, is_debug, user_defi
     """
     compiled_shaders = flutter_compile_shaders(ctx, flutter_sdk_info, "web")
 
-    fonts, _ = aggregate_pub_contributions(ctx.attr.deps)
+    fonts, _ = aggregate_pub_contributions(ctx.attr.deps, "web")
     const_finder, font_subset = resolve_font_subset_tools(flutter_sdk_info) if fonts else (None, None)
     if ctx.attr.tree_shake_icons and not is_debug and bool(fonts) and (const_finder == None or font_subset == None):
         fail(
@@ -745,6 +745,7 @@ def _web_bundle_assets(ctx, flutter_sdk_info, program, mode, is_debug, user_defi
         flutter_sdk_info,
         flutter_assets,
         compiled_shaders,
+        target_platform = "web",
         kernel_dill = kernel_dills[0] if kernel_dills else None,
         kernel_dills = kernel_dills,
         tree_shake_key = "\n---\n".join(tree_shake_key_parts),

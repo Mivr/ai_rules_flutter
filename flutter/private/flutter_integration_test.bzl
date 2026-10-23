@@ -1271,6 +1271,7 @@ def _flutter_integration_test_impl(ctx):
         flutter_sdk_info,
         flutter_assets,
         compiled_shaders,
+        target_platform = "web",
         kernel_dill = None,
         is_debug = is_debug,
     )
@@ -1694,6 +1695,7 @@ def _flutter_linux_integration_test_impl(ctx):
         flutter_sdk_info,
         flutter_assets,
         compiled_shaders,
+        target_platform = "linux",
         kernel_dill = kernel_dill,
         is_debug = is_debug,
         data_assets = transitive_data_assets,
@@ -2050,6 +2052,7 @@ def _flutter_android_integration_app_impl(ctx):
         flutter_sdk_info,
         flutter_assets,
         compiled_shaders,
+        target_platform = "android",
         kernel_dill = kernel_dill,
         is_debug = is_debug,
         data_assets = transitive_data_assets,

@@ -106,7 +106,7 @@ def flutter_info(
       native_assets: `FlutterNativeAssetInfo` providers this target declares.
       data_assets: `FlutterDataAssetInfo` providers this target declares.
       pub_fonts: Font contribution structs from a pub `flutter.fonts` block.
-      pub_assets: Asset contribution structs from a pub `flutter.assets` block.
+      pub_assets: Asset contribution structs from a pub `flutter.assets` block. Each carries `platforms` / `flavors` tuples (empty when unrestricted); bundle aggregators filter them per target platform with `pub_asset_matches_target`, flavor-first like flutter_tools.
       pub_shaders: Shader contribution structs from a `flutter.shaders` block.
 
     Returns:

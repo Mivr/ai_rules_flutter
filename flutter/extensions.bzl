@@ -25,7 +25,7 @@ load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_lock")
 load("//flutter/private:artifact_urls.bzl", "source_strip_prefix")
 load("//flutter/private:flutter_gen_l10n_repo.bzl", "flutter_gen_l10n_repo")
 load("//flutter/private:flutter_pub_lock_hub.bzl", "flutter_pub_lock_hub")
-load("//flutter/private:flutter_pub_package.bzl", "flutter_pub_package", "is_maven_dep_label")
+load("//flutter/private:flutter_pub_package.bzl", "flutter_pub_package", "flutter_pub_path_package", "is_maven_dep_label")
 load("//flutter/private:flutter_sdk_package.bzl", "flutter_sdk_package")
 load("//flutter/private:pub_lock_sdks.bzl", "hosted_package_sha256", "parse_lock_sdk_constraints", "version_below_lower_bound")
 load("//flutter/private:toolchain_selection.bzl", "select_toolchain_source")
@@ -400,15 +400,61 @@ def _check_pub_flutter_floor(lock_content, toolchain_info, pub_tag):
             version = flutter_version,
         ))
 
-def _classify_lock_packages(lock_pkgs):
-    """Splits lock packages into hosted, Flutter-SDK, and all names."""
+def _workspace_relative_lock_path(hub_name, package_name, lock_label, entry_path):
+    """Join a `relative: true` lock path onto the lock file's directory.
+
+    Pub records a path dependency relative to the dependent package — for a
+    root dependency, the lock file's own directory. The extension resolves it
+    lexically to a workspace-relative path and fails closed on anything that
+    escapes the workspace; the spoke rule re-validates at fetch time.
+    """
+    parts = []
+    if lock_label.package:
+        parts.extend(lock_label.package.split("/"))
+    parts.extend(entry_path.split("/"))
+    out = []
+    for part in parts:
+        if part in ("", "."):
+            continue
+        if part == "..":
+            if not out:
+                fail("flutter.pub hub \"{hub}\": path dependency \"{pkg}\" resolves outside the workspace. Refusing it rather than reaching outside the workspace.".format(
+                    hub = hub_name,
+                    pkg = package_name,
+                ))
+            out.pop()
+        else:
+            out.append(part)
+    if not out:
+        fail("flutter.pub hub \"{hub}\": path dependency \"{pkg}\" resolves to the workspace root, not a package directory. Refusing it rather than symlinking the whole workspace.".format(
+            hub = hub_name,
+            pkg = package_name,
+        ))
+    return "/".join(out)
+
+def _classify_lock_packages(hub_name, lock_label, lock_pkgs):
+    """Splits lock packages into hosted, path, Flutter-SDK, and all names."""
     hosted = {}
+    path_pkgs = {}
     sdk_flutter = {}
     all_package_names = []
     for name, info in lock_pkgs.items():
         source = info.get("source", "unknown")
         if source == "hosted":
             hosted[name] = info
+            all_package_names.append(name)
+        elif source == "path":
+            desc = info.get("description", {})
+            entry_path = desc.get("path", "") if type(desc) == "dict" else ""
+            if not entry_path or (type(desc) == "dict" and not desc.get("relative", False)):
+                fail("flutter.pub hub \"{hub}\": path dependency \"{pkg}\" has no workspace-relative path in the lock. Re-resolve the lock with a relative `path:` dependency.".format(
+                    hub = hub_name,
+                    pkg = name,
+                ))
+            path_pkgs[name] = struct(
+                path = _workspace_relative_lock_path(hub_name, name, lock_label, entry_path),
+                version = info.get("version", ""),
+            )
             all_package_names.append(name)
         elif source == "sdk":
             if name in _FLUTTER_SDK_PACKAGES:
@@ -418,8 +464,8 @@ def _classify_lock_packages(lock_pkgs):
             # Reason for print: warn the user that a locked package is
             # silently unsupported (not an error; the build proceeds).
             # buildifier: disable=print
-            print("flutter.pub: skipping package \"{}\" (source: {}). Only hosted and Flutter SDK packages are supported.".format(name, source))
-    return hosted, sdk_flutter, all_package_names
+            print("flutter.pub: skipping package \"{}\" (source: {}). Only hosted, path, and Flutter SDK packages are supported.".format(name, source))
+    return hosted, path_pkgs, sdk_flutter, all_package_names
 
 def _create_hosted_spokes(hub_name, hosted, all_package_names, user_overlay_roots, pub_tag, ignore_hooks):
     """Creates one `flutter_pub_package` spoke per hosted package.
@@ -461,6 +507,29 @@ def _create_hosted_spokes(hub_name, hosted, all_package_names, user_overlay_root
             ignore_hook = name in ignore_hooks,
             android_maven_deps = pub_tag.android_maven_deps,
             android_maven_ignore = pub_tag.android_maven_ignore,
+        )
+
+def _create_path_spokes(hub_name, path_pkgs, all_package_names, user_overlay_roots, ignore_hooks):
+    """Creates one `flutter_pub_path_package` spoke per path dependency.
+
+    The package directory is symlinked in from the workspace (resolved
+    against the lock file's directory at classification time) and watched
+    for changes; the spoke then runs the same generator pipeline as a
+    hosted package, so assets, fonts, shaders, and plugin metadata surface
+    identically — including the `android/BUILD.bazel` stub the hub's
+    `all_android_plugin_libs` aggregator depends on uniformly.
+    """
+    for name, path_info in path_pkgs.items():
+        flutter_pub_path_package(
+            name = hub_name + "__" + name,
+            package_name = name,
+            path = path_info.path,
+            version = path_info.version,
+            hub_name = hub_name,
+            lock_packages = all_package_names,
+            overlay_roots = user_overlay_roots + ["@rules_flutter//ext:BUILD.bazel"],
+            code_assets = curated_code_assets(name, path_info.version),
+            ignore_hook = name in ignore_hooks,
         )
 
 def _create_sdk_spokes(hub_name, sdk_flutter, all_package_names, toolchain_info, merged, flutter_version):
@@ -511,9 +580,10 @@ def _register_pub_hub(module_ctx, pub_tag, selected_info, merged, user_overlay_r
 
     _check_pub_flutter_floor(lock_content, toolchain_info, pub_tag)
 
-    hosted, sdk_flutter, all_package_names = _classify_lock_packages(lock_pkgs)
+    hosted, path_pkgs, sdk_flutter, all_package_names = _classify_lock_packages(hub_name, pub_tag.lock, lock_pkgs)
     ignore_hooks = {pkg_name: True for pkg_name in pub_tag.ignore_hooks}
     _create_hosted_spokes(hub_name, hosted, all_package_names, user_overlay_roots, pub_tag, ignore_hooks)
+    _create_path_spokes(hub_name, path_pkgs, all_package_names, user_overlay_roots, ignore_hooks)
     _create_sdk_spokes(hub_name, sdk_flutter, all_package_names, toolchain_info, merged, toolchain_info.version)
 
     # Create hub repo with aliases for all packages plus the

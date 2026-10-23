@@ -264,6 +264,8 @@ def _plugin_pub_contributions(ctx):
         ctx.attr.pkg_assets,
         ctx.attr.pkg_shaders,
         ctx.files.shader_includes,
+        ctx.attr.pkg_asset_platforms,
+        ctx.attr.pkg_asset_flavors,
     )
 
 def _check_plugin_resources(ctx):
@@ -519,6 +521,12 @@ flutter_plugin = rule(
         "pkg_assets": attr.label_keyed_string_dict(
             doc = "Map of asset File label -> package-relative path (mirrors `flutter.assets`). Same shape as `flutter_library.pkg_assets`.",
             allow_files = True,
+        ),
+        "pkg_asset_platforms": attr.string_list_dict(
+            doc = "Per-asset `platforms` conditions. Same shape as `flutter_library.pkg_asset_platforms`.",
+        ),
+        "pkg_asset_flavors": attr.string_list_dict(
+            doc = "Per-asset `flavors` conditions. Same shape as `flutter_library.pkg_asset_flavors`.",
         ),
         "shader_includes": attr.label_list(
             doc = "Files this package's `pkg_shaders` may `#include` (e.g. " +

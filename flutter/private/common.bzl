@@ -1193,7 +1193,7 @@ def declare_flutter_assets_dir(ctx):
     """
     return ctx.actions.declare_directory(ctx.label.name + "_flutter_assets")
 
-def flutter_build_assets(ctx, flutter_sdk_info, output_dir, compiled_shaders = {}, kernel_dill = None, kernel_dills = [], tree_shake_key = "", is_debug = False, data_assets = None):
+def flutter_build_assets(ctx, flutter_sdk_info, output_dir, compiled_shaders = {}, *, target_platform, kernel_dill = None, kernel_dills = [], tree_shake_key = "", is_debug = False, data_assets = None):
     """Run the shared asset bundling step.
 
     Walks `FlutterInfo.pub_fonts` / `pub_assets` from deps to bundle
@@ -1208,6 +1208,12 @@ def flutter_build_assets(ctx, flutter_sdk_info, output_dir, compiled_shaders = {
             so an application can bake the path into its `build_info` before
             the kernel compile that this action depends on.
         compiled_shaders: Dict mapping bundle dest path → compiled shader File.
+        target_platform: The bundle's platform (`android`, `ios`, `macos`,
+            `linux`, `windows`, `web`, or `tester` for test bundles).
+            Required and keyword-only, so a new bundle call site cannot
+            silently inherit the wrong filter: pub assets carrying
+            `platforms` / `flavors` conditions bundle only where
+            flutter_tools would bundle them.
         kernel_dill: The compiled kernel .dill File (needed for icon tree shaking).
         kernel_dills: Optional list of compiled kernel .dill Files when a bundle
             ships multiple programs with distinct defines (e.g. WASM + JS fallback).
@@ -1227,7 +1233,10 @@ def flutter_build_assets(ctx, flutter_sdk_info, output_dir, compiled_shaders = {
     # Walk pub-package font/asset contributions from FlutterInfo.
     # MaterialIcons is no longer special-cased here — apps depend on
     # `@rules_flutter//flutter:material_icons` to get it via this same path.
-    fonts, pub_extra_asset_copies = aggregate_pub_contributions(ctx.attr.deps)
+    fonts, pub_extra_asset_copies = aggregate_pub_contributions(
+        ctx.attr.deps,
+        target_platform,
+    )
     extra_asset_copies = dict(compiled_shaders)
     extra_asset_copies.update(pub_extra_asset_copies)
 

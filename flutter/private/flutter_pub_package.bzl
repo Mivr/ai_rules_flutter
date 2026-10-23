@@ -31,7 +31,7 @@ load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version", "m
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_deps", "parse_pubspec_sdk_constraint")
 load("//flutter/private:artifact_urls.bzl", "require_sha256")
 load("//flutter/private:download.bzl", "pinned_download")
-load("//flutter/private:flutter_pubspec.bzl", "parse_flutter_assets_block", "parse_flutter_plugin_block")
+load("//flutter/private:flutter_pubspec.bzl", "asset_platform_error", "invalid_asset_platforms", "parse_flutter_assets_block", "parse_flutter_plugin_block")
 load(
     ":gradle.bzl",
     "detect_android_namespace",
@@ -322,36 +322,63 @@ def _readdir_files_recursive(ctx, rel_dir):
 
     Returns a list of package-relative paths (e.g. `data/locales.json`).
     Used to expand directory entries from `flutter.assets:` (which Flutter
-    treats as "include every file under this directory").
+    treats as "include every file under this directory"). Relative paths
+    are tracked structurally alongside the walk, never by trimming a string
+    prefix off the walked paths — the tree may be symlinked in (path
+    packages), in which case the walked paths do not start with the spoke
+    root at all.
     """
     out = []
     base = ctx.path(rel_dir)
     if not base.exists:
         return out
-    queue = [base]
+    queue = [(base, rel_dir)]
     for _ in range(10000):  # bounded loop to satisfy Starlark's no-while constraint
         if not queue:
             break
-        cur = queue.pop()
+        cur, cur_rel = queue.pop()
         for child in cur.readdir():
+            child_rel = cur_rel + "/" + child.basename
             if child.is_dir:
-                queue.append(child)
+                queue.append((child, child_rel))
             else:
-                # Reconstruct package-relative path. ctx.path() basis is the
-                # repository root, so child.basename + walking up gets us
-                # what we want — but readdir paths already include the
-                # trailing component. Use child path's segments past the
-                # spoke root.
-                rel = str(child)
-
-                # Trim the spoke-root prefix; what's left is the relative
-                # path we want.
-                pkg_root = str(ctx.path("."))
-                if rel.startswith(pkg_root + "/"):
-                    out.append(rel[len(pkg_root) + 1:])
-                else:
-                    out.append(rel)
+                out.append(child_rel)
     return out
+
+def expand_pub_asset_entries(parsed_assets, list_dir):
+    """Expand parsed `flutter.assets` entries to one struct per bundled file.
+
+    Trailing-slash directory entries expand to every file under them, each
+    inheriting the entry's `platforms` / `flavors` conditions — the same way
+    flutter_tools applies an entry's conditions to the whole directory.
+
+    Args:
+        parsed_assets: List of `struct(path, flavors, platforms)` from
+            `parse_flutter_assets_block().assets`.
+        list_dir: Callable taking a directory path (no trailing slash) and
+            returning the file paths under it. Taking it as a parameter
+            keeps this pure so unit tests can pass a fake; the spoke passes
+            `_readdir_files_recursive` bound to its repo context.
+
+    Returns:
+        List of `struct(path, flavors, platforms)`, one per file.
+    """
+    expanded = []
+    for entry in parsed_assets:
+        if entry.path.endswith("/"):
+            for f in list_dir(entry.path.rstrip("/")):
+                expanded.append(struct(
+                    path = f,
+                    flavors = entry.flavors,
+                    platforms = entry.platforms,
+                ))
+        else:
+            expanded.append(struct(
+                path = entry.path,
+                flavors = entry.flavors,
+                platforms = entry.platforms,
+            ))
+    return expanded
 
 def _encode_fonts_json(parsed_fonts):
     """Convert parse_flutter_assets_block().fonts to the JSON shape flutter_library expects."""
@@ -376,22 +403,36 @@ def _build_font_files_dict(parsed_fonts):
             out[":" + font.asset] = font.asset
     return out
 
-def _build_pkg_assets_dict(ctx, parsed_assets):
-    """Build the `pkg_assets` dict, expanding directory entries.
+def _build_pkg_assets_dict(expanded):
+    """Build the `pkg_assets` dict from expanded per-file entries.
 
     Flutter's `flutter.assets:` accepts paths and trailing-slash directory
-    prefixes. Bazel needs an explicit label per file, so we walk each
-    directory at repo-rule time and emit one entry per discovered file.
+    prefixes. Bazel needs an explicit label per file, so each directory is
+    walked at repo-rule time and emits one entry per discovered file.
     """
-    out = {}
-    for entry in parsed_assets:
-        path = entry.path
-        if path.endswith("/"):
-            for f in _readdir_files_recursive(ctx, path.rstrip("/")):
-                out[":" + f] = f
-        else:
-            out[":" + path] = path
-    return out
+    return {":" + entry.path: entry.path for entry in expanded}
+
+def _build_pkg_asset_conditions(expanded):
+    """Build the `pkg_asset_platforms` / `pkg_asset_flavors` dicts.
+
+    Same keys as `pkg_assets` (`":" + path`), but only for entries that
+    actually restrict: unconditional files stay out of both dicts, so the
+    emitted attrs stay empty for packages without conditions.
+
+    Args:
+        expanded: Per-file entries from `expand_pub_asset_entries`.
+
+    Returns:
+        A `(platforms, flavors)` tuple of dicts.
+    """
+    platforms = {}
+    flavors = {}
+    for entry in expanded:
+        if entry.platforms:
+            platforms[":" + entry.path] = list(entry.platforms)
+        if entry.flavors:
+            flavors[":" + entry.path] = list(entry.flavors)
+    return (platforms, flavors)
 
 def _build_pkg_shaders_dict(parsed_shaders):
     """Build the `pkg_shaders` dict — same shape as pkg_assets, no directories."""
@@ -408,13 +449,23 @@ def _format_label_dict_literal(d, indent = "        "):
     lines = ['{indent}"{k}": "{v}",'.format(indent = indent, k = k, v = d[k]) for k in keys]
     return "{\n" + "\n".join(lines) + "\n" + indent[:-4] + "}"
 
+def _format_string_list_dict_literal(d, indent = "        "):
+    """Render `{":foo": ["a", "b"]}` as a multi-line BUILD source dict."""
+    if not d:
+        return "{}"
+    lines = []
+    for k in sorted(d.keys()):
+        values = ", ".join([repr(v) for v in d[k]])
+        lines.append('{indent}"{k}": [{values}],'.format(indent = indent, k = k, values = values))
+    return "{\n" + "\n".join(lines) + "\n" + indent[:-4] + "}"
+
 _SHADER_INCLUDES_GLOB = """    shader_includes = glob(
         ["**/*.glsl", "**/*.frag", "**/*.vert"],
         allow_empty = True,
     ),"""
 
-def _format_pub_asset_attrs(fonts_json_str, font_files, pkg_assets, pkg_shaders):
-    """Render the four pub-asset attrs as BUILD source, omitting empty ones."""
+def _format_pub_asset_attrs(fonts_json_str, font_files, pkg_assets, pkg_shaders, pkg_asset_platforms = {}, pkg_asset_flavors = {}):
+    """Render the pub-asset attrs as BUILD source, omitting empty ones."""
     parts = []
     if fonts_json_str:
         parts.append("    fonts_json = {},".format(repr(fonts_json_str)))
@@ -422,6 +473,10 @@ def _format_pub_asset_attrs(fonts_json_str, font_files, pkg_assets, pkg_shaders)
         parts.append("    font_files = {},".format(_format_label_dict_literal(font_files)))
     if pkg_assets:
         parts.append("    pkg_assets = {},".format(_format_label_dict_literal(pkg_assets)))
+    if pkg_asset_platforms:
+        parts.append("    pkg_asset_platforms = {},".format(_format_string_list_dict_literal(pkg_asset_platforms)))
+    if pkg_asset_flavors:
+        parts.append("    pkg_asset_flavors = {},".format(_format_string_list_dict_literal(pkg_asset_flavors)))
     if pkg_shaders:
         parts.append("    pkg_shaders = {},".format(_format_label_dict_literal(pkg_shaders)))
 
@@ -488,6 +543,8 @@ def make_flutter_library_build_content(
         font_files,
         pkg_assets,
         pkg_shaders,
+        pkg_asset_platforms = {},
+        pkg_asset_flavors = {},
         version = ""):
     """Generate BUILD content for a non-plugin Flutter spoke shipping fonts/assets/shaders.
 
@@ -508,6 +565,10 @@ def make_flutter_library_build_content(
         font_files: Dict of font file label -> package-relative path.
         pkg_assets: Dict of asset file label -> package-relative path.
         pkg_shaders: Dict of shader file label -> package-relative path.
+        pkg_asset_platforms: Dict of asset label -> platform list, only for
+            restricted entries. Empty (the common case) emits no attr, so
+            unconditional spokes are byte-identical to before.
+        pkg_asset_flavors: Dict of asset label -> flavor list, same shape.
         version: The resolved package version this spoke was fetched at, or
             empty. Emitted only when known, matching
             `make_dart_library_build_content`: its sole use is agreement
@@ -519,7 +580,7 @@ def make_flutter_library_build_content(
     """
     deps_block = _spoke_deps_block(deps)
 
-    pub_attrs = _format_pub_asset_attrs(fonts_json_str, font_files, pkg_assets, pkg_shaders)
+    pub_attrs = _format_pub_asset_attrs(fonts_json_str, font_files, pkg_assets, pkg_shaders, pkg_asset_platforms, pkg_asset_flavors)
 
     return """\
 load("@rules_flutter//flutter:defs.bzl", "flutter_library")
@@ -713,6 +774,8 @@ def make_flutter_plugin_build_content(
         font_files = {},
         pkg_assets = {},
         pkg_shaders = {},
+        pkg_asset_platforms = {},
+        pkg_asset_flavors = {},
         version = ""):
     """Generate BUILD content for a Flutter plugin spoke.
 
@@ -747,6 +810,10 @@ def make_flutter_plugin_build_content(
         font_files: Dict of font file label -> package-relative path.
         pkg_assets: Dict of asset file label -> package-relative path.
         pkg_shaders: Dict of shader file label -> package-relative path.
+        pkg_asset_platforms: Dict of asset label -> platform list, only for
+            restricted entries. Empty (the common case) emits no attr, so
+            unconditional spokes are byte-identical to before.
+        pkg_asset_flavors: Dict of asset label -> flavor list, same shape.
         version: The resolved package version this spoke was fetched at, or
             empty. Emitted only when known, matching
             `make_dart_library_build_content`: its sole use is agreement
@@ -803,7 +870,7 @@ def make_flutter_plugin_build_content(
         apple_ios_privacy_manifests,
     )
 
-    pub_attrs = _format_pub_asset_attrs(fonts_json_str, font_files, pkg_assets, pkg_shaders)
+    pub_attrs = _format_pub_asset_attrs(fonts_json_str, font_files, pkg_assets, pkg_shaders, pkg_asset_platforms, pkg_asset_flavors)
 
     return """\
 load("@rules_flutter//flutter:defs.bzl", "flutter_plugin")
@@ -1644,20 +1711,42 @@ def _spoke_dep_labels(ctx, bazel_deps, asset_block):
         dep_labels = dep_labels + ["@rules_flutter//flutter:material_icons"]
     return dep_labels
 
-def _spoke_asset_inputs(ctx, asset_block):
+def _check_asset_platforms(package_name, parsed_assets):
+    """Fail the spoke fetch on asset entries naming unknown platforms.
+
+    An entry `platforms` value flutter_tools would reject (`flutter_manifest.dart`
+    fails the manifest the same way) is refused here, naming the package, the
+    asset entry, and every valid name — a misspelled platform would otherwise
+    bundle nowhere on every target, silently.
+    """
+    for entry in parsed_assets:
+        invalid = invalid_asset_platforms(entry.platforms)
+        if invalid:
+            fail(asset_platform_error(package_name, entry.path, invalid))
+
+def _spoke_asset_inputs(ctx, package_name, asset_block):
     """Pre-computes the pub-asset generator inputs, used by either branch.
 
-    Returns `struct(fonts_json_str, font_files, pkg_assets, pkg_shaders,
+    Returns `struct(fonts_json_str, font_files, pkg_assets,
+    pkg_asset_platforms, pkg_asset_flavors, pkg_shaders,
     has_contributions)`.
     """
+    _check_asset_platforms(package_name, asset_block.assets)
     fonts_json_str = _encode_fonts_json(asset_block.fonts)
     font_files = _build_font_files_dict(asset_block.fonts)
-    pkg_assets_dict = _build_pkg_assets_dict(ctx, asset_block.assets)
+    expanded = expand_pub_asset_entries(
+        asset_block.assets,
+        lambda directory: _readdir_files_recursive(ctx, directory),
+    )
+    pkg_assets_dict = _build_pkg_assets_dict(expanded)
+    pkg_asset_platforms, pkg_asset_flavors = _build_pkg_asset_conditions(expanded)
     pkg_shaders_dict = _build_pkg_shaders_dict(asset_block.shaders)
     return struct(
         fonts_json_str = fonts_json_str,
         font_files = font_files,
         pkg_assets = pkg_assets_dict,
+        pkg_asset_platforms = pkg_asset_platforms,
+        pkg_asset_flavors = pkg_asset_flavors,
         pkg_shaders = pkg_shaders_dict,
         has_contributions = (
             bool(asset_block.fonts) or bool(asset_block.assets) or bool(asset_block.shaders)
@@ -1854,6 +1943,8 @@ def _build_plugin_spoke_content(ctx, pubspec, dep_labels, assets, unreplaced_hoo
         fonts_json_str = assets.fonts_json_str,
         font_files = assets.font_files,
         pkg_assets = assets.pkg_assets,
+        pkg_asset_platforms = assets.pkg_asset_platforms,
+        pkg_asset_flavors = assets.pkg_asset_flavors,
         pkg_shaders = assets.pkg_shaders,
     )
     return struct(build_content = build_content, android = android)
@@ -1876,6 +1967,8 @@ def _build_library_spoke_content(ctx, pubspec, dep_labels, assets, unreplaced_ho
         fonts_json_str = assets.fonts_json_str,
         font_files = assets.font_files,
         pkg_assets = assets.pkg_assets,
+        pkg_asset_platforms = assets.pkg_asset_platforms,
+        pkg_asset_flavors = assets.pkg_asset_flavors,
         pkg_shaders = assets.pkg_shaders,
     )
     return struct(build_content = build_content, android = _empty_android_spoke())
@@ -1915,6 +2008,47 @@ def _build_spoke_content(ctx, pubspec, dep_labels, assets, unreplaced_hook):
 
 def _flutter_pub_package_impl(ctx):
     _fetch_pub_archive(ctx)
+    _generate_spoke(ctx)
+
+def _link_path_package(ctx):
+    """Symlinks a workspace-local `path:` package into the spoke, hermetically.
+
+    The lock-relative path is resolved against the workspace root and every
+    top-level entry is symlinked in, so the rest of the spoke pipeline reads
+    the package exactly as if it had been extracted from an archive. Fails
+    closed: an absolute path, a `..` escape, or a missing directory fails the
+    fetch rather than emitting an empty spoke or reaching outside the
+    workspace.
+    """
+    rel = ctx.attr.path
+    if rel.startswith("/") or rel in ("", "."):
+        fail("flutter.pub spoke for \"{pkg}\": path dependency {path} is not a workspace-relative package directory. Refusing it rather than resolving outside the workspace.".format(
+            pkg = ctx.attr.package_name,
+            path = repr(rel),
+        ))
+    segments = rel.split("/")
+    if ".." in segments or "." in segments or "" in segments:
+        fail("flutter.pub spoke for \"{pkg}\": path dependency {path} escapes its directory. Refusing it rather than resolving outside the workspace.".format(
+            pkg = ctx.attr.package_name,
+            path = repr(rel),
+        ))
+    src = ctx.workspace_root.get_child(*segments)
+    if not src.exists:
+        fail("flutter.pub spoke for \"{pkg}\": path dependency {path} does not exist under the workspace. Refusing it rather than emitting an empty package.".format(
+            pkg = ctx.attr.package_name,
+            path = repr(rel),
+        ))
+    ctx.watch(src)
+    for child in src.readdir():
+        ctx.watch(child)
+        ctx.symlink(child, child.basename)
+
+def _flutter_pub_path_package_impl(ctx):
+    _link_path_package(ctx)
+    _generate_spoke(ctx)
+
+def _generate_spoke(ctx):
+    """Runs the shared spoke pipeline: pubspec in, BUILD content out."""
     pubspec = _read_spoke_pubspec(ctx)
 
     # Build full label strings for sibling spoke repos.
@@ -1922,7 +2056,7 @@ def _flutter_pub_package_impl(ctx):
 
     # Pre-compute the pub-asset attr inputs once. Used by either branch
     # below (plugin vs library).
-    assets = _spoke_asset_inputs(ctx, pubspec.asset_block)
+    assets = _spoke_asset_inputs(ctx, ctx.attr.package_name, pubspec.asset_block)
 
     # Computed once, before the branch: which generator runs depends on the
     # pubspec, but a build hook is a property of the package either way.
@@ -2087,4 +2221,48 @@ flutter_pub_package = repository_rule(
         ),
     },
     doc = "Downloads a single Flutter pub package and emits a `flutter_plugin` (when `flutter.plugin` is present) or a plain `dart_library` (otherwise). When Apple sources are detected, also emits per-platform `flutter_apple_plugin_library` sub-targets. Honors per-package overlay BUILD.bazel.tpl overrides under `overlay_roots`. The `flutter pub get` analog of `pub_lock_package`.",
+)
+
+flutter_pub_path_package = repository_rule(
+    implementation = _flutter_pub_path_package_impl,
+    attrs = {
+        "package_name": attr.string(
+            doc = "The pub package name.",
+            mandatory = True,
+        ),
+        "path": attr.string(
+            doc = "Workspace-relative directory of the package (the lock's `path:` value, relative to the lock file). Symlinked in; absolute paths and `..` escapes fail the fetch.",
+            mandatory = True,
+        ),
+        "version": attr.string(
+            doc = "The package version, when the lock states one. Empty stays " +
+                  "unstated and never conflicts, matching the hosted rule.",
+            default = "",
+        ),
+        "hub_name": attr.string(
+            doc = "Name of the hub repo (for constructing cross-spoke dep labels).",
+            mandatory = True,
+        ),
+        "lock_packages": attr.string_list(
+            doc = "All package names in the lock file (for dep filtering).",
+            default = [],
+        ),
+        "code_assets": attr.string_list(
+            doc = "Labels of `dart_code_asset` targets standing in for this " +
+                  "package's build hook, same as `flutter_pub_package`.",
+            default = [],
+        ),
+        "ignore_hook": attr.bool(
+            doc = "Treat this package's build hook as irrelevant, same as " +
+                  "`flutter_pub_package`.",
+            default = False,
+        ),
+        "overlay_roots": attr.label_list(
+            doc = "BUILD.bazel anchors for overlay trees, same as " +
+                  "`flutter_pub_package`.",
+            allow_files = True,
+            default = [],
+        ),
+    },
+    doc = "Symlinks a workspace-local `path:` pub package into a spoke and emits the same `flutter_plugin` / `flutter_library` / `dart_library` the hosted rule would. The `flutter pub get` analog for path dependencies: hermetic (workspace-relative only, watched for changes) and fail-closed on anything outside the workspace.",
 )

@@ -53,6 +53,24 @@ def _matches_android_only_test_impl(ctx):
     asserts.false(env, pub_asset_matches_target([], ["android"], "ios"))
     return unittest.end(env)
 
+def _matches_each_platform_keeps_only_its_own_test_impl(ctx):
+    """Every remaining osName keeps its own entries and drops the others'."""
+    env = unittest.begin(ctx)
+    for platform in ["ios", "linux", "macos", "windows"]:
+        others = [p for p in ["ios", "linux", "macos", "windows"] if p != platform]
+        asserts.true(
+            env,
+            pub_asset_matches_target([], [platform], platform),
+            "%s-listed asset must bundle on %s" % (platform, platform),
+        )
+        for other in others:
+            asserts.false(
+                env,
+                pub_asset_matches_target([], [other], platform),
+                "%s-listed asset must not bundle on %s" % (other, platform),
+            )
+    return unittest.end(env)
+
 def _matches_tester_keeps_platform_entries_test_impl(ctx):
     """`tester` is the flutter_tools exception: every platform entry bundles."""
     env = unittest.begin(ctx)
@@ -115,6 +133,11 @@ def _invalid_asset_platforms_test_impl(ctx):
         env,
         ["fuchsia"],
         invalid_asset_platforms(["android", "fuchsia"]),
+    )
+    asserts.equals(
+        env,
+        ["fuchsia", "tizen"],
+        invalid_asset_platforms(["fuchsia", "android", "tizen"]),
     )
     return unittest.end(env)
 
@@ -226,6 +249,7 @@ def _bundle_filter_test_impl(ctx):
 
 _t0_test = unittest.make(_matches_unconditional_everywhere_test_impl)
 _t1_test = unittest.make(_matches_android_only_test_impl)
+_t1b_test = unittest.make(_matches_each_platform_keeps_only_its_own_test_impl)
 _t2_test = unittest.make(_matches_tester_keeps_platform_entries_test_impl)
 _t3_test = unittest.make(_matches_flavor_dropped_without_selection_test_impl)
 _t4_test = unittest.make(_matches_flavor_checked_before_platform_test_impl)
@@ -250,6 +274,11 @@ _bundle_filter_test = analysistest.make(
 )
 
 def asset_platforms_test_suite(name):
+    """Declares the platform-conditional pub asset unit, plumbing, and filter tests.
+
+    Args:
+        name: Test name prefix; probe and case targets derive from it.
+    """
     native.genrule(
         name = name + "_files",
         outs = [
@@ -272,11 +301,11 @@ def asset_platforms_test_suite(name):
             ":" + name + "_paid_only.txt": "assets/paid_only.txt",
         },
         pkg_asset_platforms = {
-            ":" + name + "_android_only.txt": ["android"],
-            ":" + name + "_web_only.txt": ["web"],
+            ":assets/android_only.txt": ["android"],
+            ":assets/web_only.txt": ["web"],
         },
         pkg_asset_flavors = {
-            ":" + name + "_paid_only.txt": ["paid"],
+            ":assets/paid_only.txt": ["paid"],
         },
         tags = ["manual"],
     )
@@ -285,10 +314,17 @@ def asset_platforms_test_suite(name):
         name = name + "_probe_plugin",
         package_name = "platform_probe_plugin",
         pkg_assets = {
+            ":" + name + "_any.txt": "assets/any.txt",
             ":" + name + "_android_only.txt": "assets/android_only.txt",
+            ":" + name + "_web_only.txt": "assets/web_only.txt",
+            ":" + name + "_paid_only.txt": "assets/paid_only.txt",
         },
         pkg_asset_platforms = {
-            ":" + name + "_android_only.txt": ["android"],
+            ":assets/android_only.txt": ["android"],
+            ":assets/web_only.txt": ["web"],
+        },
+        pkg_asset_flavors = {
+            ":assets/paid_only.txt": ["paid"],
         },
         tags = ["manual"],
     )
@@ -352,6 +388,7 @@ def asset_platforms_test_suite(name):
         name + "_unit",
         _t0_test,
         _t1_test,
+        _t1b_test,
         _t2_test,
         _t3_test,
         _t4_test,

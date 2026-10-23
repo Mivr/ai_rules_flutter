@@ -213,6 +213,12 @@ Plugins need no special treatment. A pub package that is a Flutter plugin arrive
 
 Permissions a plugin declares in its own manifest, such as `record_android`'s `RECORD_AUDIO`, reach the app's manifest as they do under Gradle. You don't need `--merge_android_manifest_permissions`.
 
+### Platform- and flavor-conditional assets
+
+A pub package's `flutter.assets` entries may carry `platforms` and `flavors` lists, and the bundle keeps exactly what `flutter_tools` keeps (verified against Flutter 3.47.7: `asset.dart` `matchesFlavor` at line 1532 runs before `matchesPlatform` at line 1544 in `ManifestAssetBundle`, lines 1119–1128; `TargetPlatform.osName` in `build_info.dart`, line 701). Flavor is checked first: a flavor-restricted entry bundles only when a flavor is selected, and rules_flutter selects none yet, so flavor-restricted entries bundle nowhere — on every platform, `tester` included. Then platform: an empty list or the `tester` platform keeps the asset, anything else must name the target platform. So an Android build bundles `android`-listed entries but not `web`-listed ones, while a widget test bundles every platform's entries (but still no flavor-restricted ones).
+
+An entry naming a platform Flutter does not know fails the package fetch, naming the package, the asset entry, and every valid name (`android`, `ios`, `linux`, `macos`, `web`, `windows` — the `_kValidPluginPlatforms` set `flutter_manifest.dart` validates against, lines 20 and 909). A misspelled platform would otherwise bundle nowhere on every target, silently. Directory entries (a trailing-slash `path`) expand to every file underneath at fetch time, each file inheriting the entry's conditions. Packages without conditions emit no extra attributes, so their spokes are byte-identical to before.
+
 ### Android native (Gradle) dependencies
 
 A plugin's `android/build.gradle` (`build.gradle.kts`) runtime dependencies (`implementation`, `api`, `runtimeOnly`) are translated to `@rules_android_maven` labels automatically. Gradle evaluates exactly one build file per project directory, so when both files are present the rule reads `build.gradle` for everything — dependencies, namespace, native-build and ProGuard detection alike. Common AndroidX artifacts are built in; anything else must be mapped in `MODULE.bazel`:

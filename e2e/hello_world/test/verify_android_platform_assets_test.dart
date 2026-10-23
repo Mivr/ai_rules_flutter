@@ -79,10 +79,7 @@ Uint8List _entryData(Uint8List bytes, _Entry entry) {
   final nameLen = bd.getUint16(pos + 26, Endian.little);
   final extraLen = bd.getUint16(pos + 28, Endian.little);
   final dataStart = pos + 30 + nameLen + extraLen;
-  final raw = bytes.sublist(
-    dataStart,
-    dataStart + entry.compressedSize,
-  );
+  final raw = bytes.sublist(dataStart, dataStart + entry.compressedSize);
   if (entry.method == 0) {
     return raw;
   }
@@ -147,7 +144,7 @@ void main() {
     'paid_only.txt is not in the Android APK',
     !names.contains('paid_only.txt'),
     'assets/flutter_assets/$prefix/paid_only.txt needs a flavor that '
-    'does not exist yet',
+        'does not exist yet',
   );
 
   // AssetManifest.bin must agree with the tree: the manifest is
@@ -174,9 +171,7 @@ void main() {
     );
     check(
       'AssetManifest lists android_only.txt',
-      manifestText.contains(
-        'packages/platform_assets/assets/android_only.txt',
-      ),
+      manifestText.contains('packages/platform_assets/assets/android_only.txt'),
       'manifest is missing the android-only asset',
     );
     check(
@@ -186,9 +181,7 @@ void main() {
     );
     check(
       'AssetManifest omits paid_only.txt',
-      !manifestText.contains(
-        'packages/platform_assets/assets/paid_only.txt',
-      ),
+      !manifestText.contains('packages/platform_assets/assets/paid_only.txt'),
       'manifest lists an asset the bundle must not carry',
     );
   }

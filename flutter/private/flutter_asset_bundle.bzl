@@ -41,7 +41,10 @@ def _flutter_asset_bundle_impl(ctx):
     # Walk pub-package font/asset contributions from FlutterInfo. To get
     # MaterialIcons in the bundle, list `@rules_flutter//flutter:material_icons`
     # in deps — the same channel cupertino_icons et al. arrive through.
-    fonts, pub_extra_asset_copies = aggregate_pub_contributions(ctx.attr.deps)
+    fonts, pub_extra_asset_copies = aggregate_pub_contributions(
+        ctx.attr.deps,
+        "tester",
+    )
 
     # Shaders compiled for `flutter_tester`, as `flutter test` compiles them
     # (SkSL for Skia, Vulkan for Impeller): the target's own `shaders` plus
