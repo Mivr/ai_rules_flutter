@@ -32,7 +32,6 @@ load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_deps", "parse_pubsp
 load("//flutter/private:artifact_urls.bzl", "require_sha256")
 load("//flutter/private:download.bzl", "pinned_download")
 load("//flutter/private:flutter_pubspec.bzl", "asset_platform_error", "invalid_asset_platforms", "parse_flutter_assets_block", "parse_flutter_plugin_block")
-load(":starlark_literal.bzl", "check_spoke_file_name", "starlark_string_literal")
 load(
     ":gradle.bzl",
     "detect_android_namespace",
@@ -46,6 +45,7 @@ load(
     _gradle_parse_android_manifest_package = "parse_android_manifest_package",
     _gradle_parse_gradle_android_namespace = "parse_gradle_android_namespace",
 )
+load(":starlark_literal.bzl", "check_spoke_file_name", "starlark_string_literal")
 
 def parse_gradle_android_namespace(content, language = "groovy"):
     """Extract `android.namespace` from a Gradle build script.
@@ -283,6 +283,7 @@ def _make_android_native_build_unsupported_content(package_name, version):
         "and ships them through flutter_plugin.native_deps — see " +
         "@rules_flutter//ext/jni for the canonical example."
     ).format(pkg = package_name, version = version)
+
     # The message names a classified package name and a lock version; the
     # whole text still renders as one escaped literal, never spliced raw.
     return "fail(" + starlark_string_literal(message) + ")\n"
@@ -303,6 +304,7 @@ def _glob_block(srcs_dirs, extensions):
             patterns.append("{}/**/*.{}".format(d, ext))
         excludes.append("{}/test/**".format(d))
         excludes.append("{}/example/**".format(d))
+
     # Directories embed the pub package name, which lock classification
     # already refused when quotable; every pattern still renders through the
     # escaping helper, so an odd name lands inert inside a string literal.
@@ -452,6 +454,7 @@ def _format_label_dict_literal(d, indent = "        "):
     if not d:
         return "{}"
     keys = sorted(d.keys())
+
     # Keys and values are asset, font and shader paths from the pubspec and
     # the file-system walk: attacker-controlled for hosted packages. Each
     # renders through the escaping helper, so the dict parses back exactly.
@@ -492,6 +495,7 @@ def scoped_shader_includes_block(shader_paths):
     for d in sorted(dirs.keys()):
         for ext in _PATH_SPOKE_SHADER_INCLUDE_EXTS:
             pattern = d + "/**/*." + ext if d else "*." + ext
+
             # `d` is a declared shader's own directory, read from the
             # pubspec; the pattern renders through the escaping helper.
             lines.append("        " + starlark_string_literal(pattern) + ",")
@@ -567,6 +571,7 @@ def _format_version_attr(version):
     Returns:
         A BUILD attribute line, or "".
     """
+
     # The lock's version string renders through the helper like the rest.
     return "    version = " + starlark_string_literal(version) + ",\n" if version else ""
 
@@ -647,6 +652,7 @@ def _spoke_deps_block(deps):
     """The `deps` attribute block for a spoke, or nothing when it has none."""
     if not deps:
         return ""
+
     # Labels are built from the hub name and lock package names, which hub
     # classification already refused when quotable; each still renders
     # through the escaping helper, so a hostile label lands inert.
@@ -655,6 +661,7 @@ def _spoke_deps_block(deps):
 
 def _apple_plugin_targets(name, srcs_dirs, include_dirs, platform):
     """The `flutter_apple_plugin_library` pair (device + xtool) for one platform."""
+
     # `name` is a lock package name (refused quotable at classification) and
     # `platform` is a fixed literal at every call site; `srcs` globs and the
     # `includes` list render through the escaping helper.
@@ -685,6 +692,7 @@ flutter_apple_plugin_library(
 
 def _desktop_plugin_target(name, src_dir, platform):
     """The `flutter_<platform>_plugin_library` target for one desktop platform."""
+
     # Same shape as above: `name` is a classified lock package name and
     # `platform` is `"linux"` or `"windows"` at every call site.
     srcs, hdrs = _split_glob_block([src_dir], _DESKTOP_C_EXTS, _DESKTOP_HDR_EXTS)
@@ -706,6 +714,7 @@ def _plugin_apple_libs_arg(name, apple_macos_srcs_dirs, apple_ios_srcs_dirs):
     """The `apple_libs` select routing each OS to its device/xtool library."""
     if not (apple_macos_srcs_dirs or apple_ios_srcs_dirs):
         return ""
+
     # Branch labels compose the classified package name with fixed
     # suffixes; nothing walked or declared reaches them unquoted.
     macos_branch = '            ":{name}_apple_macos",'.format(name = name) if apple_macos_srcs_dirs else ""
@@ -744,6 +753,7 @@ def _plugin_privacy_files_arg(apple_macos_privacy_manifests, apple_ios_privacy_m
     """
     if not (apple_macos_privacy_manifests or apple_ios_privacy_manifests):
         return ""
+
     # Manifest paths are walked from detected source directories plus a
     # fixed file name; each renders through the escaping helper.
     macos_lines = "\n".join(["            " + starlark_string_literal(p) + "," for p in apple_macos_privacy_manifests])
@@ -974,6 +984,7 @@ def _android_manifest_build_args(android_manifest, java_package, has_resources):
         sub_manifest = android_manifest
         if sub_manifest.startswith("android/"):
             sub_manifest = sub_manifest[len("android/"):]
+
         # The manifest path is a fixed plugin layout location; it renders
         # through the escaping helper like every other emitted string.
         return ("    manifest = %s,\n    exports_manifest = 1,\n" % starlark_string_literal(sub_manifest), "")
@@ -1018,6 +1029,7 @@ def _android_build_config_block(bc_package):
         "}",
         "",
     ]
+
     # `bc_package` is a validated Java package name (dots only); every line
     # still renders through the escaping helper.
     return (
@@ -1123,6 +1135,7 @@ def _android_plugin_deps_block(extra_maven_labels):
         if lbl not in seen:
             seen[lbl] = True
             all_labels.append(lbl)
+
     # Base labels are fixed; maven labels arrive validated quotefree from
     # the extension. Each still renders through the escaping helper, so a
     # hostile value lands inert instead of breaking out of the list.
@@ -1428,6 +1441,7 @@ def render_overlay_deps(dep_labels):
     Returns:
         The list body, without the enclosing brackets.
     """
+
     # Labels derive from the package's own pubspec intersected with the
     # lock (names refused quotable at classification); each still renders
     # through the escaping helper before substitution into the template.
@@ -1471,6 +1485,7 @@ def _rewrite_cat_genrules(content):
             rest = rest[idx + len("genrule(\n"):]
             continue
         body_lines = body.split("\\n") + [""]
+
         # Overlay bodies are user-authored template text; every line still
         # renders through the escaping helper on its way into `content`.
         content_entries = "\n".join(["        " + starlark_string_literal(line) + "," for line in body_lines])
