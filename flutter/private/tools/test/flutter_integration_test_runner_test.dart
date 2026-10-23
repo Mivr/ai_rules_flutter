@@ -450,11 +450,13 @@ void main() {
           );
 
           final code = await runner.runIntegrationSuite(
-            launcher: launcher,
-            testPath: 'integration_test/app_test.dart',
-            selection: TestSelection(),
-            xmlOutput: xmlFile.path,
-            bazelTestTimeout: '60',
+            runner.IntegrationSuiteRun(
+              launcher: launcher,
+              testPath: 'integration_test/app_test.dart',
+              selection: TestSelection(),
+              xmlOutput: xmlFile.path,
+              bazelTestTimeout: '60',
+            ),
           );
           expect(code, 0);
           expect(launcher.disposed, isTrue);
@@ -536,11 +538,13 @@ void main() {
           );
 
           final code = await runner.runIntegrationSuite(
-            launcher: launcher,
-            testPath: 'integration_test/app_test.dart',
-            selection: TestSelection(),
-            xmlOutput: xmlFile.path,
-            bazelTestTimeout: '60',
+            runner.IntegrationSuiteRun(
+              launcher: launcher,
+              testPath: 'integration_test/app_test.dart',
+              selection: TestSelection(),
+              xmlOutput: xmlFile.path,
+              bazelTestTimeout: '60',
+            ),
           );
           expect(code, 1);
           final xml = xmlFile.readAsStringSync();
@@ -593,11 +597,13 @@ void main() {
           );
 
           final code = await runner.runIntegrationSuite(
-            launcher: launcher,
-            testPath: 'integration_test/app_test.dart',
-            selection: TestSelection(),
-            xmlOutput: xmlFile.path,
-            bazelTestTimeout: '60',
+            runner.IntegrationSuiteRun(
+              launcher: launcher,
+              testPath: 'integration_test/app_test.dart',
+              selection: TestSelection(),
+              xmlOutput: xmlFile.path,
+              bazelTestTimeout: '60',
+            ),
           );
           expect(code, 1);
         } finally {

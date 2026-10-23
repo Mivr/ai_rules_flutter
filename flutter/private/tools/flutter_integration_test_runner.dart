@@ -74,12 +74,14 @@ void main(List<String> args) async {
   }
 
   exitCode = await runIntegrationSuite(
-    launcher: launcher,
-    testPath: testPath,
-    selection: selection,
-    libraryTags: libraryTags,
-    xmlOutput: Platform.environment['XML_OUTPUT_FILE'],
-    bazelTestTimeout: Platform.environment['TEST_TIMEOUT'],
+    IntegrationSuiteRun(
+      launcher: launcher,
+      testPath: testPath,
+      selection: selection,
+      libraryTags: libraryTags,
+      xmlOutput: Platform.environment['XML_OUTPUT_FILE'],
+      bazelTestTimeout: Platform.environment['TEST_TIMEOUT'],
+    ),
   );
 }
 
@@ -1721,29 +1723,46 @@ String contentTypeForPath(String path) {
   return 'application/octet-stream';
 }
 
-/// Runs the integration test suite end-to-end using [launcher].
-Future<int> runIntegrationSuite({
-  required PlatformLauncher launcher,
-  required String testPath,
-  required TestSelection selection,
-  Set<String> libraryTags = const {},
-  required String? xmlOutput,
-  required String? bazelTestTimeout,
-  Duration dialBackBound = const Duration(seconds: 45),
-}) async {
+/// Everything needed for one integration suite run.
+///
+/// Built once from the environment in [main] and passed down to
+/// [runIntegrationSuite], so the values that travel together stay in one
+/// object instead of a long parameter list.
+class IntegrationSuiteRun {
+  const IntegrationSuiteRun({
+    required this.launcher,
+    required this.testPath,
+    required this.selection,
+    this.libraryTags = const {},
+    required this.xmlOutput,
+    required this.bazelTestTimeout,
+    this.dialBackBound = const Duration(seconds: 45),
+  });
+
+  final PlatformLauncher launcher;
+  final String testPath;
+  final TestSelection selection;
+  final Set<String> libraryTags;
+  final String? xmlOutput;
+  final String? bazelTestTimeout;
+  final Duration dialBackBound;
+}
+
+/// Runs the integration test suite end-to-end using [run.launcher].
+Future<int> runIntegrationSuite(IntegrationSuiteRun run) async {
   final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
   final harness = _IntegrationHarness(
     server: server,
-    launcher: launcher,
-    dialBackBound: dialBackBound,
+    launcher: run.launcher,
+    dialBackBound: run.dialBackBound,
   );
   try {
     return await harness.run(
-      testPath: testPath,
-      selection: selection,
-      libraryTags: libraryTags,
-      xmlOutput: xmlOutput,
-      bazelTestTimeout: bazelTestTimeout,
+      testPath: run.testPath,
+      selection: run.selection,
+      libraryTags: run.libraryTags,
+      xmlOutput: run.xmlOutput,
+      bazelTestTimeout: run.bazelTestTimeout,
     );
   } finally {
     await harness.dispose();

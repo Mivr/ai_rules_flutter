@@ -136,37 +136,62 @@ void main(List<String> args) async {
   if (shardStatus != null) File(shardStatus).writeAsStringSync('');
 
   exitCode = await _runOnce(
-    tester: tester,
-    icu: icu,
-    dill: dill,
-    baseDill: baseDill,
-    assetsDir: assetsDir,
-    testPath: testPath,
-    coverageOutput: coverageOutput,
-    updateGoldens: updateGoldens,
-    selection: selection,
-    libraryTags: libraryTags,
-    xmlOutput: Platform.environment['XML_OUTPUT_FILE'],
-    impeller: Platform.environment['FLUTTER_TEST_IMPELLER'] == '1',
+    FlutterTestRun(
+      tester: tester,
+      icu: icu,
+      dill: dill,
+      baseDill: baseDill,
+      assetsDir: assetsDir,
+      testPath: testPath,
+      coverageOutput: coverageOutput,
+      updateGoldens: updateGoldens,
+      selection: selection,
+      libraryTags: libraryTags,
+      xmlOutput: Platform.environment['XML_OUTPUT_FILE'],
+      impeller: Platform.environment['FLUTTER_TEST_IMPELLER'] == '1',
+    ),
   );
 }
 
-Future<int> _runOnce({
-  required String tester,
-  required String icu,
-  required String dill,
-  String? baseDill,
-  required String? assetsDir,
-  required String testPath,
-  required String? coverageOutput,
-  required bool updateGoldens,
-  required TestSelection selection,
-  required Set<String> libraryTags,
-  required String? xmlOutput,
-  required bool impeller,
-}) async {
+/// Everything `main` gathers for one `flutter_test` run.
+///
+/// Built once from the environment in [main] and passed down to [_runOnce]
+/// and [_Harness.run], so the values that travel together stay in one object
+/// instead of a long parameter list.
+class FlutterTestRun {
+  const FlutterTestRun({
+    required this.tester,
+    required this.icu,
+    required this.dill,
+    this.baseDill,
+    required this.assetsDir,
+    required this.testPath,
+    required this.coverageOutput,
+    required this.updateGoldens,
+    required this.selection,
+    required this.libraryTags,
+    required this.xmlOutput,
+    required this.impeller,
+  });
+
+  final String tester;
+  final String icu;
+  final String dill;
+  final String? baseDill;
+  final String? assetsDir;
+  final String testPath;
+  final String? coverageOutput;
+  final bool updateGoldens;
+  final TestSelection selection;
+  final Set<String> libraryTags;
+  final String? xmlOutput;
+  final bool impeller;
+}
+
+Future<int> _runOnce(FlutterTestRun run) async {
+  final baseDill = run.baseDill;
   File? combinedDill;
-  var effectiveDill = dill;
+  var effectiveDill = run.dill;
   if (baseDill != null && File(baseDill).existsSync()) {
     final tmpDir = Directory(
       Platform.environment['TEST_TMPDIR'] ?? Directory.systemTemp.path,
@@ -175,26 +200,14 @@ Future<int> _runOnce({
       '${tmpDir.path}/flutter_test_${pid}_${DateTime.now().microsecondsSinceEpoch}.dill',
     );
     final builder = BytesBuilder(copy: false)
-      ..add(File(dill).readAsBytesSync())
+      ..add(File(run.dill).readAsBytesSync())
       ..add(File(baseDill).readAsBytesSync());
     combinedDill.writeAsBytesSync(builder.takeBytes(), flush: true);
     effectiveDill = combinedDill.path;
   }
   final harness = await _Harness.bind();
   try {
-    return await harness.run(
-      tester: tester,
-      icu: icu,
-      dill: effectiveDill,
-      assetsDir: assetsDir,
-      testPath: testPath,
-      coverageOutput: coverageOutput,
-      updateGoldens: updateGoldens,
-      selection: selection,
-      libraryTags: libraryTags,
-      xmlOutput: xmlOutput,
-      impeller: impeller,
-    );
+    return await harness.run(run, effectiveDill);
   } finally {
     await harness.dispose();
     if (combinedDill != null && combinedDill.existsSync()) {
@@ -293,30 +306,20 @@ class _Harness {
     await teardownQuietly(() => _server.close(force: true));
   }
 
-  Future<int> run({
-    required String tester,
-    required String icu,
-    required String dill,
-    required String? assetsDir,
-    required String testPath,
-    required String? coverageOutput,
-    required bool updateGoldens,
-    required TestSelection selection,
-    required Set<String> libraryTags,
-    required String? xmlOutput,
-    required bool impeller,
-  }) async {
-    final enableVmService = coverageOutput != null;
+  /// Runs [run] against the combined kernel [effectiveDill] [_runOnce]
+  /// prepared (the base `.dill` pre-appended when the rule shares one).
+  Future<int> run(FlutterTestRun run, String effectiveDill) async {
+    final enableVmService = run.coverageOutput != null;
     _process = await _spawnTester(
       _testerCommand(
-        tester: tester,
-        icu: icu,
-        assetsDir: assetsDir,
-        dill: dill,
+        tester: run.tester,
+        icu: run.icu,
+        assetsDir: run.assetsDir,
+        dill: effectiveDill,
         enableVmService: enableVmService,
-        impeller: impeller,
+        impeller: run.impeller,
       ),
-      updateGoldens,
+      run.updateGoldens,
     );
 
     // Capture flutter_tester output so engine errors are visible. In coverage
@@ -344,7 +347,7 @@ class _Harness {
     _watchSocketClose(suiteReady);
 
     // Send the initial suite handshake.
-    _send(0, _initialMessage(testPath, libraryTags));
+    _send(0, _initialMessage(run.testPath, run.libraryTags));
 
     // Bounded inside Bazel's own budget, like each test below, so a suite that
     // never finishes loading is reported here rather than killed silently.
@@ -354,15 +357,15 @@ class _Harness {
     );
 
     final results = _Results();
-    await _driveSelectedTests(root, selection, results);
-    await _writeXmlReport(xmlOutput, results, testPath);
+    await _driveSelectedTests(root, run.selection, results);
+    await _writeXmlReport(run.xmlOutput, results, run.testPath);
 
     // Collect coverage before tearing the tester down — the isolate must still
     // be alive when we fetch source reports.
     final coverageError = await _collectCoverage(
       enableVmService: enableVmService,
       coverageVmServiceUri: coverageVmServiceUri,
-      coverageOutput: coverageOutput,
+      coverageOutput: run.coverageOutput,
     );
     if (coverageError != null) {
       stderr.writeln('flutter_test (coverage): $coverageError');
