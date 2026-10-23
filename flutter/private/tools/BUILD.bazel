@@ -21,6 +21,7 @@ exports_files(
         "incr_fkc_server.dart",
         "incr_fkc_worker.dart",
         "sha256.dart",
+        "macho_constants.dart",
         "macho_edit.dart",
         "merge_android_manifests.dart",
         "merge_plists.dart",
@@ -186,6 +187,7 @@ dart_binary(
     name = "macho_edit",
     srcs = [
         "crc32.dart",
+        "macho_constants.dart",
         "sha256.dart",
     ],
     compile_mode = "kernel",
@@ -251,6 +253,7 @@ dart_binary(
     srcs = [
         "code_resources.dart",
         "crc32.dart",
+        "macho_constants.dart",
         "macho_edit.dart",
         "plist_info.dart",
         "plist_parse.dart",
@@ -366,6 +369,7 @@ _TOOL_SRCS = {
         "zip_writer.dart",
         "code_resources.dart",
         "xtool_bundle.dart",
+        "macho_constants.dart",
         "macho_edit.dart",
         "plist_info.dart",
         "plist_parse.dart",
@@ -385,6 +389,7 @@ _TOOL_SRCS = {
     "kernel_filter.dart": ["directive_guard.dart"],
     "macho_edit.dart": [
         "crc32.dart",
+        "macho_constants.dart",
         "sha256.dart",
     ],
     "incr_fkc_worker.dart": [
