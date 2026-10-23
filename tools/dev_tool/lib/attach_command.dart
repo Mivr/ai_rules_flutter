@@ -171,25 +171,29 @@ class AttachCommand {
           host,
           pipeline,
           debugUrls[i],
-          index: i,
-          multiApp: debugUrls.length > 1,
-          workspace: workspace,
-          logForwarders: logForwarders,
-          logger: logger,
+          inputs: (
+            index: i,
+            multiApp: debugUrls.length > 1,
+            workspace: workspace,
+            logForwarders: logForwarders,
+            logger: logger,
+          ),
         );
       }
 
       await assembleAndServeAttach(
         host,
         pipeline,
-        target: target,
-        userBuildArgs: userBuildArgs,
-        workspace: workspace,
-        builtBefore: builtBefore,
-        sourceWatcher: sourceWatcher,
-        devToolsEnabled: devToolsEnabled,
-        httpChannelEnabled: httpChannelEnabled,
-        logger: logger,
+        inputs: (
+          target: target,
+          userBuildArgs: userBuildArgs,
+          workspace: workspace,
+          builtBefore: builtBefore,
+          sourceWatcher: sourceWatcher,
+          devToolsEnabled: devToolsEnabled,
+          httpChannelEnabled: httpChannelEnabled,
+          logger: logger,
+        ),
       );
     } on BazelCancelled {
       // Only a shutdown stops a bazel command (see [Bazel.close]), and here
@@ -261,6 +265,35 @@ Future<SourceWatcher> startAttachWatcher(
   return sourceWatcher;
 }
 
+/// Which app [attachApp] connects and where its session lands.
+///
+/// One object for the per-app values the multi-attach loop threads one
+/// argument at a time: which URL of how many, and where the session and its
+/// logs go.
+typedef AttachAppInputs = ({
+  int index,
+  bool multiApp,
+  String workspace,
+  List<VmServiceLogForwarder> logForwarders,
+  Logger logger,
+});
+
+/// What [assembleAndServeAttach] resolves and serves with.
+///
+/// One object for the toolchain resolution and pipeline assembly the command
+/// does once after connecting: what to resolve, what was built when, and
+/// which optional surfaces to serve.
+typedef AttachServeInputs = ({
+  String target,
+  List<String> userBuildArgs,
+  String workspace,
+  DateTime builtBefore,
+  SourceWatcher? sourceWatcher,
+  bool devToolsEnabled,
+  bool httpChannelEnabled,
+  Logger logger,
+});
+
 /// Connect one running app and register its session on [host].
 ///
 /// Attach always builds a frontend server and connects a VM service, so
@@ -271,26 +304,23 @@ Future<void> attachApp(
   SessionHost host,
   ReloadPipeline pipeline,
   String debugUrl, {
-  required int index,
-  required bool multiApp,
-  required String workspace,
-  required List<VmServiceLogForwarder> logForwarders,
-  required Logger logger,
+  required AttachAppInputs inputs,
 }) async {
   final protocol = host.protocol;
   final teardown = host.teardown;
+  final logger = inputs.logger;
   final uri = Uri.parse(debugUrl);
-  final appId = 'attach_$index';
+  final appId = 'attach_${inputs.index}';
   final deviceName = 'attached:${uri.host}:${uri.port}';
 
   protocol.appStart(
     appId,
     deviceName,
     supportsRestart: true,
-    directory: workspace,
+    directory: inputs.workspace,
     launchMode: 'attach',
   );
-  logger.info({
+  inputs.logger.info({
     'message': 'connecting',
     'text': 'Connecting to $uri...',
     'uri': uri.toString(),
@@ -331,7 +361,7 @@ Future<void> attachApp(
     vmClient,
     appInstance,
     uri,
-    logForwarders: logForwarders,
+    logForwarders: inputs.logForwarders,
     logger: logger,
   );
   appInstance.logs.lines.listen(
@@ -339,7 +369,7 @@ Future<void> attachApp(
       protocol: protocol,
       appId: appId,
       deviceName: deviceName,
-      multiDevice: multiApp,
+      multiDevice: inputs.multiApp,
     ),
   );
 
@@ -450,37 +480,30 @@ Future<void> forwardAttachedLogs(
 Future<void> assembleAndServeAttach(
   SessionHost host,
   ReloadPipeline pipeline, {
-  required String target,
-  required List<String> userBuildArgs,
-  required String workspace,
-  required DateTime builtBefore,
-  required SourceWatcher? sourceWatcher,
-  required bool devToolsEnabled,
-  required bool httpChannelEnabled,
-  required Logger logger,
+  required AttachServeInputs inputs,
 }) async {
   final sessions = host.sessions;
   final protocol = host.protocol;
   final teardown = host.teardown;
 
   final toolchain = await resolveToolchainPaths(
-    target,
-    workspace: workspace,
+    inputs.target,
+    workspace: inputs.workspace,
     runBazel: host.bazel.run,
     // The configuration the pipeline below builds in.
-    buildFlags: ['-c', 'dbg', ...userBuildArgs],
+    buildFlags: ['-c', 'dbg', ...inputs.userBuildArgs],
   );
 
   await NativePipelineAssembler(
-    workspace: workspace,
+    workspace: inputs.workspace,
     toolchain: toolchain,
-    target: target,
+    target: inputs.target,
     configDevice: sessions.first.device,
-    userBuildArgs: userBuildArgs,
+    userBuildArgs: inputs.userBuildArgs,
     host: host,
     pipeline: pipeline,
-    logger: logger,
-    builtBefore: builtBefore,
+    logger: inputs.logger,
+    builtBefore: inputs.builtBefore,
   ).assemble();
 
   // The assembler has two early returns that settle nothing — a device with
@@ -500,7 +523,7 @@ Future<void> assembleAndServeAttach(
   // this channel appearing as "the run is ready", and an edit that lands
   // before the pipeline seeds its applied state is an edit the first reload
   // cannot see.
-  if (httpChannelEnabled) await host.startHttpChannel();
+  if (inputs.httpChannelEnabled) await host.startHttpChannel();
 
   // A shutdown that arrived while the pipeline was being assembled is not
   // a failure to report: the session was asked to end before it could
@@ -529,21 +552,33 @@ Future<void> assembleAndServeAttach(
     );
   }
   await runInteractiveSession(
-    sessions: sessions,
-    frontendServer: pipeline.frontendServer,
-    protocol: protocol,
-    watcher: sourceWatcher,
-    commandRunner: host.commandRunner,
-    devToolsEnabled: devToolsEnabled,
-    dartExecutable: toolchain.dart,
-    // Attach exists to connect a VM service and stand a compiler up.
-    hotReloadUnavailable: null,
-    // Per event, not captured — see the same call in `run_command.dart`:
-    // attach's pipeline can assemble late for exactly the same reason.
-    resolver: () => pipeline.resolver,
-    awaitingAssembly: () => pipeline.awaitingAssembly,
-    isAsset: pipeline.watchesAsset,
-    shutdownSignal: host.shutdownRequested.future,
+    targets: (
+      sessions: sessions,
+      frontendServer: pipeline.frontendServer,
+      protocol: protocol,
+      commandRunner: host.commandRunner,
+    ),
+    options: (
+      devToolsEnabled: inputs.devToolsEnabled,
+      dartExecutable: toolchain.dart,
+      // Attach exists to connect a VM service and stand a compiler up.
+      hotReloadUnavailable: null,
+    ),
+    watch: (
+      watcher: inputs.sourceWatcher,
+      // Per event, not captured — see the same call in `run_command.dart`:
+      // attach's pipeline can assemble late for exactly the same reason.
+      resolver: () => pipeline.resolver,
+      awaitingAssembly: () => pipeline.awaitingAssembly,
+      isAsset: pipeline.watchesAsset,
+    ),
+    terminal: (
+      log: null,
+      keyboardReader: null,
+      setEchoMode: null,
+      setLineMode: null,
+      shutdownSignal: host.shutdownRequested.future,
+    ),
   );
 }
 
