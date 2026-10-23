@@ -400,13 +400,24 @@ def _check_pub_flutter_floor(lock_content, toolchain_info, pub_tag):
             version = flutter_version,
         ))
 
-def _workspace_relative_lock_path(hub_name, package_name, lock_label, entry_path):
+def workspace_relative_lock_path(hub_name, package_name, lock_label, entry_path):
     """Join a `relative: true` lock path onto the lock file's directory.
 
     Pub records a path dependency relative to the dependent package — for a
     root dependency, the lock file's own directory. The extension resolves it
     lexically to a workspace-relative path and fails closed on anything that
     escapes the workspace; the spoke rule re-validates at fetch time.
+
+    Args:
+        hub_name: The flutter.pub hub name, for failure messages.
+        package_name: The path dependency's name, for failure messages.
+        lock_label: The lock file label; its package is the lock's
+            directory. Must live in the root module (see
+            `foreign_lock_path_error`).
+        entry_path: The lock entry's relative path value.
+
+    Returns:
+        The workspace-relative package directory.
     """
     parts = []
     if lock_label.package:
@@ -452,7 +463,7 @@ def _classify_lock_packages(hub_name, lock_label, lock_pkgs):
                     pkg = name,
                 ))
             path_pkgs[name] = struct(
-                path = _workspace_relative_lock_path(hub_name, name, lock_label, entry_path),
+                path = workspace_relative_lock_path(hub_name, name, lock_label, entry_path),
                 version = info.get("version", ""),
             )
             all_package_names.append(name)

@@ -2010,15 +2010,24 @@ def _flutter_pub_package_impl(ctx):
     _fetch_pub_archive(ctx)
     _generate_spoke(ctx)
 
-def _link_path_package(ctx):
+def link_path_package(ctx):
     """Symlinks a workspace-local `path:` package into the spoke, hermetically.
 
     The lock-relative path is resolved against the workspace root and every
     top-level entry is symlinked in, so the rest of the spoke pipeline reads
-    the package exactly as if it had been extracted from an archive. Fails
-    closed: an absolute path, a `..` escape, or a missing directory fails the
-    fetch rather than emitting an empty spoke or reaching outside the
-    workspace.
+    the package exactly as if it had been extracted from an archive. Every
+    file and directory under the package is watched (see
+    `_watch_linked_tree`), so any add, remove, rename, or content change
+    refetches the spoke. Fails closed: an absolute path, a `..` escape, or
+    a missing directory fails the fetch rather than emitting an empty spoke
+    or reaching outside the workspace.
+
+    Args:
+        ctx: The path-package spoke's repository context. Reads `path` and
+            `package_name` from its attrs.
+
+    Returns:
+        None.
     """
     rel = ctx.attr.path
     if rel.startswith("/") or rel in ("", "."):
@@ -2038,13 +2047,43 @@ def _link_path_package(ctx):
             pkg = ctx.attr.package_name,
             path = repr(rel),
         ))
-    ctx.watch(src)
     for child in src.readdir():
-        ctx.watch(child)
         ctx.symlink(child, child.basename)
+    _watch_linked_tree(ctx, src)
+
+def _watch_linked_tree(ctx, src):
+    """Watch every file and directory under a linked path package.
+
+    The spoke generator reads the package's pubspec plus whichever asset,
+    font, shader, and plugin-source files it walks, and the generated BUILD
+    names the discovered file set — but Bazel does not watch reads inside a
+    repository's own directory, so the symlinked copy's nested listings are
+    invisible to refetch detection. Walking the workspace source tree (which
+    Bazel is allowed to watch) and watching each node closes that: a file
+    appearing in a nested asset directory refetches the spoke instead of
+    shipping a stale asset set. The scope is enough because the generator
+    reads nothing outside the package root — file contents additionally
+    rebuild through the symlinked labels at build time — and the walk fails
+    closed past 10000 directories rather than silently under-watching an
+    enormous or cyclic tree. Explicit bounded stack: Starlark has no `while`.
+    """
+    ctx.watch(src)
+    queue = [src]
+    for _ in range(10000):
+        if not queue:
+            break
+        for child in queue.pop().readdir():
+            ctx.watch(child)
+            if child.is_dir:
+                queue.append(child)
+    if queue:
+        fail("flutter.pub spoke for \"{pkg}\": path dependency {path} holds more than 10000 directories. Refusing it rather than watching part of the tree and shipping a stale spoke.".format(
+            pkg = ctx.attr.package_name,
+            path = repr(ctx.attr.path),
+        ))
 
 def _flutter_pub_path_package_impl(ctx):
-    _link_path_package(ctx)
+    link_path_package(ctx)
     _generate_spoke(ctx)
 
 def _generate_spoke(ctx):
