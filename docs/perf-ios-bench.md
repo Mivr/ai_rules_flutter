@@ -179,13 +179,15 @@ Per configuration (`device_release`, `sim_debug`) and scenario (`clean`,
 mode measures two numbers in the same unit, whole-tree user+sys CPU
 seconds:
 
-- the Bazel cost: the whole `bazel --batch build` process tree (Bazel's
-  own work plus every action), measured with wait4 rusage deltas, which
-  include reaped descendants on both macOS and Linux. One unit for the
-  whole run. A macOS instruction counter cannot do this: `/usr/bin/time
-  -l` reads "instructions retired" for its direct child alone (the JVM
-  for a build, the Python driver for a chain), so instructions are never
-  the flow number; `unit` in `ios-sol.json` is always `cpu_seconds`.
+- the Bazel cost: for the `clean` flow, the whole `bazel --batch build`
+  process tree (Bazel's own work plus every action), measured with wait4
+  rusage deltas, which include reaped descendants on both macOS and Linux.
+  Edit flows (`app_edit`, `core_edit`) are measured against a warm server,
+  not `--batch` (below). One unit for the whole run. A macOS instruction
+  counter cannot do this: `/usr/bin/time -l` reads "instructions retired"
+  for its direct child alone (the JVM for a build, the Python driver for a
+  chain), so instructions are never the flow number; `unit` in
+  `ios-sol.json` is always `cpu_seconds`.
 - the SOL cost: the minimal chain of the same tool binaries Bazel ran
   for that scenario, taken from that build's execution log (kernel
   compile, gen_snapshot, assembler/linker, bundling steps, with the same
@@ -194,7 +196,40 @@ seconds:
   (loading the log, hashing, moving files) is never included. Steps
   whose outputs did not change for the edit are skipped as a person
   would skip them: the execution log records executed spawns only, so
-  replaying it replays exactly the work the edit required.
+  replaying it replays exactly the work the edit required. Edit flows
+  run the chain from the warm-server build's execution log, exactly as
+  clean flows run it from the `--batch` build's log.
+
+The clean flow is a cold measurement: one `bazel --batch build` with no
+server, so its cost includes Bazel startup and full analysis. Edit flows
+are warm measurements: after the clean chain and host-tools replay have
+restored Bazel's outputs, a server starts on the same output base (same
+startup options minus `--batch`), and one unmeasured warm-up build of
+the same target and flags must execute zero actions — otherwise the
+config fails, because the outputs were perturbed and the edit would not
+measure an incremental build. Each edit scenario then applies its
+cumulative edit and builds through that warm server. While the server
+is up every Bazel command on that output base goes through it, never
+`--batch`; the server shuts down after the config's last flow and on
+every error path, so no server outlives its config.
+
+The warm number (`tools/perf/warm_server.py`, usable by any other bench)
+is the CPU growth of the whole process tree for the one measured
+client command: the waiting client's own CPU, the server's own CPU
+growth, the server's reaped-children growth, and the growth of the
+server's live descendant tree (a child that appears mid-command is
+counted from zero). It fails closed — missing server, a server that
+restarted under the same pid, or an unreadable sample is a config error,
+never a number. Known limit: a descendant that exits and is already
+reaped when the command ends contributes its whole-life CPU through the
+parent's reaped-children time, so the split across parts is approximate
+while their sum is exact. Edit flows record `method: "warm-server"` and
+the per-part breakdown as `bazel_parts`; clean flows record
+`method: "batch"` with no breakdown. The `profile.jvm` counter covers
+the same trace whether the build ran batched or through the server, and
+the residual still excludes all server time, so for a warm flow the
+residual is mostly JVM launch and analysis-cache warmth the trace
+counter never sees.
 
 Chain selection is output-based: a host-tool build is a spawn whose
 declared outputs land in an exec configuration
@@ -292,7 +327,19 @@ in the job log, so the artifact alone explains what the SOL ran and why
 a flow is not identical. The driver is `tools/perf/sol.py` (`run` / `chain` /
 `summarize`; unit tests in `sol_test.py` run on Linux CI from recorded
 fixtures, including a `run` -> `chain` -> `summarize` end-to-end pass
-against a fake `bazel`, with no time binary present).
+against a fake `bazel` in both `--batch` and warm-server modes — the
+fake Bazel runs a tiny daemon so the warm tests exercise the real
+server start, zero-action warm-up and per-part measurement —
+with no time binary present). The warm-server measurement itself is
+`tools/perf/warm_server.py` (tests in `warm_server_test.py`: a real
+process tree on Linux, macOS conversion math against stubbed system
+calls, and fail-closed paths).
+
+The generated workspace (`tools/perf/gen_monorepo.py`) builds the bench
+app end to end on the runner with no developer-only setup: its
+`.bazelrc` sets `common --lockfile_mode=off` by default, and it
+registers only the Flutter toolchain (no LLVM or other dev-only
+toolchains).
 
 Each flow also carries a small `profile` record, always on, with no
 command lines:
