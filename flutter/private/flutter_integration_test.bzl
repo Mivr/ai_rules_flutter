@@ -100,6 +100,7 @@ load(
     "flutter_compile_shaders",
     "flutter_web_shader_aspect",
     "host_target_arch",
+    "make_bundle_inputs",
     "make_web_wrapper_main_content",
     "merge_dart_defines",
     "resolve_exec_dart_vm",
@@ -1260,13 +1261,15 @@ def _flutter_integration_test_impl(ctx):
     compiled_shaders = flutter_compile_shaders(ctx, flutter_sdk_info, "web")
     flutter_assets = declare_flutter_assets_dir(ctx)
     flutter_build_assets(
-        ctx,
-        flutter_sdk_info,
-        flutter_assets,
-        compiled_shaders,
-        target_platform = "web",
-        kernel_dill = None,
-        is_debug = is_debug,
+        ctx = ctx,
+        flutter_sdk_info = flutter_sdk_info,
+        output_dir = flutter_assets,
+        bundle = make_bundle_inputs(
+            target_platform = "web",
+            compiled_shaders = compiled_shaders,
+            kernel_dill = None,
+            is_debug = is_debug,
+        ),
     )
 
     # Step 4: Generate web templates (index.html, flutter_bootstrap.js, manifest.json, version.json).
@@ -1684,14 +1687,16 @@ def _flutter_linux_integration_test_impl(ctx):
     compiled_shaders = flutter_compile_shaders(ctx, flutter_sdk_info, "linux")
     flutter_assets = declare_flutter_assets_dir(ctx)
     flutter_build_assets(
-        ctx,
-        flutter_sdk_info,
-        flutter_assets,
-        compiled_shaders,
-        target_platform = "linux",
-        kernel_dill = kernel_dill,
-        is_debug = is_debug,
-        data_assets = transitive_data_assets,
+        ctx = ctx,
+        flutter_sdk_info = flutter_sdk_info,
+        output_dir = flutter_assets,
+        bundle = make_bundle_inputs(
+            target_platform = "linux",
+            compiled_shaders = compiled_shaders,
+            kernel_dill = kernel_dill,
+            is_debug = is_debug,
+            data_assets = transitive_data_assets,
+        ),
     )
 
     # Step 4: Generate native C++ plugin registrant and compile GTK runner binary.
@@ -2041,14 +2046,16 @@ def _flutter_android_integration_app_impl(ctx):
     compiled_shaders = flutter_compile_shaders(ctx, flutter_sdk_info, "android")
     flutter_assets = declare_flutter_assets_dir(ctx)
     flutter_build_assets(
-        ctx,
-        flutter_sdk_info,
-        flutter_assets,
-        compiled_shaders,
-        target_platform = "android",
-        kernel_dill = kernel_dill,
-        is_debug = is_debug,
-        data_assets = transitive_data_assets,
+        ctx = ctx,
+        flutter_sdk_info = flutter_sdk_info,
+        output_dir = flutter_assets,
+        bundle = make_bundle_inputs(
+            target_platform = "android",
+            compiled_shaders = compiled_shaders,
+            kernel_dill = kernel_dill,
+            is_debug = is_debug,
+            data_assets = transitive_data_assets,
+        ),
     )
 
     native_libs = collect_native_libs(ctx.attr.native_deps)

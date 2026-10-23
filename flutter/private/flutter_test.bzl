@@ -79,6 +79,7 @@ load(
     "flutter_compile_shaders",
     "flutter_tester_shader_aspect",
     "host_target_arch",
+    "make_bundle_inputs",
     "merge_dart_defines",
 )
 load("//flutter/private:flutter_compile.bzl", "flutter_kernel_compile_action")
@@ -266,13 +267,15 @@ def _flutter_test_impl(ctx):
     compiled_shaders = flutter_compile_shaders(ctx, flutter_sdk_info, "tester")
     flutter_assets = declare_flutter_assets_dir(ctx)
     flutter_build_assets(
-        ctx,
-        flutter_sdk_info,
-        flutter_assets,
-        compiled_shaders,
-        target_platform = "tester",
-        kernel_dill = kernel_dill,
-        is_debug = True,
+        ctx = ctx,
+        flutter_sdk_info = flutter_sdk_info,
+        output_dir = flutter_assets,
+        bundle = make_bundle_inputs(
+            target_platform = "tester",
+            compiled_shaders = compiled_shaders,
+            kernel_dill = kernel_dill,
+            is_debug = True,
+        ),
     )
 
     # The entrypoint's own `@Tags`, extracted at build time (see

@@ -45,6 +45,7 @@ load(
     "flutter_build_assets",
     "flutter_compile_shaders",
     "flutter_web_shader_aspect",
+    "make_bundle_inputs",
     "make_web_plugins_stub_content",
     "make_web_ui_web_stub_content",
     "make_web_wrapper_main_content",
@@ -678,15 +679,17 @@ def _web_bundle_assets(ctx, flutter_sdk_info, program, compile):
 
     flutter_assets = declare_flutter_assets_dir(ctx)
     flutter_build_assets(
-        ctx,
-        flutter_sdk_info,
-        flutter_assets,
-        compiled_shaders,
-        target_platform = "web",
-        kernel_dill = kernel_dills[0] if kernel_dills else None,
-        kernel_dills = kernel_dills,
-        tree_shake_key = "\n---\n".join(tree_shake_key_parts),
-        is_debug = is_debug,
+        ctx = ctx,
+        flutter_sdk_info = flutter_sdk_info,
+        output_dir = flutter_assets,
+        bundle = make_bundle_inputs(
+            target_platform = "web",
+            compiled_shaders = compiled_shaders,
+            kernel_dill = kernel_dills[0] if kernel_dills else None,
+            kernel_dills = kernel_dills,
+            tree_shake_key = "\n---\n".join(tree_shake_key_parts),
+            is_debug = is_debug,
+        ),
     )
     return flutter_assets
 

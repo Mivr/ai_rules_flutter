@@ -17,7 +17,7 @@ load("@apple_support//lib:apple_support.bzl", "apple_support")
 load("@bazel_skylib//lib:dicts.bzl", "dicts")
 load("@rules_dart//dart:utils.bzl", "dart_link_hook_actions", "link_hook_runner_attr")
 load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterInfo")
-load("//flutter/private:common.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "FLUTTER_APPLICATION_ATTRS", "PLATFORM_CONSTRAINT_ATTRS", "check_unreplaced_hooks", "collect_binding_contracts", "collect_native_libs", "declare_flutter_assets_dir", "detect_target_platform", "flutter_build_assets", "flutter_build_mode", "flutter_compile_kernel", "flutter_compile_shaders", "host_target_arch", "launch_build_args", "make_kernel_inputs", "make_kernel_target", "resolve_flutter_sdk_info", "shader_sources")
+load("//flutter/private:common.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "FLUTTER_APPLICATION_ATTRS", "PLATFORM_CONSTRAINT_ATTRS", "check_unreplaced_hooks", "collect_binding_contracts", "collect_native_libs", "declare_flutter_assets_dir", "detect_target_platform", "flutter_build_assets", "flutter_build_mode", "flutter_compile_kernel", "flutter_compile_shaders", "host_target_arch", "launch_build_args", "make_bundle_inputs", "make_kernel_inputs", "make_kernel_target", "resolve_flutter_sdk_info", "shader_sources")
 load("//flutter/private:flutter_aot_compile.bzl", "flutter_aot_elf_action", "flutter_aot_gen_snapshot_flags", "flutter_aot_macho_action", "macho_snapshot_options")
 load("//flutter/private:flutter_info.bzl", "dedup_plugins")
 load("//flutter/private:flutter_native_assets.bzl", "bridge_dart_code_assets", "collect_bundled_code_asset_files", "write_native_assets_manifest")
@@ -521,14 +521,16 @@ def _flutter_application_impl(ctx):
     # bundler places them under flutter_assets/packages/<pkg>/<name>.
     compiled_shaders = flutter_compile_shaders(ctx, flutter_sdk_info, target_platform)
     flutter_build_assets(
-        ctx,
-        flutter_sdk_info,
-        flutter_assets,
-        compiled_shaders,
-        target_platform = target_platform,
-        kernel_dill = kernel_dill,
-        is_debug = is_debug,
-        data_assets = transitive_data_assets,
+        ctx = ctx,
+        flutter_sdk_info = flutter_sdk_info,
+        output_dir = flutter_assets,
+        bundle = make_bundle_inputs(
+            target_platform = target_platform,
+            compiled_shaders = compiled_shaders,
+            kernel_dill = kernel_dill,
+            is_debug = is_debug,
+            data_assets = transitive_data_assets,
+        ),
     )
 
     # Aggregate the plugin channels from deps. These are what the platform
