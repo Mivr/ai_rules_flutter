@@ -23,6 +23,176 @@ def _merge_depsets(dep_infos, direct, field):
     """Merges one plain depset channel: this target's files over its dependencies'."""
     return depset(direct = direct, transitive = [getattr(info, field) for info in dep_infos])
 
+def flutter_asset_channels(asset_dirs = [], assets = [], shader_srcs = [], apple_privacy_manifests = []):
+    """Groups what a target contributes to the bundled-asset channels.
+
+    One of the four parameter objects `flutter_info()` takes. A caller passes
+    only the channels it contributes on; every other channel keeps its empty
+    default, and the dependencies' values on all four channels are merged in
+    without the caller naming them.
+
+    Args:
+      asset_dirs: Directories of Flutter assets this target ships.
+      assets: Keyed asset entries (`struct(key, file, label)`) this target lists.
+      shader_srcs: Raw shader sources (`.frag`/`.glsl`) this target ships.
+      apple_privacy_manifests: `PrivacyInfo.xcprivacy` files this target ships.
+
+    Returns:
+      A struct carrying the four channels above.
+    """
+    return struct(
+        asset_dirs = asset_dirs,
+        assets = assets,
+        shader_srcs = shader_srcs,
+        apple_privacy_manifests = apple_privacy_manifests,
+    )
+
+def flutter_plugin_libraries(apple_plugin_libraries = [], android_plugin_libraries = [], linux_plugin_libraries = [], windows_plugin_libraries = []):
+    """Groups what a target contributes to the per-platform plugin channels.
+
+    One channel per platform rather than one tagged union, because the
+    integration mechanisms genuinely differ: Apple carries compiled
+    `CcInfo`/`SwiftInfo` to link against, Android carries `JavaInfo` and
+    resource manifests, Linux and Windows carry source bundles their runner
+    folds into its own compile. Apple multiplexes macOS and iOS in one channel
+    precisely because those two do share a mechanism.
+
+    Args:
+      apple_plugin_libraries: Apple plugin library structs this target declares
+        (`platform`, `label`, `cc_info`, `swift_info`, `package`).
+      android_plugin_libraries: Android plugin library structs this target
+        declares (`label`, `java_info`, `resources_info`, `package`).
+      linux_plugin_libraries: Linux plugin source bundles this target declares
+        (`label`, `srcs`, `hdrs`, `include_dirs`, `package`).
+      windows_plugin_libraries: Windows plugin source bundles, same shape.
+
+    Returns:
+      A struct carrying the four channels above.
+    """
+    return struct(
+        apple_plugin_libraries = apple_plugin_libraries,
+        android_plugin_libraries = android_plugin_libraries,
+        linux_plugin_libraries = linux_plugin_libraries,
+        windows_plugin_libraries = windows_plugin_libraries,
+    )
+
+def flutter_native_channels(native_libs = [], native_lib_sources = [], binding_contracts = [], native_assets = [], data_assets = []):
+    """Groups what a target contributes to the native-code channels.
+
+    Args:
+      native_libs: Shared libraries this target contributes, typically from a
+        plugin's `native_deps`.
+      native_lib_sources: `struct(library, sources)` pairs this target
+        contributes — the first-party sources each of its native libraries is
+        built from.
+      binding_contracts: `struct(library, contract)` pairs this target
+        contributes, one per `flutter_native_library` in its `native_deps`.
+      native_assets: `FlutterNativeAssetInfo` providers this target declares.
+      data_assets: `FlutterDataAssetInfo` providers this target declares.
+
+    Returns:
+      A struct carrying the five channels above.
+    """
+    return struct(
+        native_libs = native_libs,
+        native_lib_sources = native_lib_sources,
+        binding_contracts = binding_contracts,
+        native_assets = native_assets,
+        data_assets = data_assets,
+    )
+
+def flutter_pub_channels(pub_fonts = [], pub_assets = [], pub_shaders = []):
+    """Groups what a target contributes to the pub-manifest channels.
+
+    Args:
+      pub_fonts: Font contribution structs from a pub `flutter.fonts` block.
+      pub_assets: Asset contribution structs from a pub `flutter.assets` block.
+        Each carries `platforms` / `flavors` tuples (empty when unrestricted);
+        bundle aggregators filter them per target platform with
+        `pub_asset_matches_target`, flavor-first like flutter_tools.
+      pub_shaders: Shader contribution structs from a `flutter.shaders` block.
+
+    Returns:
+      A struct carrying the three channels above.
+    """
+    return struct(
+        pub_fonts = pub_fonts,
+        pub_assets = pub_assets,
+        pub_shaders = pub_shaders,
+    )
+
+def _merge_asset_channels(dep_infos, channels):
+    """Merges one `flutter_asset_channels` over its dependencies' contributions."""
+    return struct(
+        asset_dirs = depset(
+            direct = channels.asset_dirs,
+            transitive = [info.asset_dirs for info in dep_infos],
+        ),
+        assets = _merge_depsets(dep_infos, channels.assets, "assets"),
+        shader_srcs = depset(
+            direct = _normalize_shader_srcs(channels.shader_srcs),
+            transitive = [info.shader_srcs for info in dep_infos],
+        ),
+        apple_privacy_manifests = depset(
+            direct = channels.apple_privacy_manifests,
+            transitive = [info.apple_privacy_manifests for info in dep_infos],
+        ),
+    )
+
+def _merge_plugin_libraries(dep_infos, channels):
+    """Merges one `flutter_plugin_libraries` over its dependencies' contributions."""
+    return struct(
+        apple_plugin_libraries = depset(
+            direct = channels.apple_plugin_libraries,
+            transitive = [info.apple_plugin_libraries for info in dep_infos],
+        ),
+        android_plugin_libraries = depset(
+            direct = channels.android_plugin_libraries,
+            transitive = [info.android_plugin_libraries for info in dep_infos],
+        ),
+        linux_plugin_libraries = depset(
+            direct = channels.linux_plugin_libraries,
+            transitive = [info.linux_plugin_libraries for info in dep_infos],
+        ),
+        windows_plugin_libraries = depset(
+            direct = channels.windows_plugin_libraries,
+            transitive = [info.windows_plugin_libraries for info in dep_infos],
+        ),
+    )
+
+def _merge_native_channels(dep_infos, channels):
+    """Merges one `flutter_native_channels` over its dependencies' contributions."""
+    return struct(
+        transitive_native_libs = _merge_depsets(dep_infos, channels.native_libs, "transitive_native_libs"),
+        native_lib_sources = _merge_depsets(dep_infos, channels.native_lib_sources, "native_lib_sources"),
+        binding_contracts = _merge_depsets(dep_infos, channels.binding_contracts, "binding_contracts"),
+        native_assets = depset(
+            direct = channels.native_assets,
+            transitive = [info.native_assets for info in dep_infos],
+        ),
+        data_assets = depset(
+            direct = channels.data_assets,
+            transitive = [info.data_assets for info in dep_infos],
+        ),
+    )
+
+def _merge_pub_channels(dep_infos, channels):
+    """Merges one `flutter_pub_channels` over its dependencies' contributions."""
+    return struct(
+        pub_fonts = depset(
+            direct = channels.pub_fonts,
+            transitive = [info.pub_fonts for info in dep_infos],
+        ),
+        pub_assets = depset(
+            direct = channels.pub_assets,
+            transitive = [info.pub_assets for info in dep_infos],
+        ),
+        pub_shaders = depset(
+            direct = channels.pub_shaders,
+            transitive = [info.pub_shaders for info in dep_infos],
+        ),
+    )
+
 def _normalize_shader_srcs(shader_srcs):
     """Wraps bare shader Files as `struct(file, includes)` entries."""
     return [
@@ -50,30 +220,21 @@ def dedup_plugins(all_plugins):
             unique.append(p)
     return unique
 
-def flutter_info(
-        deps = [],
-        asset_dirs = [],
-        assets = [],
-        shader_srcs = [],
-        plugins = [],
-        native_libs = [],
-        native_lib_sources = [],
-        binding_contracts = [],
-        apple_plugin_libraries = [],
-        android_plugin_libraries = [],
-        linux_plugin_libraries = [],
-        windows_plugin_libraries = [],
-        apple_privacy_manifests = [],
-        native_assets = [],
-        data_assets = [],
-        pub_fonts = [],
-        pub_assets = [],
-        pub_shaders = []):
+def flutter_info(deps = [], plugins = [], asset_channels = None, plugin_libraries = None, native_channels = None, pub_channels = None):
     """Builds a `FlutterInfo`, merging its dependencies' contributions.
 
-    The caller supplies only what this target contributes itself, as plain
-    lists; everything transitive is merged here. Adding a field to
-    `FlutterInfo` is therefore a change to this function and nothing else.
+    The caller supplies only what this target contributes itself, grouped into
+    the parameter objects built by `flutter_asset_channels()`,
+    `flutter_plugin_libraries()`, `flutter_native_channels()` and
+    `flutter_pub_channels()`; everything transitive is merged here, so every
+    dependency's contribution on every channel arrives without the caller
+    naming it. Adding a field to `FlutterInfo` is therefore a change to this
+    function and its group constructors, and nothing else. A group the caller
+    passes nothing for is left at its default, which contributes empty values.
+
+    An unknown channel fails analysis: an unknown keyword to any group
+    constructor is an error, and a hand-built struct missing a field fails when
+    its field is read here.
 
     A `deps` entry with no `FlutterInfo` is skipped rather than an error: a
     Flutter target's `deps` legally holds plain `dart_library` targets, and
@@ -82,106 +243,61 @@ def flutter_info(
     Args:
       deps: Targets whose `FlutterInfo` contributions are merged in. Entries
         without one are ignored.
-      asset_dirs: Directories of Flutter assets this target ships.
-      assets: Keyed asset entries (`struct(key, file, label)`) this target
-        lists, each keyed once by its listing target; merged transitively.
-      shader_srcs: Raw shader sources (`.frag`/`.glsl`) this target ships.
       plugins: Plugin metadata structs this target declares. Deduplicated by
         name against the dependencies' plugins, this target's first.
-      native_libs: Shared libraries this target contributes, typically from a
-        plugin's `native_deps`.
-      native_lib_sources: `struct(library, sources)` pairs this target
-        contributes — the first-party sources each of its native libraries is
-        built from.
-      binding_contracts: `struct(library, contract)` pairs this target
-        contributes, one per `flutter_native_library` in its `native_deps`.
-      apple_plugin_libraries: Apple plugin library structs this target
-        declares (`platform`, `label`, `cc_info`, `swift_info`, `package`).
-      android_plugin_libraries: Android plugin library structs this target
-        declares (`label`, `java_info`, `resources_info`, `package`).
-      linux_plugin_libraries: Linux plugin source bundles this target declares
-        (`label`, `srcs`, `hdrs`, `include_dirs`, `package`).
-      windows_plugin_libraries: Windows plugin source bundles, same shape.
-      apple_privacy_manifests: `PrivacyInfo.xcprivacy` files this target ships.
-      native_assets: `FlutterNativeAssetInfo` providers this target declares.
-      data_assets: `FlutterDataAssetInfo` providers this target declares.
-      pub_fonts: Font contribution structs from a pub `flutter.fonts` block.
-      pub_assets: Asset contribution structs from a pub `flutter.assets` block. Each carries `platforms` / `flavors` tuples (empty when unrestricted); bundle aggregators filter them per target platform with `pub_asset_matches_target`, flavor-first like flutter_tools.
-      pub_shaders: Shader contribution structs from a `flutter.shaders` block.
+      asset_channels: A `flutter_asset_channels()` struct with this target's
+        `asset_dirs`, `assets`, `shader_srcs` and `apple_privacy_manifests`.
+      plugin_libraries: A `flutter_plugin_libraries()` struct with this
+        target's per-platform plugin libraries.
+      native_channels: A `flutter_native_channels()` struct with this target's
+        `native_libs`, `native_lib_sources`, `binding_contracts`,
+        `native_assets` and `data_assets`.
+      pub_channels: A `flutter_pub_channels()` struct with this target's
+        `pub_fonts`, `pub_assets` and `pub_shaders`.
 
     Returns:
       A `FlutterInfo`.
     """
+    if asset_channels == None:
+        asset_channels = flutter_asset_channels()
+    if plugin_libraries == None:
+        plugin_libraries = flutter_plugin_libraries()
+    if native_channels == None:
+        native_channels = flutter_native_channels()
+    if pub_channels == None:
+        pub_channels = flutter_pub_channels()
     dep_infos = [dep[FlutterInfo] for dep in deps if FlutterInfo in dep]
 
     dep_plugins = []
     for info in dep_infos:
         dep_plugins.extend(info.plugins)
 
+    assets = _merge_asset_channels(dep_infos, asset_channels)
+    libraries = _merge_plugin_libraries(dep_infos, plugin_libraries)
+    native = _merge_native_channels(dep_infos, native_channels)
+    pub = _merge_pub_channels(dep_infos, pub_channels)
+
     return FlutterInfo(
-        asset_dirs = depset(
-            direct = asset_dirs,
-            transitive = [info.asset_dirs for info in dep_infos],
-        ),
-        assets = _merge_depsets(dep_infos, assets, "assets"),
-        shader_srcs = depset(
-            direct = _normalize_shader_srcs(shader_srcs),
-            transitive = [info.shader_srcs for info in dep_infos],
-        ),
+        asset_dirs = assets.asset_dirs,
+        assets = assets.assets,
+        shader_srcs = assets.shader_srcs,
         # A list, not a depset: the structs carry a `platforms` dict, which is
         # unhashable. Order is meaningful to the registrant generators, and
         # this target's own plugins come first.
         plugins = dedup_plugins(plugins + dep_plugins),
-        transitive_native_libs = _merge_depsets(dep_infos, native_libs, "transitive_native_libs"),
-        native_lib_sources = _merge_depsets(dep_infos, native_lib_sources, "native_lib_sources"),
-        binding_contracts = _merge_depsets(dep_infos, binding_contracts, "binding_contracts"),
-        # Per-platform channels rather than one tagged union, because the
-        # integration mechanisms genuinely differ: Apple carries compiled
-        # `CcInfo`/`SwiftInfo` to link against, Android carries `JavaInfo`
-        # and resource manifests, Linux and Windows carry source
-        # bundles their runner folds into its own compile. Apple multiplexes
-        # macOS and iOS in one channel precisely because those two do share a
-        # mechanism.
-        apple_plugin_libraries = depset(
-            direct = apple_plugin_libraries,
-            transitive = [info.apple_plugin_libraries for info in dep_infos],
-        ),
-        android_plugin_libraries = depset(
-            direct = android_plugin_libraries,
-            transitive = [info.android_plugin_libraries for info in dep_infos],
-        ),
-        linux_plugin_libraries = depset(
-            direct = linux_plugin_libraries,
-            transitive = [info.linux_plugin_libraries for info in dep_infos],
-        ),
-        windows_plugin_libraries = depset(
-            direct = windows_plugin_libraries,
-            transitive = [info.windows_plugin_libraries for info in dep_infos],
-        ),
-        apple_privacy_manifests = depset(
-            direct = apple_privacy_manifests,
-            transitive = [info.apple_privacy_manifests for info in dep_infos],
-        ),
-        native_assets = depset(
-            direct = native_assets,
-            transitive = [info.native_assets for info in dep_infos],
-        ),
-        data_assets = depset(
-            direct = data_assets,
-            transitive = [info.data_assets for info in dep_infos],
-        ),
-        pub_fonts = depset(
-            direct = pub_fonts,
-            transitive = [info.pub_fonts for info in dep_infos],
-        ),
-        pub_assets = depset(
-            direct = pub_assets,
-            transitive = [info.pub_assets for info in dep_infos],
-        ),
-        pub_shaders = depset(
-            direct = pub_shaders,
-            transitive = [info.pub_shaders for info in dep_infos],
-        ),
+        transitive_native_libs = native.transitive_native_libs,
+        native_lib_sources = native.native_lib_sources,
+        binding_contracts = native.binding_contracts,
+        apple_plugin_libraries = libraries.apple_plugin_libraries,
+        android_plugin_libraries = libraries.android_plugin_libraries,
+        linux_plugin_libraries = libraries.linux_plugin_libraries,
+        windows_plugin_libraries = libraries.windows_plugin_libraries,
+        apple_privacy_manifests = assets.apple_privacy_manifests,
+        native_assets = native.native_assets,
+        data_assets = native.data_assets,
+        pub_fonts = pub.pub_fonts,
+        pub_assets = pub.pub_assets,
+        pub_shaders = pub.pub_shaders,
     )
 
 # The attribute `flutter_library` and `flutter_plugin` share for a package's

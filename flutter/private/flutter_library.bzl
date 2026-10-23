@@ -4,7 +4,7 @@ load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo")
 load("@rules_dart//dart:utils.bzl", "dart_analyzable_info_with_package", "dart_info", "derive_lib_root", "derive_package_name")
 load("//flutter:providers.bzl", "FlutterInfo")
 load("//flutter/private:asset_keys.bzl", "library_asset_entries")
-load("//flutter/private:flutter_info.bzl", "LINK_HOOK_ATTR", "flutter_info")
+load("//flutter/private:flutter_info.bzl", "LINK_HOOK_ATTR", "flutter_asset_channels", "flutter_info", "flutter_pub_channels")
 
 def pub_asset_matches_target(flavors, platforms, target_platform, flavor = None):
     """Whether a pub asset entry bundles on the target platform.
@@ -343,18 +343,22 @@ def _flutter_library_impl(ctx):
         flutter_analyzable_info(ctx, package_name, lib_root),
         flutter_info(
             deps = ctx.attr.deps,
-            asset_dirs = ctx.files.assets,
-            assets = library_asset_entries(ctx.label, package_name, ctx.files.assets),
-            shader_srcs = [
-                struct(
-                    file = shader,
-                    includes = tuple(ctx.files.shader_includes),
-                )
-                for shader in ctx.files.shaders
-            ],
-            pub_fonts = extra_pub_fonts,
-            pub_assets = extra_pub_assets,
-            pub_shaders = extra_pub_shaders,
+            asset_channels = flutter_asset_channels(
+                asset_dirs = ctx.files.assets,
+                assets = library_asset_entries(ctx.label, package_name, ctx.files.assets),
+                shader_srcs = [
+                    struct(
+                        file = shader,
+                        includes = tuple(ctx.files.shader_includes),
+                    )
+                    for shader in ctx.files.shaders
+                ],
+            ),
+            pub_channels = flutter_pub_channels(
+                pub_fonts = extra_pub_fonts,
+                pub_assets = extra_pub_assets,
+                pub_shaders = extra_pub_shaders,
+            ),
         ),
     ]
 

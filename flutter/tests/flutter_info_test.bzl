@@ -20,7 +20,7 @@ load("@rules_dart//dart:defs.bzl", "dart_library")
 load("@rules_dart//dart:providers.bzl", "DartInfo")
 load("@rules_dart//dart:utils.bzl", "dart_info_no_package")
 load("//flutter:providers.bzl", "FlutterInfo")
-load("//flutter/private:flutter_info.bzl", "flutter_info")
+load("//flutter/private:flutter_info.bzl", "flutter_asset_channels", "flutter_info", "flutter_pub_channels")
 
 def _contributing_library_impl(ctx):
     return [
@@ -28,14 +28,18 @@ def _contributing_library_impl(ctx):
         dart_info_no_package(),
         flutter_info(
             deps = ctx.attr.deps,
-            asset_dirs = ctx.files.assets,
             plugins = [
                 struct(name = n, platforms = {})
                 for n in ctx.attr.plugin_names
             ],
-            pub_assets = [
-                struct(package_name = ctx.attr.pkg, asset_path = "a", file = None),
-            ],
+            asset_channels = flutter_asset_channels(
+                asset_dirs = ctx.files.assets,
+            ),
+            pub_channels = flutter_pub_channels(
+                pub_assets = [
+                    struct(package_name = ctx.attr.pkg, asset_path = "a", file = None),
+                ],
+            ),
         ),
     ]
 
@@ -57,9 +61,9 @@ def _single_channel_library_impl(ctx):
         # Tuples, not lists: these structs live in a depset, whose elements
         # must be immutable. The real `pub_fonts` contributions are built the
         # same way.
-        flutter_info(pub_fonts = [
+        flutter_info(pub_channels = flutter_pub_channels(pub_fonts = [
             struct(package_name = "", family = ctx.attr.family, fonts = (), files = ()),
-        ]),
+        ])),
     ]
 
 single_channel_library = rule(

@@ -9,7 +9,7 @@ hook's data asset and `rootBundle` loads it by.
 """
 
 load("//flutter:providers.bzl", "FlutterDataAssetInfo", "FlutterInfo")
-load("//flutter/private:flutter_info.bzl", flutter_info_provider = "flutter_info")
+load("//flutter/private:flutter_info.bzl", "flutter_native_channels", flutter_info_provider = "flutter_info")
 
 def _split_asset_id(asset_id):
     """Split a `package:<pkg>/<name>` asset id into (package, name).
@@ -38,7 +38,7 @@ def _flutter_data_asset_impl(ctx):
         file = ctx.file.file,
     )
 
-    flutter_info = flutter_info_provider(data_assets = [info])
+    flutter_info = flutter_info_provider(native_channels = flutter_native_channels(data_assets = [info]))
 
     return [
         DefaultInfo(files = depset([ctx.file.file])),

@@ -27,7 +27,7 @@ of Native Assets today.
 
 load("@rules_cc//cc/common:cc_shared_library_info.bzl", "CcSharedLibraryInfo")
 load("//flutter:providers.bzl", "FlutterInfo", "FlutterNativeAssetInfo")
-load("//flutter/private:flutter_info.bzl", flutter_info_provider = "flutter_info")
+load("//flutter/private:flutter_info.bzl", "flutter_native_channels", flutter_info_provider = "flutter_info")
 load("//flutter/private:native_sources.bzl", "collect_native_sources", "native_sources_aspect")
 
 _VALID_LINK_MODES = (
@@ -140,18 +140,20 @@ def _flutter_native_asset_impl(ctx):
     # `flutter_application(deps = ...)` if a workspace prefers that over
     # routing through `flutter_plugin(native_assets = ...)`.
     flutter_info = flutter_info_provider(
-        native_assets = [asset_info],
-        # The bundled file this rule declares, paired with what the library it
-        # wraps is built from — the same question `native_deps` answers, on the
-        # Native Assets route in.
-        native_lib_sources = [
-            struct(
-                library = asset_file,
-                sources = tuple(
-                    collect_native_sources([ctx.attr.library]).to_list(),
+        native_channels = flutter_native_channels(
+            native_assets = [asset_info],
+            # The bundled file this rule declares, paired with what the library it
+            # wraps is built from — the same question `native_deps` answers, on the
+            # Native Assets route in.
+            native_lib_sources = [
+                struct(
+                    library = asset_file,
+                    sources = tuple(
+                        collect_native_sources([ctx.attr.library]).to_list(),
+                    ),
                 ),
-            ),
-        ] if asset_file else [],
+            ] if asset_file else [],
+        ),
     )
 
     return [

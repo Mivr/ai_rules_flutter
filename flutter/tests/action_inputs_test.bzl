@@ -17,7 +17,7 @@ load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
 load("//flutter/private:flutter_aot_target.bzl", "flutter_aot_target")
 load("//flutter/private:flutter_application.bzl", "flutter_application")
 load("//flutter/private:flutter_asset_bundle.bzl", "flutter_asset_bundle")
-load("//flutter/private:flutter_info.bzl", "flutter_info")
+load("//flutter/private:flutter_info.bzl", "flutter_info", "flutter_pub_channels")
 load("//flutter/private:flutter_kernel_target.bzl", "flutter_kernel_target")
 load("//flutter/private:flutter_web_application.bzl", "flutter_web_bundle")
 
@@ -861,7 +861,7 @@ def _bare_pub_fonts_dep_impl(ctx):
     return [
         DefaultInfo(files = depset([font_file])),
         dart_info_no_package(),
-        flutter_info(pub_fonts = [contribution]),
+        flutter_info(pub_channels = flutter_pub_channels(pub_fonts = [contribution])),
     ]
 
 _bare_pub_fonts_dep = rule(

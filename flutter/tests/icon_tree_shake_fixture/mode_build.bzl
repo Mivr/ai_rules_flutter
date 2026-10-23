@@ -1,7 +1,7 @@
 """Configuration transition and font fixture helpers for icon tree-shaking tests."""
 
 load("@rules_dart//dart:utils.bzl", "dart_info_no_package")
-load("//flutter/private:flutter_info.bzl", "flutter_info")
+load("//flutter/private:flutter_info.bzl", "flutter_info", "flutter_pub_channels")
 load("//flutter/private:flutter_library.bzl", "build_pub_contributions")
 
 _PROFILE_FLAG = str(Label("//flutter:profile"))
@@ -99,7 +99,7 @@ def _font_fixture_impl(ctx):
     return [
         DefaultInfo(files = depset(ctx.files.font_files)),
         dart_info_no_package(),
-        flutter_info(pub_fonts = extra_pub_fonts),
+        flutter_info(pub_channels = flutter_pub_channels(pub_fonts = extra_pub_fonts)),
     ]
 
 font_fixture = rule(

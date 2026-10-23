@@ -23,7 +23,7 @@ discovers the font File via `ctx.toolchains[...]` instead.
 """
 
 load("@rules_dart//dart:utils.bzl", "dart_info_no_package")
-load("//flutter/private:flutter_info.bzl", "flutter_info")
+load("//flutter/private:flutter_info.bzl", "flutter_info", "flutter_pub_channels")
 
 _MATERIAL_ICONS_BUNDLE_PATH = "fonts/MaterialIcons-Regular.otf"
 
@@ -63,7 +63,7 @@ def _flutter_material_icons_impl(ctx):
         # package_config.json or transitive sources — material_icons ships zero
         # Dart code; only the font.
         dart_info_no_package(),
-        flutter_info(pub_fonts = [contribution]),
+        flutter_info(pub_channels = flutter_pub_channels(pub_fonts = [contribution])),
     ]
 
 flutter_material_icons = rule(

@@ -27,7 +27,7 @@ load("//flutter:providers.bzl", "FlutterApplePluginInfo", "FlutterDataAssetInfo"
 load("//flutter/private:asset_keys.bzl", "library_asset_entries")
 load("//flutter/private:common.bzl", "collect_binding_contracts", "collect_native_libs")
 load("//flutter/private:flutter_desktop_plugin_info.bzl", "FlutterLinuxPluginInfo", "FlutterWindowsPluginInfo")
-load("//flutter/private:flutter_info.bzl", "LINK_HOOK_ATTR", "flutter_info")
+load("//flutter/private:flutter_info.bzl", "LINK_HOOK_ATTR", "flutter_asset_channels", "flutter_info", "flutter_native_channels", "flutter_plugin_libraries", "flutter_pub_channels")
 load("//flutter/private:flutter_library.bzl", "SKY_ENGINE_ATTR", "build_pub_contributions", "flutter_analyzable_info")
 load("//flutter/private:native_sources.bzl", "collect_native_source_pairs", "native_sources_aspect")
 
@@ -302,22 +302,30 @@ def _plugin_flutter_info(ctx, package_name, plugin, extra):
     """The `FlutterInfo` provider aggregating every channel the plugin adds to."""
     return flutter_info(
         deps = ctx.attr.deps,
-        asset_dirs = ctx.files.assets,
-        assets = library_asset_entries(ctx.label, package_name, ctx.files.assets),
         plugins = [plugin],
-        native_libs = extra.native_libs,
-        binding_contracts = extra.binding_contracts,
-        native_lib_sources = extra.native_lib_sources,
-        apple_plugin_libraries = extra.apple,
-        android_plugin_libraries = extra.android,
-        linux_plugin_libraries = extra.linux,
-        windows_plugin_libraries = extra.windows,
-        apple_privacy_manifests = extra.privacy,
-        native_assets = extra.native_assets,
-        data_assets = extra.data_assets,
-        pub_fonts = extra.pub_fonts,
-        pub_assets = extra.pub_assets,
-        pub_shaders = extra.pub_shaders,
+        asset_channels = flutter_asset_channels(
+            asset_dirs = ctx.files.assets,
+            assets = library_asset_entries(ctx.label, package_name, ctx.files.assets),
+            apple_privacy_manifests = extra.privacy,
+        ),
+        plugin_libraries = flutter_plugin_libraries(
+            apple_plugin_libraries = extra.apple,
+            android_plugin_libraries = extra.android,
+            linux_plugin_libraries = extra.linux,
+            windows_plugin_libraries = extra.windows,
+        ),
+        native_channels = flutter_native_channels(
+            native_libs = extra.native_libs,
+            native_lib_sources = extra.native_lib_sources,
+            binding_contracts = extra.binding_contracts,
+            native_assets = extra.native_assets,
+            data_assets = extra.data_assets,
+        ),
+        pub_channels = flutter_pub_channels(
+            pub_fonts = extra.pub_fonts,
+            pub_assets = extra.pub_assets,
+            pub_shaders = extra.pub_shaders,
+        ),
     )
 
 def _flutter_plugin_impl(ctx):
