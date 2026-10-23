@@ -9,7 +9,7 @@ One repo per unique target platform, shared across hosts.
 
 load(":artifact_urls.bzl", "desktop_engine_artifact_path", "engine_artifact_url", "require_sha256")
 load(":download.bzl", "pinned_download_and_extract")
-load(":engine_helpers.bzl", "engine_filegroup_for_os", "extract_macos_inner_framework")
+load(":engine_helpers.bzl", "WINDOWS_CPP_CLIENT_WRAPPER_FILES", "cpp_client_wrapper_artifact_path", "cpp_client_wrapper_missing_error", "cpp_client_wrapper_sha_error", "engine_filegroup_for_os", "extract_macos_inner_framework")
 load(":local_sdk.bzl", "engine_cache_dir", "link_local_dir", "macos_framework_cache_path", "resolve_local_sdk_root")
 
 def _flutter_desktop_engine_repo_impl(repository_ctx):
@@ -72,10 +72,18 @@ def _flutter_desktop_engine_repo_impl(repository_ctx):
         output = "engine",
     )
 
+    wrapper_error = cpp_client_wrapper_sha_error(
+        target_os,
+        target_arch,
+        repository_ctx.attr.cpp_client_wrapper_sha256,
+    )
+    if wrapper_error != None:
+        fail(wrapper_error)
+
     if target_os == "macos":
         extract_macos_inner_framework(repository_ctx)
-    elif target_os == "windows" and repository_ctx.attr.cpp_client_wrapper_sha256:
-        wrapper_path = "windows-{}/flutter-cpp-client-wrapper.zip".format(target_arch)
+    elif target_os == "windows":
+        wrapper_path = cpp_client_wrapper_artifact_path(target_arch)
         wrapper_url = engine_artifact_url(
             engine_revision,
             wrapper_path,
@@ -87,6 +95,10 @@ def _flutter_desktop_engine_repo_impl(repository_ctx):
             sha256 = require_sha256(repository_ctx.attr.cpp_client_wrapper_sha256, wrapper_url),
             output = "cpp-client-wrapper",
         )
+        present = [f for f in WINDOWS_CPP_CLIENT_WRAPPER_FILES if repository_ctx.path(f).exists]
+        missing_error = cpp_client_wrapper_missing_error(target_arch, present)
+        if missing_error != None:
+            fail(missing_error)
 
     repository_ctx.file("BUILD.bazel", _BUILD_TEMPLATE.format(
         engine_filegroup = engine_filegroup_for_os(target_os),
@@ -125,7 +137,10 @@ flutter_desktop_engine_repo = repository_rule(
             default = "",
         ),
         "cpp_client_wrapper_sha256": attr.string(
-            doc = "Expected SHA-256 of flutter-cpp-client-wrapper.zip (for Windows targets). Unused with `local_path`.",
+            doc = "Expected SHA-256 of flutter-cpp-client-wrapper.zip. " +
+                  "Required for Windows targets in download mode (the fetch " +
+                  "fails without it); must be empty for other target OSes, " +
+                  "and unused with `local_path`.",
             default = "",
         ),
     },

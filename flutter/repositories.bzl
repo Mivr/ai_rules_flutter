@@ -9,7 +9,7 @@ load("//flutter/private:artifact_urls.bzl", "android_engine_artifact_path", "dar
 load("//flutter/private:chrome_headless_shell_repo.bzl", "chrome_headless_shell_repo")
 load("//flutter/private:constants.bzl", "ANDROID_ABI_FOR_ARCH")
 load("//flutter/private:download.bzl", "pinned_download_and_extract")
-load("//flutter/private:engine_helpers.bzl", "PLATFORM_PREFIX_TO_OS", "dart_binary_name", "dartaotruntime_binary_name", "engine_arch_for_os", "engine_filegroup_for_os", "gen_snapshot_host_platform")
+load("//flutter/private:engine_helpers.bzl", "PLATFORM_PREFIX_TO_OS", "WINDOWS_CPP_CLIENT_WRAPPER_FILES", "cpp_client_wrapper_artifact_path", "dart_binary_name", "dartaotruntime_binary_name", "engine_arch_for_os", "engine_filegroup_for_os", "gen_snapshot_host_platform")
 load("//flutter/private:flutter_android_engine_repo.bzl", "flutter_android_engine_repo")
 load("//flutter/private:flutter_cross_repo.bzl", "flutter_cross_compilation_repo")
 load("//flutter/private:flutter_desktop_cross_repo.bzl", "flutter_desktop_cross_repo")
@@ -404,46 +404,6 @@ _WINDOWS_ENGINE_RELEASE_REL_FILES = _WINDOWS_ENGINE_COMMON_REL_FILES + [
     "gen_snapshot.exe",
 ]
 
-_WINDOWS_CPP_CLIENT_WRAPPER_FILES = [
-    "cpp-client-wrapper/LICENSE.client_wrapper_archive.md",
-    "cpp-client-wrapper/cpp_client_wrapper/README",
-    "cpp-client-wrapper/cpp_client_wrapper/binary_messenger_impl.h",
-    "cpp-client-wrapper/cpp_client_wrapper/byte_buffer_streams.h",
-    "cpp-client-wrapper/cpp_client_wrapper/core_implementations.cc",
-    "cpp-client-wrapper/cpp_client_wrapper/engine_method_result.cc",
-    "cpp-client-wrapper/cpp_client_wrapper/flutter_engine.cc",
-    "cpp-client-wrapper/cpp_client_wrapper/flutter_view_controller.cc",
-    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/basic_message_channel.h",
-    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/binary_messenger.h",
-    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/byte_streams.h",
-    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/dart_project.h",
-    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/encodable_value.h",
-    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/engine_method_result.h",
-    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/event_channel.h",
-    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/event_sink.h",
-    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/event_stream_handler.h",
-    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/event_stream_handler_functions.h",
-    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/flutter_engine.h",
-    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/flutter_view.h",
-    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/flutter_view_controller.h",
-    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/message_codec.h",
-    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/method_call.h",
-    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/method_channel.h",
-    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/method_codec.h",
-    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/method_result.h",
-    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/method_result_functions.h",
-    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/plugin_registrar.h",
-    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/plugin_registrar_windows.h",
-    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/plugin_registry.h",
-    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/standard_codec_serializer.h",
-    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/standard_message_codec.h",
-    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/standard_method_codec.h",
-    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/texture_registrar.h",
-    "cpp-client-wrapper/cpp_client_wrapper/plugin_registrar.cc",
-    "cpp-client-wrapper/cpp_client_wrapper/standard_codec.cc",
-    "cpp-client-wrapper/cpp_client_wrapper/texture_registrar_impl.h",
-]
-
 def _format_alias(name, actual):
     return """alias(
     name = "{name}",
@@ -497,7 +457,7 @@ def _lazy_repo_file_aliases(os_name, exe_suffix, user_repo_name, platform, repos
         blocks.append(_format_alias("engine-debug/" + rel, "@{}//:engine/{}".format(repos.engine_debug_repo, rel)))
 
     if os_name == "windows":
-        for path in _WINDOWS_CPP_CLIENT_WRAPPER_FILES:
+        for path in WINDOWS_CPP_CLIENT_WRAPPER_FILES:
             blocks.append(_format_alias(path, "@{}//:{}".format(repos.engine_release_repo, path)))
 
     return "\n\n".join(blocks)
@@ -1684,7 +1644,7 @@ def _register_download_desktop_engine_repos(name, desktop_engine_targets, flutte
         engine_arch = engine_arch_for_os(target_os, target_platform.split("-")[1])
         cpp_wrapper_sha256 = ""
         if target_os == "windows":
-            cpp_wrapper_path = "{platform}/flutter-cpp-client-wrapper.zip".format(platform = target_platform)
+            cpp_wrapper_path = cpp_client_wrapper_artifact_path(engine_arch)
             cpp_wrapper_sha256 = flutter_artifact_sha256(flutter_version, cpp_wrapper_path, checksums)
 
         # Release engine (AOT — used in default/opt mode, and provides release gen_snapshot on Linux/Windows).

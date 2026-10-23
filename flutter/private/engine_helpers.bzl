@@ -315,3 +315,102 @@ def find_engine_header_dir(engine_files, header_suffix):
             idx = f.path.rfind(header_suffix)
             return f.path[:idx].rstrip("/")
     return None
+
+# -- Windows C++ client wrapper --------------------------------------------------
+
+# Every file the `flutter_<platform>` host repo aliases out of a downloaded
+# Windows desktop engine repo (see `_lazy_repo_file_aliases` in
+# flutter/repositories.bzl). The single definition lives here, next to the
+# rule that fetches the archive; repositories.bzl loads it.
+WINDOWS_CPP_CLIENT_WRAPPER_FILES = [
+    "cpp-client-wrapper/LICENSE.client_wrapper_archive.md",
+    "cpp-client-wrapper/cpp_client_wrapper/README",
+    "cpp-client-wrapper/cpp_client_wrapper/binary_messenger_impl.h",
+    "cpp-client-wrapper/cpp_client_wrapper/byte_buffer_streams.h",
+    "cpp-client-wrapper/cpp_client_wrapper/core_implementations.cc",
+    "cpp-client-wrapper/cpp_client_wrapper/engine_method_result.cc",
+    "cpp-client-wrapper/cpp_client_wrapper/flutter_engine.cc",
+    "cpp-client-wrapper/cpp_client_wrapper/flutter_view_controller.cc",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/basic_message_channel.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/binary_messenger.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/byte_streams.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/dart_project.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/encodable_value.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/engine_method_result.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/event_channel.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/event_sink.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/event_stream_handler.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/event_stream_handler_functions.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/flutter_engine.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/flutter_view.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/flutter_view_controller.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/message_codec.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/method_call.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/method_channel.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/method_codec.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/method_result.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/method_result_functions.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/plugin_registrar.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/plugin_registrar_windows.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/plugin_registry.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/standard_codec_serializer.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/standard_message_codec.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/standard_method_codec.h",
+    "cpp-client-wrapper/cpp_client_wrapper/include/flutter/texture_registrar.h",
+    "cpp-client-wrapper/cpp_client_wrapper/plugin_registrar.cc",
+    "cpp-client-wrapper/cpp_client_wrapper/standard_codec.cc",
+    "cpp-client-wrapper/cpp_client_wrapper/texture_registrar_impl.h",
+]
+
+def cpp_client_wrapper_artifact_path(target_arch):
+    """Return the engine-relative path of the C++ client wrapper archive.
+
+    Args:
+        target_arch: Target architecture ("x64" or "arm64").
+
+    Returns:
+        Artifact path like "windows-x64/flutter-cpp-client-wrapper.zip".
+    """
+    return "windows-{arch}/flutter-cpp-client-wrapper.zip".format(arch = target_arch)
+
+def cpp_client_wrapper_sha_error(target_os, target_arch, sha256):
+    """Check the wrapper checksum against its target, returning an error or None.
+
+    Windows targets in download mode always fetch the wrapper archive, so an
+    empty checksum is a misconfiguration; any other target never fetches it,
+    so a checksum there is one too. The rule passes a non-None return to `fail`.
+
+    Args:
+        target_os: Target OS ("macos", "linux", or "windows").
+        target_arch: Target architecture ("x64" or "arm64").
+        sha256: The `cpp_client_wrapper_sha256` attribute value.
+
+    Returns:
+        An error message naming the wrapper archive and the attribute (an
+        empty Windows checksum) or the attribute and the target OS (a checksum
+        nothing verifies), or None when the combination is valid.
+    """
+    if target_os == "windows":
+        if not sha256:
+            return "flutter_desktop_engine_repo: {archive} has no checksum: Windows targets fetch the C++ client wrapper in download mode, so pass its SHA-256 via cpp_client_wrapper_sha256".format(archive = cpp_client_wrapper_artifact_path(target_arch))
+        return None
+    if sha256:
+        return "flutter_desktop_engine_repo: cpp_client_wrapper_sha256 is set for target_os {os}, which never fetches the C++ client wrapper (Windows targets only): remove cpp_client_wrapper_sha256".format(os = target_os)
+    return None
+
+def cpp_client_wrapper_missing_error(target_arch, present):
+    """Check the extracted wrapper layout, returning an error or None.
+
+    Args:
+        target_arch: Target architecture ("x64" or "arm64").
+        present: Paths present in the fetched repo, a subset of
+            `WINDOWS_CPP_CLIENT_WRAPPER_FILES`.
+
+    Returns:
+        An error message naming the first missing file and the wrapper
+        archive, or None when every aliased file is present.
+    """
+    for path in WINDOWS_CPP_CLIENT_WRAPPER_FILES:
+        if path not in present:
+            return "flutter_desktop_engine_repo: {archive} is missing expected file {missing}: the wrapper archive layout changed, update WINDOWS_CPP_CLIENT_WRAPPER_FILES in flutter/private/engine_helpers.bzl".format(archive = cpp_client_wrapper_artifact_path(target_arch), missing = path)
+    return None
