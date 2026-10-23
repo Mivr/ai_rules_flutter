@@ -400,6 +400,44 @@ def _check_pub_flutter_floor(lock_content, toolchain_info, pub_tag):
             version = flutter_version,
         ))
 
+def foreign_lock_path_error(hub_name, package_name, lock_label):
+    """Refuse a `relative: true` path dependency under a non-root lock.
+
+    Args:
+        hub_name: The flutter.pub hub name, for the refusal message.
+        package_name: The path dependency's name, for the refusal message.
+        lock_label: The lock file label. Under Bazel's module extension
+            semantics a path dependency is relative to the dependent
+            package, which lives in the module that owns the lock. A label
+            attribute on a module extension tag resolves in the defining
+            module, and `ctx.workspace_root` in the spoke is always the
+            root module — so a lock owned by a non-root module has no
+            repository-local root the spoke could resolve against.
+            Resolving the path in the consumer workspace would link the
+            wrong directory without a sound repository to anchor it.
+
+    Returns:
+        `None` for a root-module lock (empty `workspace_name`): entry
+        paths resolve against the consumer workspace, and the spoke
+        re-validates the result. Otherwise a human-readable refusal naming
+        the hub, the package, and the owning module; the caller `fail()`s
+        with it. Returning the message instead of failing keeps the rule
+        testable: `unittest` cannot assert on `fail()`.
+    """
+    if not lock_label.workspace_name:
+        return None
+    return (
+        "flutter.pub hub \"{hub}\": path dependency \"{pkg}\" is locked by " +
+        "module \"{owner}\", not the root module. `relative: true` paths " +
+        "resolve in the lock-owning module, which the spoke cannot reach " +
+        "from the consumer workspace. Declare the `path:` dependency in " +
+        "the root module's own lock instead."
+    ).format(
+        hub = hub_name,
+        pkg = package_name,
+        owner = lock_label.workspace_name,
+    )
+
 def workspace_relative_lock_path(hub_name, package_name, lock_label, entry_path):
     """Join a `relative: true` lock path onto the lock file's directory.
 
@@ -462,6 +500,9 @@ def _classify_lock_packages(hub_name, lock_label, lock_pkgs):
                     hub = hub_name,
                     pkg = name,
                 ))
+            refusal = foreign_lock_path_error(hub_name, name, lock_label)
+            if refusal:
+                fail(refusal)
             path_pkgs[name] = struct(
                 path = workspace_relative_lock_path(hub_name, name, lock_label, entry_path),
                 version = info.get("version", ""),

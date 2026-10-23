@@ -213,6 +213,12 @@ Plugins need no special treatment. A pub package that is a Flutter plugin arrive
 
 Permissions a plugin declares in its own manifest, such as `record_android`'s `RECORD_AUDIO`, reach the app's manifest as they do under Gradle. You don't need `--merge_android_manifest_permissions`.
 
+### Path dependencies
+
+A `path:` entry with `relative: true` in the lock is resolved against the lock file's own directory and linked into a `flutter_pub_path_package` spoke as a tree of symlinks, so the workspace never copies the package. The spoke watches the whole linked tree — every file and directory beneath the package root — so adding, changing, or removing any file refetches the spoke; without the watch, files added inside nested asset directories would stay invisible until something else retriggered the fetch. A path that escapes the workspace, or resolves to the workspace root itself, fails the extension evaluation rather than symlinking outside the workspace.
+
+The lock must belong to the root module. A `relative: true` path resolves in the lock-owning module, and module-extension label attributes already resolve in the defining module while the spoke's `workspace_root` is always the root module, so a lock owned by a non-root module has no repository-local root to resolve against; resolving it in the consumer workspace would silently link the wrong directory. A path dependency locked by another module therefore fails the extension evaluation, naming the hub, the package, and the owning module — declare the `path:` dependency in the root module's own lock instead.
+
 ### Platform- and flavor-conditional assets
 
 A pub package's `flutter.assets` entries may carry `platforms` and `flavors` lists, and the bundle keeps exactly what `flutter_tools` keeps (verified against Flutter 3.47.7: `asset.dart` `matchesFlavor` at line 1532 runs before `matchesPlatform` at line 1544 in `ManifestAssetBundle`, lines 1119–1128; `TargetPlatform.osName` in `build_info.dart`, line 701). Flavor is checked first: a flavor-restricted entry bundles only when a flavor is selected, and rules_flutter selects none yet, so flavor-restricted entries bundle nowhere — on every platform, `tester` included. Then platform: an empty list or the `tester` platform keeps the asset, anything else must name the target platform. So an Android build bundles `android`-listed entries but not `web`-listed ones, while a widget test bundles every platform's entries (but still no flavor-restricted ones).

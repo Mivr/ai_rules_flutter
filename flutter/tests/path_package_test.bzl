@@ -13,7 +13,7 @@ place. Two hermeticity properties pin the wiring:
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
-load("//flutter:extensions.bzl", "workspace_relative_lock_path")
+load("//flutter:extensions.bzl", "foreign_lock_path_error", "workspace_relative_lock_path")
 load(
     "//flutter/private:flutter_pub_package.bzl",
     "link_path_package",
@@ -158,6 +158,41 @@ link_watches_the_whole_tree_test = unittest.make(_link_watches_the_whole_tree_te
 lock_path_joins_the_lock_dir_test = unittest.make(_lock_path_joins_the_lock_dir_test_impl)
 lock_path_stays_inside_the_workspace_test = unittest.make(_lock_path_stays_inside_the_workspace_test_impl)
 
+def _root_lock_needs_no_refusal_test_impl(ctx):
+    """A main-repo lock (empty `workspace_name`) resolves path deps freely."""
+    env = unittest.begin(ctx)
+    asserts.equals(
+        env,
+        None,
+        foreign_lock_path_error(
+            "deps",
+            "platform_assets",
+            struct(workspace_name = "", package = "e2e/hello_world"),
+        ),
+    )
+    return unittest.end(env)
+
+def _foreign_lock_path_dep_is_refused_test_impl(ctx):
+    """A non-root lock's path dep is refused naming hub, package, and lock.
+
+    Resolving it against the consumer workspace would link the wrong
+    directory, silently. The message must carry everything the fix needs:
+    declare the path dep in the root module's own lock instead.
+    """
+    env = unittest.begin(ctx)
+    message = foreign_lock_path_error(
+        "deps",
+        "platform_assets",
+        struct(workspace_name = "some_dep", package = ""),
+    )
+    asserts.true(env, message != None, "a foreign lock must be refused")
+    asserts.true(env, "deps" in message, "refusal must name the hub")
+    asserts.true(env, "platform_assets" in message, "refusal must name the package")
+    return unittest.end(env)
+
+root_lock_needs_no_refusal_test = unittest.make(_root_lock_needs_no_refusal_test_impl)
+foreign_lock_path_dep_is_refused_test = unittest.make(_foreign_lock_path_dep_is_refused_test_impl)
+
 def path_package_test_suite(name):
     """Declares the path-package spoke hermeticity unit tests.
 
@@ -169,4 +204,6 @@ def path_package_test_suite(name):
         link_watches_the_whole_tree_test,
         lock_path_joins_the_lock_dir_test,
         lock_path_stays_inside_the_workspace_test,
+        root_lock_needs_no_refusal_test,
+        foreign_lock_path_dep_is_refused_test,
     )
