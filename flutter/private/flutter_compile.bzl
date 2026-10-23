@@ -161,31 +161,65 @@ def _apply_incr_worker(ctx, run_kwargs, args, manifest, direct_inputs, dartaotru
         "requires-worker-protocol": "json",
     }
 
-def _run_kernel_action(ctx, args, manifest, direct_inputs, outputs, env, dartaotruntime, kernel_filter_tool, frontend_server, resource_set, incr_worker):
+def _kernel_action_env(output, dartaotruntime):
+    """The sandboxed environment for the `FlutterKernelCompile` action.
+
+    Suppresses Dart/Flutter analytics (avoids writes to `$HOME/.dart` in the
+    sandbox) and provides a writable `HOME` scoped to the action's output
+    directory.
+    """
+    env = {"CI": "true", "FLUTTER_SUPPRESS_ANALYTICS": "true"}
+    if dartaotruntime.basename.endswith(".exe"):
+        env["USERPROFILE"] = output.dirname
+        env["LOCALAPPDATA"] = output.dirname
+    else:
+        env["HOME"] = output.dirname
+    return env
+
+def _default_entrypoint_uri(entrypoint_uri, main):
+    """The stable app-scheme URI frontend_server compiles as the root library.
+
+    The default is the stable app-scheme URI, not `main`'s exec path:
+    compiling the exec path keys the root library by a sandbox-specific
+    `file://` URI, which poisons the whole dill with absolute host paths.
+    """
+    if entrypoint_uri == None:
+        return app_scheme_location(main).uri
+    return entrypoint_uri
+
+def _run_kernel_action(ctx, run):
     """Runs the `FlutterKernelCompile` action, through `kernel_filter`.
 
-    `resource_set` stays out of the call unless set, so callers that leave it
-    unset keep byte-identical actions (same argv and action key). With the
-    incremental flag on a debug JIT compile, the action runs through the
-    persistent worker instead.
+    Args:
+        ctx: The rule context.
+        run: struct describing the action: `args` (the compiler argv), `manifest`
+            (the declared-inputs manifest), `direct_inputs` and `outputs` (from
+            `_kernel_action_inputs`), `env` (the sandboxed environment),
+            `dartaotruntime`, `kernel_filter_tool` and `frontend_server` (the
+            executables), `resource_set` (host-resource constraints, or None to
+            keep byte-identical actions) and `incr_worker` (whether to route
+            through the persistent worker instead).
+
+    With the incremental flag on a debug JIT compile, the action runs through
+    the persistent worker instead.
     """
     dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx)
     run_kwargs = dict(
         executable = dart_exe,
-        arguments = [kernel_filter_tool.path, "--declared-inputs", manifest.path, args],
+        arguments = [run.kernel_filter_tool.path, "--declared-inputs", run.manifest.path, run.args],
         inputs = depset(
-            direct = direct_inputs + [dartaotruntime, kernel_filter_tool, manifest],
+            direct = run.direct_inputs + [run.dartaotruntime, run.kernel_filter_tool, run.manifest],
             transitive = [dart_vm_files],
         ),
-        outputs = outputs,
+        outputs = run.outputs,
         mnemonic = "FlutterKernelCompile",
         progress_message = "Compiling Flutter kernel %s" % ctx.label,
-        env = env,
+        env = run.env,
     )
-    if resource_set != None:
-        run_kwargs["resource_set"] = resource_set
-    if incr_worker:
-        _apply_incr_worker(ctx, run_kwargs, args, manifest, direct_inputs, dartaotruntime, frontend_server)
+    if run.resource_set != None:
+        run_kwargs["resource_set"] = run.resource_set
+    if run.incr_worker:
+        _apply_incr_worker(ctx, run_kwargs, run.args, run.manifest, run.direct_inputs, run.dartaotruntime, run.frontend_server)
     ctx.actions.run(**run_kwargs)
 
 # Private tool labels a downstream rule merges into its own `attrs` to call
@@ -321,52 +355,76 @@ def _mount_kernel_sources(ctx, args, compile_sources, output, filesystem_roots, 
     args.add("--filesystem-scheme", APP_SCHEME)
     return struct(stage = stage, mounted_roots = mounted_roots)
 
-def _add_kernel_input_args(args, dart_plugin_registrant_uri, extra_flags, native_assets_manifest, recorded_uses, from_dill, import_dill, entrypoint_uri, main):
-    """Appends the input argv: registrant, caller flags, manifests and entrypoint."""
-    if dart_plugin_registrant_uri:
-        args.add("--source", dart_plugin_registrant_uri)
+def _add_kernel_input_args(args, inputs):
+    """Appends the input argv: registrant, caller flags, manifests and entrypoint.
+
+    Args:
+        args: The compiler argv object to append to.
+        inputs: struct with the compile inputs: `dart_plugin_registrant_uri`,
+            `extra_flags`, `native_assets_manifest`, `recorded_uses`,
+            `from_dill`, `import_dill`, `entrypoint_uri` and `main`.
+    """
+    if inputs.dart_plugin_registrant_uri:
+        args.add("--source", inputs.dart_plugin_registrant_uri)
         args.add("--source", "package:flutter/src/dart_plugin_registrant.dart")
-        args.add("-Dflutter.dart_plugin_registrant=" + dart_plugin_registrant_uri)
+        args.add("-Dflutter.dart_plugin_registrant=" + inputs.dart_plugin_registrant_uri)
 
-    args.add_all(extra_flags)
+    args.add_all(inputs.extra_flags)
 
-    if native_assets_manifest != None:
-        args.add("--native-assets", native_assets_manifest.path)
+    if inputs.native_assets_manifest != None:
+        args.add("--native-assets", inputs.native_assets_manifest.path)
 
-    if recorded_uses != None:
-        args.add("--recorded-uses", recorded_uses)
+    if inputs.recorded_uses != None:
+        args.add("--recorded-uses", inputs.recorded_uses)
 
-    if from_dill != None:
-        args.add("--from-dill", from_dill.path)
+    if inputs.from_dill != None:
+        args.add("--from-dill", inputs.from_dill.path)
 
-    if import_dill != None:
-        args.add("--import-dill=" + import_dill.path)
+    if inputs.import_dill != None:
+        args.add("--import-dill=" + inputs.import_dill.path)
 
-    if entrypoint_uri:
-        args.add(entrypoint_uri)
+    if inputs.entrypoint_uri:
+        args.add(inputs.entrypoint_uri)
     else:
-        args.add(main)
+        args.add(inputs.main)
 
-def _kernel_action_inputs(main, package_config, frontend_server, platform_dill, srcs, stage_files, from_dill, native_assets_manifest, import_dill, output, recorded_uses):
+def _kernel_action_inputs(inputs, mount):
     """Assembles the action's declared inputs and outputs.
+
+    Args:
+        inputs: struct with the compile inputs: `main`, `package_config`,
+            `frontend_server`, `platform_dill`, `srcs`, `from_dill`,
+            `native_assets_manifest`, `import_dill`, `output` and
+            `recorded_uses`.
+        mount: The `_mount_kernel_sources` result carrying the staging root.
 
     Returns `struct(direct_inputs, outputs)`.
     """
-    if from_dill != None:
-        direct_inputs = [main, package_config, frontend_server, platform_dill, from_dill] + stage_files
+    stage_files = mount.stage.files
+    if inputs.from_dill != None:
+        direct_inputs = [inputs.main, inputs.package_config, inputs.frontend_server, inputs.platform_dill, inputs.from_dill] + stage_files
     else:
-        direct_inputs = [main, package_config, frontend_server, platform_dill] + srcs + stage_files
-    if native_assets_manifest != None:
-        direct_inputs.append(native_assets_manifest)
-    if import_dill != None:
-        direct_inputs.append(import_dill)
-    outputs = [output]
-    if recorded_uses != None:
-        outputs.append(recorded_uses)
+        direct_inputs = [inputs.main, inputs.package_config, inputs.frontend_server, inputs.platform_dill] + inputs.srcs + stage_files
+    if inputs.native_assets_manifest != None:
+        direct_inputs.append(inputs.native_assets_manifest)
+    if inputs.import_dill != None:
+        direct_inputs.append(inputs.import_dill)
+    outputs = [inputs.output]
+    if inputs.recorded_uses != None:
+        outputs.append(inputs.recorded_uses)
     return struct(direct_inputs = direct_inputs, outputs = outputs)
 
-def _write_kernel_manifest(ctx, manifest, compile_sources, stage_files, package_config, platform_dill, from_dill, import_dill, native_assets_manifest, mounted_roots, output):
+def _write_kernel_manifest(ctx, manifest, inputs, mount):
     """Writes the declared-inputs manifest `kernel_filter` guards against.
+
+    Args:
+        ctx: The rule context.
+        manifest: The manifest File to write.
+        inputs: struct with the compile inputs: `compile_sources`,
+            `package_config`, `platform_dill`, `from_dill`, `import_dill`,
+            `native_assets_manifest` and `output`.
+        mount: The `_mount_kernel_sources` result carrying the staging root
+            and the mounted filesystem roots.
 
     The declared sources, then the staging root's symlinks to them, then
     every other file the compiler may read (the package config, the platform
@@ -379,24 +437,24 @@ def _write_kernel_manifest(ctx, manifest, compile_sources, stage_files, package_
     Written by path so the tool reads the same files the compiler resolves
     through the staging root.
     """
-    allowed_reads = [package_config, platform_dill]
-    if from_dill != None:
-        allowed_reads.append(from_dill)
-    if import_dill != None:
-        allowed_reads.append(import_dill)
-    if native_assets_manifest != None:
-        allowed_reads.append(native_assets_manifest)
+    allowed_reads = [inputs.package_config, inputs.platform_dill]
+    if inputs.from_dill != None:
+        allowed_reads.append(inputs.from_dill)
+    if inputs.import_dill != None:
+        allowed_reads.append(inputs.import_dill)
+    if inputs.native_assets_manifest != None:
+        allowed_reads.append(inputs.native_assets_manifest)
     ctx.actions.write(
         output = manifest,
         content = "\n".join(
-            [f.path for f in compile_sources if f != None] +
+            [f.path for f in inputs.compile_sources if f != None] +
             ["# staged"] +
-            [f.path for f in stage_files] +
+            [f.path for f in mount.stage.files] +
             ["# allowed-reads"] +
             [f.path for f in allowed_reads] +
             ["# filesystem-roots"] +
-            mounted_roots +
-            ["# output", output.path],
+            mount.mounted_roots +
+            ["# output", inputs.output.path],
         ) + "\n",
     )
 
@@ -518,15 +576,14 @@ def flutter_kernel_compile_action(
     _check_vm_flags(ctx.label, vm_flags)
     _check_extra_flags(ctx.label, extra_flags)
 
-    if entrypoint_uri == None:
-        # The default entrypoint is the stable app-scheme URI, not `main`'s
-        # exec path: compiling the exec path keys the root library by a
-        # sandbox-specific `file://` URI, which poisons the whole dill with
-        # absolute host paths. `main` is always staged (see
-        # `compile_sources` below), so the URI resolves through the staging
-        # root. Callers passing an explicit URI — every stock rule — are
-        # unaffected.
-        entrypoint_uri = app_scheme_location(main).uri
+    # The default entrypoint is the stable app-scheme URI, not `main`'s
+    # exec path: compiling the exec path keys the root library by a
+    # sandbox-specific `file://` URI, which poisons the whole dill with
+    # absolute host paths. `main` is always staged (see
+    # `compile_sources` below), so the URI resolves through the staging
+    # root. Callers passing an explicit URI — every stock rule — are
+    # unaffected.
+    entrypoint_uri = _default_entrypoint_uri(entrypoint_uri, main)
 
     # Opt-in incremental compiles run the debug JIT whole-program compile
     # through the persistent worker. With the flag off every action below is
@@ -554,18 +611,38 @@ def flutter_kernel_compile_action(
 
     compile_sources = [main] if from_dill != None else [main] + srcs
     mount = _mount_kernel_sources(ctx, args, compile_sources, output, filesystem_roots, incr_worker)
-    _add_kernel_input_args(args, dart_plugin_registrant_uri, extra_flags, native_assets_manifest, recorded_uses, from_dill, import_dill, entrypoint_uri, main)
+    inputs = struct(
+        compile_sources = compile_sources,
+        dart_plugin_registrant_uri = dart_plugin_registrant_uri,
+        entrypoint_uri = entrypoint_uri,
+        extra_flags = extra_flags,
+        from_dill = from_dill,
+        frontend_server = frontend_server,
+        import_dill = import_dill,
+        main = main,
+        native_assets_manifest = native_assets_manifest,
+        output = output,
+        package_config = package_config,
+        platform_dill = platform_dill,
+        recorded_uses = recorded_uses,
+        srcs = srcs,
+    )
+    _add_kernel_input_args(args, inputs)
 
-    # Suppress Dart/Flutter analytics (avoids writes to $HOME/.dart/ in sandbox).
-    # Provide a writable HOME scoped to this action's output directory.
-    env = {"CI": "true", "FLUTTER_SUPPRESS_ANALYTICS": "true"}
-    if dartaotruntime.basename.endswith(".exe"):
-        env["USERPROFILE"] = output.dirname
-        env["LOCALAPPDATA"] = output.dirname
-    else:
-        env["HOME"] = output.dirname
+    env = _kernel_action_env(output, dartaotruntime)
 
-    action_io = _kernel_action_inputs(main, package_config, frontend_server, platform_dill, srcs, mount.stage.files, from_dill, native_assets_manifest, import_dill, output, recorded_uses)
-    _write_kernel_manifest(ctx, manifest, compile_sources, mount.stage.files, package_config, platform_dill, from_dill, import_dill, native_assets_manifest, mount.mounted_roots, output)
+    action_io = _kernel_action_inputs(inputs, mount)
+    _write_kernel_manifest(ctx, manifest, inputs, mount)
 
-    _run_kernel_action(ctx, args, manifest, action_io.direct_inputs, action_io.outputs, env, dartaotruntime, kernel_filter_tool, frontend_server, resource_set, incr_worker)
+    _run_kernel_action(ctx, struct(
+        args = args,
+        manifest = manifest,
+        direct_inputs = action_io.direct_inputs,
+        outputs = action_io.outputs,
+        env = env,
+        dartaotruntime = dartaotruntime,
+        kernel_filter_tool = kernel_filter_tool,
+        frontend_server = frontend_server,
+        resource_set = resource_set,
+        incr_worker = incr_worker,
+    ))
