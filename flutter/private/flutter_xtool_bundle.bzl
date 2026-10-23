@@ -124,6 +124,7 @@ _COMMON_BUNDLE_ATTRS = {
     ),
     "_xtool_sdk_status": attr.label(
         default = Label("@flutter_xtool_darwin_sdk//:sdk_status"),
+        doc = "The `@flutter_xtool_darwin_sdk` status target carrying `FlutterXtoolSdkInfo`.",
     ),
     "frameworks": attr.label_list(
         allow_files = True,
@@ -182,9 +183,11 @@ _COMMON_BUNDLE_ATTRS = {
         default = Label("//flutter/private/tools:xtool_pack"),
         executable = True,
         cfg = "exec",
+        doc = "The `xtool_pack` host tool performing bundle assembly.",
     ),
     "_allowlist_function_transition": attr.label(
         default = Label("@bazel_tools//tools/allowlists/function_transition_allowlist"),
+        doc = "Allowlist for the outgoing configuration transition.",
     ),
 }
 
