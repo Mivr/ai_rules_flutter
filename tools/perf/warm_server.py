@@ -172,7 +172,8 @@ def mac_raw_times(pid, _rusage=None):
 
 
 def mac_timebase(_timebase=None):
-    """``(numer, denom)`` converting Mach absolute time to nanoseconds."""
+    """``(numerator, denominator)`` of mach_timebase_info, converting
+    Mach absolute time to nanoseconds."""
     if _timebase is not None:
         if _timebase[1] == 0:
             raise WarmServerError(
@@ -181,24 +182,24 @@ def mac_timebase(_timebase=None):
     import ctypes
 
     class _Info(ctypes.Structure):
-        _fields_ = [("numer", ctypes.c_uint32),
-                    ("denom", ctypes.c_uint32)]
+        _fields_ = [("numerator", ctypes.c_uint32),
+                    ("denominator", ctypes.c_uint32)]
 
     lib = ctypes.CDLL("libSystem.dylib", use_errno=True)
     info = _Info()
     if lib.mach_timebase_info(ctypes.byref(info)) != 0:
         raise WarmServerError("mach_timebase_info failed")
-    if info.denom == 0:
+    if info.denominator == 0:
         raise WarmServerError(
             "mach_timebase_info returned a zero denominator")
-    return (info.numer, info.denom)
+    return (info.numerator, info.denominator)
 
 
 def mac_read(pid, _rusage=None, _timebase=None):
     """``ProcTimes`` of a macOS pid through libproc, in CPU seconds."""
     raw = mac_raw_times(pid, _rusage)
-    numer, denom = mac_timebase(_timebase)
-    scale = numer / denom / 1e9
+    numerator, denominator = mac_timebase(_timebase)
+    scale = numerator / denominator / 1e9
     return ProcTimes(raw[0] * scale, raw[1] * scale, raw[2] * scale,
                      raw[3] * scale, raw[4])
 
