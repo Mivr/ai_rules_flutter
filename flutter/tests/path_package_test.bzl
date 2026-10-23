@@ -13,11 +13,11 @@ place. Two hermeticity properties pin the wiring:
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
-load("//flutter/private:flutter_pub_path.bzl", "foreign_lock_path_error", "workspace_relative_lock_path")
 load(
     "//flutter/private:flutter_pub_package.bzl",
     "link_path_package",
 )
+load("//flutter/private:flutter_pub_path.bzl", "foreign_lock_path_error", "workspace_relative_lock_path")
 
 def _tree_node(tree, rel):
     """The node at `rel` ("a/b") in a nested-dict tree, files are None."""
@@ -41,7 +41,7 @@ def _make_mock_link_ctx(tree, path_value = "platform_assets", package_name = "pl
 
     Returns:
         struct(ctx, watched, linked): the fake ctx, the watched path
-        strings, and the symlinked link names.
+        strings, and the symlinked (link name, source path) pairs.
     """
     watched = []
     linked = []
@@ -73,7 +73,7 @@ def _make_mock_link_ctx(tree, path_value = "platform_assets", package_name = "pl
         watched.append(path_obj.path)
 
     def _symlink(target, link_name):
-        linked.append(link_name)
+        linked.append(struct(name = link_name, target = target.path))
 
     return struct(
         ctx = struct(
@@ -121,7 +121,13 @@ def _link_watches_the_whole_tree_test_impl(ctx):
     mock = _make_mock_link_ctx({"platform_assets": _LINK_CONTENTS})
     link_path_package(mock.ctx)
     asserts.equals(env, sorted(_LINK_WATCHED), sorted(mock.watched))
-    asserts.equals(env, ["assets", "pubspec.yaml"], sorted(mock.linked))
+    asserts.equals(env, ["assets", "pubspec.yaml"], sorted([link.name for link in mock.linked]))
+    for link in mock.linked:
+        asserts.true(
+            env,
+            link.target.startswith("/workspace/platform_assets/"),
+            "link {} must point into the package, got {}".format(link.name, link.target),
+        )
     return unittest.end(env)
 
 def _lock_path_joins_the_lock_dir_test_impl(ctx):
