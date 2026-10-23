@@ -106,6 +106,7 @@ flutter_windows_engine_rule = rule(
     attrs = {
         "_cc_toolchain": attr.label(
             default = "@bazel_tools//tools/cpp:current_cc_toolchain",
+            doc = "C++ toolchain providing the CcToolchainInfo for the engine linking and compilation contexts.",
         ),
     },
     fragments = ["cpp"],
