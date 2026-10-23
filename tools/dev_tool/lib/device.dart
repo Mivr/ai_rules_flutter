@@ -70,6 +70,37 @@ export 'host_tools.dart' show HostTool, MissingHostToolException;
 
 final _logger = Logger('dev_tool.device');
 
+/// The inputs [Device.createCompilerConfig] varies by platform.
+///
+/// One object for the values the base implementation threads one argument at
+/// a time: the web toolchain, the filesystem roots and scheme, and the Dart
+/// defines, registrant URI and experiments the compiler is started with.
+typedef CompilerConfigInputs = ({
+  WebToolchainPaths? webToolchain,
+  List<String> fileSystemRoots,
+  String fileSystemScheme,
+  List<String> dartDefines,
+  String dartPluginRegistrantUri,
+  List<String> enableExperiments,
+});
+
+/// How long [ChromeSession.launch] waits for the browser to come up.
+///
+/// One object for the three waits a launch tunes in tests: the debugging-port
+/// announcement, the app page appearing, and the poll interval between looks.
+typedef ChromeLaunchWaits = ({
+  Duration portTimeout,
+  Duration pageTimeout,
+  Duration pollInterval,
+});
+
+/// The browser page [applyViewportOverCdp] drives, by CDP port and app URL.
+///
+/// One object for the two values every viewport call threads together: the
+/// debugging port discovered from Chrome's stderr, and the localhost URL of
+/// the launched tab.
+typedef CdpPageTarget = ({int cdpPort, String appUrl});
+
 /// Report a process the OS would not let us kill.
 ///
 /// Every `stop` implementation kills the process it launched; a refused kill
@@ -419,20 +450,15 @@ abstract class Device {
   ///
   /// Returns null if this device does not support hot reload.
   CompilerConfig? createCompilerConfig(
-    ToolchainPaths toolchain, {
-    WebToolchainPaths? webToolchain,
-    List<String> fileSystemRoots = const [],
-    String fileSystemScheme = '',
-    List<String> dartDefines = const [],
-    String dartPluginRegistrantUri = '',
-    List<String> enableExperiments = const [],
-  }) => NativeCompilerConfig(
+    ToolchainPaths toolchain, [
+    CompilerConfigInputs? inputs,
+  ]) => NativeCompilerConfig(
     patchedSdkRoot: toolchain.patchedSdkRoot,
-    fileSystemRoots: fileSystemRoots,
-    fileSystemScheme: fileSystemScheme,
-    dartDefines: dartDefines,
-    dartPluginRegistrantUri: dartPluginRegistrantUri,
-    enableExperiments: enableExperiments,
+    fileSystemRoots: inputs?.fileSystemRoots ?? const [],
+    fileSystemScheme: inputs?.fileSystemScheme ?? '',
+    dartDefines: inputs?.dartDefines ?? const [],
+    dartPluginRegistrantUri: inputs?.dartPluginRegistrantUri ?? '',
+    enableExperiments: inputs?.enableExperiments ?? const [],
   );
 
   /// Create the reload strategy for this platform.
@@ -3811,9 +3837,11 @@ class ChromeSession {
     required ProcessStarter startProcess,
     BrowserLaunchOptions options = const BrowserLaunchOptions(),
     String? chromePath,
-    Duration portTimeout = const Duration(seconds: 60),
-    Duration pageTimeout = const Duration(seconds: 15),
-    Duration pollInterval = const Duration(milliseconds: 50),
+    ChromeLaunchWaits waits = const (
+      portTimeout: Duration(seconds: 60),
+      pageTimeout: Duration(seconds: 15),
+      pollInterval: Duration(milliseconds: 50),
+    ),
   }) async {
     final exe = chromePath ?? findChrome();
     if (exe == null) {
@@ -3849,7 +3877,7 @@ class ChromeSession {
     try {
       final cdpPort = await _discoverCdpPort(
         diagnostics,
-        timeout: portTimeout,
+        timeout: waits.portTimeout,
         requestedPort: options.debugPort,
       );
       _logger.info({
@@ -3878,8 +3906,8 @@ class ChromeSession {
       final page = await resolveCdpPageTarget(
         cdpPort,
         appUrl: url,
-        timeout: pageTimeout,
-        pollInterval: pollInterval,
+        timeout: waits.pageTimeout,
+        pollInterval: waits.pollInterval,
       );
       final session = ChromeSession._(
         process: chrome,
@@ -3945,8 +3973,7 @@ class ChromeSession {
   /// measurement quietly describing the wrong viewport.
   Future<void> applyViewport(WebViewport viewport) async {
     viewportHold = await applyViewportOverCdp(
-      cdpPort: cdpPort,
-      appUrl: appUrl,
+      page: (cdpPort: cdpPort, appUrl: appUrl),
       viewport: viewport,
       asked: '--web-viewport',
       hold: viewportHold,
@@ -4046,23 +4073,19 @@ class WebDevice extends Device {
 
   @override
   CompilerConfig? createCompilerConfig(
-    ToolchainPaths toolchain, {
-    WebToolchainPaths? webToolchain,
-    List<String> fileSystemRoots = const [],
-    String fileSystemScheme = '',
-    List<String> dartDefines = const [],
-    String dartPluginRegistrantUri = '',
-    List<String> enableExperiments = const [],
-  }) {
+    ToolchainPaths toolchain, [
+    CompilerConfigInputs? inputs,
+  ]) {
     // Web builds its own filesystem roots (synthetic entrypoint dir + workspace)
     // in run_command; the native roots/scheme args are not used here. The
     // registrant URI is ignored too — the web synthetic main calls
     // registerPlugins() directly and re-runs on page-reload restart.
+    final webToolchain = inputs?.webToolchain;
     if (webToolchain == null) return null;
     return WebCompilerConfig(
       webToolchain: webToolchain,
-      dartDefines: dartDefines,
-      enableExperiments: enableExperiments,
+      dartDefines: inputs?.dartDefines ?? const [],
+      enableExperiments: inputs?.enableExperiments ?? const [],
     );
   }
 
@@ -4308,8 +4331,7 @@ class WebDevice extends Device {
     }
     _holdViewport(
       await applyViewportOverCdp(
-        cdpPort: port,
-        appUrl: url,
+        page: (cdpPort: port, appUrl: url),
         viewport: viewport,
         asked: 'app.setViewport',
         hold: _viewportHold,
@@ -4481,8 +4503,7 @@ String _secondsText(Duration d) =>
 /// override that did not take leaves every later screenshot and layout
 /// measurement quietly describing the wrong viewport.
 Future<CdpPageConnection> applyViewportOverCdp({
-  required int cdpPort,
-  required String appUrl,
+  required CdpPageTarget page,
   required WebViewport viewport,
   required String asked,
   CdpPageConnection? hold,
@@ -4492,7 +4513,7 @@ Future<CdpPageConnection> applyViewportOverCdp({
   final reuse = hold != null && !hold.isClosed;
   final connection = reuse
       ? hold
-      : await CdpPageConnection.open(cdpPort, appUrl: appUrl);
+      : await CdpPageConnection.open(page.cdpPort, appUrl: page.appUrl);
   try {
     await connection.send('Emulation.setDeviceMetricsOverride', {
       'width': viewport.width,
@@ -4513,12 +4534,17 @@ Future<CdpPageConnection> applyViewportOverCdp({
     Object? height;
     Object? ratio;
     while (true) {
-      final got = await _sendCdpToPage(cdpPort, appUrl, 'Runtime.evaluate', {
-        'expression':
-            '({w: window.innerWidth, h: window.innerHeight, '
-            'r: window.devicePixelRatio})',
-        'returnByValue': true,
-      });
+      final got = await _sendCdpToPage(
+        page.cdpPort,
+        page.appUrl,
+        'Runtime.evaluate',
+        {
+          'expression':
+              '({w: window.innerWidth, h: window.innerHeight, '
+              'r: window.devicePixelRatio})',
+          'returnByValue': true,
+        },
+      );
       final value = got['result']?['result']?['value'];
       width = value is Map ? value['w'] : null;
       height = value is Map ? value['h'] : null;

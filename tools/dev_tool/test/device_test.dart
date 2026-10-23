@@ -731,7 +731,11 @@ void main() {
       final launch = ChromeSession.launch(
         url: appUrl,
         chromePath: '/fake/chrome',
-        pollInterval: const Duration(milliseconds: 10),
+        waits: (
+          portTimeout: const Duration(seconds: 60),
+          pageTimeout: const Duration(seconds: 15),
+          pollInterval: const Duration(milliseconds: 10),
+        ),
         startProcess: (exe, a) async {
           args = a;
           return proc;
@@ -769,8 +773,11 @@ void main() {
         final launch = ChromeSession.launch(
           url: appUrl,
           chromePath: '/fake/chrome',
-          pageTimeout: const Duration(milliseconds: 100),
-          pollInterval: const Duration(milliseconds: 10),
+          waits: (
+            portTimeout: const Duration(seconds: 60),
+            pageTimeout: const Duration(milliseconds: 100),
+            pollInterval: const Duration(milliseconds: 10),
+          ),
           startProcess: (exe, a) async {
             args = a;
             return proc;
@@ -882,7 +889,11 @@ void main() {
         final launch = ChromeSession.launch(
           url: appUrl,
           chromePath: '/fake/chrome',
-          portTimeout: const Duration(milliseconds: 100),
+          waits: (
+            portTimeout: const Duration(milliseconds: 100),
+            pageTimeout: const Duration(seconds: 15),
+            pollInterval: const Duration(milliseconds: 50),
+          ),
           startProcess: (exe, a) async {
             args = a;
             return proc;
@@ -918,7 +929,11 @@ void main() {
         final launch = ChromeSession.launch(
           url: appUrl,
           chromePath: '/fake/chrome',
-          portTimeout: const Duration(milliseconds: 100),
+          waits: (
+            portTimeout: const Duration(milliseconds: 100),
+            pageTimeout: const Duration(seconds: 15),
+            pollInterval: const Duration(milliseconds: 50),
+          ),
           startProcess: (exe, a) async {
             args = a;
             return proc;
@@ -965,7 +980,11 @@ void main() {
       final launch = ChromeSession.launch(
         url: appUrl,
         chromePath: '/fake/chrome',
-        portTimeout: const Duration(milliseconds: 100),
+        waits: (
+          portTimeout: const Duration(milliseconds: 100),
+          pageTimeout: const Duration(seconds: 15),
+          pollInterval: const Duration(milliseconds: 50),
+        ),
         startProcess: (exe, a) async {
           args = a;
           return proc;
