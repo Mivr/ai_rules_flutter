@@ -66,9 +66,14 @@ load(
     "flutter_dart2js_action",
     "flutter_dart2js_cfe_action",
     "flutter_dart2wasm_action",
+    "make_dart2js_cfe_request",
+    "make_dart2js_request",
+    "make_dart2wasm_request",
     "web_build_mode",
+    "web_compile_tool_inputs",
     "web_mode_defines",
     "web_renderer_defines",
+    "web_sdk_files_for_dart2js",
 )
 load("//flutter/private:plugin_registrant.bzl", "generate_dart_plugin_registrant", "make_registrant_content")
 load(
@@ -489,7 +494,26 @@ def _web_write_wrapper(ctx, packages, all_srcs, lib_root, plugins, registrant):
         entrypoint_salt = wrapper_content + "\n" + registrant_key,
     )
 
-def _web_compile_wasm(ctx, dart, flutter_sdk_info, entrypoint, all_srcs, config_file, mode, user_defines, renderer, dart2js_web_sdk_files, web_compile_inputs, entrypoint_salt):
+def _wasm_options(ctx):
+    """The dart2wasm tuning this target asked for, as a `wasm_options` struct."""
+    return struct(
+        optimization_level = ctx.attr.optimization_level_wasm,
+        minify = ctx.attr.minify_wasm,
+        strip_wasm = ctx.attr.strip_wasm,
+    )
+
+def _js_options(ctx):
+    """The dart2js tuning this target asked for, as a `js_options` struct."""
+    return struct(
+        optimization_level = ctx.attr.optimization_level_js,
+        minify = ctx.attr.minify_js,
+        native_null_assertions = ctx.attr.native_null_assertions,
+        frequency_based_minification = ctx.attr.frequency_based_minification,
+        dump_info = ctx.attr.dump_info,
+        source_maps = ctx.attr.source_maps,
+    )
+
+def _web_compile_wasm(ctx, compile):
     """Compiles the primary dart2wasm output plus the dart2js fallback.
 
     Outputs are declared under a subdirectory with their canonical bundle
@@ -505,57 +529,22 @@ def _web_compile_wasm(ctx, dart, flutter_sdk_info, entrypoint, all_srcs, config_
     output_wasm_map = None
     if ctx.attr.source_maps:
         output_wasm_map = ctx.actions.declare_file(ctx.label.name + "_wasm/main.dart.wasm.map")
-    flutter_dart2wasm_action(
-        ctx = ctx,
-        dart = dart,
-        flutter_sdk_files = flutter_sdk_info.dart2wasm_files,
-        dart2wasm_platform_dill = ctx.file._dart2wasm_platform_dill,
-        main_dart = entrypoint,
-        srcs = all_srcs,
-        package_config = config_file,
-        output_wasm = output_wasm,
-        output_mjs = output_mjs,
-        mode = mode,
-        output_source_map = output_wasm_map,
-        optimization_level = ctx.attr.optimization_level_wasm,
-        strip_wasm = ctx.attr.strip_wasm,
-        minify = ctx.attr.minify_wasm,
-        enable_experiments = ctx.attr.enable_experiments,
-        defines = user_defines,
-        renderer = renderer,
-        web_compile_tool = ctx.executable._web_template_tool,
-        web_guard_tool = ctx.executable._web_guard_tool,
-        web_compile_inputs = web_compile_inputs,
-        stage_salt = entrypoint_salt,
-    )
+    flutter_dart2wasm_action(ctx, make_dart2wasm_request(
+        compile,
+        _wasm_options(ctx),
+        output_wasm,
+        output_mjs,
+        output_wasm_map,
+    ))
 
     # Fallback: dart2js (always canvaskit renderer) — tree artifact for deferred loading
     output_js_fallback_dir = ctx.actions.declare_directory(ctx.label.name + "_dart2js_fallback")
-    flutter_dart2js_action(
-        ctx = ctx,
-        dart = dart,
-        flutter_sdk_files = flutter_sdk_info.dart2js_files,
-        web_sdk_files = dart2js_web_sdk_files,
-        dart2js_platform_dill = ctx.file._dart2js_platform_dill,
-        main_dart = entrypoint,
-        srcs = all_srcs,
-        package_config = config_file,
-        output_dir = output_js_fallback_dir,
-        mode = mode,
-        optimization_level = ctx.attr.optimization_level_js,
-        minify = ctx.attr.minify_js,
-        native_null_assertions = ctx.attr.native_null_assertions,
-        frequency_based_minification = ctx.attr.frequency_based_minification,
-        enable_experiments = ctx.attr.enable_experiments,
-        dump_info = ctx.attr.dump_info,
-        source_maps = ctx.attr.source_maps,
-        defines = user_defines,
-        renderer = "canvaskit",
-        web_compile_tool = ctx.executable._web_template_tool,
-        web_guard_tool = ctx.executable._web_guard_tool,
-        web_compile_inputs = web_compile_inputs,
-        stage_salt = entrypoint_salt,
-    )
+    flutter_dart2js_action(ctx, make_dart2js_request(
+        compile,
+        _js_options(ctx),
+        "canvaskit",
+        output_js_fallback_dir,
+    ))
     compile_outputs = [output_wasm, output_mjs]
     compile_copies = [
         {"src": output_wasm.path, "dst": "main.dart.wasm"},
@@ -564,43 +553,24 @@ def _web_compile_wasm(ctx, dart, flutter_sdk_info, entrypoint, all_srcs, config_
     if output_wasm_map != None:
         compile_outputs.append(output_wasm_map)
         compile_copies.append({"src": output_wasm_map.path, "dst": "main.dart.wasm.map"})
-    return [_wasm_build(renderer), _JS_BUILD], compile_outputs, compile_copies, [output_js_fallback_dir]
+    return [_wasm_build(compile.renderer), _JS_BUILD], compile_outputs, compile_copies, [output_js_fallback_dir]
 
-def _web_compile_js_only(ctx, dart, flutter_sdk_info, entrypoint, all_srcs, config_file, mode, user_defines, renderer, dart2js_web_sdk_files, web_compile_inputs, entrypoint_salt):
+def _web_compile_js_only(ctx, compile):
     """Compiles the JS-only output (tree artifact for deferred loading).
 
     Returns:
       A `(builds, compile_outputs, compile_copies, dart2js_dirs)` tuple.
     """
     output_js_dir = ctx.actions.declare_directory(ctx.label.name + "_dart2js")
-    flutter_dart2js_action(
-        ctx = ctx,
-        dart = dart,
-        flutter_sdk_files = flutter_sdk_info.dart2js_files,
-        web_sdk_files = dart2js_web_sdk_files,
-        dart2js_platform_dill = ctx.file._dart2js_platform_dill,
-        main_dart = entrypoint,
-        srcs = all_srcs,
-        package_config = config_file,
-        output_dir = output_js_dir,
-        mode = mode,
-        optimization_level = ctx.attr.optimization_level_js,
-        minify = ctx.attr.minify_js,
-        native_null_assertions = ctx.attr.native_null_assertions,
-        frequency_based_minification = ctx.attr.frequency_based_minification,
-        enable_experiments = ctx.attr.enable_experiments,
-        dump_info = ctx.attr.dump_info,
-        source_maps = ctx.attr.source_maps,
-        defines = user_defines,
-        renderer = renderer,
-        web_compile_tool = ctx.executable._web_template_tool,
-        web_guard_tool = ctx.executable._web_guard_tool,
-        web_compile_inputs = web_compile_inputs,
-        stage_salt = entrypoint_salt,
-    )
+    flutter_dart2js_action(ctx, make_dart2js_request(
+        compile,
+        _js_options(ctx),
+        compile.renderer,
+        output_js_dir,
+    ))
     return [_JS_BUILD], [], [], [output_js_dir]
 
-def _web_compile_program(ctx, flutter_sdk_info, mode, entrypoint, all_srcs, config_file, user_defines, renderer, entrypoint_salt):
+def _web_compile_program(ctx, compile):
     """Runs Step 2: compile to WASM (with JS fallback) or JS only.
 
     `web_template` is compiled against `@rules_flutter//flutter:toolchain_type`
@@ -608,47 +578,26 @@ def _web_compile_program(ctx, flutter_sdk_info, mode, entrypoint, all_srcs, conf
     subcommands resolve `dartaotruntime`, `dart2wasm_product.snapshot`,
     `wasm-opt`, and `dart2js_aot.dart.snapshot` relative to the running `dart`
     executable's directory (`File(Platform.resolvedExecutable).parent.path`).
-    Pair it with `flutter_sdk_info.dart` and `flutter_sdk_info.dart_vm_files`
+    Pair it with `compile.dart` and `compile.flutter_sdk_info.dart_vm_files`
     so the compile actions always execute within the Flutter engine's bundled
     `dart-sdk/`.
 
     Returns:
-      A struct with `builds`, `compile_outputs`, `compile_copies`,
-      `dart2js_dirs`, `dart`, `dart_vm_files`, `web_compile_inputs` and
-      `dart2js_web_sdk_files`.
+      A struct with `builds`, `compile_outputs`, `compile_copies` and
+      `dart2js_dirs`.
     """
-    web_sdk_file_list = ctx.attr._web_sdk.files.to_list() if ctx.attr._web_sdk else []
-    dart2js_web_sdk_files = [
-        f
-        for f in web_sdk_file_list
-        if f.path.endswith("/libraries.json") or (
-            "/web-sdk/libraries." in f.path and f.path.endswith(".json")
-        )
-    ]
-    dart = flutter_sdk_info.dart
-    dart_vm_files = flutter_sdk_info.dart_vm_files
-    web_compile_inputs = [
-        f
-        for f in dart_vm_files.to_list()
-        if f.basename in ("dartvm", "dartvm.exe")
-    ]
-    compile_args = (ctx, dart, flutter_sdk_info, entrypoint, all_srcs, config_file, mode, user_defines, renderer, dart2js_web_sdk_files, web_compile_inputs, entrypoint_salt)
     if ctx.attr.compiler == "dart2wasm":
-        builds, compile_outputs, compile_copies, dart2js_dirs = _web_compile_wasm(*compile_args)
+        builds, compile_outputs, compile_copies, dart2js_dirs = _web_compile_wasm(ctx, compile)
     else:
-        builds, compile_outputs, compile_copies, dart2js_dirs = _web_compile_js_only(*compile_args)
+        builds, compile_outputs, compile_copies, dart2js_dirs = _web_compile_js_only(ctx, compile)
     return struct(
         builds = builds,
         compile_outputs = compile_outputs,
         compile_copies = compile_copies,
         dart2js_dirs = dart2js_dirs,
-        dart = dart,
-        dart_vm_files = dart_vm_files,
-        web_compile_inputs = web_compile_inputs,
-        dart2js_web_sdk_files = dart2js_web_sdk_files,
     )
 
-def _web_tree_shake_kernels(ctx, flutter_sdk_info, shipped_renderers, mode, user_defines, entrypoint, entrypoint_salt, all_srcs, config_file, dart, dart2js_web_sdk_files, web_compile_inputs):
+def _web_tree_shake_kernels(ctx, compile, shipped_renderers):
     """Compiles one icon tree-shake kernel per shipped renderer.
 
     The icon tree-shake kernel must see the web program the dart2js and
@@ -679,33 +628,20 @@ def _web_tree_shake_kernels(ctx, flutter_sdk_info, shipped_renderers, mode, user
         deps_out = ctx.actions.declare_file(ctx.label.name + dill_suffix + ".deps")
         renderer_defines = web_renderer_defines(r)
 
-        r_defines = list(user_defines) + web_mode_defines(mode) + renderer_defines
-        r_salt = entrypoint_salt + "\n" + "\n".join(r_defines) + "\n" + "\n".join(ctx.attr.enable_experiments)
-        flutter_dart2js_cfe_action(
-            ctx = ctx,
-            dart = dart,
-            flutter_sdk_files = flutter_sdk_info.dart2js_files,
-            web_sdk_files = dart2js_web_sdk_files,
-            dart2js_platform_dill = ctx.file._dart2js_platform_dill,
-            main_dart = entrypoint,
-            srcs = all_srcs,
-            package_config = config_file,
-            output_dill = dill_out,
-            output_deps = deps_out,
-            mode = mode,
-            enable_experiments = ctx.attr.enable_experiments,
-            defines = user_defines,
-            renderer = r,
-            web_compile_tool = ctx.executable._web_template_tool,
-            web_guard_tool = ctx.executable._web_guard_tool,
-            web_compile_inputs = web_compile_inputs,
-            stage_salt = r_salt,
-        )
+        r_defines = list(compile.defines) + web_mode_defines(compile.mode) + renderer_defines
+        r_salt = compile.stage_salt + "\n" + "\n".join(r_defines) + "\n" + "\n".join(ctx.attr.enable_experiments)
+        flutter_dart2js_cfe_action(ctx, make_dart2js_cfe_request(
+            compile,
+            r,
+            r_salt,
+            dill_out,
+            deps_out,
+        ))
         kernel_dills.append(dill_out)
         tree_shake_key_parts.append(r + ":" + r_salt)
     return kernel_dills, tree_shake_key_parts
 
-def _web_bundle_assets(ctx, flutter_sdk_info, program, mode, is_debug, user_defines, renderer, entrypoint, entrypoint_salt, all_srcs, config_file):
+def _web_bundle_assets(ctx, flutter_sdk_info, program, compile):
     """Runs Step 3: shader compilation, icon tree-shake kernels, asset bundle.
 
     Icon tree shaking compiles a kernel .dill for const_finder analysis.
@@ -719,6 +655,7 @@ def _web_bundle_assets(ctx, flutter_sdk_info, program, mode, is_debug, user_defi
 
     fonts, _ = aggregate_pub_contributions(ctx.attr.deps, "web")
     const_finder, font_subset = resolve_font_subset_tools(flutter_sdk_info) if fonts else (None, None)
+    is_debug = compile.mode == "debug"
     if ctx.attr.tree_shake_icons and not is_debug and bool(fonts) and (const_finder == None or font_subset == None):
         fail(
             "%s: icon tree shaking is enabled (`tree_shake_icons = True`) and the target bundles fonts, " % ctx.label +
@@ -736,8 +673,8 @@ def _web_bundle_assets(ctx, flutter_sdk_info, program, mode, is_debug, user_defi
     kernel_dills = []
     tree_shake_key_parts = []
     if ctx.attr.tree_shake_icons and not is_debug and (has_font_tree_shake or has_experiment_kernel):
-        icon_renderers = shipped_renderers if has_font_tree_shake else [renderer]
-        kernel_dills, tree_shake_key_parts = _web_tree_shake_kernels(ctx, flutter_sdk_info, icon_renderers, mode, user_defines, entrypoint, entrypoint_salt, all_srcs, config_file, program.dart, program.dart2js_web_sdk_files, program.web_compile_inputs)
+        icon_renderers = shipped_renderers if has_font_tree_shake else [compile.renderer]
+        kernel_dills, tree_shake_key_parts = _web_tree_shake_kernels(ctx, compile, icon_renderers)
 
     flutter_assets = declare_flutter_assets_dir(ctx)
     flutter_build_assets(
@@ -1028,15 +965,23 @@ def _web_native_module_contracts(ctx):
             native_module_contracts[f] = contracts
     return native_module_contracts
 
-def _web_assemble_copies(ctx, web_dir, program, index_html, bootstrap_js, manifest_json, version_json, service_worker_file, flutter_js_file, renderer_files):
+def _web_assemble_copies(ctx, program, files):
     """Assembles the bundle copy list and engine inputs (Step 7).
 
     Build bundle config: each compile output has an explicit destination
     entry (built where the outputs were declared), never a derived name.
 
+    Args:
+        ctx: Rule context.
+        program: The `_web_compile_program` struct (reads `compile_copies`).
+        files: The bundle content struct (`web_dir`, `index_html`,
+            `bootstrap_js`, `manifest_json`, `version_json`,
+            `service_worker_file`, `flutter_js_file`, `renderer_files`).
+
     Returns:
       A struct with `copies`, `engine_inputs`, `web_asset_files`,
-      `native_module_files` and `native_module_contracts`.
+      `native_module_files`, `native_module_contracts` and the bundle
+      content files the bundler step consumes.
     """
     copies = []
     reserved = {}
@@ -1049,22 +994,22 @@ def _web_assemble_copies(ctx, web_dir, program, index_html, bootstrap_js, manife
     # be named. Reserved without a copy entry.
     reserved["main.dart.js"] = "<dart2js output>"
 
-    _reserve(reserved, copies, index_html.path, "index.html")
-    _reserve(reserved, copies, bootstrap_js.path, "flutter_bootstrap.js")
-    _reserve(reserved, copies, manifest_json.path, "manifest.json")
-    _reserve(reserved, copies, version_json.path, "version.json")
+    _reserve(reserved, copies, files.index_html.path, "index.html")
+    _reserve(reserved, copies, files.bootstrap_js.path, "flutter_bootstrap.js")
+    _reserve(reserved, copies, files.manifest_json.path, "manifest.json")
+    _reserve(reserved, copies, files.version_json.path, "version.json")
 
-    if service_worker_file:
-        _reserve(reserved, copies, service_worker_file.path, "flutter_service_worker.js")
+    if files.service_worker_file:
+        _reserve(reserved, copies, files.service_worker_file.path, "flutter_service_worker.js")
 
     # Copy flutter.js from the web SDK.
     engine_inputs = []
-    if flutter_js_file:
-        _reserve(reserved, copies, flutter_js_file.path, "flutter.js")
-        engine_inputs.append(flutter_js_file)
+    if files.flutter_js_file:
+        _reserve(reserved, copies, files.flutter_js_file.path, "flutter.js")
+        engine_inputs.append(files.flutter_js_file)
 
     # Copy renderer engine files (canvaskit/*.wasm, *.js, etc.).
-    for f in renderer_files:
+    for f in files.renderer_files:
         idx = f.path.find("/web-sdk/canvaskit/")
         if idx >= 0:
             rel = "canvaskit/" + f.path[idx + len("/web-sdk/canvaskit/"):]
@@ -1091,8 +1036,8 @@ def _web_assemble_copies(ctx, web_dir, program, index_html, bootstrap_js, manife
             rel = rel[len(ctx.label.package) + 1:]
 
         # Strip the leading web directory (convention: files live in web/).
-        if rel.startswith(web_dir + "/"):
-            rel = rel[len(web_dir) + 1:]
+        if rel.startswith(files.web_dir + "/"):
+            rel = rel[len(files.web_dir) + 1:]
         _check_web_asset_dst(ctx, reserved, rel, f.short_path)
         copies.append({"src": f.path, "dst": rel})
         web_asset_files.append(f)
@@ -1104,14 +1049,28 @@ def _web_assemble_copies(ctx, web_dir, program, index_html, bootstrap_js, manife
         web_asset_files = web_asset_files,
         native_module_files = native_module_files,
         native_module_contracts = native_module_contracts,
+        index_html = files.index_html,
+        bootstrap_js = files.bootstrap_js,
+        manifest_json = files.manifest_json,
+        version_json = files.version_json,
+        service_worker_file = files.service_worker_file,
     )
 
-def _web_run_bundler(ctx, flutter_sdk_info, program, bundle, flutter_assets, index_html, bootstrap_js, manifest_json, version_json, service_worker_file):
+def _web_run_bundler(ctx, flutter_sdk_info, program, bundle, flutter_assets):
     """Runs the Dart bundler tool over the assembled copy lists.
 
     dart2js outputs are directories (tree artifacts) to support deferred
     loading — dart2js may produce main.dart.js + *.part.js files.
     The whole directory contents are copied into the output root.
+
+    Args:
+        ctx: Rule context.
+        flutter_sdk_info: The Flutter SDK info struct (for the exec `dart`).
+        program: The `_web_compile_program` struct (`compile_outputs`,
+            `dart2js_dirs`).
+        bundle: The `_web_assemble_copies` struct (`copies`, `engine_inputs`,
+            `web_asset_files` and the bundle content files).
+        flutter_assets: The `flutter_assets` directory artifact.
 
     Returns:
       An `(output_dir, dump_info_file, output_groups)` tuple. The dump-info
@@ -1165,9 +1124,9 @@ def _web_run_bundler(ctx, flutter_sdk_info, program, bundle, flutter_assets, ind
     bundle_config_file = ctx.actions.declare_file(ctx.label.name + "_web_bundle_config.json")
     ctx.actions.write(bundle_config_file, json.encode(config))
 
-    all_inputs = program.compile_outputs + program.dart2js_dirs + bundle.engine_inputs + bundle.web_asset_files + [flutter_assets, index_html, bootstrap_js, manifest_json, version_json, bundle_config_file]
-    if service_worker_file:
-        all_inputs.append(service_worker_file)
+    all_inputs = program.compile_outputs + program.dart2js_dirs + bundle.engine_inputs + bundle.web_asset_files + [flutter_assets, bundle.index_html, bundle.bootstrap_js, bundle.manifest_json, bundle.version_json, bundle_config_file]
+    if bundle.service_worker_file:
+        all_inputs.append(bundle.service_worker_file)
 
     exec_dart, dart_vm_files = resolve_exec_dart_vm(ctx, flutter_sdk_info)
     ctx.actions.run(
@@ -1283,7 +1242,7 @@ def _web_stage_ddc_files(ctx, dev_bootstrap_js):
     ddc_files.append(dev_bootstrap_js)
     return ddc_files, staged_agent
 
-def _web_dev_config_content(ctx, flutter_sdk_info, user_defines, lib_root, registrant, staged_agent, dev_bootstrap_js, dev, build_package_config, config_file, native_module_files, native_module_contracts):
+def _web_dev_config_content(ctx, flutter_sdk_info, debug, staged_agent, bundle):
     """Builds the web dev-loop config content.
 
     The synthetic-main entrypoint the dev tool imports: the `main`'s
@@ -1297,8 +1256,19 @@ def _web_dev_config_content(ctx, flutter_sdk_info, user_defines, lib_root, regis
     named some other app's entrypoint whenever the workspace root held
     one, and the dev loop booted that program with nothing reporting a
     mismatch.
+
+    Args:
+        ctx: Rule context.
+        flutter_sdk_info: The Flutter SDK info struct (engine revision,
+            version and host tool paths).
+        debug: The debug struct (`defines`, `lib_root`, `registrant`,
+            `dev_bootstrap_js`, `dev`, `build_package_config`,
+            `config_file`).
+        staged_agent: The staged AI-agent service extensions File.
+        bundle: The `_web_assemble_copies` struct (reads the declared
+            native modules and their binding contracts).
     """
-    app_entrypoint = app_main_location(ctx.attr.package_name, lib_root, ctx.file.main).uri
+    app_entrypoint = app_main_location(ctx.attr.package_name, debug.lib_root, ctx.file.main).uri
 
     # The dart-sdk root is derived from the module loader path:
     # .../dart-sdk/lib/dev_compiler/ddc/ddc_module_loader.js → .../dart-sdk
@@ -1317,7 +1287,7 @@ def _web_dev_config_content(ctx, flutter_sdk_info, user_defines, lib_root, regis
         # dev tool needs the path named explicitly — it stages the file
         # beside that entrypoint and imports it the same way. Empty when
         # the app has no web plugins.
-        "webPluginRegistrant": registrant.path if registrant else "",
+        "webPluginRegistrant": debug.registrant.path if debug.registrant else "",
         # The staged AI-agent service extensions. Same staging contract as
         # `webPluginRegistrant`: the build names the file, the dev tool
         # copies it beside its synthetic entrypoint and imports it. Always
@@ -1328,11 +1298,11 @@ def _web_dev_config_content(ctx, flutter_sdk_info, user_defines, lib_root, regis
         # config the dev loop runs under. Named here rather than found by
         # suffix because it is one file per target, and a run that served
         # another target's would boot the wrong app.
-        "flutterBootstrapJs": dev_bootstrap_js.path,
+        "flutterBootstrapJs": debug.dev_bootstrap_js.path,
         # Merged user defines (attr + extra_dart_defines flag). The dev
         # tool replays these as -D on its resident frontend_server so
         # hot reload/restart recompiles keep the same environment.
-        "dartDefines": user_defines,
+        "dartDefines": debug.defines,
         # Whether the DDC dev loop asserts native nullability, so a run of
         # this app checks what its built bundle checks. The dev loop
         # applies it through the SDK options in its generated bootstrap
@@ -1346,7 +1316,7 @@ def _web_dev_config_content(ctx, flutter_sdk_info, user_defines, lib_root, regis
         "enableExperiments": ctx.attr.enable_experiments,
         # Codegen hot-reload: dev package_config + multi-root layout +
         # generated source paths/URIs (empty for non-codegen apps).
-        "devPackageConfig": dev.dev_package_config.path if dev.dev_package_config else "",
+        "devPackageConfig": debug.dev.dev_package_config.path if debug.dev.dev_package_config else "",
         # The BUILD package_config, for the one consumer that needs file
         # paths rather than live sources: DWDS, which reads a `package:`
         # URI's source off disk to show it in the debugger.
@@ -1359,11 +1329,11 @@ def _web_dev_config_content(ctx, flutter_sdk_info, user_defines, lib_root, regis
         # cannot: DWDS asked through it gets "Cannot extract a file path
         # from a org-dartlang-app URI" and shows no source at all. This
         # one's rootUris are ordinary relative paths, so they resolve.
-        "buildPackageConfig": build_package_config.path if build_package_config else config_file.path,
-        "filesystemRoots": dev.dev_filesystem_roots,
-        "filesystemScheme": dev.dev_filesystem_scheme,
-        "generatedSourcePaths": dev.dev_generated_source_paths,
-        "generatedSourceUris": dev.dev_generated_source_uris,
+        "buildPackageConfig": debug.build_package_config.path if debug.build_package_config else debug.config_file.path,
+        "filesystemRoots": debug.dev.dev_filesystem_roots,
+        "filesystemScheme": debug.dev.dev_filesystem_scheme,
+        "generatedSourcePaths": debug.dev.dev_generated_source_paths,
+        "generatedSourceUris": debug.dev.dev_generated_source_uris,
         # See flutter_application's dev config.
         "shaders": shader_sources(ctx),
         # The native modules the page instantiates, and per module the files
@@ -1376,17 +1346,17 @@ def _web_dev_config_content(ctx, flutter_sdk_info, user_defines, lib_root, regis
         # Declared, never inferred. This directory also holds Flutter's own
         # `main.dart.wasm`, which changes on every Dart edit, so a watch that
         # recognised a module by extension would flag every reload.
-        "nativeLibs": [f.path for f in native_module_files],
+        "nativeLibs": [f.path for f in bundle.native_module_files],
         "nativeLibContracts": {
             f.path: [c.path for c in contracts]
-            for f, contracts in native_module_contracts.items()
+            for f, contracts in bundle.native_module_contracts.items()
         },
         # First-party source packages (app + local deps) the dev tool maps
         # live edits back to via its SourceUriResolver. libRoot is
         # workspace-relative.
         "sourcePackages": [
             {"name": sp[0], "libRoot": sp[1]}
-            for sp in dev.dev_source_packages
+            for sp in debug.dev.dev_source_packages
         ],
         # The sources outside every package the app compiles under the app
         # scheme — a `main` outside its package's `lib/` and the `srcs`
@@ -1394,38 +1364,52 @@ def _web_dev_config_content(ctx, flutter_sdk_info, user_defines, lib_root, regis
         # `main` with a `package:` URI.
         "appSources": app_scheme_sources(
             ctx.attr.package_name,
-            lib_root,
+            debug.lib_root,
             ctx.file.main,
             ctx.files.srcs,
         ),
     })
 
-def _web_debug_result(ctx, flutter_sdk_info, user_defines, lib_root, registrant, dev_bootstrap_js, dev, build_package_config, build_package_dirs, config_file, bundle, output_dir, output_groups, analyzable_info):
-    """Assembles the debug-mode providers: DDC files plus the dev config."""
-    ddc_files, staged_agent = _web_stage_ddc_files(ctx, dev_bootstrap_js)
+def _web_debug_result(ctx, flutter_sdk_info, debug, bundle, output_dir, output_groups, analyzable_info):
+    """Assembles the debug-mode providers: DDC files plus the dev config.
+
+    Args:
+        ctx: Rule context.
+        flutter_sdk_info: The Flutter SDK info struct (engine revision,
+            version and host tool paths).
+        debug: The debug struct (`defines`, `lib_root`, `registrant`,
+            `dev_bootstrap_js`, `dev`, `build_package_config`,
+            `build_package_dirs`, `config_file`).
+        bundle: The `_web_assemble_copies` struct (reads the declared
+            native modules' binding contracts).
+        output_dir: The bundled web directory.
+        output_groups: The bundler's output groups.
+        analyzable_info: The Dart analysis closure.
+    """
+    ddc_files, staged_agent = _web_stage_ddc_files(ctx, debug.dev_bootstrap_js)
 
     # Dev config JSON with engine revision, version, and host tool paths.
-    dev_config_content = _web_dev_config_content(ctx, flutter_sdk_info, user_defines, lib_root, registrant, staged_agent, dev_bootstrap_js, dev, build_package_config, config_file, bundle.native_module_files, bundle.native_module_contracts)
+    dev_config_content = _web_dev_config_content(ctx, flutter_sdk_info, debug, staged_agent, bundle)
     dev_config = ctx.actions.declare_file(ctx.label.name + "_dev_config.json")
     ctx.actions.write(dev_config, dev_config_content)
     ddc_files.append(dev_config)
-    if dev:
-        ddc_files.extend(dev.dev_generated_source_files)
-        if dev.dev_package_config:
-            ddc_files.append(dev.dev_package_config)
-    if build_package_config:
-        ddc_files.append(build_package_config)
-    ddc_files.extend(build_package_dirs)
+    if debug.dev:
+        ddc_files.extend(debug.dev.dev_generated_source_files)
+        if debug.dev.dev_package_config:
+            ddc_files.append(debug.dev.dev_package_config)
+    if debug.build_package_config:
+        ddc_files.append(debug.build_package_config)
+    ddc_files.extend(debug.build_package_dirs)
 
     # Include package_config in debug outputs.
-    ddc_files.append(config_file)
+    ddc_files.append(debug.config_file)
 
     # The web plugin registrant is otherwise only an input to the
     # dart2wasm/dart2js compile actions; declaring it a top-level debug
     # output guarantees it is materialized locally for the dev tool to
     # stage next to its synthetic entrypoint.
-    if registrant:
-        ddc_files.append(registrant)
+    if debug.registrant:
+        ddc_files.append(debug.registrant)
 
     # And the declared modules' binding contracts, which are an input to no
     # action here at all — nothing but the dev tool reads their bytes. A
@@ -1473,10 +1457,28 @@ def _flutter_web_bundle_impl(ctx):
     # Step 2: Compile to WASM (with JS fallback) or JS only.
     # dart2js outputs to a tree artifact (directory) to support deferred loading:
     # dart2js may produce main.dart.js + *.part.js files for deferred imports.
-    program = _web_compile_program(ctx, flutter_sdk_info, mode, wrapped.entrypoint, all_srcs, config_file, user_defines, renderer, wrapped.entrypoint_salt)
+    compile = struct(
+        dart = flutter_sdk_info.dart,
+        flutter_sdk_info = flutter_sdk_info,
+        dart2wasm_platform_dill = ctx.file._dart2wasm_platform_dill,
+        dart2js_platform_dill = ctx.file._dart2js_platform_dill,
+        web_sdk_files = web_sdk_files_for_dart2js(ctx.attr._web_sdk),
+        main_dart = wrapped.entrypoint,
+        srcs = all_srcs,
+        package_config = config_file,
+        mode = mode,
+        defines = user_defines,
+        renderer = renderer,
+        stage_salt = wrapped.entrypoint_salt,
+        web_compile_tool = ctx.executable._web_template_tool,
+        web_compile_inputs = web_compile_tool_inputs(flutter_sdk_info.dart_vm_files),
+        web_guard_tool = ctx.executable._web_guard_tool,
+        enable_experiments = ctx.attr.enable_experiments,
+    )
+    program = _web_compile_program(ctx, compile)
 
     # Step 3: Shader compilation + asset bundle.
-    flutter_assets = _web_bundle_assets(ctx, flutter_sdk_info, program, mode, is_debug, user_defines, renderer, wrapped.entrypoint, wrapped.entrypoint_salt, all_srcs, config_file)
+    flutter_assets = _web_bundle_assets(ctx, flutter_sdk_info, program, compile)
 
     # Step 4: Pick the index.html and flutter_bootstrap.js *templates*.
     templates = _web_write_templates(ctx)
@@ -1492,15 +1494,34 @@ def _flutter_web_bundle_impl(ctx):
     index_html, bootstrap_js, dev_bootstrap_js = _web_substitute_templates(ctx, flutter_sdk_info, is_debug, templates.index_template, templates.bootstrap_template, builtins)
 
     # Step 7: Assemble into output directory using the Dart bundler tool.
-    bundle = _web_assemble_copies(ctx, ctx.attr.web_dir, program, index_html, bootstrap_js, templates.manifest_json, templates.version_json, service_worker_file, flutter_js_file, renderer_files)
-    output_dir, _dump_info_file, output_groups = _web_run_bundler(ctx, flutter_sdk_info, program, bundle, flutter_assets, index_html, bootstrap_js, templates.manifest_json, templates.version_json, service_worker_file)
+    bundle = _web_assemble_copies(ctx, program, struct(
+        web_dir = ctx.attr.web_dir,
+        index_html = index_html,
+        bootstrap_js = bootstrap_js,
+        manifest_json = templates.manifest_json,
+        version_json = templates.version_json,
+        service_worker_file = service_worker_file,
+        flutter_js_file = flutter_js_file,
+        renderer_files = renderer_files,
+    ))
+    output_dir, _dump_info_file, output_groups = _web_run_bundler(ctx, flutter_sdk_info, program, bundle, flutter_assets)
 
     analyzable_info = _web_analyzable_info(ctx, lib_root)
 
     # In debug mode, output DDC dev files alongside the web directory.
     # The dev tool discovers these in the build output list (same pattern as native).
     if is_debug:
-        return _web_debug_result(ctx, flutter_sdk_info, user_defines, lib_root, registrant, dev_bootstrap_js, dev, build_package_config, build_package_dirs, config_file, bundle, output_dir, output_groups, analyzable_info)
+        debug = struct(
+            defines = user_defines,
+            lib_root = lib_root,
+            registrant = registrant,
+            dev_bootstrap_js = dev_bootstrap_js,
+            dev = dev,
+            build_package_config = build_package_config,
+            build_package_dirs = build_package_dirs,
+            config_file = config_file,
+        )
+        return _web_debug_result(ctx, flutter_sdk_info, debug, bundle, output_dir, output_groups, analyzable_info)
 
     return [DefaultInfo(files = depset([output_dir])), output_groups, analyzable_info]
 

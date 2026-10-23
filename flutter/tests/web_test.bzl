@@ -13,6 +13,7 @@ load(
     "default_dart2js_optimization_level",
     "default_dart2wasm_optimization_level",
     "flutter_dart2js_action",
+    "make_dart2js_request",
     "resolve_web_minify",
     "resolve_web_optimization_level",
     "web_mode_defines",
@@ -2234,24 +2235,51 @@ _web_sdk_libraries_json_failure_test = analysistest.make(
     },
 )
 
+def _probe_request(ctx, dart, main_dart, package_config, output_dir):
+    """Builds the release-mode dart2js request the exec probe compiles with.
+
+    Mirrors the rule's request shape over the probe's files: no SDK (an empty
+    file set, as the probe passed before), the web SDK's `libraries*.json`
+    files, and the dart2js platform dill.
+    """
+    return make_dart2js_request(
+        struct(
+            dart = dart,
+            flutter_sdk_info = struct(dart2js_files = depset()),
+            dart2wasm_platform_dill = None,
+            dart2js_platform_dill = ctx.file._dart2js_platform_dill,
+            web_sdk_files = [ctx.file._default_libraries_json] + ctx.files._libraries_json,
+            main_dart = main_dart,
+            srcs = [main_dart],
+            package_config = package_config,
+            mode = "release",
+            defines = [],
+            renderer = "canvaskit",
+            stage_salt = "",
+            web_compile_tool = None,
+            web_compile_inputs = [],
+            web_guard_tool = None,
+            enable_experiments = [],
+        ),
+        struct(
+            optimization_level = "auto",
+            minify = "auto",
+            native_null_assertions = True,
+            frequency_based_minification = True,
+            dump_info = False,
+            source_maps = False,
+        ),
+        "canvaskit",
+        output_dir,
+    )
+
 def _web_sdk_exec_probe_impl(ctx):
     fake_dart = ctx.actions.declare_file(ctx.label.name + "_fake_dart")
     ctx.actions.write(fake_dart, "", is_executable = True)
     pkg_cfg = ctx.actions.declare_file(ctx.label.name + "_package_config.json")
     ctx.actions.write(pkg_cfg, '{"configVersion": 2, "packages": []}\n')
     out_dir = ctx.actions.declare_directory(ctx.label.name + "_dart2js")
-    flutter_dart2js_action(
-        ctx = ctx,
-        dart = fake_dart,
-        flutter_sdk_files = depset(),
-        web_sdk_files = [ctx.file._default_libraries_json] + ctx.files._libraries_json,
-        dart2js_platform_dill = ctx.file._dart2js_platform_dill,
-        main_dart = ctx.file.main,
-        srcs = [ctx.file.main],
-        package_config = pkg_cfg,
-        output_dir = out_dir,
-        mode = "release",
-    )
+    flutter_dart2js_action(ctx, _probe_request(ctx, fake_dart, ctx.file.main, pkg_cfg, out_dir))
     return [DefaultInfo(files = depset(ctx.files._libraries_json + [out_dir]))]
 
 _web_sdk_exec_probe = rule(
