@@ -239,6 +239,30 @@ int? _closeTagList(String source, int j) {
   return (end: j, value: literal.value);
 }
 
+/// Past the `//` or `/*` comment, or the string literal, opening at [j] — or
+/// null when neither opens there.
+///
+/// The scanners below all step over comments and strings the same way; the
+/// helper keeps the one copy. An opener whose literal never closes steps past
+/// the opener: the file does not compile, so no tags are ever read from it.
+int? _skipTriviaOrString(String source, int j) {
+  final c = source[j];
+  if (c == '/' &&
+      j + 1 < source.length &&
+      (source[j + 1] == '/' || source[j + 1] == '*')) {
+    return _skipTrivia(source, j);
+  }
+  if (c == "'" ||
+      c == '"' ||
+      (c == 'r' &&
+          j + 1 < source.length &&
+          (source[j + 1] == "'" || source[j + 1] == '"'))) {
+    final literal = _parseString(source, j);
+    return literal == null ? j + 1 : literal.end;
+  }
+  return null;
+}
+
 /// Past the `<...>` type arguments opening at [i]. Type arguments hold no
 /// directive punctuation, so meeting any — or the end of the file — throws
 /// rather than wandering the rest of the file.
@@ -254,17 +278,6 @@ int _skipTypeArguments(String source, int i) {
       depth--;
       j++;
       if (depth == 0) return j;
-    } else if (c == '/' &&
-        j + 1 < source.length &&
-        (source[j + 1] == '/' || source[j + 1] == '*')) {
-      j = _skipTrivia(source, j);
-    } else if (c == "'" ||
-        c == '"' ||
-        (c == 'r' &&
-            j + 1 < source.length &&
-            (source[j + 1] == "'" || source[j + 1] == '"'))) {
-      final literal = _parseString(source, j);
-      j = literal == null ? j + 1 : literal.end;
     } else if (c == ';' ||
         c == '(' ||
         c == ')' ||
@@ -278,7 +291,7 @@ int _skipTypeArguments(String source, int i) {
         'Unterminated type arguments in @Tags.',
       );
     } else {
-      j++;
+      j = _skipTriviaOrString(source, j) ?? (j + 1);
     }
   }
   throw TagsParseException(
@@ -490,19 +503,8 @@ int _skipBalanced(String source, int i, String open, String close) {
       depth--;
       j++;
       if (depth == 0) return j;
-    } else if (c == '/' &&
-        j + 1 < source.length &&
-        (source[j + 1] == '/' || source[j + 1] == '*')) {
-      j = _skipTrivia(source, j);
-    } else if (c == "'" ||
-        c == '"' ||
-        (c == 'r' &&
-            j + 1 < source.length &&
-            (source[j + 1] == "'" || source[j + 1] == '"'))) {
-      final literal = _parseString(source, j);
-      j = literal == null ? j + 1 : literal.end;
     } else {
-      j++;
+      j = _skipTriviaOrString(source, j) ?? (j + 1);
     }
   }
   return j;
@@ -523,19 +525,8 @@ int _skipDirective(String source, int i) {
       j++;
     } else if (c == ';' && depth == 0) {
       return j + 1;
-    } else if (c == '/' &&
-        j + 1 < source.length &&
-        (source[j + 1] == '/' || source[j + 1] == '*')) {
-      j = _skipTrivia(source, j);
-    } else if (c == "'" ||
-        c == '"' ||
-        (c == 'r' &&
-            j + 1 < source.length &&
-            (source[j + 1] == "'" || source[j + 1] == '"'))) {
-      final literal = _parseString(source, j);
-      j = literal == null ? j + 1 : literal.end;
     } else {
-      j++;
+      j = _skipTriviaOrString(source, j) ?? (j + 1);
     }
   }
   return j;

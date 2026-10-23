@@ -199,6 +199,18 @@ void main() {
       );
     });
 
+    test('skips comments and strings inside annotations and directives', () {
+      expect(
+        extractLibraryTags(
+          "@Tags<String /* version */>(['golden'])\n"
+          "@Foo(')')\n"
+          "import /* lib */ 'package:flutter_test/flutter_test.dart';\n"
+          'void main() {}\n',
+        ),
+        {'golden'},
+      );
+    });
+
     test('a declaration before any directive means no directives', () {
       expect(extractLibraryTags('void main() {}\n'), isEmpty);
     });
