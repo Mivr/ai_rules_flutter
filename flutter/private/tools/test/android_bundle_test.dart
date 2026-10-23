@@ -6,13 +6,8 @@ import 'dart:convert';
 import 'package:test/test.dart';
 
 import '../android_bundle.dart';
-import '../xtool_pack.dart'
-    show
-        ZipEntry,
-        crc32,
-        encodeDeterministicZip,
-        readZipEntries,
-        readZipRawEntries;
+import '../zip_reader.dart' show readZipEntries, readZipRawEntries;
+import '../zip_writer.dart' show ZipEntry, crc32, encodeDeterministicZip;
 
 Uint8List _syntheticElf({required int machine, List<int> payload = const []}) {
   final header = Uint8List(20 + payload.length);

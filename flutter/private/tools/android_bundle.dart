@@ -20,7 +20,7 @@ import 'dart:typed_data';
 
 import 'apk_overlay.dart' show runApkOverlay;
 
-import 'xtool_pack.dart' show ZipEntry, encodeDeterministicZip;
+import 'zip_writer.dart' show ZipEntry, encodeDeterministicZip;
 
 /// Minimal valid 22-byte ZIP file (End of Central Directory record with zero
 /// entries), identical to the output of `zip` on an empty archive.

@@ -6,8 +6,8 @@ import 'dart:typed_data';
 import 'package:test/test.dart';
 
 import '../apk_overlay.dart';
-import '../xtool_pack.dart'
-    show ZipEntry, encodeDeterministicZip, readZipRawEntries;
+import '../zip_reader.dart' show readZipRawEntries;
+import '../zip_writer.dart' show ZipEntry, encodeDeterministicZip;
 
 // A 50-byte text whose level-9 sizes straddle the aapt2 tenth line: C zlib
 // reports 46 bytes (46 + 46 ~/ 10 == 50, so the reference deflates it) while

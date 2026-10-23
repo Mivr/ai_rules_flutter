@@ -28,7 +28,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'xtool_pack.dart' show ZipRawEntry, crc32, readZipRawEntries;
+import 'zip_reader.dart' show ZipRawEntry, readZipRawEntries;
+import 'zip_writer.dart' show crc32;
 import 'zlib_raw_match.dart' show zlibRawDeflate9;
 
 /// DOS timestamp used for injected entries: 2010-01-01 00:00:00, matching
