@@ -155,13 +155,29 @@ def _xtool_darwin_cc_toolchain_config_impl(ctx):
 xtool_darwin_cc_toolchain_config = rule(
     implementation = _xtool_darwin_cc_toolchain_config_impl,
     attrs = {
-        "sdk_available": attr.bool(default = True),
-        "target_key": attr.string(mandatory = True),
-        "triple": attr.string(mandatory = True),
-        "target_cpu": attr.string(mandatory = True),
-        "sdk_path": attr.string(default = ""),
+        "sdk_available": attr.bool(
+            default = True,
+            doc = "Whether the Darwin SDK is configured; the config fails at analysis when False.",
+        ),
+        "target_key": attr.string(
+            mandatory = True,
+            doc = "Key selecting this target's toolchain, used in tool paths and the toolchain identifier.",
+        ),
+        "triple": attr.string(
+            mandatory = True,
+            doc = "LLVM target triple passed as `-target` (e.g. `aarch64-apple-ios`).",
+        ),
+        "target_cpu": attr.string(
+            mandatory = True,
+            doc = "Target CPU for the toolchain.",
+        ),
+        "sdk_path": attr.string(
+            default = "",
+            doc = "SDK sysroot path used as `-isysroot`.",
+        ),
     },
     provides = [CcToolchainConfigInfo],
+    doc = "C++ toolchain config for one xtool Darwin target (device, simulator or macOS).",
 )
 
 def _xtool_darwin_sdk_target_impl(ctx):
@@ -172,8 +188,15 @@ def _xtool_darwin_sdk_target_impl(ctx):
 xtool_darwin_sdk_target = rule(
     implementation = _xtool_darwin_sdk_target_impl,
     attrs = {
-        "sdk_available": attr.bool(mandatory = True),
-        "srcs": attr.label_list(allow_files = True, default = []),
+        "sdk_available": attr.bool(
+            mandatory = True,
+            doc = "Whether the SDK is configured; the target fails at analysis when False.",
+        ),
+        "srcs": attr.label_list(
+            allow_files = True,
+            default = [],
+            doc = "SDK files exposed when configured.",
+        ),
     },
     doc = "Exposes files from @flutter_xtool_darwin_sdk or fails at analysis when the SDK is not configured.",
 )
@@ -203,12 +226,26 @@ def _xtool_darwin_sdk_status_impl(ctx):
 xtool_darwin_sdk_status = rule(
     implementation = _xtool_darwin_sdk_status_impl,
     attrs = {
-        "sdk_available": attr.bool(mandatory = True),
-        "sdk_paths": attr.string_dict(default = {}),
-        "swift_bin_dir": attr.string(default = ""),
-        "sdk_files": attr.label_list(allow_files = True, default = []),
+        "sdk_available": attr.bool(
+            mandatory = True,
+            doc = "Whether a `darwin.artifactbundle` was explicitly configured.",
+        ),
+        "sdk_paths": attr.string_dict(
+            default = {},
+            doc = "Mapping from SDK name (iPhoneOS, iPhoneSimulator, MacOSX) to path.",
+        ),
+        "swift_bin_dir": attr.string(
+            default = "",
+            doc = "Relative path to the Swift/Clang toolchain bin directory.",
+        ),
+        "sdk_files": attr.label_list(
+            allow_files = True,
+            default = [],
+            doc = "Files in the SDK repository.",
+        ),
     },
     provides = [FlutterXtoolSdkInfo],
+    doc = "Exposes `FlutterXtoolSdkInfo` metadata for the configured xtool Darwin SDK.",
 )
 
 def validate_darwin_sdk_config(
