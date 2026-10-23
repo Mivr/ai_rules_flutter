@@ -7,7 +7,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'macho_edit.dart' show Segment64Spec;
+import 'macho_parse.dart' show Segment64Spec;
 import 'xtool_bundle.dart' show encodeMachORpathCommand;
 import 'xtool_hash.dart' show sha256Bytes;
 import 'zip_writer.dart' show setUint64LE;

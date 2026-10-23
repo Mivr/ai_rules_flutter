@@ -2,12 +2,12 @@
 ///
 /// Resolves `--framework` inputs (`.framework` directories, `.xcframework`
 /// bundles, Bazel tree-artifact wrappers, and `.framework.zip` archives via
-/// `extractFrameworkZip` from `macho_edit.dart`) and copies resource and
+/// `extractFrameworkZip` from `macho_framework.dart`) and copies resource and
 /// additional-content specs into the assembled bundle.
 
 import 'dart:io';
 
-import 'macho_edit.dart' show extractFrameworkZip;
+import 'macho_framework.dart' show extractFrameworkZip;
 
 // ---------------------------------------------------------------------------
 // Framework resolution & Bundle Assembly

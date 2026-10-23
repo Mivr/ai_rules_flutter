@@ -272,13 +272,11 @@ dart_binary(
         "macho_cli.dart",
         "macho_constants.dart",
         "macho_copy.dart",
-        "macho_edit.dart",
         "macho_fat.dart",
         "macho_framework.dart",
         "macho_parse.dart",
         "macho_patch.dart",
         "macho_stub.dart",
-        "macho_verify.dart",
         "plist_info.dart",
         "plist_parse.dart",
         "sha256.dart",
@@ -387,6 +385,10 @@ _TOOL_SRCS = {
         "zlib_raw_tables.dart",
     ],
     "xtool_pack.dart": [
+        # xtool_pack_test still reaches the macho_edit main itself, so the
+        # test carries it and its verify import beyond the binary's own
+        # sources below.
+        "macho_edit.dart",
         "crc32.dart",
         "xtool_framework.dart",
         "zip_reader.dart",
@@ -396,7 +398,6 @@ _TOOL_SRCS = {
         "macho_cli.dart",
         "macho_constants.dart",
         "macho_copy.dart",
-        "macho_edit.dart",
         "macho_fat.dart",
         "macho_framework.dart",
         "macho_verify.dart",
