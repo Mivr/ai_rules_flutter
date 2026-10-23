@@ -581,32 +581,62 @@ def _ios_dev_infoplists(name, actual_info_plist, internal_tags):
         "//conditions:default": ["__%s_info_plist_dev" % name],
     })
 
-def _ios_emit_rules_apple_bundle(name, display_name, bundle_id, families, minimum_os_version, version, selected_infoplists, actual_launch_storyboard, app_icons, resources, provisioning_profile, entitlements, tags, visibility, kwargs):
+def _ios_build_runner(name, runner):
+    """Aggregates Apple plugins and builds the runner swift_library (rules_apple backend only).
+
+    Args:
+        name: The app name; internal targets derive from it.
+        runner: Struct with `application`, `backend`, `engine_target`,
+            `srcs` (discovered runner Swift sources), `module_name`,
+            `deps` (extra runner deps), `internal_tags`, and
+            `discovered_main_storyboard`.
+    """
+    _flutter_apple_plugins_aggregator(
+        name = "__%s_apple_plugins" % name,
+        application = runner.application,
+        platform = "ios",
+        tags = runner.internal_tags,
+    )
+
+    if runner.backend == "rules_apple":
+        swift_library(
+            name = "__%s_runner" % name,
+            srcs = runner.srcs + ["__%s_registrant" % name],
+            data = runner.discovered_main_storyboard,
+            module_name = runner.module_name,
+            tags = runner.internal_tags,
+            deps = [
+                runner.engine_target,
+                "__%s_apple_plugins" % name,
+            ] + runner.deps,
+        )
+
+def _ios_emit_rules_apple_bundle(name, bundle):
     """Emits the final rules_apple ios_application bundle target."""
     ios_application(
         name = name,
-        bundle_id = bundle_id,
-        bundle_name = display_name,
-        entitlements = entitlements,
-        families = families,
-        minimum_os_version = minimum_os_version,
-        infoplists = selected_infoplists,
-        version = version,
-        launch_storyboard = actual_launch_storyboard,
-        provisioning_profile = provisioning_profile,
-        app_icons = app_icons,
-        resources = resources + ["__%s_privacy_manifests" % name],
+        bundle_id = bundle.bundle_id,
+        bundle_name = bundle.display_name,
+        entitlements = bundle.entitlements,
+        families = bundle.families,
+        minimum_os_version = bundle.minimum_os_version,
+        infoplists = bundle.selected_infoplists,
+        version = bundle.version,
+        launch_storyboard = bundle.actual_launch_storyboard,
+        provisioning_profile = bundle.provisioning_profile,
+        app_icons = bundle.app_icons,
+        resources = bundle.resources + ["__%s_privacy_manifests" % name],
         deps = [
             "__%s_runner" % name,
             "__%s_app_bundle" % name,
             "__%s_native_frameworks" % name,
         ],
-        tags = tags,
-        visibility = visibility,
-        **kwargs
+        tags = bundle.tags,
+        visibility = bundle.visibility,
+        **bundle.kwargs
     )
 
-def _ios_emit_xtool_bundle(name, display_name, bundle_id, families, minimum_os_version, version, invalid_version_error, selected_infoplists, actual_launch_storyboard, app_icons, resources, discovered_main_storyboard, runner_srcs, runner_deps, engine_target, entitlements, provisioning_profile, tags, visibility, kwargs):
+def _ios_emit_xtool_bundle(name, bundle, invalid_version_error, discovered_main_storyboard, runner_srcs, runner_deps, engine_target):
     """Emits the final xtool iOS bundle target, forwarding only its kwargs."""
     valid_xtool_kwargs = (
         "additional_contents",
@@ -628,19 +658,19 @@ def _ios_emit_xtool_bundle(name, display_name, bundle_id, families, minimum_os_v
         "testonly",
         "zsign",
     )
-    forwarded_kwargs = {k: v for k, v in kwargs.items() if k in valid_xtool_kwargs}
-    unsupported_kwargs = [k for k in kwargs if k not in valid_xtool_kwargs]
+    forwarded_kwargs = {k: v for k, v in bundle.kwargs.items() if k in valid_xtool_kwargs}
+    unsupported_kwargs = [k for k in bundle.kwargs if k not in valid_xtool_kwargs]
     _flutter_xtool_ios_bundle(
         name = name,
-        app_name = display_name,
-        bundle_id = bundle_id,
-        families = families,
-        minimum_os_version = minimum_os_version,
-        version = version,
+        app_name = bundle.display_name,
+        bundle_id = bundle.bundle_id,
+        families = bundle.families,
+        minimum_os_version = bundle.minimum_os_version,
+        version = bundle.version,
         invalid_version_error = invalid_version_error,
-        infoplists = selected_infoplists,
-        launch_storyboard = actual_launch_storyboard,
-        app_icons = app_icons if app_icons != None else [],
+        infoplists = bundle.selected_infoplists,
+        launch_storyboard = bundle.actual_launch_storyboard,
+        app_icons = bundle.app_icons if bundle.app_icons != None else [],
         srcs = runner_srcs,
         registrant = ":__%s_registrant" % name,
         plugins = [":__%s_apple_plugins" % name],
@@ -650,11 +680,11 @@ def _ios_emit_xtool_bundle(name, display_name, bundle_id, families, minimum_os_v
             engine_target,
             ":__%s_native_frameworks" % name,
         ],
-        resources = resources + discovered_main_storyboard + ["__%s_privacy_manifests" % name],
-        provisioning_profile = provisioning_profile,
-        entitlements = entitlements if entitlements != False else None,
-        tags = tags,
-        visibility = visibility,
+        resources = bundle.resources + discovered_main_storyboard + ["__%s_privacy_manifests" % name],
+        provisioning_profile = bundle.provisioning_profile,
+        entitlements = bundle.entitlements if bundle.entitlements != False else None,
+        tags = bundle.tags,
+        visibility = bundle.visibility,
         unsupported_kwargs = unsupported_kwargs,
         **forwarded_kwargs
     )
@@ -855,30 +885,8 @@ def flutter_ios_app(
 
     # 7. Discover runner Swift sources and build swift_library.
     runner_srcs = _ios_discover_runner_srcs(srcs)
-
-    # 7a. Aggregate Apple plugin libraries from the application's transitive
-    # FlutterInfo so the runner's swift_library imports + links each pub
-    # plugin's Swift module.
-    _flutter_apple_plugins_aggregator(
-        name = "__%s_apple_plugins" % name,
-        application = application,
-        platform = "ios",
-        tags = internal_tags,
-    )
-
     discovered_main_storyboard = native.glob(["ios/Runner/Base.lproj/Main.storyboard"], allow_empty = True)
-    if backend == "rules_apple":
-        swift_library(
-            name = "__%s_runner" % name,
-            srcs = runner_srcs + ["__%s_registrant" % name],
-            data = discovered_main_storyboard,
-            module_name = module_name,
-            tags = internal_tags,
-            deps = [
-                engine_target,
-                "__%s_apple_plugins" % name,
-            ] + runner_deps,
-        )
+    _ios_build_runner(name, struct(application = application, backend = backend, engine_target = engine_target, srcs = runner_srcs, module_name = module_name, deps = runner_deps, internal_tags = internal_tags, discovered_main_storyboard = discovered_main_storyboard))
 
     # 8. Info.plist — preprocess to resolve Xcode variables that rules_apple
     #    doesn't handle.
@@ -913,10 +921,26 @@ def flutter_ios_app(
     selected_infoplists = _ios_dev_infoplists(name, actual_info_plist, internal_tags)
 
     # 11. Final bundle target — rules_apple (default) or explicit opt-in xtool.
+    bundle = struct(
+        display_name = display_name,
+        bundle_id = bundle_id,
+        families = families,
+        minimum_os_version = minimum_os_version,
+        version = version,
+        selected_infoplists = selected_infoplists,
+        actual_launch_storyboard = actual_launch_storyboard,
+        app_icons = app_icons,
+        resources = resources,
+        entitlements = entitlements,
+        provisioning_profile = provisioning_profile,
+        tags = tags,
+        visibility = visibility,
+        kwargs = kwargs,
+    )
     if backend == "rules_apple":
-        _ios_emit_rules_apple_bundle(name, display_name, bundle_id, families, minimum_os_version, version, selected_infoplists, actual_launch_storyboard, app_icons, resources, provisioning_profile, entitlements, tags, visibility, kwargs)
+        _ios_emit_rules_apple_bundle(name, bundle)
     else:
-        _ios_emit_xtool_bundle(name, display_name, bundle_id, families, minimum_os_version, version, invalid_version_error, selected_infoplists, actual_launch_storyboard, app_icons, resources, discovered_main_storyboard, runner_srcs, runner_deps, engine_target, entitlements, provisioning_profile, tags, visibility, kwargs)
+        _ios_emit_xtool_bundle(name, bundle, invalid_version_error, discovered_main_storyboard, runner_srcs, runner_deps, engine_target)
 
 def flutter_ios_simulator_build(name, targets, **kwargs):
     """Builds iOS apps for the simulator in debug mode, whatever `-c` says.
