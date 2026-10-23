@@ -422,6 +422,23 @@ jobs:
             echo "failing workspaces:$failed"
             exit 1
           fi
+      # Red path for release signing: the wrong-password twin of the
+      # release-signed app must fail in apksigner (not in analysis), proving
+      # the keystore attributes reach the signing action. grep -F pins the
+      # failure to apksigner's wrong-password message rather than any other
+      # error; a passing build fails the job.
+      - name: Release signing red path (wrong keystore password)
+        run: |
+          cd e2e/hello_world
+          set +e
+          bazel build :hello_world_android_release_wrong_password > /tmp/wrong-pass.log 2>&1
+          rc=$?
+          set -e
+          if [ $rc -eq 0 ]; then
+            echo "expected the wrong-password build to fail"
+            exit 1
+          fi
+          grep -F 'keystore password was incorrect' /tmp/wrong-pass.log
       - name: Report cache sizes
         if: always()
         run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true

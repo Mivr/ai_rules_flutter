@@ -30,6 +30,7 @@ an `android_binary` that packaged the payload itself (entry order differs:
 payload entries come last).
 """
 
+load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_android//providers:providers.bzl", "AndroidFeatureFlagSet", "AndroidInstrumentationInfo", "ApkInfo", "StarlarkApkInfo")
 load("@rules_java//java/common:java_info.bzl", "JavaInfo")
 load("//flutter/private:common.bzl", "resolve_exec_dart_vm")
@@ -116,12 +117,72 @@ def _overlay_signing_keys(ctx):
         signing_keys.append(ctx.file.debug_key)
     return signing_keys
 
-def _run_apksign(ctx, sdk, aligned, signing_keys, lineage, rotation_min_sdk):
+def _resolve_release_signing(ctx):
+    """Resolves the release keystore, or None to keep debug signing.
+
+    An explicit attribute always wins over its `//flutter:android_release_*`
+    flag, so a target that names its keystore signs with it while a target
+    that names none takes the secret from the command line (or the debug key
+    when no flag is set either). The label flags default to empty filegroups,
+    which read back as "unset". A resolved keystore without its password
+    file or alias fails, naming the missing attribute.
+    """
+    keystore = ctx.file.keystore
+    if keystore == None:
+        flag_keystores = ctx.files._release_keystore
+        keystore = flag_keystores[0] if flag_keystores else None
+    if keystore == None:
+        return None
+    ks_pass = ctx.file.keystore_password_file
+    if ks_pass == None:
+        flag_passes = ctx.files._release_keystore_password_file
+        ks_pass = flag_passes[0] if flag_passes else None
+    if ks_pass == None:
+        fail(
+            "flutter_android_apk_overlay %s: `keystore` is set but " % ctx.label +
+            "`keystore_password_file` is not. Set both to sign with a release keystore.",
+        )
+    alias = ctx.attr.key_alias or ctx.attr._release_key_alias[BuildSettingInfo].value
+    if not alias:
+        fail(
+            "flutter_android_apk_overlay %s: `keystore` is set but " % ctx.label +
+            "`key_alias` is not. Set both to sign with a release keystore.",
+        )
+
+    # No `key_password_file` means no `--key-pass`: apksigner then unlocks
+    # the key with the keystore password. Repeating the keystore password
+    # file here would NOT do the same — apksigner consumes one line per
+    # password read, so a second read from the same single-line file fails
+    # with "end of file reached".
+    return struct(
+        keystore = keystore,
+        ks_pass = ks_pass,
+        alias = alias,
+        key_pass = ctx.file.key_password_file,
+    )
+
+def _release_sign_args(sign_args, release):
+    """Adds the caller's keystore to the apksigner arguments.
+
+    Both passwords travel as `file:` references to password-file inputs, so
+    their text never appears on the command line. Without a key password
+    file `--key-pass` is omitted and apksigner unlocks the key with the
+    keystore password.
+    """
+    sign_args.add("--ks", release.keystore)
+    sign_args.add("--ks-key-alias", release.alias)
+    sign_args.add("--ks-pass", "file:" + release.ks_pass.path)
+    if release.key_pass:
+        sign_args.add("--key-pass", "file:" + release.key_pass.path)
+
+def _run_apksign(ctx, sdk, aligned, signing_keys, lineage, rotation_min_sdk, release):
     """Signs the aligned APK with the keystore and scheme android_binary would use.
 
     `signing` mirrors `@rules_android//flags:apk_signing_method` (wired by
     the macro via select); v4 (fs-verity) stays with android_binary — route
-    it there.
+    it there. With `release` set, apksigner signs with the caller's keystore
+    instead of the debug keys; without it every argument below is exactly the
+    debug invocation.
     """
     signing = ctx.attr.signing
     if signing == "v4":
@@ -139,11 +200,14 @@ def _run_apksign(ctx, sdk, aligned, signing_keys, lineage, rotation_min_sdk):
     sign_args.add("--alignment-preserved", "true")
     if lineage:
         sign_args.add("--lineage", lineage)
-    for i, key in enumerate(signing_keys):
-        if i > 0:
-            sign_args.add("--next-signer")
-        sign_args.add("--ks", key)
-        sign_args.add("--ks-pass", "pass:android")
+    if release:
+        _release_sign_args(sign_args, release)
+    else:
+        for i, key in enumerate(signing_keys):
+            if i > 0:
+                sign_args.add("--next-signer")
+            sign_args.add("--ks", key)
+            sign_args.add("--ks-pass", "pass:android")
     sign_args.add("--v1-signing-enabled", v1_enabled)
     sign_args.add("--v1-signer-name", "CERT")
     sign_args.add("--v2-signing-enabled", v2_enabled)
@@ -156,10 +220,16 @@ def _run_apksign(ctx, sdk, aligned, signing_keys, lineage, rotation_min_sdk):
         sign_args.add("--rotation-min-sdk-version", rotation_min_sdk)
     sign_args.add("--out", signed)
     sign_args.add(aligned)
+    if release:
+        sign_inputs = [aligned, release.keystore, release.ks_pass]
+        if release.key_pass:
+            sign_inputs.append(release.key_pass)
+    else:
+        sign_inputs = [aligned] + signing_keys
     ctx.actions.run(
         executable = sdk.apk_signer,
         arguments = [sign_args],
-        inputs = [aligned] + signing_keys + ([lineage] if lineage else []),
+        inputs = sign_inputs + ([lineage] if lineage else []),
         outputs = [signed],
         mnemonic = "ApkSignerTool",
         progress_message = "Signing APK with Flutter payload %s" % ctx.label,
@@ -231,11 +301,12 @@ def _flutter_android_apk_overlay_impl(ctx):
     aligned = _run_zipalign(ctx, sdk, overlay_unsigned)
 
     # 3. Sign with the same keystore and scheme selection android_binary
-    # would have used.
+    # would have used — or the caller's release keystore when configured.
     signing_keys = _overlay_signing_keys(ctx)
     lineage = ctx.file.debug_signing_lineage_file
     rotation_min_sdk = ctx.attr.key_rotation_min_sdk
-    signed = _run_apksign(ctx, sdk, aligned, signing_keys, lineage, rotation_min_sdk)
+    release = _resolve_release_signing(ctx)
+    signed = _run_apksign(ctx, sdk, aligned, signing_keys, lineage, rotation_min_sdk, release)
 
     # 4. Regenerate deploy info against the overlay's own signed APK and
     # merged manifest.
@@ -244,7 +315,8 @@ def _flutter_android_apk_overlay_impl(ctx):
     # Forward the base output groups verbatim EXCEPT android_deploy_info.
     group_kwargs = _overlay_output_groups(base_groups, deploy_info, merged_manifest)
 
-    keystore = signing_keys[0] if signing_keys else None
+    keystore = release.keystore if release else (signing_keys[0] if signing_keys else None)
+    release_signing_keys = [release.keystore] if release else signing_keys
     providers = [
         DefaultInfo(files = depset([signed])),
         ApkInfo(
@@ -252,14 +324,14 @@ def _flutter_android_apk_overlay_impl(ctx):
             unsigned_apk = overlay_unsigned,
             deploy_jar = base_apk_info.deploy_jar,
             coverage_metadata = base_apk_info.coverage_metadata,
-            signing_keys = signing_keys,
+            signing_keys = release_signing_keys,
             signing_lineage = base_apk_info.signing_lineage,
             signing_min_v3_rotation_api_version = base_apk_info.signing_min_v3_rotation_api_version,
             keystore = keystore,
         ),
         StarlarkApkInfo(
             keystore = keystore,
-            signing_keys = signing_keys,
+            signing_keys = release_signing_keys,
             signing_lineage = base_apk_info.signing_lineage,
             signed_apk = signed,
             unsigned_apk = overlay_unsigned,
@@ -322,6 +394,43 @@ flutter_android_apk_overlay = rule(
         "key_rotation_min_sdk": attr.string(
             doc = "Rotation minimum SDK, matching android_binary's key_rotation_min_sdk.",
             default = "",
+        ),
+        "keystore": attr.label(
+            doc = "Release keystore (.jks or PKCS#12 .p12) signing this APK instead of the debug keystore. " +
+                  "Needs `keystore_password_file` and `key_alias`; without them analysis fails. " +
+                  "When unset (with the `//flutter:android_release_keystore` flag unset) the APK signs " +
+                  "with the debug keystore exactly as before. An explicit keystore always wins over the flag.",
+            allow_single_file = True,
+        ),
+        "keystore_password_file": attr.label(
+            doc = "File holding the release keystore's password, read by apksigner at execution time " +
+                  "through `--ks-pass file:<path>`. Mandatory with `keystore`; the password text never " +
+                  "appears on the command line. Only the first line is read; end the file with a newline. " +
+                  "Falls back to the `//flutter:android_release_keystore_password_file` flag.",
+            allow_single_file = True,
+        ),
+        "key_alias": attr.string(
+            doc = "Alias of the signing key inside `keystore`. Mandatory with `keystore`. " +
+                  "Falls back to the `//flutter:android_release_key_alias` flag.",
+            default = "",
+        ),
+        "key_password_file": attr.label(
+            doc = "File holding the signing key's own password, read through `--key-pass file:<path>`. " +
+                  "When unset `--key-pass` is omitted and apksigner unlocks the key with the keystore " +
+                  "password. Only the first line is read; end the file with a newline.",
+            allow_single_file = True,
+        ),
+        "_release_keystore": attr.label(
+            default = Label("//flutter:android_release_keystore"),
+            doc = "Release keystore flag (a label_flag BuildSettingInfo).",
+        ),
+        "_release_keystore_password_file": attr.label(
+            default = Label("//flutter:android_release_keystore_password_file"),
+            doc = "Release keystore password-file flag (a label_flag BuildSettingInfo).",
+        ),
+        "_release_key_alias": attr.label(
+            default = Label("//flutter:android_release_key_alias"),
+            doc = "Release key alias flag (a string BuildSettingInfo).",
         ),
         "_overlay_tool": attr.label(
             default = Label("//flutter/private/tools:android_bundle"),

@@ -1,5 +1,5 @@
 load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
-load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag", "string_flag")
 load("//flutter/private:build_settings.bzl", "dart_defines_flag")
 load("//flutter/private:flutter_material_icons.bzl", "flutter_material_icons")
 load("//flutter/private:flutter_pub.bzl", "flutter_pub")
@@ -95,6 +95,45 @@ config_setting(
 config_setting(
     name = "apk_signing_v4",
     flag_values = {"@rules_android//flags:apk_signing_method": "v4"},
+    visibility = ["//visibility:public"],
+)
+
+# Release keystore for `flutter_android_app` (`flutter_android_apk_overlay`).
+# A target that sets the `keystore` attribute always signs with it; a target
+# that sets none takes the keystore from these flags, so CI can inject a
+# secret without editing BUILD files:
+#
+#   bazel build //app --@rules_flutter//flutter:android_release_keystore=//secret:upload
+#     --@rules_flutter//flutter:android_release_keystore_password_file=//secret:store_pass
+#     --@rules_flutter//flutter:android_release_key_alias=upload
+#
+# With neither the attribute nor the flag set, the overlay signs with the
+# debug keystore exactly as before.
+filegroup(
+    name = "_android_release_keystore_none",
+    srcs = [],
+)
+
+filegroup(
+    name = "_android_release_keystore_password_file_none",
+    srcs = [],
+)
+
+label_flag(
+    name = "android_release_keystore",
+    build_setting_default = ":_android_release_keystore_none",
+    visibility = ["//visibility:public"],
+)
+
+label_flag(
+    name = "android_release_keystore_password_file",
+    build_setting_default = ":_android_release_keystore_password_file_none",
+    visibility = ["//visibility:public"],
+)
+
+string_flag(
+    name = "android_release_key_alias",
+    build_setting_default = "",
     visibility = ["//visibility:public"],
 )
 

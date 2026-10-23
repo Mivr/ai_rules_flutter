@@ -818,6 +818,15 @@ bazel build //:my_app_android
 
 **Pure Go host tools.** `flutter_android_app` builds rules_android's Go host tools in rules_go pure mode: without a C++ toolchain, so the hermetic LLVM runtimes are never compiled from source. The APK is unchanged (only the host tools' own binaries differ). The setting is scoped to the app — desktop builds and your own Go targets keep their configuration. Opt out with `--@rules_flutter//flutter:android_pure_go=false`; you need that only if the app's own subtree contains cgo Go code, which pure mode cannot compile. Hand-assembled Tier-2 `android_binary` targets are unaffected either way: add the global `--@rules_go//go/config:pure=true` yourself if you want the same saving there and have no cgo Go code.
 
+**Release signing.** The APK signs with the debug keystore, as an `android_binary` does. To ship to Google Play, pass `keystore` (a `.jks` or PKCS#12 `.p12` file) together with `keystore_password_file` and `key_alias`; set `key_password_file` as well when the key has its own password. Both passwords travel as `file:` references to file inputs, so their text never appears on the command line. When `key_password_file` is unset, `--key-pass` is omitted and apksigner unlocks the key with the keystore password. Only each file's first line is read, so end it with a newline. A `keystore` without its password file or alias fails analysis naming the missing attribute. When `keystore` is unset, the `//flutter:android_release_keystore`, `//flutter:android_release_keystore_password_file` and `//flutter:android_release_key_alias` flags supply the same three values, so CI can inject a secret without editing BUILD files; an explicit attribute always wins over its flag:
+
+```sh
+bazel build //:my_app_android \
+  --@rules_flutter//flutter:android_release_keystore=//secret:upload \
+  --@rules_flutter//flutter:android_release_keystore_password_file=//secret:store_pass \
+  --@rules_flutter//flutter:android_release_key_alias=upload
+```
+
 | Attribute | Description |
 |---|---|
 | `application` | A `flutter_application` target. Required. |
@@ -830,6 +839,10 @@ bazel build //:my_app_android
 | `debug_manifest` | A variant manifest whose permissions merge into `-c dbg` builds only. `None` (default) discovers `android/app/src/debug/AndroidManifest.xml`. A label overrides discovery. `False` disables variant handling. |
 | `profile_manifest` | The same for profile builds. `None` (default) discovers `android/app/src/profile/AndroidManifest.xml`. |
 | `permissions` | Permission names added to the manifest in every compilation mode, for example `["android.permission.INTERNET"]`. See [Release builds and permissions](#release-builds-and-permissions). |
+| `keystore` | Release keystore (`.jks` or PKCS#12 `.p12`) signing the APK instead of the debug key. Needs `keystore_password_file` and `key_alias`. See [Release signing](#release-signing). |
+| `keystore_password_file` | File holding the keystore password, read by apksigner through `--ks-pass file:<path>`. Falls back to the `//flutter:android_release_keystore_password_file` flag. |
+| `key_alias` | Alias of the signing key inside `keystore`. Falls back to the `//flutter:android_release_key_alias` flag. |
+| `key_password_file` | File holding the signing key's own password, read through `--key-pass file:<path>`. When unset, `--key-pass` is omitted and the keystore password unlocks the key. |
 | `multidex` | Defaults to `"native"`. |
 
 <details>

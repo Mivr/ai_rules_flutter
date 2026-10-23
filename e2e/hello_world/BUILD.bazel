@@ -192,6 +192,46 @@ flutter_android_app(
     tags = ["no-windows-ci"],
 )
 
+# -- Release-signed Android app ------------------------------------------------
+#
+# The same app signed with a throwaway caller keystore instead of the debug
+# key: `testdata/release.p12` (PKCS#12, alias `release`, password in
+# `testdata/release.pass`) exercises the `keystore` /
+# `keystore_password_file` / `key_alias` attributes of `flutter_android_app`.
+# `:verify_android_release_signing_test` parses the APK Signing Block of this
+# APK and the debug-signed `:hello_world_android` and pins the release signer
+# to the fixture certificate.
+flutter_android_app(
+    name = "hello_world_android_release_signed",
+    package_name = "com.example.helloworld",
+    app_name = "Hello World",
+    application = ":hello_world_app",
+    key_alias = "release",
+    keystore = "testdata/release.p12",
+    keystore_password_file = "testdata/release.pass",
+    # See hello_world_android: skipped on the Windows CI runner (pagefile OOM)
+    # via --build_tag_filters/--test_tag_filters. Builds normally everywhere else.
+    tags = ["no-windows-ci"],
+)
+
+# Red-path twin of the target above, wired to the wrong password
+# (`testdata/wrong.pass`): building it must fail in apksigner. Tagged
+# "manual" so `//...` stays green; the e2e-linux-app CI job builds it
+# explicitly and greps the failure for apksigner's wrong-password message.
+flutter_android_app(
+    name = "hello_world_android_release_wrong_password",
+    package_name = "com.example.helloworld",
+    app_name = "Hello World",
+    application = ":hello_world_app",
+    key_alias = "release",
+    keystore = "testdata/release.p12",
+    keystore_password_file = "testdata/wrong.pass",
+    tags = [
+        "manual",
+        "no-windows-ci",
+    ],
+)
+
 # -- Android reference binary (old pipeline) -----------------------------------
 #
 # The same app assembled the pre-overlay way: a single android_binary whose
@@ -814,6 +854,23 @@ dart_test(
         "ZIPALIGN": "$(rlocationpath @androidsdk//:zipalign)",
     },
     main = "test/verify_android_apk_parity_test.dart",
+    # See hello_world_android: skipped on the Windows CI runner (pagefile OOM)
+    # via --build_tag_filters/--test_tag_filters. Builds normally everywhere else.
+    tags = ["no-windows-ci"],
+)
+
+# Release signing: the release-signed APK above must carry the fixture
+# certificate in its APK Signing Block (v3 preferred, v2 accepted), matching
+# the pinned fingerprint, while the debug-signed APK carries a different
+# signer — proving the APK was signed by the caller's keystore and not the
+# debug key. Parses the block by hand; no apksigner/keytool runs here.
+dart_test(
+    name = "verify_android_release_signing_test",
+    data = [
+        ":hello_world_android",
+        ":hello_world_android_release_signed",
+    ],
+    main = "test/verify_android_release_signing_test.dart",
     # See hello_world_android: skipped on the Windows CI runner (pagefile OOM)
     # via --build_tag_filters/--test_tag_filters. Builds normally everywhere else.
     tags = ["no-windows-ci"],

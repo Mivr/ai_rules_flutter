@@ -706,7 +706,7 @@ def _android_resolve_manifest(name, base_manifest, debug_manifest, profile_manif
     )
     return "__%s_manifest_with_library_permissions" % name
 
-def _android_binary_and_overlay(name, package_name, min_sdk_version, target_sdk_version, actual_manifest, resources, binary_deps, deps, nocompress_extensions, tags, internal_tags, kwargs):
+def _android_binary_and_overlay(name, package_name, min_sdk_version, target_sdk_version, actual_manifest, resources, binary_deps, deps, nocompress_extensions, tags, internal_tags, kwargs, keystore = None, keystore_password_file = None, key_alias = None, key_password_file = None):
     """Emits the payload-free android_binary, the payload overlay and the proxy.
 
     The android_binary builds a payload-free base APK: neither the
@@ -771,6 +771,14 @@ def _android_binary_and_overlay(name, package_name, min_sdk_version, target_sdk_
             overlay_kwargs[key] = kwargs[key]
     if nocompress_extensions != None:
         overlay_kwargs["nocompress_extensions"] = nocompress_extensions
+    for key, value in (
+        ("keystore", keystore),
+        ("keystore_password_file", keystore_password_file),
+        ("key_alias", key_alias),
+        ("key_password_file", key_password_file),
+    ):
+        if value != None:
+            overlay_kwargs[key] = value
 
     # L-1: the overlay is the target users actually build, so it must carry
     # the same testonly/compatible_with/restricted_to as the user-facing
@@ -819,6 +827,10 @@ def flutter_android_app(
         deps = [],
         pub_hub_name = "deps",
         nocompress_extensions = None,
+        keystore = None,
+        keystore_password_file = None,
+        key_alias = None,
+        key_password_file = None,
         **kwargs):
     """Builds a Flutter Android APK from a flutter_application target.
 
@@ -895,6 +907,25 @@ def flutter_android_app(
     when the app's own subtree needs cgo. See the README's Android section
     for the trade-off.
 
+    Release signing: by default the APK signs with the debug keystore, as an
+    `android_binary` does. To ship to Google Play, pass `keystore` (a `.jks`
+    or PKCS#12 `.p12` file label) together with `keystore_password_file` (a
+    file label) and `key_alias` (a string); set `key_password_file` (a file
+    label) as well when the key has its own password. The
+    overlay then signs with `--ks`, `--ks-key-alias`, `--ks-pass
+    file:<path>` and, when `key_password_file` is set, `--key-pass
+    file:<path>`: both passwords are read from files at execution time and
+    never appear on the command line. When `key_password_file` is unset,
+    `--key-pass` is omitted and apksigner unlocks the key with the keystore
+    password. A `keystore` without `keystore_password_file` or `key_alias` fails
+    analysis naming the missing attribute. When `keystore` is unset, the
+    `//flutter:android_release_keystore`,
+    `//flutter:android_release_keystore_password_file` and
+    `//flutter:android_release_key_alias` flags supply the same three
+    values, so CI can inject a secret without editing BUILD files; an
+    explicit attribute always wins over its flag. See the README's Android
+    section.
+
     Args:
         name: Target name (Bazel identifier). Produces the app APK (an android_binary behind a pure-Go proxy).
         application: A flutter_application target (required).
@@ -939,6 +970,24 @@ def flutter_android_app(
             payload-free android_binary and the overlay that injects the
             Flutter payload, so both agree on the compression policy.
             Matched case-sensitively by suffix.
+        keystore: Release keystore (a `.jks` or PKCS#12 `.p12` file label)
+            signing the APK instead of the debug keystore. Needs
+            `keystore_password_file` and `key_alias`; without them analysis
+            fails naming the missing attribute. Unset (with the
+            `//flutter:android_release_keystore` flag unset) keeps debug
+            signing. An explicit keystore always wins over the flag.
+        keystore_password_file: File holding the release keystore's
+            password, read by apksigner at execution time through `--ks-pass
+            file:<path>`. The password text never appears on the command
+            line. Only the first line is read, so end the file with a
+            newline. Falls back to the
+            `//flutter:android_release_keystore_password_file` flag.
+        key_alias: Alias of the signing key inside `keystore`. Falls back to
+            the `//flutter:android_release_key_alias` flag.
+        key_password_file: File holding the signing key's own password, read
+            through `--key-pass file:<path>`. When unset, `--key-pass` is
+            omitted and apksigner unlocks the key with the keystore password;
+            the same first-line-and-newline rule applies when it is set.
         **kwargs: Passed through to android_binary.
     """
     display_name = app_name or name
@@ -1006,7 +1055,7 @@ def flutter_android_app(
     # 9. Final android_binary, behind a proxy that scopes rules_go pure mode
     # to this app, and 10. the payload overlay. The overlay is the target
     # users actually build; the proxy is the only entry point.
-    _android_binary_and_overlay(name, package_name, min_sdk_version, target_sdk_version, actual_manifest, resources, binary_deps, deps, nocompress_extensions, tags, internal_tags, kwargs)
+    _android_binary_and_overlay(name, package_name, min_sdk_version, target_sdk_version, actual_manifest, resources, binary_deps, deps, nocompress_extensions, tags, internal_tags, kwargs, keystore = keystore, keystore_password_file = keystore_password_file, key_alias = key_alias, key_password_file = key_password_file)
 
 def _short_abi_to_full(abi):
     """Convert short ABI name to full ABI string for flutter_android_bundle."""
