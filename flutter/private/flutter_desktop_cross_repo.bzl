@@ -130,8 +130,14 @@ flutter_desktop_cross_repo = repository_rule(
                   "from it; this repo downloads nothing either way.",
             default = "",
         ),
-        "host_platform": attr.string(mandatory = True),
-        "target_platform": attr.string(mandatory = True),
+        "host_platform": attr.string(
+            mandatory = True,
+            doc = "Execution host platform the toolchain runs on (selects binary file names).",
+        ),
+        "target_platform": attr.string(
+            mandatory = True,
+            doc = "Target desktop platform the toolchain builds for (selects OS and architecture).",
+        ),
         "host_repo_name": attr.string(mandatory = True, doc = "Name of the host platform's engine artifacts repo."),
         "engine_repo_name": attr.string(mandatory = True, doc = "Name of the desktop engine repo (release) for the target platform."),
         "engine_debug_repo_name": attr.string(doc = "Name of the debug desktop engine repo. When set, select() chooses debug vs release based on compilation mode."),

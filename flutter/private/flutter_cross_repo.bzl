@@ -209,8 +209,14 @@ flutter_cross_compilation_repo = repository_rule(
                   "of the network. Mutually exclusive with downloading.",
             default = "",
         ),
-        "host_platform": attr.string(mandatory = True),
-        "target_platform": attr.string(mandatory = True),
+        "host_platform": attr.string(
+            mandatory = True,
+            doc = "Execution host platform the toolchain runs on (selects binary file names).",
+        ),
+        "target_platform": attr.string(
+            mandatory = True,
+            doc = "Target platform the toolchain builds for (selects OS, architecture and artifacts).",
+        ),
         "host_repo_name": attr.string(mandatory = True, doc = "Name of the host platform's engine artifacts repo."),
         "gen_snapshot_sha256": attr.string(
             doc = "SHA-256 of the gen_snapshot archive. Unused with `local_path`.",
