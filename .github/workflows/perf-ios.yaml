@@ -223,3 +223,15 @@ jobs:
           name: ios-sol
           path: ios-sol.json
           retention-days: 3
+      - name: Upload ios-profile
+        # Small profile companion to ios-sol: the gzipped Bazel trace
+        # profiles and execution logs behind each flow's profile record,
+        # no build outputs. Same 3-day retention as the other artifacts.
+        if: ${{ !cancelled() && inputs.mode == 'sol' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-profile
+          path: |
+            sol-results/**/trace.json.gz
+            sol-results/**/execlog.json.gz
+          retention-days: 3
