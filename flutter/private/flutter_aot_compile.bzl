@@ -6,27 +6,29 @@ Output format depends on the target platform:
 - macOS/iOS: Mach-O dylib (App.framework/App) via --snapshot_kind=app-aot-macho-dylib
 """
 
-def _flutter_aot_action(
-        ctx,
-        gen_snapshot,
-        kernel_dill,
-        output,
-        snapshot_kind,
-        output_flag,
-        strip = True,
-        extra_flags = [],
-        extra_outputs = [],
-        mnemonic = "FlutterAot"):
-    """Internal helper for all AOT compilation variants."""
+def _flutter_aot_action(ctx, gen_snapshot, kernel_dill, output, spec):
+    """Internal helper for all AOT compilation variants.
+
+    Args:
+        ctx: Rule context.
+        gen_snapshot: gen_snapshot executable File.
+        kernel_dill: Kernel .dill input.
+        output: Output native library File.
+        spec: struct describing the snapshot variant: `snapshot_kind` (the
+            `--snapshot_kind=` value), `output_flag` (the output flag name),
+            `strip` (whether to pass `--strip`), `extra_flags` (additional
+            gen_snapshot flags), `extra_outputs` (additional output Files),
+            `mnemonic` (the action mnemonic).
+    """
     args = ctx.actions.args()
     args.add("--deterministic")
-    args.add("--snapshot_kind=" + snapshot_kind)
-    args.add(output_flag + "=" + output.path)
+    args.add("--snapshot_kind=" + spec.snapshot_kind)
+    args.add(spec.output_flag + "=" + output.path)
 
-    if strip:
+    if spec.strip:
         args.add("--strip")
 
-    args.add_all(extra_flags)
+    args.add_all(spec.extra_flags)
     args.add(kernel_dill)
 
     ctx.actions.run(
@@ -35,9 +37,9 @@ def _flutter_aot_action(
         inputs = depset(
             direct = [kernel_dill],
         ),
-        outputs = [output] + extra_outputs,
-        mnemonic = mnemonic,
-        progress_message = "AOT compiling Flutter %s %s" % (snapshot_kind, ctx.label),
+        outputs = [output] + spec.extra_outputs,
+        mnemonic = spec.mnemonic,
+        progress_message = "AOT compiling Flutter %s %s" % (spec.snapshot_kind, ctx.label),
     )
 
 def _has_gen_snapshot_flag(flags, name):
@@ -112,7 +114,20 @@ def flutter_aot_gen_snapshot_flags(ctx, strip):
 
 def flutter_aot_elf_action(ctx, gen_snapshot, kernel_dill, output, strip = True, extra_flags = [], extra_outputs = []):
     """AOT compile to ELF shared library. Used for Android, Linux, Windows."""
-    _flutter_aot_action(ctx, gen_snapshot, kernel_dill, output, "app-aot-elf", "--elf", strip, extra_flags, extra_outputs, "FlutterAotElf")
+    _flutter_aot_action(
+        ctx,
+        gen_snapshot,
+        kernel_dill,
+        output,
+        struct(
+            snapshot_kind = "app-aot-elf",
+            output_flag = "--elf",
+            strip = strip,
+            extra_flags = extra_flags,
+            extra_outputs = extra_outputs,
+            mnemonic = "FlutterAotElf",
+        ),
+    )
 
 def flutter_aot_macho_action(
         ctx,
@@ -145,4 +160,17 @@ def flutter_aot_macho_action(
         macho_flags.append("--macho-min-os-version=" + min_os_version)
     if rpath:
         macho_flags.append("--macho-rpath=" + rpath)
-    _flutter_aot_action(ctx, gen_snapshot, kernel_dill, output, "app-aot-macho-dylib", "--macho", strip, macho_flags, extra_outputs, "FlutterAotMacho")
+    _flutter_aot_action(
+        ctx,
+        gen_snapshot,
+        kernel_dill,
+        output,
+        struct(
+            snapshot_kind = "app-aot-macho-dylib",
+            output_flag = "--macho",
+            strip = strip,
+            extra_flags = macho_flags,
+            extra_outputs = extra_outputs,
+            mnemonic = "FlutterAotMacho",
+        ),
+    )
