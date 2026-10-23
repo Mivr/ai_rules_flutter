@@ -29,8 +29,6 @@ dart_binary(
 dart_test(
     name = "python_host_test",
     srcs = glob(["lib/**/*.dart"]),
-    main = "test/python_host_test.dart",
-    deps = ["@dev_tool_deps//:test", "@rules_dart//dart/runfiles"],
     # The `PYTHONHOME` tests drive the launchers from a child `dart` process
     # (ambient variables cannot be set for the test's own process), so the
     # launcher source travels in runfiles for the child's import.
@@ -43,4 +41,9 @@ dart_test(
     # PATH the lookup would search a sandbox PATH and skip even when the
     # host has an interpreter.
     env_inherit = ["PATH"],
+    main = "test/python_host_test.dart",
+    deps = [
+        "@dev_tool_deps//:test",
+        "@rules_dart//dart/runfiles",
+    ],
 )
