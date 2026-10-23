@@ -519,7 +519,11 @@ def _collect_framework_args_and_inputs(framework_targets, plugin_and_dep_targets
                 direct_inputs.extend(fw_files)
                 _extract_framework_dirs_from_files(fw_files, seen_dirs, framework_dirs)
 
-    return framework_dirs, direct_inputs, transitive_inputs
+    return struct(
+        dirs = framework_dirs,
+        direct_inputs = direct_inputs,
+        transitive_inputs = transitive_inputs,
+    )
 
 def _classify_runner_file(seen, buckets, f):
     """Sort one file into the runner's source/header/modulemap buckets, deduplicated by path."""
@@ -691,7 +695,7 @@ def _xtool_sdk_availability(ctx):
         sdk_transitive.append(sdk_info.sdk_files)
     return sdk_available, sdk_transitive
 
-def _compile_xtool_runner(ctx, platform, app_name, arch, sdk_available, fw_dirs, fw_direct_inputs, fw_transitive_inputs, sdk_transitive):
+def _compile_xtool_runner(ctx, platform, app_name, arch, sdk_available, frameworks, sdk_transitive):
     """Compile the runner executable via `xtool_pack compile-runner`; returns its File."""
     executable_file = ctx.actions.declare_file("%s_runner_bin" % ctx.label.name)
     sources, headers, modulemaps, sdk_frameworks, sdk_dylibs, plugin_transitive_sets = _collect_runner_compile_inputs(ctx)
@@ -711,7 +715,7 @@ def _compile_xtool_runner(ctx, platform, app_name, arch, sdk_available, fw_dirs,
         runner_args.add("--header", hdr.path)
     for mm in modulemaps:
         runner_args.add("--modulemap", mm.path)
-    for fw_dir in fw_dirs:
+    for fw_dir in frameworks.dirs:
         runner_args.add("--framework", fw_dir)
     for sdk_fw in sdk_frameworks:
         runner_args.add("--sdk-framework", sdk_fw)
@@ -724,8 +728,8 @@ def _compile_xtool_runner(ctx, platform, app_name, arch, sdk_available, fw_dirs,
         env = {"TMPDIR": "/tmp"},
         use_default_shell_env = False,
         inputs = depset(
-            direct = sources + headers + modulemaps + fw_direct_inputs,
-            transitive = fw_transitive_inputs + plugin_transitive_sets + sdk_transitive,
+            direct = sources + headers + modulemaps + frameworks.direct_inputs,
+            transitive = frameworks.transitive_inputs + plugin_transitive_sets + sdk_transitive,
         ),
         outputs = [executable_file],
         mnemonic = "FlutterXtoolRunner",
@@ -854,7 +858,7 @@ def _run_xtool_pack_bundle(
     infoplists = ctx.files.infoplists
     resources = ctx.files.resources
 
-    fw_dirs, fw_direct_inputs, fw_transitive_inputs = _collect_framework_args_and_inputs(
+    frameworks = _collect_framework_args_and_inputs(
         ctx.attr.frameworks,
         ctx.attr.plugins + ctx.attr.deps,
     )
@@ -863,7 +867,7 @@ def _run_xtool_pack_bundle(
 
     executable_file = ctx.file.executable
     if not executable_file:
-        executable_file = _compile_xtool_runner(ctx, platform, app_name, arch, sdk_available, fw_dirs, fw_direct_inputs, fw_transitive_inputs, sdk_transitive)
+        executable_file = _compile_xtool_runner(ctx, platform, app_name, arch, sdk_available, frameworks, sdk_transitive)
 
     args = _xtool_bundle_base_args(ctx, platform, app_name, executable_file, archive_file, app_dir)
 
@@ -873,13 +877,13 @@ def _run_xtool_pack_bundle(
         resources +
         native_libs +
         additional_content_files +
-        fw_direct_inputs
+        frameworks.direct_inputs
     )
 
     if ctx.attr.version:
         _add_xtool_version_args(ctx, args, direct_inputs)
 
-    _add_xtool_bundle_content_args(ctx, args, families, fw_dirs, native_libs, resources, additional_content_pairs, infoplists)
+    _add_xtool_bundle_content_args(ctx, args, families, frameworks.dirs, native_libs, resources, additional_content_pairs, infoplists)
 
     _add_xtool_signing_args(ctx, args, direct_inputs)
 
@@ -902,7 +906,7 @@ def _run_xtool_pack_bundle(
         use_default_shell_env = False,
         inputs = depset(
             direct = direct_inputs,
-            transitive = fw_transitive_inputs,
+            transitive = frameworks.transitive_inputs,
         ),
         outputs = [archive_file, app_dir],
         mnemonic = mnemonic,
