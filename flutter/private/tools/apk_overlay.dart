@@ -29,6 +29,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'xtool_pack.dart' show ZipRawEntry, crc32, readZipRawEntries;
+import 'zlib_raw_match.dart' show zlibRawDeflate9;
 
 /// DOS timestamp used for injected entries: 2010-01-01 00:00:00, matching
 /// singlejar `--normalize` output surrounding them.
@@ -284,6 +285,31 @@ bool _storeUncompressedByName(String path, Set<String> extraNoCompress) {
   return false;
 }
 
+/// The raw-deflate size aapt2 measures before applying its store-vs-deflate
+/// rule: aapt2's `ZipFileWriter` deflates every candidate entry at level 9
+/// (`tools/aapt2/io/ZipArchive.cpp`), then keeps or discards the result in
+/// `ZipFileWriter::WriteFile` (`tools/aapt2/format/Archive.cpp`).
+///
+/// This must stay a level-9 measurement even though the payload bytes below
+/// stay level-6: only the level-9 size reproduces aapt2's decision on
+/// marginally compressible entries. Dart's `ZLibEncoder` cannot supply it:
+/// its level 9 is a different implementation whose sizes differ from C zlib's
+/// by bytes on adversarial inputs, so the size is computed by [zlibRawDeflate9],
+/// a port of zlib 1.3.2's level-9 path that is byte-identical to it.
+int aaptDeflatedSize(Uint8List data) => zlibRawDeflate9(data).length;
+
+/// Whether aapt2 would emit an entry of [rawSize] bytes deflated given the
+/// level-9 deflated size [compressedSize].
+///
+/// aapt2's `ZipFileWriter::WriteFile` (`tools/aapt2/format/Archive.cpp`)
+/// discards the deflated bytes and rewrites the entry stored unless the
+/// deflated form saves more than a tenth of itself, using integer division:
+/// `if (compressed_size + compressed_size / 10 > uncompressed_size)` stores.
+/// So an entry is deflated exactly when
+/// `compressedSize + compressedSize ~/ 10 <= rawSize`.
+bool aaptDeflates({required int compressedSize, required int rawSize}) =>
+    compressedSize + compressedSize ~/ 10 <= rawSize;
+
 /// ZIP32 field limit: values at or above it need ZIP64, which APKs never use.
 const int _zip32Limit = 0xFFFFFFFF;
 
@@ -291,9 +317,12 @@ const int _zip32Limit = 0xFFFFFFFF;
 /// record for [path] holding [data].
 ///
 /// Entries that [_storeUncompressedByName] selects are written stored without
-/// ever deflating (which is also what keeps large `.so` files fast);
-/// anything else is deflated unless that would grow it. [crc] reuses a
-/// verified checksum (jar entries); otherwise it is computed here.
+/// ever deflating (which is also what keeps large `.so` files fast); anything
+/// else follows aapt2's rule ([aaptDeflates]) measured at level 9
+/// ([aaptDeflatedSize]). A deflated entry's payload bytes stay level-6, as
+/// before: only the decision changes, so entries far from the boundary keep
+/// byte-identical output. [crc] reuses a verified checksum (jar entries);
+/// otherwise it is computed here.
 ({Uint8List local, Uint8List central}) _encodeEntry(
   String path,
   Uint8List data, {
@@ -319,19 +348,26 @@ const int _zip32Limit = 0xFFFFFFFF;
     payload = data;
     method = 0;
   } else {
-    final deflated = Uint8List.fromList(ZLibEncoder(raw: true).convert(data));
-    if (deflated.length >= _zip32Limit) {
+    final decisionSize = aaptDeflatedSize(data);
+    if (decisionSize >= _zip32Limit) {
       throw FormatException(
-        'apk-overlay: compressed entry $path is ${deflated.length} bytes, '
+        'apk-overlay: compressed entry $path is $decisionSize bytes, '
         'larger than the ZIP32 limit; ZIP64 archives are not supported.',
       );
     }
-    if (deflated.length >= data.length) {
-      payload = data;
-      method = 0;
-    } else {
+    if (aaptDeflates(compressedSize: decisionSize, rawSize: data.length)) {
+      final deflated = Uint8List.fromList(ZLibEncoder(raw: true).convert(data));
+      if (deflated.length >= _zip32Limit) {
+        throw FormatException(
+          'apk-overlay: compressed entry $path is ${deflated.length} bytes, '
+          'larger than the ZIP32 limit; ZIP64 archives are not supported.',
+        );
+      }
       payload = deflated;
       method = 8;
+    } else {
+      payload = data;
+      method = 0;
     }
   }
   final checksum = crc ?? crc32(data);
