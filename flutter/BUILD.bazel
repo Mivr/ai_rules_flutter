@@ -246,6 +246,7 @@ bzl_library(
         "//flutter/private:flutter_ios_registrant",
         "//flutter/private:flutter_plist_merge",
         "//flutter/private:flutter_xtool_bundle",
+        "//flutter/private:ios_app",
         "//flutter/private:runner_module",
     ],
 )
@@ -259,6 +260,7 @@ bzl_library(
         "//flutter/private:flutter_macos_registrant",
         "//flutter/private:flutter_plist_merge",
         "//flutter/private:flutter_xtool_bundle",
+        "//flutter/private:macos_app",
         "//flutter/private:runner_module",
     ],
 )

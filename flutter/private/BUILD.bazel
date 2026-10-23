@@ -575,14 +575,80 @@ bzl_library(
     srcs = ["flutter_xtool_bundle.bzl"],
     visibility = ["//flutter:__subpackages__"],
     deps = [
-        "//flutter:providers",
+        ":flutter_xtool_bundle_pack",
+        ":xtool_import",
+        ":xtool_version",
         "@bazel_skylib//lib:dicts",
     ],
+)
+
+bzl_library(
+    name = "flutter_xtool_bundle_pack",
+    srcs = ["flutter_xtool_bundle_pack.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+    deps = [
+        ":xtool_darwin_sdk_repo",
+        ":xtool_import",
+        ":xtool_version",
+        "//flutter:providers",
+    ],
+)
+
+bzl_library(
+    name = "xtool_import",
+    srcs = ["xtool_import.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+    deps = ["//flutter:providers"],
+)
+
+bzl_library(
+    name = "xtool_version",
+    srcs = ["xtool_version.bzl"],
+    visibility = ["//flutter:__subpackages__"],
 )
 
 bzl_library(
     name = "xtool_darwin_sdk_repo",
     srcs = ["xtool_darwin_sdk_repo.bzl"],
     visibility = ["//flutter:__subpackages__"],
-    deps = [":artifact_urls"],
+    deps = [
+        ":artifact_urls",
+        ":xtool_sdk_render",
+    ],
+)
+
+bzl_library(
+    name = "xtool_sdk_render",
+    srcs = ["xtool_sdk_render.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+)
+
+bzl_library(
+    name = "ios_app",
+    srcs = ["ios_app.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+    deps = [
+        ":flutter_ios_application",
+        ":flutter_ios_registrant",
+        ":flutter_plist_merge",
+        ":flutter_xtool_bundle",
+        ":runner_module",
+        ":validation",
+        ":xtool_version",
+    ],
+)
+
+bzl_library(
+    name = "macos_app",
+    srcs = ["macos_app.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+    deps = [
+        ":flutter_macos_application",
+        ":flutter_macos_registrant",
+        ":flutter_plist_merge",
+        ":flutter_xtool_bundle",
+        ":runner_module",
+        ":validation",
+        ":xtool_version",
+    ],
 )
