@@ -596,38 +596,58 @@ bool _skipBaseNoise(_Scanner scanner, String text) {
   return false;
 }
 
+/// One root-level base permission tag mid-fold: the scan state, the tag just
+/// read, where it sits, and the accumulator it folds into.
+///
+/// [_foldBasePermissionTag] and [_recordBasePermission] share this clump
+/// rather than threading nine values through each call.
+class _BaseTagFold {
+  final _Scanner scanner;
+  final String text;
+  final String name;
+  final Map<String, String> attrs;
+  final bool selfClosing;
+  final int insertAt;
+  final int tagStart;
+  final String basePath;
+  final List<_BasePermission> permissions;
+
+  const _BaseTagFold({
+    required this.scanner,
+    required this.text,
+    required this.name,
+    required this.attrs,
+    required this.selfClosing,
+    required this.insertAt,
+    required this.tagStart,
+    required this.basePath,
+    required this.permissions,
+  });
+}
+
 /// Records one top-level base permission tag. Returns true when the tag
 /// opens a nested element and the caller should descend instead.
-bool _foldBasePermissionTag(
-  _Scanner scanner,
-  String text,
-  String name,
-  Map<String, String> attrs,
-  bool selfClosing,
-  int insertAt,
-  int tagStart,
-  String basePath,
-  List<_BasePermission> permissions,
-) {
-  var tagEnd = scanner.pos;
+bool _foldBasePermissionTag(_BaseTagFold fold) {
+  var tagEnd = fold.scanner.pos;
   var descend = false;
-  if (!selfClosing) {
-    final closed = _closeBaseOpenTag(scanner, text, name, tagEnd);
+  if (!fold.selfClosing) {
+    final closed = _closeBaseOpenTag(
+      fold.scanner,
+      fold.text,
+      fold.name,
+      tagEnd,
+    );
     tagEnd = closed.tagEnd;
     descend = closed.descend;
   }
   if (descend) return true;
-  final span = _basePermissionSpan(text, insertAt, tagStart, tagEnd);
-  _recordBasePermission(
-    name,
-    attrs,
-    tagStart,
+  final span = _basePermissionSpan(
+    fold.text,
+    fold.insertAt,
+    fold.tagStart,
     tagEnd,
-    span.spanStart,
-    span.spanEnd,
-    basePath,
-    permissions,
   );
+  _recordBasePermission(fold, tagEnd, span);
   return false;
 }
 
@@ -655,15 +675,17 @@ List<_BasePermission> _scanBasePermissions(
     }
     if (depth == 1 && _permissionElements.contains(name)) {
       if (_foldBasePermissionTag(
-        scanner,
-        text,
-        name,
-        attrs,
-        selfClosing,
-        insertAt,
-        tagStart,
-        basePath,
-        permissions,
+        _BaseTagFold(
+          scanner: scanner,
+          text: text,
+          name: name,
+          attrs: attrs,
+          selfClosing: selfClosing,
+          insertAt: insertAt,
+          tagStart: tagStart,
+          basePath: basePath,
+          permissions: permissions,
+        ),
       )) {
         depth++;
       }
@@ -724,41 +746,37 @@ List<_BasePermission> _scanBasePermissions(
 /// Records one root-level base permission element, validating its
 /// `tools:node` and `android:maxSdkVersion`.
 void _recordBasePermission(
-  String name,
-  Map<String, String> attrs,
-  int tagStart,
+  _BaseTagFold fold,
   int tagEnd,
-  int spanStart,
-  int spanEnd,
-  String basePath,
-  List<_BasePermission> permissions,
+  ({int spanStart, int spanEnd}) span,
 ) {
-  final toolsNode = attrs['tools:node'];
+  final toolsNode = fold.attrs['tools:node'];
   if (toolsNode != null && !_supportedToolsNodes.contains(toolsNode)) {
     throw FormatException(
-      'Unsupported tools:node="$toolsNode" on <$name> in $basePath.',
+      'Unsupported tools:node="$toolsNode" on <${fold.name}> in '
+      '${fold.basePath}.',
     );
   }
   final isRemoveAll = toolsNode == 'removeAll';
-  final permName = attrs['android:name'] ?? '';
+  final permName = fold.attrs['android:name'] ?? '';
   final maxSdkVersion = _parseMaxSdkVersion(
-    attrs,
-    element: name,
+    fold.attrs,
+    element: fold.name,
     permissionName: permName,
-    manifestPath: basePath,
+    manifestPath: fold.basePath,
   );
   if (isRemoveAll || permName.isNotEmpty) {
-    permissions.add(
+    fold.permissions.add(
       _BasePermission(
-        element: name,
+        element: fold.name,
         name: permName,
-        attributes: attrs,
+        attributes: fold.attrs,
         maxSdkVersion: maxSdkVersion,
         toolsNode: toolsNode,
-        tagStart: tagStart,
+        tagStart: fold.tagStart,
         tagEnd: tagEnd,
-        spanStart: spanStart,
-        spanEnd: spanEnd,
+        spanStart: span.spanStart,
+        spanEnd: span.spanEnd,
       ),
     );
   }
@@ -1672,30 +1690,47 @@ List<String> _mergedLines(
   ];
 }
 
-String _insertMergedLines({
-  required String editedBaseXml,
-  required int insertAt,
-  required List<String> lines,
-  required String? overlayXml,
-  required String? overlayPath,
-  required Map<String, String> libraries,
-  required String basePath,
-}) {
-  final edited = editedBaseXml;
+/// The inputs for inserting one merge's new permission lines into the edited
+/// base manifest.
+class _MergedInsert {
+  final String editedBaseXml;
+  final int insertAt;
+  final List<String> lines;
+  final String? overlayXml;
+  final String? overlayPath;
+  final Map<String, String> libraries;
+  final String basePath;
+
+  const _MergedInsert({
+    required this.editedBaseXml,
+    required this.insertAt,
+    required this.lines,
+    required this.overlayXml,
+    required this.overlayPath,
+    required this.libraries,
+    required this.basePath,
+  });
+}
+
+String _insertMergedLines(_MergedInsert insert) {
+  final edited = insert.editedBaseXml;
   // An overlay always leaves its provenance, even when it adds nothing.
-  if (lines.isEmpty && overlayXml == null) return edited;
-  final sources = [?overlayPath, if (libraries.isNotEmpty) 'library manifests'];
+  if (insert.lines.isEmpty && insert.overlayXml == null) return edited;
+  final sources = [
+    ?insert.overlayPath,
+    if (insert.libraries.isNotEmpty) 'library manifests',
+  ];
   final inserted = StringBuffer()
     ..write(
       '\n    <!-- Permissions merged by rules_flutter from '
-      '${sources.join(' and ')} into $basePath. -->',
+      '${sources.join(' and ')} into ${insert.basePath}. -->',
     );
-  for (final line in lines) {
+  for (final line in insert.lines) {
     inserted.write('\n    $line');
   }
-  return edited.substring(0, insertAt) +
+  return edited.substring(0, insert.insertAt) +
       inserted.toString() +
-      edited.substring(insertAt);
+      edited.substring(insert.insertAt);
 }
 
 /// Merges [overlayXml]'s permissions and [libraries]' permissions into
@@ -1744,13 +1779,15 @@ String mergeManifests({
 
   final editedBaseXml = _applyEdits(baseXml, merge.edits);
   return _insertMergedLines(
-    editedBaseXml: editedBaseXml,
-    insertAt: insertAt,
-    lines: lines,
-    overlayXml: overlayXml,
-    overlayPath: overlayPath,
-    libraries: libraries,
-    basePath: basePath,
+    _MergedInsert(
+      editedBaseXml: editedBaseXml,
+      insertAt: insertAt,
+      lines: lines,
+      overlayXml: overlayXml,
+      overlayPath: overlayPath,
+      libraries: libraries,
+      basePath: basePath,
+    ),
   );
 }
 
