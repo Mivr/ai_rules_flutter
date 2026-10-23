@@ -425,8 +425,19 @@ def _macos_discover_runner_srcs(srcs):
              "Run 'flutter create --platforms=macos .' to generate runner files.")
     return runner_srcs
 
-def _macos_build_runner(name, backend, menu_xib, display_name, module_name, runner_srcs, runner_deps, engine_target, internal_tags):
-    """Builds the rules_apple runner library with the preprocessed menu XIB."""
+def _macos_build_runner(name, backend, menu_xib, display_name, module_name, runner, engine_target, internal_tags):
+    """Builds the rules_apple runner library with the preprocessed menu XIB.
+
+    Args:
+        name: The app name; internal targets derive from it.
+        backend: "rules_apple" builds the runner here; xtool compiles it itself.
+        menu_xib: Optional MainMenu.xib override label.
+        display_name: User-facing display name for the menu template.
+        module_name: Swift module name of the runner.
+        runner: Struct with the runner's own `srcs` and `deps`.
+        engine_target: Engine framework target label.
+        internal_tags: Tags for internal targets.
+    """
     if backend != "rules_apple":
         return
     menu_xib_template = menu_xib if menu_xib != None else "macos/Runner/Base.lproj/MainMenu.xib"
@@ -442,14 +453,14 @@ def _macos_build_runner(name, backend, menu_xib, display_name, module_name, runn
     )
     swift_library(
         name = "__%s_runner" % name,
-        srcs = runner_srcs + ["__%s_registrant" % name],
+        srcs = runner.srcs + ["__%s_registrant" % name],
         data = ["__%s_menu_xib" % name],
         module_name = module_name,
         tags = internal_tags,
         deps = [
             engine_target,
             "__%s_apple_plugins" % name,
-        ] + runner_deps,
+        ] + runner.deps,
     )
 
 def _macos_discover_app_icons(app_icons, backend):
@@ -531,26 +542,26 @@ def _macos_resolve_version(name, backend, version, internal_tags, kwargs):
         kwargs["short_version"] = version_sv
     return version, invalid_version_error
 
-def _macos_emit_rules_apple_bundle(name, display_name, bundle_id, minimum_os_version, actual_info_plist, version, app_icons, resources, flutter_contents, entitlements, tags, visibility, kwargs):
+def _macos_emit_rules_apple_bundle(name, bundle):
     """Emits the final rules_apple macos_application bundle target."""
     macos_application(
         name = name,
-        bundle_id = bundle_id,
-        bundle_name = display_name,
-        minimum_os_version = minimum_os_version,
-        infoplists = [actual_info_plist],
-        version = version,
-        app_icons = app_icons,
-        resources = resources,
-        additional_contents = flutter_contents,
-        entitlements = entitlements,
+        bundle_id = bundle.bundle_id,
+        bundle_name = bundle.display_name,
+        minimum_os_version = bundle.minimum_os_version,
+        infoplists = [bundle.actual_info_plist],
+        version = bundle.version,
+        app_icons = bundle.app_icons,
+        resources = bundle.resources,
+        additional_contents = bundle.flutter_contents,
+        entitlements = bundle.entitlements,
         deps = ["__%s_runner" % name],
-        tags = tags,
-        visibility = visibility,
-        **kwargs
+        tags = bundle.tags,
+        visibility = bundle.visibility,
+        **bundle.kwargs
     )
 
-def _macos_emit_xtool_bundle(name, display_name, bundle_id, minimum_os_version, version, invalid_version_error, additional_contents, menu_xib, app_icons, actual_info_plist, runner_srcs, runner_deps, engine_target, resources, entitlements, tags, visibility, kwargs):
+def _macos_emit_xtool_bundle(name, bundle, invalid_version_error, additional_contents, menu_xib, runner_srcs, runner_deps, engine_target):
     """Emits the final xtool macOS bundle target, forwarding only its kwargs."""
     valid_xtool_kwargs = (
         "build_version",
@@ -572,21 +583,21 @@ def _macos_emit_xtool_bundle(name, display_name, bundle_id, minimum_os_version, 
         "testonly",
         "zsign",
     )
-    forwarded_kwargs = {k: v for k, v in kwargs.items() if k in valid_xtool_kwargs}
-    unsupported_kwargs = [k for k in kwargs if k not in valid_xtool_kwargs]
+    forwarded_kwargs = {k: v for k, v in bundle.kwargs.items() if k in valid_xtool_kwargs}
+    unsupported_kwargs = [k for k in bundle.kwargs if k not in valid_xtool_kwargs]
     discovered_menu_xib = native.glob(["macos/Runner/Base.lproj/MainMenu.xib"], allow_empty = True)
     xtool_menu_xib = menu_xib if menu_xib != None else (discovered_menu_xib[0] if discovered_menu_xib else None)
     _flutter_xtool_macos_bundle(
         name = name,
-        app_name = display_name,
-        bundle_id = bundle_id,
-        minimum_os_version = minimum_os_version,
-        version = version,
+        app_name = bundle.display_name,
+        bundle_id = bundle.bundle_id,
+        minimum_os_version = bundle.minimum_os_version,
+        version = bundle.version,
         invalid_version_error = invalid_version_error,
         additional_contents = additional_contents,
         menu_xib = xtool_menu_xib,
-        app_icons = app_icons if app_icons != None else [],
-        infoplists = [actual_info_plist],
+        app_icons = bundle.app_icons if bundle.app_icons != None else [],
+        infoplists = [bundle.actual_info_plist],
         srcs = runner_srcs,
         registrant = ":__%s_registrant" % name,
         plugins = [":__%s_apple_plugins" % name],
@@ -596,12 +607,12 @@ def _macos_emit_xtool_bundle(name, display_name, bundle_id, minimum_os_version, 
             engine_target,
         ],
         native_libs = [":__%s_native_libs" % name],
-        resources = resources + [
+        resources = bundle.resources + [
             ":__%s_privacy_manifests" % name,
         ],
-        entitlements = entitlements,
-        tags = tags,
-        visibility = visibility,
+        entitlements = bundle.entitlements,
+        tags = bundle.tags,
+        visibility = bundle.visibility,
         unsupported_kwargs = unsupported_kwargs,
         **forwarded_kwargs
     )
@@ -778,7 +789,7 @@ def flutter_macos_app(
         tags = internal_tags,
     )
 
-    _macos_build_runner(name, backend, menu_xib, display_name, module_name, runner_srcs, runner_deps, engine_target, internal_tags)
+    _macos_build_runner(name, backend, menu_xib, display_name, module_name, struct(srcs = runner_srcs, deps = runner_deps), engine_target, internal_tags)
 
     # 6b. App icon — the conventional catalog `flutter create` writes, unless
     #     the caller named something else. Discovered for the same reason the
@@ -809,7 +820,21 @@ def flutter_macos_app(
     flutter_contents.update(additional_contents)
 
     # 10. Final bundle target — rules_apple (default) or explicit opt-in xtool.
+    bundle = struct(
+        display_name = display_name,
+        bundle_id = bundle_id,
+        minimum_os_version = minimum_os_version,
+        actual_info_plist = actual_info_plist,
+        version = version,
+        app_icons = app_icons,
+        resources = resources,
+        flutter_contents = flutter_contents,
+        entitlements = entitlements,
+        tags = tags,
+        visibility = visibility,
+        kwargs = kwargs,
+    )
     if backend == "rules_apple":
-        _macos_emit_rules_apple_bundle(name, display_name, bundle_id, minimum_os_version, actual_info_plist, version, app_icons, resources, flutter_contents, entitlements, tags, visibility, kwargs)
+        _macos_emit_rules_apple_bundle(name, bundle)
     else:
-        _macos_emit_xtool_bundle(name, display_name, bundle_id, minimum_os_version, version, invalid_version_error, additional_contents, menu_xib, app_icons, actual_info_plist, runner_srcs, runner_deps, engine_target, resources, entitlements, tags, visibility, kwargs)
+        _macos_emit_xtool_bundle(name, bundle, invalid_version_error, additional_contents, menu_xib, runner_srcs, runner_deps, engine_target)
