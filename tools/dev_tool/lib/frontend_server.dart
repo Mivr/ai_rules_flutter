@@ -22,6 +22,22 @@ typedef ProcessFactory = Future<Process> Function(
   List<String> arguments,
 );
 
+/// A debugger expression-compile request, in the frontend server's terms.
+///
+/// One object for the arguments DWDS passes through: the library and script
+/// the expression is written against, where in them it sits, the JS modules
+/// and frame values in scope, and the module it will be evaluated in.
+typedef ExpressionCompileRequest = ({
+  String libraryUri,
+  String scriptUri,
+  int line,
+  int column,
+  Map<String, String> jsModules,
+  Map<String, String> jsFrameValues,
+  String moduleName,
+  String expression,
+});
+
 class FrontendServer {
   final String _dartaotruntimePath;
   final String _frontendServerPath;
@@ -273,12 +289,8 @@ class FrontendServer {
         return _awaitResponse('compile');
       });
 
-  /// Compile [expression] to JavaScript against the running program, for the
+  /// Compile [request] to JavaScript against the running program, for the
   /// debugger's expression evaluation.
-  ///
-  /// The arguments are DWDS's, passed through: the library and script the
-  /// expression is written against, where in them it sits, the JS modules and
-  /// frame values in scope, and the module it will be evaluated in.
   ///
   /// A different verb from [compile] on the same connection — `JSON_INPUT`
   /// followed by one line of JSON, which is how the frontend server takes a
@@ -286,16 +298,10 @@ class FrontendServer {
   /// `result <key>` handshake, so it shares [_handleOutput]; what it does not
   /// share is the accept/reject verdict, because no expression compile changes
   /// the program the compiler is holding.
-  Future<CompileResult> compileExpressionToJs({
-    required String libraryUri,
-    required String scriptUri,
-    required int line,
-    required int column,
-    required Map<String, String> jsModules,
-    required Map<String, String> jsFrameValues,
-    required String moduleName,
-    required String expression,
-  }) => _requests.withResource(() async {
+  Future<CompileResult> compileExpressionToJs(
+    ExpressionCompileRequest request,
+  ) =>
+      _requests.withResource(() async {
     if (_closing) return _shuttingDown;
     if (_timedOut) return _timedOutResult;
     if (_process == null) throw StateError('Frontend server not started');
@@ -307,14 +313,14 @@ class FrontendServer {
       json.encode({
         'type': 'COMPILE_EXPRESSION_JS',
         'data': {
-          'expression': expression,
-          'libraryUri': libraryUri,
-          'scriptUri': scriptUri,
-          'line': line,
-          'column': column,
-          'jsModules': jsModules,
-          'jsFrameValues': jsFrameValues,
-          'moduleName': moduleName,
+          'expression': request.expression,
+          'libraryUri': request.libraryUri,
+          'scriptUri': request.scriptUri,
+          'line': request.line,
+          'column': request.column,
+          'jsModules': request.jsModules,
+          'jsFrameValues': request.jsFrameValues,
+          'moduleName': request.moduleName,
         },
       }),
     );
