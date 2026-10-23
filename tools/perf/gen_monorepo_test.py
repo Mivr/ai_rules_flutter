@@ -435,6 +435,133 @@ class ModuleTextTest(unittest.TestCase):
         self.assertIn("module(name = \"bench_monorepo\")", text)
         self.assertIn("path = \"%s\"," % rules, text)
 
+    def write_tree_module(self, rules, flutter_name, dart_name, pin):
+        with open(os.path.join(rules, "MODULE.bazel"), "w",
+                  encoding="utf-8", newline="\n") as fh:
+            fh.write("module(name = \"%s\")\n"
+                     "bazel_dep(name = \"%s\", version = \"0.0.0\")\n"
+                     "%s" % (flutter_name, dart_name, pin))
+
+    def write_full_fixture(self, rules, flutter_name, dart_name, pin):
+        hello = os.path.join(rules, "e2e", "hello_world")
+        os.makedirs(hello, exist_ok=True)
+        with open(os.path.join(hello, "MODULE.bazel"), "w",
+                  encoding="utf-8", newline="\n") as fh:
+            fh.write("module(name = \"rules_flutter_hello_world\")\n"
+                     "bazel_dep(name = \"%s\", version = \"0.0.0\")\n"
+                     "bazel_dep(name = \"%s\", version = \"0.0.0\")\n"
+                     "# labels keep repo names: @rules_dart//dart:defs.bzl\n"
+                     "local_path_override(\n"
+                     "    module_name = \"%s\",\n"
+                     "    path = \"../..\",\n"
+                     ")\n"
+                     "%s" % (flutter_name, dart_name, flutter_name, pin))
+        return rules
+
+    GIT_PIN = ("git_override(\n"
+               "    module_name = \"%s\",\n"
+               "    remote = \"https://github.com/Mivr/rules_dart.git\",\n"
+               "    commit = \"%s\"\n"
+               ")\n")
+
+    def test_repo_scheme_tree_pin_wins(self):
+        rules = os.path.join(self.tmp, "rules")
+        os.makedirs(rules)
+        self.write_tree_module(rules, "rules_flutter", "rules_dart",
+                               self.GIT_PIN % ("rules_dart", "TREE123"))
+        self.write_full_fixture(rules, "rules_flutter", "rules_dart",
+                                self.GIT_PIN % ("rules_dart", "FIXTURE999"))
+        text = module_bazel_text(rules, [])
+        self.assertIn("TREE123", text)
+        self.assertNotIn("FIXTURE999", text)
+        self.assertIn("@rules_dart//dart:defs.bzl", text)
+
+    def test_ai_scheme_names_come_from_tree(self):
+        rules = os.path.join(self.tmp, "ai-rules")
+        os.makedirs(rules)
+        self.write_tree_module(rules, "ai_rules_flutter", "ai_rules_dart",
+                               self.GIT_PIN % ("ai_rules_dart", "TREE123"))
+        self.write_full_fixture(rules, "ai_rules_flutter", "ai_rules_dart",
+                                self.GIT_PIN % ("ai_rules_dart", "TREE123"))
+        text = module_bazel_text(rules, [])
+        self.assertIn("module_name = \"ai_rules_flutter\"", text)
+        self.assertIn("module_name = \"ai_rules_dart\"", text)
+        self.assertIn("path = \"%s\"," % rules, text)
+        self.assertNotIn("module_name = \"rules_flutter\"", text)
+        self.assertNotIn("module_name = \"rules_dart\"", text)
+        self.assertIn("@rules_dart//dart:defs.bzl", text)
+
+    def test_repo_name_override_maps_to_ai_module(self):
+        rules = os.path.join(self.tmp, "ai-rules2")
+        os.makedirs(rules)
+        self.write_tree_module(rules, "ai_rules_flutter", "ai_rules_dart",
+                               self.GIT_PIN % ("ai_rules_dart", "TREE123"))
+        self.write_full_fixture(rules, "ai_rules_flutter", "ai_rules_dart",
+                                self.GIT_PIN % ("ai_rules_dart", "TREE123"))
+        text = module_bazel_text(
+            rules, [("rules_dart", "/elsewhere/rules_dart")])
+        self.assertIn("module_name = \"ai_rules_dart\"", text)
+        self.assertIn("/elsewhere/rules_dart", text)
+        self.assertNotIn("TREE123", text)
+
+    def test_module_name_override_accepted(self):
+        rules = os.path.join(self.tmp, "ai-rules3")
+        os.makedirs(rules)
+        self.write_tree_module(rules, "ai_rules_flutter", "ai_rules_dart",
+                               self.GIT_PIN % ("ai_rules_dart", "TREE123"))
+        self.write_full_fixture(rules, "ai_rules_flutter", "ai_rules_dart",
+                                self.GIT_PIN % ("ai_rules_dart", "TREE123"))
+        text = module_bazel_text(
+            rules, [("ai_rules_dart", "/elsewhere/rules_dart")])
+        self.assertIn("module_name = \"ai_rules_dart\"", text)
+        self.assertIn("/elsewhere/rules_dart", text)
+
+    def test_single_version_pin_scheme(self):
+        pin = ("single_version_override(\n"
+               "    module_name = \"rules_dart\",\n"
+               "    version = \"0.13.2\",\n"
+               ")\n")
+        rules = os.path.join(self.tmp, "sv-rules")
+        os.makedirs(rules)
+        self.write_tree_module(rules, "rules_flutter", "rules_dart", pin)
+        self.write_full_fixture(rules, "rules_flutter", "rules_dart", pin)
+        text = module_bazel_text(rules, [])
+        self.assertIn("single_version_override(", text)
+        self.assertIn("0.13.2", text)
+
+    def test_archive_pin_scheme(self):
+        pin = ("archive_override(\n"
+               "    module_name = \"rules_dart\",\n"
+               "    urls = \"https://example.com/rules_dart.tar.gz\",\n"
+               "    integrity = \"sha256-abc=\",\n"
+               ")\n")
+        rules = os.path.join(self.tmp, "ar-rules")
+        os.makedirs(rules)
+        self.write_tree_module(rules, "rules_flutter", "rules_dart", pin)
+        self.write_full_fixture(rules, "rules_flutter", "rules_dart", pin)
+        text = module_bazel_text(rules, [])
+        self.assertIn("archive_override(", text)
+        self.assertIn("sha256-abc=", text)
+
+    def test_tree_fixture_name_mismatch_raises(self):
+        rules = os.path.join(self.tmp, "bad-rules")
+        os.makedirs(rules)
+        self.write_tree_module(rules, "ai_rules_flutter", "ai_rules_dart",
+                               self.GIT_PIN % ("ai_rules_dart", "TREE123"))
+        self.write_full_fixture(rules, "rules_flutter", "rules_dart",
+                                self.GIT_PIN % ("rules_dart", "TREE123"))
+        with self.assertRaises(ValueError):
+            module_bazel_text(rules, [])
+
+    def test_fallback_uses_tree_module_names(self):
+        rules = os.path.join(self.tmp, "ai-empty")
+        os.makedirs(rules)
+        self.write_tree_module(rules, "ai_rules_flutter", "ai_rules_dart",
+                               self.GIT_PIN % ("ai_rules_dart", "TREE123"))
+        text = module_bazel_text(rules, [])
+        self.assertIn("module_name = \"ai_rules_flutter\"", text)
+        self.assertIn("module(name = \"bench_monorepo\")", text)
+
     def test_bazelrc_filtering(self):
         self.assertIn("common --lockfile_mode=off\n",
                       bazelrc_text("/nonexistent"))

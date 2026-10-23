@@ -43,6 +43,7 @@ pins can never drift from what ``rules_flutter`` main verifies.
 import argparse
 import json
 import os
+import re
 import shutil
 import sys
 
@@ -759,99 +760,161 @@ def read_bazel_version_or(rules_flutter_dir, fallback="9.3.0"):
     return fallback
 
 
+# Module names the trees may carry (BCR rename): rules_dart is published
+# as ai_rules_dart (repo_name "rules_dart") and rules_flutter as
+# ai_rules_flutter (repo_name "rules_flutter"). Labels keep the repo
+# names (@rules_dart, @rules_flutter); overrides use module names.
+FLUTTER_MODULE_NAMES = ("rules_flutter", "ai_rules_flutter")
+DART_MODULE_NAMES = ("rules_dart", "ai_rules_dart")
+HELLO_MODULE_NAME = "rules_flutter_hello_world"
+BENCH_MODULE_NAME = "bench_monorepo"
+OVERRIDE_KINDS = ("git_override", "archive_override",
+                  "single_version_override")
+
+
+def extract_pin_block(module_bazel_text, module_name):
+    """The git/archive/single_version override block for module_name.
+
+    Matches by the quoted module name, so "rules_dart" never matches
+    "ai_rules_dart". Returns None when the module has no pin block.
+    """
+    wanted = '"%s"' % module_name
+    for kind in OVERRIDE_KINDS:
+        in_block = False
+        block_lines = []
+        for line in module_bazel_text.split("\n"):
+            trimmed = line.strip()
+            if not in_block and trimmed.startswith(kind + "("):
+                in_block = True
+                block_lines = []
+            if in_block:
+                block_lines.append(line)
+                if trimmed == ")":
+                    if any(wanted in text for text in block_lines):
+                        return "\n".join(block_lines) + "\n"
+                    in_block = False
+    return None
+
+
 def extract_rules_dart_git_override(module_bazel_text):
+    return extract_pin_block(module_bazel_text, "rules_dart")
+
+
+def parse_module_name(module_bazel_text):
+    """The module(name = ...) of a MODULE.bazel, or None when absent."""
+    match = re.search(r'module\(\s*name\s*=\s*"([^"]+)"',
+                      module_bazel_text)
+    return match.group(1) if match else None
+
+
+def read_tree_modules(rules_flutter_dir):
+    """(flutter_name, dart_name, dart_pin) the rules_flutter tree declares.
+
+    The flutter name comes from the tree MODULE.bazel's module(name =
+    ...); the dart name and its pin (git/archive/single_version
+    override matched by that name) from the same file. Without a tree
+    MODULE.bazel (unit tests) the names stay None and the caller falls
+    back to the fixture's names; every name written otherwise comes
+    from the trees, never from a constant.
+    """
+    try:
+        with open(os.path.join(rules_flutter_dir, "MODULE.bazel"),
+                  encoding="utf-8") as fh:
+            root = fh.read()
+    except OSError:
+        return (None, None, None)
+    dart_name = None
+    for candidate in DART_MODULE_NAMES:
+        if 'name = "%s"' % candidate in root:
+            dart_name = candidate
+            break
+    return (parse_module_name(root), dart_name,
+            extract_pin_block(root, dart_name) if dart_name else None)
+
+
+def read_fixture_modules(fixture_text):
+    """(flutter_name, dart_name, dart_pin) the hello_world fixture declares.
+
+    The flutter name is the module_name of the local_path_override
+    pointing at "../.."; the dart name and pin come from the fixture's
+    own override block, in either naming scheme.
+    """
+    flutter_name = None
     in_block = False
     block_lines = []
-    for line in module_bazel_text.split("\n"):
+    for line in fixture_text.split("\n"):
         trimmed = line.strip()
-        if not in_block and trimmed.startswith("git_override("):
+        if not in_block and trimmed.startswith("local_path_override("):
             in_block = True
             block_lines = []
         if in_block:
             block_lines.append(line)
             if trimmed == ")":
-                if any('"rules_dart"' in b for b in block_lines):
-                    return "\n".join(block_lines) + "\n"
                 in_block = False
-    return None
+                if any('path = "../.."' in text for text in block_lines):
+                    for text in block_lines:
+                        match = re.search(
+                            r'module_name\s*=\s*"([^"]+)"', text)
+                        if match:
+                            flutter_name = match.group(1)
+    dart_name = None
+    dart_pin = None
+    for candidate in DART_MODULE_NAMES:
+        dart_pin = extract_pin_block(fixture_text, candidate)
+        if dart_pin is not None:
+            dart_name = candidate
+            break
+    return (flutter_name, dart_name, dart_pin)
 
 
-def module_bazel_text(rules_flutter_dir, overrides):
-    """MODULE.bazel derived from the hello_world fixture.
-
-    Substitutes only the module name and the rules_flutter override path;
-    everything else stays byte-identical to the fixture. Falls back to an
-    embedded minimal module when the fixture is absent (unit tests).
-    """
-    extra_overrides = ""
-    rules_dart_override = None
-    for mod_name, mod_dir in overrides:
-        if mod_name == "rules_flutter":
-            continue
-        block = (
-            "local_path_override(\n"
-            '    module_name = "%s",\n'
-            '    path = "%s",\n)\n' % (mod_name, mod_dir)
-        )
-        if mod_name == "rules_dart":
-            rules_dart_override = block
-        else:
-            extra_overrides += block
-
-    fixture = os.path.join(
-        rules_flutter_dir, "e2e", "hello_world", "MODULE.bazel")
-    if os.path.isfile(fixture):
-        with open(fixture, encoding="utf-8") as fh:
-            text = fh.read()
-        if "module(name = \"rules_flutter_hello_world\")" not in text:
-            raise ValueError(
-                "fixture '%s' is not the hello_world module" % fixture)
-        if text.count("path = \"../..\",") != 1:
-            raise ValueError(
-                "fixture '%s' lacks the single rules_flutter path override"
-                % fixture)
-        out = text.replace(
-            "module(name = \"rules_flutter_hello_world\")",
-            "module(name = \"bench_monorepo\")",
-        )
-        out = out.replace(
-            "path = \"../..\",",
-            "path = \"%s\"," % rules_flutter_dir,
-        )
-        replaced = False
-        if rules_dart_override is not None:
-            try:
-                with open(os.path.join(rules_flutter_dir, "MODULE.bazel"),
-                          encoding="utf-8") as fh:
-                    root = fh.read()
-                git_override = extract_rules_dart_git_override(root)
-                if git_override is not None and git_override in out:
-                    out = out.replace(git_override, rules_dart_override, 1)
-                    replaced = True
-            except OSError:
-                pass
-            if not replaced:
-                # No git_override to swap (minimal fixture): append instead so
-                # the override is never silently dropped.
-                extra_overrides += rules_dart_override
-        out += extra_overrides
-        return out
-
+def local_path_override(module_name, path):
+    """A local_path_override block for module_name pointing at path."""
     return (
-        "module(name = \"bench_monorepo\")\n"
-        "\n"
-        "bazel_dep(name = \"rules_flutter\", version = \"0.0.0\")\n"
-        "bazel_dep(name = \"rules_dart\", version = \"0.7.3\")\n"
-        "bazel_dep(name = \"bazel_skylib\", version = \"1.9.2\")\n"
-        "bazel_dep(name = \"apple_support\", version = \"2.9.1\")\n"
-        "bazel_dep(name = \"rules_apple\", version = \"5.2.0\")\n"
-        "bazel_dep(name = \"rules_swift\", version = \"4.1.2\")\n"
-        "bazel_dep(name = \"platforms\", version = \"1.1.0\")\n"
-        "\n"
         "local_path_override(\n"
-        "    module_name = \"rules_flutter\",\n"
-        "    path = \"%s\",\n)\n" % rules_flutter_dir
-        + (rules_dart_override or "")
+        '    module_name = "%s",\n'
+        '    path = "%s",\n)\n' % (module_name, path)
+    )
+
+
+def split_overrides(overrides, rules_flutter_dir):
+    """(flutter_path, dart_path, extra) of --override NAME=PATH flags.
+
+    NAME accepts the module name or the repo name of either rule set;
+    anything else becomes a verbatim extra local_path_override.
+    """
+    flutter_path = rules_flutter_dir
+    dart_path = None
+    extra_overrides = ""
+    for mod_name, mod_dir in overrides:
+        if mod_name in FLUTTER_MODULE_NAMES:
+            flutter_path = mod_dir
+        elif mod_name in DART_MODULE_NAMES:
+            dart_path = mod_dir
+        else:
+            extra_overrides += local_path_override(mod_name, mod_dir)
+    return (flutter_path, dart_path, extra_overrides)
+
+
+def fallback_module_text(flutter_name, dart_name, flutter_path,
+                         dart_override, extra_overrides):
+    """Embedded minimal MODULE.bazel when the fixture is absent.
+
+    Names come from the tree (defaults for unit tests without one);
+    the extension keeps the repo name, as labels do.
+    """
+    return (
+        "module(name = \"%s\")\n" % BENCH_MODULE_NAME
+        + "\n"
+        + "bazel_dep(name = \"%s\", version = \"0.0.0\")\n" % flutter_name
+        + "bazel_dep(name = \"%s\", version = \"0.7.3\")\n" % dart_name
+        + "bazel_dep(name = \"bazel_skylib\", version = \"1.9.2\")\n"
+        + "bazel_dep(name = \"apple_support\", version = \"2.9.1\")\n"
+        + "bazel_dep(name = \"rules_apple\", version = \"5.2.0\")\n"
+        + "bazel_dep(name = \"rules_swift\", version = \"4.1.2\")\n"
+        + "bazel_dep(name = \"platforms\", version = \"1.1.0\")\n"
+        + "\n"
+        + local_path_override(flutter_name, flutter_path)
+        + (dart_override or "")
         + extra_overrides
         + "flutter = use_extension(\"@rules_flutter//flutter:extensions.bzl\", \"flutter\")\n"
         "flutter.toolchain(flutter_version = \"3.47.7\")\n"
@@ -862,6 +925,85 @@ def module_bazel_text(rules_flutter_dir, overrides):
         "\n"
         "register_toolchains(\"@flutter_toolchains//:all\")\n"
     )
+
+
+def module_bazel_text(rules_flutter_dir, overrides):
+    """MODULE.bazel derived from the hello_world fixture.
+
+    Every module name written comes from the trees, never from a
+    constant: rules_flutter's own name from its MODULE.bazel
+    module(name = ...), the rules_dart dependency's name and pin from
+    the same file, and the fixture's names as the fixture declares
+    them (both schemes: rules_* and ai_rules_*). An --override
+    NAME=PATH accepts the module name or the repo name and is written
+    under the module name the tree declares; without one the dart pin
+    is the tree's own pin block. Labels keep the repo names
+    (@rules_dart, @rules_flutter). Everything else stays
+    byte-identical to the fixture. Falls back to an embedded minimal
+    module when the fixture is absent (unit tests).
+    """
+    tree_flutter, tree_dart, tree_pin = read_tree_modules(rules_flutter_dir)
+    flutter_path, dart_path, extra_overrides = split_overrides(
+        overrides, rules_flutter_dir)
+
+    fixture = os.path.join(
+        rules_flutter_dir, "e2e", "hello_world", "MODULE.bazel")
+    if os.path.isfile(fixture):
+        with open(fixture, encoding="utf-8") as fh:
+            text = fh.read()
+        if "module(name = \"%s\")" % HELLO_MODULE_NAME not in text:
+            raise ValueError(
+                "fixture '%s' is not the hello_world module" % fixture)
+        if text.count("path = \"../..\",") != 1:
+            raise ValueError(
+                "fixture '%s' lacks the single rules_flutter path override"
+                % fixture)
+        fixture_flutter, fixture_dart, fixture_pin = read_fixture_modules(
+            text)
+        if (tree_flutter is not None and fixture_flutter is not None
+                and tree_flutter != fixture_flutter):
+            raise ValueError(
+                "fixture '%s' overrides %s but the tree is %s"
+                % (fixture, fixture_flutter, tree_flutter))
+        if (tree_dart is not None and fixture_dart is not None
+                and tree_dart != fixture_dart):
+            raise ValueError(
+                "fixture '%s' pins %s but the tree depends on %s"
+                % (fixture, fixture_dart, tree_dart))
+        dart_name = tree_dart or fixture_dart or "rules_dart"
+        out = text.replace(
+            "module(name = \"%s\")" % HELLO_MODULE_NAME,
+            "module(name = \"%s\")" % BENCH_MODULE_NAME,
+        )
+        out = out.replace(
+            "path = \"../..\",",
+            "path = \"%s\"," % flutter_path,
+        )
+        if dart_path is not None:
+            dart_override = local_path_override(dart_name, dart_path)
+            if fixture_pin is not None and fixture_pin in out:
+                out = out.replace(fixture_pin, dart_override, 1)
+            else:
+                # No pin block to swap (minimal fixture): append instead
+                # so the override is never silently dropped.
+                extra_overrides += dart_override
+        elif tree_pin is not None and fixture_pin != tree_pin:
+            # The tree's own pin is the source of truth: without a user
+            # override the generated workspace pins what the tree pins.
+            if fixture_pin is not None and fixture_pin in out:
+                out = out.replace(fixture_pin, tree_pin, 1)
+            else:
+                extra_overrides += tree_pin
+        out += extra_overrides
+        return out
+
+    dart_override = None
+    if dart_path is not None:
+        dart_override = local_path_override(tree_dart or "rules_dart",
+                                            dart_path)
+    return fallback_module_text(tree_flutter or "rules_flutter",
+                                tree_dart or "rules_dart", flutter_path,
+                                dart_override, extra_overrides)
 
 
 def copy_pub_file(out_dir, rules_flutter_dir, file_name, fallback):
