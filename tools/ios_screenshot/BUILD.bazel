@@ -1,4 +1,4 @@
-load("@rules_dart//dart:defs.bzl", "dart_binary")
+load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_test")
 
 # iOS device screenshot helpers. These are `dart_binary` targets, not
 # `py_binary`: each entrypoint is a thin driver (`lib/*.dart`, `dart:io`
@@ -24,4 +24,11 @@ dart_binary(
     compile_mode = "exe",
     main = "lib/tunneld.dart",
     visibility = ["//tools/dev_tool:__pkg__"],
+)
+
+dart_test(
+    name = "python_host_test",
+    srcs = glob(["lib/**/*.dart"]),
+    main = "test/python_host_test.dart",
+    deps = ["@dev_tool_deps//:test"],
 )
