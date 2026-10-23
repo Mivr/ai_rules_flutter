@@ -329,7 +329,7 @@ def linux_plugin_inputs(srcs, hdrs = [], include_dirs = []):
     """Builds the `plugins` struct `compile_linux_runner` reads."""
     return struct(srcs = srcs, hdrs = hdrs, include_dirs = include_dirs)
 
-def compile_linux_runner(ctx, engine_files, defines, linux_sysroot, runner = struct(srcs = [], hdrs = []), registrant = struct(srcs = [], hdrs = []), target_arch = "", plugins = struct(srcs = [], hdrs = [], include_dirs = [])):
+def compile_linux_runner(ctx, engine_files, defines, linux_sysroot, runner = linux_runner_inputs([]), registrant = linux_registrant_inputs([]), target_arch = "", plugins = linux_plugin_inputs([])):
     """Compile the C++ GTK Linux runner binary.
 
     Uses cc_common.compile() + cc_common.link() with Bazel's hermetic CC
@@ -357,18 +357,7 @@ def compile_linux_runner(ctx, engine_files, defines, linux_sysroot, runner = str
     # Find the engine shared library file for the linker.
     engine_so, header_files = _find_linux_engine_so(engine_files)
 
-    # `getattr` with the constructor defaults: a caller-built struct that
-    # omits an optional field (or predates one) still analyses, exactly as
-    # the old flat `= []` defaults allowed omitting the argument.
-    runner_srcs = getattr(runner, "srcs", [])
-    runner_hdrs = getattr(runner, "hdrs", [])
-    registrant_srcs = getattr(registrant, "srcs", [])
-    registrant_hdrs = getattr(registrant, "hdrs", [])
-    plugin_srcs = getattr(plugins, "srcs", [])
-    plugin_hdrs = getattr(plugins, "hdrs", [])
-    plugin_include_dirs = getattr(plugins, "include_dirs", [])
-
-    additional_srcs = list(registrant_srcs)
+    additional_srcs = list(registrant.srcs)
 
     # Compute GTK3 include/link flags from the hermetic Chromium sysroot.
     sysroot = _linux_sysroot_flags(linux_sysroot, target_arch)
@@ -380,13 +369,13 @@ def compile_linux_runner(ctx, engine_files, defines, linux_sysroot, runner = str
     # Include registrant headers and runner headers as additional inputs so
     # #include directives resolve.  Also add their directories to the include
     # path so runner code can do #include "flutter/generated_plugin_registrant.h".
-    all_header_files = header_files + registrant_hdrs + runner_hdrs + plugin_hdrs
-    extra_compile = _linux_runner_include_flags(runner_hdrs, registrant_hdrs, plugin_hdrs, plugin_srcs, plugin_include_dirs)
+    all_header_files = header_files + registrant.hdrs + runner.hdrs + plugins.hdrs
+    extra_compile = _linux_runner_include_flags(runner.hdrs, registrant.hdrs, plugins.hdrs, plugins.srcs, plugins.include_dirs)
 
     return compile_and_link_runner(
         ctx = ctx,
         name = ctx.label.name + "_linux_runner",
-        srcs = runner_srcs,
+        srcs = runner.srcs,
         engine = make_runner_engine(
             library_file = engine_so,
             header_files = all_header_files,
@@ -398,7 +387,7 @@ def compile_linux_runner(ctx, engine_files, defines, linux_sysroot, runner = str
             defines = defines,
         ),
         extras = make_runner_extras(
-            additional_srcs = additional_srcs + plugin_srcs,
+            additional_srcs = additional_srcs + plugins.srcs,
             system_libraries = gtk_libs,
             system_include_dirs = system_include_dirs,
             additional_inputs = sysroot_files,
