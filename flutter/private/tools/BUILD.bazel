@@ -22,6 +22,8 @@ exports_files(
         "macho_edit.dart",
         "merge_android_manifests.dart",
         "merge_plists.dart",
+        "plist_info.dart",
+        "plist_parse.dart",
         "strip_native_libs.dart",
         "web_guard.dart",
         "web_template.dart",
@@ -46,6 +48,8 @@ dart_binary(
         "apk_overlay.dart",
         "crc32.dart",
         "macho_edit.dart",
+        "plist_info.dart",
+        "plist_parse.dart",
         "sha256.dart",
         "xtool_hash.dart",
         "xtool_pack.dart",
@@ -244,6 +248,8 @@ dart_binary(
     srcs = [
         "crc32.dart",
         "macho_edit.dart",
+        "plist_info.dart",
+        "plist_parse.dart",
         "sha256.dart",
         "xtool_hash.dart",
     ],
@@ -320,6 +326,8 @@ _UNIT_TESTS = {
 # runner carries it too.
 _TOOL_SRCS = {
     "android_bundle.dart": [
+        "plist_info.dart",
+        "plist_parse.dart",
         "xtool_hash.dart",
         "xtool_pack.dart",
         "apk_overlay.dart",
@@ -332,6 +340,8 @@ _TOOL_SRCS = {
         "zlib_raw_trees.dart",
     ],
     "apk_overlay.dart": [
+        "plist_info.dart",
+        "plist_parse.dart",
         "xtool_hash.dart",
         "xtool_pack.dart",
         "crc32.dart",
@@ -350,6 +360,8 @@ _TOOL_SRCS = {
     "xtool_pack.dart": [
         "crc32.dart",
         "macho_edit.dart",
+        "plist_info.dart",
+        "plist_parse.dart",
         "sha256.dart",
         "xtool_hash.dart",
     ],
