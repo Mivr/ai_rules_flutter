@@ -75,6 +75,53 @@ final List<int> _staticDCodes = List<int>.generate(
   (i) => zlibStaticDtree[i].$1,
 );
 
+/// The values that travel together into [zlibBuildTree] (`static_tree_desc`
+/// in trees.h): the static code lengths (null for the bit-length tree, which
+/// has no static counterpart), the extra-bits table, its base offset, the
+/// element count and the maximum code length.
+class ZlibStaticTreeDesc {
+  final List<int>? staticLens;
+  final List<int> extra;
+  final int extraBase;
+  final int elems;
+  final int maxLength;
+
+  const ZlibStaticTreeDesc({
+    required this.staticLens,
+    required this.extra,
+    required this.extraBase,
+    required this.elems,
+    required this.maxLength,
+  });
+}
+
+/// Descriptor for the static literal tree (`static_l_desc`).
+final ZlibStaticTreeDesc zlibStaticLDesc = ZlibStaticTreeDesc(
+  staticLens: _staticLLens,
+  extra: zlibExtraLbits,
+  extraBase: 257,
+  elems: zlibLCodes,
+  maxLength: zlibMaxBits,
+);
+
+/// Descriptor for the static distance tree (`static_d_desc`).
+final ZlibStaticTreeDesc zlibStaticDDesc = ZlibStaticTreeDesc(
+  staticLens: _staticDLens,
+  extra: zlibExtraDbits,
+  extraBase: 0,
+  elems: zlibDCodes,
+  maxLength: zlibMaxBits,
+);
+
+/// Descriptor for the bit-length tree (`static_bl_desc`).
+const ZlibStaticTreeDesc zlibStaticBlDesc = ZlibStaticTreeDesc(
+  staticLens: null,
+  extra: zlibExtraBlbits,
+  extraBase: 0,
+  elems: zlibBlCodes,
+  maxLength: zlibMaxBlBits,
+);
+
 /// Maps a match distance minus one to a distance code (`d_code`).
 int zlibDCode(int dist) =>
     dist < 256 ? zlibDistCode[dist] : zlibDistCode[256 + (dist >> 7)];
@@ -252,12 +299,11 @@ void zlibGenBitlen(
 void zlibBuildTree(
   ZlibRawState s,
   ZlibRawTree tree,
-  List<int>? staticLens,
-  List<int> extra,
-  int extraBase,
-  int elems,
-  int maxLength,
+  ZlibStaticTreeDesc desc,
 ) {
+  final List<int>? staticLens = desc.staticLens;
+  final int elems = desc.elems;
+  final int maxLength = desc.maxLength;
   s.heapLen = 0;
   s.heapMax = zlibHeapSize;
   var maxCode = -1;
@@ -305,7 +351,7 @@ void zlibBuildTree(
     zlibPqdownheap(s, tree, 1);
   } while (s.heapLen >= 2);
   s.heap[--s.heapMax] = s.heap[1];
-  zlibGenBitlen(s, tree, staticLens, extra, extraBase, maxLength);
+  zlibGenBitlen(s, tree, staticLens, desc.extra, desc.extraBase, maxLength);
   zlibGenCodes(tree, maxCode, s.blCount);
 }
 
@@ -406,15 +452,7 @@ void zlibSendTree(ZlibRawState s, ZlibRawTree tree, int maxCode) {
 int zlibBuildBlTree(ZlibRawState s) {
   zlibScanTree(s, s.dynLtree, s.dynLtree.maxCode);
   zlibScanTree(s, s.dynDtree, s.dynDtree.maxCode);
-  zlibBuildTree(
-    s,
-    s.blTree,
-    null,
-    zlibExtraBlbits,
-    0,
-    zlibBlCodes,
-    zlibMaxBlBits,
-  );
+  zlibBuildTree(s, s.blTree, zlibStaticBlDesc);
   var maxBlindex = zlibBlCodes - 1;
   while (maxBlindex >= 3) {
     if (s.blTree.len[zlibBlOrder[maxBlindex]] != 0) break;
@@ -489,24 +527,8 @@ void zlibTrStoredBlock(ZlibRawState s, int bufStart, int storedLen, int last) {
 /// window slid and no stored block is possible (`buf == NULL`). Data-type
 /// detection is omitted: its result is only reported, never encoded.
 void zlibTrFlushBlock(ZlibRawState s, int bufStart, int storedLen, int last) {
-  zlibBuildTree(
-    s,
-    s.dynLtree,
-    _staticLLens,
-    zlibExtraLbits,
-    257,
-    zlibLCodes,
-    zlibMaxBits,
-  );
-  zlibBuildTree(
-    s,
-    s.dynDtree,
-    _staticDLens,
-    zlibExtraDbits,
-    0,
-    zlibDCodes,
-    zlibMaxBits,
-  );
+  zlibBuildTree(s, s.dynLtree, zlibStaticLDesc);
+  zlibBuildTree(s, s.dynDtree, zlibStaticDDesc);
   final int maxBlindex = zlibBuildBlTree(s);
   final int staticLenb = (s.staticLen + 3 + 7) >> 3;
   var optLenb = (s.optLen + 3 + 7) >> 3;
