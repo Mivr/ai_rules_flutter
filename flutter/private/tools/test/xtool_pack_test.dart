@@ -4,8 +4,16 @@ import 'dart:typed_data';
 
 import 'package:test/test.dart';
 
+import '../code_resources.dart';
+import '../plist_info.dart';
+import '../xtool_bundle.dart';
+import '../xtool_hash.dart';
 import '../xtool_pack.dart';
-import '../macho_edit.dart' as macho;
+import '../xtool_runner.dart';
+import '../xtool_stub.dart';
+import '../zip_reader.dart';
+import '../zip_writer.dart';
+import '../macho_framework.dart' as macho;
 
 String _hex(Uint8List bytes) =>
     bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();

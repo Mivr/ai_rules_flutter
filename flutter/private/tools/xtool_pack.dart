@@ -50,17 +50,6 @@ import 'dart:io';
 import 'xtool_bundle.dart';
 import 'xtool_runner.dart';
 
-export 'code_resources.dart';
-export 'xtool_bundle.dart';
-export 'xtool_framework.dart';
-export 'plist_info.dart';
-export 'zip_reader.dart';
-export 'zip_writer.dart';
-export 'plist_parse.dart';
-export 'xtool_hash.dart';
-export 'xtool_runner.dart';
-export 'xtool_stub.dart';
-
 // ---------------------------------------------------------------------------
 // Bundle version resolution (`resolve-version` subcommand)
 // ---------------------------------------------------------------------------

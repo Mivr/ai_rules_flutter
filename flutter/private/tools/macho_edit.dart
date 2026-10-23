@@ -12,16 +12,6 @@ import 'macho_patch.dart';
 import 'macho_stub.dart';
 import 'macho_verify.dart';
 
-export 'macho_cli.dart';
-export 'macho_constants.dart';
-export 'macho_copy.dart';
-export 'macho_fat.dart';
-export 'macho_framework.dart';
-export 'macho_parse.dart';
-export 'macho_patch.dart';
-export 'macho_stub.dart';
-export 'macho_verify.dart';
-
 void main(List<String> args) {
   if (args.isEmpty) {
     usageError(

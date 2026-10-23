@@ -285,7 +285,6 @@ dart_binary(
         "xtool_hash.dart",
         "xtool_runner.dart",
         "xtool_stub.dart",
-        "zip_reader.dart",
         "zip_writer.dart",
     ],
     compile_mode = "exe",
@@ -385,10 +384,8 @@ _TOOL_SRCS = {
         "zlib_raw_tables.dart",
     ],
     "xtool_pack.dart": [
-        # xtool_pack_test still reaches the macho_edit main itself, so the
-        # test carries it and its verify import beyond the binary's own
-        # sources below.
-        "macho_edit.dart",
+        # xtool_pack_test reads produced archives back itself, so the test
+        # carries zip_reader beyond the binary's own sources below.
         "crc32.dart",
         "xtool_framework.dart",
         "zip_reader.dart",
@@ -400,7 +397,6 @@ _TOOL_SRCS = {
         "macho_copy.dart",
         "macho_fat.dart",
         "macho_framework.dart",
-        "macho_verify.dart",
         "macho_parse.dart",
         "macho_patch.dart",
         "macho_stub.dart",

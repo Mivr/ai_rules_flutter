@@ -5,6 +5,12 @@ import 'dart:typed_data';
 import 'package:test/test.dart';
 
 import '../macho_edit.dart' as macho;
+import '../macho_constants.dart' as macho;
+import '../macho_fat.dart' as macho;
+import '../macho_framework.dart' as macho;
+import '../macho_parse.dart' as macho;
+import '../macho_patch.dart' as macho;
+import '../macho_stub.dart' as macho;
 
 String _hex(Uint8List bytes) =>
     bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
