@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:test/test.dart';
@@ -142,4 +143,121 @@ void main() {
       );
     });
   });
+
+  group('aaptDecisionSize fast path', () {
+    test('fast decisions match the exact port over the fuzz corpus', () {
+      var checked = 0;
+      for (final data in _decisionCorpus()) {
+        final fastSize = ZLibEncoder(raw: true).convert(data).length;
+        final fast = aaptDeflates(
+          compressedSize: aaptDecisionSize(data, fastSize),
+          rawSize: data.length,
+        );
+        final exact = aaptDeflates(
+          compressedSize: aaptDeflatedSize(data),
+          rawSize: data.length,
+        );
+        expect(
+          fast,
+          exact,
+          reason:
+              'raw=${data.length} fastSize=$fastSize '
+              'exact=${aaptDeflatedSize(data)}',
+        );
+        checked++;
+      }
+      expect(checked, greaterThan(200));
+    });
+  });
+}
+
+/// Deterministic hostile corpus for the fast-path parity check: every size
+/// from empty to 100 KB across fills, random alphabets, periods, text and
+/// sparse patterns, seeded so the run is reproducible.
+Iterable<Uint8List> _decisionCorpus() sync* {
+  const sizes = [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    7,
+    8,
+    9,
+    15,
+    16,
+    17,
+    19,
+    23,
+    24,
+    25,
+    31,
+    32,
+    33,
+    36,
+    50,
+    56,
+    57,
+    60,
+    63,
+    64,
+    65,
+    100,
+    127,
+    128,
+    129,
+    150,
+    200,
+    220,
+    242,
+    255,
+    256,
+    257,
+    300,
+    512,
+    1000,
+    1024,
+    2048,
+    4095,
+    4096,
+    4097,
+    5000,
+    8192,
+    16384,
+    32768,
+    65536,
+    100000,
+  ];
+  final text = utf8.encode('boundary method compression entry engine ');
+  for (final size in sizes) {
+    final random = Random(0xA47A9 + size);
+    final patterns = <Uint8List>[
+      Uint8List(size),
+      Uint8List.fromList(List<int>.filled(size, 0xFF)),
+      Uint8List.fromList(
+        List<int>.generate(size, (_) => random.nextInt(256)),
+      ),
+      Uint8List.fromList(
+        List<int>.generate(size, (_) => random.nextInt(16)),
+      ),
+      Uint8List.fromList(
+        List<int>.generate(size, (_) => random.nextInt(4)),
+      ),
+      Uint8List.fromList(
+        List<int>.generate(size, (i) => text[i % text.length]),
+      ),
+      Uint8List.fromList(
+        List<int>.generate(size, (i) => i % 251),
+      ),
+      Uint8List.fromList(
+        List<int>.generate(
+          size,
+          (i) => i % 32 == 0 ? random.nextInt(256) : 0,
+        ),
+      ),
+    ];
+    // Keep the big end of the corpus cheap: two patterns past 32 KB.
+    yield* (size > 32768 ? patterns.sublist(2, 4) : patterns);
+  }
 }
