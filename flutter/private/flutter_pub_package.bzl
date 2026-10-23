@@ -2143,7 +2143,21 @@ def _spoke_entry_parts(package_name, entry_path):
              "\" which names no file or directory.")
     return parts
 
-def _link_scoped_symlink(ctx, node, repo_rel, package_name, package_realpath):
+def _link_new_symlink(ctx, node, repo_rel, linked):
+    """Symlink one node unless an earlier entry already linked it.
+
+    Overlapping declarations (a shader inside a declared asset dir, a file
+    inside its own declared dir) reach the same spoke path twice; the
+    second link would fail with "File exists". The first link already
+    watches the source, so skipping repeats loses nothing.
+    """
+    if repo_rel in linked:
+        return
+    ctx.symlink(node, repo_rel)
+    ctx.watch(node)
+    linked[repo_rel] = True
+
+def _link_scoped_symlink(ctx, node, repo_rel, package_name, package_realpath, linked):
     """Replicate one source symlink inside the spoke without descending.
 
     A link resolving to the package or an ancestor would cycle the
@@ -2153,10 +2167,9 @@ def _link_scoped_symlink(ctx, node, repo_rel, package_name, package_realpath):
     """
     if path_spoke_is_ancestor_cycle(package_realpath, str(node.realpath)):
         fail(ancestor_link_refusal(package_name, repo_rel, str(node.realpath)))
-    ctx.symlink(node, repo_rel)
-    ctx.watch(node)
+    _link_new_symlink(ctx, node, repo_rel, linked)
 
-def _link_scoped_tree(ctx, node, repo_rel, package_name, package_realpath):
+def _link_scoped_tree(ctx, node, repo_rel, package_name, package_realpath, linked):
     """Mirror one real source directory into the spoke file by file.
 
     Real directories become real repository directories holding one symlink
@@ -2180,7 +2193,7 @@ def _link_scoped_tree(ctx, node, repo_rel, package_name, package_realpath):
                 continue
             child_rel = parent_rel + "/" + name
             if str(child.realpath) != package_realpath + "/" + child_rel:
-                _link_scoped_symlink(ctx, node = child, repo_rel = child_rel, package_name = package_name, package_realpath = package_realpath)
+                _link_scoped_symlink(ctx, node = child, repo_rel = child_rel, package_name = package_name, package_realpath = package_realpath, linked = linked)
                 continue
             if child.is_dir:
                 ctx.watch(child)
@@ -2189,14 +2202,13 @@ def _link_scoped_tree(ctx, node, repo_rel, package_name, package_realpath):
             if name in _PATH_SPOKE_SKIP_FILES:
                 ctx.watch(child)
                 continue
-            ctx.symlink(child, child_rel)
-            ctx.watch(child)
+            _link_new_symlink(ctx, child, child_rel, linked)
     if stack:
         fail("flutter.pub repo rule: path dependency \"" + package_name +
              "\" holds more than 10000 directories under its linked " +
              "entries. Refusing it rather than fetching part of the tree.")
 
-def _link_top_level_shader_includes(ctx, src, package_name, package_realpath):
+def _link_top_level_shader_includes(ctx, src, package_name, package_realpath, linked):
     """Link top-level include siblings for a top-level declared shader.
 
     A declared `ripple.frag` at the package root resolves `#include`s
@@ -2216,12 +2228,11 @@ def _link_top_level_shader_includes(ctx, src, package_name, package_realpath):
         if name.rpartition(".")[2] not in _PATH_SPOKE_SHADER_INCLUDE_EXTS:
             continue
         if str(child.realpath) != package_realpath + "/" + name:
-            _link_scoped_symlink(ctx, node = child, repo_rel = name, package_name = package_name, package_realpath = package_realpath)
+            _link_scoped_symlink(ctx, node = child, repo_rel = name, package_name = package_name, package_realpath = package_realpath, linked = linked)
             continue
-        ctx.symlink(child, name)
-        ctx.watch(child)
+        _link_new_symlink(ctx, child, name, linked)
 
-def _link_scoped_dir_entry(ctx, src, entry_path, package_name, package_realpath):
+def _link_scoped_dir_entry(ctx, src, entry_path, package_name, package_realpath, linked):
     """Link one declared directory entry (asset, shader, or platform dir).
 
     Missing entries stay unlinked (a declared-but-absent directory is not
@@ -2234,15 +2245,15 @@ def _link_scoped_dir_entry(ctx, src, entry_path, package_name, package_realpath)
         return
     repo_rel = "/".join(parts)
     if str(node.realpath) != package_realpath + "/" + repo_rel:
-        _link_scoped_symlink(ctx, node = node, repo_rel = repo_rel, package_name = package_name, package_realpath = package_realpath)
+        _link_scoped_symlink(ctx, node = node, repo_rel = repo_rel, package_name = package_name, package_realpath = package_realpath, linked = linked)
         return
     if node.is_dir:
-        _link_scoped_tree(ctx, node, repo_rel, package_name, package_realpath)
+        _link_scoped_tree(ctx, node, repo_rel, package_name, package_realpath, linked)
         return
     ctx.symlink(node, repo_rel)
     ctx.watch(node)
 
-def _link_scoped_file_entry(ctx, src, entry_path, package_name, package_realpath):
+def _link_scoped_file_entry(ctx, src, entry_path, package_name, package_realpath, linked):
     """Link one declared file entry (pubspec, hook, asset, font, shader).
 
     Missing entries stay unlinked; a directory at the entry mirrors file
@@ -2255,18 +2266,17 @@ def _link_scoped_file_entry(ctx, src, entry_path, package_name, package_realpath
         return
     repo_rel = "/".join(parts)
     if str(node.realpath) != package_realpath + "/" + repo_rel:
-        _link_scoped_symlink(ctx, node = node, repo_rel = repo_rel, package_name = package_name, package_realpath = package_realpath)
+        _link_scoped_symlink(ctx, node = node, repo_rel = repo_rel, package_name = package_name, package_realpath = package_realpath, linked = linked)
         return
     if node.is_dir:
-        _link_scoped_tree(ctx, node, repo_rel, package_name, package_realpath)
+        _link_scoped_tree(ctx, node, repo_rel, package_name, package_realpath, linked)
         return
     if node.basename in _PATH_SPOKE_SKIP_FILES:
         ctx.watch(node)
         return
-    ctx.symlink(node, repo_rel)
-    ctx.watch(node)
+    _link_new_symlink(ctx, node, repo_rel, linked)
 
-def _link_spoke_contents(ctx, src, asset_block, plugin_block, package_name, package_realpath):
+def _link_spoke_contents(ctx, src, asset_block, plugin_block, package_name, package_realpath, linked):
     """Link everything the spoke generator reads or exposes — nothing else.
 
     The pubspec leads: `lib/`, hook scripts, declared assets, fonts, and
@@ -2276,27 +2286,29 @@ def _link_spoke_contents(ctx, src, asset_block, plugin_block, package_name, pack
     can parse it for this plan.) Everything else in the package —
     `example/`, `build/`, `.dart_tool/`, dot-directories, undeclared files
     — stays out of the spoke and unwatched, so machine-local state cannot
-    affect the fetch.
+    affect the fetch. Overlapping declarations (a shader inside a declared
+    asset dir, a file inside its own declared dir) link each spoke path
+    once: `linked` records every created symlink.
     """
     for entry in ["lib", "hook/build.dart", "hook/link.dart"]:
-        _link_scoped_file_entry(ctx, src, entry, package_name, package_realpath)
+        _link_scoped_file_entry(ctx, src, entry, package_name, package_realpath, linked)
     for asset in asset_block.assets:
         if asset.path.endswith("/"):
-            _link_scoped_dir_entry(ctx, src, asset.path[:-1], package_name, package_realpath)
+            _link_scoped_dir_entry(ctx, src, asset.path[:-1], package_name, package_realpath, linked)
         else:
-            _link_scoped_file_entry(ctx, src, asset.path, package_name, package_realpath)
+            _link_scoped_file_entry(ctx, src, asset.path, package_name, package_realpath, linked)
     for family in asset_block.fonts:
         for font in family.fonts:
-            _link_scoped_file_entry(ctx, src, font.asset, package_name, package_realpath)
+            _link_scoped_file_entry(ctx, src, font.asset, package_name, package_realpath, linked)
     for shader in asset_block.shaders:
-        _link_scoped_file_entry(ctx, src, shader.path, package_name, package_realpath)
+        _link_scoped_file_entry(ctx, src, shader.path, package_name, package_realpath, linked)
         shader_dir = shader.path.rpartition("/")[0]
         if shader_dir:
-            _link_scoped_dir_entry(ctx, src, shader_dir, package_name, package_realpath)
+            _link_scoped_dir_entry(ctx, src, shader_dir, package_name, package_realpath, linked)
         else:
-            _link_top_level_shader_includes(ctx, src, package_name, package_realpath)
+            _link_top_level_shader_includes(ctx, src, package_name, package_realpath, linked)
     for platform_dir in path_spoke_platform_dirs(plugin_block):
-        _link_scoped_dir_entry(ctx, src, platform_dir, package_name, package_realpath)
+        _link_scoped_dir_entry(ctx, src, platform_dir, package_name, package_realpath, linked)
 
 def link_path_package(ctx):
     """Symlinks a workspace-local `path:` package into the spoke, hermetically.
@@ -2341,12 +2353,13 @@ def link_path_package(ctx):
         ))
     package_name = ctx.attr.package_name
     package_realpath = str(src.realpath)
+    linked = {}
 
     # The pubspec leads: link it first, then parse the spoke-side copy for
     # the link plan, so the spoke links only what the generator reads or
     # exposes. A missing pubspec parses as empty rather than failing: the
     # spoke pipeline reports the real problem.
-    _link_scoped_file_entry(ctx, src, "pubspec.yaml", package_name, package_realpath)
+    _link_scoped_file_entry(ctx, src, "pubspec.yaml", package_name, package_realpath, linked)
     pubspec_node = ctx.path("pubspec.yaml")
     pubspec_text = ctx.read(pubspec_node) if pubspec_node.exists else ""
     _link_spoke_contents(
@@ -2356,6 +2369,7 @@ def link_path_package(ctx):
         parse_flutter_plugin_block(pubspec_text),
         package_name,
         package_realpath,
+        linked,
     )
     ctx.watch(src)
 

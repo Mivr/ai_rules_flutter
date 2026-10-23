@@ -313,6 +313,42 @@ def _outside_link_replicates_without_descending_test_impl(ctx):
 
 outside_link_replicates_without_descending_test = unittest.make(_outside_link_replicates_without_descending_test_impl)
 
+_OVERLAP_PUBSPEC = """name: mypkg
+flutter:
+  assets:
+    - data/x.txt
+    - data/
+  shaders:
+    - shaders/ripple.frag
+"""
+
+def _overlapping_entries_link_once_test_impl(ctx):
+    """A file inside its own declared dir (or a shader in its dir) links once.
+
+    The real fetch fails the second `ctx.symlink` to the same spoke path
+    with "File exists", so the link set dedupes: the file entry wins, the
+    directory mirror covers the rest.
+    """
+    env = unittest.begin(ctx)
+    mock = _make_mock_link_ctx({
+        "mypkg": {
+            "pubspec.yaml": _OVERLAP_PUBSPEC,
+            "lib": {"m.dart": None},
+            "data": {"x.txt": None, "y.txt": None},
+            "shaders": {"ripple.frag": None, "include": {"common.glsl": None}},
+        },
+    }, path_value = "mypkg", package_name = "mypkg")
+    link_path_package(mock.ctx)
+    names = sorted([link.name for link in mock.linked])
+    asserts.equals(
+        env,
+        ["data/x.txt", "data/y.txt", "lib/m.dart", "pubspec.yaml", "shaders/include/common.glsl", "shaders/ripple.frag"],
+        names,
+    )
+    return unittest.end(env)
+
+overlapping_entries_link_once_test = unittest.make(_overlapping_entries_link_once_test_impl)
+
 def _ancestor_link_is_refused_test_impl(ctx):
     """A link to the package or an ancestor fails naming package and link.
 
@@ -509,6 +545,7 @@ def path_package_test_suite(name):
         lock_path_uses_the_lock_files_own_directory_test,
         non_plugin_package_links_no_android_test,
         outside_link_replicates_without_descending_test,
+        overlapping_entries_link_once_test,
         path_spoke_platform_dirs_test,
         plugin_platform_dir_is_mirrored_not_symlinked_test,
         root_lock_needs_no_refusal_test,
