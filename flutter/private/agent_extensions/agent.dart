@@ -1638,8 +1638,9 @@ void _fillLinuxKeyMessage(_KeyMessageFill fill) {
   }
   if (fill.held(LogicalKeyboardKey.capsLock)) flags |= 0x10;
   fill.message['modifiers'] = flags;
-  fill.message['unicodeScalarValues'] =
-      fill.chars.isEmpty ? 0 : fill.chars.codeUnitAt(0);
+  fill.message['unicodeScalarValues'] = fill.chars.isEmpty
+      ? 0
+      : fill.chars.codeUnitAt(0);
 }
 
 void _fillWindowsKeyMessage(_KeyMessageFill fill) {

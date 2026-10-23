@@ -670,8 +670,7 @@ class _WebCompileRequest {
 /// map) with the wasm compiler's staging root mounted.
 void _compileWasm(_WebCompileRequest req) {
   final exeSuffix = Platform.isWindows ? '.exe' : '';
-  final outWasmFile =
-      File(req.outputWasm!)..parent.createSync(recursive: true);
+  final outWasmFile = File(req.outputWasm!)..parent.createSync(recursive: true);
   final tmpDir = Directory('${outWasmFile.parent.path}/_wasm_tmp')
     ..createSync(recursive: true);
   final tmpAbsPath = tmpDir.absolute.path;
