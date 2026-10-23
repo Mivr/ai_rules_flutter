@@ -5,7 +5,7 @@
 
 import 'dart:io';
 
-import 'macho_edit.dart' show parsePackedVersion, parsePlatform;
+import 'macho_fat.dart' show parsePackedVersion, parsePlatform;
 
 /// Prints a `macho_edit` usage error to stderr and exits with status 64.
 Never usageError(String message) {
