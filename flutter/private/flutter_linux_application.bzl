@@ -433,9 +433,11 @@ flutter_linux_runner_lib = rule(
         "_runner_source": attr.label(
             default = Label("//flutter/private/runners:linux_runner.cc"),
             allow_single_file = True,
+            doc = "Built-in GTK runner source compiled when the target sets no `srcs`.",
         ),
         "_cc_toolchain": attr.label(
             default = "@bazel_tools//tools/cpp:current_cc_toolchain",
+            doc = "C++ toolchain used to compile and link the runner.",
         ),
     },
     fragments = ["cpp"],
@@ -562,6 +564,7 @@ flutter_linux_bundle_rule = rule(
             default = Label("//flutter/private/tools:bundle_app"),
             executable = True,
             cfg = "exec",
+            doc = "Bundler binary assembling the Linux application directory.",
         ),
     },
     toolchains = [

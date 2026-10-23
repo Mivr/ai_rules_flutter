@@ -294,13 +294,16 @@ flutter_windows_runner_lib = rule(
         "_runner_sources": attr.label(
             default = Label("//flutter/private/runners:windows_runner_srcs"),
             allow_files = True,
+            doc = "Built-in Win32 runner sources compiled when the target sets no `srcs`.",
         ),
         "_runner_hdrs": attr.label(
             default = Label("//flutter/private/runners:windows_runner_hdrs"),
             allow_files = True,
+            doc = "Built-in Win32 runner headers added to the include path alongside `hdrs`.",
         ),
         "_cc_toolchain": attr.label(
             default = "@bazel_tools//tools/cpp:current_cc_toolchain",
+            doc = "C++ toolchain used to compile and link the runner.",
         ),
     },
     fragments = ["cpp"],
@@ -438,6 +441,7 @@ flutter_windows_bundle_rule = rule(
             default = Label("//flutter/private/tools:bundle_app"),
             executable = True,
             cfg = "exec",
+            doc = "Bundler binary assembling the Windows application directory.",
         ),
     },
     toolchains = [
