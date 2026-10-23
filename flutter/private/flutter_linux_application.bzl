@@ -22,7 +22,7 @@ Output bundle structure:
 
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
 load("//flutter/private:cc_runner_compile.bzl", "compile_and_link_runner")
-load("//flutter/private:common.bzl", "compute_desktop_bundle_copies", "resolve_exec_dart_vm", "resolve_flutter_sdk_info")
+load("//flutter/private:common.bzl", "compute_desktop_bundle_copies", "make_desktop_bundle_artifacts", "make_desktop_bundle_libs", "resolve_exec_dart_vm", "resolve_flutter_sdk_info")
 load("//flutter/private:engine_helpers.bzl", "find_engine_header_dir", "linux_multiarch_triple")
 
 # GTK3 include subdirectories within the Chromium sysroot.
@@ -465,13 +465,17 @@ def _flutter_linux_bundle_impl(ctx):
     # `bundled_code_assets` (Native Assets dynamic_loading_bundle dylibs)
     # land at `lib/<basename>` next to `libapp.so`.
     copies = compute_desktop_bundle_copies(
-        is_debug = is_debug,
-        kernel_dill_path = app_info.kernel_dill.path if app_info.kernel_dill else None,
-        aot_output_path = app_info.aot_output.path if app_info.aot_output else None,
-        aot_dst = "lib/libapp.so",
-        icu_data_path = icu_data.path,
-        engine_basenames = [(f.path, f.basename) for f in engine_files],
-        native_basenames = [(lib.path, lib.basename) for lib in native_libs],
+        artifacts = make_desktop_bundle_artifacts(
+            is_debug = is_debug,
+            kernel_dill_path = app_info.kernel_dill.path if app_info.kernel_dill else None,
+            aot_output_path = app_info.aot_output.path if app_info.aot_output else None,
+            aot_dst = "lib/libapp.so",
+            icu_data_path = icu_data.path,
+        ),
+        libs = make_desktop_bundle_libs(
+            engine_basenames = [(f.path, f.basename) for f in engine_files],
+            native_basenames = [(lib.path, lib.basename) for lib in native_libs],
+        ),
     )
     extra_inputs = []
     if is_debug and app_info.kernel_dill:

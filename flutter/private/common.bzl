@@ -1365,11 +1365,8 @@ def flutter_build_assets(ctx, flutter_sdk_info, output_dir, bundle):
         extra_asset_copies = extra_asset_copies,
     )
 
-def compute_desktop_bundle_copies(is_debug, kernel_dill_path, aot_output_path, aot_dst, icu_data_path, engine_basenames, native_basenames, engine_dst_prefix = "lib/", native_dst_prefix = "lib/"):
-    """Compute the file-copy list for a desktop Flutter bundle.
-
-    Builds the list of {"src": ..., "dst": ...} dicts that the Dart bundler
-    tool uses to assemble a Linux or Windows application directory.
+def make_desktop_bundle_artifacts(is_debug, kernel_dill_path, aot_output_path, aot_dst, icu_data_path):
+    """The app build outputs a desktop bundle copies into its directory.
 
     Args:
         is_debug: Whether this is a debug build.
@@ -1377,6 +1374,23 @@ def compute_desktop_bundle_copies(is_debug, kernel_dill_path, aot_output_path, a
         aot_output_path: Source path to AOT output (used in release mode), or None.
         aot_dst: Destination path for AOT output (e.g. "lib/libapp.so" or "app.so").
         icu_data_path: Source path to icudtl.dat.
+
+    Returns:
+        A struct with `is_debug`, `kernel_dill_path`, `aot_output_path`,
+        `aot_dst` and `icu_data_path`.
+    """
+    return struct(
+        is_debug = is_debug,
+        kernel_dill_path = kernel_dill_path,
+        aot_output_path = aot_output_path,
+        aot_dst = aot_dst,
+        icu_data_path = icu_data_path,
+    )
+
+def make_desktop_bundle_libs(engine_basenames, native_basenames, engine_dst_prefix = "lib/", native_dst_prefix = "lib/"):
+    """The engine and native libraries a desktop bundle copies, and where they land.
+
+    Args:
         engine_basenames: List of (src_path, basename) tuples for engine files.
         native_basenames: List of (src_path, basename) tuples for native FFI libs.
         engine_dst_prefix: Destination prefix for engine files (default "lib/").
@@ -1387,22 +1401,43 @@ def compute_desktop_bundle_copies(is_debug, kernel_dill_path, aot_output_path, a
             up via the standard search order.
 
     Returns:
+        A struct with `engine_basenames`, `native_basenames`,
+        `engine_dst_prefix` and `native_dst_prefix`.
+    """
+    return struct(
+        engine_basenames = engine_basenames,
+        native_basenames = native_basenames,
+        engine_dst_prefix = engine_dst_prefix,
+        native_dst_prefix = native_dst_prefix,
+    )
+
+def compute_desktop_bundle_copies(artifacts, libs):
+    """Compute the file-copy list for a desktop Flutter bundle.
+
+    Builds the list of {"src": ..., "dst": ...} dicts that the Dart bundler
+    tool uses to assemble a Linux or Windows application directory.
+
+    Args:
+        artifacts: The app build outputs, from `make_desktop_bundle_artifacts`.
+        libs: The engine and native libraries, from `make_desktop_bundle_libs`.
+
+    Returns:
         List of {"src": ..., "dst": ...} dicts.
     """
-    copies = [{"src": icu_data_path, "dst": "data/icudtl.dat"}]
+    copies = [{"src": artifacts.icu_data_path, "dst": "data/icudtl.dat"}]
 
-    if is_debug and kernel_dill_path:
+    if artifacts.is_debug and artifacts.kernel_dill_path:
         # The Flutter engine's embedder looks for kernel_blob.bin inside the
         # assets directory (settings.assets_path / "kernel_blob.bin").
-        copies.append({"src": kernel_dill_path, "dst": "data/flutter_assets/kernel_blob.bin"})
-    elif aot_output_path:
-        copies.append({"src": aot_output_path, "dst": aot_dst})
+        copies.append({"src": artifacts.kernel_dill_path, "dst": "data/flutter_assets/kernel_blob.bin"})
+    elif artifacts.aot_output_path:
+        copies.append({"src": artifacts.aot_output_path, "dst": artifacts.aot_dst})
 
-    for src_path, basename in engine_basenames:
-        copies.append({"src": src_path, "dst": engine_dst_prefix + basename})
+    for src_path, basename in libs.engine_basenames:
+        copies.append({"src": src_path, "dst": libs.engine_dst_prefix + basename})
 
-    for src_path, basename in native_basenames:
-        copies.append({"src": src_path, "dst": native_dst_prefix + basename})
+    for src_path, basename in libs.native_basenames:
+        copies.append({"src": src_path, "dst": libs.native_dst_prefix + basename})
 
     return copies
 

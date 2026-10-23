@@ -101,6 +101,8 @@ load(
     "flutter_web_shader_aspect",
     "host_target_arch",
     "make_bundle_inputs",
+    "make_desktop_bundle_artifacts",
+    "make_desktop_bundle_libs",
     "make_web_wrapper_main_content",
     "merge_dart_defines",
     "resolve_exec_dart_vm",
@@ -1741,13 +1743,17 @@ def _flutter_linux_integration_test_impl(ctx):
     bundle_dir = ctx.actions.declare_directory(ctx.label.name + "_linux")
     binary_name = ctx.label.name
     copies = compute_desktop_bundle_copies(
-        is_debug = is_debug,
-        kernel_dill_path = kernel_dill.path if is_debug else None,
-        aot_output_path = aot_output.path if aot_output else None,
-        aot_dst = "lib/libapp.so",
-        icu_data_path = flutter_sdk_info.icu_data.path,
-        engine_basenames = [(f.path, f.basename) for f in engine_files],
-        native_basenames = [(lib.path, lib.basename) for lib in native_libs],
+        artifacts = make_desktop_bundle_artifacts(
+            is_debug = is_debug,
+            kernel_dill_path = kernel_dill.path if is_debug else None,
+            aot_output_path = aot_output.path if aot_output else None,
+            aot_dst = "lib/libapp.so",
+            icu_data_path = flutter_sdk_info.icu_data.path,
+        ),
+        libs = make_desktop_bundle_libs(
+            engine_basenames = [(f.path, f.basename) for f in engine_files],
+            native_basenames = [(lib.path, lib.basename) for lib in native_libs],
+        ),
     )
     copies.append({"src": runner_binary.path, "dst": binary_name})
 

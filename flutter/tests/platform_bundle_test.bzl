@@ -5,7 +5,7 @@ Tests the pure helper functions used by linux, android, and windows bundle rules
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
-load("//flutter/private:common.bzl", "ANDROID_ABIS", "android_elf_machine_for_abi", "android_platform_for_abi", "compute_android_jni_path", "compute_desktop_bundle_copies")
+load("//flutter/private:common.bzl", "ANDROID_ABIS", "android_elf_machine_for_abi", "android_platform_for_abi", "compute_android_jni_path", "compute_desktop_bundle_copies", "make_desktop_bundle_artifacts", "make_desktop_bundle_libs")
 load("//flutter/private:flutter_android_application.bzl", "flutter_android_bundle")
 load("//flutter/private:flutter_android_registrant.bzl", "flutter_android_registrant")
 load("//flutter/private:flutter_linux_application.bzl", "flutter_linux_bundle_rule")
@@ -17,13 +17,17 @@ def _linux_debug_copies_test_impl(ctx):
     env = unittest.begin(ctx)
 
     copies = compute_desktop_bundle_copies(
-        is_debug = True,
-        kernel_dill_path = "/out/app.dill",
-        aot_output_path = None,
-        aot_dst = "lib/libapp.so",
-        icu_data_path = "/sdk/icudtl.dat",
-        engine_basenames = [("/eng/libflutter.so", "libflutter.so")],
-        native_basenames = [],
+        artifacts = make_desktop_bundle_artifacts(
+            is_debug = True,
+            kernel_dill_path = "/out/app.dill",
+            aot_output_path = None,
+            aot_dst = "lib/libapp.so",
+            icu_data_path = "/sdk/icudtl.dat",
+        ),
+        libs = make_desktop_bundle_libs(
+            engine_basenames = [("/eng/libflutter.so", "libflutter.so")],
+            native_basenames = [],
+        ),
     )
 
     # icudtl + kernel_dill + engine = 3
@@ -39,13 +43,17 @@ def _linux_release_copies_test_impl(ctx):
     env = unittest.begin(ctx)
 
     copies = compute_desktop_bundle_copies(
-        is_debug = False,
-        kernel_dill_path = None,
-        aot_output_path = "/out/libapp.so",
-        aot_dst = "lib/libapp.so",
-        icu_data_path = "/sdk/icudtl.dat",
-        engine_basenames = [("/eng/libflutter.so", "libflutter.so")],
-        native_basenames = [("/ffi/libfoo.so", "libfoo.so")],
+        artifacts = make_desktop_bundle_artifacts(
+            is_debug = False,
+            kernel_dill_path = None,
+            aot_output_path = "/out/libapp.so",
+            aot_dst = "lib/libapp.so",
+            icu_data_path = "/sdk/icudtl.dat",
+        ),
+        libs = make_desktop_bundle_libs(
+            engine_basenames = [("/eng/libflutter.so", "libflutter.so")],
+            native_basenames = [("/ffi/libfoo.so", "libfoo.so")],
+        ),
     )
 
     # icudtl + aot + engine + native = 4
@@ -60,14 +68,18 @@ def _windows_release_copies_test_impl(ctx):
     env = unittest.begin(ctx)
 
     copies = compute_desktop_bundle_copies(
-        is_debug = False,
-        kernel_dill_path = None,
-        aot_output_path = "/out/app.so",
-        aot_dst = "app.so",
-        icu_data_path = "/sdk/icudtl.dat",
-        engine_basenames = [("/eng/flutter_windows.dll", "flutter_windows.dll")],
-        native_basenames = [],
-        engine_dst_prefix = "",
+        artifacts = make_desktop_bundle_artifacts(
+            is_debug = False,
+            kernel_dill_path = None,
+            aot_output_path = "/out/app.so",
+            aot_dst = "app.so",
+            icu_data_path = "/sdk/icudtl.dat",
+        ),
+        libs = make_desktop_bundle_libs(
+            engine_basenames = [("/eng/flutter_windows.dll", "flutter_windows.dll")],
+            native_basenames = [],
+            engine_dst_prefix = "",
+        ),
     )
 
     asserts.equals(env, 3, len(copies))
@@ -83,14 +95,18 @@ def _windows_debug_copies_test_impl(ctx):
     env = unittest.begin(ctx)
 
     copies = compute_desktop_bundle_copies(
-        is_debug = True,
-        kernel_dill_path = "/out/app.dill",
-        aot_output_path = None,
-        aot_dst = "app.so",
-        icu_data_path = "/sdk/icudtl.dat",
-        engine_basenames = [],
-        native_basenames = [],
-        engine_dst_prefix = "",
+        artifacts = make_desktop_bundle_artifacts(
+            is_debug = True,
+            kernel_dill_path = "/out/app.dill",
+            aot_output_path = None,
+            aot_dst = "app.so",
+            icu_data_path = "/sdk/icudtl.dat",
+        ),
+        libs = make_desktop_bundle_libs(
+            engine_basenames = [],
+            native_basenames = [],
+            engine_dst_prefix = "",
+        ),
     )
 
     asserts.equals(env, 2, len(copies))
@@ -103,13 +119,17 @@ def _no_artifacts_copies_test_impl(ctx):
     env = unittest.begin(ctx)
 
     copies = compute_desktop_bundle_copies(
-        is_debug = False,
-        kernel_dill_path = None,
-        aot_output_path = None,
-        aot_dst = "lib/libapp.so",
-        icu_data_path = "/sdk/icudtl.dat",
-        engine_basenames = [],
-        native_basenames = [],
+        artifacts = make_desktop_bundle_artifacts(
+            is_debug = False,
+            kernel_dill_path = None,
+            aot_output_path = None,
+            aot_dst = "lib/libapp.so",
+            icu_data_path = "/sdk/icudtl.dat",
+        ),
+        libs = make_desktop_bundle_libs(
+            engine_basenames = [],
+            native_basenames = [],
+        ),
     )
 
     asserts.equals(env, 1, len(copies))
