@@ -77,6 +77,7 @@ flutter_application(
         "@deps//:cupertino_icons",
         "@deps//:flutter",
         "@deps//:flutter_localized_locales",
+        "@deps//:platform_assets",
         "@rules_flutter//flutter:material_icons",
     ],
 )
@@ -310,6 +311,7 @@ flutter_web_app(
         "@deps//:cupertino_icons",
         "@deps//:flutter",
         "@deps//:flutter_localized_locales",
+        "@deps//:platform_assets",
         "@rules_flutter//flutter:material_icons",
     ],
 )
@@ -341,6 +343,7 @@ flutter_test(
         "@deps//:flutter",
         "@deps//:flutter_localized_locales",
         "@deps//:flutter_test",
+        "@deps//:platform_assets",
         "@rules_flutter//flutter:material_icons",
     ],
 )
@@ -871,6 +874,19 @@ dart_test(
         ":hello_world_android_release_signed",
     ],
     main = "test/verify_android_release_signing_test.dart",
+    # See hello_world_android: skipped on the Windows CI runner (pagefile OOM)
+    # via --build_tag_filters/--test_tag_filters. Builds normally everywhere else.
+    tags = ["no-windows-ci"],
+)
+
+# Platform-conditional pub assets: the Android APK must carry the fixture
+# package's unconditional and android-only assets and omit its web-only and
+# flavor-restricted ones, with AssetManifest.bin agreeing. Walks the zip
+# central directory and inflates the manifest by hand; no unzip runs here.
+dart_test(
+    name = "verify_android_platform_assets_test",
+    data = [":hello_world_android"],
+    main = "test/verify_android_platform_assets_test.dart",
     # See hello_world_android: skipped on the Windows CI runner (pagefile OOM)
     # via --build_tag_filters/--test_tag_filters. Builds normally everywhere else.
     tags = ["no-windows-ci"],

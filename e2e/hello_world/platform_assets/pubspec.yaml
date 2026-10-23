@@ -1,0 +1,19 @@
+name: platform_assets
+description: Fixture package with platform- and flavor-conditional assets for asset-bundling tests.
+version: 0.1.0
+
+environment:
+  sdk: ^3.13.0
+
+flutter:
+  assets:
+    - assets/any.txt
+    - path: assets/android_only.txt
+      platforms:
+        - android
+    - path: assets/web_only.txt
+      platforms:
+        - web
+    - path: assets/paid_only.txt
+      flavors:
+        - paid

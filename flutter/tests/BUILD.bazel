@@ -10,6 +10,7 @@ load(":app_entrypoint_test.bzl", "app_entrypoint_test_suite")
 load(":artifact_urls_test.bzl", "artifact_urls_test_suite")
 load(":asset_bundle_test.bzl", "asset_bundle_test_suite")
 load(":asset_keys_test.bzl", "asset_keys_test_suite")
+load(":asset_platforms_test.bzl", "asset_platforms_test_suite")
 load(":common_test.bzl", "common_test_suite")
 load(":compile_api_test.bzl", "compile_api_test_suite")
 load(":flutter_application_test.bzl", "flutter_application_test_suite")
@@ -132,6 +133,8 @@ compile_api_test_suite(name = "compile_api_test")
 asset_bundle_test_suite(name = "asset_bundle_test")
 
 asset_keys_test_suite(name = "asset_keys_test")
+
+asset_platforms_test_suite(name = "asset_platforms_test")
 
 ios_test_suite(name = "ios_test")
 
