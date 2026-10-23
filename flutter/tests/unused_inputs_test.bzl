@@ -10,6 +10,7 @@ must keep into one closure: `:a` adopts `:b`'s `part of` file, re-exports
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
+load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME")
 load("//flutter/private:flutter_kernel_module.bzl", "flutter_kernel_module_action")
 
 def _kernel_actions(env):
@@ -95,8 +96,14 @@ def _compile(added, runs, **kw):
         version = "3.13.5",
     )
     kwargs = dict(
-        ctx = fake_ctx,
-        tools = fake_tools,
+        koutline = None,
+        extra_inputs = None,
+        closure_excluded = None,
+        droppable = True,
+        unused_inputs = False,
+    )
+    kwargs.update(kw)
+    module = struct(
         sources = [struct(
             uri = "package:unused_a/adopt.dart",
             file = _fake_file("flutter/tests/unused_inputs_fixture/a/lib/adopt.dart"),
@@ -104,12 +111,24 @@ def _compile(added, runs, **kw):
         packages = [],
         dep_kmods = depset(),
         output = _fake_file("manual_target.flutter.kmod"),
+        koutline = kwargs["koutline"],
+        extra_inputs = kwargs["extra_inputs"],
+        closure_excluded = kwargs["closure_excluded"],
+    )
+    options = struct(
         defines = [],
         exclude_non_sources = True,
-        droppable = True,
+        droppable = kwargs["droppable"],
+        target = "flutter",
+        platform_dill = None,
+        libraries_json = None,
+        libraries_platform = None,
+        extra_libraries = [],
+        scheme = APP_SCHEME,
+        extra_frontend_flags = [],
+        unused_inputs = kwargs["unused_inputs"],
     )
-    kwargs.update(kw)
-    flutter_kernel_module_action(**kwargs)
+    flutter_kernel_module_action(fake_ctx, fake_tools, module, options)
 
 def _library_unused_inputs_test_impl(ctx):
     env = unittest.begin(ctx)

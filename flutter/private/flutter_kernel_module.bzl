@@ -275,52 +275,83 @@ def _kernel_module_staged_inputs(ctx, sources, output, extra_inputs, packages, s
     stage = stage_generated_inputs(ctx, stage_candidates, output.basename, include_sources = True)
     return sources, package_config, stage
 
-def _kernel_module_base_args(ctx, target, platform, package_config, libraries, libraries_platform, extra_libraries, stage, scheme, defines, extra_frontend_flags, exclude_non_sources):
-    """The kernel worker flags naming the target, SDK summaries and compile mode."""
+def _resolve_module_sdk(tools, options):
+    """The SDK summaries the module compiles against, honouring overrides.
+
+    Returns struct(platform, libraries): the `--dart-sdk-summary` platform
+    dill and the `--libraries-json` specification, defaulting to the
+    toolchain's.
+    """
+    return struct(
+        platform = options.platform_dill if options.platform_dill != None else tools.platform_dill,
+        libraries = options.libraries_json if options.libraries_json != None else tools.libraries_json,
+    )
+
+def _kernel_module_base_args(ctx, package_config, stage, sdk, options):
+    """The kernel worker flags naming the target, SDK summaries and compile mode.
+
+    Args:
+        ctx: The rule or aspect context.
+        package_config: The `--packages-file` package config File.
+        stage: The staging result from `_kernel_module_staged_inputs`.
+        sdk: The `_resolve_module_sdk` result (platform and libraries).
+        options: struct with the compile options: `target`, `libraries_platform`,
+            `extra_libraries`, `scheme`, `defines`, `extra_frontend_flags` and
+            `exclude_non_sources`.
+    """
     args = ctx.actions.args()
     args.use_param_file("@%s", use_always = True)
     args.set_param_file_format("multiline")
 
-    args.add("--target", target)
-    args.add("--dart-sdk-summary", platform)
+    args.add("--target", options.target)
+    args.add("--dart-sdk-summary", sdk.platform)
     args.add("--packages-file", package_config)
-    args.add("--libraries-json", libraries)
-    if libraries_platform:
-        args.add("--libraries-platform", libraries_platform)
-    args.add_all(extra_libraries, before_each = "--extra-library")
+    args.add("--libraries-json", sdk.libraries)
+    if options.libraries_platform:
+        args.add("--libraries-platform", options.libraries_platform)
+    args.add_all(options.extra_libraries, before_each = "--extra-library")
     if stage.root != None:
         args.add("--multi-root", stage.root)
-    args.add("--multi-root-scheme", scheme)
-    args.add_all([d for d in defines if "," not in d], format_each = "-D%s")
-    args.add_all(extra_frontend_flags)
+    args.add("--multi-root-scheme", options.scheme)
+    args.add_all([d for d in options.defines if "," not in d], format_each = "-D%s")
+    args.add_all(options.extra_frontend_flags)
     args.add("--no-summary-only")
     args.add("--reuse-compiler-result")
     args.add("--use-incremental-compiler")
-    if exclude_non_sources:
+    if options.exclude_non_sources:
         args.add("--exclude-non-sources")
     return args
 
-def _kernel_module_source_args(args, sources, dep_kmods, output, koutline, excluded, unused_inputs_list, droppable, closure_excluded, extra_inputs):
-    """Append the per-source, output and closure flags to the kernel worker args."""
-    args.add_all(dep_kmods, before_each = "--input-kmod", expand_directories = False)
-    for s in sources:
+def _kernel_module_source_args(args, module, excluded, unused_inputs_list, options):
+    """Append the per-source, output and closure flags to the kernel worker args.
+
+    Args:
+        args: The kernel worker args object to append to.
+        module: struct with the per-module data: `sources`, `dep_kmods`,
+            `output`, `koutline`, `extra_inputs` and `closure_excluded`.
+        excluded: The VM exclusion report File (`--excluded-output`).
+        unused_inputs_list: The unused-inputs list File, or None.
+        options: struct with the compile options (`droppable`).
+    """
+    args.add_all(module.dep_kmods, before_each = "--input-kmod", expand_directories = False)
+    for s in module.sources:
         args.add("--source", s.uri)
         args.add("--input-source", s.file)
         if unused_inputs_list != None:
             args.add("--own-source-file", s.file)
-    args.add("--output", output.path)
-    if koutline != None:
-        args.add("--output-outline", koutline.path)
+    args.add("--output", module.output.path)
+    if module.koutline != None:
+        args.add("--output-outline", module.koutline.path)
 
     args.add("--excluded-output", excluded)
     if unused_inputs_list != None:
         args.add("--unused-inputs-list", unused_inputs_list)
-    if not droppable:
+    if not options.droppable:
         args.add("--no-drop")
-    if closure_excluded:
-        args.add_all(closure_excluded, before_each = "--closure-excluded")
-    if extra_inputs:
-        args.add_all(extra_inputs, before_each = "--input-source")
+    if module.closure_excluded:
+        args.add_all(module.closure_excluded, before_each = "--closure-excluded")
+    if module.extra_inputs:
+        args.add_all(module.extra_inputs, before_each = "--input-source")
 
 def _kernel_module_tool_inputs(ctx, tools, args, direct_inputs, action_tools):
     """Pick the kernel worker executable and register its tool inputs.
@@ -373,87 +404,70 @@ def _kernel_module_tool_inputs(ctx, tools, args, direct_inputs, action_tools):
         ]
     return executable, arguments
 
-def flutter_kernel_module_action(
-        ctx,
-        tools,
-        sources,
-        packages,
-        dep_kmods,
-        output,
-        defines,
-        exclude_non_sources,
-        droppable,
-        koutline = None,
-        extra_inputs = None,
-        closure_excluded = None,
-        target = "flutter",
-        platform_dill = None,
-        libraries_json = None,
-        libraries_platform = None,
-        extra_libraries = [],
-        scheme = APP_SCHEME,
-        extra_frontend_flags = [],
-        unused_inputs = False):
+def flutter_kernel_module_action(ctx, tools, module, options):
     """Compiles one Flutter kernel module with staged generated inputs instead of mounting `ctx.bin_dir`.
 
     Args:
       ctx: The rule or aspect context, used to declare outputs and register the action.
       tools: Kernel tool files (compiler, platform dill, libraries specification).
-      sources: Structs with `uri` and `file` for the module's own Dart sources.
-      packages: Package records rendered into the `--packages-file` package config.
-      dep_kmods: Transitive dependency kernels and outlines (`--input-kmod`).
-      output: The module output (a `.kmod` directory for libraries, entries otherwise).
-      defines: Extra `--define` flags forwarded to the kernel worker.
-      exclude_non_sources: Whether the compile writes the VM exclusion report.
-      droppable: Whether unreachable libraries may be dropped from the module.
-      koutline: Optional outline output receiving `--output-outline`.
-      extra_inputs: Optional additional input files (e.g. entry sources).
-      closure_excluded: Optional upstream exclusion reports for the closed world.
-      target: Kernel worker `--target` (defaults to `"flutter"`).
-      platform_dill: SDK summary override; defaults to the toolchain's.
-      libraries_json: Libraries specification override; defaults to the toolchain's.
-      libraries_platform: Optional platform libraries specification override.
-      extra_libraries: Extra SDK libraries available to the compile.
-      scheme: Package-config URI scheme for the module's sources.
-      extra_frontend_flags: Additional flags forwarded to the frontend.
-      unused_inputs: Whether the compile writes its unused-inputs list — the
-        declared inputs no compile of this action read — and takes it as the
-        action's `unused_inputs_list`, so Bazel skips the action when only an
-        unread input changed. True at every call site: each registers its
-        action once (the aspect's evaluations of one target compute identical
-        actions, which Bazel merges), as `dart_library`'s own module does in
-        rules_dart. False registers the historical action with no list.
+      module: struct with the per-module data: `sources` (structs with `uri`
+        and `file` for the module's own Dart sources), `packages` (package
+        records rendered into the `--packages-file` package config),
+        `dep_kmods` (transitive dependency kernels and outlines
+        (`--input-kmod`)), `output` (the module output: a `.kmod` directory
+        for libraries, entries otherwise), `koutline` (optional outline output
+        receiving `--output-outline`), `extra_inputs` (optional additional
+        input files, e.g. entry sources) and `closure_excluded` (optional
+        upstream exclusion reports for the closed world).
+      options: struct with the compile options: `defines` (extra `--define`
+        flags forwarded to the kernel worker), `exclude_non_sources` (whether
+        the compile writes the VM exclusion report), `droppable` (whether
+        unreachable libraries may be dropped from the module), `target`
+        (kernel worker `--target`, defaults to `"flutter"`), `platform_dill`
+        (SDK summary override; defaults to the toolchain's), `libraries_json`
+        (libraries specification override; defaults to the toolchain's),
+        `libraries_platform` (optional platform libraries specification
+        override), `extra_libraries` (extra SDK libraries available to the
+        compile), `scheme` (package-config URI scheme for the module's
+        sources), `extra_frontend_flags` (additional flags forwarded to the
+        frontend) and `unused_inputs` (whether the compile writes its
+        unused-inputs list — the declared inputs no compile of this action
+        read — and takes it as the action's `unused_inputs_list`, so Bazel
+        skips the action when only an unread input changed. True at every
+        call site: each registers its action once (the aspect's evaluations
+        of one target compute identical actions, which Bazel merges), as
+        `dart_library`'s own module does in rules_dart. False registers the
+        historical action with no list).
 
     Returns:
       The declared VM exclusion report file.
     """
-    sources, package_config, stage = _kernel_module_staged_inputs(ctx, sources, output, extra_inputs, packages, scheme)
-    platform = platform_dill if platform_dill != None else tools.platform_dill
-    libraries = libraries_json if libraries_json != None else tools.libraries_json
-    excluded = ctx.actions.declare_file(output.basename + ".vm_excluded.txt")
-    if unused_inputs:
+    sources, package_config, stage = _kernel_module_staged_inputs(ctx, module.sources, module.output, module.extra_inputs, module.packages, options.scheme)
+    sdk = _resolve_module_sdk(tools, options)
+    excluded = ctx.actions.declare_file(module.output.basename + ".vm_excluded.txt")
+    if options.unused_inputs:
         # Written by `kernel_module` alongside the module. Declared here, where
         # the one registering action is, so the declaration and the action
         # that generates the file can never part ways.
-        unused_inputs_list = ctx.actions.declare_file(output.basename + ".unused_inputs")
+        unused_inputs_list = ctx.actions.declare_file(module.output.basename + ".unused_inputs")
     else:
         unused_inputs_list = None
 
-    args = _kernel_module_base_args(ctx, target, platform, package_config, libraries, libraries_platform, extra_libraries, stage, scheme, defines, extra_frontend_flags, exclude_non_sources)
-    _kernel_module_source_args(args, sources, dep_kmods, output, koutline, excluded, unused_inputs_list, droppable, closure_excluded, extra_inputs)
+    args = _kernel_module_base_args(ctx, package_config, stage, sdk, options)
+    _kernel_module_source_args(args, module, excluded, unused_inputs_list, options)
 
     runtime_files = getattr(tools, "runtime_files", None)
     direct_inputs = [
         package_config,
         tools.dartaotruntime,
         tools.kernel_worker,
-        libraries,
-        platform,
+        sdk.libraries,
+        sdk.platform,
     ] + [s.file for s in sources] + stage.files
     action_tools = [
         tools.dartaotruntime,
         tools.kernel_worker,
-        platform,
+        sdk.platform,
         ctx.executable._kernel_module,
     ]
     executable, arguments = _kernel_module_tool_inputs(ctx, tools, args, direct_inputs, action_tools)
@@ -463,9 +477,9 @@ def flutter_kernel_module_action(
         arguments = arguments,
         inputs = depset(
             direct = direct_inputs,
-            transitive = [dep_kmods] + [
+            transitive = [module.dep_kmods] + [
                 d
-                for d in [extra_inputs, closure_excluded]
+                for d in [module.extra_inputs, module.closure_excluded]
                 if d
             ],
         ),
@@ -473,10 +487,10 @@ def flutter_kernel_module_action(
             direct = action_tools,
             transitive = [runtime_files] if runtime_files != None else [],
         ),
-        outputs = [output, excluded] + ([unused_inputs_list] if unused_inputs_list != None else []) + ([koutline] if koutline != None else []),
+        outputs = [module.output, excluded] + ([unused_inputs_list] if unused_inputs_list != None else []) + ([module.koutline] if module.koutline != None else []),
         unused_inputs_list = unused_inputs_list,
         mnemonic = "DartKernel",
-        progress_message = "Compiling Dart kernel module %s" % output.short_path,
+        progress_message = "Compiling Dart kernel module %s" % module.output.short_path,
         execution_requirements = {} if _is_manual(ctx) else {
             "supports-workers": "1",
             "requires-worker-protocol": "proto",
@@ -580,8 +594,18 @@ def _find_dep_base_dill(dep_kernels):
             break
     return base_dill, base_keys, base_kmods
 
-def _header_only_module_info(product_modular, dep_product_kernels, dep_closure, dep_outline_closure, upstream_excluded, cross_pkg_srcs, owned, edges, base_dill, base_keys, base_kmods):
-    """The provider list for a target with no own sources: dep closures only."""
+def _header_only_module_info(product_modular, dep_product_kernels, closures, base):
+    """The provider list for a target with no own sources: dep closures only.
+
+    Args:
+        product_modular: Whether the product closure agrees on one modular world.
+        dep_product_kernels: The deps' product `DartKernelInfo` values.
+        closures: struct with the dep closures: `dep_closure`,
+            `dep_outline_closure`, `upstream_excluded`, `cross_pkg_srcs`,
+            `owned` and `edges`.
+        base: struct with the base dill triple seeded by deps: `base_dill`,
+            `base_keys` and `base_kmods`.
+    """
     product_kernel_info = (
         DartKernelInfo(
             kmod = None,
@@ -596,9 +620,9 @@ def _header_only_module_info(product_modular, dep_product_kernels, dep_closure, 
             ),
             modular = True,
             closure_excluded = depset(transitive = [k.closure_excluded for k in dep_product_kernels]),
-            cross_pkg_srcs = cross_pkg_srcs,
-            owned = owned,
-            edges = edges,
+            cross_pkg_srcs = closures.cross_pkg_srcs,
+            owned = closures.owned,
+            edges = closures.edges,
             base_dill = None,
             base_keys = None,
             base_kmods = depset(),
@@ -610,49 +634,67 @@ def _header_only_module_info(product_modular, dep_product_kernels, dep_closure, 
             kernel_info = DartKernelInfo(
                 kmod = None,
                 koutline = None,
-                transitive_kmods = dep_closure,
-                transitive_koutlines = dep_outline_closure,
+                transitive_kmods = closures.dep_closure,
+                transitive_koutlines = closures.dep_outline_closure,
                 modular = True,
-                closure_excluded = upstream_excluded,
-                cross_pkg_srcs = cross_pkg_srcs,
-                owned = owned,
-                edges = edges,
-                base_dill = base_dill,
-                base_keys = base_keys,
-                base_kmods = base_kmods,
+                closure_excluded = closures.upstream_excluded,
+                cross_pkg_srcs = closures.cross_pkg_srcs,
+                owned = closures.owned,
+                edges = closures.edges,
+                base_dill = base.base_dill,
+                base_keys = base.base_keys,
+                base_kmods = base.base_kmods,
                 unseeded_base_kmods = depset(),
             ),
             product_kernel_info = product_kernel_info,
         ),
     ]
 
-def _compile_main_kmod(ctx, tools, target_name, package_name, lib_root, own_srcs, records, flutter_sdk_info, dep_outline_closure, upstream_excluded):
-    """Compile the target's own sources into the debug `.flutter.kmod` directory."""
-    kmod = ctx.actions.declare_directory(target_name + ".flutter.kmod")
-    koutline = ctx.actions.declare_directory(target_name + ".flutter.koutline")
+def _compile_main_kmod(ctx, tools, flutter_sdk_info, spec):
+    """Compile the target's own sources into the debug `.flutter.kmod` directory.
+
+    Args:
+        ctx: The aspect context.
+        tools: The kernel tools struct matching `flutter_sdk_info`.
+        flutter_sdk_info: `FlutterSdkInfo` from the active Flutter toolchain.
+        spec: struct with the target's module inputs: `target_name`,
+            `package_name`, `lib_root`, `own_srcs` (the target's own source
+            Files), `records` (the package records), `dep_outline_closure`
+            and `upstream_excluded`.
+    """
+    kmod = ctx.actions.declare_directory(spec.target_name + ".flutter.kmod")
+    koutline = ctx.actions.declare_directory(spec.target_name + ".flutter.koutline")
     sources = [
-        struct(uri = library_source_uri(package_name, lib_root, f.short_path), file = f)
-        for f in own_srcs
+        struct(uri = library_source_uri(spec.package_name, spec.lib_root, f.short_path), file = f)
+        for f in spec.own_srcs
     ]
-    deduped_packages = first_per_package(records)
+    deduped_packages = first_per_package(spec.records)
     worker_defines = _kernel_worker_defines(ctx)
     excluded = flutter_kernel_module_action(
         ctx,
         tools,
-        sources,
-        deduped_packages,
-        dep_outline_closure,
-        kmod,
-        koutline = koutline,
-        defines = worker_defines,
-        exclude_non_sources = True,
-        droppable = True,
-        closure_excluded = upstream_excluded,
-        target = "flutter",
-        platform_dill = flutter_sdk_info.platform_kernel_dill,
-        extra_libraries = ["ui", "nativewrappers"],
-        scheme = APP_SCHEME,
-        unused_inputs = True,
+        struct(
+            sources = sources,
+            packages = deduped_packages,
+            dep_kmods = spec.dep_outline_closure,
+            output = kmod,
+            koutline = koutline,
+            extra_inputs = None,
+            closure_excluded = spec.upstream_excluded,
+        ),
+        struct(
+            defines = worker_defines,
+            exclude_non_sources = True,
+            droppable = True,
+            target = "flutter",
+            platform_dill = flutter_sdk_info.platform_kernel_dill,
+            libraries_json = None,
+            libraries_platform = None,
+            extra_libraries = ["ui", "nativewrappers"],
+            scheme = APP_SCHEME,
+            extra_frontend_flags = [],
+            unused_inputs = True,
+        ),
     )
     return kmod, koutline, sources, deduped_packages, worker_defines, excluded
 
@@ -673,42 +715,60 @@ def _link_flutter_test_base(ctx, target_name, package_name, kmod, dep_closure, b
         base_kmods = depset(direct = [kmod], transitive = [dep_closure])
     return base_dill, base_keys, base_kmods
 
-def _compile_product_kmod(ctx, target_name, tools, sources, deduped_packages, worker_defines, flutter_sdk_info, dep_product_kernels, cross_pkg_srcs, owned, edges):
-    """Compile the product (AOT/profile) `.flutter_product.kmod` directory."""
+def _compile_product_kmod(ctx, tools, flutter_sdk_info, spec):
+    """Compile the product (AOT/profile) `.flutter_product.kmod` directory.
+
+    Args:
+        ctx: The aspect context.
+        tools: The kernel tools struct matching `flutter_sdk_info`.
+        flutter_sdk_info: `FlutterSdkInfo` from the active Flutter toolchain.
+        spec: struct with the target's module inputs: `target_name`, `sources`
+            (the debug compile's `struct(uri, file)` entries), `deduped_packages`,
+            `worker_defines`, `dep_product_kernels`, `cross_pkg_srcs`, `owned`
+            and `edges`.
+    """
     product_dep_closure = depset(
         order = "postorder",
-        transitive = [k.transitive_kmods for k in dep_product_kernels],
+        transitive = [k.transitive_kmods for k in spec.dep_product_kernels],
     )
     product_dep_outline_closure = depset(
         order = "postorder",
-        transitive = [k.transitive_koutlines for k in dep_product_kernels],
+        transitive = [k.transitive_koutlines for k in spec.dep_product_kernels],
     )
     product_upstream_excluded = depset(
-        transitive = [k.closure_excluded for k in dep_product_kernels],
+        transitive = [k.closure_excluded for k in spec.dep_product_kernels],
     )
-    product_kmod = ctx.actions.declare_directory(target_name + ".flutter_product.kmod")
-    product_koutline = ctx.actions.declare_directory(target_name + ".flutter_product.koutline")
+    product_kmod = ctx.actions.declare_directory(spec.target_name + ".flutter_product.kmod")
+    product_koutline = ctx.actions.declare_directory(spec.target_name + ".flutter_product.koutline")
     product_excluded = flutter_kernel_module_action(
         ctx,
         tools,
-        sources,
-        deduped_packages,
-        product_dep_outline_closure,
-        product_kmod,
-        koutline = product_koutline,
-        defines = worker_defines + [
-            "dart.vm.product=true",
-            "FLUTTER_WEB_USE_SKIA=false",
-            "FLUTTER_WEB_USE_SKWASM=true",
-        ],
-        exclude_non_sources = True,
-        droppable = True,
-        closure_excluded = product_upstream_excluded,
-        target = "flutter",
-        platform_dill = flutter_sdk_info.platform_kernel_dill_product,
-        extra_libraries = ["ui", "nativewrappers"],
-        scheme = APP_SCHEME,
-        unused_inputs = True,
+        struct(
+            sources = spec.sources,
+            packages = spec.deduped_packages,
+            dep_kmods = product_dep_outline_closure,
+            output = product_kmod,
+            koutline = product_koutline,
+            extra_inputs = None,
+            closure_excluded = product_upstream_excluded,
+        ),
+        struct(
+            defines = spec.worker_defines + [
+                "dart.vm.product=true",
+                "FLUTTER_WEB_USE_SKIA=false",
+                "FLUTTER_WEB_USE_SKWASM=true",
+            ],
+            exclude_non_sources = True,
+            droppable = True,
+            target = "flutter",
+            platform_dill = flutter_sdk_info.platform_kernel_dill_product,
+            libraries_json = None,
+            libraries_platform = None,
+            extra_libraries = ["ui", "nativewrappers"],
+            scheme = APP_SCHEME,
+            extra_frontend_flags = [],
+            unused_inputs = True,
+        ),
     )
     return DartKernelInfo(
         kmod = product_kmod,
@@ -717,14 +777,122 @@ def _compile_product_kmod(ctx, target_name, tools, sources, deduped_packages, wo
         transitive_koutlines = depset(order = "postorder", direct = [product_koutline], transitive = [product_dep_outline_closure]),
         modular = True,
         closure_excluded = depset(direct = [product_excluded], transitive = [product_upstream_excluded]),
-        cross_pkg_srcs = cross_pkg_srcs,
-        owned = owned,
-        edges = edges,
+        cross_pkg_srcs = spec.cross_pkg_srcs,
+        owned = spec.owned,
+        edges = spec.edges,
         base_dill = None,
         base_keys = None,
         base_kmods = depset(),
         unseeded_base_kmods = depset(),
     )
+
+def _modular_dep_state(ctx, rule_deps, own_record, flutter_sdk_info):
+    """The validated dependency kernel state, or None when the target falls back.
+
+    Collects the deps' `FlutterKernelModuleInfo` values and checks the closure
+    agrees on one modular world — the checks that route a target to the
+    whole-program `frontend_server` compile when they fail.
+
+    Args:
+        ctx: The aspect context.
+        rule_deps: The target's dependency Targets.
+        own_record: The `DartPackageInfo` for the target's own package.
+        flutter_sdk_info: `FlutterSdkInfo` from the active Flutter toolchain.
+
+    Returns:
+        struct(dep_kernels, dep_product_kernels, records, product_modular), or
+        None when a dep opted out or the closure disagrees.
+    """
+    dep_mod_infos = _collect_dep_mod_infos(rule_deps)
+    if dep_mod_infos == None:
+        return None
+    dep_kernels = [m.kernel_info for m in dep_mod_infos]
+    dep_product_kernels = [m.product_kernel_info for m in dep_mod_infos]
+
+    records, packages_ok, modular = _modular_consistency(own_record, rule_deps, dep_kernels)
+    if not modular:
+        return None
+    product_modular = (
+        packages_ok and
+        flutter_sdk_info.platform_kernel_dill_product != None and
+        all([k.modular for k in dep_product_kernels])
+    )
+    return struct(
+        dep_kernels = dep_kernels,
+        dep_product_kernels = dep_product_kernels,
+        records = records,
+        product_modular = product_modular,
+    )
+
+def _compile_target_kernels(ctx, tools, flutter_sdk_info, target_name, package_name, job):
+    """Compiles a target's own debug and product modules and returns the provider list.
+
+    Args:
+        ctx: The aspect context.
+        tools: The kernel tools struct matching `flutter_sdk_info`.
+        flutter_sdk_info: `FlutterSdkInfo` from the active Flutter toolchain.
+        target_name: The target's short name, for output paths.
+        package_name: The target's `package:` name.
+        job: struct with the target's module inputs: `own_srcs`, `records`,
+            `dep_product_kernels`, `dep_closure`, `dep_outline_closure`,
+            `upstream_excluded`, `cross_pkg_srcs`, `owned`, `edges`,
+            `base_dill`, `base_keys`, `base_kmods` and `product_modular`.
+    """
+    kmod, koutline, sources, deduped_packages, worker_defines, excluded = _compile_main_kmod(
+        ctx,
+        tools,
+        flutter_sdk_info,
+        struct(
+            target_name = target_name,
+            package_name = package_name,
+            lib_root = job.lib_root,
+            own_srcs = job.own_srcs,
+            records = job.records,
+            dep_outline_closure = job.dep_outline_closure,
+            upstream_excluded = job.upstream_excluded,
+        ),
+    )
+    base_dill, base_keys, base_kmods = _link_flutter_test_base(ctx, target_name, package_name, kmod, job.dep_closure, job.base_dill, job.base_keys, job.base_kmods)
+
+    if job.product_modular:
+        product_kernel_info = _compile_product_kmod(
+            ctx,
+            tools,
+            flutter_sdk_info,
+            struct(
+                target_name = target_name,
+                sources = sources,
+                deduped_packages = deduped_packages,
+                worker_defines = worker_defines,
+                dep_product_kernels = job.dep_product_kernels,
+                cross_pkg_srcs = job.cross_pkg_srcs,
+                owned = job.owned,
+                edges = job.edges,
+            ),
+        )
+    else:
+        product_kernel_info = no_kernel_module()
+
+    return [
+        FlutterKernelModuleInfo(
+            kernel_info = DartKernelInfo(
+                kmod = kmod,
+                koutline = koutline,
+                transitive_kmods = depset(order = "postorder", direct = [kmod], transitive = [job.dep_closure]),
+                transitive_koutlines = depset(order = "postorder", direct = [koutline], transitive = [job.dep_outline_closure]),
+                modular = True,
+                closure_excluded = depset(direct = [excluded], transitive = [job.upstream_excluded]),
+                cross_pkg_srcs = job.cross_pkg_srcs,
+                owned = job.owned,
+                edges = job.edges,
+                base_dill = base_dill,
+                base_keys = base_keys,
+                base_kmods = base_kmods,
+                unseeded_base_kmods = depset(),
+            ),
+            product_kernel_info = product_kernel_info,
+        ),
+    ]
 
 def _flutter_kernel_module_aspect_impl(target, ctx):
     if DartInfo not in target:
@@ -741,55 +909,55 @@ def _flutter_kernel_module_aspect_impl(target, ctx):
     if not _modular_gate_open(ctx, opaque, enabled, tools, same_sdk, flutter_sdk_info):
         return _no_flutter_kernel_module()
 
-    dep_mod_infos = _collect_dep_mod_infos(rule_deps)
-    if dep_mod_infos == None:
+    dep = _modular_dep_state(ctx, rule_deps, own_record, flutter_sdk_info)
+    if dep == None:
         return _no_flutter_kernel_module()
-    dep_kernels = [m.kernel_info for m in dep_mod_infos]
-    dep_product_kernels = [m.product_kernel_info for m in dep_mod_infos]
 
-    records, packages_ok, modular = _modular_consistency(own_record, rule_deps, dep_kernels)
-    if not modular:
-        return _no_flutter_kernel_module()
-    product_modular = (
-        packages_ok and
-        flutter_sdk_info.platform_kernel_dill_product != None and
-        all([k.modular for k in dep_product_kernels])
-    )
-
-    dep_closure, dep_outline_closure, upstream_excluded, cross_pkg_srcs, owned, edges = _modular_dep_closures(target, dep_kernels, rule_deps, own_srcs)
-    base_dill, base_keys, base_kmods = _find_dep_base_dill(dep_kernels)
+    dep_closure, dep_outline_closure, upstream_excluded, cross_pkg_srcs, owned, edges = _modular_dep_closures(target, dep.dep_kernels, rule_deps, own_srcs)
+    base_dill, base_keys, base_kmods = _find_dep_base_dill(dep.dep_kernels)
 
     if not own_srcs:
-        return _header_only_module_info(product_modular, dep_product_kernels, dep_closure, dep_outline_closure, upstream_excluded, cross_pkg_srcs, owned, edges, base_dill, base_keys, base_kmods)
-
-    kmod, koutline, sources, deduped_packages, worker_defines, excluded = _compile_main_kmod(ctx, tools, target.label.name, package_name, lib_root, own_srcs, records, flutter_sdk_info, dep_outline_closure, upstream_excluded)
-    base_dill, base_keys, base_kmods = _link_flutter_test_base(ctx, target.label.name, package_name, kmod, dep_closure, base_dill, base_keys, base_kmods)
-
-    if product_modular:
-        product_kernel_info = _compile_product_kmod(ctx, target.label.name, tools, sources, deduped_packages, worker_defines, flutter_sdk_info, dep_product_kernels, cross_pkg_srcs, owned, edges)
-    else:
-        product_kernel_info = no_kernel_module()
-
-    return [
-        FlutterKernelModuleInfo(
-            kernel_info = DartKernelInfo(
-                kmod = kmod,
-                koutline = koutline,
-                transitive_kmods = depset(order = "postorder", direct = [kmod], transitive = [dep_closure]),
-                transitive_koutlines = depset(order = "postorder", direct = [koutline], transitive = [dep_outline_closure]),
-                modular = True,
-                closure_excluded = depset(direct = [excluded], transitive = [upstream_excluded]),
+        return _header_only_module_info(
+            dep.product_modular,
+            dep.dep_product_kernels,
+            struct(
+                dep_closure = dep_closure,
+                dep_outline_closure = dep_outline_closure,
+                upstream_excluded = upstream_excluded,
                 cross_pkg_srcs = cross_pkg_srcs,
                 owned = owned,
                 edges = edges,
+            ),
+            struct(
                 base_dill = base_dill,
                 base_keys = base_keys,
                 base_kmods = base_kmods,
-                unseeded_base_kmods = depset(),
             ),
-            product_kernel_info = product_kernel_info,
+        )
+
+    return _compile_target_kernels(
+        ctx,
+        tools,
+        flutter_sdk_info,
+        target.label.name,
+        package_name,
+        struct(
+            lib_root = lib_root,
+            own_srcs = own_srcs,
+            records = dep.records,
+            dep_product_kernels = dep.dep_product_kernels,
+            dep_closure = dep_closure,
+            dep_outline_closure = dep_outline_closure,
+            upstream_excluded = upstream_excluded,
+            cross_pkg_srcs = cross_pkg_srcs,
+            owned = owned,
+            edges = edges,
+            base_dill = base_dill,
+            base_keys = base_keys,
+            base_kmods = base_kmods,
+            product_modular = dep.product_modular,
         ),
-    ]
+    )
 
 flutter_kernel_module_aspect = aspect(
     implementation = _flutter_kernel_module_aspect_impl,
@@ -832,22 +1000,30 @@ def _compile_flutter_entry_module(
     flutter_kernel_module_action(
         ctx,
         tools,
-        sources,
-        first_per_package(packages),
-        dep_outline_closure,
-        entry,
-        defines = _kernel_worker_defines(ctx),
-        exclude_non_sources = True,
-        droppable = False,
-        extra_inputs = cross_pkg_srcs,
-        closure_excluded = depset(
-            transitive = [k.closure_excluded for k in dep_kernels],
+        struct(
+            sources = sources,
+            packages = first_per_package(packages),
+            dep_kmods = dep_outline_closure,
+            output = entry,
+            koutline = None,
+            extra_inputs = cross_pkg_srcs,
+            closure_excluded = depset(
+                transitive = [k.closure_excluded for k in dep_kernels],
+            ),
         ),
-        target = "flutter",
-        platform_dill = platform_dill,
-        extra_libraries = ["ui", "nativewrappers"],
-        scheme = APP_SCHEME,
-        unused_inputs = True,
+        struct(
+            defines = _kernel_worker_defines(ctx),
+            exclude_non_sources = True,
+            droppable = False,
+            target = "flutter",
+            platform_dill = platform_dill,
+            libraries_json = None,
+            libraries_platform = None,
+            extra_libraries = ["ui", "nativewrappers"],
+            scheme = APP_SCHEME,
+            extra_frontend_flags = [],
+            unused_inputs = True,
+        ),
     )
     return entry
 
@@ -1006,36 +1182,24 @@ def compile_flutter_modular_test_kernel(
     )
     return _link_flutter_test_entry_module(ctx, dep_kernels, entry, output)
 
-def compile_flutter_modular_web_kernel(
-        ctx,
-        flutter_sdk_info,
-        tools,
-        lib_root,
-        packages,
-        output,
-        entrypoint = None,
-        ui_web_stub = None,
-        renderer_defines = [
-            "FLUTTER_WEB_USE_SKIA=false",
-            "FLUTTER_WEB_USE_SKWASM=true",
-        ],
-        platform_dill = None,
-        target = "flutter"):
-    """Compiles a `flutter_web_bundle`'s entry module and links it with dependency modules and the product platform dill.
+def _modular_entry_closures(dep_kernels):
+    """The dep closures an entry compile links against: kmods, outlines and sources."""
+    return struct(
+        dep_closure = depset(
+            order = "postorder",
+            transitive = [k.transitive_kmods for k in dep_kernels],
+        ),
+        dep_outline_closure = depset(
+            order = "postorder",
+            transitive = [k.transitive_koutlines for k in dep_kernels],
+        ),
+        cross_pkg_srcs = depset(
+            transitive = [k.cross_pkg_srcs for k in dep_kernels],
+        ),
+    )
 
-    Args:
-      ctx: The `flutter_web_bundle` rule context.
-      flutter_sdk_info: `FlutterSdkInfo` from the active Flutter toolchain.
-      tools: The kernel tools struct returned by `flutter_modular_test_tools`.
-      lib_root: The web app package's `lib_root` from `derive_lib_root`.
-      packages: The synthesized `DartPackageInfo` list for the web app.
-      output: The linked `.dill` File to produce (with product platform dill prepended).
-      entrypoint: Optional generated `<name>_wrapper_main.dart` File.
-      ui_web_stub: Optional generated `<name>_ui_web_stub.dart` File.
-      renderer_defines: Renderer `-D` define strings (`KEY=VALUE`).
-      platform_dill: Optional platform `.dill` File to compile against.
-      target: Frontend/kernel target model.
-    """
+def _web_kernel_entry_sources(ctx, lib_root, entrypoint, ui_web_stub):
+    """The web entry sources: the generated wrapper/stub plus main and srcs."""
     sources = []
     if entrypoint != None:
         sources.append(struct(
@@ -1058,48 +1222,69 @@ def compile_flutter_modular_web_kernel(
             uri = app_main_location(ctx.attr.package_name, lib_root, f).uri,
             file = f,
         ))
+    return sources
+
+def compile_flutter_modular_web_kernel(ctx, output, sdk, inputs, config):
+    """Compiles a `flutter_web_bundle`'s entry module and links it with dependency modules and the product platform dill.
+
+    Args:
+      ctx: The `flutter_web_bundle` rule context.
+      output: The linked `.dill` File to produce (with product platform dill prepended).
+      sdk: struct with the SDK and tools: `flutter_sdk_info` (from the active
+        Flutter toolchain) and `tools` (the kernel tools struct returned by
+        `flutter_modular_test_tools`).
+      inputs: struct with the entry inputs: `lib_root` (the web app package's
+        `lib_root` from `derive_lib_root`), `packages` (the synthesized
+        `DartPackageInfo` list for the web app), `entrypoint` (optional
+        generated `<name>_wrapper_main.dart` File) and `ui_web_stub`
+        (optional generated `<name>_ui_web_stub.dart` File).
+      config: struct with the compile configuration: `renderer_defines`
+        (renderer `-D` define strings (`KEY=VALUE`)), `platform_dill`
+        (optional platform `.dill` File to compile against) and `target`
+        (frontend/kernel target model).
+    """
+    sources = _web_kernel_entry_sources(ctx, inputs.lib_root, inputs.entrypoint, inputs.ui_web_stub)
 
     dep_kernels = [
         dep[FlutterKernelModuleInfo].product_kernel_info
         for dep in ctx.attr.deps
         if FlutterKernelModuleInfo in dep
     ]
-    dep_closure = depset(
-        order = "postorder",
-        transitive = [k.transitive_kmods for k in dep_kernels],
-    )
-    dep_outline_closure = depset(
-        order = "postorder",
-        transitive = [k.transitive_koutlines for k in dep_kernels],
-    )
-    cross_pkg_srcs = depset(
-        transitive = [k.cross_pkg_srcs for k in dep_kernels],
-    )
+    closures = _modular_entry_closures(dep_kernels)
+    product_dill = config.platform_dill if config.platform_dill != None else sdk.flutter_sdk_info.platform_kernel_dill_product
     entry = ctx.actions.declare_directory(ctx.label.name + "_icon_tree_shaking.flutter_entry.kmod")
     flutter_kernel_module_action(
         ctx,
-        tools,
-        sources,
-        first_per_package(packages),
-        dep_outline_closure,
-        entry,
-        defines = _kernel_worker_defines(ctx) + ["dart.vm.product=true"] + list(renderer_defines),
-        exclude_non_sources = True,
-        droppable = False,
-        extra_inputs = cross_pkg_srcs,
-        closure_excluded = depset(transitive = [k.closure_excluded for k in dep_kernels]),
-        target = target,
-        platform_dill = platform_dill if platform_dill != None else flutter_sdk_info.platform_kernel_dill_product,
-        extra_libraries = ["ui", "nativewrappers"],
-        scheme = APP_SCHEME,
-        unused_inputs = True,
+        sdk.tools,
+        struct(
+            sources = sources,
+            packages = first_per_package(inputs.packages),
+            dep_kmods = closures.dep_outline_closure,
+            output = entry,
+            koutline = None,
+            extra_inputs = closures.cross_pkg_srcs,
+            closure_excluded = depset(transitive = [k.closure_excluded for k in dep_kernels]),
+        ),
+        struct(
+            defines = _kernel_worker_defines(ctx) + ["dart.vm.product=true"] + list(config.renderer_defines),
+            exclude_non_sources = True,
+            droppable = False,
+            target = config.target,
+            platform_dill = product_dill,
+            libraries_json = None,
+            libraries_platform = None,
+            extra_libraries = ["ui", "nativewrappers"],
+            scheme = APP_SCHEME,
+            extra_frontend_flags = [],
+            unused_inputs = True,
+        ),
     )
     kernel_link_action(
         ctx,
-        dep_closure,
+        closures.dep_closure,
         entry,
         output,
-        platform_dill = platform_dill if platform_dill != None else flutter_sdk_info.platform_kernel_dill_product,
+        platform_dill = product_dill,
     )
 
 def compile_flutter_modular_app_kernel(
