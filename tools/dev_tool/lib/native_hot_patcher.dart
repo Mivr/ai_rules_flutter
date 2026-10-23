@@ -85,6 +85,20 @@ class _Patchable {
   }) : libraryFileName = p.basename(tool.manifest.library);
 }
 
+/// Everything [NativeHotPatcher.arm] snapshots the running app from.
+///
+/// One object for the workspace, the aspect build, the launched artifact, the
+/// apps to patch, and where builders run and keep state.
+typedef NativePatcherArmInputs = ({
+  String workspace,
+  Future<BazelAspectOutputs> Function() build,
+  String appFile,
+  Iterable<NativePatchTarget> Function() targets,
+  Logger logger,
+  Directory scratch,
+  PatchToolRunner? runTool,
+});
+
 class NativeHotPatcher {
   final String workspace;
 
@@ -146,29 +160,21 @@ class NativeHotPatcher {
   /// snapshot the builder refused — because every one of those means native
   /// edits in this run will need a restart, and the user is owed that sentence
   /// at launch rather than on the first edit.
-  static Future<NativeHotPatcher?> arm({
-    required String workspace,
-    required Future<BazelAspectOutputs> Function() build,
-    required String appFile,
-    required Iterable<NativePatchTarget> Function() targets,
-    required Logger logger,
-    required Directory scratch,
-    PatchToolRunner? runTool,
-  }) async {
+  static Future<NativeHotPatcher?> arm(NativePatcherArmInputs inputs) async {
     final patcher = NativeHotPatcher._(
-      workspace: workspace,
-      build: build,
-      appFile: appFile,
-      targets: targets,
-      logger: logger,
-      scratch: scratch,
+      workspace: inputs.workspace,
+      build: inputs.build,
+      appFile: inputs.appFile,
+      targets: inputs.targets,
+      logger: inputs.logger,
+      scratch: inputs.scratch,
       libraries: const [],
-      runTool: runTool,
+      runTool: inputs.runTool,
     );
     await patcher.rebaseline();
     if (patcher._libraries.isEmpty) return null;
     final undeliverable = [
-      for (final target in targets())
+      for (final target in inputs.targets())
         if (target.delivery == null) target.appId,
     ];
     if (undeliverable.isNotEmpty) {

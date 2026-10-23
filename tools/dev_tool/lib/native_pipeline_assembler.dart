@@ -469,7 +469,11 @@ class NativePipelineAssembler {
     final registrant = devConfig.registrantFor(_info.targetPlatform);
     final compilerConfig = configDevice.createCompilerConfig(
       toolchain,
-      fileSystemRoots: devConfig.filesystemRoots,
+      (
+        // A native compiler reads no web toolchain; the web device's override
+        // answers null for the same input — see `createCompilerConfig`.
+        webToolchain: null,
+        fileSystemRoots: devConfig.filesystemRoots,
       fileSystemScheme: devConfig.filesystemScheme,
       // The app's own record travels with them. `flutter_compile_kernel` bakes
       // it into the launch build only, and this compiler produces every dill
@@ -511,6 +515,7 @@ class NativePipelineAssembler {
           ? ''
           : Uri.file(registrant).toString(),
       enableExperiments: devConfig.enableExperiments,
+      ),
     );
     return compilerConfig;
   }
@@ -908,22 +913,27 @@ class NativePipelineAssembler {
     final NativeHotPatcher? armed;
     try {
       armed = await NativeHotPatcher.arm(
-        workspace: workspace,
-        build: () => host.bazel.buildAspectOutputs(
-          target,
+        (
           workspace: workspace,
-          aspect: hotPatchAspect,
-          outputGroup: hotPatchOutputGroup,
-          compilationMode: 'dbg',
-          extraArgs: _launchArgs,
+          build: () => host.bazel.buildAspectOutputs(
+            target,
+            workspace: workspace,
+            aspect: hotPatchAspect,
+            outputGroup: hotPatchOutputGroup,
+            compilationMode: 'dbg',
+            extraArgs: _launchArgs,
+          ),
+          appFile: launched.appFile,
+          targets: () => [
+            for (final session in host.sessions)
+              if (session.vmClient != null) _SessionPatchTarget(session),
+          ],
+          logger: logger,
+          scratch: scratch,
+          // Production runs builders through the real tool: only tests inject
+          // a fake here.
+          runTool: null,
         ),
-        appFile: launched.appFile,
-        targets: () => [
-          for (final session in host.sessions)
-            if (session.vmClient != null) _SessionPatchTarget(session),
-        ],
-        logger: logger,
-        scratch: scratch,
       );
     } on Exception catch (e) {
       _warnHotPatchUnavailable(e);
