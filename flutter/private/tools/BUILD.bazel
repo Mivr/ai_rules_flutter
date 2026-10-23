@@ -43,6 +43,7 @@ dart_binary(
         "apk_overlay.dart",
         "crc32.dart",
         "macho_edit.dart",
+        "sha256.dart",
         "xtool_pack.dart",
         "zlib_raw_match.dart",
         "zlib_raw_state.dart",
