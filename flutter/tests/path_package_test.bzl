@@ -160,6 +160,50 @@ def _lock_path_stays_inside_the_workspace_test_impl(ctx):
     )
     return unittest.end(env)
 
+def _lock_path_uses_the_lock_files_own_directory_test_impl(ctx):
+    """A lock below the package root resolves entries against its own directory.
+
+    Pub records a path dependency relative to the dependent package — the
+    lock file's own directory, which is the label's package plus the dirname
+    of its name. Ignoring the dirname links the wrong directory: with a root
+    `localpkg/` decoy beside `app2/localpkg/`, the entry must still resolve
+    to `app2/localpkg`.
+    """
+    env = unittest.begin(ctx)
+    asserts.equals(
+        env,
+        "app2/localpkg",
+        workspace_relative_lock_path(
+            "deps",
+            "localpkg",
+            Label("//:app2/pubspec.lock"),
+            "localpkg",
+        ),
+    )
+    asserts.equals(
+        env,
+        "foo/app2/localpkg",
+        workspace_relative_lock_path(
+            "deps",
+            "localpkg",
+            Label("//foo:app2/pubspec.lock"),
+            "localpkg",
+        ),
+    )
+    asserts.equals(
+        env,
+        "shared/x",
+        workspace_relative_lock_path(
+            "deps",
+            "localpkg",
+            Label("//:app2/pubspec.lock"),
+            "../shared/x",
+        ),
+    )
+    return unittest.end(env)
+
+lock_path_uses_the_lock_files_own_directory_test = unittest.make(_lock_path_uses_the_lock_files_own_directory_test_impl)
+
 link_watches_the_whole_tree_test = unittest.make(_link_watches_the_whole_tree_test_impl)
 
 def _android_dir_is_mirrored_not_symlinked_test_impl(ctx):
@@ -248,6 +292,7 @@ def path_package_test_suite(name):
         android_dir_is_mirrored_not_symlinked_test,
         link_watches_the_whole_tree_test,
         lock_path_joins_the_lock_dir_test,
+        lock_path_uses_the_lock_files_own_directory_test,
         lock_path_stays_inside_the_workspace_test,
         root_lock_needs_no_refusal_test,
         foreign_lock_path_dep_is_refused_test,

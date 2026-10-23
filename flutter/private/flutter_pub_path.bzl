@@ -53,9 +53,9 @@ def workspace_relative_lock_path(hub_name, package_name, lock_label, entry_path)
     Args:
         hub_name: The flutter.pub hub name, for failure messages.
         package_name: The path dependency's name, for failure messages.
-        lock_label: The lock file label; its package is the lock's
-            directory. Must live in the root module (see
-            `foreign_lock_path_error`).
+        lock_label: The lock file label; its package plus the dirname of
+            its name is the lock's directory. Must live in the root module
+            (see `foreign_lock_path_error`).
         entry_path: The lock entry's relative path value.
 
     Returns:
@@ -64,6 +64,9 @@ def workspace_relative_lock_path(hub_name, package_name, lock_label, entry_path)
     parts = []
     if lock_label.package:
         parts.extend(lock_label.package.split("/"))
+    lock_dir = lock_label.name.rpartition("/")[0]
+    if lock_dir:
+        parts.extend(lock_dir.split("/"))
     parts.extend(entry_path.split("/"))
     out = []
     for part in parts:
