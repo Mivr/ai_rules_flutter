@@ -51,28 +51,129 @@ const int zlibBlCodes = 19;
 /// Heap capacity (`HEAP_SIZE`).
 const int zlibHeapSize = 573;
 
-/// Static literal-tree code lengths, indexed by code.
-final List<int> _staticLLens = List<int>.generate(
-  zlibLCodes,
-  (i) => zlibStaticLtree[i].$2,
-);
+/// The eight static tables `tr_static_init` (trees.c) derives from the
+/// extra-bit tables: the length/dist code maps, their bases, and the static
+/// literal/distance code lengths and codes.
+typedef _StaticTables = ({
+  List<int> lengthCode,
+  List<int> distCode,
+  List<int> baseLength,
+  List<int> baseDist,
+  List<int> staticLLens,
+  List<int> staticLCodes,
+  List<int> staticDLens,
+  List<int> staticDCodes,
+});
 
-/// Static distance-tree code lengths, indexed by code.
-final List<int> _staticDLens = List<int>.generate(
-  zlibDCodes,
-  (i) => zlibStaticDtree[i].$2,
-);
+/// Derives the static tables from the extra-bit tables (`tr_static_init`,
+/// the non-`GEN_TREES_H` path zlib 1.3.2 takes).
+///
+/// `base_length[28]` is deliberately left zero: C never assigns it (length
+/// 255 is overwritten to code 28, whose extra-bit count is zero, so the base
+/// is never read). `static_ltree` covers codes 0-287 with lengths
+/// 8/9/7/8; the static distance tree is five flat bits per code.
+_StaticTables _trStaticInit() {
+  final List<int> lengthCode = List<int>.filled(256, 0);
+  final List<int> baseLength = List<int>.filled(29, 0);
+  var length = 0;
+  for (var code = 0; code < 28; code++) {
+    baseLength[code] = length;
+    for (var n = 0; n < (1 << zlibExtraLbits[code]); n++) {
+      lengthCode[length++] = code;
+    }
+  }
+  // Match length 258 is encodable two ways; use code 285 (index 28).
+  lengthCode[length - 1] = 28;
+  final List<int> distCode = List<int>.filled(512, 0);
+  final List<int> baseDist = List<int>.filled(30, 0);
+  var dist = 0;
+  for (var code = 0; code < 16; code++) {
+    baseDist[code] = dist;
+    for (var n = 0; n < (1 << zlibExtraDbits[code]); n++) {
+      distCode[dist++] = code;
+    }
+  }
+  dist >>= 7;
+  for (var code = 16; code < zlibDCodes; code++) {
+    baseDist[code] = dist << 7;
+    for (var n = 0; n < (1 << (zlibExtraDbits[code] - 7)); n++) {
+      distCode[256 + dist++] = code;
+    }
+  }
+  final List<int> staticLLens = List<int>.filled(zlibLCodes + 2, 0);
+  final List<int> blCount = List<int>.filled(zlibMaxBits + 1, 0);
+  var n = 0;
+  while (n <= 143) {
+    staticLLens[n++] = 8;
+    blCount[8]++;
+  }
+  while (n <= 255) {
+    staticLLens[n++] = 9;
+    blCount[9]++;
+  }
+  while (n <= 279) {
+    staticLLens[n++] = 7;
+    blCount[7]++;
+  }
+  while (n <= 287) {
+    staticLLens[n++] = 8;
+    blCount[8]++;
+  }
+  final ZlibRawTree staticTree = ZlibRawTree(zlibLCodes + 2);
+  for (var i = 0; i < zlibLCodes + 2; i++) {
+    staticTree.len[i] = staticLLens[i];
+  }
+  zlibGenCodes(staticTree, zlibLCodes + 1, blCount);
+  return (
+    lengthCode: lengthCode,
+    distCode: distCode,
+    baseLength: baseLength,
+    baseDist: baseDist,
+    staticLLens: staticLLens,
+    staticLCodes: staticTree.code,
+    staticDLens: List<int>.filled(zlibDCodes, 5),
+    staticDCodes: List<int>.generate(zlibDCodes, (i) => zlibBiReverse(i, 5)),
+  );
+}
+
+/// Static tables shared by every compression (`tr_static_init` above),
+/// computed once on first use.
+final _StaticTables _staticTables = _trStaticInit();
+
+/// Length code for each normalized match length (`_length_code`).
+final List<int> zlibLengthCode = _staticTables.lengthCode;
+
+/// Distance code for each distance (`_dist_code`).
+final List<int> zlibDistCode = _staticTables.distCode;
+
+/// First normalized length for each length code (`base_length`).
+final List<int> zlibBaseLength = _staticTables.baseLength;
+
+/// First normalized distance for each distance code (`base_dist`).
+final List<int> zlibBaseDist = _staticTables.baseDist;
+
+/// Static literal-tree code lengths, indexed by code.
+final List<int> _staticLLens = _staticTables.staticLLens;
 
 /// Static literal-tree codes, indexed by code.
-final List<int> _staticLCodes = List<int>.generate(
-  zlibLCodes,
-  (i) => zlibStaticLtree[i].$1,
-);
+final List<int> _staticLCodes = _staticTables.staticLCodes;
+
+/// Static distance-tree code lengths, indexed by code.
+final List<int> _staticDLens = _staticTables.staticDLens;
 
 /// Static distance-tree codes, indexed by code.
-final List<int> _staticDCodes = List<int>.generate(
-  zlibDCodes,
-  (i) => zlibStaticDtree[i].$1,
+final List<int> _staticDCodes = _staticTables.staticDCodes;
+
+/// The static literal tree (`static_ltree`, 288 entries of code and length).
+final List<(int, int)> zlibStaticLtree = List<(int, int)>.generate(
+  _staticLLens.length,
+  (i) => (_staticLCodes[i], _staticLLens[i]),
+);
+
+/// The static distance tree (`static_dtree`, 30 entries of code and length).
+final List<(int, int)> zlibStaticDtree = List<(int, int)>.generate(
+  _staticDLens.length,
+  (i) => (_staticDCodes[i], _staticDLens[i]),
 );
 
 /// The values that travel together into [zlibBuildTree] (`static_tree_desc`
