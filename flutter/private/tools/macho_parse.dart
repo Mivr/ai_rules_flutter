@@ -8,6 +8,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'macho_constants.dart';
+import 'macho_fat.dart' show isMachO32, isMachO64;
 
 /// Represents a single raw Mach-O load command.
 class LoadCommand {
@@ -225,4 +226,44 @@ int findFirstPayloadOffset(List<LoadCommand> commands, int totalLength) {
     _considerCommandPayload(lc, floor);
   }
   return floor.value;
+}
+
+/// Parses the load commands from a 64-bit Mach-O binary.
+List<LoadCommand> parseLoadCommands(Uint8List bytes) {
+  if (!isMachO64(bytes)) {
+    if (isMachO32(bytes)) {
+      throw const FormatException(
+        'Unsupported 32-bit Mach-O binary; expected 64-bit Mach-O.',
+      );
+    }
+    throw const FormatException('Not a 64-bit little-endian Mach-O binary.');
+  }
+  final bd = ByteData.sublistView(bytes);
+  final ncmds = bd.getUint32(16, Endian.little);
+  final sizeofcmds = bd.getUint32(20, Endian.little);
+  if (mhHeaderSize64 + sizeofcmds > bytes.length) {
+    throw const FormatException('Truncated Mach-O load commands.');
+  }
+  final commands = <LoadCommand>[];
+  var offset = mhHeaderSize64;
+  for (var i = 0; i < ncmds; i++) {
+    if (offset + 8 > mhHeaderSize64 + sizeofcmds) {
+      throw const FormatException(
+        'Load command header extends past sizeofcmds.',
+      );
+    }
+    final cmd = bd.getUint32(offset, Endian.little);
+    final cmdsize = bd.getUint32(offset + 4, Endian.little);
+    if (cmdsize < 8 || offset + cmdsize > mhHeaderSize64 + sizeofcmds) {
+      throw FormatException('Invalid cmdsize $cmdsize at offset $offset.');
+    }
+    commands.add(
+      LoadCommand(
+        cmd,
+        Uint8List.fromList(bytes.sublist(offset, offset + cmdsize)),
+      ),
+    );
+    offset += cmdsize;
+  }
+  return commands;
 }
