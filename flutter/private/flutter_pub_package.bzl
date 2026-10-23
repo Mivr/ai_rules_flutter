@@ -2010,6 +2010,32 @@ def _flutter_pub_package_impl(ctx):
     _fetch_pub_archive(ctx)
     _generate_spoke(ctx)
 
+def _mirror_linked_dir(ctx, child):
+    """Mirror one linked source directory's children into a repo-owned directory.
+
+    Links each child of `child` under `<basename>/`, so the spoke side is a
+    real repository directory holding symlinks rather than a single symlink
+    to the source directory. The generator must write `android/BUILD.bazel`
+    for every spoke (see `_generate_spoke`); through a symlinked `android/`
+    that write lands in the user's source tree, overwriting a user-owned
+    file or creating a new main-repo package. Through the mirror the same
+    `ctx.file` replaces a file symlink (or creates the file) inside the
+    spoke, and the source tree stays untouched. Nested directories stay
+    directory symlinks: the generator writes only the top-level BUILD file,
+    never anything nested.
+
+    Args:
+        ctx: The path-package spoke's repository context.
+        child: The source directory's path object.
+
+    Returns:
+        None.
+    """
+    for grandchild in child.readdir():
+        ctx.symlink(grandchild, child.basename + "/" + grandchild.basename)
+        ctx.watch(grandchild)
+    ctx.watch(child)
+
 def link_path_package(ctx):
     """Symlinks a workspace-local `path:` package into the spoke, hermetically.
 
@@ -2048,7 +2074,10 @@ def link_path_package(ctx):
             path = repr(rel),
         ))
     for child in src.readdir():
-        ctx.symlink(child, child.basename)
+        if child.is_dir and child.basename == "android":
+            _mirror_linked_dir(ctx, child)
+        else:
+            ctx.symlink(child, child.basename)
     _watch_linked_tree(ctx, src)
 
 def _watch_linked_tree(ctx, src):

@@ -161,6 +161,44 @@ def _lock_path_stays_inside_the_workspace_test_impl(ctx):
     return unittest.end(env)
 
 link_watches_the_whole_tree_test = unittest.make(_link_watches_the_whole_tree_test_impl)
+
+def _android_dir_is_mirrored_not_symlinked_test_impl(ctx):
+    """The spoke never writes through a symlinked directory into the source.
+
+    The generator always emits `android/BUILD.bazel`, so linking `android/`
+    as one directory symlink would carry that write into the user's tree
+    (overwriting a user-owned file or creating a new main-repo package).
+    Instead the spoke holds a real `android/` directory whose children are
+    linked one by one; the generated file then replaces a file symlink (or
+    is created) inside the spoke. Every mirrored child is watched.
+    """
+    env = unittest.begin(ctx)
+    mock = _make_mock_link_ctx({
+        "mypkg": {
+            "pubspec.yaml": None,
+            "lib": {"mypkg.dart": None},
+            "android": {
+                "BUILD.bazel": None,
+                "settings.gradle": None,
+            },
+        },
+    }, path_value = "mypkg", package_name = "mypkg")
+    link_path_package(mock.ctx)
+    names = sorted([link.name for link in mock.linked])
+    asserts.false(env, "android" in names, "android/ must not be one dir symlink, got {}".format(names))
+    asserts.true(env, "android/BUILD.bazel" in names, "android children must be linked one by one, got {}".format(names))
+    asserts.true(env, "android/settings.gradle" in names, "android children must be linked one by one, got {}".format(names))
+    for link in mock.linked:
+        if link.name.startswith("android/"):
+            asserts.true(
+                env,
+                link.target.startswith("/workspace/mypkg/android/"),
+                "link {} must point into the package's android/, got {}".format(link.name, link.target),
+            )
+    asserts.true(env, "/workspace/mypkg/android/BUILD.bazel" in mock.watched, "mirrored children must be watched, got {}".format(sorted(mock.watched)))
+    return unittest.end(env)
+
+android_dir_is_mirrored_not_symlinked_test = unittest.make(_android_dir_is_mirrored_not_symlinked_test_impl)
 lock_path_joins_the_lock_dir_test = unittest.make(_lock_path_joins_the_lock_dir_test_impl)
 lock_path_stays_inside_the_workspace_test = unittest.make(_lock_path_stays_inside_the_workspace_test_impl)
 
@@ -207,6 +245,7 @@ def path_package_test_suite(name):
     """
     unittest.suite(
         name,
+        android_dir_is_mirrored_not_symlinked_test,
         link_watches_the_whole_tree_test,
         lock_path_joins_the_lock_dir_test,
         lock_path_stays_inside_the_workspace_test,
