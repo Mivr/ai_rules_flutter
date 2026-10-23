@@ -2121,76 +2121,60 @@ class _IntegrationHarness {
     final testChannelId = (test['channel'] as num).toInt();
     final reportName = test['name'] as String? ?? '';
 
-    final readiness = testReadiness(
+    if (fileUnstartedTest(
       test: test,
+      reportName: reportName,
       fixture: fixture,
       socketClosed: _socketClosed,
       disconnectMessage:
           '${_launcher.platformName} target disconnected before this test ran',
-    );
-    if (readiness is TestSkipped) {
-      results.recordSkipped(reportName, readiness.reason);
-      return;
-    }
-    if (readiness is TestTargetGone) {
-      results.recordFailure(
-        reportName,
-        TestFailureSummary(
-          message: readiness.message,
-          type: 'TestDeviceException',
-          stackChain: '',
-        ),
-        Duration.zero,
-        '',
-      );
+      results: results,
+    )) {
       return;
     }
 
-    final ch = _allocChannel();
-    final completer = Completer<void>();
-    final started = Stopwatch()..start();
-    final output = StringBuffer();
-    _pendingTests[ch.inputId] = completer;
     TestFailureSummary? failure;
     void noteFailure(TestFailureSummary summary) => failure ??= summary;
-
-    _inbound[ch.inputId] = testMessageHandler(
-      completer: completer,
-      output: output,
+    final tracked = trackTestRun(
+      channel: _allocChannel(),
+      pending: _pendingTests,
+      inbound: _inbound,
       noteFailure: noteFailure,
     );
 
-    _send(testChannelId + 1, {'command': 'run', 'channel': ch.outputId});
+    _send(testChannelId + 1, {'command': 'run', 'channel': tracked.outputId});
 
     await _awaitIntegrationTest(
-      completer: completer,
+      completer: tracked.completer,
       ceiling: ceiling,
       reportName: reportName,
       noteFailure: noteFailure,
     );
-    _pendingTests.remove(ch.inputId);
-    _inbound.remove(ch.inputId);
+    _pendingTests.remove(tracked.inputId);
+    _inbound.remove(tracked.inputId);
 
-    if (_socketClosed && failure == null) {
-      failure = TestFailureSummary(
-        message:
-            '${_launcher.platformName} target disconnected mid-test '
-            '(or crashed)',
-        type: 'TestDeviceException',
-        stackChain: '',
-      );
-    }
+    failure = resolveTestFailure(
+      failure: failure,
+      socketClosed: _socketClosed,
+      disconnectMessage:
+          '${_launcher.platformName} target disconnected mid-test '
+          '(or crashed)',
+    );
 
-    started.stop();
+    tracked.started.stop();
     if (failure != null) {
       results.recordFailure(
         reportName,
         failure!,
-        started.elapsed,
-        output.toString(),
+        tracked.started.elapsed,
+        tracked.output.toString(),
       );
     } else if (!fixture) {
-      results.recordSuccess(reportName, started.elapsed, output.toString());
+      results.recordSuccess(
+        reportName,
+        tracked.started.elapsed,
+        tracked.output.toString(),
+      );
     }
   }
 
@@ -2289,7 +2273,7 @@ bool integrationRunFailed({
   return failed > 0 || suiteError || passed + failed == 0;
 }
 
-class _Results {
+class _Results implements TestResultSink {
   int passed = 0;
   int failed = 0;
   int skipped = 0;

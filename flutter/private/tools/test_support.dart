@@ -105,6 +105,131 @@ class TestFailureSummary {
   }
 }
 
+/// Where a runner files its per-test outcomes.
+///
+/// Implemented by each runner's result accumulator so the shared run-loop
+/// helpers below ([fileUnstartedTest], [resolveTestFailure]) can file cases
+/// without each runner copying them.
+abstract class TestResultSink {
+  void recordSuccess(String name, Duration elapsed, String output);
+
+  void recordFailure(
+    String name,
+    TestFailureSummary summary,
+    Duration elapsed,
+    String output,
+  );
+
+  void recordSkipped(String name, String? reason);
+}
+
+/// Files a test that cannot start and reports whether it was filed.
+///
+/// A skipped test (unless it is a `setUpAll`/`tearDownAll` [fixture]) files
+/// as skipped; a test whose target already disconnected files as a failure
+/// naming [disconnectMessage]. Returns true when the test was filed, so the
+/// caller returns early instead of running it.
+bool fileUnstartedTest({
+  required Map<String, dynamic> test,
+  required String reportName,
+  required bool fixture,
+  required bool socketClosed,
+  required String disconnectMessage,
+  required TestResultSink results,
+}) {
+  final readiness = testReadiness(
+    test: test,
+    fixture: fixture,
+    socketClosed: socketClosed,
+    disconnectMessage: disconnectMessage,
+  );
+  if (readiness is TestSkipped) {
+    results.recordSkipped(reportName, readiness.reason);
+    return true;
+  }
+  if (readiness is TestTargetGone) {
+    results.recordFailure(
+      reportName,
+      TestFailureSummary(
+        message: readiness.message,
+        type: 'TestDeviceException',
+        stackChain: '',
+      ),
+      Duration.zero,
+      '',
+    );
+    return true;
+  }
+  return false;
+}
+
+/// Resolves the failure to file for a finished test.
+///
+/// A test that failed on its own keeps its failure; a test with none whose
+/// target disconnected mid-test (or never yielded) files [disconnectMessage]
+/// instead, so nothing hangs waiting on a `complete` event that will never
+/// arrive. Null when the test passed and the target is still connected.
+TestFailureSummary? resolveTestFailure({
+  required TestFailureSummary? failure,
+  required bool socketClosed,
+  required String disconnectMessage,
+}) {
+  if (failure != null) return failure;
+  if (!socketClosed) return null;
+  return TestFailureSummary(
+    message: disconnectMessage,
+    type: 'TestDeviceException',
+    stackChain: '',
+  );
+}
+
+/// Bookkeeping for one running test: its channel pair, completion signal,
+/// case log and timer.
+///
+/// Created by [trackTestRun], which also wires the channel's inbound
+/// dispatch; the run loop sends `run` on [outputId], waits out [completer],
+/// then files the outcome from [output] and [started].
+class RunningTest {
+  RunningTest({
+    required this.outputId,
+    required this.inputId,
+    required this.completer,
+    required this.output,
+    required this.started,
+  });
+
+  final int outputId;
+  final int inputId;
+  final Completer<void> completer;
+  final StringBuffer output;
+  final Stopwatch started;
+}
+
+/// Allocates one running test's channel pair, registers its completion and
+/// message dispatch on [pending]/[inbound], and hands back its tracking
+/// state. Failures the handler observes go to [noteFailure].
+RunningTest trackTestRun({
+  required ({int outputId, int inputId}) channel,
+  required Map<int, Completer<void>> pending,
+  required Map<int, void Function(Object?)> inbound,
+  required void Function(TestFailureSummary) noteFailure,
+}) {
+  final tracked = RunningTest(
+    outputId: channel.outputId,
+    inputId: channel.inputId,
+    completer: Completer<void>(),
+    output: StringBuffer(),
+    started: Stopwatch()..start(),
+  );
+  pending[tracked.inputId] = tracked.completer;
+  inbound[tracked.inputId] = testMessageHandler(
+    completer: tracked.completer,
+    output: tracked.output,
+    noteFailure: noteFailure,
+  );
+  return tracked;
+}
+
 /// Builds the inbound dispatcher for one running test: explicit error
 /// events become [noteFailure], prints go to stdout and the case log, and
 /// `complete` releases the test's completer.

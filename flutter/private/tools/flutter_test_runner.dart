@@ -774,48 +774,30 @@ class _Harness {
     final testChannelId = (test['channel'] as num).toInt();
     final reportName = test['name'] as String? ?? '';
 
-    final readiness = testReadiness(
+    if (fileUnstartedTest(
       test: test,
+      reportName: reportName,
       fixture: fixture,
       socketClosed: _socketClosed,
       disconnectMessage: 'flutter_tester disconnected before this test ran',
-    );
-    if (readiness is TestSkipped) {
-      results.recordSkipped(reportName, readiness.reason);
-      return;
-    }
-    if (readiness is TestTargetGone) {
-      results.recordFailure(
-        reportName,
-        TestFailureSummary(
-          message: readiness.message,
-          type: 'TestDeviceException',
-          stackChain: '',
-        ),
-        Duration.zero,
-        '',
-      );
+      results: results,
+    )) {
       return;
     }
 
-    final ch = _allocChannel();
-    final completer = Completer<void>();
-    final started = Stopwatch()..start();
-    final output = StringBuffer();
-    _pendingTests[ch.inputId] = completer;
     TestFailureSummary? failure;
     void noteFailure(TestFailureSummary summary) => failure ??= summary;
-
-    _inbound[ch.inputId] = testMessageHandler(
-      completer: completer,
-      output: output,
+    final tracked = trackTestRun(
+      channel: _allocChannel(),
+      pending: _pendingTests,
+      inbound: _inbound,
       noteFailure: noteFailure,
     );
 
     // Send "run" to the test channel. testChannelId is bootstrap's outputId
     // for the test's virtual channel; per MultiChannel framing we send back
     // on testChannelId+1.
-    _send(testChannelId + 1, {'command': 'run', 'channel': ch.outputId});
+    _send(testChannelId + 1, {'command': 'run', 'channel': tracked.outputId});
 
     // `test_api` enforces the timeout from the metadata we sent — Bazel's own,
     // or the test's — but that's a Timer: a test that spins synchronously
@@ -825,28 +807,27 @@ class _Harness {
     // the socket as gone so the remaining tests bail out fast.
     final ceiling = testCeiling(Platform.environment['TEST_TIMEOUT']);
     await _awaitTestCompletion(
-      completer: completer,
+      completer: tracked.completer,
       ceiling: ceiling,
       reportName: reportName,
     );
-    _pendingTests.remove(ch.inputId);
-    _inbound.remove(ch.inputId);
+    _pendingTests.remove(tracked.inputId);
+    _inbound.remove(tracked.inputId);
 
-    if (_socketClosed && failure == null) {
-      failure = TestFailureSummary(
-        message: 'flutter_tester disconnected mid-test (or test timed out)',
-        type: 'TestDeviceException',
-        stackChain: '',
-      );
-    }
+    failure = resolveTestFailure(
+      failure: failure,
+      socketClosed: _socketClosed,
+      disconnectMessage:
+          'flutter_tester disconnected mid-test (or test timed out)',
+    );
 
-    started.stop();
+    tracked.started.stop();
     _recordTestResult(
       results: results,
       reportName: reportName,
       failure: failure,
-      elapsed: started.elapsed,
-      output: output.toString(),
+      elapsed: tracked.started.elapsed,
+      output: tracked.output.toString(),
       fixture: fixture,
     );
   }
@@ -956,7 +937,7 @@ final class _DialBackTimedOut extends _DialBack {
   const _DialBackTimedOut();
 }
 
-class _Results {
+class _Results implements TestResultSink {
   int passed = 0;
   int failed = 0;
   int skipped = 0;
