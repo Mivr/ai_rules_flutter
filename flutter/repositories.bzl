@@ -201,7 +201,11 @@ flutter_font_subset_repo = repository_rule(
             doc = "The engine commit hash. Empty means a local SDK (with `local_path`).",
             default = "",
         ),
-        "platform": attr.string(mandatory = True),
+        "platform": attr.string(
+            doc = "The host platform the tools run on (e.g. `darwin-arm64`). " +
+                  "Selects the engine artifact path and the local SDK cache directory.",
+            mandatory = True,
+        ),
         "sha256": attr.string(
             doc = "Expected SHA-256 of the archive. Empty means a local SDK (with `local_path`).",
             default = "",
@@ -259,7 +263,11 @@ flutter_host_tools_release_repo = repository_rule(
             doc = "The engine commit hash. Empty means a local SDK (with `local_path`).",
             default = "",
         ),
-        "platform": attr.string(mandatory = True),
+        "platform": attr.string(
+            doc = "The host platform the tools run on (e.g. `darwin-arm64`). " +
+                  "Selects the engine artifact path and the local SDK cache directory.",
+            mandatory = True,
+        ),
         "sha256": attr.string(
             doc = "Expected SHA-256 of the archive. Empty means a local SDK (with `local_path`).",
             default = "",
