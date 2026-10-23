@@ -96,6 +96,8 @@ load(
     _flutter_test_bootstrap_action = "flutter_test_bootstrap_action",
     _flutter_test_runner = "flutter_test_runner",
     _make_bootstrap_content = "make_bootstrap_content",
+    _make_test_artifacts = "make_test_artifacts",
+    _make_test_selection = "make_test_selection",
 )
 
 # Re-exported from `//flutter/private:flutter_test_common.bzl`, which holds the
@@ -287,15 +289,19 @@ def _flutter_test_impl(ctx):
     # the runfiles, all from the implementation `flutter_prebuilt_test`
     # shares — one runner contract, no copy of it.
     runner = _flutter_test_runner(
-        ctx,
-        dill = kernel_dill,
-        base_dill = base_dill,
-        assets_dir = flutter_assets,
-        library_tags = library_tags,
-        test_path = ctx.file.main.short_path,
-        enable_impeller = ctx.attr.enable_impeller,
-        include_tags = ctx.attr.include_tags,
-        exclude_tags = ctx.attr.exclude_tags,
+        ctx = ctx,
+        artifacts = _make_test_artifacts(
+            dill = kernel_dill,
+            base_dill = base_dill,
+            assets_dir = flutter_assets,
+            library_tags = library_tags,
+        ),
+        selection = _make_test_selection(
+            test_path = ctx.file.main.short_path,
+            enable_impeller = ctx.attr.enable_impeller,
+            include_tags = ctx.attr.include_tags,
+            exclude_tags = ctx.attr.exclude_tags,
+        ),
         user_env = ctx.attr.env,
         data = ctx.attr.data,
         # The bundled native-asset libraries ship here, at the runfiles-relative

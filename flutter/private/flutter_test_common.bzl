@@ -216,21 +216,66 @@ def _declare_test_executable(ctx):
     )
     return executable, tool
 
-def _base_runner_env(ctx, flutter_sdk_info, dill, assets_dir, base_dill, library_tags, test_path, enable_impeller, include_tags, exclude_tags):
+def make_test_artifacts(dill, base_dill = None, assets_dir = None, library_tags = None):
+    """The files one `flutter_tester` run executes.
+
+    Args:
+        dill: The test kernel `.dill` File to run.
+        base_dill: Optional base dill File the kernel links against at
+            run time (`FLUTTER_TEST_BASE_DILL`), or None.
+        assets_dir: The `flutter_assets/` tree artifact directory File.
+        library_tags: Optional `{"tags": [...]}` JSON File with the suite
+            entrypoint's `@Tags`, or None for no library tags.
+
+    Returns:
+        A struct with `dill`, `base_dill`, `assets_dir` and `library_tags`.
+    """
+    return struct(
+        dill = dill,
+        base_dill = base_dill,
+        assets_dir = assets_dir,
+        library_tags = library_tags,
+    )
+
+def make_test_selection(test_path = "", enable_impeller = False, include_tags = [], exclude_tags = []):
+    """How one `flutter_tester` run selects and displays its suite.
+
+    Args:
+        test_path: Display path for the suite in `package:test` report
+            output. Defaults to the dill's basename.
+        enable_impeller: Render with Impeller instead of software Skia.
+        include_tags: Run only tests matching every one of these `package:test`
+            tag selectors. A `--test_env=FLUTTER_TEST_TAGS=...` value overrides this.
+        exclude_tags: Skip tests matching any of these tag selectors. Wins over
+            `include_tags`; `--test_env=FLUTTER_TEST_EXCLUDE_TAGS=...`
+            overrides this.
+
+    Returns:
+        A struct with `test_path`, `enable_impeller`, `include_tags` and
+        `exclude_tags`.
+    """
+    return struct(
+        test_path = test_path,
+        enable_impeller = enable_impeller,
+        include_tags = include_tags,
+        exclude_tags = exclude_tags,
+    )
+
+def _base_runner_env(ctx, flutter_sdk_info, artifacts, selection):
     """Builds the rule-owned `FLUTTER_TEST_*` environment (before user env)."""
     workspace_name = ctx.workspace_name
     env = {
         "FLUTTER_TEST_TESTER": runfiles_path(flutter_sdk_info.flutter_tester, workspace_name),
         "FLUTTER_TEST_ICU": runfiles_path(flutter_sdk_info.icu_data, workspace_name),
-        "FLUTTER_TEST_DILL": runfiles_path(dill, workspace_name),
+        "FLUTTER_TEST_DILL": runfiles_path(artifacts.dill, workspace_name),
         # Display path for the suite. Used in package:test report output.
-        "FLUTTER_TEST_PATH": test_path if test_path else dill.basename,
-        "FLUTTER_TEST_IMPELLER": "1" if enable_impeller else "",
+        "FLUTTER_TEST_PATH": selection.test_path if selection.test_path else artifacts.dill.basename,
+        "FLUTTER_TEST_IMPELLER": "1" if selection.enable_impeller else "",
     }
-    if assets_dir != None:
-        env["FLUTTER_TEST_ASSETS"] = runfiles_path(assets_dir, workspace_name)
-    if base_dill != None:
-        env["FLUTTER_TEST_BASE_DILL"] = runfiles_path(base_dill, workspace_name)
+    if artifacts.assets_dir != None:
+        env["FLUTTER_TEST_ASSETS"] = runfiles_path(artifacts.assets_dir, workspace_name)
+    if artifacts.base_dill != None:
+        env["FLUTTER_TEST_BASE_DILL"] = runfiles_path(artifacts.base_dill, workspace_name)
 
     # Tag selection, as `flutter test --tags` / `--exclude-tags` resolve it.
     # Forwarded under `_ATTR` keys: a `--test_env=FLUTTER_TEST_TAGS=...` (or
@@ -238,17 +283,17 @@ def _base_runner_env(ctx, flutter_sdk_info, dill, assets_dir, base_dill, library
     # and it can only do that when the rule leaves those keys alone — Bazel
     # lets a rule-set variable win over `--test_env` for the same key. Set
     # only when the attribute names tags.
-    if include_tags:
-        env["FLUTTER_TEST_TAGS_ATTR"] = ",".join(include_tags)
-    if exclude_tags:
-        env["FLUTTER_TEST_EXCLUDE_TAGS_ATTR"] = ",".join(exclude_tags)
+    if selection.include_tags:
+        env["FLUTTER_TEST_TAGS_ATTR"] = ",".join(selection.include_tags)
+    if selection.exclude_tags:
+        env["FLUTTER_TEST_EXCLUDE_TAGS_ATTR"] = ",".join(selection.exclude_tags)
 
     # The entrypoint's own `@Tags`, extracted at build time: the runner injects
     # them as the root group's metadata, so they inherit down to every test in
     # the suite. Absent for a prebuilt kernel without library tags, which the
     # runner reads as no tags.
-    if library_tags != None:
-        env["FLUTTER_TEST_LIBRARY_TAGS"] = runfiles_path(library_tags, workspace_name)
+    if artifacts.library_tags != None:
+        env["FLUTTER_TEST_LIBRARY_TAGS"] = runfiles_path(artifacts.library_tags, workspace_name)
     return env
 
 def _merge_user_env(ctx, env, user_env):
@@ -285,19 +330,7 @@ def _assemble_test_runfiles(ctx, tool, runtime_files, data, extra_files):
         runfiles = runfiles.merge(data_target[DefaultInfo].default_runfiles)
     return runfiles
 
-def flutter_test_runner(
-        ctx,
-        dill,
-        base_dill = None,
-        assets_dir = None,
-        library_tags = None,
-        test_path = "",
-        enable_impeller = False,
-        include_tags = [],
-        exclude_tags = [],
-        user_env = {},
-        data = [],
-        extra_files = []):
+def flutter_test_runner(ctx, artifacts, selection, user_env = {}, data = [], extra_files = []):
     """Set up the shared `flutter_tester` run: executable, env and runfiles.
 
     The one implementation of the runner contract behind `flutter_test` and
@@ -311,20 +344,9 @@ def flutter_test_runner(
     Args:
         ctx: The calling test rule's context. Must declare `_tool` (the
             runner binary) and `_windows_constraint`.
-        dill: The test kernel `.dill` File to run.
-        base_dill: Optional base dill File the kernel links against at
-            run time (`FLUTTER_TEST_BASE_DILL`), or None.
-        assets_dir: The `flutter_assets/` tree artifact directory File.
-        library_tags: Optional `{"tags": [...]}` JSON File with the suite
-            entrypoint's `@Tags`, or None for no library tags.
-        test_path: Display path for the suite in `package:test` report
-            output. Defaults to the dill's basename.
-        enable_impeller: Render with Impeller instead of software Skia.
-        include_tags: Run only tests matching every one of these `package:test`
-            tag selectors. A `--test_env=FLUTTER_TEST_TAGS=...` value overrides this.
-        exclude_tags: Skip tests matching any of these tag selectors. Wins over
-            `include_tags`; `--test_env=FLUTTER_TEST_EXCLUDE_TAGS=...`
-            overrides this.
+        artifacts: The files the run executes, from `make_test_artifacts`.
+        selection: How the run selects and displays its suite, from
+            `make_test_selection`.
         user_env: Extra environment variables for the test process. Values
             are literal; the `FLUTTER_TEST_*` keys the runner reads cannot
             be set here.
@@ -351,22 +373,22 @@ def flutter_test_runner(
     executable, tool = _declare_test_executable(ctx)
 
     # Runfiles-relative paths the runner reads from env at start-up.
-    env = _base_runner_env(ctx, flutter_sdk_info, dill, assets_dir, base_dill, library_tags, test_path, enable_impeller, include_tags, exclude_tags)
+    env = _base_runner_env(ctx, flutter_sdk_info, artifacts, selection)
 
     # User-supplied variables, merged last but never over the rule's own keys.
     _merge_user_env(ctx, env, user_env)
 
     runtime_files = [
-        dill,
+        artifacts.dill,
         flutter_sdk_info.flutter_tester,
         flutter_sdk_info.icu_data,
     ]
-    if assets_dir != None:
-        runtime_files.append(assets_dir)
-    if library_tags != None:
-        runtime_files.append(library_tags)
-    if base_dill != None:
-        runtime_files.append(base_dill)
+    if artifacts.assets_dir != None:
+        runtime_files.append(artifacts.assets_dir)
+    if artifacts.library_tags != None:
+        runtime_files.append(artifacts.library_tags)
+    if artifacts.base_dill != None:
+        runtime_files.append(artifacts.base_dill)
     runfiles = _assemble_test_runfiles(ctx, tool, runtime_files, data, extra_files)
 
     return struct(

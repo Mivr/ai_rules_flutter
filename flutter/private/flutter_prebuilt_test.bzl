@@ -34,7 +34,7 @@ flutter_prebuilt_test(
 ```
 """
 
-load("//flutter/private:flutter_test_common.bzl", "flutter_test_runner")
+load("//flutter/private:flutter_test_common.bzl", "flutter_test_runner", "make_test_artifacts", "make_test_selection")
 
 def _flutter_prebuilt_test_impl(ctx):
     if len(ctx.files.base_dill) > 1:
@@ -49,15 +49,19 @@ def _flutter_prebuilt_test_impl(ctx):
             base_dill.short_path,
         ))
     runner = flutter_test_runner(
-        ctx,
-        dill = ctx.file.dill,
-        base_dill = base_dill,
-        assets_dir = ctx.file.assets,
-        library_tags = ctx.file.library_tags,
-        test_path = ctx.attr.test_path,
-        enable_impeller = ctx.attr.enable_impeller,
-        include_tags = ctx.attr.include_tags,
-        exclude_tags = ctx.attr.exclude_tags,
+        ctx = ctx,
+        artifacts = make_test_artifacts(
+            dill = ctx.file.dill,
+            base_dill = base_dill,
+            assets_dir = ctx.file.assets,
+            library_tags = ctx.file.library_tags,
+        ),
+        selection = make_test_selection(
+            test_path = ctx.attr.test_path,
+            enable_impeller = ctx.attr.enable_impeller,
+            include_tags = ctx.attr.include_tags,
+            exclude_tags = ctx.attr.exclude_tags,
+        ),
         user_env = ctx.attr.env,
         data = ctx.attr.data,
     )
