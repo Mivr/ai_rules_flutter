@@ -79,11 +79,13 @@ void main() {
 </plist>
 ''';
       final result = buildInfoPlist(
-        plistXmls: [baseXml],
-        platform: 'ios',
-        appName: 'Runner',
-        bundleId: 'com.example.runner',
-        minimumOsVersion: '14.0',
+        InfoPlistRequest(
+          plistXmls: [baseXml],
+          platform: 'ios',
+          appName: 'Runner',
+          bundleId: 'com.example.runner',
+          minimumOsVersion: '14.0',
+        ),
       );
 
       expect(
@@ -121,11 +123,13 @@ void main() {
 </plist>
 ''';
       final result = buildInfoPlist(
-        plistXmls: [macXml],
-        platform: 'macos',
-        appName: 'MyMacApp',
-        bundleId: 'com.example.macapp',
-        minimumOsVersion: '11.0',
+        InfoPlistRequest(
+          plistXmls: [macXml],
+          platform: 'macos',
+          appName: 'MyMacApp',
+          bundleId: 'com.example.macapp',
+          minimumOsVersion: '11.0',
+        ),
       );
 
       expect(
@@ -907,9 +911,11 @@ void main() {
                 '${dir.path}/Runner',
               )..writeAsBytesSync(
                 generateStubExecutableMachO(
-                  platform: 'ios',
-                  arch: 'arm64',
-                  minimumOsVersion: '14.0',
+                  StubRunnerSpec(
+                    platform: 'ios',
+                    arch: 'arm64',
+                    minimumOsVersion: '14.0',
+                  ),
                 ),
               );
           final plistFile = File('${dir.path}/Info.plist')
@@ -994,9 +1000,11 @@ void main() {
         final execFile = File('${tempDir.path}/MacApp_bin')
           ..writeAsBytesSync(
             generateStubExecutableMachO(
-              platform: 'macos',
-              arch: 'arm64',
-              minimumOsVersion: '11.0',
+              StubRunnerSpec(
+                platform: 'macos',
+                arch: 'arm64',
+                minimumOsVersion: '11.0',
+              ),
             ),
           );
         final versionJson = File('${tempDir.path}/version.json')
@@ -1066,12 +1074,14 @@ void main() {
 
         // Verify iOS families (ipad only -> UIDeviceFamily = [2])
         final iosPlist = buildInfoPlist(
-          plistXmls: const [],
-          platform: 'ios',
-          appName: 'PadApp',
-          bundleId: 'com.example.padapp',
-          minimumOsVersion: '14.0',
-          families: const ['ipad'],
+          InfoPlistRequest(
+            plistXmls: const [],
+            platform: 'ios',
+            appName: 'PadApp',
+            bundleId: 'com.example.padapp',
+            minimumOsVersion: '14.0',
+            families: const ['ipad'],
+          ),
         );
         expect(
           iosPlist,
@@ -1081,12 +1091,14 @@ void main() {
         );
         expect(
           () => buildInfoPlist(
-            plistXmls: const [],
-            platform: 'ios',
-            appName: 'BadApp',
-            bundleId: 'com.example.badapp',
-            minimumOsVersion: '14.0',
-            families: const ['tv'],
+            InfoPlistRequest(
+              plistXmls: const [],
+              platform: 'ios',
+              appName: 'BadApp',
+              bundleId: 'com.example.badapp',
+              minimumOsVersion: '14.0',
+              families: const ['tv'],
+            ),
           ),
           throwsA(isA<ArgumentError>()),
         );
@@ -1337,17 +1349,20 @@ printf 'pw=%s\\ntmpdir=%s\\ntest_tmpdir=%s\\n' "\$pw" "\${TMPDIR:-}" "\${TEST_TM
           );
         final outVer1 = '${tempDir.path}/out/ver1.json';
         resolveBundleVersion(
-          buildVersion: '1.0.{build_number}',
-          shortVersionString: '{major}.{minor}',
-          buildLabelPattern: 'release_{major}.{minor}.{patch}_b{build_number}',
-          captureGroups: {
-            'major': r'\d+',
-            'minor': r'\d+',
-            'patch': r'\d+',
-            'build_number': r'\d+',
-          },
-          stableStatusPath: buildInfo.path,
-          outputPath: outVer1,
+          BundleVersionRequest(
+            buildVersion: '1.0.{build_number}',
+            shortVersionString: '{major}.{minor}',
+            buildLabelPattern:
+                'release_{major}.{minor}.{patch}_b{build_number}',
+            captureGroups: {
+              'major': r'\d+',
+              'minor': r'\d+',
+              'patch': r'\d+',
+              'build_number': r'\d+',
+            },
+            stableStatusPath: buildInfo.path,
+            outputPath: outVer1,
+          ),
         );
         final resolved = jsonDecode(
           File(outVer1).readAsStringSync(),
@@ -1357,12 +1372,14 @@ printf 'pw=%s\\ntmpdir=%s\\ntest_tmpdir=%s\\n' "\$pw" "\${TMPDIR:-}" "\${TEST_TM
 
         final outVer2 = '${tempDir.path}/out/ver2.json';
         resolveBundleVersion(
-          buildVersion: '1.0.{build_number}',
-          shortVersionString: '1.0',
-          buildLabelPattern: 'release_{build_number}',
-          captureGroups: {'build_number': r'\d+'},
-          fallbackBuildLabel: 'release_77',
-          outputPath: outVer2,
+          BundleVersionRequest(
+            buildVersion: '1.0.{build_number}',
+            shortVersionString: '1.0',
+            buildLabelPattern: 'release_{build_number}',
+            captureGroups: {'build_number': r'\d+'},
+            fallbackBuildLabel: 'release_77',
+            outputPath: outVer2,
+          ),
         );
         final fallbackResolved = jsonDecode(
           File(outVer2).readAsStringSync(),

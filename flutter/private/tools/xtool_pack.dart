@@ -49,7 +49,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'crc32.dart' as crc32lib;
-import 'macho_edit.dart' show extractFrameworkZip;
+import 'macho_edit.dart' show Segment64Spec, extractFrameworkZip;
 import 'sha256.dart' as sha256lib;
 
 // ---------------------------------------------------------------------------
@@ -496,25 +496,43 @@ void _addMacosPlistDefaults(
   defaults['NSPrincipalClass'] = '<string>NSApplication</string>';
 }
 
+/// The inputs for merging an `Info.plist`: XML sources, bundle identity,
+/// and platform defaults. Grouped so the plist entry point stays small.
+class InfoPlistRequest {
+  const InfoPlistRequest({
+    required this.plistXmls,
+    required this.platform,
+    required this.appName,
+    required this.bundleId,
+    required this.minimumOsVersion,
+    this.extraVariables = const {},
+    this.families = const [],
+  });
+
+  final List<String> plistXmls;
+  final String platform;
+  final String appName;
+  final String bundleId;
+  final String minimumOsVersion;
+  final Map<String, String> extraVariables;
+  final List<String> families;
+}
+
 /// Merges zero or more XML `Info.plist` sources, substitutes Xcode build
 /// variables, and injects standard Apple bundle keys required by iOS/macOS.
-String buildInfoPlist({
-  required List<String> plistXmls,
-  required String platform,
-  required String appName,
-  required String bundleId,
-  required String minimumOsVersion,
-  Map<String, String> extraVariables = const {},
-  List<String> families = const [],
-}) {
+String buildInfoPlist(InfoPlistRequest request) {
+  final platform = request.platform;
+  final minimumOsVersion = request.minimumOsVersion;
+  final families = request.families;
+  final extraVariables = request.extraVariables;
   final variables = _basePlistVariables(
-    appName: appName,
-    bundleId: bundleId,
+    appName: request.appName,
+    bundleId: request.bundleId,
     minimumOsVersion: minimumOsVersion,
     extraVariables: extraVariables,
   );
   final merger = _PlistMerger(variables);
-  _mergePlistSources(merger, plistXmls);
+  _mergePlistSources(merger, request.plistXmls);
 
   // Drop empty CFBundleIconFile left by `flutter create` scaffolds if nothing
   // populated it.
@@ -522,7 +540,11 @@ String buildInfoPlist({
   _applyBuildVersionOverrides(merger, extraVariables);
 
   // Standard Apple bundle defaults (only injected when missing or empty).
-  final defaults = _standardPlistDefaults(variables, appName, bundleId);
+  final defaults = _standardPlistDefaults(
+    variables,
+    request.appName,
+    request.bundleId,
+  );
   if (platform == 'ios' || platform == 'ios_sim') {
     _addIosPlistDefaults(
       defaults,
@@ -2549,13 +2571,15 @@ class _BundleAssembly {
       for (final p in config.infoPlistPaths) File(p).readAsStringSync(),
     ];
     final mergedPlist = buildInfoPlist(
-      plistXmls: plistXmls,
-      platform: config.platform,
-      appName: config.appName,
-      bundleId: config.bundleId,
-      minimumOsVersion: config.minimumOsVersion,
-      extraVariables: effectiveDefines,
-      families: config.families,
+      InfoPlistRequest(
+        plistXmls: plistXmls,
+        platform: config.platform,
+        appName: config.appName,
+        bundleId: config.bundleId,
+        minimumOsVersion: config.minimumOsVersion,
+        extraVariables: effectiveDefines,
+        families: config.families,
+      ),
     );
     File('${contentsDir.path}/Info.plist').writeAsStringSync(mergedPlist);
     File('${contentsDir.path}/PkgInfo').writeAsStringSync('APPL????');
@@ -2863,33 +2887,25 @@ int _machOPlatformConstant(String platform) {
   }
 }
 
-Uint8List _encodeMachOSegment64Command({
-  required String segname,
-  required int vmaddr,
-  required int vmsize,
-  required int fileoff,
-  required int filesize,
-  required int maxprot,
-  required int initprot,
-}) {
+Uint8List _encodeMachOSegment64Command(Segment64Spec spec) {
   final bytes = Uint8List(72);
   final bd = ByteData.sublistView(bytes);
   bd.setUint32(0, 0x19, Endian.little); // LC_SEGMENT_64
   bd.setUint32(4, 72, Endian.little);
-  final nameBytes = ascii.encode(segname);
+  final nameBytes = ascii.encode(spec.segname);
   bytes.setRange(
     8,
     8 + (nameBytes.length > 16 ? 16 : nameBytes.length),
     nameBytes,
   );
-  _setUint64LE(bd, 24, vmaddr);
-  _setUint64LE(bd, 32, vmsize);
-  _setUint64LE(bd, 40, fileoff);
-  _setUint64LE(bd, 48, filesize);
-  bd.setInt32(56, maxprot, Endian.little);
-  bd.setInt32(60, initprot, Endian.little);
-  bd.setUint32(64, 0, Endian.little); // nsects
-  bd.setUint32(68, 0, Endian.little); // flags
+  _setUint64LE(bd, 24, spec.vmaddr);
+  _setUint64LE(bd, 32, spec.vmsize);
+  _setUint64LE(bd, 40, spec.fileoff);
+  _setUint64LE(bd, 48, spec.filesize);
+  bd.setInt32(56, spec.maxprot, Endian.little);
+  bd.setInt32(60, spec.initprot, Endian.little);
+  bd.setUint32(64, spec.nsects, Endian.little); // nsects
+  bd.setUint32(68, spec.flags, Endian.little); // flags
   return bytes;
 }
 
@@ -2987,22 +3003,20 @@ Uint8List _encodeMachOBuildVersionCommand({
   }
 }
 
-List<Uint8List> _stubLoadCommands({
-  required String platform,
-  required int versionPacked,
-  required int pageSize,
-  required int linkeditFileSize,
-  required List<String> linkedFrameworkNames,
-  required List<String> sdkFrameworks,
-  required List<String> sdkDylibs,
-}) {
+List<Uint8List> _stubLoadCommands(
+  StubRunnerSpec spec,
+  int versionPacked,
+  int pageSize,
+  int linkeditFileSize,
+) {
+  final platform = spec.platform;
   return [
     _encodeMachOBuildVersionCommand(
       platform: _machOPlatformConstant(platform),
       minos: versionPacked,
       sdk: versionPacked,
     ),
-    _encodeMachOSegment64Command(
+    _encodeMachOSegment64Command((
       segname: '__TEXT',
       vmaddr: 0,
       vmsize: pageSize,
@@ -3010,8 +3024,10 @@ List<Uint8List> _stubLoadCommands({
       filesize: pageSize,
       maxprot: 5,
       initprot: 5,
-    ),
-    _encodeMachOSegment64Command(
+      nsects: 0,
+      flags: 0,
+    )),
+    _encodeMachOSegment64Command((
       segname: '__LINKEDIT',
       vmaddr: pageSize,
       vmsize: pageSize,
@@ -3019,7 +3035,9 @@ List<Uint8List> _stubLoadCommands({
       filesize: linkeditFileSize,
       maxprot: 1,
       initprot: 1,
-    ),
+      nsects: 0,
+      flags: 0,
+    )),
     _encodeMachOSymtabCommand(
       symoff: pageSize,
       nsyms: 0,
@@ -3031,15 +3049,15 @@ List<Uint8List> _stubLoadCommands({
     _encodeMachORpathCommand('@executable_path/Frameworks'),
     if (platform == 'macos')
       _encodeMachORpathCommand('@executable_path/../Frameworks'),
-    for (final fw in linkedFrameworkNames)
+    for (final fw in spec.linkedFrameworkNames)
       _encodeMachOLoadDylibCommand('@rpath/$fw.framework/$fw'),
-    for (final sdkFw in sdkFrameworks)
+    for (final sdkFw in spec.sdkFrameworks)
       _encodeMachOLoadDylibCommand(
         platform == 'macos'
             ? '/System/Library/Frameworks/$sdkFw.framework/Versions/A/$sdkFw'
             : '/System/Library/Frameworks/$sdkFw.framework/$sdkFw',
       ),
-    for (final dylib in sdkDylibs)
+    for (final dylib in spec.sdkDylibs)
       _encodeMachOLoadDylibCommand(
         '/usr/lib/${dylib.startsWith('lib') ? dylib : 'lib$dylib'}.dylib',
       ),
@@ -3071,36 +3089,48 @@ void _stampStubUuid(Uint8List out, int uuidDataOffset) {
   out.setRange(uuidDataOffset, uuidDataOffset + 16, uuid);
 }
 
+/// The inputs for synthesizing a stub runner Mach-O binary: target platform
+/// and version plus linked frameworks, libraries, and metadata. Grouped so
+/// the stub entry points stay small.
+class StubRunnerSpec {
+  const StubRunnerSpec({
+    required this.platform,
+    this.arch = 'arm64',
+    required this.minimumOsVersion,
+    this.linkedFrameworkNames = const [],
+    this.sdkFrameworks = const [],
+    this.sdkDylibs = const [],
+    this.metadataEntries = const [],
+  });
+
+  final String platform;
+  final String arch;
+  final String minimumOsVersion;
+  final List<String> linkedFrameworkNames;
+  final List<String> sdkFrameworks;
+  final List<String> sdkDylibs;
+  final List<String> metadataEntries;
+}
+
 /// Synthesizes a 64-bit Mach-O `MH_EXECUTE` runner binary with
 /// `LC_BUILD_VERSION`, `__TEXT` / `__LINKEDIT` segments, `LC_SYMTAB`,
 /// `LC_DYSYMTAB`, `LC_UUID`, `LC_RPATH`, and `LC_LOAD_DYLIB` commands.
-Uint8List generateStubExecutableMachO({
-  required String platform,
-  String arch = 'arm64',
-  required String minimumOsVersion,
-  List<String> linkedFrameworkNames = const [],
-  List<String> sdkFrameworks = const [],
-  List<String> sdkDylibs = const [],
-  List<String> metadataEntries = const [],
-}) {
-  final archParams = _stubArchParams(arch);
+Uint8List generateStubExecutableMachO(StubRunnerSpec spec) {
+  final archParams = _stubArchParams(spec.arch);
   final pageSize = archParams.pageSize;
   const linkeditFileSize = 8;
-  final versionPacked = _packMachOVersion(minimumOsVersion);
+  final versionPacked = _packMachOVersion(spec.minimumOsVersion);
 
   final loadCommands = _stubLoadCommands(
-    platform: platform,
-    versionPacked: versionPacked,
-    pageSize: pageSize,
-    linkeditFileSize: linkeditFileSize,
-    linkedFrameworkNames: linkedFrameworkNames,
-    sdkFrameworks: sdkFrameworks,
-    sdkDylibs: sdkDylibs,
+    spec,
+    versionPacked,
+    pageSize,
+    linkeditFileSize,
   );
   final sizeofcmds = loadCommands.fold<int>(0, (s, c) => s + c.length);
-  final metadataText = metadataEntries.isEmpty
+  final metadataText = spec.metadataEntries.isEmpty
       ? ''
-      : '${metadataEntries.join('\n')}\n';
+      : '${spec.metadataEntries.join('\n')}\n';
   final metadataBytes = utf8.encode(metadataText);
 
   final totalSize = pageSize + linkeditFileSize;
@@ -3457,13 +3487,15 @@ void _synthesizeRunnerBinary(
   ];
 
   final machoBytes = generateStubExecutableMachO(
-    platform: config.platform,
-    arch: config.arch,
-    minimumOsVersion: config.minimumOsVersion,
-    linkedFrameworkNames: linkedFrameworkNames,
-    sdkFrameworks: sdkFrameworks,
-    sdkDylibs: sdkDylibs,
-    metadataEntries: metadataEntries,
+    StubRunnerSpec(
+      platform: config.platform,
+      arch: config.arch,
+      minimumOsVersion: config.minimumOsVersion,
+      linkedFrameworkNames: linkedFrameworkNames,
+      sdkFrameworks: sdkFrameworks,
+      sdkDylibs: sdkDylibs,
+      metadataEntries: metadataEntries,
+    ),
   );
   final outFile = File(config.outputPath);
   outFile.parent.createSync(recursive: true);
@@ -3578,32 +3610,50 @@ String _substituteLabelGroups(String template, Map<String, String> values) {
   });
 }
 
+/// The inputs for resolving bundle versions from a build label: templates,
+/// label-matching rules, and the output path. Grouped so the resolver entry
+/// point stays small.
+class BundleVersionRequest {
+  const BundleVersionRequest({
+    required this.buildVersion,
+    this.shortVersionString = '',
+    this.buildLabelPattern = '',
+    this.fallbackBuildLabel = '',
+    this.captureGroups = const {},
+    this.stableStatusPath,
+    required this.outputPath,
+  });
+
+  final String buildVersion;
+  final String shortVersionString;
+  final String buildLabelPattern;
+  final String fallbackBuildLabel;
+  final Map<String, String> captureGroups;
+  final String? stableStatusPath;
+  final String outputPath;
+}
+
 /// Resolves `build_version` and `short_version_string` from a Bazel
-/// `stable-status.txt` `BUILD_EMBED_LABEL` (or [fallbackBuildLabel]) and
-/// [buildLabelPattern] / [captureGroups], writing JSON to [outputPath].
-void resolveBundleVersion({
-  required String buildVersion,
-  String shortVersionString = '',
-  String buildLabelPattern = '',
-  String fallbackBuildLabel = '',
-  Map<String, String> captureGroups = const {},
-  String? stableStatusPath,
-  required String outputPath,
-}) {
-  var resolvedShort = shortVersionString.isNotEmpty
-      ? shortVersionString
+/// `stable-status.txt` `BUILD_EMBED_LABEL` (or the request's fallback build
+/// label) and the request's build-label pattern / capture groups, writing
+/// JSON to the request's output path.
+void resolveBundleVersion(BundleVersionRequest request) {
+  final buildVersion = request.buildVersion;
+  final buildLabelPattern = request.buildLabelPattern;
+  var resolvedShort = request.shortVersionString.isNotEmpty
+      ? request.shortVersionString
       : buildVersion;
   var resolvedBuild = buildVersion;
 
   if (buildLabelPattern.isNotEmpty) {
     final embedLabel = _readBuildEmbedLabel(
-      stableStatusPath,
-      fallbackBuildLabel,
+      request.stableStatusPath,
+      request.fallbackBuildLabel,
     );
     if (embedLabel != null && embedLabel.isNotEmpty) {
       final values = _matchLabelGroups(
         buildLabelPattern,
-        captureGroups,
+        request.captureGroups,
         embedLabel,
       );
       resolvedBuild = _substituteLabelGroups(resolvedBuild, values);
@@ -3611,7 +3661,7 @@ void resolveBundleVersion({
     }
   }
 
-  final outFile = File(outputPath);
+  final outFile = File(request.outputPath);
   outFile.parent.createSync(recursive: true);
   outFile.writeAsStringSync(
     '${jsonEncode({'build_version': resolvedBuild, 'short_version_string': resolvedShort})}\n',
@@ -3740,13 +3790,15 @@ void _runResolveVersionCli(List<String> args) {
 
   try {
     resolveBundleVersion(
-      buildVersion: state.buildVersion,
-      shortVersionString: state.shortVersionString,
-      buildLabelPattern: state.buildLabelPattern,
-      fallbackBuildLabel: state.fallbackBuildLabel,
-      captureGroups: state.captureGroups,
-      stableStatusPath: state.stableStatusPath,
-      outputPath: outputPath,
+      BundleVersionRequest(
+        buildVersion: state.buildVersion,
+        shortVersionString: state.shortVersionString,
+        buildLabelPattern: state.buildLabelPattern,
+        fallbackBuildLabel: state.fallbackBuildLabel,
+        captureGroups: state.captureGroups,
+        stableStatusPath: state.stableStatusPath,
+        outputPath: outputPath,
+      ),
     );
   } on Object catch (e) {
     stderr.writeln('xtool_pack resolve-version failed: $e');
