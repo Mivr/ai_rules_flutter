@@ -29,8 +29,8 @@ load(
     "resolve_overlay_roots",
     "resolve_overlay_template",
 )
-load("//flutter/private:starlark_literal.bzl", "starlark_string_literal")
 load("//flutter/private:gradle.bzl", "gradle_android_namespaces", "gradle_build_file_choice", "gradle_collect_files", "gradle_scan_namespaces", "gradle_scan_native", "gradle_scan_proguard")
+load("//flutter/private:starlark_literal.bzl", "starlark_string_literal")
 
 # Verbatim shape of record_android 1.5.1's android/build.gradle (trimmed):
 # Groovy DSL, namespace assignment, no dependencies block at all.

@@ -1602,6 +1602,7 @@ def _rewrite_cat_genrules(content, package_name = "", template = ""):
             out_chunks.append(rest[:idx + len("genrule(\n")])
             rest = rest[idx + len("genrule(\n"):]
             continue
+
         # The cut-out body (and the parsed `name`/`outs` lines) is Starlark
         # source text: its escapes are still encoded. Decode each to the
         # actual text first, or the escaping helper below escapes the
