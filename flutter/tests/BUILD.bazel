@@ -27,6 +27,7 @@ load(":gen_l10n_test.bzl", "gen_l10n_test_suite")
 load(":ios_test.bzl", "ios_test_suite")
 load(":language_version_test.bzl", "language_version_test_suite")
 load(":linux_runner_defines_test.bzl", "linux_runner_defines_test_suite")
+load(":linux_integration_runner_test.bzl", "linux_integration_runner_test_suite")
 load(":linux_sysroot_link_test.bzl", "linux_sysroot_link_test_suite")
 load(":local_sdk_test.bzl", "local_sdk_test_suite")
 load(":macos_test.bzl", "macos_test_suite")
@@ -176,6 +177,8 @@ path_package_test_suite(name = "path_package_test")
 platform_bundle_test_suite(name = "platform_bundle_test")
 
 linux_runner_defines_test_suite(name = "linux_runner_defines_test")
+
+linux_integration_runner_test_suite(name = "linux_integration_runner_test")
 
 linux_sysroot_link_test_suite(name = "linux_sysroot_link_test")
 
