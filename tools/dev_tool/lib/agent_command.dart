@@ -22,6 +22,17 @@ import 'key_press.dart';
 import 'session.dart';
 import 'vm_service_client.dart';
 
+/// How long an agent command waits: past the app's own deadline for the
+/// dispatch, and for reading the isolate's pause state.
+///
+/// One object for the two bounds every [_call] threads one argument at a
+/// time. See [_dispatchMargin] and [_pauseReadBound] for what production
+/// passes.
+typedef AgentDispatchBounds = ({
+  Duration dispatchMargin,
+  Duration pauseReadBound,
+});
+
 /// Register the `app.*` AI-agent commands on [cr].
 ///
 /// [dispatchMargin] is how far past the app's own deadline a dispatched call is
@@ -36,14 +47,17 @@ void setUpAgentCommands(
   Duration dispatchMargin = _dispatchMargin,
   Duration pauseReadBound = _pauseReadBound,
 }) {
+  final bounds = (
+    dispatchMargin: dispatchMargin,
+    pauseReadBound: pauseReadBound,
+  );
   cr.register(
     'app.dumpWidgetTree',
     (params) => _call(
       findSession,
       params,
       'ext.flutter.inspector.getRootWidgetTree',
-      dispatchMargin: dispatchMargin,
-      pauseReadBound: pauseReadBound,
+      bounds: bounds,
       extraArgs: const {
         'groupName': 'rules_flutter_agent',
         'isSummaryTree': 'false',
@@ -61,8 +75,7 @@ void setUpAgentCommands(
       findSession,
       params,
       'ext.rules_flutter.settle',
-      dispatchMargin: dispatchMargin,
-      pauseReadBound: pauseReadBound,
+      bounds: bounds,
     ),
   );
   for (final method in const [
@@ -89,8 +102,7 @@ void setUpAgentCommands(
         findSession,
         params,
         extensionMethod,
-        dispatchMargin: dispatchMargin,
-        pauseReadBound: pauseReadBound,
+        bounds: bounds,
       ),
     );
   }
@@ -160,6 +172,10 @@ void registerPressKeyCommand(
   Duration pauseReadBound = _pauseReadBound,
 }) {
   final mac = browserHostIsMac ?? Platform.isMacOS;
+  final bounds = (
+    dispatchMargin: dispatchMargin,
+    pauseReadBound: pauseReadBound,
+  );
   cr.register('app.pressKey', (params) async {
     final session = findSession(params['appId'] as String?);
     if (session == null) {
@@ -209,8 +225,7 @@ void registerPressKeyCommand(
                   if (params['timeoutMs'] case final t?) 'timeoutMs': t,
                 },
                 'ext.rules_flutter.settle',
-                dispatchMargin: dispatchMargin,
-                pauseReadBound: pauseReadBound,
+                bounds: bounds,
               )
             : null,
       ),
@@ -219,8 +234,7 @@ void registerPressKeyCommand(
         session,
         chord,
         params,
-        dispatchMargin: dispatchMargin,
-        pauseReadBound: pauseReadBound,
+        bounds: bounds,
       ),
     };
   });
@@ -312,8 +326,7 @@ Future<Map<String, dynamic>> _pressKeyInFramework(
   DeviceSession session,
   KeyChord chord,
   Map<String, dynamic> params, {
-  required Duration dispatchMargin,
-  required Duration pauseReadBound,
+  required AgentDispatchBounds bounds,
 }) async {
   final pressed = chord.pressedKey;
   final result = await _call(
@@ -327,8 +340,7 @@ Future<Map<String, dynamic>> _pressKeyInFramework(
       if (params['settle'] case final s?) 'settle': s,
     },
     'ext.rules_flutter.pressKey',
-    dispatchMargin: dispatchMargin,
-    pauseReadBound: pauseReadBound,
+    bounds: bounds,
   );
   return {
     'route': KeyRoute.framework.name,
@@ -361,8 +373,7 @@ void registerBuildInfoCommand(
       findSession,
       params,
       'ext.rules_flutter.buildInfo',
-      dispatchMargin: dispatchMargin,
-      pauseReadBound: pauseReadBound,
+      bounds: (dispatchMargin: dispatchMargin, pauseReadBound: pauseReadBound),
       waitForBinding: false,
     ),
   );
@@ -460,8 +471,7 @@ Future<Map<String, dynamic>> _call(
   DeviceSession? Function(String?) findSession,
   Map<String, dynamic> params,
   String extensionMethod, {
-  required Duration dispatchMargin,
-  required Duration pauseReadBound,
+  required AgentDispatchBounds bounds,
   Map<String, String> extraArgs = const {},
   bool waitForBinding = true,
 }) async {
@@ -489,7 +499,7 @@ Future<Map<String, dynamic>> _call(
     session,
     client,
     extensionMethod,
-    pauseReadBound: pauseReadBound,
+    pauseReadBound: bounds.pauseReadBound,
   );
   await _waitForExtension(
     client,
@@ -502,7 +512,7 @@ Future<Map<String, dynamic>> _call(
   if (await _pauseError(
         client,
         extensionMethod,
-        pauseReadBound,
+        bounds.pauseReadBound,
       )
       case final error?) {
     throw error;
@@ -513,13 +523,13 @@ Future<Map<String, dynamic>> _call(
         entry.key: entry.value.toString(),
     ...extraArgs,
   };
-  final bound = _dispatchBound(params, dispatchMargin);
+  final bound = _dispatchBound(params, bounds.dispatchMargin);
   final json = await _dispatchCall(
     client,
     extensionMethod,
     args: args,
     bound: bound,
-    pauseReadBound: pauseReadBound,
+    pauseReadBound: bounds.pauseReadBound,
   );
   if (json == null) {
     throw CommandFailure.failed('$extensionMethod returned no payload');
