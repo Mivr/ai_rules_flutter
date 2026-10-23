@@ -1828,16 +1828,18 @@ def _covering_entry(parsed_assets, path):
             return entry.path
     return path
 
-def _check_spoke_file_names(package_name, asset_block, expanded):
+def check_spoke_file_names(package_name, asset_block, expanded):
     """Fail the spoke fetch on declared or walked names no target can name.
 
-    Quotes and backslashes round-trip through the escaping helper; only
-    names no literal can name while staying addressable (see
-    `check_spoke_file_name`) fail here, naming the package, the declaring
-    entry and the file rather than emitting a spoke that cannot name them.
+    Every refused class (see `check_spoke_file_name`) fails here, naming
+    the package, the declaring entry and the file rather than emitting a
+    spoke that cannot name them. Trailing-slash directory declarations are
+    covering entries, never emitted target names, so only the files walked
+    out of them are checked (with the declaration in the message).
     """
     for entry in asset_block.assets:
-        check_spoke_file_name(package_name, entry.path, entry.path)
+        if not entry.path.endswith("/"):
+            check_spoke_file_name(package_name, entry.path, entry.path)
     for item in expanded:
         check_spoke_file_name(package_name, _covering_entry(asset_block.assets, item.path), item.path)
     for family in asset_block.fonts:
@@ -1860,7 +1862,7 @@ def _spoke_asset_inputs(ctx, package_name, asset_block):
         asset_block.assets,
         lambda directory: _readdir_files_recursive(ctx, directory),
     )
-    _check_spoke_file_names(package_name, asset_block, expanded)
+    check_spoke_file_names(package_name, asset_block, expanded)
     pkg_assets_dict = _build_pkg_assets_dict(expanded)
     pkg_asset_platforms, pkg_asset_flavors = _build_pkg_asset_conditions(expanded)
     pkg_shaders_dict = _build_pkg_shaders_dict(asset_block.shaders)

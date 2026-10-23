@@ -4,15 +4,17 @@ The spoke generators paste pubspec-declared and file-system-walked names
 into generated BUILD files. Each test below pins that the helper's output
 is a literal the Starlark parser reads back to the exact input: the
 expected value is written as a literal in this file, so equality means the
-emitted text parses back to the input. Final tests pin that quote-,
-backslash- and mixed-odd names render escaped (not spliced raw) in
-generated `flutter_library` and `flutter_plugin` spokes, and that the
-refusal for unrepresentable names carries the package, entry and file.
+emitted text parses back to the input. Final tests pin that a quote name
+(the odd class Bazel itself accepts) renders escaped (not spliced raw) in
+generated `flutter_library` and `flutter_plugin` spokes, and that every
+refused class fails the fetch with the package, entry and file in the
+message.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load(
     "//flutter/private:flutter_pub_package.bzl",
+    "check_spoke_file_names",
     "make_flutter_library_build_content",
     "make_flutter_plugin_build_content",
 )
@@ -20,6 +22,7 @@ load(
     "//flutter/private:starlark_literal.bzl",
     "check_spoke_file_name",
     "spoke_file_name_error",
+    "spoke_file_name_problem",
     "starlark_string_literal",
 )
 
@@ -45,13 +48,21 @@ def _literal_round_trip_test_impl(ctx):
 literal_round_trip_test = unittest.make(_literal_round_trip_test_impl)
 
 def _odd_name_error_names_all_three_test_impl(ctx):
-    """Each refusal names the package, the declaring entry and the file."""
+    """Each refused class names the package, the declaring entry, the file."""
     env = unittest.begin(ctx)
 
     for entry, bad in [
         ("assets/", "assets/a:b.txt"),
+        ("assets/", "assets/back\\slash.txt"),
+        ("assets/", "assets/both\"and\\mix.txt"),
         ("assets/", "assets/has\nnewline.txt"),
         ("assets/", "assets/has\rcarriage.txt"),
+        ("assets/", "assets/has\ttab.txt"),
+        ("assets/", "/leading/slash.txt"),
+        ("assets/", "assets//double/slash.txt"),
+        ("assets/", "assets/./dot/seg.txt"),
+        ("assets/", "assets/../up/seg.txt"),
+        ("assets/", "trailing/slash/"),
         ("assets/", ""),
     ]:
         err = spoke_file_name_error("mypkg", entry, bad)
@@ -65,22 +76,83 @@ odd_name_error_names_all_three_test = unittest.make(
     _odd_name_error_names_all_three_test_impl,
 )
 
-def _ordinary_name_passes_test_impl(ctx):
-    """Ordinary names (including quotes) pass the fetch-time check."""
+def _refused_classes_fail_closed_test_impl(ctx):
+    """The check refuses each Bazel-rejected class and passes the rest."""
     env = unittest.begin(ctx)
 
-    asserts.equals(env, None, check_spoke_file_name("p", "assets/", "assets/note.txt"))
-    asserts.equals(env, None, check_spoke_file_name("p", "assets/", 'assets/say"hi.txt'))
+    for bad in [
+        "assets/a:b.txt",
+        "assets/back\\slash.txt",
+        "assets/both\"and\\mix.txt",
+        "assets/has\nnewline.txt",
+        "assets/has\rcarriage.txt",
+        "assets/has\ttab.txt",
+        "/leading/slash.txt",
+        "assets//double/slash.txt",
+        "assets/./dot/seg.txt",
+        "assets/../up/seg.txt",
+        "trailing/slash/",
+        "",
+    ]:
+        asserts.true(env, spoke_file_name_problem(bad) != "", bad)
+    for good in ['assets/say"hi.txt', "assets/note.txt", "."]:
+        asserts.equals(env, "", spoke_file_name_problem(good), good)
+
+    return unittest.end(env)
+
+refused_classes_fail_closed_test = unittest.make(
+    _refused_classes_fail_closed_test_impl,
+)
+
+def _dir_declaration_passes_test_impl(ctx):
+    """A trailing-slash declaration covers files; it is never emitted."""
+    env = unittest.begin(ctx)
+
+    block = struct(
+        assets = [struct(path = "assets/odd/")],
+        fonts = [],
+        shaders = [],
+    )
+    expanded = [struct(path = "assets/odd/note.txt")]
+    asserts.equals(env, None, check_spoke_file_names("p", block, expanded))
+
+    return unittest.end(env)
+
+dir_declaration_passes_test = unittest.make(
+    _dir_declaration_passes_test_impl,
+)
+
+def _ordinary_name_passes_test_impl(ctx):
+    """Bazel-accepted names (including quotes) pass the fetch-time check."""
+    env = unittest.begin(ctx)
+
+    for good in [
+        "assets/note.txt",
+        'assets/say"hi.txt',
+        ".",
+        "assets/100%.txt",
+        "assets/star*name.txt",
+        "assets/space name.txt",
+        "assets/$HOME.txt",
+        "assets/café.txt",
+    ]:
+        asserts.equals(env, None, check_spoke_file_name("p", "assets/", good), good)
 
     return unittest.end(env)
 
 ordinary_name_passes_test = unittest.make(_ordinary_name_passes_test_impl)
 
 def _odd_names_render_escaped_test_impl(ctx):
-    """Odd names render escaped in generated spokes, never spliced raw."""
+    """A quote name renders escaped in generated spokes, never spliced raw.
+
+    Quotes are the odd class Bazel accepts in target names, so the fetch
+    lets them through and the renderer must carry them safely. Every other
+    odd class (backslash included) fails the fetch instead; those paths
+    are pinned by the refusal tests above.
+    """
     env = unittest.begin(ctx)
 
-    odd = ['say"hi.txt', "back\\slash.txt", 'both"and\\mix.txt']
+    odd = ['say"hi.txt']
     assets = {}
     for name in odd:
         assets[":" + name] = name
@@ -134,6 +206,8 @@ def starlark_literal_test_suite(name):
         name,
         literal_round_trip_test,
         odd_name_error_names_all_three_test,
+        refused_classes_fail_closed_test,
+        dir_declaration_passes_test,
         ordinary_name_passes_test,
         odd_names_render_escaped_test,
     )
