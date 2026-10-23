@@ -20,3 +20,11 @@ flutter:
     - path: assets/paid_only.txt
       flavors:
         - paid
+    # The same file in two entries bundles on the union of the platforms,
+    # as flutter_tools does: this file ships on Android and Linux.
+    - path: assets/union_android.txt
+      platforms:
+        - android
+    - path: assets/union_android.txt
+      platforms:
+        - linux

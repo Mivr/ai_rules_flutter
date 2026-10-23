@@ -3,11 +3,13 @@
 /// `@deps//:platform_assets` (a `path:` fixture package resolved through
 /// `flutter.pub`) declares `assets/any.txt` (unconditional),
 /// `assets/android_only.txt` (`platforms: [android]`), `assets/web_only.txt`
-/// (`platforms: [web]`) and `assets/paid_only.txt` (`flavors: [paid]`). The
-/// test lists the APK's zip entries and asserts
-/// `assets/flutter_assets/packages/platform_assets/assets/` holds `any.txt`
-/// and `android_only.txt` but neither `web_only.txt` nor `paid_only.txt`,
-/// and that `AssetManifest.bin` agrees.
+/// (`platforms: [web]`), `assets/paid_only.txt` (`flavors: [paid]`) and
+/// `assets/union_android.txt` (one entry for `[android]`, one for `[linux]`,
+/// so it ships on the union: Android and Linux). The test lists the APK's
+/// zip entries and asserts
+/// `assets/flutter_assets/packages/platform_assets/assets/` holds `any.txt`,
+/// `android_only.txt` and `union_android.txt` but neither `web_only.txt` nor
+/// `paid_only.txt`, and that `AssetManifest.bin` agrees.
 ///
 /// The archive is parsed by hand (central directory walk, raw inflate via
 /// `dart:io`'s `ZLibCodec` when the manifest entry is deflated): no `unzip`
@@ -136,6 +138,12 @@ void main() {
     'missing assets/flutter_assets/$prefix/android_only.txt',
   );
   check(
+    'union_android.txt is in the Android APK',
+    names.contains('union_android.txt'),
+    'missing assets/flutter_assets/$prefix/union_android.txt: the android '
+        'and linux entries must union',
+  );
+  check(
     'web_only.txt is not in the Android APK',
     !names.contains('web_only.txt'),
     'assets/flutter_assets/$prefix/web_only.txt must stay web-only',
@@ -173,6 +181,13 @@ void main() {
       'AssetManifest lists android_only.txt',
       manifestText.contains('packages/platform_assets/assets/android_only.txt'),
       'manifest is missing the android-only asset',
+    );
+    check(
+      'AssetManifest lists union_android.txt',
+      manifestText.contains(
+        'packages/platform_assets/assets/union_android.txt',
+      ),
+      'manifest is missing the unioned android/linux asset',
     );
     check(
       'AssetManifest omits web_only.txt',
