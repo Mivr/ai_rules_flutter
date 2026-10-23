@@ -876,24 +876,17 @@ Uint8List _finishFrameworkZip(
   return localParts.takeBytes();
 }
 
-/// Decodes a ZIP archive into [FrameworkZipEntry] items for inspection/testing.
-List<FrameworkZipEntry> readFrameworkZipEntries(Uint8List zipBytes) {
-  final bd = ByteData.sublistView(zipBytes);
-  var eocdOffset = -1;
-  for (var i = zipBytes.length - 22; i >= 0; i--) {
-    if (bd.getUint32(i, Endian.little) == 0x06054b50) {
-      eocdOffset = i;
-      break;
-    }
-  }
-  if (eocdOffset == -1) {
-    throw const FormatException('Invalid ZIP archive: EOCD not found.');
-  }
-  final entryCount = bd.getUint16(eocdOffset + 10, Endian.little);
-  final cdOffset = bd.getUint32(eocdOffset + 16, Endian.little);
+/// One central-directory entry of a framework ZIP with its payload inflated.
+/// Mode bits stay packed: each reader interprets [externalAttrs] itself.
+List<({String path, Uint8List data, int externalAttrs})>
+_readRawFrameworkZipEntries(
+  ByteData bd,
+  Uint8List zipBytes,
+  int entryCount,
+  int cdOffset,
+) {
   final rawInflate = ZLibCodec(raw: true);
-
-  final entries = <FrameworkZipEntry>[];
+  final entries = <({String path, Uint8List data, int externalAttrs})>[];
   var pos = cdOffset;
   for (var i = 0; i < entryCount; i++) {
     if (bd.getUint32(pos, Endian.little) != 0x02014b50) {
@@ -923,17 +916,38 @@ List<FrameworkZipEntry> readFrameworkZipEntries(Uint8List zipBytes) {
     } else {
       throw UnsupportedError('Unsupported ZIP compression method: $method');
     }
+    entries.add((path: path, data: data, externalAttrs: externalAttrs));
+  }
+  return entries;
+}
 
-    final unixMode = (externalAttrs >>> 16) & 0xFFFF;
+/// Decodes a ZIP archive into [FrameworkZipEntry] items for inspection/testing.
+List<FrameworkZipEntry> readFrameworkZipEntries(Uint8List zipBytes) {
+  final bd = ByteData.sublistView(zipBytes);
+  var eocdOffset = -1;
+  for (var i = zipBytes.length - 22; i >= 0; i--) {
+    if (bd.getUint32(i, Endian.little) == 0x06054b50) {
+      eocdOffset = i;
+      break;
+    }
+  }
+  if (eocdOffset == -1) {
+    throw const FormatException('Invalid ZIP archive: EOCD not found.');
+  }
+  final entryCount = bd.getUint16(eocdOffset + 10, Endian.little);
+  final cdOffset = bd.getUint32(eocdOffset + 16, Endian.little);
+
+  final entries = <FrameworkZipEntry>[];
+  for (final raw
+      in _readRawFrameworkZipEntries(bd, zipBytes, entryCount, cdOffset)) {
+    final unixMode = (raw.externalAttrs >>> 16) & 0xFFFF;
     final fileType = unixMode & 0xF000;
     final isSymlink = fileType == 0xA000;
-    final isExec = !isSymlink && ((unixMode & 0x49) != 0);
-
     entries.add(
       FrameworkZipEntry(
-        path: path,
-        data: data,
-        isExecutable: isExec,
+        path: raw.path,
+        data: raw.data,
+        isExecutable: !isSymlink && ((unixMode & 0x49) != 0),
         isSymlink: isSymlink,
       ),
     );
@@ -1656,37 +1670,11 @@ Map<String, Uint8List> _readZipArchiveEntries(Uint8List zipBytes) {
   }
   final entryCount = bd.getUint16(eocdOffset + 10, Endian.little);
   final cdOffset = bd.getUint32(eocdOffset + 16, Endian.little);
-  final rawInflate = ZLibCodec(raw: true);
-  final result = <String, Uint8List>{};
-  var pos = cdOffset;
-  for (var i = 0; i < entryCount; i++) {
-    if (bd.getUint32(pos, Endian.little) != 0x02014b50) {
-      throw FormatException('Invalid central directory header at $pos.');
-    }
-    final method = bd.getUint16(pos + 10, Endian.little);
-    final compressedSize = bd.getUint32(pos + 20, Endian.little);
-    final nameLen = bd.getUint16(pos + 28, Endian.little);
-    final extraLen = bd.getUint16(pos + 30, Endian.little);
-    final commentLen = bd.getUint16(pos + 32, Endian.little);
-    final localOffset = bd.getUint32(pos + 42, Endian.little);
-    final path = utf8.decode(zipBytes.sublist(pos + 46, pos + 46 + nameLen));
-    pos += 46 + nameLen + extraLen + commentLen;
-
-    final localNameLen = bd.getUint16(localOffset + 26, Endian.little);
-    final localExtraLen = bd.getUint16(localOffset + 28, Endian.little);
-    final dataStart = localOffset + 30 + localNameLen + localExtraLen;
-    final rawPayload = zipBytes.sublist(dataStart, dataStart + compressedSize);
-    final Uint8List data;
-    if (method == 0) {
-      data = Uint8List.fromList(rawPayload);
-    } else if (method == 8) {
-      data = Uint8List.fromList(rawInflate.decode(rawPayload));
-    } else {
-      throw UnsupportedError('Unsupported ZIP compression method: $method');
-    }
-    result[path] = data;
-  }
-  return result;
+  return {
+    for (final entry
+        in _readRawFrameworkZipEntries(bd, zipBytes, entryCount, cdOffset))
+      entry.path: entry.data,
+  };
 }
 
 /// Parsed `verify` subcommand flags.
