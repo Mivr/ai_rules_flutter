@@ -117,15 +117,31 @@ def _flutter_xtool_bundle_version_impl(ctx):
 flutter_xtool_bundle_version = rule(
     implementation = _flutter_xtool_bundle_version_impl,
     attrs = {
-        "build_label_pattern": attr.string(default = ""),
-        "build_version": attr.string(mandatory = True),
-        "capture_groups": attr.string_dict(default = {}),
-        "fallback_build_label": attr.string(default = ""),
-        "short_version_string": attr.string(default = ""),
+        "build_label_pattern": attr.string(
+            default = "",
+            doc = "Stamped build-label pattern with `{placeholder}` groups resolved via `capture_groups`. When empty, `build_version` is used literally.",
+        ),
+        "build_version": attr.string(
+            mandatory = True,
+            doc = "Explicit `CFBundleVersion` (`FLUTTER_BUILD_NUMBER`); may carry `{placeholder}` groups when `build_label_pattern` is set.",
+        ),
+        "capture_groups": attr.string_dict(
+            default = {},
+            doc = "Maps `build_label_pattern` placeholder names to regex capture-group names in the stamped build label.",
+        ),
+        "fallback_build_label": attr.string(
+            default = "",
+            doc = "Build label parsed when the stamped label is unavailable; requires `build_label_pattern` and `capture_groups`.",
+        ),
+        "short_version_string": attr.string(
+            default = "",
+            doc = "Optional explicit `CFBundleShortVersionString` (`FLUTTER_BUILD_NAME`); defaults to `build_version`.",
+        ),
         "_xtool_pack": attr.label(
             default = Label("//flutter/private/tools:xtool_pack"),
             executable = True,
             cfg = "exec",
+            doc = "The `xtool_pack` host tool resolving stamped versions.",
         ),
     },
     provides = [FlutterXtoolVersionInfo, DefaultInfo],
