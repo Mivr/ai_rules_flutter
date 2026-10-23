@@ -451,27 +451,29 @@ def _format_alias(name, actual):
     visibility = ["//visibility:public"],
 )""".format(name = name, actual = actual)
 
-def _lazy_repo_file_aliases(
-        os_name,
-        exe_suffix,
-        user_repo_name,
-        platform,
-        patched_sdk_product_repo,
-        font_subset_repo,
-        material_fonts_repo,
-        engine_release_repo,
-        engine_debug_repo):
-    """Generates alias() targets for all files moved into lazy SDK repositories."""
+def _lazy_repo_file_aliases(os_name, exe_suffix, user_repo_name, platform, repos):
+    """Generates alias() targets for all files moved into lazy SDK repositories.
+
+    Args:
+        os_name: Host OS name ("macos", "linux", "windows", or other).
+        exe_suffix: Executable suffix for the host platform (".exe" on Windows).
+        user_repo_name: Base name for Flutter repositories.
+        platform: Host platform string (e.g. `"linux-x64"`).
+        repos: Struct with the lazy repository names —
+            `patched_sdk_product_repo`, `font_subset_repo`,
+            `material_fonts_repo`, `engine_release_repo`, and
+            `engine_debug_repo`.
+    """
     blocks = []
 
     for path in _PATCHED_SDK_PRODUCT_FILES:
-        blocks.append(_format_alias(path, "@{}//:{}".format(patched_sdk_product_repo, path)))
+        blocks.append(_format_alias(path, "@{}//:{}".format(repos.patched_sdk_product_repo, path)))
 
     for path in _FONT_SUBSET_BASE_FILES + ["font-subset-tools/font-subset" + exe_suffix]:
-        blocks.append(_format_alias(path, "@{}//:{}".format(font_subset_repo, path)))
+        blocks.append(_format_alias(path, "@{}//:{}".format(repos.font_subset_repo, path)))
 
     for path in _MATERIAL_FONTS_FILES:
-        blocks.append(_format_alias(path, "@{}//:{}".format(material_fonts_repo, path)))
+        blocks.append(_format_alias(path, "@{}//:{}".format(repos.material_fonts_repo, path)))
 
     if os_name == "macos":
         host_tools_release_repo = "{}_host_tools_release_{}".format(user_repo_name, platform)
@@ -490,13 +492,13 @@ def _lazy_repo_file_aliases(
         debug_rel = []
 
     for rel in release_rel:
-        blocks.append(_format_alias("engine/" + rel, "@{}//:engine/{}".format(engine_release_repo, rel)))
+        blocks.append(_format_alias("engine/" + rel, "@{}//:engine/{}".format(repos.engine_release_repo, rel)))
     for rel in debug_rel:
-        blocks.append(_format_alias("engine-debug/" + rel, "@{}//:engine/{}".format(engine_debug_repo, rel)))
+        blocks.append(_format_alias("engine-debug/" + rel, "@{}//:engine/{}".format(repos.engine_debug_repo, rel)))
 
     if os_name == "windows":
         for path in _WINDOWS_CPP_CLIENT_WRAPPER_FILES:
-            blocks.append(_format_alias(path, "@{}//:{}".format(engine_release_repo, path)))
+            blocks.append(_format_alias(path, "@{}//:{}".format(repos.engine_release_repo, path)))
 
     return "\n\n".join(blocks)
 
@@ -957,15 +959,17 @@ def _write_engine_artifacts_build(
     )
 
     lazy_file_aliases = _lazy_repo_file_aliases(
-        user_repo_name = user_repo_name,
-        platform = platform,
         os_name = os_name,
         exe_suffix = exe_suffix,
-        engine_release_repo = engine_release_repo,
-        engine_debug_repo = engine_debug_repo,
-        patched_sdk_product_repo = patched_sdk_product_repo,
-        font_subset_repo = font_subset_repo,
-        material_fonts_repo = material_fonts_repo,
+        user_repo_name = user_repo_name,
+        platform = platform,
+        repos = struct(
+            patched_sdk_product_repo = patched_sdk_product_repo,
+            font_subset_repo = font_subset_repo,
+            material_fonts_repo = material_fonts_repo,
+            engine_release_repo = engine_release_repo,
+            engine_debug_repo = engine_debug_repo,
+        ),
     )
 
     # :engine_library (release) and :engine_debug_library (debug) alias the lazy
@@ -1390,33 +1394,40 @@ def _resolve_download_version(flutter_version, engine_revision, material_fonts_u
         fail(unknown_version_message(flutter_version))
     return engine_revision, material_fonts_url, source_sha256
 
-def _register_download_shared_repos(name, flutter_version, engine_revision, source_sha256, material_fonts_url, source_url, source_strip_prefix, engine_base_url, checksums):
-    """The dev-root, patched-SDK and fonts repos shared across host platforms."""
+def _register_download_shared_repos(name, config):
+    """The dev-root, patched-SDK and fonts repos shared across host platforms.
+
+    Args:
+        name: Base name for Flutter repositories.
+        config: Struct with `flutter_version`, `engine_revision`,
+            `source_sha256`, `material_fonts_url`, `source_url`,
+            `source_strip_prefix`, `engine_base_url`, and `checksums`.
+    """
 
     # FLUTTER_ROOT-shaped tree behind `@rules_flutter//flutter:pub`. Lazily
     # fetched: nothing in a normal build references it.
     flutter_dev_root_repo(
         name = name + "_dev_root",
-        flutter_version = flutter_version,
-        engine_revision = engine_revision,
-        sha256 = require_sha256(source_sha256, flutter_version),
-        source_url = source_url,
-        source_strip_prefix = source_strip_prefix,
+        flutter_version = config.flutter_version,
+        engine_revision = config.engine_revision,
+        sha256 = require_sha256(config.source_sha256, config.flutter_version),
+        source_url = config.source_url,
+        source_strip_prefix = config.source_strip_prefix,
     )
 
     # Lazy shared product patched SDK repo (only fetched by non-debug app/web builds).
     flutter_patched_sdk_product_repo(
         name = name + "_patched_sdk_product",
-        engine_revision = engine_revision,
-        sha256 = flutter_artifact_sha256(flutter_version, "flutter_patched_sdk_product.zip", checksums),
-        engine_base_url = engine_base_url,
+        engine_revision = config.engine_revision,
+        sha256 = flutter_artifact_sha256(config.flutter_version, "flutter_patched_sdk_product.zip", config.checksums),
+        engine_base_url = config.engine_base_url,
     )
 
     # Lazy shared material design fonts repo (only fetched when @rules_flutter//flutter:material_icons is used).
     flutter_material_fonts_repo(
         name = name + "_material_fonts",
-        material_fonts_url = material_fonts_url,
-        sha256 = flutter_artifact_sha256(flutter_version, "material_fonts.zip", checksums),
+        material_fonts_url = config.material_fonts_url,
+        sha256 = flutter_artifact_sha256(config.flutter_version, "material_fonts.zip", config.checksums),
     )
 
 def _register_download_host_repos(name, flutter_version, engine_revision, engine_base_url, checksums):
@@ -1644,7 +1655,16 @@ def flutter_register_toolchains(
     # version-keyed table. None keeps the stock ARTIFACT_CHECKSUMS.
     checksums = {flutter_version: artifact_sha256s} if artifact_sha256s != None else None
 
-    _register_download_shared_repos(name, flutter_version, engine_revision, source_sha256, material_fonts_url, source_url, source_strip_prefix, engine_base_url, checksums)
+    _register_download_shared_repos(name, struct(
+        flutter_version = flutter_version,
+        engine_revision = engine_revision,
+        source_sha256 = source_sha256,
+        material_fonts_url = material_fonts_url,
+        source_url = source_url,
+        source_strip_prefix = source_strip_prefix,
+        engine_base_url = engine_base_url,
+        checksums = checksums,
+    ))
     _register_download_host_repos(name, flutter_version, engine_revision, engine_base_url, checksums)
     _register_download_cross_repos(name, flutter_version, engine_revision, engine_base_url, checksums)
 
@@ -1707,21 +1727,39 @@ def _register_download_desktop_engine_repos(name, desktop_engine_targets, flutte
             engine_base_url = engine_base_url,
         )
 
+def _desktop_cross_repo_names(name, target_platform):
+    """Derives the repository names a desktop cross toolchain needs from its target platform.
+
+    Both the download and the local cross-toolchain registrations compute
+    these names the same way; they live here so the derivation exists once.
+
+    Args:
+        name: Base name for Flutter repositories.
+        target_platform: Desktop target platform string (e.g. `"linux-x64"`).
+
+    Returns:
+        A struct with `sysroot_repo_name` (empty for non-Linux targets),
+        `engine_target_key`, and `engine_debug_repo_name`.
+    """
+    sysroot_repo_name = ""
+    if target_platform.startswith("linux-"):
+        sysroot_repo_name = name + "_linux_sysroot_" + target_platform.split("-")[1]
+
+    os_prefix = target_platform.split("-")[0]
+    engine_arch = engine_arch_for_os(PLATFORM_PREFIX_TO_OS[os_prefix], target_platform.split("-")[1])
+    engine_target_key = "{}-{}".format(os_prefix, engine_arch)
+
+    return struct(
+        sysroot_repo_name = sysroot_repo_name,
+        engine_target_key = engine_target_key,
+        engine_debug_repo_name = name + "_desktop_engine_" + engine_target_key + "_debug",
+    )
+
 def _register_download_desktop_cross_repos(name, flutter_version, engine_revision):
     """Desktop cross-platform toolchain repos."""
     for host_platform, desktop_targets in DESKTOP_CROSS_PAIRS.items():
         for target_platform in desktop_targets:
-            sysroot_repo_name = ""
-            if target_platform.startswith("linux-"):
-                sysroot_repo_name = name + "_linux_sysroot_" + target_platform.split("-")[1]
-
-            os_prefix = target_platform.split("-")[0]
-            target_os = PLATFORM_PREFIX_TO_OS[os_prefix]
-            target_arch = target_platform.split("-")[1]
-            engine_arch = engine_arch_for_os(target_os, target_arch)
-            engine_target_key = "{}-{}".format(os_prefix, engine_arch)
-
-            engine_debug_repo_name = name + "_desktop_engine_" + engine_target_key + "_debug"
+            cross = _desktop_cross_repo_names(name, target_platform)
 
             flutter_desktop_cross_repo(
                 name = name + "_desktop_cross_" + host_platform + "_" + target_platform,
@@ -1730,9 +1768,9 @@ def _register_download_desktop_cross_repos(name, flutter_version, engine_revisio
                 host_platform = host_platform,
                 target_platform = target_platform,
                 host_repo_name = name + "_" + host_platform,
-                engine_repo_name = name + "_desktop_engine_" + engine_target_key,
-                engine_debug_repo_name = engine_debug_repo_name,
-                sysroot_repo_name = sysroot_repo_name,
+                engine_repo_name = name + "_desktop_engine_" + cross.engine_target_key,
+                engine_debug_repo_name = cross.engine_debug_repo_name,
+                sysroot_repo_name = cross.sysroot_repo_name,
             )
 
 def _register_download_web_sky_repos(name, flutter_version, engine_revision, engine_base_url, checksums):
@@ -2058,17 +2096,7 @@ def _register_local_desktop_cross_repos(name, local_path):
     # The version stamps are read out of the local SDK at fetch time.
     for host_platform, desktop_targets in DESKTOP_CROSS_PAIRS.items():
         for target_platform in desktop_targets:
-            sysroot_repo_name = ""
-            if target_platform.startswith("linux-"):
-                sysroot_repo_name = name + "_linux_sysroot_" + target_platform.split("-")[1]
-
-            os_prefix = target_platform.split("-")[0]
-            target_os = PLATFORM_PREFIX_TO_OS[os_prefix]
-            target_arch = target_platform.split("-")[1]
-            engine_arch = engine_arch_for_os(target_os, target_arch)
-            engine_target_key = "{}-{}".format(os_prefix, engine_arch)
-
-            engine_debug_repo_name = name + "_desktop_engine_" + engine_target_key + "_debug"
+            cross = _desktop_cross_repo_names(name, target_platform)
 
             flutter_desktop_cross_repo(
                 name = name + "_desktop_cross_" + host_platform + "_" + target_platform,
@@ -2077,9 +2105,9 @@ def _register_local_desktop_cross_repos(name, local_path):
                 host_platform = host_platform,
                 target_platform = target_platform,
                 host_repo_name = name + "_" + host_platform,
-                engine_repo_name = name + "_desktop_engine_" + engine_target_key,
-                engine_debug_repo_name = engine_debug_repo_name,
-                sysroot_repo_name = sysroot_repo_name,
+                engine_repo_name = name + "_desktop_engine_" + cross.engine_target_key,
+                engine_debug_repo_name = cross.engine_debug_repo_name,
+                sysroot_repo_name = cross.sysroot_repo_name,
                 local_path = local_path,
             )
 
