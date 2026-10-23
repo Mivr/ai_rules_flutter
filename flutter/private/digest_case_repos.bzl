@@ -24,6 +24,7 @@ def _digest_download_impl(repository_ctx):
 
 digest_download = repository_rule(
     implementation = _digest_download_impl,
+    doc = "Fetches one fixture file through a file:// URL and exports it as fetched.bin.",
     attrs = {
         "fixture": attr.label(
             mandatory = True,
@@ -47,6 +48,7 @@ def _digest_extract_impl(repository_ctx):
 
 digest_extract = repository_rule(
     implementation = _digest_extract_impl,
+    doc = "Fetches one fixture archive through a file:// URL and exports its full tree.",
     attrs = {
         "fixture": attr.label(
             mandatory = True,
