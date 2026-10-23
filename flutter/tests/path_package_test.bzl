@@ -13,7 +13,7 @@ place. Two hermeticity properties pin the wiring:
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
-load("//flutter:extensions.bzl", "foreign_lock_path_error", "workspace_relative_lock_path")
+load("//flutter/private:flutter_pub_path.bzl", "foreign_lock_path_error", "workspace_relative_lock_path")
 load(
     "//flutter/private:flutter_pub_package.bzl",
     "link_path_package",
