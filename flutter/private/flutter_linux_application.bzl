@@ -21,7 +21,7 @@ Output bundle structure:
 """
 
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
-load("//flutter/private:cc_runner_compile.bzl", "compile_and_link_runner")
+load("//flutter/private:cc_runner_compile.bzl", "compile_and_link_runner", "make_runner_engine", "make_runner_extras", "make_runner_flags")
 load("//flutter/private:common.bzl", "compute_desktop_bundle_copies", "make_desktop_bundle_artifacts", "make_desktop_bundle_libs", "resolve_exec_dart_vm", "resolve_flutter_sdk_info")
 load("//flutter/private:engine_helpers.bzl", "find_engine_header_dir", "linux_multiarch_triple")
 
@@ -368,16 +368,22 @@ def compile_linux_runner(ctx, runner_srcs, engine_files, defines, linux_sysroot,
         ctx = ctx,
         name = ctx.label.name + "_linux_runner",
         srcs = runner_srcs,
-        engine_library_file = engine_so,
-        system_libraries = gtk_libs,
-        engine_header_files = all_header_files,
-        engine_include_dir = header_dir,
-        extra_compile_flags = extra_compile,
-        extra_link_flags = sysroot_link_flags + ["-Wl,-rpath,$ORIGIN/lib"],
-        extra_defines = defines,
-        additional_srcs = additional_srcs + plugin_srcs,
-        system_include_dirs = system_include_dirs,
-        additional_inputs = sysroot_files,
+        engine = make_runner_engine(
+            library_file = engine_so,
+            header_files = all_header_files,
+            include_dir = header_dir,
+        ),
+        flags = make_runner_flags(
+            compile_flags = extra_compile,
+            link_flags = sysroot_link_flags + ["-Wl,-rpath,$ORIGIN/lib"],
+            defines = defines,
+        ),
+        extras = make_runner_extras(
+            additional_srcs = additional_srcs + plugin_srcs,
+            system_libraries = gtk_libs,
+            system_include_dirs = system_include_dirs,
+            additional_inputs = sysroot_files,
+        ),
     )
 
 flutter_linux_runner_lib = rule(
