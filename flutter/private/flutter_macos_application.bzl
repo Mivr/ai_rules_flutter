@@ -84,7 +84,7 @@ def _prepare_macos_framework_binary(ctx, dart_exe, dart_vm_files, app_info, is_d
         )
         return prepared_binary
     if not app_info.aot_output:
-        fail("flutter_macos_framework requires an AOT build (not debug mode) or a kernel_dill in debug mode.")
+        fail("flutter_macos_framework requires an AOT build (not debug mode) or a kernel_dill in debug mode; check the `application` it was given. The `application` target %s provides neither an AOT output nor a kernel_dill." % ctx.attr.application.label)
     patch_args = [
         ctx.executable._macho_edit.path,
         "patch",

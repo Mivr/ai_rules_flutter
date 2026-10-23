@@ -15,7 +15,7 @@ load(
     "flutter_macos_registrant_gen",
     "flutter_macos_runner_lib_gen",
 )
-load("//flutter:providers.bzl", "FlutterDarwinFrameworkInfo")
+load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterDarwinFrameworkInfo")
 load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
 load("//flutter/private:flutter_macos_application.bzl", "flutter_macos_framework", "flutter_macos_native_libs")
 load("//flutter/private:flutter_xtool_bundle.bzl", "flutter_darwin_xcframework_import", "flutter_xtool_macos_bundle")
@@ -219,6 +219,39 @@ _expect_failure_test = analysistest.make(
     },
 )
 
+def _aotless_application_impl(ctx):
+    """Release-shaped application outputs with neither an AOT binary nor a kernel."""
+    assets = ctx.actions.declare_directory(ctx.label.name + "/flutter_assets")
+    ctx.actions.run_shell(
+        outputs = [assets],
+        command = "mkdir -p \"$1\"",
+        arguments = [assets.path],
+    )
+    dummy = ctx.actions.declare_file(ctx.label.name + "/dummy")
+    ctx.actions.write(dummy, "aotless")
+    return [FlutterApplicationInfo(
+        aot_output = None,
+        kernel_dill = None,
+        flutter_assets = assets,
+        icu_data = dummy,
+        native_libs = [],
+        is_debug = False,
+        package_config = dummy,
+        native_assets_manifest = None,
+        bundled_code_assets = depset(),
+        bundled_data_assets = depset(),
+        apple_privacy_manifests = depset(),
+        plugins = [],
+        apple_plugin_libraries = depset(),
+        android_plugin_libraries = depset(),
+        linux_plugin_libraries = depset(),
+        windows_plugin_libraries = depset(),
+    )]
+
+_aotless_application = rule(
+    implementation = _aotless_application_impl,
+)
+
 def _xtool_macos_app_actions_test_impl(ctx):
     env = analysistest.begin(ctx)
     tut = analysistest.target_under_test(env)
@@ -333,6 +366,27 @@ def _bundling_tests(name):
             "bundled as Contents/Frameworks/libdup.dylib",
             "_fake_app_duplicate/one/libdup.dylib",
             "_fake_app_duplicate/two/libdup.dylib",
+        ],
+    )
+
+    # Release-shaped application with neither AOT output nor kernel: the
+    # framework rule must fail naming the `application` target it was given.
+    _aotless_application(
+        name = name + "_aotless_app",
+        tags = ["manual"],
+    )
+    flutter_macos_framework(
+        name = name + "_aotless_framework",
+        application = name + "_aotless_app",
+        tags = ["manual"],
+    )
+    _expect_failure_test(
+        name = name + "_aotless_framework_fails",
+        target_under_test = name + "_aotless_framework",
+        expected_substrings = [
+            "flutter_macos_framework requires an AOT build (not debug mode) or a kernel_dill in debug mode",
+            "check the `application` it was given",
+            name + "_aotless_app provides neither an AOT output nor a kernel_dill",
         ],
     )
 
@@ -809,6 +863,7 @@ def _bundling_tests(name):
         name + "_native_libs_staged",
         name + "_native_libs_nothing_to_bundle",
         name + "_native_libs_duplicate_basename_fails",
+        name + "_aotless_framework_fails",
         name + "_xtool_macos_app_actions",
         name + "_two_apps_one_package",
         name + "_macos_framework_layout_test",
