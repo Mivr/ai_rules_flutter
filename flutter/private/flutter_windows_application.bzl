@@ -70,15 +70,11 @@ def _flutter_windows_runner_lib_impl(ctx):
 
     runner_binary = _compile_windows_runner(
         ctx,
-        runner_srcs = runner_srcs,
-        runner_hdrs = runner_hdrs,
         engine_files = engine_files,
         is_debug = is_debug,
-        registrant_srcs = registrant_srcs,
-        registrant_hdrs = registrant_hdrs,
-        plugin_srcs = plugin_srcs,
-        plugin_hdrs = plugin_hdrs,
-        plugin_include_dirs = plugin_include_dirs,
+        runner = struct(srcs = runner_srcs, hdrs = runner_hdrs),
+        registrant = struct(srcs = registrant_srcs, hdrs = registrant_hdrs),
+        plugins = struct(srcs = plugin_srcs, hdrs = plugin_hdrs, include_dirs = plugin_include_dirs),
     )
 
     return [DefaultInfo(
@@ -183,7 +179,7 @@ def _windows_runner_include_flags(runner_hdrs, registrant_hdrs, plugin_hdrs, plu
                 extra_compile_flags.append("-I" + full)
     return extra_compile_flags
 
-def _compile_windows_runner(ctx, runner_srcs, engine_files, is_debug, registrant_srcs = [], registrant_hdrs = [], runner_hdrs = [], plugin_srcs = [], plugin_hdrs = [], plugin_include_dirs = []):
+def _compile_windows_runner(ctx, engine_files, is_debug, runner = struct(srcs = [], hdrs = []), registrant = struct(srcs = [], hdrs = []), plugins = struct(srcs = [], hdrs = [], include_dirs = [])):
     """Compile the C++ Win32 runner binary.
 
     Uses cc_common.compile() + cc_common.link() with Bazel's hermetic CC
@@ -195,19 +191,15 @@ def _compile_windows_runner(ctx, runner_srcs, engine_files, is_debug, registrant
 
     Args:
         ctx: Rule context.
-        runner_srcs: List of C++ source Files for the runner.
         engine_files: Engine library files from toolchain.
         is_debug: Whether this is a debug build.
-        registrant_srcs: Generated registrant .cc files.
-        registrant_hdrs: Generated registrant .h files.
-        runner_hdrs: User-provided header files for the runner.
-        plugin_srcs: Windows plugin C++ sources (from
-            FlutterApplicationInfo.windows_plugin_libraries) compiled into the runner.
-        plugin_hdrs: Windows plugin C++ headers; their parent dirs are
-            added to the include path.
-        plugin_include_dirs: Plugin-relative include directories,
-            resolved against each plugin's package root via additional
-            `-I` flags.
+        runner: Struct with the runner's own `srcs` and `hdrs`.
+        registrant: Struct with the generated registrant `srcs` (.cc) and `hdrs` (.h).
+        plugins: Struct with Windows plugin C++ `srcs` (from
+            FlutterApplicationInfo.windows_plugin_libraries) compiled into the
+            runner, plugin `hdrs` (their parent dirs are added to the include
+            path), and plugin-relative `include_dirs`, resolved against each
+            plugin's package root via additional `-I` flags.
 
     Returns:
         The compiled runner executable File.
@@ -227,19 +219,19 @@ def _compile_windows_runner(ctx, runner_srcs, engine_files, is_debug, registrant
     if not is_debug:
         defines.append("NDEBUG")
 
-    additional_srcs = list(wrapper_srcs) + list(registrant_srcs)
+    additional_srcs = list(wrapper_srcs) + list(registrant.srcs)
 
     # The engine header dir is already passed via engine_include_dir for
     # "flutter_windows.h".
-    extra_compile_flags = _windows_runner_include_flags(runner_hdrs, registrant_hdrs, plugin_hdrs, plugin_srcs, plugin_include_dirs, engine.wrapper_include_dir, engine.wrapper_root_dir)
+    extra_compile_flags = _windows_runner_include_flags(runner.hdrs, registrant.hdrs, plugins.hdrs, plugins.srcs, plugins.include_dirs, engine.wrapper_include_dir, engine.wrapper_root_dir)
 
     # Include registrant, runner, and plugin header directories.
-    all_header_files = header_files + registrant_hdrs + runner_hdrs + plugin_hdrs
+    all_header_files = header_files + registrant.hdrs + runner.hdrs + plugins.hdrs
 
     return compile_and_link_runner(
         ctx = ctx,
         name = ctx.label.name + "_windows_runner",
-        srcs = runner_srcs,
+        srcs = runner.srcs,
         engine = make_runner_engine(
             library_file = engine_dll,
             import_library = engine_import_lib,
@@ -252,7 +244,7 @@ def _compile_windows_runner(ctx, runner_srcs, engine_files, is_debug, registrant
             defines = defines,
         ),
         extras = make_runner_extras(
-            additional_srcs = additional_srcs + plugin_srcs,
+            additional_srcs = additional_srcs + plugins.srcs,
         ),
     )
 
