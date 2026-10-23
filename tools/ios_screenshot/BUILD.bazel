@@ -30,5 +30,17 @@ dart_test(
     name = "python_host_test",
     srcs = glob(["lib/**/*.dart"]),
     main = "test/python_host_test.dart",
-    deps = ["@dev_tool_deps//:test"],
+    deps = ["@dev_tool_deps//:test", "@rules_dart//dart/runfiles"],
+    # The `PYTHONHOME` tests drive the launchers from a child `dart` process
+    # (ambient variables cannot be set for the test's own process), so the
+    # launcher source travels in runfiles for the child's import.
+    data = ["lib/python_host.dart"],
+    env = {
+        "IOS_SCREENSHOT_PYTHON_HOST_RLOCATION": "$(rlocationpath lib/python_host.dart)",
+    },
+    # The tests drive the real host `python3` (a documented host
+    # prerequisite, like the Android SDK or Xcode): without the invoking
+    # PATH the lookup would search a sandbox PATH and skip even when the
+    # host has an interpreter.
+    env_inherit = ["PATH"],
 )

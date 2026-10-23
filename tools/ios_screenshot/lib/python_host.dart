@@ -98,21 +98,47 @@ del _flutter_bazel_guard_sys_path
 /// own copy.
 String guardPythonProgram(String program) => '$_pythonPathGuard\n$program';
 
+/// Environment variables never forwarded to a guarded host-Python child,
+/// with why each one is dropped. The child must resolve its standard library
+/// from the interpreter's own installed prefix, whatever the caller holds.
+const Map<String, String> _droppedPythonVariables = {
+  // A directory the tool did not choose must not outrank the installed
+  // packages either.
+  'PYTHONPATH': 'untrusted directory outranks installed packages',
+  // CPython locates its standard library from this prefix instead of the
+  // interpreter's own install, so a tree carrying a hostile `argparse.py`
+  // would run attacker code on the payload's own `import argparse`.
+  'PYTHONHOME': 'relocates the standard library to a caller-chosen tree',
+  // Replaces the platform library directory name under the prefix (`lib`
+  // by default), steering the platform standard library the same way.
+  'PYTHONPLATLIBDIR': 'relocates the platform standard library directory',
+  // Would hide `pip install --user` packages such as the `pymobiledevice3`
+  // the helpers need; the guard keeps user-site installs working.
+  'PYTHONNOUSERSITE': 'disables the user site the helpers run from',
+  // Startup file for interactive sessions. Neither launch form below is
+  // interactive (`python -` reads from a pipe, `python -c` takes an
+  // argument), so nothing the helpers run can need it.
+  'PYTHONSTARTUP': 'runs caller-chosen code at interpreter startup',
+};
+
 /// The environment a guarded host-Python child runs with.
 ///
-/// Starts from [overrides] over this process's environment, then drops
-/// `PYTHONPATH` (a directory the tool did not choose must not outrank the
-/// installed packages either) and sets `PYTHONSAFEPATH=1` (honoured from
-/// Python 3.11, ignored before, where the preamble above does the work).
-/// User-site installs and virtualenvs keep working: nothing here touches
-/// `site` or the interpreter's own prefix. Pass with
-/// `includeParentEnvironment: false` so the dropped variable stays dropped.
+/// Starts from [overrides] over this process's environment, then drops every
+/// variable in [_droppedPythonVariables] (so neither an ambient value nor one
+/// a caller passes in reaches the child) and sets `PYTHONSAFEPATH=1`
+/// (honoured from Python 3.11, ignored before, where the preamble above does
+/// the work). User-site installs and virtualenvs keep working: nothing here
+/// touches `site`, `PYTHONUSERBASE`, or the interpreter's own prefix, and the
+/// macOS `__PYVENV_LAUNCHER__` lookup stays in place. Pass with
+/// `includeParentEnvironment: false` so the dropped variables stay dropped.
 Map<String, String> guardedPythonEnvironment([
   Map<String, String>? overrides,
 ]) {
   final env = Map<String, String>.from(Platform.environment);
   if (overrides != null) env.addAll(overrides);
-  env.remove('PYTHONPATH');
+  for (final name in _droppedPythonVariables.keys) {
+    env.remove(name);
+  }
   env['PYTHONSAFEPATH'] = '1';
   return env;
 }
@@ -127,6 +153,36 @@ bool isRoot() {
   } on ProcessException {
     return false;
   }
+}
+
+/// A guarded host-Python launch: the interpreter arguments carrying [program],
+/// the environment the child runs with, and the guarded program text itself.
+///
+/// The single place both launchers ([runPythonProgram] and
+/// [runPythonProgramInteractive]) get all three from: neither builds its own
+/// arguments or environment. [interactive] selects the carrier: `false`
+/// sends the program on stdin (`python - ...`, for the short-lived helper
+/// whose stdin is free) and `true` sends it as an argument (`python -c ...`,
+/// for the long-lived daemon whose stdin is the terminal). [environment] is
+/// passed through to [guardedPythonEnvironment], so a caller-supplied
+/// `PYTHONHOME` is dropped exactly like an ambient one.
+({List<String> arguments, Map<String, String> environment, String program})
+guardedPythonLaunch(
+  String program,
+  List<String> args, {
+  required bool interactive,
+  Map<String, String>? environment,
+}) {
+  final guarded = guardPythonProgram(program);
+  return (
+    arguments: [
+      if (interactive) '-c' else '-',
+      if (interactive) guarded,
+      ...args,
+    ],
+    environment: guardedPythonEnvironment(environment),
+    program: guarded,
+  );
 }
 
 /// Runs [program] with [python], forwarding its stdout/stderr and returning
@@ -144,14 +200,20 @@ Future<int> runPythonProgram(
   String? workingDirectory,
   Map<String, String>? environment,
 }) async {
+  final launch = guardedPythonLaunch(
+    program,
+    args,
+    interactive: false,
+    environment: environment,
+  );
   final process = await Process.start(
     python,
-    ['-', ...args],
+    launch.arguments,
     workingDirectory: workingDirectory,
-    environment: guardedPythonEnvironment(environment),
+    environment: launch.environment,
     includeParentEnvironment: false,
   );
-  process.stdin.write(guardPythonProgram(program));
+  process.stdin.write(launch.program);
   await process.stdin.close();
   final stderrBytes = <int>[];
   await Future.wait([
@@ -186,12 +248,18 @@ Future<int> runPythonProgramInteractive(
   String? workingDirectory,
   Map<String, String>? environment,
 }) async {
+  final launch = guardedPythonLaunch(
+    program,
+    args,
+    interactive: true,
+    environment: environment,
+  );
   final process = await Process.start(
     python,
-    ['-c', guardPythonProgram(program), ...args],
+    launch.arguments,
     mode: ProcessStartMode.inheritStdio,
     workingDirectory: workingDirectory,
-    environment: guardedPythonEnvironment(environment),
+    environment: launch.environment,
     includeParentEnvironment: false,
   );
   return process.exitCode;
