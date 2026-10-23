@@ -20,13 +20,15 @@
 ///
 /// Like the repo's static guards, this test discovers its inputs at runtime
 /// from the workspace root (found through `BUILD_WORKSPACE_DIRECTORY` when
-/// set, else the test's own source file in `data`, hence no-sandbox), and
+/// set, else the test's own anchor in `data` resolved through the runfiles
+/// library, hence no-sandbox), and
 /// is tagged `external` so Bazel re-runs it on every invocation instead of
 /// replaying a cached pass after an untracked source file changed.
 library;
 
 import 'dart:io';
 
+import 'package:runfiles/runfiles.dart';
 import 'package:test/test.dart';
 
 /// Sentinel carried by `path_probe/android/BUILD.bazel`, the user-owned
@@ -39,23 +41,28 @@ bool _looksLikeRoot(String root) =>
     File('$root/path_probe/pubspec.yaml').existsSync();
 
 /// Workspace root the test walks: `BUILD_WORKSPACE_DIRECTORY` when set,
-/// otherwise the source file behind the test's own anchor in `data` (an
-/// unsandboxed runfiles tree symlinks it into the source tree; the root is
-/// the first ancestor that looks like the workspace). Null when neither
-/// resolves, so the test fails loudly instead of checking the wrong tree
-/// or silently passing.
+/// otherwise the test's own anchor in `data` resolved through the runfiles
+/// library (an unsandboxed runfiles tree symlinks it into the source tree;
+/// the root is the first ancestor that looks like the workspace). Null when
+/// neither resolves, so the test fails loudly instead of checking the wrong
+/// tree or silently passing.
 String? _workspaceRoot() {
   final fromEnv = Platform.environment['BUILD_WORKSPACE_DIRECTORY'];
   if (fromEnv != null && fromEnv.isNotEmpty && _looksLikeRoot(fromEnv)) {
     return fromEnv;
   }
   final anchor = Platform.environment['GUARD_ROOT_ANCHOR'];
-  final srcdir = Platform.environment['TEST_SRCDIR'];
-  if (anchor != null && anchor.isNotEmpty && srcdir != null) {
+  if (anchor != null && anchor.isNotEmpty) {
+    // Resolve the anchor through the runfiles library rather than
+    // guessing paths: that works under both the Unix symlink tree and
+    // the Windows manifest (windows-latest runs with --noenable_runfiles,
+    // so no TEST_SRCDIR directory exists). The manifest maps the anchor
+    // to the source path; elsewhere resolve the symlink the same way.
+    // An unresolvable anchor throws here, loudly, instead of checking
+    // the wrong tree.
+    final resolved = Runfiles.create().rlocation(anchor);
     try {
-      var dir = File(
-        File('$srcdir/$anchor').resolveSymbolicLinksSync(),
-      ).parent;
+      var dir = File(File(resolved).resolveSymbolicLinksSync()).parent;
       for (var i = 0; i < 8; i++) {
         if (_looksLikeRoot(dir.path)) return dir.path;
         dir = dir.parent;

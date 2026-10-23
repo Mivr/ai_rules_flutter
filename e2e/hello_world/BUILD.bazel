@@ -1010,8 +1010,9 @@ dart_test(
 # the test then pins the user BUILD's sentinel intact and no BUILD created
 # where the user had none. Reads files Bazel does not track as inputs, so
 # like the repo's static guards it is tagged `external` (re-run every
-# invocation, never a replayed cached pass) and `no-sandbox` (the unsandboxed
-# runfiles tree resolves the workspace root).
+# invocation, never a replayed cached pass) and `no-sandbox` (the anchor
+# resolves through the runfiles library, under both the Unix tree and the
+# Windows manifest).
 dart_test(
     name = "verify_path_spoke_hermeticity_test",
     size = "small",
@@ -1030,6 +1031,7 @@ dart_test(
     target_compatible_with = _HOST_COMPATIBLE,
     deps = [
         "@deps//:test",
+        "@rules_dart//dart/runfiles",
     ],
 )
 
