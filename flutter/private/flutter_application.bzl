@@ -425,32 +425,32 @@ def _application_default_files(flutter_assets, package_config, native_assets_man
         default_files.append(kernel_dill)
     return default_files
 
-def _application_providers(flutter_sdk_info, is_debug, kernel_dill, package_config, native_assets_manifest_file, bundled_code_assets, transitive_data_assets, aot_output, debug_info_output, link_hook_validation, flutter_assets, native_libs, plugins, default_files):
+def _application_providers(flutter_sdk_info, is_debug, outputs, plugins):
     """Assembles the result providers for the compiled application."""
     output_groups = {
-        "native_assets_manifest": depset([native_assets_manifest_file]),
-        "bundled_code_assets": bundled_code_assets,
+        "native_assets_manifest": depset([outputs.native_assets_manifest_file]),
+        "bundled_code_assets": outputs.bundled_code_assets,
     }
-    if debug_info_output:
-        output_groups["debug_info"] = depset([debug_info_output])
-    if link_hook_validation:
+    if outputs.debug_info_output:
+        output_groups["debug_info"] = depset([outputs.debug_info_output])
+    if outputs.link_hook_validation:
         # Every hook runs whenever the app builds, even one that emits no
         # asset, so its verdict on the program is never skipped.
-        output_groups["_validation"] = depset(link_hook_validation)
+        output_groups["_validation"] = depset(outputs.link_hook_validation)
 
     providers = [
-        DefaultInfo(files = depset(default_files)),
+        DefaultInfo(files = depset(outputs.default_files)),
         FlutterApplicationInfo(
-            aot_output = aot_output,
-            kernel_dill = kernel_dill if is_debug else None,
-            flutter_assets = flutter_assets,
+            aot_output = outputs.aot_output,
+            kernel_dill = outputs.kernel_dill if is_debug else None,
+            flutter_assets = outputs.flutter_assets,
             icu_data = flutter_sdk_info.icu_data,
-            native_libs = native_libs,
+            native_libs = outputs.native_libs,
             is_debug = is_debug,
-            package_config = package_config,
-            native_assets_manifest = native_assets_manifest_file,
-            bundled_code_assets = bundled_code_assets,
-            bundled_data_assets = transitive_data_assets,
+            package_config = outputs.package_config,
+            native_assets_manifest = outputs.native_assets_manifest_file,
+            bundled_code_assets = outputs.bundled_code_assets,
+            bundled_data_assets = outputs.transitive_data_assets,
             apple_privacy_manifests = plugins.apple_privacy_manifests,
             plugins = plugins.all_plugins,
             apple_plugin_libraries = plugins.apple_plugin_libraries,
@@ -567,7 +567,20 @@ def _flutter_application_impl(ctx):
     if is_debug and compilation.dev_package_config != None:
         default_files.extend(_write_dev_config(ctx, flutter_sdk_info, compilation, bundled_native_libs, binding_contracts, native_lib_sources, contract_files))
 
-    return _application_providers(flutter_sdk_info, is_debug, kernel_dill, package_config, native_assets_manifest_file, bundled_code_assets, transitive_data_assets, aot_output, debug_info_output, link_hook_validation, flutter_assets, native_libs, plugins, default_files)
+    outputs = struct(
+        kernel_dill = kernel_dill,
+        package_config = package_config,
+        native_assets_manifest_file = native_assets_manifest_file,
+        bundled_code_assets = bundled_code_assets,
+        transitive_data_assets = transitive_data_assets,
+        aot_output = aot_output,
+        debug_info_output = debug_info_output,
+        link_hook_validation = link_hook_validation,
+        flutter_assets = flutter_assets,
+        native_libs = native_libs,
+        default_files = default_files,
+    )
+    return _application_providers(flutter_sdk_info, is_debug, outputs, plugins)
 
 flutter_application = rule(
     implementation = _flutter_application_impl,
