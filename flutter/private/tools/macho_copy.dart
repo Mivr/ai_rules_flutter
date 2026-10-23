@@ -7,7 +7,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'macho_cli.dart';
-import 'macho_edit.dart' show createFrameworkZipBytes;
+import 'macho_framework.dart' show createFrameworkZipBytes;
 import 'macho_fat.dart'
     show FatSlice, buildFatMachO, isFatMachO, isMachO32, isMachO64;
 import 'macho_patch.dart' show PatchOptions, patchMachO;
