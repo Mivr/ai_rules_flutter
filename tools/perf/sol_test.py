@@ -4,6 +4,7 @@
 import json
 import os
 import shutil
+import signal
 import stat
 import sys
 import tempfile
@@ -1165,6 +1166,8 @@ import hashlib
 import json
 import os
 import shutil
+import signal
+import subprocess
 import sys
 import time
 import zipfile
@@ -1173,6 +1176,8 @@ out_base = ""
 log = ""
 profile = ""
 mode = ""
+key = ""
+seen_info = False
 for arg in sys.argv[1:]:
     if arg.startswith("--output_base="):
         out_base = arg.split("=", 1)[1]
@@ -1182,10 +1187,54 @@ for arg in sys.argv[1:]:
         profile = arg.split("=", 1)[1]
     elif arg == "info":
         mode = "info"
+        seen_info = True
     elif arg == "cquery":
         mode = "cquery"
     elif arg == "build":
         mode = "build"
+    elif arg == "shutdown":
+        mode = "shutdown"
+    elif seen_info and not key and not arg.startswith("--"):
+        key = arg
+batch = "--batch" in sys.argv[1:]
+
+
+# Server mode: a non-`--batch` invocation starts or reuses a stand-in
+# server process (re-executing this script as `_daemon`) and, for builds,
+# runs the build's actions as that server's children, so the warm
+# measurement attributes a real tree. `info server_pid` reports the
+# daemon pid; `shutdown` stops it.
+if len(sys.argv) > 1 and sys.argv[1] == "_daemon":
+    srv = sys.argv[2]
+    pid_path = os.path.join(srv, "pid")
+    req_path = os.path.join(srv, "req.json")
+    resp_path = os.path.join(srv, "resp.json")
+    with open(pid_path, "w") as fh:
+        fh.write(str(os.getpid()))
+    last = None
+    while True:
+        try:
+            with open(req_path) as fh:
+                req = json.load(fh)
+        except (OSError, ValueError):
+            req = None
+        if (not isinstance(req, dict) or req.get("id") == last
+                or "cmd" not in req):
+            time.sleep(0.05)
+            continue
+        merged = dict(os.environ)
+        merged.update(req.get("env") or {})
+        try:
+            proc = subprocess.run(
+                req["cmd"], env=merged, cwd=req.get("cwd") or srv,
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL)
+            code = proc.returncode
+        except OSError:
+            code = 127
+        last = req["id"]
+        with open(resp_path, "w") as fh:
+            json.dump({"id": last, "returncode": code}, fh)
 
 
 def actual(rel, dst):
@@ -1256,6 +1305,104 @@ IPA_DIRTY = (
     "archive.close()" % (IPA_ENTRIES,))
 
 
+# The build-time ipa write (fixed stamp): the daemon runs this as its
+# child in server mode, while the log records IPA_CHAIN (fresh stamp),
+# exactly as batch mode writes one and logs the other.
+IPA_FIXED = (
+    "import sys, zipfile; "
+    "src, dst = sys.argv[1], sys.argv[2]; "
+    "data = open(src, 'rb').read(); "
+    "stamp = (2020, 1, 1, 0, 0, 0); "
+    "entries = %r; "
+    "archive = zipfile.ZipFile(dst, 'w'); "
+    "[archive.writestr(zipfile.ZipInfo(e, date_time=stamp), data) "
+    "for e in entries]; "
+    "archive.close()" % (IPA_ENTRIES,))
+
+
+def server_file(name):
+    return os.path.join(out_base, "sol-server", name)
+
+
+def daemon_alive():
+    try:
+        with open(server_file("pid")) as fh:
+            pid = int(fh.read().strip())
+    except (OSError, ValueError):
+        return None
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return None
+    return pid
+
+
+def ensure_daemon():
+    pid = daemon_alive()
+    if pid is not None:
+        return pid
+    srv = os.path.join(out_base, "sol-server")
+    os.makedirs(srv, exist_ok=True)
+    for name in ("pid", "req.json", "resp.json"):
+        try:
+            os.remove(os.path.join(srv, name))
+        except OSError:
+            pass
+    subprocess.Popen(
+        [sys.executable, __file__, "_daemon", srv],
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL, start_new_session=True)
+    deadline = time.time() + 60.0
+    while time.time() < deadline:
+        pid = daemon_alive()
+        if pid is not None:
+            return pid
+        time.sleep(0.05)
+    sys.stderr.write("fake bazel: daemon did not start\\n")
+    sys.exit(1)
+
+
+def daemon_run(cmd, env):
+    rid = "%d-%d" % (os.getpid(), daemon_run.seq)
+    daemon_run.seq += 1
+    with open(server_file("req.json"), "w") as fh:
+        json.dump({"id": rid, "cmd": cmd, "env": env,
+                   "cwd": execroot}, fh)
+    deadline = time.time() + 60.0
+    while time.time() < deadline:
+        try:
+            with open(server_file("resp.json")) as fh:
+                resp = json.load(fh)
+        except (OSError, ValueError):
+            resp = None
+        if isinstance(resp, dict) and resp.get("id") == rid:
+            return resp.get("returncode", 1)
+        time.sleep(0.05)
+    sys.stderr.write("fake bazel: daemon action timed out\\n")
+    sys.exit(1)
+
+
+daemon_run.seq = 0
+
+
+def src_digest():
+    with open(os.environ["SOL_SRC"], "rb") as fh:
+        return hashlib.sha256(fh.read()).hexdigest()
+
+
+def read_marker():
+    try:
+        with open(os.path.join(out_base, ".sol_last_build")) as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return None
+
+
+def write_marker(outputs):
+    with open(os.path.join(out_base, ".sol_last_build"), "w") as fh:
+        fh.write(json.dumps({"src": src_digest(), "outputs": outputs}))
+
+
 execroot = os.path.join(out_base, "execroot")
 case = os.environ.get("SOL_CASE", "")
 fail_config = os.environ.get("SOL_FAIL_CONFIG", "")
@@ -1265,18 +1412,64 @@ is_sim = "sim_debug" in out_base
 rel = "bazel-out/x/App.framework/App"
 sim_rel = "bazel-out/x/Bench.ipa"
 if mode == "info":
-    print(execroot)
+    if batch:
+        print(execroot)
+    else:
+        pid = ensure_daemon()
+        print(pid if key == "server_pid" else execroot)
 elif mode == "cquery":
+    if not batch:
+        ensure_daemon()
     if case == "dirfail":
         print("bazel-out/x/App.framework/App")
     elif is_sim:
         print(sim_rel)
     else:
         print(rel)
+elif mode == "shutdown":
+    if batch:
+        sys.exit(0)
+    pid = daemon_alive()
+    if pid is None:
+        sys.exit(0)
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError:
+        pass
+    deadline = time.time() + 30.0
+    alive = True
+    while time.time() < deadline:
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            alive = False
+            break
+        time.sleep(0.05)
+    if alive:
+        sys.stderr.write("fake bazel: daemon did not stop\\n")
+        sys.exit(1)
+    shutil.rmtree(os.path.join(out_base, "sol-server"),
+                  ignore_errors=True)
 elif mode == "build":
     if fail_config and fail_config in out_base:
         sys.stderr.write("fake bazel: simulated build failure\\n")
         sys.exit(1)
+    if not batch:
+        ensure_daemon()
+    # Incremental builds: an unchanged source with all outputs present
+    # executes zero actions (the warm-up build's proof). SOL_WARMUP_DIRTY
+    # forces a full build so the zero-action check can fail.
+    if os.environ.get("SOL_WARMUP_DIRTY", "") != "1":
+        marker = read_marker()
+        if (isinstance(marker, dict)
+                and marker.get("src") == src_digest()
+                and marker.get("outputs")
+                and all(os.path.lexists(p)
+                        for p in marker["outputs"])):
+            with open(log, "w", encoding="utf-8") as fh:
+                fh.write("")
+            write_profile()
+            sys.exit(0)
     if case == "hosttools" and not is_sim:
         # One target spawn plus one host-tool build (outputs under an
         # -exec- directory): the chain runs the first, the host-tools
@@ -1284,11 +1477,17 @@ elif mode == "build":
         dst = os.path.join(execroot, rel)
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         src = os.environ["SOL_SRC"]
-        shutil.copyfile(src, dst)
         host_rel = "bazel-out/darwin_arm64-opt-exec-ABCD/bin/host-tool"
         host_dst = os.path.join(execroot, host_rel)
         os.makedirs(os.path.dirname(host_dst), exist_ok=True)
-        shutil.copyfile(src, host_dst)
+        if batch:
+            shutil.copyfile(src, dst)
+            shutil.copyfile(src, host_dst)
+        else:
+            daemon_run(["sh", "-c", 'cp "$SOL_SRC" "$SOL_DST"'],
+                       {"SOL_SRC": src, "SOL_DST": dst})
+            daemon_run(["sh", "-c", 'cp "$SOL_SRC" "$SOL_DST"'],
+                       {"SOL_SRC": src, "SOL_DST": host_dst})
         target = {
             "commandArgs": ["sh", "-c", 'cp "$SOL_SRC" "$SOL_DST"'],
             "environmentVariables": [
@@ -1316,15 +1515,19 @@ elif mode == "build":
         with open(log, "w", encoding="utf-8") as fh:
             fh.write(json.dumps(host) + "\\n")
             fh.write(json.dumps(target) + "\\n")
+        write_marker([dst, host_dst])
         write_profile()
         sys.exit(0)
     if is_sim and case != "dirfail":
         dst = os.path.join(execroot, sim_rel)
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         src = os.environ["SOL_SRC"]
-        with open(src, "rb") as fh:
-            data = fh.read()
-        write_ipa(dst, data, (2020, 1, 1, 0, 0, 0))
+        if batch:
+            with open(src, "rb") as fh:
+                data = fh.read()
+            write_ipa(dst, data, (2020, 1, 1, 0, 0, 0))
+        else:
+            daemon_run([sys.executable, "-c", IPA_FIXED, src, dst], {})
         if dirty:
             cmd = [sys.executable, "-c", IPA_DIRTY, src, dst]
         else:
@@ -1349,6 +1552,8 @@ elif mode == "build":
             inter_dst = os.path.join(execroot, inter)
             with open(inter_dst, "w", encoding="utf-8") as fh:
                 fh.write("intermediate")
+            if not batch:
+                daemon_run(["sh", "-c", "exit 3"], {})
             fail = {
                 "commandArgs": ["sh", "-c", "exit 3"],
                 "environmentVariables": [],
@@ -1364,6 +1569,7 @@ elif mode == "build":
             with open(log, "w", encoding="utf-8") as fh:
                 fh.write(json.dumps(fail) + "\\n")
                 fh.write(json.dumps(bundle) + "\\n")
+            write_marker([dst, inter_dst])
             write_profile()
             sys.exit(0)
     elif case == "dirfail":
@@ -1375,6 +1581,8 @@ elif mode == "build":
         dst = os.path.join(fw, "App")
         with open(dst, "w", encoding="utf-8") as fh:
             fh.write("framework-bytes")
+        if not batch:
+            daemon_run(["sh", "-c", "exit 3"], {})
         spawn = {
             "commandArgs": ["sh", "-c", "exit 3"],
             "environmentVariables": [],
@@ -1393,16 +1601,19 @@ elif mode == "build":
                 fh.write("stale-bytes")
             cmd = ["sh", "-c", "exit 3"]
             env = []
+            daemon_cmd, daemon_env = cmd, {}
         elif case == "drift":
-            shutil.copyfile(src, dst)
+            daemon_cmd = ["sh", "-c", 'cp "$SOL_SRC" "$SOL_DST"']
+            daemon_env = {"SOL_SRC": src, "SOL_DST": dst}
             cmd = ["sh", "-c", 'echo drift > "$SOL_DST"']
             env = [
                 {"name": "SOL_SRC", "value": src},
                 {"name": "SOL_DST", "value": dst},
             ]
         else:
-            shutil.copyfile(src, dst)
-            cmd = ["sh", "-c", 'cp "$SOL_SRC" "$SOL_DST"']
+            daemon_cmd = ["sh", "-c", 'cp "$SOL_SRC" "$SOL_DST"']
+            daemon_env = {"SOL_SRC": src, "SOL_DST": dst}
+            cmd = list(daemon_cmd)
             env = [
                 {"name": "SOL_SRC", "value": src},
                 {"name": "SOL_DST", "value": dst},
@@ -1416,6 +1627,11 @@ elif mode == "build":
                 cmd = ["sh", "-c", 'cp "$SOL_SRC" "$SOL_DST"; '
                        'echo side-effect > "$SOL_SIDE"']
                 env = env + [{"name": "SOL_SIDE", "value": side}]
+        if batch:
+            if os.environ.get("SOL_FAIL") != "1":
+                shutil.copyfile(src, dst)
+        else:
+            daemon_run(daemon_cmd, daemon_env)
         spawn = {
             "commandArgs": cmd,
             "environmentVariables": env,
@@ -1428,6 +1644,8 @@ elif mode == "build":
     with open(log, "w", encoding="utf-8") as fh:
         fh.write(json.dumps(spawn) + "\\n")
     write_profile()
+    write_marker([os.path.join(execroot, p)
+                  for p in spawn["listedOutputs"]])
 else:
     sys.stderr.write("fake bazel: unknown mode\\n")
     sys.exit(1)
@@ -1479,7 +1697,30 @@ class SolEndToEndTest(unittest.TestCase):
                     "SOL_SRC": os.path.join(self.work, "src.txt")}
 
     def tearDown(self):
+        for pid in self.live_server_pids():
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
         shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def live_server_pids(self):
+        """Pids of stand-in servers still running under the output base."""
+        pids = []
+        for dirpath, _, filenames in os.walk(self.out_base):
+            if (os.path.basename(dirpath) == "sol-server"
+                    and "pid" in filenames):
+                try:
+                    with open(os.path.join(dirpath, "pid")) as fh:
+                        pid = int(fh.read().strip())
+                except (OSError, ValueError):
+                    continue
+                try:
+                    os.kill(pid, 0)
+                except OSError:
+                    continue
+                pids.append(pid)
+        return pids
 
     def run_argv(self, configs):
         argv = ["run", "--tools", self.tools, "--pristine", self.pristine,
@@ -1583,6 +1824,92 @@ class SolEndToEndTest(unittest.TestCase):
             import gzip
             with gzip.open(path, "rb") as fh:
                 self.assertTrue(fh.read(), name)
+
+    def read_record(self, config, scenario):
+        path = os.path.join(self.results, "sol", config, scenario,
+                            "rep1", "record.json")
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+
+    def test_warm_methods_parts_and_no_server_left(self):
+        # Clean flows stay --batch; edit flows build against the warm
+        # server and carry its per-part breakdown. Every flow states its
+        # method, and no stand-in server outlives the run.
+        out = os.path.join(self.tmp, "ios-sol.json")
+        with mock.patch.dict(os.environ, self.env):
+            self.assertEqual(
+                sol.main(self.run_argv(["device_release"])), 0)
+            self.assertEqual(sol.main(self.summarize_argv(out)), 0)
+        for scenario, method in (("clean", "batch"),
+                                 ("app_edit", "warm-server"),
+                                 ("core_edit", "warm-server")):
+            record = self.read_record("device_release", scenario)
+            self.assertEqual(record["method"], method, scenario)
+            self.assertTrue(record["identical"], scenario)
+            if method == "warm-server":
+                parts = record["bazel_parts"]
+                self.assertEqual(sorted(parts),
+                                 ["client", "descendants",
+                                  "server_reaped", "server_self"],
+                                 scenario)
+                for part in parts.values():
+                    self.assertGreaterEqual(part["user_s"], 0.0,
+                                            scenario)
+                    self.assertGreaterEqual(part["sys_s"], 0.0,
+                                            scenario)
+                total = sum(part["user_s"] + part["sys_s"]
+                            for part in parts.values())
+                self.assertAlmostEqual(record["bazel"]["cpu_s"], total,
+                                       msg=scenario)
+            else:
+                self.assertNotIn("bazel_parts", record)
+        with open(out, encoding="utf-8") as fh:
+            summary = json.load(fh)
+        self.assertEqual(
+            summary["flows"]["ios-release-clean"]["method"], "batch")
+        self.assertNotIn(
+            "bazel_parts", summary["flows"]["ios-release-clean"])
+        for flow in ("ios-release-app", "ios-release-body"):
+            entry = summary["flows"][flow]
+            self.assertEqual(entry["method"], "warm-server", flow)
+            self.assertEqual(sorted(entry["bazel_parts"]),
+                             ["client", "descendants", "server_reaped",
+                              "server_self"], flow)
+            for part in entry["bazel_parts"].values():
+                self.assertGreaterEqual(part, 0.0, flow)
+        self.assertEqual(self.live_server_pids(), [])
+
+    def test_warmup_actions_fail_the_config(self):
+        # A warm-up build that executes actions means the clean restore
+        # perturbed the outputs: the config fails with that reason, the
+        # edit flows carry it, and the server still shuts down.
+        out = os.path.join(self.tmp, "ios-sol.json")
+        env = dict(self.env, SOL_WARMUP_DIRTY="1")
+        with mock.patch.dict(os.environ, env):
+            self.assertEqual(
+                sol.main(self.run_argv(["device_release"])), 1)
+            self.assertEqual(sol.main(self.summarize_argv(out)), 0)
+        clean = self.read_record("device_release", "clean")
+        self.assertTrue(clean["identical"])
+        self.assertEqual(clean["method"], "batch")
+        for scenario in ("app_edit", "core_edit"):
+            record = self.read_record("device_release", scenario)
+            self.assertFalse(record["identical"], scenario)
+            self.assertIsNone(record["sol"], scenario)
+            self.assertIn("warm-up", record["reason"], scenario)
+            self.assertEqual(record["method"], "warm-server", scenario)
+            self.assertEqual(record["chain"]["status"], "error",
+                             scenario)
+        with open(out, encoding="utf-8") as fh:
+            summary = json.load(fh)
+        self.assertTrue(
+            summary["flows"]["ios-release-clean"]["identical"])
+        for flow in ("ios-release-app", "ios-release-body"):
+            entry = summary["flows"][flow]
+            self.assertFalse(entry["identical"], flow)
+            self.assertIsNone(entry["sol"], flow)
+            self.assertIn("warm-up", entry["reason"], flow)
+        self.assertEqual(self.live_server_pids(), [])
 
     def test_host_tools_replayed_and_summed(self):
         # A host-tool build leaves the chain out, runs under the same

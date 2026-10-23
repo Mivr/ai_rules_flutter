@@ -160,25 +160,36 @@ jobs:
       - name: Measure speed-of-light (head only)
         if: inputs.mode == 'sol'
         # Per repeat and config: fresh workspace copy and output base, then
-        # per scenario (clean, app_edit, core_edit, cumulative like compare
-        # mode) a measured `bazel --batch build` followed by the hand-run
-        # chain from that build's execution log, with a byte-identical
-        # proof over the final bundle's declared payload (the App.framework
-        # binary for device_release; every file in the sim app bundle for
-        # sim_debug, compared by entry path and content, never a glob over
-        # bazel-out). Steps run in dependency order even for edges the log
-        # never records, and a step that would start on a still-moved-aside
-        # input is an ordering failure. Every declared output of the steps
-        # that will run is moved aside before each chain and moved back
-        # after (whatever the chain wrote is removed first, and undeclared
-        # files the chain created are swept), so a chain can never perturb
-        # the next incremental build; a step that fails (or output that
-        # differs) reports identical=false with no SOL number plus a
-        # one-line reason in the job log. An unexpected error in one config
-        # records its remaining flows with the error as their reason and
-        # lets the other config run; the step then exits non-zero, but
-        # summarize and upload still run. --batch needs no server, so there
-        # is no shutdown step.
+        # the clean scenario runs as a measured `bazel --batch build`
+        # followed by the hand-run chain from that build's execution log,
+        # with a byte-identical proof over the final bundle's declared
+        # payload (the App.framework binary for device_release; every file
+        # in the sim app bundle for sim_debug, compared by entry path and
+        # content, never a glob over bazel-out). Steps run in dependency
+        # order even for edges the log never records, and a step that would
+        # start on a still-moved-aside input is an ordering failure. Every
+        # declared output of the steps that will run is moved aside before
+        # each chain and moved back after (whatever the chain wrote is
+        # removed first, and undeclared files the chain created are swept),
+        # so a chain can never perturb the next incremental build; a step
+        # that fails (or output that differs) reports identical=false with
+        # no SOL number plus a one-line reason in the job log. After the
+        # clean chain and host-tools replay have restored Bazel's outputs,
+        # a server starts on the same output base (same startup options
+        # minus --batch) and one unmeasured warm-up build of the same
+        # target and flags must execute zero actions (otherwise the config
+        # fails: the outputs were perturbed); each edit scenario then
+        # applies its cumulative edit and builds against that warm server,
+        # measured whole-tree (client plus server growth, with the per-part
+        # breakdown in the flow record), followed by its chain, host-tools
+        # replay and profile record as for clean. While the server is up
+        # every Bazel command on that output base goes through it, never
+        # --batch; the server shuts down after the config's last flow and
+        # on every error path, so no server outlives its config. Edit flows
+        # record method warm-server, clean flows batch. An unexpected error
+        # in one config records its remaining flows with the error as their
+        # reason and lets the other config run; the step then exits
+        # non-zero, but summarize and upload still run.
         run: |
           set -euo pipefail
           tools="$GITHUB_WORKSPACE/tools-src/tools/perf"

@@ -5,9 +5,14 @@ For each bench configuration (``device_release``, ``sim_debug``) and each
 scenario (``clean``, ``app_edit``, ``core_edit``) this tool measures two
 numbers in the same unit, whole-tree user+sys CPU seconds:
 
-- the Bazel cost: the whole ``bazel --batch build`` process tree (Bazel's
-  own work plus every action), measured with wait4 rusage deltas, which
-  include reaped descendants on both macOS and Linux;
+- the Bazel cost: for ``clean``, the whole ``bazel --batch build``
+  process tree (Bazel's own work plus every action), measured with wait4
+  rusage deltas, which include reaped descendants on both macOS and
+  Linux; for the edit flows, the same cost measured against a warm Bazel
+  server (``tools/perf/warm_server.py``): the client plus the server
+  tree's growth during the command. A developer edits against a warm
+  server, while ``--batch`` pays JVM start and a cold load and analysis
+  on every edit, so the edit number follows the developer;
 - the SOL cost: the minimal chain of the same tool binaries Bazel ran
   for that scenario, taken from that build's execution log (kernel
   compile, gen_snapshot, assembler/linker, bundling steps, with the same
@@ -94,15 +99,62 @@ from run_rep import (  # noqa: E402
     make_writable_tree,
     real_run,
     reset_work,
+    shutdown,
 )
 from summarize import summarize_values  # noqa: E402
 from traceprofile import parse_jvm_profile  # noqa: E402
+import warm_server  # noqa: E402
 
 _FLOW_PREFIX = {"device_release": "ios-release", "sim_debug": "ios-debug"}
 _FLOW_SUFFIX = {"clean": "clean", "app_edit": "app", "core_edit": "body"}
 _EDITS = dict(SCENARIOS)
 _CHAIN_REPORT = "chain.json"
 _RECORD = "record.json"
+
+BATCH_METHOD = "batch"
+WARM_METHOD = warm_server.METHOD
+
+
+def startup_options(out_base):
+    """Bazel startup options shared by every command on one output base."""
+    return ["--output_base=" + out_base]
+
+
+def command_prefix(batch):
+    """``bazel`` argv head: batch commands pass ``--batch``, warm ones do
+    not, so they run on the config's server with identical startup options.
+    """
+    return ["bazel", "--batch"] if batch else ["bazel"]
+
+
+def info_argv(out_base, key, batch):
+    """Full ``bazel info`` argv in either mode."""
+    return command_prefix(batch) + startup_options(out_base) + [
+        "info", key]
+
+
+def cquery_argv(out_base, target, build_flags, batch):
+    """Full ``bazel cquery`` argv in either mode."""
+    return (command_prefix(batch) + startup_options(out_base)
+            + ["cquery", "--output=files", target] + list(build_flags))
+
+
+def build_argv(out_base, config, log_path, profile_path, batch):
+    """Full ``bazel build`` argv: the warm form drops ``--batch`` only.
+
+    The same target, build flags, execution log, trace profile and
+    param-file materialization either way; ``profile_path`` None (the
+    unmeasured warm-up build) omits ``--profile``.
+    """
+    spec = CONFIGS[config]
+    argv = (command_prefix(batch) + startup_options(out_base) + ["build"]
+            + list(spec["build_flags"])
+            + [spec["target"],
+               "--execution_log_json_file=" + log_path,
+               "--materialize_param_files"])
+    if profile_path is not None:
+        argv.append("--profile=" + profile_path)
+    return argv
 
 
 def flow_id(config, scenario):
@@ -254,10 +306,9 @@ def check_under_base(path, out_base, what):
     return abs_path
 
 
-def bazel_info(capture, work, out_base, key):
-    """One `bazel --batch info` path (execroot, ...), validated."""
-    out = capture(["bazel", "--batch", "--output_base=" + out_base,
-                   "info", key], cwd=work)
+def bazel_info(capture, work, out_base, key, batch=True):
+    """One `bazel info` path (execroot, ...), validated."""
+    out = capture(info_argv(out_base, key, batch), cwd=work)
     lines = [line.strip() for line in out.splitlines() if line.strip()]
     if len(lines) != 1:
         raise RuntimeError("bazel info %s returned %d line(s)"
@@ -265,15 +316,15 @@ def bazel_info(capture, work, out_base, key):
     return check_under_base(lines[0], out_base, "info " + key)
 
 
-def query_target_files(capture, work, out_base, target, build_flags):
+def query_target_files(capture, work, out_base, target, build_flags,
+                         batch=True):
     """Absolute output paths of a target via `cquery --output=files`.
 
     Every non-blank line must resolve to an existing path under the
     output base; anything else (a warning leaked into stdout, a format
     change) fails loudly instead of becoming a bogus verify path.
     """
-    out = capture(["bazel", "--batch", "--output_base=" + out_base,
-                   "cquery", "--output=files", target] + list(build_flags),
+    out = capture(cquery_argv(out_base, target, build_flags, batch),
                   cwd=work)
     execroot = bazel_info(capture, work, out_base, "execution_root")
     files = []
@@ -377,7 +428,8 @@ def app_dir_hashes(app_dir):
     return entries
 
 
-def plan_verify_snapshot(capture, work, out_base, execroot, config):
+def plan_verify_snapshot(capture, work, out_base, execroot, config,
+                           batch=True):
     """Discovers the verify set from declared outputs only, never a glob.
 
     device_release hashes the App.framework binary among the framework
@@ -391,7 +443,7 @@ def plan_verify_snapshot(capture, work, out_base, execroot, config):
     """
     spec = CONFIGS[config]
     listed = query_target_files(capture, work, out_base, spec["target"],
-                                spec["build_flags"])
+                                spec["build_flags"], batch)
     if config == "device_release":
         found = device_verify_files(listed)
         if not found:
@@ -554,16 +606,96 @@ def bazel_batch_build(args, config, log_path, profile_path):
     execution log feeds the SOL chain and the host-tools replay.
     """
     spec = CONFIGS[config]
-    argv = (["bazel", "--batch", "--output_base=" + out_base_of(args, config),
-             "build"] + list(spec["build_flags"]) + [spec["target"],
-             "--execution_log_json_file=" + log_path,
-             "--profile=" + profile_path,
-             "--materialize_param_files"])
+    argv = build_argv(out_base_of(args, config), config, log_path,
+                      profile_path, True)
     cost = args.measure(argv, args.work)
     if cost["returncode"] != 0:
         raise RuntimeError("bazel --batch build %s failed (exit %s)"
                            % (spec["target"], cost["returncode"]))
     return cost
+
+
+def bazel_warm_build(args, config, log_path, profile_path, server_pid):
+    """Builds one scenario against the warm server, measured whole-tree.
+
+    The same target, flags, execution log and trace profile as the batch
+    form; only `--batch` is dropped, so the build runs on the config's
+    server. The cost covers the client plus the server tree's growth
+    (warm_server), with the per-part breakdown under "parts".
+    """
+    spec = CONFIGS[config]
+    argv = build_argv(out_base_of(args, config), config, log_path,
+                      profile_path, False)
+    cost = args.measure_warm(argv, args.work, server_pid)
+    if cost["returncode"] != 0:
+        raise RuntimeError("bazel build %s failed (exit %s)"
+                           % (spec["target"], cost["returncode"]))
+    return cost
+
+
+def server_pid_of(capture_server, work, out_base):
+    """Starts (or reuses) the config's server; returns its pid, loudly.
+
+    Any server-mode command starts the server; `info server_pid` also
+    reports the pid the warm measurement attributes. A missing or
+    non-numeric pid fails closed: without it there is no warm number.
+    """
+    out = capture_server(info_argv(out_base, "server_pid", False),
+                         cwd=work)
+    lines = [line.strip() for line in out.splitlines() if line.strip()]
+    if len(lines) != 1:
+        raise RuntimeError("bazel info server_pid returned %d line(s)"
+                           % len(lines))
+    try:
+        pid = int(lines[0])
+    except ValueError:
+        raise RuntimeError("bazel info server_pid returned %r"
+                           % (lines[0],))
+    if pid <= 0:
+        raise RuntimeError("bazel info server_pid returned %r"
+                           % (lines[0],))
+    return pid
+
+
+def check_warmup_actions(log_path, target):
+    """Fails the config when the warm-up build executed any action.
+
+    The warm-up replays the clean build after its chain and replay
+    restored every output: zero executed spawns proves the restore left
+    the action cache undisturbed. Any spawn means the outputs were
+    perturbed and the edit numbers would measure rebuild work the
+    developer never pays.
+    """
+    try:
+        n_spawns = len(load_spawns(log_path))
+    except OSError as exc:
+        raise RuntimeError(
+            "warm-up build of %s left no execution log %s (%s)"
+            % (target, log_path, exc))
+    if n_spawns != 0:
+        raise RuntimeError(
+            "warm-up build of %s executed %d action(s): "
+            "the clean outputs were perturbed" % (target, n_spawns))
+    return n_spawns
+
+
+def warm_up_server_build(args, config):
+    """Unmeasured server-mode build proving the clean restore is exact.
+
+    Runs the same target and flags through the config's server (never
+    `--batch`) with an execution log that must list zero executed
+    spawns; anything else fails the config with that reason.
+    """
+    spec = CONFIGS[config]
+    log_path = os.path.join(args.work,
+                            "execlog-sol-warmup-%s.json" % config)
+    argv = build_argv(out_base_of(args, config), config, log_path, None,
+                      False)
+    proc = args.run(argv, cwd=args.work)
+    if proc.returncode != 0:
+        raise RuntimeError("warm-up bazel build %s failed (exit %s)"
+                           % (spec["target"], proc.returncode))
+    return check_warmup_actions(log_path, spec["target"])
 
 
 def run_chain(log_path, execroot, report_path, timeout, runner=None):
@@ -851,11 +983,14 @@ def build_profile(bazel_cpu, jvm, host, sol, chain):
             "sol_source": source, "residual": residual}
 
 
-def measure_scenario_build(args, config, scenario):
+def measure_scenario_build(args, config, scenario, batch=True,
+                             server_pid=None):
     """Builds one scenario; returns its costs, paths and verify plan.
 
-    The execution log and the JSON trace profile (--profile) are gzipped
-    into the scenario's record directory for the ios-profile artifact.
+    The clean flow stays a `bazel --batch` build; edit flows build
+    against the config's warm server. The execution log and the JSON
+    trace profile (--profile) are gzipped into the scenario's record
+    directory for the ios-profile artifact.
     """
     spec = CONFIGS[config]
     edit = _EDITS[scenario]
@@ -863,18 +998,24 @@ def measure_scenario_build(args, config, scenario):
         apply_edit(args.run, args.tools, args.work, edit)
     log_path = os.path.join(args.work, "execlog-sol-%s.json" % scenario)
     profile_path = os.path.join(args.work, "trace-sol-%s.json" % scenario)
-    bazel_cost = bazel_batch_build(args, config, log_path, profile_path)
+    if batch:
+        bazel_cost = bazel_batch_build(args, config, log_path,
+                                       profile_path)
+    else:
+        bazel_cost = bazel_warm_build(args, config, log_path,
+                                      profile_path, server_pid)
     if scenario == "clean":
         check_clean_actions(log_path, spec["target"],
                             args.min_clean_actions)
     out_base = out_base_of(args, config)
-    execroot = bazel_info(args.capture, args.work, out_base,
-                          "execution_root")
+    capture = args.capture if batch else args.capture_server
+    execroot = bazel_info(capture, args.work, out_base,
+                          "execution_root", batch)
     bazel_out = os.path.join(execroot, "bazel-out")
     if os.path.isdir(bazel_out):
         make_writable_tree(bazel_out)
-    plan = plan_verify_snapshot(args.capture, args.work, out_base,
-                                execroot, config)
+    plan = plan_verify_snapshot(capture, args.work, out_base,
+                                execroot, config, batch)
     record_dir = os.path.join(args.results, "sol", config, scenario,
                               "rep%d" % args.rep)
     os.makedirs(record_dir, exist_ok=True)
@@ -931,9 +1072,11 @@ def prove_chain_outputs(args, built, chainable, before, backup_dir):
     return (chain, after, exit_code, report)
 
 
-def run_sol_scenario(args, config, scenario):
+def run_sol_scenario(args, config, scenario, batch=True,
+                       server_pid=None):
     """Builds one scenario, runs its SOL chain, proves the outputs."""
-    built = measure_scenario_build(args, config, scenario)
+    built = measure_scenario_build(args, config, scenario, batch,
+                                   server_pid)
     before = read_verify_snapshot(built.plan)
     spawns = load_spawns(built.log_path)
     chainable, _ = select_sol_spawns(spawns)
@@ -959,6 +1102,7 @@ def run_sol_scenario(args, config, scenario):
                             host, sol, chain)
     record = {"flow": flow_id(config, scenario), "config": config,
               "scenario": scenario,
+              "method": BATCH_METHOD if batch else WARM_METHOD,
               "bazel": {"cpu_s": bazel_cpu,
                         "real_s": built.bazel_cost["real_s"]},
               "sol": sol,
@@ -968,6 +1112,8 @@ def run_sol_scenario(args, config, scenario):
               "verify": {"before": before, "after": after},
               "chain": chain,
               "profile": profile}
+    if not batch:
+        record["bazel_parts"] = built.bazel_cost["parts"]
     with open(os.path.join(built.record_dir, _RECORD), "w", encoding="utf-8",
               newline="\n") as fh:
         fh.write(json.dumps(record, indent=2, sort_keys=True) + "\n")
@@ -978,6 +1124,8 @@ def error_record(config, scenario, reason):
     """Flow record for a scenario an unexpected error kept from running."""
     return {"flow": flow_id(config, scenario), "config": config,
             "scenario": scenario,
+            "method": (BATCH_METHOD if scenario == "clean"
+                       else WARM_METHOD),
             "bazel": {"cpu_s": None, "real_s": None},
             "sol": None,
             "identical": False,
@@ -1015,21 +1163,39 @@ def write_error_records(args, config, scenarios, reason):
 def run_sol_rep(args, rep, configs):
     """One repeat: fresh workspace per config, cumulative edits per config.
 
-    An unexpected error in one config records that config's remaining
-    flows with the error as their reason and lets the other config run:
-    one failure never loses the rest of the run. Returns (records,
-    had_errors).
+    The clean flow stays a `bazel --batch` build. After its chain and
+    replay have restored Bazel's outputs, a server starts on the same
+    output base (same startup options minus `--batch`); one unmeasured
+    warm-up build must execute zero actions, and each edit flow then
+    builds against that server. While the server is up every Bazel
+    command on the output base goes through it, never `--batch`, and the
+    server shuts down after the config's last flow and on every error
+    path: no server outlives its config. An unexpected error in one
+    config records that config's remaining flows with the error as their
+    reason and lets the other config run: one failure never loses the
+    rest of the run. Returns (records, had_errors).
     """
     args.rep = rep
     records = {}
     had_errors = False
     for config in configs:
         reset_work(args.pristine, args.work)
-        shutil.rmtree(out_base_of(args, config), ignore_errors=True)
+        out_base = out_base_of(args, config)
+        shutil.rmtree(out_base, ignore_errors=True)
         flows = {}
+        server_started = False
         try:
+            flows["clean"] = run_sol_scenario(args, config, "clean")
+            server_pid = server_pid_of(args.capture_server, args.work,
+                                       out_base)
+            server_started = True
+            warm_up_server_build(args, config)
             for scenario, _ in SCENARIOS:
-                flows[scenario] = run_sol_scenario(args, config, scenario)
+                if scenario == "clean":
+                    continue
+                flows[scenario] = run_sol_scenario(
+                    args, config, scenario, batch=False,
+                    server_pid=server_pid)
         except Exception as exc:
             had_errors = True
             remaining = [scenario for scenario, _ in SCENARIOS
@@ -1038,6 +1204,13 @@ def run_sol_rep(args, rep, configs):
                 args, config, remaining,
                 "config %s failed: %s" % (config, exc)))
             print("config=%s failed: %s" % (config, exc))
+        finally:
+            if server_started:
+                try:
+                    shutdown(args.run, args.work, out_base)
+                except Exception as exc:
+                    had_errors = True
+                    print("config=%s shutdown failed: %s" % (config, exc))
         records[config] = flows
     return (records, had_errors)
 
@@ -1163,10 +1336,39 @@ def summarize_profile(records, bazel_median, sol_median, identical):
         "residual": residual}
 
 
+def summarize_bazel_parts(records):
+    """Median per-part CPU over repeats for a warm-server flow.
+
+    Each part's median is over the repeats' user+sys CPU for that part
+    (client / server_self / server_reaped / descendants); parts with no
+    sample stay out.
+    """
+    parts = {}
+    for name in ("client", "server_self", "server_reaped",
+                 "descendants"):
+        vals = []
+        for record in records:
+            breakdown = record.get("bazel_parts") or {}
+            part = breakdown.get(name) or {}
+            if (part.get("user_s") is not None
+                    and part.get("sys_s") is not None):
+                vals.append(part["user_s"] + part["sys_s"])
+        if vals:
+            parts[name] = summarize_values(vals)["median"]
+    return parts
+
+
 def summarize_flow(records, unit):
     """Median costs over repeats; no SOL number unless all repeats match."""
     del unit
     identical = all(record["identical"] for record in records)
+    methods = {record.get("method") for record in records}
+    if len(methods) == 1 and None not in methods:
+        method = records[0]["method"]
+    elif records[0].get("scenario") == "clean":
+        method = BATCH_METHOD
+    else:
+        method = WARM_METHOD
     bazel = summarize_values([record["bazel"]["cpu_s"] for record in records
                               if record["bazel"]["cpu_s"] is not None])
     sol_vals = [record["sol"]["cpu_s"] for record in records
@@ -1177,7 +1379,8 @@ def summarize_flow(records, unit):
     for record in records:
         if record.get("reason") not in reasons:
             reasons.append(record.get("reason"))
-    return {"bazel": bazel["median"],
+    flow = {"method": method,
+            "bazel": bazel["median"],
             "sol": sol["median"] if identical else None,
             "identical": identical,
             "reason": "ok" if identical else "; ".join(reasons),
@@ -1188,6 +1391,9 @@ def summarize_flow(records, unit):
             "spread": {"n": len(records),
                        "bazel": [bazel["min"], bazel["max"]],
                        "sol": [sol["min"], sol["max"]] if identical else None}}
+    if method == WARM_METHOD:
+        flow["bazel_parts"] = summarize_bazel_parts(records)
+    return flow
 
 
 def collect_runner_info():
@@ -1237,8 +1443,11 @@ def summarize_sol(results_dir, meta):
 def main_run(cmd):
     cmd.run = real_run
     cmd.capture = capture_bazel_output
+    cmd.capture_server = capture_bazel_output
     cmd.measure = lambda argv, cwd: measure_with_time(
         argv, cwd, cmd.time_bin)
+    cmd.measure_warm = (lambda argv, cwd, server_pid:
+                        warm_server.measure(argv, cwd, server_pid))
     configs = list(cmd.config) if cmd.config else list(CONFIG_ORDER)
     unknown = [c for c in configs if c not in CONFIGS]
     if unknown:
