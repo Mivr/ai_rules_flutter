@@ -12,6 +12,7 @@ exports_files(
         "generate_asset_manifest.dart",
         "bundle_app.dart",
         "compile_shader.dart",
+        "crc32.dart",
         "directive_guard.dart",
         "kernel_filter.dart",
         "incr_fkc_server.dart",
@@ -40,6 +41,7 @@ dart_binary(
     name = "android_bundle",
     srcs = [
         "apk_overlay.dart",
+        "crc32.dart",
         "macho_edit.dart",
         "xtool_pack.dart",
         "zlib_raw_match.dart",
@@ -163,6 +165,10 @@ dart_binary(
 
 dart_binary(
     name = "macho_edit",
+    srcs = [
+        "crc32.dart",
+        "sha256.dart",
+    ],
     compile_mode = "kernel",
     main = "macho_edit.dart",
     modular_kernel = False,
@@ -222,7 +228,11 @@ dart_binary(
 
 dart_binary(
     name = "xtool_pack",
-    srcs = ["macho_edit.dart"],
+    srcs = [
+        "crc32.dart",
+        "macho_edit.dart",
+        "sha256.dart",
+    ],
     compile_mode = "exe",
     main = "xtool_pack.dart",
     target_compatible_with = HOST_COMPATIBLE,
@@ -296,7 +306,9 @@ _TOOL_SRCS = {
     "android_bundle.dart": [
         "xtool_pack.dart",
         "apk_overlay.dart",
+        "crc32.dart",
         "macho_edit.dart",
+        "sha256.dart",
         "zlib_raw_match.dart",
         "zlib_raw_state.dart",
         "zlib_raw_tables.dart",
@@ -304,7 +316,9 @@ _TOOL_SRCS = {
     ],
     "apk_overlay.dart": [
         "xtool_pack.dart",
+        "crc32.dart",
         "macho_edit.dart",
+        "sha256.dart",
         "zlib_raw_match.dart",
         "zlib_raw_state.dart",
         "zlib_raw_tables.dart",
@@ -315,10 +329,18 @@ _TOOL_SRCS = {
         "zlib_raw_state.dart",
         "zlib_raw_tables.dart",
     ],
-    "xtool_pack.dart": ["macho_edit.dart"],
+    "xtool_pack.dart": [
+        "crc32.dart",
+        "macho_edit.dart",
+        "sha256.dart",
+    ],
     "flutter_test_runner.dart": ["bazel_test_protocol.dart"],
     "flutter_integration_test_runner.dart": ["bazel_test_protocol.dart"],
     "kernel_filter.dart": ["directive_guard.dart"],
+    "macho_edit.dart": [
+        "crc32.dart",
+        "sha256.dart",
+    ],
     "incr_fkc_worker.dart": [
         "directive_guard.dart",
         "incr_fkc_server.dart",
