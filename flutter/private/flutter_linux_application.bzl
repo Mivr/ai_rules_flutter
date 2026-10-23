@@ -184,10 +184,10 @@ def _flutter_linux_runner_lib_impl(ctx):
         engine_files = engine_files,
         defines = linux_runner_defines(ctx.attr.gtk_app_id, ctx.attr.window_title),
         linux_sysroot = flutter_sdk_info.linux_sysroot,
-        runner = struct(srcs = runner_srcs, hdrs = runner_hdrs),
-        registrant = struct(srcs = registrant_srcs, hdrs = registrant_hdrs),
+        runner = linux_runner_inputs(runner_srcs, runner_hdrs),
+        registrant = linux_registrant_inputs(registrant_srcs, registrant_hdrs),
         target_arch = flutter_sdk_info.target_arch,
-        plugins = struct(srcs = plugin_srcs, hdrs = plugin_hdrs, include_dirs = plugin_include_dirs),
+        plugins = linux_plugin_inputs(plugin_srcs, plugin_hdrs, plugin_include_dirs),
     )
 
     return [DefaultInfo(
@@ -313,6 +313,22 @@ def _linux_runner_include_flags(runner_hdrs, registrant_hdrs, plugin_hdrs, plugi
                 extra_compile.append("-I" + full)
     return extra_compile
 
+def linux_runner_inputs(srcs, hdrs = []):
+    """Builds the `runner` struct `compile_linux_runner` reads.
+
+    The single place a missing field gets its default, so callers pass only
+    what they have and a caller that forgets `hdrs` still analyses.
+    """
+    return struct(srcs = srcs, hdrs = hdrs)
+
+def linux_registrant_inputs(srcs, hdrs = []):
+    """Builds the `registrant` struct `compile_linux_runner` reads."""
+    return struct(srcs = srcs, hdrs = hdrs)
+
+def linux_plugin_inputs(srcs, hdrs = [], include_dirs = []):
+    """Builds the `plugins` struct `compile_linux_runner` reads."""
+    return struct(srcs = srcs, hdrs = hdrs, include_dirs = include_dirs)
+
 def compile_linux_runner(ctx, engine_files, defines, linux_sysroot, runner = struct(srcs = [], hdrs = []), registrant = struct(srcs = [], hdrs = []), target_arch = "", plugins = struct(srcs = [], hdrs = [], include_dirs = [])):
     """Compile the C++ GTK Linux runner binary.
 
@@ -341,7 +357,18 @@ def compile_linux_runner(ctx, engine_files, defines, linux_sysroot, runner = str
     # Find the engine shared library file for the linker.
     engine_so, header_files = _find_linux_engine_so(engine_files)
 
-    additional_srcs = list(registrant.srcs)
+    # `getattr` with the constructor defaults: a caller-built struct that
+    # omits an optional field (or predates one) still analyses, exactly as
+    # the old flat `= []` defaults allowed omitting the argument.
+    runner_srcs = getattr(runner, "srcs", [])
+    runner_hdrs = getattr(runner, "hdrs", [])
+    registrant_srcs = getattr(registrant, "srcs", [])
+    registrant_hdrs = getattr(registrant, "hdrs", [])
+    plugin_srcs = getattr(plugins, "srcs", [])
+    plugin_hdrs = getattr(plugins, "hdrs", [])
+    plugin_include_dirs = getattr(plugins, "include_dirs", [])
+
+    additional_srcs = list(registrant_srcs)
 
     # Compute GTK3 include/link flags from the hermetic Chromium sysroot.
     sysroot = _linux_sysroot_flags(linux_sysroot, target_arch)
@@ -353,13 +380,13 @@ def compile_linux_runner(ctx, engine_files, defines, linux_sysroot, runner = str
     # Include registrant headers and runner headers as additional inputs so
     # #include directives resolve.  Also add their directories to the include
     # path so runner code can do #include "flutter/generated_plugin_registrant.h".
-    all_header_files = header_files + registrant.hdrs + runner.hdrs + plugins.hdrs
-    extra_compile = _linux_runner_include_flags(runner.hdrs, registrant.hdrs, plugins.hdrs, plugins.srcs, plugins.include_dirs)
+    all_header_files = header_files + registrant_hdrs + runner_hdrs + plugin_hdrs
+    extra_compile = _linux_runner_include_flags(runner_hdrs, registrant_hdrs, plugin_hdrs, plugin_srcs, plugin_include_dirs)
 
     return compile_and_link_runner(
         ctx = ctx,
         name = ctx.label.name + "_linux_runner",
-        srcs = runner.srcs,
+        srcs = runner_srcs,
         engine = make_runner_engine(
             library_file = engine_so,
             header_files = all_header_files,
@@ -371,7 +398,7 @@ def compile_linux_runner(ctx, engine_files, defines, linux_sysroot, runner = str
             defines = defines,
         ),
         extras = make_runner_extras(
-            additional_srcs = additional_srcs + plugins.srcs,
+            additional_srcs = additional_srcs + plugin_srcs,
             system_libraries = gtk_libs,
             system_include_dirs = system_include_dirs,
             additional_inputs = sysroot_files,

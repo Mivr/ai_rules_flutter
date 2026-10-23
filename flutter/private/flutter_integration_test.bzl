@@ -124,7 +124,10 @@ load(
 load(
     "//flutter/private:flutter_linux_application.bzl",
     "compile_linux_runner",
+    "linux_plugin_inputs",
+    "linux_registrant_inputs",
     "linux_runner_defines",
+    "linux_runner_inputs",
 )
 load(
     "//flutter/private:flutter_native_assets.bzl",
@@ -1719,10 +1722,10 @@ def _flutter_linux_integration_test_impl(ctx):
         engine_files = engine_files,
         defines = linux_runner_defines(ctx.attr.gtk_app_id, ctx.attr.window_title),
         linux_sysroot = flutter_sdk_info.linux_sysroot,
-        runner = struct(srcs = [ctx.file._linux_runner_source]),
-        registrant = struct(srcs = [native_registrant_cc], hdrs = [native_registrant_h]),
+        runner = linux_runner_inputs([ctx.file._linux_runner_source]),
+        registrant = linux_registrant_inputs([native_registrant_cc], [native_registrant_h]),
         target_arch = flutter_sdk_info.target_arch,
-        plugins = struct(srcs = plugin_srcs, hdrs = plugin_hdrs, include_dirs = plugin_include_dirs),
+        plugins = linux_plugin_inputs(plugin_srcs, plugin_hdrs, plugin_include_dirs),
     )
 
     # Step 5: Assemble Linux desktop bundle directory.
