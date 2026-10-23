@@ -17,7 +17,7 @@ load("@apple_support//lib:apple_support.bzl", "apple_support")
 load("@bazel_skylib//lib:dicts.bzl", "dicts")
 load("@rules_dart//dart:utils.bzl", "dart_link_hook_actions", "link_hook_runner_attr")
 load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterInfo")
-load("//flutter/private:common.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "FLUTTER_APPLICATION_ATTRS", "PLATFORM_CONSTRAINT_ATTRS", "check_unreplaced_hooks", "collect_binding_contracts", "collect_native_libs", "declare_flutter_assets_dir", "detect_target_platform", "flutter_build_assets", "flutter_build_mode", "flutter_compile_kernel", "flutter_compile_shaders", "host_target_arch", "launch_build_args", "resolve_flutter_sdk_info", "shader_sources")
+load("//flutter/private:common.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "FLUTTER_APPLICATION_ATTRS", "PLATFORM_CONSTRAINT_ATTRS", "check_unreplaced_hooks", "collect_binding_contracts", "collect_native_libs", "declare_flutter_assets_dir", "detect_target_platform", "flutter_build_assets", "flutter_build_mode", "flutter_compile_kernel", "flutter_compile_shaders", "host_target_arch", "launch_build_args", "make_kernel_inputs", "make_kernel_target", "resolve_flutter_sdk_info", "shader_sources")
 load("//flutter/private:flutter_aot_compile.bzl", "flutter_aot_elf_action", "flutter_aot_gen_snapshot_flags", "flutter_aot_macho_action", "macho_snapshot_options")
 load("//flutter/private:flutter_info.bzl", "dedup_plugins")
 load("//flutter/private:flutter_native_assets.bzl", "bridge_dart_code_assets", "collect_bundled_code_asset_files", "write_native_assets_manifest")
@@ -128,21 +128,23 @@ def _write_application_manifest(ctx, native_assets_list, target_platform, target
 def _compile_application_kernel(ctx, flutter_sdk_info, target_platform, is_ios, native_assets_manifest_file, flutter_assets, recorded_uses):
     """Runs Step 1: mode-aware kernel compilation."""
     return flutter_compile_kernel(
-        ctx,
-        flutter_sdk_info,
-        target_platform = target_platform,
-        native_assets_manifest = native_assets_manifest_file,
-        track_widget_creation = ctx.attr.track_widget_creation,
-        assets_dir = flutter_assets,
-        recorded_uses = recorded_uses,
-        platform_build_args = launch_build_args(
-            target_platform,
-            is_simulator = is_ios and apple_support.target_environment_from_rule_ctx(ctx) == "simulator",
-            is_arm64 = ctx.target_platform_has_constraint(
-                ctx.attr._arm64_constraint[platform_common.ConstraintValueInfo],
-            ),
-            is_x86_64 = ctx.target_platform_has_constraint(
-                ctx.attr._x86_64_constraint[platform_common.ConstraintValueInfo],
+        ctx = ctx,
+        flutter_sdk_info = flutter_sdk_info,
+        target = make_kernel_target(target_platform = target_platform),
+        inputs = make_kernel_inputs(
+            native_assets_manifest = native_assets_manifest_file,
+            track_widget_creation = ctx.attr.track_widget_creation,
+            assets_dir = flutter_assets,
+            recorded_uses = recorded_uses,
+            platform_build_args = launch_build_args(
+                target_platform,
+                is_simulator = is_ios and apple_support.target_environment_from_rule_ctx(ctx) == "simulator",
+                is_arm64 = ctx.target_platform_has_constraint(
+                    ctx.attr._arm64_constraint[platform_common.ConstraintValueInfo],
+                ),
+                is_x86_64 = ctx.target_platform_has_constraint(
+                    ctx.attr._x86_64_constraint[platform_common.ConstraintValueInfo],
+                ),
             ),
         ),
     )

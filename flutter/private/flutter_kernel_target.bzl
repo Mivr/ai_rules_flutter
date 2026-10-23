@@ -5,12 +5,17 @@ This is the base compilation step shared by all Flutter platform targets.
 
 load("@rules_dart//dart:providers.bzl", "DartInfo")
 load("@rules_dart//dart:utils.bzl", "MODULAR_KERNEL_ATTRS", "MODULAR_KERNEL_TOOLCHAINS")
-load("//flutter/private:common.bzl", "AGENT_EXTENSIONS_ATTR", "COPY_TO_DIRECTORY_TOOLCHAINS", "FLUTTER_DEPS_DOC", "KERNEL_COMPILE_ATTRS", "flutter_compile_kernel", "resolve_flutter_sdk_info")
+load("//flutter/private:common.bzl", "AGENT_EXTENSIONS_ATTR", "COPY_TO_DIRECTORY_TOOLCHAINS", "FLUTTER_DEPS_DOC", "KERNEL_COMPILE_ATTRS", "flutter_compile_kernel", "make_kernel_inputs", "make_kernel_target", "resolve_flutter_sdk_info")
 load("//flutter/private:flutter_kernel_module.bzl", "flutter_kernel_module_aspect")
 
 def _flutter_kernel_target_impl(ctx):
     flutter_sdk_info = resolve_flutter_sdk_info(ctx)
-    kernel_dill = flutter_compile_kernel(ctx, flutter_sdk_info, aot = True if ctx.attr.aot else None).kernel_dill
+    kernel_dill = flutter_compile_kernel(
+        ctx = ctx,
+        flutter_sdk_info = flutter_sdk_info,
+        target = make_kernel_target(aot = True if ctx.attr.aot else None),
+        inputs = make_kernel_inputs(),
+    ).kernel_dill
 
     return [
         DefaultInfo(files = depset([kernel_dill])),

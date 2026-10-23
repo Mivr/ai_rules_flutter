@@ -7,7 +7,7 @@ flutter_application.bzl). Supports macOS/iOS (Mach-O .dylib) and other
 platforms (ELF .so).
 """
 
-load("//flutter/private:common.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "FLUTTER_APPLICATION_ATTRS", "KERNEL_COMPILE_ATTRS", "PLATFORM_CONSTRAINT_ATTRS", "detect_target_platform", "flutter_build_mode", "flutter_compile_kernel", "resolve_flutter_sdk_info")
+load("//flutter/private:common.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "FLUTTER_APPLICATION_ATTRS", "KERNEL_COMPILE_ATTRS", "PLATFORM_CONSTRAINT_ATTRS", "detect_target_platform", "flutter_build_mode", "flutter_compile_kernel", "make_kernel_inputs", "make_kernel_target", "resolve_flutter_sdk_info")
 load("//flutter/private:flutter_aot_compile.bzl", "flutter_aot_elf_action", "flutter_aot_gen_snapshot_flags", "flutter_aot_macho_action", "macho_snapshot_options")
 
 def _flutter_aot_target_impl(ctx):
@@ -55,10 +55,10 @@ def _flutter_aot_target_impl(ctx):
 
     # Step 1: Kernel compilation.
     kernel_dill = flutter_compile_kernel(
-        ctx,
-        flutter_sdk_info,
-        aot = not is_debug,
-        target_platform = target_platform,
+        ctx = ctx,
+        flutter_sdk_info = flutter_sdk_info,
+        target = make_kernel_target(aot = not is_debug, target_platform = target_platform),
+        inputs = make_kernel_inputs(),
     ).kernel_dill
 
     # In debug mode, return the kernel .dill directly (JIT, no gen_snapshot).

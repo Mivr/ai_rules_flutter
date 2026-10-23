@@ -817,113 +817,31 @@ def _kernel_compile_flags(ctx, track_widget_creation, mode, aot, assets_dir, pla
         }))
     return struct(extra_frontend = extra_frontend_flags, user_defines = user_defines, all_defines = all_defines)
 
-def _use_modular_kernel(mode, aot, frontend_server_target, registrant, staged_agent, native_assets_manifest, recorded_uses, extra_frontend_flags, all_defines):
-    return (
-        not aot and mode != "profile" and
-        frontend_server_target == "flutter" and
-        not registrant and not staged_agent and
-        not native_assets_manifest and not recorded_uses and
-        not extra_frontend_flags and not all_defines
-    )
-
-def _modular_tools_or_none(ctx, flutter_sdk_info, packages):
-    """The modular kernel tools, or None when the target needs a whole-program compile."""
-    own_files = [ctx.file.main] + [f for f in ctx.files.srcs if f != ctx.file.main]
-    return flutter_modular_test_tools(
-        ctx,
-        flutter_sdk_info,
-        own_files,
-        packages,
-        [],
-    )
-
-def _compile_modular_kernel(ctx, app_lib_root, packages, kernel_dill, platform_dill, modular_tools):
-    compile_flutter_modular_app_kernel(
-        ctx,
-        modular_tools,
-        app_lib_root,
-        packages,
-        kernel_dill,
-        platform_dill,
-    )
-
-def _compile_full_kernel(ctx, flutter_sdk_info, kernel_dill, platform_dill, st, agent, reg, flags, opts):
-    pc = compile_kernel_package_config(
-        ctx,
-        st.packages,
-        st.colocate_inputs,
-        roots = {st.app_pkg_name: True} if st.app_pkg_name else None,
-    )
-    config_file = pc.config_file
-    all_srcs = pc.srcs
-    if reg.registrant:
-        all_srcs = all_srcs + [reg.registrant]
-    if agent.agent:
-        all_srcs = all_srcs + [agent.agent, agent.native_agent]
-
-    # Resolve the kernel entrypoint: the user's main, keyed by its package:
-    # URI for hot-reload parity with the dev tool.
-    entrypoint_info = resolve_kernel_entrypoint(ctx, st.app_pkg_name, st.app_lib_root)
-    flutter_kernel_compile_action(
-        ctx = ctx,
-        dartaotruntime = flutter_sdk_info.dartaotruntime,
-        kernel_filter_tool = ctx.executable._kernel_filter_tool,
-        frontend_server = flutter_sdk_info.frontend_server,
-        platform_dill = platform_dill,
-        main = entrypoint_info.file,
-        entrypoint_uri = entrypoint_info.uri,
-        srcs = all_srcs,
-        package_config = config_file,
-        output = kernel_dill,
-        aot = opts.aot,
-        defines = flags.all_defines,
-        target = opts.frontend_server_target,
-        extra_flags = flags.extra_frontend,
-        native_assets_manifest = opts.native_assets_manifest,
-        dart_plugin_registrant_uri = reg.location.uri if reg.location else None,
-        recorded_uses = opts.recorded_uses,
-    )
-    return config_file
-
-def _run_kernel_compile(ctx, flutter_sdk_info, kernel_dill, platform_dill, st, agent, reg, flags, opts):
-    if _use_modular_kernel(
-        opts.mode,
-        opts.aot,
-        opts.frontend_server_target,
-        reg.registrant,
-        agent.agent,
-        opts.native_assets_manifest,
-        opts.recorded_uses,
-        flags.extra_frontend,
-        flags.all_defines,
-    ):
-        modular_tools = _modular_tools_or_none(ctx, flutter_sdk_info, st.packages)
-        if modular_tools != None:
-            _compile_modular_kernel(ctx, st.app_lib_root, st.packages, kernel_dill, platform_dill, modular_tools)
-            return None
-    return _compile_full_kernel(ctx, flutter_sdk_info, kernel_dill, platform_dill, st, agent, reg, flags, opts)
-
-def flutter_compile_kernel(ctx, flutter_sdk_info, aot = None, platform_dill = None, target_platform = None, frontend_server_target = "flutter", native_assets_manifest = None, track_widget_creation = False, assets_dir = None, platform_build_args = [], recorded_uses = None):
-    """Run the shared kernel compilation step.
-
-    Collects sources, generates package_config.json, and invokes
-    flutter_kernel_compile_action. If deps contain plugins with
-    dartPluginClass (or the debug agent is injected), generates a
-    registrant library the engine invokes before main() on every
-    root-isolate launch — including hot restart.
-
-    If aot and platform_dill are not specified, they follow the build mode
-    (`flutter_build_mode`): debug → debug dill + JIT, profile → debug
-    (non-product) dill + AOT, release → product dill + AOT.
+def make_kernel_target(aot = None, platform_dill = None, target_platform = None, frontend_server_target = "flutter"):
+    """Which kernel to compile: AOT or JIT, which platform dill, for which platform, through which frontend.
 
     Args:
-        ctx: Rule context (must have main, srcs, deps, defines attrs).
-        flutter_sdk_info: FlutterSdkInfo from the toolchain.
         aot: If set, override AOT mode. Otherwise determined by compilation mode.
         platform_dill: If set, override platform dill. Otherwise determined by compilation mode.
         target_platform: Optional platform string (e.g. "web", "linux", "android").
             When set, only plugins with dartPluginClass on that platform are registered.
         frontend_server_target: Frontend server --target flag ("flutter" or "dartdevc" for web).
+
+    Returns:
+        A struct with `aot`, `platform_dill`, `target_platform` and
+        `frontend_server_target`.
+    """
+    return struct(
+        aot = aot,
+        platform_dill = platform_dill,
+        target_platform = target_platform,
+        frontend_server_target = frontend_server_target,
+    )
+
+def make_kernel_inputs(native_assets_manifest = None, track_widget_creation = False, assets_dir = None, platform_build_args = [], recorded_uses = None):
+    """What else feeds the kernel compile besides sources and target.
+
+    Args:
         native_assets_manifest: Optional File pointing at the
             `native_assets.json` manifest (the JSON shape the
             frontend_server reads via `--native-assets`). Always passed
@@ -947,6 +865,114 @@ def flutter_compile_kernel(ctx, flutter_sdk_info, aot = None, platform_dill = No
             AOT compiles only.
 
     Returns:
+        A struct with `native_assets_manifest`, `track_widget_creation`,
+        `assets_dir`, `platform_build_args` and `recorded_uses`.
+    """
+    return struct(
+        native_assets_manifest = native_assets_manifest,
+        track_widget_creation = track_widget_creation,
+        assets_dir = assets_dir,
+        platform_build_args = platform_build_args,
+        recorded_uses = recorded_uses,
+    )
+
+def _use_modular_kernel(plan, agent, reg, flags):
+    return (
+        not plan.aot and plan.mode != "profile" and
+        plan.frontend_server_target == "flutter" and
+        not reg.registrant and not agent.agent and
+        not plan.native_assets_manifest and not plan.recorded_uses and
+        not flags.extra_frontend and not flags.all_defines
+    )
+
+def _modular_tools_or_none(ctx, flutter_sdk_info, packages):
+    """The modular kernel tools, or None when the target needs a whole-program compile."""
+    own_files = [ctx.file.main] + [f for f in ctx.files.srcs if f != ctx.file.main]
+    return flutter_modular_test_tools(
+        ctx,
+        flutter_sdk_info,
+        own_files,
+        packages,
+        [],
+    )
+
+def _compile_modular_kernel(ctx, app_lib_root, packages, kernel_dill, platform_dill, modular_tools):
+    compile_flutter_modular_app_kernel(
+        ctx,
+        modular_tools,
+        app_lib_root,
+        packages,
+        kernel_dill,
+        platform_dill,
+    )
+
+def _compile_full_kernel(ctx, flutter_sdk_info, st, agent, reg, flags, plan):
+    pc = compile_kernel_package_config(
+        ctx,
+        st.packages,
+        st.colocate_inputs,
+        roots = {st.app_pkg_name: True} if st.app_pkg_name else None,
+    )
+    config_file = pc.config_file
+    all_srcs = pc.srcs
+    if reg.registrant:
+        all_srcs = all_srcs + [reg.registrant]
+    if agent.agent:
+        all_srcs = all_srcs + [agent.agent, agent.native_agent]
+
+    # Resolve the kernel entrypoint: the user's main, keyed by its package:
+    # URI for hot-reload parity with the dev tool.
+    entrypoint_info = resolve_kernel_entrypoint(ctx, st.app_pkg_name, st.app_lib_root)
+    flutter_kernel_compile_action(
+        ctx = ctx,
+        dartaotruntime = flutter_sdk_info.dartaotruntime,
+        kernel_filter_tool = ctx.executable._kernel_filter_tool,
+        frontend_server = flutter_sdk_info.frontend_server,
+        platform_dill = plan.platform_dill,
+        main = entrypoint_info.file,
+        entrypoint_uri = entrypoint_info.uri,
+        srcs = all_srcs,
+        package_config = config_file,
+        output = plan.kernel_dill,
+        aot = plan.aot,
+        defines = flags.all_defines,
+        target = plan.frontend_server_target,
+        extra_flags = flags.extra_frontend,
+        native_assets_manifest = plan.native_assets_manifest,
+        dart_plugin_registrant_uri = reg.location.uri if reg.location else None,
+        recorded_uses = plan.recorded_uses,
+    )
+    return config_file
+
+def _run_kernel_compile(ctx, flutter_sdk_info, st, agent, reg, flags, plan):
+    if _use_modular_kernel(plan, agent, reg, flags):
+        modular_tools = _modular_tools_or_none(ctx, flutter_sdk_info, st.packages)
+        if modular_tools != None:
+            _compile_modular_kernel(ctx, st.app_lib_root, st.packages, plan.kernel_dill, plan.platform_dill, modular_tools)
+            return None
+    return _compile_full_kernel(ctx, flutter_sdk_info, st, agent, reg, flags, plan)
+
+def flutter_compile_kernel(ctx, flutter_sdk_info, target, inputs):
+    """Run the shared kernel compilation step.
+
+    Collects sources, generates package_config.json, and invokes
+    flutter_kernel_compile_action. If deps contain plugins with
+    dartPluginClass (or the debug agent is injected), generates a
+    registrant library the engine invokes before main() on every
+    root-isolate launch — including hot restart.
+
+    If `target.aot` and `target.platform_dill` are not specified, they
+    follow the build mode (`flutter_build_mode`): debug → debug dill +
+    JIT, profile → debug (non-product) dill + AOT, release → product
+    dill + AOT.
+
+    Args:
+        ctx: Rule context (must have main, srcs, deps, defines attrs).
+        flutter_sdk_info: FlutterSdkInfo from the toolchain.
+        target: Which kernel to compile, from `make_kernel_target`.
+        inputs: What else feeds the compile, from `make_kernel_inputs`.
+
+    Returns:
         struct with kernel_dill (File) and package_config (File).
     """
     st = _kernel_source_inputs(ctx)
@@ -962,29 +988,33 @@ def flutter_compile_kernel(ctx, flutter_sdk_info, aot = None, platform_dill = No
     mode = flutter_build_mode(ctx)
     dev = _kernel_dev_config(ctx, st, mode)
 
+    aot = target.aot
     if aot == None:
         aot = mode != "debug"
-    platform_dill = _resolve_kernel_platform_dill(platform_dill, aot, mode, flutter_sdk_info)
+    platform_dill = _resolve_kernel_platform_dill(target.platform_dill, aot, mode, flutter_sdk_info)
     agent = _stage_agent_extensions(ctx, aot, mode)
-    reg = _kernel_registrant(ctx, target_platform, agent, dev.emit)
-    flags = _kernel_compile_flags(ctx, track_widget_creation, mode, aot, assets_dir, platform_build_args, target_platform)
+    reg = _kernel_registrant(ctx, target.target_platform, agent, dev.emit)
+    flags = _kernel_compile_flags(ctx, inputs.track_widget_creation, mode, aot, inputs.assets_dir, inputs.platform_build_args, target.target_platform)
 
     kernel_dill = ctx.actions.declare_file(ctx.label.name + ".dill")
     config_file = _run_kernel_compile(
         ctx,
         flutter_sdk_info,
-        kernel_dill,
-        platform_dill,
         st,
         agent,
         reg,
         flags,
+        # The resolved compile plan: how to compile plus the declared
+        # output and the resolved platform dill, built once here and read
+        # by the modular check and both compile paths.
         struct(
             mode = mode,
             aot = aot,
-            frontend_server_target = frontend_server_target,
-            native_assets_manifest = native_assets_manifest,
-            recorded_uses = recorded_uses,
+            frontend_server_target = target.frontend_server_target,
+            native_assets_manifest = inputs.native_assets_manifest,
+            recorded_uses = inputs.recorded_uses,
+            kernel_dill = kernel_dill,
+            platform_dill = platform_dill,
         ),
     )
     return struct(

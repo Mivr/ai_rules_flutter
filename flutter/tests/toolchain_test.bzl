@@ -2,7 +2,7 @@
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("//flutter:providers.bzl", "FlutterSdkInfo", "resolve_exec_dart", "resolve_exec_dart_vm", "resolve_flutter_sdk_info")
-load("//flutter/private:common.bzl", "KERNEL_COMPILE_ATTRS", "flutter_compile_kernel")
+load("//flutter/private:common.bzl", "KERNEL_COMPILE_ATTRS", "flutter_compile_kernel", "make_kernel_inputs", "make_kernel_target")
 load("//flutter/private:engine_helpers.bzl", "dart_binary_name", "dartaotruntime_binary_name", "engine_arch_for_os", "platform_to_arch", "platform_to_os")
 load("//flutter/private:flutter_kernel_module.bzl", "find_flutter_kernel_module_tools", "is_same_sdk")
 
@@ -344,7 +344,12 @@ def _missing_product_dill_rule_impl(ctx):
         target_arch = info.target_arch,
         linux_sysroot = info.linux_sysroot,
     )
-    kernel_dill = flutter_compile_kernel(ctx, no_product_dill, aot = True).kernel_dill
+    kernel_dill = flutter_compile_kernel(
+        ctx = ctx,
+        flutter_sdk_info = no_product_dill,
+        target = make_kernel_target(aot = True),
+        inputs = make_kernel_inputs(),
+    ).kernel_dill
     return [DefaultInfo(files = depset([kernel_dill]))]
 
 _missing_product_dill_rule = rule(
