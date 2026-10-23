@@ -15,8 +15,6 @@ dependencies:
     path: path_probe_no_build
   platform_assets:
     path: platform_assets
-  quote_assets:
-    path: quote_assets
 dev_dependencies:
   very_good_analysis: ^10.3.0
   test: ^1.30.0
