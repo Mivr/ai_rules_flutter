@@ -41,6 +41,7 @@ import 'dart:typed_data';
 import 'package:runfiles/runfiles.dart';
 
 import 'bazel_test_protocol.dart';
+import 'test_support.dart';
 
 /// Whether this run should regenerate goldens instead of comparing them.
 ///
@@ -199,76 +200,6 @@ Future<int> _runOnce({
     if (combinedDill != null && combinedDill.existsSync()) {
       cleanupQuietly(combinedDill.deleteSync);
     }
-  }
-}
-
-/// The per-test ceiling the wedged-test backstop waits out.
-///
-/// Bazel exports the target's timeout in `TEST_TIMEOUT` (seconds), so honour it
-/// and stay a beat inside: the backstop exists to name a wedged test here
-/// rather than let it run out Bazel's clock, and a flat bound silently overrode
-/// whatever `--test_timeout` a longer-running test was given. Outside
-/// `bazel test` there is no budget to derive one from, so five minutes stands.
-///
-/// Public, like [collectCoverage], because the test reaches it directly.
-Duration testCeiling(String? bazelTestTimeout) {
-  final seconds = int.tryParse(bazelTestTimeout ?? '');
-  if (seconds == null || seconds <= 0) return const Duration(minutes: 5);
-  final margin = seconds ~/ 20;
-  return Duration(seconds: seconds - (margin < 10 ? 10 : margin));
-}
-
-/// The suite's default timeout, serialized as `Metadata` carries it.
-///
-/// Bazel's own limit (`TEST_TIMEOUT`, seconds) in place of `package:test`'s
-/// 30-second default, as `dart_test` sets it. Not `none`: `Timeout.merge`
-/// lets `none` on either side win, so it would discard a limit a test's author
-/// wrote on a case to catch a hang. With Bazel's limit as the default, such a
-/// `timeout:` still fires, `Timeout.factor` scales Bazel's limit, and a case
-/// with neither runs as long as Bazel lets the target run. Outside `bazel
-/// test` there is no limit to state, so the default is none.
-///
-/// Public, like [testCeiling], because the test reaches it directly.
-Object suiteTimeout(String? bazelTestTimeout) {
-  final seconds = int.tryParse(bazelTestTimeout ?? '');
-  if (seconds == null || seconds <= 0) return 'none';
-  return {
-    'duration': Duration(seconds: seconds).inMicroseconds,
-    'scaleFactor': null,
-  };
-}
-
-/// Best-effort synchronous filesystem cleanup.
-///
-/// Swallows only [FileSystemException]: a file that vanished between the
-/// `existsSync` check and the deletion is a race with the platform, not a
-/// failure of the run. Anything else is a bug in the cleanup itself and
-/// propagates.
-///
-/// Public, like [collectCoverage], because the test reaches it directly.
-void cleanupQuietly(void Function() action) {
-  try {
-    action();
-  } on FileSystemException catch (_) {
-    // Best-effort cleanup only; anything else propagates by design.
-  }
-}
-
-/// Best-effort asynchronous teardown step.
-///
-/// Swallows only the races a closing resource reports — [IOException] when
-/// the peer went away first, [StateError] when the close already happened —
-/// so a bug in teardown itself still surfaces instead of masking the run's
-/// real result from a `finally` block.
-///
-/// Public, like [collectCoverage], because the test reaches it directly.
-Future<void> teardownQuietly(Future<void> Function() step) async {
-  try {
-    await step();
-  } on IOException catch (_) {
-    // Best-effort teardown only; anything else propagates by design.
-  } on StateError catch (_) {
-    // Best-effort teardown only; anything else propagates by design.
   }
 }
 
@@ -840,21 +771,21 @@ class _Harness {
     final testChannelId = (test['channel'] as num).toInt();
     final reportName = test['name'] as String? ?? '';
 
-    final metadata = test['metadata'] as Map?;
-    final skipReason = metadata == null ? null : metadata['skipReason'];
-    final skipFlag = metadata == null
-        ? false
-        : (metadata['skip'] as bool? ?? false);
-    if (!fixture && skipFlag) {
-      results.recordSkipped(reportName, skipReason as String?);
+    final readiness = testReadiness(
+      test: test,
+      fixture: fixture,
+      socketClosed: _socketClosed,
+      disconnectMessage: 'flutter_tester disconnected before this test ran',
+    );
+    if (readiness is TestSkipped) {
+      results.recordSkipped(reportName, readiness.reason);
       return;
     }
-
-    if (_socketClosed) {
+    if (readiness is TestTargetGone) {
       results.recordFailure(
         reportName,
-        _TestFailureSummary(
-          message: 'flutter_tester disconnected before this test ran',
+        TestFailureSummary(
+          message: readiness.message,
           type: 'TestDeviceException',
           stackChain: '',
         ),
@@ -869,10 +800,10 @@ class _Harness {
     final started = Stopwatch()..start();
     final output = StringBuffer();
     _pendingTests[ch.inputId] = completer;
-    _TestFailureSummary? failure;
-    void noteFailure(_TestFailureSummary summary) => failure ??= summary;
+    TestFailureSummary? failure;
+    void noteFailure(TestFailureSummary summary) => failure ??= summary;
 
-    _inbound[ch.inputId] = _testMessageHandler(
+    _inbound[ch.inputId] = testMessageHandler(
       completer: completer,
       output: output,
       noteFailure: noteFailure,
@@ -899,7 +830,7 @@ class _Harness {
     _inbound.remove(ch.inputId);
 
     if (_socketClosed && failure == null) {
-      failure = _TestFailureSummary(
+      failure = TestFailureSummary(
         message: 'flutter_tester disconnected mid-test (or test timed out)',
         type: 'TestDeviceException',
         stackChain: '',
@@ -915,45 +846,6 @@ class _Harness {
       output: output.toString(),
       fixture: fixture,
     );
-  }
-
-  /// Builds the inbound dispatcher for one running test: explicit error
-  /// events become [noteFailure], prints go to stdout and the case log, and
-  /// `complete` releases the test's completer.
-  ///
-  /// We rely on the explicit error events for failure tracking; state
-  /// changes alone don't tell us the difference between "still
-  /// running" and "failed and continuing".
-  void Function(Object?) _testMessageHandler({
-    required Completer<void> completer,
-    required StringBuffer output,
-    required void Function(_TestFailureSummary) noteFailure,
-  }) {
-    return (data) {
-      final msg = (data as Map).cast<String, dynamic>();
-      switch (msg['type']) {
-        case 'state-change':
-          break;
-        case 'error':
-          final err = (msg['error'] as Map).cast<String, dynamic>();
-          noteFailure(
-            _TestFailureSummary(
-              message:
-                  err['message'] as String? ?? err['toString'] as String? ?? '',
-              type: err['type'] as String? ?? 'TestFailure',
-              stackChain: err['stackChain'] as String? ?? '',
-            ),
-          );
-        case 'message':
-          final mtype = msg['message-type'] as String? ?? 'print';
-          final text = msg['text'] as String? ?? '';
-          final line = mtype == 'print' ? text : '[$mtype] $text';
-          stdout.writeln(line);
-          output.writeln(line);
-        case 'complete':
-          if (!completer.isCompleted) completer.complete();
-      }
-    };
   }
 
   /// Waits out one test's ceiling, killing the tester when a wedged test
@@ -981,7 +873,7 @@ class _Harness {
   static void _recordTestResult({
     required _Results results,
     required String reportName,
-    required _TestFailureSummary? failure,
+    required TestFailureSummary? failure,
     required Duration elapsed,
     required String output,
     required bool fixture,
@@ -999,7 +891,7 @@ class _Harness {
   ) {
     return {
       'type': 'initial',
-      'metadata': _defaultMetadata(
+      'metadata': defaultSuiteMetadata(
         suiteTimeout(Platform.environment['TEST_TIMEOUT']),
         libraryTags,
       ),
@@ -1013,28 +905,6 @@ class _Harness {
       'path': testPath,
       'asciiGlyphs': !stdout.supportsAnsiEscapes,
       'ignoreTimeouts': false,
-    };
-  }
-
-  /// Minimal `Metadata.serialize` payload — all optional flags omitted, an
-  /// empty `forTag`, [libraryTags] as the suite's `@Tags`, and [timeout] as
-  /// [suiteTimeout] serializes it.
-  static Map<String, Object?> _defaultMetadata(
-    Object timeout,
-    Set<String> libraryTags,
-  ) {
-    return {
-      'testOn': null,
-      'timeout': timeout,
-      'skip': null,
-      'skipReason': null,
-      'verboseTrace': null,
-      'chainStackTraces': null,
-      'retry': null,
-      'tags': libraryTags.toList(),
-      'onPlatform': const <List<Object>>[],
-      'forTag': const <String, Object?>{},
-      'languageVersionComment': null,
     };
   }
 
@@ -1083,26 +953,6 @@ final class _DialBackTimedOut extends _DialBack {
   const _DialBackTimedOut();
 }
 
-class _TestFailureSummary {
-  _TestFailureSummary({
-    required this.message,
-    required this.type,
-    required this.stackChain,
-  });
-
-  final String message;
-  final String type;
-  final String stackChain;
-
-  @override
-  String toString() {
-    final buf = StringBuffer()
-      ..writeln('$type: $message')
-      ..write(stackChain);
-    return buf.toString();
-  }
-}
-
 class _Results {
   int passed = 0;
   int failed = 0;
@@ -1120,7 +970,7 @@ class _Results {
 
   void recordFailure(
     String name,
-    _TestFailureSummary summary,
+    TestFailureSummary summary,
     Duration elapsed,
     String output,
   ) {
@@ -1154,15 +1004,12 @@ class _Results {
 
   bool get hasFailure => failed > 0 || _suiteError;
 
-  String summary() {
-    final pieces = <String>[
-      if (passed > 0) '$passed passed',
-      if (failed > 0) '$failed failed',
-      if (skipped > 0) '$skipped skipped',
-    ];
-    final body = pieces.isEmpty ? 'no tests' : pieces.join(', ');
-    return '\n$body${_suiteError ? ' (suite error)' : ''}';
-  }
+  String summary() => summarizeTestResults(
+    passed: passed,
+    failed: failed,
+    skipped: skipped,
+    suiteError: _suiteError,
+  );
 }
 
 String _indent(String body, String prefix) {

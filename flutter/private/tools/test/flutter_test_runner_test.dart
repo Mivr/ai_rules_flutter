@@ -16,6 +16,7 @@ import 'package:test/test.dart';
 // is the test. Each public member of the runner is public because it is
 // reachable from here and nowhere else — see their docstrings.
 import '../flutter_test_runner.dart' as runner;
+import '../test_support.dart' as support;
 
 /// A VM service that answers exactly the three RPCs coverage collection makes.
 ///
@@ -240,7 +241,7 @@ void main() {
 
   group('suiteTimeout', () {
     test('is Bazel\'s TEST_TIMEOUT, not package:test\'s 30 seconds', () {
-      expect(runner.suiteTimeout('300'), {
+      expect(support.suiteTimeout('300'), {
         'duration': const Duration(seconds: 300).inMicroseconds,
         'scaleFactor': null,
       });
@@ -248,40 +249,40 @@ void main() {
 
     test('is never none under Bazel, so a test\'s own timeout still fires', () {
       // `Timeout.merge` lets `none` on either side win.
-      expect(runner.suiteTimeout('60'), isNot('none'));
+      expect(support.suiteTimeout('60'), isNot('none'));
     });
 
     test('is none outside bazel test, where there is no limit to state', () {
-      expect(runner.suiteTimeout(null), 'none');
-      expect(runner.suiteTimeout(''), 'none');
+      expect(support.suiteTimeout(null), 'none');
+      expect(support.suiteTimeout(''), 'none');
     });
   });
 
   group('testCeiling', () {
     test("derives the wedged-test backstop from Bazel's TEST_TIMEOUT, so a "
         'test given --test_timeout=1200 runs its full length', () {
-      expect(runner.testCeiling('1200').inSeconds, greaterThan(600));
+      expect(support.testCeiling('1200').inSeconds, greaterThan(600));
     });
 
     test('stays inside the Bazel budget, so a wedged test is reported here '
         'rather than killed from outside with no diagnostic', () {
-      expect(runner.testCeiling('1200').inSeconds, lessThan(1200));
-      expect(runner.testCeiling('60').inSeconds, lessThan(60));
+      expect(support.testCeiling('1200').inSeconds, lessThan(1200));
+      expect(support.testCeiling('60').inSeconds, lessThan(60));
     });
 
     test('falls back to five minutes with no TEST_TIMEOUT — a direct run '
         'outside `bazel test` has no budget to derive one from', () {
-      expect(runner.testCeiling(null), const Duration(minutes: 5));
-      expect(runner.testCeiling(''), const Duration(minutes: 5));
-      expect(runner.testCeiling('not-a-number'), const Duration(minutes: 5));
-      expect(runner.testCeiling('0'), const Duration(minutes: 5));
+      expect(support.testCeiling(null), const Duration(minutes: 5));
+      expect(support.testCeiling(''), const Duration(minutes: 5));
+      expect(support.testCeiling('not-a-number'), const Duration(minutes: 5));
+      expect(support.testCeiling('0'), const Duration(minutes: 5));
     });
   });
 
   group('cleanupQuietly', () {
     test('runs the action and swallows a filesystem race', () {
       var ran = false;
-      runner.cleanupQuietly(() {
+      support.cleanupQuietly(() {
         ran = true;
         throw const FileSystemException('gone', '/tmp/flutter_test_x.dill');
       });
@@ -290,7 +291,7 @@ void main() {
 
     test('lets a bug in the cleanup itself propagate', () {
       expect(
-        () => runner.cleanupQuietly(() => throw StateError('bug')),
+        () => support.cleanupQuietly(() => throw StateError('bug')),
         throwsStateError,
       );
     });
@@ -299,7 +300,7 @@ void main() {
       final tmpDir = Directory.systemTemp.createTempSync('cleanup_test_');
       try {
         final file = File('${tmpDir.path}/x.dill')..writeAsStringSync('dill');
-        runner.cleanupQuietly(file.deleteSync);
+        support.cleanupQuietly(file.deleteSync);
         expect(file.existsSync(), isFalse);
       } finally {
         if (tmpDir.existsSync()) {
@@ -311,15 +312,15 @@ void main() {
 
   group('teardownQuietly', () {
     test('swallows a peer-gone I/O race and an already-closed race', () async {
-      await runner.teardownQuietly(() async {
+      await support.teardownQuietly(() async {
         throw const FileSystemException('connection reset');
       });
-      await runner.teardownQuietly(() async => throw StateError('closed'));
+      await support.teardownQuietly(() async => throw StateError('closed'));
     });
 
     test('lets an unexpected teardown error propagate', () async {
       await expectLater(
-        runner.teardownQuietly(() async => throw ArgumentError('bug')),
+        support.teardownQuietly(() async => throw ArgumentError('bug')),
         throwsArgumentError,
       );
     });

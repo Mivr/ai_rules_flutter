@@ -21,6 +21,7 @@ import 'dart:io';
 import 'package:runfiles/runfiles.dart';
 
 import 'bazel_test_protocol.dart';
+import 'test_support.dart';
 
 /// WebSocket upgrade path the in-app bootstrap dials on the harness server.
 const String integrationWebSocketPath = '/__flutter_integration_ws__';
@@ -248,58 +249,6 @@ Map<String, String> decodeDeclaredEnv(String? raw) {
     // Corrupted declared environment behaves like none at all.
   }
   return const <String, String>{};
-}
-
-/// Per-test timeout ceiling inside Bazel's outer `TEST_TIMEOUT`.
-Duration testCeiling(String? bazelTestTimeout) {
-  final seconds = int.tryParse(bazelTestTimeout ?? '');
-  if (seconds == null || seconds <= 0) return const Duration(minutes: 5);
-  final margin = seconds ~/ 20;
-  return Duration(seconds: seconds - (margin < 10 ? 10 : margin));
-}
-
-/// Suite default timeout serialized as `package:test_api` `Metadata` expects.
-Object suiteTimeout(String? bazelTestTimeout) {
-  final seconds = int.tryParse(bazelTestTimeout ?? '');
-  if (seconds == null || seconds <= 0) return 'none';
-  return {
-    'duration': Duration(seconds: seconds).inMicroseconds,
-    'scaleFactor': null,
-  };
-}
-
-/// Best-effort synchronous filesystem cleanup.
-///
-/// Swallows only [FileSystemException]: a file that vanished between the
-/// `existsSync` check and the deletion is a race with the platform, not a
-/// failure of the run. Anything else is a bug in the cleanup itself and
-/// propagates.
-///
-/// Public, like [buildChromeArguments], because the test reaches it directly.
-void cleanupQuietly(void Function() action) {
-  try {
-    action();
-  } on FileSystemException catch (_) {
-    // Best-effort cleanup only; anything else propagates by design.
-  }
-}
-
-/// Best-effort asynchronous teardown step.
-///
-/// Swallows only the races a closing resource reports — [IOException] when
-/// the peer went away first, [StateError] when the close already happened —
-/// so a bug in teardown itself still surfaces instead of masking the run's
-/// real result from a `finally` block.
-///
-/// Public, like [buildChromeArguments], because the test reaches it directly.
-Future<void> teardownQuietly(Future<void> Function() step) async {
-  try {
-    await step();
-  } on IOException catch (_) {
-    // Best-effort teardown only; anything else propagates by design.
-  } on StateError catch (_) {
-    // Best-effort teardown only; anything else propagates by design.
-  }
 }
 
 /// Builds the command-line flags passed to the hermetic `chrome-headless-shell`.
@@ -2209,22 +2158,22 @@ class _IntegrationHarness {
     final testChannelId = (test['channel'] as num).toInt();
     final reportName = test['name'] as String? ?? '';
 
-    final metadata = test['metadata'] as Map?;
-    final skipReason = metadata == null ? null : metadata['skipReason'];
-    final skipFlag = metadata == null
-        ? false
-        : (metadata['skip'] as bool? ?? false);
-    if (!fixture && skipFlag) {
-      results.recordSkipped(reportName, skipReason as String?);
+    final readiness = testReadiness(
+      test: test,
+      fixture: fixture,
+      socketClosed: _socketClosed,
+      disconnectMessage:
+          '${_launcher.platformName} target disconnected before this test ran',
+    );
+    if (readiness is TestSkipped) {
+      results.recordSkipped(reportName, readiness.reason);
       return;
     }
-
-    if (_socketClosed) {
+    if (readiness is TestTargetGone) {
       results.recordFailure(
         reportName,
-        _TestFailureSummary(
-          message:
-              '${_launcher.platformName} target disconnected before this test ran',
+        TestFailureSummary(
+          message: readiness.message,
           type: 'TestDeviceException',
           stackChain: '',
         ),
@@ -2239,10 +2188,10 @@ class _IntegrationHarness {
     final started = Stopwatch()..start();
     final output = StringBuffer();
     _pendingTests[ch.inputId] = completer;
-    _TestFailureSummary? failure;
-    void noteFailure(_TestFailureSummary summary) => failure ??= summary;
+    TestFailureSummary? failure;
+    void noteFailure(TestFailureSummary summary) => failure ??= summary;
 
-    _inbound[ch.inputId] = _integrationTestMessageHandler(
+    _inbound[ch.inputId] = testMessageHandler(
       completer: completer,
       output: output,
       noteFailure: noteFailure,
@@ -2260,7 +2209,7 @@ class _IntegrationHarness {
     _inbound.remove(ch.inputId);
 
     if (_socketClosed && failure == null) {
-      failure = _TestFailureSummary(
+      failure = TestFailureSummary(
         message:
             '${_launcher.platformName} target disconnected mid-test '
             '(or crashed)',
@@ -2282,48 +2231,13 @@ class _IntegrationHarness {
     }
   }
 
-  /// Builds the inbound dispatcher for one running test: explicit error
-  /// events become [noteFailure], prints go to stdout and the case log, and
-  /// `complete` releases the test's completer.
-  void Function(Object?) _integrationTestMessageHandler({
-    required Completer<void> completer,
-    required StringBuffer output,
-    required void Function(_TestFailureSummary) noteFailure,
-  }) {
-    return (data) {
-      final msg = (data as Map).cast<String, dynamic>();
-      switch (msg['type']) {
-        case 'state-change':
-          break;
-        case 'error':
-          final err = (msg['error'] as Map).cast<String, dynamic>();
-          noteFailure(
-            _TestFailureSummary(
-              message:
-                  err['message'] as String? ?? err['toString'] as String? ?? '',
-              type: err['type'] as String? ?? 'TestFailure',
-              stackChain: err['stackChain'] as String? ?? '',
-            ),
-          );
-        case 'message':
-          final mtype = msg['message-type'] as String? ?? 'print';
-          final text = msg['text'] as String? ?? '';
-          final line = mtype == 'print' ? text : '[$mtype] $text';
-          stdout.writeln(line);
-          output.writeln(line);
-        case 'complete':
-          if (!completer.isCompleted) completer.complete();
-      }
-    };
-  }
-
   /// Waits out one test's [ceiling], killing the target when a wedged test
   /// never yields so the remaining tests bail out fast.
   Future<void> _awaitIntegrationTest({
     required Completer<void> completer,
     required Duration ceiling,
     required String reportName,
-    required void Function(_TestFailureSummary) noteFailure,
+    required void Function(TestFailureSummary) noteFailure,
   }) async {
     await completer.future.timeout(
       ceiling,
@@ -2333,7 +2247,7 @@ class _IntegrationHarness {
             'killing ${_launcher.platformName} target.';
         stderr.writeln('flutter_integration_test: $msg');
         noteFailure(
-          _TestFailureSummary(
+          TestFailureSummary(
             message: msg,
             type: 'TimeoutException',
             stackChain: '',
@@ -2352,7 +2266,7 @@ class _IntegrationHarness {
   ) {
     return {
       'type': 'initial',
-      'metadata': _defaultMetadata(
+      'metadata': defaultSuiteMetadata(
         suiteTimeout(bazelTestTimeout),
         libraryTags,
       ),
@@ -2371,25 +2285,6 @@ class _IntegrationHarness {
       'path': testPath,
       'asciiGlyphs': !stdout.supportsAnsiEscapes,
       'ignoreTimeouts': false,
-    };
-  }
-
-  static Map<String, Object?> _defaultMetadata(
-    Object timeout,
-    Set<String> libraryTags,
-  ) {
-    return {
-      'testOn': null,
-      'timeout': timeout,
-      'skip': null,
-      'skipReason': null,
-      'verboseTrace': null,
-      'chainStackTraces': null,
-      'retry': null,
-      'tags': libraryTags.toList(),
-      'onPlatform': const <List<Object>>[],
-      'forTag': const <String, Object?>{},
-      'languageVersionComment': null,
     };
   }
 
@@ -2417,27 +2312,6 @@ final class _TargetExited extends _DialBack {
 
 final class _DialBackTimedOut extends _DialBack {
   const _DialBackTimedOut();
-}
-
-class _TestFailureSummary {
-  _TestFailureSummary({
-    required this.message,
-    required this.type,
-    required this.stackChain,
-  });
-
-  final String message;
-  final String type;
-  final String stackChain;
-
-  @override
-  String toString() {
-    final buf = StringBuffer()..writeln('$type: $message');
-    if (stackChain.isNotEmpty) {
-      buf.write(stackChain);
-    }
-    return buf.toString();
-  }
 }
 
 /// Whether an integration run must be reported as a failure, given its counts.
@@ -2468,7 +2342,7 @@ class _Results {
 
   void recordFailure(
     String name,
-    _TestFailureSummary summary,
+    TestFailureSummary summary,
     Duration elapsed,
     String output,
   ) {
@@ -2508,15 +2382,12 @@ class _Results {
     suiteError: _suiteError,
   );
 
-  String summary() {
-    final pieces = <String>[
-      if (passed > 0) '$passed passed',
-      if (failed > 0) '$failed failed',
-      if (skipped > 0) '$skipped skipped',
-    ];
-    final body = pieces.isEmpty ? 'no tests' : pieces.join(', ');
-    return '\n$body${_suiteError ? ' (suite error)' : ''}';
-  }
+  String summary() => summarizeTestResults(
+    passed: passed,
+    failed: failed,
+    skipped: skipped,
+    suiteError: _suiteError,
+  );
 }
 
 String _indent(String body, String prefix) {

@@ -9,6 +9,7 @@ import 'package:test/test.dart';
 
 import '../bazel_test_protocol.dart';
 import '../flutter_integration_test_runner.dart' as runner;
+import '../test_support.dart' as support;
 
 class _FakePlatformLauncher implements runner.PlatformLauncher {
   _FakePlatformLauncher({required this.onStart});
@@ -705,7 +706,7 @@ void main() {
   group('cleanupQuietly', () {
     test('runs the action and swallows a filesystem race', () {
       var ran = false;
-      runner.cleanupQuietly(() {
+      support.cleanupQuietly(() {
         ran = true;
         throw const FileSystemException('gone', '/tmp/.X9-lock');
       });
@@ -714,7 +715,7 @@ void main() {
 
     test('lets a bug in the cleanup itself propagate', () {
       expect(
-        () => runner.cleanupQuietly(() => throw StateError('bug')),
+        () => support.cleanupQuietly(() => throw StateError('bug')),
         throwsStateError,
       );
     });
@@ -723,7 +724,7 @@ void main() {
       final tmpDir = Directory.systemTemp.createTempSync('cleanup_test_');
       try {
         final file = File('${tmpDir.path}/scratch')..writeAsStringSync('x');
-        runner.cleanupQuietly(file.deleteSync);
+        support.cleanupQuietly(file.deleteSync);
         expect(file.existsSync(), isFalse);
       } finally {
         if (tmpDir.existsSync()) {
@@ -735,15 +736,15 @@ void main() {
 
   group('teardownQuietly', () {
     test('swallows a peer-gone I/O race and an already-closed race', () async {
-      await runner.teardownQuietly(() async {
+      await support.teardownQuietly(() async {
         throw const FileSystemException('connection reset');
       });
-      await runner.teardownQuietly(() async => throw StateError('closed'));
+      await support.teardownQuietly(() async => throw StateError('closed'));
     });
 
     test('lets an unexpected teardown error propagate', () async {
       await expectLater(
-        runner.teardownQuietly(() async => throw ArgumentError('bug')),
+        support.teardownQuietly(() async => throw ArgumentError('bug')),
         throwsArgumentError,
       );
     });
