@@ -17,7 +17,7 @@ pays the cold cost.
 ## Turning it on
 
 ```sh
-bazel build -c dbg --@rules_flutter//flutter:incremental_kernel //app:app
+bazel build --@rules_flutter//flutter:incremental_kernel //app:app
 ```
 
 The flag is a `bool_flag` defaulting to `False`. Turning it off again (or
@@ -27,8 +27,9 @@ flag, so remote and local caches keep hitting.
 
 ## Scope
 
-Debug JIT whole-program compiles only (`target == "flutter"`, `-c dbg`
-without AOT). The flag never applies to AOT, web (`dartdevc`), `from_dill`,
+JIT whole-program compiles only (`target == "flutter"`, non-AOT, in any
+compilation mode — the predicate has deliberately no `-c` condition). The
+flag never applies to AOT, web (`dartdevc`), `from_dill`,
 `import_dill` or `recorded_uses` compiles — those always run the stock
 action. The guard and read-set checks enforce the same manifest-only policy
 as the stock `kernel_filter` path — allowances come only from the

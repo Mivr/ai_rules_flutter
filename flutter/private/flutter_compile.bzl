@@ -192,13 +192,13 @@ def _check_extra_flags(label, extra_flags):
 def _is_incr_worker(ctx, aot, target, from_dill, import_dill, recorded_uses):
     """Whether the compile runs through the incremental worker.
 
-    Opt-in via `--@rules_flutter//flutter:incremental_kernel`: debug (`-c
-    dbg`) JIT whole-program compiles only — never AOT, web (`dartdevc`),
-    `from_dill`, `import_dill` or `recorded_uses` compiles.
+    Opt-in via `--@rules_flutter//flutter:incremental_kernel`: JIT
+    whole-program compiles only (`target == "flutter"`, non-AOT, in any
+    compilation mode — deliberately no `-c` condition) — never AOT, web
+    (`dartdevc`), `from_dill`, `import_dill` or `recorded_uses` compiles.
     """
     return (
         ctx.attr._incremental_kernel[BuildSettingInfo].value and
-        ctx.var["COMPILATION_MODE"] == "dbg" and
         not aot and target == "flutter" and
         from_dill == None and import_dill == None and recorded_uses == None
     )
