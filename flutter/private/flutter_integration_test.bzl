@@ -1716,17 +1716,13 @@ def _flutter_linux_integration_test_impl(ctx):
     engine_files = flutter_sdk_info.engine_library.files.to_list()
     runner_binary = compile_linux_runner(
         ctx,
-        runner_srcs = [ctx.file._linux_runner_source],
-        runner_hdrs = [],
         engine_files = engine_files,
         defines = linux_runner_defines(ctx.attr.gtk_app_id, ctx.attr.window_title),
-        registrant_srcs = [native_registrant_cc],
-        registrant_hdrs = [native_registrant_h],
         linux_sysroot = flutter_sdk_info.linux_sysroot,
+        runner = struct(srcs = [ctx.file._linux_runner_source]),
+        registrant = struct(srcs = [native_registrant_cc], hdrs = [native_registrant_h]),
         target_arch = flutter_sdk_info.target_arch,
-        plugin_srcs = plugin_srcs,
-        plugin_hdrs = plugin_hdrs,
-        plugin_include_dirs = plugin_include_dirs,
+        plugins = struct(srcs = plugin_srcs, hdrs = plugin_hdrs, include_dirs = plugin_include_dirs),
     )
 
     # Step 5: Assemble Linux desktop bundle directory.

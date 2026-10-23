@@ -181,17 +181,13 @@ def _flutter_linux_runner_lib_impl(ctx):
 
     runner_binary = compile_linux_runner(
         ctx,
-        runner_srcs = runner_srcs,
-        runner_hdrs = runner_hdrs,
         engine_files = engine_files,
         defines = linux_runner_defines(ctx.attr.gtk_app_id, ctx.attr.window_title),
-        registrant_srcs = registrant_srcs,
-        registrant_hdrs = registrant_hdrs,
         linux_sysroot = flutter_sdk_info.linux_sysroot,
+        runner = struct(srcs = runner_srcs, hdrs = runner_hdrs),
+        registrant = struct(srcs = registrant_srcs, hdrs = registrant_hdrs),
         target_arch = flutter_sdk_info.target_arch,
-        plugin_srcs = plugin_srcs,
-        plugin_hdrs = plugin_hdrs,
-        plugin_include_dirs = plugin_include_dirs,
+        plugins = struct(srcs = plugin_srcs, hdrs = plugin_hdrs, include_dirs = plugin_include_dirs),
     )
 
     return [DefaultInfo(
@@ -317,7 +313,7 @@ def _linux_runner_include_flags(runner_hdrs, registrant_hdrs, plugin_hdrs, plugi
                 extra_compile.append("-I" + full)
     return extra_compile
 
-def compile_linux_runner(ctx, runner_srcs, engine_files, defines, linux_sysroot, registrant_srcs = [], registrant_hdrs = [], runner_hdrs = [], target_arch = "", plugin_srcs = [], plugin_hdrs = [], plugin_include_dirs = []):
+def compile_linux_runner(ctx, engine_files, defines, linux_sysroot, runner = struct(srcs = [], hdrs = []), registrant = struct(srcs = [], hdrs = []), target_arch = "", plugins = struct(srcs = [], hdrs = [], include_dirs = [])):
     """Compile the C++ GTK Linux runner binary.
 
     Uses cc_common.compile() + cc_common.link() with Bazel's hermetic CC
@@ -325,21 +321,17 @@ def compile_linux_runner(ctx, runner_srcs, engine_files, defines, linux_sysroot,
 
     Args:
         ctx: Rule context.
-        runner_srcs: List of C++ source Files for the runner.
         engine_files: Engine library files from toolchain.
         defines: Local defines, from `linux_runner_defines`.
         linux_sysroot: Chromium sysroot target (mandatory for hermetic GTK3 builds).
-        registrant_srcs: Generated registrant .cc files.
-        registrant_hdrs: Generated registrant .h files.
-        runner_hdrs: User-provided header files for the runner.
+        runner: Struct with the runner's own `srcs` and `hdrs`.
+        registrant: Struct with the generated registrant `srcs` (.cc) and `hdrs` (.h).
         target_arch: Target architecture string.
-        plugin_srcs: Linux plugin C++ sources (collected from
-            FlutterApplicationInfo.linux_plugin_libraries) compiled into the runner.
-        plugin_hdrs: Linux plugin C++ headers; their parent dirs are
-            added to the include path.
-        plugin_include_dirs: Plugin-relative include directories
-            (resolved against each plugin's package root via
-            additional `-I` flags).
+        plugins: Struct with Linux plugin C++ `srcs` (collected from
+            FlutterApplicationInfo.linux_plugin_libraries) compiled into the
+            runner, plugin `hdrs` (their parent dirs are added to the include
+            path), and plugin-relative `include_dirs` (resolved against each
+            plugin's package root via additional `-I` flags).
 
     Returns:
         The compiled runner executable File.
@@ -349,7 +341,7 @@ def compile_linux_runner(ctx, runner_srcs, engine_files, defines, linux_sysroot,
     # Find the engine shared library file for the linker.
     engine_so, header_files = _find_linux_engine_so(engine_files)
 
-    additional_srcs = list(registrant_srcs)
+    additional_srcs = list(registrant.srcs)
 
     # Compute GTK3 include/link flags from the hermetic Chromium sysroot.
     sysroot = _linux_sysroot_flags(linux_sysroot, target_arch)
@@ -361,13 +353,13 @@ def compile_linux_runner(ctx, runner_srcs, engine_files, defines, linux_sysroot,
     # Include registrant headers and runner headers as additional inputs so
     # #include directives resolve.  Also add their directories to the include
     # path so runner code can do #include "flutter/generated_plugin_registrant.h".
-    all_header_files = header_files + registrant_hdrs + runner_hdrs + plugin_hdrs
-    extra_compile = _linux_runner_include_flags(runner_hdrs, registrant_hdrs, plugin_hdrs, plugin_srcs, plugin_include_dirs)
+    all_header_files = header_files + registrant.hdrs + runner.hdrs + plugins.hdrs
+    extra_compile = _linux_runner_include_flags(runner.hdrs, registrant.hdrs, plugins.hdrs, plugins.srcs, plugins.include_dirs)
 
     return compile_and_link_runner(
         ctx = ctx,
         name = ctx.label.name + "_linux_runner",
-        srcs = runner_srcs,
+        srcs = runner.srcs,
         engine = make_runner_engine(
             library_file = engine_so,
             header_files = all_header_files,
@@ -379,7 +371,7 @@ def compile_linux_runner(ctx, runner_srcs, engine_files, defines, linux_sysroot,
             defines = defines,
         ),
         extras = make_runner_extras(
-            additional_srcs = additional_srcs + plugin_srcs,
+            additional_srcs = additional_srcs + plugins.srcs,
             system_libraries = gtk_libs,
             system_include_dirs = system_include_dirs,
             additional_inputs = sysroot_files,
