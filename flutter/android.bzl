@@ -941,6 +941,11 @@ def flutter_android_app(
     reach remote execution or caches. See the README's Android
     section.
 
+    Release signing never passes `debug_signing_lineage_file` to apksigner:
+    the release APK carries no `--lineage` and the overlay reports no
+    lineage, while debug signing keeps it (see
+    `docs/android-release-signing.md`).
+
     Args:
         name: Target name (Bazel identifier). Produces the app APK (an android_binary behind a pure-Go proxy).
         application: A flutter_application target (required).

@@ -21,11 +21,17 @@ secret that was never written) or a multi-file one fails analysis instead of
 silently debug-signing. The release `ApkSignerTool` action always runs with
 `no-remote` so the keystore and password files never reach a remote executor
 or cache; the debug action keeps no execution requirements.
+
+The overlay's `ApkInfo` and `StarlarkApkInfo` report what the overlay's own
+signing run used — never the base binary's fields. The debug lineage
+(`debug_signing_lineage_file`) reaches apksigner only under debug signing: a
+release-signed overlay signs without `--lineage` and reports no lineage,
+while `key_rotation_min_sdk` is reported in both modes.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
-load("@rules_android//providers:providers.bzl", "ApkInfo")
+load("@rules_android//providers:providers.bzl", "ApkInfo", "StarlarkApkInfo")
 load("@rules_java//java/common:java_info.bzl", "JavaInfo")
 load("//flutter/private:flutter_android_apk_overlay.bzl", "flutter_android_apk_overlay", "release_execution_requirements")
 
@@ -262,6 +268,65 @@ def _expect_failure_test_impl(ctx):
         asserts.expect_failure(env, expected)
     return analysistest.end(env)
 
+def _debug_reports_own_signing_test_impl(ctx):
+    """The debug overlay reports the lineage and rotation its signer used."""
+    env = analysistest.begin(ctx)
+    argv = _sign_action(env).argv
+    lineage = _flag_value(argv, "--lineage")
+    asserts.true(
+        env,
+        lineage != None and lineage.endswith("_debug_lineage.txt"),
+        "expected --lineage <debug lineage file>, got %s" % argv,
+    )
+    asserts.equals(
+        env,
+        "28",
+        _flag_value(argv, "--rotation-min-sdk-version"),
+    )
+    info = analysistest.target_under_test(env)[ApkInfo]
+    asserts.true(
+        env,
+        info.signing_lineage != None and info.signing_lineage.path.endswith("_debug_lineage.txt"),
+        "ApkInfo must report the lineage the overlay signed with, got %s" % info.signing_lineage,
+    )
+    asserts.equals(env, "28", info.signing_min_v3_rotation_api_version)
+    starlark = analysistest.target_under_test(env)[StarlarkApkInfo]
+    asserts.true(
+        env,
+        starlark.signing_lineage != None and starlark.signing_lineage.path.endswith("_debug_lineage.txt"),
+        "StarlarkApkInfo must report the lineage the overlay signed with, got %s" % starlark.signing_lineage,
+    )
+    return analysistest.end(env)
+
+def _release_drops_debug_lineage_test_impl(ctx):
+    """A release overlay signs without the debug lineage and reports None."""
+    env = analysistest.begin(ctx)
+    argv = _sign_action(env).argv
+    asserts.false(
+        env,
+        "--lineage" in argv,
+        "release signing must not pass --lineage, got %s" % argv,
+    )
+    asserts.equals(
+        env,
+        "28",
+        _flag_value(argv, "--rotation-min-sdk-version"),
+    )
+    info = analysistest.target_under_test(env)[ApkInfo]
+    asserts.equals(env, None, info.signing_lineage)
+    asserts.equals(env, "28", info.signing_min_v3_rotation_api_version)
+    starlark = analysistest.target_under_test(env)[StarlarkApkInfo]
+    asserts.equals(env, None, starlark.signing_lineage)
+    return analysistest.end(env)
+
+def _debug_no_lineage_reports_none_test_impl(ctx):
+    """Without a lineage file, the debug overlay reports no lineage."""
+    env = analysistest.begin(ctx)
+    info = analysistest.target_under_test(env)[ApkInfo]
+    asserts.equals(env, None, info.signing_lineage)
+    asserts.equals(env, None, info.signing_min_v3_rotation_api_version)
+    return analysistest.end(env)
+
 _release_signing_argv_test = analysistest.make(
     _release_signing_argv_test_impl,
     config_settings = {"//command_line_option:extra_toolchains": _EXTRA_TOOLCHAINS},
@@ -295,6 +360,18 @@ _expect_failure_test = analysistest.make(
     _expect_failure_test_impl,
     expect_failure = True,
     attrs = {"expected_substrings": attr.string_list(mandatory = True)},
+    config_settings = {"//command_line_option:extra_toolchains": _EXTRA_TOOLCHAINS},
+)
+_debug_reports_own_signing_test = analysistest.make(
+    _debug_reports_own_signing_test_impl,
+    config_settings = {"//command_line_option:extra_toolchains": _EXTRA_TOOLCHAINS},
+)
+_release_drops_debug_lineage_test = analysistest.make(
+    _release_drops_debug_lineage_test_impl,
+    config_settings = {"//command_line_option:extra_toolchains": _EXTRA_TOOLCHAINS},
+)
+_debug_no_lineage_reports_none_test = analysistest.make(
+    _debug_no_lineage_reports_none_test_impl,
     config_settings = {"//command_line_option:extra_toolchains": _EXTRA_TOOLCHAINS},
 )
 _empty_flag_keystore_test = analysistest.make(
@@ -413,6 +490,12 @@ def _setup_fixtures(name):
         content = ["flag-store-pass-b"],
         tags = ["manual"],
     )
+    write_file(
+        name = name + "_debug_lineage",
+        out = name + "_debug_lineage.txt",
+        content = ["fake signing lineage"],
+        tags = ["manual"],
+    )
     native.filegroup(
         name = name + "_two_store_passes",
         srcs = [
@@ -520,6 +603,27 @@ def _setup_fixtures(name):
         key_alias = _ALIAS,
         tags = ["manual"],
     )
+    flutter_android_apk_overlay(
+        name = name + "_signing_report_debug_overlay",
+        binary = ":" + name + "_release_fake_binary",
+        native_libs_jar = ":" + name + "_release_native_libs",
+        flutter_assets = ":" + name + "_release_flutter_assets",
+        debug_signing_lineage_file = ":" + name + "_debug_lineage",
+        key_rotation_min_sdk = "28",
+        tags = ["manual"],
+    )
+    flutter_android_apk_overlay(
+        name = name + "_signing_report_release_overlay",
+        binary = ":" + name + "_release_fake_binary",
+        native_libs_jar = ":" + name + "_release_native_libs",
+        flutter_assets = ":" + name + "_release_flutter_assets",
+        debug_signing_lineage_file = ":" + name + "_debug_lineage",
+        key_rotation_min_sdk = "28",
+        keystore = ":" + name + "_release_keystore",
+        keystore_password_file = ":" + name + "_release_store_pass",
+        key_alias = _ALIAS,
+        tags = ["manual"],
+    )
 
 def android_release_signing_test_suite(name):
     """Defines analysis tests for release-keystore APK signing.
@@ -540,6 +644,18 @@ def android_release_signing_test_suite(name):
     )
     _debug_signing_argv_test(
         name = name + "_debug_argv",
+        target_under_test = ":" + name + "_release_debug_overlay",
+    )
+    _debug_reports_own_signing_test(
+        name = name + "_debug_reports_own_signing",
+        target_under_test = ":" + name + "_signing_report_debug_overlay",
+    )
+    _release_drops_debug_lineage_test(
+        name = name + "_release_drops_debug_lineage",
+        target_under_test = ":" + name + "_signing_report_release_overlay",
+    )
+    _debug_no_lineage_reports_none_test(
+        name = name + "_debug_no_lineage_reports_none",
         target_under_test = ":" + name + "_release_debug_overlay",
     )
     _attr_beats_flag_test(
@@ -598,6 +714,9 @@ def android_release_signing_test_suite(name):
             ":" + name + "_release_requirements",
             ":" + name + "_default_key_pass",
             ":" + name + "_debug_argv",
+            ":" + name + "_debug_reports_own_signing",
+            ":" + name + "_release_drops_debug_lineage",
+            ":" + name + "_debug_no_lineage_reports_none",
             ":" + name + "_attr_beats_flag",
             ":" + name + "_flag_only",
             ":" + name + "_missing_pass_fails",

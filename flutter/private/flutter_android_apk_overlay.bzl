@@ -37,6 +37,7 @@ load("//flutter/private:common.bzl", "resolve_exec_dart_vm")
 
 _ANDROID_SDK_TOOLCHAIN_TYPE = Label("@rules_android//toolchains/android_sdk:toolchain_type")
 _ANDROID_TOOLCHAIN_TYPE = Label("@rules_android//toolchains/android:toolchain_type")
+_DART_EXEC_TOOLCHAIN_TYPE = Label("@rules_dart//dart:exec_tools_toolchain_type")
 
 # The flags' default targets: "unset" is label identity with these, never an
 # empty file list, so a flag pointing at an empty or multi-file target fails
@@ -184,6 +185,7 @@ def _run_apk_overlay(ctx, dart_exe, dart_vm_files, base_unsigned, native_libs_ja
         outputs = [overlay_unsigned],
         mnemonic = "FlutterApkOverlay",
         progress_message = "Injecting Flutter payload into base APK %s" % ctx.label,
+        toolchain = _DART_EXEC_TOOLCHAIN_TYPE,
     )
     return overlay_unsigned
 
@@ -202,6 +204,7 @@ def _run_zipalign(ctx, sdk, overlay_unsigned):
         outputs = [aligned],
         mnemonic = "AndroidZipAlign",
         progress_message = "Zipaligning APK with Flutter payload %s" % ctx.label,
+        toolchain = _ANDROID_SDK_TOOLCHAIN_TYPE,
     )
     return aligned
 
@@ -269,7 +272,9 @@ def _release_sign_args(sign_args, release):
 def _run_apksign(ctx, sdk, aligned, signing_keys, lineage, rotation_min_sdk, release):
     """Signs the aligned APK with the keystore and scheme android_binary would use.
 
-    `signing` mirrors `@rules_android//flags:apk_signing_method` (wired by
+    `lineage` is the File passed with `--lineage`, or None: the caller drops
+    the debug lineage under release signing, so a release APK never carries
+    it. `signing` mirrors `@rules_android//flags:apk_signing_method` (wired by
     the macro via select); v4 (fs-verity) stays with android_binary — route
     it there. With `release` set, apksigner signs with the caller's keystore
     instead of the debug keys; without it every argument below is exactly the
@@ -325,6 +330,7 @@ def _run_apksign(ctx, sdk, aligned, signing_keys, lineage, rotation_min_sdk, rel
         mnemonic = "ApkSignerTool",
         progress_message = "Signing APK with Flutter payload %s" % ctx.label,
         execution_requirements = release_execution_requirements(release),
+        toolchain = _ANDROID_SDK_TOOLCHAIN_TYPE,
     )
     return signed
 
@@ -350,6 +356,7 @@ def _run_overlay_deploy_info(ctx, android_toolchain, merged_manifest, signed):
         outputs = [deploy_info],
         mnemonic = "WriteDeployInfo",
         progress_message = "Writing deploy info for overlay APK %s" % ctx.label,
+        toolchain = _ANDROID_TOOLCHAIN_TYPE,
     )
     return deploy_info
 
@@ -394,11 +401,16 @@ def _flutter_android_apk_overlay_impl(ctx):
 
     # 3. Sign with the same keystore and scheme selection android_binary
     # would have used — or the caller's release keystore when configured.
+    # A release signature never carries the debug lineage: the apksigner run
+    # below omits `--lineage`, and the providers report None. Debug signing
+    # keeps the lineage exactly as before.
     signing_keys = _overlay_signing_keys(ctx)
     lineage = ctx.file.debug_signing_lineage_file
     rotation_min_sdk = ctx.attr.key_rotation_min_sdk
     release = _resolve_release_signing(ctx)
-    signed = _run_apksign(ctx, sdk, aligned, signing_keys, lineage, rotation_min_sdk, release)
+    effective_lineage = None if release else lineage
+    effective_rotation = rotation_min_sdk if rotation_min_sdk else None
+    signed = _run_apksign(ctx, sdk, aligned, signing_keys, effective_lineage, rotation_min_sdk, release)
 
     # 4. Regenerate deploy info against the overlay's own signed APK and
     # merged manifest.
@@ -417,14 +429,14 @@ def _flutter_android_apk_overlay_impl(ctx):
             deploy_jar = base_apk_info.deploy_jar,
             coverage_metadata = base_apk_info.coverage_metadata,
             signing_keys = release_signing_keys,
-            signing_lineage = base_apk_info.signing_lineage,
-            signing_min_v3_rotation_api_version = base_apk_info.signing_min_v3_rotation_api_version,
+            signing_lineage = effective_lineage,
+            signing_min_v3_rotation_api_version = effective_rotation,
             keystore = keystore,
         ),
         StarlarkApkInfo(
             keystore = keystore,
             signing_keys = release_signing_keys,
-            signing_lineage = base_apk_info.signing_lineage,
+            signing_lineage = effective_lineage,
             signed_apk = signed,
             unsigned_apk = overlay_unsigned,
         ),
@@ -480,11 +492,16 @@ flutter_android_apk_overlay = rule(
             allow_files = True,
         ),
         "debug_signing_lineage_file": attr.label(
-            doc = "Signing lineage, matching android_binary's debug_signing_lineage_file.",
+            doc = "Signing lineage, matching android_binary's debug_signing_lineage_file. " +
+                  "Debug signing passes it to apksigner with `--lineage`. A release-signed APK " +
+                  "(a `keystore` here or the `//flutter:android_release_keystore` flag) signs " +
+                  "without it and reports no lineage.",
             allow_single_file = True,
         ),
         "key_rotation_min_sdk": attr.string(
-            doc = "Rotation minimum SDK, matching android_binary's key_rotation_min_sdk.",
+            doc = "Rotation minimum SDK, matching android_binary's key_rotation_min_sdk. " +
+                  "Passed to apksigner with `--rotation-min-sdk-version` when set; the " +
+                  "overlay's ApkInfo reports the value its own signing run used.",
             default = "",
         ),
         "keystore": attr.label(
@@ -492,6 +509,8 @@ flutter_android_apk_overlay = rule(
                   "Needs `keystore_password_file` and `key_alias`; without them analysis fails. " +
                   "Must name a target with exactly one file: an empty or multi-file target fails analysis " +
                   "instead of falling back to debug signing. " +
+                  "Release signing omits the debug lineage: even with `debug_signing_lineage_file` set, " +
+                  "apksigner gets no `--lineage` and the overlay reports no lineage. " +
                   "When unset (with the `//flutter:android_release_keystore` flag unset) the APK signs " +
                   "with the debug keystore exactly as before. An explicit keystore always wins over the flag.",
             allow_files = True,
