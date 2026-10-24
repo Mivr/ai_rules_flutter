@@ -149,6 +149,126 @@ LoadCommand buildLcRpath(String rpath) {
   return LoadCommand(lcRpath, buf);
 }
 
+/// One `(offset, size)` file range a load command names: the range itself plus
+/// [field], the offset of its `dataoff` word inside the command bytes, so a
+/// rewrite can relocate the range without relearning the command layout.
+/// Grouped as a class so range helpers stay under the parameter limit.
+class CommandRange {
+  const CommandRange({
+    required this.field,
+    required this.offset,
+    required this.size,
+  });
+
+  /// Offset of the range's `dataoff` word inside the command bytes.
+  final int field;
+
+  /// The range's file offset.
+  final int offset;
+
+  /// The range's size in bytes.
+  final int size;
+}
+
+/// Whether [cmd] is a single-range `linkedit_data` command: an
+/// `(offset, size)` pair at command offsets +8/+12 naming a `__LINKEDIT`
+/// payload the strip rewrite compacts. `LC_DYLD_INFO` and
+/// `LC_DYLD_INFO_ONLY` carry five such pairs instead and are handled by
+/// [movedTableRanges].
+bool isSingleRangeLinkeditCommand(int cmd) {
+  switch (cmd) {
+    case lcFunctionStarts:
+    case lcDataInCode:
+    case lcDyldExportsTrie:
+    case lcDyldChainedFixups:
+    case lcCodeSignature:
+    case lcSegmentSplitInfo:
+    case lcDylibCodeSignDrs:
+    case lcLinkerOptimizationHint:
+      return true;
+    default:
+      return false;
+  }
+}
+
+/// Every compactable file range [lc] names, in command order: all five
+/// `(offset, size)` pairs for `LC_DYLD_INFO`/`LC_DYLD_INFO_ONLY`
+/// (rebase, bind, weak bind, lazy bind, export), the single pair for the
+/// commands [isSingleRangeLinkeditCommand] accepts, and nothing for any
+/// other command.
+///
+/// Throws [FormatException] naming the command when a table command is
+/// truncated.
+List<CommandRange> movedTableRanges(LoadCommand lc) {
+  if (lc.cmd == lcDyldInfo || lc.cmd == lcDyldInfoOnly) {
+    if (lc.bytes.length < 48) {
+      throw FormatException(
+        'Truncated load command 0x${lc.cmd.toRadixString(16)}.',
+      );
+    }
+    final bd = ByteData.sublistView(lc.bytes);
+    return [
+      for (var field = 8; field < 48; field += 8)
+        CommandRange(
+          field: field,
+          offset: bd.getUint32(field, Endian.little),
+          size: bd.getUint32(field + 4, Endian.little),
+        ),
+    ];
+  }
+  if (isSingleRangeLinkeditCommand(lc.cmd)) {
+    if (lc.bytes.length < 16) {
+      throw FormatException(
+        'Truncated load command 0x${lc.cmd.toRadixString(16)}.',
+      );
+    }
+    final bd = ByteData.sublistView(lc.bytes);
+    return [
+      CommandRange(
+        field: 8,
+        offset: bd.getUint32(8, Endian.little),
+        size: bd.getUint32(12, Endian.little),
+      ),
+    ];
+  }
+  return const [];
+}
+
+/// Every relocatable file range [lc] names: the symbol and string tables for
+/// `LC_SYMTAB`, the indirect table for `LC_DYSYMTAB`, and [movedTableRanges]
+/// for the linkedit table commands. Used both to rewrite ranges after the
+/// strip compacts `__LINKEDIT` and to verify the result.
+List<CommandRange> fileRangesOf(LoadCommand lc) {
+  if (lc.cmd == lcSymtab) {
+    if (lc.bytes.length < 24) return const [];
+    final bd = ByteData.sublistView(lc.bytes);
+    return [
+      CommandRange(
+        field: 8,
+        offset: bd.getUint32(8, Endian.little),
+        size: bd.getUint32(12, Endian.little) * 16,
+      ),
+      CommandRange(
+        field: 16,
+        offset: bd.getUint32(16, Endian.little),
+        size: bd.getUint32(20, Endian.little),
+      ),
+    ];
+  }
+  if (lc.cmd == lcDysymtab) {
+    if (lc.bytes.length < 64) return const [];
+    final bd = ByteData.sublistView(lc.bytes);
+    return [
+      CommandRange(
+        field: 56,
+        offset: bd.getUint32(56, Endian.little),
+        size: bd.getUint32(60, Endian.little) * 4,
+      ),
+    ];
+  }
+  return movedTableRanges(lc);
+}
+
 /// Tracks the lowest referenced file offset seen so far.
 class _PayloadFloor {
   int value;
@@ -184,11 +304,24 @@ void _considerCommandPayload(LoadCommand lc, _PayloadFloor floor) {
     case lcCodeSignature:
     case lcDyldExportsTrie:
     case lcDyldChainedFixups:
+    case lcSegmentSplitInfo:
+    case lcDylibCodeSignDrs:
+    case lcLinkerOptimizationHint:
       if (lc.bytes.length >= 16) {
         floor.consider(
           bd.getUint32(8, Endian.little),
           bd.getUint32(12, Endian.little),
         );
+      }
+    case lcDyldInfo:
+    case lcDyldInfoOnly:
+      if (lc.bytes.length >= 48) {
+        for (var field = 8; field < 48; field += 8) {
+          floor.consider(
+            bd.getUint32(field, Endian.little),
+            bd.getUint32(field + 4, Endian.little),
+          );
+        }
       }
   }
 }
