@@ -174,8 +174,15 @@ void main() {
       ]);
       final commented = _withDeclaredComment(zip, 14, [
         ...utf8.encode('note '),
-        0x50, 0x4B, 0x05, 0x06,
-        0, 0, 1, 2, 3,
+        0x50,
+        0x4B,
+        0x05,
+        0x06,
+        0,
+        0,
+        1,
+        2,
+        3,
       ]);
       expect(
         [for (final e in readZipRawEntries(commented)) e.path],
