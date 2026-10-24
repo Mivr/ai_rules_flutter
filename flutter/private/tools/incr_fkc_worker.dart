@@ -201,7 +201,8 @@ class IncrWorker {
   final Directory _tmp;
   final Map<String, IncrServerState> _servers = {};
   final List<String> _order = [];
-  ScratchHeartbeat? _heartbeat;
+  ScratchLock? _scratchLock;
+  bool _swept = false;
 
   static int _maxServersFromEnv() {
     final raw = Platform.environment['INCR_FKC_MAX_SERVERS'];
@@ -228,19 +229,23 @@ class IncrWorker {
     return worker;
   }
 
-  /// Starts this worker's heartbeat and reclaims the scratch that dead
-  /// workers left under the temp directory. Safe to call more than once;
-  /// later calls only re-sweep. Never throws: reclaiming must never fail a
-  /// worker start or a compile.
+  /// Claims this worker's scratch lock and reclaims dead siblings' scratch
+  /// under the temp directory. The claim lands before anything costly is
+  /// written, so a claimed directory never holds valuable state another
+  /// worker could sweep. Sweeps once per worker; later calls only keep the
+  /// lock held. Never throws: reclaiming must never fail a worker start or
+  /// a compile.
   Future<void> ensureScratchReclaimed() async {
-    _heartbeat ??= await startScratchHeartbeat(_tmp);
+    _scratchLock ??= await lockWorkerScratch(_tmp);
+    if (_swept) return;
+    _swept = true;
     await sweepWorkerScratch(
       _tmp.parent,
       exemptName: _tmp.path.split(Platform.pathSeparator).last,
     );
   }
 
-  /// Stops every server, releases the heartbeat and deletes the worker's
+  /// Stops every server, releases the scratch lock and deletes the worker's
   /// temp directory. Used when the worker itself is done, and after an
   /// unexpected error the server state cannot be trusted. Runs on every exit
   /// path — one-shot success and failure, persistent-worker stdin EOF,
@@ -254,16 +259,19 @@ class IncrWorker {
     } finally {
       _servers.clear();
       _order.clear();
-      await _closeHeartbeat();
+      await _closeScratchLock();
       _deleteTempDir();
     }
   }
 
-  /// Releases the liveness heartbeat, if one was started. Never throws.
-  Future<void> _closeHeartbeat() async {
-    final heartbeat = _heartbeat;
-    _heartbeat = null;
-    if (heartbeat != null) await heartbeat.close();
+  /// Releases the scratch lock, if one was claimed. Never throws. The lock
+  /// file is only ever opened here at claim time and closed here: POSIX
+  /// locks are per process and vanish when any descriptor for the file
+  /// closes, so no other code may open this file while the worker lives.
+  Future<void> _closeScratchLock() async {
+    final lock = _scratchLock;
+    _scratchLock = null;
+    if (lock != null) await lock.close();
   }
 
   /// Best-effort deletion of [_tmp]: the exit code already reports the
@@ -695,6 +703,8 @@ Future<void> runPersistentWorker({
 }
 
 Future<void> main(List<String> argv) async {
+  final probe = tryLockPath(argv);
+  if (probe != null) exit(await tryScratchLock(probe));
   if (argv.contains('--persistent_worker')) {
     await runPersistentWorker();
   } else {

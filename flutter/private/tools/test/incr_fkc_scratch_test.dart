@@ -38,6 +38,8 @@ Future<void> _respond(Stdout out, String cwd, String? full, String? inc) {
     'lib/a.dart',
     'stage/lib/main.dart',
     'stage/lib/a.dart',
+    'stage/lib/main.dart',
+    'stage/lib/a.dart',
     'pkg_config.json',
     'platform.dill',
   ]) {
@@ -82,6 +84,21 @@ Future<void> main(List<String> args) async {
       // Already gone; the test only checks absence.
     }
   }
+}
+''';
+
+/// A helper that holds a scratch lock exactly the way a live worker does —
+/// `openSync` plus `lockSync(FileLock.exclusive)` on the lock file — with no
+/// socket involved, then sleeps until killed. The sweep must see the held
+/// lock and keep the directory.
+const String _holderSource = r'''
+import 'dart:io';
+Future<void> main(List<String> args) async {
+  final handle = File(args[0]).openSync(mode: FileMode.write);
+  handle.lockSync(FileLock.exclusive);
+  stdout.writeln('held');
+  await stdout.flush();
+  await Future<void>.delayed(const Duration(minutes: 10));
 }
 ''';
 
@@ -182,6 +199,26 @@ String _workerBinary() {
   throw StateError(
     'incr_fkc_worker binary not found (INCR_FKC_WORKER_BIN=$rel).',
   );
+}
+
+/// Probes [lockPath] the production way: the built worker binary in
+/// lock-probe mode. Exit 0 means the lock was free (the owner is dead).
+Future<Process> _probeWithWorker(String lockPath) =>
+    Process.start(_workerBinary(), ['$incrFkcTryLockFlag$lockPath']);
+
+/// A probe spawner that fails the test when called: entries the sweep must
+/// keep without probing (exempt, foreign, lock-less) never reach a probe.
+Future<Process> _noProbe(String lockPath) =>
+    throw StateError('must not probe $lockPath');
+
+/// A probe spawner whose spawn always fails, standing in for a probe the
+/// OS refuses to start. The entry must be kept.
+Future<Process> _failingProbe(String lockPath) =>
+    throw ProcessException('probe', [lockPath]);
+
+/// Writes an unlocked lock file into [dir]: a scratch whose owner is dead.
+void _writeDeadLock(Directory dir) {
+  File('${dir.path}/$incrFkcLockFileName').writeAsStringSync('');
 }
 
 /// The names of this worker's scratch entries under [tmp].
@@ -297,70 +334,141 @@ void main() {
 
     test('reclaims a dead worker scratch', () async {
       final dead = Directory('${parent.path}/incr_fkc_dead0001')..createSync();
-      File(
-        '${dead.path}/$incrFkcAliveFileName',
-      ).writeAsStringSync(jsonEncode({'port': 1, 'token': '0' * 32}));
+      _writeDeadLock(dead);
       File('${dead.path}/full.dill').writeAsBytesSync([1, 2, 3]);
-      await sweepWorkerScratch(parent, exemptName: 'incr_fkc_mine');
+      await sweepWorkerScratch(
+        parent,
+        exemptName: 'incr_fkc_mine',
+        spawnProbe: _probeWithWorker,
+      );
       expect(dead.existsSync(), isFalse);
     });
 
-    test('spares a live worker scratch', () async {
-      const token = '0123456789abcdef0123456789abcdef';
-      final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-      addTearDown(server.close);
-      server.listen((Socket client) async {
-        try {
-          client.write('$token\n');
-          await client.flush();
-          await client.close();
-        } on SocketException {
-          // The sweep went away; nothing to do.
-        } on StateError {
-          // The socket closed under us; nothing to do.
-        }
-      });
+    test('keeps a live worker scratch with no socket involved', () async {
       final live = Directory('${parent.path}/incr_fkc_live0001')..createSync();
-      File(
-        '${live.path}/$incrFkcAliveFileName',
-      ).writeAsStringSync(
-        jsonEncode({'port': server.port, 'token': token}),
-      );
+      final lockPath = '${live.path}/$incrFkcLockFileName';
+      File(lockPath).writeAsStringSync('');
       File('${live.path}/keep.txt').writeAsStringSync('keep');
-      await sweepWorkerScratch(parent, exemptName: 'incr_fkc_mine');
+      final holderScript = File('${parent.path}/hold_lock.dart')
+        ..writeAsStringSync(_holderSource);
+      // A helper process holds the lock exactly as a real worker does:
+      // openSync plus lockSync(exclusive), kept for the process's life.
+      final holder = await Process.start(Platform.resolvedExecutable, [
+        holderScript.path,
+        lockPath,
+      ]);
+      addTearDown(() async {
+        holder.kill(ProcessSignal.sigkill);
+        await holder.exitCode;
+      });
+      final held = StreamIterator(
+        holder.stdout.transform(utf8.decoder).transform(const LineSplitter()),
+      );
+      expect(
+        await held.moveNext().timeout(const Duration(seconds: 60)),
+        isTrue,
+        reason: 'the lock holder never confirmed its lock',
+      );
+      expect(held.current, 'held');
+      await held.cancel();
+      // A dead sibling next to it proves the sweep really ran.
+      final dead = Directory('${parent.path}/incr_fkc_dead0002')..createSync();
+      _writeDeadLock(dead);
+      // The held lock fails the probe attempt at once instead of hanging
+      // the sweep: the whole sweep stays far under one probe timeout.
+      final sweepWatch = Stopwatch()..start();
+      await sweepWorkerScratch(
+        parent,
+        exemptName: 'incr_fkc_mine',
+        spawnProbe: _probeWithWorker,
+      );
+      sweepWatch.stop();
+      expect(
+        sweepWatch.elapsed,
+        lessThan(incrFkcTryLockTimeout),
+        reason: 'the sweep took ${sweepWatch.elapsed} with a held lock',
+      );
       expect(File('${live.path}/keep.txt').readAsStringSync(), 'keep');
+      expect(dead.existsSync(), isFalse);
     });
 
     test('spares the exempt entry even when it looks dead', () async {
       final own = Directory('${parent.path}/incr_fkc_mine')..createSync();
-      File(
-        '${own.path}/$incrFkcAliveFileName',
-      ).writeAsStringSync(jsonEncode({'port': 1, 'token': 'f' * 32}));
+      _writeDeadLock(own);
       await sweepWorkerScratch(parent, exemptName: 'incr_fkc_mine');
       expect(own.existsSync(), isTrue);
     });
 
-    test('spares foreign entries and claim-less scratch', () async {
+    test('spares foreign entries and lock-less scratch', () async {
       final foreign = Directory('${parent.path}/other_stuff')..createSync();
       File('${foreign.path}/keep.txt').writeAsStringSync('keep');
+      // A newborn owner has a visible directory but has not claimed its
+      // lock yet; a foreign entry may also match the prefix. Neither may
+      // be deleted, so lock-less directories are always kept.
       final noClaim = Directory('${parent.path}/incr_fkc_noclaim')
         ..createSync();
       File('${noClaim.path}/full.dill').writeAsBytesSync([9]);
       final loose = File('${parent.path}/incr_fkc_loose')
         ..writeAsStringSync('x');
-      final badJson = Directory('${parent.path}/incr_fkc_badjson')
+      final garbage = Directory('${parent.path}/incr_fkc_garbage')
         ..createSync();
-      File(
-        '${badJson.path}/$incrFkcAliveFileName',
-      ).writeAsStringSync('not json');
-      await sweepWorkerScratch(parent, exemptName: 'incr_fkc_mine');
+      File('${garbage.path}/notes.txt').writeAsStringSync('not a lock');
+      await sweepWorkerScratch(
+        parent,
+        exemptName: 'incr_fkc_mine',
+        spawnProbe: _noProbe,
+      );
       expect(File('${foreign.path}/keep.txt').readAsStringSync(), 'keep');
       expect(File('${noClaim.path}/full.dill').existsSync(), isTrue);
       expect(loose.readAsStringSync(), 'x');
-      expect(
-        File('${badJson.path}/$incrFkcAliveFileName').existsSync(),
-        isTrue,
+      expect(File('${garbage.path}/notes.txt').existsSync(), isTrue);
+    });
+
+    test('keeps a scratch whose lock file cannot be opened', () async {
+      // A directory at the lock path cannot be opened as a file, standing
+      // in for an unopenable lock file; claiming there must degrade
+      // gracefully instead of throwing.
+      final stuck = Directory('${parent.path}/incr_fkc_unopenable')
+        ..createSync();
+      Directory('${stuck.path}/$incrFkcLockFileName').createSync();
+      final lock = await lockWorkerScratch(stuck);
+      await lock.close();
+      await sweepWorkerScratch(
+        parent,
+        exemptName: 'incr_fkc_mine',
+        spawnProbe: _noProbe,
       );
+      expect(stuck.existsSync(), isTrue);
+    });
+
+    test('a probe that cannot start keeps the entry', () async {
+      final dead = Directory('${parent.path}/incr_fkc_noprobe')..createSync();
+      _writeDeadLock(dead);
+      File('${dead.path}/full.dill').writeAsBytesSync([7]);
+      await sweepWorkerScratch(
+        parent,
+        exemptName: 'incr_fkc_mine',
+        spawnProbe: _failingProbe,
+      );
+      expect(File('${dead.path}/full.dill').existsSync(), isTrue);
+    });
+
+    test('a refused probe keeps the entry', () async {
+      final dead = Directory('${parent.path}/incr_fkc_refused')..createSync();
+      _writeDeadLock(dead);
+      File('${dead.path}/full.dill').writeAsBytesSync([7]);
+      // Probing a lock file that is gone races a live owner deleting its
+      // own scratch: the probe exits nonzero, and the entry is kept.
+      Future<Process> missingProbe(String ignored) => Process.start(
+        _workerBinary(),
+        ['$incrFkcTryLockFlag${parent.path}/no-such-dir/$incrFkcLockFileName'],
+      );
+      await sweepWorkerScratch(
+        parent,
+        exemptName: 'incr_fkc_mine',
+        spawnProbe: missingProbe,
+      );
+      expect(File('${dead.path}/full.dill').existsSync(), isTrue);
     });
 
     test('an unremovable entry does not fail the sweep', () async {
@@ -368,9 +476,7 @@ void main() {
         markTestSkipped('this test needs POSIX permissions');
       }
       final stuck = Directory('${parent.path}/incr_fkc_stuck001')..createSync();
-      File(
-        '${stuck.path}/$incrFkcAliveFileName',
-      ).writeAsStringSync(jsonEncode({'port': 1, 'token': 'f' * 32}));
+      _writeDeadLock(stuck);
       final inner = Directory('${stuck.path}/key')..createSync();
       File('${inner.path}/full.dill').writeAsBytesSync([1]);
       final chmod = await Process.run('chmod', ['a-w', inner.path]);
@@ -382,8 +488,32 @@ void main() {
       });
       final control = File('${parent.path}/control.txt')
         ..writeAsStringSync('c');
-      await sweepWorkerScratch(parent, exemptName: 'incr_fkc_mine');
+      await sweepWorkerScratch(
+        parent,
+        exemptName: 'incr_fkc_mine',
+        spawnProbe: _probeWithWorker,
+      );
       expect(control.readAsStringSync(), 'c');
+    });
+
+    test('lock claim, probe flag, and probe exits', () async {
+      expect(tryLockPath(['$incrFkcTryLockFlag/x']), '/x');
+      expect(tryLockPath(['--persistent_worker']), isNull);
+      final dir = Directory('${parent.path}/incr_fkc_direct')..createSync();
+      final lock = await lockWorkerScratch(dir);
+      expect(
+        File('${dir.path}/$incrFkcLockFileName').existsSync(),
+        isTrue,
+      );
+      await lock.close();
+      final probe = await _probeWithWorker(
+        '${dir.path}/$incrFkcLockFileName',
+      );
+      expect(await probe.exitCode.timeout(const Duration(seconds: 60)), 0);
+      final missing = await Process.start(_workerBinary(), [
+        '$incrFkcTryLockFlag${parent.path}/no-such-dir/$incrFkcLockFileName',
+      ]);
+      expect(await missing.exitCode.timeout(const Duration(seconds: 60)), 1);
     });
   });
 
@@ -495,9 +625,9 @@ void main() {
             await Process.run('chmod', ['-R', 'u+w', stuck.path]);
           }
         });
-        File(
-          '${stuck.path}/$incrFkcAliveFileName',
-        ).writeAsStringSync(jsonEncode({'port': 1, 'token': 'f' * 32}));
+        // Unlocked: the starting worker's probe reports dead, the delete
+        // fails, and the start still succeeds.
+        _writeDeadLock(stuck);
         final inner = Directory('${stuck.path}/key')..createSync();
         File('${inner.path}/full.dill').writeAsBytesSync([1]);
         if (!Platform.isWindows) {
@@ -506,6 +636,22 @@ void main() {
         final w = await spawn('${h.cwd}/w.pid');
         final reply = await w.serve(h.argv('${h.cwd}/w.pid'), h.inputs, 1);
         expect(reply['exitCode'], 0, reason: reply['output']);
+      },
+      timeout: const Timeout(Duration(minutes: 3)),
+    );
+
+    test(
+      'a lock-less orphan survives a worker start',
+      () async {
+        // No lock file: a newborn that has not claimed yet, or a foreign
+        // entry. The starting worker keeps it and still serves.
+        final orphan = Directory('${tmp.path}/incr_fkc_orphan999')
+          ..createSync();
+        File('${orphan.path}/full.dill').writeAsBytesSync([1, 2, 3]);
+        final w = await spawn('${h.cwd}/w.pid');
+        final reply = await w.serve(h.argv('${h.cwd}/w.pid'), h.inputs, 1);
+        expect(reply['exitCode'], 0, reason: reply['output']);
+        expect(File('${orphan.path}/full.dill').existsSync(), isTrue);
       },
       timeout: const Timeout(Duration(minutes: 3)),
     );

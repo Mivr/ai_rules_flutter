@@ -8,14 +8,18 @@
 /// sweeps the temp directory for scratch left by workers that are no longer
 /// alive.
 ///
-/// Liveness is decided by something a dead process cannot keep holding: each
-/// live worker holds a loopback server socket open for its whole life and
-/// publishes its port plus a random token in `alive.json` inside its own
-/// scratch directory. The startup sweep connects to that port: a refused
-/// connection (or a wrong token, from an unrelated process that reused the
-/// port) means the owner is gone and the directory is deleted; any answer
-/// with the right token — or any ambiguity — means the directory is kept.
-/// Liveness never depends on age or on PIDs, so PID reuse cannot confuse it.
+/// Liveness is decided by something a dead process cannot keep holding: an
+/// advisory exclusive file lock. Each worker creates a lock file inside its
+/// own scratch, takes `lockSync(FileLock.exclusive)` on it, and keeps that
+/// one handle open for its whole life; the kernel drops the lock when the
+/// process dies, SIGKILL included, in every network and mount namespace. The
+/// sweep probes each sibling's lock file with the same lock call from a
+/// short-lived helper process (the SDK exposes no non-blocking attempt, and
+/// a helper in another process has clean cross-process lock semantics):
+/// acquiring the lock proves the owner is gone and the directory is deleted,
+/// while a held lock, a missing or unopenable lock file, or any other
+/// failure keeps the directory. Liveness never depends on age or on PIDs,
+/// so PID reuse cannot confuse it.
 ///
 /// The sweep only touches directories the worker's own naming scheme
 /// produces (`incr_fkc_*`), never the worker's own directory, and never
@@ -24,111 +28,124 @@
 library;
 
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
-import 'dart:math';
 
 /// The temp-directory entry prefix the worker's scratch uses.
 const incrFkcScratchPrefix = 'incr_fkc_';
 
-/// The liveness file inside one worker's scratch directory.
-const incrFkcAliveFileName = 'alive.json';
+/// The lock file inside one worker's scratch directory.
+const incrFkcLockFileName = 'lock';
 
-/// How long the sweep waits for one sibling's heartbeat before treating the
-/// sibling as ambiguous (and therefore live).
-const incrFkcHeartbeatTimeout = Duration(seconds: 1);
+/// The worker's lock-probe mode flag: `--incr-fkc-try-lock=<lock path>`.
+/// A sweep runs the worker binary itself with this flag to probe one
+/// sibling's lock file in a separate process.
+const incrFkcTryLockFlag = '--incr-fkc-try-lock=';
 
-/// The token shape the sweep accepts: 16 random bytes as 32 hex digits.
-final RegExp _tokenPattern = RegExp(r'^[0-9a-f]{32}$');
+/// Upper bound for one sibling's lock probe. A probe answers in
+/// milliseconds either way — the lock attempt below never blocks — so a
+/// probe that outlasts this is wedged: it is killed and the entry kept.
+const incrFkcTryLockTimeout = Duration(seconds: 5);
 
-/// One worker's held heartbeat: the loopback server that proves it is alive.
-class ScratchHeartbeat {
-  ScratchHeartbeat._(this._server, this.token);
+/// How long a stray lock probe may live. The parent sweep kills a probe
+/// that outlasts [incrFkcTryLockTimeout]; this timer only fires when the
+/// parent itself vanished, so a stranded probe still exits on its own.
+const incrFkcProbeLifetime = Duration(seconds: 30);
 
-  final ServerSocket? _server;
+/// One worker's held scratch lock: the open handle whose exclusive lock
+/// proves this worker is alive. The handle stays open for the worker's whole
+/// life and is never duplicated: POSIX locks are per process and are dropped
+/// when the process closes any descriptor for the file, so this file is
+/// opened exactly once and never read back through another handle.
+class ScratchLock {
+  ScratchLock._(this._handle);
 
-  /// The random token the heartbeat answers sweeps with.
-  final String token;
+  final RandomAccessFile? _handle;
 
-  /// Releases the heartbeat. Never throws.
+  /// Releases the lock. Never throws.
   Future<void> close() async {
-    final server = _server;
-    if (server == null) return;
+    final handle = _handle;
+    if (handle == null) return;
     try {
-      await server.close();
-    } on SocketException {
+      await handle.close();
+    } on FileSystemException {
       // Shutting down; nothing left to report.
     }
   }
 }
 
-/// Starts the heartbeat for the scratch directory [dir]: binds the loopback
-/// server, answers sweep handshakes with a fresh token, and publishes the
-/// liveness file. Never throws: when the socket or the file cannot be set
-/// up, the returned heartbeat carries no liveness (future sweeps keep the
+/// The lock file path inside scratch directory [dir].
+String scratchLockPath(Directory dir) =>
+    '${dir.path}${Platform.pathSeparator}$incrFkcLockFileName';
+
+/// Claims the lock for scratch directory [dir]: creates the lock file,
+/// takes the exclusive lock, and holds the handle. Runs before the worker
+/// writes anything costly, so a claimed directory never holds valuable
+/// state another worker could sweep. Never throws: when the lock cannot be
+/// set up, the returned lock holds nothing (future sweeps keep the
 /// directory as possibly-live) and the worker still starts.
-Future<ScratchHeartbeat> startScratchHeartbeat(Directory dir) async {
-  final ServerSocket server;
+Future<ScratchLock> lockWorkerScratch(Directory dir) async {
   try {
-    server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-  } on SocketException catch (e) {
-    stderr.writeln('incr_fkc_worker: no heartbeat socket ($e).');
-    return ScratchHeartbeat._(null, '');
-  }
-  final token = _newToken();
-  server.listen(
-    (Socket client) {
-      _answerHeartbeat(client, token);
-    },
-    onError: (_) {},
-  );
-  try {
-    _writeAliveFile(dir, server.port, token);
+    final handle = File(scratchLockPath(dir)).openSync(mode: FileMode.write);
+    handle.lockSync(FileLock.exclusive);
+    return ScratchLock._(handle);
   } on FileSystemException catch (e) {
-    stderr.writeln('incr_fkc_worker: no heartbeat file ($e).');
-    await ScratchHeartbeat._(server, token).close();
-    return ScratchHeartbeat._(null, '');
+    stderr.writeln('incr_fkc_worker: no scratch lock ($e).');
+    return ScratchLock._(null);
   }
-  return ScratchHeartbeat._(server, token);
 }
 
-/// Writes the liveness file atomically: a temporary file plus a rename, so
-/// a concurrent sweep never reads a half-written claim.
-void _writeAliveFile(Directory dir, int port, String token) {
-  final sep = Platform.pathSeparator;
-  final staging = File('${dir.path}${sep}.alive.json.tmp');
-  staging.writeAsStringSync(jsonEncode({'port': port, 'token': token}));
-  staging.renameSync('${dir.path}${sep}$incrFkcAliveFileName');
+/// Extracts the lock-probe path from the worker argv, or null when this is
+/// not a lock probe.
+String? tryLockPath(List<String> argv) {
+  for (final arg in argv) {
+    if (arg.startsWith(incrFkcTryLockFlag)) {
+      return arg.substring(incrFkcTryLockFlag.length);
+    }
+  }
+  return null;
 }
 
-/// Sixteen random bytes as 32 hex digits.
-String _newToken() {
-  final random = Random.secure();
-  final bytes = List<int>.generate(16, (_) => random.nextInt(256));
-  return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
-}
-
-/// Answers one sweep handshake: the token line, flushed before the close so
-/// the sweeper always reads it. Never throws.
-Future<void> _answerHeartbeat(Socket client, String token) async {
+/// Probes one lock file the way a sweep's helper does: attempts the
+/// exclusive lock and releases it again. The attempt never blocks: when a
+/// live owner holds the lock it fails at once (EAGAIN) and the probe exits
+/// 1. Returns 0 when the lock was acquired (the owner is dead), 1 when the
+/// file cannot be opened or the lock is held. The parent sweep kills a
+/// probe that outlasts [incrFkcTryLockTimeout], and the lifetime timer
+/// below ends a probe whose parent vanished.
+Future<int> tryScratchLock(String lockPath) async {
+  Timer(incrFkcProbeLifetime, () => exit(2));
   try {
-    client.write('$token\n');
-    await client.flush();
-    await client.close();
-  } on SocketException {
-    // The sweeper went away mid-handshake; nothing to do.
-  } on StateError {
-    // The socket closed under us; nothing to do.
+    final handle = File(lockPath).openSync(mode: FileMode.write);
+    handle.lockSync(FileLock.exclusive);
+    await handle.close();
+  } on FileSystemException {
+    return 1;
   }
+  return 0;
 }
+
+/// Spawns one lock probe for [lockPath]. A test seam: production passes
+/// nothing and probes by running the worker binary itself (always
+/// available); tests pass a spawner for their own Dart VM.
+typedef ProbeSpawner = Future<Process> Function(String lockPath);
+
+/// Probes by running this worker binary in lock-probe mode.
+Future<Process> _selfProbe(String lockPath) => Process.start(
+  Platform.resolvedExecutable,
+  ['$incrFkcTryLockFlag$lockPath'],
+);
 
 /// Deletes every dead worker's scratch directory under [parent], except the
 /// entry named [exemptName] (this worker's own). Only directories the
-/// worker's own naming scheme produces are candidates, and anything the
-/// sweep cannot remove is kept. Never throws.
+/// worker's own naming scheme produces are candidates. A sibling without a
+/// lock file is always kept: it is either a newborn whose owner has not
+/// claimed yet (the claim lands after the directory becomes visible) or a
+/// foreign entry, and neither may be deleted. Anything the sweep cannot
+/// remove is kept. Never throws.
 Future<void> sweepWorkerScratch(
   Directory parent, {
   required String exemptName,
+  ProbeSpawner? spawnProbe,
 }) async {
   final List<FileSystemEntity> entries;
   try {
@@ -139,7 +156,7 @@ Future<void> sweepWorkerScratch(
   }
   for (final entry in entries) {
     if (_entryName(entry) == exemptName) continue;
-    await _reclaimEntry(entry);
+    await _reclaimEntry(entry, spawnProbe ?? _selfProbe);
   }
 }
 
@@ -148,28 +165,14 @@ String _entryName(FileSystemEntity entry) =>
     entry.path.split(Platform.pathSeparator).last;
 
 /// Deletes [entry] when it is a dead worker's scratch. Keeps everything
-/// else: non-directories, foreign names, live workers, ambiguous claims and
-/// entries that resist removal. Notes kept entries on stderr.
-Future<void> _reclaimEntry(FileSystemEntity entry) async {
+/// else and notes kept entries on stderr.
+Future<void> _reclaimEntry(
+  FileSystemEntity entry,
+  ProbeSpawner spawnProbe,
+) async {
   if (entry is! Directory) return;
   if (!_entryName(entry).startsWith(incrFkcScratchPrefix)) return;
-  final bool dead;
-  try {
-    dead = await _isDeadScratch(entry);
-  } on FileSystemException catch (e) {
-    stderr.writeln('incr_fkc_worker: keeping ${entry.path} ($e).');
-    return;
-  } on SocketException catch (e) {
-    stderr.writeln('incr_fkc_worker: keeping ${entry.path} ($e).');
-    return;
-  } on FormatException catch (e) {
-    stderr.writeln('incr_fkc_worker: keeping ${entry.path} ($e).');
-    return;
-  } on TimeoutException catch (e) {
-    stderr.writeln('incr_fkc_worker: keeping ${entry.path} ($e).');
-    return;
-  }
-  if (!dead) return;
+  if (!await _siblingDead(entry, spawnProbe)) return;
   try {
     entry.deleteSync(recursive: true);
   } on FileSystemException catch (e) {
@@ -177,78 +180,38 @@ Future<void> _reclaimEntry(FileSystemEntity entry) async {
   }
 }
 
-/// Whether [dir] is a worker's scratch whose owner is gone: it carries a
-/// well-formed liveness claim and nothing answers for it. A missing or
-/// malformed claim means a newborn sibling (or a foreign entry), which is
-/// treated as live.
-Future<bool> _isDeadScratch(Directory dir) async {
-  final claim = _readAliveClaim(dir);
-  if (claim == null) return false;
-  return _heartbeatGone(claim);
+/// Whether [entry] is a dead worker's scratch: it carries a lock file and
+/// a helper process could take its lock. A missing lock file, an owner that
+/// still holds the lock, and every probe failure count as alive.
+Future<bool> _siblingDead(Directory entry, ProbeSpawner spawnProbe) async {
+  if (!File(scratchLockPath(entry)).existsSync()) return false;
+  return _probeSiblingLock(scratchLockPath(entry), spawnProbe);
 }
 
-/// The parsed liveness claim, or null when [dir] carries none usable: no
-/// file yet, an unreadable file, or anything but a loopback port plus a
-/// token in the worker's shape.
-({int port, String token})? _readAliveClaim(Directory dir) {
-  final file = File(
-    '${dir.path}${Platform.pathSeparator}$incrFkcAliveFileName',
-  );
-  final String text;
+/// Runs one probe for [lockPath]: exit 0 means the lock was acquired (the
+/// owner is dead); any other exit — held lock, missing or unopenable file —
+/// means keep. A probe that outlasts its timeout is wedged (a live owner
+/// only ever fails the attempt fast): it is killed and the entry kept. A
+/// spawn failure also keeps. Never throws.
+Future<bool> _probeSiblingLock(String lockPath, ProbeSpawner spawnProbe) async {
+  final Process probe;
   try {
-    text = file.readAsStringSync();
-  } on FileSystemException {
-    return null;
+    probe = await spawnProbe(lockPath);
+  } on ProcessException catch (e) {
+    stderr.writeln('incr_fkc_worker: lock probe failed ($e).');
+    return false;
   }
-  final Object? decoded;
+  // The probe writes nothing, so no pipe can block it.
   try {
-    decoded = jsonDecode(text);
-  } on FormatException {
-    return null;
-  }
-  if (decoded is! Map) return null;
-  final port = decoded['port'];
-  final token = decoded['token'];
-  if (port is! int || port <= 0 || port > 65535) return null;
-  if (token is! String || !_tokenPattern.hasMatch(token)) return null;
-  return (port: port, token: token);
-}
-
-/// Whether nothing live answers for [claim]: a refused connection means the
-/// owner is gone, as does an answer with the wrong token (an unrelated
-/// process reusing the port). Anything ambiguous — a timeout, a close
-/// without an answer — counts as live, so the sweep never deletes scratch
-/// it is unsure about.
-Future<bool> _heartbeatGone(({int port, String token}) claim) async {
-  final Socket socket;
-  try {
-    socket = await Socket.connect(
-      InternetAddress.loopbackIPv4,
-      claim.port,
-      timeout: incrFkcHeartbeatTimeout,
-    );
-  } on SocketException {
-    return true;
+    final code = await probe.exitCode.timeout(incrFkcTryLockTimeout);
+    return code == 0;
   } on TimeoutException {
+    probe.kill(ProcessSignal.sigkill);
+    try {
+      await probe.exitCode.timeout(const Duration(seconds: 5));
+    } on TimeoutException {
+      stderr.writeln('incr_fkc_worker: lock probe stuck; keeping $lockPath.');
+    }
     return false;
-  }
-  try {
-    final line = await _socketLines(
-      socket,
-    ).first.timeout(incrFkcHeartbeatTimeout);
-    return line != claim.token;
-  } on TimeoutException {
-    return false;
-  } on StateError {
-    return false;
-  } finally {
-    socket.destroy();
   }
 }
-
-/// The socket's bytes as text lines. The cast bridges `Socket`'s
-/// `Uint8List` chunks to the decoder's `List<int>` input.
-Stream<String> _socketLines(Socket socket) => socket
-    .cast<List<int>>()
-    .transform(utf8.decoder)
-    .transform(const LineSplitter());
