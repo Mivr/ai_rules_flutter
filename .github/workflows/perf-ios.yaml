@@ -73,9 +73,9 @@ name: iOS perf bench
         options: [none, committed]
       ab:
         description: "sol only: off (one run), flags (flag A/B) or lockfile (lockfile A/B)"
-        default: off
+        default: "off"
         type: choice
-        options: [off, flags, lockfile]
+        options: ["off", flags, lockfile]
 permissions:
   contents: read
 jobs:

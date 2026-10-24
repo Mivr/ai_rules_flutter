@@ -665,7 +665,8 @@ class WorkflowTest(unittest.TestCase):
         self.assertIn("ab:", text)
         self.assertRegex(text, r"lockfile:\n(\s+\S.*\n)+?.*default: none")
         self.assertIn("committed", text)
-        self.assertRegex(text, r"ab:\n(\s+\S.*\n)+?.*default: off")
+        self.assertRegex(text, r'ab:\n(\s+\S.*\n)+?.*default: "off"')
+        self.assertRegex(text, r'options: \["off", flags, lockfile\]')
         self.assertIn("lockfile", text)
 
     def test_ab_validation_and_lock_step(self):
