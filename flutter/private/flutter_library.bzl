@@ -144,7 +144,150 @@ def build_pub_contributions(package_name, fonts_json, font_files_dict, pkg_asset
 
     return (extra_pub_fonts, extra_pub_assets, extra_pub_shaders)
 
-def aggregate_pub_contributions(deps, target_platform):
+def _pub_family_origin(deps, entry):
+    """The first direct dep whose `FlutterInfo.pub_fonts` carries a family entry.
+
+    Only runs on the failure path: naming the two libraries that carry one
+    family name with two different font lists. Every flattened entry arrives
+    through at least one direct dep, so a miss below cannot happen; it still
+    returns None rather than guessing, and the caller names that honestly.
+
+    Args:
+        deps: The bundle's direct deps.
+        entry: The pub_fonts contribution struct to find.
+
+    Returns:
+        The dep's label string, or None.
+    """
+    for dep in deps:
+        if FlutterInfo in dep and entry in dep[FlutterInfo].pub_fonts.to_list():
+            return str(dep.label)
+    return None
+
+def _fail_font_family_conflict(family, first_origin, origin):
+    """Fail analysis: one font family name carries two different font lists.
+
+    Args:
+        family: The bundle-relative family name both lists claim.
+        first_origin: Where the first list came from (a label).
+        origin: Where the second list came from (a label).
+    """
+    fail("font family '%s' is carried with two different font lists by %s and %s; keep one font list for the family." % (family, first_origin, origin))
+
+def _pub_prefix(package_name):
+    """The bundle-path prefix for one pub contribution's package.
+
+    Args:
+        package_name: The contribution's package name; the empty string
+            sentinel means a non-package contribution bundled at a bare path.
+
+    Returns:
+        `"packages/<name>/"`, or `""` for the empty sentinel.
+    """
+    return "packages/{}/".format(package_name) if package_name else ""
+
+def _font_descriptors(entry, prefix, extra_asset_copies, pub_claims):
+    """One pub font entry's FontManifest descriptors, recording its copies.
+
+    Args:
+        entry: The pub_fonts contribution struct.
+        prefix: The entry's bundle-path prefix, from `_pub_prefix`.
+        extra_asset_copies: Dict to record each font file's bundle dest in.
+        pub_claims: Optional list to append one `struct(key, file, channel)`
+            claim per font file to, or None.
+
+    Returns:
+        The descriptors list for the family's FontManifest entry.
+    """
+    fonts_descriptors = []
+    for i, font in enumerate(entry.fonts):
+        descriptor = {"asset": prefix + font.asset_path}
+        if font.weight != None:
+            descriptor["weight"] = font.weight
+        if font.style != None:
+            descriptor["style"] = font.style
+        fonts_descriptors.append(descriptor)
+        if i < len(entry.files):
+            extra_asset_copies[prefix + font.asset_path] = entry.files[i]
+            if pub_claims != None:
+                pub_claims.append(struct(key = prefix + font.asset_path, file = entry.files[i], channel = "pub"))
+    return fonts_descriptors
+
+def _record_pub_family(deps, families, fonts, family_str, fonts_descriptors, entry):
+    """Record one family's descriptors, failing on a conflicting repeat.
+
+    The first list wins its position; an identical repeat is a non-event.
+    One family name carried with two different font lists fails analysis,
+    naming the family and both libraries.
+
+    Args:
+        deps: The bundle's direct deps, read only to name an origin.
+        families: Dict of family name to the winning descriptors + entry.
+        fonts: The FontManifest entries list to append a first sighting to.
+        family_str: The prefixed family name.
+        fonts_descriptors: This entry's descriptors.
+        entry: The pub_fonts contribution struct behind them.
+    """
+    prev = families.get(family_str)
+    if prev == None:
+        families[family_str] = struct(fonts = fonts_descriptors, entry = entry)
+        fonts.append({"family": family_str, "fonts": fonts_descriptors})
+    elif prev.fonts != fonts_descriptors:
+        _fail_font_family_conflict(
+            family_str,
+            _pub_family_origin(deps, prev.entry) or "an unknown dependency",
+            _pub_family_origin(deps, entry) or "an unknown dependency",
+        )
+
+def _collect_pub_fonts(deps, pub_fonts, extra_asset_copies, pub_claims):
+    """FontManifest entries for one flattened pub_fonts channel.
+
+    Args:
+        deps: The bundle's direct deps, read only to name an origin.
+        pub_fonts: The flattened pub font contributions, in bundle order.
+        extra_asset_copies: Dict to record each font file's bundle dest in.
+        pub_claims: Optional list to append each font file's claim to.
+
+    Returns:
+        The FontManifest entries list.
+    """
+    fonts = []
+    families = {}
+    for entry in pub_fonts:
+        prefix = _pub_prefix(entry.package_name)
+        _record_pub_family(
+            deps,
+            families,
+            fonts,
+            prefix + entry.family,
+            _font_descriptors(entry, prefix, extra_asset_copies, pub_claims),
+            entry,
+        )
+    return fonts
+
+def _collect_pub_assets(pub_assets, target_platform, extra_asset_copies, pub_claims):
+    """Copies and claims for one flattened pub_assets channel.
+
+    Args:
+        pub_assets: The flattened pub asset contributions, in bundle order.
+        target_platform: The bundle's platform; entries whose `platforms` /
+            `flavors` conditions exclude it are skipped.
+        extra_asset_copies: Dict to record each asset's bundle dest in.
+        pub_claims: Optional list to append each asset's claim to.
+    """
+    for entry in pub_assets:
+        if not pub_asset_matches_target(
+            getattr(entry, "flavors", []),
+            getattr(entry, "platforms", []),
+            target_platform,
+        ):
+            continue
+        prefix = _pub_prefix(entry.package_name)
+        extra_asset_copies[prefix + entry.asset_path] = entry.file
+        if pub_claims != None:
+            pub_claims.append(struct(key = prefix + entry.asset_path, file = entry.file, channel = "pub"))
+
+def aggregate_pub_contributions(deps, target_platform, pub_claims = None):
     """Walk transitive `FlutterInfo.pub_fonts` / `pub_assets` from deps.
 
     Each contribution carries `package_name` — the empty string sentinel
@@ -161,10 +304,25 @@ def aggregate_pub_contributions(deps, target_platform):
     `ManifestAssetBundle` applies. `getattr` defaults keep contributions
     from older spokes (which state no conditions) unconditional.
 
+    Each channel flattens once, through one `depset` union over the deps, so
+    a bundle's analysis cost is linear in the contributions it ships rather
+    than growing with the number of deps that reach them. The union lists
+    each contribution once in first-reached order, so bundles without a
+    repeat keep exactly today's fonts and copies.
+
+    A family reached along several paths, with the same fonts, is written
+    once, at its first position. One family name carried with two different
+    font lists fails analysis, naming the family and both libraries.
+
     Args:
         deps: List of Targets — typically `ctx.attr.deps`.
         target_platform: The bundle's platform (`android`, `ios`, `macos`,
             `linux`, `windows`, `web`, or `tester` for test bundles).
+        pub_claims: Optional list to append one
+            `struct(key, file, channel)` claim per bundled pub file to, in
+            bundle order (font files first, then assets). The bundle's
+            cross-channel key check reads these; callers that discard the
+            copies (`flutter_web_application`'s font-only read) pass nothing.
 
     Returns:
         Tuple of:
@@ -173,42 +331,13 @@ def aggregate_pub_contributions(deps, target_platform):
           - extra_asset_copies: dict[str, File] mapping bundle dest path to
             File for both fonts and non-font pub-package assets.
     """
-    pub_fonts = []
-    pub_assets = []
-    for dep in deps:
-        if FlutterInfo not in dep:
-            continue
-        info = dep[FlutterInfo]
-        pub_fonts.extend(info.pub_fonts.to_list())
-        pub_assets.extend(info.pub_assets.to_list())
+    infos = [dep[FlutterInfo] for dep in deps if FlutterInfo in dep]
+    pub_fonts = depset(transitive = [info.pub_fonts for info in infos]).to_list()
+    pub_assets = depset(transitive = [info.pub_assets for info in infos]).to_list()
 
-    fonts = []
     extra_asset_copies = {}
-
-    for entry in pub_fonts:
-        prefix = "packages/{}/".format(entry.package_name) if entry.package_name else ""
-        family_str = prefix + entry.family
-        fonts_descriptors = []
-        for i, font in enumerate(entry.fonts):
-            descriptor = {"asset": prefix + font.asset_path}
-            if font.weight != None:
-                descriptor["weight"] = font.weight
-            if font.style != None:
-                descriptor["style"] = font.style
-            fonts_descriptors.append(descriptor)
-            if i < len(entry.files):
-                extra_asset_copies[prefix + font.asset_path] = entry.files[i]
-        fonts.append({"family": family_str, "fonts": fonts_descriptors})
-
-    for entry in pub_assets:
-        if not pub_asset_matches_target(
-            getattr(entry, "flavors", []),
-            getattr(entry, "platforms", []),
-            target_platform,
-        ):
-            continue
-        prefix = "packages/{}/".format(entry.package_name) if entry.package_name else ""
-        extra_asset_copies[prefix + entry.asset_path] = entry.file
+    fonts = _collect_pub_fonts(deps, pub_fonts, extra_asset_copies, pub_claims)
+    _collect_pub_assets(pub_assets, target_platform, extra_asset_copies, pub_claims)
 
     return (fonts, extra_asset_copies)
 

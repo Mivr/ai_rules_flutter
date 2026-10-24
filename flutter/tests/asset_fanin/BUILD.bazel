@@ -1,0 +1,11 @@
+"""Fan-in benchmark pool (COV-63): `p` thin deps over one weighted base.
+
+Vary `p` (`0` vs `6000`) and measure warm-server analysis cost of
+`:fanin_narrow` (1 thin dep) against `:fanin_wide` (300 thin deps):
+`build --nobuild` after touching this file. `wide - narrow` must not
+grow with `p`.
+"""
+
+load(":defs.bzl", "asset_fanin_bundle")
+
+asset_fanin_bundle(name = "fanin")

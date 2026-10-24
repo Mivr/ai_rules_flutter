@@ -136,6 +136,24 @@ def library_asset_entries(label, package_name, files):
         for f in files
     ]
 
+def fail_asset_key_conflict(label, key, first_file, first_origin, file, origin):
+    """Fail analysis: two different files claim one bundle key.
+
+    The one refusal every asset channel shares: COV-1's same-channel refusal
+    below and the cross-channel check in `//flutter/private:common.bzl` both
+    go through here. It names the key, both files and where each came from,
+    so the fix — one different path — is stated where the collision is.
+
+    Args:
+      label: The bundling target's label, for the message.
+      key: The bundle key both files claim.
+      first_file: The file that claimed the key first.
+      first_origin: Where `first_file` came from (a label).
+      file: The file claiming the key again.
+      origin: Where `file` came from (a label).
+    """
+    fail("%s: two assets share key '%s': %s (from %s) and %s (from %s); give one a different path." % (label, key, first_file.short_path, first_origin, file.short_path, origin))
+
 def dedupe_asset_entries(label, entries):
     """Drop same-file duplicates, refusing two files that share one key.
 
@@ -154,11 +172,18 @@ def dedupe_asset_entries(label, entries):
             by_key[e.key] = e
             ordered.append(e.key)
         elif seen.file != e.file:
-            fail("%s: two assets share key '%s': %s (from %s) and %s (from %s); give one a different path." % (label, e.key, seen.file.short_path, seen.label, e.file.short_path, e.label))
+            fail_asset_key_conflict(label, e.key, seen.file, seen.label, e.file, e.label)
     return [by_key[k] for k in ordered]
 
 def bundle_asset_entries(label, own_files, deps):
     """Every entry one bundle ships: the target's own plus transitive deps'.
+
+    The transitive entries flatten once, through one `depset` union over the
+    deps, so a bundle's analysis cost is linear in the assets it ships rather
+    than growing with the number of deps that reach them. The union lists each
+    entry once in first-reached order — the same order concatenating each
+    dep's own flattening produced — so bundles without a collision keep
+    exactly today's entries.
 
     Args:
       label: The bundling target's label; its package roots its own assets.
@@ -169,7 +194,7 @@ def bundle_asset_entries(label, own_files, deps):
       The deduplicated `struct(key, file, label)` entries for the bundle.
     """
     entries = list(app_asset_entries(label, own_files))
-    for dep in deps:
-        if FlutterInfo in dep:
-            entries.extend(dep[FlutterInfo].assets.to_list())
+    entries.extend(depset(
+        transitive = [dep[FlutterInfo].assets for dep in deps if FlutterInfo in dep],
+    ).to_list())
     return dedupe_asset_entries(label, entries)

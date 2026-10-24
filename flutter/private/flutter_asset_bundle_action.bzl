@@ -155,16 +155,23 @@ def flutter_asset_bundle_action(ctx, content, shaking, output_dir):
     # Build asset paths and copy map relative to the output directory. The key
     # travels with the file — set once by the target that listed the asset —
     # so this action keys every file by its carried key and computes none.
+    # One channel may repeat a key another already claimed for the same file
+    # (a diamond, or an own asset a dep also ships through pub): both callers
+    # refuse two different files for one key before reaching this action, so
+    # a repeat here is always the same file, and the manifest lists each key
+    # once. The copies map already collapses to one entry per key.
     asset_paths = []
     copies = {}
     for entry in content.assets:
-        asset_paths.append(entry.key)
+        if entry.key not in copies:
+            asset_paths.append(entry.key)
         copies[entry.key] = entry.file.path
 
     # Add extra copies with custom destination paths.
     extra_files = []
     for dest_path, f in content.extra_asset_copies.items():
-        asset_paths.append(dest_path)
+        if dest_path not in copies:
+            asset_paths.append(dest_path)
         copies[dest_path] = f.path
         extra_files.append(f)
 

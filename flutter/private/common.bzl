@@ -10,7 +10,7 @@ load("@rules_dart//dart:providers.bzl", "DartInfo")
 load("@rules_dart//dart:utils.bzl", "collect_packages", "collect_transitive_srcs", "derive_lib_root", "generate_dev_package_config", _COPY_TO_DIRECTORY_TOOLCHAINS = "COPY_TO_DIRECTORY_TOOLCHAINS")
 load("//flutter:providers.bzl", "FlutterCompiledShadersInfo", "FlutterInfo", "FlutterNativeLibraryInfo", _resolve_exec_dart = "resolve_exec_dart", _resolve_exec_dart_vm = "resolve_exec_dart_vm", _resolve_flutter_sdk_info = "resolve_flutter_sdk_info")
 load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "app_main_location", "app_scheme_location", "app_scheme_sources", "compile_kernel_package_config", "resolve_kernel_entrypoint", "synthesize_app_package", "with_root")
-load("//flutter/private:asset_keys.bzl", "bundle_asset_entries", "is_within_package", "relative_key")
+load("//flutter/private:asset_keys.bzl", "bundle_asset_entries", "fail_asset_key_conflict", "is_within_package", "relative_key")
 load("//flutter/private:flutter_asset_bundle_action.bzl", "flutter_asset_bundle_action", "make_bundle_content", "make_tree_shake")
 load(
     "//flutter/private:flutter_compile.bzl",
@@ -1134,15 +1134,18 @@ def _shader_jobs(ctx):
         shader = entry.file if hasattr(entry, "file") else entry
         includes = entry.includes if hasattr(entry, "includes") else ()
         jobs.append(struct(bundle_path = "shaders/" + shader.basename, file = shader, includes = includes))
-    for dep in ctx.attr.deps:
-        if FlutterInfo in dep:
-            for entry in dep[FlutterInfo].pub_shaders.to_list():
-                prefix = "packages/{}/".format(entry.package_name) if entry.package_name else ""
-                jobs.append(struct(
-                    bundle_path = prefix + entry.shader_path,
-                    file = entry.file,
-                    includes = entry.includes,
-                ))
+
+    # One flatten of the package-shader channel, through one `depset` union
+    # over the deps: a shader file reached through W thin deps costs one
+    # listing, not W. The union lists each contribution once in
+    # first-reached order, so bundles without a repeat keep today's jobs.
+    for entry in depset(transitive = [dep[FlutterInfo].pub_shaders for dep in ctx.attr.deps if FlutterInfo in dep]).to_list():
+        prefix = "packages/{}/".format(entry.package_name) if entry.package_name else ""
+        jobs.append(struct(
+            bundle_path = prefix + entry.shader_path,
+            file = entry.file,
+            includes = entry.includes,
+        ))
 
     # One package can reach a target along several paths; the same file at
     # the same bundle path is one shader.
@@ -1244,6 +1247,146 @@ def flutter_compile_shaders(ctx, flutter_sdk_info, target_platform):
     _compile_missing_shaders(ctx, flutter_sdk_info, target_platform, require_sksl, compiled)
     return compiled
 
+def _find_pub_file_origin(deps, file):
+    """The first direct dep whose pub assets or font files carry `file`.
+
+    Only runs on the failure path, to name where a conflicting pub file came
+    from. Returns None when no direct dep carries it; the caller then names
+    the bundling target, which is where the file is bundled either way.
+
+    Args:
+        deps: The bundle's direct deps.
+        file: The conflicting pub file.
+
+    Returns:
+        The dep's label string, or None.
+    """
+    for dep in deps:
+        if FlutterInfo not in dep:
+            continue
+        info = dep[FlutterInfo]
+        for entry in info.pub_assets.to_list():
+            if entry.file == file:
+                return str(dep.label)
+        for entry in info.pub_fonts.to_list():
+            for font_file in entry.files:
+                if font_file == file:
+                    return str(dep.label)
+    return None
+
+def _find_shader_origin(deps, file):
+    """The first direct dep whose pre-compiled shaders hold `file`.
+
+    Only runs on the failure path. A miss means the bundle compiled the file
+    itself (its own or SDK sources the dep aspects did not already compile),
+    which the caller names as the bundling target.
+
+    Args:
+        deps: The bundle's direct deps.
+        file: The conflicting compiled shader file.
+
+    Returns:
+        The dep's label string, or None.
+    """
+    for dep in deps:
+        if FlutterCompiledShadersInfo not in dep:
+            continue
+        for entry in dep[FlutterCompiledShadersInfo].compiled_shaders.to_list():
+            if entry.file == file:
+                return str(dep.label)
+    return None
+
+def _find_data_origin(deps, file):
+    """The first direct dep whose data assets carry `file`.
+
+    Only runs on the failure path, to name where a conflicting data file
+    came from. Returns None when no direct dep carries it.
+
+    Args:
+        deps: The bundle's direct deps.
+        file: The conflicting data file.
+
+    Returns:
+        The dep's label string, or None.
+    """
+    for dep in deps:
+        if FlutterInfo not in dep:
+            continue
+        for entry in dep[FlutterInfo].data_assets.to_list():
+            if entry.file == file:
+                return str(dep.label)
+    return None
+
+def _resolve_claim_origin(bundle, channel, file):
+    """Name where a conflicting extra-channel file came from.
+
+    Only runs on the failure path, after the one-flatten assembly found two
+    different files for one key. The scans below re-flatten deps, but a
+    conflicting analysis fails here, so their cost never reaches a build.
+
+    Args:
+        bundle: A `struct(label, deps)` naming the bundling target.
+        channel: Which channel claimed the file (`pub`, `shader` or `data`).
+        file: The conflicting file.
+
+    Returns:
+        A label string for the failure message.
+    """
+    if channel == "pub":
+        return _find_pub_file_origin(bundle.deps, file) or str(bundle.label)
+    if channel == "shader":
+        return _find_shader_origin(bundle.deps, file) or str(bundle.label)
+    if channel == "data":
+        return _find_data_origin(bundle.deps, file) or str(bundle.label)
+    fail("check_bundle_claims: unknown channel %r for %s." % (channel, file.short_path))
+
+def _claim_bundle_key(seen, bundle, key, file, channel, label):
+    """Claim one bundle key for a file, failing on a different file's claim.
+
+    The first claim wins; the same file under the same key, reached along
+    several paths or channels, stays legal and is bundled once.
+
+    Args:
+        seen: Dict of key to the winning `struct(file, channel, label)`.
+        bundle: A `struct(label, deps)` naming the bundling target.
+        key: The bundle key being claimed.
+        file: The file claiming it.
+        channel: Which channel claims it (`assets`, `pub`, `shader`, `data`).
+        label: Where the file came from, or None for extra channels (their
+            origin is resolved only when a conflict fails the build).
+    """
+    prev = seen.get(key)
+    if prev == None:
+        seen[key] = struct(file = file, channel = channel, label = label)
+        return
+    if prev.file == file:
+        return
+    first_origin = prev.label if prev.label != None else _resolve_claim_origin(bundle, prev.channel, prev.file)
+    origin = label if label != None else _resolve_claim_origin(bundle, channel, file)
+    fail_asset_key_conflict(bundle.label, key, prev.file, first_origin, file, origin)
+
+def check_bundle_claims(bundle, asset_entries, extra_claims):
+    """Fail when two different files claim one bundle key, across any channels.
+
+    The one cross-channel key check every bundle runs: the `assets` entries
+    first, then the extra claims in bundle order (compiled shaders, pub
+    files, data assets — the order the copies dict is assembled in). A key
+    claimed twice by the same file stays legal; a key claimed by two
+    different files fails in COV-1's same-channel shape, naming the key,
+    both files and where each came from.
+
+    Args:
+        bundle: A `struct(label, deps)` — the bundling target's label and
+            direct deps (deps are only read to name an origin on failure).
+        asset_entries: `struct(key, file, label)` entries in bundle order.
+        extra_claims: `struct(key, file, channel)` claims in bundle order.
+    """
+    seen = {}
+    for entry in asset_entries:
+        _claim_bundle_key(seen, bundle, entry.key, entry.file, "assets", entry.label)
+    for claim in extra_claims:
+        _claim_bundle_key(seen, bundle, claim.key, claim.file, claim.channel, None)
+
 def declare_flutter_assets_dir(ctx):
     """Declare the `flutter_assets/` tree artifact for this target.
 
@@ -1321,9 +1464,13 @@ def flutter_build_assets(ctx, flutter_sdk_info, output_dir, bundle):
     # Walk pub-package font/asset contributions from FlutterInfo.
     # MaterialIcons is no longer special-cased here — apps depend on
     # `@rules_flutter//flutter:material_icons` to get it via this same path.
+    # The pub claims ride the same list as the shader and data claims below,
+    # in bundle order, for the one cross-channel key check.
+    extra_claims = [struct(key = dest, file = f, channel = "shader") for dest, f in bundle.compiled_shaders.items()]
     fonts, pub_extra_asset_copies = aggregate_pub_contributions(
         ctx.attr.deps,
         bundle.target_platform,
+        extra_claims,
     )
     extra_asset_copies = dict(bundle.compiled_shaders)
     extra_asset_copies.update(pub_extra_asset_copies)
@@ -1331,13 +1478,15 @@ def flutter_build_assets(ctx, flutter_sdk_info, output_dir, bundle):
     # Drop each DataAsset at flutter_assets/packages/<pkg>/<name>, the key
     # flutter_tools gives a hook's data asset and the one `rootBundle` loads
     # it by. The bundle action keys extra_asset_copies on a destination path
-    # relative to the assets/ root.
+    # relative to the assets/ root. A data asset landing on another channel's
+    # key fails in the cross-channel check below, naming both files.
     if bundle.data_assets != None:
         for entry in bundle.data_assets.to_list():
             dst = "packages/{pkg}/{name}".format(pkg = entry.package, name = entry.name)
-            if dst in extra_asset_copies:
-                fail("%s: data asset %s collides with another asset bundled at %s." % (ctx.label, entry.file.short_path, dst))
+            extra_claims.append(struct(key = dst, file = entry.file, channel = "data"))
             extra_asset_copies[dst] = entry.file
+
+    check_bundle_claims(struct(label = ctx.label, deps = ctx.attr.deps), all_entries, extra_claims)
 
     license_files = ctx.files.license_files
 
