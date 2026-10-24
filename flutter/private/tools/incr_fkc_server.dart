@@ -359,16 +359,65 @@ class FrontendServerSession implements CompilerSession {
   @override
   bool get alive => !_exited;
 
+  /// How long `close` waits for the server to leave on `quit`, and then for
+  /// a SIGKILLed server to be reaped, before giving up on that wait. Short
+  /// enough that a persistent worker exits within a few seconds of stdin
+  /// EOF; quitting is a trivial command, so a healthy server is long gone.
+  static const _quitGrace = Duration(seconds: 5);
+
+  /// Whether the process pipes were already released.
+  bool _released = false;
+
+  /// Stops the server and releases every process handle: the stdout
+  /// subscription, whose lingering keeps the worker process alive after
+  /// stdin EOF, and the stdin pipe. A server that ignores `quit` is
+  /// SIGKILLed, so no `frontend_server` of ours is left running.
   @override
   Future<void> close() async {
-    if (!alive) return;
+    if (alive) {
+      await _quitGracefully();
+    }
+    await _releaseHandles();
+  }
+
+  /// Asks the server to quit, SIGKILLing it when it does not leave in time.
+  /// Never throws: every pipe error below means the server is already gone.
+  Future<void> _quitGracefully() async {
     try {
       await _send('quit');
-      await _process.exitCode.timeout(const Duration(seconds: 10));
+      await _process.exitCode.timeout(_quitGrace);
     } on TimeoutException {
       _process.kill(ProcessSignal.sigkill);
-    } on StateError catch (_) {
+      try {
+        await _process.exitCode.timeout(_quitGrace);
+      } on TimeoutException {
+        // Unkillable; the pipes are still released below.
+      }
+    } on StateError {
       // Already gone (stdin closed under us); the exit handler marks it.
+    } on SocketException {
+      // The stdin pipe broke under us; the server is already gone.
+    }
+  }
+
+  /// Cancels the stdout subscription and closes the stdin pipe. Runs on
+  /// every close, even when the server is already dead: its idle
+  /// subscription is what kept served workers from exiting on stdin EOF.
+  /// Idempotent and never throws.
+  Future<void> _releaseHandles() async {
+    if (_released) return;
+    _released = true;
+    try {
+      await _lines.cancel();
+    } on StateError {
+      // Already cancelled; nothing left to release.
+    }
+    try {
+      await _process.stdin.close();
+    } on StateError {
+      // Already closed; nothing left to release.
+    } on SocketException {
+      // The stdin pipe broke under us; the server is already gone.
     }
   }
 }

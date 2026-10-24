@@ -28,6 +28,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'directive_guard.dart';
+import 'incr_fkc_scratch.dart';
 import 'incr_fkc_server.dart';
 import 'kernel_filter.dart';
 import 'sha256.dart';
@@ -200,6 +201,7 @@ class IncrWorker {
   final Directory _tmp;
   final Map<String, IncrServerState> _servers = {};
   final List<String> _order = [];
+  ScratchHeartbeat? _heartbeat;
 
   static int _maxServersFromEnv() {
     final raw = Platform.environment['INCR_FKC_MAX_SERVERS'];
@@ -207,11 +209,43 @@ class IncrWorker {
     return parsed > 0 ? parsed : 1;
   }
 
-  /// Stops every server and deletes the worker's temp directory. Used when
-  /// the worker itself is done, and after an unexpected error the server
-  /// state cannot be trusted. Runs on every exit path — one-shot success and
-  /// failure, persistent-worker stdin EOF, exceptions, and signals — so no
-  /// `incr_fkc_*` directory survives the worker.
+  /// Creates a worker and reclaims dead siblings' scratch before it serves.
+  /// This is how production workers start; tests that need no sweep keep
+  /// using the generative constructor.
+  static Future<IncrWorker> create({
+    String? cwd,
+    int? maxServers,
+    SessionFactory? sessions,
+    String? tempParent,
+  }) async {
+    final worker = IncrWorker(
+      cwd: cwd,
+      maxServers: maxServers,
+      sessions: sessions,
+      tempParent: tempParent,
+    );
+    await worker.ensureScratchReclaimed();
+    return worker;
+  }
+
+  /// Starts this worker's heartbeat and reclaims the scratch that dead
+  /// workers left under the temp directory. Safe to call more than once;
+  /// later calls only re-sweep. Never throws: reclaiming must never fail a
+  /// worker start or a compile.
+  Future<void> ensureScratchReclaimed() async {
+    _heartbeat ??= await startScratchHeartbeat(_tmp);
+    await sweepWorkerScratch(
+      _tmp.parent,
+      exemptName: _tmp.path.split(Platform.pathSeparator).last,
+    );
+  }
+
+  /// Stops every server, releases the heartbeat and deletes the worker's
+  /// temp directory. Used when the worker itself is done, and after an
+  /// unexpected error the server state cannot be trusted. Runs on every exit
+  /// path — one-shot success and failure, persistent-worker stdin EOF,
+  /// exceptions, and signals — so no `incr_fkc_*` directory survives the
+  /// worker.
   Future<void> closeAll() async {
     try {
       for (final state in _servers.values) {
@@ -220,8 +254,16 @@ class IncrWorker {
     } finally {
       _servers.clear();
       _order.clear();
+      await _closeHeartbeat();
       _deleteTempDir();
     }
+  }
+
+  /// Releases the liveness heartbeat, if one was started. Never throws.
+  Future<void> _closeHeartbeat() async {
+    final heartbeat = _heartbeat;
+    _heartbeat = null;
+    if (heartbeat != null) await heartbeat.close();
   }
 
   /// Best-effort deletion of [_tmp]: the exit code already reports the
@@ -570,9 +612,12 @@ class IncrWorker {
 /// — success, failure and exception alike — via [IncrWorker.closeAll].
 Future<int> runOneShotWorker(
   List<String> argv, {
-  IncrWorker Function()? createWorker,
+  FutureOr<IncrWorker> Function()? createWorker,
 }) async {
-  final worker = (createWorker ?? IncrWorker.new)();
+  final worker = createWorker != null
+      ? await createWorker()
+      : await IncrWorker.create();
+  await worker.ensureScratchReclaimed();
   final signals = watchWorkerSignals(worker);
   try {
     final result = await worker.handleRequest(argv, const []);
@@ -594,11 +639,14 @@ Future<int> runOneShotWorker(
 /// stdin closes, after closing every server and deleting the worker's temp
 /// directory, so no `incr_fkc_*` directory survives the worker.
 Future<void> runPersistentWorker({
-  IncrWorker Function()? createWorker,
+  FutureOr<IncrWorker> Function()? createWorker,
   Stream<List<int>>? stdinBytes,
   StringSink? responseSink,
 }) async {
-  final worker = (createWorker ?? IncrWorker.new)();
+  final worker = createWorker != null
+      ? await createWorker()
+      : await IncrWorker.create();
+  await worker.ensureScratchReclaimed();
   final signals = watchWorkerSignals(worker);
   try {
     final out = responseSink ?? stdout;

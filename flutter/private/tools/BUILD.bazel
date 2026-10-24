@@ -18,6 +18,7 @@ exports_files(
         "crc32.dart",
         "directive_guard.dart",
         "kernel_filter.dart",
+        "incr_fkc_scratch.dart",
         "incr_fkc_server.dart",
         "incr_fkc_worker.dart",
         "sha256.dart",
@@ -176,6 +177,7 @@ dart_binary(
     name = "incr_fkc_worker",
     srcs = [
         "directive_guard.dart",
+        "incr_fkc_scratch.dart",
         "incr_fkc_server.dart",
         "kernel_filter.dart",
         "sha256.dart",
@@ -431,6 +433,7 @@ _TOOL_SRCS = {
     ],
     "incr_fkc_worker.dart": [
         "directive_guard.dart",
+        "incr_fkc_scratch.dart",
         "incr_fkc_server.dart",
         "kernel_filter.dart",
         "sha256.dart",
@@ -465,3 +468,18 @@ _TEST_ENV = {
     target_compatible_with = HOST_COMPATIBLE,
     deps = ["@dev_tool_deps//:test"] + extra_deps,
 ) for name, (tool, extra_deps) in _UNIT_TESTS.items()]
+
+# Lifecycle tests for the incremental worker's crash-safe scratch: they drive
+# the built worker binary the way Bazel does (persistent protocol over
+# pipes, TMPDIR plus SIGKILL and stdin EOF), so the target carries the
+# binary as data and a longer timeout for its process spawns.
+dart_test(
+    name = "incr_fkc_scratch_test",
+    timeout = "moderate",
+    srcs = ["incr_fkc_scratch.dart"],
+    data = [":incr_fkc_worker"],
+    env = {"INCR_FKC_WORKER_BIN": "$(rlocationpath :incr_fkc_worker)"},
+    main = "test/incr_fkc_scratch_test.dart",
+    target_compatible_with = HOST_COMPATIBLE,
+    deps = ["@dev_tool_deps//:test"],
+)
