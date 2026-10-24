@@ -1467,7 +1467,8 @@ def summarize_sol(results_dir, meta):
             "runner": collect_runner_info(), "flows": flows,
             "meta": {"repeats": meta["repeats"],
                      "target_loc": meta["target_loc"], "seed": meta["seed"],
-                     "bazel_flags": list(flags)}}
+                     "bazel_flags": list(flags),
+                     "lockfile": meta.get("lockfile", "none")}}
 
 
 def main_run(cmd):
@@ -1497,10 +1498,14 @@ def main_chain(cmd):
 
 
 def main_summarize(cmd):
+    if cmd.lockfile not in ("none", "committed"):
+        raise ValueError("invalid lockfile %r: expected none/committed"
+                         % (cmd.lockfile,))
     meta = {"sha": cmd.sha, "repeats": cmd.repeats,
             "target_loc": cmd.target_loc, "seed": cmd.seed,
             "bazel_flags": validate_bazel_flags(
-                parse_bazel_flags(cmd.bazel_flags))}
+                parse_bazel_flags(cmd.bazel_flags)),
+            "lockfile": cmd.lockfile}
     summary = summarize_sol(cmd.results, meta)
     with open(cmd.out, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
@@ -1555,6 +1560,8 @@ def build_parser():
     summ.add_argument("--bazel-flags", default="",
                       help="raw whitespace-separated extra Bazel flags "
                       "for this run (recorded in meta)")
+    summ.add_argument("--lockfile", default="none",
+                      help="none or committed (recorded in meta)")
     summ.add_argument("--out", required=True, help="ios-sol.json path")
     return parser
 
