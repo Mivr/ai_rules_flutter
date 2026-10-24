@@ -291,7 +291,7 @@ PYEOF
 # process can never match; each must be exactly one.
 snapshot_pids() {
   local w p ppid kids kid
-  w="$(pgrep -f "incr_fkc_worke[r] --persistent_worker")"
+  w="$(pgrep -f "incr_fkc_worker --persistent_worker")"
   [ -n "$w" ] || die "no persistent incr_fkc_worker process found"
   if [ "$(printf '%s\n' "$w" | wc -l)" != "1" ]; then
     die "more than one persistent worker: $w"
@@ -301,7 +301,7 @@ snapshot_pids() {
     *) die "pid $w is not the worker" ;;
   esac
   kids=""
-  for p in $(pgrep -f "frontend_server_ao[t].dart.snapshot"); do
+  for p in $(pgrep -f "frontend_server_aot.dart.snapshot"); do
     ppid="$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ')"
     if [ "$ppid" = "$w" ]; then
       kids="$kids $p"
