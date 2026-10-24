@@ -15,7 +15,8 @@ second and later builds go faster; the first compile of a configuration
 pays the cold cost.
 
 The byte-equality between a warm worker's dill and the one-shot compile's is
-checked by `tools/incr_kernel_identity/check.sh`, which the `E2E Linux app
+checked by `//tools/incr_kernel_identity` (`bazel run
+//tools/incr_kernel_identity` from the repo root), which the `E2E Linux app
 (hello_world, codegen)` CI job runs. The check builds `e2e/hello_world`'s
 `//:hello_world` under `-c dbg` with the flag on, in two fresh output bases:
 a worker leg (`--strategy=FlutterKernelCompile=worker`, one worker instance)
