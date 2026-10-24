@@ -23,11 +23,11 @@ load(
     "pub_asset_matches_target",
 )
 load("//flutter/private:flutter_plugin.bzl", "flutter_plugin")
+load("//flutter/private:flutter_pub_assets.bzl", "expand_pub_asset_entries")
 load(
     "//flutter/private:flutter_pub_package.bzl",
     "merge_pub_asset_conditions",
 )
-load("//flutter/private:flutter_pub_assets.bzl", "expand_pub_asset_entries")
 load(
     "//flutter/private:flutter_pubspec.bzl",
     "VALID_ASSET_PLATFORMS",
