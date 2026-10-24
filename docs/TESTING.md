@@ -1279,7 +1279,7 @@ script's own package requires ≥ 3.13.
 | Windows runner / bundle (`flutter/private/*windows*`) | windows_example (on Windows), GCP VM visual test |
 | Desktop engine selection (debug/release) | cross_compile_example `bazel build :cross_linux` + verify on VM |
 | Dart compilation / AOT | hello_world, ffi_example, macos_example |
-| Asset bundling | hello_world, plugin_example |
+| Asset bundling | hello_world (incl. `font_manifest:verify_font_manifest_unique_test`), plugin_example, `//flutter/tests/asset_channels` |
 | Shader compilation, bundling or hot reload, or how a workspace plugin is wired | `glass_plugin_e2e_test.dart` on every platform it covers, and by hand: `bazel build //impeller_shader:app_flutter_sksl_required` in plugin_example must **fail**, saying the shader does not compile for Skia |
 | Web support | `web_smoke_e2e_test.dart` (render) + `plugin_example_e2e_test.dart` (plugins on web) + `native_libs_reload_e2e_test.dart`'s web group if the change touches `native_modules` or the web reload arms |
 | FFI / native deps / native assets | ffi_example (incl. manual iOS-sim + macOS runtime tests), ffi_plugin_example |
