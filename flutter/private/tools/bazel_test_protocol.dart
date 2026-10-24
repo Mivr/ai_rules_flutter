@@ -329,6 +329,96 @@ Set<String> readLibraryTags(
   };
 }
 
+/// The runfiles the `flutter_test` rule hands the runner, resolved to paths.
+///
+/// [tester], [icu] and [dill] are always set. [baseDill] is set when the rule
+/// shares a base dill the runner combines the test kernel with; null means a
+/// whole-program kernel. [assetsDir] is set when the bundle ships a Flutter
+/// assets tree.
+typedef TestRunfiles = ({
+  String tester,
+  String icu,
+  String dill,
+  String? baseDill,
+  String? assetsDir,
+});
+
+/// Resolves every runfile the `flutter_test` rule hands the runner.
+///
+/// The rule always sets `FLUTTER_TEST_DILL`, `FLUTTER_TEST_TESTER` and
+/// `FLUTTER_TEST_ICU` (files), and sets `FLUTTER_TEST_BASE_DILL` (a file) when
+/// it shares a base dill and `FLUTTER_TEST_ASSETS` (a directory) when the
+/// bundle ships one. Each value is a runfiles key, resolved through
+/// [rlocation]; [exists] probes the resolved path, so tests drive this
+/// without runfiles.
+///
+/// Throws [FormatException] naming the variable, the runfiles key and the
+/// resolved path when one is missing: a delta kernel run on its own, or a
+/// `flutter_tester` error far from the file that never arrived, would hide
+/// which input went missing. An unset or empty `FLUTTER_TEST_BASE_DILL` means
+/// a whole-program kernel, as today; an unset or empty `FLUTTER_TEST_ASSETS`
+/// means the bundle ships none.
+TestRunfiles resolveTestRunfiles(
+  Map<String, String> env,
+  String Function(String) rlocation,
+  bool Function(String) exists,
+) {
+  String requiredFile(String variable) {
+    final key = env[variable];
+    if (key == null || key.isEmpty) {
+      throw FormatException(
+        '$variable must be set; the flutter_test rule always sets it',
+      );
+    }
+    return _existingRunfile(variable, key, rlocation, exists);
+  }
+
+  final baseDillKey = env['FLUTTER_TEST_BASE_DILL'];
+  final assetsKey = env['FLUTTER_TEST_ASSETS'];
+  return (
+    tester: requiredFile('FLUTTER_TEST_TESTER'),
+    icu: requiredFile('FLUTTER_TEST_ICU'),
+    dill: requiredFile('FLUTTER_TEST_DILL'),
+    baseDill: (baseDillKey == null || baseDillKey.isEmpty)
+        ? null
+        : _existingRunfile(
+            'FLUTTER_TEST_BASE_DILL',
+            baseDillKey,
+            rlocation,
+            exists,
+          ),
+    assetsDir: (assetsKey == null || assetsKey.isEmpty)
+        ? null
+        : _existingRunfile(
+            'FLUTTER_TEST_ASSETS',
+            assetsKey,
+            rlocation,
+            exists,
+          ),
+  );
+}
+
+/// Resolves [key] through [rlocation], throwing when nothing is there.
+///
+/// Throws [FormatException] naming [variable], [key] and the resolved path,
+/// as [readLibraryTags] does: the runner must fail on the missing input
+/// itself, not on whatever breaks downstream without it.
+String _existingRunfile(
+  String variable,
+  String key,
+  String Function(String) rlocation,
+  bool Function(String) exists,
+) {
+  final path = rlocation(key);
+  if (!exists(path)) {
+    throw FormatException(
+      '$variable names "$key", which resolved to "$path", '
+      'but that path is not in runfiles',
+    );
+  }
+  return path;
+}
+
 /// One case's outcome, for the JUnit report.
 class TestCaseResult {
   TestCaseResult.passed(this.name, this.elapsed, this.output)

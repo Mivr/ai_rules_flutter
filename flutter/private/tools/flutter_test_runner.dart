@@ -90,26 +90,17 @@ void main(List<String> args) async {
     exit(64);
   }
 
-  final testerKey = Platform.environment['FLUTTER_TEST_TESTER'];
-  final icuKey = Platform.environment['FLUTTER_TEST_ICU'];
-  final dillKey = Platform.environment['FLUTTER_TEST_DILL'];
-  final assetsKey = Platform.environment['FLUTTER_TEST_ASSETS'];
-  if (testerKey == null || icuKey == null || dillKey == null) {
-    stderr.writeln(
-      'flutter_test runner: FLUTTER_TEST_TESTER, FLUTTER_TEST_ICU, and '
-      'FLUTTER_TEST_DILL must be set.',
+  final TestRunfiles files;
+  try {
+    files = resolveTestRunfiles(
+      Platform.environment,
+      r.rlocation,
+      _runfileExists,
     );
+  } on FormatException catch (e) {
+    stderr.writeln('flutter_test runner: ${e.message}');
     exit(64);
   }
-
-  final tester = r.rlocation(testerKey);
-  final icu = r.rlocation(icuKey);
-  final dill = r.rlocation(dillKey);
-  final baseDillKey = Platform.environment['FLUTTER_TEST_BASE_DILL'];
-  final baseDill = (baseDillKey == null || baseDillKey.isEmpty)
-      ? null
-      : r.rlocation(baseDillKey);
-  final assetsDir = assetsKey == null ? null : r.rlocation(assetsKey);
   final testPath = Platform.environment['FLUTTER_TEST_PATH'] ?? 'test.dart';
   final coverageOutput = Platform.environment['COVERAGE_OUTPUT_FILE'];
 
@@ -137,11 +128,11 @@ void main(List<String> args) async {
 
   exitCode = await _runOnce(
     FlutterTestRun(
-      tester: tester,
-      icu: icu,
-      dill: dill,
-      baseDill: baseDill,
-      assetsDir: assetsDir,
+      tester: files.tester,
+      icu: files.icu,
+      dill: files.dill,
+      baseDill: files.baseDill,
+      assetsDir: files.assetsDir,
       testPath: testPath,
       coverageOutput: coverageOutput,
       updateGoldens: updateGoldens,
@@ -213,11 +204,22 @@ class FlutterTestRun {
   final bool impeller;
 }
 
+/// Whether [path] names something on disk, as a file or a directory.
+///
+/// The rule hands the runner files (`FLUTTER_TEST_DILL` and friends) and one
+/// directory (`FLUTTER_TEST_ASSETS`), so the probe [resolveTestRunfiles] runs
+/// here accepts both; a missing path fails there, naming its variable.
+bool _runfileExists(String path) =>
+    File(path).existsSync() || Directory(path).existsSync();
+
 Future<int> _runOnce(FlutterTestRun run) async {
   final baseDill = run.baseDill;
   File? combinedDill;
   var effectiveDill = run.dill;
-  if (baseDill != null && File(baseDill).existsSync()) {
+  // `baseDill` already passed the existence check in `main`: when the rule
+  // shares one it is always combined, never silently dropped for a lone run
+  // of the delta kernel. Null (or empty) means a whole-program kernel.
+  if (baseDill != null && baseDill.isNotEmpty) {
     final tmpDir = Directory(
       Platform.environment['TEST_TMPDIR'] ?? Directory.systemTemp.path,
     );

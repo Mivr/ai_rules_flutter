@@ -557,4 +557,146 @@ void main() {
       expect(xml, contains('<skipped/>'));
     });
   });
+
+  group('resolveTestRunfiles', () {
+    Map<String, String> env({
+      String? baseDill = 'base-key',
+      String? assets = 'assets-key',
+    }) => {
+      'FLUTTER_TEST_TESTER': 'tester-key',
+      'FLUTTER_TEST_ICU': 'icu-key',
+      'FLUTTER_TEST_DILL': 'dill-key',
+      if (baseDill != null) 'FLUTTER_TEST_BASE_DILL': baseDill,
+      if (assets != null) 'FLUTTER_TEST_ASSETS': assets,
+    };
+
+    String rlocation(String key) => '/runfiles/$key';
+
+    bool exists(Set<String> present, String path) => present.contains(path);
+
+    Set<String> allPresent() => {
+      '/runfiles/tester-key',
+      '/runfiles/icu-key',
+      '/runfiles/dill-key',
+      '/runfiles/base-key',
+      '/runfiles/assets-key',
+    };
+
+    test('resolves every runfile the rule hands the runner', () {
+      final present = allPresent();
+      final files = resolveTestRunfiles(
+        env(),
+        rlocation,
+        (path) => exists(present, path),
+      );
+      expect(files.tester, '/runfiles/tester-key');
+      expect(files.icu, '/runfiles/icu-key');
+      expect(files.dill, '/runfiles/dill-key');
+      expect(files.baseDill, '/runfiles/base-key');
+      expect(files.assetsDir, '/runfiles/assets-key');
+    });
+
+    test('a missing file fails naming the variable, the key and the path', () {
+      final present = allPresent()..remove('/runfiles/dill-key');
+      expect(
+        () => resolveTestRunfiles(
+          env(),
+          rlocation,
+          (path) => exists(present, path),
+        ),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            allOf(
+              contains('FLUTTER_TEST_DILL'),
+              contains('dill-key'),
+              contains('/runfiles/dill-key'),
+            ),
+          ),
+        ),
+      );
+    });
+
+    test('each of the five variables missing names that variable', () {
+      for (final variable in [
+        'FLUTTER_TEST_TESTER',
+        'FLUTTER_TEST_ICU',
+        'FLUTTER_TEST_DILL',
+        'FLUTTER_TEST_BASE_DILL',
+        'FLUTTER_TEST_ASSETS',
+      ]) {
+        // Set but absent on disk: the rule handed the runner a key whose
+        // file never arrived. (Unset optionals pass; the next tests cover
+        // that.)
+        final full = env();
+        final key = full[variable]!;
+        final present = allPresent()..remove('/runfiles/$key');
+        expect(
+          () => resolveTestRunfiles(
+            full,
+            rlocation,
+            (path) => exists(present, path),
+          ),
+          throwsA(
+            isA<FormatException>().having(
+              (e) => e.message,
+              'message',
+              contains(variable),
+            ),
+          ),
+          reason: 'missing $variable should name $variable',
+        );
+      }
+    });
+
+    test('an unset FLUTTER_TEST_BASE_DILL or FLUTTER_TEST_ASSETS passes', () {
+      final present = {
+        '/runfiles/tester-key',
+        '/runfiles/icu-key',
+        '/runfiles/dill-key',
+      };
+      final files = resolveTestRunfiles(
+        env(baseDill: null, assets: null),
+        rlocation,
+        (path) => exists(present, path),
+      );
+      expect(files.baseDill, isNull);
+      expect(files.assetsDir, isNull);
+    });
+
+    test('an empty FLUTTER_TEST_BASE_DILL counts as unset', () {
+      final present = {
+        '/runfiles/tester-key',
+        '/runfiles/icu-key',
+        '/runfiles/dill-key',
+        '/runfiles/assets-key',
+      };
+      final files = resolveTestRunfiles(
+        env(baseDill: ''),
+        rlocation,
+        (path) => exists(present, path),
+      );
+      expect(files.baseDill, isNull);
+    });
+
+    test('an unset required variable fails naming it', () {
+      final missing = env()..remove('FLUTTER_TEST_TESTER');
+      final present = allPresent();
+      expect(
+        () => resolveTestRunfiles(
+          missing,
+          rlocation,
+          (path) => exists(present, path),
+        ),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            contains('FLUTTER_TEST_TESTER'),
+          ),
+        ),
+      );
+    });
+  });
 }
