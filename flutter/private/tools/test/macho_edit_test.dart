@@ -1459,6 +1459,13 @@ void main() {
   /// The linkedit payloads are laid out in scrambled file order (chained fixups
   /// first, the signature last). With [cmsTrailer], non-zero bytes follow the
   /// SuperBlob inside `LC_CODE_SIGNATURE`, modelling a real CMS signature.
+  /// With [cmsWrapper] set to `'empty'`, the SuperBlob carries a signature-slot
+  /// (`0x10000`) blob wrapper without a payload (what ad-hoc `codesign`
+  /// writes); `'payload'` gives that wrapper a payload a rebuild must refuse.
+  /// With [alternateCd], the SuperBlob also carries an alternate CodeDirectory
+  /// (`0x1000`) the rebuild must re-sign like the primary. With
+  /// [legacyIdent44], the primary CodeDirectory is a version-0x20100 directory
+  /// whose identifier starts at offset 44 (no scatter/team words there).
   ({
     Uint8List bytes,
     int linkeditOff,
@@ -1473,6 +1480,9 @@ void main() {
   _buildStripIntegrityDylib({
     required bool dyldInfoOnly,
     bool cmsTrailer = false,
+    String? cmsWrapper,
+    bool alternateCd = false,
+    bool legacyIdent44 = false,
   }) {
     const linkeditOff = 0x3000;
     const nLocals = 220;
@@ -1547,14 +1557,29 @@ void main() {
       ..setUint32(4, 0, Endian.little)
       ..setUint32(8, macho.indirectSymbolLocal, Endian.little);
 
-    // Size the signature: SuperBlob header + index + requirements + CodeDirectory
-    // (+ CMS trailer when asked). The slot count follows the signature offset.
-    final nBlobs = cmsTrailer ? 3 : 2;
+    // Size the signature: SuperBlob header + index + requirements + primary
+    // CodeDirectory (+ CMS wrapper, alternate CodeDirectory and CMS trailer
+    // when asked). The slot count follows the signature offset.
+    final wrapperLength = cmsWrapper == null
+        ? 0
+        : cmsWrapper == 'empty'
+        ? 8
+        : 32;
+    final nBlobs =
+        (cmsTrailer ? 3 : 2) +
+        (cmsWrapper == null ? 0 : 1) +
+        (alternateCd ? 1 : 0);
     var nSlots = 8;
     var sigLength = 0;
     for (var i = 0; i < 3; i++) {
       final cdLength = 128 + nSlots * 32 + 5;
-      sigLength = 12 + nBlobs * 8 + requirementsBlob.length + cdLength;
+      sigLength =
+          12 +
+          nBlobs * 8 +
+          requirementsBlob.length +
+          wrapperLength +
+          (alternateCd ? cdLength : 0) +
+          cdLength;
       final base =
           linkeditOff +
           chained.length +
@@ -1572,7 +1597,13 @@ void main() {
       nSlots = (base + sigLength + 0xfff) ~/ 0x1000;
     }
     final cdLength = 128 + nSlots * 32 + 5;
-    final superLength = 12 + nBlobs * 8 + requirementsBlob.length + cdLength;
+    final superLength =
+        12 +
+        nBlobs * 8 +
+        requirementsBlob.length +
+        wrapperLength +
+        (alternateCd ? cdLength : 0) +
+        cdLength;
     final sigDatasize = superLength + (cmsTrailer ? 24 : 0);
 
     // Assign file offsets in scrambled order.
@@ -1753,47 +1784,92 @@ void main() {
     }
     buf.setRange(chainedOff, chainedOff + chained.length, chained);
 
-    // The embedded signature: SuperBlob with a requirements blob and one
-    // CodeDirectory (zeroed hashes; the patch step recomputes them).
+    // Builds one CodeDirectory with zeroed hashes; the patch step recomputes
+    // them. The special slot keeps [specialSlot] so the verifier can check it
+    // survives the rebuild byte-identical.
+    Uint8List buildCd({
+      required int version,
+      required String ident,
+      required int identOffset,
+    }) {
+      final cd = Uint8List(cdLength);
+      final cbd = ByteData.sublistView(cd);
+      cbd.setUint32(0, macho.csMagicCodeDirectory, Endian.big);
+      cbd.setUint32(4, cdLength, Endian.big);
+      cbd.setUint32(8, version, Endian.big);
+      cbd.setUint32(12, 0x20002, Endian.big);
+      cbd.setUint32(16, 128, Endian.big); // hashOffset
+      cbd.setUint32(20, identOffset, Endian.big);
+      cbd.setUint32(24, 1, Endian.big); // nSpecialSlots
+      cbd.setUint32(28, nSlots, Endian.big);
+      cbd.setUint32(32, sigOff, Endian.big); // codeLimit
+      cd[36] = 32;
+      cd[37] = 2; // SHA-256
+      cd[38] = 0;
+      cd[39] = 12; // 4096-byte pages
+      cbd.setUint32(40, 0, Endian.big);
+      cbd.setUint64(
+        56,
+        0xdeadbeefdeadbeef,
+        Endian.big,
+      ); // stale codeLimit64
+      cbd.setUint64(64, 0x1000, Endian.big); // execSegBase
+      cbd.setUint64(72, 0x2000, Endian.big); // execSegLimit
+      cbd.setUint64(80, 3, Endian.big); // execSegFlags
+      final identBytes = ascii.encode('$ident\x00');
+      cd.setRange(
+        identOffset,
+        identOffset + identBytes.length,
+        identBytes,
+      );
+      cd.setRange(96, 128, specialSlot);
+      return cd;
+    }
+
+    // The signature-slot wrapper: empty for ad-hoc `codesign` output, or
+    // carrying a payload the rebuild must refuse.
+    Uint8List? wrapperBytes;
+    if (cmsWrapper != null) {
+      wrapperBytes = Uint8List(wrapperLength);
+      final wbd = ByteData.sublistView(wrapperBytes);
+      wbd.setUint32(0, macho.csMagicBlobWrapper, Endian.big);
+      wbd.setUint32(4, wrapperLength, Endian.big);
+      if (wrapperLength > 8) {
+        wrapperBytes.setRange(
+          8,
+          wrapperLength,
+          _patternBytes(33, wrapperLength - 8),
+        );
+      }
+    }
+
+    // The embedded signature: SuperBlob with a requirements blob and the
+    // primary CodeDirectory, plus the CMS wrapper and alternate CodeDirectory
+    // when asked.
+    final entries = <(int, Uint8List)>[
+      (2, requirementsBlob),
+      (
+        0,
+        buildCd(
+          version: legacyIdent44 ? 0x20100 : 0x20400,
+          ident: legacyIdent44 ? 'fixture' : 'test',
+          identOffset: legacyIdent44 ? 44 : 88,
+        ),
+      ),
+      if (wrapperBytes != null) (0x10000, wrapperBytes),
+      if (alternateCd)
+        (0x1000, buildCd(version: 0x20400, ident: 'alt', identOffset: 88)),
+    ];
     var sigCursor = sigOff + 12 + nBlobs * 8;
     bd.setUint32(sigOff, macho.csMagicEmbeddedSignature, Endian.big);
     bd.setUint32(sigOff + 4, superLength, Endian.big);
     bd.setUint32(sigOff + 8, nBlobs, Endian.big);
-    bd.setUint32(sigOff + 12, 2, Endian.big);
-    bd.setUint32(sigOff + 16, sigCursor - sigOff, Endian.big);
-    buf.setRange(
-      sigCursor,
-      sigCursor + requirementsBlob.length,
-      requirementsBlob,
-    );
-    sigCursor += requirementsBlob.length;
-    bd.setUint32(sigOff + 20, 0, Endian.big);
-    bd.setUint32(sigOff + 24, sigCursor - sigOff, Endian.big);
-    final cdOff = sigCursor;
-    bd.setUint32(cdOff, macho.csMagicCodeDirectory, Endian.big);
-    bd.setUint32(cdOff + 4, cdLength, Endian.big);
-    bd.setUint32(cdOff + 8, 0x20400, Endian.big);
-    bd.setUint32(cdOff + 12, 0x20002, Endian.big);
-    bd.setUint32(cdOff + 16, 128, Endian.big); // hashOffset
-    bd.setUint32(cdOff + 20, 88, Endian.big); // identOffset
-    bd.setUint32(cdOff + 24, 1, Endian.big); // nSpecialSlots
-    bd.setUint32(cdOff + 28, nSlots, Endian.big);
-    bd.setUint32(cdOff + 32, sigOff, Endian.big); // codeLimit
-    bd.setUint8(cdOff + 36, 32);
-    bd.setUint8(cdOff + 37, 2); // SHA-256
-    bd.setUint8(cdOff + 38, 0);
-    bd.setUint8(cdOff + 39, 12); // 4096-byte pages
-    bd.setUint32(cdOff + 40, 0, Endian.big);
-    bd.setUint64(
-      cdOff + 56,
-      0xdeadbeefdeadbeef,
-      Endian.big,
-    ); // stale codeLimit64
-    bd.setUint64(cdOff + 64, 0x1000, Endian.big); // execSegBase
-    bd.setUint64(cdOff + 72, 0x2000, Endian.big); // execSegLimit
-    bd.setUint64(cdOff + 80, 3, Endian.big); // execSegFlags
-    buf.setRange(cdOff + 88, cdOff + 93, ascii.encode('test\x00'));
-    buf.setRange(cdOff + 96, cdOff + 128, specialSlot);
+    for (var i = 0; i < entries.length; i++) {
+      bd.setUint32(sigOff + 12 + i * 8, entries[i].$1, Endian.big);
+      bd.setUint32(sigOff + 12 + i * 8 + 4, sigCursor - sigOff, Endian.big);
+      buf.setRange(sigCursor, sigCursor + entries[i].$2.length, entries[i].$2);
+      sigCursor += entries[i].$2.length;
+    }
     if (cmsTrailer) {
       buf.setRange(
         sigOff + superLength,
@@ -1890,16 +1966,27 @@ void main() {
   /// `codeLimit` names the signature offset, the slot count covers it, every
   /// page hash matches, the identifier/flags/special slot/requirements/execSeg
   /// words survive, and `codeLimit64` is zeroed.
+  ///
+  /// Like ld64 and llvm-strip, the rewrite places `LC_CODE_SIGNATURE` at a
+  /// 16-byte-aligned file offset. [expectedIdent] and [expectedVersion] pin
+  /// the primary CodeDirectory's identity; when [checkCodeLimit64Zero] is
+  /// false the stale `codeLimit64` word must survive untouched instead (a
+  /// pre-0x20300 directory carries none).
   void _expectValidStripSignature(
     Uint8List bytes, {
     required Uint8List specialSlot,
     required Uint8List requirements,
+    String expectedIdent = 'test',
+    int expectedVersion = 0x20400,
+    bool checkCodeLimit64Zero = true,
+    int expectedCount = 2,
   }) {
     final cmds = macho.parseLoadCommands(bytes);
     final sigLc = cmds.singleWhere((c) => c.cmd == macho.lcCodeSignature);
     final sigBd = ByteData.sublistView(sigLc.bytes);
     final dataoff = sigBd.getUint32(8, Endian.little);
     final datasize = sigBd.getUint32(12, Endian.little);
+    expect(dataoff % 16, 0, reason: 'LC_CODE_SIGNATURE must stay 16-aligned');
     final blob = bytes.sublist(dataoff, dataoff + datasize);
     final bbd = ByteData.sublistView(blob);
     expect(bbd.getUint32(0, Endian.big), macho.csMagicEmbeddedSignature);
@@ -1907,7 +1994,7 @@ void main() {
     var cdOff = -1;
     var reqOff = -1;
     var reqLength = 0;
-    expect(count, 2);
+    expect(count, expectedCount);
     for (var i = 0; i < count; i++) {
       final type = bbd.getUint32(12 + i * 8, Endian.big);
       final at = bbd.getUint32(12 + i * 8 + 4, Endian.big);
@@ -1925,7 +2012,7 @@ void main() {
 
     final cdBd = ByteData.sublistView(blob, cdOff, cdOff + 64);
     expect(cdBd.getUint32(0, Endian.big), macho.csMagicCodeDirectory);
-    expect(cdBd.getUint32(8, Endian.big), 0x20400);
+    expect(cdBd.getUint32(8, Endian.big), expectedVersion);
     expect(cdBd.getUint32(12, Endian.big), 0x20002);
     expect(cdBd.getUint32(24, Endian.big), 1); // one special slot
     final slots = cdBd.getUint32(28, Endian.big);
@@ -1934,7 +2021,11 @@ void main() {
     expect(cdBd.getUint8(36), 32);
     expect(cdBd.getUint8(37), 2); // SHA-256
     expect(cdBd.getUint8(39), 12);
-    expect(cdBd.getUint64(56, Endian.big), 0); // zeroed codeLimit64
+    if (checkCodeLimit64Zero) {
+      expect(cdBd.getUint64(56, Endian.big), 0); // zeroed codeLimit64
+    } else {
+      expect(cdBd.getUint64(56, Endian.big), 0xdeadbeefdeadbeef);
+    }
     final execBd = ByteData.sublistView(blob, cdOff + 64, cdOff + 88);
     expect(execBd.getUint64(0, Endian.big), 0x1000);
     expect(execBd.getUint64(8, Endian.big), 0x2000);
@@ -1942,7 +2033,7 @@ void main() {
 
     final hashOffset = cdBd.getUint32(16, Endian.big);
     final identOffset = cdBd.getUint32(20, Endian.big);
-    expect(_readCString(blob, cdOff + identOffset), 'test');
+    expect(_readCString(blob, cdOff + identOffset), expectedIdent);
     final hashesStart = cdOff + hashOffset - 32;
     expect(blob.sublist(hashesStart, hashesStart + 32), equals(specialSlot));
     for (var slot = 0; slot < slots; slot++) {
@@ -1967,6 +2058,34 @@ void main() {
       expect(segBd.getUint64(48, Endian.little), bytes.length - fileoff);
     }
   }
+
+  /// Returns the SuperBlob entry of [bytes] with index [type].
+  Uint8List _superBlobEntry(Uint8List bytes, int type) {
+    final sigLc = macho
+        .parseLoadCommands(bytes)
+        .singleWhere((c) => c.cmd == macho.lcCodeSignature);
+    final sigBd = ByteData.sublistView(sigLc.bytes);
+    final dataoff = sigBd.getUint32(8, Endian.little);
+    final datasize = sigBd.getUint32(12, Endian.little);
+    final blob = bytes.sublist(dataoff, dataoff + datasize);
+    final bbd = ByteData.sublistView(blob);
+    final count = bbd.getUint32(8, Endian.big);
+    for (var i = 0; i < count; i++) {
+      if (bbd.getUint32(12 + i * 8, Endian.big) != type) continue;
+      final at = bbd.getUint32(12 + i * 8 + 4, Endian.big);
+      final length = ByteData.sublistView(
+        blob,
+        at,
+        at + 8,
+      ).getUint32(4, Endian.big);
+      return Uint8List.fromList(blob.sublist(at, at + length));
+    }
+    throw StateError('no SuperBlob entry with type $type');
+  }
+
+  /// Returns the primary CodeDirectory blob of [bytes].
+  Uint8List _primaryCdBlob(Uint8List bytes) =>
+      _superBlobEntry(bytes, macho.csSlotCodeDirectory);
 
   /// Returns [bytes] with [cmd] appended to its load commands.
   Uint8List _withAppendedCommand(Uint8List bytes, Uint8List cmd) {
@@ -2201,6 +2320,117 @@ void main() {
         ),
       );
     });
+
+    test('patch refuses a payload-carrying CMS signature wrapper', () {
+      final input = _buildStripIntegrityDylib(
+        dyldInfoOnly: false,
+        cmsWrapper: 'payload',
+      );
+      expect(
+        () => macho.patchMachO(input.bytes, macho.PatchOptions()),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            contains('CMS'),
+          ),
+        ),
+      );
+    });
+
+    test(
+      'strip keeps an empty CMS wrapper and rebuilds alternate CodeDirectories',
+      () {
+        final input = _buildStripIntegrityDylib(
+          dyldInfoOnly: false,
+          cmsWrapper: 'empty',
+          alternateCd: true,
+        );
+        final stripped = macho.patchMachO(
+          input.bytes,
+          macho.PatchOptions(stripSymbols: true),
+        );
+        _expectLinkeditSound(stripped, input.linkeditOff);
+        _expectValidStripSignature(
+          stripped,
+          specialSlot: input.specialSlot,
+          requirements: input.requirements,
+          expectedCount: 4,
+        );
+
+        // The empty signature wrapper survives byte-identical.
+        final wrapper = _superBlobEntry(stripped, 0x10000);
+        expect(wrapper.length, 8);
+        final wbd = ByteData.sublistView(wrapper);
+        expect(wbd.getUint32(0, Endian.big), macho.csMagicBlobWrapper);
+        expect(wbd.getUint32(4, Endian.big), 8);
+
+        // The alternate CodeDirectory is re-signed like the primary: the new
+        // codeLimit, a covering slot count, the kept identifier and fresh
+        // page hashes.
+        final sigLc = macho
+            .parseLoadCommands(stripped)
+            .singleWhere((c) => c.cmd == macho.lcCodeSignature);
+        final sigBd = ByteData.sublistView(sigLc.bytes);
+        final dataoff = sigBd.getUint32(8, Endian.little);
+        final alt = _superBlobEntry(stripped, 0x1000);
+        final altBd = ByteData.sublistView(alt);
+        expect(altBd.getUint32(0, Endian.big), macho.csMagicCodeDirectory);
+        final altSlots = altBd.getUint32(28, Endian.big);
+        expect(altSlots, (dataoff + 0xfff) ~/ 0x1000);
+        expect(altBd.getUint32(32, Endian.big), dataoff);
+        final altIdent = altBd.getUint32(20, Endian.big);
+        expect(_readCString(alt, altIdent), 'alt');
+        final altHashOff = altBd.getUint32(16, Endian.big);
+        for (var slot = 0; slot < altSlots; slot++) {
+          final start = slot * 0x1000;
+          var end = start + 0x1000;
+          if (end > dataoff) end = dataoff;
+          expect(
+            alt.sublist(
+              altHashOff + slot * 32,
+              altHashOff + (slot + 1) * 32,
+            ),
+            equals(macho.sha256(Uint8List.sublistView(stripped, start, end))),
+            reason: 'alternate page $slot hash',
+          );
+        }
+      },
+    );
+
+    test(
+      'strip keeps a version-0x20100 identifier at offset 44 byte-identical',
+      () {
+        final input = _buildStripIntegrityDylib(
+          dyldInfoOnly: false,
+          legacyIdent44: true,
+        );
+        final stripped = macho.patchMachO(
+          input.bytes,
+          macho.PatchOptions(stripSymbols: true),
+        );
+        _expectLinkeditSound(stripped, input.linkeditOff);
+        _expectValidStripSignature(
+          stripped,
+          specialSlot: input.specialSlot,
+          requirements: input.requirements,
+          expectedIdent: 'fixture',
+          expectedVersion: 0x20100,
+          checkCodeLimit64Zero: false,
+        );
+
+        // Offset 44 holds the identifier `fixture\0`, not a scatter vector:
+        // the strip drops a slot yet the identifier bytes come out unchanged.
+        expect(
+          _primaryCdBlob(stripped).sublist(44, 52),
+          equals(_primaryCdBlob(input.bytes).sublist(44, 52)),
+        );
+        expect(
+          _primaryCdBlob(stripped).sublist(44, 52),
+          equals(ascii.encode('fixture\x00')),
+        );
+      },
+    );
 
     test('strip leaves a binary without LC_SYMTAB unchanged', () {
       final input = _buildHeaderOnlyMachO();
