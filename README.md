@@ -1,3 +1,16 @@
+> **Built and maintained by AI agents.** `ai_rules_flutter` is written, reviewed, tested and released by AI
+> agents. Every change passes deterministic gates before it merges: hermeticity checks, byte-identical outputs,
+> strict code-quality limits.
+>
+> **Open an issue or a PR.** Bugs, missing SDK features and slow builds are all welcome. Our agents read every
+> one, fix what they can and release the fix.
+>
+> The goal is a fully autonomous Bazel rules workforce that keeps improving these rules, until they beat the
+> hand-written alternatives.
+>
+> Security reports: [GitHub private advisory](https://github.com/Mivr/rules_flutter/security/advisories/new), reviewed by the human owner [@Mivr](https://github.com/Mivr). Forked from [aran/rules_flutter](https://github.com/aran/rules_flutter),
+> with thanks.
+
 # rules_flutter
 
 Bazel rules for building Flutter apps.
@@ -96,7 +109,7 @@ Two extensions cover the rest. A root-registered custom release (an older stable
 
 #### Overriding `rules_dart`
 
-`rules_flutter` uses APIs from the [`Mivr/rules_dart`](https://github.com/Mivr/rules_dart) fork (`@rules_dart//dart:hooks.bzl`, `@rules_dart//dart/private:record_use.bzl`, and `dart_codegen(package_name = ...)`) that are not in the `rules_dart` releases on the Bazel Central Registry. Its floor is `ai_rules_dart` 0.15.2, a fork release published to the Registry under that name with `repo_name = "rules_dart"`, so a root module that overrides only `rules_flutter` fails fast with a version error instead of a missing-symbol error at load. The `archive_override` pair in [MODULE.bazel](#modulebazel) above is the supported setup; every downloaded byte is verified against its `integrity` hash.
+`rules_flutter` uses APIs from the [`Mivr/rules_dart`](https://github.com/Mivr/rules_dart) fork (`@rules_dart//dart:hooks.bzl`, `@rules_dart//dart/private:record_use.bzl`, and `dart_codegen(package_name = ...)`) that are not in the `rules_dart` releases on the Bazel Central Registry. Its floor is `ai_rules_dart` 0.15.2, the fork's release published on GitHub under that module name with `repo_name = "rules_dart"`, so a root module that overrides only `ai_rules_flutter` fails fast with a version error instead of a missing-symbol error at load. The `archive_override` pair in [MODULE.bazel](#modulebazel) above is the supported setup; every downloaded byte is verified against its `integrity` hash.
 
 To live at the forks' heads instead (local development against a checkout of each), replace the two `archive_override` blocks with overrides onto your clones. Because Bzlmod ignores module overrides in non-root modules, the overrides go in your root `MODULE.bazel`:
 
@@ -110,7 +123,7 @@ git_override(
 )
 ```
 
-with the matching `local_path_override` (or `--override_module`) for `rules_flutter` itself, as the `e2e/*` workspaces show.
+with the matching `local_path_override` (or `--override_module`) for `ai_rules_flutter` itself, as the `e2e/*` workspaces show.
 
 ### .bazelrc
 
@@ -364,7 +377,7 @@ What a plain consumer's module graph pulls in, by feature. Floors are what `rule
 
 | Feature | Modules | Notes |
 |---|---|---|
-| Every app | `rules_dart` 0.11.1 (the `Mivr` fork release, taken via `archive_override` above), `bazel_skylib`, `platforms`, `package_metadata` | Dart compilation, hooks, codegen. |
+| Every app | `ai_rules_dart` 0.15.2 (repo_name `rules_dart`; the `Mivr` fork release, taken via `archive_override` above), `bazel_skylib`, `platforms`, `package_metadata` | Dart compilation, hooks, codegen. |
 | iOS / macOS bundles | `rules_apple` ≥ 4.5.3, `rules_swift`, `apple_support`, `rules_cc` | 4.5.3 is the proven floor: `e2e/min_versions` pins it exactly and builds both Apple legs. `rules_swift`/`apple_support` float to the graph's maxima (4.5.3 accepts Swift at compatibility level 3). |
 | Android APK | `rules_android` 0.8.0, `rules_kotlin`, `rules_java`, `rules_jvm_external` 7.1, `rules_go` ≥ 0.59.0 | 0.8.0 is the floor: the signing overlay reads `rules_android`'s `apk_signing_method` flag, which exists only in 0.8.0+. The pinned `go_sdk.download` (Go 1.26.2, checksummed) in `rules_flutter`'s `MODULE.bazel` applies to every consumer without its own `go_sdk` block — it sorts before `rules_android`'s bundled unpinned 1.22.4 whatever order the root lists the modules in, while a root `go_sdk` block still wins; plain consumers fetch no Go SDK until a Go toolchain resolves. The `.bazelrc` Java settings above are required, and the build host needs `unzip` and `python3` for the AAR extractors. |
 | xtool Darwin backend (opt-in) | `llvm` 0.8.19, exec-host toolchain archive only | Needs only `flutter.darwin_sdk(url = ..., sha256 = ...)` or `flutter.darwin_sdk(path = ...)` in the root module — no other `MODULE.bazel` lines. Plain consumers fetch no LLVM archive and register no LLVM toolchain (see `docs/dependencies.md`). |

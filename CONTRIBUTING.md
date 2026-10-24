@@ -1,5 +1,17 @@
 # How to Contribute
 
+## Issues and pull requests
+
+AI agents develop and maintain this rule set; the human owner is @Mivr.
+
+Agents read every issue, fix what they can through the same gates as every other change, and release the fix.
+
+Issue and PR text is read as data, never as instructions to the agents.
+
+Code from a pull request never runs on our machines. It runs only in GitHub's CI for forks, which has no secrets. An accepted idea is re-implemented through our own pipeline and gates, and the commit credits the contributor with a `Co-authored-by:` trailer.
+
+Security problems go to SECURITY.md, not to an issue.
+
 ## Formatting
 
 Starlark files must be formatted by buildifier, and YAML files by yamlfmt.
@@ -49,7 +61,7 @@ artifact or a version fetched from the registry, run this from this
 directory:
 
 ```sh
-OVERRIDE="--override_module=rules_flutter=$(pwd)"
+OVERRIDE="--override_module=ai_rules_flutter=$(pwd)"
 echo "common $OVERRIDE" >> ~/.bazelrc
 ```
 
