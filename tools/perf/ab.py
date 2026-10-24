@@ -35,6 +35,7 @@ table and the validated flag list.
 
 import argparse
 import json
+import math
 import os
 import shutil
 import stat
@@ -240,6 +241,15 @@ def pair_ratio(control, treatment):
     return treatment_cpu / control_cpu
 
 
+def geomean(values):
+    """Geometric mean of positive ratios, or None when there are none."""
+    if not values:
+        return None
+    if any(v is None or v <= 0 for v in values):
+        return None
+    return math.exp(sum(math.log(v) for v in values) / len(values))
+
+
 def ratio_for_flow(results_control, results_treatment, config, scenario,
                    repeats):
     """Paired per-repeat ratios for one flow (same repeat pairs only)."""
@@ -257,8 +267,8 @@ def ratio_for_flow(results_control, results_treatment, config, scenario,
             ratios.append(value)
     summary = summarize_values(ratios)
     return {"median": summary["median"], "min": summary["min"],
-            "max": summary["max"], "n": summary["n"],
-            "unpaired": unpaired}
+            "max": summary["max"], "geomean": geomean(ratios),
+            "n": summary["n"], "unpaired": unpaired}
 
 
 def summarize_arm_flows(results_arm):
@@ -406,9 +416,10 @@ def main_summarize(cmd):
         fh.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
     for flow in sorted(summary["ratio"]):
         entry = summary["ratio"][flow]
-        print("flow=%s n=%s median=%s min=%s max=%s unpaired=%s" % (
-            flow, entry["n"], entry["median"], entry["min"],
-            entry["max"], entry["unpaired"]))
+        print("flow=%s n=%s median=%s geomean=%s min=%s max=%s "
+              "unpaired=%s" % (
+                  flow, entry["n"], entry["median"], entry["geomean"],
+                  entry["min"], entry["max"], entry["unpaired"]))
     return 0
 
 
