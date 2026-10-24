@@ -65,15 +65,32 @@ load("//flutter/private:flutter_pub_path.bzl", "foreign_lock_path_error", "is_ab
 load("//flutter/private:flutter_pub_semver.bzl", "parse_pub_version")
 load("//flutter/private:flutter_pubspec.bzl", "parse_flutter_plugin_block")
 
-def _tree_node(tree, rel):
-    """The node at `rel` ("a/b") in a nested-dict tree, files are None or str."""
+def _tree_lookup(tree, rel, fold):
+    """The node at `rel` in a nested-dict tree, optionally folding case.
+
+    With `fold`, each segment matches the first key that agrees
+    case-insensitively, like a case-insensitive filesystem resolving a
+    wrong-case spelling; directory listings still report the true names.
+    """
     node = tree
     if rel == "":
         return node
     for seg in rel.split("/"):
-        if type(node) != "dict" or seg not in node:
+        if type(node) != "dict":
             return "missing"
-        node = node[seg]
+        if seg in node:
+            node = node[seg]
+            continue
+        if not fold:
+            return "missing"
+        hit = None
+        for key in node:
+            if key.lower() == seg.lower():
+                hit = key
+                break
+        if hit == None:
+            return "missing"
+        node = node[hit]
     return node
 
 def _mock_target_rel(real):
@@ -83,14 +100,17 @@ def _mock_target_rel(real):
         return None
     return real[len(prefix):]
 
-def _make_mock_link_ctx(tree, path_value = "platform_assets", package_name = "platform_assets", version = "", hub_name = "test_hub"):
+def _make_mock_link_ctx(tree, path_value = "platform_assets", package_name = "platform_assets", version = "", hub_name = "test_hub", case_insensitive_fs = False):
     """Fake repository_ctx for `link_path_package` over an in-memory tree.
 
     Tree leaves: None is an empty file, a string is a file with that
     content, a dict is a real directory, and `struct(symlink_to = ...)` is
     a symlink node resolving to the given real path. A symlink struct with
     `is_dir = True` is a directory link: its children list the target's
-    entries, like a fetch host that follows directory symlinks.
+    entries, like a fetch host that follows directory symlinks. With
+    `case_insensitive_fs`, lookups also resolve wrong-case spellings (like
+    APFS or NTFS default) while `readdir` still lists the true names, so
+    the case probe can tell the two hosts apart.
 
     Args:
         tree: Nested dicts relative to a fake `/workspace` root.
@@ -98,6 +118,7 @@ def _make_mock_link_ctx(tree, path_value = "platform_assets", package_name = "pl
         package_name: Value for `ctx.attr.package_name`.
         version: Value for `ctx.attr.version` (the lock's version).
         hub_name: Value for `ctx.attr.hub_name`.
+        case_insensitive_fs: Resolve lookups folding case.
 
     Returns:
         struct(ctx, watched, linked): the fake ctx, the watched path
@@ -111,14 +132,14 @@ def _make_mock_link_ctx(tree, path_value = "platform_assets", package_name = "pl
         look = disk_rel if disk_rel != None else rel
         full = "/workspace/" + rel if rel else "/workspace"
         disk_full = "/workspace/" + look if look else "/workspace"
-        node = _tree_node(tree, look)
+        node = _tree_lookup(tree, look, case_insensitive_fs)
         if type(node) == "struct":
             real = node.symlink_to
             exists = True
             is_dir = node.is_dir if hasattr(node, "is_dir") else False
             content = ""
             target_rel = _mock_target_rel(real)
-            target = _tree_node(tree, target_rel) if target_rel != None else "missing"
+            target = _tree_lookup(tree, target_rel, case_insensitive_fs) if target_rel != None else "missing"
             names = sorted(target.keys()) if is_dir and type(target) == "dict" else []
             kid_base = target_rel
         else:
@@ -139,7 +160,7 @@ def _make_mock_link_ctx(tree, path_value = "platform_assets", package_name = "pl
                 child_rel = child_rel + "/" + seg if child_rel else seg
                 disk = (disk + "/" + seg if disk else seg) if disk != None else None
                 if disk != None:
-                    inter = _tree_node(tree, disk)
+                    inter = _tree_lookup(tree, disk, case_insensitive_fs)
                     if type(inter) == "struct":
                         disk = _mock_target_rel(inter.symlink_to)
             return _make_path(child_rel, disk)
@@ -744,6 +765,55 @@ def _cycle_refusal_names_the_link_test_impl(ctx):
 
 cycle_refusal_names_the_link_test = unittest.make(_cycle_refusal_names_the_link_test_impl)
 
+def _case_folded_skip_applies_end_to_end_test_impl(ctx):
+    """The probe's answer changes what a whole fetch links.
+
+    A `Build/` directory at the root of a declared asset dir is skipped
+    when the host folds case and mirrored when it does not, through the
+    whole `link_path_package` fetch — the probe, not the caller, decides.
+    """
+    env = unittest.begin(ctx)
+    tree = {
+        "casepkg": {
+            "pubspec.yaml": "name: casepkg\nflutter:\n  assets:\n    - assets/\n",
+            "lib": {"casepkg.dart": None},
+            "assets": {
+                "any.txt": None,
+                "Build": {"top.txt": None},
+            },
+        },
+    }
+    exact = _make_mock_link_ctx(tree, path_value = "casepkg", package_name = "casepkg")
+    link_path_package(exact.ctx)
+    asserts.equals(env, ["assets/Build/top.txt", "assets/any.txt", "lib/casepkg.dart", "pubspec.yaml"], sorted([link.name for link in exact.linked]))
+    folded = _make_mock_link_ctx(tree, path_value = "casepkg", package_name = "casepkg", case_insensitive_fs = True)
+    link_path_package(folded.ctx)
+    asserts.equals(env, ["assets/any.txt", "lib/casepkg.dart", "pubspec.yaml"], sorted([link.name for link in folded.linked]))
+    return unittest.end(env)
+
+case_folded_skip_applies_end_to_end_test = unittest.make(_case_folded_skip_applies_end_to_end_test_impl)
+
+def _case_probe_needs_readdir_evidence_test_impl(ctx):
+    """The case probe trusts only evidence a sensitive host cannot fake.
+
+    A flipped spelling that resolves but has no exactly-named entry in
+    its parent's `readdir()` means the filesystem matched a name it does
+    not hold, so the host folds case; on such a host a target outside
+    the workspace only by case still counts as inside. Two case-variant
+    directories listed side by side prove a case-sensitive host instead,
+    and an outside target differing only by case is refused.
+    """
+    env = unittest.begin(ctx)
+    folded = _make_mock_link_ctx({"mypkg": {"lib": {}}}, path_value = "mypkg", package_name = "mypkg", case_insensitive_fs = True)
+    asserts.true(env, detect_case_insensitive_host(folded.ctx, ["mypkg"]))
+    asserts.false(env, path_spoke_resolves_outside("/x/ws", "/x/WS/secret", True))
+    listed = _make_mock_link_ctx({"mypkg": {"lib": {}}, "MYPKG": {"lib": {}}}, path_value = "mypkg", package_name = "mypkg")
+    asserts.false(env, detect_case_insensitive_host(listed.ctx, ["mypkg"]))
+    asserts.true(env, path_spoke_resolves_outside("/x/ws", "/x/WS/secret", False))
+    return unittest.end(env)
+
+case_probe_needs_readdir_evidence_test = unittest.make(_case_probe_needs_readdir_evidence_test_impl)
+
 def _case_rule_folds_only_on_insensitive_hosts_test_impl(ctx):
     """Path comparisons fold case exactly on case-insensitive hosts.
 
@@ -751,9 +821,9 @@ def _case_rule_folds_only_on_insensitive_hosts_test_impl(ctx):
     the host probes case-insensitive, so two distinct entries never merge on
     a case-sensitive host while a case-variant package root, workspace root,
     or skip name still confines on an insensitive one. The probe flips the
-    case of the existing package path: a host answering for the flipped
-    spelling folds case (a case-sensitive host holding both variants answers
-    True too, failing closed rather than merging them).
+    case of the existing package path and checks the parent's entries: a
+    host answering for a spelling it does not list folds case, while one
+    listing both variants is case-sensitive.
     """
     env = unittest.begin(ctx)
     asserts.true(env, paths_match("a/B", "a/B", False))
@@ -768,7 +838,7 @@ def _case_rule_folds_only_on_insensitive_hosts_test_impl(ctx):
     sensitive = _make_mock_link_ctx({"mypkg": {"lib": {}}}, path_value = "mypkg", package_name = "mypkg")
     asserts.false(env, detect_case_insensitive_host(sensitive.ctx, ["mypkg"]))
     decoy = _make_mock_link_ctx({"mypkg": {"lib": {}}, "MYPKG": {"lib": {}}}, path_value = "mypkg", package_name = "mypkg")
-    asserts.true(env, detect_case_insensitive_host(decoy.ctx, ["mypkg"]))
+    asserts.false(env, detect_case_insensitive_host(decoy.ctx, ["mypkg"]))
     return unittest.end(env)
 
 case_rule_folds_only_on_insensitive_hosts_test = unittest.make(_case_rule_folds_only_on_insensitive_hosts_test_impl)
@@ -1117,6 +1187,8 @@ def path_package_test_suite(name):
         name,
         absolute_lock_path_decides_test,
         ancestor_link_is_refused_test,
+        case_folded_skip_applies_end_to_end_test,
+        case_probe_needs_readdir_evidence_test,
         case_rule_folds_only_on_insensitive_hosts_test,
         cycle_refusal_names_the_link_test,
         dir_link_mirrors_not_symlinks_test,

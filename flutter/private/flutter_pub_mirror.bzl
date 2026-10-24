@@ -80,10 +80,14 @@ def paths_match(first, second, case_insensitive):
 def detect_case_insensitive_host(ctx, segments):
     """Probe whether the fetch host resolves paths case-insensitively.
 
-    Looks up the (existing) package path with its case flipped: on a
-    case-insensitive host (APFS, NTFS default) the flipped spelling still
-    exists, on a case-sensitive one it does not. All path comparisons for
-    the fetch then fold case exactly when this returns True.
+    Looks up the package path with its case flipped, then checks the
+    flipped parent's `readdir()`: on a case-insensitive host (APFS, NTFS
+    default) the flipped spelling resolves even though no entry holds
+    that exact name — evidence a case-sensitive host cannot produce. A
+    case-sensitive host holding both case variants lists the flipped
+    spelling exactly, so the probe answers False and comparisons stay
+    exact. All path comparisons for the fetch then fold case exactly
+    when this returns True.
 
     Args:
         ctx: The path-package spoke's repository context.
@@ -91,18 +95,23 @@ def detect_case_insensitive_host(ctx, segments):
             exist (the caller checks first).
 
     Returns:
-        True when the flipped-case package path still resolves, i.e. the
-        host folds case. A case-sensitive host holding two case-variant
-        directories side by side also answers True; the fetch then folds
-        and fails closed rather than merging the two entries.
+        True when the flipped-case package path resolves without an
+        exactly-named entry, i.e. the host folds case.
     """
     lowered = [segment.lower() for segment in segments]
-    if lowered != segments:
-        return ctx.workspace_root.get_child(*lowered).exists
-    uppered = [segment.upper() for segment in segments]
-    if uppered == segments:
+    flipped = lowered if lowered != segments else [segment.upper() for segment in segments]
+    if flipped == segments:
         return False
-    return ctx.workspace_root.get_child(*uppered).exists
+    if not ctx.workspace_root.get_child(*flipped).exists:
+        return False
+    if len(flipped) > 1:
+        parent = ctx.workspace_root.get_child(*flipped[:-1])
+    else:
+        parent = ctx.workspace_root
+    for child in parent.readdir():
+        if child.basename == flipped[-1]:
+            return False
+    return True
 
 def is_path_spoke_skipped_dir(name, case_insensitive = False):
     """Whether a path-spoke link walk skips this top-level entry.
