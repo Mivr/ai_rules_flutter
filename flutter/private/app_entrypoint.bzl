@@ -205,6 +205,7 @@ def stage_generated_inputs(ctx, files, scope, include_sources = False, salt = ""
         _note_generated_only(ctx, seen, app_scheme_rel_path(f), f)
     if not seen:
         return struct(root = None, files = [])
+
     # The staged set names the directory, exactly like the `include_sources`
     # path: sources never enter `seen`, so adding or removing one does not move
     # the root, while a removed generated file leaves its stale directory
