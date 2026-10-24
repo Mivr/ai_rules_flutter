@@ -77,6 +77,9 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from bench_flags import parse_bazel_flags  # noqa: E402
+from bench_flags import validate_bazel_flags  # noqa: E402
+from bench_flags import worker_steps as count_worker_steps  # noqa: E402
 from execlog import load_spawns  # noqa: E402
 from replay import (  # noqa: E402
     TIME_BIN,
@@ -1119,6 +1122,7 @@ def run_sol_scenario(args, config, scenario, batch,
               "identical": identical,
               "reason": flow_reason(chain, exit_code),
               "n_sol_actions": (report or {}).get("n_replayed", 0),
+              "worker_steps": count_worker_steps(chainable),
               "verify": {"before": before, "after": after},
               "chain": chain,
               "profile": profile}
@@ -1141,6 +1145,7 @@ def error_record(config, scenario, reason):
             "identical": False,
             "reason": reason,
             "n_sol_actions": 0,
+            "worker_steps": {},
             "verify": {"before": {}, "after": {}},
             "profile": {"jvm": {"total": None, "phases": {}},
                         "host_tools": {"total": None, "by_mnemonic": {},
@@ -1369,6 +1374,17 @@ def summarize_bazel_parts(records):
     return parts
 
 
+def summarize_worker_steps(records):
+    """Merged worker-step counts over repeats (first value per mnemonic)."""
+    merged = {}
+    for record in records:
+        for mnemonic, count in (
+                record.get("worker_steps") or {}).items():
+            if mnemonic not in merged:
+                merged[mnemonic] = count
+    return merged
+
+
 def summarize_flow(records, unit):
     """Median costs over repeats; no SOL number unless all repeats match."""
     del unit
@@ -1396,6 +1412,7 @@ def summarize_flow(records, unit):
             "identical": identical,
             "reason": "ok" if identical else "; ".join(reasons),
             "chain": records[0].get("chain"),
+            "worker_steps": summarize_worker_steps(records),
             "profile": summarize_profile(records, bazel["median"],
                                          sol["median"] if identical else None,
                                          identical),
@@ -1445,10 +1462,12 @@ def summarize_sol(results_dir, meta):
                 flows[flow] = summarize_flow(collected[flow], unit)
             else:
                 flows[flow] = {"error": "missing repeats"}
+    flags = meta.get("bazel_flags", [])
     return {"rules_flutter": meta["sha"], "unit": unit,
             "runner": collect_runner_info(), "flows": flows,
             "meta": {"repeats": meta["repeats"],
-                     "target_loc": meta["target_loc"], "seed": meta["seed"]}}
+                     "target_loc": meta["target_loc"], "seed": meta["seed"],
+                     "bazel_flags": list(flags)}}
 
 
 def main_run(cmd):
@@ -1479,7 +1498,9 @@ def main_chain(cmd):
 
 def main_summarize(cmd):
     meta = {"sha": cmd.sha, "repeats": cmd.repeats,
-            "target_loc": cmd.target_loc, "seed": cmd.seed}
+            "target_loc": cmd.target_loc, "seed": cmd.seed,
+            "bazel_flags": validate_bazel_flags(
+                parse_bazel_flags(cmd.bazel_flags))}
     summary = summarize_sol(cmd.results, meta)
     with open(cmd.out, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
@@ -1531,6 +1552,9 @@ def build_parser():
     summ.add_argument("--repeats", type=int, required=True)
     summ.add_argument("--target-loc", type=int, required=True)
     summ.add_argument("--seed", type=int, required=True)
+    summ.add_argument("--bazel-flags", default="",
+                      help="raw whitespace-separated extra Bazel flags "
+                      "for this run (recorded in meta)")
     summ.add_argument("--out", required=True, help="ios-sol.json path")
     return parser
 

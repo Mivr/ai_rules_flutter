@@ -216,6 +216,8 @@ def discover_configs(results_dir, ref):
 def build_summary(results_dir, base_ref, head_ref, meta):
     configs = sorted(set(discover_configs(results_dir, base_ref))
                      | set(discover_configs(results_dir, head_ref)))
+    meta = dict(meta)
+    meta.setdefault("bazel_flags", [])
     summary = {
         "base_ref": base_ref,
         "head_ref": head_ref,
@@ -267,7 +269,12 @@ def render_markdown(summary):
     lines.append("")
     meta = summary.get("meta", {})
     for key in sorted(meta):
+        if key == "bazel_flags":
+            continue
         lines.append("- %s: %s" % (key, meta[key]))
+    flags = meta.get("bazel_flags", [])
+    if flags:
+        lines.append("- bazel_flags: %s" % " ".join(str(f) for f in flags))
     lines.append("")
     versions = {}
     for key in ["base_stats", "head_stats"]:
