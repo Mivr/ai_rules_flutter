@@ -28,7 +28,9 @@ Future<void> main() async {
     exit(2);
   }
   final run = IdentityRun(
-    bazel: Platform.environment['BAZEL'] ?? 'bazel',
+    // `$BAZEL` substitutes a wrapper; otherwise the wrapper the user invoked
+    // is recovered from PATH (never bazelisk's raw download shim).
+    bazel: await resolveBazel(override: Platform.environment['BAZEL']),
     repoRoot: rootPath,
   );
   final stopwatch = Stopwatch()..start();
