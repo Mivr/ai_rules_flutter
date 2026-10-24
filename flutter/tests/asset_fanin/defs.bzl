@@ -1,12 +1,14 @@
 """Fan-in benchmark fixture (COV-63): bundle analysis cost vs dep count.
 
-`asset_fanin_bundle` builds one weighted base library carrying `p`
-generated pub contributions (half font families, half plain assets), `p`
-thin libraries that each depend only on the base, and two bundles over
-them: `narrow` (one thin dep) and `wide` (300 thin deps). The bundles
-exist to measure: analysis cost must be linear in the contributions a
-bundle ships, so `wide - narrow` must not grow with `p`. Every target is
-`manual`: the pool at `p = 6000` stays out of `//...` builds.
+`asset_fanin_pool` declares one weighted base library carrying `p`
+generated pub contributions (half font families, half plain assets) and a
+fixed pool of thin libraries that each depend only on the base. The two
+measured bundles live in the `narrow/` and `wide/` subpackages, declared
+with `asset_fanin_narrow` (one thin dep) and `asset_fanin_wide` (every
+thin dep), so that touching one bundle's BUILD file re-analyses only that
+bundle. Analysis cost must be linear in the contributions a bundle ships,
+so `wide - narrow` must not grow with `p`. Every target is `manual`: the
+pool at `p = 6000` stays out of `//...` builds.
 """
 
 load("//flutter:defs.bzl", "flutter_asset_bundle", "flutter_library")
@@ -44,13 +46,13 @@ def _declare_weight(name, count):
         pkg_assets[":%s_txt_%d" % (name, i)] = "gen/%s" % txt
     return (font_files, "[" + ",".join(families) + "]", pkg_assets)
 
-def asset_fanin_bundle(name, p = 6000, wide = 300):
-    """Declares the fan-in pool, the thin deps and the two bundles.
+def asset_fanin_pool(name, p = 6000, thin_count = 300):
+    """Declares the weighted base and the fixed thin-dep pool.
 
     Args:
-        name: Prefix for every generated target.
-        p: Thin deps (and, one per two, generated weight files).
-        wide: Thin deps the wide bundle takes.
+        name: Prefix for the base and every thin library.
+        p: Generated weight contributions on the base (even counts only).
+        thin_count: Thin libraries, each depending only on the base.
     """
     font_files, fonts_json, pkg_assets = _declare_weight(name + "_w", p)
     base = name + "_base"
@@ -62,23 +64,39 @@ def asset_fanin_bundle(name, p = 6000, wide = 300):
         pkg_assets = pkg_assets,
         tags = ["manual"],
     )
-    thins = []
-    for i in range(p):
-        thin = "%s_thin_%d" % (name, i)
-        thins.append(thin)
+    for i in range(thin_count):
         flutter_library(
-            name = thin,
+            name = "%s_thin_%d" % (name, i),
             srcs = ["stub.dart"],
             deps = [":" + base],
             tags = ["manual"],
         )
+
+def asset_fanin_narrow(name, pool, stem):
+    """Declares the narrow bundle over one thin dep from the pool.
+
+    Args:
+        name: Name of the bundle target.
+        pool: Label of the package holding the pool.
+        stem: Name prefix the pool was declared with.
+    """
     flutter_asset_bundle(
-        name = name + "_narrow",
+        name = name,
         tags = ["manual"],
-        deps = [":" + thins[0]] if thins else [":" + base],
+        deps = [pool + ":" + stem + "_thin_0"],
     )
+
+def asset_fanin_wide(name, pool, stem, thin_count = 300):
+    """Declares the wide bundle over every thin dep in the pool.
+
+    Args:
+        name: Name of the bundle target.
+        pool: Label of the package holding the pool.
+        stem: Name prefix the pool was declared with.
+        thin_count: Thin libraries the bundle takes; matches the pool.
+    """
     flutter_asset_bundle(
-        name = name + "_wide",
+        name = name,
         tags = ["manual"],
-        deps = [":" + t for t in thins[:wide]] if thins else [":" + base],
+        deps = [pool + ":" + stem + "_thin_%d" % i for i in range(thin_count)],
     )
