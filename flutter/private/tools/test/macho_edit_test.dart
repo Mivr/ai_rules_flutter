@@ -1439,6 +1439,779 @@ void main() {
     });
   });
 
+  /// Deterministic filler for a linkedit payload: byte `i` is
+  /// `(i * 31 + seed) & 0xff`, so every table has recognizable contents.
+  Uint8List _patternBytes(int seed, int length) {
+    final out = Uint8List(length);
+    for (var i = 0; i < length; i++) {
+      out[i] = (i * 31 + seed) & 0xff;
+    }
+    return out;
+  }
+
+  /// Builds a signed arm64 dylib for the COV-24 strip-integrity tests: 220 local
+  /// symbols plus stabs (so the strip removes more than two pages), an
+  /// `LC_DYLD_INFO` (or `LC_DYLD_INFO_ONLY`) with all five pairs non-empty, the
+  /// four single-range table commands, an export trie, an indirect table, a
+  /// `LC_UUID`, and an embedded signature whose CodeDirectory carries one
+  /// special slot and a requirements blob.
+  ///
+  /// The linkedit payloads are laid out in scrambled file order (chained fixups
+  /// first, the signature last). With [cmsTrailer], non-zero bytes follow the
+  /// SuperBlob inside `LC_CODE_SIGNATURE`, modelling a real CMS signature.
+  ({
+    Uint8List bytes,
+    int linkeditOff,
+    List<Uint8List> dyldRanges,
+    Uint8List functionStarts,
+    Uint8List dataInCode,
+    Uint8List exportsTrie,
+    Uint8List chainedFixups,
+    Uint8List specialSlot,
+    Uint8List requirements,
+  })
+  _buildStripIntegrityDylib({
+    required bool dyldInfoOnly,
+    bool cmsTrailer = false,
+  }) {
+    const linkeditOff = 0x3000;
+    const nLocals = 220;
+    final names = [
+      for (var i = 0; i < nLocals; i++)
+        '_local_${i}_with_long_padding_0123456789abcdef',
+      '_MyApp.build',
+      'MyApp.dart',
+      '_kDartSnapshotText',
+      '_kDartSnapshotData',
+      '_printf',
+    ];
+    final types = [
+      for (var i = 0; i < nLocals; i++) 0x0e,
+      0x24,
+      0x64,
+      0x0f,
+      0x0f,
+      0x01,
+    ];
+    final sects = [
+      for (var i = 0; i < nLocals; i++) 1,
+      1,
+      0,
+      1,
+      1,
+      0,
+    ];
+
+    final strings = BytesBuilder(copy: false)..addByte(0);
+    final strx = <int>[];
+    for (final name in names) {
+      strx.add(strings.length);
+      strings.add(utf8.encode(name));
+      strings.addByte(0);
+    }
+    final strBytes = strings.toBytes();
+    final symBytes = BytesBuilder(copy: false);
+    for (var i = 0; i < names.length; i++) {
+      final entry = ByteData(16)
+        ..setUint32(0, strx[i], Endian.little)
+        ..setUint8(4, types[i])
+        ..setUint8(5, sects[i])
+        ..setUint16(6, 0, Endian.little)
+        ..setUint64(8, 0x1000 + i * 8, Endian.little);
+      symBytes.add(entry.buffer.asUint8List());
+    }
+    final symTab = symBytes.toBytes();
+
+    // Linkedit payloads with distinct contents, in scrambled file order.
+    final chained = _patternBytes(23, 48);
+    final rebase = _patternBytes(11, 256);
+    final bind = _patternBytes(12, 320);
+    final weak = _patternBytes(13, 192);
+    final lazy = _patternBytes(14, 224);
+    final export = _patternBytes(15, 160);
+    final funcStarts = _patternBytes(21, 64);
+    final dataInCode = _patternBytes(22, 80);
+    final trie = _buildSnapshotExportsTrie();
+    final specialSlot = _patternBytes(8, 32);
+    final requirements = _patternBytes(9, 32);
+    // Every SuperBlob entry points at a `CS_Blob` (magic + length + body),
+    // so the requirements payload carries its header; the verifier compares
+    // the body bytes.
+    final requirementsBlob = Uint8List(40);
+    final requirementsBd = ByteData.sublistView(requirementsBlob);
+    requirementsBd.setUint32(0, 0xfade0c01, Endian.big);
+    requirementsBd.setUint32(4, requirementsBlob.length, Endian.big);
+    requirementsBlob.setRange(8, 40, requirements);
+    final indirect = ByteData(12)
+      ..setUint32(0, nLocals + 2, Endian.little)
+      ..setUint32(4, 0, Endian.little)
+      ..setUint32(8, macho.indirectSymbolLocal, Endian.little);
+
+    // Size the signature: SuperBlob header + index + requirements + CodeDirectory
+    // (+ CMS trailer when asked). The slot count follows the signature offset.
+    final nBlobs = cmsTrailer ? 3 : 2;
+    var nSlots = 8;
+    var sigLength = 0;
+    for (var i = 0; i < 3; i++) {
+      final cdLength = 128 + nSlots * 32 + 5;
+      sigLength = 12 + nBlobs * 8 + requirementsBlob.length + cdLength;
+      final base =
+          linkeditOff +
+          chained.length +
+          symTab.length +
+          bind.length +
+          strBytes.length +
+          rebase.length +
+          funcStarts.length +
+          weak.length +
+          12 +
+          lazy.length +
+          trie.length +
+          export.length +
+          dataInCode.length;
+      nSlots = (base + sigLength + 0xfff) ~/ 0x1000;
+    }
+    final cdLength = 128 + nSlots * 32 + 5;
+    final superLength = 12 + nBlobs * 8 + requirementsBlob.length + cdLength;
+    final sigDatasize = superLength + (cmsTrailer ? 24 : 0);
+
+    // Assign file offsets in scrambled order.
+    var cursor = linkeditOff;
+    int take(Uint8List payload) {
+      final off = cursor;
+      cursor += payload.length;
+      return off;
+    }
+
+    final chainedOff = take(chained);
+    final symoff = take(symTab);
+    final bindOff = take(bind);
+    final stroff = take(strBytes);
+    final rebaseOff = take(rebase);
+    final funcOff = take(funcStarts);
+    final weakOff = take(weak);
+    cursor = (cursor + 3) & ~3;
+    final indirectOff = cursor;
+    cursor += 12;
+    final lazyOff = take(lazy);
+    final trieOff = take(trie);
+    final exportOff = take(export);
+    final dicOff = take(dataInCode);
+    final sigOff = cursor;
+    final fileSize = sigOff + sigDatasize;
+
+    Uint8List tableCommand(int cmd, int dataoff, int datasize) {
+      final buf = Uint8List(16);
+      final bd = ByteData.sublistView(buf);
+      bd.setUint32(0, cmd, Endian.little);
+      bd.setUint32(4, 16, Endian.little);
+      bd.setUint32(8, dataoff, Endian.little);
+      bd.setUint32(12, datasize, Endian.little);
+      return buf;
+    }
+
+    final dyldCmd = Uint8List(48);
+    final dyldBd = ByteData.sublistView(dyldCmd);
+    dyldBd.setUint32(
+      0,
+      dyldInfoOnly ? macho.lcDyldInfoOnly : macho.lcDyldInfo,
+      Endian.little,
+    );
+    dyldBd.setUint32(4, 48, Endian.little);
+    final pairs = [
+      (rebaseOff, rebase.length),
+      (bindOff, bind.length),
+      (weakOff, weak.length),
+      (lazyOff, lazy.length),
+      (exportOff, export.length),
+    ];
+    for (var i = 0; i < pairs.length; i++) {
+      dyldBd.setUint32(8 + i * 8, pairs[i].$1, Endian.little);
+      dyldBd.setUint32(12 + i * 8, pairs[i].$2, Endian.little);
+    }
+
+    final textSeg = Uint8List(72 + 80);
+    final textBd = ByteData.sublistView(textSeg);
+    textBd.setUint32(0, macho.lcSegment64, Endian.little);
+    textBd.setUint32(4, 152, Endian.little);
+    textSeg.setRange(8, 8 + '__TEXT'.length, ascii.encode('__TEXT'));
+    textBd.setUint64(24, 0, Endian.little);
+    textBd.setUint64(32, 0x4000, Endian.little);
+    textBd.setUint64(40, 0, Endian.little);
+    textBd.setUint64(48, 0x3000, Endian.little);
+    textBd.setUint32(56, 5, Endian.little);
+    textBd.setUint32(60, 5, Endian.little);
+    textBd.setUint32(64, 1, Endian.little);
+    textSeg.setRange(72, 72 + '__text'.length, ascii.encode('__text'));
+    textSeg.setRange(
+      72 + 16,
+      72 + 16 + '__TEXT'.length,
+      ascii.encode('__TEXT'),
+    );
+    // The section lives in the code pages, past the load commands, so the
+    // patched commands fit before the first payload offset.
+    textBd.setUint64(72 + 32, 0x1000, Endian.little);
+    textBd.setUint64(72 + 40, 0x200, Endian.little);
+    textBd.setUint32(72 + 48, 0x1000, Endian.little);
+    textBd.setUint32(72 + 52, 2, Endian.little);
+
+    final dysymtab = ByteData(80)
+      ..setUint32(0, macho.lcDysymtab, Endian.little)
+      ..setUint32(4, 80, Endian.little)
+      ..setUint32(8, 0, Endian.little)
+      ..setUint32(12, nLocals + 2, Endian.little)
+      ..setUint32(16, nLocals + 2, Endian.little)
+      ..setUint32(20, 2, Endian.little)
+      ..setUint32(24, nLocals + 4, Endian.little)
+      ..setUint32(28, 1, Endian.little)
+      ..setUint32(56, indirectOff, Endian.little)
+      ..setUint32(60, 3, Endian.little);
+
+    final commands = <Uint8List>[
+      textSeg,
+      macho.buildLcSegment64((
+        segname: '__LINKEDIT',
+        vmaddr: 0x4000,
+        vmsize: fileSize - linkeditOff,
+        fileoff: linkeditOff,
+        filesize: fileSize - linkeditOff,
+        maxprot: 1,
+        initprot: 1,
+        nsects: 0,
+        flags: 0,
+      )).bytes,
+      macho
+          .buildLcSymtab(
+            symoff: symoff,
+            nsyms: names.length,
+            stroff: stroff,
+            strsize: strBytes.length,
+          )
+          .bytes,
+      dysymtab.buffer.asUint8List(),
+      dyldCmd,
+      tableCommand(macho.lcFunctionStarts, funcOff, funcStarts.length),
+      tableCommand(macho.lcDataInCode, dicOff, dataInCode.length),
+      tableCommand(macho.lcDyldExportsTrie, trieOff, trie.length),
+      tableCommand(macho.lcDyldChainedFixups, chainedOff, chained.length),
+      macho.buildLcUuid(_patternBytes(7, 16)).bytes,
+      macho.buildLcIdDylib('@rpath/Strip.dylib').bytes,
+      tableCommand(macho.lcCodeSignature, sigOff, sigDatasize),
+    ];
+    var sizeofcmds = 0;
+    for (final c in commands) {
+      sizeofcmds += c.length;
+    }
+
+    final buf = Uint8List(fileSize);
+    for (var i = 0; i < linkeditOff; i++) {
+      buf[i] = (i * 31 + 7) & 0xff;
+    }
+    final bd = ByteData.sublistView(buf);
+    bd.setUint32(0, macho.mhMagic64, Endian.little);
+    bd.setUint32(4, macho.cpuTypeArm64, Endian.little);
+    bd.setUint32(8, macho.cpuSubtypeArm64All, Endian.little);
+    bd.setUint32(12, macho.mhDylib, Endian.little);
+    bd.setUint32(16, commands.length, Endian.little);
+    bd.setUint32(20, sizeofcmds, Endian.little);
+    bd.setUint32(24, macho.mhNoReexportedDylibs, Endian.little);
+    bd.setUint32(28, 0, Endian.little);
+    var off = macho.mhHeaderSize64;
+    for (final c in commands) {
+      buf.setRange(off, off + c.length, c);
+      off += c.length;
+    }
+    buf.setRange(symoff, symoff + symTab.length, symTab);
+    buf.setRange(stroff, stroff + strBytes.length, strBytes);
+    buf.setRange(
+      indirectOff,
+      indirectOff + 12,
+      indirect.buffer.asUint8List(),
+    );
+    final blobs = [
+      rebase,
+      bind,
+      weak,
+      lazy,
+      export,
+      funcStarts,
+      dataInCode,
+      trie,
+    ];
+    final blobOffs = [
+      rebaseOff,
+      bindOff,
+      weakOff,
+      lazyOff,
+      exportOff,
+      funcOff,
+      dicOff,
+      trieOff,
+    ];
+    for (var i = 0; i < blobs.length; i++) {
+      buf.setRange(blobOffs[i], blobOffs[i] + blobs[i].length, blobs[i]);
+    }
+    buf.setRange(chainedOff, chainedOff + chained.length, chained);
+
+    // The embedded signature: SuperBlob with a requirements blob and one
+    // CodeDirectory (zeroed hashes; the patch step recomputes them).
+    var sigCursor = sigOff + 12 + nBlobs * 8;
+    bd.setUint32(sigOff, macho.csMagicEmbeddedSignature, Endian.big);
+    bd.setUint32(sigOff + 4, superLength, Endian.big);
+    bd.setUint32(sigOff + 8, nBlobs, Endian.big);
+    bd.setUint32(sigOff + 12, 2, Endian.big);
+    bd.setUint32(sigOff + 16, sigCursor - sigOff, Endian.big);
+    buf.setRange(
+      sigCursor,
+      sigCursor + requirementsBlob.length,
+      requirementsBlob,
+    );
+    sigCursor += requirementsBlob.length;
+    bd.setUint32(sigOff + 20, 0, Endian.big);
+    bd.setUint32(sigOff + 24, sigCursor - sigOff, Endian.big);
+    final cdOff = sigCursor;
+    bd.setUint32(cdOff, macho.csMagicCodeDirectory, Endian.big);
+    bd.setUint32(cdOff + 4, cdLength, Endian.big);
+    bd.setUint32(cdOff + 8, 0x20400, Endian.big);
+    bd.setUint32(cdOff + 12, 0x20002, Endian.big);
+    bd.setUint32(cdOff + 16, 128, Endian.big); // hashOffset
+    bd.setUint32(cdOff + 20, 88, Endian.big); // identOffset
+    bd.setUint32(cdOff + 24, 1, Endian.big); // nSpecialSlots
+    bd.setUint32(cdOff + 28, nSlots, Endian.big);
+    bd.setUint32(cdOff + 32, sigOff, Endian.big); // codeLimit
+    bd.setUint8(cdOff + 36, 32);
+    bd.setUint8(cdOff + 37, 2); // SHA-256
+    bd.setUint8(cdOff + 38, 0);
+    bd.setUint8(cdOff + 39, 12); // 4096-byte pages
+    bd.setUint32(cdOff + 40, 0, Endian.big);
+    bd.setUint64(
+      cdOff + 56,
+      0xdeadbeefdeadbeef,
+      Endian.big,
+    ); // stale codeLimit64
+    bd.setUint64(cdOff + 64, 0x1000, Endian.big); // execSegBase
+    bd.setUint64(cdOff + 72, 0x2000, Endian.big); // execSegLimit
+    bd.setUint64(cdOff + 80, 3, Endian.big); // execSegFlags
+    buf.setRange(cdOff + 88, cdOff + 93, ascii.encode('test\x00'));
+    buf.setRange(cdOff + 96, cdOff + 128, specialSlot);
+    if (cmsTrailer) {
+      buf.setRange(
+        sigOff + superLength,
+        sigOff + superLength + 24,
+        _patternBytes(31, 24),
+      );
+    }
+    return (
+      bytes: buf,
+      linkeditOff: linkeditOff,
+      dyldRanges: [rebase, bind, weak, lazy, export],
+      functionStarts: funcStarts,
+      dataInCode: dataInCode,
+      exportsTrie: trie,
+      chainedFixups: chained,
+      specialSlot: specialSlot,
+      requirements: requirements,
+    );
+  }
+
+  /// The five `(offset, size)` pairs of an `LC_DYLD_INFO` command body.
+  List<(int, int)> _dyldPairs(Uint8List cmdBytes) {
+    final bd = ByteData.sublistView(cmdBytes);
+    return [
+      for (var field = 8; field < 48; field += 8)
+        (
+          bd.getUint32(field, Endian.little),
+          bd.getUint32(field + 4, Endian.little),
+        ),
+    ];
+  }
+
+  /// The `(offset, size)` pair of a single-range linkedit command body.
+  (int, int) _singleRange(Uint8List cmdBytes) {
+    final bd = ByteData.sublistView(cmdBytes);
+    return (bd.getUint32(8, Endian.little), bd.getUint32(12, Endian.little));
+  }
+
+  /// Every relocatable `(offset, size)` range the load commands of [bytes] name.
+  List<(int, int)> _allLinkeditRanges(Uint8List bytes) {
+    final ranges = <(int, int)>[];
+    for (final lc in macho.parseLoadCommands(bytes)) {
+      if (lc.cmd == macho.lcSymtab) {
+        final bd = ByteData.sublistView(lc.bytes);
+        ranges.add((
+          bd.getUint32(8, Endian.little),
+          bd.getUint32(12, Endian.little) * 16,
+        ));
+        ranges.add((
+          bd.getUint32(16, Endian.little),
+          bd.getUint32(20, Endian.little),
+        ));
+      } else if (lc.cmd == macho.lcDysymtab) {
+        final bd = ByteData.sublistView(lc.bytes);
+        ranges.add((
+          bd.getUint32(56, Endian.little),
+          bd.getUint32(60, Endian.little) * 4,
+        ));
+      } else if (lc.cmd == macho.lcDyldInfo || lc.cmd == macho.lcDyldInfoOnly) {
+        ranges.addAll(_dyldPairs(lc.bytes));
+      } else if (lc.cmd == macho.lcFunctionStarts ||
+          lc.cmd == macho.lcDataInCode ||
+          lc.cmd == macho.lcDyldExportsTrie ||
+          lc.cmd == macho.lcDyldChainedFixups ||
+          lc.cmd == macho.lcCodeSignature) {
+        ranges.add(_singleRange(lc.bytes));
+      }
+    }
+    return ranges;
+  }
+
+  /// Fails the test when any linkedit range of [bytes] escapes `__LINKEDIT` or
+  /// overlaps another range: the strip must never point a command at reused
+  /// bytes.
+  void _expectLinkeditSound(Uint8List bytes, int linkeditOff) {
+    final ranges = [
+      for (final r in _allLinkeditRanges(bytes))
+        if (r.$2 != 0) r,
+    ];
+    for (final r in ranges) {
+      expect(r.$1, greaterThanOrEqualTo(linkeditOff));
+      expect(r.$1 + r.$2, lessThanOrEqualTo(bytes.length));
+    }
+    ranges.sort((a, b) => a.$1.compareTo(b.$1));
+    for (var i = 1; i < ranges.length; i++) {
+      expect(
+        ranges[i].$1,
+        greaterThanOrEqualTo(ranges[i - 1].$1 + ranges[i - 1].$2),
+      );
+    }
+  }
+
+  /// Fails unless the embedded signature of [bytes] is a valid rebuild: the
+  /// `codeLimit` names the signature offset, the slot count covers it, every
+  /// page hash matches, the identifier/flags/special slot/requirements/execSeg
+  /// words survive, and `codeLimit64` is zeroed.
+  void _expectValidStripSignature(
+    Uint8List bytes, {
+    required Uint8List specialSlot,
+    required Uint8List requirements,
+  }) {
+    final cmds = macho.parseLoadCommands(bytes);
+    final sigLc = cmds.singleWhere((c) => c.cmd == macho.lcCodeSignature);
+    final sigBd = ByteData.sublistView(sigLc.bytes);
+    final dataoff = sigBd.getUint32(8, Endian.little);
+    final datasize = sigBd.getUint32(12, Endian.little);
+    final blob = bytes.sublist(dataoff, dataoff + datasize);
+    final bbd = ByteData.sublistView(blob);
+    expect(bbd.getUint32(0, Endian.big), macho.csMagicEmbeddedSignature);
+    final count = bbd.getUint32(8, Endian.big);
+    var cdOff = -1;
+    var reqOff = -1;
+    var reqLength = 0;
+    expect(count, 2);
+    for (var i = 0; i < count; i++) {
+      final type = bbd.getUint32(12 + i * 8, Endian.big);
+      final at = bbd.getUint32(12 + i * 8 + 4, Endian.big);
+      if (type == 2) {
+        reqOff = at;
+        reqLength = bbd.getUint32(at + 4, Endian.big);
+      } else if (type == 0) {
+        cdOff = at;
+      }
+    }
+    expect(cdOff, greaterThanOrEqualTo(0));
+    expect(reqOff, greaterThanOrEqualTo(0));
+    expect(reqLength, requirements.length + 8);
+    expect(blob.sublist(reqOff + 8, reqOff + reqLength), equals(requirements));
+
+    final cdBd = ByteData.sublistView(blob, cdOff, cdOff + 64);
+    expect(cdBd.getUint32(0, Endian.big), macho.csMagicCodeDirectory);
+    expect(cdBd.getUint32(8, Endian.big), 0x20400);
+    expect(cdBd.getUint32(12, Endian.big), 0x20002);
+    expect(cdBd.getUint32(24, Endian.big), 1); // one special slot
+    final slots = cdBd.getUint32(28, Endian.big);
+    expect(slots, (dataoff + 0xfff) ~/ 0x1000);
+    expect(cdBd.getUint32(32, Endian.big), dataoff); // codeLimit
+    expect(cdBd.getUint8(36), 32);
+    expect(cdBd.getUint8(37), 2); // SHA-256
+    expect(cdBd.getUint8(39), 12);
+    expect(cdBd.getUint64(56, Endian.big), 0); // zeroed codeLimit64
+    final execBd = ByteData.sublistView(blob, cdOff + 64, cdOff + 88);
+    expect(execBd.getUint64(0, Endian.big), 0x1000);
+    expect(execBd.getUint64(8, Endian.big), 0x2000);
+    expect(execBd.getUint64(16, Endian.big), 3);
+
+    final hashOffset = cdBd.getUint32(16, Endian.big);
+    final identOffset = cdBd.getUint32(20, Endian.big);
+    expect(_readCString(blob, cdOff + identOffset), 'test');
+    final hashesStart = cdOff + hashOffset - 32;
+    expect(blob.sublist(hashesStart, hashesStart + 32), equals(specialSlot));
+    for (var slot = 0; slot < slots; slot++) {
+      final start = slot * 0x1000;
+      var end = start + 0x1000;
+      if (end > dataoff) end = dataoff;
+      final want = macho.sha256(Uint8List.sublistView(bytes, start, end));
+      final got = blob.sublist(
+        hashesStart + 32 + slot * 32,
+        hashesStart + 64 + slot * 32,
+      );
+      expect(got, equals(want), reason: 'page $slot hash');
+    }
+
+    // The `__LINKEDIT` segment tracks the new file size.
+    for (final lc in cmds) {
+      if (lc.cmd != macho.lcSegment64) continue;
+      final name = ascii.decode(lc.bytes.sublist(8, 24)).split('\x00').first;
+      if (name != '__LINKEDIT') continue;
+      final segBd = ByteData.sublistView(lc.bytes);
+      final fileoff = segBd.getUint64(40, Endian.little);
+      expect(segBd.getUint64(48, Endian.little), bytes.length - fileoff);
+    }
+  }
+
+  /// Returns [bytes] with [cmd] appended to its load commands.
+  Uint8List _withAppendedCommand(Uint8List bytes, Uint8List cmd) {
+    final cmds = macho.parseLoadCommands(bytes);
+    var sizeofcmds = 0;
+    for (final c in cmds) {
+      sizeofcmds += c.cmdsize;
+    }
+    final out = Uint8List.fromList(bytes);
+    final bd = ByteData.sublistView(out);
+    out.setRange(
+      macho.mhHeaderSize64 + sizeofcmds,
+      macho.mhHeaderSize64 + sizeofcmds + cmd.length,
+      cmd,
+    );
+    bd.setUint32(16, cmds.length + 1, Endian.little);
+    bd.setUint32(20, sizeofcmds + cmd.length, Endian.little);
+    return out;
+  }
+
+  /// Builds a header-only 64-bit Mach-O with no `LC_SYMTAB`.
+  Uint8List _buildHeaderOnlyMachO() {
+    final commands = [
+      macho.buildLcUuid(_patternBytes(7, 16)).bytes,
+      macho.buildLcIdDylib('@rpath/Bare.dylib').bytes,
+    ];
+    var sizeofcmds = 0;
+    for (final c in commands) {
+      sizeofcmds += c.length;
+    }
+    final buf = Uint8List(macho.mhHeaderSize64 + sizeofcmds);
+    final bd = ByteData.sublistView(buf);
+    bd.setUint32(0, macho.mhMagic64, Endian.little);
+    bd.setUint32(4, macho.cpuTypeArm64, Endian.little);
+    bd.setUint32(8, macho.cpuSubtypeArm64All, Endian.little);
+    bd.setUint32(12, macho.mhDylib, Endian.little);
+    bd.setUint32(16, commands.length, Endian.little);
+    bd.setUint32(20, sizeofcmds, Endian.little);
+    bd.setUint32(24, macho.mhNoReexportedDylibs, Endian.little);
+    var off = macho.mhHeaderSize64;
+    for (final c in commands) {
+      buf.setRange(off, off + c.length, c);
+      off += c.length;
+    }
+    return buf;
+  }
+
+  /// Runs the COV-24 strip-integrity checks over a fixture using [dyldInfoOnly]
+  /// for the dyld table command: every moved range keeps its bytes, the ranges
+  /// never overlap, the signature is rebuilt over the shrunk layout, and a
+  /// retag of the stripped binary re-signs cleanly.
+  void _checkStripIntegrity({required bool dyldInfoOnly}) {
+    final input = _buildStripIntegrityDylib(dyldInfoOnly: dyldInfoOnly);
+    final stripped = macho.patchMachO(
+      input.bytes,
+      macho.PatchOptions(stripSymbols: true),
+    );
+
+    // More than two pages of locals and stabs are gone.
+    expect(
+      input.bytes.length - stripped.length,
+      greaterThanOrEqualTo(2 * 0x1000),
+    );
+
+    final cmds = macho.parseLoadCommands(stripped);
+    final dyldLc = cmds.singleWhere(
+      (c) => c.cmd == (dyldInfoOnly ? macho.lcDyldInfoOnly : macho.lcDyldInfo),
+    );
+    final pairs = _dyldPairs(dyldLc.bytes);
+    expect(pairs.length, 5);
+    for (var i = 0; i < 5; i++) {
+      expect(
+        stripped.sublist(pairs[i].$1, pairs[i].$1 + pairs[i].$2),
+        equals(input.dyldRanges[i]),
+      );
+    }
+
+    // The other table payloads move down byte-identical too.
+    Uint8List moved(int cmd) {
+      final lc = cmds.singleWhere((c) => c.cmd == cmd);
+      final range = _singleRange(lc.bytes);
+      return stripped.sublist(range.$1, range.$1 + range.$2);
+    }
+
+    expect(moved(macho.lcFunctionStarts), equals(input.functionStarts));
+    expect(moved(macho.lcDataInCode), equals(input.dataInCode));
+    expect(moved(macho.lcDyldExportsTrie), equals(input.exportsTrie));
+    expect(moved(macho.lcDyldChainedFixups), equals(input.chainedFixups));
+
+    _expectLinkeditSound(stripped, input.linkeditOff);
+    _expectValidStripSignature(
+      stripped,
+      specialSlot: input.specialSlot,
+      requirements: input.requirements,
+    );
+
+    // Only the two exports and the undefined import survive, defined first.
+    expect(_readTestSymtab(stripped).names, [
+      '_kDartSnapshotText',
+      '_kDartSnapshotData',
+      '_printf',
+    ]);
+    expect(_readTestDysymtabGroups(stripped), [0, 0, 0, 2, 2, 1]);
+    expect(_readTestIndirect(stripped), [
+      0,
+      macho.indirectSymbolAbs,
+      macho.indirectSymbolLocal,
+    ]);
+
+    // The UUID and install name survive the strip.
+    expect(
+      cmds.where((c) => c.cmd == macho.lcUuid).single.bytes,
+      equals(
+        macho
+            .parseLoadCommands(input.bytes)
+            .singleWhere((c) => c.cmd == macho.lcUuid)
+            .bytes,
+      ),
+    );
+    expect(
+      _readCString(
+        cmds.singleWhere((c) => c.cmd == macho.lcIdDylib).bytes,
+        24,
+      ),
+      '@rpath/Strip.dylib',
+    );
+
+    // A retag of the stripped binary re-signs over the edited layout.
+    final retagged = macho.patchMachO(
+      stripped,
+      macho.PatchOptions(installName: '@rpath/Retagged.dylib'),
+    );
+    final retaggedCmds = macho.parseLoadCommands(retagged);
+    expect(
+      _readCString(
+        retaggedCmds.singleWhere((c) => c.cmd == macho.lcIdDylib).bytes,
+        24,
+      ),
+      '@rpath/Retagged.dylib',
+    );
+    _expectLinkeditSound(retagged, input.linkeditOff);
+    _expectValidStripSignature(
+      retagged,
+      specialSlot: input.specialSlot,
+      requirements: input.requirements,
+    );
+  }
+
+  group('stripIntegrity (COV-24)', () {
+    test('strip moves all five LC_DYLD_INFO ranges byte-identical', () {
+      _checkStripIntegrity(dyldInfoOnly: false);
+    });
+
+    test('strip moves all five LC_DYLD_INFO_ONLY ranges byte-identical', () {
+      _checkStripIntegrity(dyldInfoOnly: true);
+    });
+
+    test('strip refuses a load command pointing into __LINKEDIT', () {
+      final input = _buildStripIntegrityDylib(dyldInfoOnly: false);
+      // LC_TWOLEVEL_HINTS (0x16) carries an (offset, nhints) pair at +8/+12.
+      final hints = ByteData(16)
+        ..setUint32(0, 0x16, Endian.little)
+        ..setUint32(4, 16, Endian.little)
+        ..setUint32(8, input.linkeditOff + 64, Endian.little)
+        ..setUint32(12, 8, Endian.little);
+      final boobyTrapped = _withAppendedCommand(
+        input.bytes,
+        hints.buffer.asUint8List(),
+      );
+      expect(
+        () => macho.patchMachO(
+          boobyTrapped,
+          macho.PatchOptions(stripSymbols: true),
+        ),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            contains('__LINKEDIT'),
+          ),
+        ),
+      );
+    });
+
+    test('patch refuses a non-SHA-256 CodeDirectory', () {
+      final input = _buildStripIntegrityDylib(dyldInfoOnly: false);
+      final cmds = macho.parseLoadCommands(input.bytes);
+      final sigLc = cmds.singleWhere((c) => c.cmd == macho.lcCodeSignature);
+      final sigBd = ByteData.sublistView(sigLc.bytes);
+      final dataoff = sigBd.getUint32(8, Endian.little);
+      final blob = ByteData.sublistView(input.bytes, dataoff);
+      final count = blob.getUint32(8, Endian.big);
+      var cdOff = -1;
+      for (var i = 0; i < count; i++) {
+        if (blob.getUint32(12 + i * 8, Endian.big) == 0 &&
+            ByteData.sublistView(
+                  input.bytes,
+                  dataoff + blob.getUint32(12 + i * 8 + 4, Endian.big),
+                ).getUint32(0, Endian.big) ==
+                macho.csMagicCodeDirectory) {
+          cdOff = dataoff + blob.getUint32(12 + i * 8 + 4, Endian.big);
+        }
+      }
+      expect(cdOff, greaterThanOrEqualTo(0));
+      final doctored = Uint8List.fromList(input.bytes);
+      doctored[cdOff + 37] = 1; // SHA-1: unhashable by the pure-Dart signer
+      expect(
+        () => macho.patchMachO(doctored, macho.PatchOptions()),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            contains('hash type'),
+          ),
+        ),
+      );
+    });
+
+    test('patch refuses a CMS signature blob', () {
+      final input = _buildStripIntegrityDylib(
+        dyldInfoOnly: false,
+        cmsTrailer: true,
+      );
+      expect(
+        () => macho.patchMachO(input.bytes, macho.PatchOptions()),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            contains('CMS'),
+          ),
+        ),
+      );
+    });
+
+    test('strip leaves a binary without LC_SYMTAB unchanged', () {
+      final input = _buildHeaderOnlyMachO();
+      final stripped = macho.patchMachO(
+        input,
+        macho.PatchOptions(stripSymbols: true),
+      );
+      expect(stripped, equals(input));
+    });
+  });
+
   group('CLI', () {
     late Directory tempDir;
 
