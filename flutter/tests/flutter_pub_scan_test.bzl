@@ -145,7 +145,7 @@ def _walk_runs_after_extraction_test_impl(ctx):
 
     asserts.equals(env, "", result)
     asserts.true(env, events.index("extract:_archive.tar.gz") < events.index("walk:ok_clean"), events)
-    asserts.true(env, events.index("scan:_archive.tar.gz:ok_clean") < events.index("extract"), events)
+    asserts.true(env, events.index("scan:_archive.tar.gz:ok_clean") < events.index("extract:_archive.tar.gz"), events)
 
     return unittest.end(env)
 
