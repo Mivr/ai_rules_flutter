@@ -801,7 +801,10 @@ def _case_probe_needs_readdir_evidence_test_impl(ctx):
     not hold, so the host folds case; on such a host a target outside
     the workspace only by case still counts as inside. Two case-variant
     directories listed side by side prove a case-sensitive host instead,
-    and an outside target differing only by case is refused.
+    and an outside target differing only by case is refused. Only the
+    deepest cased segment is flipped, so a lowercase package under a
+    mixed-case parent (or cased letters only in an ancestor) still proves
+    a folding host, while a letterless path answers False everywhere.
     """
     env = unittest.begin(ctx)
     folded = _make_mock_link_ctx({"mypkg": {"lib": {}}}, path_value = "mypkg", package_name = "mypkg", case_insensitive_fs = True)
@@ -810,6 +813,16 @@ def _case_probe_needs_readdir_evidence_test_impl(ctx):
     listed = _make_mock_link_ctx({"mypkg": {"lib": {}}, "MYPKG": {"lib": {}}}, path_value = "mypkg", package_name = "mypkg")
     asserts.false(env, detect_case_insensitive_host(listed.ctx, ["mypkg"]))
     asserts.true(env, path_spoke_resolves_outside("/x/ws", "/x/WS/secret", False))
+    mixed_folded = _make_mock_link_ctx({"Pkgs": {"casepkg": {"lib": {}}}}, path_value = "Pkgs/casepkg", package_name = "casepkg", case_insensitive_fs = True)
+    asserts.true(env, detect_case_insensitive_host(mixed_folded.ctx, ["Pkgs", "casepkg"]))
+    ancestor_folded = _make_mock_link_ctx({"Pkgs": {"123": {"lib": {}}}}, path_value = "Pkgs/123", package_name = "123", case_insensitive_fs = True)
+    asserts.true(env, detect_case_insensitive_host(ancestor_folded.ctx, ["Pkgs", "123"]))
+    mixed_listed = _make_mock_link_ctx({"Pkgs": {"casepkg": {"lib": {}}}, "pkgs": {"casepkg": {"lib": {}}}}, path_value = "Pkgs/casepkg", package_name = "casepkg")
+    asserts.false(env, detect_case_insensitive_host(mixed_listed.ctx, ["Pkgs", "casepkg"]))
+    mixed_only = _make_mock_link_ctx({"Pkgs": {"casepkg": {"lib": {}}}}, path_value = "Pkgs/casepkg", package_name = "casepkg")
+    asserts.false(env, detect_case_insensitive_host(mixed_only.ctx, ["Pkgs", "casepkg"]))
+    letterless = _make_mock_link_ctx({"123": {"lib": {}}}, path_value = "123", package_name = "123", case_insensitive_fs = True)
+    asserts.false(env, detect_case_insensitive_host(letterless.ctx, ["123"]))
     return unittest.end(env)
 
 case_probe_needs_readdir_evidence_test = unittest.make(_case_probe_needs_readdir_evidence_test_impl)
