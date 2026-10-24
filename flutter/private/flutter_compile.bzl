@@ -7,7 +7,7 @@ Flutter compilation differs from vanilla Dart in that it uses:
 
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("//flutter:providers.bzl", "resolve_exec_dart_vm", "resolve_flutter_sdk_info")
-load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "app_scheme_location", "stage_generated_inputs", "validate_filesystem_roots")
+load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "app_scheme_location", "app_scheme_rel_path", "stage_generated_inputs", "validate_filesystem_roots")
 load(
     "//flutter/private:flutter_compile_params.bzl",
     _flutter_kernel_dills = "flutter_kernel_dills",
@@ -396,32 +396,36 @@ def _add_kernel_mode_args(ctx, args, aot, defines):
     for d in defines:
         args.add("-D" + d)
 
-def _mount_kernel_sources(ctx, args, compile_sources, output, filesystem_roots, incr_worker):
-    """Stages declared inputs and mounts the roots the compile resolves under.
+def _mount_kernel_sources(ctx, args, compile_sources, output, filesystem_roots):
+    """Stages generated inputs and mounts the roots the compile resolves under.
 
-    Stage every declared input into a per-action staging root and mount only
-    it under APP_SCHEME — never the exec root (`.`) and never
-    `ctx.bin_dir.path`. Mounting either lets the compiler read files the
-    action did not declare: a `file:` directive reads them straight off the
-    host under every strategy, and Bazel caches the stale result. Behind the
-    staging root an undeclared file is not there to be read whatever its
-    spelling, and `kernel_filter` refuses disallowed directives and verifies
-    the compiler's read set on top. Staging by workspace path keeps every
-    `org-dartlang-app:///` URI (package roots, the entrypoint, the
-    registrant) resolving where it did under `.`.
+    Stages only the generated inputs into a per-action staging root and mounts
+    it first under APP_SCHEME, then the exec root (`.`) for the sources, which
+    are declared as themselves — one `ctx.actions.symlink` per generated file,
+    never per source. The staging root sorts first so a generated file keeps
+    precedence over a source at the same app path. Staging by workspace path
+    keeps every `org-dartlang-app:///` URI (package roots, the entrypoint, the
+    registrant) resolving where it did when every source was staged.
+
+    Under local and worker strategies undeclared files are now visible to the
+    compiler through the exec root. Hermeticity rests on three layers instead
+    of invisibility: the directive guard refuses disallowed directives before
+    the compile, `kernel_filter` verifies the frontend's dependency report
+    against the declared-inputs manifest after it (failing closed on anything
+    it cannot verify), and the sandbox — or remote execution — exposes only
+    declared inputs.
 
     Returns `struct(stage, mounted_roots)`: the staging result and the
     exec-root-relative roots mounted via `--filesystem-root`.
     """
-    stage = stage_generated_inputs(ctx, compile_sources, output.basename, include_sources = True, stable_root = incr_worker)
+    stage = stage_generated_inputs(ctx, compile_sources, output.basename, include_sources = False)
     mounted_roots = []
     if stage.root != None:
         mounted_roots.append(stage.root)
+    mounted_roots.append(".")
     for r in filesystem_roots:
         if r != None and r != "" and r != "." and r not in mounted_roots:
             mounted_roots.append(r)
-    if not mounted_roots:
-        fail("%s: no filesystem root to compile under: staging is empty and no filesystem_roots were given" % ctx.label)
     for root in mounted_roots:
         args.add("--filesystem-root", root)
     args.add("--filesystem-scheme", APP_SCHEME)
@@ -486,28 +490,52 @@ def _kernel_action_inputs(inputs, mount):
         outputs.append(inputs.recorded_uses)
     return struct(direct_inputs = direct_inputs, outputs = outputs)
 
+def _kernel_entrypoint_spellings(main, mount):
+    """The entrypoint's declared spellings for the dependency-report check.
+
+    The entrypoint's exec path, plus its stage twin when one was staged (a
+    generated entrypoint). `kernel_filter` and the incremental worker refuse a
+    compile whose report names none of these.
+
+    Args:
+        main: The entrypoint `.dart` source File.
+        mount: The `_mount_kernel_sources` result carrying the staging root.
+
+    Returns:
+        The list of exec-root-relative paths the report may name the
+        entrypoint under.
+    """
+    spellings = [main.path]
+    if mount.stage.root != None:
+        twin = mount.stage.root + "/" + app_scheme_rel_path(main)
+        if twin in [f.path for f in mount.stage.files]:
+            spellings.append(twin)
+    return spellings
+
 def _write_kernel_manifest(ctx, manifest, inputs, mount):
     """Writes the declared-inputs manifest `kernel_filter` guards against.
 
     Args:
         ctx: The rule context.
         manifest: The manifest File to write.
-        inputs: struct with the compile inputs: `compile_sources`,
+        inputs: struct with the compile inputs: `compile_sources`, `main`,
             `package_config`, `platform_dill`, `from_dill`, `import_dill`,
             `native_assets_manifest` and `output`.
         mount: The `_mount_kernel_sources` result carrying the staging root
             and the mounted filesystem roots.
 
-    The declared sources, then the staging root's symlinks to them, then
-    every other file the compiler may read (the package config, the platform
-    dill, the summary dills, the native-assets manifest), the mounted
-    filesystem roots the directive guard resolves through, and the output
+    The declared sources, then the staging root's symlinks to the generated
+    inputs, then every other file the compiler may read (the package config,
+    the platform dill, the summary dills, the native-assets manifest), the
+    mounted filesystem roots the directive guard resolves through, the
+    entrypoint's declared spellings (its exec path, plus its stage twin when
+    staged) the report check requires the report to name, and the output
     dill the refusal path deletes. Every entry names a Starlark-declared
     `File` (or an action-constructed root/output string): `kernel_filter`
     derives nothing from the compile argv, so a flag smuggled into
     `vm_flags` or `extra_flags` cannot widen what the compile may read.
     Written by path so the tool reads the same files the compiler resolves
-    through the staging root.
+    through the mounted roots.
     """
     allowed_reads = [inputs.package_config, inputs.platform_dill]
     if inputs.from_dill != None:
@@ -526,6 +554,8 @@ def _write_kernel_manifest(ctx, manifest, inputs, mount):
             [f.path for f in allowed_reads] +
             ["# filesystem-roots"] +
             mount.mounted_roots +
+            ["# entrypoint"] +
+            _kernel_entrypoint_spellings(inputs.main, mount) +
             ["# output", inputs.output.path],
         ) + "\n",
     )
@@ -596,10 +626,9 @@ def flutter_kernel_compile_action(ctx, tools, sources, outputs, options, dills, 
     # The default entrypoint is the stable app-scheme URI, not `main`'s
     # exec path: compiling the exec path keys the root library by a
     # sandbox-specific `file://` URI, which poisons the whole dill with
-    # absolute host paths. `main` is always staged (see
-    # `compile_sources` below), so the URI resolves through the staging
-    # root. Callers passing an explicit URI — every stock rule — are
-    # unaffected.
+    # absolute host paths. A source `main` resolves through the mounted exec
+    # root, a generated one through the staging root. Callers passing an
+    # explicit URI — every stock rule — are unaffected.
     entrypoint_uri = _default_entrypoint_uri(
         entrypoint_uri = sources.entrypoint_uri,
         main = sources.main,
@@ -649,7 +678,6 @@ def flutter_kernel_compile_action(ctx, tools, sources, outputs, options, dills, 
         compile_sources,
         outputs.output,
         sources.filesystem_roots,
-        incr_worker,
     )
     inputs = struct(
         compile_sources = compile_sources,

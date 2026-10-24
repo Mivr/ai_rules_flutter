@@ -39,12 +39,19 @@ def flutter_kernel_sources(
         when the dev tool's incremental dill keys the library by the *same*
         URI as the running program.
       filesystem_roots: Extra exec-root-relative directories mounted under
-        `APP_SCHEME` alongside the staging root. The exec root itself is never
-        mounted: only declared inputs are staged, so an undeclared file is not
-        there for the compiler to read whatever its spelling. Every entry is
+        `APP_SCHEME` after the generated-only staging root and the exec root
+        (`.`), which the compile always mounts: sources are declared as
+        themselves and read in place, while only generated inputs are staged.
+        Undeclared files are visible through the exec root under local and
+        worker strategies, so hermeticity rests on three layers rather than
+        invisibility — the directive guard before the compile, the frontend's
+        dependency report verified against the declared-inputs manifest after
+        it, and the sandbox (or remote execution) exposing only declared
+        inputs. Every entry is
         validated at analysis like `extra_roots` — an absolute, empty, or
         `..`-escaping root fails the build naming the target, the parameter
-        and the value — and must be single-line. (`"."` entries are dropped.)
+        and the value — and must be single-line. (`"."` entries are dropped:
+        the exec root is already mounted.)
       native_assets_manifest: Optional `native_assets.json` File. Passed to
         the `frontend_server` via `--native-assets`. The frontend server
         embeds the manifest into the resulting kernel so the engine can
