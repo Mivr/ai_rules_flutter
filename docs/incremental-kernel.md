@@ -51,9 +51,10 @@ built from Dart (no host Python, no new downloads):
 - `worker` strategy: Bazel keeps the worker process alive, and the worker
   keeps one warm `frontend_server` per distinct compiler configuration
   (argv minus the output path). Repeated builds recompile only the changed
-  libraries. Staged `org-dartlang-app` deltas recompile by URI; any other
-  changed input restarts that server cold. Servers that fail, or whose
-  process dies, restart cold on the next request.
+  libraries. Declared `org-dartlang-app` deltas recompile by URI — staged
+  generated files through the stage root, sources read in place through the
+  mounted exec root; any other changed input restarts that server cold.
+  Servers that fail, or whose process dies, restart cold on the next request.
 - `sandboxed` / `local` / `remote` strategies: the same binary runs once
   per action (a fresh process that compiles cold, then applies rule F), so
   the output is identical without any persistent state.
@@ -71,4 +72,14 @@ with the compiler's diagnostics (or the refusal text), exactly as the
 stock action would. The next build resumes from the last accepted state:
 rejected recompiles are repaired by recompiling the same URIs again, so
 fixing the error and rebuilding converges without a cold restart unless an
-input outside the staged sources changed.
+input outside the declared sources changed.
+
+## Coverage
+
+The contract's goals map to suites: mount order and declared-once inputs to
+`//flutter/tests/kernel_mount/...`, the fail-closed report checks to the
+`runFiltered` tests in `flutter/private/tools/test/kernel_filter_test.dart`,
+and the worker's in-place mapping, twin dedupe, warm in-place delta, and
+mount-order precedence to `incr_fkc_worker_test.dart` (the `kernelMountContract`
+groups in both files pin the contract's shapes). The scratch suite beside the
+worker tests (`incr_fkc_scratch_test.dart`) is untouched and must stay green.

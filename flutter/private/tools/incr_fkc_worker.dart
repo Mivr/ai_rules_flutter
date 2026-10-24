@@ -13,11 +13,13 @@
 /// without it for a one-shot fresh-process run of the same protocol.
 ///
 /// A request whose inputs differ from the last accepted request only in
-/// staged Dart sources sends `recompile` with the changed sources' URIs (a
-/// delta), accepts, then `reset` plus an empty `recompile`; anything else (a
-/// new key, a changed non-source input, a dead server) starts cold. Every
-/// compile's read set is checked against the declared-inputs manifest, and a
-/// failed compile is rejected, so the server stays at the last good state.
+/// declared Dart sources sends `recompile` with the changed sources' URIs (a
+/// delta) — staged files through their stage root, sources read in place
+/// through the mounted exec root — accepts, then `reset` plus an empty
+/// `recompile`; anything else (a new key, a changed non-source input, a dead
+/// server) starts cold. Every compile's read set is checked against the
+/// declared-inputs manifest, and a failed compile is rejected, so the server
+/// stays at the last good state.
 ///
 /// Change detection reads file contents: request digests are ignored, so a
 /// stale digest never hides a change.
@@ -340,16 +342,27 @@ class IncrWorker {
   /// The refusal text for the cumulative read set, or null when clean. Uses
   /// the same messages as the batch path, decided by the manifest alone: a
   /// read under a `--filesystem-root` the argv names but the manifest does
-  /// not is refused, exactly like batch.
+  /// not is refused, exactly like batch. The report must also name a declared
+  /// source and the entrypoint under a declared spelling, like batch.
   String? _checkReads(Set<String> current, KernelInputsManifest manifest) {
     final lines = [for (final u in current.toList()..sort()) '+$u'];
+    if (lines.isEmpty) return noDependencyReadsMessage();
     final bad = findUndeclaredReads(
       lines,
       manifest.declared,
       manifest.extraAllowed,
     );
-    if (bad.isEmpty) return null;
-    return bad.map(undeclaredReadMessage).join('\n');
+    if (bad.isNotEmpty) {
+      return bad.map(undeclaredReadMessage).join('\n');
+    }
+    final noSource = checkNoDeclaredSourceReads(lines, manifest.declared);
+    if (noSource != null) return noSource;
+    final noEntry = checkMissingEntrypointRead(
+      lines,
+      entrypointSpellingCandidates(manifest),
+    );
+    if (noEntry != null) return noEntry;
+    return null;
   }
 
   void _deleteOutput(String? outputDill) {
@@ -592,14 +605,6 @@ class IncrWorker {
       await _drop(key);
       _deleteOutput(parts.outputRel);
       return (exitCode: 1, output: refusal);
-    }
-    if (state.currentReads.isEmpty) {
-      // A real compile reads at least its entrypoint: zero reads means the
-      // dependency report was silenced, so the build fails instead of
-      // caching unverified bytes.
-      await _drop(key);
-      _deleteOutput(parts.outputRel);
-      return (exitCode: 1, output: noDependencyReadsMessage());
     }
     state.contentHashes = current;
     final dst = _abs(parts.outputRel);

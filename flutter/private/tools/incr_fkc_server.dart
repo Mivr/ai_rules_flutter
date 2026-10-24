@@ -140,9 +140,47 @@ String normalizeWorkerPath(String path) {
   return slash.replaceFirst(RegExp(r'^(?:\./)+'), '');
 }
 
-/// The multi-root URI the compiler knows the staged file [path] by, or null
-/// when [path] sits under no filesystem [roots] and is not itself a staged
-/// input the compiler resolves.
+/// Whether [roots] mount the exec root: a `.` (or empty) root resolves every
+/// exec-root-relative path under the app scheme, so sources read in place
+/// have a delta URI.
+bool mountsExecRoot(List<String> roots) {
+  for (final rawRoot in roots) {
+    final r = normalizeWorkerPath(rawRoot);
+    if (r.isEmpty || r == '.') return true;
+  }
+  return false;
+}
+
+/// The app-scheme key of an in-place exec-root-relative path: workspace paths
+/// keep their spelling, while a generated file's `bazel-out/<config>/bin/`
+/// prefix strips to the workspace-relative path it is staged at — the same
+/// key its staged twin maps to, so the two spellings dedupe to one URI.
+String inPlaceSourceKey(String path) {
+  final bin = RegExp('^bazel-out/[^/]+/bin/').firstMatch(path);
+  if (bin != null) return path.substring(bin[0]!.length);
+  return path;
+}
+
+/// Whether [path] can name a file under the exec root: relative, non-empty,
+/// and climbing nowhere above it. Anything else maps to no URI, so the
+/// server restarts cold rather than recompiling a URI the compiler may not
+/// know.
+bool isInPlacePath(String path) {
+  if (path.isEmpty || path == '.') return false;
+  if (path.startsWith('/') || RegExp(r'^[a-zA-Z]:').hasMatch(path)) {
+    return false;
+  }
+  return !path.split('/').any((s) => s == '..');
+}
+
+/// The multi-root URI the compiler knows the file [path] by, or null when it
+/// names no file the compiler resolves.
+///
+/// A file under a filesystem [roots] entry maps through that root's prefix.
+/// Otherwise, when [roots] mount the exec root (`.`), an in-place
+/// exec-root-relative path maps to its app-scheme key: sources are declared
+/// as themselves and read in place, so a changed source carries its own URI
+/// with no staged twin.
 String? uriOfStaged(String path, List<String> roots) {
   final p = normalizeWorkerPath(path);
   for (final rawRoot in roots) {
@@ -152,7 +190,8 @@ String? uriOfStaged(String path, List<String> roots) {
       return incrAppSchemeRoot + p.substring(r.length + 1);
     }
   }
-  return null;
+  if (!mountsExecRoot(roots) || !isInPlacePath(p)) return null;
+  return incrAppSchemeRoot + inPlaceSourceKey(p);
 }
 
 /// How the worker reaches the changed inputs of one request.
@@ -167,27 +206,31 @@ typedef ChangedInputs = ({
 
 /// Sorts [changed] exec-root-relative paths into a delta or a cold restart.
 ///
-/// Changed staged `.dart` files recompile through their multi-root URIs. A
-/// changed `.dart` source behind a staged symlink carries no URI itself: its
-/// staged twin is in [changed] too and supplies the URI, so it is skipped
-/// here. Any other changed input (the package config, the platform dill, the
-/// flags, a non-`.dart` file, a `.dart` file under no root and in no manifest
-/// section) restarts the server cold. [manifestSources] holds the manifest's
-/// sources section.
+/// Changed `.dart` files recompile through their multi-root URIs: staged
+/// files through their stage root, and — when the roots mount the exec root
+/// (`.`) — sources read in place through their app-scheme key, with no
+/// staged twin. A generated file changed in place keys the same URI as its
+/// staged twin, so the pair dedupes to one recompile. Any other changed
+/// input (the package config, the platform dill, the flags, a non-`.dart`
+/// file, a `.dart` file under no root and in no manifest section) restarts
+/// the server cold, as does a manifest source that maps to no URI while the
+/// exec root stays unmounted — the legacy staged-twin world, where its twin
+/// carries the URI. [manifestSources] holds the manifest's sources section.
 ChangedInputs classifyChanged(
   List<String> changed,
   List<String> roots,
   Set<String> manifestSources,
 ) {
   final uris = <String>[];
+  final seenUris = <String>{};
   for (final p in changed) {
     if (p.endsWith('.dart')) {
       final uri = uriOfStaged(p, roots);
       if (uri != null) {
-        uris.add(uri);
+        if (seenUris.add(uri)) uris.add(uri);
         continue;
       }
-      if (manifestSources.contains(p)) {
+      if (!mountsExecRoot(roots) && manifestSources.contains(p)) {
         // The source behind a staged symlink: its staged twin carries the
         // URI.
         continue;

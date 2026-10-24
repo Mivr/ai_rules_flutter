@@ -282,7 +282,12 @@ void main() {
         'org-dartlang-app:///lib/a.dart',
       );
       expect(uriOfStaged('lib/a.dart', ['stage']), isNull);
-      expect(uriOfStaged('stage/lib/a.dart', ['.', '']), isNull);
+      // The mount world reads sources in place: under an exec-root mount an
+      // in-place path carries its own URI, so no staged twin is needed.
+      expect(
+        uriOfStaged('stage/lib/a.dart', ['.', '']),
+        'org-dartlang-app:///stage/lib/a.dart',
+      );
     });
 
     test('staged dart files become URIs, their source twins are skipped', () {
@@ -321,6 +326,76 @@ void main() {
       );
       expect(classified.restartReason, isNull);
       expect(classified.uris, ['org-dartlang-app:///lib/gone.dart']);
+    });
+
+    test('in-place sources map under an exec-root mount', () {
+      expect(
+        uriOfStaged('lib/a.dart', ['gen.stage', '.']),
+        'org-dartlang-app:///lib/a.dart',
+      );
+      expect(mountsExecRoot(['gen.stage', '.']), isTrue);
+      expect(mountsExecRoot(['gen.stage']), isFalse);
+      expect(isInPlacePath('lib/a.dart'), isTrue);
+      expect(isInPlacePath('../escape.dart'), isFalse);
+      expect(isInPlacePath('/abs/a.dart'), isFalse);
+    });
+
+    test('a generated file keys the same URI in place and staged', () {
+      // The in-place `bazel-out/<config>/bin/` path strips to the
+      // workspace-relative path it is staged at ...
+      expect(
+        inPlaceSourceKey('bazel-out/k8-fastbuild/bin/gen/foo.dart'),
+        'gen/foo.dart',
+      );
+      expect(inPlaceSourceKey('lib/a.dart'), 'lib/a.dart');
+      expect(
+        uriOfStaged('bazel-out/k8-fastbuild/bin/gen/foo.dart', [
+          'gen.stage',
+          '.',
+        ]),
+        'org-dartlang-app:///gen/foo.dart',
+      );
+      // ... so the pair dedupes to one delta URI.
+      final classified = classifyChanged(
+        ['bazel-out/k8-fastbuild/bin/gen/foo.dart', 'gen.stage/gen/foo.dart'],
+        ['gen.stage', '.'],
+        {'bazel-out/k8-fastbuild/bin/gen/foo.dart'},
+      );
+      expect(classified.restartReason, isNull);
+      expect(classified.uris, ['org-dartlang-app:///gen/foo.dart']);
+    });
+
+    test('a source beside its staged twin recompiles once', () {
+      final classified = classifyChanged(
+        ['lib/a.dart', 'gen.stage/lib/a.dart'],
+        ['gen.stage', '.'],
+        {'lib/a.dart'},
+      );
+      expect(classified.restartReason, isNull);
+      expect(classified.uris, ['org-dartlang-app:///lib/a.dart']);
+    });
+
+    test('an unmappable dart file still restarts cold', () {
+      expect(uriOfStaged('../escape.dart', ['.']), isNull);
+      final classified = classifyChanged(
+        ['../escape.dart'],
+        ['.'],
+        {'lib/main.dart'},
+      );
+      expect(classified.restartReason, '../escape.dart');
+    });
+  });
+
+  group('kernelMountContract', () {
+    // Goal G pins the mount order (the stage, then the exec root, then the
+    // filesystem_roots): a path under the stage maps through the stage even
+    // with the exec root mounted.
+    test('the stage wins over the exec root for a staged path', () {
+      expect(
+        uriOfStaged('gen.stage/gen/foo.dart', ['gen.stage', '.', 'sdk-root']),
+        'org-dartlang-app:///gen/foo.dart',
+      );
+      expect(mountsExecRoot(['gen.stage', '.', 'sdk-root']), isTrue);
     });
   });
 
@@ -424,6 +499,88 @@ void main() {
         h.write('stage/lib/a.dart', 'int get answer => 43;\n');
         h.write('lib/a.dart', 'int get answer => 43;\n');
         result = await worker.handleRequest(h.argv, h.inputs);
+        expect(result.exitCode, 0, reason: result.output);
+        expect(sessions, hasLength(1));
+        expect(sessions.single.commands, [
+          'compile package:app/main.dart',
+          'accept',
+          'reset+recompile package:app/main.dart []',
+          'accept',
+          'recompile package:app/main.dart [org-dartlang-app:///lib/a.dart]',
+          'accept',
+          'reset+recompile package:app/main.dart []',
+          'accept',
+        ]);
+      },
+    );
+
+    test(
+      'warm: an in-place-only edit recompiles with no staged twin',
+      () async {
+        // The mount world: the manifest stages generated files only and the
+        // roots mount the stage plus the exec root (`.`), so an edit to a
+        // source read in place carries its own URI.
+        h.write('gen.stage/gen/foo.dart', 'int get foo => 1;\n');
+        h.write(
+          'manifest.txt',
+          [
+            'lib/main.dart',
+            'lib/a.dart',
+            '# staged',
+            'gen.stage/gen/foo.dart',
+            '# allowed-reads',
+            'pkg_config.json',
+            'platform.dill',
+            '# filesystem-roots',
+            'gen.stage',
+            '.',
+            '# entrypoint',
+            'lib/main.dart',
+            '# output',
+            'out/app.dill',
+          ].join('\n'),
+        );
+        final reads = [
+          '+file://${h.cwd}/lib/main.dart',
+          '+file://${h.cwd}/lib/a.dart',
+          '+file://${h.cwd}/gen.stage/gen/foo.dart',
+          '+file://${h.cwd}/pkg_config.json',
+          '+file://${h.cwd}/platform.dill',
+        ];
+        CompileResult readOk() =>
+            (errors: 0, diagnostics: const [], depLines: reads);
+        final argv = [
+          '--declared-inputs',
+          'manifest.txt',
+          '--',
+          'fake-vm',
+          '--output-dill',
+          'out/app.dill',
+          '--filesystem-root',
+          'gen.stage',
+          '--filesystem-root',
+          '.',
+          '--packages',
+          'pkg_config.json',
+          'package:app/main.dart',
+        ];
+        final inputs = [
+          'manifest.txt',
+          'lib/main.dart',
+          'lib/a.dart',
+          'gen.stage/gen/foo.dart',
+          'pkg_config.json',
+          'platform.dill',
+        ];
+        worker = IncrWorker(
+          cwd: h.cwd,
+          sessions: factoryFor(() => [readOk(), readOk(), readOk(), readOk()]),
+        );
+        var result = await worker.handleRequest(argv, inputs);
+        expect(result.exitCode, 0, reason: result.output);
+        // Only the in-place source changes: there is no staged twin to edit.
+        h.write('lib/a.dart', 'int get answer => 43;\n');
+        result = await worker.handleRequest(argv, inputs);
         expect(result.exitCode, 0, reason: result.output);
         expect(sessions, hasLength(1));
         expect(sessions.single.commands, [

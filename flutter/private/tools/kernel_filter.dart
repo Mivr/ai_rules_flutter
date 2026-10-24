@@ -11,13 +11,21 @@
 /// against the declared inputs (`directive_guard.dart`): a directive that
 /// names no declared file — a `file:` URI in any spelling, any other
 /// unexpected scheme, or a relative URI climbing out of the declared inputs —
-/// fails the build, under every strategy. The compile mounts only its staging
-/// root, so an undeclared file is not there to be read whatever its spelling.
+/// fails the build, under every strategy. The compile mounts a generated-only
+/// stage plus the exec root, so under local and worker strategies undeclared
+/// files are visible to the compiler: hermeticity rests on three layers — the
+/// directive guard before the compile, the dependency report verified against
+/// the declared-inputs manifest after it (failing closed on anything it
+/// cannot verify), and the sandbox, or remote execution, which exposes only
+/// declared inputs.
 ///
 /// After the compiler runs, its `+file://` dependency lines are verified
 /// against the same manifest: a read of a file the manifest does not name
 /// fails the build instead of caching bytes Bazel never reruns on.
 /// The lines are dropped either way, so a successful build stays silent.
+/// The report is mandatory and fails closed: it must name a declared source
+/// and the entrypoint, in a declared spelling, or the compile fails and its
+/// output is deleted even when it exited 0.
 ///
 /// The report cannot be switched off: the tool appends its own
 /// `--print-incremental-dependencies` after the caller's flags (the last
@@ -221,13 +229,15 @@ List<String> withForcedDependencyReport(List<String> cmdArgs) {
 ///
 /// The manifest lists one exec-root-relative path per line in sections: the
 /// declared sources, then a `# staged` marker with the staging root's
-/// symlinks to them, then `# allowed-reads` with every other file the
-/// compiler may read (the package config, the platform dill, the summary
-/// dills, the native-assets manifest), then `# filesystem-roots` with the
-/// mounted roots the directive guard resolves through, then `# output` with
-/// the output dill. Written by `flutter_kernel_compile_action` from its
-/// Starlark `File` objects. Shared with the incremental worker, which guards
-/// and verifies against the same manifest.
+/// symlinks to the generated inputs, then `# allowed-reads` with every other
+/// file the compiler may read (the package config, the platform dill, the
+/// summary dills, the native-assets manifest), then `# filesystem-roots` with
+/// the mounted roots the directive guard resolves through, then
+/// `# entrypoint` with the entrypoint's declared spellings (its exec path,
+/// plus its stage twin when staged), then `# output` with the output dill.
+/// Written by `flutter_kernel_compile_action` from its Starlark `File`
+/// objects. Shared with the incremental worker, which guards and verifies
+/// against the same manifest.
 typedef KernelInputsManifest = ({
   /// Every path in the manifest's sources section, in order.
   List<String> sources,
@@ -242,6 +252,11 @@ typedef KernelInputsManifest = ({
   /// The manifest's `filesystem-roots` section.
   List<String> fsRoots,
 
+  /// The manifest's `entrypoint` section: the entrypoint's declared
+  /// spellings. Empty when the manifest predates the section; callers fall
+  /// back to the sources section's first entry (Starlark writes main first).
+  List<String> entrypoint,
+
   /// The manifest's `# output` entry, or null when absent.
   String? outputDill,
 });
@@ -252,6 +267,7 @@ KernelInputsManifest readKernelInputsManifest(String manifestPath) {
   final declared = <String>{};
   final extraAllowed = <String>{};
   final fsRoots = <String>[];
+  final entrypoint = <String>[];
   String? outputDill;
   var section = 'sources';
   for (final line in File(manifestPath).readAsLinesSync()) {
@@ -262,6 +278,7 @@ KernelInputsManifest readKernelInputsManifest(String manifestPath) {
         '# staged' => 'staged',
         '# allowed-reads' => 'reads',
         '# filesystem-roots' => 'roots',
+        '# entrypoint' => 'entry',
         '# output' => 'output',
         _ => 'unknown',
       };
@@ -277,6 +294,8 @@ KernelInputsManifest readKernelInputsManifest(String manifestPath) {
         extraAllowed.add(path);
       case 'roots':
         fsRoots.add(path);
+      case 'entry':
+        entrypoint.add(path);
       case 'output':
         outputDill ??= path;
       case 'unknown':
@@ -288,6 +307,7 @@ KernelInputsManifest readKernelInputsManifest(String manifestPath) {
     declared: declared,
     extraAllowed: extraAllowed,
     fsRoots: fsRoots,
+    entrypoint: entrypoint,
     outputDill: outputDill,
   );
 }
@@ -311,6 +331,69 @@ String noDependencyReadsMessage() =>
     'entrypoint: the report was silenced, and the compile controls '
     '`--print-incremental-dependencies` itself. Remove any silencer from '
     '`extra_flags` and rebuild.';
+
+/// The failure when a successful compile's report names no declared source:
+/// every read is an allowed non-source read, so the check has verified no
+/// program input. Shared with the incremental worker so both paths fail
+/// closed with the same message.
+String noDeclaredSourceReadsMessage() =>
+    'flutter: the compiler reported reads, but none names a declared source '
+    'of this compile, so the read-set check has verified no program input. '
+    'A real compile reads at least its entrypoint: the report is incomplete, '
+    'and the compile controls `--print-incremental-dependencies` itself. '
+    'Remove any silencer from `extra_flags` and rebuild.';
+
+/// The failure when a successful compile's report names the entrypoint under
+/// no declared spelling. Shared with the incremental worker so both paths
+/// fail closed with the same message.
+String missingEntrypointReadMessage(String entry) =>
+    'flutter: the compiler reported reads, but none names the entrypoint '
+    '$entry, so the read-set check has not seen the root library. A real '
+    'compile reads its entrypoint: the report is incomplete, and the compile '
+    'controls `--print-incremental-dependencies` itself. Remove any silencer '
+    'from `extra_flags` and rebuild.';
+
+/// The entrypoint's declared spellings from [manifest]: the explicit
+/// `# entrypoint` section, else the sources section's first entry (Starlark
+/// writes main first). Shared with the incremental worker so both paths
+/// require the same spellings.
+List<String> entrypointSpellingCandidates(KernelInputsManifest manifest) {
+  if (manifest.entrypoint.isNotEmpty) return manifest.entrypoint;
+  if (manifest.sources.isNotEmpty) return [manifest.sources.first];
+  return const [];
+}
+
+/// The refusal when none of the report's [lines] names a declared source, or
+/// null when at least one does. Entries naming no file under the compile's
+/// working directory fail the undeclared-read check first; this sees only
+/// what that check accepted. Shared with the incremental worker.
+String? checkNoDeclaredSourceReads(
+  List<String> lines,
+  Set<String> declared,
+) {
+  for (final line in lines) {
+    final rel = dependencyExecPath(line);
+    if (rel != null && declared.contains(rel)) return null;
+  }
+  return noDeclaredSourceReadsMessage();
+}
+
+/// The refusal when none of the report's [lines] names one of the
+/// entrypoint's declared [candidates], or null when one does. Shared with
+/// the incremental worker.
+String? checkMissingEntrypointRead(
+  List<String> lines,
+  List<String> candidates,
+) {
+  if (candidates.isEmpty) {
+    return missingEntrypointReadMessage('the entrypoint');
+  }
+  for (final line in lines) {
+    final rel = dependencyExecPath(line);
+    if (rel != null && candidates.contains(rel)) return null;
+  }
+  return missingEntrypointReadMessage(candidates.first);
+}
 
 Future<void> main(List<String> argv) async {
   exit(await runFiltered(argv, stdout, stderr));
@@ -407,31 +490,56 @@ int _reportCompilerFailure(
 
 /// Verifies a successful compile's dependency report against the manifest.
 ///
-/// Returns 1 after writing each refusal on [err] — deleting only the
-/// manifest's output, never a path the argv names — or null when every read
-/// is declared and the caller should print the filtered output.
+/// The report is mandatory and fails closed: zero reads, a read of a file
+/// the manifest does not name, no read of a declared source, or no read of
+/// the entrypoint under a declared spelling each fail the build. Returns 1
+/// after writing each refusal on [err] — deleting only the manifest's
+/// output, never a path the argv names — or null when every read is declared
+/// and the caller should print the filtered output.
 int? _refuseUndeclaredReads(
   ({List<String> reads, String rest}) split,
-  Set<String> declared,
-  Set<String> extraAllowed,
-  String? outputDill,
+  KernelInputsManifest manifest,
   StringSink err,
 ) {
   if (split.reads.isEmpty) {
     err.writeln(noDependencyReadsMessage());
-    _deleteRefusedOutput(outputDill);
+    _deleteRefusedOutput(manifest.outputDill);
     return 1;
   }
-  final undeclared = findUndeclaredReads(split.reads, declared, extraAllowed);
-  if (undeclared.isEmpty) return null;
-  for (final line in undeclared) {
-    err.writeln(undeclaredReadMessage(line));
+  final undeclared = findUndeclaredReads(
+    split.reads,
+    manifest.declared,
+    manifest.extraAllowed,
+  );
+  if (undeclared.isNotEmpty) {
+    for (final line in undeclared) {
+      err.writeln(undeclaredReadMessage(line));
+    }
+    // Delete only the manifest's output: an `--output-dill` smuggled into
+    // the argv names no file here, so the refusal cannot be redirected at
+    // (or away from) another path.
+    _deleteRefusedOutput(manifest.outputDill);
+    return 1;
   }
-  // Delete only the manifest's output: an `--output-dill` smuggled into
-  // the argv names no file here, so the refusal cannot be redirected at
-  // (or away from) another path.
-  _deleteRefusedOutput(outputDill);
-  return 1;
+  final noSource = checkNoDeclaredSourceReads(
+    split.reads,
+    manifest.declared,
+  );
+  if (noSource != null) {
+    err.writeln(noSource);
+    _deleteRefusedOutput(manifest.outputDill);
+    return 1;
+  }
+  final noEntry = checkMissingEntrypointRead(
+    split.reads,
+    entrypointSpellingCandidates(manifest),
+  );
+  if (noEntry != null) {
+    err.writeln(noEntry);
+    _deleteRefusedOutput(manifest.outputDill);
+    return 1;
+  }
+  return null;
 }
 
 /// Runs the command [argv] names after `--`, writing its output to [out] and
@@ -440,14 +548,16 @@ int? _refuseUndeclaredReads(
 /// The tool flags before `--` name the compile's declared inputs
 /// (`--declared-inputs <manifest>`): the manifest lists one exec-root-relative
 /// path per line in sections — the declared sources, then a `# staged`
-/// marker, then the staging root's symlinks to them, then `# allowed-reads`
-/// (the package config, the platform dill, the summary dills, the
-/// native-assets manifest), then `# filesystem-roots` (the mounted roots the
-/// directive guard resolves through), then `# output` with the output dill —
+/// marker, then the staging root's symlinks to the generated inputs, then
+/// `# allowed-reads` (the package config, the platform dill, the summary
+/// dills, the native-assets manifest), then `# filesystem-roots` (the mounted
+/// roots the directive guard resolves through), then `# entrypoint` with the
+/// entrypoint's declared spellings, then `# output` with the output dill —
 /// written by `flutter_kernel_compile_action` from its Starlark `File`
 /// objects. The sources' directives are refused before the compiler runs
 /// when they name an undeclared file, and the compiler's own read set is
-/// verified against the manifest after it runs. Nothing is read from the
+/// verified against the manifest after it runs — including that it names a
+/// declared source and the entrypoint. Nothing is read from the
 /// compile argv: flags after `--` run the compiler unchanged, and never
 /// widen what it may read.
 Future<int> runFiltered(
@@ -465,12 +575,12 @@ Future<int> runFiltered(
     return 2;
   }
   // The manifest lists the declared sources, then `# staged` with the
-  // staging root's symlinks to them, then `# allowed-reads` with every other
-  // file the compiler may read, then `# filesystem-roots`, then `# output`
-  // with the output dill. The guard scans the sources (the links hold the
-  // same bytes), while the read set allows the source spellings, the staged
-  // spellings, and the allowed reads — all of them manifest entries, never
-  // argv values.
+  // staging root's symlinks to the generated inputs, then `# allowed-reads`
+  // with every other file the compiler may read, then `# filesystem-roots`,
+  // then `# entrypoint` with the entrypoint's declared spellings, then
+  // `# output` with the output dill. The guard scans the sources, while the
+  // read set allows the source spellings, the staged spellings, and the
+  // allowed reads — all of them manifest entries, never argv values.
   final inputs = readKernelInputsManifest(manifestPath);
   final sources = [
     for (final path in inputs.sources)
@@ -493,13 +603,7 @@ Future<int> runFiltered(
   }
 
   final split = splitDependencyLines(result.stdout as String);
-  final readsRefusal = _refuseUndeclaredReads(
-    split,
-    inputs.declared,
-    inputs.extraAllowed,
-    inputs.outputDill,
-    err,
-  );
+  final readsRefusal = _refuseUndeclaredReads(split, inputs, err);
   if (readsRefusal != null) return readsRefusal;
   out.write(split.rest);
   err.write(result.stderr as String);

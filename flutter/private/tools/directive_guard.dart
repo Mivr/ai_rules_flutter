@@ -11,11 +11,12 @@
 //
 // The front end behind `flutter_kernel_compile_action` (`frontend_server`)
 // loads `file:` URIs straight off the host filesystem, outside every
-// `--filesystem-root`, so a compile that mounts the exec root embeds
-// undeclared bytes and Bazel caches the stale result. `kernel_filter.dart`
+// `--filesystem-root`, so a compile that mounts the exec root would embed
+// undeclared bytes and Bazel would cache the stale result. `kernel_filter.dart`
 // runs this check over every declared source before the compiler runs, and
-// the action mounts only its staging root, so an undeclared file is not there
-// to be read whatever its spelling.
+// verifies the compiler's own read set after it: together with the sandbox —
+// or remote execution — exposing only declared inputs, these three layers are
+// what keep undeclared bytes out of the dill, whatever a directive's spelling.
 //
 // Like the shared check, a directive with an empty path segment (`a//b.dart`)
 // is refused: the front end does not resolve every such spelling the way

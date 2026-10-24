@@ -530,6 +530,7 @@ void main() {}
       List<String> reads = const [],
       List<String> roots = const [],
       String? output,
+      List<String> entrypoint = const [],
     ]) {
       final lines = <String>[
         ...sources,
@@ -539,6 +540,8 @@ void main() {}
         ...reads,
         '# filesystem-roots',
         ...roots,
+        '# entrypoint',
+        ...entrypoint,
         '# output',
         if (output != null) output,
       ];
@@ -1073,6 +1076,133 @@ void main() {}
       expect(output.existsSync(), isFalse);
     });
 
+    test('fails closed when the report names no declared source', () async {
+      writeWork('lib/main.dart', 'void main() {}\n');
+      final output = File('${work.path}/app.dill')
+        ..writeAsStringSync('stale bytes');
+      final script = fakeCompiler(
+        'sourceless',
+        'import "dart:io";\n'
+            'void main() {\n'
+            '  stdout.writeln("result $_id");\n'
+            '  stdout.writeln("$_id");\n'
+            '  stdout.writeln("+file://${work.path}/pkg_config.json");\n'
+            '  stdout.writeln("$_id app.dill 0");\n'
+            '}\n',
+      );
+      final r = await run([
+        '--declared-inputs',
+        writeManifest(
+          [
+            'lib/main.dart',
+          ],
+          [],
+          ['pkg_config.json'],
+          [],
+          'app.dill',
+        ),
+        '--',
+        Platform.resolvedExecutable,
+        script.path,
+        '--output-dill',
+        output.path,
+      ]);
+      expect(r.code, 1);
+      expect(r.err, contains('none names a declared source'));
+      expect(output.existsSync(), isFalse);
+    });
+
+    test('fails closed when the report does not name the entrypoint', () async {
+      writeWork('lib/main.dart', 'void main() {}\n');
+      writeWork('lib/a.dart', 'int get answer => 42;\n');
+      final output = File('${work.path}/app.dill')
+        ..writeAsStringSync('stale bytes');
+      final script = fakeCompiler(
+        'entryless',
+        'import "dart:io";\n'
+            'void main() {\n'
+            '  stdout.writeln("result $_id");\n'
+            '  stdout.writeln("$_id");\n'
+            '  stdout.writeln("+file://${work.path}/lib/a.dart");\n'
+            '  stdout.writeln("$_id app.dill 0");\n'
+            '}\n',
+      );
+      final r = await run([
+        '--declared-inputs',
+        writeManifest(['lib/main.dart', 'lib/a.dart'], [], [], [], 'app.dill'),
+        '--',
+        Platform.resolvedExecutable,
+        script.path,
+        '--output-dill',
+        output.path,
+      ]);
+      expect(r.code, 1);
+      expect(r.err, contains('lib/main.dart'));
+      expect(output.existsSync(), isFalse);
+    });
+
+    test(
+      'fails closed on a report entry that names no parseable file',
+      () async {
+        writeWork('lib/main.dart', 'void main() {}\n');
+        final output = File('${work.path}/app.dill')
+          ..writeAsStringSync('stale bytes');
+        final script = fakeCompiler(
+          'badentry',
+          'import "dart:io";\n'
+              'void main() {\n'
+              '  stdout.writeln("result $_id");\n'
+              '  stdout.writeln("$_id");\n'
+              '  stdout.writeln("+file://${work.path}/lib/main.dart");\n'
+              '  stdout.writeln("+dart:async");\n'
+              '  stdout.writeln("$_id app.dill 0");\n'
+              '}\n',
+        );
+        final r = await run([
+          '--declared-inputs',
+          writeManifest(['lib/main.dart'], [], [], [], 'app.dill'),
+          '--',
+          Platform.resolvedExecutable,
+          script.path,
+          '--output-dill',
+          output.path,
+        ]);
+        expect(r.code, 1);
+        expect(r.err, contains('+dart:async'));
+        expect(output.existsSync(), isFalse);
+      },
+    );
+
+    test('accepts the entrypoint under its staged twin spelling', () async {
+      writeWork('lib/main.dart', 'void main() {}\n');
+      final script = fakeCompiler(
+        'stagedentry',
+        'import "dart:io";\n'
+            'void main() {\n'
+            '  stdout.writeln("result $_id");\n'
+            '  stdout.writeln("$_id");\n'
+            '  stdout.writeln("+file://${work.path}/out/stage/lib/main.dart");\n'
+            '  stdout.writeln("$_id app.dill 0");\n'
+            '}\n',
+      );
+      final r = await run([
+        '--declared-inputs',
+        writeManifest(
+          ['lib/main.dart'],
+          ['out/stage/lib/main.dart'],
+          [],
+          [],
+          null,
+          ['lib/main.dart', 'out/stage/lib/main.dart'],
+        ),
+        '--',
+        Platform.resolvedExecutable,
+        script.path,
+      ]);
+      expect(r.code, 0, reason: r.err);
+      expect(r.out.trim(), isEmpty);
+    });
+
     test(
       'forces --print-incremental-dependencies after the caller flags',
       () async {
@@ -1306,6 +1436,66 @@ void main() {}
     test('strips leading dot-slash and trailing root slashes', () {
       expect(stripFsRootPrefix('./a/b.dart', []), 'a/b.dart');
       expect(stripFsRootPrefix('a/b.dart', ['a/']), 'b.dart');
+    });
+  });
+
+  group('kernelMountContract', () {
+    // Goal G pins in plain unit tests what the contract guarantees: the
+    // mount order (the stage, then the exec root, then the filesystem_roots),
+    // where the entrypoint resolves now (in the exec root, not the stage),
+    // and the fail-closed report checks. The behavioral suites above prove
+    // each check fires; these pin the shape they check.
+    KernelInputsManifest readLines(List<String> lines) {
+      final dir = Directory.systemTemp.createTempSync('contract_manifest_');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      File('${dir.path}/manifest.txt').writeAsStringSync(lines.join('\n'));
+      return readKernelInputsManifest('${dir.path}/manifest.txt');
+    }
+
+    test('the manifest keeps the stage-exec-roots mount order', () {
+      final manifest = readLines([
+        'lib/main.dart',
+        '# staged',
+        'gen.stage/gen/foo.dart',
+        '# allowed-reads',
+        'pkg_config.json',
+        '# filesystem-roots',
+        'gen.stage',
+        '.',
+        'sdk-root',
+        '# entrypoint',
+        'lib/main.dart',
+        '# output',
+        'out/app.dill',
+      ]);
+      expect(manifest.fsRoots, ['gen.stage', '.', 'sdk-root']);
+      expect(manifest.entrypoint, ['lib/main.dart']);
+    });
+
+    test('entrypoint candidates prefer the explicit section', () {
+      final manifest = readLines([
+        'lib/main.dart',
+        '# entrypoint',
+        'lib/main.dart',
+        'gen.stage/lib/main.dart',
+      ]);
+      expect(
+        entrypointSpellingCandidates(manifest),
+        ['lib/main.dart', 'gen.stage/lib/main.dart'],
+      );
+    });
+
+    test('entrypoint candidates fall back to the first source', () {
+      final manifest = readLines(['lib/main.dart', 'lib/a.dart']);
+      expect(entrypointSpellingCandidates(manifest), ['lib/main.dart']);
+    });
+
+    test('the fail-closed messages name the check', () {
+      expect(noDeclaredSourceReadsMessage(), contains('declared source'));
+      expect(
+        missingEntrypointReadMessage('lib/main.dart'),
+        contains('lib/main.dart'),
+      );
     });
   });
 }
