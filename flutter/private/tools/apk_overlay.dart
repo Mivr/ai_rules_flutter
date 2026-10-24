@@ -28,7 +28,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'zip_reader.dart' show ZipRawEntry, readZipRawEntries;
+import 'zip_reader.dart'
+    show ZipRawEntry, decodeZipEntryName, findEocdOffset, readZipRawEntries;
 import 'zip_writer.dart' show crc32;
 import 'zlib_raw_match.dart' show zlibRawDeflate9;
 
@@ -106,28 +107,17 @@ class _PayloadEntry {
   _PayloadEntry(this.path, this.data, {this.crc});
 }
 
-/// Locates the End of Central Directory record in [bytes], returning its
-/// offset. Handles an optional archive comment.
-int _findEocd(Uint8List bytes) {
-  final bd = ByteData.sublistView(bytes);
-  for (var i = bytes.length - 22; i >= 0; i--) {
-    if (bd.getUint32(i, Endian.little) == 0x06054b50) {
-      return i;
-    }
-    // The EOCD must lie within the last 64 KiB + 22 bytes; stop early.
-    if (i < bytes.length - 22 - 65536) break;
-  }
-  throw FormatException('apk-overlay: EOCD signature not found.');
-}
-
 /// Reads the central directory of [bytes], returning the record name set
 /// (for collision checks), the concatenated verbatim record bytes, and the
 /// central directory offset.
+///
+/// Record bytes stay verbatim; only the collision-check names decode, per the
+/// ZIP spec (UTF-8 with bit 11, CP437 without).
 ({Set<String> names, Uint8List records, int cdOffset, int count}) _readCentral(
   Uint8List bytes,
 ) {
   final bd = ByteData.sublistView(bytes);
-  final eocd = _findEocd(bytes);
+  final eocd = findEocdOffset(bytes);
   final count = _getUint16LE(bd, eocd + 8);
   // entryCount == 0xFFFF would mean ZIP64; APKs never use it.
   if (count == 0xFFFF ||
@@ -165,7 +155,13 @@ int _findEocd(Uint8List bytes) {
     final extraLen = _getUint16LE(bd, pos + 30);
     final commentLen = _getUint16LE(bd, pos + 32);
     final recordLen = 46 + nameLen + extraLen + commentLen;
-    names.add(utf8.decode(bytes.sublist(pos + 46, pos + 46 + nameLen)));
+    names.add(
+      decodeZipEntryName(
+        bytes.sublist(pos + 46, pos + 46 + nameLen),
+        flags,
+        pos,
+      ),
+    );
     records.add(Uint8List.sublistView(bytes, pos, pos + recordLen));
     pos += recordLen;
   }

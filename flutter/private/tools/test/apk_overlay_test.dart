@@ -6,7 +6,7 @@ import 'dart:typed_data';
 import 'package:test/test.dart';
 
 import '../apk_overlay.dart';
-import '../zip_reader.dart' show readZipRawEntries;
+import '../zip_reader.dart' show readZipEntries, readZipRawEntries;
 import '../zip_writer.dart' show ZipEntry, encodeDeterministicZip;
 
 // A 50-byte text whose level-9 sizes straddle the aapt2 tenth line: C zlib
@@ -74,16 +74,23 @@ void main() {
     Map<String, int> spliceMethods({
       required Map<String, Uint8List> assets,
       required List<ZipEntry> jarEntries,
+      List<int>? baseComment,
     }) {
       final basePath = '${tempDir.path}/base.apk';
-      File(basePath).writeAsBytesSync(
-        encodeDeterministicZip([
-          ZipEntry(
-            path: 'AndroidManifest.xml',
-            data: Uint8List.fromList([1]),
-          ),
-        ]),
-      );
+      var baseBytes = encodeDeterministicZip([
+        ZipEntry(
+          path: 'AndroidManifest.xml',
+          data: Uint8List.fromList([1]),
+        ),
+      ]);
+      if (baseComment != null) {
+        baseBytes = _withDeclaredComment(
+          baseBytes,
+          baseComment.length,
+          baseComment,
+        );
+      }
+      File(basePath).writeAsBytesSync(baseBytes);
       final jarPath = '${tempDir.path}/native_libs.jar';
       File(jarPath).writeAsBytesSync(encodeDeterministicZip(jarEntries));
       final assetsDir = Directory('${tempDir.path}/flutter_assets')
@@ -142,6 +149,94 @@ void main() {
         reason: '46 + 46 ~/ 10 == 50 clears the tenth line',
       );
     });
+
+    test('splices a base APK whose comment holds a stray EOCD signature', () {
+      final methods = spliceMethods(
+        assets: {
+          'plain.txt': Uint8List.fromList([1, 2, 3]),
+        },
+        jarEntries: const [],
+        baseComment: [
+          ...utf8.encode('note '),
+          0x50, 0x4B, 0x05, 0x06, // stray EOCD signature, not the record
+          0, 0, 1, 2, 3,
+        ],
+      );
+      expect(methods['AndroidManifest.xml'], isNotNull);
+      expect(methods['assets/flutter_assets/plain.txt'], isNotNull);
+    });
+  });
+
+  group('EOCD finder and entry names', () {
+    test('ignores a stray EOCD signature inside the archive comment', () {
+      final zip = encodeDeterministicZip([
+        ZipEntry(path: 'a.txt', data: Uint8List.fromList([1, 2, 3])),
+      ]);
+      final commented = _withDeclaredComment(zip, 14, [
+        ...utf8.encode('note '),
+        0x50, 0x4B, 0x05, 0x06,
+        0, 0, 1, 2, 3,
+      ]);
+      expect(
+        [for (final e in readZipRawEntries(commented)) e.path],
+        ['a.txt'],
+      );
+      expect(
+        [for (final e in readZipEntries(commented)) e.path],
+        ['a.txt'],
+      );
+    });
+
+    test('rejects an EOCD whose comment does not reach the end of file', () {
+      final zip = encodeDeterministicZip([
+        ZipEntry(path: 'a.txt', data: Uint8List.fromList([1])),
+      ]);
+      final truncated = _withDeclaredComment(zip, 16, [1, 2, 3]);
+      expect(
+        () => readZipRawEntries(truncated),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            contains('EOCD'),
+          ),
+        ),
+      );
+    });
+
+    test('decodes a CP437 name when bit 11 is clear', () {
+      // 'cp437_' + 0x82 (U+00E9 in CP437, invalid alone in UTF-8) + '.txt'.
+      final zip = _storedZip(
+        [0x63, 0x70, 0x34, 0x33, 0x37, 0x5F, 0x82, 0x2E, 0x74, 0x78, 0x74],
+        0,
+        Uint8List.fromList([9]),
+      );
+      expect(readZipRawEntries(zip).single.path, 'cp437_é.txt');
+    });
+
+    test('decodes a UTF-8 name when bit 11 is set', () {
+      final nameBytes = utf8.encode('café_☃.txt');
+      final zip = _storedZip(nameBytes, 0x0800, Uint8List.fromList([9]));
+      expect(readZipRawEntries(zip).single.path, 'café_☃.txt');
+    });
+
+    test('names the entry whose UTF-8 name is malformed', () {
+      final zip = _storedZip(
+        [0x62, 0x61, 0x64, 0xFF],
+        0x0800,
+        Uint8List.fromList([9]),
+      );
+      expect(
+        () => readZipRawEntries(zip),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            allOf(contains('offset 0'), contains('not valid UTF-8')),
+          ),
+        ),
+      );
+    });
   });
 
   group('aaptDecisionSize fast path', () {
@@ -169,6 +264,62 @@ void main() {
       expect(checked, greaterThan(200));
     });
   });
+}
+
+/// Appends [actual] comment bytes to a comment-free ZIP while declaring
+/// [declaredLength] in the EOCD: equal lengths for a well-formed comment, a
+/// longer declaration for a comment that never reaches the end of the file.
+Uint8List _withDeclaredComment(
+  Uint8List zip,
+  int declaredLength,
+  List<int> actual,
+) {
+  final bytes = Uint8List.fromList([...zip, ...actual]);
+  ByteData.sublistView(bytes).setUint16(
+    bytes.length - actual.length - 2,
+    declaredLength,
+    Endian.little,
+  );
+  return bytes;
+}
+
+/// A minimal one-entry stored archive with verbatim [nameBytes] and [flags],
+/// for entry-name cases the deterministic writer cannot express.
+Uint8List _storedZip(List<int> nameBytes, int flags, Uint8List content) {
+  final local = ByteData(30 + nameBytes.length)
+    ..setUint32(0, 0x04034b50, Endian.little)
+    ..setUint16(4, 20, Endian.little)
+    ..setUint16(6, flags, Endian.little)
+    ..setUint16(8, 0, Endian.little)
+    ..setUint32(18, content.length, Endian.little)
+    ..setUint32(22, content.length, Endian.little)
+    ..setUint16(26, nameBytes.length, Endian.little);
+  local.buffer.asUint8List().setRange(30, 30 + nameBytes.length, nameBytes);
+  final central = ByteData(46 + nameBytes.length)
+    ..setUint32(0, 0x02014b50, Endian.little)
+    ..setUint16(4, (3 << 8) | 20, Endian.little)
+    ..setUint16(6, 20, Endian.little)
+    ..setUint16(8, flags, Endian.little)
+    ..setUint16(10, 0, Endian.little)
+    ..setUint32(20, content.length, Endian.little)
+    ..setUint32(24, content.length, Endian.little)
+    ..setUint16(28, nameBytes.length, Endian.little)
+    ..setUint32(38, 0x81A4 << 16, Endian.little)
+    ..setUint32(42, 0, Endian.little);
+  central.buffer.asUint8List().setRange(46, 46 + nameBytes.length, nameBytes);
+  final cdOffset = 30 + nameBytes.length + content.length;
+  final eocd = ByteData(22)
+    ..setUint32(0, 0x06054b50, Endian.little)
+    ..setUint16(8, 1, Endian.little)
+    ..setUint16(10, 1, Endian.little)
+    ..setUint32(12, 46 + nameBytes.length, Endian.little)
+    ..setUint32(16, cdOffset, Endian.little);
+  return Uint8List.fromList([
+    ...local.buffer.asUint8List(),
+    ...content,
+    ...central.buffer.asUint8List(),
+    ...eocd.buffer.asUint8List(),
+  ]);
 }
 
 /// Deterministic hostile corpus for the fast-path parity check: every size

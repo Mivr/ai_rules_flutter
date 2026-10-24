@@ -30,14 +30,77 @@ typedef _CentralRecord = ({
   int nextPos,
 });
 
-int _findEocdOffset(ByteData bd, Uint8List zipBytes) {
-  // Locate End of Central Directory (0x06054b50).
+/// Locates the End of Central Directory record (`0x06054b50`) in [zipBytes].
+///
+/// A candidate counts only when it is structurally valid: its comment length
+/// reaches exactly the end of the file. A bare backward scan would take an
+/// `0x06054b50` stamped inside the archive comment for the record itself. The
+/// record must lie within the last 64 KiB plus its 22 bytes, the most an
+/// archive comment may hold.
+int findEocdOffset(Uint8List zipBytes) {
+  final bd = ByteData.sublistView(zipBytes);
   for (var i = zipBytes.length - 22; i >= 0; i--) {
-    if (bd.getUint32(i, Endian.little) == 0x06054b50) {
+    if (bd.getUint32(i, Endian.little) == 0x06054b50 &&
+        i + 22 + bd.getUint16(i + 20, Endian.little) == zipBytes.length) {
       return i;
     }
+    // The EOCD must lie within the last 64 KiB + 22 bytes; stop early.
+    if (i < zipBytes.length - 22 - 65536) break;
   }
   throw FormatException('Invalid ZIP archive: EOCD signature not found.');
+}
+
+/// Code points for CP437 bytes `0x80`-`0xFF`, in order.
+///
+/// The ZIP spec defaults entry names to CP437 unless general-purpose bit 11
+/// marks them UTF-8; bytes below `0x80` match ASCII either way.
+const List<int> _cp437TailCodePoints = [
+  0x00C7, 0x00FC, 0x00E9, 0x00E2, 0x00E4, 0x00E0, 0x00E5, 0x00E7,
+  0x00EA, 0x00EB, 0x00E8, 0x00EF, 0x00EE, 0x00EC, 0x00C4, 0x00C5,
+  0x00C9, 0x00E6, 0x00C6, 0x00F4, 0x00F6, 0x00F2, 0x00FB, 0x00F9,
+  0x00FF, 0x00D6, 0x00DC, 0x00A2, 0x00A3, 0x00A5, 0x20A7, 0x0192,
+  0x00E1, 0x00ED, 0x00F3, 0x00FA, 0x00F1, 0x00D1, 0x00AA, 0x00BA,
+  0x00BF, 0x2310, 0x00AC, 0x00BD, 0x00BC, 0x00A1, 0x00AB, 0x00BB,
+  0x2591, 0x2592, 0x2593, 0x2502, 0x2524, 0x2561, 0x2562, 0x2556,
+  0x2555, 0x2563, 0x2551, 0x2557, 0x255D, 0x255C, 0x255B, 0x2510,
+  0x2514, 0x2534, 0x252C, 0x251C, 0x2500, 0x253C, 0x255E, 0x255F,
+  0x255A, 0x2554, 0x2569, 0x2566, 0x2560, 0x2550, 0x256C, 0x2567,
+  0x2568, 0x2564, 0x2565, 0x2559, 0x2558, 0x2552, 0x2553, 0x256B,
+  0x256A, 0x2518, 0x250C, 0x2588, 0x2584, 0x258C, 0x2590, 0x2580,
+  0x03B1, 0x00DF, 0x0393, 0x03C0, 0x03A3, 0x03C3, 0x00B5, 0x03C4,
+  0x03A6, 0x0398, 0x03A9, 0x03B4, 0x221E, 0x03C6, 0x03B5, 0x2229,
+  0x2261, 0x00B1, 0x2265, 0x2264, 0x2320, 0x2321, 0x00F7, 0x2248,
+  0x00B0, 0x2219, 0x00B7, 0x221A, 0x207F, 0x00B2, 0x25A0, 0x00A0,
+];
+
+/// Decodes CP437 [nameBytes] (general-purpose bit 11 clear) to a string.
+String _decodeCp437Name(List<int> nameBytes) {
+  final out = StringBuffer();
+  for (final byte in nameBytes) {
+    out.writeCharCode(
+      byte < 0x80 ? byte : _cp437TailCodePoints[byte - 0x80],
+    );
+  }
+  return out.toString();
+}
+
+/// Decodes a central-directory entry name held in [nameBytes] per the ZIP spec.
+///
+/// UTF-8 when general-purpose bit 11 of [flags] is set, CP437 when it is
+/// clear. A malformed UTF-8 name fails naming the record's [recordOffset]
+/// instead of leaking the decoder's bare error.
+String decodeZipEntryName(List<int> nameBytes, int flags, int recordOffset) {
+  if ((flags & 0x0800) == 0) {
+    return _decodeCp437Name(nameBytes);
+  }
+  try {
+    return utf8.decode(nameBytes);
+  } on FormatException catch (e) {
+    throw FormatException(
+      'Invalid central directory entry at offset $recordOffset: '
+      'entry name is not valid UTF-8 (${e.message}).',
+    );
+  }
 }
 
 /// Applies the ZIP64 End of Central Directory locator when present,
@@ -155,7 +218,8 @@ _CentralRecord _parseCentralRecord(
       bd.getUint32(pos, Endian.little) != 0x02014b50) {
     throw FormatException('Invalid central directory header at $pos.');
   }
-  final flags = options.flagsOverride ?? bd.getUint16(pos + 8, Endian.little);
+  final rawFlags = bd.getUint16(pos + 8, Endian.little);
+  final flags = options.flagsOverride ?? rawFlags;
   final method = bd.getUint16(pos + 10, Endian.little);
   final crc = bd.getUint32(pos + 16, Endian.little);
   var compressedSize = bd.getUint32(pos + 20, Endian.little);
@@ -169,7 +233,13 @@ _CentralRecord _parseCentralRecord(
   if (options.checkBounds && pos + 46 + nameLen > zipBytes.length) {
     throw FormatException('Invalid central directory header at $pos.');
   }
-  final path = utf8.decode(zipBytes.sublist(pos + 46, pos + 46 + nameLen));
+  // The name decodes by the flags actually on disk: the inflated reader's
+  // flags override only silences bit 3 for payload handling, never the name.
+  final path = decodeZipEntryName(
+    zipBytes.sublist(pos + 46, pos + 46 + nameLen),
+    rawFlags,
+    pos,
+  );
 
   if (uncompressedSize == zip64Limit32 ||
       compressedSize == zip64Limit32 ||
@@ -339,7 +409,7 @@ _inflateStreamingZipPayload(_CentralRecord central, Uint8List rawPayload) {
 /// testing.
 List<ZipEntry> readZipEntries(Uint8List zipBytes) {
   final bd = ByteData.sublistView(zipBytes);
-  final eocdOffset = _findEocdOffset(bd, zipBytes);
+  final eocdOffset = findEocdOffset(zipBytes);
   final located = _applyZip64Locator(
     bd,
     zipBytes,
@@ -415,20 +485,6 @@ class ZipRawEntry {
 /// compression methods. Entries with data descriptors (bit 3) read fine: the
 /// central record carries the authoritative sizes. Anything else below the
 /// ZIP32 limits reads, at any size.
-int _findRawEocdOffset(ByteData bd, Uint8List zipBytes) {
-  // Locate End of Central Directory (0x06054b50): the last occurrence that
-  // exactly consumes the trailing bytes (signature + comment).
-  for (var i = zipBytes.length - 22; i >= 0; i--) {
-    if (bd.getUint32(i, Endian.little) == 0x06054b50 &&
-        i + 22 + bd.getUint16(i + 20, Endian.little) == zipBytes.length) {
-      return i;
-    }
-    // The EOCD must lie within the last 64 KiB + 22 bytes; stop early.
-    if (i < zipBytes.length - 22 - 65536) break;
-  }
-  throw FormatException('Invalid ZIP archive: EOCD signature not found.');
-}
-
 _CentralRecord _parseRawCentralRecord(
   ByteData bd,
   Uint8List zipBytes,
@@ -504,7 +560,7 @@ ZipRawEntry _materializeRawEntry(
 /// ZIP32 limits reads, at any size.
 List<ZipRawEntry> readZipRawEntries(Uint8List zipBytes) {
   final bd = ByteData.sublistView(zipBytes);
-  final eocdOffset = _findRawEocdOffset(bd, zipBytes);
+  final eocdOffset = findEocdOffset(zipBytes);
   final located = _applyZip64Locator(
     bd,
     zipBytes,
