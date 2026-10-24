@@ -104,6 +104,25 @@ Future<void> main(List<String> args) async {
 }
 ''';
 
+/// A helper that attempts a shared lock on a path the way the sweep's
+/// probe does, prints `held` or `free`, and exits. A shared lock conflicts
+/// with a live owner's exclusive lock and succeeds once it is dead.
+const String _sharedProbeSource = r'''
+import 'dart:io';
+Future<void> main(List<String> args) async {
+  try {
+    final handle = File(args[0]).openSync(mode: FileMode.read);
+    handle.lockSync(FileLock.shared);
+    stdout.writeln('free');
+    await stdout.flush();
+    await handle.close();
+  } on FileSystemException {
+    stdout.writeln('held');
+    await stdout.flush();
+  }
+}
+''';
+
 /// A workspace with a manifest, clean sources, and the files the compiler
 /// reports reading, used as a worker's cwd.
 class ScratchHarness {
@@ -244,12 +263,34 @@ class LockHolder {
   }
 }
 
+/// Writes a helper [source] under [name] next to the test's scratch and
+/// returns its path. Helper scripts are files outside the sweep prefix, so
+/// the sweep ignores them.
+String _writeScript(Directory parent, String name, String source) =>
+    (File('${parent.path}/$name')..writeAsStringSync(source)).path;
+
 /// Writes the lock-holder helper next to the test's scratch and returns its
-/// path. The script is a file outside the sweep prefix, so the sweep
-/// ignores it.
-String _writeHolderScript(Directory parent) => (File(
-  '${parent.path}/hold_lock.dart',
-)..writeAsStringSync(_holderSource)).path;
+/// path.
+String _writeHolderScript(Directory parent) =>
+    _writeScript(parent, 'hold_lock.dart', _holderSource);
+
+/// Runs the shared-lock probe helper against [lockPath] and returns its
+/// `held` or `free` verdict. Only ever touches the probe's own process.
+Future<String> _sharedVerdict(String script, String lockPath) async {
+  final proc = await Process.start(Platform.resolvedExecutable, [
+    script,
+    lockPath,
+  ]);
+  final lines = StreamIterator(
+    proc.stdout.transform(utf8.decoder).transform(const LineSplitter()),
+  );
+  final verdict = await lines.moveNext().timeout(const Duration(seconds: 60))
+      ? lines.current
+      : '';
+  await lines.cancel();
+  await proc.exitCode.timeout(const Duration(seconds: 60));
+  return verdict;
+}
 
 /// This process's current child PIDs, unioned over every thread's children
 /// listing. For proving a sweep spawns no process: holders spawned before
@@ -431,6 +472,84 @@ void main() {
       expect(dead.existsSync(), isFalse);
     });
 
+    test('keeps a sibling holding only a temporary claim', () async {
+      final young = Directory('${parent.path}/incr_fkc_young')..createSync();
+      final claimPath = '${young.path}/$incrFkcClaimFileName';
+      File(claimPath).writeAsStringSync('');
+      File('${young.path}/keep.txt').writeAsStringSync('keep');
+      // A newborn mid-claim: the claim file is locked, but `lock` is not
+      // published yet, so the sweep must keep the directory.
+      final holder = await LockHolder.start(
+        _writeHolderScript(parent),
+        claimPath,
+      );
+      addTearDown(holder.kill);
+      await sweepWorkerScratch(parent, exemptName: 'incr_fkc_mine');
+      expect(File('${young.path}/keep.txt').readAsStringSync(), 'keep');
+      expect(
+        File('${young.path}/$incrFkcLockFileName').existsSync(),
+        isFalse,
+      );
+    });
+
+    test('a kept lock is untouched by the sweep', () async {
+      final live = Directory('${parent.path}/incr_fkc_kept0001')..createSync();
+      final lockPath = '${live.path}/$incrFkcLockFileName';
+      File(lockPath).writeAsStringSync('owner');
+      final holder = await LockHolder.start(
+        _writeHolderScript(parent),
+        lockPath,
+      );
+      addTearDown(holder.kill);
+      final before = File(lockPath).statSync();
+      final bytes = File(lockPath).readAsBytesSync();
+      await sweepWorkerScratch(parent, exemptName: 'incr_fkc_mine');
+      final after = File(lockPath).statSync();
+      // Read-only probing leaves bytes, size and mtime identical.
+      expect(File(lockPath).readAsBytesSync(), bytes);
+      expect(after.size, before.size);
+      expect(after.modified, before.modified);
+    });
+
+    test('a sweep creates no file where the lock is missing', () async {
+      final bare = Directory('${parent.path}/incr_fkc_bare')..createSync();
+      File('${bare.path}/keep.txt').writeAsStringSync('keep');
+      Set<String> names(Directory dir) => {
+        for (final e in dir.listSync())
+          e.path.split(Platform.pathSeparator).last,
+      };
+      final before = names(bare);
+      await sweepWorkerScratch(parent, exemptName: 'incr_fkc_mine');
+      // A creating open would publish a lock file here; the read-only
+      // probe must leave the directory exactly as it found it.
+      expect(names(bare), before);
+      expect(
+        File('${bare.path}/$incrFkcLockFileName').existsSync(),
+        isFalse,
+      );
+    });
+
+    test('a claimed lock refuses a shared lock from another process', () async {
+      final dir = Directory('${parent.path}/incr_fkc_owned')..createSync();
+      final lock = await lockWorkerScratch(dir);
+      final lockFile = File('${dir.path}/$incrFkcLockFileName');
+      // The claim is published atomically: `lock` exists, locked, with no
+      // temporary claim left behind.
+      expect(lockFile.existsSync(), isTrue);
+      expect(
+        File('${dir.path}/$incrFkcClaimFileName').existsSync(),
+        isFalse,
+      );
+      final probe = _writeScript(
+        parent,
+        'shared_probe.dart',
+        _sharedProbeSource,
+      );
+      expect(await _sharedVerdict(probe, lockFile.path), 'held');
+      await lock.close();
+      expect(await _sharedVerdict(probe, lockFile.path), 'free');
+    });
+
     test(
       'a sweep over live siblings spawns no process and stays quick',
       () async {
@@ -514,8 +633,9 @@ void main() {
         ..createSync();
       Directory('${stuck.path}/$incrFkcLockFileName').createSync();
       await (await lockWorkerScratch(stuck)).close();
-      // A permission-less lock file cannot be opened either — unless this
-      // runs as root, where permissions prove nothing.
+      // A permission-less lock file with no owner behind it cannot be
+      // opened for reading either — unless this runs as root, where
+      // permissions prove nothing.
       final noperm = Directory('${parent.path}/incr_fkc_noperm')..createSync();
       final nopermLock = File('${noperm.path}/$incrFkcLockFileName')
         ..writeAsStringSync('');
@@ -525,7 +645,7 @@ void main() {
         final chmod = await Process.run('chmod', ['000', nopermLock.path]);
         if (chmod.exitCode == 0) {
           try {
-            File(nopermLock.path).openSync(mode: FileMode.append).closeSync();
+            File(nopermLock.path).openSync(mode: FileMode.read).closeSync();
           } on FileSystemException {
             unopenable = true;
           }

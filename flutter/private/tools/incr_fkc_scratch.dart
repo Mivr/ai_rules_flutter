@@ -9,20 +9,21 @@
 /// alive.
 ///
 /// Liveness is decided by something a dead process cannot keep holding: an
-/// advisory exclusive file lock. Each worker creates a lock file inside its
-/// own scratch, takes `lockSync(FileLock.exclusive)` on it, and keeps that
-/// one handle open for its whole life; the kernel drops the lock when the
-/// process dies, SIGKILL included, in every network and mount namespace. The
-/// sweep probes each sibling's lock file in process, with the same lock
-/// call: `lockSync(FileLock.exclusive)` is the non-blocking attempt (only
-/// `FileLock.blockingExclusive` blocks), so a held lock fails at once.
-/// Acquiring the lock proves the owner is gone and the directory is deleted,
-/// while a held lock, a missing or unopenable lock file, or any other
-/// failure keeps the directory. This is sound because POSIX record locks
-/// conflict between processes, and the sweeping worker is never the process
-/// that owns a sibling's lock — it never sweeps its own directory, and it
-/// never opens its own lock file through any other handle. Liveness never
-/// depends on age or on PIDs, so PID reuse cannot confuse it.
+/// advisory exclusive file lock. Each worker publishes a lock file named
+/// `lock` inside its own scratch and holds `lockSync(FileLock.exclusive)`
+/// on it for its whole life; the kernel drops the lock when the process
+/// dies, SIGKILL included, in every network and mount namespace. The claim
+/// is published atomically: the worker creates `lock.claim`, locks it, and
+/// renames it to `lock` on the same still-open handle — POSIX locks belong
+/// to the inode, so the rename keeps the lock and `lock` never exists
+/// unlocked. A directory with only the temporary claim, or none, is a
+/// newborn mid-claim and is always kept. The sweep probes each sibling's
+/// `lock` in process and read-only, attempting `lockSync(FileLock.shared)`:
+/// the shared lock conflicts with a live owner's exclusive lock and fails
+/// at once, and succeeds once the owner is dead. Acquiring it proves the
+/// owner is gone and the directory is deleted, while a held lock, a missing
+/// or unopenable lock file, or any other failure keeps the directory.
+/// Liveness never depends on age or on PIDs, so PID reuse cannot confuse it.
 ///
 /// The sweep only touches directories the worker's own naming scheme
 /// produces (`incr_fkc_*`), never the worker's own directory, spawns no
@@ -37,6 +38,9 @@ const incrFkcScratchPrefix = 'incr_fkc_';
 
 /// The lock file inside one worker's scratch directory.
 const incrFkcLockFileName = 'lock';
+
+/// The temporary claim file a worker locks before renaming it to [incrFkcLockFileName].
+const incrFkcClaimFileName = 'lock.claim';
 
 /// One worker's held scratch lock: the open handle whose exclusive lock
 /// proves this worker is alive. The handle stays open for the worker's whole
@@ -64,22 +68,42 @@ class ScratchLock {
 String scratchLockPath(Directory dir) =>
     '${dir.path}${Platform.pathSeparator}$incrFkcLockFileName';
 
-/// Claims the lock for scratch directory [dir]: creates the lock file,
-/// takes the exclusive lock, and holds the handle. Runs before the worker
-/// writes anything costly, so a claimed directory never holds valuable
-/// state another worker could sweep. Never throws: when the lock cannot be
-/// set up, the returned lock holds nothing (future sweeps keep the
-/// directory as possibly-live) and the worker still starts.
+/// The temporary claim file path inside scratch directory [dir].
+String scratchClaimPath(Directory dir) =>
+    '${dir.path}${Platform.pathSeparator}$incrFkcClaimFileName';
+
+/// Claims the lock for scratch directory [dir]: creates the temporary
+/// claim file, takes the exclusive lock on it, renames it to the lock file,
+/// and holds the same handle. Runs before the worker writes anything
+/// costly, so a claimed directory never holds valuable state another worker
+/// could sweep. Never throws: when the lock cannot be set up, the returned
+/// lock holds nothing (future sweeps keep the directory as possibly-live)
+/// and the worker still starts.
 Future<ScratchLock> lockWorkerScratch(Directory dir) async {
+  RandomAccessFile? handle;
   try {
-    // Append mode never truncates: a probe must not destroy another
-    // worker's file, and neither must a repeated claim.
-    final handle = File(
-      scratchLockPath(dir),
-    ).openSync(mode: FileMode.append);
+    // Claim under a temporary name, lock it, then rename it to `lock`:
+    // POSIX locks belong to the inode, so the same open handle stays
+    // locked across the rename and `lock` never exists unlocked — a sweep
+    // that sees `lock` either fails against its live owner's exclusive
+    // lock or acquires it after that owner died. Several workers start at
+    // once and sweep at start, so without this a sweep could catch the
+    // file between creation and locking, judge the newborn dead, and
+    // delete its scratch.
+    handle = File(
+      scratchClaimPath(dir),
+    ).openSync(mode: FileMode.write);
     handle.lockSync(FileLock.exclusive);
+    File(scratchClaimPath(dir)).renameSync(scratchLockPath(dir));
     return ScratchLock._(handle);
   } on FileSystemException catch (e) {
+    if (handle != null) {
+      try {
+        handle.closeSync();
+      } on FileSystemException {
+        // Releasing a lock that was never published; nothing to report.
+      }
+    }
     stderr.writeln('incr_fkc_worker: no scratch lock ($e).');
     return ScratchLock._(null);
   }
@@ -136,19 +160,23 @@ bool _siblingDead(Directory entry) {
   return _tryTakeLock(scratchLockPath(entry));
 }
 
-/// Attempts the exclusive lock on [lockPath] without blocking and releases
-/// it again. `lockSync(FileLock.exclusive)` is the non-blocking attempt: a
-/// lock held by a live owner fails at once, so this always answers in
-/// microseconds. Returns true only when the lock was acquired — the owner
-/// is dead — and false on a held lock, an unopenable file, or any other
-/// [FileSystemException]. Releasing the probe handle touches only this
-/// process's lock, never the owner's. Never throws.
+/// Attempts the exclusive verdict on [lockPath] without blocking: opens it
+/// read-only and tries a shared lock, then releases the probe handle.
+/// `lockSync(FileLock.shared)` is a non-blocking attempt that conflicts
+/// with the owner's exclusive lock — failing at once while the owner lives
+/// and succeeding once it is dead — so this always answers in microseconds.
+/// Read-only never creates, truncates or modifies another worker's file,
+/// and a file that vanished throws here, keeping the entry. Returns true
+/// only when the lock was acquired — the owner is dead — and false on a
+/// held lock, an unopenable file, or any other [FileSystemException].
+/// Releasing the probe handle touches only this process's lock, never the
+/// owner's; two sweepers that both succeed delete in turn, and the loser
+/// finds nothing and keeps. Never throws.
 bool _tryTakeLock(String lockPath) {
   RandomAccessFile? handle;
   try {
-    // Append mode never truncates a live worker's file.
-    handle = File(lockPath).openSync(mode: FileMode.append);
-    handle.lockSync(FileLock.exclusive);
+    handle = File(lockPath).openSync(mode: FileMode.read);
+    handle.lockSync(FileLock.shared);
   } on FileSystemException {
     if (handle != null) {
       try {

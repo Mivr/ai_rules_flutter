@@ -38,9 +38,10 @@ refusal messages. The worker deletes its `incr_fkc_*` temp directories on
 every exit path, so no state survives a finished build. A worker that is
 killed outright cannot run that cleanup, so every starting worker also
 reclaims the scratch of workers that are no longer alive (kept alive-proof
-by an exclusive lock file each worker holds for its life: a starting
-worker opens each sibling's lock file and attempts the same lock in
-process, and only an acquired lock means dead — never age or PID).
+by an exclusive lock file each worker holds for its life, published
+atomically so it never exists unlocked: a starting worker opens each
+sibling's lock read-only and attempts a shared lock in process, and only
+an acquired lock means dead — never age or PID).
 
 ## Strategies
 
