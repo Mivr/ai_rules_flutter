@@ -20,7 +20,11 @@ and links only what the spoke generator reads or exposes:
   the root module's workspace is reachable from a spoke.
 * The lock entry needs a true `relative` marker and a non-absolute path,
   and the package's pubspec `name` and `version` must match the lock entry
-  (overlays and code assets are selected by lock name and version).
+  (overlays and code assets are selected by lock name and version): a
+  pubspec with no `version:` field reads as `0.0.0`, the way `pub get`
+  locks it, and the two versions compare as parsed semantic versions —
+  quoting, surrounding whitespace and the YAML scalar type do not matter,
+  while an unparsable version on either side fails the fetch.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
@@ -29,6 +33,7 @@ load(
     "ancestor_link_refusal",
     "is_path_spoke_skipped_dir",
     "link_path_package",
+    "malformed_pub_version_refusal",
     "missing_pubspec_refusal",
     "outside_workspace_refusal",
     "parse_pubspec_identity",
@@ -39,6 +44,7 @@ load(
     "pubspec_version_refusal",
     "scoped_shader_includes_block",
 )
+load("//flutter/private:flutter_pub_semver.bzl", "parse_pub_version")
 load("//flutter/private:flutter_pub_path.bzl", "foreign_lock_path_error", "is_absolute_lock_path", "is_relative_path_dependency", "workspace_relative_lock_path")
 load("//flutter/private:flutter_pubspec.bzl", "parse_flutter_plugin_block")
 
@@ -459,7 +465,12 @@ def _absolute_lock_path_decides_test_impl(ctx):
 absolute_lock_path_decides_test = unittest.make(_absolute_lock_path_decides_test_impl)
 
 def _pubspec_identity_parses_test_impl(ctx):
-    """The spoke reads the package's pubspec name and version as strings."""
+    """The spoke reads the package's pubspec name and version as strings.
+
+    A missing (or empty) `version:` reads as `0.0.0`, exactly how `pub
+    get` locks it; surrounding whitespace and quoting fall away before
+    the comparison.
+    """
     env = unittest.begin(ctx)
     identity = parse_pubspec_identity("name: mypkg\nversion: 0.1.0\n")
     asserts.equals(env, "mypkg", identity.name)
@@ -467,15 +478,83 @@ def _pubspec_identity_parses_test_impl(ctx):
     quoted = parse_pubspec_identity("name: \"mypkg\"\nversion: '1.2.3'\n")
     asserts.equals(env, "mypkg", quoted.name)
     asserts.equals(env, "1.2.3", quoted.version)
-    unversioned = parse_pubspec_identity("name: mypkg\n")
+    padded = parse_pubspec_identity("name: mypkg\nversion: '  0.1.0  '\n")
+    asserts.equals(env, "0.1.0", padded.version)
+    unversioned = parse_pubspec_identity("name: mypkg\npublish_to: none\n")
     asserts.equals(env, "mypkg", unversioned.name)
-    asserts.equals(env, "", unversioned.version)
+    asserts.equals(env, "0.0.0", unversioned.version)
+    empty = parse_pubspec_identity("name: mypkg\nversion:\n")
+    asserts.equals(env, "0.0.0", empty.version)
     missing = parse_pubspec_identity("")
     asserts.equals(env, "", missing.name)
-    asserts.equals(env, "", missing.version)
+    asserts.equals(env, "0.0.0", missing.version)
     return unittest.end(env)
 
 pubspec_identity_parses_test = unittest.make(_pubspec_identity_parses_test_impl)
+
+def _pub_version_compares_semantically_test_impl(ctx):
+    """Lock and pubspec versions compare parsed, not as raw strings.
+
+    Whitespace, quoting (already unwrapped by YAML here) and leading
+    zeros fall away; pre-release and build identifiers participate, so a
+    build that moved is still a move.
+    """
+    env = unittest.begin(ctx)
+    for lock, actual in [
+        ("0.1.0", "0.1.0"),
+        ("0.1.0", "  0.1.0  "),
+        ("0.1.0", "00.01.00"),
+        ("1.0.0-alpha", "1.0.0-alpha"),
+        ("1.0.0-alpha.01", "1.0.0-alpha.1"),
+        ("1.0.0+1", "1.0.0+1"),
+        ("0.0.0", ""),
+    ]:
+        asserts.equals(
+            env,
+            parse_pub_version(lock).canonical,
+            parse_pub_version(actual).canonical,
+            "{} must agree with {}".format(lock, actual),
+        )
+        asserts.true(env, parse_pub_version(lock).ok, lock)
+        asserts.true(env, parse_pub_version(actual).ok, actual)
+    for lock, actual in [
+        ("1.0.0", "2.0.0"),
+        ("0.0.0", "0.1.0"),
+        ("1.0.0", "1.0.0-alpha"),
+        ("1.0.0+1", "1.0.0+2"),
+        ("1.0.0", "1.0.0+1"),
+    ]:
+        asserts.false(
+            env,
+            parse_pub_version(lock).canonical == parse_pub_version(actual).canonical,
+            "{} must disagree with {}".format(lock, actual),
+        )
+    return unittest.end(env)
+
+pub_version_compares_semantically_test = unittest.make(_pub_version_compares_semantically_test_impl)
+
+def _malformed_pub_version_is_refused_test_impl(ctx):
+    """An unparsable version on either side fails naming hub, key, and value.
+
+    `link_path_package` itself `fail()`s on these shapes (untestable
+    here), so these pin the parse verdicts and the message it fails with.
+    A numeric YAML scalar (`version: 2`) behaves exactly like its string
+    spelling — the scalar type never changes the outcome.
+    """
+    env = unittest.begin(ctx)
+    for bad in ["abc", "1.0", "1.0.0.0", "v1.0.0", "1.0.0-", "1.0.0+", "1.0.0-+", "2", "True"]:
+        parsed = parse_pub_version(bad)
+        asserts.false(env, parsed.ok, "{} must not parse".format(bad))
+        asserts.equals(env, bad, parsed.text)
+    asserts.false(env, parse_pub_version(2).ok, "an int scalar must not parse")
+    asserts.equals(env, "2", parse_pub_version(2).text)
+    message = malformed_pub_version_refusal("deps", "foo", "abc")
+    asserts.true(env, "deps" in message, "refusal must name the hub: {}".format(message))
+    asserts.true(env, "foo" in message, "refusal must name the lock key: {}".format(message))
+    asserts.true(env, "abc" in message, "refusal must name the bad value: {}".format(message))
+    return unittest.end(env)
+
+malformed_pub_version_is_refused_test = unittest.make(_malformed_pub_version_is_refused_test_impl)
 
 def _pubspec_mismatch_is_refused_test_impl(ctx):
     """A pubspec disagreeing with the lock fails naming hub, key, and values.
@@ -497,6 +576,7 @@ def _pubspec_mismatch_is_refused_test_impl(ctx):
     asserts.true(env, "foo" in version_message, "refusal must name the lock key: {}".format(version_message))
     asserts.true(env, "1.0.0" in version_message, "refusal must name the lock version: {}".format(version_message))
     asserts.true(env, "2.0.0" in version_message, "refusal must name the pubspec version: {}".format(version_message))
+    asserts.true(env, "0.0.0" in version_message, "refusal must describe the missing-version rule: {}".format(version_message))
     asserts.true(env, "re-resolve" in version_message, "refusal must tell the user to re-resolve: {}".format(version_message))
     missing_message = missing_pubspec_refusal("deps", "foo")
     asserts.true(env, "deps" in missing_message, "refusal must name the hub: {}".format(missing_message))
@@ -519,6 +599,45 @@ def _matching_identity_links_test_impl(ctx):
     return unittest.end(env)
 
 matching_identity_links_test = unittest.make(_matching_identity_links_test_impl)
+
+def _unversioned_identity_links_test_impl(ctx):
+    """A pubspec with no `version:` links against a `0.0.0` lock entry.
+
+    `pub get` locks such a package as `0.0.0` (pub's `Version.none`), so
+    the spoke must read the missing field the same way instead of
+    refusing the fetch.
+    """
+    env = unittest.begin(ctx)
+    mock = _make_mock_link_ctx({
+        "mypkg": {
+            "pubspec.yaml": "name: mypkg\npublish_to: none\n",
+            "lib": {"mypkg.dart": None},
+        },
+    }, path_value = "mypkg", package_name = "mypkg", version = "0.0.0", hub_name = "deps")
+    link_path_package(mock.ctx)
+    asserts.equals(env, ["lib/mypkg.dart", "pubspec.yaml"], sorted([link.name for link in mock.linked]))
+    return unittest.end(env)
+
+unversioned_identity_links_test = unittest.make(_unversioned_identity_links_test_impl)
+
+def _padded_identity_links_test_impl(ctx):
+    """A whitespace-padded pubspec version links against the lock version.
+
+    The comparison is semantic, so padding (and quoting, which YAML
+    already unwrapped) never skews it.
+    """
+    env = unittest.begin(ctx)
+    mock = _make_mock_link_ctx({
+        "mypkg": {
+            "pubspec.yaml": "name: mypkg\nversion: '  0.1.0  '\n",
+            "lib": {"mypkg.dart": None},
+        },
+    }, path_value = "mypkg", package_name = "mypkg", version = "0.1.0", hub_name = "deps")
+    link_path_package(mock.ctx)
+    asserts.equals(env, ["lib/mypkg.dart", "pubspec.yaml"], sorted([link.name for link in mock.linked]))
+    return unittest.end(env)
+
+padded_identity_links_test = unittest.make(_padded_identity_links_test_impl)
 
 def _path_spoke_platform_dirs_test_impl(ctx):
     """Only declared platforms resolve sources, so only they link."""
@@ -694,17 +813,21 @@ def path_package_test_suite(name):
         lock_path_joins_the_lock_dir_test,
         lock_path_stays_inside_the_workspace_test,
         lock_path_uses_the_lock_files_own_directory_test,
+        malformed_pub_version_is_refused_test,
         matching_identity_links_test,
         non_plugin_package_links_no_android_test,
         outside_workspace_is_refused_test,
         overlapping_entries_link_once_test,
+        padded_identity_links_test,
         path_spoke_platform_dirs_test,
         plugin_platform_dir_is_mirrored_not_symlinked_test,
+        pub_version_compares_semantically_test,
         pubspec_identity_parses_test,
         pubspec_mismatch_is_refused_test,
         relative_marker_decides_test,
         root_lock_needs_no_refusal_test,
         scoped_shader_includes_block_test,
         skipped_dirs_test,
+        unversioned_identity_links_test,
         workspace_sibling_link_replicates_without_descending_test,
     )

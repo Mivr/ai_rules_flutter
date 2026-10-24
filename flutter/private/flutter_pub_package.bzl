@@ -32,6 +32,7 @@ load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_deps", "parse_pubsp
 load("//flutter/private:artifact_urls.bzl", "require_sha256")
 load("//flutter/private:download.bzl", "pinned_download")
 load("//flutter/private:flutter_pubspec.bzl", "asset_flavor_error", "asset_platform_error", "invalid_asset_platforms", "parse_flutter_assets_block", "parse_flutter_plugin_block", "parse_pubspec")
+load(":flutter_pub_semver.bzl", "parse_pub_version", "pub_version_text")
 load(
     ":flutter_pub_assets.bzl",
     "check_asset_entry_problems",
@@ -2715,20 +2716,27 @@ def parse_pubspec_identity(content):
     pubspec names another package, or whose version moved since the lock
     was resolved, gets another package's overlay and native code assets.
 
+    A pubspec with no `version:` field (or an empty one) reads as
+    `"0.0.0"` — exactly how `pub get` locks it (pub's `Version.none`), so
+    unversioned `publish_to: none` packages agree with the lock. The
+    comparison itself is semantic (see `parse_pub_version`): quoting,
+    surrounding whitespace and the YAML scalar type do not matter.
+
     Args:
         content: Full pubspec.yaml content as a string.
 
     Returns:
-        A `struct(name, version)` of strings; each is `""` when absent,
-        unparsable, or not a scalar. A missing pubspec therefore never
-        matches a lock key and fails closed at the caller's comparison.
+        A `struct(name, version)` of strings; the name is `""` when
+        absent, unparsable, or not a scalar, and the version is `"0.0.0"`
+        when unstated. A missing pubspec therefore never matches a lock
+        key and fails closed at the caller's comparison.
     """
     pubspec = parse_pubspec(content)
     name = pubspec.get("name", "")
-    version = pubspec.get("version", "")
+    version = pub_version_text(pubspec.get("version", ""))
     return struct(
         name = "" if name == None else str(name),
-        version = "" if version == None else str(version),
+        version = "0.0.0" if version == "" else version,
     )
 
 def missing_pubspec_refusal(hub_name, package_name):
@@ -2764,12 +2772,33 @@ def pubspec_version_refusal(hub_name, package_name, locked, actual):
 
     Returns the message instead of failing so unit tests can assert it; the
     caller `fail()`s with it. Names the hub, the lock key, and both values.
+    A pubspec with no `version:` field reads as `0.0.0` (the way `pub get`
+    locks it), so an unversioned package shows `0.0.0` on the pubspec side
+    here when the lock moved on.
     """
     return (
         "flutter.pub hub \"" + hub_name + "\": path dependency \"" +
         package_name + "\" locks version \"" + locked + "\" but its " +
-        "pubspec.yaml says \"" + actual + "\". Overlays and code assets " +
-        "are selected by lock version; re-resolve the lock so the two agree."
+        "pubspec.yaml says \"" + actual + "\" (a pubspec with no " +
+        "`version:` field reads as \"0.0.0\", the way `pub get` locks " +
+        "it). Overlays and code assets are selected by lock version; " +
+        "re-resolve the lock so the two agree."
+    )
+
+def malformed_pub_version_refusal(hub_name, package_name, bad_value):
+    """The fetch refusal for a path package with an unparsable version.
+
+    Either side can be bad: the lock entry or the package's own pubspec.
+    Returns the message instead of failing so unit tests can assert it; the
+    caller `fail()`s with it. Names the hub, the lock key, and the bad value.
+    """
+    return (
+        "flutter.pub hub \"" + hub_name + "\": path dependency \"" +
+        package_name + "\" has malformed version \"" + bad_value + "\" " +
+        "in its pubspec.yaml or the lock entry. Versions are " +
+        "major.minor.patch with optional -pre-release and +build (a " +
+        "pubspec with no `version:` field reads as \"0.0.0\"); fix the " +
+        "version or re-resolve the lock."
     )
 
 def _fail_on_pubspec_identity_mismatch(hub_name, package_name, lock_version, pubspec_text):
@@ -2780,15 +2809,23 @@ def _fail_on_pubspec_identity_mismatch(hub_name, package_name, lock_version, pub
     whose version moved since the lock was resolved, must not silently get
     another package's overlay and native code assets. Each mismatch fails
     naming the hub, the lock key, and both values, telling the user to
-    re-resolve.
+    re-resolve. The two versions compare as parsed semantic versions (a
+    missing pubspec version reads as `0.0.0`, like `pub get` locks it); an
+    unparsable version on either side fails naming the bad value.
     """
     identity = parse_pubspec_identity(pubspec_text)
     if not pubspec_text.strip() or not identity.name:
         fail(missing_pubspec_refusal(hub_name, package_name))
     if identity.name != package_name:
         fail(pubspec_name_refusal(hub_name, package_name, identity.name))
-    if identity.version != lock_version:
-        fail(pubspec_version_refusal(hub_name, package_name, lock_version, identity.version))
+    locked = parse_pub_version(lock_version)
+    if not locked.ok:
+        fail(malformed_pub_version_refusal(hub_name, package_name, locked.text))
+    actual = parse_pub_version(identity.version)
+    if not actual.ok:
+        fail(malformed_pub_version_refusal(hub_name, package_name, actual.text))
+    if actual.canonical != locked.canonical:
+        fail(pubspec_version_refusal(hub_name, package_name, locked.text, actual.text))
 
 def link_path_package(ctx):
     """Symlinks a workspace-local `path:` package into the spoke, hermetically.
@@ -2807,7 +2844,9 @@ def link_path_package(ctx):
     components, or any replicated symlink resolving outside the
     workspace's real root (host bytes in the bundle). The pubspec's own
     `name` and `version` must match the lock entry, since overlays and
-    code assets are selected by lock name and version. Fails closed: an
+    code assets are selected by lock name and version (a pubspec with no
+    `version:` field reads as `0.0.0`, the way `pub get` locks it, and the
+    two versions compare as parsed semantic versions). Fails closed: an
     absolute path, a `..` escape, or a missing directory fails the fetch
     rather than emitting an empty spoke or reaching outside the workspace.
 

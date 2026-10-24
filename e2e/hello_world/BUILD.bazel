@@ -811,6 +811,14 @@ build_test(
     targets = [":hello_world_app"],
 )
 
+# An unversioned `path:` package (no `version:` field, `publish_to: none`)
+# locks as `0.0.0` under `pub get`; the spoke must read the missing field
+# the same way. Building the spoke proves the fetch agrees with the lock.
+build_test(
+    name = "unversioned_path_build_test",
+    targets = ["@deps//:unversioned_path"],
+)
+
 build_test(
     name = "macos_bundle_build_test",
     target_compatible_with = ["@platforms//os:macos"],
