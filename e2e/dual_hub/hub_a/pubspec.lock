@@ -9,6 +9,13 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.1.2"
+  dirlink_plugin:
+    dependency: "direct main"
+    description:
+      path: "dirlink_plugin"
+      relative: true
+    source: path
+    version: "0.1.0"
   path:
     dependency: "direct main"
     description:

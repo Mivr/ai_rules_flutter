@@ -1,5 +1,5 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
-load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_binary", "dart_library")
+load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_binary", "dart_library", "dart_test")
 
 # Two pub hubs, one library collecting a package from each, and a binary over
 # that library. See MODULE.bazel for how the two locks differ.
@@ -86,4 +86,69 @@ dart_analysis_options(
 dart_analysis_config(
     name = "analysis_config",
     options = [":options"],
+)
+
+# -- dirlink_plugin path package ----------------------------------------------
+#
+# `dirlink_plugin` (in `//hub_a`) is a plugin whose `android/` and `assets/`
+# are directory symlinks to `shared_android/` and `shared_assets/`
+# elsewhere in this workspace. `:dirlink_bin` compiles against the spoke's
+# mirrored `lib/` sources, and `:dirlink_spoke_test` builds the spoke
+# itself — analysing it proves the linked `assets/` sweep and the
+# conditional per-file entry for `assets/extra.txt` reached the spoke's
+# asset targets exactly once. `:verify_dirlink_hermeticity_test` then pins
+# the source tree the fetch must leave alone: the links still links, the
+# user-owned `shared_android/BUILD.bazel` sentinel intact, and no generated
+# file created beside it.
+
+dart_library(
+    name = "dirlink_user",
+    package_name = "dirlink_user",
+    srcs = ["lib/dirlink_user.dart"],
+    deps = ["@hub_a//:dirlink_plugin"],
+)
+
+dart_binary(
+    name = "dirlink_bin",
+    main = "bin/dirlink_main.dart",
+    deps = [":dirlink_user"],
+)
+
+build_test(
+    name = "dirlink_test",
+    size = "small",
+    targets = [":dirlink_bin"],
+)
+
+build_test(
+    name = "dirlink_spoke_test",
+    size = "small",
+    targets = ["@hub_a//:dirlink_plugin"],
+)
+
+# The `data` dep on the spoke forces its fetch before this test runs; the
+# test then checks the source tree, discovered at runtime from the
+# workspace root (found through `BUILD_WORKSPACE_DIRECTORY` when set, else
+# the anchor below resolved through the runfiles library, hence
+# no-sandbox). Tagged `external` so Bazel re-runs it on every invocation
+# instead of replaying a cached pass after an untracked source file
+# changed. No `target_compatible_with`: this workspace only ever builds on
+# Linux (the small E2E job), and its MODULE cannot see `@platforms`.
+dart_test(
+    name = "verify_dirlink_hermeticity_test",
+    size = "small",
+    data = [
+        "test/verify_dirlink_hermeticity_test.dart",
+        "@hub_a//:dirlink_plugin",
+    ],
+    env = {"GUARD_ROOT_ANCHOR": "$(rlocationpath :test/verify_dirlink_hermeticity_test.dart)"},
+    env_inherit = ["BUILD_WORKSPACE_DIRECTORY"],
+    main = "test/verify_dirlink_hermeticity_test.dart",
+    tags = [
+        "external",
+        "no-sandbox",
+    ],
+    deps = [
+        "@rules_dart//dart/runfiles",
+    ],
 )
