@@ -255,10 +255,36 @@ retention) instead of `ios-sol.json`:
   that arm's repeats).
 - `ratio`: per flow the median, min and max over
   repeats of the paired per-repeat ratio treatment.bazel /
-  control.bazel (pairs from the same repeat), plus `n` and `unpaired`
+  control.bazel (pairs from the same repeat), plus the geometric mean
+  (`geomean`: `exp(mean(log r))` over the paired ratios, null when
+  `n` is 0), plus `n` and `unpaired`
   (the repeat numbers with no pair). A flow that is non-identical or
   missing in either arm of a repeat has no pair for that repeat, and
   the record says so.
+
+The arms alternate which runs first (repeat 1 control first, repeat 2
+treatment first, and so on), and at small repeat counts the median is
+a poor central estimate of the effect: with `n=2` the upper median is
+just the upper pair, which is always the repeat where treatment ran
+first. An order effect — the second arm of a repeat running faster or
+slower than the first — multiplies one pair's ratio by a factor `f`
+and the other's by `1/f`, so the geometric mean of the pairs cancels
+the effect while the median does not. Read the geomean as the central
+estimate and the median alongside it.
+
+How to read an A/B honestly: a flag's effect on the flows it touches
+counts only when the flows it cannot touch stay within ±5% between
+arms (geomean); otherwise the run is inconclusive and needs more
+repeats. The first macOS A/Bs showed why: pairs such as 0.649 / 1.16
+on one flow mean the runner moved under the run, not that the flag
+did anything.
+
+Dashboard series: since bench v3 (2026-10-24), main dashboard points
+are sol runs with `lockfile=committed`. The bench generates the lock
+per measured ref, with that ref's own rules, by an unmeasured run
+before any timed build. Points with `lockfile=none` belong to the
+earlier series (bench 1 and 2). A/B and `bazel_flags` runs are never
+dashboard points.
 
 The `ios-profile` artifact keeps both arms' traces and logs under
 per-arm paths. A/B runs are never main dashboard points: use them to
