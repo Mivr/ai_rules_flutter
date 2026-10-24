@@ -239,7 +239,7 @@ void main() {
           isA<FormatException>().having(
             (e) => e.message,
             'message',
-            allOf(contains('offset 0'), contains('not valid UTF-8')),
+            allOf(contains('offset 35'), contains('not valid UTF-8')),
           ),
         ),
       );
