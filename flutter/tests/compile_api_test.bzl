@@ -15,10 +15,10 @@ hidden consumer checks rely on:
   `--[no-]print-incremental-dependencies`, which the compile controls
   itself);
 - `import_dill` is passed as `--import-dill=<path>` and is an action input,
-  while an undeclared source beside it stays out of the inputs and the
-  mounted roots (its refusal is pinned in `kernel_filter_test.dart`, including
-  under `extra_flags = ["--incremental"]`, which keeps working without
-  silencing the check);
+  while an undeclared source beside it stays out of the inputs (its refusal
+  is pinned in `kernel_filter_test.dart`, including under
+  `extra_flags = ["--incremental"]`, which keeps working without silencing
+  the check);
 - `extra_roots` entries appear in the emitted `package_config.json`, and an
   absolute, empty, or `..`-escaping root fails at analysis naming the
   package and the value;
@@ -225,8 +225,9 @@ def _full_argv_test_impl(ctx):
 
     Order, flags and values are pinned exactly; only host/toolchain file
     paths are discovered from the action's own inputs (matched by basename,
-    each required to match exactly one input), and the staging root from the
-    staged symlink inputs. A reordered, added or dropped flag fails here even
+    each required to match exactly one input). The default target declares
+    no generated inputs, so nothing is staged and the exec root is the only
+    `--filesystem-root`. A reordered, added or dropped flag fails here even
     when every fragment assertion above still passes.
     """
     env = analysistest.begin(ctx)
@@ -244,18 +245,19 @@ def _full_argv_test_impl(ctx):
     configs = [p for p in paths if p.endswith(".package_config.json")]
     asserts.equals(env, 1, len(configs), "expected exactly one package_config.json input, got %r" % (paths,))
     staged = [p for p in paths if ".stage/" in p]
-    asserts.true(env, len(staged) > 0, "expected staged symlink inputs, got %r" % (paths,))
-    roots = {p[:p.index(".stage") + len(".stage")]: True for p in staged}
-    asserts.equals(env, 1, len(roots.keys()), "expected one staging root, got %r" % (staged,))
-    stage_root = roots.keys()[0] if len(roots.keys()) == 1 else ""
-    asserts.true(
+    asserts.equals(env, [], staged, "with no generated inputs nothing is staged, got %r" % (staged,))
+    roots = [argv[i + 1] for i in range(len(argv) - 1) if argv[i] == "--filesystem-root"]
+    asserts.equals(env, ["."], roots, "with no generated inputs only the exec root is mounted, got %r" % (roots,))
+    main_inputs = [p for p in paths if p.endswith("flutter/tests/compile_api_main.dart")]
+    asserts.equals(
         env,
-        "_compile_api_default.dill." in stage_root and stage_root.endswith(".stage"),
-        "the staging root is the action-scoped hashed directory, got %r" % (stage_root,),
+        ["flutter/tests/compile_api_main.dart"],
+        main_inputs,
+        "the declared main is an input exactly once, as itself, got %r" % (paths,),
     )
     outputs = action.outputs.to_list()
     asserts.equals(env, 1, len(outputs), "expected exactly one compile output")
-    if len(runtimes) == 1 and len(snapshots) == 1 and len(platforms) == 1 and len(configs) == 1 and len(outputs) == 1 and len(roots.keys()) == 1:
+    if len(runtimes) == 1 and len(snapshots) == 1 and len(platforms) == 1 and len(configs) == 1 and len(outputs) == 1 and roots == ["."]:
         asserts.equals(
             env,
             [
@@ -272,7 +274,7 @@ def _full_argv_test_impl(ctx):
                 "--verbosity=error",
                 "--enable-asserts",
                 "--filesystem-root",
-                stage_root,
+                ".",
                 "--filesystem-scheme",
                 "org-dartlang-app",
                 "org-dartlang-app:///flutter/tests/compile_api_main.dart",
@@ -379,9 +381,11 @@ def _undeclared_staged_out_test_impl(ctx):
 
     The sibling exists on disk and the entrypoint imports it, but no target
     declares it: it must reach neither the action inputs nor any mounted
-    `--filesystem-root`. `kernel_filter` then refuses the import before the
-    compiler runs (see `kernel_filter_test.dart`); the staging here is what
-    leaves the compiler nothing undeclared to read whatever its spelling.
+    `--filesystem-root` beyond the exec root. The target declares no
+    generated inputs, so the exec root is the only root; `kernel_filter`
+    then refuses the import before the compiler runs (see
+    `kernel_filter_test.dart`), and the dependency report would refuse any
+    undeclared read after it.
     """
     env = analysistest.begin(ctx)
     action = _kernel_action(env)
@@ -395,10 +399,11 @@ def _undeclared_staged_out_test_impl(ctx):
         )
         argv = _compile_argv(env, action)
         roots = [argv[i + 1] for i in range(len(argv) - 1) if argv[i] == "--filesystem-root"]
-        asserts.false(
+        asserts.equals(
             env,
-            "." in roots,
-            "only the staging root is mounted, got %r" % (roots,),
+            ["."],
+            roots,
+            "with no generated inputs only the exec root is mounted, got %r" % (roots,),
         )
         asserts.equals(
             env,
