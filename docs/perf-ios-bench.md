@@ -217,6 +217,84 @@ by mnemonic). The warm number counts live descendants (workers) while
 the server is up; the server shuts down after each config and on every
 error path, so no worker or server outlives its config.
 
+In A/B runs flags reach the arms as `ab` says (next section): with
+`ab=flags` only the treatment arm gets `bazel_flags`, with
+`ab=lockfile` both arms get them.
+
+## Same-runner A/B (`ab`, never main points)
+
+Two 100k runs of the same commit on two free macOS runners differed
+1.3-1.7x on flows no flag could touch (release clean 108.5 vs 66.9 CPU
+s; runs 40052206141 and 40052214120), so comparing two separate runs
+does not measure a flag. An A/B runs both arms in the same job on the
+same runner, interleaved: repeat 1 runs control first, repeat 2
+treatment first, and so on alternating. Each arm runs the full sol
+scenario sequence (clean batch, warm-up, warm edits, chains) in its own
+output base and work directory, exactly as a single sol run does, and
+every server and worker of one arm is gone before the other arm starts.
+
+Dispatch input `ab` (choice, default `off`; sol mode only — any other
+mode with `ab` set fails at once with a clear message):
+
+- `off`: today's behaviour. One measured workspace with `bazel_flags`
+  and `lockfile` applied; writes `ios-sol.json` (artifact `ios-sol`).
+- `flags`: two arms. Control is the workspace with the `lockfile`
+  setting and no flags; treatment is the same plus `bazel_flags`,
+  which must be non-empty.
+- `lockfile`: two arms. Both get `bazel_flags`; control has no
+  lockfile, treatment the committed one. The `lockfile` input must be
+  `none` here.
+
+With `ab` on the run writes `ios-ab.json` (artifact `ios-ab`, 3-day
+retention) instead of `ios-sol.json`:
+
+- `meta`: `repeats`, `target_loc`, `seed`, `ab`, `bazel_flags`,
+  `lockfile`, and the per-repeat arm order (`order`, also as
+  `arm_order`).
+- `arms`: `control` and `treatment`, each mapping every flow id to its
+  flow record in exactly the `ios-sol.json` flow schema (medians over
+  that arm's repeats).
+- `ratio` (also as `ratios`): per flow the median, min and max over
+  repeats of the paired per-repeat ratio treatment.bazel /
+  control.bazel (pairs from the same repeat), plus `n` and `unpaired`
+  (the repeat numbers with no pair). A flow that is non-identical or
+  missing in either arm of a repeat has no pair for that repeat, and
+  the record says so.
+
+The `ios-profile` artifact keeps both arms' traces and logs under
+per-arm paths. A/B runs are never main dashboard points: use them to
+decide whether a flag or the committed lock changes the cost, then
+record the decision; the dashboard tracks single-arm runs only.
+
+An A/B doubles the measured work: the single-arm 500k / 3-repeat run
+takes about 95 minutes, so the same size as an A/B takes about 190
+minutes and still fits the 300-minute job timeout. For quick iteration
+use 100k with 1-2 repeats.
+
+## Committed lockfile (`lockfile`)
+
+Dispatch input `lockfile` (choice, default `none`): `committed` gives
+the measured workspace a `MODULE.bazel.lock`, as a real team's checkout
+carries. Without one, every clean build re-evaluates the module
+extensions whose results Bazel stores in the lockfile; whether that
+cost matters needs the same kind of same-runner A/B (`ab=lockfile`).
+
+The lock is produced the way a team's committed lock would be:
+generated on the runner, before any measured build, by an unmeasured
+Bazel run with the workspace's default lockfile mode and its own output
+base. That run builds every bench target for both configs, analysis
+only (`--nobuild`), so it evaluates everything the measured builds
+need while staying fast. Its output base is deleted afterwards and its
+server shut down. Every measured build still starts from a fresh output
+base. The lock is generated once per job and every repeat gets the same
+bytes.
+
+With `ab` off, `ios-sol.json` stays what it is today and also records
+`meta.lockfile`. With `ab` off and `lockfile` none, every run is
+exactly today's: the generated workspace is byte-identical, every Bazel
+command line is unchanged, and the `ios-sol.json` fields keep their
+meaning.
+
 ## Speed-of-light (SOL) mode
 
 The performance dashboard compares each developer flow's cost with its best
