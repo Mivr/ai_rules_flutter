@@ -20,6 +20,10 @@ load(
     "compile_package_config",
     "flutter_kernel_compile_action",
     "flutter_kernel_compile_tools",
+    "flutter_kernel_dills",
+    "flutter_kernel_options",
+    "flutter_kernel_outputs",
+    "flutter_kernel_sources",
     "flutter_test_bootstrap",
 )
 load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
@@ -176,15 +180,16 @@ def _bootstrap_pipeline_caller_impl(ctx):
     pc = compile_package_config(ctx, [], all_srcs)
     output = ctx.actions.declare_file(ctx.label.name + ".dill")
     flutter_kernel_compile_action(
-        ctx = ctx,
-        dartaotruntime = tools.dartaotruntime,
-        kernel_filter_tool = tools.kernel_filter_tool,
-        frontend_server = tools.frontend_server,
-        platform_dill = tools.platform_dill,
-        main = bootstrap,
-        srcs = pc.srcs,
-        package_config = pc.config_file,
-        output = output,
+        ctx,
+        tools,
+        flutter_kernel_sources(
+            main = bootstrap,
+            srcs = pc.srcs,
+            package_config = pc.config_file,
+        ),
+        flutter_kernel_outputs(output = output),
+        flutter_kernel_options(),
+        flutter_kernel_dills(),
     )
     return [DefaultInfo(files = depset([output]))]
 

@@ -83,7 +83,14 @@ load(
     "make_bundle_inputs",
     "merge_dart_defines",
 )
-load("//flutter/private:flutter_compile.bzl", "flutter_kernel_compile_action")
+load(
+    "//flutter/private:flutter_compile.bzl",
+    "flutter_kernel_compile_action",
+    "flutter_kernel_dills",
+    "flutter_kernel_options",
+    "flutter_kernel_outputs",
+    "flutter_kernel_sources",
+)
 load(
     "//flutter/private:flutter_kernel_module.bzl",
     "compile_flutter_modular_test_kernel",
@@ -243,20 +250,27 @@ def _flutter_test_impl(ctx):
             roots = {ctx.attr.package_name: True} if ctx.attr.package_name else None,
         )
         flutter_kernel_compile_action(
-            ctx = ctx,
-            dartaotruntime = flutter_sdk_info.dartaotruntime,
-            kernel_filter_tool = ctx.executable._kernel_filter_tool,
-            frontend_server = flutter_sdk_info.frontend_server,
-            platform_dill = flutter_sdk_info.platform_kernel_dill,
-            main = bootstrap,
-            entrypoint_uri = app_scheme_location(bootstrap).uri,
-            srcs = pc.srcs,
-            package_config = pc.config_file,
-            output = kernel_dill,
-            aot = False,
-            defines = merge_dart_defines(ctx),
-            target = "flutter",
-            native_assets_manifest = native_assets_manifest,
+            ctx,
+            struct(
+                dartaotruntime = flutter_sdk_info.dartaotruntime,
+                kernel_filter_tool = ctx.executable._kernel_filter_tool,
+                frontend_server = flutter_sdk_info.frontend_server,
+                platform_dill = flutter_sdk_info.platform_kernel_dill,
+            ),
+            flutter_kernel_sources(
+                main = bootstrap,
+                entrypoint_uri = app_scheme_location(bootstrap).uri,
+                srcs = pc.srcs,
+                package_config = pc.config_file,
+                native_assets_manifest = native_assets_manifest,
+            ),
+            flutter_kernel_outputs(output = kernel_dill),
+            flutter_kernel_options(
+                aot = False,
+                defines = merge_dart_defines(ctx),
+                target = "flutter",
+            ),
+            flutter_kernel_dills(),
         )
 
     # Build a `flutter_assets/` tree for the test. Material widgets pull

@@ -12,6 +12,10 @@ load(
     "compile_package_config",
     "flutter_kernel_compile_action",
     "flutter_kernel_compile_tools",
+    "flutter_kernel_dills",
+    "flutter_kernel_options",
+    "flutter_kernel_outputs",
+    "flutter_kernel_sources",
 )
 
 def _my_compile_impl(ctx):
@@ -19,15 +23,16 @@ def _my_compile_impl(ctx):
     pc = compile_package_config(ctx, packages, all_srcs)
     output = ctx.actions.declare_file(ctx.label.name + ".dill")
     flutter_kernel_compile_action(
-        ctx = ctx,
-        dartaotruntime = tools.dartaotruntime,
-        kernel_filter_tool = tools.kernel_filter_tool,
-        frontend_server = tools.frontend_server,
-        platform_dill = tools.platform_dill,
-        main = ctx.file.main,
-        srcs = pc.srcs,
-        package_config = pc.config_file,
-        output = output,
+        ctx,
+        tools,
+        flutter_kernel_sources(
+            main = ctx.file.main,
+            srcs = pc.srcs,
+            package_config = pc.config_file,
+        ),
+        flutter_kernel_outputs(output = output),
+        flutter_kernel_options(),
+        flutter_kernel_dills(),
     )
     return [DefaultInfo(files = depset([output]))]
 
@@ -42,15 +47,18 @@ my_compile = rule(
 )
 ```
 
-Stability note: these helpers are stable for external use. New optional
-parameters may be added to `flutter_kernel_compile_action` (and matching
-fields to the `flutter_kernel_compile_tools` struct). Two defaults changed
-once, and those calls' argv and action keys change with them: an omitted
-`entrypoint_uri` now compiles the entrypoint's stable
+Stability note: these helpers are stable for external use. `flutter_kernel_compile_action`
+takes grouped parameter objects: `flutter_kernel_sources(...)` for what the
+compile reads, `flutter_kernel_outputs(...)` for what it writes,
+`flutter_kernel_options(...)` for how it runs, and `flutter_kernel_dills(...)`
+for the precompiled dills it builds on. The full call is
+`flutter_kernel_compile_action(ctx, tools, sources, outputs, options, dills)`
+with an optional trailing `resource_set`; the flat keyword call shape is gone.
+Two defaults changed once, and those calls' argv and action keys change with
+them: an omitted `entrypoint_uri` now compiles the entrypoint's stable
 `org-dartlang-app:///` URI instead of its exec path, and
 `compile_package_config` writes `org-dartlang-app:///` rootUris instead of
-exec-root-relative ones. Otherwise existing calls keep their argv and action
-keys. The minimal example above is itself a tested
+exec-root-relative ones. The minimal example above is itself a tested
 shape: `//flutter/tests:compile_api_test_docstring_example` instantiates this
 exact call, and `//flutter/tests:compile_api_test_full_argv` pins the resulting
 action's full argv element for element.
@@ -92,6 +100,10 @@ load(
     _FLUTTER_KERNEL_COMPILE_TOOLCHAINS = "FLUTTER_KERNEL_COMPILE_TOOLCHAINS",
     _flutter_kernel_compile_action = "flutter_kernel_compile_action",
     _flutter_kernel_compile_tools = "flutter_kernel_compile_tools",
+    _flutter_kernel_dills = "flutter_kernel_dills",
+    _flutter_kernel_options = "flutter_kernel_options",
+    _flutter_kernel_outputs = "flutter_kernel_outputs",
+    _flutter_kernel_sources = "flutter_kernel_sources",
 )
 load(
     "//flutter/private:flutter_kernel_module.bzl",
@@ -109,9 +121,28 @@ load(
 
 # The whole-program kernel compile behind every Flutter target: runs
 # `frontend_server` via `dartaotruntime` behind the `kernel_filter` guard.
-# See `flutter_kernel_compile_action` for the parameters (including `vm_flags`,
-# `import_dill` and `resource_set`).
+# Takes grouped parameter objects; see `flutter_kernel_sources`,
+# `flutter_kernel_outputs`, `flutter_kernel_options` and
+# `flutter_kernel_dills` (including `vm_flags`, `import_dill` and
+# `resource_set`).
 flutter_kernel_compile_action = _flutter_kernel_compile_action
+
+# What a `flutter_kernel_compile_action` call reads: the entrypoint, the
+# sources, the package config, and the roots they mount under. See
+# `flutter_kernel_sources`.
+flutter_kernel_sources = _flutter_kernel_sources
+
+# What a `flutter_kernel_compile_action` call produces. See
+# `flutter_kernel_outputs`.
+flutter_kernel_outputs = _flutter_kernel_outputs
+
+# How a `flutter_kernel_compile_action` call runs. See
+# `flutter_kernel_options`.
+flutter_kernel_options = _flutter_kernel_options
+
+# The precompiled dills a `flutter_kernel_compile_action` call builds on. See
+# `flutter_kernel_dills`.
+flutter_kernel_dills = _flutter_kernel_dills
 
 # Writes the multi-root `package_config.json` the compile resolves through
 # `org-dartlang-app:///`, including `extra_roots` entries for packages with no
@@ -352,15 +383,16 @@ def flutter_test_bootstrap(ctx, test_main_uri, output):
     srcs = [bootstrap] + ([comparator] if comparator else [])
     pc = compile_package_config(ctx, packages, srcs + all_test_srcs)
     flutter_kernel_compile_action(
-        ctx = ctx,
-        dartaotruntime = tools.dartaotruntime,
-        kernel_filter_tool = tools.kernel_filter_tool,
-        frontend_server = tools.frontend_server,
-        platform_dill = tools.platform_dill,
-        main = bootstrap,
-        srcs = pc.srcs,
-        package_config = pc.config_file,
-        output = kernel_dill,
+        ctx,
+        tools,
+        flutter_kernel_sources(
+            main = bootstrap,
+            srcs = pc.srcs,
+            package_config = pc.config_file,
+        ),
+        flutter_kernel_outputs(output = kernel_dill),
+        flutter_kernel_options(),
+        flutter_kernel_dills(),
     )
     ```
 

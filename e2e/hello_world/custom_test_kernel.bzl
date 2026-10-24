@@ -24,6 +24,10 @@ load(
     "compile_package_config",
     "flutter_kernel_compile_action",
     "flutter_kernel_compile_tools",
+    "flutter_kernel_dills",
+    "flutter_kernel_options",
+    "flutter_kernel_outputs",
+    "flutter_kernel_sources",
     "flutter_test_bootstrap",
 )
 
@@ -54,15 +58,16 @@ def _custom_test_kernel_impl(ctx):
 
     kernel = ctx.actions.declare_file(ctx.label.name + ".dill")
     flutter_kernel_compile_action(
-        ctx = ctx,
-        dartaotruntime = tools.dartaotruntime,
-        kernel_filter_tool = tools.kernel_filter_tool,
-        frontend_server = tools.frontend_server,
-        platform_dill = tools.platform_dill,
-        main = bootstrap,
-        srcs = pc.srcs,
-        package_config = pc.config_file,
-        output = kernel,
+        ctx,
+        tools,
+        flutter_kernel_sources(
+            main = bootstrap,
+            srcs = pc.srcs,
+            package_config = pc.config_file,
+        ),
+        flutter_kernel_outputs(output = kernel),
+        flutter_kernel_options(),
+        flutter_kernel_dills(),
     )
 
     # The suite's own `@Tags`, extracted the way `extract_library_tags_action`

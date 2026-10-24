@@ -115,7 +115,14 @@ load(
     "flutter_android_registrant",
 )
 load("//flutter/private:flutter_aot_compile.bzl", "flutter_aot_elf_action")
-load("//flutter/private:flutter_compile.bzl", "flutter_kernel_compile_action")
+load(
+    "//flutter/private:flutter_compile.bzl",
+    "flutter_kernel_compile_action",
+    "flutter_kernel_dills",
+    "flutter_kernel_options",
+    "flutter_kernel_outputs",
+    "flutter_kernel_sources",
+)
 load("//flutter/private:flutter_info.bzl", "dedup_plugins")
 load(
     "//flutter/private:flutter_kernel_module.bzl",
@@ -1661,22 +1668,29 @@ def _flutter_linux_integration_test_impl(ctx):
 
     kernel_dill = ctx.actions.declare_file(ctx.label.name + ".dill")
     flutter_kernel_compile_action(
-        ctx = ctx,
-        dartaotruntime = flutter_sdk_info.dartaotruntime,
-        kernel_filter_tool = ctx.executable._kernel_filter_tool,
-        frontend_server = flutter_sdk_info.frontend_server,
-        platform_dill = platform_dill,
-        main = bootstrap,
-        entrypoint_uri = bootstrap_location.uri,
-        srcs = pc.srcs,
-        package_config = pc.config_file,
-        output = kernel_dill,
-        aot = aot,
-        defines = all_defines,
-        target = "flutter",
-        extra_flags = extra_frontend_flags,
-        native_assets_manifest = native_assets_manifest,
-        dart_plugin_registrant_uri = registrant_location.uri if registrant_location else None,
+        ctx,
+        struct(
+            dartaotruntime = flutter_sdk_info.dartaotruntime,
+            kernel_filter_tool = ctx.executable._kernel_filter_tool,
+            frontend_server = flutter_sdk_info.frontend_server,
+            platform_dill = platform_dill,
+        ),
+        flutter_kernel_sources(
+            main = bootstrap,
+            entrypoint_uri = bootstrap_location.uri,
+            srcs = pc.srcs,
+            package_config = pc.config_file,
+            native_assets_manifest = native_assets_manifest,
+            dart_plugin_registrant_uri = registrant_location.uri if registrant_location else None,
+        ),
+        flutter_kernel_outputs(output = kernel_dill),
+        flutter_kernel_options(
+            aot = aot,
+            defines = all_defines,
+            target = "flutter",
+            extra_flags = extra_frontend_flags,
+        ),
+        flutter_kernel_dills(),
     )
 
     # Step 2: AOT compile when not in debug mode.
@@ -2022,22 +2036,29 @@ def _flutter_android_integration_app_impl(ctx):
 
     kernel_dill = ctx.actions.declare_file(ctx.label.name + ".dill")
     flutter_kernel_compile_action(
-        ctx = ctx,
-        dartaotruntime = flutter_sdk_info.dartaotruntime,
-        kernel_filter_tool = ctx.executable._kernel_filter_tool,
-        frontend_server = flutter_sdk_info.frontend_server,
-        platform_dill = platform_dill,
-        main = bootstrap,
-        entrypoint_uri = bootstrap_location.uri,
-        srcs = pc.srcs,
-        package_config = pc.config_file,
-        output = kernel_dill,
-        aot = aot,
-        defines = all_defines,
-        target = "flutter",
-        extra_flags = extra_frontend_flags,
-        native_assets_manifest = native_assets_manifest,
-        dart_plugin_registrant_uri = registrant_location.uri if registrant_location else None,
+        ctx,
+        struct(
+            dartaotruntime = flutter_sdk_info.dartaotruntime,
+            kernel_filter_tool = ctx.executable._kernel_filter_tool,
+            frontend_server = flutter_sdk_info.frontend_server,
+            platform_dill = platform_dill,
+        ),
+        flutter_kernel_sources(
+            main = bootstrap,
+            entrypoint_uri = bootstrap_location.uri,
+            srcs = pc.srcs,
+            package_config = pc.config_file,
+            native_assets_manifest = native_assets_manifest,
+            dart_plugin_registrant_uri = registrant_location.uri if registrant_location else None,
+        ),
+        flutter_kernel_outputs(output = kernel_dill),
+        flutter_kernel_options(
+            aot = aot,
+            defines = all_defines,
+            target = "flutter",
+            extra_flags = extra_frontend_flags,
+        ),
+        flutter_kernel_dills(),
     )
 
     aot_output = None

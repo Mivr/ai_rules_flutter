@@ -10,7 +10,7 @@ cross-module visibility proof for `flutter:utils.bzl`.
 
 load("@rules_dart//dart:providers.bzl", "DartInfo")
 load("@rules_dart//dart:utils.bzl", "collect_packages", "collect_transitive_srcs")
-load("@rules_flutter//flutter:utils.bzl", "FLUTTER_KERNEL_COMPILE_ATTRS", "FLUTTER_KERNEL_COMPILE_TOOLCHAINS", "compile_package_config", "flutter_kernel_compile_action", "flutter_kernel_compile_tools")
+load("@rules_flutter//flutter:utils.bzl", "FLUTTER_KERNEL_COMPILE_ATTRS", "FLUTTER_KERNEL_COMPILE_TOOLCHAINS", "compile_package_config", "flutter_kernel_compile_action", "flutter_kernel_compile_tools", "flutter_kernel_dills", "flutter_kernel_options", "flutter_kernel_outputs", "flutter_kernel_sources")
 
 _CONSUMER_RESOURCE_SET = {"memory": 8000, "cpu": 1}
 
@@ -21,21 +21,24 @@ def _consumer_caller_impl(ctx):
     pc = compile_package_config(ctx, packages, all_srcs, extra_roots = ctx.attr.extra_roots)
     output = ctx.actions.declare_file(ctx.label.name + ".dill")
     flutter_kernel_compile_action(
-        ctx = ctx,
-        dartaotruntime = tools.dartaotruntime,
-        kernel_filter_tool = tools.kernel_filter_tool,
-        frontend_server = tools.frontend_server,
-        platform_dill = tools.platform_dill,
-        main = ctx.file.main,
-        srcs = pc.srcs,
-        package_config = pc.config_file,
-        output = output,
-        vm_flags = ctx.attr.vm_flags,
-        import_dill = ctx.file.import_dill if ctx.attr.import_dill else None,
+        ctx,
+        tools,
+        flutter_kernel_sources(
+            main = ctx.file.main,
+            srcs = pc.srcs,
+            package_config = pc.config_file,
+            filesystem_roots = ctx.attr.filesystem_roots,
+        ),
+        flutter_kernel_outputs(output = output),
+        flutter_kernel_options(
+            defines = ctx.attr.defines,
+            extra_flags = ctx.attr.extra_flags,
+            vm_flags = ctx.attr.vm_flags,
+        ),
+        flutter_kernel_dills(
+            import_dill = ctx.file.import_dill if ctx.attr.import_dill else None,
+        ),
         resource_set = _CONSUMER_RESOURCE_SET if ctx.attr.use_resource_set else None,
-        extra_flags = ctx.attr.extra_flags,
-        defines = ctx.attr.defines,
-        filesystem_roots = ctx.attr.filesystem_roots,
     )
     return [DefaultInfo(files = depset([output]))]
 

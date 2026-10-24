@@ -12,7 +12,14 @@ load("//flutter:providers.bzl", "FlutterCompiledShadersInfo", "FlutterInfo", "Fl
 load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "app_main_location", "app_scheme_location", "app_scheme_sources", "compile_kernel_package_config", "resolve_kernel_entrypoint", "synthesize_app_package", "with_root")
 load("//flutter/private:asset_keys.bzl", "bundle_asset_entries", "is_within_package", "relative_key")
 load("//flutter/private:flutter_asset_bundle_action.bzl", "flutter_asset_bundle_action", "make_bundle_content", "make_tree_shake")
-load("//flutter/private:flutter_compile.bzl", "flutter_kernel_compile_action")
+load(
+    "//flutter/private:flutter_compile.bzl",
+    "flutter_kernel_compile_action",
+    "flutter_kernel_dills",
+    "flutter_kernel_options",
+    "flutter_kernel_outputs",
+    "flutter_kernel_sources",
+)
 load("//flutter/private:flutter_info.bzl", "dedup_plugins")
 load(
     "//flutter/private:flutter_kernel_module.bzl",
@@ -925,23 +932,32 @@ def _compile_full_kernel(ctx, flutter_sdk_info, st, agent, reg, flags, plan):
     # URI for hot-reload parity with the dev tool.
     entrypoint_info = resolve_kernel_entrypoint(ctx, st.app_pkg_name, st.app_lib_root)
     flutter_kernel_compile_action(
-        ctx = ctx,
-        dartaotruntime = flutter_sdk_info.dartaotruntime,
-        kernel_filter_tool = ctx.executable._kernel_filter_tool,
-        frontend_server = flutter_sdk_info.frontend_server,
-        platform_dill = plan.platform_dill,
-        main = entrypoint_info.file,
-        entrypoint_uri = entrypoint_info.uri,
-        srcs = all_srcs,
-        package_config = config_file,
-        output = plan.kernel_dill,
-        aot = plan.aot,
-        defines = flags.all_defines,
-        target = plan.frontend_server_target,
-        extra_flags = flags.extra_frontend,
-        native_assets_manifest = plan.native_assets_manifest,
-        dart_plugin_registrant_uri = reg.location.uri if reg.location else None,
-        recorded_uses = plan.recorded_uses,
+        ctx,
+        struct(
+            dartaotruntime = flutter_sdk_info.dartaotruntime,
+            kernel_filter_tool = ctx.executable._kernel_filter_tool,
+            frontend_server = flutter_sdk_info.frontend_server,
+            platform_dill = plan.platform_dill,
+        ),
+        flutter_kernel_sources(
+            main = entrypoint_info.file,
+            entrypoint_uri = entrypoint_info.uri,
+            srcs = all_srcs,
+            package_config = config_file,
+            native_assets_manifest = plan.native_assets_manifest,
+            dart_plugin_registrant_uri = reg.location.uri if reg.location else None,
+        ),
+        flutter_kernel_outputs(
+            output = plan.kernel_dill,
+            recorded_uses = plan.recorded_uses,
+        ),
+        flutter_kernel_options(
+            aot = plan.aot,
+            defines = flags.all_defines,
+            target = plan.frontend_server_target,
+            extra_flags = flags.extra_frontend,
+        ),
+        flutter_kernel_dills(),
     )
     return config_file
 

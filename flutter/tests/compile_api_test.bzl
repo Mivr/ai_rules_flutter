@@ -44,7 +44,7 @@ load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@rules_dart//dart:defs.bzl", "dart_library")
 load("@rules_dart//dart:providers.bzl", "DartInfo")
 load("@rules_dart//dart:utils.bzl", "collect_packages", "collect_transitive_srcs")
-load("//flutter:utils.bzl", "FLUTTER_KERNEL_COMPILE_ATTRS", "FLUTTER_KERNEL_COMPILE_TOOLCHAINS", "compile_package_config", "flutter_kernel_compile_action", "flutter_kernel_compile_tools")
+load("//flutter:utils.bzl", "FLUTTER_KERNEL_COMPILE_ATTRS", "FLUTTER_KERNEL_COMPILE_TOOLCHAINS", "compile_package_config", "flutter_kernel_compile_action", "flutter_kernel_compile_tools", "flutter_kernel_dills", "flutter_kernel_options", "flutter_kernel_outputs", "flutter_kernel_sources")
 load(":action_content.bzl", "package_entry", "written_json")
 
 # `HOST_COMPATIBLE` without the `//flutter/private` load this file must not
@@ -66,19 +66,22 @@ def _compile_api_caller_impl(ctx):
     pc = compile_package_config(ctx, packages, all_srcs, extra_roots = ctx.attr.extra_roots)
     output = ctx.actions.declare_file(ctx.label.name + ".dill")
     flutter_kernel_compile_action(
-        ctx = ctx,
-        dartaotruntime = tools.dartaotruntime,
-        kernel_filter_tool = tools.kernel_filter_tool,
-        frontend_server = tools.frontend_server,
-        platform_dill = tools.platform_dill,
-        main = ctx.file.main,
-        srcs = pc.srcs,
-        package_config = pc.config_file,
-        output = output,
-        vm_flags = ctx.attr.vm_flags,
-        import_dill = ctx.file.import_dill if ctx.attr.import_dill else None,
+        ctx,
+        tools,
+        flutter_kernel_sources(
+            main = ctx.file.main,
+            srcs = pc.srcs,
+            package_config = pc.config_file,
+        ),
+        flutter_kernel_outputs(output = output),
+        flutter_kernel_options(
+            extra_flags = ctx.attr.extra_flags,
+            vm_flags = ctx.attr.vm_flags,
+        ),
+        flutter_kernel_dills(
+            import_dill = ctx.file.import_dill if ctx.attr.import_dill else None,
+        ),
         resource_set = _TEST_RESOURCE_SET if ctx.attr.use_resource_set else None,
-        extra_flags = ctx.attr.extra_flags,
     )
     return [DefaultInfo(files = depset([output]))]
 
@@ -141,15 +144,16 @@ def _docstring_example_impl(ctx):
     pc = compile_package_config(ctx, packages, all_srcs)
     output = ctx.actions.declare_file(ctx.label.name + ".dill")
     flutter_kernel_compile_action(
-        ctx = ctx,
-        dartaotruntime = tools.dartaotruntime,
-        kernel_filter_tool = tools.kernel_filter_tool,
-        frontend_server = tools.frontend_server,
-        platform_dill = tools.platform_dill,
-        main = ctx.file.main,
-        srcs = pc.srcs,
-        package_config = pc.config_file,
-        output = output,
+        ctx,
+        tools,
+        flutter_kernel_sources(
+            main = ctx.file.main,
+            srcs = pc.srcs,
+            package_config = pc.config_file,
+        ),
+        flutter_kernel_outputs(output = output),
+        flutter_kernel_options(),
+        flutter_kernel_dills(),
     )
     return [DefaultInfo(files = depset([output]))]
 

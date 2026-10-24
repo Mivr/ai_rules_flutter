@@ -276,11 +276,18 @@ bzl_library(
 )
 
 bzl_library(
+    name = "flutter_compile_params",
+    srcs = ["flutter_compile_params.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+)
+
+bzl_library(
     name = "flutter_compile",
     srcs = ["flutter_compile.bzl"],
     visibility = ["//flutter:__subpackages__"],
     deps = [
         ":app_entrypoint",
+        ":flutter_compile_params",
         "//flutter:providers",
     ],
 )
