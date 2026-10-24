@@ -29,7 +29,7 @@ def _own_data_conflict_test_impl(ctx):
     asserts.expect_failure(env, "channel_data/own.txt")
     asserts.expect_failure(env, "blob.bin")
     asserts.expect_failure(env, "own_lib")
-    asserts.expect_failure(env, "blob_data")
+    asserts.expect_failure(env, "blob_glue")
     return analysistest.end(env)
 
 def _same_file_two_channels_test_impl(ctx):
@@ -37,6 +37,13 @@ def _same_file_two_channels_test_impl(ctx):
     variants = config["assets"]["channel_data/shared.txt"]
     asserts.equals(env, 1, len(variants))
     asserts.equals(env, "channel_data/shared.txt", variants[0]["asset"])
+    return analysistest.end(env)
+
+def _same_file_data_test_impl(ctx):
+    env, config = _bundle_config(ctx)
+    variants = config["assets"]["packages/cov63/channel_data/shared.txt"]
+    asserts.equals(env, 1, len(variants))
+    asserts.equals(env, "packages/cov63/channel_data/shared.txt", variants[0]["asset"])
     return analysistest.end(env)
 
 def _font_diamond_written_once_test_impl(ctx):
@@ -68,6 +75,10 @@ _same_file_two_channels_test = analysistest.make(
     _same_file_two_channels_test_impl,
 )
 
+_same_file_data_test = analysistest.make(
+    _same_file_data_test_impl,
+)
+
 _font_diamond_written_once_test = analysistest.make(
     _font_diamond_written_once_test_impl,
 )
@@ -89,11 +100,15 @@ def asset_channels_test_suite(name):
     )
     _own_data_conflict_test(
         name = name + "_own_data_conflict",
-        target_under_test = ":own_data_collision",
+        target_under_test = ":own_data_collision_app",
     )
     _same_file_two_channels_test(
         name = name + "_same_file_two_channels",
         target_under_test = ":shared_channel_bundle",
+    )
+    _same_file_data_test(
+        name = name + "_same_file_data",
+        target_under_test = ":shared_data_app",
     )
     _font_diamond_written_once_test(
         name = name + "_font_diamond_written_once",
@@ -109,6 +124,7 @@ def asset_channels_test_suite(name):
             ":" + name + "_own_pub_conflict",
             ":" + name + "_own_data_conflict",
             ":" + name + "_same_file_two_channels",
+            ":" + name + "_same_file_data",
             ":" + name + "_font_diamond_written_once",
             ":" + name + "_font_clash",
         ],

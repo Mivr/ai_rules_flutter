@@ -1,12 +1,14 @@
 """Cross-channel asset key fixtures (COV-63).
 
 Each bundle below pins one ordering of the channel claims: own `assets`
-entries first, then compiled-shader, pub and data claims in bundle order.
-The `manual` tag keeps the intentionally-failing bundles out of `//...`
-builds; only the analysistest suite builds them.
+entries first, then compiled-shader, pub and (on applications, which are
+the only targets that ship data assets) data claims in bundle order.
+The `manual` tag keeps the intentionally-failing targets and the
+applications out of `//...` builds; only the analysistest suite builds
+them.
 """
 
-load("//flutter:defs.bzl", "flutter_asset_bundle", "flutter_library")
+load("//flutter:defs.bzl", "flutter_application", "flutter_asset_bundle", "flutter_library", "flutter_plugin")
 load("//flutter:native_assets.bzl", "flutter_data_asset")
 load(":asset_channels_test.bzl", "asset_channels_test_suite")
 
@@ -46,13 +48,31 @@ flutter_data_asset(
     file = "packages/blob/blob.bin",
 )
 
+# A data file lands in a bundle only through an application. The glue stands
+# in for package `cov63`'s hook output the way the synthetic e2e does: it
+# claims the app's package and carries the data declaration into the
+# `FlutterInfo` dep graph for `flutter_application` to pick up. It shares
+# the app's package name because it shares its Bazel package: two Dart
+# packages cannot be rooted at one directory.
+flutter_plugin(
+    name = "blob_glue",
+    package_name = "cov63",
+    srcs = [],
+    data_assets = [":blob_data"],
+    platforms = [],
+    tags = ["manual"],
+)
+
 # Assets-channel key meets a different data file at one key: must fail,
 # naming the key, both files and both labels.
-flutter_asset_bundle(
-    name = "own_data_collision",
+flutter_application(
+    name = "own_data_collision_app",
+    package_name = "cov63",
+    srcs = ["lib.dart"],
+    main = "lib.dart",
     tags = ["manual"],
     deps = [
-        ":blob_data",
+        ":blob_glue",
         ":own_lib",
     ],
 )
@@ -85,9 +105,31 @@ flutter_asset_bundle(
     name = "shared_channel_bundle",
     assets = ["channel_data/shared.txt"],
     deps = [
-        ":file_data",
         ":file_lib",
         ":pub_shared",
+    ],
+)
+
+# The same file claimed as a library asset and as a data asset: legal, so
+# the application below analyses and lists the key once.
+flutter_plugin(
+    name = "file_glue",
+    package_name = "cov63",
+    srcs = [],
+    data_assets = [":file_data"],
+    platforms = [],
+    tags = ["manual"],
+)
+
+flutter_application(
+    name = "shared_data_app",
+    package_name = "cov63",
+    srcs = ["lib.dart"],
+    main = "lib.dart",
+    tags = ["manual"],
+    deps = [
+        ":file_glue",
+        ":file_lib",
     ],
 )
 

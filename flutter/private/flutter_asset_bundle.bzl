@@ -7,7 +7,6 @@ Produces a `flutter_assets/` tree artifact containing:
 - Copied asset files (images, etc.)
 """
 
-load("//flutter:providers.bzl", "FlutterInfo")
 load("//flutter/private:asset_keys.bzl", "bundle_asset_entries")
 load(
     "//flutter/private:common.bzl",
@@ -46,7 +45,9 @@ def _flutter_asset_bundle_impl(ctx):
     # MaterialIcons in the bundle, list `@rules_flutter//flutter:material_icons`
     # in deps — the same channel cupertino_icons et al. arrive through.
     # The pub claims ride the same list as the shader claims, in bundle
-    # order, for the one cross-channel key check.
+    # order, for the one cross-channel key check. Data assets are not read
+    # here: this tree ships none, so only `flutter_build_assets`
+    # (applications and tests) claims that channel.
     compiled_shaders = flutter_compile_shaders(ctx, flutter_sdk_info, "tester")
     extra_claims = [struct(key = dest, file = f, channel = "shader") for dest, f in compiled_shaders.items()]
     fonts, pub_extra_asset_copies = aggregate_pub_contributions(
@@ -62,20 +63,6 @@ def _flutter_asset_bundle_impl(ctx):
     # cannot draw what the `flutter_test` it was split from drew.
     extra_asset_copies = dict(compiled_shaders)
     extra_asset_copies.update(pub_extra_asset_copies)
-
-    # Data assets land at `packages/<pkg>/<name>`, the key `rootBundle`
-    # loads them by. One flatten, like every other channel here; entries that
-    # collide with another channel's key fail in the check below.
-    for entry in depset(transitive = [
-        dep[FlutterInfo].data_assets
-        for dep in ctx.attr.deps
-        if FlutterInfo in dep
-    ]).to_list():
-        extra_claims.append(struct(
-            key = "packages/%s/%s" % (entry.package, entry.name),
-            file = entry.file,
-            channel = "data",
-        ))
 
     check_bundle_claims(struct(label = ctx.label, deps = ctx.attr.deps), all_entries, extra_claims)
 
