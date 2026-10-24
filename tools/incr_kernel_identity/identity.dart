@@ -376,41 +376,12 @@ final List<EditStep> s2CommonSteps = [
   ),
 ];
 
-/// Picks the Bazel binary from `which -a bazel` [candidates]: the first entry
-/// outside a bazelisk download directory. Bazelisk prepends its versioned
-/// download directory to the PATH of `bazel run` actions, so a naive lookup
-/// would re-enter the raw server binary without the wrapper flags (rc files,
-/// output root, caches) the outer build used; skipping those entries recovers
-/// the wrapper the user invoked. Falls back to the first entry, then `bazel`.
-String pickBazel({
-  required List<String> candidates,
-  String fallback = 'bazel',
-}) {
-  for (final candidate in candidates) {
-    if (!candidate.contains('bazelisk')) return candidate;
-  }
-  return candidates.isEmpty ? fallback : candidates.first;
-}
-
 /// The Bazel binary driving the inner builds: [override] (`$BAZEL`) when set,
-/// else [pickBazel] over this process's PATH.
-Future<String> resolveBazel({String? override}) async {
-  if (override != null && override.isNotEmpty) return override;
-  try {
-    final which = await Process.run('which', ['-a', 'bazel']);
-    if (which.exitCode == 0) {
-      final candidates = (which.stdout as String)
-          .split('\n')
-          .map((line) => line.trim())
-          .where((line) => line.isNotEmpty)
-          .toList();
-      return pickBazel(candidates: candidates);
-    }
-  } on ProcessException {
-    // No `which` here; fall through to the PATH default below.
-  }
-  return 'bazel';
-}
+/// else `bazel` on PATH. Under `bazel run` the PATH `bazel` is Bazel's own
+/// binary, so a caller whose Bazel is a wrapper sets `BAZEL` to that wrapper
+/// (on the KVM host that is `BAZEL=/usr/local/bin/bazel`).
+String resolveBazel({String? override}) =>
+    (override != null && override.isNotEmpty) ? override : 'bazel';
 
 /// Resolves the built `hello_world.dill` under [linkPrefix] in [workDir] to its
 /// real path under the output base. The `bazel-bin` entry may be a symlink or

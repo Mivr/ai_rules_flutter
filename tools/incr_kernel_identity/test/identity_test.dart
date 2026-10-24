@@ -279,38 +279,6 @@ void main() {
     });
   });
 
-  group('bazel resolution', () {
-    test('skips the bazelisk download shim for the real wrapper', () {
-      expect(
-        pickBazel(
-          candidates: [
-            '/cache/home/.cache/bazelisk/downloads/sha256/abc/bin/bazel',
-            '/usr/local/bin/bazel',
-          ],
-        ),
-        '/usr/local/bin/bazel',
-      );
-    });
-
-    test('a lone wrapper needs no skipping', () {
-      expect(
-        pickBazel(candidates: ['/usr/local/bin/bazel']),
-        '/usr/local/bin/bazel',
-      );
-    });
-
-    test('no candidates falls back to PATH lookup', () {
-      expect(pickBazel(candidates: []), 'bazel');
-    });
-
-    test('an explicit override always wins', () async {
-      expect(
-        await resolveBazel(override: '/opt/wrapper/bazel'),
-        '/opt/wrapper/bazel',
-      );
-    });
-  });
-
   group('locateDill', () {
     late Directory dir;
     setUp(() {

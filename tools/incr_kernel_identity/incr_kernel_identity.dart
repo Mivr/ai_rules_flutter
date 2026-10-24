@@ -9,6 +9,10 @@
 /// for the same inputs, after a sequence of edits on `e2e/hello_world`'s
 /// `//:hello_world`. Prints its own elapsed time and exits 0 when every
 /// comparison holds, 1 otherwise.
+///
+/// It calls Bazel as the `BAZEL` environment variable names, or `bazel` on
+/// PATH. Under `bazel run` the PATH `bazel` is Bazel's own binary, so a
+/// caller whose Bazel is a wrapper sets `BAZEL` to that wrapper.
 library;
 
 import 'dart:io';
@@ -28,9 +32,8 @@ Future<void> main() async {
     exit(2);
   }
   final run = IdentityRun(
-    // `$BAZEL` substitutes a wrapper; otherwise the wrapper the user invoked
-    // is recovered from PATH (never bazelisk's raw download shim).
-    bazel: await resolveBazel(override: Platform.environment['BAZEL']),
+    // `$BAZEL` names a wrapper; otherwise `bazel` on PATH.
+    bazel: resolveBazel(override: Platform.environment['BAZEL']),
     repoRoot: rootPath,
   );
   final stopwatch = Stopwatch()..start();

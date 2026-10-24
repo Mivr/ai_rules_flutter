@@ -26,7 +26,10 @@ app library including an import change, then the revert; a one-shot leg
 worker dill must be byte-equal to the one-shot dill of that state, every
 compared build must have executed its compile under its stated strategy (no
 cache hit, no fallback), and the worker leg must prove one worker and one
-compiler process served all four builds.
+compiler process served all four builds. The check calls Bazel as the `BAZEL`
+environment variable names, or `bazel` on PATH: under `bazel run` the PATH
+`bazel` is Bazel's own binary, so a caller whose Bazel is a wrapper sets
+`BAZEL` to that wrapper.
 
 ## Turning it on
 
