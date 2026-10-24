@@ -247,9 +247,11 @@ void main() {
     });
 
     test('backup and restore round-trip both sources', () {
+      // Production filenames: the dotted `common_widgets.dart` stem once
+      // drifted between backup and restore, silently skipping its restore.
       final main = File('${dir.path}/main.dart')
         ..writeAsStringSync('main v1\n');
-      final common = File('${dir.path}/common.dart')
+      final common = File('${dir.path}/common_widgets.dart')
         ..writeAsStringSync('common v1\n');
       backupSources(
         mainPath: main.path,
@@ -265,6 +267,31 @@ void main() {
       );
       expect(main.readAsStringSync(), 'main v1\n');
       expect(common.readAsStringSync(), 'common v1\n');
+    });
+
+    test('restore after editing both sources recovers exact bytes', () {
+      // Pins the s3 revert: both edited files must come back byte-for-byte,
+      // so a warm recompile over the reverted inputs repeats s0 exactly.
+      const mainOrig = '// main original\nvoid main() {}\n';
+      const commonOrig = '// common original\nclass C {}\n';
+      final main = File('${dir.path}/main.dart')
+        ..writeAsStringSync(mainOrig);
+      final common = File('${dir.path}/common_widgets.dart')
+        ..writeAsStringSync(commonOrig);
+      backupSources(
+        mainPath: main.path,
+        commonPath: common.path,
+        dir: dir.path,
+      );
+      main.writeAsStringSync('// main edited $mainOrig');
+      common.writeAsStringSync('// common edited $commonOrig');
+      restoreSources(
+        mainPath: main.path,
+        commonPath: common.path,
+        dir: dir.path,
+      );
+      expect(main.readAsBytesSync(), mainOrig.codeUnits);
+      expect(common.readAsBytesSync(), commonOrig.codeUnits);
     });
 
     test('restore with no backup leaves the file alone', () {

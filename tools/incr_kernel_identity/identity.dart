@@ -434,7 +434,9 @@ class IdentityRun {
   Future<int> run() async {
     try {
       _watchSignals();
-      _backupSources();
+      // The class delegates to the tested backupSources/restoreSources pair
+      // so the backup filenames cannot drift between backup and restore.
+      backupSources(mainPath: _main, commonPath: _common, dir: work.path);
       await _workerS0();
       await _oneshotS0();
       await _workerS1();
@@ -447,19 +449,6 @@ class IdentityRun {
       await _cleanup();
     }
     return 0;
-  }
-
-  void _backupSources() {
-    File('$_main').copySync('${work.path}/main.dart.bak');
-    File('$_common').copySync('${work.path}/common_widgets.bak');
-  }
-
-  void _restoreSources() {
-    for (final name in ['main.dart', 'common_widgets.dart']) {
-      final backup = File('${work.path}/$name.bak');
-      if (!backup.existsSync()) continue;
-      backup.copySync(name == 'main.dart' ? _main : _common);
-    }
   }
 
   /// Runs one build, proves it executed under its stated strategy from its
@@ -716,7 +705,7 @@ class IdentityRun {
 
   Future<void> _workerS3() async {
     print('identity-check: revert to the original sources');
-    _restoreSources();
+    restoreSources(mainPath: _main, commonPath: _common, dir: work.path);
     // The reverted inputs repeat s0 exactly, so without this the compile
     // would be an action-cache hit and the warm path would go untested.
     File(_locateDill(linkPrefix: 'wlink-')).deleteSync();
@@ -811,7 +800,7 @@ class IdentityRun {
     await _sigint?.cancel();
     await _sigterm?.cancel();
     try {
-      _restoreSources();
+      restoreSources(mainPath: _main, commonPath: _common, dir: work.path);
     } on FileSystemException catch (e) {
       stderr.writeln('identity-check: warning: restore failed ($e).');
     }
