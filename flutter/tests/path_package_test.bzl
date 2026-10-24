@@ -8,14 +8,22 @@ and links only what the spoke generator reads or exposes:
   each shader's own directory), and the plugin's platform directories —
   mirrored one file at a time into real repository directories, so the
   generator's `ctx.file` writes can never land in the user tree through a
-  symlinked directory.
+  symlinked directory. A directory that arrives as a symlink resolves to
+  its target and mirrors the same way — no directory is ever symlinked —
+  and every link at any depth is confined to the workspace and checked
+  for cycles.
 * `example/`, `build/`, `.dart_tool/`, dot-directories, undeclared files,
-  and user BUILD files stay unlinked — skipped subtrees are not even
-  watched, so machine-local output cannot affect the fetch.
-* Source links replicate without descending and fail closed, naming the
-  package and the link, when they resolve to the package or an ancestor,
-  or outside the workspace's real root — as do the package directory
-  itself and any of its parent components.
+  and user BUILD files stay unlinked — top-level skipped subtrees are not
+  even watched, while every declared path is watched before testing
+  whether it exists, so creating it later refetches the spoke instead of
+  leaving its files silently missing. Below the top level only user BUILD
+  files stay out (watched, never linked), so nested `example/`, `build/`,
+  and dot-files link normally.
+* Source links fail closed, naming the package and the link, when they
+  resolve to the package or an ancestor, enter a symlink cycle, or leave
+  the workspace's real root — as do the package directory itself and any
+  of its parent components. Path comparisons fold case exactly when the
+  fetch host proves case-insensitive.
 * A `path:` entry resolves against the lock file's own directory, and only
   the root module's workspace is reachable from a spoke.
 * The lock entry needs a true `relative` marker and a non-absolute path,
@@ -29,17 +37,26 @@ and links only what the spoke generator reads or exposes:
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load(
-    "//flutter/private:flutter_pub_package.bzl",
+    "//flutter/private:flutter_pub_mirror.bzl",
     "ancestor_link_refusal",
+    "cycle_refusal",
+    "detect_case_insensitive_host",
     "is_path_spoke_skipped_dir",
+    "link_target_is_cycle",
+    "make_link_scope",
+    "mirror_tree_bounded",
+    "outside_workspace_refusal",
+    "path_spoke_is_ancestor_cycle",
+    "path_spoke_resolves_outside",
+    "paths_match",
+)
+load(
+    "//flutter/private:flutter_pub_package.bzl",
     "link_path_package",
     "malformed_pub_version_refusal",
     "missing_pubspec_refusal",
-    "outside_workspace_refusal",
     "parse_pubspec_identity",
-    "path_spoke_is_ancestor_cycle",
     "path_spoke_platform_dirs",
-    "path_spoke_resolves_outside",
     "pubspec_name_refusal",
     "pubspec_version_refusal",
     "scoped_shader_includes_block",
@@ -59,12 +76,21 @@ def _tree_node(tree, rel):
         node = node[seg]
     return node
 
+def _mock_target_rel(real):
+    """The tree lookup for a symlink target, or None outside the workspace."""
+    prefix = "/workspace/"
+    if not real.startswith(prefix):
+        return None
+    return real[len(prefix):]
+
 def _make_mock_link_ctx(tree, path_value = "platform_assets", package_name = "platform_assets", version = "", hub_name = "test_hub"):
     """Fake repository_ctx for `link_path_package` over an in-memory tree.
 
     Tree leaves: None is an empty file, a string is a file with that
     content, a dict is a real directory, and `struct(symlink_to = ...)` is
-    a symlink node resolving to the given real path.
+    a symlink node resolving to the given real path. A symlink struct with
+    `is_dir = True` is a directory link: its children list the target's
+    entries, like a fetch host that follows directory symlinks.
 
     Args:
         tree: Nested dicts relative to a fake `/workspace` root.
@@ -81,30 +107,42 @@ def _make_mock_link_ctx(tree, path_value = "platform_assets", package_name = "pl
     linked = []
     linked_names = {}
 
-    def _make_path(rel):
+    def _make_path(rel, disk_rel = None):
+        look = disk_rel if disk_rel != None else rel
         full = "/workspace/" + rel if rel else "/workspace"
-        node = _tree_node(tree, rel)
+        disk_full = "/workspace/" + look if look else "/workspace"
+        node = _tree_node(tree, look)
         if type(node) == "struct":
             real = node.symlink_to
             exists = True
-            is_dir = False
+            is_dir = node.is_dir if hasattr(node, "is_dir") else False
             content = ""
-            children = []
+            target_rel = _mock_target_rel(real)
+            target = _tree_node(tree, target_rel) if target_rel != None else "missing"
+            names = sorted(target.keys()) if is_dir and type(target) == "dict" else []
+            kid_base = target_rel
         else:
-            real = full
+            real = disk_full
             exists = node != "missing"
             is_dir = type(node) == "dict"
             content = node if type(node) == "string" else ""
-            children = sorted(node.keys()) if is_dir else []
+            names = sorted(node.keys()) if is_dir else []
+            kid_base = look
 
         def _readdir():
-            return [_make_path(rel + "/" + c if rel else c) for c in children]
+            return [_make_path(rel + "/" + c if rel else c, kid_base + "/" + c if kid_base != None and kid_base else c) for c in names]
 
         def _get_child(*segments):
             child_rel = rel
+            disk = kid_base
             for seg in segments:
                 child_rel = child_rel + "/" + seg if child_rel else seg
-            return _make_path(child_rel)
+                disk = (disk + "/" + seg if disk else seg) if disk != None else None
+                if disk != None:
+                    inter = _tree_node(tree, disk)
+                    if type(inter) == "struct":
+                        disk = _mock_target_rel(inter.symlink_to)
+            return _make_path(child_rel, disk)
 
         return struct(
             path = full,
@@ -121,7 +159,7 @@ def _make_mock_link_ctx(tree, path_value = "platform_assets", package_name = "pl
         watched.append(path_obj.path)
 
     def _symlink(target, link_name):
-        linked.append(struct(name = link_name, target = target.realpath))
+        linked.append(struct(name = link_name, target = target.realpath, is_dir = target.is_dir))
         linked_names[link_name] = target.content
 
     def _repo_path(rel):
@@ -201,13 +239,16 @@ _SCOPED_LINKED = [
 
 _SCOPED_WATCHED = [
     "/workspace/mypkg",
-    "/workspace/mypkg/pubspec.yaml",
-    "/workspace/mypkg/lib",
-    "/workspace/mypkg/lib/mypkg.dart",
+    "/workspace/mypkg/assets",
     "/workspace/mypkg/assets/any.txt",
     "/workspace/mypkg/assets/dir",
-    "/workspace/mypkg/assets/dir/one.txt",
     "/workspace/mypkg/assets/dir/BUILD.bazel",
+    "/workspace/mypkg/assets/dir/one.txt",
+    "/workspace/mypkg/hook/build.dart",
+    "/workspace/mypkg/hook/link.dart",
+    "/workspace/mypkg/lib",
+    "/workspace/mypkg/lib/mypkg.dart",
+    "/workspace/mypkg/pubspec.yaml",
 ]
 
 def _link_scopes_to_the_pubspec_plan_test_impl(ctx):
@@ -223,7 +264,7 @@ def _link_scopes_to_the_pubspec_plan_test_impl(ctx):
     mock = _make_mock_link_ctx({"mypkg": _SCOPED_CONTENTS}, path_value = "mypkg", package_name = "mypkg")
     link_path_package(mock.ctx)
     asserts.equals(env, _SCOPED_LINKED, sorted([link.name for link in mock.linked]))
-    asserts.equals(env, sorted(_SCOPED_WATCHED), sorted(mock.watched))
+    asserts.equals(env, sorted(_SCOPED_WATCHED), sorted({w: True for w in mock.watched}))
     for link in mock.linked:
         asserts.true(
             env,
@@ -463,6 +504,274 @@ def _absolute_lock_path_decides_test_impl(ctx):
     return unittest.end(env)
 
 absolute_lock_path_decides_test = unittest.make(_absolute_lock_path_decides_test_impl)
+
+_DIR_LINK_PUBSPEC = """name: dirlinkpkg
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.example.dirlinkpkg
+        pluginClass: DirlinkPlugin
+  assets:
+    - assets/
+    - path: assets/extra.txt
+      platforms:
+        - android
+"""
+
+def _dir_link_mirrors_not_symlinks_test_impl(ctx):
+    """A directory symlink mirrors file by file; no directory is symlinked.
+
+    The plugin's `android/` and `assets/` are links to directories elsewhere
+    in the workspace: the spoke holds one file symlink per file, so the
+    generated `android/BUILD.bazel` lands in the spoke, never in the user's
+    tree. The linked `assets/` plus the conditional per-file entry for
+    `assets/extra.txt` under it link that file exactly once (no "File
+    exists"); the link targets are watched entry by entry, so adding a file
+    under them refetches; nested `com/example` Kotlin links (skip names stop
+    at the mirrored tree's top level, so `android/build/` stays out); and the
+    user's BUILD file is watched but not linked.
+    """
+    env = unittest.begin(ctx)
+    mock = _make_mock_link_ctx({
+        "dirlinkpkg": {
+            "pubspec.yaml": _DIR_LINK_PUBSPEC,
+            "lib": {"dirlinkpkg.dart": None},
+            "android": struct(symlink_to = "/workspace/shared/android", is_dir = True),
+            "assets": struct(symlink_to = "/workspace/shared/assets", is_dir = True),
+        },
+        "shared": {
+            "android": {
+                "BUILD.bazel": "user BUILD sentinel, watched but never linked",
+                "settings.gradle": None,
+                "build": {"stale.txt": None},
+                "src": {"main": {"kotlin": {"com": {"example": {"Plugin.kt": None}}}}},
+            },
+            "assets": {
+                "any.txt": None,
+                "extra.txt": None,
+            },
+        },
+    }, path_value = "dirlinkpkg", package_name = "dirlinkpkg")
+    link_path_package(mock.ctx)
+    names = sorted([link.name for link in mock.linked])
+    asserts.equals(env, [
+        "android/settings.gradle",
+        "android/src/main/kotlin/com/example/Plugin.kt",
+        "assets/any.txt",
+        "assets/extra.txt",
+        "lib/dirlinkpkg.dart",
+        "pubspec.yaml",
+    ], names)
+    for link in mock.linked:
+        asserts.false(env, link.is_dir, "link {} must be a file symlink, never a directory symlink".format(link.name))
+        asserts.true(
+            env,
+            link.target.startswith("/workspace/"),
+            "link {} must point into the workspace, got {}".format(link.name, link.target),
+        )
+    for seen in [
+        "/workspace/shared/android",
+        "/workspace/shared/assets",
+        "/workspace/shared/android/BUILD.bazel",
+    ]:
+        asserts.true(env, seen in mock.watched, "{} must be watched, got {}".format(seen, sorted(mock.watched)))
+    return unittest.end(env)
+
+dir_link_mirrors_not_symlinks_test = unittest.make(_dir_link_mirrors_not_symlinks_test_impl)
+
+def _nested_links_stay_confined_test_impl(ctx):
+    """Links nested inside a mirrored directory stay confined to the workspace.
+
+    A file link nested in `lib/` replicates as one watched symlink without
+    descending into its target; a directory link nested there resolves back
+    through the workspace root and mirrors entry by entry; and a link nested
+    inside that mirrored target replicates too. Every emitted link is a file
+    symlink pointing into the workspace.
+    """
+    env = unittest.begin(ctx)
+    mock = _make_mock_link_ctx({
+        "nestedpkg": {
+            "pubspec.yaml": "name: nestedpkg\n",
+            "lib": {
+                "nestedpkg.dart": None,
+                "sibling.txt": None,
+                "ext_link.txt": struct(symlink_to = "/workspace/nestedpkg/lib/sibling.txt"),
+                "dir_link": struct(symlink_to = "/workspace/shared/dir", is_dir = True),
+            },
+        },
+        "shared": {
+            "dir": {
+                "deep.txt": None,
+                "inner_link.txt": struct(symlink_to = "/workspace/nestedpkg/lib/sibling.txt"),
+            },
+        },
+    }, path_value = "nestedpkg", package_name = "nestedpkg")
+    link_path_package(mock.ctx)
+    names = sorted([link.name for link in mock.linked])
+    asserts.equals(env, [
+        "lib/dir_link/deep.txt",
+        "lib/dir_link/inner_link.txt",
+        "lib/ext_link.txt",
+        "lib/nestedpkg.dart",
+        "lib/sibling.txt",
+        "pubspec.yaml",
+    ], names)
+    for link in mock.linked:
+        asserts.false(env, link.is_dir, "link {} must be a file symlink, never a directory symlink".format(link.name))
+        asserts.true(
+            env,
+            link.target.startswith("/workspace/"),
+            "link {} must point into the workspace, got {}".format(link.name, link.target),
+        )
+    asserts.true(env, "/workspace/shared/dir" in mock.watched, "the mirrored link target must be watched, got {}".format(sorted(mock.watched)))
+    return unittest.end(env)
+
+nested_links_stay_confined_test = unittest.make(_nested_links_stay_confined_test_impl)
+
+_SKIP_ROOT_PUBSPEC = """name: skippkg
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.example.skippkg
+        pluginClass: SkipPlugin
+  assets:
+    - assets/icons/
+"""
+
+def _skips_stop_at_mirror_root_test_impl(ctx):
+    """Skip names stop at each mirrored tree's top level; dot-files link.
+
+    `build/` and `example/` segments nested under `lib/` or a platform dir
+    link normally (so do `com/example` Kotlin, dot-files inside a declared
+    asset directory, and dot-directories below the mirrored tree's top
+    level) — only each mirrored tree's immediate children consult the skip
+    list.
+    """
+    env = unittest.begin(ctx)
+    mock = _make_mock_link_ctx({
+        "skippkg": {
+            "pubspec.yaml": _SKIP_ROOT_PUBSPEC,
+            "lib": {
+                "skippkg.dart": None,
+                "src": {
+                    "build": {"gen.dart": None},
+                    "example": {"sample.dart": None},
+                },
+            },
+            "android": {"src": {"main": {"kotlin": {"com": {"example": {"Plugin.kt": None}}}}}},
+            "assets": {"icons": {".keep": None, "sub": {".cache": {"c.txt": None}}, "a.txt": None}},
+        },
+    }, path_value = "skippkg", package_name = "skippkg")
+    link_path_package(mock.ctx)
+    names = sorted([link.name for link in mock.linked])
+    asserts.equals(env, [
+        "android/src/main/kotlin/com/example/Plugin.kt",
+        "assets/icons/.keep",
+        "assets/icons/a.txt",
+        "assets/icons/sub/.cache/c.txt",
+        "lib/skippkg.dart",
+        "lib/src/build/gen.dart",
+        "lib/src/example/sample.dart",
+        "pubspec.yaml",
+    ], names)
+    return unittest.end(env)
+
+skips_stop_at_mirror_root_test = unittest.make(_skips_stop_at_mirror_root_test_impl)
+
+def _missing_declared_paths_are_watched_test_impl(ctx):
+    """A declared path is watched before testing whether it exists.
+
+    A declared asset file and a declared asset directory that are both
+    missing at fetch time stay unlinked but watched, so creating either
+    later refetches the spoke instead of leaving its files silently
+    missing.
+    """
+    env = unittest.begin(ctx)
+    mock = _make_mock_link_ctx({
+        "latepkg": {
+            "pubspec.yaml": "name: latepkg\nflutter:\n  assets:\n    - assets/late.txt\n    - assets/missing_dir/\n",
+            "lib": {"latepkg.dart": None},
+        },
+    }, path_value = "latepkg", package_name = "latepkg")
+    link_path_package(mock.ctx)
+    names = sorted([link.name for link in mock.linked])
+    asserts.equals(env, ["lib/latepkg.dart", "pubspec.yaml"], names)
+    for seen in [
+        "/workspace/latepkg/assets",
+        "/workspace/latepkg/assets/late.txt",
+        "/workspace/latepkg/assets/missing_dir",
+    ]:
+        asserts.true(env, seen in mock.watched, "{} must be watched, got {}".format(seen, sorted(mock.watched)))
+    return unittest.end(env)
+
+missing_declared_paths_are_watched_test = unittest.make(_missing_declared_paths_are_watched_test_impl)
+
+def _cycle_refusal_names_the_link_test_impl(ctx):
+    """Entering a symlink cycle fails fast naming the link as a cycle.
+
+    `mirror_tree_bounded` reports the refusal instead of failing (the caller
+    `fail()`s with it), so the walk stops at the cycle instead of running to
+    the bound and reporting a misleading directory count.
+    """
+    env = unittest.begin(ctx)
+    mock = _make_mock_link_ctx({
+        "cycpkg": {
+            "lib": {"a": {
+                "back": struct(symlink_to = "/workspace/cycpkg/lib/a", is_dir = True),
+                "f.txt": None,
+            }},
+        },
+    }, path_value = "cycpkg", package_name = "cycpkg")
+    src = mock.ctx.workspace_root.get_child("cycpkg")
+    scope = make_link_scope("cycpkg", "/workspace/cycpkg", "/workspace", False, {})
+    result = mirror_tree_bounded(
+        mock.ctx,
+        [(src.get_child("lib", "a"), "lib/a", ("/workspace/cycpkg/lib/a",), "lib/a")],
+        scope,
+        100,
+    )
+    asserts.false(env, result.leftover)
+    asserts.true(env, "lib/a/back" in result.error, "refusal must name the link: {}".format(result.error))
+    asserts.true(env, "cycle" in result.error, "refusal must say it is a cycle: {}".format(result.error))
+    message = cycle_refusal("cycpkg", "lib/a/back", "/workspace/cycpkg/lib/a")
+    for want in ["cycpkg", "lib/a/back", "cycle"]:
+        asserts.true(env, want in message, "refusal must name the package, the link, and the cycle: {}".format(message))
+    asserts.true(env, link_target_is_cycle(("/workspace/x",), "/workspace/x", False))
+    asserts.false(env, link_target_is_cycle(("/workspace/x",), "/workspace/y", False))
+    return unittest.end(env)
+
+cycle_refusal_names_the_link_test = unittest.make(_cycle_refusal_names_the_link_test_impl)
+
+def _case_rule_folds_only_on_insensitive_hosts_test_impl(ctx):
+    """Path comparisons fold case exactly on case-insensitive hosts.
+
+    Exact spellings always match; a case-only difference matches only when
+    the host probes case-insensitive, so two distinct entries never merge on
+    a case-sensitive host while a case-variant package root, workspace root,
+    or skip name still confines on an insensitive one. The probe flips the
+    case of the existing package path: a host answering for the flipped
+    spelling folds case (a case-sensitive host holding both variants answers
+    True too, failing closed rather than merging them).
+    """
+    env = unittest.begin(ctx)
+    asserts.true(env, paths_match("a/B", "a/B", False))
+    asserts.true(env, paths_match("a/B", "a/b", True))
+    asserts.false(env, paths_match("a/B", "a/b", False))
+    asserts.true(env, path_spoke_is_ancestor_cycle("/w/Pkg", "/W", True))
+    asserts.false(env, path_spoke_is_ancestor_cycle("/w/Pkg", "/W", False))
+    asserts.false(env, path_spoke_resolves_outside("/Workspace", "/workspace/x", True))
+    asserts.true(env, path_spoke_resolves_outside("/Workspace", "/workspace/x", False))
+    asserts.true(env, is_path_spoke_skipped_dir("Build", True))
+    asserts.false(env, is_path_spoke_skipped_dir("Build", False))
+    sensitive = _make_mock_link_ctx({"mypkg": {"lib": {}}}, path_value = "mypkg", package_name = "mypkg")
+    asserts.false(env, detect_case_insensitive_host(sensitive.ctx, ["mypkg"]))
+    decoy = _make_mock_link_ctx({"mypkg": {"lib": {}}, "MYPKG": {"lib": {}}}, path_value = "mypkg", package_name = "mypkg")
+    asserts.true(env, detect_case_insensitive_host(decoy.ctx, ["mypkg"]))
+    return unittest.end(env)
+
+case_rule_folds_only_on_insensitive_hosts_test = unittest.make(_case_rule_folds_only_on_insensitive_hosts_test_impl)
 
 def _pubspec_identity_parses_test_impl(ctx):
     """The spoke reads the package's pubspec name and version as strings.
@@ -808,6 +1117,9 @@ def path_package_test_suite(name):
         name,
         absolute_lock_path_decides_test,
         ancestor_link_is_refused_test,
+        case_rule_folds_only_on_insensitive_hosts_test,
+        cycle_refusal_names_the_link_test,
+        dir_link_mirrors_not_symlinks_test,
         foreign_lock_path_dep_is_refused_test,
         link_scopes_to_the_pubspec_plan_test,
         lock_path_joins_the_lock_dir_test,
@@ -815,6 +1127,8 @@ def path_package_test_suite(name):
         lock_path_uses_the_lock_files_own_directory_test,
         malformed_pub_version_is_refused_test,
         matching_identity_links_test,
+        missing_declared_paths_are_watched_test,
+        nested_links_stay_confined_test,
         non_plugin_package_links_no_android_test,
         outside_workspace_is_refused_test,
         overlapping_entries_link_once_test,
@@ -828,6 +1142,7 @@ def path_package_test_suite(name):
         root_lock_needs_no_refusal_test,
         scoped_shader_includes_block_test,
         skipped_dirs_test,
+        skips_stop_at_mirror_root_test,
         unversioned_identity_links_test,
         workspace_sibling_link_replicates_without_descending_test,
     )
