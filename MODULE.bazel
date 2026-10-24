@@ -64,7 +64,7 @@ bazel_dep(name = "rules_jvm_external", version = "7.1")
 # missing-symbol error, so the floor points at the fork and consumers take
 # both modules from the fork's releases (see README.md). This repo's own
 # builds use the git_override below; e2e workspaces do the same.
-bazel_dep(name = "ai_rules_dart", version = "0.14.0", repo_name = "rules_dart")
+bazel_dep(name = "ai_rules_dart", version = "0.15.2", repo_name = "rules_dart")
 bazel_dep(name = "rules_go", version = "0.59.0")
 bazel_dep(name = "yaml.bzl", version = "0.1.2")
 
@@ -98,7 +98,7 @@ use_repo(
 
 git_override(
     module_name = "ai_rules_dart",
-    commit = "4e8793de199fa8954ab99aca144d229994cd9874",
+    commit = "7fb11607021819832699b08463e950e8f5c3495a",
     remote = "https://github.com/Mivr/rules_dart.git",
 )
 

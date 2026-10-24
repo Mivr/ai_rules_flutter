@@ -96,16 +96,16 @@ Two extensions cover the rest. A root-registered custom release (an older stable
 
 #### Overriding `rules_dart`
 
-`rules_flutter` uses APIs from the [`Mivr/rules_dart`](https://github.com/Mivr/rules_dart) fork (`@rules_dart//dart:hooks.bzl`, `@rules_dart//dart/private:record_use.bzl`, and `dart_codegen(package_name = ...)`) that are not in the `rules_dart` releases on the Bazel Central Registry. Its floor is `ai_rules_dart` 0.14.0, a fork release published to the Registry under that name with `repo_name = "rules_dart"`, so a root module that overrides only `rules_flutter` fails fast with a version error instead of a missing-symbol error at load. The `archive_override` pair in [MODULE.bazel](#modulebazel) above is the supported setup; every downloaded byte is verified against its `integrity` hash.
+`rules_flutter` uses APIs from the [`Mivr/rules_dart`](https://github.com/Mivr/rules_dart) fork (`@rules_dart//dart:hooks.bzl`, `@rules_dart//dart/private:record_use.bzl`, and `dart_codegen(package_name = ...)`) that are not in the `rules_dart` releases on the Bazel Central Registry. Its floor is `ai_rules_dart` 0.15.2, a fork release published to the Registry under that name with `repo_name = "rules_dart"`, so a root module that overrides only `rules_flutter` fails fast with a version error instead of a missing-symbol error at load. The `archive_override` pair in [MODULE.bazel](#modulebazel) above is the supported setup; every downloaded byte is verified against its `integrity` hash.
 
 To live at the forks' heads instead (local development against a checkout of each), replace the two `archive_override` blocks with overrides onto your clones. Because Bzlmod ignores module overrides in non-root modules, the overrides go in your root `MODULE.bazel`:
 
 ```starlark
-bazel_dep(name = "ai_rules_dart", version = "0.14.0", repo_name = "rules_dart")
+bazel_dep(name = "ai_rules_dart", version = "0.15.2", repo_name = "rules_dart")
 
 git_override(
     module_name = "ai_rules_dart",
-    commit = "4e8793de199fa8954ab99aca144d229994cd9874",
+    commit = "7fb11607021819832699b08463e950e8f5c3495a",
     remote = "https://github.com/Mivr/rules_dart.git",
 )
 ```
