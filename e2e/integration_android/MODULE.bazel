@@ -2,7 +2,7 @@
 
 module(name = "rules_flutter_integration_android")
 
-bazel_dep(name = "rules_flutter", version = "0.0.0")
+bazel_dep(name = "ai_rules_flutter", version = "0.0.0", repo_name = "rules_flutter")
 bazel_dep(name = "ai_rules_dart", version = "0.14.0", repo_name = "rules_dart")
 bazel_dep(name = "rules_android", version = "0.8.0")
 bazel_dep(name = "rules_android_ndk", version = "0.1.5")
@@ -14,7 +14,7 @@ bazel_dep(name = "rules_java", version = "9.9.0")
 bazel_dep(name = "llvm", version = "0.8.19", dev_dependency = True)
 
 local_path_override(
-    module_name = "rules_flutter",
+    module_name = "ai_rules_flutter",
     path = "../..",
 )
 

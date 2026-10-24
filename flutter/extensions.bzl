@@ -255,7 +255,7 @@ def _llvm_tool_repos_for_modules(*, modules, sdk_configured):
     """
     self_root = False
     for mod in modules:
-        if mod.is_root and mod.name == "rules_flutter":
+        if mod.is_root and mod.name == "ai_rules_flutter":
             self_root = True
             break
     if not sdk_configured and not self_root:

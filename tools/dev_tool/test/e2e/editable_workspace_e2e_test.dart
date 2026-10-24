@@ -44,7 +44,7 @@ void main() {
         // Invariant 2, and the one that fails first and least legibly without
         // the rewrite: the source resolves rules_flutter by `path = "../.."`.
         final config = ws.file('.bazelrc.user').readAsStringSync();
-        expect(config, contains('--override_module=rules_flutter='));
+        expect(config, contains('--override_module=ai_rules_flutter='));
         expect(
           config,
           contains(p.normalize(p.join(e2eWorkspace('web_example'), '../..'))),

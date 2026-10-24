@@ -147,16 +147,16 @@ version in the same change, then reformatting whatever the new style moves.
 The one exception is `flutter/private/gen_l10n/pubspec.yaml`, which matches
 upstream `flutter_tools` exactly.
 
-### A green sweep does not test the published rules_dart pin
+### A green sweep does not test the published ai_rules_dart pin
 
 The repo root and all fourteen `e2e/*` workspaces carry a gitignored
 `.bazelrc.user` holding:
 
-    common --override_module=rules_dart=/Users/aran/Projects/rules_dart
+    common --override_module=ai_rules_dart=/Users/aran/Projects/rules_dart
     common --lockfile_mode=off
 
-So every local build resolves rules_dart **main**, and the committed
-`bazel_dep(name = "rules_dart", version = ...)` is inert. CI has no such file —
+So every local build resolves ai_rules_dart **main**, and the committed
+`bazel_dep(name = "ai_rules_dart", version = ...)` is inert. CI has no such file —
 it is gitignored and no sibling checkout exists there — so CI builds against the
 published pin. A full green sweep is therefore *no evidence* that the code works
 against the version consumers get.
@@ -288,8 +288,8 @@ dart --version   # expect 3.13 or newer
 ```
 
 The glob spans both repo-name shapes: `+flutter+flutter_<platform>` when
-rules_flutter is the main module (which it is here), and
-`rules_flutter++flutter+flutter_<platform>` from a consumer workspace.
+ai_rules_flutter is the main module (which it is here), and
+`ai_rules_flutter++flutter+flutter_<platform>` from a consumer workspace.
 
 The unit tests are unaffected — Bazel resolves the toolchain for them.
 
@@ -985,8 +985,8 @@ is reload-observable. Verify:
 > [Stale staged sources (a poisoned action cache)](#stale-staged-sources-a-poisoned-action-cache)
 > for the signature, the one-command diagnosis, and the fix.
 
-Requires a `local_path_override` for `rules_dart` in `e2e/codegen/MODULE.bazel`
-until the new rules_dart (`generate_dev_package_config` + `source_packages`) ships
+Requires a `local_path_override` for `ai_rules_dart` in `e2e/codegen/MODULE.bazel`
+until the new ai_rules_dart (`generate_dev_package_config` + `source_packages`) ships
 in a release.
 
 **Watch mode (filesystem-watcher-driven reload).** Machine mode defaults the watcher
@@ -1326,8 +1326,8 @@ The build must fail, naming both hubs and both versions:
 
 ```
 Error in fail: Package "clock" is supplied more than once with different versions:
-  - 1.1.2 (../rules_flutter++flutter+hub_a__clock)
-  - 1.1.3 (../rules_flutter++flutter+hub_b__clock)
+  - 1.1.2 (../ai_rules_flutter++flutter+hub_a__clock)
+  - 1.1.3 (../ai_rules_flutter++flutter+hub_b__clock)
 ```
 
 A build that succeeds instead, emitting a `package_config.json` that names

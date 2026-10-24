@@ -6,7 +6,7 @@ module(name = "rules_flutter_android_no_go_sdk")
 # workspace uses. There is deliberately no go_sdk block below: the pinned Go
 # 1.26.2 must come from rules_flutter's own MODULE.bazel, not from
 # rules_android's bundled unpinned 1.22.4.
-bazel_dep(name = "rules_flutter", version = "0.0.0")
+bazel_dep(name = "ai_rules_flutter", version = "0.0.0", repo_name = "rules_flutter")
 bazel_dep(name = "ai_rules_dart", version = "0.14.0", repo_name = "rules_dart")
 bazel_dep(name = "rules_android", version = "0.8.0")
 bazel_dep(name = "rules_android_ndk", version = "0.1.5")
@@ -16,7 +16,7 @@ bazel_dep(name = "bazel_skylib", version = "1.9.2")
 bazel_dep(name = "platforms", version = "1.1.0")
 
 local_path_override(
-    module_name = "rules_flutter",
+    module_name = "ai_rules_flutter",
     path = "../..",
 )
 

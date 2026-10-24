@@ -48,7 +48,7 @@ python3 ai-docs/performance/harness/suite.py <rules_flutter checkout> <label> --
 ```
 
 Against a local rules_dart, add `--rules-dart <rules_dart checkout>`. The
-generated `.bazelrc` then gets `common --override_module=rules_dart=<path>`.
+generated `.bazelrc` then gets `common --override_module=ai_rules_dart=<path>`.
 
 Every generated workspace's `.bazelrc` sets `startup --host_jvm_args=-Xmx4g`
 and `common --jobs=8`, and `--lockfile_mode=off`. On a memory-capped host, set
@@ -73,8 +73,8 @@ with `bazel shutdown` in the workspace.
 
 `gen_bench.py` writes:
 
-- `MODULE.bazel`: `rules_flutter` as a `local_path_override` of the checkout.
-  `rules_dart` 0.7.2 from the registry. `flutter.toolchain(flutter_version = "3.47.6")`
+- `MODULE.bazel`: `ai_rules_flutter` as a `local_path_override` of the checkout.
+  `ai_rules_dart` 0.15.2 from the registry. `flutter.toolchain(flutter_version = "3.47.6")`
   and `flutter.pub(name = "deps")` with the root `pubspec.lock`.
 - `.bazelrc`, `.bazelversion` (copied from the checkout), `analysis_options.yaml`.
   `build:lint` carries the dart analyze and format aspects, as rules_dart's does.
@@ -131,7 +131,7 @@ Each build-type scenario writes `results/<label>.<name>.json.gz`, a
 | --- | --- | --- |
 | `reanalysis_<N>pkg_s`, `..._runs_s` | analysis | Median of three `build //... --nobuild` runs, each with a fresh `--define`, so each run re-analyses every target. `N` is 10 (small) or 80 (full). |
 | `clean_build` | build | `bazel clean`, then `build //...`. Wall time, sandboxed actions, per-mnemonic actions and CPU. |
-| `fetch_footprint` | build | After the clean build: the `dart` and `flutter` directories in the output base's `external/`, each with `du -sm`, plus whether `rules_dart++dart+dart_linux-x64` was fetched. Pub spokes (`__`, `+deps`, `ext_pub`) are excluded. |
+| `fetch_footprint` | build | After the clean build: the `dart` and `flutter` directories in the output base's `external/`, each with `du -sm`, plus whether `ai_rules_dart++dart+dart_linux-x64` was fetched. Pub spokes (`__`, `+deps`, `ext_pub`) are excluded. |
 | `body_edit_build` | build | `bump.py` on `pkg0/lib/src/f0.dart`, then `build //...`. |
 | `api_edit_build` | build | Adds a public function to the same file, then `build //...`. The file is then restored and rebuilt, untimed. |
 | `null_build` (and `null_build_s`) | build | `build //...` with nothing changed. |
@@ -175,7 +175,7 @@ and say in the report what else was running.
 - `gen_bench.py` fetches the workspace with `bazel build //... --nobuild`
   before formatting, because the SDK's `dart` only exists once the Flutter repos
   are fetched. It finds it at `external/*flutter*/dart-sdk/bin/dart` in the output
-  base. Under Bazel 9 the repo is `rules_flutter++flutter+flutter_linux-x64`.
+  base. Under Bazel 9 the repo is `ai_rules_flutter++flutter+flutter_linux-x64`.
 - The formatting run uses a throwaway `HOME` next to the workspace, so the SDK
   does not write into the real home directory.
 - The generated `pubspec.lock` and `pubspec.yaml` come from

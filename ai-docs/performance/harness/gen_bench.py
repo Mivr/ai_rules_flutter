@@ -31,13 +31,13 @@ def w(out, path, text):
 def module_bazel(rules, rules_dart_given):
     return f'''module(name = "rules_flutter_bench")
 
-bazel_dep(name = "rules_flutter", version = "0.0.0")
-bazel_dep(name = "rules_dart", version = "0.7.2")
+bazel_dep(name = "ai_rules_flutter", version = "0.0.0", repo_name = "rules_flutter")
+bazel_dep(name = "ai_rules_dart", version = "0.15.2", repo_name = "rules_dart")
 bazel_dep(name = "bazel_skylib", version = "1.9.2")
 bazel_dep(name = "platforms", version = "1.1.0")
 
 local_path_override(
-    module_name = "rules_flutter",
+    module_name = "ai_rules_flutter",
     path = "{rules}",
 )
 
@@ -70,7 +70,7 @@ def bazelrc(rules_dart_path):
         "common --lockfile_mode=off",
     ]
     if rules_dart_path:
-        lines.append(f"common --override_module=rules_dart={rules_dart_path}")
+        lines.append(f"common --override_module=ai_rules_dart={rules_dart_path}")
     lines += [
         "",
         "build:lint --aspects=@rules_dart//dart:analyze.bzl%dart_analyze",

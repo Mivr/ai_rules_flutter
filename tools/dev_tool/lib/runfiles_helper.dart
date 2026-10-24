@@ -7,7 +7,7 @@
 ///
 /// Runfile keys must use the **apparent repo name** (e.g.
 /// `rules_flutter/tools/macos_screenshot/screenshot`), not the canonical
-/// name (e.g. `_main/...` or `rules_flutter+/...`). `package:runfiles`
+/// name (e.g. `_main/...` or `ai_rules_flutter+/...`). `package:runfiles`
 /// consults `_repo_mapping` to translate apparent → canonical, so the
 /// same key works whether rules_flutter is the main module or a Bzlmod
 /// dep of a downstream project.
@@ -16,7 +16,7 @@ import 'dart:io';
 import 'package:runfiles/runfiles.dart';
 
 /// Canonical Bazel repo name of the binary this code is compiled into,
-/// e.g. `_main` when rules_flutter is the main module or `rules_flutter+`
+/// e.g. `_main` when ai_rules_flutter is the main module or `ai_rules_flutter+`
 /// when it's a Bzlmod dep. Threaded in at compile time via a `-D` define
 /// set by the `dart_binary` BUILD target — `Label(":target").workspace_name`
 /// is evaluated at load time, then passed through `defines`.

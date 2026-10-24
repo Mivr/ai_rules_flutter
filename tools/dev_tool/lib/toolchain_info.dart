@@ -53,14 +53,14 @@ typedef BazelRunner = Future<ProcessResult> Function(
 ///
 /// A module extension's repos are named
 /// `<canonical repo of the module that DEFINES the extension>+<extension>+<repo>`.
-/// This extension is defined in `rules_flutter`, whose own canonical repo name
-/// is `''` when it is the root module and `rules_flutter+` when it is a
+/// This extension is defined in `ai_rules_flutter`, whose own canonical repo name
+/// is `''` when it is the root module and `ai_rules_flutter+` when it is a
 /// dependency — so there are exactly two possible names, a workspace resolves
 /// `rules_flutter` in one position or the other, and never both. This is an
 /// enumeration of a two-valued fact, not a search: at most one of these exists
 /// in any one output base.
 List<String> flutterToolchainRepoNames(String platform) => [
-  'rules_flutter++flutter+flutter_$platform',
+  'ai_rules_flutter++flutter+flutter_$platform',
   '+flutter+flutter_$platform',
 ];
 

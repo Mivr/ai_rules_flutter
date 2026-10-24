@@ -18,7 +18,7 @@ cat <<EOF
 Add to your \`MODULE.bazel\` file:
 
 \`\`\`starlark
-bazel_dep(name = "rules_flutter", version = "${TAG:1}")
+bazel_dep(name = "ai_rules_flutter", version = "${TAG:1}", repo_name = "rules_flutter")
 \`\`\`
 EOF
 

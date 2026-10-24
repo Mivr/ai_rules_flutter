@@ -40,8 +40,8 @@ The bar is `CLAUDE.md`'s verification policy and `docs/TESTING.md`, applied to
 **everything unreleased**: `git log $(git tag --sort=-v:refname | grep '^v' | head -1)..main`.
 
 1. **Sync.** `git fetch origin --tags`; on `main`, tree clean, not behind `origin/main`.
-2. **Test against the published rules_dart, not the sibling checkout.** Every workspace
-   here has a gitignored `.bazelrc.user` that overrides rules_dart to
+2. **Test against the published ai_rules_dart, not the sibling checkout.** Every workspace
+   here has a gitignored `.bazelrc.user` that overrides ai_rules_dart to
    `../rules_dart` and turns lockfile checking off, so an ordinary local sweep never tests
    the pin consumers get. Move them aside for this phase, keeping the disk-cache lines:
 
@@ -49,11 +49,11 @@ The bar is `CLAUDE.md`'s verification policy and `docs/TESTING.md`, applied to
    find . -name .bazelrc.user -not -path "*/bazel-*" -not -path "./.claude/*"
    ```
 
-   Back each one up outside the tree, rewrite it without the `override_module=rules_dart`
+   Back each one up outside the tree, rewrite it without the `override_module=ai_rules_dart`
    and `lockfile_mode=off` lines, and restore every one at the end of the phase (count
    them before and after). Don't run this while another session builds in this tree.
 
-3. **Locks.** In the root and each workspace that pins rules_dart (every `e2e/*`, plus
+3. **Locks.** In the root and each workspace that pins ai_rules_dart (every `e2e/*`, plus
    `e2e/_overlay_tests/native_assets_synthetic`, which overrides it locally):
    `bazel build --nobuild --lockfile_mode=error //...` must pass. If it doesn't, regenerate
    with `bazel mod tidy --lockfile_mode=refresh` then
@@ -196,7 +196,7 @@ bug to fix before tagging.
 
    ```sh
    d=$(mktemp -d) && cd "$d" && touch BUILD.bazel
-   printf 'module(name="c",version="0.0.0")\nbazel_dep(name="rules_flutter",version="%s")\n' "${VERSION#v}" > MODULE.bazel
+   printf 'module(name="c",version="0.0.0")\nbazel_dep(name="ai_rules_flutter",version="%s",repo_name="rules_flutter")\n' "${VERSION#v}" > MODULE.bazel
    bazel mod show_repo rules_flutter   # must print an http_archive with an integrity hash
    ```
 
@@ -207,9 +207,9 @@ bug to fix before tagging.
    served only after many requests in a row all return 200:
    ```sh
    for i in $(seq 1 20); do curl -s -o /dev/null -w '%{http_code} ' \
-     "https://bcr.bazel.build/modules/rules_flutter/${VERSION#v}/MODULE.bazel"; done
+     "https://bcr.bazel.build/modules/ai_rules_flutter/${VERSION#v}/MODULE.bazel"; done
    ```
-   The same holds for the rules_dart version this release pins; check it before Phase 1.
+   The same holds for the ai_rules_dart version this release pins; check it before Phase 1.
 
    The registry repo, `metadata.json`, and even the storage bucket all show the version
    before `bcr.bazel.build` serves it. **Do not probe `bcr.bazel.build` for the module's

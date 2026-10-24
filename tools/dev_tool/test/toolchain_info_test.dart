@@ -26,13 +26,13 @@ void main() {
   });
 
   group('flutterToolchainRepoNames', () {
-    test('is the two module positions rules_flutter can occupy', () {
+    test('is the two module positions ai_rules_flutter can occupy', () {
       // Not a search list. A module extension's repos are named
       // `<canonical repo of the module defining the extension>+<ext>+<repo>`,
-      // and rules_flutter's own canonical name is `''` as the root module and
-      // `rules_flutter+` as a dependency.
+      // and ai_rules_flutter's own canonical name is `''` as the root module and
+      // `ai_rules_flutter+` as a dependency.
       expect(flutterToolchainRepoNames('darwin-arm64'), [
-        'rules_flutter++flutter+flutter_darwin-arm64',
+        'ai_rules_flutter++flutter+flutter_darwin-arm64',
         '+flutter+flutter_darwin-arm64',
       ]);
     });
@@ -75,7 +75,9 @@ void main() {
 
     test('resolves the five paths out of the repo that exists', () async {
       final platform = detectHostPlatform();
-      final base = outputBaseWith('rules_flutter++flutter+flutter_$platform');
+      final base = outputBaseWith(
+        'ai_rules_flutter++flutter+flutter_$platform',
+      );
       final bazel = fakeBazel({'info': ok('$base\n')});
 
       final paths = await resolveToolchainPaths(
@@ -87,7 +89,7 @@ void main() {
       final repo = p.join(
         base,
         'external',
-        'rules_flutter++flutter+flutter_$platform',
+        'ai_rules_flutter++flutter+flutter_$platform',
       );
       expect(
         p.split(paths.dartaotruntime),
@@ -114,9 +116,9 @@ void main() {
       expect(bazel.calls.map((c) => c.first), ['info']);
     });
 
-    test('finds the toolchain when rules_flutter is the root module', () async {
+    test('finds the toolchain when ai_rules_flutter is the root module', () async {
       // The name `+flutter+flutter_<platform>`: without it, `flutter_bazel
-      // run` inside rules_flutter's own workspace cannot resolve a toolchain
+      // run` inside ai_rules_flutter's own workspace cannot resolve a toolchain
       // however warm the output base is.
       final platform = detectHostPlatform();
       final base = outputBaseWith('+flutter+flutter_$platform');
@@ -137,7 +139,7 @@ void main() {
       // step that creates it, not a retry.
       final platform = detectHostPlatform();
       final base = outputBaseWith(null);
-      final repoName = 'rules_flutter++flutter+flutter_$platform';
+      final repoName = 'ai_rules_flutter++flutter+flutter_$platform';
       final calls = <List<String>>[];
       Future<ProcessResult> run(
         List<String> args, {
@@ -171,7 +173,7 @@ void main() {
       // that before anything was built.
       final platform = detectHostPlatform();
       final base = outputBaseWith(null);
-      final repoName = 'rules_flutter++flutter+flutter_$platform';
+      final repoName = 'ai_rules_flutter++flutter+flutter_$platform';
       final calls = <List<String>>[];
       Future<ProcessResult> run(
         List<String> args, {
@@ -232,7 +234,7 @@ void main() {
 
     test('separates a fetch that succeeded and left no toolchain', () async {
       // A different fact from the one above, and it has a different remedy:
-      // bazel is happy, so the target simply does not resolve a rules_flutter
+      // bazel is happy, so the target simply does not resolve an ai_rules_flutter
       // toolchain. Merging the two points the message at the toolchain for
       // failures that have nothing to do with it.
       final base = outputBaseWith(null);

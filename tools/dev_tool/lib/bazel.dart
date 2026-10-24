@@ -181,7 +181,7 @@ bool _recordNamedSet(
 /// The file-set ids [event] contributes to [outputGroup] of [aspect].
 ///
 /// Matched on the aspect's own name: the event spells the repository in
-/// its canonical form (`@@rules_flutter+//…`), which is not what was passed.
+/// its canonical form (`@@ai_rules_flutter+//…`), which is not what was passed.
 List<String> _outputGroupRoots(
   Map<String, Object?> event,
   String aspect,

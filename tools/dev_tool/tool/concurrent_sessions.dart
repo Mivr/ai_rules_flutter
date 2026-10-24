@@ -322,7 +322,7 @@ class _ForestSampler {
     final outputBase = (info.stdout as String).trim();
     final external = Directory('$outputBase/execroot/_main/external');
     // Found rather than named: the canonical repository name carries the
-    // module-extension mangling (`rules_flutter++flutter+deps__flutter`), which
+    // module-extension mangling (`ai_rules_flutter++flutter+deps__flutter`), which
     // is not a string this script should pretend to know.
     final matches = external.existsSync()
         ? external

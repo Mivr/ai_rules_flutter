@@ -354,8 +354,8 @@ dart_test(
 dart_test(
     name = "verify_build_config_test",
     data = [
-        "@@rules_flutter++flutter+deps__audio_session//android:_build_config_src",
-        "@@rules_flutter++flutter+deps__jni//android:_build_config_src",
+        "@@ai_rules_flutter++flutter+deps__audio_session//android:_build_config_src",
+        "@@ai_rules_flutter++flutter+deps__jni//android:_build_config_src",
     ],
     main = "test/verify_build_config_test.dart",
 )

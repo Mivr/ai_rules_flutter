@@ -43,7 +43,7 @@ common --@rules_dart//dart:analysis_config=//:analysis_config
 # `.bazelrc.user` aside — the root's plus one per `e2e/*` workspace. Enumerate
 # them rather than counting from memory, because the set grows with the
 # workspaces: `find . -name .bazelrc.user -not -path './bazel-*'`. Each puts
-# `--override_module=rules_dart` on `common`, which applies to `mod tidy` too,
+# `--override_module=ai_rules_dart` on `common`, which applies to `mod tidy` too,
 # and regenerating through one writes a lock that omits the very registry entry
 # it is meant to pin.
 #

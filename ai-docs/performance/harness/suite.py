@@ -132,7 +132,7 @@ def fetch_footprint(ws):
     return {
         "entries": entries,
         "total_mb": sum(e["mb"] for e in entries),
-        "rules_dart_linux_sdk_fetched": "rules_dart++dart+dart_linux-x64" in names,
+        "rules_dart_linux_sdk_fetched": "ai_rules_dart++dart+dart_linux-x64" in names,
     }
 
 
