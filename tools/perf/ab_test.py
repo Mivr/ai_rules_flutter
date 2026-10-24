@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Unit tests for ab.py (iOS bench same-runner A/B, Linux fixtures)."""
 
+import io
 import json
 import os
 import shutil
@@ -18,6 +19,7 @@ from ab import (
     arm_order,
     first_arm,
     generate_committed_lock,
+    geomean,
     load_arm_rep_record,
     lock_build_argv,
     pair_ratio,
@@ -266,6 +268,19 @@ class RatioTest(unittest.TestCase):
         self.assertIsNone(pair_ratio(flow_record(1.0), flow_record(None)))
         self.assertIsNone(pair_ratio(flow_record(0), flow_record(1.0)))
 
+    def test_geomean_of_known_pairs(self):
+        import math
+        pairs = [0.649, 1.16]
+        self.assertAlmostEqual(
+            geomean(pairs), math.exp(sum(math.log(v) for v in pairs) / 2))
+        self.assertAlmostEqual(geomean(pairs), 0.86766, places=4)
+
+    def test_geomean_empty_is_none(self):
+        self.assertIsNone(geomean([]))
+
+    def test_geomean_single_pair(self):
+        self.assertAlmostEqual(geomean([1.25]), 1.25)
+
     def test_ratio_summarizes_pairs_and_names_unpaired(self):
         tmp = tempfile.mkdtemp(prefix="ab-ratio-")
         self.addCleanup(shutil.rmtree, tmp, True)
@@ -293,6 +308,7 @@ class RatioTest(unittest.TestCase):
         self.assertAlmostEqual(entry["median"], 1.1)
         self.assertAlmostEqual(entry["min"], 0.5)
         self.assertAlmostEqual(entry["max"], 1.1)
+        self.assertAlmostEqual(entry["geomean"], 0.7416198, places=5)
         self.assertEqual(entry["unpaired"], [3])
 
     def test_empty_pairs_say_so(self):
@@ -303,6 +319,9 @@ class RatioTest(unittest.TestCase):
                                "device_release", "clean", 2)
         self.assertEqual(entry["n"], 0)
         self.assertIsNone(entry["median"])
+        self.assertIsNone(entry["min"])
+        self.assertIsNone(entry["max"])
+        self.assertIsNone(entry["geomean"])
         self.assertEqual(entry["unpaired"], [1, 2])
 
 
@@ -359,6 +378,9 @@ class SummarizeAbTest(unittest.TestCase):
         ratio = summary["ratio"]["ios-release-clean"]
         self.assertEqual(ratio["n"], 2)
         self.assertAlmostEqual(ratio["median"], 1.0)
+        self.assertAlmostEqual(ratio["min"], 1.0)
+        self.assertAlmostEqual(ratio["max"], 1.0)
+        self.assertAlmostEqual(ratio["geomean"], 1.0)
         self.assertEqual(ratio["unpaired"], [])
         self.assertNotIn("ratios", summary)
         self.assertEqual(summary["meta"]["ab"], "flags")
@@ -384,16 +406,25 @@ class SummarizeAbTest(unittest.TestCase):
         self.write("treatment", "device_release", "clean", 1,
                    self.full_record("ios-release-clean", 10.0, 5.0))
         out = os.path.join(self.tmp, "ios-ab.json")
-        code = ab.main(["summarize", "--results", self.tmp,
-                        "--sha", "b" * 40, "--repeats", "1",
-                        "--target-loc", "100", "--seed", "7",
-                        "--ab", "flags", "--bazel-flags=--jobs=8",
-                        "--lockfile", "none", "--out", out])
+        with mock.patch("sys.stdout",
+                         new_callable=io.StringIO) as stdout:
+            code = ab.main(["summarize", "--results", self.tmp,
+                            "--sha", "b" * 40, "--repeats", "1",
+                            "--target-loc", "100", "--seed", "7",
+                            "--ab", "flags", "--bazel-flags=--jobs=8",
+                            "--lockfile", "none", "--out", out])
         self.assertEqual(code, 0)
         with open(out, encoding="utf-8") as fh:
             summary = json.load(fh)
         self.assertEqual(summary["meta"]["ab"], "flags")
         self.assertEqual(summary["ratio"]["ios-release-clean"]["n"], 1)
+        self.assertAlmostEqual(
+            summary["ratio"]["ios-release-clean"]["geomean"], 1.0)
+        line = [ln for ln in stdout.getvalue().splitlines()
+                if ln.startswith("flow=ios-release-clean ")]
+        self.assertEqual(len(line), 1)
+        self.assertIn("median=1.0", line[0])
+        self.assertIn("geomean=1.0", line[0])
 
     def test_cli_summarize_refuses_ab_off(self):
         with self.assertRaises(ValueError):
