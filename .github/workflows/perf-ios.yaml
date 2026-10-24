@@ -27,6 +27,15 @@
 # which is written and uploaded even when a config fails (its remaining
 # flows carry the error as their reason).
 #
+# Same-runner A/B (mode=sol with ab=flags|lockfile): two arms run in the
+# same job on the same runner from their own pristine copies, alternating
+# which runs first per repeat. ab=flags compares flags vs no flags;
+# ab=lockfile compares no lockfile vs a committed MODULE.bazel.lock
+# (lockfile=committed gives the single measured workspace such a lock,
+# generated once by an unmeasured analysis-only run for both configs).
+# A/B runs write ios-ab.json (artifact ios-ab) with per-arm medians and
+# paired per-repeat treatment/control ratios instead of ios-sol.json.
+#
 # Cost: workflow_dispatch only (never automatic), macos-15, 5 h job timeout,
 # one small artifact (retention 3 days), no caches, build outputs never
 # uploaded. Must stay that way: this workflow runs on freemacOS minutes.
@@ -57,6 +66,16 @@ name: iOS perf bench
       bazel_flags:
         description: "extra Bazel flags for the head workspace only (A/B experiments)"
         default: ""
+      lockfile:
+        description: "measured workspace lockfile: none or a committed MODULE.bazel.lock"
+        default: none
+        type: choice
+        options: [none, committed]
+      ab:
+        description: "sol only: off (one run), flags (flag A/B) or lockfile (lockfile A/B)"
+        default: off
+        type: choice
+        options: [off, flags, lockfile]
 permissions:
   contents: read
 jobs:
@@ -91,6 +110,16 @@ jobs:
           set -euo pipefail
           python3 "$GITHUB_WORKSPACE/tools-src/tools/perf/bench_flags.py" \
             --flags="$BAZEL_FLAGS"
+      - name: Validate A/B inputs
+        env:
+          BAZEL_FLAGS: ${{ inputs.bazel_flags }}
+        run: |
+          set -euo pipefail
+          python3 "$GITHUB_WORKSPACE/tools-src/tools/perf/ab.py" validate \
+            --mode "${{ inputs.mode }}" \
+            --ab "${{ inputs.ab }}" \
+            --lockfile "${{ inputs.lockfile }}" \
+            --flags="$BAZEL_FLAGS"
       - name: Generate pristine monorepos
         env:
           BAZEL_FLAGS: ${{ inputs.bazel_flags }}
@@ -105,9 +134,57 @@ jobs:
               --rules-flutter "$GITHUB_WORKSPACE/rules-$ref" \
               --out "$RUNNER_TEMP/ws-$ref-pristine"
           done
-          python3 "$GITHUB_WORKSPACE/tools-src/tools/perf/bench_flags.py" \
-            --flags="$BAZEL_FLAGS" \
-            --workspace "$RUNNER_TEMP/ws-head-pristine"
+          tools="$GITHUB_WORKSPACE/tools-src/tools/perf"
+          if [ "${{ inputs.mode }}" = "compare" ]; then
+            if [ "${{ inputs.lockfile }}" = "committed" ]; then
+              for ref in $refs; do
+                python3 "$tools/ab.py" lock \
+                  --pristine "$RUNNER_TEMP/ws-$ref-pristine" \
+                  --lock-out "$RUNNER_TEMP/lock-out-$ref"
+              done
+            fi
+            python3 "$tools/bench_flags.py" \
+              --flags="$BAZEL_FLAGS" \
+              --workspace "$RUNNER_TEMP/ws-head-pristine"
+          elif [ "${{ inputs.ab }}" = "off" ]; then
+            if [ "${{ inputs.lockfile }}" = "committed" ]; then
+              python3 "$tools/ab.py" lock \
+                --pristine "$RUNNER_TEMP/ws-head-pristine" \
+                --lock-out "$RUNNER_TEMP/lock-out"
+            fi
+            python3 "$tools/bench_flags.py" \
+              --flags="$BAZEL_FLAGS" \
+              --workspace "$RUNNER_TEMP/ws-head-pristine"
+          else
+            need_lock=0
+            if [ "${{ inputs.lockfile }}" = "committed" ]; then need_lock=1; fi
+            if [ "${{ inputs.ab }}" = "lockfile" ]; then need_lock=1; fi
+            if [ "$need_lock" = "1" ]; then
+              python3 "$tools/ab.py" lock \
+                --pristine "$RUNNER_TEMP/ws-head-pristine" \
+                --lock-out "$RUNNER_TEMP/lock-out"
+            fi
+            rm -rf "$RUNNER_TEMP/ws-control-pristine" "$RUNNER_TEMP/ws-treatment-pristine"
+            cp -a "$RUNNER_TEMP/ws-head-pristine" "$RUNNER_TEMP/ws-control-pristine"
+            cp -a "$RUNNER_TEMP/ws-head-pristine" "$RUNNER_TEMP/ws-treatment-pristine"
+            if [ "${{ inputs.ab }}" = "flags" ]; then
+              if [ "$need_lock" = "0" ]; then
+                rm -f "$RUNNER_TEMP/ws-control-pristine/MODULE.bazel.lock" \
+                  "$RUNNER_TEMP/ws-treatment-pristine/MODULE.bazel.lock"
+              fi
+              python3 "$tools/bench_flags.py" \
+                --flags="$BAZEL_FLAGS" \
+                --workspace "$RUNNER_TEMP/ws-treatment-pristine"
+            else
+              rm -f "$RUNNER_TEMP/ws-control-pristine/MODULE.bazel.lock"
+              python3 "$tools/bench_flags.py" \
+                --flags="$BAZEL_FLAGS" \
+                --workspace "$RUNNER_TEMP/ws-control-pristine"
+              python3 "$tools/bench_flags.py" \
+                --flags="$BAZEL_FLAGS" \
+                --workspace "$RUNNER_TEMP/ws-treatment-pristine"
+            fi
+          fi
       - name: Build, edit, replay
         if: inputs.mode == 'compare'
         # One repeat at a time: run_rep.py resets the workspace from the
@@ -219,17 +296,31 @@ jobs:
           set -euo pipefail
           tools="$GITHUB_WORKSPACE/tools-src/tools/perf"
           failed=0
-          for rep in $(seq 1 "${{ inputs.repeats }}"); do
-            rm -rf "$RUNNER_TEMP/sol-out-$rep" "$RUNNER_TEMP/sol-run-$rep"
-            python3 "$tools/sol.py" run --tools "$tools" \
-              --pristine "$RUNNER_TEMP/ws-head-pristine" \
-              --work "$RUNNER_TEMP/sol-run-$rep" \
-              --out-base "$RUNNER_TEMP/sol-out-$rep" \
-              --results "$GITHUB_WORKSPACE/sol-results" \
-              --rep "$rep" \
+          if [ "${{ inputs.ab }}" = "off" ]; then
+            for rep in $(seq 1 "${{ inputs.repeats }}"); do
+              rm -rf "$RUNNER_TEMP/sol-out-$rep" "$RUNNER_TEMP/sol-run-$rep"
+              python3 "$tools/sol.py" run --tools "$tools" \
+                --pristine "$RUNNER_TEMP/ws-head-pristine" \
+                --work "$RUNNER_TEMP/sol-run-$rep" \
+                --out-base "$RUNNER_TEMP/sol-out-$rep" \
+                --results "$GITHUB_WORKSPACE/sol-results" \
+                --rep "$rep" \
+                --config device_release --config sim_debug \
+                || failed=1
+            done
+          else
+            python3 "$tools/ab.py" run --tools "$tools" \
+              --pristine-control "$RUNNER_TEMP/ws-control-pristine" \
+              --pristine-treatment "$RUNNER_TEMP/ws-treatment-pristine" \
+              --work-control "$RUNNER_TEMP/ab-run-control" \
+              --work-treatment "$RUNNER_TEMP/ab-run-treatment" \
+              --out-base-control "$RUNNER_TEMP/ab-out-control" \
+              --out-base-treatment "$RUNNER_TEMP/ab-out-treatment" \
+              --results "$GITHUB_WORKSPACE/ab-results" \
+              --repeats "${{ inputs.repeats }}" \
               --config device_release --config sim_debug \
               || failed=1
-          done
+          fi
           exit "$failed"
       - name: Summarize speed-of-light
         # Runs even when measuring failed, so ios-sol.json (with the
@@ -241,31 +332,60 @@ jobs:
           set -euo pipefail
           tools="$GITHUB_WORKSPACE/tools-src/tools/perf"
           sha="$(git -C "$GITHUB_WORKSPACE/rules-head" rev-parse HEAD)"
-          python3 "$tools/sol.py" summarize \
-            --results "$GITHUB_WORKSPACE/sol-results" \
-            --sha "$sha" \
-            --repeats "${{ inputs.repeats }}" \
-            --target-loc "${{ inputs.target_loc }}" \
-            --seed "${{ inputs.seed }}" \
-            --bazel-flags="$BAZEL_FLAGS" \
-            --out "$GITHUB_WORKSPACE/ios-sol.json"
-          {
-            echo '```json'
-            cat "$GITHUB_WORKSPACE/ios-sol.json"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ inputs.ab }}" = "off" ]; then
+            python3 "$tools/sol.py" summarize \
+              --results "$GITHUB_WORKSPACE/sol-results" \
+              --sha "$sha" \
+              --repeats "${{ inputs.repeats }}" \
+              --target-loc "${{ inputs.target_loc }}" \
+              --seed "${{ inputs.seed }}" \
+              --bazel-flags="$BAZEL_FLAGS" \
+              --lockfile "${{ inputs.lockfile }}" \
+              --out "$GITHUB_WORKSPACE/ios-sol.json"
+            {
+              echo '```json'
+              cat "$GITHUB_WORKSPACE/ios-sol.json"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            python3 "$tools/ab.py" summarize \
+              --results "$GITHUB_WORKSPACE/ab-results" \
+              --sha "$sha" \
+              --repeats "${{ inputs.repeats }}" \
+              --target-loc "${{ inputs.target_loc }}" \
+              --seed "${{ inputs.seed }}" \
+              --ab "${{ inputs.ab }}" \
+              --bazel-flags="$BAZEL_FLAGS" \
+              --lockfile "${{ inputs.lockfile }}" \
+              --out "$GITHUB_WORKSPACE/ios-ab.json"
+            {
+              echo '```json'
+              cat "$GITHUB_WORKSPACE/ios-ab.json"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Upload ios-sol
         # Runs even when measuring failed: the artifact explains the run.
-        if: ${{ !cancelled() && inputs.mode == 'sol' }}
+        # Single-arm runs only; A/B runs upload ios-ab instead.
+        if: ${{ !cancelled() && inputs.mode == 'sol' && inputs.ab == 'off' }}
         uses: actions/upload-artifact@v4
         with:
           name: ios-sol
           path: ios-sol.json
           retention-days: 3
+      - name: Upload ios-ab
+        # Runs even when measuring failed: the artifact explains the run.
+        if: ${{ !cancelled() && inputs.mode == 'sol' && inputs.ab != 'off' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ab
+          path: ios-ab.json
+          retention-days: 3
       - name: Upload ios-profile
-        # Small profile companion to ios-sol: the gzipped Bazel trace
-        # profiles and execution logs behind each flow's profile record,
-        # no build outputs. Same 3-day retention as the other artifacts.
+        # Small profile companion to ios-sol / ios-ab: the gzipped Bazel
+        # trace profiles and execution logs behind each flow's profile
+        # record, no build outputs. A/B runs keep both arms' traces and
+        # logs under per-arm paths. Same 3-day retention as the others.
         if: ${{ !cancelled() && inputs.mode == 'sol' }}
         uses: actions/upload-artifact@v4
         with:
@@ -273,4 +393,8 @@ jobs:
           path: |
             sol-results/**/trace.json.gz
             sol-results/**/execlog.json.gz
+            ab-results/control/**/trace.json.gz
+            ab-results/control/**/execlog.json.gz
+            ab-results/treatment/**/trace.json.gz
+            ab-results/treatment/**/execlog.json.gz
           retention-days: 3
