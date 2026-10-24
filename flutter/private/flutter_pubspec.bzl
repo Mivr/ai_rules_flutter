@@ -149,27 +149,89 @@ def _parse_fonts(raw):
         out.append(struct(family = family, fonts = fonts))
     return out
 
+def _parse_condition_list(raw_value, key):
+    """Validate one asset entry `flavors` / `platforms` value, flutter_tools style.
+
+    Mirrors `AssetsEntry._parseFlavorsSection` / `_parsePlatformsSection`
+    (`_parseList` in `flutter_manifest.dart`): the value must be a list of
+    strings. Anything else (a scalar `platforms: web`, an element that is
+    not a string) is an error, never silently unconditional.
+
+    Args:
+        raw_value: The value under the key (None when the key is absent).
+        key: `"flavors"` or `"platforms"`, for the problem detail.
+
+    Returns:
+        A `(values, problem)` tuple: the string list (possibly empty) and ""
+        or the `Expected <key> to be a list of String, but ...` detail naming
+        the key.
+    """
+    if raw_value == None:
+        return ([], "")
+    if type(raw_value) != "list":
+        return ([], "Expected {key} to be a list of String, but got {value} ({type}).".format(
+            key = key,
+            value = repr(raw_value),
+            type = type(raw_value),
+        ))
+    values = []
+    for index, item in enumerate(raw_value):
+        if type(item) != "string":
+            return ([], "Expected {key} to be a list of String, but element at index {index} was a {type}.".format(
+                key = key,
+                index = index,
+                type = type(item),
+            ))
+        values.append(item)
+    return (values, "")
+
 def _parse_assets(raw):
+    """Parse the raw `flutter.assets` list, collecting malformed entries.
+
+    A map entry's `flavors` / `platforms` must each be a list of strings,
+    and an entry must not carry `transformers` (rules_flutter does not run
+    asset transformers; shipping the untransformed file would silently do
+    the wrong thing). Problems are collected, not failed here, so unit
+    tests can assert them; the spoke fails the fetch on each (see
+    `check_asset_entry_problems`). Any other unknown key in an entry
+    mapping is ignored, the way flutter_tools ignores it.
+
+    Args:
+        raw: The raw `flutter.assets` YAML value.
+
+    Returns:
+        An `(entries, problems)` tuple: `entries` holds one
+        `struct(path, flavors, platforms)` per usable entry (a problem
+        entry keeps empty conditions; the fetch fails before they matter),
+        and `problems` holds one `struct(path, key, detail)` per refusal.
+    """
     if type(raw) != "list":
-        return []
-    out = []
-    for entry in raw:
-        if type(entry) == "string":
-            out.append(struct(path = entry, flavors = [], platforms = []))
+        return ([], [])
+    entries = []
+    problems = []
+    for item in raw:
+        if type(item) == "string":
+            entries.append(struct(path = item, flavors = [], platforms = []))
             continue
-        if type(entry) != "dict":
+        if type(item) != "dict":
             continue
-        path = entry.get("path")
+        path = item.get("path")
         if type(path) != "string":
             continue
-        flavors_raw = entry.get("flavors", [])
-        platforms_raw = entry.get("platforms", [])
-        out.append(struct(
-            path = path,
-            flavors = [str(f) for f in flavors_raw] if type(flavors_raw) == "list" else [],
-            platforms = [str(p) for p in platforms_raw] if type(platforms_raw) == "list" else [],
-        ))
-    return out
+        (flavors, flavors_problem) = _parse_condition_list(item.get("flavors"), "flavors")
+        if flavors_problem:
+            problems.append(struct(path = path, key = "flavors", detail = flavors_problem))
+        (platforms, platforms_problem) = _parse_condition_list(item.get("platforms"), "platforms")
+        if platforms_problem:
+            problems.append(struct(path = path, key = "platforms", detail = platforms_problem))
+        if "transformers" in item and item.get("transformers") != None:
+            problems.append(struct(
+                path = path,
+                key = "transformers",
+                detail = "asset transformers are not supported by rules_flutter.",
+            ))
+        entries.append(struct(path = path, flavors = flavors, platforms = platforms))
+    return (entries, problems)
 
 # The platforms a `flutter.assets` entry may name, mirroring flutter_tools'
 # `_kValidPluginPlatforms` (`packages/flutter_tools/lib/src/flutter_manifest.dart`):
@@ -268,6 +330,7 @@ def parse_flutter_assets_block(content):
             assets:   list[struct(path, flavors, platforms)],
             shaders:  list[struct(path)],
             uses_material_design: bool,
+            asset_errors: list[struct(path, key, detail)],
         )
 
     `weight` and `style` on a font are None when unset. `flavors`/`platforms`
@@ -275,12 +338,18 @@ def parse_flutter_assets_block(content):
     (`pub_asset_matches_target` checks flavor first, then platform, with the
     `tester` exception, exactly like flutter_tools' `matchesFlavor` /
     `matchesPlatform`); an unknown platform fails the spoke fetch.
+    `asset_errors` collects the entries flutter_tools would refuse (a
+    `flavors` / `platforms` value that is not a list of strings, or an
+    entry carrying `transformers`); the spoke fails the fetch on each (see
+    `check_asset_entry_problems`), naming the package, the entry and the key.
     """
     flutter = parse_flutter_block(content)
     umd_raw = flutter.get("uses-material-design", False)
+    (assets, asset_errors) = _parse_assets(flutter.get("assets"))
     return struct(
         fonts = _parse_fonts(flutter.get("fonts")),
-        assets = _parse_assets(flutter.get("assets")),
+        assets = assets,
         shaders = _parse_shaders(flutter.get("shaders")),
         uses_material_design = umd_raw if type(umd_raw) == "bool" else False,
+        asset_errors = asset_errors,
     )

@@ -34,6 +34,7 @@ load("//flutter/private:download.bzl", "pinned_download")
 load("//flutter/private:flutter_pubspec.bzl", "asset_flavor_error", "asset_platform_error", "invalid_asset_platforms", "parse_flutter_assets_block", "parse_flutter_plugin_block", "parse_pubspec")
 load(
     ":flutter_pub_assets.bzl",
+    "check_asset_entry_problems",
     "ctx_package_lister",
     "expand_pub_asset_entries",
     "is_asset_variant_dir",
@@ -1942,6 +1943,7 @@ def _spoke_asset_inputs(ctx, package_name, asset_block):
     pkg_asset_platforms, pkg_asset_flavors, pkg_shaders,
     has_contributions)`.
     """
+    check_asset_entry_problems(package_name, asset_block.asset_errors)
     _check_asset_platforms(package_name, asset_block.assets)
     fonts_json_str = _encode_fonts_json(asset_block.fonts)
     font_files = _build_font_files_dict(asset_block.fonts)
