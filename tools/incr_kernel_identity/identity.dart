@@ -474,6 +474,13 @@ class IdentityRun {
       'rc=${result.exitCode} (${stopwatch.elapsed.inSeconds}s)',
     );
     if (result.exitCode != 0) {
+      // The scratch log is deleted on cleanup, so the failure cause travels
+      // in the output like the old shell check's `tail -n 30`.
+      final lines = verbose.split('\n');
+      final tail = lines
+          .skip(lines.length > 30 ? lines.length - 30 : 0)
+          .join('\n');
+      stderr.writeln('identity-check: build ${spec.step} log tail:\n$tail');
       throw IdentityFailure(
         'build ${spec.step} failed (rc=${result.exitCode})',
       );
