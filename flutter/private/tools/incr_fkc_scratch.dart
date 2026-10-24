@@ -151,7 +151,7 @@ void _reclaimEntry(FileSystemEntity entry) {
 }
 
 /// Whether [entry] is a dead worker's scratch: it carries a lock file whose
-/// exclusive lock this process can take right now. A missing lock file, an
+/// shared lock this process can take right now. A missing lock file, an
 /// owner that still holds the lock, and every failure count as alive. If the
 /// lock file vanishes between the existence check and the open, the open
 /// throws and the entry is kept.
