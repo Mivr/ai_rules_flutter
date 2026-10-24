@@ -412,6 +412,20 @@ Future<String> resolveBazel({String? override}) async {
   return 'bazel';
 }
 
+/// Resolves the built `hello_world.dill` under [linkPrefix] in [workDir] to its
+/// real path under the output base. The `bazel-bin` entry may be a symlink or
+/// a regular file (Bazel hardlinks some outputs), so existence is checked
+/// without following the final component; a missing entry throws
+/// [IdentityFailure]. (`Link.existsSync` alone would miss a regular file.)
+String locateDill({required String workDir, required String linkPrefix}) {
+  final path = '$workDir/${linkPrefix}bin/hello_world.dill';
+  if (FileSystemEntity.typeSync(path, followLinks: false) ==
+      FileSystemEntityType.notFound) {
+    throw IdentityFailure('no $path (build produced no dill?)');
+  }
+  return File(path).resolveSymbolicLinksSync();
+}
+
 /// One run of the identity check: two fresh output bases, the edit sequence,
 /// the comparisons, and the cleanup. Create with [IdentityRun.new], drive
 /// with [run]; [run] restores the edited sources, shuts down both Bazel
@@ -533,15 +547,8 @@ class IdentityRun {
 
   /// The `hello_world.dill` built under [linkPrefix], resolved to its real
   /// path under the output base.
-  String _locateDill({required String linkPrefix}) {
-    final link = Link('${work.path}/${linkPrefix}bin/hello_world.dill');
-    if (!link.existsSync()) {
-      throw IdentityFailure(
-        'no ${link.path} (build produced no dill?)',
-      );
-    }
-    return link.resolveSymbolicLinksSync();
-  }
+  String _locateDill({required String linkPrefix}) =>
+      locateDill(workDir: work.path, linkPrefix: linkPrefix);
 
   void _saveDill({required String built, required String name}) {
     File(built).copySync('${work.path}/$name');
@@ -838,10 +845,14 @@ class IdentityRun {
       stderr.writeln('identity-check: warning: restore failed ($e).');
     }
     for (final base in [_wbase, _obase]) {
-      final result = await Process.run(bazel, [
-        '--output_base=$base',
-        'shutdown',
-      ]);
+      final result = await Process.run(
+        bazel,
+        ['--output_base=$base', 'shutdown'],
+        // Same workspace as the builds: under `bazel run` the tool's own
+        // directory is the runfiles tree, which only adds a benign
+        // startup-option mismatch to the shutdown.
+        workingDirectory: _ws,
+      );
       if (result.exitCode != 0) {
         stderr.writeln(
           'identity-check: warning: shutdown of $base failed '

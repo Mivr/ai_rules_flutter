@@ -311,6 +311,42 @@ void main() {
     });
   });
 
+  group('locateDill', () {
+    late Directory dir;
+    setUp(() {
+      dir = Directory.systemTemp.createTempSync('identity_dill_');
+      Directory('${dir.path}/wlink-bin').createSync();
+    });
+    tearDown(() => dir.deleteSync(recursive: true));
+
+    test('a regular file resolves to itself', () {
+      final dill = File('${dir.path}/wlink-bin/hello_world.dill')
+        ..writeAsStringSync('dill');
+      expect(
+        locateDill(workDir: dir.path, linkPrefix: 'wlink-'),
+        dill.resolveSymbolicLinksSync(),
+      );
+    });
+
+    test('a symlink resolves to its target', () {
+      final target = File('${dir.path}/real.dill')..writeAsStringSync('dill');
+      Link(
+        '${dir.path}/wlink-bin/hello_world.dill',
+      ).createSync(target.path);
+      expect(
+        locateDill(workDir: dir.path, linkPrefix: 'wlink-'),
+        target.resolveSymbolicLinksSync(),
+      );
+    });
+
+    test('a missing entry throws', () {
+      expect(
+        () => locateDill(workDir: dir.path, linkPrefix: 'wlink-'),
+        throwsA(isA<IdentityFailure>()),
+      );
+    });
+  });
+
   group('bytes and digests', () {
     test('bytesEqual compares lengths and contents', () {
       expect(bytesEqual([1, 2], [1, 2]), isTrue);
