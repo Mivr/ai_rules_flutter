@@ -510,6 +510,13 @@ jobs:
             echo "failing workspaces:$failed"
             exit 1
           fi
+      - name: dual_hub source tree unchanged by the dirlink fetch
+        run: |
+          if [ -n "$(git status --porcelain -- e2e/dual_hub)" ]; then
+            echo "e2e/dual_hub changed during the build:"
+            git status --porcelain -- e2e/dual_hub
+            exit 1
+          fi
       - name: Report cache sizes
         if: always()
         run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true
