@@ -10,7 +10,13 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'macho_constants.dart';
-import 'macho_parse.dart' show LoadCommand, buildLcSymtab;
+import 'macho_parse.dart'
+    show
+        CommandRange,
+        LoadCommand,
+        buildLcSymtab,
+        fileRangesOf,
+        movedTableRanges;
 
 /// A decoded 16-byte `nlist_64` symbol-table entry.
 class _NlistEntry {
@@ -399,7 +405,9 @@ class _LinkeditPayload {
 }
 
 /// Collects every `__LINKEDIT` payload besides the symbol and string tables:
-/// the linkedit table commands' data ranges. Zero-length ranges are not
+/// the linkedit table commands' data ranges. For `LC_DYLD_INFO` and
+/// `LC_DYLD_INFO_ONLY` that is all five pairs (rebase, bind, weak bind, lazy
+/// bind, export), not just the rebase pair. Zero-length ranges are not
 /// payloads; anything else is bounds-checked against the file.
 void _collectTablePayloads(
   Uint8List inputBytes,
@@ -407,39 +415,101 @@ void _collectTablePayloads(
   List<_LinkeditPayload> into,
 ) {
   for (final lc in commands) {
-    switch (lc.cmd) {
-      case lcFunctionStarts:
-      case lcDataInCode:
-      case lcDyldInfo:
-      case lcDyldInfoOnly:
-      case lcDyldExportsTrie:
-      case lcDyldChainedFixups:
-      case lcCodeSignature:
-        if (lc.bytes.length < 16) {
-          throw FormatException(
-            'Truncated load command 0x${lc.cmd.toRadixString(16)}.',
-          );
-        }
-        final bd = ByteData.sublistView(lc.bytes);
-        final dataoff = bd.getUint32(8, Endian.little);
-        final datasize = bd.getUint32(12, Endian.little);
-        if (datasize == 0) continue;
-        if (dataoff + datasize > inputBytes.length) {
-          throw FormatException(
-            'Load command 0x${lc.cmd.toRadixString(16)} points past the '
-            'end of the file.',
-          );
-        }
-        into.add(
-          _LinkeditPayload(
-            oldOffset: dataoff,
-            oldSize: datasize,
-            bytes: Uint8List.fromList(
-              inputBytes.sublist(dataoff, dataoff + datasize),
-            ),
-          ),
+    for (final range in movedTableRanges(lc)) {
+      if (range.size == 0) continue;
+      if (range.offset + range.size > inputBytes.length) {
+        throw FormatException(
+          'Load command 0x${lc.cmd.toRadixString(16)} points past the '
+          'end of the file.',
         );
+      }
+      into.add(
+        _LinkeditPayload(
+          oldOffset: range.offset,
+          oldSize: range.size,
+          bytes: Uint8List.fromList(
+            inputBytes.sublist(range.offset, range.offset + range.size),
+          ),
+        ),
+      );
     }
+  }
+}
+
+/// Throws when a load command names a file range inside `__LINKEDIT` that
+/// the rewrite cannot move: anything but the symbol tables, the indirect
+/// table, the segment commands and the table commands [movedTableRanges]
+/// knows. Such a command would otherwise keep pointing at bytes the
+/// compacting rewrite reuses, so the strip fails loudly instead.
+///
+/// [linkeditOff] is the `__LINKEDIT` file offset; [covered] are the payload
+/// ranges [_collectTablePayloads] already collected.
+void _throwOnUnmovedLinkeditRanges(
+  List<LoadCommand> commands,
+  int linkeditOff,
+  int fileLength,
+  List<_LinkeditPayload> covered,
+) {
+  bool isCovered(int offset, int size) {
+    for (final payload in covered) {
+      if (payload.oldOffset == offset && payload.oldSize == size) return true;
+    }
+    return false;
+  }
+
+  for (final lc in commands) {
+    _throwOnUnmovedCommandRange(lc, linkeditOff, fileLength, isCovered);
+  }
+}
+
+/// Checks one [lc] for an unmovable range reaching into `__LINKEDIT`.
+void _throwOnUnmovedCommandRange(
+  LoadCommand lc,
+  int linkeditOff,
+  int fileLength,
+  bool Function(int offset, int size) isCovered,
+) {
+  switch (lc.cmd) {
+    case lcSegment64:
+    case lcSymtab:
+    case lcDysymtab:
+    case lcDyldInfo:
+    case lcDyldInfoOnly:
+    case lcUuid:
+    case lcSourceVersion:
+      return;
+  }
+  if (movedTableRanges(lc).isNotEmpty) return;
+  if (lc.bytes.length < 16) return;
+  final bd = ByteData.sublistView(lc.bytes);
+  _checkCandidateRange(
+    lc.cmd,
+    bd.getUint32(8, Endian.little),
+    bd.getUint32(12, Endian.little),
+    linkeditOff,
+    fileLength,
+    isCovered,
+  );
+}
+
+/// Throws when the candidate `(offset, size)` range of command [cmd] is a
+/// plausible in-file range reaching into `__LINKEDIT` that no collected
+/// payload covers.
+void _checkCandidateRange(
+  int cmd,
+  int offset,
+  int size,
+  int linkeditOff,
+  int fileLength,
+  bool Function(int offset, int size) isCovered,
+) {
+  if (size == 0 || offset + size > fileLength) return;
+  if (offset + size <= linkeditOff) return;
+  if (!isCovered(offset, size)) {
+    throw FormatException(
+      'Cannot strip local symbols: load command 0x${cmd.toRadixString(16)} '
+      'points into __LINKEDIT.',
+    );
   }
 }
 
@@ -650,6 +720,12 @@ class _StripPlan {
       payloads.add(indirectPayload);
     }
     _collectTablePayloads(input, commands, payloads);
+    _throwOnUnmovedLinkeditRanges(
+      commands,
+      linkeditOff,
+      input.length,
+      payloads,
+    );
     final newLinkeditSize = _layoutLinkeditPayloads(
       payloads,
       linkeditOff,
@@ -667,7 +743,7 @@ class _StripPlan {
       );
       moved[payload.oldOffset] = payload.newOffset;
     }
-    return StrippedSymbols(
+    final stripped = StrippedSymbols(
       out,
       _commandsFor(
         (
@@ -682,6 +758,41 @@ class _StripPlan {
         (linkedit, newLinkeditSize),
       ),
     );
+    _verifyCompactedRanges(stripped.commands, linkeditOff, out.length);
+    return stripped;
+  }
+
+  /// Throws when the compacted `__LINKEDIT` ranges overlap, escape the
+  /// segment, or escape the file: the rewrite must never emit a command
+  /// pointing at bytes it reused.
+  void _verifyCompactedRanges(
+    List<LoadCommand> updated,
+    int linkeditOff,
+    int fileLength,
+  ) {
+    final ranges = <CommandRange>[];
+    for (final lc in updated) {
+      ranges.addAll(fileRangesOf(lc));
+    }
+    for (final range in ranges) {
+      if (range.size == 0) continue;
+      if (range.offset < linkeditOff ||
+          range.offset + range.size > fileLength) {
+        throw FormatException(
+          'Cannot strip local symbols: a rewritten linkedit range '
+          'escapes __LINKEDIT.',
+        );
+      }
+    }
+    ranges.sort((a, b) => a.offset.compareTo(b.offset));
+    for (var i = 1; i < ranges.length; i++) {
+      if (ranges[i].size == 0 || ranges[i - 1].size == 0) continue;
+      if (ranges[i].offset < ranges[i - 1].offset + ranges[i - 1].size) {
+        throw const FormatException(
+          'Cannot strip local symbols: rewritten linkedit ranges overlap.',
+        );
+      }
+    }
   }
 
   /// Returns [commands] with the stripped table positions applied: a rebuilt
@@ -732,18 +843,9 @@ class _StripPlan {
         updated.add(LoadCommand(lc.cmd, bytes));
         continue;
       }
-      if (movedOffsets != null && _isMovedTableCommand(lc)) {
-        final bd = ByteData.sublistView(lc.bytes);
-        final dataoff = bd.getUint32(8, Endian.little);
-        final datasize = bd.getUint32(12, Endian.little);
-        if (datasize != 0 && movedOffsets.containsKey(dataoff)) {
-          final bytes = Uint8List.fromList(lc.bytes);
-          ByteData.sublistView(
-            bytes,
-          ).setUint32(8, movedOffsets[dataoff]!, Endian.little);
-          updated.add(LoadCommand(lc.cmd, bytes));
-          continue;
-        }
+      if (movedOffsets != null && movedTableRanges(lc).isNotEmpty) {
+        updated.add(_relocatedTableCommand(lc, movedOffsets));
+        continue;
       }
       updated.add(lc);
     }
@@ -751,19 +853,25 @@ class _StripPlan {
   }
 }
 
-/// Whether [lc] is a linkedit table command whose data offset the compacting
-/// rewrite moves (besides the symbol tables, handled separately).
-bool _isMovedTableCommand(LoadCommand lc) {
-  switch (lc.cmd) {
-    case lcFunctionStarts:
-    case lcDataInCode:
-    case lcDyldInfo:
-    case lcDyldInfoOnly:
-    case lcDyldExportsTrie:
-    case lcDyldChainedFixups:
-    case lcCodeSignature:
-      return lc.bytes.length >= 16;
-    default:
-      return false;
+/// Returns [lc] with every non-empty table range relocated through
+/// [movedOffsets]: all five pairs for `LC_DYLD_INFO`/`LC_DYLD_INFO_ONLY`,
+/// the single pair for the other linkedit table commands.
+///
+/// Throws [FormatException] when a non-empty range has no new offset: the
+/// fail-closed scan should have refused such a command already.
+LoadCommand _relocatedTableCommand(LoadCommand lc, Map<int, int> movedOffsets) {
+  final bytes = Uint8List.fromList(lc.bytes);
+  final bd = ByteData.sublistView(bytes);
+  for (final range in movedTableRanges(lc)) {
+    if (range.size == 0) continue;
+    final fresh = movedOffsets[range.offset];
+    if (fresh == null) {
+      throw FormatException(
+        'Cannot strip local symbols: load command '
+        '0x${lc.cmd.toRadixString(16)} points at bytes the rewrite reused.',
+      );
+    }
+    bd.setUint32(range.field, fresh, Endian.little);
   }
+  return LoadCommand(lc.cmd, bytes);
 }

@@ -9,6 +9,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'macho_cli.dart';
+import 'macho_codesign.dart' show resignEmbeddedSignature;
 import 'macho_constants.dart';
 import 'macho_fat.dart'
     show
@@ -29,7 +30,6 @@ import 'macho_parse.dart'
         findFirstPayloadOffset,
         parseLoadCommands;
 import 'macho_strip.dart' show stripLocalSymbols;
-import 'macho_stub.dart' show sha256;
 
 /// Writes [bytes] to [outputPath], creating parent directories as needed.
 void _writePatchedOutput(Uint8List bytes, String outputPath) {
@@ -412,7 +412,7 @@ Uint8List _patchSingleMachO64(Uint8List inputBytes, PatchOptions options) {
     oldSizeofcmds,
     maxLoadCommandEnd,
     state.updatedCommands,
-    state.codeSigCommand,
+    state.codeSigCommand != null,
   );
 }
 
@@ -513,13 +513,14 @@ _idDylibVersions(LoadCommand lc) {
 }
 
 /// Serializes [updatedCommands] over [inputBytes], growing a header-only
-/// buffer or fitting before the first payload offset, then re-signs.
+/// buffer or fitting before the first payload offset, then rebuilds the
+/// embedded signature over the new layout when [hasSignature] is set.
 Uint8List _emitPatchedMachO(
   Uint8List inputBytes,
   int oldSizeofcmds,
   int maxLoadCommandEnd,
   List<LoadCommand> updatedCommands,
-  LoadCommand? codeSigCommand,
+  bool hasSignature,
 ) {
   var newSizeofcmds = 0;
   for (final lc in updatedCommands) {
@@ -565,72 +566,9 @@ Uint8List _emitPatchedMachO(
     writeOffset += lc.cmdsize;
   }
 
-  if (codeSigCommand != null) {
-    _resignEmbeddedCodeSignature(out, codeSigCommand);
+  if (hasSignature) {
+    return resignEmbeddedSignature(out);
   }
 
   return out;
-}
-
-/// Recomputes SHA-256 page hashes inside `LC_CODE_SIGNATURE`'s `CS_CodeDirectory`
-/// blob if present.
-void _resignEmbeddedCodeSignature(Uint8List bytes, LoadCommand codeSigLc) {
-  if (codeSigLc.bytes.length < 16) return;
-  final lcBd = ByteData.sublistView(codeSigLc.bytes);
-  final dataoff = lcBd.getUint32(8, Endian.little);
-  final datasize = lcBd.getUint32(12, Endian.little);
-  if (dataoff == 0 || datasize < 12 || dataoff + datasize > bytes.length) {
-    return;
-  }
-
-  final bd = ByteData.sublistView(bytes);
-  final superMagic = bd.getUint32(dataoff, Endian.big);
-  if (superMagic != csMagicEmbeddedSignature) {
-    return;
-  }
-  final blobCount = bd.getUint32(dataoff + 8, Endian.big);
-  for (var i = 0; i < blobCount; i++) {
-    final indexOff = dataoff + 12 + i * 8;
-    if (indexOff + 8 > dataoff + datasize) break;
-    final blobOffset = bd.getUint32(indexOff + 4, Endian.big);
-    final cdOff = dataoff + blobOffset;
-    if (cdOff + 44 > dataoff + datasize) continue;
-
-    final blobMagic = bd.getUint32(cdOff, Endian.big);
-    if (blobMagic != csMagicCodeDirectory) continue;
-
-    final cdLength = bd.getUint32(cdOff + 4, Endian.big);
-    final hashOffset = bd.getUint32(cdOff + 16, Endian.big);
-    final nCodeSlots = bd.getUint32(cdOff + 28, Endian.big);
-    final codeLimit = bd.getUint32(cdOff + 32, Endian.big);
-    final hashSize = bd.getUint8(cdOff + 36);
-    final hashType = bd.getUint8(cdOff + 37);
-    final pageSizeShift = bd.getUint8(cdOff + 39);
-
-    if (hashType != csHashTypeSha256 || hashSize != 32) {
-      continue;
-    }
-    final pageSize = pageSizeShift > 0 ? (1 << pageSizeShift) : codeLimit;
-    final hashesStart = cdOff + hashOffset;
-    if (hashesStart + nCodeSlots * 32 > cdOff + cdLength ||
-        hashesStart + nCodeSlots * 32 > bytes.length) {
-      continue;
-    }
-
-    for (var slot = 0; slot < nCodeSlots; slot++) {
-      final pageStart = slot * pageSize;
-      final pageEnd = math.min<int>(pageStart + pageSize, codeLimit);
-      if (pageStart >= bytes.length ||
-          pageEnd > bytes.length ||
-          pageStart >= pageEnd) {
-        break;
-      }
-      final digest = sha256(Uint8List.sublistView(bytes, pageStart, pageEnd));
-      bytes.setRange(
-        hashesStart + slot * 32,
-        hashesStart + (slot + 1) * 32,
-        digest,
-      );
-    }
-  }
 }
