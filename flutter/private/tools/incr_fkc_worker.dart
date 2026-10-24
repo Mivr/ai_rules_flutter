@@ -703,8 +703,6 @@ Future<void> runPersistentWorker({
 }
 
 Future<void> main(List<String> argv) async {
-  final probe = tryLockPath(argv);
-  if (probe != null) exit(await tryScratchLock(probe));
   if (argv.contains('--persistent_worker')) {
     await runPersistentWorker();
   } else {
