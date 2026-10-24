@@ -23,8 +23,10 @@ checks rely on:
 - the app path does the same for the app's own sources, with the debug
   platform dill prepended at link time — complete by default, delta-linked
   with `use_base_dill` (base search, base staging and base group included);
-- a comma-bearing global `extra_dart_defines` does NOT fall back: the `deps`
-  transition strips it for the custom closure, so the actions stay modular;
+- a comma-bearing global `extra_dart_defines` with `ignore_global_dart_defines`
+  does NOT fall back: the `deps` transition strips it for the custom closure
+  and the entry compile takes none of it, so the actions stay modular
+  (without the opt-out the build fails instead);
 - a caller-set `defines` fails the build (a custom kernel has no
   whole-program fallback);
 - the app path executes end to end in both modes (`build_test` over real
@@ -341,12 +343,13 @@ def _based_app_shapes_test_impl(ctx):
     return analysistest.end(env)
 
 def _comma_stays_modular_test_impl(ctx):
-    """A comma-bearing global define does not fork the custom closure off modular.
+    """A comma-bearing global define stays modular when the target opts out.
 
-    The built-in rules fall back to `FlutterKernelCompile` here; the custom
-    `deps` transition strips the flag for the custom closure instead, so the
-    entry compile (which never reads the flag) stays consistent with the
-    dependency modules and the actions stay `DartKernel` + `DartKernelLink`.
+    The built-in rules fall back to `FlutterKernelCompile` here; without
+    `ignore_global_dart_defines` the custom entry refuses the flag at analysis
+    instead. With the opt-out the `deps` transition strips the flag for the
+    custom closure and the entry compile takes none of it, so the actions stay
+    `DartKernel` + `DartKernelLink`.
     """
     env = analysistest.begin(ctx)
     _entry_and_link(env)
@@ -393,6 +396,19 @@ def modular_api_test_suite(name):
         name = "_modular_api_test_based",
         tags = ["manual"],
         use_base_dill = True,
+        deps = [
+            "//flutter/tests/modular_api_fixture:dep_b",
+            "//flutter/tests/modular_api_sdk_fixture:fake_flutter_test_sdk",
+        ],
+    )
+
+    # Opt-out twin of the above: the same closure with
+    # `ignore_global_dart_defines`, so a flag-bearing global `extra_dart_defines`
+    # keeps the modular actions instead of failing the build.
+    _modular_api_test_caller(
+        name = "_modular_api_test_optout",
+        tags = ["manual"],
+        ignore_global_dart_defines = True,
         deps = [
             "//flutter/tests/modular_api_fixture:dep_b",
             "//flutter/tests/modular_api_sdk_fixture:fake_flutter_test_sdk",
@@ -457,7 +473,7 @@ def modular_api_test_suite(name):
     )
     _comma_stays_modular_test(
         name = name + "_comma_stays_modular",
-        target_under_test = ":_modular_api_test",
+        target_under_test = ":_modular_api_test_optout",
     )
     _defines_reject_test(
         name = name + "_defines_reject",

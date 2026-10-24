@@ -104,6 +104,23 @@ def _global_extra_defines(ctx):
         defines.extend(ctx.attr._extra_dart_defines[BuildSettingInfo].value)
     return defines
 
+def _reject_global_extra_defines(ctx, what):
+    """Fails a custom modular kernel analysed with a global `extra_dart_defines`.
+
+    A custom kernel has no whole-program fallback, so a flag-bearing global
+    cannot quietly split the closure: the `deps` edge resets it for the
+    dependency modules while the entry would keep it. Refuse it unless the
+    target knowingly opts out with `ignore_global_dart_defines`.
+
+    Args:
+      ctx: The custom rule context. Must merge `FLUTTER_MODULAR_KERNEL_ATTRS`
+        (which provides `ignore_global_dart_defines`).
+      what: The calling function name, for error messages.
+    """
+    global_defines = _global_extra_defines(ctx)
+    if global_defines and not getattr(ctx.attr, "ignore_global_dart_defines", False):
+        fail("%s: %s refuses global //flutter:extra_dart_defines %s: the dependency modules are keyed and built without it, so the entry compile takes none of it either; set `ignore_global_dart_defines = True` to build without the global defines, or compile whole-program with `flutter_kernel_compile_action` when the defines must reach the kernel" % (ctx.label, what, global_defines))
+
 def _has_comma_defines(ctx):
     return any(["," in d for d in _global_extra_defines(ctx)])
 
@@ -117,7 +134,12 @@ def _kernel_worker_defines(ctx):
     When any global define contains `,`, `_has_comma_defines(ctx)` disables
     modular kernel compilation so targets fall back to whole-program
     `frontend_server` compilation instead of silently dropping the define.
+    A custom modular kernel that set `ignore_global_dart_defines` builds its
+    whole closure without the flag (the `deps` edge resets it for the
+    dependency modules), so the entry compile takes none of it either.
     """
+    if getattr(ctx.attr, "ignore_global_dart_defines", False):
+        return []
     return [
         d
         for d in _global_extra_defines(ctx)
@@ -1090,7 +1112,8 @@ def flutter_modular_test_tools(ctx, flutter_sdk_info, own_files, packages, nativ
     platform_dill = (
         flutter_sdk_info.platform_kernel_dill_product if product and flutter_sdk_info != None else (flutter_sdk_info.platform_kernel_dill if flutter_sdk_info != None else None)
     )
-    if not enabled or _has_comma_defines(ctx) or platform_dill == None:
+    opted_out = getattr(ctx.attr, "ignore_global_dart_defines", False)
+    if not enabled or (_has_comma_defines(ctx) and not opted_out) or platform_dill == None:
         return None
     if tools == None:
         tools = flutter_kernel_tools_for(ctx, flutter_sdk_info)
@@ -1251,8 +1274,17 @@ FLUTTER_MODULAR_KERNEL_ATTRS = {
         cfg = _modular_deps_transition,
     ),
     "defines": attr.string_list(
-        doc = "Extra `-D` defines for the entry compile. Must stay empty: unlike the built-in rules, a custom modular kernel has no whole-program fallback, so a non-empty list fails the build. The global `//flutter:extra_dart_defines` flag is not read either (the `deps` edge above resets it to keep the entry compile consistent with the dependency modules).",
+        doc = "Extra `-D` defines for the entry compile. Must stay empty: unlike the built-in rules, a custom modular kernel has no whole-program fallback, so a non-empty list fails the build. A non-empty global `//flutter:extra_dart_defines` fails the build too, unless the target sets `ignore_global_dart_defines` (the `deps` edge below resets the flag for the dependency modules, so the entry compile takes none of it either way).",
         default = [],
+    ),
+    "ignore_global_dart_defines": attr.bool(
+        doc = "Whether the global `//flutter:extra_dart_defines` is NOT applied to the target. The dependency modules are keyed and built without it (the `deps` edge resets the flag for the custom closure), so the entry compile ignores it too; set this for a pipeline that knowingly builds without the global defines. Default False: a non-empty global flag fails the build.",
+        default = False,
+    ),
+    "_extra_dart_defines": attr.label(
+        doc = "The //flutter:extra_dart_defines build setting, read to refuse a non-empty global value unless `ignore_global_dart_defines` opts out.",
+        default = Label("//flutter:extra_dart_defines"),
+        providers = [BuildSettingInfo],
     ),
     "_allowlist_function_transition": attr.label(
         doc = "Function-transition allowlist the `deps` edge's platform transition requires.",
@@ -1272,8 +1304,8 @@ def _flutter_modular_custom_tools(ctx, deps, own_files, packages, what):
     fails here with the reason instead.
 
     Args:
-      ctx: The custom rule context. Must provide `defines` (see
-        `FLUTTER_MODULAR_KERNEL_ATTRS`).
+      ctx: The custom rule context. Must provide `defines` and
+        `ignore_global_dart_defines` (see `FLUTTER_MODULAR_KERNEL_ATTRS`).
       deps: The custom rule's dependency Targets.
       own_files: The entry's own `.dart` Files.
       packages: The `DartPackageInfo` list for the entry compile.
@@ -1286,6 +1318,7 @@ def _flutter_modular_custom_tools(ctx, deps, own_files, packages, what):
     flutter_sdk_info = flutter_toolchain.flutter_sdk_info if flutter_toolchain else None
     if flutter_sdk_info == None or flutter_sdk_info.platform_kernel_dill == None:
         fail("%s: %s needs a Flutter SDK with a debug platform kernel dill" % (ctx.label, what))
+    _reject_global_extra_defines(ctx, what)
     if ctx.attr.defines:
         fail("%s: %s does not accept defines (%s); the built-in rules fall back to a whole-program compile for targets with defines, but a custom modular kernel has no fallback" % (ctx.label, what, ctx.attr.defines))
     native_assets = depset(transitive = [

@@ -715,6 +715,7 @@ flutter_prebuilt_test(
 
 custom_modular_test_kernel(
     name = "widget_modular_kernel",
+    ignore_global_dart_defines = True,
     target_compatible_with = _HOST_COMPATIBLE,
     deps = [
         "//modular_greeter",
@@ -745,6 +746,7 @@ flutter_prebuilt_test(
 
 custom_modular_test_kernel(
     name = "widget_modular_based_kernel",
+    ignore_global_dart_defines = True,
     target_compatible_with = _HOST_COMPATIBLE,
     use_base_dill = True,
     deps = [
@@ -780,6 +782,7 @@ flutter_prebuilt_test(
 custom_modular_app_kernel(
     name = "hello_world_modular_app",
     srcs = ["lib/common_widgets.dart"],
+    ignore_global_dart_defines = True,
     main = "lib/main.dart",
     deps = [
         "@deps//:cupertino_icons",
