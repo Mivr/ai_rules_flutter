@@ -517,6 +517,29 @@ jobs:
             git status --porcelain -- e2e/dual_hub
             exit 1
           fi
+      - name: pub_hosted_escape hosted archives refuse link escapes
+        run: |
+          cd e2e/pub_hosted_escape
+          trap 'git checkout -- locks/' EXIT
+          sed -i "s|file://FIXTURES_ROOT|file://$PWD/fixtures|" locks/*.lock
+          bazel build //:ok_app
+          check_refusal() {
+            if bazel build "//:$1_app" 2>refusal.log; then
+              echo "expected //:$1_app to fail, but it built"
+              exit 1
+            fi
+            grep -F -q "$2" refusal.log || {
+              echo "//:$1_app failed without the expected diagnostic:"
+              cat refusal.log
+              exit 1
+            }
+          }
+          check_refusal evil_hard_out 'pub package "evil_hard_out": hard-link "lib/evil.dart" points at "../../outside.txt"'
+          check_refusal evil_hard_in 'pub package "evil_hard_in": hard-link "lib/evil.dart" points at "lib/ok.dart"'
+          check_refusal evil_abs 'pub package "evil_abs": symlink "lib/evil.dart" escapes the package (points at "/etc/passwd")'
+          check_refusal evil_esc 'pub package "evil_esc": symlink "lib/evil.dart" escapes the package (points at "../../outside.txt")'
+          check_refusal evil_path_abs 'pub package "evil_path_abs": entry "/abs.dart" escapes the package'
+          check_refusal evil_path_dotdot 'pub package "evil_path_dotdot": entry "../outside.dart" escapes the package'
       - name: Report cache sizes
         if: always()
         run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true

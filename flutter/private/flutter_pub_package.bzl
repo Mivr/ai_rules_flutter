@@ -27,10 +27,9 @@ extract pattern (replicated, not abstracted, to keep the cross-repo
 surface small).
 """
 
-load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version", "make_dart_library_build_content", "trim_gzip_trailing_nulls")
+load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version", "make_dart_library_build_content")
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_deps", "parse_pubspec_sdk_constraint")
-load("//flutter/private:artifact_urls.bzl", "require_sha256")
-load("//flutter/private:download.bzl", "pinned_download")
+load("//flutter/private:flutter_pub_scan.bzl", "fetch_hosted_archive", "scan_hosted_archive", "walk_hosted_package")
 load("//flutter/private:flutter_pubspec.bzl", "asset_flavor_error", "asset_platform_error", "invalid_asset_platforms", "parse_flutter_assets_block", "parse_flutter_plugin_block", "parse_pubspec")
 load(
     ":flutter_pub_assets.bzl",
@@ -1890,27 +1889,15 @@ def resolve_overlay_roots(ctx, overlay_roots, package_name, version, language_ve
 def _fetch_pub_archive(ctx):
     """Downloads and extracts the package archive, like `pub_lock_package`.
 
-    Verifies sha256 on download, strips trailing NUL padding past the RFC
-    1952 gzip trailer, and unpacks with `ctx.extract`.
+    Delegates to `fetch_hosted_archive`: a sha256-verified download, the
+    gzip trailer trim, rules_dart's header scan over the trimmed bytes
+    before `ctx.extract`, and its symlink walk over the extracted tree
+    before anything reads it. A refused archive fails the fetch with
+    rules_dart's diagnostic naming the package and the entry.
     """
-    url = "{base}/packages/{name}/versions/{version}.tar.gz".format(
-        base = ctx.attr.base_url,
-        name = ctx.attr.package_name,
-        version = ctx.attr.version,
-    )
-    pinned_download(
-        ctx,
-        url = url,
-        output = "_archive.tar.gz",
-        sha256 = require_sha256(ctx.attr.sha256, url),
-    )
-    raw_archive = ctx.read("_archive.tar.gz", watch = "no")
-    trimmed_archive = trim_gzip_trailing_nulls(raw_archive)
-    if trimmed_archive != raw_archive:
-        ctx.delete("_archive.tar.gz")
-        ctx.file("_archive.tar.gz", trimmed_archive, executable = False)
-    ctx.extract("_archive.tar.gz")
-    ctx.delete("_archive.tar.gz")
+    refusal = fetch_hosted_archive(ctx, scan_hosted_archive, walk_hosted_package)
+    if refusal:
+        fail(refusal)
 
 def _read_spoke_pubspec(ctx):
     """Parses the extracted `pubspec.yaml` into spoke inputs.

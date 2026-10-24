@@ -49,6 +49,7 @@
 /e2e/min_versions/ export-ignore
 /e2e/multi_window_example/ export-ignore
 /e2e/plugin_example/ export-ignore
+/e2e/pub_hosted_escape/ export-ignore
 /e2e/web_example/ export-ignore
 /e2e/windows_example/ export-ignore
 /e2e/xtool_sdk_invalid/ export-ignore

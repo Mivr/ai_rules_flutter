@@ -23,6 +23,7 @@ load(":flutter_plugin_test.bzl", "flutter_plugin_test_suite")
 load(":flutter_prebuilt_test.bzl", "flutter_prebuilt_test_suite")
 load(":flutter_pub_overlays_test.bzl", "flutter_pub_overlays_test_suite")
 load(":flutter_pub_package_test.bzl", "flutter_pub_package_test_suite")
+load(":flutter_pub_scan_test.bzl", "flutter_pub_scan_test_suite")
 load(":flutter_pubspec_test.bzl", "flutter_pubspec_test_suite")
 load(":flutter_sdk_package_test.bzl", "flutter_sdk_package_test_suite")
 load(":flutter_test_bootstrap_test.bzl", "flutter_test_bootstrap_test_suite")
@@ -168,6 +169,8 @@ flutter_plugin_test_suite(name = "flutter_plugin_test")
 flutter_prebuilt_test_suite(name = "flutter_prebuilt_test")
 
 flutter_pub_package_test_suite(name = "flutter_pub_package_test")
+
+flutter_pub_scan_test_suite(name = "flutter_pub_scan_test")
 
 flutter_pub_overlays_test_suite(name = "flutter_pub_overlays_test")
 
