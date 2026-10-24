@@ -518,8 +518,8 @@ jobs:
             exit 1
           fi
       - name: pub_hosted_escape hosted archives refuse link escapes
+        working-directory: e2e/pub_hosted_escape
         run: |
-          cd e2e/pub_hosted_escape
           trap 'git checkout -- locks/' EXIT
           sed -i "s|file://FIXTURES_ROOT|file://$PWD/fixtures|" locks/*.lock
           bazel build //:ok_app
