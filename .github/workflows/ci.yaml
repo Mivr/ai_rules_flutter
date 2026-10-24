@@ -443,6 +443,17 @@ jobs:
             exit 1
           fi
           grep -F 'keystore password was incorrect' /tmp/wrong-pass.log
+      # Real-compiler proof that a warm incremental worker's dill is
+      # byte-for-byte the one-shot compile's, over an edit sequence on
+      # e2e/hello_world. Fails the job on any difference. Timed so the
+      # job's 60-minute budget stays visible.
+      - name: Incremental kernel identity check (timed)
+        run: |
+          start=$(date +%s)
+          bash tools/incr_kernel_identity/check.sh
+          rc=$?
+          echo "incremental kernel identity check took $(( $(date +%s) - start ))s (rc=$rc)"
+          exit $rc
       - name: Report cache sizes
         if: always()
         run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true
