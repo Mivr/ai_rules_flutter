@@ -31,21 +31,21 @@ def _make_mock_fetch_ctx(events, package_name = "evil"):
     """
 
     def _download(sha256 = None, url = None, output = None):
-        events.append("download:" + str(url))
+        events.append("download:" + str(url) + "->" + str(output))
         return struct(sha256 = sha256)
 
     def _read(path, watch = None):
-        events.append("read")
+        events.append("read:" + str(path) + ":" + str(watch))
         return "archive-bytes"
 
     def _file(path, content, executable = False):
-        events.append("file")
+        events.append("file:" + str(path) + ":" + str(content) + ":" + str(executable))
 
     def _delete(path):
-        events.append("delete")
+        events.append("delete:" + str(path))
 
     def _extract(archive):
-        events.append("extract")
+        events.append("extract:" + str(archive))
 
     return struct(
         attr = struct(
@@ -64,7 +64,7 @@ def _make_mock_fetch_ctx(events, package_name = "evil"):
 def _make_scan_fake(events, refusal = ""):
     """A scan fake logging its arguments and answering `refusal`."""
 
-    def _scan(ctx, archive_path, package_name):
+    def _scan(_ctx, archive_path, package_name):
         events.append("scan:" + str(archive_path) + ":" + package_name)
         return refusal
 
@@ -73,17 +73,17 @@ def _make_scan_fake(events, refusal = ""):
 def _make_walk_fake(events):
     """A walk fake logging the package it runs over."""
 
-    def _walk(ctx, package_name):
+    def _walk(_ctx, package_name):
         events.append("walk:" + package_name)
 
     return _walk
 
 _CLEAN_EVENTS = [
-    "download:file://fixtures/packages/evil/versions/1.0.0.tar.gz",
-    "read",
+    "download:file://fixtures/packages/evil/versions/1.0.0.tar.gz->_archive.tar.gz",
+    "read:_archive.tar.gz:no",
     "scan:_archive.tar.gz:evil",
-    "extract",
-    "delete",
+    "extract:_archive.tar.gz",
+    "delete:_archive.tar.gz",
     "walk:evil",
 ]
 
@@ -121,8 +121,8 @@ def _refusal_stops_before_extract_test_impl(ctx):
     asserts.equals(
         env,
         [
-            "download:file://fixtures/packages/evil/versions/1.0.0.tar.gz",
-            "read",
+            "download:file://fixtures/packages/evil/versions/1.0.0.tar.gz->_archive.tar.gz",
+            "read:_archive.tar.gz:no",
             "scan:_archive.tar.gz:evil",
         ],
         events,
@@ -144,7 +144,7 @@ def _walk_runs_after_extraction_test_impl(ctx):
     )
 
     asserts.equals(env, "", result)
-    asserts.true(env, events.index("extract") < events.index("walk:ok_clean"), events)
+    asserts.true(env, events.index("extract:_archive.tar.gz") < events.index("walk:ok_clean"), events)
     asserts.true(env, events.index("scan:_archive.tar.gz:ok_clean") < events.index("extract"), events)
 
     return unittest.end(env)
