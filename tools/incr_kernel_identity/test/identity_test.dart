@@ -274,8 +274,7 @@ void main() {
       // so a warm recompile over the reverted inputs repeats s0 exactly.
       const mainOrig = '// main original\nvoid main() {}\n';
       const commonOrig = '// common original\nclass C {}\n';
-      final main = File('${dir.path}/main.dart')
-        ..writeAsStringSync(mainOrig);
+      final main = File('${dir.path}/main.dart')..writeAsStringSync(mainOrig);
       final common = File('${dir.path}/common_widgets.dart')
         ..writeAsStringSync(commonOrig);
       backupSources(
