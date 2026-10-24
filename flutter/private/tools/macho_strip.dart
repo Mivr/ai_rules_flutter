@@ -390,7 +390,10 @@ LoadCommand? _findLinkeditSegment(List<LoadCommand> commands) {
 }
 
 /// One `__LINKEDIT` payload to lay out: its original file range, its new
-/// bytes, and the new offset [_layoutLinkeditPayloads] assigns it.
+/// bytes, and the new offset [_layoutLinkeditPayloads] assigns it. The code
+/// signature payload sets [align16]: like ld64 and llvm-strip, the rewrite
+/// places `LC_CODE_SIGNATURE` at a 16-byte-aligned file offset, zero-padding
+/// the gap before it inside `__LINKEDIT`.
 class _LinkeditPayload {
   _LinkeditPayload({
     required this.oldOffset,
@@ -401,6 +404,10 @@ class _LinkeditPayload {
   final int oldOffset;
   final int oldSize;
   final Uint8List bytes;
+
+  /// Whether the layout aligns this payload's new offset to 16 bytes (set by
+  /// [_alignSignaturePayload] for `LC_CODE_SIGNATURE`).
+  bool align16 = false;
   int newOffset = -1;
 }
 
@@ -432,6 +439,25 @@ void _collectTablePayloads(
           ),
         ),
       );
+    }
+  }
+}
+
+/// Marks the `LC_CODE_SIGNATURE` payload (when present and non-empty) for
+/// 16-byte alignment: ld64 and llvm-strip place the signature blob aligned,
+/// and the resign step keeps the stripped offset as the new `codeLimit`.
+void _alignSignaturePayload(
+  List<LoadCommand> commands,
+  List<_LinkeditPayload> payloads,
+) {
+  for (final lc in commands) {
+    if (lc.cmd != lcCodeSignature || lc.bytes.length < 16) continue;
+    final dataoff = ByteData.sublistView(lc.bytes).getUint32(8, Endian.little);
+    final datasize = ByteData.sublistView(lc.bytes)
+        .getUint32(12, Endian.little);
+    if (datasize == 0) continue;
+    for (final payload in payloads) {
+      if (payload.oldOffset == dataoff) payload.align16 = true;
     }
   }
 }
@@ -566,7 +592,9 @@ void _checkRangeOutsideLinkedit(
 }
 
 /// Lays [payloads] out contiguously from [linkeditOff] in file order,
-/// failing on overlapping or out-of-file original ranges.
+/// failing on overlapping or out-of-file original ranges. Payloads marked
+/// [align16] start at a 16-byte-aligned file offset; the output buffer is
+/// freshly zeroed, so the padding gap stays zero-filled inside `__LINKEDIT`.
 int _layoutLinkeditPayloads(
   List<_LinkeditPayload> payloads,
   int linkeditOff,
@@ -589,6 +617,9 @@ int _layoutLinkeditPayloads(
       );
     }
     end = payload.oldOffset + payload.oldSize;
+    if (payload.align16) {
+      cursor += (16 - (cursor % 16)) % 16;
+    }
     payload.newOffset = cursor;
     cursor += payload.bytes.length;
   }
@@ -720,6 +751,7 @@ class _StripPlan {
       payloads.add(indirectPayload);
     }
     _collectTablePayloads(input, commands, payloads);
+    _alignSignaturePayload(commands, payloads);
     _throwOnUnmovedLinkeditRanges(
       commands,
       linkeditOff,

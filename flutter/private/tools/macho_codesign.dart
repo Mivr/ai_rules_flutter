@@ -19,9 +19,6 @@ import 'macho_constants.dart';
 import 'macho_parse.dart' show LoadCommand, fileRangesOf, parseLoadCommands;
 import 'macho_stub.dart' show sha256;
 
-/// Blob-index type of the CMS signature slot in a `CS_SuperBlob`.
-const _blobTypeSignature = 0;
-
 /// `CS_CodeDirectory` versions carrying a `codeLimit64` word at offset 56.
 const _cdVersionCodeLimit64 = 0x20300;
 
@@ -214,8 +211,9 @@ void _checkSignatureRange(int fileLength, int dataoff, int datasize) {
 
 /// Throws when the blob at [dataoff] is not a `CS_SuperBlob`, is truncated,
 /// or carries a real CMS signature blob the rebuild cannot re-create: either
-/// non-zero trailer bytes past the SuperBlob or a slot-0 entry holding
-/// anything but a `CS_CodeDirectory` (slot 0 is shared with the CMS slot).
+/// non-zero trailer bytes past the SuperBlob or a signature-slot
+/// (`0x10000`) wrapper holding a payload. An empty signature wrapper (what
+/// ad-hoc `codesign` writes) is kept as is.
 void _checkSuperBlob(Uint8List bytes, int dataoff, int datasize) {
   final view = Uint8List.sublistView(bytes, dataoff, dataoff + datasize);
   final bd = ByteData.sublistView(view);
@@ -237,16 +235,7 @@ void _checkSuperBlob(Uint8List bytes, int dataoff, int datasize) {
     }
   }
   for (final entry in _parseBlobIndex(view)) {
-    if (entry.type != _blobTypeSignature) continue;
-    if (entry.offset + 4 > view.length) {
-      throw const FormatException('Truncated embedded signature blob.');
-    }
-    final magic = ByteData.sublistView(
-      view,
-      entry.offset,
-      entry.offset + 4,
-    ).getUint32(0, Endian.big);
-    if (magic != csMagicCodeDirectory) {
+    if (entry.type == csSlotSignature && entry.length > 8) {
       throw const FormatException(
         'Cannot rebuild the embedded code signature: it carries a CMS '
         'signature blob.',
@@ -288,7 +277,7 @@ List<_BlobEntry> _parseBlobIndex(Uint8List sigBytes) {
       offset,
       offset + 8,
     ).getUint32(4, Endian.big);
-    if (offset + length > sigBytes.length) {
+    if (length < 8 || offset + length > sigBytes.length) {
       throw const FormatException('Truncated embedded signature blob.');
     }
     entries.add(_BlobEntry(type: type, offset: offset, length: length));
@@ -401,7 +390,6 @@ void _fillCodeHashes(Uint8List out, List<_RebuiltBlob> rebuilt) {
   bd.setUint32(4, freshLength, Endian.big);
   bd.setUint32(28, freshSlots, Endian.big);
   bd.setUint32(32, codeLimit, Endian.big);
-  dir.shiftTrailingOffsets(bd, newHashesEnd - dir.oldHashesEnd);
   dir.zeroCodeLimit64(bd, freshLength, newHashesEnd);
   return (bytes: out, pageSize: pageSize);
 }
@@ -464,6 +452,11 @@ Uint8List _shiftedRanges(LoadCommand lc, int oldSigEnd, int shrink) {
 
 /// A bounds-checked `CS_CodeDirectory` header: the values the rebuild reads
 /// and writes, grouped so the rebuild stays under the parameter limit.
+///
+/// Everything the rebuild keeps (identifier, scatter and team strings, spare
+/// words) sits before the hash array and is copied byte-identical, so the
+/// header carries no offsets out: any string or vector at or past the hash
+/// array fails the read instead of being moved.
 class _ParsedCodeDirectory {
   _ParsedCodeDirectory({
     required this.version,
@@ -475,8 +468,6 @@ class _ParsedCodeDirectory {
     required this.slots,
     required this.hashesStart,
     required this.oldHashesEnd,
-    required this.scatterOffset,
-    required this.teamOffset,
   });
 
   /// The directory version word.
@@ -506,14 +497,15 @@ class _ParsedCodeDirectory {
   /// End of the old hash array.
   final int oldHashesEnd;
 
-  /// The scatter-vector offset, or 0 when absent.
-  final int scatterOffset;
-
-  /// The team-ID offset, or 0 when absent.
-  final int teamOffset;
-
   /// Reads and validates the header of [cd], throwing [FormatException]
   /// when it is truncated, malformed or unhashable.
+  ///
+  /// The scatter-vector and team-ID words are only read when the [version]
+  /// defines them (0x20100 and 0x20200) and the header reaching up to the
+  /// identifier or the hash array actually contains them; anything else at
+  /// those positions is payload bytes, not offsets. A referenced string or
+  /// vector at or past the hash array is refused: ad-hoc and linker
+  /// signatures never put anything there, and moving it would corrupt it.
   static _ParsedCodeDirectory read(Uint8List cd) {
     if (cd.length < 44) {
       throw const FormatException('Truncated CodeDirectory blob.');
@@ -535,14 +527,20 @@ class _ParsedCodeDirectory {
     if (hashesStart < 0 || hashOffset > cd.length || oldHashesEnd > cd.length) {
       throw const FormatException('Truncated CodeDirectory hash array.');
     }
-    final identEnd = _identEnd(cd, identOffset);
-    if (identEnd > hashesStart && identOffset < oldHashesEnd) {
-      throw const FormatException('Malformed CodeDirectory identifier.');
-    }
-    final scatter = _gatedOffset(bd, version, cd.length, 44, 0x20000);
-    final team = _gatedOffset(bd, version, cd.length, 48, 0x20001);
-    _checkAuxOffset(scatter, hashesStart, oldHashesEnd, 'scatter vector');
-    _checkAuxOffset(team, hashesStart, oldHashesEnd, 'team ID');
+    final identEnd = _identEnd(cd, identOffset, hashesStart);
+    final headerExtent = identOffset < hashesStart ? identOffset : hashesStart;
+    _checkAuxOffset(
+      _presentOffset(bd, cd.length, headerExtent, 44, version, 0x20100),
+      hashesStart,
+      cd.length,
+      'scatter vector',
+    );
+    _checkAuxOffset(
+      _presentOffset(bd, cd.length, headerExtent, 48, version, 0x20200),
+      hashesStart,
+      cd.length,
+      'team ID',
+    );
     return _ParsedCodeDirectory(
       version: version,
       oldLimit: bd.getUint32(32, Endian.big),
@@ -553,8 +551,6 @@ class _ParsedCodeDirectory {
       slots: slots,
       hashesStart: hashesStart,
       oldHashesEnd: oldHashesEnd,
-      scatterOffset: scatter,
-      teamOffset: team,
     );
   }
 
@@ -563,21 +559,6 @@ class _ParsedCodeDirectory {
   int pageSizeFor(int codeLimit) {
     if (pageShift > 0) return 1 << pageShift;
     return codeLimit > 0 ? oldLimit : 4096;
-  }
-
-  /// Moves the identifier, scatter and team offsets in [bd] past the old
-  /// hash end down by [delta] bytes.
-  void shiftTrailingOffsets(ByteData bd, int delta) {
-    if (delta == 0) return;
-    if (identOffset >= oldHashesEnd) {
-      bd.setUint32(20, identOffset + delta, Endian.big);
-    }
-    if (scatterOffset >= oldHashesEnd && scatterOffset != 0) {
-      bd.setUint32(44, scatterOffset + delta, Endian.big);
-    }
-    if (teamOffset >= oldHashesEnd && teamOffset != 0) {
-      bd.setUint32(48, teamOffset + delta, Endian.big);
-    }
   }
 
   /// Zeroes the `codeLimit64` word in [bd] when the directory carries one:
@@ -599,31 +580,61 @@ class _ParsedCodeDirectory {
   }
 }
 
-/// Throws when the auxiliary string at [offset] overlaps the hash array.
+/// Throws when the auxiliary string or vector at [offset] would need moving:
+/// anything at or past the hash array ([hashesStart]). Ad-hoc and linker
+/// signatures keep every referenced string before the hashes; a non-zero
+/// offset that does not even point inside the directory is payload garbage
+/// and is left untouched, copied byte-identical with the header.
 void _checkAuxOffset(
   int offset,
   int hashesStart,
-  int oldHashesEnd,
+  int cdLength,
   String what,
 ) {
-  if (offset != 0 && offset >= hashesStart && offset < oldHashesEnd) {
+  if (offset == 0 || offset >= cdLength) return;
+  if (offset >= hashesStart) {
     throw FormatException('Malformed CodeDirectory $what offset.');
   }
 }
 
-/// Reads the version-gated 4-byte offset at [field]: the value when the
-/// directory [version] enables it and [cdLength] covers it, else 0.
-int _gatedOffset(ByteData bd, int version, int cdLength, int field, int since) {
-  if (version < since || cdLength < field + 4) return 0;
+/// Reads the version-gated 4-byte offset at [field]: the value when [version]
+/// defines it ([since] or later) and the header reaching up to the identifier
+/// or the hash array ([headerExtent]) actually contains the field, else 0.
+/// Anything else at that position is identifier or padding bytes, not an
+/// offset: a version-0x20100 directory with its identifier at 44 keeps
+/// `fixture\0` there, not a scatter vector.
+int _presentOffset(
+  ByteData bd,
+  int cdLength,
+  int headerExtent,
+  int field,
+  int version,
+  int since,
+) {
+  if (version < since || field + 4 > headerExtent || field + 4 > cdLength) {
+    return 0;
+  }
   return bd.getUint32(field, Endian.big);
 }
 
 /// Returns the end (past the NUL) of the identifier at [offset] in [cd].
-int _identEnd(Uint8List cd, int offset) {
-  if (offset >= cd.length) return offset;
+///
+/// A value of 0 or past the blob is left untouched: the header bytes are
+/// copied as they are. An identifier at or past the hash array
+/// ([hashesStart]), or one running into it, is refused: ad-hoc and linker
+/// signatures keep the identifier before the hashes, and moving it would
+/// corrupt it.
+int _identEnd(Uint8List cd, int offset, int hashesStart) {
+  if (offset == 0 || offset >= cd.length) return offset;
+  if (offset >= hashesStart) {
+    throw const FormatException('Malformed CodeDirectory identifier.');
+  }
   var end = offset;
-  while (end < cd.length && cd[end] != 0) {
+  while (end < hashesStart && end < cd.length && cd[end] != 0) {
     end++;
+  }
+  if (end >= hashesStart) {
+    throw const FormatException('Malformed CodeDirectory identifier.');
   }
   if (end >= cd.length) {
     throw const FormatException('Truncated CodeDirectory identifier.');

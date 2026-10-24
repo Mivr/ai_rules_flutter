@@ -75,4 +75,10 @@ const int indirectSymbolSpecialMask = 0xc0000000;
 // Code signature constants (big-endian in Mach-O).
 const int csMagicEmbeddedSignature = 0xfade0cc0;
 const int csMagicCodeDirectory = 0xfade0c02;
+const int csMagicBlobWrapper = 0xfade0b01;
 const int csHashTypeSha256 = 2;
+
+// SuperBlob index types: slot 0 names the primary CodeDirectory, 0x1000 range
+// the alternates, and 0x10000 the CMS signature wrapper.
+const int csSlotCodeDirectory = 0;
+const int csSlotSignature = 0x10000;
