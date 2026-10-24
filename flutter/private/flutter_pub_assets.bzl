@@ -20,10 +20,14 @@ fetch on the returned error, which already names the package and the entry
 or directory.
 """
 
+load(":flutter_pub_walk.bzl", "PUB_WALK_BOUND")
+
 # Bound for every asset directory walk. Starlark has no `while`, so every
 # walk is a bounded `for`; reaching the bound fails loudly (see
-# `walk_bound_error`) instead of silently dropping files.
-PUB_ASSET_LIST_BOUND = 10000
+# `walk_bound_error`) instead of silently dropping files. This is the
+# shared pub spoke walk bound (`PUB_WALK_BOUND` in `flutter_pub_walk.bzl`),
+# kept under its old name so existing loads keep working.
+PUB_ASSET_LIST_BOUND = PUB_WALK_BOUND
 
 def is_asset_variant_dir(name):
     """True when `name` is a resolution-variant directory, per flutter_tools.

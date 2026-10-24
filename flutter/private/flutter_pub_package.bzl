@@ -40,6 +40,13 @@ load(
     "is_asset_variant_dir",
 )
 load(
+    ":flutter_pub_walk.bzl",
+    "PUB_WALK_BOUND",
+    "has_files_under_walk",
+    "heredoc_blocks_bound_error",
+    "scoped_tree_bound_error",
+)
+load(
     ":gradle.bzl",
     "detect_android_namespace",
     "detect_android_native_build",
@@ -103,37 +110,52 @@ _DESKTOP_SRC_EXTENSIONS = ("cc", "cpp", "c", "h", "hh", "hpp")
 # Kotlin/Java source extensions for Android plugin libraries.
 _ANDROID_SRC_EXTENSIONS = ("kt", "java")
 
-def _has_files_under(ctx, relative_path, extensions = None):
+def _ctx_has_files_readdir(ctx, relative_path):
+    """A `has_files_under_walk` reader over one spoke directory via `ctx.path`.
+
+    Args:
+        ctx: The spoke's repository context.
+        relative_path: The package-relative directory the walk is rooted at.
+
+    Returns:
+        A `readdir` callable as `has_files_under_walk` takes it: a missing
+        directory reads as empty, matching the walk's old skip.
+    """
+    def readdir(rel_dir):
+        """The immediate children of `relative_path/rel_dir`."""
+        full = relative_path if rel_dir == "" else relative_path + "/" + rel_dir
+        node = ctx.path(full)
+        if not node.exists:
+            return []
+        return [struct(name = child.basename, is_dir = child.is_dir) for child in node.readdir()]
+
+    return readdir
+
+def _has_files_under(ctx, relative_path, extensions = None, package_name = "", bound = PUB_WALK_BOUND):
     """Check `<package>/<relative_path>` for source files.
 
     Returns True if the directory exists and contains at least one file
     matching one of `extensions` (any file when `extensions` is None).
     `ctx.path(p).readdir()` is the documented repo-rule way to walk a
     directory; recursing in Starlark keeps the logic local instead of
-    forking out to `find`.
+    forking out to `find`. The walk shares the pub spoke bound
+    (`PUB_WALK_BOUND`): reaching it with directories unvisited fails the
+    fetch naming the package, the directory, and the bound, instead of
+    silently reporting no sources from a half-walked tree.
     """
     root = ctx.path(relative_path)
     if not root.exists:
         return False
-
-    stack = [root]
-    for _ in range(10000):  # bound the walk; pub packages are not deep
-        if not stack:
-            break
-        d = stack.pop()
-        if not d.exists:
-            continue
-        for entry in d.readdir():
-            if entry.is_dir:
-                stack.append(entry)
-            else:
-                if extensions == None:
-                    return True
-                name = entry.basename
-                ext = name.rsplit(".", 1)[-1] if "." in name else ""
-                if ext in extensions:
-                    return True
-    return False
+    found = has_files_under_walk(
+        _ctx_has_files_readdir(ctx, relative_path),
+        "",
+        package_name,
+        extensions,
+        bound,
+    )
+    if found.error:
+        fail(found.error)
+    return found.found
 
 def _detect_apple_source_dirs(ctx, package_name, platform, shared_darwin_source):
     """List Apple source directory globs for the given platform.
@@ -145,23 +167,23 @@ def _detect_apple_source_dirs(ctx, package_name, platform, shared_darwin_source)
 
     # Modern SwiftPM layout: <platform>/<pkg>/Sources/<pkg>/...
     swiftpm_dir = "{plat}/{pkg}/Sources/{pkg}".format(plat = platform, pkg = package_name)
-    if _has_files_under(ctx, swiftpm_dir, _APPLE_SRC_EXTENSIONS):
+    if _has_files_under(ctx, swiftpm_dir, _APPLE_SRC_EXTENSIONS, package_name):
         candidates.append(swiftpm_dir)
 
     # Shared darwin source layout: darwin/Classes/...
     if shared_darwin_source:
         darwin_dir = "darwin/Classes"
-        if _has_files_under(ctx, darwin_dir, _APPLE_SRC_EXTENSIONS):
+        if _has_files_under(ctx, darwin_dir, _APPLE_SRC_EXTENSIONS, package_name):
             candidates.append(darwin_dir)
 
         # Legacy darwin SwiftPM (older path_provider_foundation versions).
         darwin_swiftpm_dir = "darwin/{pkg}/Sources/{pkg}".format(pkg = package_name)
-        if _has_files_under(ctx, darwin_swiftpm_dir, _APPLE_SRC_EXTENSIONS):
+        if _has_files_under(ctx, darwin_swiftpm_dir, _APPLE_SRC_EXTENSIONS, package_name):
             candidates.append(darwin_swiftpm_dir)
 
     # Legacy split layout: <platform>/Classes/...
     legacy_dir = "{plat}/Classes".format(plat = platform)
-    if _has_files_under(ctx, legacy_dir, _APPLE_SRC_EXTENSIONS):
+    if _has_files_under(ctx, legacy_dir, _APPLE_SRC_EXTENSIONS, package_name):
         candidates.append(legacy_dir)
 
     return candidates
@@ -221,7 +243,7 @@ def _detect_apple_privacy_manifests(ctx, source_dirs):
                 manifests[relpath] = True
     return sorted(manifests.keys())
 
-def _detect_desktop_source_dir(ctx, platform):
+def _detect_desktop_source_dir(ctx, package_name, platform):
     """Return the Linux/Windows source dir if it contains C/C++ files.
 
     Pub plugins put Linux sources at `linux/` and Windows sources at
@@ -229,21 +251,21 @@ def _detect_desktop_source_dir(ctx, platform):
     plugin's own conventions); subdirectories like `linux/include/` are
     swept by the resulting glob.
     """
-    if _has_files_under(ctx, platform, _DESKTOP_SRC_EXTENSIONS):
+    if _has_files_under(ctx, platform, _DESKTOP_SRC_EXTENSIONS, package_name):
         return platform
     return ""
 
-def _detect_android_source_dir(ctx):
+def _detect_android_source_dir(ctx, package_name):
     """Return the Android source dir if it contains Kotlin/Java files.
 
     Pub plugins use the standard Android directory layout
     `android/src/main/{kotlin,java}/`.
     """
-    if _has_files_under(ctx, "android/src/main", _ANDROID_SRC_EXTENSIONS):
+    if _has_files_under(ctx, "android/src/main", _ANDROID_SRC_EXTENSIONS, package_name):
         return "android/src/main"
     return ""
 
-def _detect_android_resources(ctx):
+def _detect_android_resources(ctx, package_name):
     """True when the plugin ships Android resources at `android/src/main/res/`.
 
     The standard AGP resource location. Detected resources are compiled
@@ -251,7 +273,7 @@ def _detect_android_resources(ctx):
     plugin's `R` class resolves and the resources merge into the
     consuming APK — same as any Gradle-built Android library.
     """
-    return _has_files_under(ctx, "android/src/main/res")
+    return _has_files_under(ctx, "android/src/main/res", None, package_name)
 
 def _detect_android_manifest(ctx):
     """Return the plugin's `android/src/main/AndroidManifest.xml` path if present.
@@ -1497,65 +1519,86 @@ def _decode_heredoc_field(source, package_name, template, genrule_name, field):
         ))
     return decoded.text
 
-def _rewrite_cat_genrules(content, package_name = "", template = ""):
-    """Rewrite heredoc `cat` `genrule` targets in overlay templates to `write_file`.
+def _peek_heredoc_block(rest):
+    """Classify the next `genrule(` block in `rest` without consuming it.
 
-    The cut-out heredoc body (and the parsed `name`/`outs` lines) is
-    Starlark source text: its escapes are still encoded. Each decodes to
-    the actual text before rendering, so the `write_file` output equals the
-    bytes the original genrule's `cat` heredoc would have written. An
-    undecodable escape fails the fetch, naming the package and the
-    template. Every decoded line still renders through
-    `starlark_string_literal`; the build-escape fix stays intact.
+    Shared by the bounded rewrite and its bound check, so the check sees
+    exactly what the rewrite would do next: a convertible block left over
+    after the bound means the template would otherwise emit partially.
+
+    Args:
+        rest: The not-yet-rewritten template tail.
+
+    Returns:
+        A `struct(kind, idx, end, body, name_val, out_val)`: `kind` is
+        `"none"` (no block, or no heredoc terminator, left), `"plain"`
+        (the next block is not a convertible heredoc genrule and stays
+        untouched), or `"convert"` (the next block is a heredoc `cat`
+        genrule the rewrite replaces; `end` is just past its terminator).
+    """
+    no_block = struct(kind = "none", idx = -1, end = -1, body = "", name_val = "", out_val = "")
+    idx = rest.find("genrule(\n")
+    if idx < 0:
+        return no_block
+    end_idx = rest.find(_CAT_HEREDOC_SUFFIX, idx)
+    if end_idx < 0:
+        return no_block
+    end = end_idx + len(_CAT_HEREDOC_SUFFIX)
+    block = rest[idx:end]
+    cmd_idx = block.find(_CAT_HEREDOC_PREFIX)
+    if cmd_idx < 0:
+        return struct(kind = "plain", idx = idx, end = -1, body = "", name_val = "", out_val = "")
+    header = block[:cmd_idx]
+    body = block[cmd_idx + len(_CAT_HEREDOC_PREFIX):len(block) - len(_CAT_HEREDOC_SUFFIX)]
+    name_val = ""
+    out_val = ""
+    for hline in header.split("\n"):
+        s = hline.strip()
+        if s.startswith('name = "') and s.endswith('",'):
+            name_val = s[len('name = "'):-2]
+        elif s.startswith('outs = ["') and s.endswith('"],'):
+            out_val = s[len('outs = ["'):-3]
+    if not name_val or not out_val:
+        return struct(kind = "plain", idx = idx, end = -1, body = "", name_val = "", out_val = "")
+    return struct(kind = "convert", idx = idx, end = end, body = body, name_val = name_val, out_val = out_val)
+
+def rewrite_cat_genrules_bounded(content, package_name, template, bound):
+    """Rewrite at most `bound` heredoc blocks, reporting leftovers purely.
+
+    Pure core of `_rewrite_cat_genrules`: unit tests drive it with a small
+    bound and count blocks. An undecodable escape still fails the fetch
+    (see `_decode_heredoc_field`); a bound reached with a convertible block
+    left over is reported in `leftover`, and the caller fails the fetch.
 
     Args:
         content: The substituted overlay template text.
         package_name: The pub package the overlay belongs to, for failures.
         template: The overlay template path, for failures.
+        bound: Maximum heredoc blocks to rewrite; tests drive this small.
 
     Returns:
-        The template with each heredoc `cat` genrule replaced by an
-        equivalent `write_file`, plus the `write_file` load when missing.
+        A `struct(text, leftover)`: `text` holds the template with each
+        rewritten block replaced (plus the untouched tail); `leftover` is
+        True when a convertible heredoc block remains.
     """
-    if _CAT_HEREDOC_PREFIX not in content:
-        return content
     out_chunks = []
     rest = content
-    for _ in range(16):
-        idx = rest.find("genrule(\n")
-        if idx < 0:
+    for _ in range(bound):
+        scanned = _peek_heredoc_block(rest)
+        if scanned.kind == "none":
             break
-        end_idx = rest.find(_CAT_HEREDOC_SUFFIX, idx)
-        if end_idx < 0:
-            break
-        block = rest[idx:end_idx + len(_CAT_HEREDOC_SUFFIX)]
-        cmd_idx = block.find(_CAT_HEREDOC_PREFIX)
-        if cmd_idx < 0:
-            out_chunks.append(rest[:idx + len("genrule(\n")])
-            rest = rest[idx + len("genrule(\n"):]
-            continue
-        header = block[:cmd_idx]
-        body = block[cmd_idx + len(_CAT_HEREDOC_PREFIX):len(block) - len(_CAT_HEREDOC_SUFFIX)]
-        name_val = ""
-        out_val = ""
-        for hline in header.split("\n"):
-            s = hline.strip()
-            if s.startswith('name = "') and s.endswith('",'):
-                name_val = s[len('name = "'):-2]
-            elif s.startswith('outs = ["') and s.endswith('"],'):
-                out_val = s[len('outs = ["'):-3]
-        if not name_val or not out_val:
-            out_chunks.append(rest[:idx + len("genrule(\n")])
-            rest = rest[idx + len("genrule(\n"):]
+        if scanned.kind == "plain":
+            out_chunks.append(rest[:scanned.idx + len("genrule(\n")])
+            rest = rest[scanned.idx + len("genrule(\n"):]
             continue
 
         # The cut-out body (and the parsed `name`/`outs` lines) is Starlark
         # source text: its escapes are still encoded. Decode each to the
         # actual text first, or the escaping helper below escapes the
         # already-escaped text a second time.
-        name = _decode_heredoc_field(name_val, package_name, template, name_val, "name")
-        out = _decode_heredoc_field(out_val, package_name, template, name_val, "outs")
-        body_text = _decode_heredoc_field(body, package_name, template, name_val, "heredoc body")
+        name = _decode_heredoc_field(scanned.name_val, package_name, template, scanned.name_val, "name")
+        out = _decode_heredoc_field(scanned.out_val, package_name, template, scanned.name_val, "outs")
+        body_text = _decode_heredoc_field(scanned.body, package_name, template, scanned.name_val, "heredoc body")
         body_lines = body_text.split("\n") + [""]
 
         # Decoded lines are plain values now; every line still renders
@@ -1575,18 +1618,50 @@ def _rewrite_cat_genrules(content, package_name = "", template = ""):
             '    visibility = ["//visibility:public"],\n' +
             ")"
         )
-        out_chunks.append(rest[:idx])
+        out_chunks.append(rest[:scanned.idx])
         out_chunks.append(replacement)
-        rest = rest[end_idx + len(_CAT_HEREDOC_SUFFIX):]
+        rest = rest[scanned.end:]
     out_chunks.append(rest)
-    rewritten = "".join(out_chunks)
-    if _WRITE_FILE_LOAD not in rewritten:
-        load_idx = rewritten.find("load(")
+    leftover = _peek_heredoc_block(rest).kind == "convert"
+    return struct(text = "".join(out_chunks), leftover = leftover)
+
+def _rewrite_cat_genrules(content, package_name = "", template = "", bound = PUB_WALK_BOUND):
+    """Rewrite heredoc `cat` `genrule` targets in overlay templates to `write_file`.
+
+    The cut-out heredoc body (and the parsed `name`/`outs` lines) is
+    Starlark source text: its escapes are still encoded. Each decodes to
+    the actual text before rendering, so the `write_file` output equals the
+    bytes the original genrule's `cat` heredoc would have written. An
+    undecodable escape fails the fetch, naming the package and the
+    template. Every decoded line still renders through
+    `starlark_string_literal`; the build-escape fix stays intact. At most
+    `bound` blocks are rewritten; a template with more convertible blocks
+    fails the fetch naming the package, the template, and the bound,
+    instead of emitting part of the template.
+
+    Args:
+        content: The substituted overlay template text.
+        package_name: The pub package the overlay belongs to, for failures.
+        template: The overlay template path, for failures.
+        bound: Maximum heredoc blocks to rewrite.
+
+    Returns:
+        The template with each heredoc `cat` genrule replaced by an
+        equivalent `write_file`, plus the `write_file` load when missing.
+    """
+    if _CAT_HEREDOC_PREFIX not in content:
+        return content
+    rewritten = rewrite_cat_genrules_bounded(content, package_name, template, bound)
+    if rewritten.leftover:
+        fail(heredoc_blocks_bound_error(package_name, template, bound))
+    text = rewritten.text
+    if _WRITE_FILE_LOAD not in text:
+        load_idx = text.find("load(")
         if load_idx >= 0:
-            rewritten = rewritten[:load_idx] + _WRITE_FILE_LOAD + rewritten[load_idx:]
+            text = text[:load_idx] + _WRITE_FILE_LOAD + text[load_idx:]
         else:
-            rewritten = _WRITE_FILE_LOAD + rewritten
-    return rewritten
+            text = _WRITE_FILE_LOAD + text
+    return text
 
 def apply_overlay_substitutions(content, hub_name, package_name, version, language_version, deps, template = ""):
     """Fill an overlay template's placeholders.
@@ -2067,7 +2142,7 @@ def _detect_apple_plugin_sources(ctx, package_name, plugin_block):
         ios_manifests = apple_ios_privacy_manifests,
     )
 
-def _detect_desktop_plugin_sources(ctx, plugin_block):
+def _detect_desktop_plugin_sources(ctx, package_name, plugin_block):
     """Detects Linux/Windows sources when pluginClass is set on that platform.
 
     The plugin's own `linux/`/`windows/` directory is the canonical
@@ -2078,12 +2153,12 @@ def _detect_desktop_plugin_sources(ctx, plugin_block):
     linux_src_dir = ""
     windows_src_dir = ""
     if linux_info and linux_info.get("pluginClass", ""):
-        linux_src_dir = _detect_desktop_source_dir(ctx, "linux")
+        linux_src_dir = _detect_desktop_source_dir(ctx, package_name, "linux")
     if windows_info and windows_info.get("pluginClass", ""):
-        windows_src_dir = _detect_desktop_source_dir(ctx, "windows")
+        windows_src_dir = _detect_desktop_source_dir(ctx, package_name, "windows")
     return struct(linux = linux_src_dir, windows = windows_src_dir)
 
-def _detect_android_plugin_sources(ctx, plugin_block):
+def _detect_android_plugin_sources(ctx, package_name, plugin_block):
     """Detects the Android side when pluginClass is set on android.
 
     The plugin's Android Gradle build is ONE consistent model: Gradle
@@ -2112,8 +2187,8 @@ def _detect_android_plugin_sources(ctx, plugin_block):
     android_consumer_proguard_specs = []
     android_has_resources = False
     if android_info and android_info.get("pluginClass", ""):
-        android_src_dir = _detect_android_source_dir(ctx)
-        android_has_resources = _detect_android_resources(ctx)
+        android_src_dir = _detect_android_source_dir(ctx, package_name)
+        android_has_resources = _detect_android_resources(ctx, package_name)
         android_java_package = (
             detect_android_namespace(ctx, android_build.path, android_build.content) or
             android_info.get("package", "") or
@@ -2139,8 +2214,8 @@ def _build_plugin_spoke_content(ctx, pubspec, dep_labels, assets, unreplaced_hoo
     """Builds a `flutter_plugin` spoke and its Android sub-package inputs."""
     package_name = ctx.attr.package_name
     apple = _detect_apple_plugin_sources(ctx, package_name, pubspec.plugin_block)
-    desktop = _detect_desktop_plugin_sources(ctx, pubspec.plugin_block)
-    android = _detect_android_plugin_sources(ctx, pubspec.plugin_block)
+    desktop = _detect_desktop_plugin_sources(ctx, package_name, pubspec.plugin_block)
+    android = _detect_android_plugin_sources(ctx, package_name, pubspec.plugin_block)
     plugin_platforms_json = json.encode(pubspec.plugin_block.platforms)
     build_content = make_flutter_plugin_build_content(
         name = package_name,
@@ -2411,21 +2486,30 @@ def _link_scoped_symlink(ctx, node, repo_rel, package_name, package_realpath, wo
         fail(outside_workspace_refusal(package_name, repo_rel, target_realpath))
     _link_new_symlink(ctx, node, repo_rel, linked)
 
-def _link_scoped_tree(ctx, node, repo_rel, package_name, package_realpath, workspace_realpath, linked):
-    """Mirror one real source directory into the spoke file by file.
+def link_scoped_tree_bounded(ctx, node, repo_rel, package_name, package_realpath, workspace_realpath, linked, bound):
+    """Mirror one real source directory into the spoke, reporting leftovers.
 
-    Real directories become real repository directories holding one symlink
-    per file, so the generator's `ctx.file` writes (the root and generated
-    BUILD files) can never land in the user tree through a symlinked
-    directory. Symlinks replicate without descending; skipped subtrees
-    (`build/`, `.dart_tool/`, `example/`, dot-directories) stay unlinked
-    and unwatched so machine-local output cannot affect the fetch; user
-    BUILD files are watched but not linked. The explicit stack over a
-    bounded loop keeps one pathological package from hanging the fetch.
+    Pure traversal core of `_link_scoped_tree` (the `ctx.symlink` /
+    `ctx.watch` calls are the only effects): unit tests drive it with a
+    small bound and a fake directory listing. Returns True when
+    directories are left unvisited, and the caller fails the fetch.
+
+    Args:
+        ctx: The path-package spoke's repository context.
+        node: The workspace-side source directory node.
+        repo_rel: The spoke-relative path the directory mirrors to.
+        package_name: The pub package linked, for refusals.
+        package_realpath: The resolved package directory, for cycle checks.
+        workspace_realpath: The resolved workspace root, for confinement.
+        linked: Dict of already-linked spoke paths, updated in place.
+        bound: Maximum directory pops; tests drive this small.
+
+    Returns:
+        True when directories are left unvisited at the bound.
     """
     ctx.watch(node)
     stack = [(node, repo_rel)]
-    for _ in range(10000):
+    for _ in range(bound):
         if not stack:
             break
         (parent, parent_rel) = stack.pop()
@@ -2445,10 +2529,25 @@ def _link_scoped_tree(ctx, node, repo_rel, package_name, package_realpath, works
                 ctx.watch(child)
                 continue
             _link_new_symlink(ctx, child, child_rel, linked)
-    if stack:
-        fail("flutter.pub repo rule: path dependency \"" + package_name +
-             "\" holds more than 10000 directories under its linked " +
-             "entries. Refusing it rather than fetching part of the tree.")
+    return len(stack) > 0
+
+def _link_scoped_tree(ctx, node, repo_rel, package_name, package_realpath, workspace_realpath, linked, bound = PUB_WALK_BOUND):
+    """Mirror one real source directory into the spoke file by file.
+
+    Real directories become real repository directories holding one symlink
+    per file, so the generator's `ctx.file` writes (the root and generated
+    BUILD files) can never land in the user tree through a symlinked
+    directory. Symlinks replicate without descending; skipped subtrees
+    (`build/`, `.dart_tool/`, `example/`, dot-directories) stay unlinked
+    and unwatched so machine-local output cannot affect the fetch; user
+    BUILD files are watched but not linked. The explicit stack over a
+    bounded loop keeps one pathological package from hanging the fetch:
+    the walk shares the pub spoke bound (`PUB_WALK_BOUND`), and reaching
+    it with directories left over fails the fetch instead of fetching part
+    of the tree.
+    """
+    if link_scoped_tree_bounded(ctx, node, repo_rel, package_name, package_realpath, workspace_realpath, linked, bound):
+        fail(scoped_tree_bound_error(package_name, bound))
 
 def _link_top_level_shader_includes(ctx, src, package_name, package_realpath, workspace_realpath, linked):
     """Link top-level include siblings for a top-level declared shader.

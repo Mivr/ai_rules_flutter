@@ -20,6 +20,15 @@ into bundle inputs, matching `flutter_tools` (`asset.dart`, `flutter_manifest.da
 - Asset walks are bounded; a walk that reaches its bound fails the fetch,
   naming the package and the directory, instead of bundling part of the tree.
 
+## Walk bounds
+
+Every pub spoke directory walk shares one bound, `PUB_WALK_BOUND`
+(1000000 directories): asset listing, plugin source detection, and
+path-package linking. A walk that reaches it fails the fetch naming the
+package, the directory, and the bound, instead of bundling or reporting
+part of the tree. Overlay heredoc rewriting fails the same way, naming
+the package, the template, and the bound.
+
 ## What the fetch refuses
 
 - A `platforms` or `flavors` value that is not a list of strings (for example
