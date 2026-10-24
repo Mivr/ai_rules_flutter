@@ -11,7 +11,6 @@ load(
     "@rules_dart//dart:utils.bzl",
     "STABLE_SCHEME",
     "dart_analyzable_info",
-    "gen_kernel_args",
     "stable_entry_path",
 )
 
@@ -49,9 +48,13 @@ def _find_flutter_sdk_gen_kernel_tools(flutter_sdk_info):
     )
 
 def _writable_home_env(dart, beside):
+    # Beside the action's own output, never the shared /tmp: every user and
+    # action on the host shares /tmp, so a compiler home there is shared
+    # mutable state. The output's directory is the action's own, as the
+    # Windows branch already did.
     if dart.basename.endswith(".exe"):
         return {"USERPROFILE": beside.dirname, "LOCALAPPDATA": beside.dirname}
-    return {"HOME": "/tmp"}
+    return {"HOME": beside.dirname}
 
 def _flutter_sdk_kernel_binary_impl(ctx):
     flutter_sdk_info = ctx.toolchains["@rules_flutter//flutter:toolchain_type"].flutter_sdk_info
@@ -64,17 +67,35 @@ def _flutter_sdk_kernel_binary_impl(ctx):
         content = '{"configVersion": 2, "packages": []}\n',
     )
 
-    args = gen_kernel_args(ctx, tools, tools.platform_dill, package_config)
+    # `main` staged alone under a per-target root, which is the only
+    # `--filesystem-root` the compile mounts: gen_kernel resolves the entry's
+    # stable URI against its filesystem roots, so mounting the exec root (as
+    # rules_dart's `gen_kernel_args` does) lets an import of a file nobody
+    # declared resolve under a non-sandboxed strategy. With only the staging
+    # root mounted, such an import fails under every strategy, sandboxed or
+    # not. The entry keeps its stable URI, so the dill stays free of absolute
+    # paths and byte-identical across strategies.
+    entry = stable_entry_path(ctx, ctx.file.main.path)
+    staged = ctx.actions.declare_file(ctx.label.name + ".stage/" + entry)
+    ctx.actions.symlink(output = staged, target_file = ctx.file.main)
+    root = staged.path[:len(staged.path) - len(entry) - 1]
+
+    args = ctx.actions.args()
+    args.add(tools.gen_kernel_snapshot)
+    args.add("--platform", tools.platform_dill)
+    args.add("--packages", package_config)
+    args.add("--filesystem-scheme", STABLE_SCHEME)
+    args.add("--filesystem-root", root)
     args.add("-Ddart.vm.product=false")
     args.add_all(["-Ddart.vm.asan=false", "-Ddart.vm.msan=false", "-Ddart.vm.tsan=false"])
     args.add("-o", output)
-    args.add(STABLE_SCHEME + ":///" + stable_entry_path(ctx, ctx.file.main.path))
+    args.add(STABLE_SCHEME + ":///" + entry)
 
     ctx.actions.run(
         executable = tools.dartaotruntime,
         arguments = [args],
         inputs = depset(
-            direct = [ctx.file.main, package_config, tools.dartaotruntime, tools.gen_kernel_snapshot, tools.platform_dill] + tools.compile_inputs,
+            direct = [staged, package_config, tools.dartaotruntime, tools.gen_kernel_snapshot, tools.platform_dill] + tools.compile_inputs,
         ),
         outputs = [output],
         mnemonic = "FlutterToolKernel",
