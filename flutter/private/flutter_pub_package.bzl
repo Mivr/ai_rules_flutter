@@ -33,6 +33,12 @@ load("//flutter/private:artifact_urls.bzl", "require_sha256")
 load("//flutter/private:download.bzl", "pinned_download")
 load("//flutter/private:flutter_pubspec.bzl", "asset_flavor_error", "asset_platform_error", "invalid_asset_platforms", "parse_flutter_assets_block", "parse_flutter_plugin_block", "parse_pubspec")
 load(
+    ":flutter_pub_assets.bzl",
+    "ctx_package_lister",
+    "expand_pub_asset_entries",
+    "is_asset_variant_dir",
+)
+load(
     ":gradle.bzl",
     "detect_android_namespace",
     "detect_android_native_build",
@@ -325,69 +331,6 @@ def _split_glob_block(srcs_dirs, src_exts, hdr_exts):
 _DESKTOP_HDR_EXTS = ("h", "hh", "hpp")
 _DESKTOP_C_EXTS = ("cc", "cpp", "c")
 
-def _readdir_files_recursive(ctx, rel_dir):
-    """Recursively walk `<package>/<rel_dir>` and return file paths.
-
-    Returns a list of package-relative paths (e.g. `data/locales.json`).
-    Used to expand directory entries from `flutter.assets:` (which Flutter
-    treats as "include every file under this directory"). Relative paths
-    are tracked structurally alongside the walk, never by trimming a string
-    prefix off the walked paths — the tree may be symlinked in (path
-    packages), in which case the walked paths do not start with the spoke
-    root at all.
-    """
-    out = []
-    base = ctx.path(rel_dir)
-    if not base.exists:
-        return out
-    queue = [(base, rel_dir)]
-    for _ in range(10000):  # bounded loop to satisfy Starlark's no-while constraint
-        if not queue:
-            break
-        cur, cur_rel = queue.pop()
-        for child in cur.readdir():
-            child_rel = cur_rel + "/" + child.basename
-            if child.is_dir:
-                queue.append((child, child_rel))
-            else:
-                out.append(child_rel)
-    return out
-
-def expand_pub_asset_entries(parsed_assets, list_dir):
-    """Expand parsed `flutter.assets` entries to one struct per bundled file.
-
-    Trailing-slash directory entries expand to every file under them, each
-    inheriting the entry's `platforms` / `flavors` conditions — the same way
-    flutter_tools applies an entry's conditions to the whole directory.
-
-    Args:
-        parsed_assets: List of `struct(path, flavors, platforms)` from
-            `parse_flutter_assets_block().assets`.
-        list_dir: Callable taking a directory path (no trailing slash) and
-            returning the file paths under it. Taking it as a parameter
-            keeps this pure so unit tests can pass a fake; the spoke passes
-            `_readdir_files_recursive` bound to its repo context.
-
-    Returns:
-        List of `struct(path, flavors, platforms)`, one per file.
-    """
-    expanded = []
-    for entry in parsed_assets:
-        if entry.path.endswith("/"):
-            for f in list_dir(entry.path.rstrip("/")):
-                expanded.append(struct(
-                    path = f,
-                    flavors = entry.flavors,
-                    platforms = entry.platforms,
-                ))
-        else:
-            expanded.append(struct(
-                path = entry.path,
-                flavors = entry.flavors,
-                platforms = entry.platforms,
-            ))
-    return expanded
-
 def _encode_fonts_json(parsed_fonts):
     """Convert parse_flutter_assets_block().fonts to the JSON shape flutter_library expects."""
     fonts_for_json = []
@@ -438,7 +381,8 @@ def merge_pub_asset_conditions(expanded, package_name):
     not matter); the caller fails the fetch with the returned message.
 
     Args:
-        expanded: Per-file entries from `expand_pub_asset_entries`.
+        expanded: Per-file entries from
+            `expand_pub_asset_entries(...).expanded`.
         package_name: The pub package the entries come from, for the conflict
             message.
 
@@ -502,7 +446,8 @@ def _build_pkg_asset_conditions(expanded, package_name):
     fail the spoke fetch.
 
     Args:
-        expanded: Per-file entries from `expand_pub_asset_entries`.
+        expanded: Per-file entries from
+            `expand_pub_asset_entries(...).expanded`.
         package_name: The pub package the entries come from.
 
     Returns:
@@ -1898,6 +1843,7 @@ def _read_spoke_pubspec(ctx):
         assets = [],
         shaders = [],
         uses_material_design = False,
+        asset_errors = [],
     )
     pubspec_path = ctx.path("pubspec.yaml")
     if pubspec_path.exists:
@@ -1999,10 +1945,14 @@ def _spoke_asset_inputs(ctx, package_name, asset_block):
     _check_asset_platforms(package_name, asset_block.assets)
     fonts_json_str = _encode_fonts_json(asset_block.fonts)
     font_files = _build_font_files_dict(asset_block.fonts)
-    expanded = expand_pub_asset_entries(
+    expansion = expand_pub_asset_entries(
         asset_block.assets,
-        lambda directory: _readdir_files_recursive(ctx, directory),
+        ctx_package_lister(ctx, package_name),
+        package_name,
     )
+    if expansion.error:
+        fail(expansion.error)
+    expanded = expansion.expanded
     check_spoke_file_names(package_name, asset_block, expanded)
     pkg_assets_dict = _build_pkg_assets_dict(expanded)
     pkg_asset_platforms, pkg_asset_flavors = _build_pkg_asset_conditions(expanded, package_name)
@@ -2568,6 +2518,36 @@ def _link_scoped_file_entry(ctx, src, entry_path, package_name, package_realpath
         return
     _link_new_symlink(ctx, node, repo_rel, linked)
 
+def _link_asset_variant_files(ctx, src, entry_path, package_name, package_realpath, workspace_realpath, linked):
+    """Link the resolution variants of one declared file entry.
+
+    A file entry bundles its main file plus same-named files in sibling
+    `<N>x` directories; path spokes link selectively, so each variant is
+    linked here or the spoke would reference an unlinked file. Missing
+    variants stay unlinked — a main file without variants is the common
+    case, and a missing main is reported later by the spoke generator.
+
+    Args:
+        ctx: The path-package spoke's repository context.
+        src: The workspace-side package directory node.
+        entry_path: The entry's `path`, as declared in pubspec.yaml.
+        package_name: The pub package linked, for refusals.
+        package_realpath: The resolved package directory, for cycle checks.
+        workspace_realpath: The resolved workspace root, for confinement.
+        linked: Dict of already-linked spoke paths, updated in place.
+    """
+    parts = _spoke_entry_parts(package_name, entry_path)
+    base = parts[-1]
+    parent_parts = parts[:-1]
+    dir_node = src.get_child(*parent_parts) if parent_parts else src
+    if not dir_node.exists:
+        return
+    for child in dir_node.readdir():
+        if not child.is_dir or not is_asset_variant_dir(child.basename):
+            continue
+        variant = "/".join(parent_parts + [child.basename, base])
+        _link_scoped_file_entry(ctx, src, variant, package_name, package_realpath, workspace_realpath, linked)
+
 def _link_spoke_contents(ctx, src, asset_block, plugin_block, package_name, package_realpath, workspace_realpath, linked):
     """Link everything the spoke generator reads or exposes — nothing else.
 
@@ -2589,6 +2569,7 @@ def _link_spoke_contents(ctx, src, asset_block, plugin_block, package_name, pack
             _link_scoped_dir_entry(ctx, src, asset.path[:-1], package_name, package_realpath, workspace_realpath, linked)
         else:
             _link_scoped_file_entry(ctx, src, asset.path, package_name, package_realpath, workspace_realpath, linked)
+            _link_asset_variant_files(ctx, src, asset.path, package_name, package_realpath, workspace_realpath, linked)
     for family in asset_block.fonts:
         for font in family.fonts:
             _link_scoped_file_entry(ctx, src, font.asset, package_name, package_realpath, workspace_realpath, linked)

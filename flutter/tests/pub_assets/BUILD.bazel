@@ -1,0 +1,3 @@
+load(":pub_assets_test.bzl", "pub_assets_test_suite")
+
+pub_assets_test_suite(name = "pub_assets_test")

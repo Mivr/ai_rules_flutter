@@ -25,9 +25,9 @@ load(
 load("//flutter/private:flutter_plugin.bzl", "flutter_plugin")
 load(
     "//flutter/private:flutter_pub_package.bzl",
-    "expand_pub_asset_entries",
     "merge_pub_asset_conditions",
 )
+load("//flutter/private:flutter_pub_assets.bzl", "expand_pub_asset_entries")
 load(
     "//flutter/private:flutter_pubspec.bzl",
     "VALID_ASSET_PLATFORMS",
@@ -156,8 +156,21 @@ def _asset_platform_error_names_package_entry_valid_test_impl(ctx):
 
 def _fake_list_dir(directory):
     if directory == "assets/icons":
-        return ["assets/icons/a.png", "assets/icons/b.png"]
-    return []
+        return struct(
+            files = ["assets/icons/a.png", "assets/icons/b.png"],
+            error = "",
+        )
+    if directory == "assets":
+        return struct(
+            files = [
+                "assets/any.txt",
+                "assets/android_only.txt",
+                "assets/icons/a.png",
+                "assets/icons/b.png",
+            ],
+            error = "",
+        )
+    return struct(files = [], error = "")
 
 def _expand_files_pass_through_test_impl(ctx):
     env = unittest.begin(ctx)
@@ -165,7 +178,9 @@ def _expand_files_pass_through_test_impl(ctx):
         struct(path = "assets/any.txt", flavors = [], platforms = []),
         struct(path = "assets/android_only.txt", flavors = [], platforms = ["android"]),
     ]
-    expanded = expand_pub_asset_entries(entries, _fake_list_dir)
+    result = expand_pub_asset_entries(entries, _fake_list_dir)
+    asserts.equals(env, "", result.error)
+    expanded = result.expanded
     asserts.equals(env, 2, len(expanded))
     asserts.equals(env, "assets/any.txt", expanded[0].path)
     asserts.equals(env, [], expanded[0].platforms)
@@ -178,7 +193,9 @@ def _expand_directory_inherits_conditions_test_impl(ctx):
     entries = [
         struct(path = "assets/icons/", flavors = [], platforms = ["android"]),
     ]
-    expanded = expand_pub_asset_entries(entries, _fake_list_dir)
+    result = expand_pub_asset_entries(entries, _fake_list_dir)
+    asserts.equals(env, "", result.error)
+    expanded = result.expanded
     asserts.equals(env, 2, len(expanded))
     paths = sorted([e.path for e in expanded])
     asserts.equals(env, ["assets/icons/a.png", "assets/icons/b.png"], paths)
@@ -192,7 +209,9 @@ def _expand_unconditional_directory_stays_unconditional_test_impl(ctx):
     entries = [
         struct(path = "assets/icons/", flavors = [], platforms = []),
     ]
-    expanded = expand_pub_asset_entries(entries, _fake_list_dir)
+    result = expand_pub_asset_entries(entries, _fake_list_dir)
+    asserts.equals(env, "", result.error)
+    expanded = result.expanded
     asserts.equals(env, 2, len(expanded))
     for entry in expanded:
         asserts.equals(env, [], entry.platforms)
@@ -272,8 +291,8 @@ def _merge_single_entry_keeps_declared_order_test_impl(ctx):
 
 def _fake_dup_list_dir(directory):
     if directory == "dup":
-        return ["dup/x.txt"]
-    return []
+        return struct(files = ["dup/x.txt"], error = "")
+    return struct(files = [], error = "")
 
 def _merge_flavor_conflict_fails_test_impl(ctx):
     """A file entry and a directory entry with different flavors conflict."""
@@ -282,7 +301,9 @@ def _merge_flavor_conflict_fails_test_impl(ctx):
         struct(path = "dup/x.txt", flavors = ["paid"], platforms = []),
         struct(path = "dup/", flavors = ["free"], platforms = []),
     ]
-    expanded = expand_pub_asset_entries(entries, _fake_dup_list_dir)
+    result = expand_pub_asset_entries(entries, _fake_dup_list_dir)
+    asserts.equals(env, "", result.error)
+    expanded = result.expanded
     merged = merge_pub_asset_conditions(expanded, "review_pkg")
     asserts.true(env, merged.conflict != "", "differing flavor sets must conflict")
     for want in ["review_pkg", "dup/x.txt", "paid", "free"]:
