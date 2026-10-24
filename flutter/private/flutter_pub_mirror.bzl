@@ -518,24 +518,49 @@ def _link_top_level_shader_includes(ctx, src, scope):
             continue
         _link_new_symlink(ctx, child, name, scope.linked)
 
-def _link_scoped_dir_entry(ctx, src, entry_path, scope):
-    """Link one declared directory entry (asset, shader, or platform dir).
+def _watch_scoped_entry(ctx, src, entry_path, scope):
+    """Watch a declared entry and resolve it to its link triple.
 
     The declared path is watched before testing whether it exists, so
     creating it later refetches the spoke instead of leaving its files
-    silently missing. Missing entries otherwise stay unlinked
-    (a declared-but-absent directory is not an error); real directories
-    mirror file by file; anything else resolves, confines, cycle-checks,
-    and mirrors (a directory link) or replicates as one file symlink,
-    refusing package-ancestor cycles and targets outside the workspace.
+    silently missing. Returns None when the entry is missing (a
+    declared-but-absent path is not an error); otherwise returns
+    (node, repo_rel, node_real), the workspace-side node, its
+    package-relative repo path, and its canonical real path.
+
+    Args:
+        ctx: The path-package spoke's repository context.
+        src: The workspace-side package directory node.
+        entry_path: The package-relative declared path to resolve.
+        scope: The fetch's link scope.
     """
     parts = _spoke_entry_parts(scope.package_name, entry_path)
     node = src.get_child(*parts)
     ctx.watch(node)
     if not node.exists:
-        return
+        return None
     repo_rel = "/".join(parts)
-    node_real = str(node.realpath)
+    return (node, repo_rel, str(node.realpath))
+
+def _link_scoped_dir_entry(ctx, src, entry_path, scope):
+    """Link one declared directory entry (asset, shader, or platform dir).
+
+    Missing entries stay unlinked (a declared-but-absent directory is not
+    an error); real directories mirror file by file; anything else
+    resolves, confines, cycle-checks, and mirrors (a directory link) or
+    replicates as one file symlink, refusing package-ancestor cycles and
+    targets outside the workspace.
+
+    Args:
+        ctx: The path-package spoke's repository context.
+        src: The workspace-side package directory node.
+        entry_path: The package-relative declared path to link.
+        scope: The fetch's link scope.
+    """
+    resolved = _watch_scoped_entry(ctx, src, entry_path, scope)
+    if resolved == None:
+        return
+    node, repo_rel, node_real = resolved
     if not paths_match(node_real, scope.package_realpath + "/" + repo_rel, scope.case_insensitive):
         _mirror_single_link(ctx, node, repo_rel, node_real, scope, (fold_path_case(scope.package_realpath, scope.case_insensitive),))
         return
@@ -560,13 +585,10 @@ def link_scoped_file_entry(ctx, src, entry_path, scope):
         entry_path: The package-relative declared path to link.
         scope: The fetch's link scope.
     """
-    parts = _spoke_entry_parts(scope.package_name, entry_path)
-    node = src.get_child(*parts)
-    ctx.watch(node)
-    if not node.exists:
+    resolved = _watch_scoped_entry(ctx, src, entry_path, scope)
+    if resolved == None:
         return
-    repo_rel = "/".join(parts)
-    node_real = str(node.realpath)
+    node, repo_rel, node_real = resolved
     if not paths_match(node_real, scope.package_realpath + "/" + repo_rel, scope.case_insensitive):
         _mirror_single_link(ctx, node, repo_rel, node_real, scope, (fold_path_case(scope.package_realpath, scope.case_insensitive),))
         return
