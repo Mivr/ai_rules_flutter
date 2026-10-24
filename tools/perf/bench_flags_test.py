@@ -267,6 +267,70 @@ class WorkerChainTest(unittest.TestCase):
                 "device_release", "clean", "boom")["worker_steps"], {})
 
 
+class SingleFlagTest(unittest.TestCase):
+    """One raw token must never read as an argparse option (equals form)."""
+
+    def run_main(self, argv):
+        import contextlib
+        import io
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            code = bench_flags.main(argv)
+        return (code, err.getvalue())
+
+    def test_single_valid_tokens(self):
+        for token in ["--host_compilation_mode=fastbuild",
+                      "--@rules_flutter//flutter:incremental_kernel"]:
+            with self.subTest(token=token):
+                code, _ = self.run_main(["--flags=" + token])
+                self.assertEqual(code, 0)
+
+    def test_single_refused_token_names_it(self):
+        code, err = self.run_main(["--flags=--config=x"])
+        self.assertEqual(code, 1)
+        self.assertIn("--config=x", err)
+
+    def test_single_no_negation_names_it(self):
+        code, err = self.run_main(["--flags=--noconfig"])
+        self.assertEqual(code, 1)
+        self.assertIn("--noconfig", err)
+
+    def test_summarize_single_valid_token(self):
+        import json
+        import shutil
+        import sol
+        tmp = tempfile.mkdtemp(prefix="bench-flags-sol-")
+        try:
+            out = os.path.join(tmp, "ios-sol.json")
+            code = sol.main([
+                "summarize", "--results", tmp, "--sha", "a" * 40,
+                "--repeats", "1", "--target-loc", "100", "--seed", "7",
+                "--bazel-flags=--host_compilation_mode=fastbuild",
+                "--out", out])
+            self.assertEqual(code, 0)
+            with open(out, encoding="utf-8") as fh:
+                summary = json.load(fh)
+            self.assertEqual(summary["meta"]["bazel_flags"],
+                             ["--host_compilation_mode=fastbuild"])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_summarize_single_refused_token_names_it(self):
+        import shutil
+        import sol
+        tmp = tempfile.mkdtemp(prefix="bench-flags-sol-")
+        try:
+            with self.assertRaises(ValueError) as ctx:
+                sol.main([
+                    "summarize", "--results", tmp, "--sha", "a" * 40,
+                    "--repeats", "1", "--target-loc", "100",
+                    "--seed", "7", "--bazel-flags=--noconfig",
+                    "--out", os.path.join(tmp, "ios-sol.json")])
+            self.assertIn("--noconfig", str(ctx.exception))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 class WorkflowTest(unittest.TestCase):
     def path(self):
         here = os.path.dirname(os.path.abspath(__file__))
@@ -308,6 +372,12 @@ class WorkflowTest(unittest.TestCase):
         self.assertIn("bench_flags.py", text)
         self.assertIn("ws-head-pristine", text)
         self.assertNotIn("ws-base-pristine", text)
+        # The raw input reaches argparse only in --opt=<value> form, so a
+        # single token starting with -- never reads as an option.
+        self.assertIn('--flags="$BAZEL_FLAGS"', text)
+        self.assertIn('--bazel-flags="$BAZEL_FLAGS"', text)
+        self.assertNotIn('--flags "$BAZEL_FLAGS"', text)
+        self.assertNotIn('--bazel-flags "$BAZEL_FLAGS"', text)
 
 
 if __name__ == "__main__":
