@@ -14,6 +14,19 @@ app libraries and all 1,051 sources identical, same `main`). Only the
 second and later builds go faster; the first compile of a configuration
 pays the cold cost.
 
+The byte-equality between a warm worker's dill and the one-shot compile's is
+checked by `tools/incr_kernel_identity/check.sh`, which the `E2E Linux app
+(hello_world, codegen)` CI job runs. The check builds `e2e/hello_world`'s
+`//:hello_world` under `-c dbg` with the flag on, in two fresh output bases:
+a worker leg (`--strategy=FlutterKernelCompile=worker`, one worker instance)
+builds the original sources, then two successive edits touching more than one
+app library including an import change, then the revert; a one-shot leg
+(`--strategy=FlutterKernelCompile=local`) builds the same states. Every
+worker dill must be byte-equal to the one-shot dill of that state, every
+compared build must have executed its compile under its stated strategy (no
+cache hit, no fallback), and the worker leg must prove one worker and one
+compiler process served all four builds.
+
 ## Turning it on
 
 ```sh
