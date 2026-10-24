@@ -312,10 +312,10 @@ jobs:
             python3 "$tools/ab.py" run --tools "$tools" \
               --pristine-control "$RUNNER_TEMP/ws-control-pristine" \
               --pristine-treatment "$RUNNER_TEMP/ws-treatment-pristine" \
-              --work-control "$RUNNER_TEMP/ab-run-control" \
-              --work-treatment "$RUNNER_TEMP/ab-run-treatment" \
-              --out-base-control "$RUNNER_TEMP/ab-out-control" \
-              --out-base-treatment "$RUNNER_TEMP/ab-out-treatment" \
+              --work-root-control "$RUNNER_TEMP/ab-run-control" \
+              --work-root-treatment "$RUNNER_TEMP/ab-run-treatment" \
+              --out-base-root-control "$RUNNER_TEMP/ab-out-control" \
+              --out-base-root-treatment "$RUNNER_TEMP/ab-out-treatment" \
               --results "$GITHUB_WORKSPACE/ab-results" \
               --repeats "${{ inputs.repeats }}" \
               --config device_release --config sim_debug \

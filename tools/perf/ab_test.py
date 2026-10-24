@@ -172,6 +172,30 @@ class LockStepTest(unittest.TestCase):
             generate_committed_lock(self.pristine, self.lock_out, run)
         self.assertFalse(os.path.exists(self.lock_out))
 
+    def test_read_only_leftovers_removed_not_reused(self):
+        import stat
+        stale = os.path.join(self.lock_out, "stale-dir")
+        os.makedirs(stale)
+        leaf = os.path.join(stale, "stale.txt")
+        with open(leaf, "w", encoding="utf-8") as fh:
+            fh.write("stale")
+        os.chmod(leaf, stat.S_IRUSR)
+        os.chmod(stale, stat.S_IRUSR | stat.S_IXUSR)
+        data = generate_committed_lock(
+            self.pristine, self.lock_out, self.fake_run())
+        self.assertEqual(data, b"lock-bytes-v1")
+        self.assertFalse(os.path.lexists(self.lock_out))
+
+    def test_unremovable_base_fails_loudly(self):
+        os.makedirs(self.lock_out, exist_ok=True)
+        with mock.patch("shutil.rmtree",
+                        side_effect=OSError("denied")):
+            with self.assertRaisesRegex(RuntimeError, "cannot remove"):
+                generate_committed_lock(
+                    self.pristine, self.lock_out, self.fake_run())
+            with self.assertRaisesRegex(RuntimeError, "cannot remove"):
+                ab.remove_tree(self.lock_out)
+
     def test_lock_helpers(self):
         self.assertIsNone(read_lock_bytes(self.pristine))
         remove_lock(self.pristine)
@@ -333,15 +357,15 @@ class SummarizeAbTest(unittest.TestCase):
             self.assertIn("chain", entry)
             self.assertIn("profile", entry)
         ratio = summary["ratio"]["ios-release-clean"]
-        self.assertEqual(ratio, summary["ratios"]["ios-release-clean"])
         self.assertEqual(ratio["n"], 2)
         self.assertAlmostEqual(ratio["median"], 1.0)
         self.assertEqual(ratio["unpaired"], [])
+        self.assertNotIn("ratios", summary)
         self.assertEqual(summary["meta"]["ab"], "flags")
         self.assertEqual(summary["meta"]["bazel_flags"], ["--jobs=8"])
         self.assertEqual(summary["meta"]["lockfile"], "none")
         self.assertEqual(summary["meta"]["order"], arm_order(2))
-        self.assertEqual(summary["meta"]["arm_order"], arm_order(2))
+        self.assertNotIn("arm_order", summary["meta"])
         self.assertEqual(summary["unit"], "cpu_seconds")
 
     def test_missing_flow_records_say_so(self):
@@ -392,12 +416,21 @@ class AbEndToEndTest(unittest.TestCase):
         bazel = os.path.join(self.bindir, "bazel")
         with open(bazel, "w", encoding="utf-8", newline="\n") as fh:
             fh.write("#!/bin/sh\n"
-                     'case "$*" in\n'
-                     "  *treatment*) SOL_SRC=\"$AB_TREAT_SRC\" ;;\n"
-                     '  *) SOL_SRC="$AB_CTRL_SRC" ;;\n'
+                     "out=\"\"\n"
+                     "for a in \"$@\"; do\n"
+                     "  case \"$a\" in\n"
+                     "    --output_base=*) out=\"${a#--output_base=}\" ;;\n"
+                     "  esac\n"
+                     "done\n"
+                     "case \"$out\" in\n"
+                     "  \"$AB_OUT_TREATMENT\"/*) "
+                     "work=\"$AB_WORK_TREATMENT\" ;;\n"
+                     "  *) work=\"$AB_WORK_CONTROL\" ;;\n"
                      "esac\n"
-                     'export SOL_SRC\n'
-                     'exec python3 "$AB_FAKE" "$@"\n')
+                     "rep=$(basename \"$(dirname \"$out\")\")\n"
+                     "SOL_SRC=\"$work/$rep/src.txt\"\n"
+                     "export SOL_SRC\n"
+                     "exec python3 \"$AB_FAKE\" \"$@\"\n")
         os.chmod(bazel, os.stat(bazel).st_mode
                  | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
         self.tools = os.path.join(self.tmp, "tools")
@@ -420,10 +453,10 @@ class AbEndToEndTest(unittest.TestCase):
         self.results = os.path.join(self.tmp, "results")
         self.env = {"PATH": self.bindir + os.pathsep + os.environ["PATH"],
                     "AB_FAKE": self.fake,
-                    "AB_CTRL_SRC": os.path.join(
-                        self.work_control, "src.txt"),
-                    "AB_TREAT_SRC": os.path.join(
-                        self.work_treatment, "src.txt")}
+                    "AB_WORK_CONTROL": self.work_control,
+                    "AB_WORK_TREATMENT": self.work_treatment,
+                    "AB_OUT_CONTROL": self.out_control,
+                    "AB_OUT_TREATMENT": self.out_treatment}
 
     def tearDown(self):
         for dirpath, _, filenames in os.walk(self.tmp):
@@ -461,16 +494,26 @@ class AbEndToEndTest(unittest.TestCase):
         return ["run", "--tools", self.tools,
                 "--pristine-control", self.pristine_control,
                 "--pristine-treatment", self.pristine_treatment,
-                "--work-control", self.work_control,
-                "--work-treatment", self.work_treatment,
-                "--out-base-control", self.out_control,
-                "--out-base-treatment", self.out_treatment,
+                "--work-root-control", self.work_control,
+                "--work-root-treatment", self.work_treatment,
+                "--out-base-root-control", self.out_control,
+                "--out-base-root-treatment", self.out_treatment,
                 "--results", self.results, "--repeats", "2",
                 "--config", "device_release",
                 "--min-clean-actions", "1",
                 "--time-bin", os.path.join(self.tmp, "absent")]
 
     def test_both_arms_identical_alternating_isolated(self):
+        import stat
+        # A stale read-only tree where rep 1 will measure: the repeat
+        # must start empty, not reuse it.
+        stale = os.path.join(self.work_control, "rep1", "stale-dir")
+        os.makedirs(stale)
+        leaf = os.path.join(stale, "stale.txt")
+        with open(leaf, "w", encoding="utf-8") as fh:
+            fh.write("stale")
+        os.chmod(leaf, stat.S_IRUSR)
+        os.chmod(stale, stat.S_IRUSR | stat.S_IXUSR)
         out = os.path.join(self.tmp, "ios-ab.json")
         with mock.patch.dict(os.environ, self.env):
             self.assertEqual(ab.main(self.run_argv()), 0)
@@ -503,6 +546,17 @@ class AbEndToEndTest(unittest.TestCase):
             os.path.join(self.results, "control", "sol")))
         self.assertTrue(os.path.isdir(
             os.path.join(self.results, "treatment", "sol")))
+        # Every (arm, repeat) measured in its own fresh directories.
+        for root in (self.work_control, self.work_treatment,
+                     self.out_control, self.out_treatment):
+            first = os.path.join(root, "rep1")
+            second = os.path.join(root, "rep2")
+            self.assertTrue(os.path.isdir(first), first)
+            self.assertTrue(os.path.isdir(second), second)
+            self.assertNotEqual(first, second)
+        # The stale tree did not survive into the repeat's workspace.
+        self.assertFalse(os.path.lexists(os.path.join(
+            self.work_control, "rep1", "stale-dir")))
         self.assertEqual(self.live_server_pids(), [])
         # No workspace file shared: a marker in one arm is absent after.
         with open(os.path.join(

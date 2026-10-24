@@ -37,6 +37,7 @@ import argparse
 import json
 import os
 import shutil
+import stat
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -45,7 +46,6 @@ from run_rep import (  # noqa: E402
     CONFIGS,
     DEFAULT_MIN_CLEAN_ACTIONS,
     SCENARIOS,
-    reset_work,
     shutdown,
 )
 from summarize import summarize_values  # noqa: E402
@@ -94,6 +94,38 @@ def arm_order(repeats):
     return [("control-first" if first_arm(rep) == CONTROL
              else "treatment-first")
             for rep in range(1, repeats + 1)]
+
+
+def remove_tree(path):
+    """Removes a tree, restoring write permission first; fails loudly.
+
+    Bazel leaves read-only directories behind, so a plain rmtree can
+    silently keep them (or raise halfway). Every bit is made writable
+    first, then the tree is deleted, and a survivor fails loudly instead
+    of letting the next build reuse a stale output base.
+    """
+    if not os.path.lexists(path):
+        return
+    for dirpath, dirnames, filenames in os.walk(path, followlinks=False):
+        for name in dirnames + filenames:
+            full = os.path.join(dirpath, name)
+            if os.path.islink(full):
+                continue
+            try:
+                mode = os.stat(full).st_mode
+                extra = stat.S_IWUSR
+                if os.path.isdir(full):
+                    extra |= stat.S_IXUSR
+                if mode & extra != extra:
+                    os.chmod(full, mode | extra)
+            except OSError:
+                continue
+    try:
+        shutil.rmtree(path)
+    except OSError as exc:
+        raise RuntimeError("cannot remove %s (%s)" % (path, exc))
+    if os.path.lexists(path):
+        raise RuntimeError("cannot remove %s" % path)
 
 
 def lock_path(workspace):
@@ -156,7 +188,7 @@ def generate_committed_lock(pristine, lock_out, run):
     missing lock or a failed build raises instead of measuring without
     one. Nothing measured is touched, so the step is unmeasured.
     """
-    shutil.rmtree(lock_out, ignore_errors=True)
+    remove_tree(lock_out)
     try:
         for config in CONFIG_ORDER:
             proc = run(lock_build_argv(lock_out, config), cwd=pristine)
@@ -168,7 +200,7 @@ def generate_committed_lock(pristine, lock_out, run):
         try:
             shutdown(run, pristine, lock_out)
         finally:
-            shutil.rmtree(lock_out, ignore_errors=True)
+            remove_tree(lock_out)
     data = read_lock_bytes(pristine)
     if not data:
         raise RuntimeError("lockfile run left no %s in %s"
@@ -211,8 +243,6 @@ def pair_ratio(control, treatment):
 def ratio_for_flow(results_control, results_treatment, config, scenario,
                    repeats):
     """Paired per-repeat ratios for one flow (same repeat pairs only)."""
-    flow = sol.flow_id(config, scenario)
-    del flow
     ratios = []
     unpaired = []
     for rep in range(1, repeats + 1):
@@ -262,13 +292,12 @@ def summarize_ab(results_control, results_treatment, meta):
                "ab": meta["ab"],
                "bazel_flags": list(meta.get("bazel_flags", [])),
                "lockfile": meta.get("lockfile", "none"),
-               "order": order, "arm_order": list(order)}
-    ratio = dict(ratios)
+               "order": order}
     return {"rules_flutter": meta["sha"], "unit": "cpu_seconds",
             "runner": sol.collect_runner_info(),
             "meta": ab_meta,
             "arms": {CONTROL: control_flows, TREATMENT: treatment_flows},
-            "ratio": ratio, "ratios": dict(ratios)}
+            "ratio": dict(ratios)}
 
 
 def child_args(args, pristine, work, out_base, results):
@@ -282,13 +311,28 @@ def child_args(args, pristine, work, out_base, results):
         measure_warm=args.measure_warm)
 
 
+def arm_paths(args, arm, rep):
+    """Per-repeat work and output-base paths for one arm (fresh paths).
+
+    Every (arm, repeat) pair measures in directories no earlier repeat
+    ever used, exactly as a single sol run gets a fresh path per repeat.
+    """
+    if arm == CONTROL:
+        roots = (args.work_root_control, args.out_base_root_control)
+    else:
+        roots = (args.work_root_treatment, args.out_base_root_treatment)
+    return (os.path.join(roots[0], "rep%d" % rep),
+            os.path.join(roots[1], "rep%d" % rep))
+
+
 def run_ab_measure(args, configs):
     """Every repeat, both arms, alternating which runs first.
 
     Each arm runs the full sol scenario sequence through sol's own
-    repeat driver in its own output base and work directory; sol shuts
-    each config's server down, so every server and worker of one arm is
-    gone before the other arm starts. Returns True when any arm erred.
+    repeat driver in a work directory and output base no earlier repeat
+    used (both emptied before use, loudly); sol shuts each config's
+    server down, so every server and worker of one arm is gone before
+    the other arm starts. Returns True when any arm erred.
     """
     had_errors = False
     for rep in range(1, args.repeats + 1):
@@ -296,15 +340,14 @@ def run_ab_measure(args, configs):
         second = TREATMENT if first == CONTROL else CONTROL
         for arm in (first, second):
             if arm == CONTROL:
-                child = child_args(args, args.pristine_control,
-                                   args.work_control,
-                                   args.out_base_control,
-                                   os.path.join(args.results, CONTROL))
+                pristine = args.pristine_control
             else:
-                child = child_args(args, args.pristine_treatment,
-                                   args.work_treatment,
-                                   args.out_base_treatment,
-                                   os.path.join(args.results, TREATMENT))
+                pristine = args.pristine_treatment
+            work, out_base = arm_paths(args, arm, rep)
+            remove_tree(work)
+            remove_tree(out_base)
+            child = child_args(args, pristine, work, out_base,
+                               os.path.join(args.results, arm))
             _, arm_errors = sol.run_sol_rep(child, rep, configs)
             had_errors = had_errors or arm_errors
             print("rep=%d arm=%s errors=%s" % (rep, arm, arm_errors))
@@ -342,13 +385,6 @@ def main_run(cmd):
     unknown = [c for c in configs if c not in CONFIGS]
     if unknown:
         raise ValueError("unknown config(s): %s" % ", ".join(unknown))
-    for label, pristine, work, out_base in (
-            (CONTROL, cmd.pristine_control, cmd.work_control,
-             cmd.out_base_control),
-            (TREATMENT, cmd.pristine_treatment, cmd.work_treatment,
-             cmd.out_base_treatment)):
-        reset_work(pristine, work)
-        del label
     had_errors = run_ab_measure(cmd, configs)
     return 1 if had_errors else 0
 
@@ -392,10 +428,10 @@ def build_parser():
     run.add_argument("--tools", required=True)
     run.add_argument("--pristine-control", required=True)
     run.add_argument("--pristine-treatment", required=True)
-    run.add_argument("--work-control", required=True)
-    run.add_argument("--work-treatment", required=True)
-    run.add_argument("--out-base-control", required=True)
-    run.add_argument("--out-base-treatment", required=True)
+    run.add_argument("--work-root-control", required=True)
+    run.add_argument("--work-root-treatment", required=True)
+    run.add_argument("--out-base-root-control", required=True)
+    run.add_argument("--out-base-root-treatment", required=True)
     run.add_argument("--results", required=True)
     run.add_argument("--repeats", type=int, required=True)
     run.add_argument("--config", action="append", default=[],

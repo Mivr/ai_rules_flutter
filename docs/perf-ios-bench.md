@@ -249,12 +249,11 @@ With `ab` on the run writes `ios-ab.json` (artifact `ios-ab`, 3-day
 retention) instead of `ios-sol.json`:
 
 - `meta`: `repeats`, `target_loc`, `seed`, `ab`, `bazel_flags`,
-  `lockfile`, and the per-repeat arm order (`order`, also as
-  `arm_order`).
+  `lockfile`, and the per-repeat arm order (`order`).
 - `arms`: `control` and `treatment`, each mapping every flow id to its
   flow record in exactly the `ios-sol.json` flow schema (medians over
   that arm's repeats).
-- `ratio` (also as `ratios`): per flow the median, min and max over
+- `ratio`: per flow the median, min and max over
   repeats of the paired per-repeat ratio treatment.bazel /
   control.bazel (pairs from the same repeat), plus `n` and `unpaired`
   (the repeat numbers with no pair). A flow that is non-identical or
