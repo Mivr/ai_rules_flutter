@@ -54,6 +54,7 @@ load(
     "collect_packages",
     "collect_transitive_srcs",
     "dart_analyzable_info_with_package",
+    "dart_package_identity",
     "derive_lib_root",
 )
 load("//flutter:providers.bzl", "FlutterInfo")
@@ -367,15 +368,17 @@ def _flutter_test_impl(ctx):
         # analysis genuinely needs an entry compilation does not.
         dart_analyzable_info_with_package(
             label = ctx.label,
-            package_name = ctx.attr.package_name,
-            lib_root = derive_lib_root(ctx.label.workspace_root, ctx.label.package),
+            package = dart_package_identity(
+                package_name = ctx.attr.package_name,
+                lib_root = derive_lib_root(ctx.label.workspace_root, ctx.label.package),
+                # The same version the compile path above states. Analysis reading
+                # a different one than the compiler is the divergence this attr
+                # exists to close, reappearing one layer down.
+                language_version = ctx.attr.language_version,
+            ),
             deps = ctx.attr.deps + [ctx.attr._sky_engine],
             srcs = [ctx.file.main],
             package_srcs = ctx.files.srcs,
-            # The same version the compile path above states. Analysis reading
-            # a different one than the compiler is the divergence this attr
-            # exists to close, reappearing one layer down.
-            language_version = ctx.attr.language_version,
         ),
         # The test's own build products, for `flutter_prebuilt_test` to run
         # without compiling: `test_kernel` is exactly the test `.dill`,

@@ -20,7 +20,7 @@ Platform-specific native dependencies use select() in BUILD files:
 load("@rules_android//providers:providers.bzl", "AndroidLibraryResourceClassJarProvider", "StarlarkAndroidResourcesInfo")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo")
-load("@rules_dart//dart:utils.bzl", "dart_info", "derive_lib_root", "derive_package_name")
+load("@rules_dart//dart:utils.bzl", "dart_info", "dart_package_identity", "derive_lib_root", "derive_package_name")
 load("@rules_java//java/common:java_info.bzl", "JavaInfo")
 load("@rules_swift//swift:swift.bzl", "SwiftInfo")
 load("//flutter:providers.bzl", "FlutterApplePluginInfo", "FlutterDataAssetInfo", "FlutterInfo", "FlutterNativeAssetInfo")
@@ -291,14 +291,16 @@ def _plugin_dart_infos(ctx, package_name, lib_root):
         DefaultInfo(files = depset(ctx.files.srcs + ctx.files.resources)),
         dart_info(
             label = ctx.label,
-            package_name = package_name,
-            lib_root = lib_root,
+            package = dart_package_identity(
+                package_name = package_name,
+                lib_root = lib_root,
+                language_version = ctx.attr.language_version,
+                version = ctx.attr.version,
+            ),
             deps = ctx.attr.deps,
             srcs = ctx.files.srcs,
             resources = ctx.files.resources,
             code_assets = ctx.attr.code_assets,
-            language_version = ctx.attr.language_version,
-            version = ctx.attr.version,
             has_unreplaced_hook = ctx.attr.has_unreplaced_hook,
             link_hook = ctx.file.link_hook,
         ),

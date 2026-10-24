@@ -1,7 +1,7 @@
 """Implementation of the flutter_library rule."""
 
 load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo")
-load("@rules_dart//dart:utils.bzl", "dart_analyzable_info_with_package", "dart_info", "derive_lib_root", "derive_package_name")
+load("@rules_dart//dart:utils.bzl", "dart_analyzable_info_with_package", "dart_info", "dart_package_identity", "derive_lib_root", "derive_package_name")
 load("//flutter:providers.bzl", "FlutterInfo")
 load("//flutter/private:asset_keys.bzl", "library_asset_entries")
 load("//flutter/private:flutter_info.bzl", "LINK_HOOK_ATTR", "flutter_asset_channels", "flutter_info", "flutter_pub_channels")
@@ -256,14 +256,16 @@ def flutter_analyzable_info(ctx, package_name, lib_root):
     """
     return dart_analyzable_info_with_package(
         label = ctx.label,
-        package_name = package_name,
-        lib_root = lib_root,
-        language_version = ctx.attr.language_version,
+        package = dart_package_identity(
+            package_name = package_name,
+            lib_root = lib_root,
+            language_version = ctx.attr.language_version,
+            version = ctx.attr.version,
+        ),
         deps = ctx.attr.deps + [ctx.attr._sky_engine],
         package_srcs = ctx.files.srcs,
         resources = ctx.files.resources,
         code_assets = ctx.attr.code_assets,
-        version = ctx.attr.version,
     )
 
 def _flutter_library_impl(ctx):
@@ -329,14 +331,16 @@ def _flutter_library_impl(ctx):
         ),
         dart_info(
             label = ctx.label,
-            package_name = package_name,
-            lib_root = lib_root,
+            package = dart_package_identity(
+                package_name = package_name,
+                lib_root = lib_root,
+                language_version = ctx.attr.language_version,
+                version = ctx.attr.version,
+            ),
             deps = ctx.attr.deps,
             srcs = ctx.files.srcs,
             resources = ctx.files.resources,
             code_assets = ctx.attr.code_assets,
-            language_version = ctx.attr.language_version,
-            version = ctx.attr.version,
             has_unreplaced_hook = ctx.attr.has_unreplaced_hook,
             link_hook = ctx.file.link_hook,
         ),

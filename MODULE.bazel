@@ -57,12 +57,14 @@ bazel_dep(name = "rules_jvm_external", version = "7.1")
 
 # Minimum rules_dart with the fork APIs rules_flutter loads
 # (`@rules_dart//dart:hooks.bzl`, `@rules_dart//dart/private:record_use.bzl`,
-# `dart_codegen(package_name = ...)`): the `Mivr/rules_dart` fork release.
+# `dart_codegen(package_name = ...)`): the `Mivr/rules_dart` fork release,
+# published to the Bazel Central Registry as `ai_rules_dart` with
+# `repo_name = "rules_dart"`, so every `@rules_dart//` label keeps working.
 # aran's BCR releases (up to 0.7.3) lack them and fail at load with a
 # missing-symbol error, so the floor points at the fork and consumers take
 # both modules from the fork's releases (see README.md). This repo's own
 # builds use the git_override below; e2e workspaces do the same.
-bazel_dep(name = "rules_dart", version = "0.11.1")
+bazel_dep(name = "ai_rules_dart", version = "0.14.0", repo_name = "rules_dart")
 bazel_dep(name = "rules_go", version = "0.59.0")
 bazel_dep(name = "yaml.bzl", version = "0.1.2")
 
@@ -95,8 +97,8 @@ use_repo(
 )
 
 git_override(
-    module_name = "rules_dart",
-    commit = "dc0b9a23bf74fc832c89a8f5a0f95d999c8a6f0a",
+    module_name = "ai_rules_dart",
+    commit = "4e8793de199fa8954ab99aca144d229994cd9874",
     remote = "https://github.com/Mivr/rules_dart.git",
 )
 

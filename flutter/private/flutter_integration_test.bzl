@@ -57,6 +57,7 @@ load(
     "collect_packages",
     "collect_transitive_srcs",
     "dart_analyzable_info_with_package",
+    "dart_package_identity",
     "derive_lib_root",
     "runfiles_path",
 )
@@ -1091,12 +1092,14 @@ def _build_analyzable_and_coverage_infos(ctx, package_name, lib_root, main_file,
 
     analyzable_info = dart_analyzable_info_with_package(
         label = ctx.label,
-        package_name = package_name,
-        lib_root = lib_root,
+        package = dart_package_identity(
+            package_name = package_name,
+            lib_root = lib_root,
+            language_version = ctx.attr.language_version,
+        ),
         deps = ctx.attr.deps + [ctx.attr._sky_engine],
         srcs = non_pkg_srcs,
         package_srcs = in_pkg_srcs,
-        language_version = ctx.attr.language_version,
     )
     return instrumented_files_info, analyzable_info
 

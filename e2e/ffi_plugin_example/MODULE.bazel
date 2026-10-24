@@ -3,7 +3,7 @@
 module(name = "rules_flutter_ffi_plugin_example")
 
 bazel_dep(name = "rules_flutter", version = "0.0.0")
-bazel_dep(name = "rules_dart", version = "0.7.3")
+bazel_dep(name = "ai_rules_dart", version = "0.14.0", repo_name = "rules_dart")
 bazel_dep(name = "bazel_skylib", version = "1.9.2")
 bazel_dep(name = "apple_support", version = "2.9.1")
 bazel_dep(name = "rules_apple", version = "5.2.0")
@@ -19,8 +19,8 @@ local_path_override(
 )
 
 git_override(
-    module_name = "rules_dart",
-    commit = "dc0b9a23bf74fc832c89a8f5a0f95d999c8a6f0a",
+    module_name = "ai_rules_dart",
+    commit = "4e8793de199fa8954ab99aca144d229994cd9874",
     remote = "https://github.com/Mivr/rules_dart.git",
 )
 

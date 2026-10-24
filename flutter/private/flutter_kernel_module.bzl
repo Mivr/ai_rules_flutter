@@ -27,7 +27,9 @@ load(
     "kernel_packages_consistent",
     "kernel_tools_for",
     "library_source_uri",
+    "modular_kernel_conditions",
     "modular_kernel_eligible",
+    "modular_kernel_mode",
     "no_kernel_module",
     _DART_MODULAR_KERNEL_ATTRS = "MODULAR_KERNEL_ATTRS",
 )
@@ -1108,15 +1110,16 @@ def flutter_modular_test_tools(ctx, flutter_sdk_info, own_files, packages, nativ
     duplicate = duplicated_source([f.short_path for f in own_files], owned, edges)
 
     eligible = modular_kernel_eligible(
-        enabled = enabled,
-        kernel_mode = True,
-        dep_modular = dep_modular,
-        packages_consistent = kernel_packages_consistent(packages),
-        has_code_assets = len(native_assets_list) > 0,
-        has_own_defines = len(ctx.attr.defines) > 0,
-        has_compile_flags = False,
-        has_duplicate_source = duplicate != None,
-        same_sdk = same_sdk,
+        modular_kernel_conditions(
+            mode = modular_kernel_mode(enabled = enabled, kernel_mode = True),
+            dep_modular = dep_modular,
+            packages_consistent = kernel_packages_consistent(packages),
+            has_code_assets = len(native_assets_list) > 0,
+            has_own_defines = len(ctx.attr.defines) > 0,
+            has_compile_flags = False,
+            has_duplicate_source = duplicate != None,
+            same_sdk = same_sdk,
+        ),
     )
     return tools if eligible else None
 

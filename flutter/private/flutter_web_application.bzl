@@ -20,7 +20,7 @@ so we skip the frontend_server kernel compilation step used by desktop/mobile.
 """
 
 load("@rules_dart//dart:providers.bzl", "DartInfo")
-load("@rules_dart//dart:utils.bzl", "MODULAR_KERNEL_TOOLCHAINS", "collect_packages", "collect_transitive_srcs", "colocate_packages", "dart_analyzable_info_with_package", "derive_lib_root", "generate_dev_package_config", "generate_package_config")
+load("@rules_dart//dart:utils.bzl", "MODULAR_KERNEL_TOOLCHAINS", "collect_packages", "collect_transitive_srcs", "colocate_packages", "dart_analyzable_info_with_package", "dart_package_identity", "derive_lib_root", "generate_dev_package_config", "generate_package_config")
 load("//flutter:providers.bzl", "FlutterInfo", "FlutterNativeLibraryInfo")
 load(
     "//flutter/private:app_entrypoint.bzl",
@@ -1185,14 +1185,16 @@ def _web_analyzable_info(ctx, lib_root):
     # so analysis genuinely needs an entry compilation does not.
     return dart_analyzable_info_with_package(
         label = ctx.label,
-        package_name = ctx.attr.package_name,
-        lib_root = lib_root,
+        package = dart_package_identity(
+            package_name = ctx.attr.package_name,
+            lib_root = lib_root,
+            # As on the compile path above: the analyzer and the compiler have to
+            # agree on the version, or the attr closes the divergence in only one.
+            language_version = ctx.attr.language_version,
+        ),
         deps = ctx.attr.deps + [ctx.attr._sky_engine],
         srcs = [] if main_in_package else [ctx.file.main],
         package_srcs = ctx.files.srcs + ([ctx.file.main] if main_in_package else []),
-        # As on the compile path above: the analyzer and the compiler have to
-        # agree on the version, or the attr closes the divergence in only one.
-        language_version = ctx.attr.language_version,
     )
 
 def _web_stage_ddc_files(ctx, dev_bootstrap_js):
