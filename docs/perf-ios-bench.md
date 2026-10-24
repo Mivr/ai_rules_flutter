@@ -167,6 +167,56 @@ That fits the 5 h timeout with margin; a 100k dispatch should take
 roughly a fifth of the full size. The first successful dispatch
 calibrates these numbers; if the job times out, lower `target_loc`.
 
+## `bazel_flags` (A/B experiments, never main points)
+
+Dispatch input `bazel_flags` (string, default empty) carries Bazel flags
+separated by whitespace for one run. They apply to the head workspace
+only: each flag becomes one `common <flag>` line appended to the
+generated head workspace's `.bazelrc`, after generation and before any
+Bazel command. Compare mode never gives them to base, and sol mode
+measures head only. Empty input runs exactly as before (the workspace
+is byte-identical, every Bazel command line unchanged); the only
+addition is `meta.bazel_flags: []`. With flags, `ios-sol.json`
+`meta.bazel_flags` (and compare mode's `summary.json` meta, plus a
+`summary.md` line) records the accepted tokens.
+
+Use it for A/B runs of flags that change how a build runs but not which
+rules it uses: the opt-in incremental kernel worker
+(`--@rules_flutter//flutter:incremental_kernel`, a persistent worker
+whose effect only the warm-server edit flows of sol mode can show), or
+`--host_compilation_mode=fastbuild` on the debug clean build, where the
+exec-configuration C++ build of the Swift worker dominates. Never use
+flagged runs as main dashboard points.
+
+Validation (`tools/perf/bench_flags.py`, before anything is generated
+or built) accepts only `--<name>` or `--<name>=<value>` where `<name>`
+is a plain option name or a Starlark flag label and `<value>` uses only
+letters, digits and `_ @ / : . , + = -`, with no whitespace, quotes,
+`$`, backtick, `;`, `|`, `&`, `<`, `>`, `\`, `#` or control characters.
+One bad token fails the job naming the token. Refused, in `--name` and
+`--no<name>` forms because they would change what the bench measures or
+where it writes: caches and remote services (`disk_cache`,
+`repository_cache`, `remote_*`, `experimental_remote*`, `bes_*`,
+`google_*`); locations, logs and profiles (`output_base`,
+`output_user_root`, `install_base`, `symlink_prefix`, `profile`,
+`generate_json_trace_profile`, `execution_log*`,
+`experimental_execution_log*`); rc files and configs (`config`,
+`bazelrc`, `ignore_all_rc_files`); module and repository resolution
+(`lockfile_mode`, `override_module`, `override_repository`,
+`registry`); and startup options the bench owns (`batch`,
+`host_jvm_args`, `max_idle_secs`, `output_base`).
+
+Workers in sol mode: when a flag makes Bazel run a chain step in a
+persistent worker (the execution log's `runner` names a worker), the
+SOL chain still runs that step by hand, one-shot, from its recorded
+argv (its params files are in the execroot, via
+`--materialize_param_files`, as for any step). The step's CPU, its
+byte-identity proof and the ordering rules stay as for any step. The
+flow record carries `worker_steps` (chain steps Bazel ran in a worker,
+by mnemonic). The warm number counts live descendants (workers) while
+the server is up; the server shuts down after each config and on every
+error path, so no worker or server outlives its config.
+
 ## Speed-of-light (SOL) mode
 
 The performance dashboard compares each developer flow's cost with its best
