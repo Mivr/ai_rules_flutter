@@ -32,7 +32,6 @@ load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_deps", "parse_pubsp
 load("//flutter/private:artifact_urls.bzl", "require_sha256")
 load("//flutter/private:download.bzl", "pinned_download")
 load("//flutter/private:flutter_pubspec.bzl", "asset_flavor_error", "asset_platform_error", "invalid_asset_platforms", "parse_flutter_assets_block", "parse_flutter_plugin_block", "parse_pubspec")
-load(":flutter_pub_semver.bzl", "parse_pub_version", "pub_version_text")
 load(
     ":flutter_pub_assets.bzl",
     "check_asset_entry_problems",
@@ -40,6 +39,7 @@ load(
     "expand_pub_asset_entries",
     "is_asset_variant_dir",
 )
+load(":flutter_pub_semver.bzl", "parse_pub_version", "pub_version_text")
 load(
     ":flutter_pub_walk.bzl",
     "PUB_WALK_BOUND",

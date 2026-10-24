@@ -44,8 +44,8 @@ load(
     "pubspec_version_refusal",
     "scoped_shader_includes_block",
 )
-load("//flutter/private:flutter_pub_semver.bzl", "parse_pub_version")
 load("//flutter/private:flutter_pub_path.bzl", "foreign_lock_path_error", "is_absolute_lock_path", "is_relative_path_dependency", "workspace_relative_lock_path")
+load("//flutter/private:flutter_pub_semver.bzl", "parse_pub_version")
 load("//flutter/private:flutter_pubspec.bzl", "parse_flutter_plugin_block")
 
 def _tree_node(tree, rel):
