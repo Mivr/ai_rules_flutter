@@ -121,6 +121,7 @@ def _ctx_has_files_readdir(ctx, relative_path):
         A `readdir` callable as `has_files_under_walk` takes it: a missing
         directory reads as empty, matching the walk's old skip.
     """
+
     def readdir(rel_dir):
         """The immediate children of `relative_path/rel_dir`."""
         full = relative_path if rel_dir == "" else relative_path + "/" + rel_dir

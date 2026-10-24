@@ -56,6 +56,7 @@ _ASSET_FAIL_TREE = {
 
 def _tree_readdir(tree):
     """A `readdir` callable over a dict tree; a missing directory reads as empty."""
+
     def readdir(directory):
         return tree.get(directory, [])
 
