@@ -14,9 +14,10 @@
 # per config.
 #
 # Speed-of-light (SOL) mode (mode=sol) checks head_ref only: for each config
-# and scenario it times the whole `bazel build` process tree with
-# wait4 rusage deltas (whole-tree user+sys CPU seconds, the same method on
-# macOS and Linux), then runs the minimal chain of the same tool binaries
+# and scenario it measures the `bazel build` cost in whole-tree user+sys
+# CPU seconds — clean flows with wait4 rusage deltas, edit flows as the
+# client plus the warm server tree's growth — then runs the minimal chain
+# of the same tool binaries
 # Bazel ran (taken from that build's execution log) by hand, and proves
 # the chain did the same work by comparing byte-identical final outputs.
 # Clean flows build with `bazel --batch`; edit flows build against a warm
@@ -89,7 +90,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 "$GITHUB_WORKSPACE/tools-src/tools/perf/bench_flags.py" \
-            --flags "$BAZEL_FLAGS"
+            --flags="$BAZEL_FLAGS"
       - name: Generate pristine monorepos
         env:
           BAZEL_FLAGS: ${{ inputs.bazel_flags }}
@@ -105,7 +106,7 @@ jobs:
               --out "$RUNNER_TEMP/ws-$ref-pristine"
           done
           python3 "$GITHUB_WORKSPACE/tools-src/tools/perf/bench_flags.py" \
-            --flags "$BAZEL_FLAGS" \
+            --flags="$BAZEL_FLAGS" \
             --workspace "$RUNNER_TEMP/ws-head-pristine"
       - name: Build, edit, replay
         if: inputs.mode == 'compare'
@@ -246,7 +247,7 @@ jobs:
             --repeats "${{ inputs.repeats }}" \
             --target-loc "${{ inputs.target_loc }}" \
             --seed "${{ inputs.seed }}" \
-            --bazel-flags "$BAZEL_FLAGS" \
+            --bazel-flags="$BAZEL_FLAGS" \
             --out "$GITHUB_WORKSPACE/ios-sol.json"
           {
             echo '```json'
