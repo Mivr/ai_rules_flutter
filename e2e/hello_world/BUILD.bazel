@@ -660,6 +660,7 @@ custom_test_kernel(
         "@deps//:flutter",
         "@deps//:flutter_localized_locales",
         "@deps//:flutter_test",
+        "@deps//:platform_assets",
         "@rules_flutter//flutter:material_icons",
     ],
 )
