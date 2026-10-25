@@ -63,14 +63,18 @@ byte-order mark moves no line. Accepted pubspecs parse exactly as before.
   the entry carries `asset`. A non-string
   key reports twice, the way flutter_tools reports both its checks. An
   absent `weight` or `style` stays valid and reads as unset.
-- A whole-number float font `weight` (for example `weight: 400.0`) fails
+- A whole-number float font `weight` (for example `weight: 400.0`) on an
+  entry carrying `asset` fails
   the fetch at the key's line: it passes flutter_tools' validation, but
   no build can read it, so the refusal says flutter_tools 3.47.7 cannot
   read it instead of quoting a validation error flutter_tools never prints.
+  Without `asset` the build skips the entry before any cast, so the weight
+  stays silent there.
 - An unexpected key in a font family entry fails the fetch at the key's
   line, as flutter_tools does.
 - A `platforms` or `flavors` value that is not a list of strings (for example
-  a scalar `platforms: web`) fails the fetch, naming the package, the entry
+  a scalar `platforms: web`), or a `platforms` value naming an unknown
+  platform (for example `platforms: [tvos]`), fails the fetch, naming the package, the entry
   and the key, as flutter_tools does. The check is shared by `assets` and
   `shaders` entries, the way flutter_tools validates both with one function.
 - An asset entry with a `transformers` key fails the fetch, naming the package
