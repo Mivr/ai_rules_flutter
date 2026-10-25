@@ -7,10 +7,16 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
 import 'package:hello_world/main.dart';
+import 'package:platform_assets/build/marker.dart';
 
 void main() {
+  test('platform_assets lib/build marker mirrors into the spoke', () {
+    // COV-76: `lib/build/marker.dart` is a normal importable file, the way
+    // `flutter_tools` reads `lib/`. The spoke used to skip it.
+    expect(platformAssetsBuildMarker, isNotEmpty);
+  });
+
   testWidgets('Counter increments smoke test', (tester) async {
     // Build our app and trigger a frame.
     await tester.pumpWidget(const MyApp());
