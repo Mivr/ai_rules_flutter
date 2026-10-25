@@ -7,27 +7,34 @@
 # caller's HOME. For every row in registry.tsv the script either runs the
 # target under canary HOME dirs (mode `run`) or builds it (mode `build`).
 #
-# Canary model: each run row gets a fresh temp root holding canary dirs for
-# HOME, USERPROFILE, APPDATA, LOCALAPPDATA, XDG_CONFIG_HOME, XDG_CACHE_HOME
-# and XDG_DATA_HOME, each seeded with a single marker file. PUB_CACHE and
-# BAZELISK_HOME point at sibling dirs outside the canaries (the tools under
+# Resource model (binding): Bazel itself never runs with the canary
+# variables, or its output root and launcher cache would land in the
+# canary. Each run row is therefore staged first under the caller's
+# environment with `bazel run --script_path=<scratch>/<n>/stage.sh
+# <label>`, and only the generated stage script runs with the canary
+# HOME/USERPROFILE/APPDATA/LOCALAPPDATA/XDG_* dirs plus the entry's args.
+# BAZELISK_HOME is never set and the Bazel binary never lives under a
+# canary or a fresh directory: Bazel and every toolchain come from the
+# existing pinned, sha256-checked caches, so no run downloads anything.
+# PUB_CACHE points at a sibling dir outside the canaries (the tools under
 # test must resolve their package cache outside HOME-derived defaults).
 # Caller-home rows additionally seed the caller credential at
 # XDG_CONFIG_HOME/dart/pub-tokens.json — the location `pub token list`
 # reads — and the script asserts the tool prints it while writing nothing
-# else. After `bazel run` the script snapshots every canary dir and fails
-# naming the entry if anything was created, changed, or removed — except
-# Bazel's own output base, which a PATH `bazel` unavoidably places under
-# HOME (or XDG_CACHE_HOME when set): paths under `home/.cache/bazel` and
-# `xdg-cache/bazel` are allowlisted. Target telemetry (.dart-tool,
-# .config/dart, ...) matches no allowlist entry, so a leak always fails.
+# else. After the stage script exits the script snapshots every canary
+# dir and fails naming the entry if anything was created, changed, or
+# removed. Bazel never ran under the canary, so there is no output-base
+# allowlist: every write is the entry's own leak, and target telemetry
+# (.dart-tool, .config/dart, ...) always fails.
 #
 # Usage: ./run_home_test.sh (runs from this directory)
-# Env:   BAZEL (default: bazel) — the Bazel binary; no startup flags needed.
+# Env:   BAZEL (default: `bazel --max_idle_secs=60`) — the Bazel binary;
+#        no startup flags are passed when $BAZEL is set.
+#        RUN_HOME_SCRATCH (default: e2e/run_home/.scratch/) — parent dir
+#        for the per-run scratch holding stage scripts and canaries.
 #
 set -euo pipefail
 
-BAZEL="${BAZEL:-bazel}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REGISTRY="$HERE/registry.tsv"
 AUDIT="$HERE/audit.tsv"
@@ -37,6 +44,39 @@ AUDIT="$HERE/audit.tsv"
 # lookup still resolves from the caller env while HOME stays clean.
 FAKE_HOST="https://pub.example.com"
 FAILURES=""
+
+# Bazel entry point: the manager and fix agents export $BAZEL at a wrapper
+# that takes a heavy-job slot and bounds the server's idle time itself (it
+# rejects startup throttles such as --max_idle_secs), so pass no startup
+# flags there. With $BAZEL unset (CI) fall back to plain bazel with a
+# bounded idle time. Never --output_user_root.
+if [[ -n "${BAZEL:-}" ]]; then
+  BAZ=("$BAZEL")
+else
+  BAZ=(bazel --max_idle_secs=60)
+fi
+
+# All scratch — stage scripts, canaries, pub cache, logs — lives under one
+# fresh dir inside $RUN_HOME_SCRATCH (default .scratch/, git-ignored).
+# Never bare /tmp, and TMPDIR is never pointed at bare /tmp either: the
+# runs below point it at a non-canary sibling inside the scratch instead.
+SCRATCH_PARENT="${RUN_HOME_SCRATCH:-$HERE/.scratch}"
+mkdir -p "$SCRATCH_PARENT"
+SCRATCH="$(mktemp -d "$SCRATCH_PARENT/run-home.XXXXXX")"
+STAGED=0
+
+cleanup() {
+  # One EXIT trap for the whole script: shut down every server started in
+  # this workspace under the caller's environment (never the canary
+  # variables), then remove the scratch, the canary dirs included.
+  cd "$HERE"
+  "${BAZ[@]}" shutdown >/dev/null 2>&1 || true
+  if [[ -n "${SCRATCH:-}" && -d "${SCRATCH:-}" ]]; then
+    chmod -R u+w "$SCRATCH" 2>/dev/null || true
+    rm -rf "$SCRATCH"
+  fi
+}
+trap cleanup EXIT
 
 fail() {
   echo "FAIL: $1" >&2
@@ -86,7 +126,7 @@ check_enumeration() {
     'kind(test, @rules_flutter//dart/...)' \
     'kind(test, @rules_flutter//flutter/...)'; do
     one=""
-    if ! one="$("$BAZEL" query "$q" 2>/dev/null)"; then
+    if ! one="$("${BAZ[@]}" query "$q" 2>/dev/null)"; then
       fail "enumeration query failed: $q"
       missing=1
       continue
@@ -96,7 +136,7 @@ check_enumeration() {
   # //tools/... does not load from a downstream workspace, so its audit
   # rows are only re-enumerated when these queries happen to succeed.
   local tools_got=""
-  if tools_got="$("$BAZEL" query \
+  if tools_got="$("${BAZ[@]}" query \
     'kind(".*_binary rule", @rules_flutter//tools/...)' \
     'kind(test, @rules_flutter//tools/...)' 2>/dev/null)"; then
     got="$got$tools_got"$'\n'
@@ -112,7 +152,7 @@ check_enumeration() {
   done <<<"$(sort -u <<<"$got")"
   # Every registry row must still resolve.
   while IFS=$'\t' read -r label _ _ _ _; do
-    if [[ -z "$("$BAZEL" query "$label" 2>/dev/null)" ]]; then
+    if [[ -z "$("${BAZ[@]}" query "$label" 2>/dev/null)" ]]; then
       fail "registry entry does not resolve: $label"
       missing=1
     fi
@@ -128,64 +168,61 @@ snapshot_tree() {
   (cd "$dir" && find . -mindepth 1 -type f -exec sha256sum -- {} + | LC_ALL=C sort >"$out.sums")
 }
 
-# Prints diff lines (unified, one per changed path) that are NOT Bazel's own
-# output base. $1 = subdir name under the canary root (selects the
-# allowlist), $2/$3 = before/after snapshot prefixes.
+# Prints diff lines (unified, one per changed path) between two snapshots.
+# Bazel never runs under the canary, so there is no output-base
+# allowlist: any change is the entry's own leak.
 unsanctioned_changes() {
-  local sub="$1" before="$2" after="$3" diff
-  diff="$(diff -u "$before.files" "$after.files"; diff -u "$before.sums" "$after.sums"; true)"
-  case "$sub" in
-    home) grep -E '^[+-][^+-]' <<<"$diff" | grep -v '^[+-] \./\.cache/bazel\(/\|$\)' || true ;;
-    xdg-cache) grep -E '^[+-][^+-]' <<<"$diff" | grep -v '^[+-] \./bazel\(/\|$\)' || true ;;
-    *) grep -E '^[+-][^+-]' <<<"$diff" || true ;;
-  esac
+  local before="$1" after="$2"
+  { diff -u "$before.files" "$after.files"; diff -u "$before.sums" "$after.sums"; } | grep -E '^[+-][^+-]' || true
 }
 
 run_row() {
   local label="$1" args="$2" policy="$3"
   echo "== run: $label -- $args ($policy)"
-  local root canary sub out changes rc=0 row_failed=0
-  root="$(mktemp -d "${TMPDIR:-/tmp}/run-home.XXXXXX")"
-  # Bazel marks its output-base files and directories read-only, so plain
-  # `rm -rf` fails there; restore write permission first. Quoted at trap
-  # definition time so the cleanup runs even after `cd` elsewhere.
-  # shellcheck disable=SC2064
-  trap "chmod -R u+w '$root' 2>/dev/null; rm -rf '$root'" RETURN
+  STAGED=$((STAGED + 1))
+  local root="$SCRATCH/$STAGED" stage sub out changes rc=0 row_failed=0
+  mkdir -p "$root"
+  stage="$root/stage.sh"
+  # Stage under the caller's environment so the output root, the launcher
+  # cache and any toolchain resolution stay out of the canaries.
+  # --script_path writes the run script instead of executing the target.
+  if ! "${BAZ[@]}" run --script_path="$stage" "$label" >"$root/stage.log" 2>&1; then
+    fail "$label staging failed"
+    tail -n 30 "$root/stage.log" >&2 || true
+    return
+  fi
   for sub in home userprofile appdata localappdata xdg-config xdg-cache xdg-data; do
     mkdir -p "$root/$sub"
     echo "run-home canary for $label" >"$root/$sub/.run-home-marker"
   done
-  mkdir -p "$root/ext/pubcache" "$root/ext/bazelisk-home"
-  mkdir -p "$root/xdg-config/dart"
+  mkdir -p "$root/ext/pubcache" "$root/tmp" "$root/xdg-config/dart"
   printf '{"version":1,"hosted":[{"url":"%s","token":"run-home-fake-token"}]}' \
     "$FAKE_HOST" >"$root/xdg-config/dart/pub-tokens.json"
   for sub in home userprofile appdata localappdata xdg-config xdg-cache xdg-data; do
     snapshot_tree "$root/$sub" "$root/$sub.before"
   done
   out="$root/stdout.log"
+  # Only the stage script runs with the canary variables; Bazel never
+  # does. PUB_CACHE and TMPDIR point at non-canary siblings of the
+  # canaries, inside the same scratch.
   if [[ "$args" == "-" ]]; then
-    HOME="$root/home" USERPROFILE="$root/userprofile" APPDATA="$root/appdata" \
+    env HOME="$root/home" USERPROFILE="$root/userprofile" APPDATA="$root/appdata" \
       LOCALAPPDATA="$root/localappdata" XDG_CONFIG_HOME="$root/xdg-config" \
       XDG_CACHE_HOME="$root/xdg-cache" XDG_DATA_HOME="$root/xdg-data" \
-      PUB_CACHE="$root/ext/pubcache" BAZELISK_HOME="$root/ext/bazelisk-home" \
-      "$BAZEL" run "$label" -- >"$out" 2>&1 || rc=$?
+      PUB_CACHE="$root/ext/pubcache" TMPDIR="$root/tmp" \
+      "$stage" >"$out" 2>&1 || rc=$?
   else
     # Word-split the registry args: they are simple tokens, never quoted.
     # shellcheck disable=SC2086
-    HOME="$root/home" USERPROFILE="$root/userprofile" APPDATA="$root/appdata" \
+    env HOME="$root/home" USERPROFILE="$root/userprofile" APPDATA="$root/appdata" \
       LOCALAPPDATA="$root/localappdata" XDG_CONFIG_HOME="$root/xdg-config" \
       XDG_CACHE_HOME="$root/xdg-cache" XDG_DATA_HOME="$root/xdg-data" \
-      PUB_CACHE="$root/ext/pubcache" BAZELISK_HOME="$root/ext/bazelisk-home" \
-      "$BAZEL" run "$label" -- $args >"$out" 2>&1 || rc=$?
+      PUB_CACHE="$root/ext/pubcache" TMPDIR="$root/tmp" \
+      "$stage" $args >"$out" 2>&1 || rc=$?
   fi
-  # Shut down this row's server: its output base lives under the canary,
-  # which the trap removes, so never reuse it.
-  HOME="$root/home" XDG_CACHE_HOME="$root/xdg-cache" \
-    BAZELISK_HOME="$root/ext/bazelisk-home" \
-    "$BAZEL" shutdown >/dev/null 2>&1 || true
   if [[ "$rc" -ne 0 ]]; then
-    fail "$label exited $rc (expected 0); log: $out (canary root kept: $root)"
-    trap - RETURN
+    fail "$label exited $rc (expected 0)"
+    tail -n 30 "$out" >&2 || true
     return
   fi
   if [[ "$args" == *"token list"* ]] && ! grep -q -F "$FAKE_HOST" "$out"; then
@@ -194,7 +231,7 @@ run_row() {
   fi
   for sub in home userprofile appdata localappdata xdg-config xdg-cache xdg-data; do
     snapshot_tree "$root/$sub" "$root/$sub.after"
-    changes="$(unsanctioned_changes "$sub" "$root/$sub.before" "$root/$sub.after")"
+    changes="$(unsanctioned_changes "$root/$sub.before" "$root/$sub.after")"
     if [[ -n "$changes" ]]; then
       fail "$label wrote under canary $sub:$changes"
       row_failed=1
@@ -203,19 +240,18 @@ run_row() {
   if [[ "$row_failed" -eq 0 ]]; then
     echo "ok: $label left every canary dir unchanged"
   else
-    echo "forensics for $label: stdout $out, canary root kept: $root" >&2
-    trap - RETURN
+    echo "forensics for $label: stdout tail:" >&2
+    tail -n 30 "$out" >&2 || true
   fi
 }
 
 build_row() {
-  local label="$1" log rc=0
+  local label="$1"
   echo "== build (not-run): $label"
-  log="$(mktemp "${TMPDIR:-/tmp}/run-home-build.XXXXXX.log")"
-  if ! "$BAZEL" build "$label" >"$log" 2>&1; then
-    fail "$label failed to build; log kept: $log"
+  if ! "${BAZ[@]}" build "$label" >"$SCRATCH/build.log" 2>&1; then
+    fail "$label failed to build"
+    tail -n 30 "$SCRATCH/build.log" >&2 || true
   else
-    rm -f "$log"
     echo "ok: $label built"
   fi
 }

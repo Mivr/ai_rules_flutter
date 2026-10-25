@@ -52,3 +52,7 @@ in Linux CI.
 2. Add the row to `registry.tsv` (run rows) or `audit.tsv`
    (out-of-class, with reason), using the shared helper for its launcher.
 3. The gate fails until the new entry is both registered and clean.
+
+Bazel itself never runs with the canary variables: each entry is staged
+first under the caller's environment (`bazel run --script_path=...`), and
+only the generated stage script runs under the canaries.
