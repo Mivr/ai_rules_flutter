@@ -11,6 +11,18 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from summarize import (
+    _executed_mnemonic_lines,
+    _failure_sample_lines,
+    _header_lines,
+    _instruction_totals,
+    _metric_table_lines,
+    _notes_lines,
+    _replay_cpu_lines,
+    _replay_failure_lines,
+    _replay_vectors,
+    _scenario_lines,
+    _skipped_lines,
+    _version_warning_lines,
     build_summary,
     compare_metrics,
     delta_pct,
@@ -276,6 +288,134 @@ class TreeTest(unittest.TestCase):
             "configs": {"cfg": {"scenarios": {"clean": compared}}}})
         self.assertIn("no PMU", md)
         self.assertIn("Replay CPU", md)
+
+
+class HelperTest(unittest.TestCase):
+    def test_instruction_totals(self):
+        totals = _instruction_totals(
+            [replay_report([100]), replay_report([110])])
+        self.assertEqual(totals.values, [100, 110])
+        self.assertTrue(totals.complete)
+        self.assertTrue(totals.available)
+        partial = _instruction_totals(
+            [{"actions": [{"instructions": 5}, {"instructions": None}]}])
+        self.assertEqual(partial.values, [])
+        self.assertFalse(partial.complete)
+        self.assertTrue(partial.available)
+        absent = _instruction_totals(
+            [{"actions": [{"instructions": None}]}])
+        self.assertFalse(absent.available)
+        empty = _instruction_totals([])
+        self.assertEqual(empty.values, [])
+        self.assertFalse(empty.complete)
+
+    def test_replay_vectors_first_sample_wins(self):
+        first = {"target": "//a", "exit_code": 1, "stderr_tail": "one"}
+        second = {"target": "//b", "exit_code": 2, "stderr_tail": "two"}
+        vec = _replay_vectors([
+            replay_report([10], failures=1, truncated=True, cpu_s=1.0,
+                          sample_failure=first),
+            replay_report([20], failures=3, cpu_s=2.0,
+                          sample_failure=second)])
+        self.assertEqual(vec.failures, {"FlutterAotMacho": [1, 3]})
+        self.assertEqual(vec.cpu_s, {"FlutterAotMacho": [1.0, 2.0]})
+        self.assertEqual(vec.samples, {"FlutterAotMacho": first})
+        self.assertEqual(vec.truncated, [True, False])
+
+    def test_header_lines(self):
+        lines = _header_lines({
+            "base_ref": "base", "head_ref": "head",
+            "meta": {"zeta": 1, "alpha": "x",
+                     "bazel_flags": ["--config=a", "--config=b"]}})
+        self.assertEqual(lines[0], "# iOS bench: head vs base")
+        self.assertLess(lines.index("- alpha: x"), lines.index("- zeta: 1"))
+        self.assertIn("- bazel_flags: --config=a --config=b", lines)
+        self.assertEqual(lines[-1], "")
+
+    def test_version_warning_lines(self):
+        mismatch = _version_warning_lines(
+            {"base_stats": {"generator_version": 1},
+             "head_stats": {"generator_version": 2}})
+        self.assertEqual(len(mismatch), 2)
+        self.assertIn("not comparable", mismatch[0])
+        self.assertEqual(_version_warning_lines(
+            {"base_stats": {"generator_version": 2},
+             "head_stats": {"generator_version": 2}}), [])
+        self.assertEqual(_version_warning_lines({}), [])
+
+    def test_metric_table_lines_repeats_note(self):
+        exe = [exe_summary(5, 100.0, 50.0, 0.5, {"Genrule": 2})]
+        rep = [replay_report([10])]
+        compared = compare_metrics(scenario_metrics(exe, rep),
+                                   scenario_metrics(exe, rep))
+        lines = _metric_table_lines(compared)
+        self.assertIn("| metric | base median [min, max] | "
+                      "head median [min, max] | delta |", lines)
+        self.assertIn("| wall_s | 100.00s [100.00s, 100.00s] | "
+                      "100.00s [100.00s, 100.00s] | +0.0% |", lines)
+        self.assertIn("repeats=1: medians are single samples, no spread.",
+                      lines)
+
+    def test_notes_lines_branches(self):
+        import summarize as summarize_mod
+        exe = [exe_summary(5, 100.0, 50.0, 0.5, {"Genrule": 2})]
+        noin = [{"n_replayed": 1, "truncated": False, "by_mnemonic": {},
+                 "actions": [{"mnemonic": "Genrule", "instructions": None}]}]
+        metrics = summarize_mod.scenario_metrics(exe, noin)
+        compared = summarize_mod.compare_metrics(metrics, metrics)
+        self.assertIn("no PMU", "\n".join(_notes_lines(compared)))
+        trunc = [dict(replay_report([10]), truncated=True)]
+        metrics = summarize_mod.scenario_metrics(exe, trunc)
+        compared = summarize_mod.compare_metrics(metrics, metrics)
+        self.assertIn("time budget", "\n".join(_notes_lines(compared)))
+        ok = [replay_report([10])]
+        metrics = summarize_mod.scenario_metrics(exe, ok)
+        compared = summarize_mod.compare_metrics(metrics, metrics)
+        self.assertEqual(_notes_lines(compared), [])
+
+    def test_mnemonic_table_helpers(self):
+        exe = [exe_summary(5, 100.0, 50.0, 0.5, {"Genrule": 2})]
+        rep = [replay_report([10])]
+        compared = compare_metrics(scenario_metrics(exe, rep),
+                                   scenario_metrics(exe, rep))
+        self.assertIn("| Genrule | 2 | 2 | +0.0% |",
+                      _executed_mnemonic_lines(compared))
+        self.assertEqual(_replay_failure_lines(compared),
+                         ["Replay failures by mnemonic (median count of "
+                          "non-zero exits/timeouts):",
+                          "", "no replayed actions.", ""])
+        self.assertEqual(_replay_cpu_lines(compared)[2],
+                         "no replayed actions.")
+        self.assertEqual(_skipped_lines(compared)[-2],
+                         "everything executed was replayed.")
+        self.assertEqual(_failure_sample_lines(compared), [])
+
+    def test_failure_sample_lines(self):
+        import summarize as summarize_mod
+        exe = [exe_summary(5, 100.0, 50.0, 0.5, {"FlutterAotMacho": 1})]
+        rep = [replay_report([10], failures=2, sample_failure={
+            "target": "//app:app_ios", "exit_code": 1,
+            "stderr_tail": "clang: error: boom"})]
+        compared = summarize_mod.compare_metrics(
+            summarize_mod.scenario_metrics(exe, rep),
+            summarize_mod.scenario_metrics(exe, rep))
+        text = "\n".join(_failure_sample_lines(compared))
+        self.assertIn("clang: error: boom", text)
+        self.assertIn("`FlutterAotMacho` base:", text)
+
+    def test_scenario_lines_error_and_composition(self):
+        error = _scenario_lines("cfg", "clean", {"error": "missing repeats"})
+        self.assertEqual(error, ["## cfg / clean", "",
+                                 "error: missing repeats", ""])
+        exe = [exe_summary(5, 100.0, 50.0, 0.5, {"Genrule": 2})]
+        rep = [replay_report([10])]
+        compared = compare_metrics(scenario_metrics(exe, rep),
+                                   scenario_metrics(exe, rep))
+        section = "\n".join(_scenario_lines("cfg", "clean", compared))
+        full = render_markdown({
+            "base_ref": "base", "head_ref": "head", "meta": {},
+            "configs": {"cfg": {"scenarios": {"clean": compared}}}})
+        self.assertIn(section, full)
 
 
 if __name__ == "__main__":
