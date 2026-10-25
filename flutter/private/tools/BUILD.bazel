@@ -55,6 +55,8 @@ exports_files(
         "zlib_raw_trees.dart",
         "flutter_test_runner.dart",
         "flutter_integration_test_runner.dart",
+        "flutter_integration_test_launcher.dart",
+        "flutter_integration_test_android.dart",
         "bazel_test_protocol.dart",
         "extract_library_tags.dart",
         "test_support.dart",
@@ -110,6 +112,8 @@ dart_binary(
     name = "flutter_integration_test_runner",
     srcs = [
         "bazel_test_protocol.dart",
+        "flutter_integration_test_android.dart",
+        "flutter_integration_test_launcher.dart",
         "test_support.dart",
     ],
     compile_mode = "exe",
@@ -362,6 +366,13 @@ _UNIT_TESTS = {
             "@rules_dart//dart/runfiles",
         ],
     ),
+    "flutter_integration_test_android_test": (
+        "flutter_integration_test_android.dart",
+        [
+            "@dev_tool_deps//:boolean_selector",
+            "@rules_dart//dart/runfiles",
+        ],
+    ),
     "bazel_test_protocol_test": (
         "bazel_test_protocol.dart",
         ["@dev_tool_deps//:boolean_selector"],
@@ -429,6 +440,12 @@ _TOOL_SRCS = {
     ],
     "flutter_integration_test_runner.dart": [
         "bazel_test_protocol.dart",
+        "flutter_integration_test_android.dart",
+        "flutter_integration_test_launcher.dart",
+        "test_support.dart",
+    ],
+    "flutter_integration_test_android.dart": [
+        "flutter_integration_test_launcher.dart",
         "test_support.dart",
     ],
     "kernel_filter.dart": ["directive_guard.dart"],
