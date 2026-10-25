@@ -340,6 +340,7 @@ def normalize_asset_uri(entry):
         return _refusal("it has a query part")
     if "#" in entry:
         return _refusal("it has a fragment part")
+
     # A raw `\` is a path separator, exactly as `Uri.parse` reads it: split
     # first, dot-resolve and percent-decode after. A `%5C` escape still
     # decodes to a backslash byte and is refused below, as on the base.
@@ -360,6 +361,7 @@ def normalize_asset_uri(entry):
     resolved = _resolve_segments(texts)
     if not resolved.ok:
         return _refusal(resolved.reason)
+
     # An empty segment stays in the key (flutter_tools keys `entryUri.path`,
     # so `assets/e//em.png` manifests with `//`) while the decoded file
     # collapses it (flutter_tools reads `path.fromUri`, which opens
