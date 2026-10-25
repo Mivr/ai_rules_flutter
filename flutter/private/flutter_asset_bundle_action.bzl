@@ -6,6 +6,8 @@ rule so the rule can load the shader helpers from `common.bzl` without a
 load cycle.
 """
 
+load("//flutter/private:asset_uri.bzl", "decode_asset_key")
+
 # Regex-like DPR directory patterns we detect in Starlark.
 # A directory named like "2x", "1.5x", "3.0x" indicates a resolution variant.
 _DPR_SUFFIXES = {
@@ -36,32 +38,43 @@ def detect_dpr(path):
     return path, None
 
 def build_asset_manifest(assets):
-    """Build the asset manifest structure from a list of asset paths.
+    """Build the asset manifest structure from a list of encoded asset keys.
+
+    Mirrors `_createAssetManifest` (flutter_tools 3.47.7 `asset.dart:905-930`):
+    the input lists the encoded bundle keys (what the copied files are named,
+    `bundle_builder.dart:182`), while every manifest key and variant path is
+    `Uri.decodeFull` of its key. Variant grouping still reads the encoded
+    keys, as flutter_tools groups by `entryUri.path`. Font assets never reach
+    here; FontManifest keeps the encoded `assetUri.path`
+    (`flutter_manifest.dart:480`).
 
     Args:
-        assets: list of asset path strings relative to package root.
+        assets: list of encoded asset keys relative to the bundle root.
 
     Returns:
-        dict mapping logical key -> list of variant dicts.
+        dict mapping decoded logical key -> list of variant dicts with
+        decoded `asset` paths.
     """
     manifest = {}
 
-    # Group by base path.
+    # Group by base path, sorted by the encoded key as flutter_tools sorts by
+    # `entryUri.path`; only the emitted keys and variants are decoded.
     for path in sorted(assets):
         base, dpr = detect_dpr(path)
-        if base not in manifest:
-            manifest[base] = []
-        entry = {"asset": path}
+        decoded_base = decode_asset_key(base)
+        if decoded_base not in manifest:
+            manifest[decoded_base] = []
+        entry = {"asset": decode_asset_key(path)}
         if dpr != None:
             entry["dpr"] = dpr
-        manifest[base].append(entry)
+        manifest[decoded_base].append(entry)
 
     # Ensure the main (1x) variant is first in each list.
-    for base in manifest:
-        variants = manifest[base]
+    for decoded_base in manifest:
+        variants = manifest[decoded_base]
         main_idx = None
         for i, v in enumerate(variants):
-            if v["asset"] == base:
+            if v["asset"] == decoded_base:
                 main_idx = i
                 break
         if main_idx != None and main_idx != 0:
@@ -155,6 +168,8 @@ def flutter_asset_bundle_action(ctx, content, shaking, output_dir):
     # Build asset paths and copy map relative to the output directory. The key
     # travels with the file — set once by the target that listed the asset —
     # so this action keys every file by its carried key and computes none.
+    # The manifest decodes those keys (`build_asset_manifest`); the copies
+    # keep them encoded.
     # One channel may repeat a key another already claimed for the same file
     # (a diamond, or an own asset a dep also ships through pub): both callers
     # refuse two different files for one key before reaching this action, so

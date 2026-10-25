@@ -197,9 +197,9 @@ def _conditioned_entry(entry, path):
 
     `path` is the decoded file path (what the label names); `key` is its
     percent-encoded bundle key (see `asset_uri.bzl`). A file entry's own
-    path keeps the intake key exactly (so `packages`-first entries stay
-    byte-identical); walked files encode their listed path, which is
-    filesystem truth and never decodes.
+    path keeps the intake key exactly (already normalized, so a
+    `packages`-first main file keeps its normalized key); walked files
+    encode their listed path, which is filesystem truth and never decodes.
 
     Args:
         entry: The normalized entry (`struct(path, key, flavors,

@@ -2,8 +2,9 @@
 
 `asset_uri.bzl` is the one module that turns entry text into bundle keys:
 `Uri.parse` plus `Uri(pathSegments:)` per segment, checked against the real
-Dart SDK. Plain names and `packages`-first entries keep byte-identical keys;
-anything else encodes like flutter_tools (`a b.png` bundles as `a%20b.png`,
+Dart SDK. Plain names keep byte-identical keys; `packages`-first entries
+normalize like every other entry, and anything else encodes like
+flutter_tools (`a b.png` bundles as `a%20b.png`,
 the key the engine asks for) or is refused as not supported. The through
 test runs the whole spoke chain (parse, normalize, expand, spoke dicts,
 name check) over spaced names, showing manifest key, copy key and source
@@ -12,6 +13,7 @@ file for each entry.
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//flutter/private:asset_uri.bzl", "encode_asset_key", "normalize_asset_uri", "normalize_spoke_assets", "normalize_spoke_fonts", "normalize_spoke_shaders", "pub_bundle_key", "spoke_asset_uri_error")
+load("//flutter/private:flutter_asset_bundle_action.bzl", "build_asset_manifest")
 load("//flutter/private:flutter_pub_assets.bzl", "expand_pub_asset_entries")
 load(
     "//flutter/private:flutter_pub_package.bzl",
@@ -88,10 +90,20 @@ def _non_ascii_matches_dart_test_impl(ctx):
     return unittest.end(env)
 
 def _packages_first_passes_through_test_impl(ctx):
-    """`packages`-first entries stay byte-identical, as on the base."""
+    """`packages`-first entries normalize like every other entry."""
     env = unittest.begin(ctx)
     _check_ok(env, "packages/foo/a.png", "packages/foo/a.png", "packages/foo/a.png")
-    _check_ok(env, "packages/foo/a b.png", "packages/foo/a b.png", "packages/foo/a b.png")
+    _check_ok(env, "packages/d/./a.png", "packages/d/a.png", "packages/d/a.png")
+    _check_ok(
+        env,
+        "packages/d/ca" + "f%c3%a9.png",
+        "packages/d/ca" + "f" + "\303\251" + ".png",
+        "packages/d/ca" + "f%C3%A9.png",
+    )
+    _check_ok(env, "packages/d/a%20b.png", "packages/d/a b.png", "packages/d/a%20b.png")
+    norm = normalize_asset_uri("packages/d/a\\b.png")
+    asserts.false(env, norm.ok, "packages/d/a\\b.png")
+    asserts.true(env, "backslash" in norm.reason, norm.reason)
     return unittest.end(env)
 
 _REFUSALS = [
@@ -362,13 +374,151 @@ def _escaped_entries_bundle_encoded_test_impl(ctx):
     )
     return unittest.end(env)
 
+# -- manifest decode with encoded copies and fonts --------------------------------
+
+_MANIFEST_PUBSPEC = """\
+name: mani_pkg
+flutter:
+  assets:
+    - a b.png
+    - enc%20c.png
+    - pct%25.png
+    - ca%C3%A9.png
+  fonts:
+    - family: Mani
+      fonts:
+        - asset: fonts/a b.ttf
+        - asset: fonts/p%25.ttf
+"""
+
+_MANIFEST_FILES = {
+    "": ["a b.png", "enc c.png", "pct%.png", _CAFE_ENTRY],
+    "fonts": ["fonts/a b.ttf", "fonts/p%.ttf"],
+}
+
+def _manifest_list_dir(directory):
+    """Fake package listing: decoded names, as the spoke lister reads them."""
+    return struct(files = _MANIFEST_FILES.get(directory, []), error = "")
+
+def _manifest_decoded_copies_encoded_test_impl(ctx):
+    """The manifest decodes while copies and FontManifest stay encoded.
+
+    `Uri.decodeFull` of every key (`asset.dart:923-929`) names the manifest
+    entries; the copied files keep the encoded keys
+    (`bundle_builder.dart:182`), as do the FontManifest assets
+    (`flutter_manifest.dart:480`).
+    """
+    env = unittest.begin(ctx)
+    parsed = parse_flutter_assets_block(_MANIFEST_PUBSPEC)
+    asserts.equals(env, [], parsed.asset_errors)
+    assets = normalize_spoke_assets("mani_pkg", parsed.assets)
+    fonts = normalize_spoke_fonts("mani_pkg", parsed.fonts)
+    result = expand_pub_asset_entries(assets, _manifest_list_dir, "mani_pkg")
+    asserts.equals(env, "", result.error)
+    asserts.equals(
+        env,
+        ["a b.png", "enc c.png", "pct%.png", _CAFE_ENTRY],
+        [e.path for e in result.expanded],
+    )
+    copy_keys = [e.key for e in result.expanded]
+    asserts.equals(
+        env,
+        ["a%20b.png", "enc%20c.png", "pct%25.png", _CAFE_KEY],
+        copy_keys,
+    )
+    manifest = build_asset_manifest(copy_keys)
+    asserts.equals(
+        env,
+        ["a b.png", _CAFE_ENTRY, "enc c.png", "pct%.png"],
+        sorted(manifest.keys()),
+    )
+    for key in ["a b.png", "enc c.png", "pct%.png", _CAFE_ENTRY]:
+        asserts.equals(env, key, manifest[key][0]["asset"])
+    spoke_fonts = encode_spoke_fonts(fonts)
+    asserts.equals(
+        env,
+        {":fonts/a b.ttf": "fonts/a%20b.ttf", ":fonts/p%.ttf": "fonts/p%25.ttf"},
+        spoke_fonts.font_files,
+    )
+    asserts.true(env, "fonts/a%20b.ttf" in spoke_fonts.fonts_json_str, spoke_fonts.fonts_json_str)
+    asserts.true(env, "fonts/p%25.ttf" in spoke_fonts.fonts_json_str, spoke_fonts.fonts_json_str)
+    return unittest.end(env)
+
+# -- packages-first entries through the spoke -------------------------------------
+
+# The declaring package's own accented file, built in pieces like
+# `_CAFE_ENTRY`: the spellchecker never sees those three letters whole.
+_PACKAGES_CAFE = "ca" + "f" + "\303\251" + ".png"
+_PACKAGES_CAFE_KEY = "ca" + "f%C3%A9.png"
+
+_PACKAGES_PUBSPEC = """\
+name: d
+flutter:
+  assets:
+    - packages/d/./a.png
+    - packages/d/ca""" + "f%c3%a9.png\n" + """\
+"""
+
+_PACKAGES_FILES = {
+    "packages/d": ["packages/d/a.png", "packages/d/" + _PACKAGES_CAFE],
+}
+
+def _packages_list_dir(directory):
+    """Fake declaring-package listing holding the normalized files."""
+    return struct(files = _PACKAGES_FILES.get(directory, []), error = "")
+
+def _packages_first_spoke_test_impl(ctx):
+    """`packages`-first entries naming own files normalize, then bundle.
+
+    Dot segments collapse and escapes key uppercase, as flutter_tools reads
+    them (`asset.dart:1402-1428`); the manifest decodes the keys while the
+    copies keep them encoded.
+    """
+    env = unittest.begin(ctx)
+    parsed = parse_flutter_assets_block(_PACKAGES_PUBSPEC)
+    asserts.equals(env, [], parsed.asset_errors)
+    assets = normalize_spoke_assets("d", parsed.assets)
+    result = expand_pub_asset_entries(assets, _packages_list_dir, "d")
+    asserts.equals(env, "", result.error)
+    asserts.equals(
+        env,
+        ["packages/d/a.png", "packages/d/" + _PACKAGES_CAFE],
+        [e.path for e in result.expanded],
+    )
+    copy_keys = [e.key for e in result.expanded]
+    asserts.equals(
+        env,
+        ["packages/d/a.png", "packages/d/" + _PACKAGES_CAFE_KEY],
+        copy_keys,
+    )
+    manifest = build_asset_manifest(copy_keys)
+    asserts.equals(
+        env,
+        ["packages/d/a.png", "packages/d/" + _PACKAGES_CAFE],
+        sorted(manifest.keys()),
+    )
+    return unittest.end(env)
+
+_PACKAGES_BACKSLASH_PUBSPEC = "name: d\nflutter:\n  assets:\n    - packages/d/a\\b.png\n"
+
+def _packages_backslash_refused_test_impl(ctx):
+    """A backslash `packages`-first spelling fails closed, naming everything."""
+    env = unittest.begin(ctx)
+    parsed = parse_flutter_assets_block(_PACKAGES_BACKSLASH_PUBSPEC)
+    asserts.equals(env, 1, len(parsed.assets))
+    norm = normalize_asset_uri(parsed.assets[0].path)
+    asserts.false(env, norm.ok, parsed.assets[0].path)
+    message = spoke_asset_uri_error("d", parsed.assets[0].path, norm.reason)
+    for want in ["d", "pubspec.yaml", "not supported", "backslash"]:
+        asserts.true(env, want in message, message)
+    return unittest.end(env)
+
 _REFUSED_PUBSPEC = """\
 name: refused_pkg
 flutter:
   assets:
     - a?.png
 """
-
 def _through_refusal_test_impl(ctx):
     """A pubspec entry no engine build reads fails as not supported."""
     env = unittest.begin(ctx)
@@ -396,6 +546,9 @@ _t10_test = unittest.make(_spoke_error_names_package_test_impl)
 _t11_test = unittest.make(_through_pub_package_test_impl)
 _t12_test = unittest.make(_through_refusal_test_impl)
 _t13_test = unittest.make(_escaped_entries_bundle_encoded_test_impl)
+_t14_test = unittest.make(_manifest_decoded_copies_encoded_test_impl)
+_t15_test = unittest.make(_packages_first_spoke_test_impl)
+_t16_test = unittest.make(_packages_backslash_refused_test_impl)
 
 def asset_uri_test_suite(name):
     """Defines the asset-URI normalization unit and through tests.
@@ -419,4 +572,7 @@ def asset_uri_test_suite(name):
         _t11_test,
         _t12_test,
         _t13_test,
+        _t14_test,
+        _t15_test,
+        _t16_test,
     )

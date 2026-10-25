@@ -31,7 +31,11 @@ byte no Bazel target can name (`:`, a backslash, a control character) — is
 a refusal carrying the reason; the caller fails naming the package, its
 pubspec.yaml and the entry. The label always names the decoded file; only
 the bundle key is encoded. Entries whose first segment is `packages`
-pass through byte-identical, as on the base.
+normalize like every other entry (`packages/d/./a.png` bundles as
+`packages/d/a.png`, with dot segments resolved and escapes keyed as
+flutter_tools keys them); a reference into another package normalizes to
+itself, so the declaring package's walk still refuses it as missing, as on
+the base.
 
 Bazel 9.3 Starlark indexes strings by byte and offers no `chr`/`ord`, so
 the normalizer works one byte at a time over a 256-byte table (`_BYTES`,
@@ -302,8 +306,15 @@ def normalize_asset_uri(entry):
     `asset.dart:617` for the app): `decoded` is what `pathSegments` decodes
     to (the file to fetch, which the Bazel label names), `key` is the
     percent-encoded bundle key. A trailing `/` still marks a directory
-    entry on both. Entries whose first segment is `packages` pass through
-    byte-identical, as on the base.
+    entry on both. An entry whose first segment is `packages` normalizes
+    like any other entry: `Uri.parse` resolves its dot segments
+    (`flutter_manifest.dart:826-841` feeds every entry through it) and
+    re-encodes the key uppercase, so `packages/d/./a.png` bundles as
+    `packages/d/a.png` and `packages/d/caf%c3%a9.png` as
+    `packages/d/caf%C3%A9.png`. A reference into another package
+    normalizes to itself when plain, keeping today's behaviour; a spelling
+    no engine build reads (a backslash among them) is refused like any
+    other entry.
 
     Args:
         entry: The entry text as written in pubspec.yaml (or a BUILD-listed
@@ -318,8 +329,6 @@ def normalize_asset_uri(entry):
     """
     if entry == "":
         return _refusal("it is null or empty")
-    if entry.split("/")[0] == "packages":
-        return struct(ok = True, segments = entry.split("/"), decoded = entry, key = entry, is_dir = entry.endswith("/"), reason = "")
     if "?" in entry:
         return _refusal("it has a query part")
     if "#" in entry:
@@ -366,6 +375,25 @@ def encode_asset_key(decoded):
         The encoded bundle key.
     """
     return "/".join([_encode_segment(piece, i == 0) for i, piece in enumerate(decoded.split("/"))])
+
+def decode_asset_key(key):
+    """Decode an encoded bundle key for an AssetManifest entry.
+
+    Mirrors `Uri.decodeFull` over the encoded key (flutter_tools 3.47.7
+    `asset.dart:923-929`, `_createAssetManifest`): every `%XX` escape
+    becomes its bytes — so `%25` is `%`, and escapes of reserved characters
+    decode too — while literal `/` separators stay. The inverse of
+    `encode_asset_key` on encoder output; a lone `%` stays literal, as in
+    `_decode_segment`. Total: unlike `normalize_asset_uri` it never
+    refuses, so callers must already know the key bundles.
+
+    Args:
+        key: The encoded bundle key (what the copied file is named).
+
+    Returns:
+        The decoded manifest key: the manifest entry and variant path.
+    """
+    return "/".join([_decode_segment(piece).text for piece in key.split("/")])
 
 def pub_bundle_key(prefix, path):
     """The bundle key for one contribution path under `prefix`.

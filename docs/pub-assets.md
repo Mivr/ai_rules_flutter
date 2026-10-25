@@ -30,11 +30,16 @@ mirroring flutter_tools 3.47.7 (`Uri.parse` plus `Uri(pathSegments:)`):
   `./a.png` bundles `a.png`; `a b.png` bundles as `a%20b.png`, the key the
   engine asks for. Non-ASCII names encode as UTF-8 (`%C3%A9` in the key
   decodes to the file's accented letter).
-- Entries whose first segment is `packages` pass through byte-identical, as
-  on the base, and plain entries keep exactly their old keys.
+- Entries whose first segment is `packages` normalize like every other
+  entry (`packages/d/./a.png` bundles as `packages/d/a.png`); a reference
+  into another package normalizes to itself when plain, and plain entries
+  keep exactly their old keys.
 - The decoded path names the file (labels, directory walks, resolution
-  variants); the encoded key names the manifest entry and the copied file.
-  The app's own assets key the same way.
+  variants); the encoded key names the copied file, while the manifest
+  entry and its variant paths are `Uri.decodeFull` of that key
+  (`a%20b.png` copies encoded but manifests as `a b.png`). FontManifest
+  keeps the encoded asset, as flutter_tools does. The app's own assets
+  key the same way.
 - Each entry decodes once: the path-package link plan links the decoded
   files, and the expansion resolves them, carrying the intake key — so
   `pct%25.png` finds the `pct%.png` file keyed `pct%25.png`, never decoding
