@@ -27,7 +27,7 @@ void main() {
 
   group('renderVersionSnippet', () {
     test('renders the versions entry and every artifact section', () {
-      const sha = 'a' * 64;
+      final sha = 'a' * 64;
       final rendered = renderVersionSnippet(
         version: '3.42.0',
         engineRev: 'enginerev',
