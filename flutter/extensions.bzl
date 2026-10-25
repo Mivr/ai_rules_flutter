@@ -30,6 +30,7 @@ load("//flutter/private:flutter_pub_package.bzl", "flutter_pub_package", "flutte
 load("//flutter/private:flutter_pub_path.bzl", "foreign_lock_path_error", "is_absolute_lock_path", "is_relative_path_dependency", "workspace_relative_lock_path")
 load("//flutter/private:flutter_sdk_package.bzl", "flutter_sdk_package")
 load("//flutter/private:pub_lock_sdks.bzl", "hosted_package_sha256", "parse_lock_sdk_constraints", "version_below_lower_bound")
+load("//flutter/private:rules_dart_floor.bzl", "check_rules_dart_floor")
 load("//flutter/private:toolchain_selection.bzl", "select_toolchain_source")
 load("//flutter/private:versions.bzl", "custom_engine_base_url", "custom_source_url", "flutter_source_sha256", "merge_custom_versions", "unknown_version_message")
 load("//flutter/private:xtool_darwin_sdk_repo.bzl", "resolve_darwin_sdk_from_modules")
@@ -635,6 +636,12 @@ def _overlay_roots_of_module(mod):
     return roots
 
 def _toolchain_extension(module_ctx):
+    # Refuse an ai_rules_dart older than the floor before creating any
+    # repository: a root override pins the version Bazel resolves, so the
+    # bazel_dep floor alone cannot catch it. The probe reads the resolved
+    # module's own behaviour, so toolchain-only consumers fail the same way
+    # flutter.pub consumers do.
+    check_rules_dart_floor()
     darwin_sdk = resolve_darwin_sdk_from_modules(module_ctx.modules)
 
     # Custom versions first: every later lookup resolves against the merged

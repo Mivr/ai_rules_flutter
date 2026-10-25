@@ -88,6 +88,8 @@ use_repo(flutter, "deps", "flutter_toolchains")
 register_toolchains("@flutter_toolchains//:all")
 ```
 
+Keep the `ai_rules_dart` override in your root `MODULE.bazel` at or above 0.19.0: an older one fails the `flutter` extension before any repository is created, naming the override to raise.
+
 `flutter.toolchain` downloads the Flutter SDK and engine. `flutter.pub` reads your `pubspec.lock` and creates a repository, here named `deps`, with one target per package: `@deps//:flutter`, `@deps//:flutter_test`, `@deps//:collection`, and so on. See [Pub packages](#pub-packages).
 
 Some platforms need one more repository from the same extension. Add it to `use_repo` when you build for that platform:
