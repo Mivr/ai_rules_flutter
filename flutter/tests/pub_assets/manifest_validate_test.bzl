@@ -43,6 +43,138 @@ def _assert_accepted(env, content):
     asserts.equals(env, [], result.asset_errors)
     return result
 
+def _assert_refused_n(env, content, expected):
+    """Assert `content` yields refusals matching `(key, fragment, line)` triples.
+
+    Args:
+        env: The unittest environment.
+        content: Full pubspec.yaml content with malformed sections.
+        expected: The `(key, detail_fragment, line)` triples each refusal
+            must match, in order.
+
+    Returns:
+        The parsed block, so the caller can pin what survived refusal.
+    """
+    result = parse_flutter_assets_block(content)
+    asserts.equals(env, len(expected), len(result.asset_errors))
+    for problem, want in zip(result.asset_errors, expected):
+        asserts.equals(env, want[0], problem.key)
+        asserts.equals(env, want[2], problem.line)
+        asserts.true(env, want[1] in problem.detail, problem.detail)
+        message = asset_entry_problem_error("manifest_pkg", problem)
+        asserts.true(env, "manifest_pkg" in message, message)
+        asserts.true(env, "pubspec.yaml line %d" % want[2] in message, message)
+    return result
+
+# -- pubspec root: non-string keys and a non-string name -----------------------------------
+
+_ROOT_KEY_PUBSPEC = """\
+name: bad_root_key
+123: x
+"""
+
+def _root_key_refused_test_impl(ctx):
+    """A non-string pubspec root key fails at the key's own line."""
+    env = unittest.begin(ctx)
+    result = _assert_refused(
+        env,
+        _ROOT_KEY_PUBSPEC,
+        "flutter",
+        "Expected YAML key to be a string, but got 123.",
+        2,
+    )
+    asserts.equals(env, "123", result.asset_errors[0].path)
+    return unittest.end(env)
+
+_ROOT_BOOL_KEY_PUBSPEC = """\
+name: bad_root_bool_key
+true: x
+"""
+
+def _root_bool_key_refused_test_impl(ctx):
+    """A boolean pubspec root key fails at the key's own line."""
+    env = unittest.begin(ctx)
+    _assert_refused(
+        env,
+        _ROOT_BOOL_KEY_PUBSPEC,
+        "flutter",
+        "Expected YAML key to be a string, but got true.",
+        2,
+    )
+    return unittest.end(env)
+
+_BAD_NAME_PUBSPEC = """\
+name: 5
+flutter:
+  generate: true
+"""
+
+def _bad_name_refused_test_impl(ctx):
+    """A non-string `name` fails at the `name:` line."""
+    env = unittest.begin(ctx)
+    result = _assert_refused(
+        env,
+        _BAD_NAME_PUBSPEC,
+        "flutter",
+        "Expected \"name\" to be a string, but got 5.",
+        1,
+    )
+    asserts.equals(env, "name", result.asset_errors[0].path)
+    return unittest.end(env)
+
+_BARE_NAME_PUBSPEC = """\
+name:
+flutter:
+  generate: true
+"""
+
+def _bare_name_refused_test_impl(ctx):
+    """An empty `name` fails at the `name:` line, not silently unnamed."""
+    env = unittest.begin(ctx)
+    _assert_refused(
+        env,
+        _BARE_NAME_PUBSPEC,
+        "flutter",
+        "Expected \"name\" to be a string, but got null.",
+        1,
+    )
+    return unittest.end(env)
+
+_ROOT_FIRST_PUBSPEC = """\
+name: 5
+flutter:
+  bogus: 1
+"""
+
+def _root_first_test_impl(ctx):
+    """Root problems come before section problems, in document order."""
+    env = unittest.begin(ctx)
+    _assert_refused_n(env, _ROOT_FIRST_PUBSPEC, [
+        ("flutter", "Expected \"name\" to be a string", 1),
+        ("bogus", "Unexpected child \"bogus\" found under \"flutter\".", 3),
+    ])
+    return unittest.end(env)
+
+# -- non-string flutter key ------------------------------------------------------------------
+
+_BOOL_FLUTTER_KEY_PUBSPEC = """\
+name: bad_flutter_key
+flutter:
+  true: x
+"""
+
+def _bool_flutter_key_refused_test_impl(ctx):
+    """A non-string `flutter:` key fails at the key's own line."""
+    env = unittest.begin(ctx)
+    _assert_refused(
+        env,
+        _BOOL_FLUTTER_KEY_PUBSPEC,
+        "flutter",
+        "Expected YAML key to be a string, but got true (String).",
+        3,
+    )
+    return unittest.end(env)
+
 # -- font weight / style --------------------------------------------------------------
 
 _BAD_WEIGHT_PUBSPEC = """\
@@ -126,6 +258,29 @@ def _font_extra_key_refused_test_impl(ctx):
     """An unexpected key in a font file entry fails at the key's line."""
     env = unittest.begin(ctx)
     _assert_refused(env, _FONT_EXTRA_KEY_PUBSPEC, "fonts", "Unexpected key foo", 7)
+    return unittest.end(env)
+
+_FONT_BAD_KEY_PUBSPEC = """\
+name: font_bad_key
+flutter:
+  fonts:
+    - family: F
+      fonts:
+        - asset: a.ttf
+          5: x
+"""
+
+def _font_bad_key_refused_test_impl(ctx):
+    """A non-string font file key fails twice at the key's line.
+
+    flutter_tools reports both its `if` refusal and the `switch` default
+    the key also falls into.
+    """
+    env = unittest.begin(ctx)
+    _assert_refused_n(env, _FONT_BAD_KEY_PUBSPEC, [
+        ("fonts", "Expected \"5\" under \"fonts\" to be a string.", 7),
+        ("fonts", "Unexpected key 5 ((String)) under font.", 7),
+    ])
     return unittest.end(env)
 
 _FAMILY_EXTRA_KEY_PUBSPEC = """\
@@ -265,6 +420,42 @@ def _bad_license_element_refused_test_impl(ctx):
     )
     return unittest.end(env)
 
+_MULTI_BAD_LICENSES_PUBSPEC = """\
+name: multi_bad_licenses
+flutter:
+  licenses:
+    - a.txt
+    - 5
+    - true
+"""
+
+def _multi_bad_licenses_refused_test_impl(ctx):
+    """Every non-string `licenses` element fails, not just the first."""
+    env = unittest.begin(ctx)
+    _assert_refused_n(env, _MULTI_BAD_LICENSES_PUBSPEC, [
+        ("licenses", "but element at index 1 was a int.", 5),
+        ("licenses", "but element at index 2 was a bool.", 6),
+    ])
+    return unittest.end(env)
+
+_BARE_LICENSES_PUBSPEC = """\
+name: bare_licenses
+flutter:
+  licenses:
+"""
+
+def _bare_licenses_refused_test_impl(ctx):
+    """An empty `licenses` value fails at its line, like flutter_tools."""
+    env = unittest.begin(ctx)
+    _assert_refused(
+        env,
+        _BARE_LICENSES_PUBSPEC,
+        "licenses",
+        "Expected \"licenses\" to be a list of files, but got null (Null).",
+        3,
+    )
+    return unittest.end(env)
+
 _BAD_DEFAULT_FLAVOR_PUBSPEC = """\
 name: bad_default_flavor
 flutter:
@@ -337,6 +528,24 @@ def _bad_android_x_refused_test_impl(ctx):
         "module",
         "The \"androidX\" value must be a bool if set.",
         4,
+    )
+    return unittest.end(env)
+
+_BARE_MODULE_PUBSPEC = """\
+name: bare_module
+flutter:
+  module:
+"""
+
+def _bare_module_refused_test_impl(ctx):
+    """An empty `module` value fails at its line, like flutter_tools."""
+    env = unittest.begin(ctx)
+    _assert_refused(
+        env,
+        _BARE_MODULE_PUBSPEC,
+        "module",
+        "Expected \"module\" to be an object, but got null (Null).",
+        3,
     )
     return unittest.end(env)
 
@@ -519,6 +728,27 @@ def _bad_libraries_deferred_refused_test_impl(ctx):
     )
     return unittest.end(env)
 
+_BARE_LIBRARIES_DEFERRED_PUBSPEC = """\
+name: bare_libraries_deferred
+flutter:
+  deferred-components:
+    - name: c
+      libraries:
+"""
+
+def _bare_libraries_deferred_refused_test_impl(ctx):
+    """An empty deferred `libraries` value fails at its line."""
+    env = unittest.begin(ctx)
+    _assert_refused(
+        env,
+        _BARE_LIBRARIES_DEFERRED_PUBSPEC,
+        "deferred-components",
+        "\"libraries\" key in the element at index 0 of \"deferred-components\" " +
+        "to be a list of String, but got null (Null).",
+        5,
+    )
+    return unittest.end(env)
+
 _BAD_ASSETS_DEFERRED_PUBSPEC = """\
 name: bad_assets_deferred
 flutter:
@@ -555,6 +785,50 @@ def _flow_fonts_refused_test_impl(ctx):
         _FLOW_FONTS_PUBSPEC,
         "fonts",
         "Expected \"fonts\" to contain maps",
+        3,
+    )
+    return unittest.end(env)
+
+_MULTI_BAD_FLAVORS_PUBSPEC = """\
+name: multi_bad_flavors
+flutter:
+  assets:
+    - path: a.png
+      flavors: [1, 2]
+"""
+
+def _multi_bad_flavors_refused_test_impl(ctx):
+    """Every non-string flavor joins one wrapped refusal, like flutter_tools."""
+    env = unittest.begin(ctx)
+    result = _assert_refused(
+        env,
+        _MULTI_BAD_FLAVORS_PUBSPEC,
+        "flavors",
+        "In flavors section of asset \"a.png\"",
+        5,
+    )
+    asserts.true(
+        env,
+        "but element at index 0 was a int.\nExpected flavors to be a list of " +
+        "String, but element at index 1 was a int." in result.asset_errors[0].detail,
+        result.asset_errors[0].detail,
+    )
+    return unittest.end(env)
+
+_BARE_FONTS_PUBSPEC = """\
+name: bare_fonts
+flutter:
+  fonts:
+"""
+
+def _bare_fonts_refused_test_impl(ctx):
+    """An empty `flutter.fonts` value fails at its line, like flutter_tools."""
+    env = unittest.begin(ctx)
+    _assert_refused(
+        env,
+        _BARE_FONTS_PUBSPEC,
+        "fonts",
+        "Expected \"fonts\" to be a list, but got null (Null).",
         3,
     )
     return unittest.end(env)
@@ -710,14 +984,37 @@ flutter:
   deferred-components: []
 """
 
-def _empty_deferred_loads_test_impl(ctx):
-    """An empty `deferred-components` list stays accepted.
+def _empty_deferred_refused_test_impl(ctx):
+    """An empty `deferred-components` list fails at its line.
 
-    flutter_tools 3.47.7 crashes reading one (an upstream bug, never a
-    reported error), so refusing it would diverge from its errors.
+    flutter_tools 3.47.7 crashes reading one, so no package with one can
+    build; the fetch fails instead of shipping a build flutter_tools
+    cannot read.
     """
     env = unittest.begin(ctx)
-    _assert_accepted(env, _EMPTY_DEFERRED_PUBSPEC)
+    _assert_refused(
+        env,
+        _EMPTY_DEFERRED_PUBSPEC,
+        "deferred-components",
+        "\"deferred-components\" must not be empty",
+        3,
+    )
+    return unittest.end(env)
+
+_BARE_DEFERRED_PUBSPEC = """\
+name: bare_deferred
+flutter:
+  deferred-components:
+"""
+
+def _bare_deferred_loads_test_impl(ctx):
+    """An empty `deferred-components` value stays accepted.
+
+    flutter_tools reads a null value as no components, so only a present
+    empty list is refused.
+    """
+    env = unittest.begin(ctx)
+    _assert_accepted(env, _BARE_DEFERRED_PUBSPEC)
     return unittest.end(env)
 
 _EMPTY_LICENSES_MODULE_PUBSPEC = """\
@@ -785,9 +1082,23 @@ _m32_test = unittest.make(_valid_legacy_plugin_loads_test_impl)
 _m33_test = unittest.make(_empty_platforms_plugin_loads_test_impl)
 _m34_test = unittest.make(_unvalidated_plugin_loads_test_impl)
 _m35_test = unittest.make(_default_package_plugin_loads_test_impl)
-_m36_test = unittest.make(_empty_deferred_loads_test_impl)
+_m36_test = unittest.make(_empty_deferred_refused_test_impl)
 _m37_test = unittest.make(_empty_licenses_module_loads_test_impl)
 _m38_test = unittest.make(_no_flutter_loads_test_impl)
+_m39_test = unittest.make(_root_key_refused_test_impl)
+_m40_test = unittest.make(_root_bool_key_refused_test_impl)
+_m41_test = unittest.make(_bad_name_refused_test_impl)
+_m42_test = unittest.make(_bare_name_refused_test_impl)
+_m43_test = unittest.make(_root_first_test_impl)
+_m44_test = unittest.make(_bool_flutter_key_refused_test_impl)
+_m45_test = unittest.make(_font_bad_key_refused_test_impl)
+_m46_test = unittest.make(_multi_bad_licenses_refused_test_impl)
+_m47_test = unittest.make(_bare_licenses_refused_test_impl)
+_m48_test = unittest.make(_bare_module_refused_test_impl)
+_m49_test = unittest.make(_bare_libraries_deferred_refused_test_impl)
+_m50_test = unittest.make(_multi_bad_flavors_refused_test_impl)
+_m51_test = unittest.make(_bare_fonts_refused_test_impl)
+_m52_test = unittest.make(_bare_deferred_loads_test_impl)
 
 def manifest_validate_test_suite(name):
     """The `flutter:` section validation test suite."""
@@ -832,4 +1143,18 @@ def manifest_validate_test_suite(name):
         _m36_test,
         _m37_test,
         _m38_test,
+        _m39_test,
+        _m40_test,
+        _m41_test,
+        _m42_test,
+        _m43_test,
+        _m44_test,
+        _m45_test,
+        _m46_test,
+        _m47_test,
+        _m48_test,
+        _m49_test,
+        _m50_test,
+        _m51_test,
+        _m52_test,
     )
