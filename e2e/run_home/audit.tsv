@@ -57,6 +57,7 @@
 @rules_flutter//flutter/private/tools:macho_section_type_test	Dart unit test; no CLI spawn
 @rules_flutter//flutter/private/tools:merge_android_manifests_test	Dart unit test; no CLI spawn
 @rules_flutter//flutter/private/tools:merge_plists_test	Dart unit test; no CLI spawn
+@rules_flutter//flutter/private/tools:run_home_test	Dart unit test; no CLI spawn
 @rules_flutter//flutter/private/tools:sha256_test	Dart unit test; no CLI spawn
 @rules_flutter//flutter/private/tools:strip_native_libs_test	Dart unit test; no CLI spawn
 @rules_flutter//flutter/private/tools:web_guard_test	Dart unit test; no CLI spawn
