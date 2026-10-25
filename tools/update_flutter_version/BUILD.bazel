@@ -6,6 +6,7 @@ dart_binary(
         "artifact_list.dart",
         "pinned_checksums.dart",
         "shader_flags.dart",
+        "version_update.dart",
     ],
     main = "main.dart",
 )
@@ -24,5 +25,15 @@ dart_test(
         "pinned_checksums.dart",
     ],
     main = "test/artifact_list_test.dart",
+    deps = ["@dev_tool_deps//:test"],
+)
+
+dart_test(
+    name = "version_update_test",
+    srcs = [
+        "artifact_list.dart",
+        "version_update.dart",
+    ],
+    main = "test/version_update_test.dart",
     deps = ["@dev_tool_deps//:test"],
 )

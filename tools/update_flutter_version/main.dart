@@ -15,66 +15,22 @@
 ///   3. Prints the Starlark snippet to add to versions.bzl
 library;
 
-import 'dart:convert';
 import 'dart:io';
 
-import 'artifact_list.dart';
 import 'pinned_checksums.dart';
 import 'shader_flags.dart';
-
-const gcsBase = 'https://storage.googleapis.com/flutter_infra_release/flutter';
+import 'version_update.dart';
 
 Future<void> main(List<String> args) async {
-  if (args.isEmpty) {
-    stderr.writeln(
-      'Usage: bazel run //tools/update_flutter_version -- <flutter-version>',
-    );
-    exit(1);
-  }
-
-  final version = args[0];
-
-  // Locate the Flutter repo. BUILD_WORKSPACE_DIRECTORY is set by `bazel run`.
-  final workspaceDir =
-      Platform.environment['BUILD_WORKSPACE_DIRECTORY'] ??
-      Directory.current.path;
-  final flutterRepo =
-      Platform.environment['FLUTTER_REPO'] ??
-      '$workspaceDir/references/flutter';
+  final request = resolveVersionRequest(args);
+  final version = request.version;
 
   print('Flutter version: $version');
-  print('Flutter repo: $flutterRepo');
+  print('Flutter repo: ${request.flutterRepo}');
 
-  // Get engine revision from the Flutter tag.
-  final gitResult = Process.runSync(
-    'git',
-    ['show', '$version:bin/internal/engine.version'],
-    workingDirectory: flutterRepo,
-  );
-  if (gitResult.exitCode != 0) {
-    stderr.writeln(
-      'ERROR: Could not find engine.version for tag $version in $flutterRepo',
-    );
-    stderr.writeln('Make sure the tag exists: git fetch --tags');
-    exit(1);
-  }
-  final engineRev = (gitResult.stdout as String).trim();
-  print('Engine revision: $engineRev');
-
-  // Get material fonts URL from the Flutter repo.
-  final materialFontsResult = Process.runSync(
-    'git',
-    ['show', '$version:bin/internal/material_fonts.version'],
-    workingDirectory: flutterRepo,
-  );
-  if (materialFontsResult.exitCode != 0) {
-    stderr.writeln(
-      'ERROR: Could not find material_fonts.version for tag $version',
-    );
-    exit(1);
-  }
-  final materialFontsUrl = (materialFontsResult.stdout as String).trim();
-  print('Material fonts URL: $materialFontsUrl');
+  final engine = await readEngineRevisions(version, request.flutterRepo);
+  final engineRev = engine.engineRev;
+  final materialFontsUrl = engine.materialFontsUrl;
 
   // Download artifacts and compute checksums.
   print('');
@@ -84,340 +40,42 @@ Future<void> main(List<String> args) async {
 
   // Archives already pinned for this version are not downloaded again.
   final versionsBzl = File(
-    '$workspaceDir/flutter/private/versions.bzl',
+    '${request.workspaceDir}/flutter/private/versions.bzl',
   ).readAsStringSync();
   final pinned = pinnedArtifactChecksums(versionsBzl, version);
-  final checksums = <String, String>{};
-  final failures = <String>[];
   final client = HttpClient();
-
-  for (final artifact in artifacts) {
-    final known = pinned[artifact];
-    if (known != null) {
-      checksums[artifact] = known;
-      print('  $artifact ... $known (pinned)');
-      continue;
-    }
-    final url = '$gcsBase/$engineRev/$artifact';
-    stdout.write('  $artifact ... ');
-
-    try {
-      final sha = await _downloadAndHash(client, url);
-      checksums[artifact] = sha;
-      print(sha);
-    } catch (e) {
-      print('FAILED ($e)');
-      failures.add(artifact);
-    }
-  }
-
-  // The Flutter source tarball. Not an engine artifact — it comes from GitHub,
-  // keyed by release tag rather than engine revision. Every rule that needs
-  // Flutter's own Dart source pins this one checksum: the per-package SDK
-  // spokes, the vendored gen-l10n generator, and the FLUTTER_ROOT tree behind
-  // `flutter:pub`. A version entry without it cannot be built.
-  final pinnedSource = pinnedSourceSha256(versionsBzl, version);
-  if (pinnedSource != null) {
-    checksums['__source__'] = pinnedSource;
-    print('  flutter-$version.tar.gz (source) ... $pinnedSource (pinned)');
-  } else {
-    final url =
-        'https://github.com/flutter/flutter/archive/refs/tags/$version.tar.gz';
-    stdout.write('  flutter-$version.tar.gz (source) ... ');
-    try {
-      final sha = await _downloadAndHash(client, url);
-      checksums['__source__'] = sha;
-      print(sha);
-    } catch (e) {
-      print('FAILED ($e)');
-      failures.add('flutter-$version.tar.gz');
-    }
-  }
-
-  // Download material fonts and compute checksum.
-  final pinnedFonts = pinned['material_fonts.zip'];
-  if (pinnedFonts != null) {
-    checksums['material_fonts.zip'] = pinnedFonts;
-    print('  material_fonts.zip ... $pinnedFonts (pinned)');
-  } else {
-    final url = 'https://storage.googleapis.com/$materialFontsUrl';
-    stdout.write('  material_fonts.zip ... ');
-    try {
-      final sha = await _downloadAndHash(client, url);
-      checksums['material_fonts.zip'] = sha;
-      print(sha);
-    } catch (e) {
-      print('FAILED ($e)');
-      failures.add('material_fonts.zip');
-    }
-  }
-
-  client.close();
-
-  // Check Linux sysroot checksums from the engine's sysroots.json.
-  // The file lives in the Flutter monorepo at the version tag, under
-  // engine/src/build/linux/sysroot_scripts/sysroots.json.
-  print('');
-  print('Checking Linux sysroot checksums...');
-  final sysrootsRef =
-      '$version:engine/src/build/linux/sysroot_scripts/sysroots.json';
-  final sysrootsResult = Process.runSync(
-    'git',
-    ['show', sysrootsRef],
-    workingDirectory: flutterRepo,
+  final outcome = await downloadAllChecksums(
+    client,
+    DownloadSpec(
+      version: version,
+      engineRev: engineRev,
+      materialFontsUrl: materialFontsUrl,
+      pinned: pinned,
+      pinnedSource: pinnedSourceSha256(versionsBzl, version),
+    ),
   );
-  if (sysrootsResult.exitCode == 0) {
-    // Read current checksums from versions.bzl so we compare against the
-    // actual committed values, not hardcoded copies. Deliberately outside the
-    // try below, which reports whatever it catches as a sysroots.json parse
-    // failure: a versions.bzl that can't be read is a different fact.
-    final currentChecksums = _readCurrentSysrootChecksums(workspaceDir);
+  client.close();
+  final checksums = outcome.checksums;
+  final failures = outcome.failures;
 
-    // The try covers the decode alone, which is the only step its message
-    // describes. Reading the entries outside it is what lets them throw:
-    // jsonDecode raises FormatException too, so a catch spanning both could
-    // not tell a malformed file from one that simply lacks what we pin.
-    Map<String, dynamic>? sysroots;
-    try {
-      sysroots =
-          jsonDecode(sysrootsResult.stdout as String) as Map<String, dynamic>;
-    } catch (e) {
-      print('  WARNING: Failed to parse sysroots.json: $e');
-    }
+  await reportSysrootChecksums(version, request.flutterRepo, request.workspaceDir);
 
-    if (sysroots != null) {
-      final newChecksums = _readEngineSysrootChecksums(sysroots, sysrootsRef);
-      final changed =
-          newChecksums['amd64'] != currentChecksums['amd64'] ||
-          newChecksums['arm64'] != currentChecksums['arm64'];
-      if (changed) {
-        print('  WARNING: Sysroot checksums have changed!');
-        print(
-          '  Update LINUX_SYSROOT_CHECKSUMS in flutter/private/versions.bzl:',
-        );
-        print('');
-        print('LINUX_SYSROOT_CHECKSUMS = {');
-        print('    "amd64": "${newChecksums['amd64']}",');
-        print('    "arm64": "${newChecksums['arm64']}",');
-        print('}');
-      } else {
-        print('  Sysroot checksums unchanged.');
-      }
-    }
-  } else {
-    print(
-      '  Could not read sysroots.json for tag $version (path may differ in older Flutter versions).',
-    );
-  }
-
-  _checkShaderFlags(version, flutterRepo, workspaceDir);
+  _checkShaderFlags(version, request.flutterRepo, request.workspaceDir);
 
   if (failures.isNotEmpty) {
-    stderr.writeln('');
-    stderr.writeln(
-      'ERROR: ${failures.length} artifact(s) could not be downloaded and hashed:',
-    );
-    for (final artifact in failures) {
-      stderr.writeln('  $artifact');
-    }
-    stderr.writeln(
-      'Their entries above read MISSING. Fix the download and re-run.',
-    );
+    stderr.write(renderFailuresReport(failures));
     exitCode = 1;
   }
 
   // Print Starlark snippet.
-  print('');
-  print('=== Add to FLUTTER_VERSIONS in flutter/private/versions.bzl ===');
-  print('');
-  print('    "$version": struct(');
-  print('        engine_revision = "$engineRev",');
-  print('        material_fonts_url = "$materialFontsUrl",');
-  print('        # sha256 of the GitHub source tarball. Required: every');
-  print('        # fetch of the framework source is pinned against it.');
-  print('        source_sha256 = "${checksums['__source__'] ?? 'FIXME'}",');
-  print('    ),');
-  print('');
-  print('=== Add to ARTIFACT_CHECKSUMS in flutter/private/versions.bzl ===');
-  print('');
-  print('    "$version": {');
-  for (final section in artifactSections) {
-    print('        # ${section.comment}');
-    for (final path in section.paths) {
-      _printChecksum(checksums, path);
-    }
-  }
-  print(
-    '        # Material design fonts (MaterialIcons-Regular.otf, Roboto family)',
+  stdout.write(
+    renderVersionSnippet(
+      version: version,
+      engineRev: engineRev,
+      materialFontsUrl: materialFontsUrl,
+      checksums: checksums,
+    ),
   );
-  _printChecksum(checksums, 'material_fonts.zip');
-  print('    },');
-}
-
-void _printChecksum(Map<String, String> checksums, String artifact) {
-  final sha = checksums[artifact] ?? 'MISSING';
-  print('        "$artifact": "$sha",');
-}
-
-/// A failure to produce an artifact's SHA-256, in either the download or the
-/// hashing step.
-///
-/// A named type rather than a thrown `String`, because a raw string is neither
-/// an `Exception` nor an `Error`: `on Exception` never matches one, so a caller
-/// that ever catches selectively would miss these entirely. `toString` returns
-/// the bare message, so the reports below print it unadorned.
-class ArtifactChecksumException implements Exception {
-  final String message;
-
-  ArtifactChecksumException(this.message);
-
-  @override
-  String toString() => message;
-}
-
-Future<String> _downloadAndHash(HttpClient client, String url) async {
-  final uri = Uri.parse(url);
-  final request = await client.getUrl(uri);
-  final response = await request.close();
-
-  // Follow redirects manually if needed.
-  if (response.statusCode == 302 || response.statusCode == 301) {
-    final location = response.headers['location']?.first;
-    if (location != null) {
-      await response.drain<void>();
-      return _downloadAndHash(client, location);
-    }
-  }
-
-  if (response.statusCode != 200) {
-    await response.drain<void>();
-    throw ArtifactChecksumException('HTTP ${response.statusCode}');
-  }
-
-  // Download to a temp file, then compute SHA-256 using a platform-appropriate tool.
-  final tempDir = await Directory.systemTemp.createTemp('flutter_hash_');
-  final tempFile = File('${tempDir.path}/artifact');
-  final sink = tempFile.openWrite();
-  await response.pipe(sink);
-
-  try {
-    final hash = await _sha256OfFile(tempFile.path);
-    return hash;
-  } finally {
-    await tempDir.delete(recursive: true);
-  }
-}
-
-/// Reads LINUX_SYSROOT_CHECKSUMS from versions.bzl.
-///
-/// Returns a map like `{'amd64': '<sha256>', 'arm64': '<sha256>'}`, always with
-/// both keys.
-///
-/// Throws [FileSystemException] if versions.bzl cannot be read, and
-/// [FormatException] if it carries no `LINUX_SYSROOT_CHECKSUMS` block or that
-/// block is missing an architecture. None of those states has a defensible
-/// stand-in value: the caller compares what it gets here against the engine's
-/// current checksums, so any placeholder reports "changed" — making a file this
-/// tool failed to read indistinguishable from a checksum that genuinely moved,
-/// at the moment that distinction matters most.
-Map<String, String> _readCurrentSysrootChecksums(String workspaceDir) {
-  final path = '$workspaceDir/flutter/private/versions.bzl';
-  final content = File(path).readAsStringSync();
-
-  // Bound the scan to this block's own braces, anchored at the top-level
-  // assignment. Scanning from the marker to end of file instead would let any
-  // later block carrying these keys overwrite the real values and win silently;
-  // anchoring at line start keeps a differently-named block that merely ends in
-  // this name (`OLD_LINUX_SYSROOT_CHECKSUMS`) from claiming the match.
-  final block = RegExp(
-    r'^LINUX_SYSROOT_CHECKSUMS\s*=\s*\{([^}]*)\}',
-    multiLine: true,
-  ).firstMatch(content);
-  if (block == null) {
-    throw FormatException('No LINUX_SYSROOT_CHECKSUMS block in $path');
-  }
-
-  // Match lines like:   "amd64": "abc123...",
-  final pattern = RegExp(r'"(amd64|arm64)":\s*"([a-f0-9]+)"');
-  final result = <String, String>{
-    for (final match in pattern.allMatches(block.group(1)!))
-      match.group(1)!: match.group(2)!,
-  };
-
-  for (final arch in const ['amd64', 'arm64']) {
-    if (!result.containsKey(arch)) {
-      throw FormatException(
-        'No "$arch" checksum in LINUX_SYSROOT_CHECKSUMS in $path',
-      );
-    }
-  }
-  return result;
-}
-
-/// Reads the sysroot checksums we pin out of the engine's decoded sysroots.json.
-///
-/// Returns a map like `{'amd64': '<sha256>', 'arm64': '<sha256>'}`, always with
-/// both keys — the mirror of [_readCurrentSysrootChecksums], so the caller
-/// compares two complete maps and can print both lines of its suggested
-/// replacement block unconditionally.
-///
-/// Throws [FormatException] naming [source] if either bullseye entry is absent
-/// or carries no string `Sha256Sum`. An absent entry is a state upstream really
-/// ships: Flutter through 3.35.x keyed this file `sid_*`, 3.38 onward
-/// `bullseye_*`, and today's file already carries a `trixie_riscv64` from the
-/// next such migration. So a missing entry means the sysroot generation we pin
-/// moved, not that the file is corrupt — and no replacement checksum exists to
-/// suggest, because the entry it would come from is gone. The keys that were
-/// found go in the message, since those are the new names.
-Map<String, String> _readEngineSysrootChecksums(
-  Map<String, dynamic> sysroots,
-  String source,
-) {
-  final result = <String, String>{};
-  for (final arch in const ['amd64', 'arm64']) {
-    final entry = sysroots['bullseye_$arch'];
-    if (entry == null) {
-      throw FormatException(
-        'No "bullseye_$arch" entry in $source '
-        '(found: ${sysroots.keys.join(', ')})',
-      );
-    }
-    final sha = entry is Map ? entry['Sha256Sum'] : null;
-    if (sha is! String) {
-      throw FormatException(
-        'No string "Sha256Sum" for "bullseye_$arch" in $source',
-      );
-    }
-    result[arch] = sha;
-  }
-  return result;
-}
-
-Future<String> _sha256OfFile(String path) async {
-  if (Platform.isWindows) {
-    // certutil outputs multiple lines; the hash is on the second line.
-    final result = await Process.run('certutil', ['-hashfile', path, 'SHA256']);
-    if (result.exitCode != 0) {
-      throw ArtifactChecksumException('certutil failed: ${result.stderr}');
-    }
-    final lines = (result.stdout as String).trim().split('\n');
-    if (lines.length < 2) {
-      throw ArtifactChecksumException('Unexpected certutil output');
-    }
-    return lines[1].trim().replaceAll(' ', '');
-  } else {
-    // macOS and Linux: use sha256sum (Linux) or shasum -a 256 (macOS).
-    ProcessResult result;
-    if (Platform.isMacOS) {
-      result = await Process.run('shasum', ['-a', '256', path]);
-    } else {
-      result = await Process.run('sha256sum', [path]);
-    }
-    if (result.exitCode != 0) {
-      throw ArtifactChecksumException('sha256 hash failed: ${result.stderr}');
-    }
-    return (result.stdout as String).split(' ').first;
-  }
 }
 
 /// Compares `SHADER_PLATFORM_FLAGS` with the runtime stages flutter_tools at
