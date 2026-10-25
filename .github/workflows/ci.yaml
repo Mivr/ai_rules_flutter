@@ -34,9 +34,10 @@
 #   unit-tests:          root unit tests, plus the digest-mismatch red fetch
 #     (e2e/digest_mismatch, expected to fail on Bazel's checksum error), the
 #     xtool red fetch (e2e/xtool_sdk_invalid, expected to fail on the
-#     nonexistent bundle path) and the pubspec-shape red fetch
+#     nonexistent bundle path) and the pubspec-shape red fetches
 #     (e2e/pub_flutter_shape_red, expected to fail on the malformed
-#     `flutter.assets` section)
+#     `flutter.assets`/`flutter.fonts` sections and the unreadable
+#     `environment.sdk` constraints)
 #   e2e-linux-app:       hello_world, codegen
 #   e2e-linux-small:     smoke, dual_hub, ffi_example, ffi_plugin_example,
 #     web_example
@@ -374,6 +375,36 @@ jobs:
           fi
           echo "$out" | grep -F 'for font -> weight'
           echo "$out" | grep -F 'pubspec.yaml line 18'
+      # SDK-constraint red path: e2e/pub_flutter_shape_red also carries a
+      # path package whose pubspec declares `environment.sdk: "3.10"` (a
+      # string pub_semver refuses). The spoke fetch must fail on the sdk
+      # refusal naming the package, its pubspec.yaml and environment.sdk
+      # instead of deriving a default language version. Both greps pin the
+      # refusal so a skip or a differently-worded failure cannot pass as
+      # red.
+      - name: Unreadable environment.sdk fetch fails on the sdk refusal
+        working-directory: e2e/pub_flutter_shape_red
+        run: |
+          if out=$(bazel fetch @red_deps//:bad_sdk 2>&1); then
+            echo "$out"
+            echo "expected the bad-sdk fetch to fail, but it succeeded"
+            exit 1
+          fi
+          echo "$out" | grep -F 'bad_sdk in bad_sdk/pubspec.yaml: invalid environment.sdk constraint "3.10"'
+      # SDK-type red path: e2e/pub_flutter_shape_red also carries a path
+      # package whose pubspec declares a non-string `environment.sdk: 3.5`.
+      # The spoke fetch must fail on the same sdk refusal. Both greps pin
+      # the refusal so a skip or a differently-worded failure cannot pass
+      # as red.
+      - name: Non-string environment.sdk fetch fails on the sdk refusal
+        working-directory: e2e/pub_flutter_shape_red
+        run: |
+          if out=$(bazel fetch @red_deps//:bad_sdk_type 2>&1); then
+            echo "$out"
+            echo "expected the non-string-sdk fetch to fail, but it succeeded"
+            exit 1
+          fi
+          echo "$out" | grep -F 'bad_sdk_type in bad_sdk_type/pubspec.yaml: invalid environment.sdk constraint "3.5"'
       # Compile-soundness red path: the entrypoint imports a sibling that
       # exists on disk but is never declared, so executing the compile must
       # fail on the guard's refusal — never with a built dill. The target is

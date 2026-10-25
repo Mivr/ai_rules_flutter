@@ -11,7 +11,7 @@ Omitting it is not neutral: `package_config.json` reads a missing
 """
 
 load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version")
-load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_deps", "parse_pubspec_sdk_constraint")
+load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_deps", "parse_pubspec_sdk_constraint", "pubspec_sdk_constraint_error")
 load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url", "require_sha256")
 load("//flutter/private:download.bzl", "pinned_download_and_extract")
 load("//flutter/private:local_sdk.bzl", "link_local_dir", "link_local_file", "resolve_local_sdk_root")
@@ -147,6 +147,9 @@ def _flutter_sdk_package_impl(repository_ctx):
     pubspec_path = repository_ctx.path("pubspec.yaml")
     if pubspec_path.exists:
         content = repository_ctx.read(pubspec_path)
+        sdk_err = pubspec_sdk_constraint_error(content, package_name + "/pubspec.yaml")
+        if sdk_err:
+            fail(sdk_err)
         all_deps = parse_pubspec_deps(content)
         available = {p: True for p in repository_ctx.attr.lock_packages}
         bazel_deps = sorted([d for d in all_deps if d in available])

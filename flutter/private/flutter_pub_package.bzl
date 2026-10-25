@@ -28,7 +28,7 @@ surface small).
 """
 
 load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version", "make_dart_library_build_content")
-load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_deps", "parse_pubspec_sdk_constraint")
+load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_deps", "parse_pubspec_sdk_constraint", "pubspec_sdk_constraint_error")
 load("//flutter/private:flutter_pub_scan.bzl", "fetch_hosted_archive", "scan_hosted_archive", "walk_hosted_package")
 load("//flutter/private:flutter_pubspec.bzl", "asset_flavor_error", "parse_flutter_assets_block", "parse_flutter_plugin_block", "parse_pubspec")
 load(":asset_uri.bzl", "normalize_spoke_asset_block", "normalize_spoke_assets", "normalize_spoke_fonts", "normalize_spoke_shaders")
@@ -37,6 +37,11 @@ load(
     "check_asset_entry_problems",
     "ctx_package_lister",
     "expand_pub_asset_entries",
+)
+load(
+    ":flutter_pub_cover.bzl",
+    "covering_entry",
+    "covering_entry_lookup",
 )
 load(
     ":flutter_pub_mirror.bzl",
@@ -1942,6 +1947,9 @@ def _read_spoke_pubspec(ctx):
     pubspec_path = ctx.path("pubspec.yaml")
     if pubspec_path.exists:
         pubspec_content = ctx.read(pubspec_path)
+        sdk_err = pubspec_sdk_constraint_error(pubspec_content, ctx.attr.package_name + "/pubspec.yaml")
+        if sdk_err:
+            fail(sdk_err)
         all_deps = parse_pubspec_deps(pubspec_content)
         available = {p: True for p in ctx.attr.lock_packages}
         bazel_deps = sorted([d for d in all_deps if d in available])
@@ -1974,60 +1982,6 @@ def _spoke_dep_labels(ctx, bazel_deps, asset_block):
         dep_labels = dep_labels + ["@rules_flutter//flutter:material_icons"]
     return dep_labels
 
-def _covering_entry_lookup(parsed_assets):
-    """Index asset declarations for linear covering-entry lookup.
-
-    Records each declaration's position so `_covering_entry` replays the
-    scan's first-match-in-declaration-order rule through dict lookups:
-    exact file entries by path, trailing-slash directory entries by
-    directory path. Built once per fetch; every walked file below then
-    resolves in time linear in its own depth.
-
-    Args:
-        parsed_assets: The `assets` of `parse_flutter_assets_block`.
-
-    Returns:
-        A struct `(exact, dirs)` of declaration-path-to-position dicts.
-    """
-    exact = {}
-    dirs = {}
-    for i, entry in enumerate(parsed_assets):
-        if entry.path.endswith("/"):
-            if entry.path not in dirs:
-                dirs[entry.path] = i
-        elif entry.path not in exact:
-            exact[entry.path] = i
-    return struct(exact = exact, dirs = dirs)
-
-def _covering_entry(lookup, path):
-    """The `flutter.assets` declaration covering `path`, for failure messages.
-
-    A direct entry covers itself; a trailing-slash directory declaration
-    covers every file walked out of it. Falls back to the path itself when
-    no declaration covers it (a font asset or a shader path). When several
-    declarations cover `path`, the earliest in declaration order wins, the
-    way the scan it replaces did.
-
-    Args:
-        lookup: A `_covering_entry_lookup` index over the declarations.
-        path: The walked or declared file path to cover.
-
-    Returns:
-        The covering declaration's path, or `path` itself.
-    """
-    hit = None
-    hit_at = None
-    if path in lookup.exact:
-        hit = path
-        hit_at = lookup.exact[path]
-    ancestor = ""
-    for part in path.split("/")[:-1]:
-        ancestor = ancestor + part + "/"
-        if ancestor in lookup.dirs and (hit_at == None or lookup.dirs[ancestor] < hit_at):
-            hit = ancestor
-            hit_at = lookup.dirs[ancestor]
-    return hit if hit != None else path
-
 def check_spoke_file_names(package_name, asset_block, expanded):
     """Fail the spoke fetch on declared or walked names no target can name.
 
@@ -2048,9 +2002,9 @@ def check_spoke_file_names(package_name, asset_block, expanded):
     for entry in asset_block.assets:
         if not entry.path.endswith("/"):
             check_spoke_file_name(package_name, entry.path, entry.path)
-    lookup = _covering_entry_lookup(asset_block.assets)
+    lookup = covering_entry_lookup(asset_block.assets)
     for item in expanded:
-        check_spoke_file_name(package_name, _covering_entry(lookup, item.path), item.path)
+        check_spoke_file_name(package_name, covering_entry(lookup, item.path), item.path)
     for family in asset_block.fonts:
         for font in family.fonts:
             check_spoke_file_name(package_name, "flutter.fonts[" + family.family + "]", font.asset)

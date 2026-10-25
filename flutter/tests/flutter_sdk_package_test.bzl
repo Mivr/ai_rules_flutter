@@ -12,7 +12,7 @@ language version instead — silently more permissive than pub.
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version")
-load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_deps", "parse_pubspec_sdk_constraint")
+load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_deps", "parse_pubspec_sdk_constraint", "pubspec_sdk_constraint_error")
 load("//flutter/private:flutter_sdk_package.bzl", "make_flutter_sdk_build_content")
 
 # Verbatim `packages/flutter/pubspec.yaml` from the pinned Flutter 3.47.7.
@@ -148,6 +148,71 @@ def _pubspec_without_environment_yields_no_language_version_test_impl(ctx):
 
     return unittest.end(env)
 
+# A pubspec whose `environment.sdk` is a string pub_semver refuses. `3.10`
+# is a bare partial version; the fetch must fail rather than fall back to a
+# default language version. The `fail()` itself runs in the repository rule
+# and is untestable here, so these tests pin the predicate and its message.
+_SDK_BAD_STRING_PUBSPEC = """\
+name: probe_pkg
+environment:
+  sdk: "3.10"
+"""
+
+# A pubspec whose `environment.sdk` is not a string at all. Pub requires a
+# version-constraint string; a bare number must fail the same way.
+_SDK_NON_STRING_PUBSPEC = """\
+name: probe_pkg
+environment:
+  sdk: 3.5
+"""
+
+def _bad_string_sdk_constraint_is_refused_test_impl(ctx):
+    """A refused sdk string fails naming package, pubspec.yaml and environment.sdk."""
+    env = unittest.begin(ctx)
+
+    err = pubspec_sdk_constraint_error(_SDK_BAD_STRING_PUBSPEC, "probe_pkg/pubspec.yaml")
+    asserts.true(env, err != None, "bad sdk string is refused")
+    asserts.true(env, "probe_pkg" in err, "refusal names the package: %s" % err)
+    asserts.true(env, "pubspec.yaml" in err, "refusal names pubspec.yaml: %s" % err)
+    asserts.true(env, "environment.sdk" in err, "refusal names environment.sdk: %s" % err)
+    asserts.true(env, '"3.10"' in err, "refusal quotes the value: %s" % err)
+
+    return unittest.end(env)
+
+def _non_string_sdk_constraint_is_refused_test_impl(ctx):
+    """A non-string sdk fails naming package, pubspec.yaml and environment.sdk."""
+    env = unittest.begin(ctx)
+
+    err = pubspec_sdk_constraint_error(_SDK_NON_STRING_PUBSPEC, "probe_pkg/pubspec.yaml")
+    asserts.true(env, err != None, "non-string sdk is refused")
+    asserts.true(env, "probe_pkg" in err, "refusal names the package: %s" % err)
+    asserts.true(env, "pubspec.yaml" in err, "refusal names pubspec.yaml: %s" % err)
+    asserts.true(env, "environment.sdk" in err, "refusal names environment.sdk: %s" % err)
+    asserts.true(env, '"3.5"' in err, "refusal quotes the value: %s" % err)
+
+    return unittest.end(env)
+
+def _clean_sdk_constraints_read_as_before_test_impl(ctx):
+    """A valid, null or missing `environment.sdk` reads exactly as before.
+
+    The predicate is refusal-only: anything it does not refuse returns
+    None, and the spoke derives the language version down the old path.
+    """
+    env = unittest.begin(ctx)
+
+    for content in [
+        "name: probe_pkg\nenvironment:\n  sdk: ^3.0.0\n",
+        "name: probe_pkg\nenvironment:\n  sdk:\n",
+        "name: probe_pkg\n",
+    ]:
+        asserts.true(
+            env,
+            pubspec_sdk_constraint_error(content, "probe_pkg/pubspec.yaml") == None,
+            "sdk block reads as before:\n%s" % content,
+        )
+
+    return unittest.end(env)
+
 _derives_the_language_version_from_the_sdk_constraint_test = unittest.make(
     _derives_the_language_version_from_the_sdk_constraint_test_impl,
 )
@@ -163,6 +228,15 @@ _non_flutter_spoke_declares_its_language_version_test = unittest.make(
 _pubspec_without_environment_yields_no_language_version_test = unittest.make(
     _pubspec_without_environment_yields_no_language_version_test_impl,
 )
+_bad_string_sdk_constraint_is_refused_test = unittest.make(
+    _bad_string_sdk_constraint_is_refused_test_impl,
+)
+_non_string_sdk_constraint_is_refused_test = unittest.make(
+    _non_string_sdk_constraint_is_refused_test_impl,
+)
+_clean_sdk_constraints_read_as_before_test = unittest.make(
+    _clean_sdk_constraints_read_as_before_test_impl,
+)
 
 def flutter_sdk_package_test_suite(name):
     unittest.suite(
@@ -172,4 +246,7 @@ def flutter_sdk_package_test_suite(name):
         _flutter_spoke_declares_its_language_version_test,
         _non_flutter_spoke_declares_its_language_version_test,
         _pubspec_without_environment_yields_no_language_version_test,
+        _bad_string_sdk_constraint_is_refused_test,
+        _non_string_sdk_constraint_is_refused_test,
+        _clean_sdk_constraints_read_as_before_test,
     )

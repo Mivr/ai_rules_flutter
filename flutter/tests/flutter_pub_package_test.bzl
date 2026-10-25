@@ -11,6 +11,7 @@ The fixture shapes mirror real pub.dev plugins:
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
+load("@rules_dart//dart/pub:yaml_parser.bzl", "pubspec_sdk_constraint_error")
 load(
     "//flutter/private:flutter_pub_package.bzl",
     "apply_overlay_substitutions",
@@ -2226,6 +2227,42 @@ gradle_namespace_qualified_test = unittest.make(
     _gradle_namespace_qualified_test_impl,
 )
 
+# `_read_spoke_pubspec` refuses a present, non-null `environment.sdk` pub
+# does not read before deriving anything, so a bad constraint can never
+# silently fall back to a default language version. The `fail()` itself runs
+# in the repository rule and is untestable here, so this test pins the
+# predicate and its message through a path-package label.
+def _spoke_sdk_constraint_refusal_test_impl(ctx):
+    env = unittest.begin(ctx)
+
+    for content, quoted in [
+        ("name: my_pkg\nenvironment:\n  sdk: \"3.10\"\n", '"3.10"'),
+        ("name: my_pkg\nenvironment:\n  sdk: 3.5\n", '"3.5"'),
+    ]:
+        err = pubspec_sdk_constraint_error(content, "my_pkg/pubspec.yaml")
+        asserts.true(env, err != None, "bad sdk is refused:\n%s" % content)
+        asserts.true(env, "my_pkg" in err, "refusal names the package: %s" % err)
+        asserts.true(env, "pubspec.yaml" in err, "refusal names pubspec.yaml: %s" % err)
+        asserts.true(env, "environment.sdk" in err, "refusal names environment.sdk: %s" % err)
+        asserts.true(env, quoted in err, "refusal quotes the value: %s" % err)
+
+    for content in [
+        "name: my_pkg\nenvironment:\n  sdk: ^3.0.0\n",
+        "name: my_pkg\nenvironment:\n  sdk:\n",
+        "name: my_pkg\n",
+    ]:
+        asserts.true(
+            env,
+            pubspec_sdk_constraint_error(content, "my_pkg/pubspec.yaml") == None,
+            "sdk block reads as before:\n%s" % content,
+        )
+
+    return unittest.end(env)
+
+spoke_sdk_constraint_refusal_test = unittest.make(
+    _spoke_sdk_constraint_refusal_test_impl,
+)
+
 def flutter_pub_package_test_suite(name):
     unittest.suite(
         name,
@@ -2281,4 +2318,5 @@ def flutter_pub_package_test_suite(name):
         java_package_name_validation_test,
         maven_dep_label_validation_test,
         hostile_label_renders_inert_test,
+        spoke_sdk_constraint_refusal_test,
     )
