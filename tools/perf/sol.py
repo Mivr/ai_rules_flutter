@@ -507,6 +507,86 @@ def snapshot_tree(root):
     return seen
 
 
+def _is_protected(path, declared):
+    """Whether a chain path is a declared output or covers one.
+
+    A path equal to, under, or above a declared output stays: declared
+    outputs are restored separately, and anything above one is a parent
+    the restore walks back through.
+    """
+    for root in declared:
+        if (path == root or path.startswith(root + os.sep)
+                or root.startswith(path + os.sep)):
+            return True
+    return False
+
+
+def _drop_chain_file(full):
+    """Removes one undeclared chain file or link, loudly on failure.
+
+    A removal failure raises RuntimeError naming the path: the next
+    build must never run over a hole the sweep left behind.
+    """
+    try:
+        os.remove(full)
+    except OSError as exc:
+        raise RuntimeError("sol cannot remove chain side effect %s "
+                           "(%s)" % (full, exc))
+
+
+def _sweep_undeclared_files(base, declared, before):
+    """Removes undeclared chain files under base; returns relpaths."""
+    removed = []
+    for dirpath, _, filenames in os.walk(base, followlinks=False):
+        for name in filenames:
+            full = os.path.normpath(os.path.join(dirpath, name))
+            if full not in before and not _is_protected(full, declared):
+                _drop_chain_file(full)
+                removed.append(os.path.relpath(full, base))
+    return removed
+
+
+def _sweep_undeclared_links(base, declared, before):
+    """Removes undeclared chain symlinks under base; returns relpaths.
+
+    Links hide in dirnames (os.walk lists them as dirs): a link the
+    chain created is removed like a file, never descended into.
+    """
+    removed = []
+    for dirpath, dirnames, _ in os.walk(base, followlinks=False):
+        for name in list(dirnames):
+            full = os.path.join(dirpath, name)
+            if not os.path.islink(full):
+                continue
+            norm = os.path.normpath(full)
+            if norm not in before and not _is_protected(norm, declared):
+                _drop_chain_file(full)
+                removed.append(os.path.relpath(norm, base))
+    return removed
+
+
+def _sweep_empty_dirs(base, declared, before):
+    """Removes dirs the sweep emptied under base; returns relpaths.
+
+    Bottom-up, so an emptied parent goes once its children are gone;
+    base itself, Bazel's own paths and anything covering a declared
+    output stay.
+    """
+    removed = []
+    for dirpath, _, _ in os.walk(base, followlinks=False, topdown=False):
+        norm = os.path.normpath(dirpath)
+        if norm == base or norm in before or _is_protected(norm, declared):
+            continue
+        try:
+            if not os.listdir(norm):
+                os.rmdir(norm)
+                removed.append(os.path.relpath(norm, base))
+        except OSError as exc:
+            raise RuntimeError("sol cannot remove chain side-effect dir "
+                               "%s (%s)" % (norm, exc))
+    return removed
+
+
 def sweep_chain_side_effects(bazel_out, declared_outputs, before):
     """Removes chain-created files/dirs under bazel-out no step declares.
 
@@ -523,49 +603,12 @@ def sweep_chain_side_effects(bazel_out, declared_outputs, before):
     """
     base = os.path.abspath(bazel_out)
     declared = [os.path.normpath(path) for path in declared_outputs]
-
-    def protected(path):
-        for root in declared:
-            if (path == root or path.startswith(root + os.sep)
-                    or root.startswith(path + os.sep)):
-                return True
-        return False
-
-    def drop_file(full):
-        try:
-            os.remove(full)
-        except OSError as exc:
-            raise RuntimeError("sol cannot remove chain side effect %s "
-                               "(%s)" % (full, exc))
-
     removed = []
     if not os.path.isdir(base):
         return {"n": 0, "paths": []}
-    for dirpath, dirnames, filenames in os.walk(base, followlinks=False):
-        for name in filenames:
-            full = os.path.normpath(os.path.join(dirpath, name))
-            if full not in before and not protected(full):
-                drop_file(full)
-                removed.append(os.path.relpath(full, base))
-        for name in list(dirnames):
-            full = os.path.join(dirpath, name)
-            if not os.path.islink(full):
-                continue
-            norm = os.path.normpath(full)
-            if norm not in before and not protected(norm):
-                drop_file(full)
-                removed.append(os.path.relpath(norm, base))
-    for dirpath, _, _ in os.walk(base, followlinks=False, topdown=False):
-        norm = os.path.normpath(dirpath)
-        if norm == base or norm in before or protected(norm):
-            continue
-        try:
-            if not os.listdir(norm):
-                os.rmdir(norm)
-                removed.append(os.path.relpath(norm, base))
-        except OSError as exc:
-            raise RuntimeError("sol cannot remove chain side-effect dir "
-                               "%s (%s)" % (norm, exc))
+    removed.extend(_sweep_undeclared_files(base, declared, before))
+    removed.extend(_sweep_undeclared_links(base, declared, before))
+    removed.extend(_sweep_empty_dirs(base, declared, before))
     removed = sorted(set(removed))
     return {"n": len(removed), "paths": removed[:10]}
 

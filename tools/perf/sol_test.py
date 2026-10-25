@@ -319,6 +319,78 @@ class SweepSideEffectsTest(unittest.TestCase):
             {"n": 0, "paths": []})
 
 
+class SweepPassesTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="sol-passes-")
+        self.bazel_out = os.path.join(self.tmp, "execroot", "bazel-out")
+        os.makedirs(os.path.join(self.bazel_out, "x"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def write(self, rel, data=b"x"):
+        path = os.path.join(self.bazel_out, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as fh:
+            fh.write(data)
+        return path
+
+    def test_protected_covers_equal_under_and_above(self):
+        declared = [os.path.join(self.bazel_out, "x", "out.zip")]
+        self.assertTrue(sol._is_protected(declared[0], declared))
+        self.assertTrue(sol._is_protected(
+            os.path.join(self.bazel_out, "x", "out.zip", "inner"), declared))
+        self.assertTrue(sol._is_protected(
+            os.path.join(self.bazel_out, "x"), declared))
+        self.assertFalse(sol._is_protected(
+            os.path.join(self.bazel_out, "x", "other.o"), declared))
+        self.assertFalse(sol._is_protected(
+            os.path.join(self.bazel_out, "x-out.zip"), declared))
+
+    def test_file_pass_keeps_declared_and_before(self):
+        declared = self.write("x/out.zip")
+        self.write("x/Info.plist", b"bazel-own")
+        before = snapshot_tree(self.bazel_out)
+        side = self.write("x/side.o", b"side-effect")
+        removed = sol._sweep_undeclared_files(
+            self.bazel_out, [os.path.normpath(declared)], before)
+        self.assertEqual(removed, ["x/side.o"])
+        self.assertFalse(os.path.lexists(side))
+        self.assertTrue(os.path.isfile(declared))
+
+    def test_link_pass_removes_undeclared_links(self):
+        # Directory symlinks surface in dirnames (file symlinks ride
+        # the file pass instead).
+        target_dir = os.path.join(self.bazel_out, "x", "real")
+        os.makedirs(target_dir)
+        with open(os.path.join(target_dir, "f.o"), "wb") as fh:
+            fh.write(b"x")
+        before = snapshot_tree(self.bazel_out)
+        link = os.path.join(self.bazel_out, "x", "alias")
+        os.symlink(target_dir, link)
+        removed = sol._sweep_undeclared_links(
+            self.bazel_out, [], before)
+        self.assertEqual(removed, ["x/alias"])
+        self.assertFalse(os.path.lexists(link))
+        self.assertTrue(os.path.isdir(target_dir))
+
+    def test_empty_dir_pass_removes_emptied_only(self):
+        self.write("x/keep.o")
+        before = snapshot_tree(self.bazel_out)
+        os.makedirs(os.path.join(self.bazel_out, "x", "empty", "inner"))
+        removed = sol._sweep_empty_dirs(self.bazel_out, [], before)
+        self.assertEqual(sorted(removed),
+                         ["x/empty", "x/empty/inner"])
+        self.assertFalse(os.path.lexists(
+            os.path.join(self.bazel_out, "x", "empty")))
+        self.assertTrue(os.path.isfile(
+            os.path.join(self.bazel_out, "x", "keep.o")))
+
+    def test_drop_failure_names_path(self):
+        with mock.patch.object(sol.os, "remove",
+                               side_effect=OSError("denied")):
+            with self.assertRaisesRegex(RuntimeError, "cannot remove"):
+                sol._drop_chain_file(os.path.join(self.bazel_out, "x", "o"))
+
+
 class VerifyFilesTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="sol-verify-")
