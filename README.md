@@ -60,21 +60,21 @@ If `flutter build` works for you, here is what Bazel adds:
 `rules_flutter` is released from the [`Mivr/rules_flutter`](https://github.com/Mivr/rules_flutter) fork together with the [`Mivr/rules_dart`](https://github.com/Mivr/rules_dart) fork it builds on. Take both from the GitHub releases with `archive_override` in your root `MODULE.bazel`:
 
 ```starlark
-bazel_dep(name = "rules_flutter", version = "0.5.0")
-bazel_dep(name = "rules_dart", version = "0.11.1")
+bazel_dep(name = "ai_rules_flutter", version = "0.20.0", repo_name = "rules_flutter")
+bazel_dep(name = "ai_rules_dart", version = "0.18.0", repo_name = "rules_dart")
 
 archive_override(
-    module_name = "rules_flutter",
-    urls = ["https://github.com/Mivr/rules_flutter/releases/download/v0.5.0/rules_flutter-v0.5.0.tar.gz"],
-    integrity = "sha256-nJoGOvU1GLkZnWw8QrpzyyhkWL5K8Ia5SIksLM8tJhc=",
-    strip_prefix = "rules_flutter-0.5.0",
+    module_name = "ai_rules_flutter",
+    urls = ["https://github.com/Mivr/rules_flutter/releases/download/v0.20.0/rules_flutter-v0.20.0.tar.gz"],
+    integrity = "sha256-1AyJQxzuzfL4p4A8wex8VUZerGOXIokNlhPv+2yYNug=",
+    strip_prefix = "rules_flutter-0.20.0",
 )
 
 archive_override(
-    module_name = "rules_dart",
-    urls = ["https://github.com/Mivr/rules_dart/releases/download/v0.11.1/rules_dart-v0.11.1.tar.gz"],
-    integrity = "sha256-cBJ3Yu142yo14j9nlaR4nzR5nef9+RQO/yCy3uwCER8=",
-    strip_prefix = "rules_dart-0.11.1",
+    module_name = "ai_rules_dart",
+    urls = ["https://github.com/Mivr/rules_dart/releases/download/v0.18.0/rules_dart-v0.18.0.tar.gz"],
+    integrity = "sha256-9sFt975mhYbFlKNUJ0F9dExQzCu6yv9Dc+WEGsxVuO0=",
+    strip_prefix = "rules_dart-0.18.0",
 )
 
 flutter = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter")
@@ -109,9 +109,9 @@ Two extensions cover the rest. A root-registered custom release (an older stable
 
 #### Overriding `rules_dart`
 
-`rules_flutter` uses APIs from the [`Mivr/rules_dart`](https://github.com/Mivr/rules_dart) fork (`@rules_dart//dart:hooks.bzl`, `@rules_dart//dart/private:record_use.bzl`, and `dart_codegen(package_name = ...)`) that are not in the `rules_dart` releases on the Bazel Central Registry. Its floor is `ai_rules_dart` 0.18.0, the fork's release published on GitHub under that module name with `repo_name = "rules_dart"`, so a root module that overrides only `ai_rules_flutter` fails fast with a version error instead of a missing-symbol error at load. The `archive_override` pair in [MODULE.bazel](#modulebazel) above is the supported setup; every downloaded byte is verified against its `integrity` hash.
+`rules_flutter` uses APIs from the [`Mivr/rules_dart`](https://github.com/Mivr/rules_dart) fork (`@rules_dart//dart:hooks.bzl`, `@rules_dart//dart/private:record_use.bzl`, and `dart_codegen(package_name = ...)`) that are not in the `rules_dart` releases on the Bazel Central Registry. Its floor is `ai_rules_dart` 0.18.0, the fork's release published on GitHub under that module name with `repo_name = "rules_dart"`, so a root module that overrides only `ai_rules_flutter` fails fast with a version error instead of a missing-symbol error at load. The block above gives the latest released, CI-tested pair: `ai_rules_flutter` 0.20.0 with `ai_rules_dart` 0.18.0. The `archive_override` pair in [MODULE.bazel](#modulebazel) above is the supported setup; every downloaded byte is verified against its `integrity` hash.
 
-To live at the forks' heads instead (local development against a checkout of each), replace the two `archive_override` blocks with overrides onto your clones. Because Bzlmod ignores module overrides in non-root modules, the overrides go in your root `MODULE.bazel`:
+To live at the forks' heads instead of these releases (local development against a checkout of each fork's `main`), replace the two `archive_override` blocks with overrides onto your clones. Because Bzlmod ignores module overrides in non-root modules, the overrides go in your root `MODULE.bazel`:
 
 ```starlark
 bazel_dep(name = "ai_rules_dart", version = "0.18.0", repo_name = "rules_dart")
@@ -1383,7 +1383,7 @@ flutter_prebuilt_test(
 )
 ```
 
-`test_kernel` is the test `.dill`, `test_base_kernel` the base dill it links against at run time (empty for whole-program kernels), `test_assets` its `flutter_assets/` tree, and `test_library_tags` the entrypoint's `@Tags` as a `{"tags": [...]}` JSON file, for `flutter_prebuilt_test`'s `library_tags`. To build the assets tree yourself instead, use `flutter_asset_bundle` with the test's shaders (compiled for `flutter_tester`, as `flutter_test` compiles them) and the same `deps`: dep fonts, package assets and the Material shaders land in the bundle the same way.
+`test_kernel` is the test `.dill`, `test_base_kernel` the base dill it links against at run time (empty for whole-program kernels), `test_assets` its `flutter_assets/` tree, and `test_library_tags` the entrypoint's `@Tags` as a `{"tags": [...]}` JSON file, for `flutter_prebuilt_test`'s `library_tags`. To build the assets tree yourself instead, use `flutter_asset_bundle` with the test's shaders and the same `deps`: dep fonts, package assets and the Material shaders land in the bundle the same way. The bundle always targets `tester`: a pub asset gated to another platform is dropped unless an entry also keeps it for `tester`, flavor-restricted entries bundle nowhere, and shaders are compiled for `flutter_tester` with the SkSL and Vulkan stages `flutter test` gives them.
 
 To compile the kernel yourself, write the bootstrap with `flutter_test_bootstrap` from `@rules_flutter//flutter:utils.bzl` (merging `FLUTTER_TEST_BOOTSTRAP_ATTRS` into your rule's attrs for the golden block) and compile it as the entry point with `flutter_kernel_compile_action` (passing the bootstrap as `main`); then run the resulting dill under `flutter_prebuilt_test`. Extract the suite's `@Tags` with the public `//flutter/private/tools:extract_library_tags` tool and feed the JSON to `library_tags`, or the suite runs without its root-group tags. A kernel compiled from any other entry point does not dial the harness back and fails to connect. `e2e/hello_world/custom_test_kernel.bzl` is this pipeline as a running target, over the same suites its `flutter_test` twins run. For the modular variant — one entry-module compile against the dependency outlines plus a link, so body-only edits never recompile the whole program — use `flutter_modular_test_kernel` instead; `e2e/hello_world/custom_modular_test_kernel.bzl` is that pipeline as a running target, in both link modes. By default the link is complete (`use_base_dill = False`): every reachable module lands in the kernel and it runs under `flutter_prebuilt_test` with no `base_dill` — `:widget_modular_prebuilt_test` is that green run. With `use_base_dill = True` the kernel delta-links against the shared `flutter_test` base dill instead and the returned base dill must reach `flutter_prebuilt_test`'s `base_dill`: the delta is incomplete without it and `flutter_tester` aborts before connecting when it is missing — `:widget_modular_based_prebuilt_test` is that green run, fed from the kernel's `test_base_kernel` group.
 
@@ -1475,7 +1475,7 @@ Bundle keys follow the `flutter build` rule, keyed off the package directory of 
 
 Two listings, one rule: every file in `assets` or `shaders` must sit under the listing target's package directory. A file from a nested subpackage's directory is still inside, so it keys relative to the listing directory. Only a file outside it — a sibling or parent directory, or another repository — fails the build naming the file and the target: move it into a `flutter_library` with a `package_name` and depend on it instead. Two different files keyed to the same path fail the build naming both. `pkg_assets` keeps its own `packages/<package>/<path>` keying, unchanged.
 
-Migration note: this is a behavior change. Bundles used to key `assets` by raw workspace-relative path, so a target outside the workspace root shipped `apps/sub/assets/logo.png` where `flutter build` ships `assets/logo.png`. If a lookup uses a prefixed key, drop the prefix; if it relied on reaching another package's file through `assets`, move the file into a library and use its `packages/<name>/...` key. Targets at the workspace root keep exactly their old keys. The same change now applies to `shaders`: a target outside the workspace root ships its own shaders at package-relative keys, so a `FragmentProgram.fromAsset` lookup that used the prefixed path must drop the prefix.
+Migration note: this is a behavior change. Bundles used to key `assets` by raw workspace-relative path, so a target outside the workspace root shipped `apps/sub/assets/logo.png` where `flutter build` ships `assets/logo.png`. If a lookup uses a prefixed key, drop the prefix; if it relied on reaching another package's file through `assets`, move the file into a library and use its `packages/<name>/...` key. An app, test, or bundle target at the workspace root keeps exactly its old keys, since its package directory is the root. A `flutter_library` or `flutter_plugin` at the workspace root does not: its assets take the same `packages/<package_name>/...` keys as anywhere else. The same change now applies to `shaders`: a target outside the workspace root ships its own shaders at package-relative keys, so a `FragmentProgram.fromAsset` lookup that used the prefixed path must drop the prefix.
 
 ### Link hooks
 
@@ -1510,7 +1510,7 @@ These are what `flutter_application` is made of. Most apps never need them.
 |---|---|
 | `flutter_kernel_target` | Compiles Dart to a kernel `.dill` with Flutter's patched platform kernel. |
 | `flutter_aot_target` | Compiles Dart to an AOT shared library (`.so` on Linux and Android, `.dylib` on macOS) with `gen_snapshot`. |
-| `flutter_asset_bundle` | Builds the `flutter_assets/` tree: `AssetManifest.bin`, `FontManifest.json`, `NOTICES.Z`, and the asset files. |
+| `flutter_asset_bundle` | Builds the `flutter_assets/` tree: `AssetManifest.bin`, `FontManifest.json`, `NOTICES.Z`, and the asset files. It always bundles for the `tester` platform: pub-asset `platforms` and `flavors` are evaluated for `tester`, and shaders are compiled for `flutter_tester`. |
 | `flutter_native_library` | Pairs a native library with its binding contract. See [Hot reload across a native rebuild](#hot-reload-across-a-native-rebuild). |
 | `flutter_native_asset`, `flutter_data_asset` | Declare Dart Native Assets, from `@rules_flutter//flutter:native_assets.bzl`. A data asset is bundled at `flutter_assets/packages/<package>/<name>`. |
 
