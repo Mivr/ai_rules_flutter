@@ -7,7 +7,8 @@ keyed `packages/<package_name>/...`. The rule is by directory, not by Bazel
 package boundary: a nested subpackage's files are still under the directory
 and keyed, never refused. A file outside the directory tree is refused, as
 are two files sharing one key. `pkg_assets` already keys correctly and is
-not covered here.
+not covered here. Keys are percent-encoded (`asset_uri.bzl`): a file named
+`a b.png` bundles as `a%20b.png`, the key the engine asks for.
 
 The pure path math is pinned by unit tests (including the external-repository
 and workspace-root spellings, which no in-repo target can exhibit). The rule
@@ -115,6 +116,20 @@ def _root_generated_key_is_repo_relative_test_impl(ctx):
     )
     return unittest.end(env)
 
+def _spaced_key_encodes_test_impl(ctx):
+    env = unittest.begin(ctx)
+    asserts.equals(
+        env,
+        "a%20b.png",
+        relative_key("", "flutter/tests", "flutter/tests/a b.png"),
+    )
+    asserts.equals(
+        env,
+        "assets/brand%20spaced.txt",
+        relative_key("", "flutter/tests/asset_keys_fixture", "flutter/tests/asset_keys_fixture/assets/brand spaced.txt"),
+    )
+    return unittest.end(env)
+
 _t0_test = unittest.make(_root_key_is_short_path_test_impl)
 _t1_test = unittest.make(_subpackage_key_strips_package_test_impl)
 _t2_test = unittest.make(_external_key_strips_repo_root_test_impl)
@@ -125,6 +140,7 @@ _t6_test = unittest.make(_subpackage_membership_test_impl)
 _t7_test = unittest.make(_cross_repo_is_outside_test_impl)
 _t8_test = unittest.make(_nested_dir_is_within_test_impl)
 _t9_test = unittest.make(_root_generated_key_is_repo_relative_test_impl)
+_t10_test = unittest.make(_spaced_key_encodes_test_impl)
 
 def _entry_keys(info):
     return sorted([e.key for e in info.assets.to_list()])
@@ -234,6 +250,17 @@ def _nested_keys_test_impl(ctx):
 
 _nested_keys_test = analysistest.make(_nested_keys_test_impl)
 
+def _spaced_keys_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    asserts.equals(
+        env,
+        ["asset_keys_fixture/assets/brand%20spaced.txt"],
+        analysistest.target_under_test(env)[_KeyProbeInfo].keys,
+    )
+    return analysistest.end(env)
+
+_spaced_keys_test = analysistest.make(_spaced_keys_test_impl)
+
 def _generated_keys_test_impl(ctx):
     env = analysistest.begin(ctx)
     info = analysistest.target_under_test(env)[FlutterInfo]
@@ -260,6 +287,7 @@ def asset_keys_test_suite(name):
         _t7_test,
         _t8_test,
         _t9_test,
+        _t10_test,
     )
 
     # The probe lists its own package's asset file, so its own entry proves
@@ -286,6 +314,17 @@ def asset_keys_test_suite(name):
     _nested_keys_test(
         name = name + "_nested_keys",
         target_under_test = ":" + name + "_nested_probe",
+    )
+
+    # A real file with a space bundles under its encoded key end to end.
+    entries_probe(
+        name = name + "_spaced_probe",
+        assets = [_FIXTURE + ":assets/brand spaced.txt"],
+        tags = ["manual"],
+    )
+    _spaced_keys_test(
+        name = name + "_spaced_keys",
+        target_under_test = ":" + name + "_spaced_probe",
     )
     _generated_keys_test(
         name = name + "_generated_keys",
@@ -318,6 +357,7 @@ def asset_keys_test_suite(name):
             ":" + name + "_keys_pure",
             ":" + name + "_own_keys",
             ":" + name + "_nested_keys",
+            ":" + name + "_spaced_keys",
             ":" + name + "_generated_keys",
             ":" + name + "_library_keys",
             ":" + name + "_consumer_forwards_keys",

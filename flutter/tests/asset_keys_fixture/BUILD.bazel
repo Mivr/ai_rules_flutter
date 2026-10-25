@@ -11,6 +11,8 @@ package(
     default_visibility = ["//flutter/tests:__pkg__"],
 )
 
+exports_files(["assets/brand spaced.txt"])
+
 flutter_library(
     name = "brand",
     package_name = "brand",
