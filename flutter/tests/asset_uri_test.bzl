@@ -519,6 +519,7 @@ flutter:
   assets:
     - a?.png
 """
+
 def _through_refusal_test_impl(ctx):
     """A pubspec entry no engine build reads fails as not supported."""
     env = unittest.begin(ctx)
