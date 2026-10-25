@@ -6,6 +6,8 @@ Usage:
 """
 
 load("//flutter:providers.bzl", "resolve_exec_dart")
+
+# buildifier: disable=bzl-visibility
 load("//flutter/private:run_home.bzl", "RUN_HOME_SH", "RUN_HOME_SUPPRESS_ANALYTICS")
 
 _BASH_RUNFILES_INIT = """\

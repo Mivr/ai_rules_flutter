@@ -678,10 +678,10 @@ bzl_library(
 bzl_library(
     name = "run_home",
     srcs = ["run_home.bzl"],
-    # Public like `//flutter:providers`: shell-template launchers outside
-    # `//flutter` (`//dart:flutter_sdk_binary`) load this module, and the
-    # buildifier visibility check only honours public visibility there.
-    visibility = ["//visibility:public"],
+    visibility = [
+        "//dart:__subpackages__",
+        "//flutter:__subpackages__",
+    ],
 )
 
 # `run_home.bzl` is loaded by shell-template launchers outside
