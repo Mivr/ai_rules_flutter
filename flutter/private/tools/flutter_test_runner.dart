@@ -690,9 +690,11 @@ class _Harness {
       return null;
     }
     try {
-      final lcov = await coverage.collectCoverage(
-        coverageVmServiceUri,
-      ).timeout(const Duration(minutes: 2));
+      final lcov = await coverage
+          .collectCoverage(
+            coverageVmServiceUri,
+          )
+          .timeout(const Duration(minutes: 2));
       // Every healthy run yields at least the bootstrap's own record, so an
       // empty report means collection reached no source at all. Writing it
       // would produce exactly the green-test-with-empty-LCOV outcome the
