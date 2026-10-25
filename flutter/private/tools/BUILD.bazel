@@ -99,6 +99,7 @@ dart_binary(
     name = "flutter_test_runner",
     srcs = [
         "bazel_test_protocol.dart",
+        "flutter_test_coverage.dart",
         "run_home.dart",
         "test_support.dart",
     ],
@@ -458,6 +459,7 @@ _TOOL_SRCS = {
     ],
     "flutter_test_runner.dart": [
         "bazel_test_protocol.dart",
+        "flutter_test_coverage.dart",
         "run_home.dart",
         "test_support.dart",
     ],

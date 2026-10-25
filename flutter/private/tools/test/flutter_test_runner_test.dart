@@ -15,6 +15,7 @@ import 'package:test/test.dart';
 // Imported under a prefix rather than plainly: this script is a `main`, and so
 // is the test. Each public member of the runner is public because it is
 // reachable from here and nowhere else — see their docstrings.
+import '../flutter_test_coverage.dart' as coverage;
 import '../flutter_test_runner.dart' as runner;
 import '../test_support.dart' as support;
 
@@ -118,7 +119,7 @@ void main() {
   group('collectCoverage', () {
     test('renders hits and misses as LCOV line records', () async {
       expect(
-        await runner.collectCoverage(vm.httpUri),
+        await coverage.collectCoverage(vm.httpUri),
         'SF:/pkg/a.dart\n'
         'DA:5,1\n'
         'DA:7,0\n'
@@ -139,7 +140,7 @@ void main() {
         };
 
         await expectLater(
-          runner.collectCoverage(vm.httpUri),
+          coverage.collectCoverage(vm.httpUri),
           throwsA(
             isA<StateError>().having(
               (e) => e.message,
@@ -158,7 +159,7 @@ void main() {
       };
 
       await expectLater(
-        runner.collectCoverage(vm.httpUri),
+        coverage.collectCoverage(vm.httpUri),
         throwsA(
           isA<StateError>().having(
             (e) => e.message,
@@ -183,7 +184,7 @@ void main() {
         };
 
         await expectLater(
-          runner.collectCoverage(vm.httpUri),
+          coverage.collectCoverage(vm.httpUri),
           throwsA(isA<TypeError>()),
         );
       },
