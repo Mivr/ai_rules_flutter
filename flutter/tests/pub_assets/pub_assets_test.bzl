@@ -264,6 +264,221 @@ def _unknown_keys_ignored_test_impl(ctx):
     asserts.equals(env, ["ios"], result.assets[0].platforms)
     return unittest.end(env)
 
+# -- refused pubspec shapes (COV-75) ------------------------------------------------------
+#
+# Every shape below is one flutter_tools 3.47.7 refuses
+# (`packages/flutter_tools/lib/src/flutter_manifest.dart`) that the
+# projection used to drop silently. Each test pins the refusal: the
+# parsed block carries an `asset_errors` entry naming the section key,
+# the spoke message names the package and the key, and nothing usable
+# survives the refused section.
+
+_STRING_ASSETS_PUBSPEC = """\
+name: string_assets
+flutter:
+  assets: assets/a.png
+"""
+
+_MAP_ASSETS_PUBSPEC = """\
+name: map_assets
+flutter:
+  assets: {a: b}
+"""
+
+_BAD_ITEM_ASSETS_PUBSPEC = """\
+name: bad_item_assets
+flutter:
+  assets:
+    - 5
+"""
+
+_BAD_PATH_ASSETS_PUBSPEC = """\
+name: bad_path_assets
+flutter:
+  assets:
+    - path: 5
+"""
+
+_STRING_FONTS_PUBSPEC = """\
+name: string_fonts
+flutter:
+  fonts: x
+"""
+
+_INT_LIST_FONTS_PUBSPEC = """\
+name: int_list_fonts
+flutter:
+  fonts: [1]
+"""
+
+_BAD_FAMILY_FONTS_PUBSPEC = """\
+name: bad_family_fonts
+flutter:
+  fonts: [{family: 1}]
+"""
+
+_BAD_FONTS_KEY_FONTS_PUBSPEC = """\
+name: bad_fonts_key_fonts
+flutter:
+  fonts: [{family: F, fonts: x}]
+"""
+
+_BAD_FILE_FONTS_PUBSPEC = """\
+name: bad_file_fonts
+flutter:
+  fonts:
+    - family: F
+      fonts:
+        - 5
+"""
+
+_BAD_FILE_ASSET_FONTS_PUBSPEC = """\
+name: bad_file_asset_fonts
+flutter:
+  fonts:
+    - family: F
+      fonts:
+        - asset: 5
+"""
+
+_STRING_SHADERS_PUBSPEC = """\
+name: string_shaders
+flutter:
+  shaders: x
+"""
+
+_BAD_ITEM_SHADERS_PUBSPEC = """\
+name: bad_item_shaders
+flutter:
+  shaders:
+    - 5
+"""
+
+_BAD_PATH_SHADERS_PUBSPEC = """\
+name: bad_path_shaders
+flutter:
+  shaders:
+    - path: 5
+"""
+
+def _assert_shape_refused(env, content, key):
+    """Assert parsing `content` refuses the `key` section for the fetch.
+
+    Every problem names the section key, and the spoke message built from
+    it names the package, the entry and the key.
+
+    Args:
+        env: The unittest environment.
+        content: Full pubspec.yaml content with a malformed section.
+        key: `"assets"`, `"fonts"` or `"shaders"`.
+
+    Returns:
+        The parsed block, so the caller can pin what survived refusal.
+    """
+    result = parse_flutter_assets_block(content)
+    asserts.true(env, len(result.asset_errors) > 0, "expected an %s refusal" % key)
+    for problem in result.asset_errors:
+        asserts.equals(env, key, problem.key)
+        message = asset_entry_problem_error("shape_pkg", problem)
+        for want in ["shape_pkg", problem.path, key]:
+            asserts.true(env, want in message, message)
+    return result
+
+def _string_assets_refused_test_impl(ctx):
+    """A string `assets` section fails naming the package and the key."""
+    env = unittest.begin(ctx)
+    result = _assert_shape_refused(env, _STRING_ASSETS_PUBSPEC, "assets")
+    asserts.equals(env, [], result.assets)
+    return unittest.end(env)
+
+def _map_assets_refused_test_impl(ctx):
+    """A map `assets` section fails instead of bundling no assets."""
+    env = unittest.begin(ctx)
+    result = _assert_shape_refused(env, _MAP_ASSETS_PUBSPEC, "assets")
+    asserts.equals(env, [], result.assets)
+    return unittest.end(env)
+
+def _bad_item_assets_refused_test_impl(ctx):
+    """An asset item that is neither a string nor a map fails."""
+    env = unittest.begin(ctx)
+    result = _assert_shape_refused(env, _BAD_ITEM_ASSETS_PUBSPEC, "assets")
+    asserts.equals(env, [], result.assets)
+    return unittest.end(env)
+
+def _bad_path_assets_refused_test_impl(ctx):
+    """An asset map whose `path` is not a string fails."""
+    env = unittest.begin(ctx)
+    result = _assert_shape_refused(env, _BAD_PATH_ASSETS_PUBSPEC, "assets")
+    asserts.equals(env, [], result.assets)
+    return unittest.end(env)
+
+def _string_fonts_refused_test_impl(ctx):
+    """A string `fonts` section fails naming the package and the key."""
+    env = unittest.begin(ctx)
+    result = _assert_shape_refused(env, _STRING_FONTS_PUBSPEC, "fonts")
+    asserts.equals(env, [], result.fonts)
+    return unittest.end(env)
+
+def _int_list_fonts_refused_test_impl(ctx):
+    """A non-map `fonts` entry fails instead of dropping the family."""
+    env = unittest.begin(ctx)
+    result = _assert_shape_refused(env, _INT_LIST_FONTS_PUBSPEC, "fonts")
+    asserts.equals(env, [], result.fonts)
+    return unittest.end(env)
+
+def _bad_family_fonts_refused_test_impl(ctx):
+    """A non-string font `family` fails instead of dropping the family."""
+    env = unittest.begin(ctx)
+    result = _assert_shape_refused(env, _BAD_FAMILY_FONTS_PUBSPEC, "fonts")
+    asserts.equals(env, [], result.fonts)
+    return unittest.end(env)
+
+def _bad_fonts_key_fonts_refused_test_impl(ctx):
+    """A non-list per-family `fonts` fails instead of emptying the family."""
+    env = unittest.begin(ctx)
+    result = _assert_shape_refused(env, _BAD_FONTS_KEY_FONTS_PUBSPEC, "fonts")
+    asserts.equals(env, [], result.fonts)
+    return unittest.end(env)
+
+def _bad_file_fonts_refused_test_impl(ctx):
+    """A non-map font file entry fails while the family still parses."""
+    env = unittest.begin(ctx)
+    result = _assert_shape_refused(env, _BAD_FILE_FONTS_PUBSPEC, "fonts")
+    asserts.equals(env, 1, len(result.fonts))
+    asserts.equals(env, "F", result.fonts[0].family)
+    asserts.equals(env, [], result.fonts[0].fonts)
+    return unittest.end(env)
+
+def _bad_file_asset_fonts_refused_test_impl(ctx):
+    """A non-string font file `asset` fails while the family still parses."""
+    env = unittest.begin(ctx)
+    result = _assert_shape_refused(env, _BAD_FILE_ASSET_FONTS_PUBSPEC, "fonts")
+    asserts.equals(env, 1, len(result.fonts))
+    asserts.equals(env, "F", result.fonts[0].family)
+    asserts.equals(env, [], result.fonts[0].fonts)
+    return unittest.end(env)
+
+def _string_shaders_refused_test_impl(ctx):
+    """A string `shaders` section fails naming the package and the key."""
+    env = unittest.begin(ctx)
+    result = _assert_shape_refused(env, _STRING_SHADERS_PUBSPEC, "shaders")
+    asserts.equals(env, [], result.shaders)
+    return unittest.end(env)
+
+def _bad_item_shaders_refused_test_impl(ctx):
+    """A shader item that is neither a string nor a map fails."""
+    env = unittest.begin(ctx)
+    result = _assert_shape_refused(env, _BAD_ITEM_SHADERS_PUBSPEC, "shaders")
+    asserts.equals(env, [], result.shaders)
+    return unittest.end(env)
+
+def _bad_path_shaders_refused_test_impl(ctx):
+    """A shader map whose `path` is not a string fails."""
+    env = unittest.begin(ctx)
+    result = _assert_shape_refused(env, _BAD_PATH_SHADERS_PUBSPEC, "shaders")
+    asserts.equals(env, [], result.shaders)
+    return unittest.end(env)
+
 _t0_test = unittest.make(_variant_dir_names_test_impl)
 _t1_test = unittest.make(_walk_lists_all_files_test_impl)
 _t2_test = unittest.make(_walk_bound_fails_loudly_test_impl)
@@ -277,6 +492,19 @@ _t9_test = unittest.make(_scalar_flavors_refused_test_impl)
 _t10_test = unittest.make(_non_string_element_refused_test_impl)
 _t11_test = unittest.make(_transformers_refused_test_impl)
 _t12_test = unittest.make(_unknown_keys_ignored_test_impl)
+_t13_test = unittest.make(_string_assets_refused_test_impl)
+_t14_test = unittest.make(_map_assets_refused_test_impl)
+_t15_test = unittest.make(_bad_item_assets_refused_test_impl)
+_t16_test = unittest.make(_bad_path_assets_refused_test_impl)
+_t17_test = unittest.make(_string_fonts_refused_test_impl)
+_t18_test = unittest.make(_int_list_fonts_refused_test_impl)
+_t19_test = unittest.make(_bad_family_fonts_refused_test_impl)
+_t20_test = unittest.make(_bad_fonts_key_fonts_refused_test_impl)
+_t21_test = unittest.make(_bad_file_fonts_refused_test_impl)
+_t22_test = unittest.make(_bad_file_asset_fonts_refused_test_impl)
+_t23_test = unittest.make(_string_shaders_refused_test_impl)
+_t24_test = unittest.make(_bad_item_shaders_refused_test_impl)
+_t25_test = unittest.make(_bad_path_shaders_refused_test_impl)
 
 def pub_assets_test_suite(name):
     unittest.suite(
@@ -294,4 +522,17 @@ def pub_assets_test_suite(name):
         _t10_test,
         _t11_test,
         _t12_test,
+        _t13_test,
+        _t14_test,
+        _t15_test,
+        _t16_test,
+        _t17_test,
+        _t18_test,
+        _t19_test,
+        _t20_test,
+        _t21_test,
+        _t22_test,
+        _t23_test,
+        _t24_test,
+        _t25_test,
     )
