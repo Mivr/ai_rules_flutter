@@ -13,12 +13,16 @@ spoke, and every mirrored file and directory is watched, so adding or
 removing an entry refetches the spoke.
 
 Skip rule: directory names in `_PATH_SPOKE_SKIP_DIRS` (build output,
-tool state, the example app, dot-directories) are skipped only at the
-top level of each mirrored tree — the package root for the shader
-siblings, the entry root for a mirrored directory. Deeper names link
-normally, so plugin Kotlin under `android/src/main/kotlin/com/example/`
-and files under `lib/src/build/` or `lib/src/example/` reach the spoke,
-and dot-files inside declared asset directories are kept. User `BUILD`
+tool state, the example app, dot-directories) are skipped at the
+package root (the shader-sibling walk) and at the top level of each
+mirrored platform or shader directory tree — never inside `lib/` or
+inside a declared asset directory, whose trees mirror whole the way
+`flutter_tools` reads them. Names directly under `lib/` such as
+`lib/build/a.dart`, and names directly under a declared asset
+directory, link normally, as do deeper names everywhere (plugin Kotlin
+under `android/src/main/kotlin/com/example/`, files under
+`lib/src/build/` or `lib/src/example/`), and dot-files inside declared
+asset directories are kept. User `BUILD`
 files are watched but never linked, at any depth, so a nested BUILD
 file can never cut the spoke's globs into a second Bazel package.
 
@@ -37,7 +41,9 @@ load(":flutter_pub_walk.bzl", "PUB_WALK_BOUND", "scoped_tree_bound_error")
 # `.plugin_symlinks` cycle back to the package root next to its own `build/`
 # output), and dot-directories. The generator reads nothing under them, so
 # linking or watching them only makes the fetch machine-dependent. Applies
-# at the top level of each mirrored tree only (see the module docstring).
+# at the package root and at the top level of mirrored platform/shader
+# trees only — never inside `lib/` or a declared asset directory (see the
+# module docstring).
 _PATH_SPOKE_SKIP_DIRS = ("build", ".dart_tool", "example")
 
 # File names a path spoke never links: the spoke generates every BUILD file
@@ -127,7 +133,9 @@ def is_path_spoke_skipped_dir(name, case_insensitive = False):
 
     Anything under `build/`, `.dart_tool/`, `example/`, or a dot-directory
     is build output or tool state the generator never reads. Applies at the
-    top level of each mirrored tree only; deeper names link normally.
+    package root and at the top of mirrored platform/shader trees only —
+    never inside `lib/` or a declared asset directory; deeper names link
+    normally.
 
     Args:
         name: A single directory basename (no slashes).
@@ -366,11 +374,14 @@ def _mirror_link_child(ctx, child, child_rel, child_real, scope, seen, tree_root
         child_real: The link's resolved path.
         scope: The fetch's link scope.
         seen: The folded real paths on the current descent stack.
-        tree_root: The spoke-relative root of the mirrored tree the
-            child belongs to; a directory target starts its own tree
-            here when the link is a declared entry, and deeper links
-            inherit it so only the target's immediate children consult
-            the skip list.
+        tree_root: The mirrored tree's root: a `struct(root, apply_skip)`
+            holding the spoke-relative root of the mirrored tree the
+            child belongs to and whether that tree consults the skip
+            list. A directory target starts its own tree here when the
+            link is a declared entry, and deeper links inherit it so
+            only the target's immediate children consult the skip list,
+            and only when the tree applies skips (`lib/` and declared
+            asset directory trees never do).
         stack: The walk stack, extended in place for directory targets.
 
     Returns:
@@ -404,23 +415,28 @@ def mirror_tree_bounded(ctx, stack, scope, bound):
     repository directories holding one file symlink per file; source
     symlinks replicate (files) or resolve and join the walk
     (directories); skipped top-level subtrees stay unlinked and unwatched
-    so machine-local output cannot affect the fetch; user BUILD files are
+    so machine-local output cannot affect the fetch (only trees that
+    apply skips consult the list — `lib/` and declared asset directory
+    trees mirror whole); user BUILD files are
     watched but not linked. The explicit stack over a bounded loop keeps
     one pathological package from hanging the fetch.
 
-    Each stack frame carries its mirrored tree's root: a directory link
-    that is a declared entry starts its own tree at the link, so its
-    immediate children consult the skip list exactly like a real
-    directory's do; links met deeper inherit the root, so deeper names
-    link normally.
+    Each stack frame carries its mirrored tree's root as a
+    `struct(root, apply_skip)`: a directory link that is a declared
+    entry starts its own tree at the link, so its immediate children
+    consult the skip list exactly like a real directory's do when the
+    tree applies skips; links met deeper inherit the root, so deeper
+    names link normally. A plain string root (from older callers such as
+    `link_scoped_tree_bounded`) applies skips, preserving the old rule.
 
     Args:
         ctx: The path-package spoke's repository context.
         stack: The walk stack of `(node, repo_rel, seen, tree_root)`
             tuples, updated in place; `seen` holds the folded real paths
             on that entry's descent stack for cycle checks, and
-            `tree_root` is the spoke-relative root of the mirrored tree
-            the frame belongs to. The walk root itself is already watched
+            `tree_root` is the mirrored tree's `struct(root, apply_skip)`
+            (or a plain spoke-relative root string, which applies
+            skips). The walk root itself is already watched
             by the caller; every directory popped here is watched as it
             is visited.
         scope: The fetch's link scope.
@@ -435,11 +451,13 @@ def mirror_tree_bounded(ctx, stack, scope, bound):
         if not stack:
             break
         parent, parent_rel, seen, tree_root = stack.pop()
+        root_rel = tree_root.root if type(tree_root) == "struct" else tree_root
+        root_skips = tree_root.apply_skip if type(tree_root) == "struct" else True
         for child in parent.readdir():
             name = child.basename
             child_rel = parent_rel + "/" + name
             child_real = str(child.realpath)
-            if child.is_dir and parent_rel == tree_root and is_path_spoke_skipped_dir(name, scope.case_insensitive):
+            if child.is_dir and parent_rel == root_rel and root_skips and is_path_spoke_skipped_dir(name, scope.case_insensitive):
                 continue
             if not paths_match(child_real, scope.package_realpath + "/" + child_rel, scope.case_insensitive):
                 error = _mirror_link_child(ctx, child, child_rel, child_real, scope, seen, tree_root, stack)
@@ -458,7 +476,7 @@ def mirror_tree_bounded(ctx, stack, scope, bound):
         return struct(leftover = True, error = "")
     return struct(leftover = False, error = "")
 
-def _link_scoped_tree(ctx, node, repo_rel, scope, bound = PUB_WALK_BOUND):
+def _link_scoped_tree(ctx, node, repo_rel, scope, bound = PUB_WALK_BOUND, apply_skip = True):
     """Mirror one real source directory into the spoke file by file.
 
     Real directories become real repository directories holding one symlink
@@ -468,19 +486,32 @@ def _link_scoped_tree(ctx, node, repo_rel, scope, bound = PUB_WALK_BOUND):
     resolve, confine, cycle-check, and mirror for directories; skipped
     top-level subtrees (`build/`, `.dart_tool/`, `example/`,
     dot-directories) stay unlinked and unwatched so machine-local output
-    cannot affect the fetch; user BUILD files are watched but not linked.
+    cannot affect the fetch, except in `lib/` and declared asset directory
+    trees (`apply_skip = False`), which mirror whole the way
+    `flutter_tools` reads them; user BUILD files are watched but not linked.
     The walk shares the pub spoke bound (`PUB_WALK_BOUND`): reaching it
     with directories left over, or entering a symlink cycle, fails the
     fetch instead of fetching part of the tree.
+
+    Args:
+        ctx: The path-package spoke's repository context.
+        node: The workspace-side source directory node.
+        repo_rel: The spoke-relative path the directory mirrors to.
+        scope: The fetch's link scope.
+        bound: Maximum directory pops.
+        apply_skip: False for `lib/` and declared asset directory trees,
+            which link skip names directly under them normally; True for
+            every other mirrored tree.
     """
     seed = (fold_path_case(str(node.realpath), scope.case_insensitive),)
-    result = mirror_tree_bounded(ctx, [(node, repo_rel, seed, repo_rel)], scope, bound)
+    root = struct(root = repo_rel, apply_skip = apply_skip)
+    result = mirror_tree_bounded(ctx, [(node, repo_rel, seed, root)], scope, bound)
     if result.error:
         fail(result.error)
     if result.leftover:
         fail(scoped_tree_bound_error(scope.package_name, bound))
 
-def _mirror_single_link(ctx, node, repo_rel, node_real, scope, seen):
+def _mirror_single_link(ctx, node, repo_rel, node_real, scope, seen, apply_skip = True):
     """Replicate one source symlink outside any running walk.
 
     Files replicate as one watched symlink; directory links resolve to
@@ -495,17 +526,22 @@ def _mirror_single_link(ctx, node, repo_rel, node_real, scope, seen):
         node_real: The link's resolved path.
         scope: The fetch's link scope.
         seen: The folded real paths on the current descent stack.
+        apply_skip: False for a declared `lib/` or asset-directory link,
+            whose drained walk links skip names directly under it
+            normally; True for every other link.
     """
     stack = []
-    error = _mirror_link_child(ctx, node, repo_rel, node_real, scope, seen, repo_rel, stack)
+    root = struct(root = repo_rel, apply_skip = apply_skip)
+    error = _mirror_link_child(ctx, node, repo_rel, node_real, scope, seen, root, stack)
     if error:
         fail(error)
     if not stack:
         return
 
     # The drained walk roots at the link target: its own mirrored tree, so
-    # its immediate children consult the skip list while deeper names link
-    # normally — the same rule as every other mirrored tree.
+    # its immediate children consult the skip list when the tree applies
+    # skips, while deeper names link normally — the same rule as every
+    # other mirrored tree.
     drained = mirror_tree_bounded(ctx, stack, scope, PUB_WALK_BOUND)
     if drained.error:
         fail(drained.error)
@@ -560,7 +596,7 @@ def _watch_scoped_entry(ctx, src, entry_path, scope):
     repo_rel = "/".join(parts)
     return (node, repo_rel, str(node.realpath))
 
-def _link_scoped_dir_entry(ctx, src, entry_path, scope):
+def _link_scoped_dir_entry(ctx, src, entry_path, scope, apply_skip = True):
     """Link one declared directory entry (asset, shader, or platform dir).
 
     Missing entries stay unlinked (a declared-but-absent directory is not
@@ -574,20 +610,22 @@ def _link_scoped_dir_entry(ctx, src, entry_path, scope):
         src: The workspace-side package directory node.
         entry_path: The package-relative declared path to link.
         scope: The fetch's link scope.
+        apply_skip: False for `lib/` and declared asset directories,
+            which mirror whole; True for platform and shader directories.
     """
     resolved = _watch_scoped_entry(ctx, src, entry_path, scope)
     if resolved == None:
         return
     node, repo_rel, node_real = resolved
     if not paths_match(node_real, scope.package_realpath + "/" + repo_rel, scope.case_insensitive):
-        _mirror_single_link(ctx, node, repo_rel, node_real, scope, (fold_path_case(scope.package_realpath, scope.case_insensitive),))
+        _mirror_single_link(ctx, node, repo_rel, node_real, scope, (fold_path_case(scope.package_realpath, scope.case_insensitive),), apply_skip)
         return
     if node.is_dir:
-        _link_scoped_tree(ctx, node, repo_rel, scope)
+        _link_scoped_tree(ctx, node, repo_rel, scope, PUB_WALK_BOUND, apply_skip)
         return
     _link_new_symlink(ctx, node, repo_rel, scope.linked)
 
-def link_scoped_file_entry(ctx, src, entry_path, scope):
+def link_scoped_file_entry(ctx, src, entry_path, scope, apply_skip = True):
     """Link one declared file entry (pubspec, hook, asset, font, shader).
 
     The declared path is watched before testing whether it exists, so
@@ -602,16 +640,18 @@ def link_scoped_file_entry(ctx, src, entry_path, scope):
         src: The workspace-side package directory node.
         entry_path: The package-relative declared path to link.
         scope: The fetch's link scope.
+        apply_skip: False when the entry is `lib/` or a declared asset
+            directory, which mirrors whole; True otherwise.
     """
     resolved = _watch_scoped_entry(ctx, src, entry_path, scope)
     if resolved == None:
         return
     node, repo_rel, node_real = resolved
     if not paths_match(node_real, scope.package_realpath + "/" + repo_rel, scope.case_insensitive):
-        _mirror_single_link(ctx, node, repo_rel, node_real, scope, (fold_path_case(scope.package_realpath, scope.case_insensitive),))
+        _mirror_single_link(ctx, node, repo_rel, node_real, scope, (fold_path_case(scope.package_realpath, scope.case_insensitive),), apply_skip)
         return
     if node.is_dir:
-        _link_scoped_tree(ctx, node, repo_rel, scope)
+        _link_scoped_tree(ctx, node, repo_rel, scope, PUB_WALK_BOUND, apply_skip)
         return
     if node.basename in _PATH_SPOKE_SKIP_FILES:
         ctx.watch(node)
@@ -652,7 +692,11 @@ def link_spoke_contents(ctx, src, asset_block, platform_dirs, scope):
     can parse it for this plan.) Everything else in the package —
     `example/`, `build/`, `.dart_tool/`, dot-directories, undeclared files
     — stays out of the spoke and unwatched, so machine-local state cannot
-    affect the fetch. Overlapping declarations (a shader inside a declared
+    affect the fetch. `lib/` and each declared asset directory mirror
+    whole instead — `build/`, `example/`, or dot names directly under
+    them link normally, the way `flutter_tools` reads them — while
+    platform and shader directory trees still skip those names at their
+    own top level. Overlapping declarations (a shader inside a declared
     asset dir, a file inside its own declared dir) link each spoke path
     once: `linked` records every created symlink.
 
@@ -663,11 +707,12 @@ def link_spoke_contents(ctx, src, asset_block, platform_dirs, scope):
         platform_dirs: The plugin platform directories to mirror.
         scope: The fetch's link scope.
     """
-    for entry in ["lib", "hook/build.dart", "hook/link.dart"]:
+    for entry in ["hook/build.dart", "hook/link.dart"]:
         link_scoped_file_entry(ctx, src, entry, scope)
+    link_scoped_file_entry(ctx, src, "lib", scope, False)
     for asset in asset_block.assets:
         if asset.path.endswith("/"):
-            _link_scoped_dir_entry(ctx, src, asset.path[:-1], scope)
+            _link_scoped_dir_entry(ctx, src, asset.path[:-1], scope, False)
         else:
             link_scoped_file_entry(ctx, src, asset.path, scope)
             _link_asset_variant_files(ctx, src, asset.path, scope)

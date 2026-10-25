@@ -13,12 +13,15 @@ and links only what the spoke generator reads or exposes:
   and every link at any depth is confined to the workspace and checked
   for cycles.
 * `example/`, `build/`, `.dart_tool/`, dot-directories, undeclared files,
-  and user BUILD files stay unlinked — top-level skipped subtrees are not
-  even watched, while every declared path is watched before testing
-  whether it exists, so creating it later refetches the spoke instead of
-  leaving its files silently missing. Below the top level only user BUILD
-  files stay out (watched, never linked), so nested `example/`, `build/`,
-  and dot-files link normally.
+  and user BUILD files stay unlinked at the package root — skipped
+  top-level subtrees are not even watched, while every declared path is
+  watched before testing whether it exists, so creating it later
+  refetches the spoke instead of leaving its files silently missing.
+  `lib/` and declared asset directories mirror whole, so `lib/build/`,
+  `lib/example/`, `lib/.hidden/`, and skip names directly under a
+  declared asset directory link normally. Elsewhere below the top level
+  only user BUILD files stay out (watched, never linked), so nested
+  `example/`, `build/`, and dot-files link normally.
 * Source links fail closed, naming the package and the link, when they
   resolve to the package or an ancestor, enter a symlink cycle, or leave
   the workspace's real root — as do the package directory itself and any
@@ -662,13 +665,14 @@ flutter:
 """
 
 def _skips_stop_at_mirror_root_test_impl(ctx):
-    """Skip names stop at each mirrored tree's top level; dot-files link.
+    """Skip names stop at each skipping tree's top level; dot-files link.
 
-    `build/` and `example/` segments nested under `lib/` or a platform dir
-    link normally (so do `com/example` Kotlin, dot-files inside a declared
-    asset directory, and dot-directories below the mirrored tree's top
-    level) — only each mirrored tree's immediate children consult the skip
-    list.
+    `lib/` and declared asset directory trees mirror whole, so skip names
+    directly under them link too. Elsewhere `build/` and `example/`
+    segments nested under a platform dir link normally (so do
+    `com/example` Kotlin, dot-files inside a declared asset directory,
+    and dot-directories below a skipping tree's top level) — only each
+    skipping mirrored tree's immediate children consult the skip list.
     """
     env = unittest.begin(ctx)
     mock = _make_mock_link_ctx({
@@ -700,6 +704,71 @@ def _skips_stop_at_mirror_root_test_impl(ctx):
     return unittest.end(env)
 
 skips_stop_at_mirror_root_test = unittest.make(_skips_stop_at_mirror_root_test_impl)
+
+_COV76_PUBSPEC = """name: cov76pkg
+flutter:
+  assets:
+    - assets/
+"""
+
+def _lib_and_asset_dir_skip_names_link_test_impl(ctx):
+    """COV-76: `lib/` and asset dirs mirror whole; root skips stay.
+
+    `lib/build/a.dart`, `lib/example/b.dart`, and `lib/.hidden/c.dart`
+    all mirror (as do skip names directly under the declared `assets/`
+    dir), while the package-root `build/`, `example/`, and `.dart_tool/`
+    subtrees stay unlinked and unwatched. Fails against main's
+    `flutter_pub_mirror.bzl`, which drops the `lib/`- and asset-dir-top
+    names.
+    """
+    env = unittest.begin(ctx)
+    mock = _make_mock_link_ctx({
+        "cov76pkg": {
+            "pubspec.yaml": _COV76_PUBSPEC,
+            "lib": {
+                "cov76pkg.dart": None,
+                "build": {"a.dart": None},
+                "example": {"b.dart": None},
+                ".hidden": {"c.dart": None},
+            },
+            "assets": {
+                "ok.txt": None,
+                "build": {"d.txt": None},
+                "example": {"e.txt": None},
+                ".hidden": {"f.txt": None},
+            },
+            "build": {"root.txt": None},
+            "example": {"main.dart": None},
+            ".dart_tool": {"package_config.json": None},
+        },
+    }, path_value = "cov76pkg", package_name = "cov76pkg")
+    link_path_package(mock.ctx)
+    names = sorted([link.name for link in mock.linked])
+    asserts.equals(env, [
+        "assets/.hidden/f.txt",
+        "assets/build/d.txt",
+        "assets/example/e.txt",
+        "assets/ok.txt",
+        "lib/.hidden/c.dart",
+        "lib/build/a.dart",
+        "lib/cov76pkg.dart",
+        "lib/example/b.dart",
+        "pubspec.yaml",
+    ], names)
+    for skipped in ["build/root.txt", "example/main.dart", ".dart_tool/package_config.json"]:
+        asserts.false(env, skipped in names, skipped + " must stay out, got {}".format(names))
+    for seen in [
+        "/workspace/cov76pkg/build",
+        "/workspace/cov76pkg/build/root.txt",
+        "/workspace/cov76pkg/example",
+        "/workspace/cov76pkg/example/main.dart",
+        "/workspace/cov76pkg/.dart_tool",
+        "/workspace/cov76pkg/.dart_tool/package_config.json",
+    ]:
+        asserts.false(env, seen in mock.watched, seen + " must stay unwatched, got {}".format(sorted(mock.watched)))
+    return unittest.end(env)
+
+lib_and_asset_dir_skip_names_link_test = unittest.make(_lib_and_asset_dir_skip_names_link_test_impl)
 
 def _missing_declared_paths_are_watched_test_impl(ctx):
     """A declared path is watched before testing whether it exists.
@@ -768,27 +837,33 @@ cycle_refusal_names_the_link_test = unittest.make(_cycle_refusal_names_the_link_
 def _case_folded_skip_applies_end_to_end_test_impl(ctx):
     """The probe's answer changes what a whole fetch links.
 
-    A `Build/` directory at the root of a declared asset dir is skipped
-    when the host folds case and mirrored when it does not, through the
-    whole `link_path_package` fetch — the probe, not the caller, decides.
+    A `Build/` directory at the root of a declared asset dir mirrors on
+    both hosts (asset trees never skip), while a `Build/` directory at
+    the root of the mirrored `android/` platform dir is skipped when the
+    host folds case and mirrored when it does not, through the whole
+    `link_path_package` fetch — the probe, not the caller, decides.
     """
     env = unittest.begin(ctx)
     tree = {
         "casepkg": {
-            "pubspec.yaml": "name: casepkg\nflutter:\n  assets:\n    - assets/\n",
+            "pubspec.yaml": "name: casepkg\nflutter:\n  assets:\n    - assets/\n  plugin:\n    platforms:\n      android:\n        package: com.example.casepkg\n        pluginClass: CasePlugin\n",
             "lib": {"casepkg.dart": None},
             "assets": {
                 "any.txt": None,
                 "Build": {"top.txt": None},
             },
+            "android": {
+                "settings.gradle": None,
+                "Build": {"stale.txt": None},
+            },
         },
     }
     exact = _make_mock_link_ctx(tree, path_value = "casepkg", package_name = "casepkg")
     link_path_package(exact.ctx)
-    asserts.equals(env, ["assets/Build/top.txt", "assets/any.txt", "lib/casepkg.dart", "pubspec.yaml"], sorted([link.name for link in exact.linked]))
+    asserts.equals(env, ["android/Build/stale.txt", "android/settings.gradle", "assets/Build/top.txt", "assets/any.txt", "lib/casepkg.dart", "pubspec.yaml"], sorted([link.name for link in exact.linked]))
     folded = _make_mock_link_ctx(tree, path_value = "casepkg", package_name = "casepkg", case_insensitive_fs = True)
     link_path_package(folded.ctx)
-    asserts.equals(env, ["assets/any.txt", "lib/casepkg.dart", "pubspec.yaml"], sorted([link.name for link in folded.linked]))
+    asserts.equals(env, ["android/settings.gradle", "assets/Build/top.txt", "assets/any.txt", "lib/casepkg.dart", "pubspec.yaml"], sorted([link.name for link in folded.linked]))
     return unittest.end(env)
 
 case_folded_skip_applies_end_to_end_test = unittest.make(_case_folded_skip_applies_end_to_end_test_impl)
@@ -1206,6 +1281,7 @@ def path_package_test_suite(name):
         cycle_refusal_names_the_link_test,
         dir_link_mirrors_not_symlinks_test,
         foreign_lock_path_dep_is_refused_test,
+        lib_and_asset_dir_skip_names_link_test,
         link_scopes_to_the_pubspec_plan_test,
         lock_path_joins_the_lock_dir_test,
         lock_path_stays_inside_the_workspace_test,
