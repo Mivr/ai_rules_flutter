@@ -406,6 +406,34 @@ def _mirror_link_child(ctx, child, child_rel, child_real, scope, seen, tree_root
     stack.append((target, child_rel, seen + (fold_path_case(child_real, scope.case_insensitive),), tree_root))
     return ""
 
+def _tree_skips_child(tree_root, parent_rel, name, case_insensitive):
+    """Whether this mirrored tree skips directory `name` under `parent_rel`.
+
+    Only a skipping tree's own top level consults the skip list: `lib/`
+    and declared asset directory trees (whose root carries
+    `apply_skip = False`) mirror whole, and deeper names link normally
+    everywhere. A plain string root (from older callers such as
+    `link_scoped_tree_bounded`) applies skips, preserving the old rule.
+
+    Args:
+        tree_root: The mirrored tree's `struct(root, apply_skip)`, or a
+            plain spoke-relative root string, which applies skips.
+        parent_rel: The spoke-relative path of the directory holding
+            `name`.
+        name: A single directory basename (no slashes).
+        case_insensitive: True when the host proves case-insensitive,
+            in which case a case-only skip variant skips too.
+
+    Returns:
+        True when the walk skips this directory here.
+    """
+    root_rel = tree_root.root if type(tree_root) == "struct" else tree_root
+    if parent_rel != root_rel:
+        return False
+    if type(tree_root) == "struct" and not tree_root.apply_skip:
+        return False
+    return is_path_spoke_skipped_dir(name, case_insensitive)
+
 def mirror_tree_bounded(ctx, stack, scope, bound):
     """Mirror one source directory into the spoke, reporting problems.
 
@@ -451,13 +479,11 @@ def mirror_tree_bounded(ctx, stack, scope, bound):
         if not stack:
             break
         parent, parent_rel, seen, tree_root = stack.pop()
-        root_rel = tree_root.root if type(tree_root) == "struct" else tree_root
-        root_skips = tree_root.apply_skip if type(tree_root) == "struct" else True
         for child in parent.readdir():
             name = child.basename
             child_rel = parent_rel + "/" + name
             child_real = str(child.realpath)
-            if child.is_dir and parent_rel == root_rel and root_skips and is_path_spoke_skipped_dir(name, scope.case_insensitive):
+            if child.is_dir and _tree_skips_child(tree_root, parent_rel, name, scope.case_insensitive):
                 continue
             if not paths_match(child_real, scope.package_realpath + "/" + child_rel, scope.case_insensitive):
                 error = _mirror_link_child(ctx, child, child_rel, child_real, scope, seen, tree_root, stack)
