@@ -125,6 +125,22 @@ load(
 )
 load("//flutter/private:flutter_info.bzl", "dedup_plugins")
 load(
+    "//flutter/private:flutter_integration_android_app.bzl",
+    "ANDROID_APP_KWARG_KEYS",
+    "make_android_integration_manifest_lines",
+    "sanitize_android_package_segment",
+)
+load(
+    "//flutter/private:flutter_integration_web_bundle.bzl",
+    "BOOTSTRAP_JS_TEMPLATE",
+    "INDEX_HTML_TEMPLATE",
+    "JS_BUILD",
+    "MANIFEST_JSON_TEMPLATE",
+    "VERSION_JSON_TEMPLATE",
+    "build_config_js",
+    "wasm_build",
+)
+load(
     "//flutter/private:flutter_kernel_module.bzl",
     "MODULAR_KERNEL_ATTRS",
     "flutter_kernel_module_aspect",
@@ -166,81 +182,6 @@ load(
     "validate_web_compiler_renderer",
     "web_renderer",
 )
-
-_INDEX_HTML_TEMPLATE = """<!DOCTYPE html>
-<html>
-<head>
-  <base href="$FLUTTER_BASE_HREF">
-  <meta charset="UTF-8">
-  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <title>{title}</title>
-</head>
-<body>
-  <script src="flutter_bootstrap.js" async></script>
-</body>
-</html>
-"""
-
-_BOOTSTRAP_JS_TEMPLATE = """\
-{{flutter_build_config}}
-{
-  let script = document.createElement("script");
-  script.src = "flutter.js";
-  script.addEventListener("load", function() {
-    _flutter.loader.load();
-  });
-  document.head.appendChild(script);
-}
-"""
-
-_MANIFEST_JSON_TEMPLATE = """\
-{{
-    "name": "{name}",
-    "short_name": "{name}",
-    "start_url": ".",
-    "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A Flutter web integration test.",
-    "orientation": "portrait-primary",
-    "prefer_related_applications": false
-}}
-"""
-
-_VERSION_JSON_TEMPLATE = """\
-{{
-    "app_name": "{app_name}",
-    "version": "1.0.0",
-    "build_number": "1",
-    "package_name": "{app_name}"
-}}
-"""
-
-def _build_config_js(engine_revision, builds):
-    config = {
-        "engineRevision": engine_revision,
-        "builds": builds,
-        "useLocalCanvasKit": True,
-    }
-    return """if (!window._flutter) {
-  window._flutter = {};
-}
-_flutter.buildConfig = %s;
-""" % json.encode(config)
-
-def _wasm_build(renderer):
-    return {
-        "compileTarget": "dart2wasm",
-        "renderer": renderer,
-        "mainWasmPath": "main.dart.wasm",
-        "jsSupportRuntimePath": "main.dart.mjs",
-    }
-
-_JS_BUILD = {
-    "compileTarget": "dart2js",
-    "renderer": "canvaskit",
-    "mainJsPath": "main.dart.js",
-}
 
 def _exposes_package(deps, names):
     """True if any dep transitively exposes one of `names`."""
@@ -1253,7 +1194,7 @@ def _flutter_integration_test_impl(ctx):
         if output_wasm_map != None:
             compile_outputs.append(output_wasm_map)
             compile_copies.append({"src": output_wasm_map.path, "dst": "main.dart.wasm.map"})
-        builds = [_wasm_build(renderer)]
+        builds = [wasm_build(renderer)]
     else:
         output_js_dir = ctx.actions.declare_directory(ctx.label.name + "_dart2js")
         flutter_dart2js_action(ctx, make_dart2js_request(
@@ -1270,7 +1211,7 @@ def _flutter_integration_test_impl(ctx):
             output_js_dir,
         ))
         dart2js_dirs = [output_js_dir]
-        builds = [_JS_BUILD]
+        builds = [JS_BUILD]
 
     # Step 3: Compile shaders + bundle assets.
     compiled_shaders = flutter_compile_shaders(ctx, flutter_sdk_info, "web")
@@ -1290,16 +1231,16 @@ def _flutter_integration_test_impl(ctx):
     # Step 4: Generate web templates (index.html, flutter_bootstrap.js, manifest.json, version.json).
     safe_title = escape_html(ctx.label.name)
     index_template = ctx.actions.declare_file(ctx.label.name + "_index_template.html")
-    ctx.actions.write(index_template, _INDEX_HTML_TEMPLATE.format(title = safe_title))
+    ctx.actions.write(index_template, INDEX_HTML_TEMPLATE.format(title = safe_title))
 
     bootstrap_template = ctx.actions.declare_file(ctx.label.name + "_bootstrap_template.js")
-    ctx.actions.write(bootstrap_template, _BOOTSTRAP_JS_TEMPLATE)
+    ctx.actions.write(bootstrap_template, BOOTSTRAP_JS_TEMPLATE)
 
     manifest_json = ctx.actions.declare_file(ctx.label.name + "_manifest.json")
-    ctx.actions.write(manifest_json, _MANIFEST_JSON_TEMPLATE.format(name = safe_title))
+    ctx.actions.write(manifest_json, MANIFEST_JSON_TEMPLATE.format(name = safe_title))
 
     version_json = ctx.actions.declare_file(ctx.label.name + "_version.json")
-    ctx.actions.write(version_json, _VERSION_JSON_TEMPLATE.format(app_name = package_name))
+    ctx.actions.write(version_json, VERSION_JSON_TEMPLATE.format(app_name = package_name))
 
     flutter_js_file = None
     renderer_files = []
@@ -1312,7 +1253,7 @@ def _flutter_integration_test_impl(ctx):
     index_html = ctx.actions.declare_file(ctx.label.name + "_index.html")
     bootstrap_js = ctx.actions.declare_file(ctx.label.name + "_flutter_bootstrap.js")
 
-    build_config = _build_config_js(flutter_sdk_info.engine_revision, builds)
+    build_config = build_config_js(flutter_sdk_info.engine_revision, builds)
     shared_builtins = {
         "flutter_build_config": {"value": build_config},
         "flutter_service_worker_version": {"value": "null"},
@@ -2599,80 +2540,6 @@ _flutter_android_integration_test = rule(
     doc = "Runs a compiled Flutter Android integration test APK inside a hermetic, pinned headless Android emulator.",
 )
 
-def _sanitize_android_package_segment(raw):
-    """Sanitizes a string into a valid Java package identifier segment."""
-    chars = []
-    for c in raw.elems():
-        if c.isalnum() or c == "_":
-            chars.append(c.lower())
-        else:
-            chars.append("_")
-    segment = "".join(chars)
-    if not segment or segment[0].isdigit():
-        segment = "app_" + segment
-    return segment
-
-def _make_android_integration_manifest_lines(package_name, app_name):
-    """Generates AndroidManifest.xml lines for an Android integration test APK."""
-    return [
-        "<?xml version=\"1.0\" encoding=\"utf-8\"?>",
-        "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"",
-        "    package=\"%s\">" % package_name,
-        "    <uses-permission android:name=\"android.permission.INTERNET\"/>",
-        "    <uses-sdk android:minSdkVersion=\"%s\" android:targetSdkVersion=\"%s\"/>" % (
-            ANDROID_MIN_SDK_VERSION,
-            ANDROID_TARGET_SDK_VERSION,
-        ),
-        "",
-        "    <application",
-        "        android:label=\"%s\"" % app_name,
-        "        android:name=\"android.app.Application\"",
-        "        android:hardwareAccelerated=\"true\">",
-        "        <activity",
-        "            android:name=\"io.flutter.embedding.android.FlutterActivity\"",
-        "            android:exported=\"true\"",
-        "            android:launchMode=\"singleTop\"",
-        "            android:configChanges=\"orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode\"",
-        "            android:hardwareAccelerated=\"true\"",
-        "            android:windowSoftInputMode=\"adjustResize\"",
-        "            android:theme=\"@android:style/Theme.Light.NoTitleBar\">",
-        "            <intent-filter>",
-        "                <action android:name=\"android.intent.action.MAIN\"/>",
-        "                <category android:name=\"android.intent.category.LAUNCHER\"/>",
-        "            </intent-filter>",
-        "            <meta-data",
-        "                android:name=\"io.flutter.embedding.android.NormalTheme\"",
-        "                android:resource=\"@android:style/Theme.Light.NoTitleBar\"/>",
-        "        </activity>",
-        "",
-        "        <meta-data",
-        "            android:name=\"io.flutter.embedding.android.EnableImpeller\"",
-        "            android:value=\"false\"/>",
-        "        <meta-data",
-        "            android:name=\"flutterEmbedding\"",
-        "            android:value=\"2\"/>",
-        "    </application>",
-        "</manifest>",
-        "",
-    ]
-
-_ANDROID_APP_KWARG_KEYS = (
-    "srcs",
-    "main",
-    "app_srcs",
-    "assets",
-    "shaders",
-    "shader_includes",
-    "require_sksl_shaders",
-    "tree_shake_icons",
-    "license_files",
-    "track_widget_creation",
-    "profile",
-    "language_version",
-    "defines",
-    "native_deps",
-)
-
 def flutter_integration_test(
         name,
         package_name = "",
@@ -2724,11 +2591,11 @@ def flutter_integration_test(
 
     if platform == "android":
         resolved_android_package = android_package or (
-            "com.example.%s" % _sanitize_android_package_segment(resolved_package_name)
+            "com.example.%s" % sanitize_android_package_segment(resolved_package_name)
         )
         helper_tags = ["manual"]
         app_kwargs = {}
-        for k in _ANDROID_APP_KWARG_KEYS:
+        for k in ANDROID_APP_KWARG_KEYS:
             if k in kwargs:
                 app_kwargs[k] = kwargs[k]
 
@@ -2825,7 +2692,7 @@ def flutter_integration_test(
         write_file(
             name = "__%s_base_manifest" % name,
             out = "__%s_base_manifest/AndroidManifest.xml" % name,
-            content = _make_android_integration_manifest_lines(
+            content = make_android_integration_manifest_lines(
                 resolved_android_package,
                 name,
             ),
@@ -2860,7 +2727,7 @@ def flutter_integration_test(
         test_kwargs = {
             k: v
             for k, v in kwargs.items()
-            if k not in _ANDROID_APP_KWARG_KEYS or k in ("srcs", "main", "app_srcs", "language_version")
+            if k not in ANDROID_APP_KWARG_KEYS or k in ("srcs", "main", "app_srcs", "language_version")
         }
 
         _flutter_android_integration_test(
