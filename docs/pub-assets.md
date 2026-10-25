@@ -31,6 +31,21 @@ the package, the template, and the bound.
 
 ## What the fetch refuses
 
+- A `flutter.assets` or `flutter.shaders` section that is not a list (for
+  example a string `assets: assets/logo.png`) fails the fetch, naming the
+  package, the key and the expected list shape, as flutter_tools does.
+- An asset or shader list item that is neither a string nor a map, a null
+  or empty item, or a map whose `path` is not a string fails the fetch,
+  naming the package, the key and the expected shape, as flutter_tools
+  does. An empty map item is silently no entry, the way flutter_tools
+  reads it.
+- A `flutter.fonts` section that is not a list, a font entry that is not a
+  map, a non-string `family`, a non-list per-family `fonts`, a font file
+  entry that is not a map, or a non-string font file `asset` fails the
+  fetch, naming the package, the key and the expected shape, as
+  flutter_tools does. A missing `family`, or a file entry without an
+  `asset` key, stays silently skipped, the way flutter_tools only warns
+  on it.
 - A `platforms` or `flavors` value that is not a list of strings (for example
   a scalar `platforms: web`) fails the fetch, naming the package, the entry
   and the key, as flutter_tools does.
