@@ -30,7 +30,7 @@ surface small).
 load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version", "make_dart_library_build_content")
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_deps", "parse_pubspec_sdk_constraint")
 load("//flutter/private:flutter_pub_scan.bzl", "fetch_hosted_archive", "scan_hosted_archive", "walk_hosted_package")
-load("//flutter/private:flutter_pubspec.bzl", "asset_flavor_error", "asset_platform_error", "invalid_asset_platforms", "parse_flutter_assets_block", "parse_flutter_plugin_block", "parse_pubspec")
+load("//flutter/private:flutter_pubspec.bzl", "asset_flavor_error", "parse_flutter_assets_block", "parse_flutter_plugin_block", "parse_pubspec")
 load(
     ":flutter_pub_assets.bzl",
     "check_asset_entry_problems",
@@ -1957,19 +1957,6 @@ def _spoke_dep_labels(ctx, bazel_deps, asset_block):
         dep_labels = dep_labels + ["@rules_flutter//flutter:material_icons"]
     return dep_labels
 
-def _check_asset_platforms(package_name, parsed_assets):
-    """Fail the spoke fetch on asset entries naming unknown platforms.
-
-    An entry `platforms` value flutter_tools would reject (`flutter_manifest.dart`
-    fails the manifest the same way) is refused here, naming the package, the
-    asset entry, and every valid name — a misspelled platform would otherwise
-    bundle nowhere on every target, silently.
-    """
-    for entry in parsed_assets:
-        invalid = invalid_asset_platforms(entry.platforms)
-        if invalid:
-            fail(asset_platform_error(package_name, entry.path, invalid))
-
 def _covering_entry_lookup(parsed_assets):
     """Index asset declarations for linear covering-entry lookup.
 
@@ -2061,7 +2048,6 @@ def _spoke_asset_inputs(ctx, package_name, asset_block):
     has_contributions)`.
     """
     check_asset_entry_problems(package_name, asset_block.asset_errors)
-    _check_asset_platforms(package_name, asset_block.assets)
     fonts_json_str = _encode_fonts_json(asset_block.fonts)
     font_files = _build_font_files_dict(asset_block.fonts)
     expansion = expand_pub_asset_entries(

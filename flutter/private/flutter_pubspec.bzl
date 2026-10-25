@@ -248,10 +248,14 @@ def _font_file_key_problems(item, slot, lines, flocator):
     `switch` default it also falls into. Each bad key is reported; an
     absent `weight` or `style` stays valid. A whole-number float `weight`
     (`400.0`) passes flutter_tools' validation (Dart `400.0 == 400`
-    holds) but no build can read it (`flutter_manifest.dart:422` casts
-    the weight with `as int?`), so it fails saying that instead of
-    quoting a validation error flutter_tools never prints. Every other
-    non-member `weight` (including a fractional float like `150.0`)
+    holds, so `fontWeights.contains` accepts it) but no build can read it
+    (`flutter_manifest.dart:422` casts the weight with `as int?`), so on
+    an entry carrying `asset` it fails saying that instead of quoting a
+    validation error flutter_tools never prints. The build skips an
+    entry with no `asset` before any cast
+    (`flutter_manifest.dart:413-416`), so a whole-number float `weight`
+    there stays silent. Every other non-member `weight` (an out-of-range
+    whole-number float like `150.0`, a fractional float like `350.0`)
     keeps flutter_tools' own `Invalid value` refusal.
 
     Args:
@@ -264,6 +268,11 @@ def _font_file_key_problems(item, slot, lines, flocator):
         The refusal structs for `asset_errors`.
     """
     problems = []
+
+    # The build reads a file entry's weight only when the entry carries an
+    # `asset` (entries without one are skipped before any cast), so the
+    # unreadable-weight refusal applies only then.
+    weight_readable = type(item.get("asset")) == "string"
     for key in item.keys():
         value = item[key]
         if type(key) != "string":
@@ -295,15 +304,16 @@ def _font_file_key_problems(item, slot, lines, flocator):
                 ))
         elif key == "weight":
             if type(value) == "float" and value in _FONT_WEIGHTS:
-                problems.append(_shape_problem(
-                    slot,
-                    "fonts",
-                    "Font weight {value} (({type})) must be an int: flutter_tools 3.47.7 cannot read it (flutter_manifest.dart:422 casts the weight with 'as int?').".format(
-                        value = dart_str(value),
-                        type = dart_type(value),
-                    ),
-                    flutter_line_of(lines, flocator + ["weight"]),
-                ))
+                if weight_readable:
+                    problems.append(_shape_problem(
+                        slot,
+                        "fonts",
+                        "Font weight {value} (({type})) must be an int: flutter_tools 3.47.7 cannot read it (flutter_manifest.dart:422 casts the weight with 'as int?').".format(
+                            value = dart_str(value),
+                            type = dart_type(value),
+                        ),
+                        flutter_line_of(lines, flocator + ["weight"]),
+                    ))
             elif type(value) != "int" or value not in _FONT_WEIGHTS:
                 problems.append(_shape_problem(
                     slot,
@@ -502,6 +512,13 @@ def _parse_fonts(raw, lines, locator):
             out.append(family)
     return (out, problems)
 
+# The platform names an `assets` / `shaders` entry may carry, in flutter_tools'
+# `_kValidPluginPlatforms` order
+# (`packages/flutter_tools/lib/src/flutter_manifest.dart`): anything else is
+# an `Invalid platform(s)` refusal, worded like
+# `AssetsEntry._parsePlatformsSection`.
+VALID_ASSET_PLATFORMS = ("android", "ios", "web", "windows", "linux", "macos")
+
 def _parse_condition_list(raw_value, key):
     """Validate one asset entry `flavors` / `platforms` value, flutter_tools style.
 
@@ -510,7 +527,9 @@ def _parse_condition_list(raw_value, key):
     null and is valid; anything else must be a list of strings. A scalar
     `platforms: web` is one error, and every non-string element is
     reported, not just the first, so the caller can wrap them the way
-    `parseFromYamlSafe` joins its section errors.
+    `parseFromYamlSafe` joins its section errors. A `platforms` list that
+    parses but names anything outside `VALID_ASSET_PLATFORMS` is one
+    `Invalid platform(s)` error, like `_parsePlatformsSection` reports.
 
     Args:
         raw_value: The value under the key (None when the key is absent).
@@ -542,6 +561,16 @@ def _parse_condition_list(raw_value, key):
             values.append(item)
     if bad:
         return ([], "\n".join(bad))
+    if key == "platforms":
+        unknown = []
+        for value in values:
+            if value not in VALID_ASSET_PLATFORMS and value not in unknown:
+                unknown.append(value)
+        if unknown:
+            return ([], "Invalid platform(s): \"{unknown}\". Supported platforms are: \"{valid}\".".format(
+                unknown = ", ".join(unknown),
+                valid = ", ".join(VALID_ASSET_PLATFORMS),
+            ))
     return (values, "")
 
 def _section_error(path, section, inner):
@@ -591,7 +620,8 @@ def _entry_condition_problems(path, item, lines, elocator):
     (`packages/flutter_tools/lib/src/flutter_manifest.dart`), so a shader
     map entry whose conditions are malformed fails exactly like an asset
     entry's do, with the same wrapped `Unable to parse assets section`
-    refusal.
+    refusal. That includes a `platforms` value naming an unknown
+    platform (`_parsePlatformsSection` reports `Invalid platform(s)`).
 
     Args:
         path: The entry path, for the problem path.
@@ -614,8 +644,9 @@ def _parse_assets(raw, lines, locator, shown):
     `path` is a refusal shaped like flutter_tools'
     `AssetsEntry.parseFromYamlSafe`
     (`packages/flutter_tools/lib/src/flutter_manifest.dart`); a map
-    entry's `flavors` / `platforms` must each be a list of strings (a bad
-    one is the wrapped `Unable to parse assets section` refusal), and an
+    entry's `flavors` / `platforms` must each be a list of strings naming
+    known platforms (a bad one is the wrapped `Unable to parse assets section`
+    refusal), and an
     entry must not carry `transformers` (rules_flutter does not run asset
     transformers; shipping the untransformed file would silently do the
     wrong thing). Problems are collected, not failed here, so unit tests
@@ -666,46 +697,6 @@ def _parse_assets(raw, lines, locator, shown):
             ))
         entries.append(struct(path = path, flavors = flavors, platforms = platforms))
     return (entries, problems)
-
-# The platforms a `flutter.assets` entry may name, mirroring flutter_tools'
-# `_kValidPluginPlatforms` (`packages/flutter_tools/lib/src/flutter_manifest.dart`):
-# an entry naming anything else fails the spoke fetch.
-VALID_ASSET_PLATFORMS = ("android", "ios", "linux", "macos", "web", "windows")
-
-def invalid_asset_platforms(platforms):
-    """The entries of `platforms` flutter_tools would reject, in order.
-
-    Args:
-        platforms: The `platforms` list of one parsed asset entry.
-
-    Returns:
-        The platform names not in `VALID_ASSET_PLATFORMS`.
-    """
-    return [p for p in platforms if p not in VALID_ASSET_PLATFORMS]
-
-def asset_platform_error(package_name, asset_path, invalid):
-    """The fetch failure for an asset entry naming unknown platforms.
-
-    Names the package, the asset entry, and every valid name, so the fix
-    (a typo or a platform flutter does not know) is in the message.
-
-    Args:
-        package_name: The pub package the entry comes from.
-        asset_path: The entry's `path`, as declared in pubspec.yaml.
-        invalid: The unknown platform names (`invalid_asset_platforms`).
-
-    Returns:
-        The error string; the caller `fail()`s with it.
-    """
-    return (
-        "flutter.pub spoke for \"{pkg}\": asset \"{path}\" lists unknown " +
-        "platform(s) {invalid}. Supported platforms are: {valid}."
-    ).format(
-        pkg = package_name,
-        path = asset_path,
-        invalid = ", ".join(["\"%s\"" % p for p in invalid]),
-        valid = ", ".join(["\"%s\"" % p for p in VALID_ASSET_PLATFORMS]),
-    )
 
 def _format_flavor_list(flavors):
     """Render a `flavors` list as `["a", "b"]`, or `[]` when it is empty."""
@@ -823,11 +814,13 @@ def parse_flutter_assets_block(content):
     `path`, a `flutter.fonts` section that is not a list, a non-map font
     entry, a non-string `family`, a non-list per-family `fonts`, a non-map
     font file entry, a non-string font `asset`, an invalid font `weight`
-    or `style` (a whole-number float `weight` fails as unreadable by
-    flutter_tools 3.47.7 instead), an unexpected key in a font (checked
+    or `style` (a whole-number float `weight` on an entry carrying `asset`
+    fails as unreadable by flutter_tools 3.47.7 instead; without `asset`
+    it stays silent), an unexpected key in a font (checked
     whether or not the file entry carries `asset`), a `flavors` /
-    `platforms` value that is not a list of strings on an asset or a
-    shader entry, an entry carrying
+    `platforms` value that is not a list of strings, or a `platforms`
+    value naming an unknown platform, on an asset or a shader entry, an
+    entry carrying
     `transformers`, a `flutter:` section that is neither a map nor null,
     an empty `deferred-components` list (flutter_tools crashes reading
     one), and every other `flutter:` child flutter_tools `_validate` rejects

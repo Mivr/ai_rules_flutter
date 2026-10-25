@@ -1231,10 +1231,10 @@ def _bom_section_lines_test_impl(ctx):
 #
 # A whole-number float `weight` passes flutter_tools' validation (Dart
 # `400.0 == 400` holds) but every build reading the fonts casts it with
-# `as int?` (flutter_manifest.dart:422) and throws, so the fetch still
-# fails — saying flutter_tools cannot read it, not quoting a validation
-# error flutter_tools never prints. A fractional float keeps the
-# validation refusal flutter_tools reports.
+# `as int?` (flutter_manifest.dart:422) and throws, so on an entry
+# carrying `asset` the fetch still fails — saying flutter_tools cannot
+# read it, not quoting a validation error flutter_tools never prints. A
+# fractional float keeps the validation refusal flutter_tools reports.
 
 _FLOAT_WEIGHT_PUBSPEC = """\
 name: float_weight
@@ -1283,6 +1283,107 @@ def _fractional_weight_refused_test_impl(ctx):
         "fonts",
         "Invalid value 150.0 ((double)) for font -> weight.",
         7,
+    )
+    return unittest.end(env)
+
+# -- unknown platforms refused at parse time ---------------------------------------------------
+#
+# `AssetsEntry._parsePlatformsSection` (flutter_manifest.dart:909) reports
+# `Invalid platform(s)` for names outside `_kValidPluginPlatforms`, wrapped
+# the way `parseFromYamlSafe` (flutter_manifest.dart:825) wraps section
+# errors. The shared condition checks run it for asset and shader entries
+# alike, at the `platforms` key's line.
+
+_SHADER_UNKNOWN_PLATFORM_PUBSPEC = """\
+name: shader_unknown_platform
+flutter:
+  shaders:
+    - path: s.frag
+      platforms: [tvos]
+"""
+
+def _shader_unknown_platform_refused_test_impl(ctx):
+    """A shader entry naming an unknown platform fails at the key's line."""
+    env = unittest.begin(ctx)
+    result = _assert_refused(
+        env,
+        _SHADER_UNKNOWN_PLATFORM_PUBSPEC,
+        "platforms",
+        "Invalid platform(s): \"tvos\". Supported platforms are: \"android, ios, web, windows, linux, macos\".",
+        5,
+    )
+    asserts.equals(env, "s.frag", result.asset_errors[0].path)
+    asserts.true(
+        env,
+        "In platforms section of asset \"s.frag\"" in result.asset_errors[0].detail,
+        result.asset_errors[0].detail,
+    )
+    return unittest.end(env)
+
+_ASSET_UNKNOWN_PLATFORM_PUBSPEC = """\
+name: asset_unknown_platform
+flutter:
+  assets:
+    - path: assets/a.txt
+      platforms: [tvos]
+"""
+
+def _asset_unknown_platform_refused_test_impl(ctx):
+    """An asset entry naming an unknown platform fails at the key's line."""
+    env = unittest.begin(ctx)
+    result = _assert_refused(
+        env,
+        _ASSET_UNKNOWN_PLATFORM_PUBSPEC,
+        "platforms",
+        "Invalid platform(s): \"tvos\". Supported platforms are: \"android, ios, web, windows, linux, macos\".",
+        5,
+    )
+    asserts.equals(env, "assets/a.txt", result.asset_errors[0].path)
+    return unittest.end(env)
+
+# -- asset-less whole-number float weight stays silent -----------------------------------------
+#
+# The build skips a font file entry with no `asset` before any cast
+# (flutter_manifest.dart:413-416), so a whole-number float `weight` there
+# builds with a warning only and stays accepted. A weight outside
+# 100..900 still fails validation with flutter_tools' own `Invalid value`
+# refusal, with or without `asset`.
+
+_FONT_NOASSET_FLOAT_WEIGHT_PUBSPEC = """\
+name: font_noasset_float_weight
+flutter:
+  fonts:
+    - family: F
+      fonts:
+        - weight: 400.0
+"""
+
+def _font_noasset_float_weight_loads_test_impl(ctx):
+    """A whole-number float `weight` without `asset` stays silently skipped."""
+    env = unittest.begin(ctx)
+    result = _assert_accepted(env, _FONT_NOASSET_FLOAT_WEIGHT_PUBSPEC)
+    asserts.equals(env, "F", result.fonts[0].family)
+    asserts.equals(env, [], result.fonts[0].fonts)
+    return unittest.end(env)
+
+_FONT_NOASSET_FRACTIONAL_WEIGHT_PUBSPEC = """\
+name: font_noasset_fractional_weight
+flutter:
+  fonts:
+    - family: F
+      fonts:
+        - weight: 350.0
+"""
+
+def _font_noasset_fractional_weight_refused_test_impl(ctx):
+    """An out-of-range float `weight` fails even without `asset`."""
+    env = unittest.begin(ctx)
+    _assert_refused(
+        env,
+        _FONT_NOASSET_FRACTIONAL_WEIGHT_PUBSPEC,
+        "fonts",
+        "Invalid value 350.0 ((double)) for font -> weight.",
+        6,
     )
     return unittest.end(env)
 
@@ -1349,6 +1450,10 @@ _m59_test = unittest.make(_family_int_key_refused_test_impl)
 _m60_test = unittest.make(_bom_section_lines_test_impl)
 _m61_test = unittest.make(_float_weight_unreadable_refused_test_impl)
 _m62_test = unittest.make(_fractional_weight_refused_test_impl)
+_m63_test = unittest.make(_shader_unknown_platform_refused_test_impl)
+_m64_test = unittest.make(_asset_unknown_platform_refused_test_impl)
+_m65_test = unittest.make(_font_noasset_float_weight_loads_test_impl)
+_m66_test = unittest.make(_font_noasset_fractional_weight_refused_test_impl)
 
 def manifest_validate_test_suite(name):
     """The `flutter:` section validation test suite."""
@@ -1417,4 +1522,8 @@ def manifest_validate_test_suite(name):
         _m60_test,
         _m61_test,
         _m62_test,
+        _m63_test,
+        _m64_test,
+        _m65_test,
+        _m66_test,
     )

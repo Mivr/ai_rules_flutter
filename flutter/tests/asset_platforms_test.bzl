@@ -7,8 +7,9 @@ when a flavor is selected (rules_flutter selects none yet, so never) — then
 asset and anything else must name the target's `osName`.
 
 Covers the pure filter (`pub_asset_matches_target`), the fetch-time
-validation helpers (`VALID_ASSET_PLATFORMS`, `invalid_asset_platforms`,
-`asset_platform_error`), directory expansion (`expand_pub_asset_entries`),
+validation helper (`VALID_ASSET_PLATFORMS`; unknown `platforms` names are
+refused at parse time in `manifest_validate_test`), directory expansion
+(`expand_pub_asset_entries`),
 and the rule-level plumbing: `pkg_asset_platforms` / `pkg_asset_flavors`
 reach `FlutterInfo.pub_assets`, and `aggregate_pub_contributions` filters
 them per platform.
@@ -32,8 +33,6 @@ load(
     "//flutter/private:flutter_pubspec.bzl",
     "VALID_ASSET_PLATFORMS",
     "asset_flavor_error",
-    "asset_platform_error",
-    "invalid_asset_platforms",
 )
 
 # -- pub_asset_matches_target ---------------------------------------------------
@@ -125,31 +124,6 @@ def _valid_platforms_cover_flutter_tools_set_test_impl(ctx):
             platform in VALID_ASSET_PLATFORMS,
             "%s must be a valid asset platform" % platform,
         )
-    return unittest.end(env)
-
-def _invalid_asset_platforms_test_impl(ctx):
-    env = unittest.begin(ctx)
-    asserts.equals(env, [], invalid_asset_platforms(["android", "web"]))
-    asserts.equals(env, [], invalid_asset_platforms([]))
-    asserts.equals(
-        env,
-        ["fuchsia"],
-        invalid_asset_platforms(["android", "fuchsia"]),
-    )
-    asserts.equals(
-        env,
-        ["fuchsia", "tizen"],
-        invalid_asset_platforms(["fuchsia", "android", "tizen"]),
-    )
-    return unittest.end(env)
-
-def _asset_platform_error_names_package_entry_valid_test_impl(ctx):
-    env = unittest.begin(ctx)
-    message = asset_platform_error("my_pkg", "assets/odd.txt", ["fuchsia"])
-    asserts.true(env, "my_pkg" in message, "error must name the package")
-    asserts.true(env, "assets/odd.txt" in message, "error must name the asset entry")
-    for platform in ["android", "ios", "web", "windows", "linux", "macos"]:
-        asserts.true(env, platform in message, "error must list valid names")
     return unittest.end(env)
 
 # -- directory expansion ----------------------------------------------------------
@@ -388,8 +362,6 @@ _t3_test = unittest.make(_matches_flavor_dropped_without_selection_test_impl)
 _t4_test = unittest.make(_matches_flavor_checked_before_platform_test_impl)
 _t5_test = unittest.make(_matches_selected_flavor_test_impl)
 _t6_test = unittest.make(_valid_platforms_cover_flutter_tools_set_test_impl)
-_t7_test = unittest.make(_invalid_asset_platforms_test_impl)
-_t8_test = unittest.make(_asset_platform_error_names_package_entry_valid_test_impl)
 _t9_test = unittest.make(_expand_files_pass_through_test_impl)
 _t10_test = unittest.make(_expand_directory_inherits_conditions_test_impl)
 _t11_test = unittest.make(_expand_unconditional_directory_stays_unconditional_test_impl)
@@ -534,8 +506,6 @@ def asset_platforms_test_suite(name):
         _t4_test,
         _t5_test,
         _t6_test,
-        _t7_test,
-        _t8_test,
         _t9_test,
         _t10_test,
         _t11_test,
