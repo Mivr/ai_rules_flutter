@@ -86,7 +86,7 @@ def _file_entry_bundles_main_and_variants_test_impl(ctx):
     """The main file plus every variant, each with the entry's conditions."""
     env = unittest.begin(ctx)
     entries = [
-        struct(path = "img/logo.png", flavors = ["paid"], platforms = ["ios"]),
+        struct(path = "img/logo.png", key = "img/logo.png", flavors = ["paid"], platforms = ["ios"]),
     ]
     result = expand_pub_asset_entries(entries, _fake_list_dir, "variant_pkg")
     asserts.equals(env, "", result.error)
@@ -103,7 +103,7 @@ def _file_entry_bundles_main_and_variants_test_impl(ctx):
 def _variant_only_entry_accepted_test_impl(ctx):
     """A missing main with variants bundles the variants, no error."""
     env = unittest.begin(ctx)
-    entries = [struct(path = "lonely/ghost.png", flavors = [], platforms = [])]
+    entries = [struct(path = "lonely/ghost.png", key = "lonely/ghost.png", flavors = [], platforms = [])]
     result = expand_pub_asset_entries(entries, _fake_list_dir, "variant_pkg")
     asserts.equals(env, "", result.error)
     asserts.equals(env, ["lonely/2.0x/ghost.png"], [e.path for e in result.expanded])
@@ -112,7 +112,7 @@ def _variant_only_entry_accepted_test_impl(ctx):
 def _missing_entry_fails_test_impl(ctx):
     """Neither main nor variant fails naming the package and the entry."""
     env = unittest.begin(ctx)
-    entries = [struct(path = "img/absent.png", flavors = [], platforms = [])]
+    entries = [struct(path = "img/absent.png", key = "img/absent.png", flavors = [], platforms = [])]
     result = expand_pub_asset_entries(entries, _fake_list_dir, "variant_pkg")
     asserts.equals(env, [], result.expanded)
     asserts.true(env, "variant_pkg" in result.error, result.error)
@@ -122,7 +122,7 @@ def _missing_entry_fails_test_impl(ctx):
 def _directory_entry_skips_nested_test_impl(ctx):
     """Own files plus their variants bundle; nested subdirectories do not."""
     env = unittest.begin(ctx)
-    entries = [struct(path = "img/", flavors = [], platforms = ["android"])]
+    entries = [struct(path = "img/", key = "img/", flavors = [], platforms = ["android"])]
     result = expand_pub_asset_entries(entries, _fake_list_dir, "variant_pkg")
     asserts.equals(env, "", result.error)
     asserts.equals(
@@ -148,7 +148,7 @@ def _directory_bound_error_propagates_test_impl(ctx):
         return struct(files = [], error = "walk refused for " + directory)
 
     result = expand_pub_asset_entries(
-        [struct(path = "img/", flavors = [], platforms = [])],
+        [struct(path = "img/", key = "img/", flavors = [], platforms = [])],
         _failing_list_dir,
         "variant_pkg",
     )
@@ -523,9 +523,9 @@ def _big_variants_by_main():
 def _big_directory_and_file_entries_expand_test_impl(ctx):
     """4,000 files expand identically through one directory and 4,000 file entries."""
     env = unittest.begin(ctx)
-    entries = [struct(path = "big/", flavors = [], platforms = [])]
+    entries = [struct(path = "big/", key = "big/", flavors = [], platforms = [])]
     for main in _BIG_MAINS:
-        entries.append(struct(path = main, flavors = [], platforms = []))
+        entries.append(struct(path = main, key = main, flavors = [], platforms = []))
     counter = _counting_list_dir({"big": _BIG_FILES})
     result = expand_pub_asset_entries(entries, counter.list_dir, "big_pkg")
     asserts.equals(env, "", result.error)
@@ -590,9 +590,9 @@ def _shallow_lister_reads_once_and_skips_deep_test_impl(ctx):
     fake = _recording_repo_ctx(_DEEP_TREE)
     lister = ctx_package_lister(fake.ctx, "deep_pkg", 100)
     entries = [
-        struct(path = "img/", flavors = [], platforms = []),
-        struct(path = "img/a.png", flavors = [], platforms = []),
-        struct(path = "img/b.png", flavors = [], platforms = []),
+        struct(path = "img/", key = "img/", flavors = [], platforms = []),
+        struct(path = "img/a.png", key = "img/a.png", flavors = [], platforms = []),
+        struct(path = "img/b.png", key = "img/b.png", flavors = [], platforms = []),
     ]
     result = expand_pub_asset_entries(entries, lister, "deep_pkg")
     asserts.equals(env, "", result.error)
@@ -618,7 +618,7 @@ def _shallow_lister_bound_fails_loudly_test_impl(ctx):
     fake = _recording_repo_ctx(tree)
     lister = ctx_package_lister(fake.ctx, "bound_pkg", 3)
     result = expand_pub_asset_entries(
-        [struct(path = "many/", flavors = [], platforms = [])],
+        [struct(path = "many/", key = "many/", flavors = [], platforms = [])],
         lister,
         "bound_pkg",
     )

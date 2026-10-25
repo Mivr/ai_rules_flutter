@@ -164,6 +164,50 @@ def _lead_window(lead):
         return struct(ok = True, need = 3, lo = 0x80, hi = 0x8F)
     return struct(ok = False, need = 0, lo = 0, hi = 0)
 
+def _ascii_byte_refusal(v, need):
+    """The refusal reason for one ASCII byte, or "" when it bundles.
+
+    Args:
+        v: The byte value (below 0x80).
+        need: Continuations still owed to an open sequence, if any.
+
+    Returns:
+        "" when the byte bundles, else why the spelling is not supported.
+    """
+    if need:
+        return "an escape is cut off mid-sequence and is not valid UTF-8"
+    if v == 0x2F:
+        return "an escape decodes to `/`"
+    if v == 0x5C:
+        return "it holds a backslash"
+    if v == 0x3A:
+        return "it holds a `:`"
+    if v < 0x20 or v == 0x7F:
+        return "it holds a control character"
+    return ""
+
+def _step_multibyte(v, need, lo, hi):
+    """Fold one non-ASCII byte into the open UTF-8 sequence, if any.
+
+    Args:
+        v: The byte value (0x80 or above).
+        need: Continuations still owed to an open sequence, if any.
+        lo: The low end of the continuation window the lead opened.
+        hi: The high end of the continuation window the lead opened.
+
+    Returns:
+        `struct(refusal, need, lo, hi)`: the refusal reason ("" when the
+        byte fits) and the updated sequence state.
+    """
+    if need:
+        if v < lo or v > hi:
+            return struct(refusal = "an escape is not valid UTF-8", need = 0, lo = 0, hi = 0)
+        return struct(refusal = "", need = need - 1, lo = 0x80, hi = 0xBF)
+    window = _lead_window(v)
+    if not window.ok:
+        return struct(refusal = "an escape is not valid UTF-8", need = 0, lo = 0, hi = 0)
+    return struct(refusal = "", need = window.need, lo = window.lo, hi = window.hi)
+
 def _check_segment_bytes(values):
     """The refusal reason for decoded segment bytes, or "" when bundlable.
 
@@ -183,29 +227,16 @@ def _check_segment_bytes(values):
     hi = 0
     for v in values:
         if v < 0x80:
-            if need:
-                return "an escape is cut off mid-sequence and is not valid UTF-8"
-            if v == 0x2F:
-                return "an escape decodes to `/`"
-            if v == 0x5C:
-                return "it holds a backslash"
-            if v == 0x3A:
-                return "it holds a `:`"
-            if v < 0x20 or v == 0x7F:
-                return "it holds a control character"
-        elif need:
-            if v < lo or v > hi:
-                return "an escape is not valid UTF-8"
-            need -= 1
-            lo = 0x80
-            hi = 0xBF
+            refusal = _ascii_byte_refusal(v, need)
+            if refusal:
+                return refusal
         else:
-            window = _lead_window(v)
-            if not window.ok:
-                return "an escape is not valid UTF-8"
-            need = window.need
-            lo = window.lo
-            hi = window.hi
+            step = _step_multibyte(v, need, lo, hi)
+            if step.refusal:
+                return step.refusal
+            need = step.need
+            lo = step.lo
+            hi = step.hi
     if need:
         return "an escape is cut off mid-sequence and is not valid UTF-8"
     return ""
