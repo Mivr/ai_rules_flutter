@@ -13,8 +13,11 @@ leniently, so this module re-checks the parsed value with the same checks and
 returns one refusal per error. The spoke fails the fetch on each through the
 single `asset_errors` / `check_asset_entry_problems` path, naming the package,
 `pubspec.yaml` and the offending line. Refusal details reuse flutter_tools'
-wording. Shapes flutter_tools only warns on (a font family without `family`,
-a font file entry without `asset`, an empty map asset entry) stay silent.
+wording, including its Dart value and type spellings (`null`, `true`, `Null`,
+`String`, `YamlList`, `YamlMap`). Shapes flutter_tools only warns on (a font
+family without `family`, a font file entry without `asset`, an empty map
+asset entry) stay silent. An empty `deferred-components` list is refused:
+flutter_tools 3.47.7 crashes reading one, so it cannot build.
 """
 
 def _refusal(path, key, detail, line):
@@ -34,6 +37,98 @@ def _refusal(path, key, detail, line):
         takes it.
     """
     return struct(path = path, key = key, detail = detail, line = line)
+
+def _dart_scalar(value):
+    """Render one scalar `value` the way Dart string interpolation renders it.
+
+    An empty value reads `null` (not `None`) and booleans read
+    `true`/`false`; strings read as themselves and anything else falls
+    back to `str`, which already matches Dart for ints.
+
+    Args:
+        value: The parsed YAML scalar to render.
+
+    Returns:
+        The Dart-style rendering for refusal details.
+    """
+    if type(value) == "bool":
+        return "true" if value else "false"
+    if value == None:
+        return "null"
+    if type(value) == "string":
+        return value
+    return str(value)
+
+def _dart_shallow(value):
+    """Render `value` with one collection level over scalars.
+
+    Starlark forbids recursion, so nesting deeper than one collection
+    level renders its leaves with `str`. Pubspec refusal details only
+    ever nest one level (a list of maps or scalars).
+
+    Args:
+        value: The parsed YAML value to render.
+
+    Returns:
+        The Dart-style rendering for refusal details.
+    """
+    if type(value) == "list":
+        return "[" + ", ".join([_dart_scalar(item) for item in value]) + "]"
+    if type(value) == "dict":
+        return "{" + ", ".join([
+            _dart_scalar(k) + ": " + _dart_scalar(v)
+            for k, v in value.items()
+        ]) + "}"
+    return _dart_scalar(value)
+
+def dart_str(value):
+    """Render `value` the way Dart string interpolation renders it.
+
+    flutter_tools interpolates values into its errors with `$value`, so an
+    empty value reads `null` (not `None`), booleans read `true`/`false`,
+    and collections read `[a, b]` / `{a: b}` without Starlark's quotes.
+
+    Args:
+        value: The parsed YAML value to render.
+
+    Returns:
+        The Dart-style rendering for refusal details.
+    """
+    if type(value) == "list":
+        return "[" + ", ".join([_dart_shallow(item) for item in value]) + "]"
+    if type(value) == "dict":
+        return "{" + ", ".join([
+            _dart_shallow(k) + ": " + _dart_shallow(v)
+            for k, v in value.items()
+        ]) + "}"
+    return _dart_scalar(value)
+
+def dart_type(value):
+    """The Dart `runtimeType` name flutter_tools prints for `value`.
+
+    The YAML values flutter_tools interpolates are `YamlMap`/`YamlList`
+    instances, so a map reads `YamlMap` (not `dict`), a list `YamlList`, a
+    string `String`, an empty value `Null` and a float `double`; ints and
+    bools already read the same.
+
+    Args:
+        value: The parsed YAML value to name the type of.
+
+    Returns:
+        The Dart type name for refusal details.
+    """
+    t = type(value)
+    if t == "NoneType":
+        return "Null"
+    if t == "string":
+        return "String"
+    if t == "list":
+        return "YamlList"
+    if t == "dict":
+        return "YamlMap"
+    if t == "float":
+        return "double"
+    return t
 
 # ---------------------------------------------------------------------------
 # Line numbers
@@ -170,6 +265,100 @@ def _flutter_section_line(lines):
             return i
     return -1
 
+def _key_head_candidates(key):
+    """The YAML head spellings a parsed mapping `key` may be written with.
+
+    A string key reads back as written (quotes are stripped by `_key_head`
+    before comparing); a boolean key may use any case (`true`, `True`,
+    `TRUE`), an empty key `null` or `~`, and an int key an optional `+`
+    sign. Comparing lowercased covers the remaining case spellings.
+
+    Args:
+        key: The parsed mapping key to find the head line of.
+
+    Returns:
+        The candidate head spellings to match.
+    """
+    if type(key) == "string":
+        return [key]
+    if type(key) == "bool":
+        spell = "true" if key else "false"
+        return [spell, spell.capitalize(), spell.upper()]
+    if key == None:
+        return ["null", "Null", "NULL", "~"]
+    if type(key) == "int" and key >= 0:
+        return [str(key), "+" + str(key)]
+    return [str(key)]
+
+def _raw_head_line(lines, start, end, parent_indent, top, key):
+    """Line index of the `key:` head in `[start, end)`, or -1 when missing.
+
+    Like `_child_key_line`, but matches the raw head text instead of a known
+    string key, so a non-string key (which no locator can name) still
+    resolves to its own line. The shallowest match wins, then the first; a
+    quoted string key sharing the spelling wins over a deeper same-spelled
+    head only when it sits shallower.
+
+    Args:
+        lines: The pubspec text split on newlines.
+        start: First index the head may sit at.
+        end: First index past the searched span.
+        parent_indent: Indent of the key opening the span; only deeper
+            lines match, unless `top` skips the span check.
+        top: True to match only column-0 lines (a pubspec root key).
+        key: The parsed mapping key to find the head line of.
+
+    Returns:
+        The matching line index, or -1.
+    """
+    lowered = [candidate.lower() for candidate in _key_head_candidates(key)]
+    best = -1
+    best_indent = 0
+    for i in range(start, end):
+        text = lines[i].strip()
+        if not _is_real_line(text):
+            continue
+        indent = _indent_of(lines[i])
+        if top:
+            if indent != 0:
+                continue
+        elif indent <= parent_indent:
+            continue
+        if _key_head(text).lower() not in lowered:
+            continue
+        if best == -1 or indent < best_indent:
+            best = i
+            best_indent = indent
+    return best
+
+def _root_key_line(lines, key):
+    """The 1-based line of the top-level `key:`, or 1 when missing."""
+    found = _raw_head_line(lines, 0, len(lines), -1, True, key)
+    return found + 1 if found != -1 else 1
+
+def item_key_line(lines, locator, key):
+    """The 1-based line of `key:` inside the map `locator` names.
+
+    A key no locator step can name (a non-string key, which reads as a
+    list index) still resolves to its own head line: the search covers
+    the item's span only, so a same-spelled head elsewhere never wins.
+    A value written in flow on the item's own line, or a missing head,
+    resolves to the item's line.
+
+    Args:
+        lines: The pubspec text split on newlines.
+        locator: The path to the map holding the key.
+        key: The parsed mapping key to find the head line of.
+
+    Returns:
+        The 1-based line number, always at least 1.
+    """
+    item = flutter_line_of(lines, locator)
+    indent = _indent_of(lines[item - 1])
+    end = _span_end(lines, item, indent, True)
+    found = _raw_head_line(lines, item, end, indent, False, key)
+    return found + 1 if found != -1 else item
+
 def flutter_line_of(lines, locator):
     """The 1-based `pubspec.yaml` line of the entry `locator` names.
 
@@ -212,6 +401,52 @@ def flutter_line_of(lines, locator):
     return line
 
 # ---------------------------------------------------------------------------
+# Pubspec root: non-string keys and a non-string name
+# ---------------------------------------------------------------------------
+
+def validate_pubspec_root(pubspec, lines):
+    """The refusals for the pubspec root shapes `_validate` reports.
+
+    Mirrors the root loop in `_validate` (`flutter_manifest.dart`): a
+    non-string root key is `Expected YAML key to be a string, but got ...`
+    (with no type, unlike the `flutter:`-level message), and a present
+    `name` that is not a string is `Expected "name" to be a string, ...`.
+    Any other root key stays allowed. Each refusal names the offending
+    key's own line. A non-mapping root never reaches here: the YAML
+    parser fails it first, naming the package and line 1.
+
+    Args:
+        pubspec: The parsed pubspec mapping ({} when the document is empty).
+        lines: The pubspec text split on newlines.
+
+    Returns:
+        The refusal structs for `asset_errors`, in document order.
+    """
+    problems = []
+    for key in pubspec.keys():
+        if type(key) != "string":
+            problems.append(_refusal(
+                dart_str(key),
+                "flutter",
+                "Expected YAML key to be a string, but got {key}.".format(
+                    key = dart_str(key),
+                ),
+                _root_key_line(lines, key),
+            ))
+        elif key == "name":
+            value = pubspec["name"]
+            if type(value) != "string":
+                problems.append(_refusal(
+                    "name",
+                    "flutter",
+                    "Expected \"name\" to be a string, but got {value}.".format(
+                        value = dart_str(value),
+                    ),
+                    _root_key_line(lines, "name"),
+                ))
+    return problems
+
+# ---------------------------------------------------------------------------
 # Scalar flags: uses-material-design, default-flavor, disable-swift-package-manager
 # ---------------------------------------------------------------------------
 
@@ -230,8 +465,8 @@ def _uses_material_design_problem(flutter, lines):
         "uses-material-design",
         "uses-material-design",
         "Expected \"uses-material-design\" to be a bool, but got {value} ({type}).".format(
-            value = str(value),
-            type = type(value),
+            value = dart_str(value),
+            type = dart_type(value),
         ),
         flutter_line_of(lines, ["flutter", "uses-material-design"]),
     )]
@@ -249,8 +484,8 @@ def _default_flavor_problem(flutter, lines):
         "default-flavor",
         "default-flavor",
         "Expected \"default-flavor\" to be a string, but got {value} ({type}).".format(
-            value = str(value),
-            type = type(value),
+            value = dart_str(value),
+            type = dart_type(value),
         ),
         flutter_line_of(lines, ["flutter", "default-flavor"]),
     )]
@@ -298,17 +533,27 @@ def _non_string_key_problem(key, value, lines):
     """The refusal for a non-string `key` directly under `flutter:`.
 
     Mirrors the non-string-key case in `_validateFlutter`
-    (`flutter_manifest.dart`). The line is the section's own: a non-string
-    key cannot be named by a locator.
+    (`flutter_manifest.dart`): the detail prints the key and its value's
+    type, and the line is the key's own, found by a raw-head search over
+    the section's span (a non-string key cannot be named by a locator),
+    falling back to the section's line when the head is missing.
     """
+    section = _flutter_section_line(lines)
+    if section == -1:
+        line = 1
+    else:
+        indent = _indent_of(lines[section])
+        end = _span_end(lines, section + 1, indent, False)
+        found = _raw_head_line(lines, section + 1, end, indent, False, key)
+        line = found + 1 if found != -1 else section + 1
     return _refusal(
         "flutter",
         "flutter",
         "Expected YAML key to be a string, but got {key} ({type}).".format(
-            key = str(key),
-            type = type(value),
+            key = dart_str(key),
+            type = dart_type(value),
         ),
-        flutter_line_of(lines, ["flutter"]),
+        line,
     )
 
 # ---------------------------------------------------------------------------
@@ -319,21 +564,21 @@ def _licenses_problems(flutter, lines):
     """The refusals for a malformed `flutter.licenses` value.
 
     Mirrors the `licenses` case in `_validateFlutter` (`_parseList` in
-    `flutter_manifest.dart`): the value must be a list of file paths. A
-    scalar `licenses: a.txt` loads today and silently grants no license.
-    An absent or empty value reads as null and is valid.
+    `flutter_manifest.dart`): only an absent value is valid without checks;
+    a present value (even an empty one) must be a list of file paths, and
+    every non-string element is reported, not just the first.
     """
-    raw = flutter.get("licenses")
-    if raw == None:
+    if "licenses" not in flutter:
         return []
+    raw = flutter["licenses"]
     locator = ["flutter", "licenses"]
     if type(raw) != "list":
         return [_refusal(
             "licenses",
             "licenses",
             "Expected \"licenses\" to be a list of files, but got {value} ({type}).".format(
-                value = str(raw),
-                type = type(raw),
+                value = dart_str(raw),
+                type = dart_type(raw),
             ),
             flutter_line_of(lines, locator),
         )]
@@ -345,7 +590,7 @@ def _licenses_problems(flutter, lines):
                 "licenses",
                 "Expected \"licenses\" to be a list of files, but element at index {index} was a {type}.".format(
                     index = index,
-                    type = type(item),
+                    type = dart_type(item),
                 ),
                 flutter_line_of(lines, locator + [index]),
             ))
@@ -359,22 +604,23 @@ def _module_problems(flutter, lines):
     """The refusals for a malformed `flutter.module` value.
 
     Mirrors the `module` case in `_validateFlutter`
-    (`flutter_manifest.dart`): the value must be a map, and `androidX` must
-    be a bool, `androidPackage` a string and `iosBundleIdentifier` a string
-    when set. Each check is independent, so all are reported. An absent or
-    empty value reads as null and is valid.
+    (`flutter_manifest.dart`): only an absent value is valid without
+    checks; a present value (even an empty one) must be a map, and
+    `androidX` must be a bool, `androidPackage` a string and
+    `iosBundleIdentifier` a string when set. Each check is independent, so
+    all are reported.
     """
-    raw = flutter.get("module")
-    if raw == None:
+    if "module" not in flutter:
         return []
+    raw = flutter["module"]
     locator = ["flutter", "module"]
     if type(raw) != "dict":
         return [_refusal(
             "module",
             "module",
             "Expected \"module\" to be an object, but got {value} ({type}).".format(
-                value = str(raw),
-                type = type(raw),
+                value = dart_str(raw),
+                type = dart_type(raw),
             ),
             flutter_line_of(lines, locator),
         )]
@@ -546,8 +792,8 @@ def _plugin_problems(flutter, lines):
             "plugin",
             "plugin",
             "Expected \"plugin\" to be an object, but got {value} ({type}).".format(
-                value = str(value),
-                type = type(value),
+                value = dart_str(value),
+                type = dart_type(value),
             ),
             flutter_line_of(lines, locator),
         )]
@@ -598,8 +844,8 @@ def _libraries_problems(libraries, index, lines, locator):
             "deferred-components",
             "Expected {context} to be a list of String, but got {value} ({type}).".format(
                 context = context,
-                value = str(libraries),
-                type = type(libraries),
+                value = dart_str(libraries),
+                type = dart_type(libraries),
             ),
             flutter_line_of(lines, locator),
         )]
@@ -612,7 +858,7 @@ def _libraries_problems(libraries, index, lines, locator):
                 "Expected {context} to be a list of String, but element at index {position} was a {type}.".format(
                     context = context,
                     position = position,
-                    type = type(item),
+                    type = dart_type(item),
                 ),
                 flutter_line_of(lines, locator + [position]),
             ))
@@ -621,14 +867,16 @@ def _libraries_problems(libraries, index, lines, locator):
 def _deferred_problems(flutter, scope):
     """The refusals for a malformed `flutter.deferred-components` value.
 
-    Mirrors `_validateDeferredComponents` (`flutter_manifest.dart`): an
-    absent or empty value is valid (flutter_tools itself crashes on an empty
-    list, which is never a reported error, so it stays accepted here); any
-    other non-list value, or a list whose first element is not a map, is one
+    Mirrors `_validateDeferredComponents` (`flutter_manifest.dart`): only
+    an absent or empty (null) value is valid without checks. An empty list
+    is one refusal: flutter_tools 3.47.7 crashes reading it instead of
+    reporting an error, so no package with one can build. Any other
+    non-list value, or a list whose first element is not a map, is one
     refusal naming the whole value. Each map element needs a string `name`,
-    a string list `libraries` when present, and valid `assets` when present
-    (checked by the caller's asset validator, which shares the top-level
-    asset rules; the entries are validated only, never bundled).
+    a string list `libraries` when the key is present at all, and valid
+    `assets` when present (checked by the caller's asset validator, which
+    shares the top-level asset rules; the entries are validated only,
+    never bundled).
 
     Args:
         flutter: The parsed `flutter:` mapping.
@@ -646,14 +894,21 @@ def _deferred_problems(flutter, scope):
     if raw == None:
         return []
     locator = ["flutter", "deferred-components"]
-    if type(raw) != "list" or (len(raw) > 0 and type(raw[0]) != "dict"):
+    if type(raw) != "list" or len(raw) == 0 or type(raw[0]) != "dict":
+        if type(raw) == "list" and len(raw) == 0:
+            detail = (
+                "\"deferred-components\" must not be empty: flutter_tools " +
+                "crashes reading an empty list, so it cannot build."
+            )
+        else:
+            detail = "Expected \"deferred-components\" to be a list, but got {value} ({type}).".format(
+                value = dart_str(raw),
+                type = dart_type(raw),
+            )
         return [_refusal(
             "deferred-components",
             "deferred-components",
-            "Expected \"deferred-components\" to be a list, but got {value} ({type}).".format(
-                value = str(raw),
-                type = type(raw),
-            ),
+            detail,
             flutter_line_of(scope.lines, locator),
         )]
     problems = []
@@ -665,8 +920,8 @@ def _deferred_problems(flutter, scope):
                 "deferred-components",
                 "Expected the {index} element in \"deferred-components\" to be a map, but got {value} ({type}).".format(
                     index = index,
-                    value = str(element),
-                    type = type(element),
+                    value = dart_str(element),
+                    type = dart_type(element),
                 ),
                 flutter_line_of(scope.lines, elocator),
             ))
@@ -680,7 +935,7 @@ def _deferred_problems(flutter, scope):
                 ),
                 flutter_line_of(scope.lines, elocator + ["name"]),
             ))
-        if element.get("libraries") != None:
+        if "libraries" in element:
             problems.extend(_libraries_problems(
                 element["libraries"],
                 index,
@@ -698,6 +953,40 @@ def _deferred_problems(flutter, scope):
 # ---------------------------------------------------------------------------
 # Section entry point
 # ---------------------------------------------------------------------------
+
+# flutter_tools 3.47.7 check catalog. Every check below mirrors the cited
+# function or case; line numbers are for the pinned 3.47.7 sources (the
+# oracle in `.referee-runs/ft-manifest-oracle-3.47.7` carries verbatim
+# copies). `FM` is `packages/flutter_tools/lib/src/flutter_manifest.dart`:
+#
+# - pubspec root keys, `name`, `flutter` null/scalar/map: `_validate`, FM:488
+#   (non-string root key FM:494, `name` FM:499, `flutter` FM:503)
+# - non-string `flutter:` key: `_validateFlutter`, FM:530 (key check FM:537)
+# - `uses-material-design`: FM:542; `assets`/`shaders`: FM:548/550 through
+#   `_validateAssets` FM:684 and `_computeAssetsSafe` FM:693
+# - `fonts` section shape (non-list, empty, first-non-map): FM:552;
+#   family and file entries: `_validateFonts` FM:726 (`asset` FM:758,
+#   `weight` FM:764, `style` FM:770)
+# - `licenses`: FM:566 through `_parseList` FM:627
+# - `module`: FM:569; `plugin` shape: FM:587; `generate`/`config` skipped:
+#   FM:596/598; `deferred-components`: FM:601 through
+#   `_validateDeferredComponents` FM:651 (empty-list crash FM:653)
+# - `disable-swift-package-manager` migration: FM:603;
+#   `default-flavor`: FM:615; unknown children: FM `default`
+# - plugin formats: `Plugin.validatePluginYaml` plugins.dart:276 (old/new
+#   mix and neither-format errors), `_validateMultiPlatformYaml`
+#   plugins.dart:311, `_validateLegacyYaml` plugins.dart:351, and each
+#   platform's `validate` in platform_plugins.dart (android:163, ios:344,
+#   macos:456, windows:582, linux:688)
+# - asset entry shapes: `AssetsEntry.parseFromYamlSafe` FM:825; `flavors`
+#   and `platforms` lists: `_parseFlavorsSection` FM:897 and
+#   `_parsePlatformsSection` FM:909 through `_parseList` FM:627
+#
+# Deliberate divergences: an empty `deferred-components` list is refused
+# (flutter_tools crashes instead of reporting); multi-error sections stay
+# one refusal per offending key or entry (with that key's or entry's
+# line) rather than one joined error per entry; unknown asset `platforms`
+# still fail at the spoke's platform check.
 
 def validate_flutter_section(flutter, scope):
     """Validate one parsed `flutter:` mapping the way flutter_tools does.

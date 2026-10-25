@@ -48,7 +48,15 @@ Schema reference (Flutter's pubspec):
 """
 
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_document")
-load(":flutter_manifest_validate.bzl", "flutter_line_of", "validate_flutter_section")
+load(
+    ":flutter_manifest_validate.bzl",
+    "dart_str",
+    "dart_type",
+    "flutter_line_of",
+    "item_key_line",
+    "validate_flutter_section",
+    "validate_pubspec_root",
+)
 
 def parse_pubspec(content):
     """Parse pubspec.yaml content into a Starlark dict.
@@ -167,8 +175,8 @@ def _expected_list_problem(key, raw, lines, locator):
         key,
         "Expected \"{key}\" to be a list, but got {value} ({type}).".format(
             key = key,
-            value = repr(raw),
-            type = type(raw),
+            value = dart_str(raw),
+            type = dart_type(raw),
         ),
         flutter_line_of(lines, locator),
     )
@@ -213,14 +221,14 @@ def _parse_path_entry(item, index, key, lines, locator, shown):
             key,
             "Asset manifest entry is malformed. Expected asset entry to be " +
             "either a string or a map containing a \"path\" entry. " +
-            "Got {type} instead.".format(type = type(path)),
+            "Got {type} instead.".format(type = dart_type(path)),
             item_line,
         )])
     return (None, [_shape_problem(
         slot,
         key,
         "Assets entry had unexpected shape. Expected a string or an object. " +
-        "Got {type} instead.".format(type = type(item)),
+        "Got {type} instead.".format(type = dart_type(item)),
         item_line,
     )])
 
@@ -232,11 +240,13 @@ _FONT_WEIGHTS = (100, 200, 300, 400, 500, 600, 700, 800, 900)
 def _font_file_key_problems(item, slot, lines, flocator):
     """The refusals for one font file entry's keys, in document order.
 
-    Mirrors the `weight` / `style` / extra-key checks of `_validateFonts`
+    Mirrors the per-key loop of `_validateFonts`
     (`packages/flutter_tools/lib/src/flutter_manifest.dart`): a present
     `weight` must be one of 100..900, a present `style` must be `normal`
-    or `italic`, and any other key is `Unexpected`. Each bad key is
-    reported; an absent `weight` or `style` stays valid.
+    or `italic`, and any other key is `Unexpected`. A non-string key
+    reports twice, like flutter_tools: its `if` refusal, then the
+    `switch` default it also falls into. Each bad key is reported; an
+    absent `weight` or `style` stays valid.
 
     Args:
         item: The raw font file mapping (known to carry `asset`).
@@ -254,8 +264,17 @@ def _font_file_key_problems(item, slot, lines, flocator):
             problems.append(_shape_problem(
                 slot,
                 "fonts",
-                "Expected \"{key}\" under \"fonts\" to be a string.".format(key = key),
-                flutter_line_of(lines, flocator),
+                "Expected \"{key}\" under \"fonts\" to be a string.".format(key = dart_str(key)),
+                item_key_line(lines, flocator, key),
+            ))
+            problems.append(_shape_problem(
+                slot,
+                "fonts",
+                "Unexpected key {key} (({type})) under font.".format(
+                    key = dart_str(key),
+                    type = dart_type(value),
+                ),
+                item_key_line(lines, flocator, key),
             ))
         elif key == "asset":
             if type(value) != "string":
@@ -263,8 +282,8 @@ def _font_file_key_problems(item, slot, lines, flocator):
                     slot,
                     "fonts",
                     "Expected font asset {value} (({type})) to be a string.".format(
-                        value = repr(value),
-                        type = type(value),
+                        value = dart_str(value),
+                        type = dart_type(value),
                     ),
                     flutter_line_of(lines, flocator + ["asset"]),
                 ))
@@ -274,8 +293,8 @@ def _font_file_key_problems(item, slot, lines, flocator):
                     slot,
                     "fonts",
                     "Invalid value {value} (({type})) for font -> weight.".format(
-                        value = str(value),
-                        type = type(value),
+                        value = dart_str(value),
+                        type = dart_type(value),
                     ),
                     flutter_line_of(lines, flocator + ["weight"]),
                 ))
@@ -285,8 +304,8 @@ def _font_file_key_problems(item, slot, lines, flocator):
                     slot,
                     "fonts",
                     "Invalid value {value} (({type})) for font -> style.".format(
-                        value = str(value),
-                        type = type(value),
+                        value = dart_str(value),
+                        type = dart_type(value),
                     ),
                     flutter_line_of(lines, flocator + ["style"]),
                 ))
@@ -296,7 +315,7 @@ def _font_file_key_problems(item, slot, lines, flocator):
                 "fonts",
                 "Unexpected key {key} (({type})) under font.".format(
                     key = key,
-                    type = type(value),
+                    type = dart_type(value),
                 ),
                 flutter_line_of(lines, flocator + [key]),
             ))
@@ -415,14 +434,14 @@ def _parse_fonts(raw, lines, locator):
     """Parse the raw `flutter.fonts` list, collecting malformed shapes.
 
     Mirrors the `fonts` checks in `_validate` and `_validateFonts`
-    (`packages/flutter_tools/lib/src/flutter_manifest.dart`): a non-list
-    section, a non-map entry, a non-string `family`, a non-list
-    per-family `fonts`, a non-map font file entry and a non-string
-    `asset` are each a refusal; entries flutter_tools only warns on (a
-    missing family, a file entry without an `asset` key) stay silently
-    skipped, exactly as on main. When the first element is not a map the
-    whole list is one refusal naming the value, and the remaining entries
-    are not checked further.
+    (`packages/flutter_tools/lib/src/flutter_manifest.dart`): a present
+    but empty section value, a non-list section, a non-map entry, a
+    non-string `family`, a non-list per-family `fonts`, a non-map font
+    file entry and a non-string `asset` are each a refusal; entries
+    flutter_tools only warns on (a missing family, a file entry without
+    an `asset` key) stay silently skipped, exactly as on main. When the
+    first element is not a map the whole list is one refusal naming the
+    value, and the remaining entries are not checked further.
 
     Args:
         raw: The raw `flutter.fonts` YAML value (None when absent).
@@ -434,7 +453,7 @@ def _parse_fonts(raw, lines, locator):
         refusal structs for `asset_errors`.
     """
     if raw == None:
-        return ([], [])
+        return ([], [_expected_list_problem("fonts", raw, lines, locator)])
     if type(raw) != "list":
         return ([], [_expected_list_problem("fonts", raw, lines, locator)])
     if len(raw) > 0 and type(raw[0]) != "dict":
@@ -442,8 +461,8 @@ def _parse_fonts(raw, lines, locator):
             "fonts",
             "fonts",
             "Expected \"fonts\" to contain maps, but the first element is {value} ({type}).".format(
-                value = str(raw),
-                type = type(raw[0]),
+                value = dart_str(raw),
+                type = dart_type(raw),
             ),
             flutter_line_of(lines, locator),
         )])
@@ -455,7 +474,7 @@ def _parse_fonts(raw, lines, locator):
                 "fonts[{index}]".format(index = index),
                 "fonts",
                 "Unexpected child {value} found under \"fonts\". Expected a map.".format(
-                    value = repr(entry),
+                    value = dart_str(entry),
                 ),
                 flutter_line_of(lines, locator + [index]),
             ))
@@ -470,36 +489,42 @@ def _parse_condition_list(raw_value, key):
     """Validate one asset entry `flavors` / `platforms` value, flutter_tools style.
 
     Mirrors `AssetsEntry._parseFlavorsSection` / `_parsePlatformsSection`
-    (`_parseList` in `flutter_manifest.dart`): the value must be a list of
-    strings. Anything else (a scalar `platforms: web`, an element that is
-    not a string) is an error, never silently unconditional.
+    (`_parseList` in `flutter_manifest.dart`): an absent value reads as
+    null and is valid; anything else must be a list of strings. A scalar
+    `platforms: web` is one error, and every non-string element is
+    reported, not just the first, so the caller can wrap them the way
+    `parseFromYamlSafe` joins its section errors.
 
     Args:
         raw_value: The value under the key (None when the key is absent).
         key: `"flavors"` or `"platforms"`, for the problem detail.
 
     Returns:
-        A `(values, problem)` tuple: the string list (possibly empty) and ""
-        or the `Expected <key> to be a list of String, but ...` detail naming
-        the key.
+        A `(values, problem)` tuple: the string list (empty when the
+        value errors) and "" or the newline-joined `Expected <key> to be
+        a list of String, but ...` details naming the key.
     """
     if raw_value == None:
         return ([], "")
     if type(raw_value) != "list":
         return ([], "Expected {key} to be a list of String, but got {value} ({type}).".format(
             key = key,
-            value = repr(raw_value),
-            type = type(raw_value),
+            value = dart_str(raw_value),
+            type = dart_type(raw_value),
         ))
     values = []
+    bad = []
     for index, item in enumerate(raw_value):
         if type(item) != "string":
-            return ([], "Expected {key} to be a list of String, but element at index {index} was a {type}.".format(
+            bad.append("Expected {key} to be a list of String, but element at index {index} was a {type}.".format(
                 key = key,
                 index = index,
-                type = type(item),
+                type = dart_type(item),
             ))
-        values.append(item)
+        else:
+            values.append(item)
+    if bad:
+        return ([], "\n".join(bad))
     return (values, "")
 
 def _section_error(path, section, inner):
@@ -744,7 +769,9 @@ def parse_flutter_assets_block(content):
     `tester` exception, exactly like flutter_tools' `matchesFlavor` /
     `matchesPlatform`); an unknown platform fails the spoke fetch.
     `asset_errors` collects the entries flutter_tools would refuse: a
-    `flutter.assets` / `flutter.shaders` section that is not a list, an
+    non-string pubspec root key, a non-string `name`, a `flutter.assets`
+    / `flutter.shaders` / `flutter.fonts` section that is present but
+    not a list (an empty `flutter.fonts` value counts), an
     asset or shader item that is neither a string nor a map with a string
     `path`, a `flutter.fonts` section that is not a list, a non-map font
     entry, a non-string `family`, a non-list per-family `fonts`, a non-map
@@ -752,7 +779,8 @@ def parse_flutter_assets_block(content):
     or `style`, an unexpected key in a font, a `flavors` / `platforms`
     value that is not a list of strings, an entry carrying
     `transformers`, a `flutter:` section that is neither a map nor null,
-    and every other `flutter:` child flutter_tools `_validate` rejects
+    an empty `deferred-components` list (flutter_tools crashes reading
+    one), and every other `flutter:` child flutter_tools `_validate` rejects
     (`uses-material-design`, `licenses`, `module`, `plugin`,
     `deferred-components`, `disable-swift-package-manager`,
     `default-flavor`, unknown children); the spoke fails the fetch on each
@@ -761,6 +789,7 @@ def parse_flutter_assets_block(content):
     """
     lines = content.split("\n")
     pubspec = parse_pubspec(content)
+    root_problems = validate_pubspec_root(pubspec, lines)
     raw_flutter = pubspec.get("flutter")
     if raw_flutter == None:
         flutter = {}
@@ -771,7 +800,7 @@ def parse_flutter_assets_block(content):
             "flutter",
             "flutter",
             "Expected \"flutter\" section to be an object or null, but got {value}.".format(
-                value = str(raw_flutter),
+                value = dart_str(raw_flutter),
             ),
             flutter_line_of(lines, ["flutter"]),
         )]
@@ -780,7 +809,10 @@ def parse_flutter_assets_block(content):
         flutter_problem = []
     umd_raw = flutter.get("uses-material-design", False)
     (assets, asset_problems) = _parse_assets(flutter.get("assets"), lines, ["flutter", "assets"], "assets")
-    (fonts, font_problems) = _parse_fonts(flutter.get("fonts"), lines, ["flutter", "fonts"])
+    if "fonts" in flutter:
+        (fonts, font_problems) = _parse_fonts(flutter["fonts"], lines, ["flutter", "fonts"])
+    else:
+        (fonts, font_problems) = ([], [])
     (shaders, shader_problems) = _parse_shaders(flutter.get("shaders"), lines, ["flutter", "shaders"])
     scope = struct(lines = lines, check_assets = _deferred_assets_check(lines))
     section_problems = validate_flutter_section(flutter, scope)
@@ -789,5 +821,5 @@ def parse_flutter_assets_block(content):
         assets = assets,
         shaders = shaders,
         uses_material_design = umd_raw if type(umd_raw) == "bool" else False,
-        asset_errors = asset_problems + font_problems + shader_problems + flutter_problem + section_problems,
+        asset_errors = root_problems + asset_problems + font_problems + shader_problems + flutter_problem + section_problems,
     )
