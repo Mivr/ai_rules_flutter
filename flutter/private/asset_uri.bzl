@@ -450,3 +450,29 @@ def normalize_spoke_shaders(package_name, parsed_shaders):
             fail(spoke_asset_uri_error(package_name, entry.path, norm.reason))
         out.append(struct(path = norm.decoded, key = norm.key))
     return out
+
+def normalize_spoke_asset_block(package_name, asset_block):
+    """Normalize a parsed `flutter` block once, for linking and expansion.
+
+    The path-package link plan resolves declared entries against the source
+    tree, and the expansion resolves them against the spoke listing: both
+    must read the decoded files, never the raw entry text, or an escaped
+    entry (`enc%20c.png`) links and expands nothing while the file
+    (`enc c.png`) sits there. Normalizing here — and never again downstream —
+    also means no entry text is decoded twice: a `%25` names the `%` file
+    once (`pct%25.png` finds `pct%.png`, keyed `pct%25.png`).
+
+    Args:
+        package_name: The pub package the entries come from, for refusals.
+        asset_block: The `parse_flutter_assets_block()` result to normalize.
+
+    Returns:
+        A struct `(fonts, assets, shaders)` of the `normalize_spoke_*`
+        results; fails the fetch on the first spelling that is not
+        supported.
+    """
+    return struct(
+        fonts = normalize_spoke_fonts(package_name, asset_block.fonts),
+        assets = normalize_spoke_assets(package_name, asset_block.assets),
+        shaders = normalize_spoke_shaders(package_name, asset_block.shaders),
+    )

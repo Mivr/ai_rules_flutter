@@ -35,6 +35,10 @@ mirroring flutter_tools 3.47.7 (`Uri.parse` plus `Uri(pathSegments:)`):
 - The decoded path names the file (labels, directory walks, resolution
   variants); the encoded key names the manifest entry and the copied file.
   The app's own assets key the same way.
+- Each entry decodes once: the path-package link plan links the decoded
+  files, and the expansion resolves them, carrying the intake key — so
+  `pct%25.png` finds the `pct%.png` file keyed `pct%25.png`, never decoding
+  twice down to `pct.png`.
 
 Spellings no engine build reads fail the fetch as not supported, naming the
 package, its pubspec.yaml and the entry (entry form, without a line number):

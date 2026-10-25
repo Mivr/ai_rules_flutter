@@ -27,7 +27,7 @@ escaping `..`, an invalid escape, ...) refuses here, naming the package,
 its pubspec.yaml and the entry.
 """
 
-load(":asset_uri.bzl", "encode_asset_key", "normalize_asset_uri", "spoke_asset_uri_error")
+load(":asset_uri.bzl", "encode_asset_key")
 load(":flutter_pub_walk.bzl", "PUB_WALK_BOUND")
 
 # Bound for every asset directory walk. Starlark has no `while`, so every
@@ -196,9 +196,21 @@ def _conditioned_entry(entry, path):
     """One expanded file inheriting its declaring entry's conditions.
 
     `path` is the decoded file path (what the label names); `key` is its
-    percent-encoded bundle key (see `asset_uri.bzl`).
+    percent-encoded bundle key (see `asset_uri.bzl`). A file entry's own
+    path keeps the intake key exactly (so `packages`-first entries stay
+    byte-identical); walked files encode their listed path, which is
+    filesystem truth and never decodes.
+
+    Args:
+        entry: The normalized entry (`struct(path, key, flavors,
+            platforms)`); `path` is decoded, `key` encoded.
+        path: The decoded file path to emit.
     """
-    return struct(path = path, key = encode_asset_key(path), flavors = entry.flavors, platforms = entry.platforms)
+    if path == entry.path:
+        key = entry.key
+    else:
+        key = encode_asset_key(path)
+    return struct(path = path, key = key, flavors = entry.flavors, platforms = entry.platforms)
 
 def _memoized_reader(reader):
     """Wrap a directory `reader` so each distinct directory is read once.
@@ -306,11 +318,12 @@ def _expand_directory_entry(entry, scope, expanded):
     """Bundle a trailing-slash entry's own files plus each one's variants.
 
     Args:
-        entry: The parsed entry (`struct(path, flavors, platforms)`).
+        entry: The normalized entry (`struct(path, key, flavors,
+            platforms)`); `path` is decoded with its trailing `/`.
         scope: An `_asset_scope` struct; the entry's directory is read
             and indexed once per expansion.
-        expanded: The output list to append `struct(path, flavors, platforms)`
-            entries to.
+        expanded: The output list to append `struct(path, key, flavors,
+            platforms)` entries to.
 
     Returns:
         "" or the fetch failure (a walk bound, already naming the package
@@ -329,7 +342,8 @@ def _expand_file_entry(entry, scope, expanded):
     """Bundle a file entry's main file (when present) plus its variants.
 
     Args:
-        entry: The parsed entry (`struct(path, flavors, platforms)`).
+        entry: The normalized entry (`struct(path, key, flavors,
+            platforms)`); `path` names the decoded file.
         scope: An `_asset_scope` struct, as in `_expand_directory_entry`.
         expanded: The output list to append to.
 
@@ -351,8 +365,8 @@ def _expand_file_entry(entry, scope, expanded):
         expanded.append(_conditioned_entry(entry, variant))
     return ""
 
-def expand_pub_asset_entries(parsed_assets, list_dir, package_name = ""):
-    """Expand parsed `flutter.assets` entries to one struct per bundled file.
+def expand_pub_asset_entries(normalized_assets, list_dir, package_name = ""):
+    """Expand normalized `flutter.assets` entries to one struct per bundled file.
 
     Pure core of the spoke's asset expansion: file entries resolve to their
     main file plus resolution variants (variant-only entries are accepted),
@@ -362,10 +376,15 @@ def expand_pub_asset_entries(parsed_assets, list_dir, package_name = ""):
     entries name it, so directory and file entries both resolve in time
     linear in the number of files.
 
+    The entries arrive already normalized (see `normalize_spoke_assets`):
+    `path` names the decoded file, `key` its encoded bundle key, and a
+    trailing `/` still marks a directory entry. Nothing here decodes again,
+    so no entry text is decoded twice between the pubspec and the spoke
+    dicts; walked files encode their listed path, which is filesystem truth.
+
     Args:
-        parsed_assets: List of `struct(path, flavors, platforms)` from
-            `parse_flutter_assets_block().assets` (raw entry text; each is
-            normalized here, so `./a.png` resolves `a.png` keyed `a.png`).
+        normalized_assets: List of `struct(path, key, flavors, platforms)`
+            from `normalize_spoke_assets` (decoded paths, encoded keys).
         list_dir: Callable taking a directory path (no trailing slash, ""
             for the package root) and returning `struct(files, error)` with
             every file under it. Tests pass a fake; the spoke passes a
@@ -382,15 +401,11 @@ def expand_pub_asset_entries(parsed_assets, list_dir, package_name = ""):
     """
     scope = _asset_scope(list_dir, package_name)
     expanded = []
-    for entry in parsed_assets:
-        norm = normalize_asset_uri(entry.path)
-        if not norm.ok:
-            return struct(expanded = [], error = spoke_asset_uri_error(package_name, entry.path, norm.reason))
-        dec = struct(path = norm.decoded, flavors = entry.flavors, platforms = entry.platforms)
-        if norm.is_dir:
-            error = _expand_directory_entry(dec, scope, expanded)
+    for entry in normalized_assets:
+        if entry.path.endswith("/"):
+            error = _expand_directory_entry(entry, scope, expanded)
         else:
-            error = _expand_file_entry(dec, scope, expanded)
+            error = _expand_file_entry(entry, scope, expanded)
         if error:
             return struct(expanded = [], error = error)
     return struct(expanded = expanded, error = "")

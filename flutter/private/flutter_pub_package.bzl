@@ -31,7 +31,7 @@ load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version", "m
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_deps", "parse_pubspec_sdk_constraint")
 load("//flutter/private:flutter_pub_scan.bzl", "fetch_hosted_archive", "scan_hosted_archive", "walk_hosted_package")
 load("//flutter/private:flutter_pubspec.bzl", "asset_flavor_error", "parse_flutter_assets_block", "parse_flutter_plugin_block", "parse_pubspec")
-load(":asset_uri.bzl", "normalize_spoke_assets", "normalize_spoke_fonts", "normalize_spoke_shaders")
+load(":asset_uri.bzl", "normalize_spoke_asset_block", "normalize_spoke_assets", "normalize_spoke_fonts", "normalize_spoke_shaders")
 load(
     ":flutter_pub_assets.bzl",
     "check_asset_entry_problems",
@@ -2626,7 +2626,7 @@ def link_path_package(ctx):
     link_spoke_contents(
         ctx,
         src,
-        parse_flutter_assets_block(pubspec_text),
+        normalize_spoke_asset_block(package_name, parse_flutter_assets_block(pubspec_text)),
         path_spoke_platform_dirs(parse_flutter_plugin_block(pubspec_text)),
         scope,
     )
