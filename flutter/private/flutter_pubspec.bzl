@@ -11,6 +11,17 @@ consumes:
 - `parse_flutter_assets_block` — `flutter.{fonts,assets,shaders,uses-material-design}`
   for the asset-bundling pipeline.
 
+Parsing stays lenient (every readable shape loads), and `parse_flutter_assets_block`
+additionally validates the section the way flutter_tools 3.47.7 `_validate`
+(`packages/flutter_tools/lib/src/flutter_manifest.dart`, plus
+`Plugin.validatePluginYaml` and each platform's `validate`) validates it: any
+error flutter_tools reports is one refusal in `asset_errors`, and the spoke
+fails the fetch on each through the single `check_asset_entry_problems` path,
+naming the package, `pubspec.yaml` and the offending line. The per-key checks
+live in `flutter_manifest_validate.bzl`, which shares this module's asset and
+font parsers; accepted pubspecs parse exactly as on main. Shapes flutter_tools
+only warns on stay silently skipped.
+
 Schema reference (Flutter's pubspec):
 
     flutter:
@@ -37,6 +48,7 @@ Schema reference (Flutter's pubspec):
 """
 
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_document")
+load(":flutter_manifest_validate.bzl", "flutter_line_of", "validate_flutter_section")
 
 def parse_pubspec(content):
     """Parse pubspec.yaml content into a Starlark dict.
@@ -117,7 +129,7 @@ def parse_flutter_plugin_block(content):
 # flutter.fonts / flutter.assets / flutter.shaders / flutter.uses-material-design
 # ---------------------------------------------------------------------------
 
-def _shape_problem(path, key, detail):
+def _shape_problem(path, key, detail, line):
     """One spoke-fetch refusal for a malformed `flutter:` section shape.
 
     Args:
@@ -126,13 +138,14 @@ def _shape_problem(path, key, detail):
             whole-section shape.
         key: `"assets"`, `"fonts"` or `"shaders"`, for the failure message.
         detail: The complaint, worded like flutter_tools where it has one.
+        line: The 1-based `pubspec.yaml` line of the offending key or entry.
 
     Returns:
-        A `struct(path, key, detail)` as `check_asset_entry_problems` takes it.
+        A `struct(path, key, detail, line)` as `check_asset_entry_problems` takes it.
     """
-    return struct(path = path, key = key, detail = detail)
+    return struct(path = path, key = key, detail = detail, line = line)
 
-def _expected_list_problem(key, raw):
+def _expected_list_problem(key, raw, lines, locator):
     """The refusal for a non-list `flutter:` section value.
 
     Mirrors `_computeAssetsSafe` and the `fonts` check in `_validate`
@@ -143,6 +156,8 @@ def _expected_list_problem(key, raw):
     Args:
         key: `"assets"`, `"fonts"` or `"shaders"`.
         raw: The raw section value.
+        lines: The pubspec text split on newlines.
+        locator: The `["flutter", key]` path to the section, for the line.
 
     Returns:
         The refusal struct; the caller fails the fetch on it.
@@ -155,9 +170,10 @@ def _expected_list_problem(key, raw):
             value = repr(raw),
             type = type(raw),
         ),
+        flutter_line_of(lines, locator),
     )
 
-def _parse_path_entry(item, index, key):
+def _parse_path_entry(item, index, key, lines, locator, shown):
     """Split one `assets`/`shaders` list item into its path or its refusal.
 
     Mirrors `AssetsEntry.parseFromYamlSafe`, which serves both sections
@@ -170,15 +186,20 @@ def _parse_path_entry(item, index, key):
         item: The raw list item.
         index: Its index in the section list, for the problem path.
         key: `"assets"` or `"shaders"`, for the problem key.
+        lines: The pubspec text split on newlines.
+        locator: The path to the item, for the line.
+        shown: The problem-path slot prefix (`"assets"`, `"shaders"`, or a
+            deferred `deferred-components[i].assets` slot).
 
     Returns:
         A `(path, problems)` tuple: the entry path, or None when the item
         is no entry, and the refusal structs (empty when the item is usable
         or silently skipped).
     """
-    slot = "{key}[{index}]".format(key = key, index = index)
+    slot = "{shown}[{index}]".format(shown = shown, index = index)
+    item_line = flutter_line_of(lines, locator)
     if item == None or item == "":
-        return (None, [_shape_problem(slot, key, "Asset manifest contains a null or empty uri.")])
+        return (None, [_shape_problem(slot, key, "Asset manifest contains a null or empty uri.", item_line)])
     if type(item) == "string":
         return (item, [])
     if type(item) == "dict":
@@ -193,26 +214,113 @@ def _parse_path_entry(item, index, key):
             "Asset manifest entry is malformed. Expected asset entry to be " +
             "either a string or a map containing a \"path\" entry. " +
             "Got {type} instead.".format(type = type(path)),
+            item_line,
         )])
     return (None, [_shape_problem(
         slot,
         key,
         "Assets entry had unexpected shape. Expected a string or an object. " +
         "Got {type} instead.".format(type = type(item)),
+        item_line,
     )])
 
-def _parse_font_files(fonts_raw, slot):
+# The font weights flutter_tools accepts (`_validateFonts` in
+# `packages/flutter_tools/lib/src/flutter_manifest.dart`): a present `weight`
+# holding anything else is an invalid value, never silently unset.
+_FONT_WEIGHTS = (100, 200, 300, 400, 500, 600, 700, 800, 900)
+
+def _font_file_key_problems(item, slot, lines, flocator):
+    """The refusals for one font file entry's keys, in document order.
+
+    Mirrors the `weight` / `style` / extra-key checks of `_validateFonts`
+    (`packages/flutter_tools/lib/src/flutter_manifest.dart`): a present
+    `weight` must be one of 100..900, a present `style` must be `normal`
+    or `italic`, and any other key is `Unexpected`. Each bad key is
+    reported; an absent `weight` or `style` stays valid.
+
+    Args:
+        item: The raw font file mapping (known to carry `asset`).
+        slot: The `fonts[index]` problem path of the owning family entry.
+        lines: The pubspec text split on newlines.
+        flocator: The path to the file entry, for the line.
+
+    Returns:
+        The refusal structs for `asset_errors`.
+    """
+    problems = []
+    for key in item.keys():
+        value = item[key]
+        if type(key) != "string":
+            problems.append(_shape_problem(
+                slot,
+                "fonts",
+                "Expected \"{key}\" under \"fonts\" to be a string.".format(key = key),
+                flutter_line_of(lines, flocator),
+            ))
+        elif key == "asset":
+            if type(value) != "string":
+                problems.append(_shape_problem(
+                    slot,
+                    "fonts",
+                    "Expected font asset {value} (({type})) to be a string.".format(
+                        value = repr(value),
+                        type = type(value),
+                    ),
+                    flutter_line_of(lines, flocator + ["asset"]),
+                ))
+        elif key == "weight":
+            if type(value) != "int" or value not in _FONT_WEIGHTS:
+                problems.append(_shape_problem(
+                    slot,
+                    "fonts",
+                    "Invalid value {value} (({type})) for font -> weight.".format(
+                        value = str(value),
+                        type = type(value),
+                    ),
+                    flutter_line_of(lines, flocator + ["weight"]),
+                ))
+        elif key == "style":
+            if value != "normal" and value != "italic":
+                problems.append(_shape_problem(
+                    slot,
+                    "fonts",
+                    "Invalid value {value} (({type})) for font -> style.".format(
+                        value = str(value),
+                        type = type(value),
+                    ),
+                    flutter_line_of(lines, flocator + ["style"]),
+                ))
+        else:
+            problems.append(_shape_problem(
+                slot,
+                "fonts",
+                "Unexpected key {key} (({type})) under font.".format(
+                    key = key,
+                    type = type(value),
+                ),
+                flutter_line_of(lines, flocator + [key]),
+            ))
+    return problems
+
+def _parse_font_files(fonts_raw, slot, lines, locator):
     """Parse one family's `fonts` list into font structs or refusals.
 
-    Mirrors the inner loop of `_extractFonts`
+    Mirrors the inner loop of `_extractFonts` and the `weight` / `style` /
+    extra-key checks of `_validateFonts`
     (`packages/flutter_tools/lib/src/flutter_manifest.dart`): a non-map
     file entry is `Expected "fonts" to be a list of maps`, a file entry
-    without an `asset` key is silently skipped, and a non-string `asset`
-    is `Expected font asset ... to be a string`.
+    without an `asset` key is silently skipped (a warning only), a
+    non-string `asset` is `Expected font asset ... to be a string`, a
+    present `weight` must be one of 100..900, a present `style` must be
+    `normal` or `italic`, and any other key is `Unexpected`. An absent
+    `weight` or `style` stays valid and reads as None.
 
     Args:
         fonts_raw: The raw `fonts` list of one family entry.
         slot: The `fonts[index]` problem path of the owning family entry.
+        lines: The pubspec text split on newlines.
+        locator: The `["flutter", "fonts", index, "fonts"]` path to the
+            list, for the line.
 
     Returns:
         A `(fonts, problems)` tuple of `struct(asset, weight, style)`
@@ -220,65 +328,90 @@ def _parse_font_files(fonts_raw, slot):
     """
     fonts = []
     problems = []
-    for item in fonts_raw:
+    for index, item in enumerate(fonts_raw):
+        flocator = locator + [index]
         if type(item) != "dict":
-            problems.append(_shape_problem(slot, "fonts", "Expected \"fonts\" to be a list of maps."))
-            continue
-        if "asset" not in item:
-            continue
-        asset = item.get("asset")
-        if type(asset) != "string":
             problems.append(_shape_problem(
                 slot,
                 "fonts",
-                "Expected font asset {value} (({type})) to be a string.".format(
-                    value = repr(asset),
-                    type = type(asset),
-                ),
+                "Expected \"fonts\" to be a list of maps.",
+                flutter_line_of(lines, flocator),
             ))
+            continue
+        if "asset" not in item:
+            continue
+        problems.extend(_font_file_key_problems(item, slot, lines, flocator))
+        asset = item.get("asset")
+        if type(asset) != "string":
             continue
         weight = item.get("weight")
         style = item.get("style")
         fonts.append(struct(
             asset = asset,
-            weight = weight if type(weight) == "int" else None,
-            style = style if type(style) == "string" else None,
+            weight = weight if type(weight) == "int" and weight in _FONT_WEIGHTS else None,
+            style = style if style == "normal" or style == "italic" else None,
         ))
     return (fonts, problems)
 
-def _parse_font_family(entry, index):
+def _parse_font_family(entry, index, lines, locator):
     """Parse one `fonts` list entry into a family struct or refusals.
 
     Mirrors `_validateFonts`
-    (`packages/flutter_tools/lib/src/flutter_manifest.dart`): a missing
-    (null) `family` is silently skipped, a non-string one is `Font family
-    must either be null or a String`; a missing or null per-family `fonts`
-    stays the empty list, a non-list one is `Expected "fonts" to either be
-    null or a list`.
+    (`packages/flutter_tools/lib/src/flutter_manifest.dart`): any key
+    besides `family` and `fonts` is `Unexpected child ... under "fonts"`, a
+    missing (null) `family` is silently skipped, a non-string one is `Font
+    family must either be null or a String`; a missing or null per-family
+    `fonts` stays the empty list, a non-list one is `Expected "fonts" to
+    either be null or a list`.
 
     Args:
         entry: The raw family mapping.
         index: Its index in the `fonts` list, for the problem path.
+        lines: The pubspec text split on newlines.
+        locator: The `["flutter", "fonts", index]` path to the entry, for
+            the line.
 
     Returns:
         A `(family, problems)` tuple: `struct(family, fonts)` or None, and
         the refusal structs for `asset_errors`.
     """
     slot = "fonts[{index}]".format(index = index)
+    problems = []
+    for key in entry.keys():
+        if key != "family" and key != "fonts":
+            problems.append(_shape_problem(
+                slot,
+                "fonts",
+                "Unexpected child \"{key}\" found under \"fonts\".".format(key = key),
+                flutter_line_of(lines, locator + [key]),
+            ))
     family = entry.get("family")
     if family == None:
-        return (None, [])
+        return (None, problems)
     if type(family) != "string":
-        return (None, [_shape_problem(slot, "fonts", "Font family must either be null or a String.")])
+        problems.append(_shape_problem(
+            slot,
+            "fonts",
+            "Font family must either be null or a String.",
+            flutter_line_of(lines, locator + ["family"]),
+        ))
+        return (None, problems)
     fonts_raw = entry.get("fonts", [])
     if fonts_raw == None:
         fonts_raw = []
     if type(fonts_raw) != "list":
-        return (None, [_shape_problem(slot, "fonts", "Expected \"fonts\" to either be null or a list.")])
-    (fonts, problems) = _parse_font_files(fonts_raw, slot)
+        problems.append(_shape_problem(
+            slot,
+            "fonts",
+            "Expected \"fonts\" to either be null or a list.",
+            flutter_line_of(lines, locator + ["fonts"]),
+        ))
+        return (None, problems)
+    (fonts, file_problems) = _parse_font_files(fonts_raw, slot, lines, locator + ["fonts"])
+    problems.extend(file_problems)
     return (struct(family = family, fonts = fonts), problems)
 
-def _parse_fonts(raw):
+def _parse_fonts(raw, lines, locator):
     """Parse the raw `flutter.fonts` list, collecting malformed shapes.
 
     Mirrors the `fonts` checks in `_validate` and `_validateFonts`
@@ -287,10 +420,14 @@ def _parse_fonts(raw):
     per-family `fonts`, a non-map font file entry and a non-string
     `asset` are each a refusal; entries flutter_tools only warns on (a
     missing family, a file entry without an `asset` key) stay silently
-    skipped, exactly as on main.
+    skipped, exactly as on main. When the first element is not a map the
+    whole list is one refusal naming the value, and the remaining entries
+    are not checked further.
 
     Args:
         raw: The raw `flutter.fonts` YAML value (None when absent).
+        lines: The pubspec text split on newlines.
+        locator: The `["flutter", "fonts"]` path to the section, for the line.
 
     Returns:
         A `(fonts, problems)` tuple of `struct(family, fonts)` entries and
@@ -299,7 +436,17 @@ def _parse_fonts(raw):
     if raw == None:
         return ([], [])
     if type(raw) != "list":
-        return ([], [_expected_list_problem("fonts", raw)])
+        return ([], [_expected_list_problem("fonts", raw, lines, locator)])
+    if len(raw) > 0 and type(raw[0]) != "dict":
+        return ([], [_shape_problem(
+            "fonts",
+            "fonts",
+            "Expected \"fonts\" to contain maps, but the first element is {value} ({type}).".format(
+                value = str(raw),
+                type = type(raw[0]),
+            ),
+            flutter_line_of(lines, locator),
+        )])
     out = []
     problems = []
     for index, entry in enumerate(raw):
@@ -310,9 +457,10 @@ def _parse_fonts(raw):
                 "Unexpected child {value} found under \"fonts\". Expected a map.".format(
                     value = repr(entry),
                 ),
+                flutter_line_of(lines, locator + [index]),
             ))
             continue
-        (family, family_problems) = _parse_font_family(entry, index)
+        (family, family_problems) = _parse_font_family(entry, index, lines, locator + [index])
         problems.extend(family_problems)
         if family != None:
             out.append(family)
@@ -354,55 +502,103 @@ def _parse_condition_list(raw_value, key):
         values.append(item)
     return (values, "")
 
-def _parse_assets(raw):
+def _section_error(path, section, inner):
+    """Wrap a condition-list complaint the way flutter_tools wraps it.
+
+    Mirrors `AssetsEntry.parseFromYamlSafe`
+    (`packages/flutter_tools/lib/src/flutter_manifest.dart`): a bad
+    `flavors` / `platforms` / `transformers` value is `Unable to parse
+    assets section.\nIn {section} section of asset "{path}": {inner}`.
+    """
+    return "Unable to parse assets section.\nIn {section} section of asset \"{path}\": {inner}".format(
+        section = section,
+        path = path,
+        inner = inner,
+    )
+
+def _condition_problems(path, item, cond_key, lines, locator):
+    """Validate one asset entry `flavors` / `platforms` value as a refusal.
+
+    Args:
+        path: The entry path, for the problem path.
+        item: The raw entry mapping.
+        cond_key: `"flavors"` or `"platforms"`.
+        lines: The pubspec text split on newlines.
+        locator: The `["flutter", "assets", index]` path to the entry, for
+            the line.
+
+    Returns:
+        A `(values, problems)` tuple: the string list (possibly empty) and
+        the refusal structs (at most one) for `asset_errors`.
+    """
+    (values, detail) = _parse_condition_list(item.get(cond_key), cond_key)
+    if not detail:
+        return (values, [])
+    return (values, [_shape_problem(
+        path,
+        cond_key,
+        _section_error(path, cond_key, detail),
+        flutter_line_of(lines, locator + [cond_key]),
+    )])
+
+def _parse_assets(raw, lines, locator, shown):
     """Parse the raw `flutter.assets` list, collecting malformed entries.
 
     A list item that is neither a usable string nor a map with a string
     `path` is a refusal shaped like flutter_tools'
     `AssetsEntry.parseFromYamlSafe`
     (`packages/flutter_tools/lib/src/flutter_manifest.dart`); a map
-    entry's `flavors` / `platforms` must each be a list of strings, and an
+    entry's `flavors` / `platforms` must each be a list of strings (a bad
+    one is the wrapped `Unable to parse assets section` refusal), and an
     entry must not carry `transformers` (rules_flutter does not run asset
     transformers; shipping the untransformed file would silently do the
     wrong thing). Problems are collected, not failed here, so unit tests
     can assert them; the spoke fails the fetch on each (see
-    `check_asset_entry_problems`). Any other unknown key in an entry
-    mapping is ignored, the way flutter_tools ignores it.
+    `check_asset_entry_problems`) naming the package, `pubspec.yaml` and
+    the line. Any other unknown key in an entry mapping is ignored, the way
+    flutter_tools ignores it. Deferred-component asset lists share this
+    validator (their entries are validated only, never bundled).
 
     Args:
         raw: The raw `flutter.assets` YAML value (None when absent).
+        lines: The pubspec text split on newlines.
+        locator: The path to the section (e.g. `["flutter", "assets"]`),
+            extended per item, for the line.
+        shown: The problem-path slot prefix (`"assets"`, `"shaders"`, or a
+            deferred `deferred-components[i].assets` slot).
 
     Returns:
         An `(entries, problems)` tuple: `entries` holds one
         `struct(path, flavors, platforms)` per usable entry (a problem
         entry keeps empty conditions; the fetch fails before they matter),
-        and `problems` holds one `struct(path, key, detail)` per refusal.
+        and `problems` holds one `struct(path, key, detail, line)` per
+        refusal.
     """
     if raw == None:
         return ([], [])
     if type(raw) != "list":
-        return ([], [_expected_list_problem("assets", raw)])
+        return ([], [_expected_list_problem("assets", raw, lines, locator)])
     entries = []
     problems = []
     for index, item in enumerate(raw):
-        (path, shape_problems) = _parse_path_entry(item, index, "assets")
+        elocator = locator + [index]
+        (path, shape_problems) = _parse_path_entry(item, index, "assets", lines, elocator, shown)
         problems.extend(shape_problems)
         if path == None:
             continue
         if type(item) == "string":
             entries.append(struct(path = path, flavors = [], platforms = []))
             continue
-        (flavors, flavors_problem) = _parse_condition_list(item.get("flavors"), "flavors")
-        if flavors_problem:
-            problems.append(struct(path = path, key = "flavors", detail = flavors_problem))
-        (platforms, platforms_problem) = _parse_condition_list(item.get("platforms"), "platforms")
-        if platforms_problem:
-            problems.append(struct(path = path, key = "platforms", detail = platforms_problem))
+        (flavors, flavor_problems) = _condition_problems(path, item, "flavors", lines, elocator)
+        problems.extend(flavor_problems)
+        (platforms, platform_problems) = _condition_problems(path, item, "platforms", lines, elocator)
+        problems.extend(platform_problems)
         if "transformers" in item and item.get("transformers") != None:
-            problems.append(struct(
-                path = path,
-                key = "transformers",
-                detail = "asset transformers are not supported by rules_flutter.",
+            problems.append(_shape_problem(
+                path,
+                "transformers",
+                "asset transformers are not supported by rules_flutter.",
+                flutter_line_of(lines, elocator + ["transformers"]),
             ))
         entries.append(struct(path = path, flavors = flavors, platforms = platforms))
     return (entries, problems)
@@ -478,7 +674,7 @@ def asset_flavor_error(package_name, asset_path, flavors_a, flavors_b):
         second = _format_flavor_list(flavors_b),
     )
 
-def _parse_shaders(raw):
+def _parse_shaders(raw, lines, locator):
     """Parse the raw `flutter.shaders` list, collecting malformed shapes.
 
     Mirrors `_computeAssetsSafe`, which serves both `assets` and `shaders`
@@ -489,6 +685,9 @@ def _parse_shaders(raw):
 
     Args:
         raw: The raw `flutter.shaders` YAML value (None when absent).
+        lines: The pubspec text split on newlines.
+        locator: The `["flutter", "shaders"]` path to the section, for the
+            line.
 
     Returns:
         A `(shaders, problems)` tuple of `struct(path)` entries and
@@ -497,15 +696,32 @@ def _parse_shaders(raw):
     if raw == None:
         return ([], [])
     if type(raw) != "list":
-        return ([], [_expected_list_problem("shaders", raw)])
+        return ([], [_expected_list_problem("shaders", raw, lines, locator)])
     out = []
     problems = []
     for index, entry in enumerate(raw):
-        (path, shape_problems) = _parse_path_entry(entry, index, "shaders")
+        (path, shape_problems) = _parse_path_entry(entry, index, "shaders", lines, locator + [index], "shaders")
         problems.extend(shape_problems)
         if path != None:
             out.append(struct(path = path))
     return (out, problems)
+
+def _deferred_assets_check(lines):
+    """A `check_assets` callback validating deferred-component asset lists.
+
+    Args:
+        lines: The pubspec text split on newlines.
+
+    Returns:
+        A `check_assets(raw, locator, shown)` callable returning that
+        value's asset problems (entries are validated only, never bundled).
+    """
+
+    def check(raw, locator, shown):
+        """Validate one deferred `assets` value, discarding its entries."""
+        return _parse_assets(raw, lines, locator, shown)[1]
+
+    return check
 
 def parse_flutter_assets_block(content):
     """Parse `flutter.fonts`, `flutter.assets`, `flutter.shaders`, and `flutter.uses-material-design`.
@@ -519,7 +735,7 @@ def parse_flutter_assets_block(content):
             assets:   list[struct(path, flavors, platforms)],
             shaders:  list[struct(path)],
             uses_material_design: bool,
-            asset_errors: list[struct(path, key, detail)],
+            asset_errors: list[struct(path, key, detail, line)],
         )
 
     `weight` and `style` on a font are None when unset. `flavors`/`platforms`
@@ -532,20 +748,46 @@ def parse_flutter_assets_block(content):
     asset or shader item that is neither a string nor a map with a string
     `path`, a `flutter.fonts` section that is not a list, a non-map font
     entry, a non-string `family`, a non-list per-family `fonts`, a non-map
-    font file entry, a non-string font `asset`, a `flavors` / `platforms`
-    value that is not a list of strings, or an entry carrying
-    `transformers`; the spoke fails the fetch on each (see
-    `check_asset_entry_problems`), naming the package, the entry and the key.
+    font file entry, a non-string font `asset`, an invalid font `weight`
+    or `style`, an unexpected key in a font, a `flavors` / `platforms`
+    value that is not a list of strings, an entry carrying
+    `transformers`, a `flutter:` section that is neither a map nor null,
+    and every other `flutter:` child flutter_tools `_validate` rejects
+    (`uses-material-design`, `licenses`, `module`, `plugin`,
+    `deferred-components`, `disable-swift-package-manager`,
+    `default-flavor`, unknown children); the spoke fails the fetch on each
+    (see `check_asset_entry_problems`), naming the package, `pubspec.yaml`
+    and the line.
     """
-    flutter = parse_flutter_block(content)
+    lines = content.split("\n")
+    pubspec = parse_pubspec(content)
+    raw_flutter = pubspec.get("flutter")
+    if raw_flutter == None:
+        flutter = {}
+        flutter_problem = []
+    elif type(raw_flutter) != "dict":
+        flutter = {}
+        flutter_problem = [_shape_problem(
+            "flutter",
+            "flutter",
+            "Expected \"flutter\" section to be an object or null, but got {value}.".format(
+                value = str(raw_flutter),
+            ),
+            flutter_line_of(lines, ["flutter"]),
+        )]
+    else:
+        flutter = raw_flutter
+        flutter_problem = []
     umd_raw = flutter.get("uses-material-design", False)
-    (assets, asset_problems) = _parse_assets(flutter.get("assets"))
-    (fonts, font_problems) = _parse_fonts(flutter.get("fonts"))
-    (shaders, shader_problems) = _parse_shaders(flutter.get("shaders"))
+    (assets, asset_problems) = _parse_assets(flutter.get("assets"), lines, ["flutter", "assets"], "assets")
+    (fonts, font_problems) = _parse_fonts(flutter.get("fonts"), lines, ["flutter", "fonts"])
+    (shaders, shader_problems) = _parse_shaders(flutter.get("shaders"), lines, ["flutter", "shaders"])
+    scope = struct(lines = lines, check_assets = _deferred_assets_check(lines))
+    section_problems = validate_flutter_section(flutter, scope)
     return struct(
         fonts = fonts,
         assets = assets,
         shaders = shaders,
         uses_material_design = umd_raw if type(umd_raw) == "bool" else False,
-        asset_errors = asset_problems + font_problems + shader_problems,
+        asset_errors = asset_problems + font_problems + shader_problems + flutter_problem + section_problems,
     )
