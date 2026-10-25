@@ -362,7 +362,9 @@ String renderVersionSnippet({
       '        "$artifact": "${checksums[artifact] ?? 'MISSING'}",';
   final out = StringBuffer();
   out.writeln('');
-  out.writeln('=== Add to FLUTTER_VERSIONS in flutter/private/versions.bzl ===');
+  out.writeln(
+    '=== Add to FLUTTER_VERSIONS in flutter/private/versions.bzl ===',
+  );
   out.writeln('');
   out.writeln('    "$version": struct(');
   out.writeln('        engine_revision = "$engineRev",');
@@ -374,7 +376,9 @@ String renderVersionSnippet({
   );
   out.writeln('    ),');
   out.writeln('');
-  out.writeln('=== Add to ARTIFACT_CHECKSUMS in flutter/private/versions.bzl ===');
+  out.writeln(
+    '=== Add to ARTIFACT_CHECKSUMS in flutter/private/versions.bzl ===',
+  );
   out.writeln('');
   out.writeln('    "$version": {');
   for (final section in artifactSections) {

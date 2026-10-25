@@ -58,7 +58,11 @@ Future<void> main(List<String> args) async {
   final checksums = outcome.checksums;
   final failures = outcome.failures;
 
-  await reportSysrootChecksums(version, request.flutterRepo, request.workspaceDir);
+  await reportSysrootChecksums(
+    version,
+    request.flutterRepo,
+    request.workspaceDir,
+  );
 
   _checkShaderFlags(version, request.flutterRepo, request.workspaceDir);
 
