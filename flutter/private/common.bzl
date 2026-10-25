@@ -11,6 +11,7 @@ load("@rules_dart//dart:utils.bzl", "collect_packages", "collect_transitive_srcs
 load("//flutter:providers.bzl", "FlutterCompiledShadersInfo", "FlutterInfo", "FlutterNativeLibraryInfo", _resolve_exec_dart = "resolve_exec_dart", _resolve_exec_dart_vm = "resolve_exec_dart_vm", _resolve_flutter_sdk_info = "resolve_flutter_sdk_info")
 load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "app_main_location", "app_scheme_location", "app_scheme_sources", "compile_kernel_package_config", "resolve_kernel_entrypoint", "synthesize_app_package", "with_root")
 load("//flutter/private:asset_keys.bzl", "bundle_asset_entries", "fail_asset_key_conflict", "is_within_package", "relative_key")
+load("//flutter/private:asset_uri.bzl", "encode_asset_key")
 load("//flutter/private:flutter_asset_bundle_action.bzl", "flutter_asset_bundle_action", "make_bundle_content", "make_tree_shake")
 load(
     "//flutter/private:flutter_compile.bzl",
@@ -1115,7 +1116,10 @@ def _shader_jobs(ctx):
     listing target's package directory, which is where
     `FragmentProgram.fromAsset` looks for them. SDK shaders go under
     "shaders/<basename>" (Flutter's convention), and a package's under
-    "packages/<pkg>/<path>" (bare "<path>" when it has no package name). A
+    "packages/<pkg>/<path>" (bare "<path>" when it has no package name).
+    Basenames and contribution paths arrive percent-encoded
+    (`asset_uri.bzl`), so a file named `a b.frag` compiles to
+    `shaders/a%20b.frag`, the key the engine asks for. A
     shader outside the listing target's package fails here rather than
     guessing a key, and two shaders claiming one bundle path fail here: one
     would otherwise overwrite the other.
@@ -1132,8 +1136,7 @@ def _shader_jobs(ctx):
         ))
     for entry in collect_sdk_shader_srcs(ctx.attr.deps):
         shader = entry.file if hasattr(entry, "file") else entry
-        includes = entry.includes if hasattr(entry, "includes") else ()
-        jobs.append(struct(bundle_path = "shaders/" + shader.basename, file = shader, includes = includes))
+        jobs.append(struct(bundle_path = "shaders/" + encode_asset_key(shader.basename), file = shader, includes = entry.includes if hasattr(entry, "includes") else ()))
 
     # One flatten of the package-shader channel, through one `depset` union
     # over the deps: a shader file reached through W thin deps costs one
@@ -2053,7 +2056,7 @@ def _aspect_direct_jobs(ctx, shader_includes):
     if hasattr(ctx.rule.files, "shaders"):
         for shader in ctx.rule.files.shaders:
             direct_jobs.append(struct(
-                bundle_path = "shaders/" + shader.basename,
+                bundle_path = "shaders/" + encode_asset_key(shader.basename),
                 file = shader,
                 includes = shader_includes,
             ))

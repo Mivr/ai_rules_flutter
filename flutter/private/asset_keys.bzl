@@ -14,6 +14,7 @@ action, so no consumer computes a key a second time and every platform bundle
 """
 
 load("//flutter:providers.bzl", "FlutterInfo")
+load(":asset_uri.bzl", "encode_asset_key")
 
 def _listing_dir(workspace_root, package):
     """The listing target's package directory in `File.short_path` space.
@@ -67,10 +68,15 @@ def is_within_package(workspace_root, package, short_path):
     return rel.startswith(listing_dir + "/")
 
 def relative_key(workspace_root, package, short_path):
-    """The file's path relative to the listing target's package.
+    """The file's bundle key from the listing target's package.
 
     Callers must check `is_within_package` first and fail on the outside;
-    this assumes the file is within and only strips the prefix.
+    this assumes the file is within and only strips the prefix. The key is
+    the percent-encoded relative path (see `asset_uri.bzl`): a file named
+    `a b.png` bundles as `a%20b.png`, the key the engine asks for
+    (`asset.dart:617`). For a target at the workspace root this is the
+    encoded `short_path` itself, so root bundles of plain names keep
+    exactly today's keys.
 
     Args:
       workspace_root: The listing label's `workspace_root`.
@@ -78,22 +84,22 @@ def relative_key(workspace_root, package, short_path):
       short_path: The asset file's `short_path`.
 
     Returns:
-      The package-relative key. For a target at the workspace root this is
-      the `short_path` itself, so root bundles stay byte-identical.
+      The encoded package-relative bundle key.
     """
     rel = _repo_relative(short_path)
     listing_dir = _listing_dir(workspace_root, package)
     if listing_dir == "":
-        return rel
-    return rel[len(listing_dir) + 1:]
+        return encode_asset_key(rel)
+    return encode_asset_key(rel[len(listing_dir) + 1:])
 
 def _checked_relative_key(label, file):
     """The package-relative key for one listed file, or a failure.
 
     The rule is by directory: the file's repository-relative path (generated
     files shed their `bazel-out/<config>/bin/` prefix first) must sit in the
-    listing target's package directory or below it, and the key is the path
-    relative to that directory. A nested BUILD file, filegroup or
+    listing target's package directory or below it, and the key is the
+    encoded path relative to that directory (see `relative_key`). A nested
+    BUILD file, filegroup or
     `exports_files` changes nothing — those files are still under the
     directory. Only a sibling or parent directory, or another repository, is
     outside and refused. A target at the workspace root strips nothing, so

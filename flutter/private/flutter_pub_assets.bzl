@@ -18,8 +18,16 @@ over caller-provided `readdir` / `list_dir` callables so unit tests drive it
 with fakes; the spoke passes context-backed adapters and `fail()`s the
 fetch on the returned error, which already names the package and the entry
 or directory.
+
+Every entry is normalized through `asset_uri.bzl` (what `Uri.parse` plus
+`Uri(pathSegments:)` do in flutter_tools 3.47.7): the file is resolved
+from the decoded path while the emitted `key` carries the percent-encoded
+bundle key. A spelling flutter_tools would not bundle (a query, an
+escaping `..`, an invalid escape, ...) refuses here, naming the package,
+its pubspec.yaml and the entry.
 """
 
+load(":asset_uri.bzl", "encode_asset_key", "normalize_asset_uri", "spoke_asset_uri_error")
 load(":flutter_pub_walk.bzl", "PUB_WALK_BOUND")
 
 # Bound for every asset directory walk. Starlark has no `while`, so every
@@ -185,8 +193,12 @@ def _split_asset_path(path):
     return (parent, base)
 
 def _conditioned_entry(entry, path):
-    """One expanded file inheriting its declaring entry's conditions."""
-    return struct(path = path, flavors = entry.flavors, platforms = entry.platforms)
+    """One expanded file inheriting its declaring entry's conditions.
+
+    `path` is the decoded file path (what the label names); `key` is its
+    percent-encoded bundle key (see `asset_uri.bzl`).
+    """
+    return struct(path = path, key = encode_asset_key(path), flavors = entry.flavors, platforms = entry.platforms)
 
 def _memoized_reader(reader):
     """Wrap a directory `reader` so each distinct directory is read once.
@@ -352,7 +364,8 @@ def expand_pub_asset_entries(parsed_assets, list_dir, package_name = ""):
 
     Args:
         parsed_assets: List of `struct(path, flavors, platforms)` from
-            `parse_flutter_assets_block().assets`.
+            `parse_flutter_assets_block().assets` (raw entry text; each is
+            normalized here, so `./a.png` resolves `a.png` keyed `a.png`).
         list_dir: Callable taking a directory path (no trailing slash, ""
             for the package root) and returning `struct(files, error)` with
             every file under it. Tests pass a fake; the spoke passes a
@@ -361,18 +374,23 @@ def expand_pub_asset_entries(parsed_assets, list_dir, package_name = ""):
 
     Returns:
         `struct(expanded, error)`: `expanded` holds one
-        `struct(path, flavors, platforms)` per bundled file (in declaration
-        order, mains before their variants); `error` is "" or the fetch
-        failure naming the package and the entry or directory. The caller
-        `fail()`s on it.
+        `struct(path, key, flavors, platforms)` per bundled file (in
+        declaration order, mains before their variants; `path` names the
+        decoded file, `key` its encoded bundle key); `error` is "" or the
+        fetch failure naming the package and the entry or directory. The
+        caller `fail()`s on it.
     """
     scope = _asset_scope(list_dir, package_name)
     expanded = []
     for entry in parsed_assets:
-        if entry.path.endswith("/"):
-            error = _expand_directory_entry(entry, scope, expanded)
+        norm = normalize_asset_uri(entry.path)
+        if not norm.ok:
+            return struct(expanded = [], error = spoke_asset_uri_error(package_name, entry.path, norm.reason))
+        dec = struct(path = norm.decoded, flavors = entry.flavors, platforms = entry.platforms)
+        if norm.is_dir:
+            error = _expand_directory_entry(dec, scope, expanded)
         else:
-            error = _expand_file_entry(entry, scope, expanded)
+            error = _expand_file_entry(dec, scope, expanded)
         if error:
             return struct(expanded = [], error = error)
     return struct(expanded = expanded, error = "")

@@ -20,6 +20,28 @@ into bundle inputs, matching `flutter_tools` (`asset.dart`, `flutter_manifest.da
 - Asset walks are bounded; a walk that reaches its bound fails the fetch,
   naming the package and the directory, instead of bundling part of the tree.
 
+## Entry spellings and bundle keys
+
+Every entry kind that names a file (assets in both forms, shaders, font
+`asset:`) normalizes through one module (`flutter/private/asset_uri.bzl`),
+mirroring flutter_tools 3.47.7 (`Uri.parse` plus `Uri(pathSegments:)`):
+
+- Entries decode `%XX` escapes, resolve `.` and `x/..`, then re-encode:
+  `./a.png` bundles `a.png`; `a b.png` bundles as `a%20b.png`, the key the
+  engine asks for. Non-ASCII names encode as UTF-8 (`%C3%A9` in the key
+  decodes to the file's accented letter).
+- Entries whose first segment is `packages` pass through byte-identical, as
+  on the base, and plain entries keep exactly their old keys.
+- The decoded path names the file (labels, directory walks, resolution
+  variants); the encoded key names the manifest entry and the copied file.
+  The app's own assets key the same way.
+
+Spellings no engine build reads fail the fetch as not supported, naming the
+package, its pubspec.yaml and the entry (entry form, without a line number):
+query (`?`) and fragment (`#`) parts, absolute paths, backslashes, empty
+segments, `..` escaping the package, entries naming no file, escapes
+decoding to `/`, invalid UTF-8, and `:` (no Bazel target can name it).
+
 ## Walk bounds
 
 Every pub spoke directory walk shares one bound, `PUB_WALK_BOUND`

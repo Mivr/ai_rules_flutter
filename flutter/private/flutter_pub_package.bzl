@@ -31,6 +31,7 @@ load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version", "m
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_deps", "parse_pubspec_sdk_constraint")
 load("//flutter/private:flutter_pub_scan.bzl", "fetch_hosted_archive", "scan_hosted_archive", "walk_hosted_package")
 load("//flutter/private:flutter_pubspec.bzl", "asset_flavor_error", "parse_flutter_assets_block", "parse_flutter_plugin_block", "parse_pubspec")
+load(":asset_uri.bzl", "normalize_spoke_assets", "normalize_spoke_fonts", "normalize_spoke_shaders")
 load(
     ":flutter_pub_assets.bzl",
     "check_asset_entry_problems",
@@ -363,37 +364,52 @@ def _split_glob_block(srcs_dirs, src_exts, hdr_exts):
 _DESKTOP_HDR_EXTS = ("h", "hh", "hpp")
 _DESKTOP_C_EXTS = ("cc", "cpp", "c")
 
-def _encode_fonts_json(parsed_fonts):
-    """Convert parse_flutter_assets_block().fonts to the JSON shape flutter_library expects."""
+def encode_spoke_fonts(parsed_fonts):
+    """The spoke's font attrs from normalized `flutter.fonts` entries.
+
+    One loop builds both shapes `build_pub_contributions` matches by key:
+    the `fonts_json` payload carrying each font's encoded bundle key, and
+    the `font_files` label dict whose decoded labels name the files. Each
+    font arrives normalized (`struct(asset, key, weight, style)` from
+    `normalize_spoke_fonts`); a spelling flutter_tools would not bundle
+    already failed the fetch there.
+
+    Args:
+        parsed_fonts: Normalized entries from `normalize_spoke_fonts`.
+
+    Returns:
+        `struct(fonts_json_str, font_files)`: the JSON payload ("" when
+        there are no fonts) and the label-to-path dict.
+    """
     fonts_for_json = []
+    font_files = {}
     for entry in parsed_fonts:
         fonts_list = []
         for font in entry.fonts:
-            d = {"asset": font.asset}
+            d = {"asset": font.key}
             if font.weight != None:
                 d["weight"] = font.weight
             if font.style != None:
                 d["style"] = font.style
             fonts_list.append(d)
+            font_files[":" + font.asset] = font.key
         fonts_for_json.append({"family": entry.family, "fonts": fonts_list})
-    return json.encode(fonts_for_json) if fonts_for_json else ""
+    return struct(
+        fonts_json_str = json.encode(fonts_for_json) if fonts_for_json else "",
+        font_files = font_files,
+    )
 
-def _build_font_files_dict(parsed_fonts):
-    """Build the `font_files` label_keyed_string_dict literal — {":path": "path", ...}."""
-    out = {}
-    for entry in parsed_fonts:
-        for font in entry.fonts:
-            out[":" + font.asset] = font.asset
-    return out
-
-def _build_pkg_assets_dict(expanded):
+def build_pkg_assets_dict(expanded):
     """Build the `pkg_assets` dict from expanded per-file entries.
 
     Flutter's `flutter.assets:` accepts paths and trailing-slash directory
     prefixes. Bazel needs an explicit label per file, so each directory is
-    walked at repo-rule time and emits one entry per discovered file.
+    walked at repo-rule time and emits one entry per discovered file. The
+    label names the decoded file (`":" + path`); the value is the
+    percent-encoded bundle key, as flutter_tools keys it
+    (`asset.dart:1425-1428`).
     """
-    return {":" + entry.path: entry.path for entry in expanded}
+    return {":" + entry.path: entry.key for entry in expanded}
 
 def _sorted_flavor_set(flavors):
     """The deduplicated, sorted flavor names, for order-insensitive comparison."""
@@ -490,12 +506,13 @@ def _build_pkg_asset_conditions(expanded, package_name):
         fail(merged.conflict)
     return (merged.platforms, merged.flavors)
 
-def _build_pkg_shaders_dict(parsed_shaders):
-    """Build the `pkg_shaders` dict — same shape as pkg_assets, no directories."""
-    out = {}
-    for entry in parsed_shaders:
-        out[":" + entry.path] = entry.path
-    return out
+def build_pkg_shaders_dict(parsed_shaders):
+    """Build the `pkg_shaders` dict from normalized shader entries.
+
+    Same shape as pkg_assets, no directories: decoded labels naming the
+    files, encoded bundle keys as values (`asset.dart:1425-1428`).
+    """
+    return {":" + entry.path: entry.key for entry in parsed_shaders}
 
 def _format_label_dict_literal(d, indent = "        "):
     """Render `{":foo": "foo", ":bar": "bar"}` as a multi-line BUILD source dict."""
@@ -2043,28 +2060,36 @@ def check_spoke_file_names(package_name, asset_block, expanded):
 def _spoke_asset_inputs(ctx, package_name, asset_block):
     """Pre-computes the pub-asset generator inputs, used by either branch.
 
+    Every entry is normalized through `asset_uri.bzl` first (see
+    `normalize_asset_uri`): labels name the decoded files while every dict
+    carries the encoded bundle keys flutter_tools bundles
+    (`asset.dart:1425-1428`). A spelling flutter_tools would not bundle
+    fails the fetch naming the package, its pubspec.yaml and the entry.
+
     Returns `struct(fonts_json_str, font_files, pkg_assets,
     pkg_asset_platforms, pkg_asset_flavors, pkg_shaders,
     has_contributions)`.
     """
     check_asset_entry_problems(package_name, asset_block.asset_errors)
-    fonts_json_str = _encode_fonts_json(asset_block.fonts)
-    font_files = _build_font_files_dict(asset_block.fonts)
+    assets = normalize_spoke_assets(package_name, asset_block.assets)
+    fonts = normalize_spoke_fonts(package_name, asset_block.fonts)
+    shaders = normalize_spoke_shaders(package_name, asset_block.shaders)
+    spoke_fonts = encode_spoke_fonts(fonts)
     expansion = expand_pub_asset_entries(
-        asset_block.assets,
+        assets,
         ctx_package_lister(ctx, package_name),
         package_name,
     )
     if expansion.error:
         fail(expansion.error)
     expanded = expansion.expanded
-    check_spoke_file_names(package_name, asset_block, expanded)
-    pkg_assets_dict = _build_pkg_assets_dict(expanded)
+    check_spoke_file_names(package_name, struct(assets = assets, fonts = fonts, shaders = shaders), expanded)
+    pkg_assets_dict = build_pkg_assets_dict(expanded)
     pkg_asset_platforms, pkg_asset_flavors = _build_pkg_asset_conditions(expanded, package_name)
-    pkg_shaders_dict = _build_pkg_shaders_dict(asset_block.shaders)
+    pkg_shaders_dict = build_pkg_shaders_dict(shaders)
     return struct(
-        fonts_json_str = fonts_json_str,
-        font_files = font_files,
+        fonts_json_str = spoke_fonts.fonts_json_str,
+        font_files = spoke_fonts.font_files,
         pkg_assets = pkg_assets_dict,
         pkg_asset_platforms = pkg_asset_platforms,
         pkg_asset_flavors = pkg_asset_flavors,

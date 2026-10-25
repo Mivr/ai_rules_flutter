@@ -4,6 +4,7 @@ load("@rules_dart//dart:providers.bzl", "DartCodeAssetInfo", "DartInfo")
 load("@rules_dart//dart:utils.bzl", "dart_analyzable_info_with_package", "dart_info", "dart_package_identity", "derive_lib_root", "derive_package_name")
 load("//flutter:providers.bzl", "FlutterInfo")
 load("//flutter/private:asset_keys.bzl", "library_asset_entries")
+load("//flutter/private:asset_uri.bzl", "normalize_asset_uri")
 load("//flutter/private:flutter_info.bzl", "LINK_HOOK_ATTR", "flutter_asset_channels", "flutter_info", "flutter_pub_channels")
 
 def pub_asset_matches_target(flavors, platforms, target_platform, flavor = None):
@@ -33,11 +34,12 @@ def pub_asset_matches_target(flavors, platforms, target_platform, flavor = None)
         return True
     return target_platform in platforms
 
-def _entry_conditions(asset_path, pkg_asset_platforms, pkg_asset_flavors):
+def _entry_conditions(decoded_path, pkg_asset_platforms, pkg_asset_flavors):
     """The `(platforms, flavors)` condition lists for one asset path.
 
     Args:
-        asset_path: The package-relative asset path (a `pkg_assets` value).
+        decoded_path: The normalized package-relative asset path (decoded,
+            a `pkg_assets` value through `normalize_asset_uri`).
         pkg_asset_platforms: `ctx.attr.pkg_asset_platforms` — label string
             (`":" + path`) to platform list, only for restricted entries.
         pkg_asset_flavors: `ctx.attr.pkg_asset_flavors` — same shape.
@@ -45,11 +47,33 @@ def _entry_conditions(asset_path, pkg_asset_platforms, pkg_asset_flavors):
     Returns:
         A `(platforms, flavors)` tuple of lists (empty = unconditional).
     """
-    key = ":" + asset_path
+    key = ":" + decoded_path
     return (
         list(pkg_asset_platforms.get(key, [])),
         list(pkg_asset_flavors.get(key, [])),
     )
+
+def _normalize_attr_value(package_name, attr_name, value):
+    """Normalize one `pkg_assets` / `pkg_shaders` / `font_files` / `fonts_json` value.
+
+    Values arrive as raw entry text (handwritten attrs) or decoded labels
+    (spoke attrs); normalization is idempotent, so both land on the same
+    decoded path and encoded bundle key. The decoded path joins the
+    conditions dicts and the font file table; the key is what bundles.
+
+    Args:
+        package_name: The contribution's package name, for the failure.
+        attr_name: The attr the value came from, for the failure.
+        value: The attr value string.
+
+    Returns:
+        The `normalize_asset_uri` struct; fails on a spelling that is not
+        supported, naming the attr and the value.
+    """
+    norm = normalize_asset_uri(value)
+    if not norm.ok:
+        fail("package \"%s\": %s value %s uses a spelling that is not supported: %s" % (package_name, attr_name, repr(value), norm.reason))
+    return norm
 
 def build_pub_contributions(package_name, fonts_json, font_files_dict, pkg_assets_dict, pkg_shaders_dict, shader_includes = [], pkg_asset_platforms = {}, pkg_asset_flavors = {}):
     """Build pub_fonts/pub_assets/pub_shaders contribution structs from rule attrs.
@@ -64,12 +88,16 @@ def build_pub_contributions(package_name, fonts_json, font_files_dict, pkg_asset
             name (or first-party package name) used as the prefix.
         fonts_json: str — JSON-encoded list of
             `{family: str, fonts: [{asset: str, weight: int?, style: str?}]}`.
-            Empty string when the rule declares no fonts.
+            Empty string when the rule declares no fonts. Each `asset` is
+            normalized (`_normalize_attr_value`); the contribution keeps the
+            encoded bundle key.
         font_files_dict: dict[Target, str] — `ctx.attr.font_files`. Each
             target must resolve to exactly one File. The string value is the
-            package-relative asset path matching an entry in fonts_json.
+            package-relative asset path matching an entry in fonts_json;
+            matched on the normalized decoded path.
         pkg_assets_dict: dict[Target, str] — `ctx.attr.pkg_assets`. Same
-            shape, for non-font assets.
+            shape, for non-font assets. Contributions keep the encoded key,
+            so the bundle never reads a raw path.
         pkg_shaders_dict: dict[Target, str] — `ctx.attr.pkg_shaders`. Same
             shape, for shaders.
         shader_includes: list[File] — `ctx.files.shader_includes`, the files
@@ -91,7 +119,7 @@ def build_pub_contributions(package_name, fonts_json, font_files_dict, pkg_asset
             files = target.files.to_list()
             if len(files) != 1:
                 fail("font_files entry %s must resolve to exactly one File; got %d" % (target.label, len(files)))
-            path_to_file[asset_path] = files[0]
+            path_to_file[_normalize_attr_value(package_name, "font_files", asset_path).decoded] = files[0]
 
         # Tuples (not lists) inside the struct because depset elements must
         # be fully immutable — mutable fields propagate to the struct's
@@ -101,14 +129,14 @@ def build_pub_contributions(package_name, fonts_json, font_files_dict, pkg_asset
             fonts_list = []
             file_list = []
             for font in family_entry.get("fonts", []):
-                asset_path = font.get("asset", "")
+                norm = _normalize_attr_value(package_name, "fonts_json", font.get("asset", ""))
                 fonts_list.append(struct(
-                    asset_path = asset_path,
+                    asset_path = norm.key,
                     weight = font.get("weight"),
                     style = font.get("style"),
                 ))
-                if asset_path in path_to_file:
-                    file_list.append(path_to_file[asset_path])
+                if norm.decoded in path_to_file:
+                    file_list.append(path_to_file[norm.decoded])
             extra_pub_fonts.append(struct(
                 package_name = package_name,
                 family = family,
@@ -121,10 +149,11 @@ def build_pub_contributions(package_name, fonts_json, font_files_dict, pkg_asset
         files = target.files.to_list()
         if len(files) != 1:
             fail("pkg_assets entry %s must resolve to exactly one File; got %d" % (target.label, len(files)))
-        platforms, flavors = _entry_conditions(asset_path, pkg_asset_platforms, pkg_asset_flavors)
+        norm = _normalize_attr_value(package_name, "pkg_assets", asset_path)
+        platforms, flavors = _entry_conditions(norm.decoded, pkg_asset_platforms, pkg_asset_flavors)
         extra_pub_assets.append(struct(
             package_name = package_name,
-            asset_path = asset_path,
+            asset_path = norm.key,
             file = files[0],
             platforms = tuple(platforms),
             flavors = tuple(flavors),
@@ -137,7 +166,7 @@ def build_pub_contributions(package_name, fonts_json, font_files_dict, pkg_asset
             fail("pkg_shaders entry %s must resolve to exactly one File; got %d" % (target.label, len(files)))
         extra_pub_shaders.append(struct(
             package_name = package_name,
-            shader_path = shader_path,
+            shader_path = _normalize_attr_value(package_name, "pkg_shaders", shader_path).key,
             file = files[0],
             includes = tuple(shader_includes),
         ))
