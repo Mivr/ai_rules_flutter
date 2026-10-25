@@ -400,7 +400,10 @@ _UNIT_TESTS = {
     "extract_library_tags_test": ("extract_library_tags.dart", []),
     # The run_home helper's own tests, including the Dart/shell flag
     # agreement checks against `//flutter/private:run_home.bzl`.
-    "run_home_test": ("run_home.dart", ["@rules_dart//dart/runfiles"]),
+    "run_home_test": (
+        "run_home.dart",
+        ["@rules_dart//dart/runfiles"],
+    ),
 }
 
 # The runner imports its protocol module by relative path, so every test of the
