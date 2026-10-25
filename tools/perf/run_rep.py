@@ -34,11 +34,14 @@ the layout summarize.py reads.
 """
 
 import argparse
+import dataclasses
 import os
 import shutil
 import stat
 import subprocess
 import sys
+from typing import Callable
+from typing import Optional
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from execlog import load_spawns  # noqa: E402
@@ -67,6 +70,24 @@ CONFIG_ORDER = ["device_release", "sim_debug"]
 # //app:app_framework did: its import wrapper has no actions of its own)
 # and the repeat must fail loudly instead of recording a silent no-op.
 DEFAULT_MIN_CLEAN_ACTIONS = 10
+
+
+@dataclasses.dataclass(frozen=True)
+class RunOptions:
+    """Tuning and injection values for run_config and run_rep.
+
+    The defaults are the ones both functions always had: 600 s replay
+    timeouts, 1800 s replay budgets, the minimum clean-action guard,
+    and the real run, chmod and reset hooks. run_rep passes the same
+    object down to every run_config; run_config ignores reset.
+    """
+
+    replay_timeout: float = 600.0
+    replay_budget: float = 1800.0
+    min_clean_actions: int = DEFAULT_MIN_CLEAN_ACTIONS
+    run: Optional[Callable] = None
+    chmod: Optional[Callable] = None
+    reset: Optional[Callable] = None
 
 
 def real_run(argv, cwd=None, capture_output=False):
@@ -188,13 +209,17 @@ def shutdown(run, work, out_base):
 
 
 def run_config(tools_dir, work, out_base, results_ref_dir, rep, config,
-               replay_timeout=600.0, replay_budget=1800.0,
-               min_clean_actions=DEFAULT_MIN_CLEAN_ACTIONS, run=None,
-               chmod=None):
-    """Runs one configuration: three builds, chmod, three replay passes."""
+               options=None):
+    """Runs one configuration: three builds, chmod, three replay passes.
+
+    The options carry the replay timeouts and budgets, the minimum
+    clean-action guard and the run/chmod hooks, with the same defaults
+    run_config always had.
+    """
     spec = CONFIGS[config]
-    run = run or real_run
-    chmod = chmod or make_writable_tree
+    opts = options if options is not None else RunOptions()
+    run = opts.run or real_run
+    chmod = opts.chmod or make_writable_tree
     logs = {}
     for scenario, edit_command in SCENARIOS:
         if edit_command is not None:
@@ -205,7 +230,7 @@ def run_config(tools_dir, work, out_base, results_ref_dir, rep, config,
         logs[scenario] = log_path
         if scenario == "clean":
             check_clean_actions(log_path, spec["target"],
-                                min_clean_actions)
+                                opts.min_clean_actions)
     execroot = get_execroot(run, work, out_base)
     bazel_out = os.path.join(execroot, "bazel-out")
     made_writable = chmod(bazel_out) if os.path.isdir(bazel_out) else 0
@@ -217,37 +242,36 @@ def run_config(tools_dir, work, out_base, results_ref_dir, rep, config,
                       os.path.join(rep_dir, "execlog.json"))
         replay_log(run, tools_dir, logs[scenario], execroot,
                    os.path.join(rep_dir, "replay.json"),
-                   replay_timeout, replay_budget)
+                   opts.replay_timeout, opts.replay_budget)
     shutdown(run, work, out_base)
     return {"execroot": execroot, "logs": logs,
             "made_writable": made_writable}
 
 
 def run_rep(tools_dir, pristine, work, out_base_root, results_ref_dir, rep,
-            configs=None, replay_timeout=600.0, replay_budget=1800.0,
-            min_clean_actions=DEFAULT_MIN_CLEAN_ACTIONS,
-            run=None, chmod=None, reset=None):
+            configs=None, options=None):
     """Runs one full repeat over configs, each with a fresh work copy.
 
     The workspace is reset from pristine before every config so edits
     applied by an earlier config can never leak into a later config's
     clean build. Output bases are <root>/<config>: no shared server
-    between configs.
+    between configs. The options carry the replay timeouts and budgets,
+    the minimum clean-action guard and the run/chmod/reset hooks, with
+    the same defaults run_rep always had; the same object goes to every
+    run_config.
     """
     configs = list(configs) if configs else list(CONFIG_ORDER)
     unknown = [c for c in configs if c not in CONFIGS]
     if unknown:
         raise ValueError("unknown config(s): %s" % ", ".join(unknown))
-    reset = reset or reset_work
+    opts = options if options is not None else RunOptions()
+    reset = opts.reset or reset_work
     records = {}
     for config in configs:
         reset(pristine, work)
         records[config] = run_config(
             tools_dir, work, os.path.join(out_base_root, config),
-            results_ref_dir, rep, config,
-            replay_timeout=replay_timeout, replay_budget=replay_budget,
-            min_clean_actions=min_clean_actions,
-            run=run, chmod=chmod)
+            results_ref_dir, rep, config, options=opts)
     return records
 
 
@@ -274,9 +298,10 @@ def main(argv=None):
     args = parser.parse_args(argv)
     records = run_rep(args.tools, args.pristine, args.work, args.out_base,
                       args.results_ref_dir, args.rep, configs=args.config,
-                      replay_timeout=args.replay_timeout,
-                      replay_budget=args.replay_budget,
-                      min_clean_actions=args.min_clean_actions)
+                      options=RunOptions(
+                          replay_timeout=args.replay_timeout,
+                          replay_budget=args.replay_budget,
+                          min_clean_actions=args.min_clean_actions))
     for config, record in records.items():
         print("config=%s rep=%d execroot=%s made_writable=%d"
               % (config, args.rep, record["execroot"],

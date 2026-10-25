@@ -12,7 +12,8 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import run_rep
-from run_rep import CONFIGS, make_writable_tree, real_run, run_rep
+from run_rep import (CONFIGS, DEFAULT_MIN_CLEAN_ACTIONS, RunOptions,
+                     make_writable_tree, real_run, run_rep)
 
 
 class Proc:
@@ -105,9 +106,10 @@ class ConfigTableTest(unittest.TestCase):
     def test_unknown_config_rejected(self):
         with self.assertRaises(ValueError):
             run_rep("/tools", "/pristine", "/work", "/out", "/dest", 1,
-                    configs=["nope"], run=FakeRun(),
-                    chmod=lambda path: 0,
-                    reset=lambda pristine, work: None)
+                    configs=["nope"],
+                    options=RunOptions(
+                        run=FakeRun(), chmod=lambda path: 0,
+                        reset=lambda pristine, work: None))
 
 
 class OrderingTest(unittest.TestCase):
@@ -135,7 +137,7 @@ class OrderingTest(unittest.TestCase):
             self.execroot, os.path.basename(out_base))
 
     def drive(self, **kwargs):
-        kwargs.setdefault("run", FakeRun(execroot=self.execroot))
+        run = kwargs.pop("run", None) or FakeRun(execroot=self.execroot)
 
         def chmod(path):
             self.chmods.append(path)
@@ -146,12 +148,18 @@ class OrderingTest(unittest.TestCase):
             shutil.rmtree(work, ignore_errors=True)
             shutil.copytree(pristine, work, symlinks=True)
 
-        kwargs.setdefault("chmod", chmod)
-        kwargs.setdefault("reset", reset)
+        options = RunOptions(
+            replay_timeout=kwargs.pop("replay_timeout", 600.0),
+            replay_budget=kwargs.pop("replay_budget", 1800.0),
+            min_clean_actions=kwargs.pop("min_clean_actions",
+                                         DEFAULT_MIN_CLEAN_ACTIONS),
+            run=run,
+            chmod=kwargs.pop("chmod", chmod),
+            reset=kwargs.pop("reset", reset))
         records = run_rep(
             "/tools", self.pristine, self.work, "/fake/out", self.dest, 2,
-            **kwargs)
-        return (kwargs["run"], records)
+            options=options, **kwargs)
+        return (run, records)
 
     def test_builds_before_replays_and_shutdown_last(self):
         fake, records = self.drive()
@@ -238,9 +246,10 @@ class OrderingTest(unittest.TestCase):
         fake = FakeRun()
         run_rep("/tools", self.pristine, self.work, "/fake/out", self.dest,
                 1, configs=["device_release"],
-                replay_timeout=11.0, replay_budget=22.0,
-                run=fake, chmod=lambda path: 0,
-                reset=lambda pristine, work: None)
+                options=RunOptions(
+                    replay_timeout=11.0, replay_budget=22.0, run=fake,
+                    chmod=lambda path: 0,
+                    reset=lambda pristine, work: None))
         replays = [c for c in fake.calls
                    if len(c) > 1 and "replay.py" in c[1]]
         self.assertEqual(len(replays), 3)
@@ -259,25 +268,31 @@ class OrderingTest(unittest.TestCase):
         fake = FailBuild()
         with self.assertRaises(RuntimeError):
             run_rep("/tools", self.pristine, self.work, "/fake/out",
-                    self.dest, 1, run=fake, chmod=lambda path: 0,
-                    reset=lambda pristine, work: None)
+                    self.dest, 1,
+                    options=RunOptions(
+                        run=fake, chmod=lambda path: 0,
+                        reset=lambda pristine, work: None))
         self.assertNotIn("replay", fake.kinds())
 
     def test_near_empty_clean_build_fails_loudly(self):
         fake = FakeRun(n_spawns=2)
         with self.assertRaisesRegex(RuntimeError, "only 2 action"):
             run_rep("/tools", self.pristine, self.work, "/fake/out",
-                    self.dest, 1, run=fake, chmod=lambda path: 0,
-                    reset=lambda pristine, work: None)
+                    self.dest, 1,
+                    options=RunOptions(
+                        run=fake, chmod=lambda path: 0,
+                        reset=lambda pristine, work: None))
         self.assertNotIn("replay", fake.kinds())
 
     def test_min_clean_actions_override(self):
         fake = FakeRun(n_spawns=2)
         records = run_rep(
             "/tools", self.pristine, self.work, "/fake/out", self.dest, 1,
-            configs=["sim_debug"], min_clean_actions=2,
-            run=fake, chmod=lambda path: 0,
-            reset=lambda pristine, work: None)
+            configs=["sim_debug"],
+            options=RunOptions(
+                min_clean_actions=2, run=fake,
+                chmod=lambda path: 0,
+                reset=lambda pristine, work: None))
         self.assertEqual(sorted(records), ["sim_debug"])
 
     def test_missing_clean_log_fails_loudly(self):
@@ -291,8 +306,10 @@ class OrderingTest(unittest.TestCase):
         fake = NoLog()
         with self.assertRaisesRegex(RuntimeError, "no execution log"):
             run_rep("/tools", self.pristine, self.work, "/fake/out",
-                    self.dest, 1, run=fake, chmod=lambda path: 0,
-                    reset=lambda pristine, work: None)
+                    self.dest, 1,
+                    options=RunOptions(
+                        run=fake, chmod=lambda path: 0,
+                        reset=lambda pristine, work: None))
 
 
 class ChmodTest(unittest.TestCase):
@@ -345,6 +362,64 @@ class RealRunTest(unittest.TestCase):
         self.assertEqual(proc.stdout.strip(), "/out-base/execroot/ws")
         self.assertNotIn("OpenJDK", proc.stdout)
         self.assertIn("OpenJDK", proc.stderr)
+
+
+class RunOptionsTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="run-opts-")
+        self.work = os.path.join(self.tmp, "work")
+        os.makedirs(self.work)
+        self.dest = os.path.join(self.tmp, "dest")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_defaults_match_old_signature(self):
+        opts = RunOptions()
+        self.assertEqual(opts.replay_timeout, 600.0)
+        self.assertEqual(opts.replay_budget, 1800.0)
+        self.assertEqual(opts.min_clean_actions, DEFAULT_MIN_CLEAN_ACTIONS)
+        self.assertIsNone(opts.run)
+        self.assertIsNone(opts.chmod)
+        self.assertIsNone(opts.reset)
+
+    def test_frozen(self):
+        import dataclasses
+        with self.assertRaises(dataclasses.FrozenInstanceError):
+            RunOptions().replay_timeout = 1.0
+
+    def test_run_config_forwards_options(self):
+        fake = FakeRun()
+        record = run_rep("/tools", self.tmp, self.work, "/fake/out",
+                         self.dest, 1, configs=["device_release"],
+                         options=RunOptions(
+                             replay_timeout=11.0, replay_budget=22.0,
+                             run=fake, chmod=lambda path: 0,
+                             reset=lambda pristine, work: None))
+        self.assertEqual(sorted(record), ["device_release"])
+        replays = [c for c in fake.calls
+                   if len(c) > 1 and "replay.py" in c[1]]
+        self.assertEqual(len(replays), 3)
+        for argv in replays:
+            self.assertIn("11.0", argv[argv.index("--timeout") + 1])
+            self.assertIn("22.0", argv[argv.index("--budget-seconds") + 1])
+
+    def test_none_options_uses_defaults(self):
+        import sys
+        from unittest import mock
+        pristine = os.path.join(self.tmp, "pristine")
+        os.makedirs(pristine)
+        with open(os.path.join(pristine, "marker.txt"), "w",
+                  encoding="utf-8") as fh:
+            fh.write("pristine\n")
+        fake = FakeRun()
+        module = sys.modules["run_rep"]
+        with mock.patch.object(module, "real_run", fake):
+            records = run_rep("/tools", pristine, self.work, "/fake/out",
+                              self.dest, 1, configs=["sim_debug"])
+        self.assertEqual(sorted(records), ["sim_debug"])
+        self.assertTrue(os.path.isfile(
+            os.path.join(self.work, "marker.txt")))
 
 
 if __name__ == "__main__":
