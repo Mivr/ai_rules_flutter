@@ -58,6 +58,27 @@ class RetryBounds {
   const RetryBounds({required this.first, required this.overall});
 }
 
+/// Bounds for `simctl list -j`: a minute for the first attempt (simulators
+/// enumerate from disk, and a loaded runner is slow, not stuck), five minutes
+/// overall.
+///
+/// The default [BootOptions.listBounds]; named so every caller that boots a
+/// simulator shares the one pair instead of repeating it.
+const defaultListBounds = RetryBounds(
+  first: Duration(seconds: 60),
+  overall: Duration(minutes: 5),
+);
+
+/// Bounds for `simctl boot`: three minutes for the first attempt, five
+/// minutes overall. `bootstatus` takes over the wait once `boot` returns.
+///
+/// The default [BootOptions.bootBounds]; named so every caller that boots a
+/// simulator shares the one pair instead of repeating it.
+const defaultBootBounds = RetryBounds(
+  first: Duration(seconds: 180),
+  overall: Duration(minutes: 5),
+);
+
 /// The `bootstatus` deadline when `--timeout` is not given.
 const _defaultBootstatusTimeout = Duration(seconds: 600);
 
@@ -140,14 +161,8 @@ class BootOptions {
     required this.spawner,
     required this.bootstatusTimeout,
     required this.log,
-    this.listBounds = const RetryBounds(
-      first: Duration(seconds: 60),
-      overall: Duration(minutes: 5),
-    ),
-    this.bootBounds = const RetryBounds(
-      first: Duration(seconds: 180),
-      overall: Duration(minutes: 5),
-    ),
+    this.listBounds = defaultListBounds,
+    this.bootBounds = defaultBootBounds,
     this.now = DateTime.now,
   });
 }

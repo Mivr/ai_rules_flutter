@@ -62,18 +62,12 @@ IosPlatformLauncher iosLauncherFromEnv(
 /// bounded helpers under one of these; past a deadline the child is killed and
 /// the run fails with one line naming the step and the bound. The install,
 /// terminate and uninstall bounds are at least the
-/// `verify_ios_simulator_test.dart` budgets (180 s, 60 s, 60 s); the listing,
-/// boot and bootstatus bounds mirror [BootOptions]' defaults.
+/// `verify_ios_simulator_test.dart` budgets (180 s, 60 s, 60 s); the listing
+/// and boot bounds reuse the boot module's defaults.
 class IosLauncherBounds {
   const IosLauncherBounds({
-    this.listBounds = const RetryBounds(
-      first: Duration(seconds: 60),
-      overall: Duration(minutes: 5),
-    ),
-    this.bootBounds = const RetryBounds(
-      first: Duration(seconds: 180),
-      overall: Duration(minutes: 5),
-    ),
+    this.listBounds = defaultListBounds,
+    this.bootBounds = defaultBootBounds,
     this.bootstatusTimeout = const Duration(seconds: 600),
     this.installTimeout = const Duration(seconds: 180),
     this.terminateTimeout = const Duration(seconds: 60),
