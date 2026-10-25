@@ -49,6 +49,7 @@ dart_binary(
             "run_e2e.dart",
             "deploy_bundle_test.dart",
             "gcloud_test.dart",
+            "run_e2e_test.dart",
         ],
     ),
     compile_mode = "kernel",
@@ -73,5 +74,14 @@ dart_test(
     name = "deploy_bundle_test",
     srcs = ["vm_deploy.dart"],
     main = "deploy_bundle_test.dart",
+    deps = ["@dev_tool_deps//:test"],
+)
+
+# Pure e2e orchestration helpers: flag parsing and the per-folder summary.
+# No VM, no network.
+dart_test(
+    name = "run_e2e_test",
+    srcs = ["vm_e2e.dart"],
+    main = "run_e2e_test.dart",
     deps = ["@dev_tool_deps//:test"],
 )

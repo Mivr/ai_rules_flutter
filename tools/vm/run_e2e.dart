@@ -19,20 +19,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'gcloud.dart';
-
-/// The default folder matrix, mirroring the `e2e` job in
-/// `.github/workflows/ci.yaml`. `.` is the root module (Starlark unit tests).
-/// Override with `--folders=` to scope a run (e.g. just the Linux or Windows
-/// subset).
-const _ciFolders = [
-  '.',
-  'e2e/smoke',
-  'e2e/hello_world',
-  'e2e/ffi_example',
-  'e2e/plugin_example',
-  'e2e/ffi_plugin_example',
-  'e2e/codegen',
-];
+import 'vm_e2e.dart';
 
 /// Per-folder timeout. The first folder pays for the hermetic Flutter SDK +
 /// engine download; later folders re-fetch (separate output bases).
@@ -41,44 +28,47 @@ const _folderTimeout = Duration(minutes: 30);
 /// Short Windows output root — keeps generated paths under MAX_PATH (260).
 const _winOutputRoot = 'C:/b';
 
-class _FolderResult {
-  _FolderResult(this.folder, this.exitCode, this.pass, this.tail);
-  final String folder;
-  final int exitCode;
-  final bool pass;
-  final String tail;
-}
-
 Future<void> main(List<String> args) async {
-  final positional = args.where((a) => !a.startsWith('--')).toList();
-  if (positional.isEmpty) {
-    stderr.writeln(
-      'Usage: dart run tools/vm/run_e2e.dart <vm-name> [--windows] '
-      '[--folders=a,b,c] [--keep-going]',
-    );
-    exit(2);
-  }
-  final vmName = positional.first;
-  final isWindows = args.contains('--windows');
-  final keepGoing = args.contains('--keep-going');
-  final foldersArg = args
-      .firstWhere((a) => a.startsWith('--folders='), orElse: () => '')
-      .replaceFirst('--folders=', '');
-  final folders = foldersArg.isEmpty
-      ? _ciFolders
-      : foldersArg.split(',').map((s) => s.trim()).toList();
+  final options = parseE2eArgs(args);
+  final vmName = options.vmName;
+  final isWindows = options.isWindows;
 
   final repoRoot = _repoRoot();
   _warnIfDirty(repoRoot);
 
-  // 1. Package the committed tree.
-  //
-  // Deliberately not `git archive`: it honours `export-ignore`, and
-  // `.gitattributes` marks `e2e/` as one so release tarballs stay small. An
-  // archive built that way arrives on the VM with every workspace this tool
-  // exists to run stripped out, and the run fails on a missing directory.
-  // `git ls-files` names the same committed tree without consulting
-  // export-ignore.
+  final tgz = await _packageCommittedTree(repoRoot);
+
+  await _waitForToolchain(vmName, isWindows: isWindows);
+  await _transferTreeToVm(vmName, tgz, isWindows: isWindows);
+
+  // Run each folder.
+  final results = <E2eFolderResult>[];
+  for (final folder in options.folders) {
+    stdout.writeln('\n=== $folder ===');
+    final result = await _runFolder(vmName, folder, isWindows: isWindows);
+    results.add(result);
+    stdout.writeln(
+      '${result.pass ? "PASS" : "FAIL"} $folder (exit ${result.exitCode})',
+    );
+    if (!result.pass && !options.keepGoing) {
+      stdout.writeln('Stopping (use --keep-going to run the rest).');
+      break;
+    }
+  }
+
+  stdout.write(renderE2eSummary(results, isWindows));
+  exit(results.any((r) => !r.pass) ? 1 : 0);
+}
+
+/// Packages the committed tree into a tarball, returning its path.
+///
+/// Deliberately not `git archive`: it honours `export-ignore`, and
+/// `.gitattributes` marks `e2e/` as one so release tarballs stay small. An
+/// archive built that way arrives on the VM with every workspace this tool
+/// exists to run stripped out, and the run fails on a missing directory.
+/// `git ls-files` names the same committed tree without consulting
+/// export-ignore.
+Future<String> _packageCommittedTree(String repoRoot) async {
   final tgz = '${Directory.systemTemp.path}/rules_flutter_src.tgz';
   print('Packaging committed HEAD -> $tgz');
   final listing = File('${Directory.systemTemp.path}/rules_flutter_files.txt');
@@ -103,9 +93,15 @@ Future<void> main(List<String> args) async {
     ['-C', repoRoot, '-czf', tgz, '--null', '-T', listing.path],
     environment: {'COPYFILE_DISABLE': '1'},
   );
+  return tgz;
+}
 
-  // 2. Wait for the toolchain, then transfer + extract + clone rules_dart.
-  await _waitForToolchain(vmName, isWindows: isWindows);
+/// Transfers the packaged tree to the VM and clones the rules_dart sibling.
+Future<void> _transferTreeToVm(
+  String vmName,
+  String tgz, {
+  required bool isWindows,
+}) async {
   print('Transferring source tree to $vmName ...');
   if (isWindows) {
     await scpToVm(vmName, tgz, 'C:/rf_src.tgz', compress: true);
@@ -134,45 +130,11 @@ Future<void> main(List<String> args) async {
       "~/rules_dart'",
     );
   }
-
-  // 3. Run each folder.
-  final results = <_FolderResult>[];
-  for (final folder in folders) {
-    stdout.writeln('\n=== $folder ===');
-    final result = await _runFolder(vmName, folder, isWindows: isWindows);
-    results.add(result);
-    stdout.writeln(
-      '${result.pass ? "PASS" : "FAIL"} $folder (exit ${result.exitCode})',
-    );
-    if (!result.pass && !keepGoing) {
-      stdout.writeln('Stopping (use --keep-going to run the rest).');
-      break;
-    }
-  }
-
-  // 4. Summary.
-  stdout.writeln(
-    '\n========== SUMMARY (${isWindows ? "windows" : "linux"}) ==========',
-  );
-  for (final r in results) {
-    stdout.writeln('  ${r.pass ? "PASS" : "FAIL"}  ${r.folder}');
-  }
-  final failed = results.where((r) => !r.pass).toList();
-  if (failed.isEmpty) {
-    stdout.writeln('\nAll ${results.length} folders passed.');
-    exit(0);
-  }
-  stdout.writeln('\n${failed.length} folder(s) FAILED:');
-  for (final r in failed) {
-    stdout.writeln('\n----- ${r.folder} (exit ${r.exitCode}) -----');
-    stdout.writeln(r.tail);
-  }
-  exit(1);
 }
 
 /// Runs `bazel test //...` in [folder] and maps the exit code: 0 (success) and
 /// 4 (no test targets) pass; anything else fails.
-Future<_FolderResult> _runFolder(
+Future<E2eFolderResult> _runFolder(
   String vmName,
   String folder, {
   required bool isWindows,
@@ -202,13 +164,13 @@ Future<_FolderResult> _runFolder(
   try {
     result = await sshExec(vmName, command).timeout(_folderTimeout);
   } on TimeoutException {
-    return _FolderResult(folder, -2, false, 'TIMEOUT after $_folderTimeout');
+    return E2eFolderResult(folder, -2, false, 'TIMEOUT after $_folderTimeout');
   }
 
   final combined = '${result.stdout}\n${result.stderr}';
   final exitCode = _parseRfExit(result.stdout.toString());
   final pass = exitCode == 0 || exitCode == 4;
-  return _FolderResult(folder, exitCode, pass, _tail(combined));
+  return E2eFolderResult(folder, exitCode, pass, _tail(combined));
 }
 
 /// Waits until the VM's toolchain (bazel + C compiler) is installed.
