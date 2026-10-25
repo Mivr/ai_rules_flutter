@@ -15,6 +15,7 @@ from replay import (
     CHAIN_SKIP_NOT_RUN,
     DEFAULT_IOS_MNEMONICS,
     HOST_TOOLS_SKIPPED_KEY,
+    ReplayOptions,
     aggregate_replays,
     apple_env,
     blocked_input,
@@ -158,7 +159,7 @@ class ReplayHelpersTest(unittest.TestCase):
 
         report = replay_all([AOT_SPAWN, SWIFT_SPAWN],
                             DEFAULT_IOS_MNEMONICS, "/nonexistent",
-                            60.0, runner=fake_runner)
+                            60.0, options=ReplayOptions(runner=fake_runner))
         self.assertEqual(report["n_replayed"], 2)
         self.assertEqual(
             report["by_mnemonic"]["FlutterAotMacho"]["instructions_total"],
@@ -229,8 +230,10 @@ class BudgetTest(unittest.TestCase):
 
         report = replay.replay_all(
             [AOT_SPAWN, SWIFT_SPAWN, AOT_SPAWN], DEFAULT_IOS_MNEMONICS,
-            "/nonexistent", 60.0, budget_seconds=150.0,
-            runner=fake_runner, clock=fake_clock)
+            "/nonexistent", 60.0,
+            options=replay.ReplayOptions(
+                budget_seconds=150.0, runner=fake_runner,
+                clock=fake_clock))
         self.assertTrue(report["truncated"])
         self.assertEqual(report["n_replayed"], 2)
         self.assertEqual(report["budget_seconds"], 150.0)
@@ -241,11 +244,12 @@ class BudgetTest(unittest.TestCase):
     def test_no_budget_runs_everything(self):
         report = replay.replay_all(
             [AOT_SPAWN], DEFAULT_IOS_MNEMONICS, "/nonexistent", 60.0,
-            budget_seconds=None,
-            runner=lambda spawn: {
-                "mnemonic": spawn["mnemonic"], "target": "",
-                "instructions": 1, "real_s": 0.1, "exit_code": 0,
-                "command": []})
+            options=replay.ReplayOptions(
+                budget_seconds=None,
+                runner=lambda spawn: {
+                    "mnemonic": spawn["mnemonic"], "target": "",
+                    "instructions": 1, "real_s": 0.1, "exit_code": 0,
+                    "command": []}))
         self.assertFalse(report["truncated"])
         self.assertEqual(report["n_replayed"], 1)
 
@@ -342,10 +346,11 @@ class ExecConfigTest(unittest.TestCase):
         report = replay_all(
             [self.exec_spawn(), self.exec_spawn("CppLink"), AOT_SPAWN],
             DEFAULT_IOS_MNEMONICS, "/nonexistent", 60.0,
-            runner=lambda spawn: {
-                "mnemonic": spawn["mnemonic"], "target": "",
-                "instructions": 1, "real_s": 0.1, "exit_code": 0,
-                "command": []})
+            options=ReplayOptions(
+                runner=lambda spawn: {
+                    "mnemonic": spawn["mnemonic"], "target": "",
+                    "instructions": 1, "real_s": 0.1, "exit_code": 0,
+                    "command": []}))
         self.assertEqual(report["n_replayed"], 1)
         self.assertEqual(report["skipped_by_mnemonic"],
                          {HOST_TOOLS_SKIPPED_KEY: 2})
@@ -580,6 +585,116 @@ class ChainSelectTest(unittest.TestCase):
         self.assertEqual(skipped[CHAIN_SKIP_CACHED], 1)
         self.assertEqual(skipped["bazel exit 3"], 1)
         self.assertEqual(sum(skipped.values()), 3)
+
+
+class SpawnInputHelpersTest(unittest.TestCase):
+    def test_path_of_entry(self):
+        self.assertEqual(replay._path_of_entry({"path": "a.o"}), "a.o")
+        self.assertIsNone(replay._path_of_entry({"path": ""}))
+        self.assertIsNone(replay._path_of_entry({"path": 5}))
+        self.assertIsNone(replay._path_of_entry({}))
+        self.assertIsNone(
+            replay._path_of_entry({"digest": {"hash": "abc"}}))
+
+    def test_dict_shape_keys_and_nested_paths(self):
+        value = {"a.o": {"path": "a.o"}, "b.h": {}, "": {"path": "c.o"}}
+        self.assertEqual(replay._input_strings_from_dict(value),
+                         ["a.o", "a.o", "b.h", "c.o"])
+
+    def test_dict_list_items(self):
+        value = {"k": ["a.o", {"path": "b.o"}, "", {"path": ""}, 5]}
+        self.assertEqual(replay._input_strings_from_dict(value),
+                         ["k", "a.o", "b.o"])
+
+    def test_list_shape(self):
+        self.assertEqual(
+            replay._input_strings_from_list(
+                ["a.o", {"path": "b.o"}, "", {"nopath": 1}]),
+            ["a.o", "b.o"])
+
+    def test_spawn_dedups_first_occurrence_wins(self):
+        spawn = dict(AOT_SPAWN, inputs={"a.o": {}, "k": ["a.o"]})
+        self.assertEqual(spawn_input_strings(spawn), ["a.o", "k"])
+
+    def test_spawn_string_kept_verbatim(self):
+        self.assertEqual(spawn_input_strings(dict(AOT_SPAWN, inputs="")),
+                         [""])
+        self.assertEqual(
+            spawn_input_strings(dict(AOT_SPAWN, inputs="only.o")),
+            ["only.o"])
+
+
+class ReplayOptionsTest(unittest.TestCase):
+    def test_defaults_match_old_signature(self):
+        opts = ReplayOptions()
+        self.assertIsNone(opts.budget_seconds)
+        self.assertIsNone(opts.runner)
+        self.assertIsNone(opts.clock)
+        self.assertFalse(opts.include_exec_config)
+        self.assertIsNone(opts.apple_cache)
+        self.assertIsNone(opts.xcode_runner)
+
+    def test_frozen(self):
+        import dataclasses
+        with self.assertRaises(dataclasses.FrozenInstanceError):
+            ReplayOptions().budget_seconds = 1.0
+
+    def test_none_options_uses_defaults(self):
+        report = replay_all([dict(AOT_SPAWN, mnemonic="Genrule")],
+                            DEFAULT_IOS_MNEMONICS, "/nonexistent", 60.0)
+        self.assertEqual(report["n_replayed"], 0)
+        self.assertEqual(report["skipped_by_mnemonic"], {"Genrule": 1})
+        self.assertIsNone(report["budget_seconds"])
+
+    def test_apple_cache_shared_through_options(self):
+        calls = []
+
+        def xcode_runner(argv):
+            calls.append(argv)
+
+            class Proc:
+                returncode = 0
+                stdout = ("Xcode.app/Contents/Developer\n"
+                          if argv[0] == "xcode-select"
+                          else "iPhoneOS.sdk\n")
+
+            return Proc()
+
+        import subprocess as subprocess_mod
+        real_run = subprocess_mod.run
+        seen = {}
+
+        def fake_run(argv, **kwargs):
+            seen.update(kwargs)
+
+            class Proc:
+                returncode = 0
+                stderr = "  1.5 real         1.1 user         0.2 sys\n"
+
+            return Proc()
+
+        spawn = {
+            "commandArgs": ["gen_snapshot"],
+            "environmentVariables": [
+                {"name": "APPLE_SDK_PLATFORM", "value": "iphoneos"}],
+            "mnemonic": "FlutterAotMacho",
+            "exitCode": 0,
+            "targetLabel": "//app:a",
+        }
+        subprocess_mod.run = fake_run
+        try:
+            report = replay_all(
+                [dict(spawn), dict(spawn)], DEFAULT_IOS_MNEMONICS,
+                "/execroot", 60.0,
+                options=ReplayOptions(apple_cache={},
+                                      xcode_runner=xcode_runner))
+        finally:
+            subprocess_mod.run = real_run
+        self.assertEqual(report["n_replayed"], 2)
+        # One platform probed once (xcode-select + xcrun), shared via
+        # the options' cache across both spawns.
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(seen["env"]["SDKROOT"], "iPhoneOS.sdk")
 
 
 if __name__ == "__main__":
@@ -880,6 +995,8 @@ class SpawnInputsTest(unittest.TestCase):
             "bazel-out/x/a.o": {}, "/etc/hostname": {}})
         self.assertEqual(spawn_input_paths(spawn, tmp),
                          [os.path.join(tmp, "bazel-out/x/a.o")])
+
+
 
 
 class ChainOrderTest(unittest.TestCase):

@@ -55,6 +55,7 @@ why a replay class failed.
 """
 
 import argparse
+import dataclasses
 import heapq
 import json
 import os
@@ -63,6 +64,8 @@ import shutil
 import subprocess
 import sys
 import time
+from typing import Callable
+from typing import Optional
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from execlog import load_spawns  # noqa: E402
@@ -363,6 +366,53 @@ def _resolve_under_base(strings, execroot):
     return sorted(paths)
 
 
+def _path_of_entry(entry):
+    """Usable path of an inputs {path, ...} entry, or None.
+
+    Only a non-empty path string counts, never digests or flags; a
+    missing or unusable path yields no edge.
+    """
+    path = entry.get("path")
+    return path if isinstance(path, str) and path else None
+
+
+def _input_strings_from_dict(value):
+    """Input paths of a dict-form inputs map, in encounter order.
+
+    Every non-empty string key counts; each item contributes the
+    usable paths of its {path, ...} entries (a list item contributes
+    its strings and entry paths too).
+    """
+    found = []
+    for key, item in value.items():
+        if isinstance(key, str) and key:
+            found.append(key)
+        if isinstance(item, dict):
+            path = _path_of_entry(item)
+            if path is not None:
+                found.append(path)
+        elif isinstance(item, (list, tuple)):
+            found.extend(_input_strings_from_list(item))
+    return found
+
+
+def _input_strings_from_list(value):
+    """Input paths of a list-form inputs value, in encounter order.
+
+    Only non-empty path strings and usable {path, ...} entries are
+    collected, never digests or flags.
+    """
+    found = []
+    for item in value:
+        if isinstance(item, str) and item:
+            found.append(item)
+        elif isinstance(item, dict):
+            path = _path_of_entry(item)
+            if path is not None:
+                found.append(path)
+    return found
+
+
 def spawn_input_strings(spawn):
     """Input paths of a spawn, exactly as the execution log lists them.
 
@@ -372,34 +422,15 @@ def spawn_input_strings(spawn):
     missing or unparsable inputs field yields no edges: the step simply
     keeps its log position in the chain order.
     """
-    found = []
     value = spawn.get("inputs")
     if isinstance(value, str):
-        found.append(value)
+        found = [value]
     elif isinstance(value, dict):
-        for key, item in value.items():
-            if isinstance(key, str) and key:
-                found.append(key)
-            if isinstance(item, dict):
-                nested = item.get("path")
-                if isinstance(nested, str) and nested:
-                    found.append(nested)
-            elif isinstance(item, (list, tuple)):
-                for sub in item:
-                    if isinstance(sub, str) and sub:
-                        found.append(sub)
-                    elif (isinstance(sub, dict)
-                            and isinstance(sub.get("path"), str)
-                            and sub.get("path")):
-                        found.append(sub["path"])
+        found = _input_strings_from_dict(value)
     elif isinstance(value, (list, tuple)):
-        for item in value:
-            if isinstance(item, str) and item:
-                found.append(item)
-            elif (isinstance(item, dict)
-                    and isinstance(item.get("path"), str)
-                    and item.get("path")):
-                found.append(item["path"])
+        found = _input_strings_from_list(value)
+    else:
+        found = []
     return list(dict.fromkeys(found))
 
 
@@ -826,29 +857,50 @@ def aggregate_replays(records):
     return by_mnemonic
 
 
-def replay_all(spawns, mnemonics, execroot, timeout, budget_seconds=None,
-               runner=None, clock=None, include_exec_config=False,
-               apple_cache=None, xcode_runner=None):
+@dataclasses.dataclass(frozen=True)
+class ReplayOptions:
+    """Tuning and injection values for replay_all.
+
+    The defaults are the ones replay_all always had: no whole-log time
+    budget, the real replay runner and clock, exec-configuration
+    (host tool) spawns skipped, and no shared Apple SDK cache or Xcode
+    probe runner.
+    """
+
+    budget_seconds: Optional[float] = None
+    runner: Optional[Callable] = None
+    clock: Optional[Callable] = None
+    include_exec_config: bool = False
+    apple_cache: Optional[dict] = None
+    xcode_runner: Optional[Callable] = None
+
+
+def replay_all(spawns, mnemonics, execroot, timeout, options=None):
     """Selects and replays spawns under a whole-log time budget.
 
-    Stops starting new replays once budget_seconds elapse; the report then
-    carries truncated=true and the un-run actions land in
-    skipped_by_mnemonic as "<mnemonic> (budget-exhausted)".
+    Stops starting new replays once the options' budget_seconds elapse;
+    the report then carries truncated=true and the un-run actions land
+    in skipped_by_mnemonic as "<mnemonic> (budget-exhausted)". The
+    options carry the same defaults replay_all always had (no budget,
+    the real runner and clock, host-tool spawns skipped).
     """
-    now = clock or time.monotonic
+    opts = options if options is not None else ReplayOptions()
+    now = opts.clock or time.monotonic
     replayable, skipped = select_spawns(
-        spawns, mnemonics, include_exec_config=include_exec_config)
+        spawns, mnemonics, include_exec_config=opts.include_exec_config)
     skipped = dict(skipped)
-    cache = apple_cache if apple_cache is not None else {}
-    if runner is None:
+    cache = opts.apple_cache if opts.apple_cache is not None else {}
+    if opts.runner is None:
         runner = (lambda spawn: run_replay(
             spawn, execroot, timeout, apple_cache=cache,
-            xcode_runner=xcode_runner))
+            xcode_runner=opts.xcode_runner))
+    else:
+        runner = opts.runner
     records = []
     truncated = False
     start = now()
     for spawn in replayable:
-        if budget_seconds is not None and now() - start >= budget_seconds:
+        if opts.budget_seconds is not None and now() - start >= opts.budget_seconds:
             truncated = True
             break
         records.append(runner(spawn))
@@ -862,7 +914,7 @@ def replay_all(spawns, mnemonics, execroot, timeout, budget_seconds=None,
         "skipped_by_mnemonic": skipped,
         "actions": records,
         "truncated": truncated,
-        "budget_seconds": budget_seconds,
+        "budget_seconds": opts.budget_seconds,
     }
 
 
@@ -899,8 +951,9 @@ def main(argv=None):
         print("replayable=%d skipped=%s" % (len(replayable), skipped))
         return 0
     report = replay_all(spawns, mnemonics, args.execroot, args.timeout,
-                        budget_seconds=args.budget_seconds,
-                        include_exec_config=args.include_exec_config)
+                        options=ReplayOptions(
+                            budget_seconds=args.budget_seconds,
+                            include_exec_config=args.include_exec_config))
     with open(args.out, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(json.dumps(report, indent=2, sort_keys=True) + "\n")
     print("replayed=%d skipped=%s" % (report["n_replayed"],
