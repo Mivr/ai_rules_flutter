@@ -23,14 +23,21 @@ relative path entry: split on `/`, decode valid `%XX` escapes as UTF-8,
 dot-resolve `.` / `x/..` on the decoded segments the way Dart does (so an
 escaped `%2E` counts as `.`), then re-encode each segment leaving RFC 3986
 unreserved characters, sub-delims, `:` and `@` literal and emitting every
-other UTF-8 byte as uppercase `%XX` (a lone `%` becomes `%25`). Anything
+other UTF-8 byte as uppercase `%XX` (a lone `%` becomes `%25`). A raw
+backslash reads as a path separator exactly as `Uri.parse` reads it
+(before dot resolution and before percent-decoding, so
+`assets/../x.png` with backslash separators is `x.png`);
+a `%5C` escape stays a literal backslash byte and is still refused, as on
+the base. An empty segment stays in the key (`assets/e//em.png` keys with
+`//`) while the decoded file collapses it (`assets/e/em.png`), as
+flutter_tools keys `entryUri.path` but reads `path.fromUri`. Anything
 that cannot bundle as flutter_tools would — a query, a fragment, a scheme,
-a leading `/`, a backslash, an empty segment, a `..` that leaves the
+a leading `/`, a `..` that leaves the
 package, an escape decoding to `/` or to bytes that are not UTF-8, or a
 byte no Bazel target can name (`:`, a backslash, a control character) — is
 a refusal carrying the reason; the caller fails naming the package, its
-pubspec.yaml and the entry. The label always names the decoded file; only
-the bundle key is encoded. Entries whose first segment is `packages`
+pubspec.yaml and the entry. The label always names the decoded
+(collapsed) file; only the bundle key keeps the `//` spelling. Entries whose first segment is `packages`
 normalize like every other entry (`packages/d/./a.png` bundles as
 `packages/d/a.png`, with dot segments resolved and escapes keyed as
 flutter_tools keys them); a reference into another package normalizes to
@@ -313,7 +320,7 @@ def normalize_asset_uri(entry):
     `packages/d/a.png` and `packages/d/caf%c3%a9.png` as
     `packages/d/caf%C3%A9.png`. A reference into another package
     normalizes to itself when plain, keeping today's behaviour; a spelling
-    no engine build reads (a backslash among them) is refused like any
+    no engine build reads (a query among them) is refused like any
     other entry.
 
     Args:
@@ -333,16 +340,16 @@ def normalize_asset_uri(entry):
         return _refusal("it has a query part")
     if "#" in entry:
         return _refusal("it has a fragment part")
-    if "\\" in entry:
-        return _refusal("it holds a backslash")
-    if entry.startswith("/"):
+    # A raw `\` is a path separator, exactly as `Uri.parse` reads it: split
+    # first, dot-resolve and percent-decode after. A `%5C` escape still
+    # decodes to a backslash byte and is refused below, as on the base.
+    slashed = entry.replace("\\", "/")
+    if slashed.startswith("/"):
         return _refusal("it is an absolute path")
-    is_dir = entry.endswith("/")
-    body = entry[:len(entry) - 1] if is_dir else entry
+    is_dir = slashed.endswith("/")
+    body = slashed[:len(slashed) - 1] if is_dir else slashed
     texts = []
     for raw in body.split("/"):
-        if raw == "":
-            return _refusal("it holds an empty segment")
         seg = _decode_segment(raw)
         if not seg.ok:
             return _refusal(seg.reason)
@@ -353,11 +360,20 @@ def normalize_asset_uri(entry):
     resolved = _resolve_segments(texts)
     if not resolved.ok:
         return _refusal(resolved.reason)
+    # An empty segment stays in the key (flutter_tools keys `entryUri.path`,
+    # so `assets/e//em.png` manifests with `//`) while the decoded file
+    # collapses it (flutter_tools reads `path.fromUri`, which opens
+    # `assets/e/em.png`, and `path.join` lands the copy collapsed). The
+    # label names the collapsed file, so the spoke check and link plan see
+    # a Bazel-nameable path.
     key = "/".join([_encode_segment(text, i == 0) for i, text in enumerate(resolved.segments)])
-    decoded = "/".join(resolved.segments)
+    collapsed = [text for text in resolved.segments if text != ""]
+    if not collapsed:
+        return _refusal("it names no file")
+    decoded = "/".join(collapsed)
     if is_dir:
-        return struct(ok = True, segments = resolved.segments, decoded = decoded + "/", key = key + "/", is_dir = True, reason = "")
-    return struct(ok = True, segments = resolved.segments, decoded = decoded, key = key, is_dir = False, reason = "")
+        return struct(ok = True, segments = collapsed, decoded = decoded + "/", key = key + "/", is_dir = True, reason = "")
+    return struct(ok = True, segments = collapsed, decoded = decoded, key = key, is_dir = False, reason = "")
 
 def encode_asset_key(decoded):
     """Percent-encode an already-decoded path for a bundle key.

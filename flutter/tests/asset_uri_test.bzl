@@ -101,22 +101,19 @@ def _packages_first_passes_through_test_impl(ctx):
         "packages/d/ca" + "f%C3%A9.png",
     )
     _check_ok(env, "packages/d/a%20b.png", "packages/d/a b.png", "packages/d/a%20b.png")
-    norm = normalize_asset_uri("packages/d/a\\b.png")
-    asserts.false(env, norm.ok, "packages/d/a\\b.png")
-    asserts.true(env, "backslash" in norm.reason, norm.reason)
+    _check_ok(env, "packages/d/a\\b.png", "packages/d/a/b.png", "packages/d/a/b.png")
     return unittest.end(env)
 
 _REFUSALS = [
     ("img/a?.png", "query"),
     ("img/a#.png", "fragment"),
-    ("a\\b.png", "backslash"),
     ("/a.png", "absolute"),
-    ("a//b.png", "empty segment"),
     ("../a.png", "escapes"),
     ("..", "escapes"),
     (".", "names no file"),
     ("a/..", "names no file"),
     ("a/%2F/b.png", "decodes to `/`"),
+    ("a%5Cb.png", "backslash"),
     ("a/%FF/b.png", "not valid UTF-8"),
     ("a/%E2%82/b.png", "cut off"),
     ("a/%C0%AF/b.png", "not valid UTF-8"),
@@ -159,7 +156,7 @@ _ENCODED_BYTES = {
     "}": "%7D",
 }
 
-_REFUSED_BYTES = ["#", "?", ":", "\\"]
+_REFUSED_BYTES = ["#", "?", ":"]
 
 def _printable_ascii_round_trip_test_impl(ctx):
     """All 95 printable bytes: exact keys, refusals, stable round trip."""
@@ -171,11 +168,20 @@ def _printable_ascii_round_trip_test_impl(ctx):
             asserts.false(env, norm.ok, entry)
             continue
         asserts.true(env, norm.ok, entry)
-        asserts.equals(env, entry, norm.decoded)
-        if c in _LITERAL_BYTES or c == "/":
+        if c == "\\":
+            # A raw backslash is a separator, as `Uri.parse` reads it.
+            asserts.equals(env, "v/.png", norm.decoded)
+            asserts.equals(env, "v/.png", norm.key)
+        elif c == "/":
+            # An empty segment stays in the key; the file collapses it.
+            asserts.equals(env, "v/.png", norm.decoded)
             asserts.equals(env, entry, norm.key)
         else:
-            asserts.equals(env, "v" + _ENCODED_BYTES[c] + ".png", norm.key)
+            asserts.equals(env, entry, norm.decoded)
+            if c in _LITERAL_BYTES:
+                asserts.equals(env, entry, norm.key)
+            else:
+                asserts.equals(env, "v" + _ENCODED_BYTES[c] + ".png", norm.key)
         again = normalize_asset_uri(norm.key)
         asserts.true(env, again.ok, norm.key)
         asserts.equals(env, norm.decoded, again.decoded)
@@ -501,16 +507,14 @@ def _packages_first_spoke_test_impl(ctx):
 
 _PACKAGES_BACKSLASH_PUBSPEC = "name: d\nflutter:\n  assets:\n    - packages/d/a\\b.png\n"
 
-def _packages_backslash_refused_test_impl(ctx):
-    """A backslash `packages`-first spelling fails closed, naming everything."""
+def _packages_backslash_bundles_test_impl(ctx):
+    """A backslash `packages`-first spelling splits as `Uri.parse` splits it."""
     env = unittest.begin(ctx)
     parsed = parse_flutter_assets_block(_PACKAGES_BACKSLASH_PUBSPEC)
     asserts.equals(env, 1, len(parsed.assets))
-    norm = normalize_asset_uri(parsed.assets[0].path)
-    asserts.false(env, norm.ok, parsed.assets[0].path)
-    message = spoke_asset_uri_error("d", parsed.assets[0].path, norm.reason)
-    for want in ["d", "pubspec.yaml", "not supported", "backslash"]:
-        asserts.true(env, want in message, message)
+    assets = normalize_spoke_assets("d", parsed.assets)
+    asserts.equals(env, "packages/d/a/b.png", assets[0].path)
+    asserts.equals(env, "packages/d/a/b.png", assets[0].key)
     return unittest.end(env)
 
 _REFUSED_PUBSPEC = """\
@@ -533,6 +537,74 @@ def _through_refusal_test_impl(ctx):
         asserts.true(env, want in message, message)
     return unittest.end(env)
 
+def _backslash_splits_like_uri_test_impl(ctx):
+    """Raw backslashes split as `Uri.parse` splits them (RT37-flutter:01)."""
+    env = unittest.begin(ctx)
+    _check_ok(env, "assets\\sub\\bs.png", "assets/sub/bs.png", "assets/sub/bs.png")
+    _check_ok(env, "assets\\dir\\", "assets/dir/", "assets/dir/", True)
+    _check_ok(env, "assets\\..\\x.png", "x.png", "x.png")
+    _check_ok(env, "a\\b/c", "a/b/c", "a/b/c")
+    norm = normalize_asset_uri("a%5Cb.png")
+    asserts.false(env, norm.ok, "a%5Cb.png")
+    asserts.true(env, "backslash" in norm.reason, norm.reason)
+    norm = normalize_asset_uri("\\a.png")
+    asserts.false(env, norm.ok, "\\a.png")
+    asserts.true(env, "absolute" in norm.reason, norm.reason)
+    return unittest.end(env)
+
+_DOUBLE_SLASH_PUBSPEC = """\
+name: dbl_pkg
+flutter:
+  assets:
+    - assets/e//em.png
+  fonts:
+    - family: Dbl
+      fonts:
+        - asset: fonts//f g.ttf
+"""
+
+_DOUBLE_SLASH_FILES = {
+    "assets/e": ["assets/e/em.png"],
+    "fonts": ["fonts/f g.ttf"],
+}
+
+def _double_slash_list_dir(directory):
+    """Fake package listing: collapsed names, as the spoke lister reads them."""
+    return struct(files = _DOUBLE_SLASH_FILES.get(directory, []), error = "")
+
+def _empty_segment_keeps_key_test_impl(ctx):
+    """An empty segment keys with `//` while the file collapses (RT37-flutter:01)."""
+    env = unittest.begin(ctx)
+    _check_ok(env, "assets/e//em.png", "assets/e/em.png", "assets/e//em.png")
+    norm = normalize_asset_uri("/a.png")
+    asserts.false(env, norm.ok, "/a.png")
+    asserts.true(env, "absolute" in norm.reason, norm.reason)
+    parsed = parse_flutter_assets_block(_DOUBLE_SLASH_PUBSPEC)
+    asserts.equals(env, [], parsed.asset_errors)
+    assets = normalize_spoke_assets("dbl_pkg", parsed.assets)
+    fonts = normalize_spoke_fonts("dbl_pkg", parsed.fonts)
+    result = expand_pub_asset_entries(assets, _double_slash_list_dir, "dbl_pkg")
+    asserts.equals(env, "", result.error)
+    asserts.equals(env, ["assets/e/em.png"], [e.path for e in result.expanded])
+    asserts.equals(env, ["assets/e//em.png"], [e.key for e in result.expanded])
+    pkg_assets = build_pkg_assets_dict(result.expanded)
+    asserts.equals(env, "assets/e//em.png", pkg_assets[":assets/e/em.png"])
+    manifest = build_asset_manifest([e.key for e in result.expanded])
+    asserts.equals(env, "assets/e//em.png", manifest["assets/e//em.png"][0]["asset"])
+    spoke_fonts = encode_spoke_fonts(fonts)
+    asserts.equals(env, {":fonts/f g.ttf": "fonts//f%20g.ttf"}, spoke_fonts.font_files)
+    asserts.true(env, "fonts//f%20g.ttf" in spoke_fonts.fonts_json_str, spoke_fonts.fonts_json_str)
+    asserts.equals(
+        env,
+        None,
+        check_spoke_file_names(
+            "dbl_pkg",
+            struct(assets = assets, fonts = fonts, shaders = parsed.shaders),
+            result.expanded,
+        ),
+    )
+    return unittest.end(env)
+
 _t0_test = unittest.make(_plain_entry_passes_through_test_impl)
 _t1_test = unittest.make(_spaced_entry_encodes_test_impl)
 _t2_test = unittest.make(_dot_entries_resolve_test_impl)
@@ -549,7 +621,9 @@ _t12_test = unittest.make(_through_refusal_test_impl)
 _t13_test = unittest.make(_escaped_entries_bundle_encoded_test_impl)
 _t14_test = unittest.make(_manifest_decoded_copies_encoded_test_impl)
 _t15_test = unittest.make(_packages_first_spoke_test_impl)
-_t16_test = unittest.make(_packages_backslash_refused_test_impl)
+_t16_test = unittest.make(_packages_backslash_bundles_test_impl)
+_t17_test = unittest.make(_backslash_splits_like_uri_test_impl)
+_t18_test = unittest.make(_empty_segment_keeps_key_test_impl)
 
 def asset_uri_test_suite(name):
     """Defines the asset-URI normalization unit and through tests.
@@ -576,4 +650,6 @@ def asset_uri_test_suite(name):
         _t14_test,
         _t15_test,
         _t16_test,
+        _t17_test,
+        _t18_test,
     )
