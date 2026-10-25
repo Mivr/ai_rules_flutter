@@ -32,9 +32,11 @@
 #     plus min_versions' iOS/macOS legs against the Apple version floor
 #   e2e-macos-toolchain: smoke workspace (toolchain resolution, all platforms)
 #   unit-tests:          root unit tests, plus the digest-mismatch red fetch
-#     (e2e/digest_mismatch, expected to fail on Bazel's checksum error) and
-#     the xtool red fetch (e2e/xtool_sdk_invalid, expected to fail on the
-#     nonexistent bundle path)
+#     (e2e/digest_mismatch, expected to fail on Bazel's checksum error), the
+#     xtool red fetch (e2e/xtool_sdk_invalid, expected to fail on the
+#     nonexistent bundle path) and the pubspec-shape red fetch
+#     (e2e/pub_flutter_shape_red, expected to fail on the malformed
+#     `flutter.assets` section)
 #   e2e-linux-app:       hello_world, codegen
 #   e2e-linux-small:     smoke, dual_hub, ffi_example, ffi_plugin_example,
 #     web_example
@@ -341,6 +343,21 @@ jobs:
             exit 1
           fi
           echo "$out" | grep -F "configured darwin.artifactbundle path '/nonexistent/darwin.artifactbundle' does not exist"
+      # Pubspec-shape red path: e2e/pub_flutter_shape_red carries a path
+      # package whose pubspec says `assets: assets/a.png` (a string where
+      # flutter_tools requires a list). The spoke fetch must fail on the
+      # shape refusal instead of bundling no assets with a green build.
+      # The grep pins the exact refusal so a skip or a differently-worded
+      # failure cannot pass as red.
+      - name: Malformed flutter.assets fetch fails on the shape refusal
+        working-directory: e2e/pub_flutter_shape_red
+        run: |
+          if out=$(bazel fetch @red_deps//:bad_shape 2>&1); then
+            echo "$out"
+            echo "expected the malformed-assets fetch to fail, but it succeeded"
+            exit 1
+          fi
+          echo "$out" | grep -F 'Expected "assets" to be a list'
       # Compile-soundness red path: the entrypoint imports a sibling that
       # exists on disk but is never declared, so executing the compile must
       # fail on the guard's refusal — never with a built dill. The target is

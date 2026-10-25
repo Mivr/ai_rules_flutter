@@ -1,0 +1,21 @@
+# Hand-written lock for the shape red path: the only resolved package is the
+# `bad_shape` path package, plus the Flutter SDK entry `flutter.pub`
+# requires. The fixture never runs `dart pub get`; CI only fetches the
+# spoke, which must fail on the malformed `flutter.assets` section before
+# any hosted download could matter.
+packages:
+  bad_shape:
+    dependency: "direct main"
+    description:
+      path: "bad_shape"
+      relative: true
+    source: path
+    version: "0.1.0"
+  flutter:
+    dependency: "direct main"
+    description: flutter
+    source: sdk
+    version: "0.0.0"
+sdks:
+  dart: ">=3.13.0 <4.0.0"
+  flutter: ">=3.18.0-18.0.pre.54"

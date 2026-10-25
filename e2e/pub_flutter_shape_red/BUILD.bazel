@@ -1,0 +1,3 @@
+# Fetch-only workspace: the shape red path (`bazel fetch @red_deps//:bad_shape`)
+# is driven by CI, which expects the fetch to fail on the malformed
+# `flutter.assets` section. There are no build targets here by design.

@@ -1,0 +1,33 @@
+"""Pubspec-shape red path: a malformed `flutter.assets` section must fail the fetch.
+
+The `bad_shape` path package declares `assets: assets/a.png` (a string where
+flutter_tools requires a list). CI fetches `@red_deps//:bad_shape`, expects
+the fetch to fail, and greps the exact shape refusal. It guards the
+fail-closed projection in `flutter_pubspec.bzl`: a projection that skipped
+the shape would bundle no assets with a green build, so only this red path
+would turn red.
+"""
+
+module(name = "rules_flutter_pub_shape_red")
+
+bazel_dep(name = "ai_rules_flutter", version = "0.0.0", repo_name = "rules_flutter")
+bazel_dep(name = "ai_rules_dart", version = "0.18.0", repo_name = "rules_dart")
+
+local_path_override(
+    module_name = "ai_rules_flutter",
+    path = "../..",
+)
+
+git_override(
+    module_name = "ai_rules_dart",
+    commit = "3357617aa34be5f9355496da3bdaea1b8191704a",
+    remote = "https://github.com/Mivr/rules_dart.git",
+)
+
+flutter = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter")
+flutter.toolchain(flutter_version = "3.47.7")
+flutter.pub(
+    name = "red_deps",
+    lock = "//:pubspec.lock",
+)
+use_repo(flutter, "red_deps")
