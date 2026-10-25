@@ -22,10 +22,12 @@ import 'package:runfiles/runfiles.dart';
 
 import 'bazel_test_protocol.dart';
 import 'flutter_integration_test_android.dart';
+import 'flutter_integration_test_ios.dart';
 import 'flutter_integration_test_launcher.dart';
 import 'test_support.dart';
 
 export 'flutter_integration_test_android.dart';
+export 'flutter_integration_test_ios.dart';
 export 'flutter_integration_test_launcher.dart';
 
 void main(List<String> args) async {
@@ -83,6 +85,7 @@ void main(List<String> args) async {
       libraryTags: libraryTags,
       xmlOutput: Platform.environment['XML_OUTPUT_FILE'],
       bazelTestTimeout: Platform.environment['TEST_TIMEOUT'],
+      dialBackBound: dialBackBoundForPlatform(platform),
     ),
   );
 }
@@ -100,32 +103,43 @@ PlatformLauncher createPlatformLauncher(
       return _linuxLauncherFromEnv(env, r);
     case 'android':
       return androidLauncherFromEnv(env, r);
+    case 'ios':
+      return iosLauncherFromEnv(env, r);
     default:
       throw FormatException(
         'Unsupported integration test platform "$platform". '
-        'Supported platforms: web, linux, android.',
+        'Supported platforms: web, linux, android, ios.',
       );
   }
+}
+
+/// Reads a required launcher environment variable, failing with the same
+/// `platform="…"` message the builders always raised.
+///
+/// One helper for the web and Linux builders, so the missing-variable checks
+/// they used to repeat stay identical everywhere.
+String _requireLauncherEnv(
+  Map<String, String> env,
+  String key,
+  String platform,
+) {
+  final value = env[key];
+  if (value == null || value.isEmpty) {
+    throw FormatException('$key must be set for platform="$platform".');
+  }
+  return value;
 }
 
 /// Builds the web launcher: the built bundle served over localhost HTTP to
 /// the pinned `chrome-headless-shell`.
 WebPlatformLauncher _webLauncherFromEnv(Map<String, String> env, Runfiles r) {
-  final webDirKey = env['FLUTTER_INTEGRATION_TEST_WEB_DIR'];
-  final browserKey = env['FLUTTER_INTEGRATION_TEST_BROWSER'];
+  final webDir = r.rlocation(
+    _requireLauncherEnv(env, 'FLUTTER_INTEGRATION_TEST_WEB_DIR', 'web'),
+  );
+  final browserBinary = r.rlocation(
+    _requireLauncherEnv(env, 'FLUTTER_INTEGRATION_TEST_BROWSER', 'web'),
+  );
   final fontconfigKey = env['FLUTTER_INTEGRATION_TEST_FONTCONFIG'];
-  if (webDirKey == null || webDirKey.isEmpty) {
-    throw const FormatException(
-      'FLUTTER_INTEGRATION_TEST_WEB_DIR must be set for platform="web".',
-    );
-  }
-  if (browserKey == null || browserKey.isEmpty) {
-    throw const FormatException(
-      'FLUTTER_INTEGRATION_TEST_BROWSER must be set for platform="web".',
-    );
-  }
-  final webDir = r.rlocation(webDirKey);
-  final browserBinary = r.rlocation(browserKey);
   final fontconfigFile = (fontconfigKey == null || fontconfigKey.isEmpty)
       ? null
       : r.rlocation(fontconfigKey);
@@ -147,34 +161,21 @@ LinuxPlatformLauncher _linuxLauncherFromEnv(
   Map<String, String> env,
   Runfiles r,
 ) {
-  final bundleDirKey = env['FLUTTER_INTEGRATION_TEST_LINUX_BUNDLE'];
-  final binaryName = env['FLUTTER_INTEGRATION_TEST_LINUX_BINARY'];
-  final xvfbKey = env['FLUTTER_INTEGRATION_TEST_XVFB'];
-  final xkbcompKey = env['FLUTTER_INTEGRATION_TEST_XKBCOMP'];
+  final bundleDir = r.rlocation(
+    _requireLauncherEnv(env, 'FLUTTER_INTEGRATION_TEST_LINUX_BUNDLE', 'linux'),
+  );
+  final binaryName = _requireLauncherEnv(
+    env,
+    'FLUTTER_INTEGRATION_TEST_LINUX_BINARY',
+    'linux',
+  );
+  final xvfbBinary = r.rlocation(
+    _requireLauncherEnv(env, 'FLUTTER_INTEGRATION_TEST_XVFB', 'linux'),
+  );
+  final xkbcompBinary = r.rlocation(
+    _requireLauncherEnv(env, 'FLUTTER_INTEGRATION_TEST_XKBCOMP', 'linux'),
+  );
   final fontconfigKey = env['FLUTTER_INTEGRATION_TEST_FONTCONFIG'];
-  if (bundleDirKey == null || bundleDirKey.isEmpty) {
-    throw const FormatException(
-      'FLUTTER_INTEGRATION_TEST_LINUX_BUNDLE must be set for platform="linux".',
-    );
-  }
-  if (binaryName == null || binaryName.isEmpty) {
-    throw const FormatException(
-      'FLUTTER_INTEGRATION_TEST_LINUX_BINARY must be set for platform="linux".',
-    );
-  }
-  if (xvfbKey == null || xvfbKey.isEmpty) {
-    throw const FormatException(
-      'FLUTTER_INTEGRATION_TEST_XVFB must be set for platform="linux".',
-    );
-  }
-  if (xkbcompKey == null || xkbcompKey.isEmpty) {
-    throw const FormatException(
-      'FLUTTER_INTEGRATION_TEST_XKBCOMP must be set for platform="linux".',
-    );
-  }
-  final bundleDir = r.rlocation(bundleDirKey);
-  final xvfbBinary = r.rlocation(xvfbKey);
-  final xkbcompBinary = r.rlocation(xkbcompKey);
   final fontconfigFile = (fontconfigKey == null || fontconfigKey.isEmpty)
       ? null
       : r.rlocation(fontconfigKey);
