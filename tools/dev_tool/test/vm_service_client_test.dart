@@ -585,7 +585,7 @@ void main() {
       );
       final client = await connected(fakeService);
 
-      final tmpFile = File('${Directory.systemTemp.path}/test_screenshot.png');
+      final tmpFile = File(p.join(tmp.path, 'test_screenshot.png'));
       try {
         await client.screenshot(tmpFile.path);
         expect(tmpFile.existsSync(), isTrue);
