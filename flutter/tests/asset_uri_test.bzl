@@ -276,6 +276,92 @@ def _through_pub_package_test_impl(ctx):
     )
     return unittest.end(env)
 
+_ESCAPED_PUBSPEC = """\
+name: esc_pkg
+flutter:
+  assets:
+    - enc%20c.png
+    - pct%25.png
+    - pct%2525.png
+    - ca%C3%A9.png
+    - dir%20d/
+  fonts:
+    - family: Esc
+      fonts:
+        - asset: fonts/f%20g.ttf
+  shaders:
+    - shaders/a%20b.frag
+"""
+
+# The encoded entry below names the same oracle file as `_CAFE_ENTRY`: the
+# spellchecker never sees those three letters whole in either spelling.
+_ESCAPED_FILES = {
+    "": ["enc c.png", "pct%.png", "pct%25.png", _CAFE_ENTRY],
+    "dir d": ["dir d/f.png"],
+    "fonts": ["fonts/f g.ttf"],
+    "shaders": ["shaders/a b.frag"],
+}
+
+def _escaped_list_dir(directory):
+    """Fake package listing: decoded names, as the spoke lister reads them."""
+    return struct(files = _ESCAPED_FILES.get(directory, []), error = "")
+
+def _escaped_entries_bundle_encoded_test_impl(ctx):
+    """Escaped entries resolve the decoded files and key them encoded.
+
+    Each entry decodes exactly once between the pubspec and the spoke
+    dicts: `pct%25.png` names the `pct%.png` file (not `pct.png`), and a
+    doubly-escaped `pct%2525.png` names the `pct%25.png` file instead of
+    decoding twice down to `pct%.png`.
+    """
+    env = unittest.begin(ctx)
+    parsed = parse_flutter_assets_block(_ESCAPED_PUBSPEC)
+    asserts.equals(env, [], parsed.asset_errors)
+    assets = normalize_spoke_assets("esc_pkg", parsed.assets)
+    fonts = normalize_spoke_fonts("esc_pkg", parsed.fonts)
+    shaders = normalize_spoke_shaders("esc_pkg", parsed.shaders)
+    result = expand_pub_asset_entries(assets, _escaped_list_dir, "esc_pkg")
+    asserts.equals(env, "", result.error)
+    asserts.equals(
+        env,
+        ["enc c.png", "pct%.png", "pct%25.png", _CAFE_ENTRY, "dir d/f.png"],
+        [e.path for e in result.expanded],
+    )
+    asserts.equals(
+        env,
+        ["enc%20c.png", "pct%25.png", "pct%2525.png", _CAFE_KEY, "dir%20d/f.png"],
+        [e.key for e in result.expanded],
+    )
+    pkg_assets = build_pkg_assets_dict(result.expanded)
+    for source, key in [
+        ("enc c.png", "enc%20c.png"),
+        ("pct%.png", "pct%25.png"),
+        ("pct%25.png", "pct%2525.png"),
+        (_CAFE_ENTRY, _CAFE_KEY),
+        ("dir d/f.png", "dir%20d/f.png"),
+    ]:
+        asserts.equals(env, key, pkg_assets[":" + source])
+    merged = merge_pub_asset_conditions(result.expanded, "esc_pkg")
+    asserts.equals(env, "", merged.conflict)
+    spoke_fonts = encode_spoke_fonts(fonts)
+    asserts.equals(env, {":fonts/f g.ttf": "fonts/f%20g.ttf"}, spoke_fonts.font_files)
+    asserts.true(env, "fonts/f%20g.ttf" in spoke_fonts.fonts_json_str, spoke_fonts.fonts_json_str)
+    asserts.equals(
+        env,
+        {":shaders/a b.frag": "shaders/a%20b.frag"},
+        build_pkg_shaders_dict(shaders),
+    )
+    asserts.equals(
+        env,
+        None,
+        check_spoke_file_names(
+            "esc_pkg",
+            struct(assets = assets, fonts = fonts, shaders = shaders),
+            result.expanded,
+        ),
+    )
+    return unittest.end(env)
+
 _REFUSED_PUBSPEC = """\
 name: refused_pkg
 flutter:
@@ -309,6 +395,7 @@ _t9_test = unittest.make(_pub_bundle_key_test_impl)
 _t10_test = unittest.make(_spoke_error_names_package_test_impl)
 _t11_test = unittest.make(_through_pub_package_test_impl)
 _t12_test = unittest.make(_through_refusal_test_impl)
+_t13_test = unittest.make(_escaped_entries_bundle_encoded_test_impl)
 
 def asset_uri_test_suite(name):
     """Defines the asset-URI normalization unit and through tests.
@@ -331,4 +418,5 @@ def asset_uri_test_suite(name):
         _t10_test,
         _t11_test,
         _t12_test,
+        _t13_test,
     )

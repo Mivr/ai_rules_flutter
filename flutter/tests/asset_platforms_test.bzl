@@ -149,8 +149,8 @@ def _fake_list_dir(directory):
 def _expand_files_pass_through_test_impl(ctx):
     env = unittest.begin(ctx)
     entries = [
-        struct(path = "assets/any.txt", flavors = [], platforms = []),
-        struct(path = "assets/android_only.txt", flavors = [], platforms = ["android"]),
+        struct(path = "assets/any.txt", key = "assets/any.txt", flavors = [], platforms = []),
+        struct(path = "assets/android_only.txt", key = "assets/android_only.txt", flavors = [], platforms = ["android"]),
     ]
     result = expand_pub_asset_entries(entries, _fake_list_dir)
     asserts.equals(env, "", result.error)
@@ -165,7 +165,7 @@ def _expand_directory_inherits_conditions_test_impl(ctx):
     """Every file under a conditioned directory inherits its conditions."""
     env = unittest.begin(ctx)
     entries = [
-        struct(path = "assets/icons/", flavors = [], platforms = ["android"]),
+        struct(path = "assets/icons/", key = "assets/icons/", flavors = [], platforms = ["android"]),
     ]
     result = expand_pub_asset_entries(entries, _fake_list_dir)
     asserts.equals(env, "", result.error)
@@ -181,7 +181,7 @@ def _expand_directory_inherits_conditions_test_impl(ctx):
 def _expand_unconditional_directory_stays_unconditional_test_impl(ctx):
     env = unittest.begin(ctx)
     entries = [
-        struct(path = "assets/icons/", flavors = [], platforms = []),
+        struct(path = "assets/icons/", key = "assets/icons/", flavors = [], platforms = []),
     ]
     result = expand_pub_asset_entries(entries, _fake_list_dir)
     asserts.equals(env, "", result.error)
@@ -272,8 +272,8 @@ def _merge_flavor_conflict_fails_test_impl(ctx):
     """A file entry and a directory entry with different flavors conflict."""
     env = unittest.begin(ctx)
     entries = [
-        struct(path = "dup/x.txt", flavors = ["paid"], platforms = []),
-        struct(path = "dup/", flavors = ["free"], platforms = []),
+        struct(path = "dup/x.txt", key = "dup/x.txt", flavors = ["paid"], platforms = []),
+        struct(path = "dup/", key = "dup/", flavors = ["free"], platforms = []),
     ]
     result = expand_pub_asset_entries(entries, _fake_dup_list_dir)
     asserts.equals(env, "", result.error)

@@ -604,6 +604,51 @@ def _dir_link_mirrors_not_symlinks_test_impl(ctx):
 
 dir_link_mirrors_not_symlinks_test = unittest.make(_dir_link_mirrors_not_symlinks_test_impl)
 
+_ESCAPED_LINK_PUBSPEC = """name: hpkg
+flutter:
+  assets:
+    - enc%20c.png
+    - pct%25.png
+    - dir%20d/
+  fonts:
+    - family: Esc
+      fonts:
+        - asset: fonts/f%20g.ttf
+  shaders:
+    - shaders/a%20b.frag
+"""
+
+def _escaped_entries_link_decoded_test_impl(ctx):
+    """Escaped entries link the decoded files, in every entry kind.
+
+    The link plan resolves declarations against the source tree, so it
+    must read the decoded names: `enc%20c.png` links `enc c.png`, and the
+    same for a `%25` asset, a directory entry, a font asset and a shader.
+    Linking the raw entry text would watch a missing path and leave the
+    file out of the spoke, failing expansion with no file found.
+    """
+    env = unittest.begin(ctx)
+    mock = _make_mock_link_ctx({
+        "hpkg": {
+            "pubspec.yaml": _ESCAPED_LINK_PUBSPEC,
+            "enc c.png": None,
+            "pct%.png": None,
+            "dir d": {"f.png": None},
+            "fonts": {"f g.ttf": None},
+            "shaders": {"a b.frag": None},
+        },
+    }, path_value = "hpkg", package_name = "hpkg")
+    link_path_package(mock.ctx)
+    names = sorted([link.name for link in mock.linked])
+    asserts.equals(
+        env,
+        ["dir d/f.png", "enc c.png", "fonts/f g.ttf", "pct%.png", "pubspec.yaml", "shaders/a b.frag"],
+        names,
+    )
+    return unittest.end(env)
+
+escaped_entries_link_decoded_test = unittest.make(_escaped_entries_link_decoded_test_impl)
+
 def _nested_links_stay_confined_test_impl(ctx):
     """Links nested inside a mirrored directory stay confined to the workspace.
 
@@ -1280,6 +1325,7 @@ def path_package_test_suite(name):
         case_rule_folds_only_on_insensitive_hosts_test,
         cycle_refusal_names_the_link_test,
         dir_link_mirrors_not_symlinks_test,
+        escaped_entries_link_decoded_test,
         foreign_lock_path_dep_is_refused_test,
         lib_and_asset_dir_skip_names_link_test,
         link_scopes_to_the_pubspec_plan_test,
