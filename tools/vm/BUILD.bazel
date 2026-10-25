@@ -41,12 +41,13 @@ dart_binary(
     name = "vm_scripts",
     srcs = glob(
         ["*.dart"],
-        # `gcloud_test.dart` is a test, not a VM script: it imports
-        # `package:test`, which this target deliberately has no dep for, so
-        # leaving it in the glob would fail the analysis this target exists
-        # to carry. It is analyzed (and run) through `:gcloud_test` below.
+        # `*_test.dart` are tests, not VM scripts: they import `package:test`,
+        # which this target deliberately has no dep for, so leaving them in
+        # the glob would fail the analysis this target exists to carry. Each
+        # is analyzed (and run) through its `:..._test` target below.
         exclude = [
             "run_e2e.dart",
+            "deploy_bundle_test.dart",
             "gcloud_test.dart",
         ],
     ),
@@ -63,5 +64,14 @@ dart_test(
     name = "gcloud_test",
     srcs = ["gcloud.dart"],
     main = "gcloud_test.dart",
+    deps = ["@dev_tool_deps//:test"],
+)
+
+# Pure Windows deploy helpers: session and executable parsing plus the PsExec
+# wrapper rendering. No VM, no network, no credentials.
+dart_test(
+    name = "deploy_bundle_test",
+    srcs = ["vm_deploy.dart"],
+    main = "deploy_bundle_test.dart",
     deps = ["@dev_tool_deps//:test"],
 )

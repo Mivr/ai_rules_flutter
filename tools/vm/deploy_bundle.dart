@@ -23,6 +23,7 @@ library;
 import 'dart:io';
 
 import 'gcloud.dart';
+import 'vm_deploy.dart';
 
 Future<void> main(List<String> args) async {
   if (args.length < 2) {
@@ -134,6 +135,35 @@ Future<void> _deployWindows(
   final scriptDir = Platform.script.resolve('.').toFilePath();
   final projectRoot = Directory(scriptDir).parent.parent.path;
 
+  await _ensureWindowsReady(vmName);
+  final sessionId = await _discoverWindowsSession(vmName);
+  print('VM ready. Interactive session $sessionId confirmed.');
+
+  // Copy bundle to a temp dir (Bazel tree artifacts are symlinks / read-only).
+  print('Preparing bundle for upload ...');
+  final tmpDir = Directory.systemTemp.createTempSync('deploy_');
+  final tmpBundle = '${tmpDir.path}/$appName';
+  await Process.run('cp', ['-RL', bundlePath, tmpBundle]);
+
+  try {
+    await _uploadWindowsBundle(vmName, tmpBundle, appName, projectRoot);
+  } finally {
+    tmpDir.deleteSync(recursive: true);
+  }
+
+  final pythonPath = await _discoverWindowsPython(vmName);
+  final exeName = await _discoverWindowsExe(vmName, appName);
+  await _captureWindowsScreenshot(
+    vmName,
+    sessionId,
+    appName,
+    exeName,
+    pythonPath,
+  );
+}
+
+/// Fails out when the VM startup script has not finished installing tools.
+Future<void> _ensureWindowsReady(String vmName) async {
   // Check that the startup script has finished installing tools.
   print('Checking VM readiness ...');
   try {
@@ -149,14 +179,15 @@ Future<void> _deployWindows(
     );
     exit(1);
   }
+}
 
+/// Returns the auto-logon session id, failing out when nobody is logged on.
+Future<String> _discoverWindowsSession(String vmName) async {
   // Verify the auto-logon interactive session and get the session ID.
   // query user returns exit code 1 even on success — force exit 0.
   final sessions = await sshRun(vmName, 'query user & exit /b 0');
-  final sessionMatch = RegExp(
-    r'testuser\s+\S*\s+(\d+)\s+Active',
-  ).firstMatch(sessions);
-  if (sessionMatch == null) {
+  final sessionId = parseWindowsSessionId(sessions);
+  if (sessionId == null) {
     stderr.writeln('ERROR: No active interactive session for testuser.');
     stderr.writeln('Session output:\n$sessions');
     stderr.writeln(
@@ -164,41 +195,41 @@ Future<void> _deployWindows(
     );
     exit(1);
   }
-  final sessionId = sessionMatch.group(1)!;
-  print('VM ready. Interactive session $sessionId confirmed.');
+  return sessionId;
+}
 
-  // Copy bundle to a temp dir (Bazel tree artifacts are symlinks / read-only).
-  print('Preparing bundle for upload ...');
-  final tmpDir = Directory.systemTemp.createTempSync('deploy_');
-  final tmpBundle = '${tmpDir.path}/$appName';
-  await Process.run('cp', ['-RL', bundlePath, tmpBundle]);
+/// Uploads the staged bundle and the DXGI screenshot script.
+Future<void> _uploadWindowsBundle(
+  String vmName,
+  String tmpBundle,
+  String appName,
+  String projectRoot,
+) async {
+  // Upload bundle to a shared location accessible to all users.
+  print('Uploading bundle ...');
+  await sshRun(
+    vmName,
+    'if exist C:\\temp\\$appName rmdir /s /q C:\\temp\\$appName',
+  );
+  await sshRun(vmName, 'if not exist C:\\temp mkdir C:\\temp');
+  await scpToVm(vmName, tmpBundle, 'C:/temp/$appName', compress: true);
 
-  try {
-    // Upload bundle to a shared location accessible to all users.
-    print('Uploading bundle ...');
-    await sshRun(
-      vmName,
-      'if exist C:\\temp\\$appName rmdir /s /q C:\\temp\\$appName',
-    );
-    await sshRun(vmName, 'if not exist C:\\temp mkdir C:\\temp');
-    await scpToVm(vmName, tmpBundle, 'C:/temp/$appName', compress: true);
+  // Upload the DXGI screenshot script.
+  print('Uploading verification scripts ...');
+  await sshRun(
+    vmName,
+    'if exist C:\\temp\\verify_scripts rmdir /s /q C:\\temp\\verify_scripts',
+  );
+  await sshRun(vmName, 'mkdir C:\\temp\\verify_scripts');
+  await scpToVm(
+    vmName,
+    '$projectRoot/e2e/_windows_test/dxgi_screenshot.py',
+    'C:/temp/verify_scripts/dxgi_screenshot.py',
+  );
+}
 
-    // Upload the DXGI screenshot script.
-    print('Uploading verification scripts ...');
-    await sshRun(
-      vmName,
-      'if exist C:\\temp\\verify_scripts rmdir /s /q C:\\temp\\verify_scripts',
-    );
-    await sshRun(vmName, 'mkdir C:\\temp\\verify_scripts');
-    await scpToVm(
-      vmName,
-      '$projectRoot/e2e/_windows_test/dxgi_screenshot.py',
-      'C:/temp/verify_scripts/dxgi_screenshot.py',
-    );
-  } finally {
-    tmpDir.deleteSync(recursive: true);
-  }
-
+/// Returns the VM's Python install directory, failing out when absent.
+Future<String> _discoverWindowsPython(String vmName) async {
   // Discover Python path.
   final pythonPath = (await sshRun(
     vmName,
@@ -209,19 +240,33 @@ Future<void> _deployWindows(
     exit(1);
   }
   print('Python: $pythonPath');
+  return pythonPath;
+}
 
+/// Returns the app executable name inside the uploaded bundle.
+Future<String> _discoverWindowsExe(String vmName, String appName) async {
   // Find the app executable inside the bundle.
   final exeList = await sshRun(
     vmName,
     'powershell -Command "Get-ChildItem C:\\temp\\$appName\\*.exe | Select-Object -ExpandProperty Name"',
   );
-  final exeName = exeList.trim().split('\n').first.trim();
+  final exeName = parseWindowsExeName(exeList);
   if (exeName.isEmpty || !exeName.endsWith('.exe')) {
     stderr.writeln('ERROR: No .exe found in C:\\temp\\$appName\\');
     exit(1);
   }
   print('App executable: $exeName');
+  return exeName;
+}
 
+/// Runs the screenshot capture in the interactive session and downloads it.
+Future<void> _captureWindowsScreenshot(
+  String vmName,
+  String sessionId,
+  String appName,
+  String exeName,
+  String pythonPath,
+) async {
   // PsExec -i runs the process in the interactive session, but stdout goes
   // to that session's console, not back to SSH. Use a batch file that
   // redirects output to a file, then read the file.
@@ -233,10 +278,13 @@ Future<void> _deployWindows(
   // Write the wrapper batch file via PowerShell (avoids cmd.exe escaping).
   await sshRun(
     vmName,
-    "powershell -Command \"Set-Content -Path C:\\temp\\run_verify.bat "
-    "-Value '$pythonPath\\python.exe C:\\temp\\verify_scripts\\dxgi_screenshot.py "
-    "C:\\temp\\$appName\\$exeName $screenshotRemotePath 15 "
-    "> $outputRemotePath 2>&1' -Force\"",
+    buildWindowsVerifyBat(
+      pythonPath: pythonPath,
+      appName: appName,
+      exeName: exeName,
+      screenshotRemotePath: screenshotRemotePath,
+      outputRemotePath: outputRemotePath,
+    ),
   );
 
   // Run via PsExec in the interactive session. PsExec propagates the child
