@@ -16,6 +16,18 @@ import gen_monorepo
 from gen_monorepo import (
     Options,
     SplitMix64,
+    _LibSpec,
+    _apply_pin_replacement,
+    _check_fixture_text,
+    _lib_class_lines,
+    _lib_import_lines,
+    _lib_method_lines,
+    _package_build_text,
+    _package_test_build_text,
+    _PinReplacement,
+    _write_package_builds,
+    _write_root_files,
+    _ScaffoldFiles,
     apply_api_edit,
     apply_app_edit,
     apply_body_edit,
@@ -828,6 +840,140 @@ class EditTest(unittest.TestCase):
         os.remove(os.path.join(self.ws, "bench-edit-manifest.json"))
         with self.assertRaises(Exception):
             apply_body_edit(self.ws)
+
+
+class HelperTest(unittest.TestCase):
+    def spec(self, package=5, file=1, files_per_package=12, deps=(0, 2),
+             method_count=3):
+        return _LibSpec(package, file, files_per_package, deps, method_count)
+
+    def test_lib_spec_shape_flags(self):
+        self.assertTrue(self.spec(file=1).has_sibling)
+        self.assertFalse(self.spec(file=0).has_sibling)
+        self.assertTrue(self.spec(file=8).has_part)
+        self.assertFalse(self.spec(file=1).has_part)
+        self.assertTrue(self.spec(file=1).odd_file)
+        self.assertFalse(self.spec(file=2).odd_file)
+        self.assertEqual(self.spec(file=3).factor, 5)
+        self.assertEqual(self.spec(file=7).pad, pad_file(12, 7))
+
+    def test_lib_import_lines(self):
+        lines = _lib_import_lines(self.spec())
+        self.assertEqual(lines, sorted(l for l in lines if l.startswith(
+            "import ")) + [l for l in lines if not l.startswith("import ")])
+        text = "\n".join(lines)
+        self.assertIn("import 'package:pkg0/pkg0.dart';", text)
+        self.assertIn("import 'package:pkg5/src/f00.dart';", text)
+        self.assertIn("typedef D5x1A0 = C0x0<int>;", text)
+        self.assertNotIn("part ", text)
+        first = _lib_import_lines(self.spec(file=0, deps=()))
+        self.assertNotIn("src/f", "\n".join(first))
+        part = _lib_import_lines(self.spec(file=8, deps=()))
+        self.assertIn("part 'f08.part.dart';", "\n".join(part))
+
+    def test_lib_class_lines(self):
+        text = "\n".join(_lib_class_lines(self.spec()))
+        self.assertIn("class C5x1<T> {", text)
+        self.assertIn("T? pick(List<T> items)", text)
+        mixed = "\n".join(_lib_class_lines(self.spec(file=8)))
+        self.assertIn("class C5x8<T> with M5x8 {", mixed)
+
+    def test_lib_method_lines(self):
+        lines = _lib_method_lines(self.spec(method_count=3))
+        self.assertEqual(len(lines), 24)
+        self.assertIn("    return total + m1(x);", lines)
+        self.assertIn("    return total;", lines)
+        self.assertNotIn("    return total + m3(x);", lines)
+        self.assertEqual(_lib_method_lines(self.spec(method_count=1))[6],
+                         "    return total;")
+
+    def test_lib_helpers_assemble_full_render(self):
+        for file, deps in [(0, []), (1, [0, 1]), (8, [0]), (9, [1, 3])]:
+            spec = self.spec(file=file, deps=tuple(deps))
+            rendered = render_lib_file(5, file, 12, deps, 3)
+            for block in [_lib_import_lines(spec), _lib_class_lines(spec),
+                          _lib_method_lines(spec)]:
+                self.assertIn("\n".join(block), rendered)
+            order = [rendered.index("\n".join(block)) for block in
+                     [_lib_import_lines(spec), _lib_class_lines(spec),
+                      _lib_method_lines(spec)]]
+            self.assertEqual(order, sorted(order))
+
+    def test_check_fixture_text(self):
+        good = ("module(name = \"rules_flutter_hello_world\")\n"
+                "local_path_override(\n"
+                "    module_name = \"rules_flutter\",\n"
+                "    path = \"../..\",\n"
+                ")\n")
+        _check_fixture_text("fixture", good)
+        with self.assertRaises(ValueError):
+            _check_fixture_text("fixture", good.replace(
+                "rules_flutter_hello_world", "other"))
+        with self.assertRaises(ValueError):
+            _check_fixture_text(
+                "fixture", good.replace("../..", "../../.."))
+
+    def test_apply_pin_replacement(self):
+        pin_block = ("git_override(\n"
+                     "    module_name = \"rules_dart\",\n"
+                     "    commit = \"OLD\"\n"
+                     ")\n")
+        out = "header\n" + pin_block + "tail\n"
+        swapped = _apply_pin_replacement(
+            out, "", _PinReplacement("rules_dart", "/dd", pin_block, None))
+        self.assertIn("/dd", swapped.out)
+        self.assertNotIn("OLD", swapped.out)
+        self.assertEqual(swapped.extra, "")
+        appended = _apply_pin_replacement(
+            "header\n", "x\n",
+            _PinReplacement("rules_dart", "/dd", None, None))
+        self.assertIn("/dd", appended.extra)
+        tree = _apply_pin_replacement(
+            out, "", _PinReplacement("rules_dart", None, pin_block,
+                                     pin_block.replace("OLD", "NEW")))
+        self.assertIn("NEW", tree.out)
+        self.assertNotIn("OLD", tree.out)
+        same = _apply_pin_replacement(
+            out, "", _PinReplacement("rules_dart", None, pin_block,
+                                     pin_block))
+        self.assertEqual(same.out, out)
+        self.assertEqual(same.extra, "")
+
+    def test_package_build_texts(self):
+        build = _package_build_text(3, [0, 1])
+        self.assertIn("name = \"pkg3\",", build)
+        self.assertIn("//packages/pkg0", build)
+        self.assertIn("//packages/pkg1", build)
+        test_build = _package_test_build_text(3, [0])
+        self.assertIn("name = \"pkg3_test\",", test_build)
+        self.assertIn("flutter_test(", test_build)
+
+    def test_write_helpers(self):
+        import types
+        tmp = tempfile.mkdtemp(prefix="gen-mono-helper-")
+        try:
+            rules_dir = os.path.join(tmp, "rules")
+            os.makedirs(rules_dir)
+            out = os.path.join(tmp, "ws")
+            os.makedirs(out)
+            _write_root_files(_ScaffoldFiles(out, rules_dir, []))
+            for rel in ["MODULE.bazel", "BUILD.bazel", ".bazelrc",
+                        ".bazelversion", "pubspec.yaml", "pubspec.lock",
+                        "analysis_options.yaml"]:
+                self.assertTrue(os.path.isfile(os.path.join(out, rel)), rel)
+            plan = types.SimpleNamespace(
+                dag={"deps": [[], [0]]}, has_test=[False, True])
+            targets = _write_package_builds(out, plan)
+            self.assertEqual(targets, 3)
+            with open(os.path.join(out, "packages/pkg1/BUILD.bazel"),
+                      encoding="utf-8") as fh:
+                pkg1 = fh.read()
+            self.assertIn("flutter_test(", pkg1)
+            with open(os.path.join(out, "packages/pkg0/BUILD.bazel"),
+                      encoding="utf-8") as fh:
+                self.assertNotIn("flutter_test(", fh.read())
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 if __name__ == "__main__":

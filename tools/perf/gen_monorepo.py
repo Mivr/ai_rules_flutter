@@ -55,6 +55,7 @@ import os
 import re
 import shutil
 import sys
+from typing import NamedTuple, Optional
 
 MASK64 = (1 << 64) - 1
 
@@ -263,6 +264,112 @@ def lib_skeleton_lines(has_sibling, dep_count, has_part, odd_file):
 # Dart rendering.
 
 
+class _LibSpec(NamedTuple):
+    """Shape of one generated library file: identity plus dependencies."""
+
+    package: int
+    file: int
+    files_per_package: int
+    deps: tuple
+    method_count: int
+
+    @property
+    def has_sibling(self):
+        return self.file > 0
+
+    @property
+    def has_part(self):
+        return self.file % 8 == 0
+
+    @property
+    def odd_file(self):
+        return self.file % 2 == 1
+
+    @property
+    def factor(self):
+        return self.file + 2
+
+    @property
+    def pad(self):
+        return pad_file(self.files_per_package, self.file)
+
+
+def _lib_import_lines(spec):
+    """Import block plus the dependency typedefs of one library file."""
+    package = spec.package
+    file = spec.file
+    imports = ["import 'package:flutter/material.dart';"]
+    for d in spec.deps:
+        imports.append("import 'package:pkg%d/pkg%d.dart';" % (d, d))
+    if spec.has_sibling:
+        imports.append(
+            "import 'package:pkg%d/src/f%s.dart';"
+            % (package, pad_file(spec.files_per_package, file - 1))
+        )
+    imports.sort()
+
+    out = []
+    out.extend(imports)
+    out.append("")
+    if spec.has_part:
+        out.append("part 'f%s.part.dart';" % spec.pad)
+    if spec.deps:
+        dep_lines = sorted(
+            "import 'package:pkg%d/pkg%d.dart';" % (d, d) for d in spec.deps
+        )
+        for line in dep_lines:
+            d = int(line.split("pkg")[1].split("/")[0])
+            out.append("/// Dependency API of package pkg%d used here." % d)
+            out.append("typedef D%dx%dA%d = C%dx0<int>;" % (package, file, d, d))
+        out.append("")
+    return out
+
+
+def _lib_class_lines(spec):
+    """Value-holder class header, fields and small members."""
+    package, file = spec.package, spec.file
+    out = []
+    out.append("/// Boxed value %d of package %d." % (file, package))
+    if spec.has_part:
+        out.append("class C%dx%d<T> with M%dx%d {" % (package, file, package, file))
+    else:
+        out.append("class C%dx%d<T> {" % (package, file))
+    out.append("  /// Creates the value holder.")
+    out.append("  C%dx%d(this.value, [this.tag, this.payload]);" % (package, file))
+    out.append("")
+    out.append("  /// The value.")
+    out.append("  final int value;")
+    out.append("")
+    out.append("  /// The tag.")
+    out.append("  final E%dx%d? tag;" % (package, file))
+    out.append("")
+    out.append("  /// The extra payload.")
+    out.append("  final T? payload;")
+    out.append("")
+    out.append("  /// Describe this holder.")
+    out.append("  String describe() => 'C%dx%d($value)';" % (package, file))
+    out.append("")
+    out.append("  /// Pick an item.")
+    out.append("  T? pick(List<T> items) => items.isEmpty ? null : items.first;")
+    return out
+
+
+def _lib_method_lines(spec):
+    """The chained m0.. methods of the value holder."""
+    out = []
+    for m in range(spec.method_count):
+        tail = " + m%d(x)" % (m + 1) if m + 1 < spec.method_count else ""
+        out.append("  /// Method %d of C%dx%d." % (m, spec.package, spec.file))
+        out.append("  int m%d(int x) {" % m)
+        out.append("    var total = x + value;")
+        out.append("    for (var i = 0; i < x; i++) {")
+        out.append("      total += i * %d;" % spec.factor)
+        out.append("    }")
+        out.append("    return total%s;" % tail)
+        out.append("  }")
+    return out
+
+
 def render_lib_file(package, file, files_per_package, deps, method_count):
     """One library file: package: imports only, enum, extension, generic class.
 
@@ -272,36 +379,11 @@ def render_lib_file(package, file, files_per_package, deps, method_count):
     class carries the api_edit marker ("  /// The value.") and the value
     function the body_edit marker ("  var total = 1;").
     """
-    has_sibling = file > 0
-    has_part = file % 8 == 0
-    odd_file = file % 2 == 1
-    factor = file + 2
-    pad = pad_file(files_per_package, file)
-
-    imports = ["import 'package:flutter/material.dart';"]
-    for d in deps:
-        imports.append("import 'package:pkg%d/pkg%d.dart';" % (d, d))
-    if has_sibling:
-        imports.append(
-            "import 'package:pkg%d/src/f%s.dart';"
-            % (package, pad_file(files_per_package, file - 1))
-        )
-    imports.sort()
+    spec = _LibSpec(package, file, files_per_package, tuple(deps),
+                    method_count)
 
     out = []
-    out.extend(imports)
-    out.append("")
-    if has_part:
-        out.append("part 'f%s.part.dart';" % pad)
-    if deps:
-        dep_lines = sorted(
-            "import 'package:pkg%d/pkg%d.dart';" % (d, d) for d in deps
-        )
-        for line in dep_lines:
-            d = int(line.split("pkg")[1].split("/")[0])
-            out.append("/// Dependency API of package pkg%d used here." % d)
-            out.append("typedef D%dx%dA%d = C%dx0<int>;" % (package, file, d, d))
-        out.append("")
+    out.extend(_lib_import_lines(spec))
     out.append("/// File %d of package %d." % (file, package))
     out.append("enum E%dx%d {" % (package, file))
     for value, kind in [
@@ -326,41 +408,11 @@ def render_lib_file(package, file, files_per_package, deps, method_count):
     out.append("  }")
     out.append("}")
     out.append("")
-    out.append("/// Boxed value %d of package %d." % (file, package))
-    if has_part:
-        out.append("class C%dx%d<T> with M%dx%d {" % (package, file, package, file))
-    else:
-        out.append("class C%dx%d<T> {" % (package, file))
-    out.append("  /// Creates the value holder.")
-    out.append("  C%dx%d(this.value, [this.tag, this.payload]);" % (package, file))
-    out.append("")
-    out.append("  /// The value.")
-    out.append("  final int value;")
-    out.append("")
-    out.append("  /// The tag.")
-    out.append("  final E%dx%d? tag;" % (package, file))
-    out.append("")
-    out.append("  /// The extra payload.")
-    out.append("  final T? payload;")
-    out.append("")
-    out.append("  /// Describe this holder.")
-    out.append("  String describe() => 'C%dx%d($value)';" % (package, file))
-    out.append("")
-    out.append("  /// Pick an item.")
-    out.append("  T? pick(List<T> items) => items.isEmpty ? null : items.first;")
-    for m in range(method_count):
-        tail = " + m%d(x)" % (m + 1) if m + 1 < method_count else ""
-        out.append("  /// Method %d of C%dx%d." % (m, package, file))
-        out.append("  int m%d(int x) {" % m)
-        out.append("    var total = x + value;")
-        out.append("    for (var i = 0; i < x; i++) {")
-        out.append("      total += i * %d;" % factor)
-        out.append("    }")
-        out.append("    return total%s;" % tail)
-        out.append("  }")
+    out.extend(_lib_class_lines(spec))
+    out.extend(_lib_method_lines(spec))
     out.append("}")
     out.append("")
-    if odd_file:
+    if spec.odd_file:
         out.extend(render_stateful_widget(package, file))
     else:
         out.append("/// Widget %d of package %d." % (file, package))
@@ -393,7 +445,7 @@ def render_lib_file(package, file, files_per_package, deps, method_count):
     out.append(
         "  total += C%dx%d<int>(total).m0(total %% 7);" % (package, file)
     )
-    if has_sibling:
+    if spec.has_sibling:
         out.append("  total += fn%dx%d(x);" % (package, file - 1))
     out.append("  return total;")
     out.append("}")
@@ -1151,6 +1203,53 @@ def fallback_module_text(flutter_name, dart_name, flutter_path,
     )
 
 
+class _PinReplacement(NamedTuple):
+    """Dart override choice for the generated MODULE.bazel."""
+
+    dart_name: str
+    dart_path: Optional[str]
+    fixture_pin: Optional[str]
+    tree_pin: Optional[str]
+
+
+class _PinResult(NamedTuple):
+    """Generated MODULE.bazel text plus the appended extra overrides."""
+
+    out: str
+    extra: str
+
+
+def _check_fixture_text(fixture, text):
+    """Fails when the hello_world fixture lost its expected shape."""
+    if "module(name = \"%s\")" % HELLO_MODULE_NAME not in text:
+        raise ValueError(
+            "fixture '%s' is not the hello_world module" % fixture)
+    if text.count("path = \"../..\",") != 1:
+        raise ValueError(
+            "fixture '%s' lacks the single rules_flutter path override"
+            % fixture)
+
+
+def _apply_pin_replacement(out, extra_overrides, pin):
+    """Swaps the fixture's dart pin for the override or the tree's pin."""
+    if pin.dart_path is not None:
+        dart_override = local_path_override(pin.dart_name, pin.dart_path)
+        if pin.fixture_pin is not None and pin.fixture_pin in out:
+            out = out.replace(pin.fixture_pin, dart_override, 1)
+        else:
+            # No pin block to swap (minimal fixture): append instead
+            # so the override is never silently dropped.
+            extra_overrides += dart_override
+    elif pin.tree_pin is not None and pin.fixture_pin != pin.tree_pin:
+        # The tree's own pin is the source of truth: without a user
+        # override the generated workspace pins what the tree pins.
+        if pin.fixture_pin is not None and pin.fixture_pin in out:
+            out = out.replace(pin.fixture_pin, pin.tree_pin, 1)
+        else:
+            extra_overrides += pin.tree_pin
+    return _PinResult(out, extra_overrides)
+
+
 def module_bazel_text(rules_flutter_dir, overrides):
     """MODULE.bazel derived from the hello_world fixture.
 
@@ -1175,13 +1274,7 @@ def module_bazel_text(rules_flutter_dir, overrides):
     if os.path.isfile(fixture):
         with open(fixture, encoding="utf-8") as fh:
             text = fh.read()
-        if "module(name = \"%s\")" % HELLO_MODULE_NAME not in text:
-            raise ValueError(
-                "fixture '%s' is not the hello_world module" % fixture)
-        if text.count("path = \"../..\",") != 1:
-            raise ValueError(
-                "fixture '%s' lacks the single rules_flutter path override"
-                % fixture)
+        _check_fixture_text(fixture, text)
         text, dropped = drop_dev_dependency_blocks(text, fixture)
         fixture_flutter, fixture_dart, fixture_pin = read_fixture_modules(
             text)
@@ -1204,21 +1297,11 @@ def module_bazel_text(rules_flutter_dir, overrides):
             "path = \"../..\",",
             "path = \"%s\"," % flutter_path,
         )
-        if dart_path is not None:
-            dart_override = local_path_override(dart_name, dart_path)
-            if fixture_pin is not None and fixture_pin in out:
-                out = out.replace(fixture_pin, dart_override, 1)
-            else:
-                # No pin block to swap (minimal fixture): append instead
-                # so the override is never silently dropped.
-                extra_overrides += dart_override
-        elif tree_pin is not None and fixture_pin != tree_pin:
-            # The tree's own pin is the source of truth: without a user
-            # override the generated workspace pins what the tree pins.
-            if fixture_pin is not None and fixture_pin in out:
-                out = out.replace(fixture_pin, tree_pin, 1)
-            else:
-                extra_overrides += tree_pin
+        result = _apply_pin_replacement(
+            out, extra_overrides,
+            _PinReplacement(dart_name, dart_path, fixture_pin, tree_pin))
+        out = result.out
+        extra_overrides = result.extra
         out += extra_overrides
         check_dropped_names_absent(out, dropped, fixture)
         return out
@@ -1365,7 +1448,19 @@ def write_app_build(out_dir, top_layer):
     return 5
 
 
-def write_scaffolding(out_dir, rules_flutter_dir, overrides, plan, tally):
+class _ScaffoldFiles(NamedTuple):
+    """Workspace locations the scaffolding files are written to."""
+
+    out_dir: str
+    rules_flutter_dir: str
+    overrides: list
+
+
+def _write_root_files(files):
+    """MODULE, pub files, bazelrc, analysis config and the ios scaffold."""
+    out_dir = files.out_dir
+    rules_flutter_dir = files.rules_flutter_dir
+    overrides = files.overrides
     bazel_version = read_bazel_version_or(rules_flutter_dir)
     write_plain(
         out_dir, "MODULE.bazel", module_bazel_text(rules_flutter_dir, overrides))
@@ -1399,55 +1494,76 @@ def write_scaffolding(out_dir, rules_flutter_dir, overrides, plan, tally):
     copy_fixture_dir(
         out_dir, rules_flutter_dir, ["e2e", "hello_world", "ios"], "app/ios")
 
+
+def _package_build_text(package, deps):
+    """One leaf package BUILD.bazel (library over its direct deps)."""
+    dep_lines = "".join(
+        "        \"//packages/pkg%d\",\n" % d for d in deps)
+    return (
+        "load(\"@rules_flutter//flutter:defs.bzl\", \"flutter_library\", \"flutter_test\")\n"
+        "\n"
+        "_HOST_COMPATIBLE = select({\n"
+        "    \"@platforms//os:linux\": [],\n"
+        "    \"@platforms//os:macos\": [],\n"
+        "    \"@platforms//os:windows\": [],\n"
+        "    \"//conditions:default\": [\"@platforms//:incompatible\"],\n"
+        "})\n"
+        "\n"
+        "flutter_library(\n"
+        "    name = \"pkg%d\",\n" % package
+        + "    package_name = \"pkg%d\",\n" % package
+        + "    srcs = glob([\"lib/**/*.dart\"]),\n"
+        + "    visibility = [\"//visibility:public\"],\n"
+        + "    deps = [\n"
+        + "%s" % dep_lines
+        + "        \"@deps//:flutter\",\n"
+        + "    ],\n"
+        + ")\n"
+    )
+
+
+def _package_test_build_text(package, deps):
+    """The flutter_test block appended for packages with tests."""
+    dep_lines = "".join(
+        "        \"//packages/pkg%d\",\n" % d for d in deps)
+    return (
+        "\nflutter_test(\n"
+        "    name = \"pkg%d_test\",\n" % package
+        + "    package_name = \"pkg%d\",\n" % package
+        + "    main = \"test/pkg%d_test.dart\",\n" % package
+        + "    srcs = glob([\"lib/**/*.dart\"]),\n"
+        + "    target_compatible_with = _HOST_COMPATIBLE,\n"
+        + "    deps = [\n"
+        + "%s" % dep_lines
+        + "        \"@deps//:flutter\",\n"
+        + "        \"@deps//:flutter_test\",\n"
+        + "    ],\n"
+        + ")\n"
+    )
+
+
+def _write_package_builds(out_dir, plan):
+    """Per-package BUILD.bazel files; returns the targets added."""
+    targets = 0
     n = len(plan.dag["deps"])
     for p in range(n):
-        dep_lines = "".join(
-            "        \"//packages/pkg%d\",\n" % d for d in plan.dag["deps"][p])
-        pkg_build = (
-            "load(\"@rules_flutter//flutter:defs.bzl\", \"flutter_library\", \"flutter_test\")\n"
-            "\n"
-            "_HOST_COMPATIBLE = select({\n"
-            "    \"@platforms//os:linux\": [],\n"
-            "    \"@platforms//os:macos\": [],\n"
-            "    \"@platforms//os:windows\": [],\n"
-            "    \"//conditions:default\": [\"@platforms//:incompatible\"],\n"
-            "})\n"
-            "\n"
-            "flutter_library(\n"
-            "    name = \"pkg%d\",\n" % p
-            + "    package_name = \"pkg%d\",\n" % p
-            + "    srcs = glob([\"lib/**/*.dart\"]),\n"
-            "    visibility = [\"//visibility:public\"],\n"
-            "    deps = [\n"
-            "%s" % dep_lines
-            + "        \"@deps//:flutter\",\n"
-            "    ],\n"
-            ")\n"
-        )
-        write_plain(out_dir, "packages/pkg%d/BUILD.bazel" % p, pkg_build)
-        tally["targets"] += 1
+        write_plain(out_dir, "packages/pkg%d/BUILD.bazel" % p,
+                    _package_build_text(p, plan.dag["deps"][p]))
+        targets += 1
         if plan.has_test[p]:
-            test_build = (
-                "\nflutter_test(\n"
-                "    name = \"pkg%d_test\",\n" % p
-                + "    package_name = \"pkg%d\",\n" % p
-                + "    main = \"test/pkg%d_test.dart\",\n" % p
-                + "    srcs = glob([\"lib/**/*.dart\"]),\n"
-                "    target_compatible_with = _HOST_COMPATIBLE,\n"
-                "    deps = [\n"
-                "%s" % dep_lines
-                + "        \"@deps//:flutter\",\n"
-                "        \"@deps//:flutter_test\",\n"
-                "    ],\n"
-                ")\n"
-            )
             path = os.path.join(out_dir, "packages/pkg%d/BUILD.bazel" % p)
             with open(path, encoding="utf-8") as fh:
                 existing = fh.read()
             write_plain(
-                out_dir, "packages/pkg%d/BUILD.bazel" % p, existing + test_build)
-            tally["targets"] += 1
+                out_dir, "packages/pkg%d/BUILD.bazel" % p,
+                existing + _package_test_build_text(p, plan.dag["deps"][p]))
+            targets += 1
+    return targets
 
+
+def write_scaffolding(out_dir, rules_flutter_dir, overrides, plan, tally):
+    _write_root_files(_ScaffoldFiles(out_dir, rules_flutter_dir, overrides))
+    tally["targets"] += _write_package_builds(out_dir, plan)
     tally["targets"] += write_app_build(out_dir, plan.top_layer())
 
 
