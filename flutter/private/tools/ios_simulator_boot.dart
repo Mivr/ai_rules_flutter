@@ -18,7 +18,7 @@
 /// Run it locally before the dev tool's iOS simulator e2e cases:
 ///
 /// ```sh
-/// dart run tools/dev_tool/tool/boot_ios_simulator.dart [--timeout=<seconds>]
+/// dart flutter/private/tools/ios_simulator_boot.dart [--timeout=<seconds>]
 /// ```
 ///
 /// `--timeout` sets the `bootstatus` deadline in seconds (default 600); the

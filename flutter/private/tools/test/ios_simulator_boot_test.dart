@@ -1,4 +1,4 @@
-/// Tests for the iOS simulator boot script — `tool/boot_ios_simulator.dart`.
+/// Tests for the iOS simulator boot script — `ios_simulator_boot.dart`.
 ///
 /// The script cannot boot anything on Linux or Windows CI (there is no
 /// `xcrun` there, and the contract says that is simply one of its failures),
@@ -18,7 +18,7 @@ import 'dart:io';
 
 import 'package:test/test.dart';
 
-import '../tool/boot_ios_simulator.dart';
+import '../ios_simulator_boot.dart';
 
 /// A canned child result: output plus an optional hang (an exit that never
 /// arrives, so the driver's deadline fires and must kill the child).

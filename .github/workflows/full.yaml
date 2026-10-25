@@ -279,7 +279,7 @@ jobs:
   #   one the dev tool itself runs on) onto PATH for every step after. The
   #   export serves this step's own `dart --version` print; `$GITHUB_PATH`
   #   serves the steps after.
-  # - `boot_ios_simulator.dart` boots the newest available iOS runtime's
+  # - `ios_simulator_boot.dart` boots the newest available iOS runtime's
   #   iPhone and waits for `bootstatus`, exiting non-zero when there is
   #   nothing to boot on rather than skipping.
   # - The suite runs from the repo root (the runner locates `tools/dev_tool`
@@ -308,7 +308,7 @@ jobs:
           export PATH="$dart_bin:$PATH"
           dart --version
       - name: Boot an iOS simulator
-        run: dart run tools/dev_tool/tool/boot_ios_simulator.dart
+        run: dart flutter/private/tools/ios_simulator_boot.dart
       - name: Dev tool iOS simulator e2e
         env:
           DEV_TOOL_E2E_LOG_DIR: ${{ runner.temp }}/dev-tool-ios-logs
