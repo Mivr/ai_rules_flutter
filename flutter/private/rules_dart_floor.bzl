@@ -1,33 +1,33 @@
 """Floor check for the resolved `ai_rules_dart` module.
 
-`rules_flutter` needs `ai_rules_dart` 0.19.0 (see `MODULE.bazel`), but a root
+`rules_flutter` needs `ai_rules_dart` 0.20.0 (see `MODULE.bazel`), but a root
 module override (`archive_override`, `git_override`, `local_path_override`
 or `single_version_override`) replaces that resolution while Bazel ignores
 the overridden module's `bazel_dep` version. Release archives carry no module
 version and overridden modules report none, so the version cannot be read:
-this module probes the behaviour the floor exists for instead. The 0.19.0
-pubspec reader refuses a second YAML document; the 0.18.0 one silently reads
-past it. One tiny parse per extension evaluation keeps the check cheap, and
-everything the check needs (the floor, the probe and the message) lives here
-so a floor bump touches one file.
+this module probes the behaviour the floor exists for instead. The 0.20.0
+pubspec reader refuses a `%YAML` or `%TAG` directive after the `...` end
+marker; the 0.19.0 one silently reads past it. One tiny parse per extension
+evaluation keeps the check cheap, and everything the check needs (the floor,
+the probe and the message) lives here so a floor bump touches one file.
 """
 
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_document_error")
 
-RULES_DART_FLOOR = "0.19.0"
+RULES_DART_FLOOR = "0.20.0"
 
 # A pubspec-shaped stream the floor reader refuses and the previous release
 # accepts: `parse_pubspec_document_error` is public in both, reports None on
-# 0.18.0 (the second document is silently dropped) and an error on 0.19.0
-# (`second document marker (---) at line 2`).
-_FLOOR_PROBE = "name: floor_probe\n---\nname: second\n"
+# 0.19.0 (the trailing directive is silently dropped) and an error on 0.20.0
+# (`directive after document end (...) at line 3`).
+_FLOOR_PROBE = "name: floor_probe\n...\n%YAML 1.2\n"
 
 def _floor_message():
     """Returns the failure message naming the module, floor and override fix."""
     return (
         "rules_flutter needs ai_rules_dart " + RULES_DART_FLOOR + " or newer, but the " +
         "resolved ai_rules_dart reads pubspecs like an older release: it accepts a " +
-        "second YAML document that " + RULES_DART_FLOOR + " refuses. A root " +
+        "%YAML/%TAG directive after `...` that " + RULES_DART_FLOOR + " refuses. A root " +
         "archive_override, git_override, local_path_override or " +
         "single_version_override is probably pinning an older ai_rules_dart: raise " +
         "that override to " + RULES_DART_FLOOR + " or above, or drop it so the version " +
@@ -39,7 +39,7 @@ def rules_dart_floor_error(read_error = parse_pubspec_document_error):
 
     The injected `read_error` is `parse_pubspec_document_error` by default;
     tests pass a stand-in that mimics an older reader. A None probe result
-    means the reader accepts the second document, so it is older than
+    means the reader accepts the trailing directive, so it is older than
     `RULES_DART_FLOOR` and the returned message says which override to
     change. A non-None result means the reader refuses it, so it meets the
     floor and there is no error.
