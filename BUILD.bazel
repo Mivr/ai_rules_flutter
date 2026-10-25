@@ -31,3 +31,6 @@ license(
     kind = "@package_metadata//licenses/spdx:Apache-2.0",
     text = "LICENSE",
 )
+
+# Exported for //tools/readme_check, which reads the install block.
+exports_files(["README.md"])
