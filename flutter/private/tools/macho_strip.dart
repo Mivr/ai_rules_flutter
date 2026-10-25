@@ -23,10 +23,12 @@ import 'macho_ranges.dart'
         accountedRangesOf,
         auditOutputRanges,
         describeStripCommand,
+        isZeroFillSectionType,
         notePayloadRange,
         rangeWithinFile,
         rangesIntersect,
         relocatedNoteCommand,
+        sectionTypeOf,
         segmentNameOf,
         throwOnInPlaceSegmentOverlap;
 
@@ -589,8 +591,7 @@ void _checkNoPayloadPastLinkedit(
       final sectOff = 72 + s * 80;
       if (sectOff + 80 > lc.bytes.length) break;
       final sectBd = ByteData.sublistView(lc.bytes, sectOff, sectOff + 80);
-      if ((sectBd.getUint32(68, Endian.little) & sectionTypeMask) ==
-          sectionTypeZerofill) {
+      if (isZeroFillSectionType(sectionTypeOf(bd, sectOff))) {
         continue;
       }
       _checkRangeOutsideLinkedit(

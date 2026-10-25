@@ -192,8 +192,7 @@ List<CommandRange> _segmentRanges(LoadCommand lc) {
         'section ${s + 1}.',
       );
     }
-    if ((bd.getUint32(at + 68, Endian.little) & sectionTypeMask) ==
-        sectionTypeZerofill) {
+    if (isZeroFillSectionType(sectionTypeOf(bd, at))) {
       continue;
     }
     ranges.add(
@@ -207,10 +206,23 @@ List<CommandRange> _segmentRanges(LoadCommand lc) {
   return ranges;
 }
 
+/// Reads a `section_64` record's section type: the low byte of its `flags`
+/// word at record offset +64 (`sectname` 16, `segname` 16, `addr` 8, `size`
+/// 8, then `offset`, `align`, `reloff` and `nreloc`, 4 bytes each). Attribute
+/// bits above the low byte are masked out. The only type reader the Mach-O
+/// tools use: `reserved1` (+68) holds stub and pointer sections'
+/// indirect-symbol index, never the type.
+int sectionTypeOf(ByteData commandBytes, int at) {
+  return commandBytes.getUint32(at + 64, Endian.little) & sectionTypeMask;
+}
+
 /// Whether a `section_64` type byte (the low byte of its flags word) names a
 /// zero-fill section (`S_ZEROFILL`, `S_GB_ZEROFILL` or
 /// `S_THREAD_LOCAL_ZEROFILL`). Zero-fill sections occupy no file bytes, so the
 /// in-place strip's segment overlap check skips them.
+///
+/// [sectionType] must come from [sectionTypeOf]: the type is the low byte of
+/// the `flags` word, never `reserved1`.
 bool isZeroFillSectionType(int sectionType) {
   return sectionType == sectionTypeZerofill ||
       sectionType == sectionTypeGbZerofill ||
@@ -251,7 +263,7 @@ List<SectionLayout> sectionLayoutsOf(LoadCommand lc) {
     layouts.add((
       at: at,
       name: ascii.decode(lc.bytes.sublist(at, at + 16)).split('\x00').first,
-      type: bd.getUint32(at + 68, Endian.little) & sectionTypeMask,
+      type: sectionTypeOf(bd, at),
       offset: bd.getUint32(at + 48, Endian.little),
       size: bd.getUint64(at + 40, Endian.little),
     ));
