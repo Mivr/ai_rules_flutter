@@ -38,6 +38,9 @@ is one editor jump away. Accepted pubspecs parse exactly as before.
 
 - A `flutter:` section that is neither a map nor absent fails the fetch at
   the `flutter:` line, as flutter_tools does.
+- A non-string pubspec root key, or a present `name` that is not a string
+  (including an empty value), fails the fetch at the key's line, as
+  flutter_tools does. Any other root key stays allowed.
 - A `flutter.assets` or `flutter.shaders` section that is not a list (for
   example a string `assets: assets/logo.png`) fails the fetch, naming the
   package, the key and the expected list shape, as flutter_tools does.
@@ -55,8 +58,9 @@ is one editor jump away. Accepted pubspecs parse exactly as before.
   on it.
 - A font `weight` outside 100..900 (for example `weight: 150`), a font
   `style` outside `italic`/`normal`, or any other key in a font file entry
-  fails the fetch at the key's line, as flutter_tools does. An absent
-  `weight` or `style` stays valid and reads as unset.
+  fails the fetch at the key's line, as flutter_tools does. A non-string
+  key reports twice, the way flutter_tools reports both its checks. An
+  absent `weight` or `style` stays valid and reads as unset.
 - An unexpected key in a font family entry fails the fetch at the key's
   line, as flutter_tools does.
 - A `platforms` or `flavors` value that is not a list of strings (for example
@@ -83,12 +87,13 @@ is one editor jump away. Accepted pubspecs parse exactly as before.
   `pluginClass`) fails the fetch at the entry's line, as flutter_tools
   does. `web` entries, unknown platforms, and `default_package` entries are
   not validated, the way flutter_tools skips them.
-- A `deferred-components` value that is not a list, an element that is not
-  a map, an element without a string `name`, a non-string-list
-  `libraries`, or malformed element `assets` each fail the fetch at their
-  line, as flutter_tools does. An absent or empty value stays valid. (An
-  empty list crashes flutter_tools itself, an upstream bug rather than a
-  reported error, so it stays accepted here.)
-- Any other unknown key directly under `flutter:` fails the fetch at the
-  key's line, as flutter_tools does. `generate` and `config` carry no
-  checks and stay accepted at any value.
+- A `deferred-components` value that is not a list, an empty list
+  (flutter_tools crashes reading one, so it cannot build), an element
+  that is not a map, an element without a string `name`, a `libraries`
+  key holding anything but a string list, or malformed element `assets`
+  each fail the fetch at their line, as flutter_tools does. An absent or
+  empty value stays valid.
+- A non-string key directly under `flutter:` fails the fetch at the key's
+  line, as flutter_tools does. Any other unknown key directly under
+  `flutter:` fails the fetch at the key's line, as flutter_tools does.
+  `generate` and `config` carry no checks and stay accepted at any value.
