@@ -534,35 +534,42 @@ def _drop_chain_file(full):
                            "(%s)" % (full, exc))
 
 
-def _sweep_undeclared_files(base, declared, before):
-    """Removes undeclared chain files under base; returns relpaths."""
-    removed = []
-    for dirpath, _, filenames in os.walk(base, followlinks=False):
-        for name in filenames:
-            full = os.path.normpath(os.path.join(dirpath, name))
-            if full not in before and not _is_protected(full, declared):
-                _drop_chain_file(full)
-                removed.append(os.path.relpath(full, base))
-    return removed
+def _sweep_dir_files(dirpath, filenames, base, declared, before,
+                       removed):
+    """Removes undeclared chain files in one directory; appends relpaths."""
+    for name in filenames:
+        full = os.path.normpath(os.path.join(dirpath, name))
+        if full not in before and not _is_protected(full, declared):
+            _drop_chain_file(full)
+            removed.append(os.path.relpath(full, base))
 
 
-def _sweep_undeclared_links(base, declared, before):
-    """Removes undeclared chain symlinks under base; returns relpaths.
+def _sweep_dir_links(dirpath, dirnames, base, declared, before, removed):
+    """Removes undeclared chain symlinks in one directory.
 
     Links hide in dirnames (os.walk lists them as dirs): a link the
     chain created is removed like a file, never descended into.
     """
-    removed = []
-    for dirpath, dirnames, _ in os.walk(base, followlinks=False):
-        for name in list(dirnames):
-            full = os.path.join(dirpath, name)
-            if not os.path.islink(full):
-                continue
-            norm = os.path.normpath(full)
-            if norm not in before and not _is_protected(norm, declared):
-                _drop_chain_file(full)
-                removed.append(os.path.relpath(norm, base))
-    return removed
+    for name in list(dirnames):
+        full = os.path.join(dirpath, name)
+        if not os.path.islink(full):
+            continue
+        norm = os.path.normpath(full)
+        if norm not in before and not _is_protected(norm, declared):
+            _drop_chain_file(full)
+            removed.append(os.path.relpath(norm, base))
+
+
+def _sweep_dir_entries(dirpath, dirnames, filenames, base, declared,
+                       before, removed):
+    """Sweeps one directory's files, then its links, in walk order.
+
+    One top-down os.walk pass calls this per directory, so a failure
+    partway leaves the same tree as removing files-then-links per
+    directory in walk order: earlier directories are already swept.
+    """
+    _sweep_dir_files(dirpath, filenames, base, declared, before, removed)
+    _sweep_dir_links(dirpath, dirnames, base, declared, before, removed)
 
 
 def _sweep_empty_dirs(base, declared, before):
@@ -606,8 +613,9 @@ def sweep_chain_side_effects(bazel_out, declared_outputs, before):
     removed = []
     if not os.path.isdir(base):
         return {"n": 0, "paths": []}
-    removed.extend(_sweep_undeclared_files(base, declared, before))
-    removed.extend(_sweep_undeclared_links(base, declared, before))
+    for dirpath, dirnames, filenames in os.walk(base, followlinks=False):
+        _sweep_dir_entries(dirpath, dirnames, filenames, base, declared,
+                           before, removed)
     removed.extend(_sweep_empty_dirs(base, declared, before))
     removed = sorted(set(removed))
     return {"n": len(removed), "paths": removed[:10]}

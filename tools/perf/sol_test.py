@@ -350,8 +350,10 @@ class SweepPassesTest(unittest.TestCase):
         self.write("x/Info.plist", b"bazel-own")
         before = snapshot_tree(self.bazel_out)
         side = self.write("x/side.o", b"side-effect")
-        removed = sol._sweep_undeclared_files(
-            self.bazel_out, [os.path.normpath(declared)], before)
+        removed = []
+        sol._sweep_dir_files(os.path.join(self.bazel_out, "x"), ["side.o"],
+                             self.bazel_out, [os.path.normpath(declared)],
+                             before, removed)
         self.assertEqual(removed, ["x/side.o"])
         self.assertFalse(os.path.lexists(side))
         self.assertTrue(os.path.isfile(declared))
@@ -366,11 +368,56 @@ class SweepPassesTest(unittest.TestCase):
         before = snapshot_tree(self.bazel_out)
         link = os.path.join(self.bazel_out, "x", "alias")
         os.symlink(target_dir, link)
-        removed = sol._sweep_undeclared_links(
-            self.bazel_out, [], before)
+        removed = []
+        sol._sweep_dir_links(os.path.join(self.bazel_out, "x"), ["alias"],
+                             self.bazel_out, [], before, removed)
         self.assertEqual(removed, ["x/alias"])
         self.assertFalse(os.path.lexists(link))
         self.assertTrue(os.path.isdir(target_dir))
+
+    def test_dir_entries_do_files_then_links(self):
+        target_dir = os.path.join(self.bazel_out, "x", "real")
+        os.makedirs(target_dir)
+        before = snapshot_tree(self.bazel_out)
+        side = self.write("x/side.o", b"side-effect")
+        link = os.path.join(self.bazel_out, "x", "alias")
+        os.symlink(target_dir, link)
+        removed = []
+        sol._sweep_dir_entries(os.path.join(self.bazel_out, "x"),
+                               ["real", "alias"], ["side.o"],
+                               self.bazel_out, [], before, removed)
+        self.assertEqual(sorted(removed), ["x/alias", "x/side.o"])
+        self.assertFalse(os.path.lexists(side))
+        self.assertFalse(os.path.lexists(link))
+
+    def test_failure_order_removes_link_before_raising(self):
+        # One top-down walk, files-then-links per directory in walk
+        # order: the top directory's undeclared link goes before the
+        # deeper unremovable file raises. A whole-tree file pass first
+        # would raise with the link still there.
+        target = os.path.join(self.tmp, "target")
+        os.makedirs(target)
+        before = snapshot_tree(self.bazel_out)
+        locked = os.path.join(self.bazel_out, "locked")
+        os.makedirs(locked)
+        only = os.path.join(locked, "only.o")
+        with open(only, "wb") as fh:
+            fh.write(b"x")
+        link = os.path.join(self.bazel_out, "dlink")
+        os.symlink(target, link)
+        real_remove = os.remove
+
+        def fake_remove(path, *args, **kwargs):
+            if os.path.basename(str(path)) == "only.o":
+                raise OSError("denied")
+            return real_remove(path, *args, **kwargs)
+
+        with mock.patch.object(sol.os, "remove",
+                               side_effect=fake_remove):
+            with self.assertRaisesRegex(RuntimeError, "cannot remove"):
+                sweep_chain_side_effects(self.bazel_out, [], before)
+        self.assertFalse(os.path.lexists(link))
+        self.assertTrue(os.path.lexists(only))
 
     def test_empty_dir_pass_removes_emptied_only(self):
         self.write("x/keep.o")
