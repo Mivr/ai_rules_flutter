@@ -1,0 +1,54 @@
+# Run-HOME hermeticity
+
+No runnable target may let the dart CLI, pub, flutter_tools, or the Dart
+VM write telemetry or state into the caller's `HOME` (RT37-flutter:02:
+`CLIENT_ID` and `dart-flutter-telemetry-*` appearing under `~/.dart-tool`
+after `bazel run //flutter:pub`).
+
+## The two policies
+
+- Caller-home: the tool CLI must resolve the caller's `PUB_CACHE` and
+  credentials, so the parent environment is kept and the CLI takes the
+  global `--suppress-analytics` flag instead. Applies to `//dart:dart`
+  (SDK pass-through) and `//flutter:pub`.
+- Private: the spawned program gets a fresh dir for `HOME`,
+  `USERPROFILE`, `LOCALAPPDATA`, `APPDATA`, `XDG_CONFIG_HOME`,
+  `XDG_CACHE_HOME`, and `XDG_DATA_HOME`, removed afterwards. Applies to
+  the `flutter_tester` spawn and the web/Linux integration launchers
+  (browser profile, Xvfb, desktop app).
+
+User app and test code keeps the caller env; only rule-owned launchers
+and tool CLIs are routed through the helper.
+
+## The helper
+
+`flutter/private/tools/run_home.dart` is the single source: `homeEnvKeys`,
+`suppressAnalyticsFlag`, `withSuppressedAnalytics` (flag before the
+command, never duplicated), `createPrivateHome`, `privateHomeEnv`. The
+integration launchers' old per-launcher scrubs fold into it — there is one
+copy of the key list.
+
+Launchers that are shell templates cannot import Dart, so
+`flutter/private/run_home.bzl` carries the shell counterpart
+(`RUN_HOME_SH`, plus `RUN_HOME_SUPPRESS_ANALYTICS` for the Windows
+launcher). The two copies are asserted equal by
+`//flutter/private/tools:run_home_test`; update them together.
+
+## The gate
+
+`e2e/run_home` is a self-contained workspace with one instance of every
+`bazel run`-capable entry point. `registry.tsv` records label, args, and
+HOME policy per entry; `audit.tsv` records every other executable target
+with the reason it is out of class. `run_home_test.sh` replays the
+registry's `bazel query` enumeration (an unregistered or missing entry
+fails the run), then executes each entry under canary home dirs and fails
+naming any entry that creates, changes, or removes canary content. It runs
+in Linux CI.
+
+## Adding an entry point
+
+1. Add a runnable instance to `e2e/run_home/BUILD.bazel` (or record why
+   the target cannot run headless).
+2. Add the row to `registry.tsv` (run rows) or `audit.tsv`
+   (out-of-class, with reason), using the shared helper for its launcher.
+3. The gate fails until the new entry is both registered and clean.

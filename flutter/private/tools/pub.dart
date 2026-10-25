@@ -18,6 +18,8 @@ import 'dart:io';
 
 import 'package:runfiles/runfiles.dart';
 
+import 'run_home.dart' as run_home;
+
 /// Depth of `bin/cache/flutter.version.json` below the root it anchors.
 const _manifestDepth = 3;
 
@@ -89,7 +91,10 @@ Future<void> main(List<String> args) async {
 
   final process = await Process.start(
     dart,
-    ['pub', ...args],
+    // Caller-home policy: the parent env stays (PUB_CACHE and the caller's
+    // credentials resolve), and the dart CLI takes the global analytics
+    // flag so it writes no telemetry under the caller's HOME.
+    run_home.withSuppressedAnalytics(<String>['pub', ...args]),
     workingDirectory: workspace,
     environment: {'FLUTTER_ROOT': flutterRoot.path},
     mode: ProcessStartMode.inheritStdio,

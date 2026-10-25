@@ -6,6 +6,7 @@ Usage:
 """
 
 load("//flutter:providers.bzl", "resolve_exec_dart")
+load("//flutter/private:run_home.bzl", "RUN_HOME_SH", "RUN_HOME_SUPPRESS_ANALYTICS")
 
 _BASH_RUNFILES_INIT = """\
 # --- begin runfiles.bash initialization v3 ---
@@ -26,7 +27,10 @@ set RUNFILES_DIR=%~dp0%~n0.exe.runfiles
 if not exist "%RUNFILES_DIR%" set RUNFILES_DIR=%~dp0%~n0.runfiles
 set DART=%RUNFILES_DIR%\\{dart}
 if defined BUILD_WORKING_DIRECTORY cd /d "%BUILD_WORKING_DIRECTORY%"
-"%DART%" %*
+:: Caller-home policy (RT37-flutter:02): keep the caller env so tool state
+:: resolves, and pass the analytics flag from //flutter/private:run_home.bzl
+:: so the CLI writes no telemetry into the caller's HOME.
+"%DART%" {suppress} %*
 """
 
 def _runfiles_path(f, workspace_name):
@@ -49,7 +53,10 @@ def _flutter_sdk_binary_impl(ctx):
         script = ctx.actions.declare_file(ctx.label.name + ".bat")
         ctx.actions.write(
             output = script,
-            content = _BAT_TEMPLATE.format(dart = dart_path.replace("/", "\\")),
+            content = _BAT_TEMPLATE.format(
+                dart = dart_path.replace("/", "\\"),
+                suppress = RUN_HOME_SUPPRESS_ANALYTICS,
+            ),
             is_executable = True,
         )
     else:
@@ -58,13 +65,17 @@ def _flutter_sdk_binary_impl(ctx):
             output = script,
             content = """#!/usr/bin/env bash
 {runfiles_init}
+{run_home_sh}
 DART="$(rlocation "{dart}")"
 if [[ -n "${{BUILD_WORKING_DIRECTORY:-}}" ]]; then
   cd "$BUILD_WORKING_DIRECTORY"
 fi
-exec "$DART" "$@"
+# Caller-home policy (RT37-flutter:02): keep the caller env so PUB_CACHE
+# and credentials resolve; the helper execs dart with telemetry suppressed.
+run_home_caller_home_exec "$DART" "$@"
 """.format(
                 runfiles_init = _BASH_RUNFILES_INIT,
+                run_home_sh = RUN_HOME_SH,
                 dart = dart_path,
             ),
             is_executable = True,

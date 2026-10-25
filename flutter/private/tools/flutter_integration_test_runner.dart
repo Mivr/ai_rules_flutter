@@ -24,6 +24,7 @@ import 'bazel_test_protocol.dart';
 import 'flutter_integration_test_android.dart';
 import 'flutter_integration_test_ios.dart';
 import 'flutter_integration_test_launcher.dart';
+import 'run_home.dart' as run_home;
 import 'test_support.dart';
 
 export 'flutter_integration_test_android.dart';
@@ -238,10 +239,10 @@ Map<String, String> buildChromeEnvironment({
   final result = <String, String>{
     'PATH': '',
     'LD_LIBRARY_PATH': libDirs.join(':'),
-    'HOME': scratchDir,
+    // Private HOME policy (RT37-flutter:02): every home-locating key lands
+    // in the scratch dir, which the launcher removes afterwards.
+    ...run_home.privateHomeEnv(scratchDir),
     'TMPDIR': scratchDir,
-    'XDG_CONFIG_HOME': '$scratchDir/.config',
-    'XDG_CACHE_HOME': '$scratchDir/.cache',
     'TZ': resolved.timeZone,
     if (fontconfigFile != null) ...{
       'FONTCONFIG_FILE': fontconfigFile,
@@ -288,7 +289,8 @@ Map<String, String> buildXvfbEnvironment({
   return <String, String>{
     'PATH': '$sysrootDir/usr/bin',
     'LD_LIBRARY_PATH': libDirs.join(':'),
-    'HOME': scratchDir,
+    // Private HOME policy (RT37-flutter:02); see buildChromeEnvironment.
+    ...run_home.privateHomeEnv(scratchDir),
     'TMPDIR': scratchDir,
     'XKB_BINDIR': '$sysrootDir/usr/bin',
   };
@@ -332,10 +334,11 @@ Map<String, String> buildLinuxAppEnvironment({
     'GTK_PATH': '$scratchDir/empty-gtk-path',
     'NO_AT_BRIDGE': '1',
     'GSETTINGS_BACKEND': 'memory',
-    'HOME': scratchDir,
+    // Private HOME policy (RT37-flutter:02); see buildChromeEnvironment.
+    // XDG_RUNTIME_DIR keeps its own subdir, as before: it is not one of
+    // the helper's home-locating keys.
+    ...run_home.privateHomeEnv(scratchDir),
     'TMPDIR': scratchDir,
-    'XDG_CONFIG_HOME': '$scratchDir/.config',
-    'XDG_CACHE_HOME': '$scratchDir/.cache',
     'XDG_RUNTIME_DIR': '$scratchDir/xdg-runtime',
     'FLUTTER_INTEGRATION_TEST_HARNESS_URL': harnessUrl,
     'TZ': resolved.timeZone,
@@ -463,8 +466,6 @@ class WebPlatformLauncher implements PlatformLauncher {
     _scratchDir = scratch;
     final userDataDir = Directory('${scratch.path}/profile')
       ..createSync(recursive: true);
-    Directory('${scratch.path}/.config').createSync(recursive: true);
-    Directory('${scratch.path}/.cache').createSync(recursive: true);
     Directory('${scratch.path}/fontconfig-cache').createSync(recursive: true);
 
     final url = 'http://127.0.0.1:$harnessPort/';
@@ -557,15 +558,15 @@ class LinuxPlatformLauncher implements PlatformLauncher {
   @override
   String get suiteCompiler => 'kernel';
 
-  /// Creates the scratch tree for a Linux run: config, cache, runtime and
-  /// fontconfig homes plus the empty GTK/GIO override directories.
+  /// Creates the scratch tree for a Linux run: runtime and fontconfig homes
+  /// plus the empty GTK/GIO override directories. The XDG home keys point
+  /// at the scratch root itself (see buildLinuxAppEnvironment), so no
+  /// `.config`/`.cache` subdirs are needed.
   Directory _prepareLinuxScratch() {
     final scratch = Directory(
       '$baseTempDir/linux_integration_${pid}_${DateTime.now().microsecondsSinceEpoch}',
     )..createSync(recursive: true);
     _scratchDir = scratch;
-    Directory('${scratch.path}/.config').createSync(recursive: true);
-    Directory('${scratch.path}/.cache').createSync(recursive: true);
     Directory('${scratch.path}/xdg-runtime').createSync(recursive: true);
     Directory('${scratch.path}/fontconfig-cache').createSync(recursive: true);
     Directory('${scratch.path}/empty-gio-modules').createSync(recursive: true);

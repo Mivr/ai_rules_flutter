@@ -674,3 +674,21 @@ bzl_library(
         ":xtool_version",
     ],
 )
+
+bzl_library(
+    name = "run_home",
+    srcs = ["run_home.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+)
+
+# `run_home.bzl` is loaded by shell-template launchers outside
+# `//flutter` (`//dart:flutter_sdk_binary`) and read as data by the
+# `run_home` unit test, so the file itself is exported wider than the
+# `bzl_library` above.
+exports_files(
+    ["run_home.bzl"],
+    visibility = [
+        "//dart:__subpackages__",
+        "//flutter:__subpackages__",
+    ],
+)

@@ -41,6 +41,7 @@ import 'dart:typed_data';
 import 'package:runfiles/runfiles.dart';
 
 import 'bazel_test_protocol.dart';
+import 'run_home.dart' as run_home;
 import 'test_support.dart';
 
 /// Whether this run should regenerate goldens instead of comparing them.
@@ -249,6 +250,10 @@ class _Harness {
 
   final HttpServer _server;
   Process? _process;
+
+  /// Private HOME the tester process runs under (RT37-flutter:02 private
+  /// policy), removed in [dispose] once the tester has exited.
+  Directory? _testerHome;
   WebSocket? _ws;
   bool _socketClosed = false;
 
@@ -331,6 +336,11 @@ class _Harness {
     if (ws != null) await teardownQuietly(ws.close);
     _process?.kill(ProcessSignal.sigkill);
     await teardownQuietly(() => _server.close(force: true));
+    final testerHome = _testerHome;
+    _testerHome = null;
+    if (testerHome != null && testerHome.existsSync()) {
+      cleanupQuietly(() => testerHome.deleteSync(recursive: true));
+    }
   }
 
   /// Runs [run] against the combined kernel [effectiveDill] [_runOnce]
@@ -472,7 +482,15 @@ class _Harness {
   /// tester at runtime instead. The parent environment comes along by
   /// default, which is how the comparator also sees
   /// BUILD_WORKSPACE_DIRECTORY and TEST_UNDECLARED_OUTPUTS_DIR.
+  ///
+  /// Private HOME policy (RT37-flutter:02): only the home-locating keys are
+  /// overridden, at a fresh dir [dispose] removes; everything else is
+  /// inherited unchanged.
   Future<Process> _spawnTester(List<String> command, bool updateGoldens) {
+    final testerHome = run_home.createPrivateHome(
+      Platform.environment['TEST_TMPDIR'] ?? Directory.systemTemp.path,
+    );
+    _testerHome = testerHome;
     return Process.start(
       command.first,
       command.sublist(1),
@@ -480,6 +498,7 @@ class _Harness {
         'FLUTTER_TEST': 'true',
         'FLUTTER_TEST_HARNESS_PORT': '${_server.port}',
         if (updateGoldens) 'FLUTTER_TEST_UPDATE_GOLDENS': '1',
+        ...run_home.privateHomeEnv(testerHome.path),
       },
     );
   }
