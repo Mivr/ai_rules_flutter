@@ -246,10 +246,16 @@ def _font_file_key_problems(item, slot, lines, flocator):
     or `italic`, and any other key is `Unexpected`. A non-string key
     reports twice, like flutter_tools: its `if` refusal, then the
     `switch` default it also falls into. Each bad key is reported; an
-    absent `weight` or `style` stays valid.
+    absent `weight` or `style` stays valid. A whole-number float `weight`
+    (`400.0`) passes flutter_tools' validation (Dart `400.0 == 400`
+    holds) but no build can read it (`flutter_manifest.dart:422` casts
+    the weight with `as int?`), so it fails saying that instead of
+    quoting a validation error flutter_tools never prints. Every other
+    non-member `weight` (including a fractional float like `150.0`)
+    keeps flutter_tools' own `Invalid value` refusal.
 
     Args:
-        item: The raw font file mapping (known to carry `asset`).
+        item: The raw font file mapping, with or without `asset`.
         slot: The `fonts[index]` problem path of the owning family entry.
         lines: The pubspec text split on newlines.
         flocator: The path to the file entry, for the line.
@@ -288,7 +294,17 @@ def _font_file_key_problems(item, slot, lines, flocator):
                     flutter_line_of(lines, flocator + ["asset"]),
                 ))
         elif key == "weight":
-            if type(value) != "int" or value not in _FONT_WEIGHTS:
+            if type(value) == "float" and value in _FONT_WEIGHTS:
+                problems.append(_shape_problem(
+                    slot,
+                    "fonts",
+                    "Font weight {value} (({type})) must be an int: flutter_tools 3.47.7 cannot read it (flutter_manifest.dart:422 casts the weight with 'as int?').".format(
+                        value = dart_str(value),
+                        type = dart_type(value),
+                    ),
+                    flutter_line_of(lines, flocator + ["weight"]),
+                ))
+            elif type(value) != "int" or value not in _FONT_WEIGHTS:
                 problems.append(_shape_problem(
                     slot,
                     "fonts",
@@ -327,12 +343,14 @@ def _parse_font_files(fonts_raw, slot, lines, locator):
     Mirrors the inner loop of `_extractFonts` and the `weight` / `style` /
     extra-key checks of `_validateFonts`
     (`packages/flutter_tools/lib/src/flutter_manifest.dart`): a non-map
-    file entry is `Expected "fonts" to be a list of maps`, a file entry
-    without an `asset` key is silently skipped (a warning only), a
-    non-string `asset` is `Expected font asset ... to be a string`, a
-    present `weight` must be one of 100..900, a present `style` must be
-    `normal` or `italic`, and any other key is `Unexpected`. An absent
-    `weight` or `style` stays valid and reads as None.
+    file entry is `Expected "fonts" to be a list of maps`, every key of
+    every file mapping runs the per-key checks whether or not the entry
+    carries `asset` (a missing `asset` with no other problem stays
+    silently skipped, a warning only), a non-string `asset` is `Expected
+    font asset ... to be a string`, a present `weight` must be one of
+    100..900, a present `style` must be `normal` or `italic`, and any
+    other key is `Unexpected`. An absent `weight` or `style` stays valid
+    and reads as None.
 
     Args:
         fonts_raw: The raw `fonts` list of one family entry.
@@ -356,8 +374,6 @@ def _parse_font_files(fonts_raw, slot, lines, locator):
                 "Expected \"fonts\" to be a list of maps.",
                 flutter_line_of(lines, flocator),
             ))
-            continue
-        if "asset" not in item:
             continue
         problems.extend(_font_file_key_problems(item, slot, lines, flocator))
         asset = item.get("asset")
@@ -438,8 +454,9 @@ def _parse_fonts(raw, lines, locator):
     but empty section value, a non-list section, a non-map entry, a
     non-string `family`, a non-list per-family `fonts`, a non-map font
     file entry and a non-string `asset` are each a refusal; entries
-    flutter_tools only warns on (a missing family, a file entry without
-    an `asset` key) stay silently skipped, exactly as on main. When the
+    flutter_tools only warns on stay silently skipped (a missing family;
+    a file entry without an `asset` key whose other keys are clean),
+    exactly as on main. When the
     first element is not a map the whole list is one refusal naming the
     value, and the remaining entries are not checked further.
 
@@ -566,6 +583,30 @@ def _condition_problems(path, item, cond_key, lines, locator):
         flutter_line_of(lines, locator + [cond_key]),
     )])
 
+def _entry_condition_problems(path, item, lines, elocator):
+    """Validate one entry's `flavors` / `platforms` values as refusals.
+
+    Shared by the `assets` and `shaders` parsers: flutter_tools validates
+    both sections with the same `_validateAssets`
+    (`packages/flutter_tools/lib/src/flutter_manifest.dart`), so a shader
+    map entry whose conditions are malformed fails exactly like an asset
+    entry's do, with the same wrapped `Unable to parse assets section`
+    refusal.
+
+    Args:
+        path: The entry path, for the problem path.
+        item: The raw entry mapping.
+        lines: The pubspec text split on newlines.
+        elocator: The path to the entry, for the line.
+
+    Returns:
+        A `(flavors, platforms, problems)` tuple: the string lists (empty
+        when the value errors) and the refusal structs for `asset_errors`.
+    """
+    (flavors, flavor_problems) = _condition_problems(path, item, "flavors", lines, elocator)
+    (platforms, platform_problems) = _condition_problems(path, item, "platforms", lines, elocator)
+    return (flavors, platforms, flavor_problems + platform_problems)
+
 def _parse_assets(raw, lines, locator, shown):
     """Parse the raw `flutter.assets` list, collecting malformed entries.
 
@@ -614,10 +655,8 @@ def _parse_assets(raw, lines, locator, shown):
         if type(item) == "string":
             entries.append(struct(path = path, flavors = [], platforms = []))
             continue
-        (flavors, flavor_problems) = _condition_problems(path, item, "flavors", lines, elocator)
-        problems.extend(flavor_problems)
-        (platforms, platform_problems) = _condition_problems(path, item, "platforms", lines, elocator)
-        problems.extend(platform_problems)
+        (flavors, platforms, condition_problems) = _entry_condition_problems(path, item, lines, elocator)
+        problems.extend(condition_problems)
         if "transformers" in item and item.get("transformers") != None:
             problems.append(_shape_problem(
                 path,
@@ -706,7 +745,11 @@ def _parse_shaders(raw, lines, locator):
     (`packages/flutter_tools/lib/src/flutter_manifest.dart`): a non-list
     section, a null or empty entry, a non-string non-map item and a map
     whose `path` is not a string are each a refusal; an empty map is
-    silently no entry, exactly as flutter_tools reads it.
+    silently no entry, exactly as flutter_tools reads it. A map entry's
+    `flavors` / `platforms` run the same condition checks an asset entry's
+    do (`_entry_condition_problems`), with the same messages; a `path`
+    entry that reads keeps only its path (shader bundling takes no
+    conditions), but the fetch still fails on the problems first.
 
     Args:
         raw: The raw `flutter.shaders` YAML value (None when absent).
@@ -725,10 +768,14 @@ def _parse_shaders(raw, lines, locator):
     out = []
     problems = []
     for index, entry in enumerate(raw):
-        (path, shape_problems) = _parse_path_entry(entry, index, "shaders", lines, locator + [index], "shaders")
+        elocator = locator + [index]
+        (path, shape_problems) = _parse_path_entry(entry, index, "shaders", lines, elocator, "shaders")
         problems.extend(shape_problems)
-        if path != None:
-            out.append(struct(path = path))
+        if path == None:
+            continue
+        if type(entry) == "dict":
+            problems.extend(_entry_condition_problems(path, entry, lines, elocator)[2])
+        out.append(struct(path = path))
     return (out, problems)
 
 def _deferred_assets_check(lines):
@@ -776,8 +823,11 @@ def parse_flutter_assets_block(content):
     `path`, a `flutter.fonts` section that is not a list, a non-map font
     entry, a non-string `family`, a non-list per-family `fonts`, a non-map
     font file entry, a non-string font `asset`, an invalid font `weight`
-    or `style`, an unexpected key in a font, a `flavors` / `platforms`
-    value that is not a list of strings, an entry carrying
+    or `style` (a whole-number float `weight` fails as unreadable by
+    flutter_tools 3.47.7 instead), an unexpected key in a font (checked
+    whether or not the file entry carries `asset`), a `flavors` /
+    `platforms` value that is not a list of strings on an asset or a
+    shader entry, an entry carrying
     `transformers`, a `flutter:` section that is neither a map nor null,
     an empty `deferred-components` list (flutter_tools crashes reading
     one), and every other `flutter:` child flutter_tools `_validate` rejects

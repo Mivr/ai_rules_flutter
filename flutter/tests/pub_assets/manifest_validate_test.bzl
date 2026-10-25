@@ -1046,6 +1046,246 @@ def _no_flutter_loads_test_impl(ctx):
     asserts.false(env, result.uses_material_design)
     return unittest.end(env)
 
+# -- shaders: conditions checked like assets (RT31-flutter:01) -----------------------------------
+#
+# flutter_tools validates `shaders` with the same `_validateAssets` as
+# `assets` (flutter_manifest.dart:550-551), so a shader map entry whose
+# `flavors` or `platforms` is malformed fails exactly like an asset
+# entry's does.
+
+_SHADER_SCALAR_FLAVORS_PUBSPEC = """\
+name: shader_scalar_flavors
+flutter:
+  shaders:
+    - path: s.frag
+      flavors: 42
+"""
+
+def _shader_scalar_flavors_refused_test_impl(ctx):
+    """A scalar shader `flavors` fails at its line, like an asset entry's."""
+    env = unittest.begin(ctx)
+    result = _assert_refused(
+        env,
+        _SHADER_SCALAR_FLAVORS_PUBSPEC,
+        "flavors",
+        "In flavors section of asset \"s.frag\"",
+        5,
+    )
+    asserts.equals(env, "s.frag", result.asset_errors[0].path)
+    asserts.equals(env, 1, len(result.shaders))
+    return unittest.end(env)
+
+_SHADER_MIXED_PLATFORMS_PUBSPEC = """\
+name: shader_mixed_platforms
+flutter:
+  shaders:
+    - path: s.frag
+      platforms:
+        - android
+        - 5
+"""
+
+def _shader_mixed_platforms_refused_test_impl(ctx):
+    """A non-string shader `platforms` element fails at the key's line."""
+    env = unittest.begin(ctx)
+    _assert_refused(
+        env,
+        _SHADER_MIXED_PLATFORMS_PUBSPEC,
+        "platforms",
+        "but element at index 1 was a int.",
+        5,
+    )
+    return unittest.end(env)
+
+_SHADER_CONDITIONS_OK_PUBSPEC = """\
+name: shader_conditions_ok
+flutter:
+  shaders:
+    - path: s.frag
+      flavors: [prod]
+      platforms: [android]
+"""
+
+def _shader_conditions_load_test_impl(ctx):
+    """A shader entry with string-list conditions stays accepted."""
+    env = unittest.begin(ctx)
+    result = _assert_accepted(env, _SHADER_CONDITIONS_OK_PUBSPEC)
+    asserts.equals(env, 1, len(result.shaders))
+    asserts.equals(env, "s.frag", result.shaders[0].path)
+    return unittest.end(env)
+
+# -- font file entries without `asset` (RT31-flutter:02) ----------------------------------------
+#
+# `_validateFonts` checks each key of each font file map whether or not
+# `asset` is present (flutter_manifest.dart:747-780). A missing `asset`
+# with no other problem stays silent, as on main.
+
+_FONT_NOASSET_WEIGHT_PUBSPEC = """\
+name: font_noasset_weight
+flutter:
+  fonts:
+    - family: F
+      fonts:
+        - weight: 150
+"""
+
+def _font_noasset_weight_refused_test_impl(ctx):
+    """A bad `weight` fails even when the file entry has no `asset`."""
+    env = unittest.begin(ctx)
+    result = _assert_refused(
+        env,
+        _FONT_NOASSET_WEIGHT_PUBSPEC,
+        "fonts",
+        "for font -> weight",
+        6,
+    )
+    asserts.equals(env, "F", result.fonts[0].family)
+    asserts.equals(env, [], result.fonts[0].fonts)
+    return unittest.end(env)
+
+_FONT_NOASSET_EXTRA_KEY_PUBSPEC = """\
+name: font_noasset_extra_key
+flutter:
+  fonts:
+    - family: F
+      fonts:
+        - style: italic
+          foo: 1
+"""
+
+def _font_noasset_extra_key_refused_test_impl(ctx):
+    """An unexpected key fails even when the file entry has no `asset`."""
+    env = unittest.begin(ctx)
+    _assert_refused(
+        env,
+        _FONT_NOASSET_EXTRA_KEY_PUBSPEC,
+        "fonts",
+        "Unexpected key foo",
+        7,
+    )
+    return unittest.end(env)
+
+_FONT_NOASSET_CLEAN_PUBSPEC = """\
+name: font_noasset_clean
+flutter:
+  fonts:
+    - family: F
+      fonts:
+        - weight: 700
+"""
+
+def _font_noasset_clean_loads_test_impl(ctx):
+    """A clean file entry without `asset` stays silently skipped."""
+    env = unittest.begin(ctx)
+    result = _assert_accepted(env, _FONT_NOASSET_CLEAN_PUBSPEC)
+    asserts.equals(env, 1, len(result.fonts))
+    asserts.equals(env, "F", result.fonts[0].family)
+    asserts.equals(env, [], result.fonts[0].fonts)
+    return unittest.end(env)
+
+# -- refusal lines (RT31-flutter:04) --------------------------------------------------------------
+#
+# Each refusal names the line of the offending key or list entry: a
+# non-string key at any depth names its own line, and a leading BOM
+# shifts and hides no key.
+
+_FAMILY_INT_KEY_PUBSPEC = """\
+name: family_int_key
+flutter:
+  fonts:
+    - family: Bar
+      42: x
+"""
+
+def _family_int_key_refused_test_impl(ctx):
+    """A non-string family key fails at the key's own line, not the item's."""
+    env = unittest.begin(ctx)
+    result = _assert_refused(
+        env,
+        _FAMILY_INT_KEY_PUBSPEC,
+        "fonts",
+        "Unexpected child \"42\" found under \"fonts\".",
+        5,
+    )
+    asserts.equals(env, "Bar", result.fonts[0].family)
+    return unittest.end(env)
+
+# U+FEFF byte-order mark below: the quoted string starts with the BOM bytes EF BB BF.
+# Do not delete it as whitespace: the BOM test fails without it.
+_BOM_SECTION_PUBSPEC = "﻿" + """\
+flutter:
+  frobnicate: true
+  bogus: 1
+"""
+
+def _bom_section_lines_test_impl(ctx):
+    """A leading BOM hides no key: refusals name their own lines."""
+    env = unittest.begin(ctx)
+    _assert_refused_n(env, _BOM_SECTION_PUBSPEC, [
+        ("frobnicate", "Unexpected child \"frobnicate\" found under \"flutter\".", 2),
+        ("bogus", "Unexpected child \"bogus\" found under \"flutter\".", 3),
+    ])
+    return unittest.end(env)
+
+# -- unreadable font weight (wording) --------------------------------------------------------------
+#
+# A whole-number float `weight` passes flutter_tools' validation (Dart
+# `400.0 == 400` holds) but every build reading the fonts casts it with
+# `as int?` (flutter_manifest.dart:422) and throws, so the fetch still
+# fails — saying flutter_tools cannot read it, not quoting a validation
+# error flutter_tools never prints. A fractional float keeps the
+# validation refusal flutter_tools reports.
+
+_FLOAT_WEIGHT_PUBSPEC = """\
+name: float_weight
+flutter:
+  fonts:
+    - family: F
+      fonts:
+        - asset: a.ttf
+          weight: 400.0
+"""
+
+def _float_weight_unreadable_refused_test_impl(ctx):
+    """A whole-number float `weight` fails as unreadable, at its line."""
+    env = unittest.begin(ctx)
+    result = _assert_refused(
+        env,
+        _FLOAT_WEIGHT_PUBSPEC,
+        "fonts",
+        "flutter_tools 3.47.7 cannot read it",
+        7,
+    )
+    detail = result.asset_errors[0].detail
+    for want in ["must be an int", "flutter_manifest.dart:422", "as int?"]:
+        asserts.true(env, want in detail, detail)
+    asserts.true(env, "Invalid value" not in detail, detail)
+    asserts.equals(env, "a.ttf", result.fonts[0].fonts[0].asset)
+    asserts.equals(env, None, result.fonts[0].fonts[0].weight)
+    return unittest.end(env)
+
+_FRACTIONAL_WEIGHT_PUBSPEC = """\
+name: fractional_weight
+flutter:
+  fonts:
+    - family: F
+      fonts:
+        - asset: a.ttf
+          weight: 150.0
+"""
+
+def _fractional_weight_refused_test_impl(ctx):
+    """A fractional float `weight` keeps flutter_tools' own refusal."""
+    env = unittest.begin(ctx)
+    _assert_refused(
+        env,
+        _FRACTIONAL_WEIGHT_PUBSPEC,
+        "fonts",
+        "Invalid value 150.0 ((double)) for font -> weight.",
+        7,
+    )
+    return unittest.end(env)
+
 _m0_test = unittest.make(_bad_weight_refused_test_impl)
 _m1_test = unittest.make(_bool_weight_refused_test_impl)
 _m2_test = unittest.make(_null_weight_refused_test_impl)
@@ -1099,6 +1339,16 @@ _m49_test = unittest.make(_bare_libraries_deferred_refused_test_impl)
 _m50_test = unittest.make(_multi_bad_flavors_refused_test_impl)
 _m51_test = unittest.make(_bare_fonts_refused_test_impl)
 _m52_test = unittest.make(_bare_deferred_loads_test_impl)
+_m53_test = unittest.make(_shader_scalar_flavors_refused_test_impl)
+_m54_test = unittest.make(_shader_mixed_platforms_refused_test_impl)
+_m55_test = unittest.make(_shader_conditions_load_test_impl)
+_m56_test = unittest.make(_font_noasset_weight_refused_test_impl)
+_m57_test = unittest.make(_font_noasset_extra_key_refused_test_impl)
+_m58_test = unittest.make(_font_noasset_clean_loads_test_impl)
+_m59_test = unittest.make(_family_int_key_refused_test_impl)
+_m60_test = unittest.make(_bom_section_lines_test_impl)
+_m61_test = unittest.make(_float_weight_unreadable_refused_test_impl)
+_m62_test = unittest.make(_fractional_weight_refused_test_impl)
 
 def manifest_validate_test_suite(name):
     """The `flutter:` section validation test suite."""
@@ -1157,4 +1407,14 @@ def manifest_validate_test_suite(name):
         _m50_test,
         _m51_test,
         _m52_test,
+        _m53_test,
+        _m54_test,
+        _m55_test,
+        _m56_test,
+        _m57_test,
+        _m58_test,
+        _m59_test,
+        _m60_test,
+        _m61_test,
+        _m62_test,
     )

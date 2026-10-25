@@ -15,8 +15,9 @@ single `asset_errors` / `check_asset_entry_problems` path, naming the package,
 `pubspec.yaml` and the offending line. Refusal details reuse flutter_tools'
 wording, including its Dart value and type spellings (`null`, `true`, `Null`,
 `String`, `YamlList`, `YamlMap`). Shapes flutter_tools only warns on (a font
-family without `family`, a font file entry without `asset`, an empty map
-asset entry) stay silent. An empty `deferred-components` list is refused:
+family without `family`, an empty map asset entry, and a font file entry
+without `asset` whose other keys are clean) stay silent. An empty
+`deferred-components` list is refused:
 flutter_tools 3.47.7 crashes reading one, so it cannot build.
 """
 
@@ -256,13 +257,24 @@ def _list_item_line(lines, start, end, parent_indent, index):
     return -1
 
 def _flutter_section_line(lines):
-    """Line index of the top-level `flutter:` key, or -1 when absent."""
+    """Line index of the top-level `flutter:` key, or -1 when absent.
+
+    The file's first line may carry a byte-order mark before `flutter:`.
+    U+FEFF encodes as the three bytes EF BB BF, and Starlark strings are
+    byte-indexed, so a line-0 head that matches past three leading bytes
+    still counts: without this every lookup under a BOM-led `flutter:`
+    misses and each refusal falls back to line 1.
+    """
     for i in range(len(lines)):
         text = lines[i].strip()
         if not _is_real_line(text):
             continue
-        if _indent_of(lines[i]) == 0 and _key_head(text) == "flutter":
-            return i
+        if _indent_of(lines[i]) == 0:
+            head = _key_head(text)
+            if head == "flutter":
+                return i
+            if i == 0 and head[3:] == "flutter":
+                return i
     return -1
 
 def _key_head_candidates(key):
@@ -366,9 +378,13 @@ def flutter_line_of(lines, locator):
     indices, e.g. `["flutter", "fonts", 0, "fonts", 1, "weight"]`. Each step
     descends into the key's (or item's) block; a step with nothing deeper to
     find (a value in flow, a missing key, a short list) resolves to the
-    deepest line found so far. The answer is therefore always the closest
-    named line: the key holding a flow collection, the item holding an inline
-    map, the section key, or `flutter:` itself.
+    deepest line found so far. A non-string mapping key (an int, bool or
+    float a locator step cannot name, e.g. `42: x` in a font family) still
+    resolves to its own head line: inside a list item the scope is a map, so
+    a non-string step searches the raw head text instead of counting list
+    items. The answer is therefore always the closest named line: the key
+    holding a flow collection, the item holding an inline map, the section
+    key, or `flutter:` itself.
 
     Args:
         lines: The pubspec text split on newlines.
@@ -390,6 +406,8 @@ def flutter_line_of(lines, locator):
         end = _span_end(lines, start, indent, in_item)
         if type(step) == "string":
             found = _child_key_line(lines, start, end, indent, step)
+        elif in_item:
+            found = _raw_head_line(lines, start, end, indent, False, step)
         else:
             found = _list_item_line(lines, start, end, indent, step)
         if found == -1:
