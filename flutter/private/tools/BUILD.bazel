@@ -332,6 +332,7 @@ _UNIT_TESTS = {
         ["@rules_dart//dart/guard:directive_guard"],
     ),
     "macho_edit_test": ("macho_edit.dart", []),
+    "macho_payload_floor_test": ("macho_edit.dart", []),
     "macho_section_type_test": ("macho_edit.dart", []),
     "sha256_test": ("sha256.dart", []),
     "generate_asset_manifest_test": ("generate_asset_manifest.dart", []),

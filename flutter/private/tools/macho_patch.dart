@@ -28,7 +28,10 @@ import 'macho_parse.dart'
         buildLcIdDylib,
         buildLcRpath,
         findFirstPayloadOffset,
+        isSingleRangeLinkeditCommand,
         parseLoadCommands;
+import 'macho_ranges.dart'
+    show isZeroFillSectionType, sectionTypeOf, segmentNameOf;
 import 'macho_strip.dart' show stripLocalSymbols;
 
 /// Writes [bytes] to [outputPath], creating parent directories as needed.
@@ -328,7 +331,11 @@ Uint8List _patchFatMachO(Uint8List inputBytes, PatchOptions options) {
         'Fat Mach-O slice $i is not a valid 64-bit Mach-O binary.',
       );
     }
-    final patchedBytes = _patchSingleMachO64(s.bytes, options);
+    final patchedBytes = _patchSingleMachO64(
+      s.bytes,
+      options,
+      'slice $i (${_archNameForCpuType(s.cputype)})',
+    );
     patchedSlices.add(
       FatSlice(
         cputype: s.cputype,
@@ -339,6 +346,14 @@ Uint8List _patchFatMachO(Uint8List inputBytes, PatchOptions options) {
     );
   }
   return buildFatMachO(patchedSlices, fat64: isFat64);
+}
+
+/// The architecture name for a fat slice's [cputype] (`arm64`, `x86_64`, or a
+/// hex fallback), so a refused slice is named by index and architecture.
+String _archNameForCpuType(int cputype) {
+  if (cputype == cpuTypeArm64) return 'arm64';
+  if (cputype == cpuTypeX86_64) return 'x86_64';
+  return 'cputype 0x${cputype.toRadixString(16)}';
 }
 
 /// Throws when a thin binary's cputype is not the requested [arch].
@@ -355,7 +370,11 @@ void _checkThinArch(Uint8List inputBytes, String arch) {
   }
 }
 
-Uint8List _patchSingleMachO64(Uint8List inputBytes, PatchOptions options) {
+Uint8List _patchSingleMachO64(
+  Uint8List inputBytes,
+  PatchOptions options, [
+  String? sliceLabel,
+]) {
   // Locals: PatchOptions' public fields do not promote on null checks.
   final platform = options.platform;
   final minOs = options.minOs;
@@ -405,8 +424,12 @@ Uint8List _patchSingleMachO64(Uint8List inputBytes, PatchOptions options) {
 
   return _emitPatchedMachO(
     workBytes,
-    oldSizeofcmds,
-    maxLoadCommandEnd,
+    _PayloadCeiling(
+      oldSizeofcmds: oldSizeofcmds,
+      firstPayloadOffset: maxLoadCommandEnd,
+      commands: originalCommands,
+      sliceLabel: sliceLabel,
+    ),
     state.updatedCommands,
     state.codeSigCommand != null,
   );
@@ -508,13 +531,42 @@ _idDylibVersions(LoadCommand lc) {
   );
 }
 
+/// The ceiling rewritten load commands must fit under: the old command size
+/// (for the header-only growth check), the first payload offset they must not
+/// reach, the commands naming that payload (for the refusal), and the fat
+/// slice label when patching a universal binary. Grouped so the emit entry
+/// point stays small.
+class _PayloadCeiling {
+  const _PayloadCeiling({
+    required this.oldSizeofcmds,
+    required this.firstPayloadOffset,
+    required this.commands,
+    this.sliceLabel,
+  });
+
+  /// The input's old `sizeofcmds`, for the header-only growth check.
+  final int oldSizeofcmds;
+
+  /// The first file byte any segment, section or linkedit table names.
+  final int firstPayloadOffset;
+
+  /// The parsed load commands naming the payload at [firstPayloadOffset].
+  final List<LoadCommand> commands;
+
+  /// The fat slice being patched (`slice 1 (arm64)`), or null for thin input.
+  final String? sliceLabel;
+}
+
 /// Serializes [updatedCommands] over [inputBytes], growing a header-only
 /// buffer or fitting before the first payload offset, then rebuilds the
 /// embedded signature over the new layout when [hasSignature] is set.
+///
+/// Refuses with a [FormatException] when the rewritten commands do not fit:
+/// the refusal keeps both byte offsets and names what starts at the payload
+/// offset (and the fat slice, when [ceiling] names one).
 Uint8List _emitPatchedMachO(
   Uint8List inputBytes,
-  int oldSizeofcmds,
-  int maxLoadCommandEnd,
+  _PayloadCeiling ceiling,
   List<LoadCommand> updatedCommands,
   bool hasSignature,
 ) {
@@ -524,6 +576,8 @@ Uint8List _emitPatchedMachO(
   }
 
   final newLoadCmdEnd = mhHeaderSize64 + newSizeofcmds;
+  final maxLoadCommandEnd = ceiling.firstPayloadOffset;
+  final oldSizeofcmds = ceiling.oldSizeofcmds;
   // If the file has no payload sections/segments at all (header-only fixture)
   // and grows past EOF, extend the buffer; otherwise verify we fit before
   // the first payload offset.
@@ -532,10 +586,7 @@ Uint8List _emitPatchedMachO(
       mhHeaderSize64 + oldSizeofcmds == inputBytes.length;
 
   if (!isHeaderOnly && newLoadCmdEnd > maxLoadCommandEnd) {
-    throw StateError(
-      'Not enough header padding for load commands: need $newLoadCmdEnd bytes, '
-      'first payload is at $maxLoadCommandEnd.',
-    );
+    throw FormatException(_noRoomMessage(ceiling, newLoadCmdEnd));
   }
 
   final outLength = isHeaderOnly
@@ -567,4 +618,181 @@ Uint8List _emitPatchedMachO(
   }
 
   return out;
+}
+
+/// The no-room refusal for [ceiling]: where the rewritten commands would end,
+/// where the first payload starts, what starts there, and the fat slice when
+/// patching a universal binary. A [FormatException], the patch's refusal for
+/// an input it cannot patch; `runPatch` prefixes the input path.
+String _noRoomMessage(_PayloadCeiling ceiling, int newLoadCmdEnd) {
+  final payloadOffset = ceiling.firstPayloadOffset;
+  final where = ceiling.sliceLabel == null
+      ? 'first payload is at $payloadOffset'
+      : 'first payload is at $payloadOffset in fat ${ceiling.sliceLabel}';
+  final what = _describePayloadAtOffset(ceiling.commands, payloadOffset);
+  if (what == null) {
+    return 'Not enough header padding for load commands: need $newLoadCmdEnd '
+        'bytes, $where (end of file).';
+  }
+  return 'Not enough header padding for load commands: need $newLoadCmdEnd '
+      'bytes, $where: $what starts at $payloadOffset.';
+}
+
+/// Names what starts at [payloadOffset]: the most specific range naming it, a
+/// section before the linkedit table before the segment range sharing it, or
+/// null when nothing names it (the file ends there).
+String? _describePayloadAtOffset(
+  List<LoadCommand> commands,
+  int payloadOffset,
+) {
+  final section = _sectionAtOffset(commands, payloadOffset);
+  if (section != null) return section;
+  final table = _tableAtOffset(commands, payloadOffset);
+  if (table != null) return table;
+  return _segmentAtOffset(commands, payloadOffset);
+}
+
+/// The `section <sect> of segment <seg>` starting at [payloadOffset], if any.
+/// Zero-fill sections name no file bytes and never match, mirroring the floor.
+String? _sectionAtOffset(List<LoadCommand> commands, int payloadOffset) {
+  for (final lc in commands) {
+    if (lc.cmd != lcSegment64 || lc.bytes.length < 72) continue;
+    final bd = ByteData.sublistView(lc.bytes);
+    final segname = segmentNameOf(lc);
+    final nsects = bd.getUint32(64, Endian.little);
+    for (var s = 0; s < nsects; s++) {
+      final at = 72 + s * 80;
+      if (at + 80 > lc.bytes.length) break;
+      if (isZeroFillSectionType(sectionTypeOf(bd, at))) continue;
+      final offset = bd.getUint32(at + 48, Endian.little);
+      final size = bd.getUint64(at + 40, Endian.little);
+      if (offset == payloadOffset && offset > 0 && size > 0) {
+        final name = ascii
+            .decode(lc.bytes.sublist(at, at + 16))
+            .split('\x00')
+            .first;
+        return 'section $name of segment $segname';
+      }
+    }
+  }
+  return null;
+}
+
+/// The linkedit table starting at [payloadOffset], if any: `LC_SYMTAB`'s
+/// symbol or string table, another table command's table, or an `LC_DYLD_INFO`
+/// pair's table.
+String? _tableAtOffset(List<LoadCommand> commands, int payloadOffset) {
+  for (final lc in commands) {
+    final hit = _tableRangeAtOffset(lc, payloadOffset);
+    if (hit != null) return hit;
+  }
+  return null;
+}
+
+/// The table [lc] starts at [payloadOffset], if any.
+String? _tableRangeAtOffset(LoadCommand lc, int payloadOffset) {
+  if (lc.cmd == lcSymtab) return _symtabAtOffset(lc, payloadOffset);
+  if (lc.cmd == lcDyldInfo || lc.cmd == lcDyldInfoOnly) {
+    return _dyldInfoAtOffset(lc, payloadOffset);
+  }
+  if (isSingleRangeLinkeditCommand(lc.cmd)) {
+    return _singleTableAtOffset(lc, payloadOffset);
+  }
+  return null;
+}
+
+/// The `LC_SYMTAB` symbol or string table starting at [payloadOffset], if any.
+String? _symtabAtOffset(LoadCommand lc, int payloadOffset) {
+  if (lc.bytes.length < 24) return null;
+  final bd = ByteData.sublistView(lc.bytes);
+  final symoff = bd.getUint32(8, Endian.little);
+  final nsyms = bd.getUint32(12, Endian.little);
+  if (symoff == payloadOffset && symoff > 0 && nsyms * 16 > 0) {
+    return 'LC_SYMTAB symbol table';
+  }
+  final stroff = bd.getUint32(16, Endian.little);
+  final strsize = bd.getUint32(20, Endian.little);
+  if (stroff == payloadOffset && stroff > 0 && strsize > 0) {
+    return 'LC_SYMTAB string table';
+  }
+  return null;
+}
+
+/// The single `(dataoff, datasize)` table [lc] starts at [payloadOffset], if
+/// any, named by its load command.
+String? _singleTableAtOffset(LoadCommand lc, int payloadOffset) {
+  if (lc.bytes.length < 16) return null;
+  final bd = ByteData.sublistView(lc.bytes);
+  final dataoff = bd.getUint32(8, Endian.little);
+  final datasize = bd.getUint32(12, Endian.little);
+  if (dataoff == payloadOffset && dataoff > 0 && datasize > 0) {
+    return '${_loadCommandName(lc.cmd)} table';
+  }
+  return null;
+}
+
+/// The `LC_DYLD_INFO` pair table starting at [payloadOffset], if any.
+String? _dyldInfoAtOffset(LoadCommand lc, int payloadOffset) {
+  if (lc.bytes.length < 48) return null;
+  const pairNames = ['rebase', 'bind', 'weak bind', 'lazy bind', 'export'];
+  final bd = ByteData.sublistView(lc.bytes);
+  for (var i = 0; i < 5; i++) {
+    final field = 8 + i * 8;
+    final offset = bd.getUint32(field, Endian.little);
+    final size = bd.getUint32(field + 4, Endian.little);
+    if (offset == payloadOffset && offset > 0 && size > 0) {
+      return '${_loadCommandName(lc.cmd)} ${pairNames[i]} table';
+    }
+  }
+  return null;
+}
+
+/// The segment whose own file range starts at [payloadOffset], if any.
+String? _segmentAtOffset(List<LoadCommand> commands, int payloadOffset) {
+  for (final lc in commands) {
+    if (lc.cmd != lcSegment64 || lc.bytes.length < 72) continue;
+    final bd = ByteData.sublistView(lc.bytes);
+    final fileoff = bd.getUint64(40, Endian.little);
+    final filesize = bd.getUint64(48, Endian.little);
+    if (fileoff == payloadOffset && fileoff > 0 && filesize > 0) {
+      final name = segmentNameOf(lc);
+      if (name.isEmpty) return '${_loadCommandName(lc.cmd)} segment';
+      return 'segment $name';
+    }
+  }
+  return null;
+}
+
+/// The `LC_*` name of a payload-floor load command [cmd], or its hex type.
+String _loadCommandName(int cmd) {
+  switch (cmd) {
+    case lcSegment64:
+      return 'LC_SEGMENT_64';
+    case lcSymtab:
+      return 'LC_SYMTAB';
+    case lcDysymtab:
+      return 'LC_DYSYMTAB';
+    case lcFunctionStarts:
+      return 'LC_FUNCTION_STARTS';
+    case lcDataInCode:
+      return 'LC_DATA_IN_CODE';
+    case lcCodeSignature:
+      return 'LC_CODE_SIGNATURE';
+    case lcDyldExportsTrie:
+      return 'LC_DYLD_EXPORTS_TRIE';
+    case lcDyldChainedFixups:
+      return 'LC_DYLD_CHAINED_FIXUPS';
+    case lcSegmentSplitInfo:
+      return 'LC_SEGMENT_SPLIT_INFO';
+    case lcDylibCodeSignDrs:
+      return 'LC_DYLIB_CODE_SIGN_DRS';
+    case lcLinkerOptimizationHint:
+      return 'LC_LINKER_OPTIMIZATION_HINT';
+    case lcDyldInfo:
+      return 'LC_DYLD_INFO';
+    case lcDyldInfoOnly:
+      return 'LC_DYLD_INFO_ONLY';
+    default:
+      return 'load command 0x${cmd.toRadixString(16)}';
+  }
 }

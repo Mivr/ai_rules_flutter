@@ -9,6 +9,7 @@ import 'dart:typed_data';
 
 import 'macho_constants.dart';
 import 'macho_fat.dart' show isMachO32, isMachO64;
+import 'macho_ranges.dart' show isZeroFillSectionType, sectionTypeOf;
 
 /// Represents a single raw Mach-O load command.
 class LoadCommand {
@@ -327,6 +328,8 @@ void _considerCommandPayload(LoadCommand lc, _PayloadFloor floor) {
 }
 
 /// Folds a `LC_SEGMENT_64` command's file range and its sections into [floor].
+/// Zero-fill sections name no file bytes whatever their `offset` field holds,
+/// so they never lower the floor; every other section counts.
 void _considerSegmentPayload(
   LoadCommand lc,
   ByteData bd,
@@ -343,6 +346,9 @@ void _considerSegmentPayload(
   for (var s = 0; s < nsects; s++) {
     final sectOff = 72 + s * 80;
     if (sectOff + 80 <= lc.bytes.length) {
+      if (isZeroFillSectionType(sectionTypeOf(bd, sectOff))) {
+        continue;
+      }
       final sSize = bd.getUint64(sectOff + 40, Endian.little);
       final sOffset = bd.getUint32(sectOff + 48, Endian.little);
       floor.consider(sOffset, sSize);
