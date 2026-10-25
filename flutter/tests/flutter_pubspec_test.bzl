@@ -317,6 +317,69 @@ def _empty_flutter_block_test_impl(ctx):
     return unittest.end(env)
 
 # ---------------------------------------------------------------------------
+# flutter.plugin validation (parse_flutter_assets_block refusals)
+# ---------------------------------------------------------------------------
+
+_EMPTY_PLUGIN_MAP_PUBSPEC = """\
+name: empty_plugin_pkg
+flutter:
+  plugin: {}
+"""
+
+def _empty_plugin_map_refused_test_impl(ctx):
+    """An empty `plugin:` map fails naming the missing `platforms` key."""
+    env = unittest.begin(ctx)
+    result = parse_flutter_assets_block(_EMPTY_PLUGIN_MAP_PUBSPEC)
+    asserts.equals(env, 1, len(result.asset_errors))
+    problem = result.asset_errors[0]
+    asserts.equals(env, "plugin", problem.key)
+    asserts.equals(env, 3, problem.line)
+    asserts.true(
+        env,
+        "Cannot find the `flutter.plugin.platforms` key" in problem.detail,
+        problem.detail,
+    )
+    return unittest.end(env)
+
+_BAD_ANDROID_PLUGINCLASS_PUBSPEC = """\
+name: bad_android_pkg
+flutter:
+  plugin:
+    platforms:
+      android:
+        pluginClass: 5
+"""
+
+def _bad_android_pluginclass_refused_test_impl(ctx):
+    """A non-identifier android `pluginClass` fails at the entry's line."""
+    env = unittest.begin(ctx)
+    result = parse_flutter_assets_block(_BAD_ANDROID_PLUGINCLASS_PUBSPEC)
+    asserts.equals(env, 1, len(result.asset_errors))
+    problem = result.asset_errors[0]
+    asserts.equals(env, "plugin", problem.key)
+    asserts.equals(env, 5, problem.line)
+    asserts.true(
+        env,
+        "Invalid \"android\" plugin specification." in problem.detail,
+        problem.detail,
+    )
+    return unittest.end(env)
+
+def _umbrella_plugin_loads_test_impl(ctx):
+    """A federated umbrella plugin parses with no refusals."""
+    env = unittest.begin(ctx)
+    result = parse_flutter_assets_block(_PATH_PROVIDER_PUBSPEC)
+    asserts.equals(env, [], result.asset_errors)
+    return unittest.end(env)
+
+def _monolithic_plugin_loads_test_impl(ctx):
+    """A monolithic multi-platform plugin parses with no refusals."""
+    env = unittest.begin(ctx)
+    result = parse_flutter_assets_block(_PACKAGE_INFO_PLUS_PUBSPEC)
+    asserts.equals(env, [], result.asset_errors)
+    return unittest.end(env)
+
+# ---------------------------------------------------------------------------
 # parse_pubspec / parse_flutter_block
 # ---------------------------------------------------------------------------
 
@@ -352,6 +415,10 @@ _t10_test = unittest.make(_shaders_and_material_test_impl)
 _t11_test = unittest.make(_empty_flutter_block_test_impl)
 _t12_test = unittest.make(_parse_pubspec_basics_test_impl)
 _t13_test = unittest.make(_parse_pubspec_empty_test_impl)
+_t14_test = unittest.make(_empty_plugin_map_refused_test_impl)
+_t15_test = unittest.make(_bad_android_pluginclass_refused_test_impl)
+_t16_test = unittest.make(_umbrella_plugin_loads_test_impl)
+_t17_test = unittest.make(_monolithic_plugin_loads_test_impl)
 
 def flutter_pubspec_test_suite(name):
     unittest.suite(
@@ -370,4 +437,8 @@ def flutter_pubspec_test_suite(name):
         _t11_test,
         _t12_test,
         _t13_test,
+        _t14_test,
+        _t15_test,
+        _t16_test,
+        _t17_test,
     )

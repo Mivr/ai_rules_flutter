@@ -358,6 +358,22 @@ jobs:
             exit 1
           fi
           echo "$out" | grep -F 'Expected "assets" to be a list'
+      # Font-shape red path: e2e/pub_flutter_shape_red also carries a path
+      # package whose pubspec declares a font `weight: 150` (flutter_tools
+      # only accepts 100..900). The spoke fetch must fail on the weight
+      # refusal naming `pubspec.yaml` line 18 instead of bundling the font
+      # with an unset weight. Both greps pin the refusal and its line so a
+      # skip or a differently-worded failure cannot pass as red.
+      - name: Invalid font weight fetch fails on the weight refusal
+        working-directory: e2e/pub_flutter_shape_red
+        run: |
+          if out=$(bazel fetch @red_deps//:bad_font 2>&1); then
+            echo "$out"
+            echo "expected the invalid-weight fetch to fail, but it succeeded"
+            exit 1
+          fi
+          echo "$out" | grep -F 'for font -> weight'
+          echo "$out" | grep -F 'pubspec.yaml line 18'
       # Compile-soundness red path: the entrypoint imports a sibling that
       # exists on disk but is never declared, so executing the compile must
       # fail on the guard's refusal — never with a built dill. The target is

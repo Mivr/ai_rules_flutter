@@ -1,11 +1,13 @@
-"""Pubspec-shape red path: a malformed `flutter.assets` section must fail the fetch.
+"""Pubspec-shape red path: malformed `flutter:` sections must fail the fetch.
 
 The `bad_shape` path package declares `assets: assets/a.png` (a string where
-flutter_tools requires a list). CI fetches `@red_deps//:bad_shape`, expects
-the fetch to fail, and greps the exact shape refusal. It guards the
-fail-closed projection in `flutter_pubspec.bzl`: a projection that skipped
-the shape would bundle no assets with a green build, so only this red path
-would turn red.
+flutter_tools requires a list), and the `bad_font` path package declares a
+font `weight: 150` (outside the accepted 100..900). CI fetches
+`@red_deps//:bad_shape` and `@red_deps//:bad_font`, expects each fetch to
+fail, and greps the exact shape refusal with its `pubspec.yaml` line. They
+guard the fail-closed projection in `flutter_pubspec.bzl`: a projection that
+skipped a shape would bundle the package with a green build, so only these
+red paths would turn red.
 """
 
 module(name = "rules_flutter_pub_shape_red")
