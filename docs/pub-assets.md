@@ -34,7 +34,8 @@ the package, the template, and the bound.
 Every refusal fails the spoke fetch with
 `flutter.pub spoke for "<package>": pubspec.yaml line <N>: ...`, naming the
 package and the 1-based line of the offending key or list entry, so the fix
-is one editor jump away. Accepted pubspecs parse exactly as before.
+is one editor jump away. A non-string key names its own line, and a leading
+byte-order mark moves no line. Accepted pubspecs parse exactly as before.
 
 - A `flutter:` section that is neither a map nor absent fails the fetch at
   the `flutter:` line, as flutter_tools does.
@@ -53,19 +54,25 @@ is one editor jump away. Accepted pubspecs parse exactly as before.
   map, a non-string `family`, a non-list per-family `fonts`, a font file
   entry that is not a map, or a non-string font file `asset` fails the
   fetch, naming the package, the key and the expected shape, as
-  flutter_tools does. A missing `family`, or a file entry without an
-  `asset` key, stays silently skipped, the way flutter_tools only warns
-  on it.
+  flutter_tools does. A missing `family` stays silently skipped; a file
+  entry without an `asset` key stays silent only when its other keys are
+  clean, the way flutter_tools only warns on it.
 - A font `weight` outside 100..900 (for example `weight: 150`), a font
   `style` outside `italic`/`normal`, or any other key in a font file entry
-  fails the fetch at the key's line, as flutter_tools does. A non-string
+  fails the fetch at the key's line, as flutter_tools does, whether or not
+  the entry carries `asset`. A non-string
   key reports twice, the way flutter_tools reports both its checks. An
   absent `weight` or `style` stays valid and reads as unset.
+- A whole-number float font `weight` (for example `weight: 400.0`) fails
+  the fetch at the key's line: it passes flutter_tools' validation, but
+  no build can read it, so the refusal says flutter_tools 3.47.7 cannot
+  read it instead of quoting a validation error flutter_tools never prints.
 - An unexpected key in a font family entry fails the fetch at the key's
   line, as flutter_tools does.
 - A `platforms` or `flavors` value that is not a list of strings (for example
   a scalar `platforms: web`) fails the fetch, naming the package, the entry
-  and the key, as flutter_tools does.
+  and the key, as flutter_tools does. The check is shared by `assets` and
+  `shaders` entries, the way flutter_tools validates both with one function.
 - An asset entry with a `transformers` key fails the fetch, naming the package
   and the entry: asset transformers are not supported by rules_flutter.
 - Any other unknown key in an entry mapping is ignored, the way flutter_tools
