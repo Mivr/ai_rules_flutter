@@ -179,41 +179,115 @@ def _conditioned_entry(entry, path):
     """One expanded file inheriting its declaring entry's conditions."""
     return struct(path = path, flavors = entry.flavors, platforms = entry.platforms)
 
-def _variant_files_for(own_path, files):
-    """The resolution variants of one bundled file, sorted.
+def _memoized_reader(reader):
+    """Wrap a directory `reader` so each distinct directory is read once.
 
-    Mirrors `variantsFor`: same-basename files living exactly one level down
-    in a sibling directory whose name matches `is_asset_variant_dir`. Files
-    deeper in the tree, or under a non-variant subdirectory, are not variants.
+    The pub asset expansion and the spoke lister both resolve many entries
+    against few directories; without memoization K file entries under one
+    directory would read it K times. The cache lives for one fetch.
 
     Args:
-        own_path: The package-relative main file (it need not exist: a
-            variant-only entry still bundles its variants).
-        files: Every file under the entry's parent directory, recursively.
+        reader: Callable taking a directory path and returning its listing.
 
     Returns:
-        The sorted variant paths.
+        A callable with the same shape that reads each directory once.
     """
-    parent, base = _split_asset_path(own_path)
-    variants = []
-    for candidate in files:
-        cand_parent, cand_base = _split_asset_path(candidate)
-        if cand_base != base or cand_parent == parent:
-            continue
-        grandparent, _, vdir = cand_parent.rpartition("/")
-        if grandparent != parent or not is_asset_variant_dir(vdir):
-            continue
-        variants.append(candidate)
-    return sorted(variants)
+    cache = {}
+
+    def cached(rel_dir):
+        """The cached read of `rel_dir`."""
+        if rel_dir not in cache:
+            cache[rel_dir] = reader(rel_dir)
+        return cache[rel_dir]
+
+    return cached
+
+def _index_listed_files(directory, files):
+    """Index one directory listing for linear asset resolution.
+
+    Partitions `files` into the directory's own files (a sorted list plus
+    an exact-membership dict) and, per basename, the files living directly
+    inside its immediate resolution-variant subdirectories
+    (`is_asset_variant_dir`). Files deeper in the tree, or under a
+    non-variant subdirectory, land in neither — mirroring `variantsFor`,
+    which only consults the directory itself and its immediate variant
+    subdirectories. Every entry below then resolves through dict lookups.
+
+    Args:
+        directory: The listed directory path ("" for the package root).
+        files: Every file path the listing returned for it.
+
+    Returns:
+        A struct `(own, own_set, variants)`: `own` the sorted own files,
+        `own_set` the same paths as a membership dict, `variants` a dict
+        from basename to that basename's sorted variant paths.
+    """
+    own = []
+    own_set = {}
+    variants = {}
+    for f in files:
+        parent, _, base = f.rpartition("/")
+        if parent == directory:
+            own.append(f)
+            own_set[f] = True
+        else:
+            grandparent, _, vdir = parent.rpartition("/")
+            if grandparent == directory and is_asset_variant_dir(vdir):
+                variants.setdefault(base, []).append(f)
+    return struct(
+        own = sorted(own),
+        own_set = own_set,
+        variants = {base: sorted(paths) for base, paths in variants.items()},
+    )
+
+def _asset_scope(list_dir, package_name):
+    """Bundle one expansion's memoized listing reader and index cache.
+
+    Args:
+        list_dir: Callable taking a directory path (no trailing slash, ""
+            for the package root) and returning `struct(files, error)`.
+        package_name: The pub package the entries come from, for failures.
+
+    Returns:
+        A struct `(list_dir, index, package_name)`: the memoized reader,
+        the per-directory index cache (built once per directory), and the
+        package name.
+    """
+    return struct(
+        list_dir = _memoized_reader(list_dir),
+        index = {},
+        package_name = package_name,
+    )
+
+def _scope_index(scope, rel_dir):
+    """The listing index for `rel_dir`, read and built once per expansion.
+
+    Args:
+        scope: An `_asset_scope` struct, updated in place.
+        rel_dir: The directory path to index.
+
+    Returns:
+        A struct `(error, listing)`: `error` is "" or the listing failure,
+        and `listing` is the `_index_listed_files` result (None on error).
+    """
+    if rel_dir not in scope.index:
+        listed = scope.list_dir(rel_dir)
+        if listed.error:
+            scope.index[rel_dir] = struct(error = listed.error, listing = None)
+        else:
+            scope.index[rel_dir] = struct(
+                error = "",
+                listing = _index_listed_files(rel_dir, listed.files),
+            )
+    return scope.index[rel_dir]
 
 def _expand_directory_entry(entry, scope, expanded):
     """Bundle a trailing-slash entry's own files plus each one's variants.
 
     Args:
         entry: The parsed entry (`struct(path, flavors, platforms)`).
-        scope: `struct(list_dir, package_name)`; `list_dir` takes a directory
-            path (no trailing slash) and returns `struct(files, error)` with
-            every file under it.
+        scope: An `_asset_scope` struct; the entry's directory is read
+            and indexed once per expansion.
         expanded: The output list to append `struct(path, flavors, platforms)`
             entries to.
 
@@ -221,13 +295,12 @@ def _expand_directory_entry(entry, scope, expanded):
         "" or the fetch failure (a walk bound, already naming the package
         and the directory).
     """
-    listed = scope.list_dir(entry.path.rstrip("/"))
-    if listed.error:
-        return listed.error
-    own = sorted([f for f in listed.files if _split_asset_path(f)[0] == entry.path.rstrip("/")])
-    for main in own:
+    indexed = _scope_index(scope, entry.path.rstrip("/"))
+    if indexed.error:
+        return indexed.error
+    for main in indexed.listing.own:
         expanded.append(_conditioned_entry(entry, main))
-        for variant in _variant_files_for(main, listed.files):
+        for variant in indexed.listing.variants.get(_split_asset_path(main)[1], []):
             expanded.append(_conditioned_entry(entry, variant))
     return ""
 
@@ -236,19 +309,19 @@ def _expand_file_entry(entry, scope, expanded):
 
     Args:
         entry: The parsed entry (`struct(path, flavors, platforms)`).
-        scope: `struct(list_dir, package_name)`, as in `_expand_directory_entry`.
+        scope: An `_asset_scope` struct, as in `_expand_directory_entry`.
         expanded: The output list to append to.
 
     Returns:
         "" or the fetch failure: a walk bound, or `missing_asset_error`
         when neither the main file nor any variant exists.
     """
-    parent, _base = _split_asset_path(entry.path)
-    listed = scope.list_dir(parent)
-    if listed.error:
-        return listed.error
-    found_main = entry.path in listed.files
-    variants = _variant_files_for(entry.path, listed.files)
+    parent, base = _split_asset_path(entry.path)
+    indexed = _scope_index(scope, parent)
+    if indexed.error:
+        return indexed.error
+    found_main = entry.path in indexed.listing.own_set
+    variants = indexed.listing.variants.get(base, [])
     if not found_main and not variants:
         return missing_asset_error(scope.package_name, entry.path)
     if found_main:
@@ -264,6 +337,9 @@ def expand_pub_asset_entries(parsed_assets, list_dir, package_name = ""):
     main file plus resolution variants (variant-only entries are accepted),
     directory entries to their own files plus each one's variants. Every
     emitted file inherits its declaring entry's `platforms` / `flavors`.
+    Each distinct directory is read and indexed once no matter how many
+    entries name it, so directory and file entries both resolve in time
+    linear in the number of files.
 
     Args:
         parsed_assets: List of `struct(path, flavors, platforms)` from
@@ -281,7 +357,7 @@ def expand_pub_asset_entries(parsed_assets, list_dir, package_name = ""):
         failure naming the package and the entry or directory. The caller
         `fail()`s on it.
     """
-    scope = struct(list_dir = list_dir, package_name = package_name)
+    scope = _asset_scope(list_dir, package_name)
     expanded = []
     for entry in parsed_assets:
         if entry.path.endswith("/"):
@@ -299,18 +375,68 @@ def _ctx_readdir(ctx, directory):
         return []
     return [struct(name = child.basename, is_dir = child.is_dir) for child in base.readdir()]
 
-def ctx_package_lister(ctx, package_name, bound = PUB_ASSET_LIST_BOUND):
-    """The spoke's `list_dir` for `expand_pub_asset_entries`, memoized.
+def _shallow_asset_files(readdir, rel_dir, package_name, bound = PUB_ASSET_LIST_BOUND):
+    """List one asset directory the way flutter_tools reads it, bounded and loud.
 
-    Walks through `list_files_recursive` with the fetch's bound; a walk that
-    reaches it fails the fetch naming the package and the directory rather
-    than bundling part of the tree. One walk per distinct directory: file
-    entries sharing a parent reuse it.
+    Reads the directory's own entries plus the entries directly inside its
+    immediate resolution-variant subdirectories (`is_asset_variant_dir`) —
+    the two listings `_AssetDirectoryCache.variantsFor` in
+    `packages/flutter_tools/lib/src/asset.dart` consults — and nothing
+    deeper. Needs one read for the directory itself plus one per variant
+    subdirectory; needing more than `bound` returns `error` instead of
+    silently truncating, the same `walk_bound_error` failure the recursive
+    walk reports.
 
     Args:
-        ctx: The spoke's repository context.
-        package_name: The pub package walked, for the bound failure.
-        bound: Maximum directory pops per walked directory.
+        readdir: Callable taking a package-relative directory path and
+            returning its immediate children as a list of
+            `struct(name, is_dir)`. A missing directory returns [].
+        rel_dir: Package-relative directory to list ("" for the package root).
+        package_name: The pub package listed, for the bound failure.
+        bound: Maximum directory reads; needing more returns `error`
+            instead of silently truncating. Tests drive this small.
+
+    Returns:
+        `struct(files, error)`: `files` holds the package-relative paths of
+        the directory's own files plus the files directly inside its
+        variant subdirectories ([] on error); `error` is "" or the fetch
+        failure naming the package and the directory.
+    """
+    own = []
+    variant_dirs = []
+    for child in readdir(rel_dir):
+        if child.is_dir:
+            if is_asset_variant_dir(child.name):
+                variant_dirs.append(child.name)
+        elif rel_dir == "":
+            own.append(child.name)
+        else:
+            own.append(rel_dir + "/" + child.name)
+    if 1 + len(variant_dirs) > bound:
+        return struct(files = [], error = walk_bound_error(package_name, rel_dir, bound))
+    files = list(own)
+    for vdir in variant_dirs:
+        vrel = vdir if rel_dir == "" else rel_dir + "/" + vdir
+        for child in readdir(vrel):
+            if not child.is_dir:
+                files.append(vrel + "/" + child.name)
+    return struct(files = files, error = "")
+
+def _asset_lister(readdir, package_name, bound = PUB_ASSET_LIST_BOUND):
+    """A memoized shallow `list_dir` over `readdir`, for tests and the spoke.
+
+    Each distinct directory is read once through `_shallow_asset_files`;
+    file entries sharing a parent reuse its listing. This keeps its own
+    closure rather than reusing `_memoized_reader`: the lister always flows
+    into `expand_pub_asset_entries`, which memoizes again, and Bazel refuses
+    to re-enter one closure factory's function object.
+
+    Args:
+        readdir: Callable taking a package-relative directory path and
+            returning its immediate children as a list of
+            `struct(name, is_dir)`.
+        package_name: The pub package listed, for the bound failure.
+        bound: Maximum directory reads per listed directory.
 
     Returns:
         A `list_dir` callable as `expand_pub_asset_entries` takes it.
@@ -318,14 +444,33 @@ def ctx_package_lister(ctx, package_name, bound = PUB_ASSET_LIST_BOUND):
     cache = {}
 
     def list_dir(rel_dir):
-        """Every file under `rel_dir`, memoized per directory."""
+        """The cached shallow listing of `rel_dir`."""
         if rel_dir not in cache:
-            cache[rel_dir] = list_files_recursive(
-                lambda directory: _ctx_readdir(ctx, directory),
-                rel_dir,
-                package_name,
-                bound,
-            )
+            cache[rel_dir] = _shallow_asset_files(readdir, rel_dir, package_name, bound)
         return cache[rel_dir]
 
     return list_dir
+
+def ctx_package_lister(ctx, package_name, bound = PUB_ASSET_LIST_BOUND):
+    """The spoke's `list_dir` for `expand_pub_asset_entries`, memoized.
+
+    Reads through `_shallow_asset_files` with the fetch's bound: the
+    directory's own files plus its immediate variant subdirectories' files,
+    the same two listings flutter_tools reads, never deeper trees. A read
+    that needs more than the bound fails the fetch naming the package and
+    the directory rather than bundling part of the tree. One read per
+    distinct directory: file entries sharing a parent reuse it.
+
+    Args:
+        ctx: The spoke's repository context.
+        package_name: The pub package walked, for the bound failure.
+        bound: Maximum directory reads per listed directory.
+
+    Returns:
+        A `list_dir` callable as `expand_pub_asset_entries` takes it.
+    """
+    return _asset_lister(
+        lambda directory: _ctx_readdir(ctx, directory),
+        package_name,
+        bound,
+    )

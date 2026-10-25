@@ -684,7 +684,7 @@ def link_scoped_file_entry(ctx, src, entry_path, scope, apply_skip = True):
         return
     _link_new_symlink(ctx, node, repo_rel, scope.linked)
 
-def _link_asset_variant_files(ctx, src, entry_path, scope):
+def _link_asset_variant_files(ctx, src, entry_path, scope, variant_cache):
     """Link the resolution variants of one declared file entry.
 
     A file entry bundles its main file plus same-named files in sibling
@@ -693,19 +693,35 @@ def _link_asset_variant_files(ctx, src, entry_path, scope):
     variants stay unlinked — a main file without variants is the common
     case, and a missing main is reported later by the spoke generator.
     The variant directory is watched before testing whether it exists, so
-    adding variants later refetches the spoke.
+    adding variants later refetches the spoke. `variant_cache` maps each
+    parent directory to its already-read variant subdirectory names, so K
+    file entries under one directory read it once.
+
+    Args:
+        ctx: The path-package spoke's repository context.
+        src: The workspace-side package directory node.
+        entry_path: The package-relative declared file path.
+        scope: The fetch's link scope.
+        variant_cache: Dict from parent directory path to its variant
+            subdirectory names, updated in place.
     """
     parts = _spoke_entry_parts(scope.package_name, entry_path)
     base = parts[-1]
-    parent_parts = parts[:-1]
-    dir_node = src.get_child(*parent_parts) if parent_parts else src
-    ctx.watch(dir_node)
-    if not dir_node.exists:
-        return
-    for child in dir_node.readdir():
-        if not child.is_dir or not is_asset_variant_dir(child.basename):
-            continue
-        variant = "/".join(parent_parts + [child.basename, base])
+    parent_key = "/".join(parts[:-1])
+    if parent_key not in variant_cache:
+        dir_node = src.get_child(*parts[:-1]) if parts[:-1] else src
+        ctx.watch(dir_node)
+        variants = []
+        if dir_node.exists:
+            for child in dir_node.readdir():
+                if child.is_dir and is_asset_variant_dir(child.basename):
+                    variants.append(child.basename)
+        variant_cache[parent_key] = variants
+    for vdir in variant_cache[parent_key]:
+        if parent_key == "":
+            variant = vdir + "/" + base
+        else:
+            variant = parent_key + "/" + vdir + "/" + base
         link_scoped_file_entry(ctx, src, variant, scope)
 
 def link_spoke_contents(ctx, src, asset_block, platform_dirs, scope):
@@ -736,12 +752,13 @@ def link_spoke_contents(ctx, src, asset_block, platform_dirs, scope):
     for entry in ["hook/build.dart", "hook/link.dart"]:
         link_scoped_file_entry(ctx, src, entry, scope)
     link_scoped_file_entry(ctx, src, "lib", scope, False)
+    variant_cache = {}
     for asset in asset_block.assets:
         if asset.path.endswith("/"):
             _link_scoped_dir_entry(ctx, src, asset.path[:-1], scope, False)
         else:
             link_scoped_file_entry(ctx, src, asset.path, scope)
-            _link_asset_variant_files(ctx, src, asset.path, scope)
+            _link_asset_variant_files(ctx, src, asset.path, scope, variant_cache)
     for family in asset_block.fonts:
         for font in family.fonts:
             link_scoped_file_entry(ctx, src, font.asset, scope)

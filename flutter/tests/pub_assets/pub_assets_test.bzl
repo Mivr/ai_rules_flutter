@@ -12,10 +12,12 @@ load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load(
     "//flutter/private:flutter_pub_assets.bzl",
     "asset_entry_problem_error",
+    "ctx_package_lister",
     "expand_pub_asset_entries",
     "is_asset_variant_dir",
     "list_files_recursive",
 )
+load("//flutter/private:flutter_pub_package.bzl", "check_spoke_file_names")
 load("//flutter/private:flutter_pubspec.bzl", "parse_flutter_assets_block")
 
 # -- variant directory names ------------------------------------------------------
@@ -479,6 +481,164 @@ def _bad_path_shaders_refused_test_impl(ctx):
     asserts.equals(env, [], result.shaders)
     return unittest.end(env)
 
+# -- linear expansion at scale (M-9) ------------------------------------------------------
+#
+# One directory entry plus one file entry per file over 4,000 files, with
+# variants, expands exactly as the quadratic code did, while the listing is
+# read once per directory however many entries name it. The spoke reader
+# below the expansion reads only what flutter_tools reads — the directory's
+# own files plus its immediate variant subdirectories' files — so deeper
+# non-variant directories are never read, and every read still fails loudly
+# at its bound.
+
+_BIG_COUNT = 4000
+_BIG_MAINS = ["big/f" + str(i) + ".png" for i in range(_BIG_COUNT)]
+_BIG_VARIANTS = ["big/2.0x/f" + str(i) + ".png" for i in range(_BIG_COUNT) if i % 2 == 0]
+_BIG_FILES = _BIG_MAINS + _BIG_VARIANTS
+
+def _counting_list_dir(files_by_dir):
+    """A `list_dir` fake over `files_by_dir` recording every directory read.
+
+    Args:
+        files_by_dir: Dict from directory path to that directory's files.
+
+    Returns:
+        A struct `(list_dir, calls)`: the fake and its read log.
+    """
+    calls = []
+
+    def list_dir(directory):
+        calls.append(directory)
+        return struct(files = files_by_dir.get(directory, []), error = "")
+
+    return struct(list_dir = list_dir, calls = calls)
+
+def _big_variants_by_main():
+    """Map each big main file to its variant path, for the want list."""
+    variants = {}
+    for path in _BIG_VARIANTS:
+        variants["big/" + path.rpartition("/")[2]] = path
+    return variants
+
+def _big_directory_and_file_entries_expand_test_impl(ctx):
+    """4,000 files expand identically through one directory and 4,000 file entries."""
+    env = unittest.begin(ctx)
+    entries = [struct(path = "big/", flavors = [], platforms = [])]
+    for main in _BIG_MAINS:
+        entries.append(struct(path = main, flavors = [], platforms = []))
+    counter = _counting_list_dir({"big": _BIG_FILES})
+    result = expand_pub_asset_entries(entries, counter.list_dir, "big_pkg")
+    asserts.equals(env, "", result.error)
+    by_main = _big_variants_by_main()
+    want = []
+    for main in sorted(_BIG_MAINS):
+        want.append(main)
+        if main in by_main:
+            want.append(by_main[main])
+    for main in _BIG_MAINS:
+        want.append(main)
+        if main in by_main:
+            want.append(by_main[main])
+    asserts.equals(env, want, [e.path for e in result.expanded])
+    asserts.equals(env, ["big"], counter.calls)
+    return unittest.end(env)
+
+_DEEP_TREE = {
+    "img": [
+        struct(name = "a.png", is_dir = False),
+        struct(name = "b.png", is_dir = False),
+        struct(name = "2.0x", is_dir = True),
+        struct(name = "sub", is_dir = True),
+    ],
+    "img/2.0x": [struct(name = "a.png", is_dir = False)],
+    "img/sub": [struct(name = "deep.png", is_dir = False)],
+}
+
+def _recording_repo_ctx(tree):
+    """A repository-ctx fake over a flat directory tree, recording reads.
+
+    Covers the `ctx.path` surface `ctx_package_lister` reads: a missing
+    directory reports `exists = False`, a listed one answers `readdir()`
+    with its immediate children.
+
+    Args:
+        tree: Dict from package-relative directory path to its children as
+            `struct(name, is_dir)` lists. A missing key reads as missing.
+
+    Returns:
+        A struct `(ctx, reads)`: the fake ctx and its `path()` call log.
+    """
+    reads = []
+
+    def path(rel):
+        reads.append(rel)
+        key = "" if rel == "." else rel
+        if key not in tree:
+            return struct(exists = False)
+        children = tree[key]
+
+        def readdir():
+            return [struct(basename = child.name, is_dir = child.is_dir) for child in children]
+
+        return struct(exists = True, readdir = readdir)
+
+    return struct(ctx = struct(path = path), reads = reads)
+
+def _shallow_lister_reads_once_and_skips_deep_test_impl(ctx):
+    """The spoke reader reads each directory once and never a deep non-variant dir."""
+    env = unittest.begin(ctx)
+    fake = _recording_repo_ctx(_DEEP_TREE)
+    lister = ctx_package_lister(fake.ctx, "deep_pkg", 100)
+    entries = [
+        struct(path = "img/", flavors = [], platforms = []),
+        struct(path = "img/a.png", flavors = [], platforms = []),
+        struct(path = "img/b.png", flavors = [], platforms = []),
+    ]
+    result = expand_pub_asset_entries(entries, lister, "deep_pkg")
+    asserts.equals(env, "", result.error)
+    asserts.equals(
+        env,
+        [
+            "img/a.png",
+            "img/2.0x/a.png",
+            "img/b.png",
+            "img/a.png",
+            "img/2.0x/a.png",
+            "img/b.png",
+        ],
+        [e.path for e in result.expanded],
+    )
+    asserts.equals(env, ["img", "img/2.0x"], fake.reads)
+    return unittest.end(env)
+
+def _shallow_lister_bound_fails_loudly_test_impl(ctx):
+    """A directory with more reads than the bound fails naming package, dir, bound."""
+    env = unittest.begin(ctx)
+    tree = {"many": [struct(name = str(i) + "x", is_dir = True) for i in range(5)]}
+    fake = _recording_repo_ctx(tree)
+    lister = ctx_package_lister(fake.ctx, "bound_pkg", 3)
+    result = expand_pub_asset_entries(
+        [struct(path = "many/", flavors = [], platforms = [])],
+        lister,
+        "bound_pkg",
+    )
+    asserts.equals(env, [], result.expanded)
+    for want in ["bound_pkg", "many", "3"]:
+        asserts.true(env, want in result.error, result.error)
+    asserts.equals(env, ["many"], fake.reads)
+    return unittest.end(env)
+
+def _covering_entries_resolve_at_scale_test_impl(ctx):
+    """4,000 file entries under one directory entry all resolve through the lookup."""
+    env = unittest.begin(ctx)
+    assets = [struct(path = "big/")]
+    for main in _BIG_MAINS:
+        assets.append(struct(path = main))
+    block = struct(assets = assets, fonts = [], shaders = [])
+    expanded = [struct(path = main) for main in _BIG_MAINS]
+    asserts.equals(env, None, check_spoke_file_names("big_pkg", block, expanded))
+    return unittest.end(env)
+
 _t0_test = unittest.make(_variant_dir_names_test_impl)
 _t1_test = unittest.make(_walk_lists_all_files_test_impl)
 _t2_test = unittest.make(_walk_bound_fails_loudly_test_impl)
@@ -505,6 +665,10 @@ _t22_test = unittest.make(_bad_file_asset_fonts_refused_test_impl)
 _t23_test = unittest.make(_string_shaders_refused_test_impl)
 _t24_test = unittest.make(_bad_item_shaders_refused_test_impl)
 _t25_test = unittest.make(_bad_path_shaders_refused_test_impl)
+_t26_test = unittest.make(_big_directory_and_file_entries_expand_test_impl)
+_t27_test = unittest.make(_shallow_lister_reads_once_and_skips_deep_test_impl)
+_t28_test = unittest.make(_shallow_lister_bound_fails_loudly_test_impl)
+_t29_test = unittest.make(_covering_entries_resolve_at_scale_test_impl)
 
 def pub_assets_test_suite(name):
     unittest.suite(
@@ -535,4 +699,8 @@ def pub_assets_test_suite(name):
         _t23_test,
         _t24_test,
         _t25_test,
+        _t26_test,
+        _t27_test,
+        _t28_test,
+        _t29_test,
     )
