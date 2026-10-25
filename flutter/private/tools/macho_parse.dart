@@ -9,7 +9,8 @@ import 'dart:typed_data';
 
 import 'macho_constants.dart';
 import 'macho_fat.dart' show isMachO32, isMachO64;
-import 'macho_ranges.dart' show isZeroFillSectionType, sectionTypeOf;
+import 'macho_ranges.dart'
+    show isZeroFillSectionType, sectionTypeOf, segmentNameOf;
 
 /// Represents a single raw Mach-O load command.
 class LoadCommand {
@@ -270,20 +271,44 @@ List<CommandRange> fileRangesOf(LoadCommand lc) {
   return movedTableRanges(lc);
 }
 
-/// Tracks the lowest referenced file offset seen so far.
-class _PayloadFloor {
-  int value;
+/// The first payload byte of a Mach-O binary and what owns it: the segment
+/// and section for a section, the load command and its table for a linkedit
+/// table (for example `LC_SYMTAB`'s symbol table), or the segment for a
+/// segment's own file range. [owner] is null when no range names a byte, in
+/// which case [offset] is the file length.
+typedef FirstPayload = ({int offset, String? owner});
 
+/// The `LC_DYLD_INFO` pair table names, in command order: rebase, bind, weak
+/// bind, lazy bind, export.
+const _dyldInfoPairNames = [
+  'rebase',
+  'bind',
+  'weak bind',
+  'lazy bind',
+  'export',
+];
+
+/// Tracks the lowest referenced file offset seen so far, and what owns it.
+/// When two ranges share the lowest offset, the owner is the first one found
+/// in load-command order: commands walk in list order, and within one command
+/// the ranges walk in the order [_considerCommandPayload] reads them.
+class _PayloadFloor {
   _PayloadFloor(this.value);
 
-  void consider(int offset, int size) {
+  int value;
+
+  String? owner;
+
+  void consider(int offset, int size, String owner) {
     if (offset > 0 && size > 0 && offset < value) {
       value = offset;
+      this.owner = owner;
     }
   }
 }
 
-/// Folds one load command's referenced file range into [floor].
+/// Folds one load command's referenced file range into [floor], keeping each
+/// range's owner alongside its offset so the refusal names what is in the way.
 void _considerCommandPayload(LoadCommand lc, _PayloadFloor floor) {
   final bd = ByteData.sublistView(lc.bytes);
   switch (lc.cmd) {
@@ -294,10 +319,12 @@ void _considerCommandPayload(LoadCommand lc, _PayloadFloor floor) {
         floor.consider(
           bd.getUint32(8, Endian.little),
           bd.getUint32(12, Endian.little) * 16,
+          'LC_SYMTAB symbol table',
         );
         floor.consider(
           bd.getUint32(16, Endian.little),
           bd.getUint32(20, Endian.little),
+          'LC_SYMTAB string table',
         );
       }
     case lcFunctionStarts:
@@ -312,15 +339,18 @@ void _considerCommandPayload(LoadCommand lc, _PayloadFloor floor) {
         floor.consider(
           bd.getUint32(8, Endian.little),
           bd.getUint32(12, Endian.little),
+          '${_loadCommandName(lc.cmd)} table',
         );
       }
     case lcDyldInfo:
     case lcDyldInfoOnly:
       if (lc.bytes.length >= 48) {
-        for (var field = 8; field < 48; field += 8) {
+        for (var i = 0; i < 5; i++) {
+          final field = 8 + i * 8;
           floor.consider(
             bd.getUint32(field, Endian.little),
             bd.getUint32(field + 4, Endian.little),
+            '${_loadCommandName(lc.cmd)} ${_dyldInfoPairNames[i]} table',
           );
         }
       }
@@ -336,11 +366,18 @@ void _considerSegmentPayload(
   _PayloadFloor floor,
 ) {
   if (lc.bytes.length < 72) return;
+  final segname = segmentNameOf(lc);
   final fileoff = bd.getUint64(40, Endian.little);
   final filesize = bd.getUint64(48, Endian.little);
   final nsects = bd.getUint32(64, Endian.little);
   if (fileoff > 0 && filesize > 0) {
-    floor.consider(fileoff, filesize);
+    floor.consider(
+      fileoff,
+      filesize,
+      segname.isEmpty
+          ? '${_loadCommandName(lc.cmd)} segment'
+          : 'segment $segname',
+    );
   }
   // Inspect each section_64 (80 bytes each starting at offset 72).
   for (var s = 0; s < nsects; s++) {
@@ -351,20 +388,60 @@ void _considerSegmentPayload(
       }
       final sSize = bd.getUint64(sectOff + 40, Endian.little);
       final sOffset = bd.getUint32(sectOff + 48, Endian.little);
-      floor.consider(sOffset, sSize);
+      final name = ascii
+          .decode(lc.bytes.sublist(sectOff, sectOff + 16))
+          .split('\x00')
+          .first;
+      floor.consider(sOffset, sSize, 'section $name of segment $segname');
     }
   }
 }
 
 /// Finds the lowest non-zero file offset referenced by any segment, section,
-/// or linkedit table in the Mach-O binary. Load commands may grow up to this
-/// boundary without overwriting section/segment payload bytes.
-int findFirstPayloadOffset(List<LoadCommand> commands, int totalLength) {
+/// or linkedit table in the Mach-O binary, and what owns it. Load commands
+/// may grow up to this boundary without overwriting section/segment payload
+/// bytes. When two ranges share the lowest offset, the owner is the first one
+/// found in load-command order (see [_PayloadFloor]).
+FirstPayload findFirstPayload(List<LoadCommand> commands, int totalLength) {
   final floor = _PayloadFloor(totalLength);
   for (final lc in commands) {
     _considerCommandPayload(lc, floor);
   }
-  return floor.value;
+  return (offset: floor.value, owner: floor.owner);
+}
+
+/// The `LC_*` name of a payload-floor load command [cmd], or its hex type.
+String _loadCommandName(int cmd) {
+  switch (cmd) {
+    case lcSegment64:
+      return 'LC_SEGMENT_64';
+    case lcSymtab:
+      return 'LC_SYMTAB';
+    case lcDysymtab:
+      return 'LC_DYSYMTAB';
+    case lcFunctionStarts:
+      return 'LC_FUNCTION_STARTS';
+    case lcDataInCode:
+      return 'LC_DATA_IN_CODE';
+    case lcCodeSignature:
+      return 'LC_CODE_SIGNATURE';
+    case lcDyldExportsTrie:
+      return 'LC_DYLD_EXPORTS_TRIE';
+    case lcDyldChainedFixups:
+      return 'LC_DYLD_CHAINED_FIXUPS';
+    case lcSegmentSplitInfo:
+      return 'LC_SEGMENT_SPLIT_INFO';
+    case lcDylibCodeSignDrs:
+      return 'LC_DYLIB_CODE_SIGN_DRS';
+    case lcLinkerOptimizationHint:
+      return 'LC_LINKER_OPTIMIZATION_HINT';
+    case lcDyldInfo:
+      return 'LC_DYLD_INFO';
+    case lcDyldInfoOnly:
+      return 'LC_DYLD_INFO_ONLY';
+    default:
+      return 'load command 0x${cmd.toRadixString(16)}';
+  }
 }
 
 /// Parses the load commands from a 64-bit Mach-O binary.
