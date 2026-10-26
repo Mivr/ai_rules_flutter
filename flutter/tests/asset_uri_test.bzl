@@ -605,6 +605,209 @@ def _empty_segment_keeps_key_test_impl(ctx):
     )
     return unittest.end(env)
 
+# -- map-form entries read literally (RT38-flutter:01) ----------------------------
+
+def _check_map_ok(env, entry, decoded, key):
+    """Assert one map-form entry reads literally to the file and key."""
+    norm = normalize_asset_uri(entry, True)
+    asserts.true(env, norm.ok, entry)
+    asserts.equals(env, decoded, norm.decoded)
+    asserts.equals(env, key, norm.key)
+
+def _map_form_reads_literal_test_impl(ctx):
+    """Map-form entries read like `Uri(pathSegments: path.split('/'))`.
+
+    Oracle-checked against flutter_tools 3.47.7: a backslash never
+    separates and a `%XX` never decodes, so the literal bytes name the
+    file and re-encode into the key — where the string form of the same
+    text would split and decode. A literal backslash still refuses, as on
+    the base (no Bazel target can name it), and so do a leading `/`, a
+    query and a fragment, matching what flutter_tools throws on.
+    """
+    env = unittest.begin(ctx)
+    _check_map_ok(env, "m/b.png", "m/b.png", "m/b.png")
+    _check_map_ok(env, "a%20b.png", "a%20b.png", "a%2520b.png")
+    _check_map_ok(env, "x%2Ey.png", "x%2Ey.png", "x%252Ey.png")
+    _check_map_ok(env, "g/./h.png", "g/h.png", "g/h.png")
+    _check_ok(env, "m\\b.png", "m/b.png", "m/b.png")
+    _check_ok(env, "a%20b.png", "a b.png", "a%20b.png")
+    norm = normalize_asset_uri("m\\b.png", True)
+    asserts.false(env, norm.ok, "map backslash")
+    asserts.true(env, "backslash" in norm.reason, norm.reason)
+    norm = normalize_asset_uri("/a.png", True)
+    asserts.false(env, norm.ok, "map absolute")
+    asserts.true(env, "absolute" in norm.reason, norm.reason)
+    norm = normalize_asset_uri("img/a?.png", True)
+    asserts.false(env, norm.ok, "map query")
+    asserts.true(env, "query" in norm.reason, norm.reason)
+    norm = normalize_asset_uri("img/a#.png", True)
+    asserts.false(env, norm.ok, "map fragment")
+    asserts.true(env, "fragment" in norm.reason, norm.reason)
+    return unittest.end(env)
+
+_MAP_FORM_PUBSPEC = """\
+name: map_pkg
+flutter:
+  assets:
+    - path: lit%20x.png
+      platforms:
+        - ios
+    - path: dots/./ok.png
+  shaders:
+    - path: shaders/s%2Ehd.frag
+"""
+
+_MAP_FORM_FILES = {
+    "": ["lit%20x.png"],
+    "dots": ["dots/ok.png"],
+    "shaders": ["shaders/s%2Ehd.frag"],
+}
+
+def _map_form_list_dir(directory):
+    """Fake package listing: literal names, as the spoke lister reads them."""
+    return struct(files = _MAP_FORM_FILES.get(directory, []), error = "")
+
+def _map_form_entries_bundle_literal_test_impl(ctx):
+    """Map-form entries resolve the literal files and key them re-encoded.
+
+    Oracle-checked against flutter_tools 3.47.7: `- path: a%20b.png`
+    bundles the `a%20b.png` file (manifest `a%20b.png`, copy
+    `a%2520b.png`), and dot segments still resolve. Platforms travel
+    untouched from the map entry to the merged conditions.
+    """
+    env = unittest.begin(ctx)
+    parsed = parse_flutter_assets_block(_MAP_FORM_PUBSPEC)
+    asserts.equals(env, [], parsed.asset_errors)
+    asserts.equals(env, True, parsed.assets[0].is_map)
+    asserts.equals(env, True, parsed.assets[1].is_map)
+    asserts.equals(env, True, parsed.shaders[0].is_map)
+    assets = normalize_spoke_assets("map_pkg", parsed.assets)
+    shaders = normalize_spoke_shaders("map_pkg", parsed.shaders)
+    result = expand_pub_asset_entries(assets, _map_form_list_dir, "map_pkg")
+    asserts.equals(env, "", result.error)
+    asserts.equals(
+        env,
+        ["lit%20x.png", "dots/ok.png"],
+        [e.path for e in result.expanded],
+    )
+    asserts.equals(
+        env,
+        ["lit%2520x.png", "dots/ok.png"],
+        [e.key for e in result.expanded],
+    )
+    pkg_assets = build_pkg_assets_dict(result.expanded)
+    asserts.equals(env, "lit%2520x.png", pkg_assets[":lit%20x.png"])
+    asserts.equals(env, "dots/ok.png", pkg_assets[":dots/ok.png"])
+    merged = merge_pub_asset_conditions(result.expanded, "map_pkg")
+    asserts.equals(env, "", merged.conflict)
+    asserts.equals(env, ["ios"], merged.platforms.get(":lit%20x.png"))
+    asserts.equals(
+        env,
+        {":shaders/s%2Ehd.frag": "shaders/s%252Ehd.frag"},
+        build_pkg_shaders_dict(shaders),
+    )
+    manifest = build_asset_manifest([e.key for e in result.expanded])
+    asserts.equals(env, ["dots/ok.png", "lit%20x.png"], sorted(manifest.keys()))
+    asserts.equals(env, "lit%20x.png", manifest["lit%20x.png"][0]["asset"])
+    asserts.equals(
+        env,
+        None,
+        check_spoke_file_names(
+            "map_pkg",
+            struct(assets = assets, fonts = [], shaders = shaders),
+            result.expanded,
+        ),
+    )
+    return unittest.end(env)
+
+_MISSING_LITERAL_PUBSPEC = """\
+name: miss_pkg
+flutter:
+  assets:
+    - path: no%20pe.png
+"""
+
+def _missing_literal_fails_fetch_test_impl(ctx):
+    """A map-form entry whose literal file is missing fails the fetch.
+
+    Oracle-checked against flutter_tools 3.47.7: with no literal file on
+    disk the build fails rather than bundling under a guessed key. The
+    fetch failure names the package and the entry.
+    """
+    env = unittest.begin(ctx)
+    parsed = parse_flutter_assets_block(_MISSING_LITERAL_PUBSPEC)
+    asserts.equals(env, [], parsed.asset_errors)
+    assets = normalize_spoke_assets("miss_pkg", parsed.assets)
+    asserts.equals(env, "no%20pe.png", assets[0].path)
+    asserts.equals(env, "no%2520pe.png", assets[0].key)
+    result = expand_pub_asset_entries(assets, _through_list_dir, "miss_pkg")
+    asserts.true(env, result.error != "", "a missing literal file fails")
+    asserts.true(env, "miss_pkg" in result.error, result.error)
+    asserts.true(env, "no%20pe.png" in result.error, result.error)
+    return unittest.end(env)
+
+# -- empty-segment entries in either form (RT38-flutter:02) ---------------------
+
+_EMPTY_SEGMENT_FORMS_PUBSPEC = """\
+name: es_pkg
+flutter:
+  assets:
+    - a//2.0x/b.png
+    - path: f//fm.png
+"""
+
+_EMPTY_SEGMENT_FORMS_FILES = {
+    "a/2.0x": ["a/2.0x/b.png"],
+    "f": ["f/fm.png"],
+}
+
+def _empty_segment_forms_list_dir(directory):
+    """Fake package listing: collapsed names, as the spoke lister reads them."""
+    return struct(files = _EMPTY_SEGMENT_FORMS_FILES.get(directory, []), error = "")
+
+def _empty_segment_forms_bundle_raw_test_impl(ctx):
+    """Empty-segment entries in either form key raw and copy collapsed.
+
+    Oracle-checked against flutter_tools 3.47.7: string `a//2.0x/b.png`
+    manifests as `a//2.0x/b.png` <- [`a//2.0x/b.png` dpr 2.0,
+    `a/2.0x/b.png` dpr 2.0], and map `f//fm.png` as `f//fm.png` <-
+    [`f//fm.png`, `f/fm.png`]. The copies read the collapsed files.
+    """
+    env = unittest.begin(ctx)
+    parsed = parse_flutter_assets_block(_EMPTY_SEGMENT_FORMS_PUBSPEC)
+    asserts.equals(env, [], parsed.asset_errors)
+    asserts.equals(env, False, parsed.assets[0].is_map)
+    asserts.equals(env, True, parsed.assets[1].is_map)
+    assets = normalize_spoke_assets("es_pkg", parsed.assets)
+    result = expand_pub_asset_entries(assets, _empty_segment_forms_list_dir, "es_pkg")
+    asserts.equals(env, "", result.error)
+    asserts.equals(
+        env,
+        ["a/2.0x/b.png", "f/fm.png"],
+        [e.path for e in result.expanded],
+    )
+    asserts.equals(
+        env,
+        ["a//2.0x/b.png", "f//fm.png"],
+        [e.key for e in result.expanded],
+    )
+    pkg_assets = build_pkg_assets_dict(result.expanded)
+    asserts.equals(env, "a//2.0x/b.png", pkg_assets[":a/2.0x/b.png"])
+    asserts.equals(env, "f//fm.png", pkg_assets[":f/fm.png"])
+    manifest = build_asset_manifest([e.key for e in result.expanded])
+    asserts.equals(env, ["a//2.0x/b.png", "f//fm.png"], sorted(manifest.keys()))
+    variants = manifest["a//2.0x/b.png"]
+    asserts.equals(env, 2, len(variants))
+    asserts.equals(env, "a//2.0x/b.png", variants[0]["asset"])
+    asserts.equals(env, 2.0, variants[0]["dpr"])
+    asserts.equals(env, "a/2.0x/b.png", variants[1]["asset"])
+    asserts.equals(env, 2.0, variants[1]["dpr"])
+    variants = manifest["f//fm.png"]
+    asserts.equals(env, 2, len(variants))
+    asserts.equals(env, "f//fm.png", variants[0]["asset"])
+    asserts.equals(env, "f/fm.png", variants[1]["asset"])
+    return unittest.end(env)
+
 _t0_test = unittest.make(_plain_entry_passes_through_test_impl)
 _t1_test = unittest.make(_spaced_entry_encodes_test_impl)
 _t2_test = unittest.make(_dot_entries_resolve_test_impl)
@@ -624,6 +827,10 @@ _t15_test = unittest.make(_packages_first_spoke_test_impl)
 _t16_test = unittest.make(_packages_backslash_bundles_test_impl)
 _t17_test = unittest.make(_backslash_splits_like_uri_test_impl)
 _t18_test = unittest.make(_empty_segment_keeps_key_test_impl)
+_t19_test = unittest.make(_map_form_reads_literal_test_impl)
+_t20_test = unittest.make(_map_form_entries_bundle_literal_test_impl)
+_t21_test = unittest.make(_missing_literal_fails_fetch_test_impl)
+_t22_test = unittest.make(_empty_segment_forms_bundle_raw_test_impl)
 
 def asset_uri_test_suite(name):
     """Defines the asset-URI normalization unit and through tests.
@@ -652,4 +859,8 @@ def asset_uri_test_suite(name):
         _t16_test,
         _t17_test,
         _t18_test,
+        _t19_test,
+        _t20_test,
+        _t21_test,
+        _t22_test,
     )

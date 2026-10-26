@@ -281,6 +281,7 @@ def _string_assets_test_impl(ctx):
     result = parse_flutter_assets_block(_LOCALES_PUBSPEC)
     asserts.equals(env, 1, len(result.assets))
     asserts.equals(env, "data/", result.assets[0].path)
+    asserts.equals(env, False, result.assets[0].is_map)
     asserts.equals(env, [], result.assets[0].flavors)
     asserts.equals(env, [], result.assets[0].platforms)
     return unittest.end(env)
@@ -291,10 +292,12 @@ def _map_assets_test_impl(ctx):
     asserts.equals(env, 2, len(result.assets))
 
     asserts.equals(env, "assets/foo.png", result.assets[0].path)
+    asserts.equals(env, True, result.assets[0].is_map)
     asserts.equals(env, ["prod"], result.assets[0].flavors)
     asserts.equals(env, ["ios", "android"], result.assets[0].platforms)
 
     asserts.equals(env, "assets/bar.png", result.assets[1].path)
+    asserts.equals(env, False, result.assets[1].is_map)
     asserts.equals(env, [], result.assets[1].flavors)
     asserts.equals(env, [], result.assets[1].platforms)
     return unittest.end(env)
@@ -305,6 +308,7 @@ def _shaders_and_material_test_impl(ctx):
     asserts.equals(env, True, result.uses_material_design)
     asserts.equals(env, 1, len(result.shaders))
     asserts.equals(env, "shaders/ink_sparkle.frag", result.shaders[0].path)
+    asserts.equals(env, False, result.shaders[0].is_map)
     return unittest.end(env)
 
 def _empty_flutter_block_test_impl(ctx):

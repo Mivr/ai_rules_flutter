@@ -19,8 +19,9 @@ with fakes; the spoke passes context-backed adapters and `fail()`s the
 fetch on the returned error, which already names the package and the entry
 or directory.
 
-Every entry is normalized through `asset_uri.bzl` (what `Uri.parse` plus
-`Uri(pathSegments:)` do in flutter_tools 3.47.7): the file is resolved
+Every entry is normalized through `asset_uri.bzl` (string entries read
+like `Uri.parse`, map-form entries like `Uri(pathSegments:
+path.split('/'))` in flutter_tools 3.47.7): the file is resolved
 from the decoded path while the emitted `key` carries the percent-encoded
 bundle key. A spelling flutter_tools would not bundle (a query, an
 escaping `..`, an invalid escape, ...) refuses here, naming the package,

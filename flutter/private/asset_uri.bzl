@@ -1,8 +1,9 @@
 """One URI normalizer for every Flutter asset path (RT35-flutter:01).
 
 flutter_tools 3.47.7 reads every `flutter:` entry that names a file as a
-URI: assets in both forms and shaders via `AssetsEntry.parseFromYamlSafe`
-(`flutter_manifest.dart:826-841`, which calls `Uri.parse(entry)`), font
+URI: string-form assets and shaders via `Uri.parse(entry)`, map-form
+(`path:`) assets and shaders via `Uri(pathSegments: path.split('/'))`
+(`flutter_manifest.dart:826-890`, `AssetsEntry.parseFromYamlSafe`), font
 files via `Uri.parse(fontFile['asset'])` (`flutter_manifest.dart:421`). It
 finds the file from the decoded `pathSegments` (`asset.dart:1185`,
 `1402-1428`) and keys the bundle by the percent-encoded path:
@@ -18,17 +19,23 @@ rules_flutter used to keep the raw entry text as both file name and key, so
 flutter_tools bundles it as `a.png`, and `a b.png` bundled under the key
 `a b.png` while flutter_tools (and hence the engine) uses `a%20b.png`.
 
-This module does what `Uri.parse` plus `Uri(pathSegments:)` do for a
-relative path entry: split on `/`, decode valid `%XX` escapes as UTF-8,
-dot-resolve `.` / `x/..` on the decoded segments the way Dart does (so an
-escaped `%2E` counts as `.`), then re-encode each segment leaving RFC 3986
-unreserved characters, sub-delims, `:` and `@` literal and emitting every
-other UTF-8 byte as uppercase `%XX` (a lone `%` becomes `%25`). A raw
-backslash reads as a path separator exactly as `Uri.parse` reads it
-(before dot resolution and before percent-decoding, so
-`assets/../x.png` with backslash separators is `x.png`);
-a `%5C` escape stays a literal backslash byte and is still refused, as on
-the base. An empty segment stays in the key (`assets/e//em.png` keys with
+This module mirrors both readings. A string-form entry reads like
+`Uri.parse`: split on `/` (a raw backslash separates first), decode valid
+`%XX` escapes as UTF-8, dot-resolve `.` / `x/..` on the decoded segments
+the way Dart does (so an escaped `%2E` counts as `.`), then re-encode each
+segment leaving RFC 3986 unreserved characters, sub-delims, `:` and `@`
+literal and emitting every other UTF-8 byte as uppercase `%XX` (a lone `%`
+becomes `%25`). A map-form entry reads like `Uri(pathSegments:
+path.split('/'))`: every byte stays literal (a backslash never separates, a
+`%XX` never decodes, so `%2E` is data rather than `.`), while dot segments
+still resolve and empty segments stay; the literal bytes then re-encode
+the same way. A map-form `?` or `#` stays refused as not supported, as on
+the base. A raw backslash in string form reads as a path separator exactly
+as `Uri.parse` reads it (before dot resolution and before
+percent-decoding, so `assets/../x.png` with backslash separators is
+`x.png`); a `%5C` escape stays a literal backslash byte and is still
+refused, as on the base, as is a literal backslash from a map-form entry
+(no Bazel target can name it). An empty segment stays in the key (`assets/e//em.png` keys with
 `//`) while the decoded file collapses it (`assets/e/em.png`), as
 flutter_tools keys `entryUri.path` but reads `path.fromUri`. Anything
 that cannot bundle as flutter_tools would — a query, a fragment, a scheme,
@@ -139,6 +146,29 @@ def _decode_segment(raw):
             chars.append(raw[i])
             i += 1
     return struct(ok = True, values = values, text = "".join(chars), reason = "")
+
+def _literal_segment(raw):
+    """Read one raw `/`-separated piece literally, for map-form entries.
+
+    Mirrors `Uri(pathSegments: path.split('/'))`: no byte is special, so
+    `%XX` never decodes, `?` and `#` stay data (both are still refused by
+    the caller, as on the base), and a backslash stays a backslash byte
+    (refused below, since no Bazel target can name it).
+
+    Args:
+        raw: The segment as written in the entry.
+
+    Returns:
+        `struct(ok, values, text, reason)`: the byte values, the unchanged
+        text, or the refusal reason.
+    """
+    values = []
+    for unit in raw.elems():
+        v = _BYTES.find(unit)
+        if v < 0:
+            return struct(ok = False, values = [], text = "", reason = "it holds a byte outside 0-255")
+        values.append(v)
+    return struct(ok = True, values = values, text = raw, reason = "")
 
 def _lead_window(lead):
     """The continuation window a UTF-8 lead byte opens, strictly.
@@ -304,20 +334,22 @@ def _encode_segment(text, first):
             chars.append("%" + _HEX_DIGITS[v // 16] + _HEX_DIGITS[v % 16])
     return "".join(chars)
 
-def normalize_asset_uri(entry):
+def normalize_asset_uri(entry, is_map = False):
     """Normalize one asset entry the way flutter_tools 3.47.7 reads it.
 
-    Mirrors `Uri.parse(entry)` (`flutter_manifest.dart:826-841` for assets
-    in both forms and shaders, `flutter_manifest.dart:421` for font files)
-    plus the bundle key derivation (`asset.dart:1425-1428` for a package,
-    `asset.dart:617` for the app): `decoded` is what `pathSegments` decodes
-    to (the file to fetch, which the Bazel label names), `key` is the
-    percent-encoded bundle key. A trailing `/` still marks a directory
-    entry on both. An entry whose first segment is `packages` normalizes
-    like any other entry: `Uri.parse` resolves its dot segments
-    (`flutter_manifest.dart:826-841` feeds every entry through it) and
-    re-encodes the key uppercase, so `packages/d/./a.png` bundles as
-    `packages/d/a.png` and `packages/d/caf%c3%a9.png` as
+    A string-form entry mirrors `Uri.parse(entry)`; a map-form (`path:`)
+    entry mirrors `Uri(pathSegments: entry.split('/'))`
+    (`flutter_manifest.dart:826-890` for assets and shaders in either form,
+    `flutter_manifest.dart:421` for font files, which are always
+    string-form). Either reading then derives the bundle key
+    (`asset.dart:1425-1428` for a package, `asset.dart:617` for the app):
+    `decoded` is what the segments read as (the file to fetch, which the
+    Bazel label names), `key` is the percent-encoded bundle key. A trailing
+    `/` still marks a directory entry on both. An entry whose first segment
+    is `packages` normalizes like any other entry: `Uri.parse` resolves its
+    dot segments (`flutter_manifest.dart:826-841` feeds every entry through
+    it) and re-encodes the key uppercase, so `packages/d/./a.png` bundles
+    as `packages/d/a.png` and `packages/d/caf%c3%a9.png` as
     `packages/d/caf%C3%A9.png`. A reference into another package
     normalizes to itself when plain, keeping today's behaviour; a spelling
     no engine build reads (a query among them) is refused like any
@@ -328,6 +360,9 @@ def normalize_asset_uri(entry):
             relative path, which is already decoded — use `encode_asset_key`
             for those instead, so a literal `%` in a file name is not
             decoded).
+        is_map: Whether the entry came from a map-form (`path:`) item. The
+            parser threads the shape; never guess it from the text. String
+            entries keep exactly the old reading.
 
     Returns:
         `struct(ok, segments, decoded, key, is_dir, reason)`: the decoded
@@ -341,17 +376,26 @@ def normalize_asset_uri(entry):
     if "#" in entry:
         return _refusal("it has a fragment part")
 
-    # A raw `\` is a path separator, exactly as `Uri.parse` reads it: split
-    # first, dot-resolve and percent-decode after. A `%5C` escape still
-    # decodes to a backslash byte and is refused below, as on the base.
-    slashed = entry.replace("\\", "/")
-    if slashed.startswith("/"):
-        return _refusal("it is an absolute path")
+    if is_map:
+        # Map form reads like `Uri(pathSegments: entry.split('/'))`: every
+        # byte is literal, so a backslash never separates and a `%XX` never
+        # decodes. A literal backslash is refused below, since no Bazel
+        # target can name it.
+        if entry.startswith("/"):
+            return _refusal("it is an absolute path")
+        slashed = entry
+    else:
+        # A raw `\` is a path separator, exactly as `Uri.parse` reads it: split
+        # first, dot-resolve and percent-decode after. A `%5C` escape still
+        # decodes to a backslash byte and is refused below, as on the base.
+        slashed = entry.replace("\\", "/")
+        if slashed.startswith("/"):
+            return _refusal("it is an absolute path")
     is_dir = slashed.endswith("/")
     body = slashed[:len(slashed) - 1] if is_dir else slashed
     texts = []
     for raw in body.split("/"):
-        seg = _decode_segment(raw)
+        seg = _literal_segment(raw) if is_map else _decode_segment(raw)
         if not seg.ok:
             return _refusal(seg.reason)
         bad = _check_segment_bytes(seg.values)
@@ -462,11 +506,13 @@ def normalize_spoke_assets(package_name, parsed_assets):
     Decodes each entry for file resolution (the label names the decoded
     file) and keys it encoded (the bundle key). Directory entries keep
     their trailing `/` on both spellings; `flavors` / `platforms` travel
-    untouched.
+    untouched. Each entry carries its pubspec shape (`is_map`), so a
+    map-form entry reads like `Uri(pathSegments: path.split('/'))` while a
+    string entry keeps the `Uri.parse` reading.
 
     Args:
         package_name: The pub package the entries come from, for refusals.
-        parsed_assets: `struct(path, flavors, platforms)` entries from
+        parsed_assets: `struct(path, is_map, flavors, platforms)` entries from
             `parse_flutter_assets_block().assets`.
 
     Returns:
@@ -476,7 +522,7 @@ def normalize_spoke_assets(package_name, parsed_assets):
     """
     out = []
     for entry in parsed_assets:
-        norm = normalize_asset_uri(entry.path)
+        norm = normalize_asset_uri(entry.path, entry.is_map)
         if not norm.ok:
             fail(spoke_asset_uri_error(package_name, entry.path, norm.reason))
         out.append(struct(path = norm.decoded, key = norm.key, flavors = entry.flavors, platforms = entry.platforms))
@@ -512,7 +558,7 @@ def normalize_spoke_shaders(package_name, parsed_shaders):
 
     Args:
         package_name: The pub package the entries come from, for refusals.
-        parsed_shaders: `struct(path)` entries from
+        parsed_shaders: `struct(path, is_map)` entries from
             `parse_flutter_assets_block().shaders`.
 
     Returns:
@@ -522,7 +568,7 @@ def normalize_spoke_shaders(package_name, parsed_shaders):
     """
     out = []
     for entry in parsed_shaders:
-        norm = normalize_asset_uri(entry.path)
+        norm = normalize_asset_uri(entry.path, entry.is_map)
         if not norm.ok:
             fail(spoke_asset_uri_error(package_name, entry.path, norm.reason))
         out.append(struct(path = norm.decoded, key = norm.key))

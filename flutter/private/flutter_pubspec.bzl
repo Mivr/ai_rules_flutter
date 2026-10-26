@@ -188,7 +188,11 @@ def _parse_path_entry(item, index, key, lines, locator, shown):
     (`packages/flutter_tools/lib/src/flutter_manifest.dart`): null or empty
     is a `null or empty uri` refusal, a string is the entry, an empty map is
     silently no entry, a map whose `path` is not a string is `malformed`,
-    and anything else has an `unexpected shape`.
+    and anything else has an `unexpected shape`. The returned shape records
+    which reading the normalizer must use: a string reads like `Uri.parse`,
+    a map reads like `Uri(pathSegments: path.split('/'))`
+    (RT38-flutter:01); the caller threads it, never guesses it from the
+    text.
 
     Args:
         item: The raw list item.
@@ -200,23 +204,24 @@ def _parse_path_entry(item, index, key, lines, locator, shown):
             deferred `deferred-components[i].assets` slot).
 
     Returns:
-        A `(path, problems)` tuple: the entry path, or None when the item
-        is no entry, and the refusal structs (empty when the item is usable
-        or silently skipped).
+        A `(path, is_map, problems)` tuple: the entry path, whether it came
+        from a map-form item, or None when the item is no entry, and the
+        refusal structs (empty when the item is usable or silently
+        skipped).
     """
     slot = "{shown}[{index}]".format(shown = shown, index = index)
     item_line = flutter_line_of(lines, locator)
     if item == None or item == "":
-        return (None, [_shape_problem(slot, key, "Asset manifest contains a null or empty uri.", item_line)])
+        return (None, False, [_shape_problem(slot, key, "Asset manifest contains a null or empty uri.", item_line)])
     if type(item) == "string":
-        return (item, [])
+        return (item, False, [])
     if type(item) == "dict":
         if not item.keys():
-            return (None, [])
+            return (None, False, [])
         path = item.get("path")
         if type(path) == "string":
-            return (path, [])
-        return (None, [_shape_problem(
+            return (path, True, [])
+        return (None, False, [_shape_problem(
             slot,
             key,
             "Asset manifest entry is malformed. Expected asset entry to be " +
@@ -224,7 +229,7 @@ def _parse_path_entry(item, index, key, lines, locator, shown):
             "Got {type} instead.".format(type = dart_type(path)),
             item_line,
         )])
-    return (None, [_shape_problem(
+    return (None, False, [_shape_problem(
         slot,
         key,
         "Assets entry had unexpected shape. Expected a string or an object. " +
@@ -666,10 +671,10 @@ def _parse_assets(raw, lines, locator, shown):
 
     Returns:
         An `(entries, problems)` tuple: `entries` holds one
-        `struct(path, flavors, platforms)` per usable entry (a problem
-        entry keeps empty conditions; the fetch fails before they matter),
-        and `problems` holds one `struct(path, key, detail, line)` per
-        refusal.
+        `struct(path, is_map, flavors, platforms)` per usable entry (a
+        problem entry keeps empty conditions; the fetch fails before they
+        matter), and `problems` holds one `struct(path, key, detail, line)`
+        per refusal.
     """
     if raw == None:
         return ([], [])
@@ -679,12 +684,12 @@ def _parse_assets(raw, lines, locator, shown):
     problems = []
     for index, item in enumerate(raw):
         elocator = locator + [index]
-        (path, shape_problems) = _parse_path_entry(item, index, "assets", lines, elocator, shown)
+        (path, is_map, shape_problems) = _parse_path_entry(item, index, "assets", lines, elocator, shown)
         problems.extend(shape_problems)
         if path == None:
             continue
         if type(item) == "string":
-            entries.append(struct(path = path, flavors = [], platforms = []))
+            entries.append(struct(path = path, is_map = False, flavors = [], platforms = []))
             continue
         (flavors, platforms, condition_problems) = _entry_condition_problems(path, item, lines, elocator)
         problems.extend(condition_problems)
@@ -695,7 +700,7 @@ def _parse_assets(raw, lines, locator, shown):
                 "asset transformers are not supported by rules_flutter.",
                 flutter_line_of(lines, elocator + ["transformers"]),
             ))
-        entries.append(struct(path = path, flavors = flavors, platforms = platforms))
+        entries.append(struct(path = path, is_map = is_map, flavors = flavors, platforms = platforms))
     return (entries, problems)
 
 def _format_flavor_list(flavors):
@@ -749,7 +754,7 @@ def _parse_shaders(raw, lines, locator):
             line.
 
     Returns:
-        A `(shaders, problems)` tuple of `struct(path)` entries and
+        A `(shaders, problems)` tuple of `struct(path, is_map)` entries and
         refusal structs for `asset_errors`.
     """
     if raw == None:
@@ -760,13 +765,13 @@ def _parse_shaders(raw, lines, locator):
     problems = []
     for index, entry in enumerate(raw):
         elocator = locator + [index]
-        (path, shape_problems) = _parse_path_entry(entry, index, "shaders", lines, elocator, "shaders")
+        (path, is_map, shape_problems) = _parse_path_entry(entry, index, "shaders", lines, elocator, "shaders")
         problems.extend(shape_problems)
         if path == None:
             continue
         if type(entry) == "dict":
             problems.extend(_entry_condition_problems(path, entry, lines, elocator)[2])
-        out.append(struct(path = path))
+        out.append(struct(path = path, is_map = is_map))
     return (out, problems)
 
 def _deferred_assets_check(lines):
@@ -795,8 +800,8 @@ def parse_flutter_assets_block(content):
     Returns:
         struct(
             fonts:    list[struct(family, fonts=list[struct(asset, weight, style)])],
-            assets:   list[struct(path, flavors, platforms)],
-            shaders:  list[struct(path)],
+            assets:   list[struct(path, is_map, flavors, platforms)],
+            shaders:  list[struct(path, is_map)],
             uses_material_design: bool,
             asset_errors: list[struct(path, key, detail, line)],
         )

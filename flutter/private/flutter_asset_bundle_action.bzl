@@ -37,6 +37,83 @@ def detect_dpr(path):
             return base, _DPR_SUFFIXES[part]
     return path, None
 
+def _collapse_empty_segments(key):
+    """Drop the empty segments of one encoded bundle key.
+
+    Mirrors how flutter_tools reads an entry whose URI keeps an empty
+    segment: it keys the manifest by the raw path (`entryUri.path`) but
+    opens the collapsed file (the OS resolves `f//fm.png` to `f/fm.png`).
+    `a//b.png` collapses to `a/b.png`; a key without empty segments is
+    unchanged.
+
+    Args:
+        key: The encoded bundle key.
+
+    Returns:
+        The key with every empty `/`-separated piece removed.
+    """
+    return "/".join([part for part in key.split("/") if part != ""])
+
+def _parent_segment_dpr(key):
+    """The dpr of one bundle key's own parent directory, if it names one.
+
+    Mirrors the manifest dpr (flutter_tools 3.47.7 `asset.dart:940-956`,
+    `_createAssetManifestBinary`): each variant carries the dpr parsed from
+    its own parent directory, so the raw spelling of an empty-segment
+    entry carries the dpr of the directory it names (`a//2.0x/b.png` is
+    dpr 2.0).
+
+    Args:
+        key: The encoded bundle key.
+
+    Returns:
+        The float dpr, or None when the parent is not a variant directory.
+    """
+    parts = key.split("/")
+    if len(parts) < 2:
+        return None
+    return _DPR_SUFFIXES.get(parts[len(parts) - 2])
+
+def _raw_manifest_variants(raw_key, assets):
+    """The manifest variants of one raw (`//`-keeping) bundle key.
+
+    Mirrors one flutter_tools manifest entry for an entry whose URI keeps
+    an empty segment (`asset.dart:905-975`, `1217-1270`): the raw key
+    itself, the collapsed path (its file is what the spoke read, so it
+    exists whenever the raw key was emitted), then the collapsed
+    directory's variant files present in the bundle, each with the dpr of
+    its own parent directory.
+
+    Args:
+        raw_key: The encoded bundle key keeping an empty segment.
+        assets: Every encoded bundle key, for the variant scan.
+
+    Returns:
+        The variant dict list for the raw key's manifest entry.
+    """
+    collapsed = _collapse_empty_segments(raw_key)
+    raw_variant = {"asset": decode_asset_key(raw_key)}
+    raw_dpr = _parent_segment_dpr(raw_key)
+    if raw_dpr != None:
+        raw_variant["dpr"] = raw_dpr
+    collapsed_variant = {"asset": decode_asset_key(collapsed)}
+    collapsed_dpr = _parent_segment_dpr(collapsed)
+    if collapsed_dpr != None:
+        collapsed_variant["dpr"] = collapsed_dpr
+    variants = [raw_variant, collapsed_variant]
+    for path in sorted(assets):
+        if path == raw_key or path == collapsed or "" in path.split("/"):
+            continue
+        base, _stripped = detect_dpr(path)
+        if base != collapsed:
+            continue
+        variant = {"asset": decode_asset_key(path)}
+        variant_dpr = _parent_segment_dpr(path)
+        if variant_dpr != None:
+            variant["dpr"] = variant_dpr
+        variants.append(variant)
+    return variants
+
 def build_asset_manifest(assets):
     """Build the asset manifest structure from a list of encoded asset keys.
 
@@ -48,6 +125,14 @@ def build_asset_manifest(assets):
     here; FontManifest keeps the encoded `assetUri.path`
     (`flutter_manifest.dart:480`).
 
+    A key keeping an empty segment groups flutter_tools' entry under its
+    raw key (see `_raw_manifest_variants`): the raw key, the collapsed
+    path, and the collapsed directory's variants, each with its own dpr.
+    The collapsed files ride that entry alone and never gain their own key,
+    so no key names a file the entry did not declare. Every other key
+    groups exactly as before. Each variant carries the dpr parsed from its
+    own parent directory.
+
     Args:
         assets: list of encoded asset keys relative to the bundle root.
 
@@ -57,10 +142,26 @@ def build_asset_manifest(assets):
     """
     manifest = {}
 
+    # Bundle keys claimed by a raw entry, by collapsed path: a collapsed
+    # file (or its variants) without its own declaration rides the raw
+    # key's entry instead of gaining one.
+    key_set = {path: True for path in assets}
+    collapsed_of = {}
+    for path in sorted(assets):
+        if "" in path.split("/"):
+            collapsed = _collapse_empty_segments(path)
+            if collapsed not in collapsed_of:
+                collapsed_of[collapsed] = path
+
     # Group by base path, sorted by the encoded key as flutter_tools sorts by
     # `entryUri.path`; only the emitted keys and variants are decoded.
     for path in sorted(assets):
+        if "" in path.split("/"):
+            manifest[decode_asset_key(path)] = _raw_manifest_variants(path, assets)
+            continue
         base, dpr = detect_dpr(path)
+        if base in collapsed_of and base not in key_set:
+            continue
         decoded_base = decode_asset_key(base)
         if decoded_base not in manifest:
             manifest[decoded_base] = []
@@ -189,6 +290,17 @@ def flutter_asset_bundle_action(ctx, content, shaking, output_dir):
             asset_paths.append(dest_path)
         copies[dest_path] = f.path
         extra_files.append(f)
+
+    # An entry keeping an empty segment also bundles its collapsed file:
+    # the manifest lists the collapsed variant (see
+    # `build_asset_manifest`), so the copy must exist under the collapsed
+    # key too, holding the same file flutter_tools read. A key another
+    # entry already claimed keeps its file.
+    for dest in asset_paths:
+        if "" in dest.split("/"):
+            collapsed = _collapse_empty_segments(dest)
+            if collapsed not in copies:
+                copies[collapsed] = copies[dest]
 
     # Build manifest structure.
     manifest = build_asset_manifest(asset_paths)

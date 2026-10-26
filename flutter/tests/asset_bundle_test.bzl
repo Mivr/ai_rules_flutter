@@ -97,6 +97,66 @@ def _manifest_decodes_keys_test_impl(ctx):
     )
     return unittest.end(env)
 
+def _manifest_empty_segment_test_impl(ctx):
+    """An empty-segment entry keys the raw path with flutter_tools' variants.
+
+    Oracle-checked against flutter_tools 3.47.7 (`ManifestAssetBundle.build`
+    over files `a/b.png`, `a/2.0x/b.png`): entry `a//b.png` manifests as
+    `a//b.png` <- [`a//b.png`, `a/b.png`, `a/2.0x/b.png` dpr 2.0], and no
+    key names the undeclared collapsed file. Copies still read the
+    collapsed file, so the bundle holds both spellings.
+    """
+    env = unittest.begin(ctx)
+    manifest = build_asset_manifest([
+        "packages/hpkg/a//b.png",
+        "packages/hpkg/a/2.0x/b.png",
+    ])
+    asserts.equals(env, ["packages/hpkg/a//b.png"], sorted(manifest.keys()))
+    variants = manifest["packages/hpkg/a//b.png"]
+    asserts.equals(env, 3, len(variants))
+    asserts.equals(env, "packages/hpkg/a//b.png", variants[0]["asset"])
+    asserts.false(env, "dpr" in variants[0], "raw variant has no variant dir")
+    asserts.equals(env, "packages/hpkg/a/b.png", variants[1]["asset"])
+    asserts.false(env, "dpr" in variants[1], "collapsed variant has no variant dir")
+    asserts.equals(env, "packages/hpkg/a/2.0x/b.png", variants[2]["asset"])
+    asserts.equals(env, 2.0, variants[2]["dpr"])
+    return unittest.end(env)
+
+def _manifest_empty_segment_variant_dir_test_impl(ctx):
+    """An empty segment inside a variant directory keeps its own dpr.
+
+    Oracle-checked against flutter_tools 3.47.7: entry `a//2.0x/b.png`
+    manifests as `a//2.0x/b.png` <- [`a//2.0x/b.png` dpr 2.0,
+    `a/2.0x/b.png` dpr 2.0] — each variant carries the dpr parsed from its
+    own parent directory, never a phantom `a//b.png` key.
+    """
+    env = unittest.begin(ctx)
+    manifest = build_asset_manifest(["packages/hpkg/a//2.0x/b.png"])
+    asserts.equals(env, ["packages/hpkg/a//2.0x/b.png"], sorted(manifest.keys()))
+    variants = manifest["packages/hpkg/a//2.0x/b.png"]
+    asserts.equals(env, 2, len(variants))
+    asserts.equals(env, "packages/hpkg/a//2.0x/b.png", variants[0]["asset"])
+    asserts.equals(env, 2.0, variants[0]["dpr"])
+    asserts.equals(env, "packages/hpkg/a/2.0x/b.png", variants[1]["asset"])
+    asserts.equals(env, 2.0, variants[1]["dpr"])
+    return unittest.end(env)
+
+def _manifest_empty_segment_no_variants_test_impl(ctx):
+    """An empty-segment entry without variants still lists the collapsed file.
+
+    Oracle-checked against flutter_tools 3.47.7: entry `e//em.png` (only
+    `e/em.png` on disk) manifests as `e//em.png` <- [`e//em.png`,
+    `e/em.png`].
+    """
+    env = unittest.begin(ctx)
+    manifest = build_asset_manifest(["e//em.png"])
+    asserts.equals(env, ["e//em.png"], sorted(manifest.keys()))
+    variants = manifest["e//em.png"]
+    asserts.equals(env, 2, len(variants))
+    asserts.equals(env, "e//em.png", variants[0]["asset"])
+    asserts.equals(env, "e/em.png", variants[1]["asset"])
+    return unittest.end(env)
+
 _t0_test = unittest.make(_detect_dpr_no_variant_test_impl)
 _t1_test = unittest.make(_detect_dpr_2x_test_impl)
 _t2_test = unittest.make(_detect_dpr_3x_test_impl)
@@ -105,6 +165,9 @@ _t4_test = unittest.make(_manifest_basic_test_impl)
 _t5_test = unittest.make(_manifest_with_variants_test_impl)
 _t6_test = unittest.make(_manifest_variant_only_test_impl)
 _t7_test = unittest.make(_manifest_decodes_keys_test_impl)
+_t8_test = unittest.make(_manifest_empty_segment_test_impl)
+_t9_test = unittest.make(_manifest_empty_segment_variant_dir_test_impl)
+_t10_test = unittest.make(_manifest_empty_segment_no_variants_test_impl)
 
 def asset_bundle_test_suite(name):
-    unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test, _t6_test, _t7_test)
+    unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test, _t6_test, _t7_test, _t8_test, _t9_test, _t10_test)
