@@ -294,7 +294,8 @@ def swiftpm_translate_test_suite(name):
         _clang_target_emit_test,
         _generated_map_emit_test,
         _mixed_source_refusal_test,
-        _mixed_language_refusal_test,
+        _mixed_c_family_translates_test,
+        _assembly_refusal_names_file_test,
     )
     native.test_suite(
         name = name,
@@ -465,15 +466,39 @@ def _mixed_source_refusal_test_impl(ctx):
 
 _mixed_source_refusal_test = unittest.make(_mixed_source_refusal_test_impl)
 
-def _mixed_language_refusal_test_impl(ctx):
+def _mixed_c_family_translates_test_impl(ctx):
     env = unittest.begin(ctx)
     parsed = parse_swiftpm_package("shims", _CLANG_MANIFEST)
     asserts.true(env, parsed.ok)
     files = _clang_files()
+    files["Shims"] = struct(dir = "pkg/Sources/Shims", srcs = [], c_srcs = ["pkg/Sources/Shims/a.c", "pkg/Sources/Shims/b.cpp", "pkg/Sources/Shims/c.m", "pkg/Sources/Shims/d.mm"], public_hdrs = ["pkg/Sources/Shims/include/Shims.h"], private_hdrs = [], explicit_map = "pkg/Sources/Shims/include/module.modulemap", map_in_include = True)
+    translated = translate_swiftpm_package("shims", "deps", parsed.model, ["shims"], files)
+    asserts.true(env, translated.ok)
+    asserts.true(env, "load(\"@rules_cc//cc:objc_library.bzl\", \"objc_library\")" in translated.text)
+    asserts.true(env, "objc_library(" in translated.text)
+    asserts.true(env, "\"pkg/Sources/Shims/a.c\"" in translated.text)
+    asserts.true(env, "\"pkg/Sources/Shims/b.cpp\"" in translated.text)
+    asserts.true(env, "\"pkg/Sources/Shims/c.m\"" in translated.text)
+    asserts.true(env, "\"pkg/Sources/Shims/d.mm\"" in translated.text)
     files["Shims"] = struct(dir = "pkg/Sources/Shims", srcs = [], c_srcs = ["pkg/Sources/Shims/a.c", "pkg/Sources/Shims/b.cpp"], public_hdrs = ["pkg/Sources/Shims/include/Shims.h"], private_hdrs = [], explicit_map = "pkg/Sources/Shims/include/module.modulemap", map_in_include = True)
     translated = translate_swiftpm_package("shims", "deps", parsed.model, ["shims"], files)
-    asserts.true(env, not translated.ok)
-    asserts.true(env, "mixes C and C++ sources" in translated.error)
+    asserts.true(env, translated.ok)
+    asserts.true(env, "cc_library(" in translated.text)
     return unittest.end(env)
 
-_mixed_language_refusal_test = unittest.make(_mixed_language_refusal_test_impl)
+_mixed_c_family_translates_test = unittest.make(_mixed_c_family_translates_test_impl)
+
+def _assembly_refusal_names_file_test_impl(ctx):
+    env = unittest.begin(ctx)
+    parsed = parse_swiftpm_package("shims", _CLANG_MANIFEST)
+    asserts.true(env, parsed.ok)
+    files = _clang_files()
+    files["Shims"] = struct(dir = "pkg/Sources/Shims", srcs = [], c_srcs = ["pkg/Sources/Shims/a.c", "pkg/Sources/Shims/b.S"], public_hdrs = ["pkg/Sources/Shims/include/Shims.h"], private_hdrs = [], explicit_map = None, map_in_include = False)
+    translated = translate_swiftpm_package("shims", "deps", parsed.model, ["shims"], files)
+    asserts.true(env, not translated.ok)
+    asserts.true(env, "assembly source" in translated.error)
+    asserts.true(env, "\"pkg/Sources/Shims/b.S\"" in translated.error)
+    asserts.true(env, "\"Shims\"" in translated.error)
+    return unittest.end(env)
+
+_assembly_refusal_names_file_test = unittest.make(_assembly_refusal_names_file_test_impl)

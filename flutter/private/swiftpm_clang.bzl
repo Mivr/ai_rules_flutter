@@ -30,8 +30,10 @@ def swiftpm_clang_module_spec(target, target_dir, sources, public_headers, expli
     target root for single-directory layouts, never `include/`) becomes
     the umbrella directory of a generated map. Headers anywhere else — or
     a map that needs search paths beyond the package — are refused, as is
-    an empty (headerless) target or one mixing source languages (`.c`
-    with `.cpp`, or any assembly, which has no Bazel translation).
+    an empty (headerless) target. Any mix of C, C++, Objective-C and
+    Objective-C++ sources translates to the one C-family library, the
+    way SwiftPM builds such targets; only assembly sources have no Bazel
+    translation, and the refusal names the file.
 
     Args:
         target: The parsed target struct (`name`, for messages,
@@ -49,15 +51,9 @@ def swiftpm_clang_module_spec(target, target_dir, sources, public_headers, expli
         None.
     """
     who = "target " + repr(target.name)
-    languages = {}
     for source in sources:
-        languages[_swiftpm_clang_language(source)] = True
-    if "asm" in languages:
-        return struct(ok = False, detail = "{who} has assembly sources, which have no Bazel translation".format(who = who), module_map = None, umbrella_dir = None)
-    if "c" in languages and ("cxx" in languages or "objcxx" in languages):
-        return struct(ok = False, detail = "{who} mixes C and C++ sources, which have no Bazel translation".format(who = who), module_map = None, umbrella_dir = None)
-    if "objc" in languages and "objcxx" in languages:
-        return struct(ok = False, detail = "{who} mixes Objective-C and Objective-C++ sources, which have no Bazel translation".format(who = who), module_map = None, umbrella_dir = None)
+        if _swiftpm_clang_language(source) == "asm":
+            return struct(ok = False, detail = "{who} has assembly source {file}, which has no Bazel translation".format(who = who, file = repr(source)), module_map = None, umbrella_dir = None)
     if explicit_map != None:
         return struct(ok = True, detail = "", module_map = explicit_map, umbrella_dir = None)
     if not public_headers:
