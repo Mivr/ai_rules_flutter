@@ -153,12 +153,12 @@ def swiftpm_render_clang_library(lib):
     ones in `srcs`: they compile with the target's own sources but stay
     invisible to dependents. The header search paths go in `includes`
     (hermetic in the spoke repository, where a `-I` in `copts` would
-    not rebase), and the module name — plus the explicit map when the
-    target ships one — in `aspect_hints` via a separate
-    `swift_interop_hint` target (a rule, so it needs its own `name`)
-    so Swift importers see the same module SwiftPM
-    computes. A target with no public headers gets no hint: it is
-    link-only. Lists render through `swiftpm_render_list_attr`, so
+    not rebase), and the module name — plus the module map, explicit or
+    generated, so the one map Swift and clang use is SwiftPM's — in
+    `aspect_hints` via a separate `swift_interop_hint` target (a rule,
+    so it needs its own `name`) so Swift importers see the same module
+    SwiftPM computes. A target with no public headers gets no hint: it
+    is link-only. Lists render through `swiftpm_render_list_attr`, so
     `.when(platforms:)`-gated settings and dependencies become
     `select()`s on the target platform's OS.
 
@@ -169,10 +169,13 @@ def swiftpm_render_clang_library(lib):
             library name; `"cc_library"` or `"objc_library"`; the
             unconditional source labels; the unconditional public and
             private header labels; the C99-mangled module name (""
-            for link-only); the explicit map label, or None; whether
-            `module_map` is an explicit map; `struct(text, platforms)`
-            C-only, C++, link option, include and dependency entries;
-            the manual-tag list.
+            for link-only); the module map label — the explicit
+            `module.modulemap` when the target ships one, else the
+            generated `<public>/module.modulemap` the repo rule writes —
+            or None for link-only; whether `module_map` is an explicit
+            map (informational: both forms reach the hint the same way);
+            `struct(text, platforms)` C-only, C++, link option, include
+            and dependency entries; the manual-tag list.
 
     Returns:
         The rule text (the caller loads `swift_interop_hint` when the
@@ -211,7 +214,7 @@ def swiftpm_render_clang_library(lib):
         lines.append("swift_interop_hint(")
         lines.append("    name = \"{name}_interop_hint\",".format(name = lib.library_name))
         lines.append("    module_name = {name},".format(name = repr(lib.module_name)))
-        if lib.explicit_map:
+        if lib.module_map != None:
             lines.append("    module_map = {map},".format(map = repr(lib.module_map)))
         lines.append(")")
     return "\n".join(lines)

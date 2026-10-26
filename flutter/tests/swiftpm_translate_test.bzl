@@ -294,6 +294,7 @@ def swiftpm_translate_test_suite(name):
         _swift_settings_emit_test,
         _clang_target_emit_test,
         _generated_map_emit_test,
+        _generated_map_forms_emit_test,
         _mixed_source_refusal_test,
         _mixed_c_family_translates_test,
         _assembly_refusal_names_file_test,
@@ -450,11 +451,43 @@ def _generated_map_emit_test_impl(ctx):
     translated = translate_swiftpm_package("gen", "deps", parsed.model, ["gen"], files)
     asserts.true(env, translated.ok)
     asserts.true(env, "module_name = \"Gen\"" in translated.text)
-    asserts.true(env, not "module_map" in translated.text)
+    asserts.true(env, "module_map = \"pkg/Sources/Gen/include/module.modulemap\"" in translated.text)
     asserts.true(env, "\"pkg/Sources/Gen/include\"" in translated.text)
     return unittest.end(env)
 
 _generated_map_emit_test = unittest.make(_generated_map_emit_test_impl)
+
+def _generated_map_forms_emit_test_impl(ctx):
+    env = unittest.begin(ctx)
+    parsed = parse_swiftpm_package("gen", _GENERATED_MANIFEST)
+    asserts.true(env, parsed.ok)
+
+    # `<public>/<c99name>.h` umbrella-header form.
+    files = {
+        "Gen": struct(dir = "pkg/Sources/Gen", srcs = [], c_srcs = ["pkg/Sources/Gen/Gen.c"], public_hdrs = ["pkg/Sources/Gen/include/Gen.h", "pkg/Sources/Gen/include/Other.h"], private_hdrs = [], explicit_map = None, map_in_include = False),
+    }
+    translated = translate_swiftpm_package("gen", "deps", parsed.model, ["gen"], files)
+    asserts.true(env, translated.ok)
+    asserts.true(env, "module_map = \"pkg/Sources/Gen/include/module.modulemap\"" in translated.text)
+
+    # `<public>/<c99name>/<c99name>.h` nested umbrella-header form.
+    files = {
+        "Gen": struct(dir = "pkg/Sources/Gen", srcs = [], c_srcs = ["pkg/Sources/Gen/Gen.c"], public_hdrs = ["pkg/Sources/Gen/include/Gen/Gen.h"], private_hdrs = [], explicit_map = None, map_in_include = False),
+    }
+    translated = translate_swiftpm_package("gen", "deps", parsed.model, ["gen"], files)
+    asserts.true(env, translated.ok)
+    asserts.true(env, "module_map = \"pkg/Sources/Gen/include/module.modulemap\"" in translated.text)
+
+    # Umbrella-directory form (no umbrella header at all).
+    files = {
+        "Gen": struct(dir = "pkg/Sources/Gen", srcs = [], c_srcs = ["pkg/Sources/Gen/Gen.c"], public_hdrs = ["pkg/Sources/Gen/include/Other.h"], private_hdrs = [], explicit_map = None, map_in_include = False),
+    }
+    translated = translate_swiftpm_package("gen", "deps", parsed.model, ["gen"], files)
+    asserts.true(env, translated.ok)
+    asserts.true(env, "module_map = \"pkg/Sources/Gen/include/module.modulemap\"" in translated.text)
+    return unittest.end(env)
+
+_generated_map_forms_emit_test = unittest.make(_generated_map_forms_emit_test_impl)
 
 def _mixed_source_refusal_test_impl(ctx):
     env = unittest.begin(ctx)

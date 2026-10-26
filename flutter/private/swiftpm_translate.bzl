@@ -448,6 +448,12 @@ def _swiftpm_emit_swift_library(identity, model, target, edges, files, mode):
 def _swiftpm_emit_clang_library(identity, target, edges, files):
     """Emit one `cc_library`/`objc_library` for a reached C-family target.
 
+    The interop hint points at the target's module map, explicit or
+    generated, so the one map Swift and clang use is SwiftPM's: without
+    it rules_swift would generate a different map from `hdrs` while the
+    written map sat unreferenced (and implicitly visible through
+    `includes`) as a second definition of the same module.
+
     Args:
         identity: The SwiftPM package identity.
         target: The target struct.
@@ -492,7 +498,7 @@ def _swiftpm_emit_clang_library(identity, target, edges, files):
         public_headers = sorted(getattr(files, "public_hdrs", [])),
         private_headers = sorted(getattr(files, "private_hdrs", [])),
         module_name = module_name if spec.module_map != None else "",
-        module_map = spec.module_map if explicit_map else None,
+        module_map = spec.module_map,
         explicit_map = explicit_map,
         c_only = settings.c_only,
         cxx = settings.cxx,
