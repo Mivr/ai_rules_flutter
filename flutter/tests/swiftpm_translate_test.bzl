@@ -288,14 +288,19 @@ def swiftpm_translate_test_suite(name):
         _product_naming_test_target_fails_test,
         _same_dep_onto_test_target_fails_test,
         _executable_target_refusal_test,
-        _conditioned_dep_refusal_test,
+        _conditioned_dep_select_test,
+        _swift_settings_emit_test,
+        _clang_target_emit_test,
+        _generated_map_emit_test,
+        _mixed_source_refusal_test,
+        _mixed_language_refusal_test,
     )
     native.test_suite(
         name = name,
         tests = [":" + name + "_unit"],
     )
 
-def _conditioned_dep_refusal_test_impl(ctx):
+def _conditioned_dep_select_test_impl(ctx):
     env = unittest.begin(ctx)
     manifest = """// swift-tools-version:5.9
 import PackageDescription
@@ -303,15 +308,145 @@ let package = Package(
     name: "Cond",
     products: [.library(name: "Cond", targets: ["Cond"])],
     dependencies: [.package(url: "https://example.com/Dep.git", from: "1.0.0")],
-    targets: [.target(name: "Cond", dependencies: [.product(name: "Dp", package: "Dep", condition: .when(platforms: [.iOS]))])],
+    targets: [.target(name: "Cond", dependencies: [.product(name: "Dp", package: "Dep", condition: .when(platforms: [.iOS])), "Help", .target(name: "Both", condition: .when(platforms: [.iOS, .macOS]))]), .target(name: "Help"), .target(name: "Both")],
 )
 """
     parsed = parse_swiftpm_package("cond", manifest)
     asserts.true(env, parsed.ok)
-    translated = translate_swiftpm_package("cond", "deps", parsed.model, ["cond", "dep"], {"Cond": struct(dir = "d", srcs = ["d/a.swift"])})
-    asserts.true(env, not translated.ok)
-    asserts.true(env, "with a `condition:`" in translated.error)
-    asserts.true(env, "\"Cond\"" in translated.error)
+    translated = translate_swiftpm_package("cond", "deps", parsed.model, ["cond", "dep"], {
+        "Cond": struct(dir = "d", srcs = ["d/a.swift"]),
+        "Help": struct(dir = "d", srcs = ["d/h.swift"]),
+        "Both": struct(dir = "d", srcs = ["d/b.swift"]),
+    })
+    asserts.true(env, translated.ok)
+    asserts.equals(env, ["Cond", "Help", "Both"], translated.names)
+    asserts.true(env, "\"@deps__swiftpm-dep//:Dp\"" in translated.text)
+    asserts.true(env, "\":Help_lib\"" in translated.text)
+    asserts.true(env, "\":Both_lib\"" in translated.text)
+    asserts.true(env, "select({" in translated.text)
+    asserts.true(env, "\"@platforms//os:ios\"" in translated.text)
+    asserts.true(env, "\"//conditions:default\": []" in translated.text)
+    asserts.true(env, not "@platforms//os:macos" in translated.text)
     return unittest.end(env)
 
-_conditioned_dep_refusal_test = unittest.make(_conditioned_dep_refusal_test_impl)
+_conditioned_dep_select_test = unittest.make(_conditioned_dep_select_test_impl)
+
+_SETTINGS_MANIFEST = """// swift-tools-version:5.9
+import PackageDescription
+let package = Package(
+    name: "Set",
+    products: [.library(name: "Set", targets: ["Set"])],
+    targets: [.target(name: "Set", swiftSettings: [.define("SWIFT_FOO"), .enableUpcomingFeature("Existentials"), .enableExperimentalFeature("X", .when(platforms: [.macOS]))], linkerSettings: [.linkedLibrary("z"), .linkedFramework("CoreGraphics")])],
+)
+"""
+
+def _swift_settings_emit_test_impl(ctx):
+    env = unittest.begin(ctx)
+    parsed = parse_swiftpm_package("set", _SETTINGS_MANIFEST)
+    asserts.true(env, parsed.ok)
+    translated = translate_swiftpm_package("set", "deps", parsed.model, ["set"], {"Set": struct(dir = "d", srcs = ["d/a.swift"])})
+    asserts.true(env, translated.ok)
+    asserts.true(env, "\"SWIFT_FOO\"" in translated.text)
+    asserts.true(env, "\"-enable-upcoming-feature\"" in translated.text)
+    asserts.true(env, "\"Existentials\"" in translated.text)
+    asserts.true(env, "\"@platforms//os:macos\"" in translated.text)
+    asserts.true(env, "\"-enable-experimental-feature\"" in translated.text)
+    asserts.true(env, "\"-lz\"" in translated.text)
+    asserts.true(env, "\"-framework\"" in translated.text)
+    asserts.true(env, "\"CoreGraphics\"" in translated.text)
+    return unittest.end(env)
+
+_swift_settings_emit_test = unittest.make(_swift_settings_emit_test_impl)
+
+_CLANG_MANIFEST = """// swift-tools-version:5.9
+import PackageDescription
+let package = Package(
+    name: "Shims",
+    products: [.library(name: "Shims", targets: ["Shims"])],
+    targets: [.target(name: "Shims", dependencies: [.target(name: "Help", condition: .when(platforms: [.iOS]))], cSettings: [.define("SHIMMED"), .headerSearchPath("detail")]), .target(name: "Help")],
+)
+"""
+
+def _clang_files():
+    return {
+        "Shims": struct(dir = "pkg/Sources/Shims", srcs = [], c_srcs = ["pkg/Sources/Shims/Shims.c"], public_hdrs = ["pkg/Sources/Shims/include/Shims.h"], private_hdrs = ["pkg/Sources/Shims/secret.h"], explicit_map = "pkg/Sources/Shims/include/module.modulemap", map_in_include = True),
+        "Help": struct(dir = "pkg/Sources/Help", srcs = ["pkg/Sources/Help/Help.swift"]),
+    }
+
+def _clang_target_emit_test_impl(ctx):
+    env = unittest.begin(ctx)
+    parsed = parse_swiftpm_package("shims", _CLANG_MANIFEST)
+    asserts.true(env, parsed.ok)
+    translated = translate_swiftpm_package("shims", "deps", parsed.model, ["shims"], _clang_files())
+    asserts.true(env, translated.ok)
+    asserts.equals(env, ["Shims", "Help"], translated.names)
+    asserts.true(env, "load(\"@rules_cc//cc:cc_library.bzl\", \"cc_library\")" in translated.text)
+    asserts.true(env, "cc_library(" in translated.text)
+    asserts.true(env, "name = \"Shims_lib\"" in translated.text)
+    asserts.true(env, "\"pkg/Sources/Shims/Shims.c\"" in translated.text)
+    asserts.true(env, "\"pkg/Sources/Shims/include/Shims.h\"" in translated.text)
+    asserts.true(env, "\"pkg/Sources/Shims/secret.h\"" in translated.text)
+    asserts.true(env, "swift_interop_hint" in translated.text)
+    asserts.true(env, "module_name = \"Shims\"" in translated.text)
+    asserts.true(env, "module_map = \"pkg/Sources/Shims/include/module.modulemap\"" in translated.text)
+    asserts.true(env, "\"pkg/Sources/Shims/include\"" in translated.text)
+    asserts.true(env, "\"pkg/Sources/Shims/detail\"" in translated.text)
+    asserts.true(env, "\"-DSHIMMED\"" in translated.text)
+    asserts.true(env, "\"@platforms//os:ios\"" in translated.text)
+    asserts.true(env, "\":Help_lib\"" in translated.text)
+    asserts.true(env, "tags = [\"manual\"]" in translated.text)
+    return unittest.end(env)
+
+_clang_target_emit_test = unittest.make(_clang_target_emit_test_impl)
+
+_GENERATED_MANIFEST = """// swift-tools-version:5.9
+import PackageDescription
+let package = Package(
+    name: "Gen",
+    products: [.library(name: "Gen", targets: ["Gen"])],
+    targets: [.target(name: "Gen", publicHeadersPath: "include")],
+)
+"""
+
+def _generated_map_emit_test_impl(ctx):
+    env = unittest.begin(ctx)
+    parsed = parse_swiftpm_package("gen", _GENERATED_MANIFEST)
+    asserts.true(env, parsed.ok)
+    files = {
+        "Gen": struct(dir = "pkg/Sources/Gen", srcs = [], c_srcs = ["pkg/Sources/Gen/Gen.c"], public_hdrs = ["pkg/Sources/Gen/include/Gen.h"], private_hdrs = [], explicit_map = None, map_in_include = False),
+    }
+    translated = translate_swiftpm_package("gen", "deps", parsed.model, ["gen"], files)
+    asserts.true(env, translated.ok)
+    asserts.true(env, "module_name = \"Gen\"" in translated.text)
+    asserts.true(env, not "module_map" in translated.text)
+    asserts.true(env, "\"pkg/Sources/Gen/include\"" in translated.text)
+    return unittest.end(env)
+
+_generated_map_emit_test = unittest.make(_generated_map_emit_test_impl)
+
+def _mixed_source_refusal_test_impl(ctx):
+    env = unittest.begin(ctx)
+    parsed = parse_swiftpm_package("shims", _CLANG_MANIFEST)
+    asserts.true(env, parsed.ok)
+    files = _clang_files()
+    files["Shims"] = struct(dir = "pkg/Sources/Shims", srcs = ["pkg/Sources/Shims/Shims.swift"], c_srcs = ["pkg/Sources/Shims/Shims.c"])
+    translated = translate_swiftpm_package("shims", "deps", parsed.model, ["shims"], files)
+    asserts.true(env, not translated.ok)
+    asserts.true(env, "mixes Swift and C-family sources" in translated.error)
+    asserts.true(env, "\"Shims\"" in translated.error)
+    return unittest.end(env)
+
+_mixed_source_refusal_test = unittest.make(_mixed_source_refusal_test_impl)
+
+def _mixed_language_refusal_test_impl(ctx):
+    env = unittest.begin(ctx)
+    parsed = parse_swiftpm_package("shims", _CLANG_MANIFEST)
+    asserts.true(env, parsed.ok)
+    files = _clang_files()
+    files["Shims"] = struct(dir = "pkg/Sources/Shims", srcs = [], c_srcs = ["pkg/Sources/Shims/a.c", "pkg/Sources/Shims/b.cpp"], public_hdrs = ["pkg/Sources/Shims/include/Shims.h"], private_hdrs = [], explicit_map = "pkg/Sources/Shims/include/module.modulemap", map_in_include = True)
+    translated = translate_swiftpm_package("shims", "deps", parsed.model, ["shims"], files)
+    asserts.true(env, not translated.ok)
+    asserts.true(env, "mixes C and C++ sources" in translated.error)
+    return unittest.end(env)
+
+_mixed_language_refusal_test = unittest.make(_mixed_language_refusal_test_impl)

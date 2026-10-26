@@ -19,6 +19,7 @@ load(
     "parse_swiftpm_tools_line",
     "swiftpm_first_content_line",
 )
+load(":swiftpm_settings.bzl", "swiftpm_parse_target_setting")
 
 def _swiftpm_fail(identity, line, detail):
     """The fetch failure for one manifest refusal.
@@ -298,7 +299,7 @@ def _swiftpm_parse_modes(value):
         modes.append(struct(major = mode.major, minor = mode.minor))
     return struct(ok = True, detail = "", modes = modes)
 
-def _swiftpm_parse_target_dep(element):
+def _swiftpm_parse_target_dep(element, target_name):
     """Read one target `dependencies` element.
 
     Accepts a string, `.target(name:)` and `.byName(name:)` (a target of
@@ -309,6 +310,8 @@ def _swiftpm_parse_target_dep(element):
 
     Args:
         element: The element's token list.
+        target_name: The target holding the dependency, for messages (""
+            when the manifest has not named it yet).
 
     Returns:
         `struct(ok, detail, dep)`: `dep` is `struct(kind, name, package,
@@ -324,20 +327,25 @@ def _swiftpm_parse_target_dep(element):
     if not kwargs.ok:
         return struct(ok = False, detail = kwargs.detail, dep = None)
     if head.name == "product":
-        return _swiftpm_parse_product_dep(kwargs.kwargs)
-    return _swiftpm_parse_same_dep(kwargs.kwargs)
+        return _swiftpm_parse_product_dep(kwargs.kwargs, target_name)
+    return _swiftpm_parse_same_dep(kwargs.kwargs, target_name)
 
 _SWIFTPM_CONDITION_PLATFORMS = {"iOS": "ios", "macOS": "macos"}
 
-def _swiftpm_parse_dep_condition(kwarg):
+def _swiftpm_parse_dep_condition(kwarg, target_name):
     """Read a `condition:` target-dependency argument.
 
     Only `.when(platforms: [...])` translates: the hub builds one
-    library for every Apple platform, so any other shape (traits,
-    configurations, other platforms) has no Bazel meaning and fails.
+    library for every Apple platform and the emitter keeps the gated
+    dependency only when building for a listed platform, so any other
+    shape (traits, configurations, other platforms) has no Bazel meaning
+    and fails. Failures name the holding target; the caller wraps them
+    with the package identity and line.
 
     Args:
         kwarg: The `condition:` kwarg struct, or None when absent.
+        target_name: The target holding the dependency, for messages (""
+            when the manifest has not named it yet).
 
     Returns:
         `struct(ok, detail, value)`: `value` is None when the argument
@@ -346,30 +354,32 @@ def _swiftpm_parse_dep_condition(kwarg):
     """
     if kwarg == None:
         return struct(ok = True, detail = "", value = None)
+    holder = "target {name}: ".format(name = repr(target_name)) if target_name else ""
     head = _swiftpm_call_head(kwarg.value)
     if not head.ok or not head.dotted or head.name != "when":
-        return struct(ok = False, detail = "expected a build condition (`.when(platforms: [...])`)", value = None)
+        return struct(ok = False, detail = holder + "expected a build condition (`.when(platforms: [...])`)", value = None)
     kwargs = _swiftpm_split_kwargs(head.args)
     if not kwargs.ok:
-        return struct(ok = False, detail = kwargs.detail, value = None)
+        return struct(ok = False, detail = holder + kwargs.detail, value = None)
     if len(kwargs.kwargs) != 1 or kwargs.kwargs[0].key != "platforms":
-        return struct(ok = False, detail = "only `.when(platforms: [...])` conditions are supported", value = None)
+        return struct(ok = False, detail = holder + "only `.when(platforms: [...])` conditions are supported", value = None)
     array = _swiftpm_array_parts(kwargs.kwargs[0].value)
     if not array.ok:
-        return struct(ok = False, detail = array.detail, value = None)
+        return struct(ok = False, detail = holder + array.detail, value = None)
     platforms = []
     for element in array.elements:
         if len(element) == 2 and element[0].kind == "punct" and element[0].text == "." and element[1].kind == "word" and element[1].text in _SWIFTPM_CONDITION_PLATFORMS:
             platforms.append(_SWIFTPM_CONDITION_PLATFORMS[element[1].text])
         else:
-            return struct(ok = False, detail = "unsupported condition platform (only `.iOS` and `.macOS` translate)", value = None)
+            return struct(ok = False, detail = holder + "unsupported condition platform (only `.iOS` and `.macOS` translate)", value = None)
     return struct(ok = True, detail = "", value = struct(platforms = platforms))
 
-def _swiftpm_parse_same_dep(kwargs):
+def _swiftpm_parse_same_dep(kwargs, target_name):
     """Read a `.target(name:)` / `.byName(name:)` dependency.
 
     Args:
         kwargs: The call's parsed keyword arguments.
+        target_name: The target holding the dependency, for messages.
 
     Returns:
         `struct(ok, detail, dep)`.
@@ -383,16 +393,17 @@ def _swiftpm_parse_same_dep(kwargs):
     one = _swiftpm_single_string(by_key["name"].value)
     if not one.ok:
         return struct(ok = False, detail = one.detail, dep = None)
-    condition = _swiftpm_parse_dep_condition(by_key.get("condition", None))
+    condition = _swiftpm_parse_dep_condition(by_key.get("condition", None), target_name)
     if not condition.ok:
         return struct(ok = False, detail = condition.detail, dep = None)
     return struct(ok = True, detail = "", dep = struct(kind = "same", name = one.text, package = "", condition = condition.value))
 
-def _swiftpm_parse_product_dep(kwargs):
+def _swiftpm_parse_product_dep(kwargs, target_name):
     """Read a `.product(name:package:)` dependency.
 
     Args:
         kwargs: The call's parsed keyword arguments.
+        target_name: The target holding the dependency, for messages.
 
     Returns:
         `struct(ok, detail, dep)`.
@@ -407,12 +418,19 @@ def _swiftpm_parse_product_dep(kwargs):
     package = _swiftpm_single_string(by_key["package"].value)
     if not name.ok or not package.ok:
         return struct(ok = False, detail = "expected string literals for `name:` and `package:`", dep = None)
-    condition = _swiftpm_parse_dep_condition(by_key.get("condition", None))
+    condition = _swiftpm_parse_dep_condition(by_key.get("condition", None), target_name)
     if not condition.ok:
         return struct(ok = False, detail = condition.detail, dep = None)
     return struct(ok = True, detail = "", dep = struct(kind = "product", name = name.text, package = package.text, condition = condition.value))
 
-_SWIFTPM_REFUSED_TARGET_KEYS = ["resources", "swiftSettings", "cSettings", "cxxSettings", "linkerSettings", "plugins"]
+_SWIFTPM_REFUSED_TARGET_KEYS = ["resources", "plugins"]
+
+_SWIFTPM_SETTING_ARRAYS = {
+    "cSettings": "c_settings",
+    "cxxSettings": "cxx_settings",
+    "swiftSettings": "swift_settings",
+    "linkerSettings": "linker_settings",
+}
 
 def _swiftpm_target_kwarg_error(target_name, key):
     """The refusal detail for an untranslatable target argument.
@@ -426,11 +444,13 @@ def _swiftpm_target_kwarg_error(target_name, key):
     """
     return "target {target} uses `{key}`, which has no Bazel translation".format(target = repr(target_name), key = key)
 
-def _swiftpm_apply_target_deps(identity, kwarg, acc):
+def _swiftpm_apply_target_deps(identity, kind, kwarg, acc):
     """Fold a `.target(...)` `dependencies:` array into the accumulator.
 
     Args:
         identity: The SwiftPM package identity.
+        kind: The target head (`target`), for messages when the manifest
+            has not named the target yet.
         kwarg: The parsed keyword argument.
         acc: The accumulator dict (mutated in place).
 
@@ -440,12 +460,43 @@ def _swiftpm_apply_target_deps(identity, kwarg, acc):
     array = _swiftpm_array_parts(kwarg.value)
     if not array.ok:
         return struct(ok = False, error = _swiftpm_fail(identity, kwarg.line, array.detail))
+    target_name = acc["name"] if acc["name"] else kind
     for element in array.elements:
-        dep = _swiftpm_parse_target_dep(element)
+        dep = _swiftpm_parse_target_dep(element, target_name)
         if not dep.ok:
             element_line = element[0].line if element else kwarg.line
             return struct(ok = False, error = _swiftpm_fail(identity, element_line, dep.detail))
         acc["deps"].append(dep.dep)
+    return struct(ok = True, error = "")
+
+def _swiftpm_apply_target_settings(identity, kind, kwarg, acc):
+    """Fold a `cSettings:`/`cxxSettings:`/`swiftSettings:`/`linkerSettings:` array.
+
+    Every element parses through the settings reader: translatable
+    settings accumulate on the target for the BUILD emitter, while
+    `.unsafeFlags(...)`, unknown setting kinds and untranslatable
+    `.when(...)` conditions fail the fetch.
+
+    Args:
+        identity: The SwiftPM package identity.
+        kind: The target head (`target`), for messages when the manifest
+            has not named the target yet.
+        kwarg: The parsed keyword argument.
+        acc: The accumulator dict (mutated in place).
+
+    Returns:
+        `struct(ok, error)`.
+    """
+    array = _swiftpm_array_parts(kwarg.value)
+    if not array.ok:
+        return struct(ok = False, error = _swiftpm_fail(identity, kwarg.line, array.detail))
+    target_name = acc["name"] if acc["name"] else kind
+    for element in array.elements:
+        setting = swiftpm_parse_target_setting(target_name, kwarg.key, element)
+        if not setting.ok:
+            element_line = element[0].line if element else kwarg.line
+            return struct(ok = False, error = _swiftpm_fail(identity, element_line, setting.detail))
+        acc[_SWIFTPM_SETTING_ARRAYS[kwarg.key]].append(setting.setting)
     return struct(ok = True, error = "")
 
 def _swiftpm_apply_target_kwarg(identity, kind, kwarg, acc, lenient):
@@ -458,7 +509,7 @@ def _swiftpm_apply_target_kwarg(identity, kind, kwarg, acc, lenient):
         acc: The accumulator dict (mutated in place).
         lenient: When True, skip every setting that cannot change the
             dependency list (`publicHeadersPath`, `packageAccess`,
-            `resources`, `swiftSettings`, ...) instead of refusing it.
+            `resources`, `cSettings`, ...) instead of refusing it.
             The pub plugin spoke reads only the `.package(...)`
             declarations and the plugin target's `dependencies`, so such
             settings never change its output.
@@ -473,7 +524,7 @@ def _swiftpm_apply_target_kwarg(identity, kind, kwarg, acc, lenient):
             return struct(ok = False, error = _swiftpm_fail(identity, kwarg.line, one.detail))
         acc[key] = one.text
     elif key == "dependencies":
-        return _swiftpm_apply_target_deps(identity, kwarg, acc)
+        return _swiftpm_apply_target_deps(identity, kind, kwarg, acc)
     elif key == "exclude" or key == "sources":
         listed = _swiftpm_string_list(kwarg.value)
         if not listed.ok:
@@ -483,8 +534,15 @@ def _swiftpm_apply_target_kwarg(identity, kind, kwarg, acc, lenient):
         # The plugin spoke reads only the `.package(...)` declarations and
         # the plugin target's `dependencies`, so any other target setting
         # (`publicHeadersPath`, `packageAccess`, `resources`,
-        # `swiftSettings`, ...) never changes its output.
+        # `cSettings`, ...) never changes its output.
         return struct(ok = True, error = "")
+    elif key == "publicHeadersPath":
+        one = _swiftpm_single_string(kwarg.value)
+        if not one.ok:
+            return struct(ok = False, error = _swiftpm_fail(identity, kwarg.line, one.detail))
+        acc["public_headers_path"] = one.text
+    elif key in _SWIFTPM_SETTING_ARRAYS:
+        return _swiftpm_apply_target_settings(identity, kind, kwarg, acc)
     elif key in _SWIFTPM_REFUSED_TARGET_KEYS:
         return struct(ok = False, error = _swiftpm_fail(identity, kwarg.line, _swiftpm_target_kwarg_error(acc["name"] if acc["name"] else kind, key)))
     else:
@@ -504,19 +562,21 @@ def _swiftpm_parse_target_kwargs(identity, kind, args, line, lenient):
     Returns:
         `struct(ok, error, target)`: `target` holds `kind`, `name`,
         `deps`, `path` ("" when defaulted), `exclude`, `sources` (None
-        when unrestricted) and `line`.
+        when unrestricted), `public_headers_path` ("" when defaulted),
+        the four build-setting lists (`c_settings`, `cxx_settings`,
+        `swift_settings`, `linker_settings`) and `line`.
     """
     kwargs = _swiftpm_split_kwargs(args)
     if not kwargs.ok:
         return struct(ok = False, error = _swiftpm_fail(identity, line, kwargs.detail), target = None)
-    acc = {"name": "", "deps": [], "path": "", "exclude": [], "sources": None}
+    acc = {"name": "", "deps": [], "path": "", "exclude": [], "sources": None, "public_headers_path": "", "c_settings": [], "cxx_settings": [], "swift_settings": [], "linker_settings": []}
     for kwarg in kwargs.kwargs:
         applied = _swiftpm_apply_target_kwarg(identity, kind, kwarg, acc, lenient)
         if not applied.ok:
             return struct(ok = False, error = applied.error, target = None)
     if not acc["name"]:
         return struct(ok = False, error = _swiftpm_fail(identity, line, "a `.{kind}(...)` target without a `name:`".format(kind = kind)), target = None)
-    return struct(ok = True, error = "", target = struct(kind = kind, name = acc["name"], deps = acc["deps"], path = acc["path"], exclude = acc["exclude"], sources = acc["sources"], line = line))
+    return struct(ok = True, error = "", target = struct(kind = kind, name = acc["name"], deps = acc["deps"], path = acc["path"], exclude = acc["exclude"], sources = acc["sources"], public_headers_path = acc["public_headers_path"], c_settings = acc["c_settings"], cxx_settings = acc["cxx_settings"], swift_settings = acc["swift_settings"], linker_settings = acc["linker_settings"], line = line))
 
 def _swiftpm_parse_target_element(identity, element, lenient):
     """Parse one `targets` array element of any target kind.
@@ -530,9 +590,10 @@ def _swiftpm_parse_target_element(identity, element, lenient):
         `struct(ok, error, target)`: regular `.target` declarations keep
         their full arguments; every other kind (`testTarget`,
         `executableTarget`, `binaryTarget`, `systemLibrary`, `plugin`,
-        `macro`) keeps only its kind and name. Test targets are ignored
-        by the translator; the rest are refused when a product reaches
-        them.
+        `macro`) keeps only its kind and name, with empty
+        `public_headers_path` and build-setting lists. Test targets are
+        ignored by the translator; the rest are refused when a product
+        reaches them.
     """
     line = element[0].line if element else 0
     head = _swiftpm_call_head(element)
@@ -544,7 +605,7 @@ def _swiftpm_parse_target_element(identity, element, lenient):
         named = _swiftpm_parse_special_target_name(identity, head.name, head.args, line)
         if not named.ok:
             return struct(ok = False, error = named.error, target = None)
-        return struct(ok = True, error = "", target = struct(kind = head.name, name = named.name, deps = [], path = "", exclude = [], sources = None, line = line))
+        return struct(ok = True, error = "", target = struct(kind = head.name, name = named.name, deps = [], path = "", exclude = [], sources = None, public_headers_path = "", c_settings = [], cxx_settings = [], swift_settings = [], linker_settings = [], line = line))
     return struct(ok = False, error = _swiftpm_fail(identity, line, "unknown target kind `.{kind}(...)`".format(kind = head.name)), target = None)
 
 def _swiftpm_parse_special_target_name(identity, kind, args, line):

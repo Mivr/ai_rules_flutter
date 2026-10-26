@@ -232,11 +232,66 @@ def _plugin_parser_accepts_objc_target_settings_test_impl(ctx):
     manifest = "// swift-tools-version: 5.9\nimport PackageDescription\nlet package = Package(name: \"P\", products: [.library(name: \"P\", targets: [\"P\"])], dependencies: [.package(url: \"https://example.com/Dep.git\", exact: \"1.0.0\")], targets: " + _OBJC_PLUGIN_TARGET + ")\n"
     strict = parse_swiftpm_package("plugin", manifest)
     asserts.true(env, not strict.ok)
-    asserts.true(env, "unknown `.target(...)` argument `publicHeadersPath`" in strict.error)
+    asserts.true(env, "unknown `.target(...)` argument `packageAccess`" in strict.error)
     lenient = parse_swiftpm_plugin_package("plugin", manifest)
     asserts.true(env, lenient.ok)
     asserts.equals(env, 1, len(lenient.model.targets[0].deps))
     asserts.equals(env, "D", lenient.model.targets[0].deps[0].name)
+    return unittest.end(env)
+
+_SETTINGS_TARGET = ".target(name: \"C\", publicHeadersPath: \"include\", cSettings: [.define(\"CLANG\"), .define(\"VER\", to: \"2\"), .headerSearchPath(\"detail\"), .define(\"IOS_ONLY\", .when(platforms: [.iOS]))], cxxSettings: [.define(\"CXX\")], swiftSettings: [.define(\"SWIFT\"), .enableUpcomingFeature(\"Existentials\"), .enableExperimentalFeature(\"X\", .when(platforms: [.macOS]))], linkerSettings: [.linkedLibrary(\"z\"), .linkedFramework(\"CoreGraphics\", condition: .when(platforms: [.iOS, .macOS]))])"
+
+def _parses_target_settings_test_impl(ctx):
+    env = unittest.begin(ctx)
+    manifest = "// swift-tools-version: 5.9\nimport PackageDescription\nlet package = Package(name: \"P\", products: [.library(name: \"P\", targets: [\"C\"])], targets: [" + _SETTINGS_TARGET + "])\n"
+    parsed = parse_swiftpm_package("settings", manifest)
+    asserts.true(env, parsed.ok)
+    target = parsed.model.targets[0]
+    asserts.equals(env, "include", target.public_headers_path)
+    asserts.equals(env, 4, len(target.c_settings))
+    asserts.equals(env, ("define", "CLANG", "", None), (target.c_settings[0].kind, target.c_settings[0].name, target.c_settings[0].value, target.c_settings[0].condition))
+    asserts.equals(env, ("define", "VER", "2"), (target.c_settings[1].kind, target.c_settings[1].name, target.c_settings[1].value))
+    asserts.equals(env, ("headerSearchPath", "detail"), (target.c_settings[2].kind, target.c_settings[2].name))
+    asserts.equals(env, ["ios"], target.c_settings[3].condition.platforms)
+    asserts.equals(env, 1, len(target.cxx_settings))
+    asserts.equals(env, "CXX", target.cxx_settings[0].name)
+    asserts.equals(env, 3, len(target.swift_settings))
+    asserts.equals(env, "SWIFT", target.swift_settings[0].name)
+    asserts.equals(env, "enableUpcomingFeature", target.swift_settings[1].kind)
+    asserts.equals(env, None, target.swift_settings[1].condition)
+    asserts.equals(env, ["macos"], target.swift_settings[2].condition.platforms)
+    asserts.equals(env, 2, len(target.linker_settings))
+    asserts.equals(env, ("linkedLibrary", "z", None), (target.linker_settings[0].kind, target.linker_settings[0].name, target.linker_settings[0].condition))
+    asserts.equals(env, ["ios", "macos"], target.linker_settings[1].condition.platforms)
+    return unittest.end(env)
+
+def _target_setting_refusals_test_impl(ctx):
+    env = unittest.begin(ctx)
+    cases = [
+        (".target(name: \"C\", cSettings: [.unsafeFlags([\"-Xcc\", \"-x\"])])", "target \"C\" uses `.unsafeFlags(...)` in `cSettings`"),
+        (".target(name: \"C\", cxxSettings: [.weird(\"x\")])", "target \"C\" uses `.weird(...)` in `cxxSettings`"),
+        (".target(name: \"C\", swiftSettings: [.define(\"X\", to: \"1\")])", "unexpected `.define(...)` argument `to`"),
+        (".target(name: \"C\", swiftSettings: [.define(\"X\", .when(configuration: .debug))])", "target \"C\" uses a build condition on `configuration:`"),
+        (".target(name: \"C\", linkerSettings: [.linkedLibrary(\"z\", .when(platforms: [.watchOS]))])", "target \"C\" uses an unsupported condition platform"),
+        (".target(name: \"C\", linkerSettings: [.linkedLibrary(\"z\", .when(traits: [\"T\"]))])", "target \"C\" uses a build condition on `traits:`"),
+        (".target(name: \"C\", cSettings: [.define(\"X\", .define(\"Y\"))])", "target \"C\": expected a build condition"),
+    ]
+    for target_decl, detail in cases:
+        manifest = "// swift-tools-version: 5.9\nimport PackageDescription\nlet package = Package(name: \"P\", products: [.library(name: \"P\", targets: [\"C\"])], targets: [" + target_decl + "])\n"
+        parsed = parse_swiftpm_package("settings", manifest)
+        asserts.true(env, not parsed.ok)
+        asserts.true(env, detail in parsed.error)
+        asserts.true(env, "SwiftPM package \"settings\" (Package.swift line " in parsed.error)
+    return unittest.end(env)
+
+def _condition_refusal_names_target_test_impl(ctx):
+    env = unittest.begin(ctx)
+    manifest = "// swift-tools-version: 5.9\nimport PackageDescription\nlet package = Package(name: \"Cond\", products: [.library(name: \"Cond\", targets: [\"C\"])], dependencies: [.package(url: \"https://example.com/Dep.git\", from: \"1.0.0\")], targets: [.target(name: \"C\", dependencies: [.product(name: \"Dp\", package: \"Dep\", condition: .when(configuration: .debug))])])\n"
+    parsed = parse_swiftpm_package("cond", manifest)
+    asserts.true(env, not parsed.ok)
+    asserts.true(env, "target \"C\":" in parsed.error)
+    asserts.true(env, "only `.when(platforms: [...])`" in parsed.error)
+    asserts.true(env, "SwiftPM package \"cond\" (Package.swift line " in parsed.error)
     return unittest.end(env)
 
 _PLUGIN_PACKAGE_SETTINGS = ', defaultLocalization: "en", pkgConfig: "libfoo", providers: [.apt(["libfoo-dev"]), .brew(["libfoo"])]'
@@ -293,6 +348,9 @@ def _package_dep_still_refuses_unlocatable_test_impl(ctx):
         asserts.true(env, case[1] in lenient.error)
     return unittest.end(env)
 
+_parses_target_settings_test = unittest.make(_parses_target_settings_test_impl)
+_target_setting_refusals_test = unittest.make(_target_setting_refusals_test_impl)
+_condition_refusal_names_target_test = unittest.make(_condition_refusal_names_target_test_impl)
 _parses_the_bigint_manifest_test = unittest.make(_parses_the_bigint_manifest_test_impl)
 _parses_every_supported_shape_test = unittest.make(_parses_every_supported_shape_test_impl)
 _parses_a_plugin_template_manifest_test = unittest.make(_parses_a_plugin_template_manifest_test_impl)
@@ -319,6 +377,9 @@ def swiftpm_manifest_test_suite(name):
         _package_dep_still_refuses_unlocatable_test,
         _parses_condition_arguments_test,
         _condition_refusals_test,
+        _parses_target_settings_test,
+        _target_setting_refusals_test,
+        _condition_refusal_names_target_test,
         _refusal_names_identity_file_and_line_test,
         _tools_line_refusals_test,
         _statement_refusals_test,

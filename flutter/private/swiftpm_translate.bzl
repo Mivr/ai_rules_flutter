@@ -7,6 +7,14 @@ reachability, special-kind refusals) and `swiftpm_emit_build` (BUILD text)
 here. Starlark unit tests drive both without any fetch.
 """
 
+load(
+    ":swiftpm_clang.bzl",
+    "swiftpm_clang_module_spec",
+    "swiftpm_clang_rule",
+    "swiftpm_render_clang_library",
+)
+load(":swiftpm_settings.bzl", "swiftpm_render_list_attr", "swiftpm_target_setting_entries")
+
 _SWIFTPM_C99_OK = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_"
 
 def swiftpm_c99name(name):
@@ -234,10 +242,11 @@ def _swiftpm_product_dep_label(identity, hub_name, dep, pkg_deps, pin_identities
 def _swiftpm_target_edge(identity, model, target, by_name, pin_identities, hub_name):
     """Resolve one target's dependencies to Bazel labels.
 
-    A dependency carrying a `condition:` fails the fetch: the hub builds
-    one library for every Apple platform, so a platform-gated dependency
-    has no Bazel meaning here. The pub plugin spoke filters conditions
-    per platform instead (see `select_apple_swiftpm_deps`).
+    A dependency carrying a `condition:` keeps its listed platforms: the
+    emitter renders it inside a `select()` on the target platform's OS,
+    so the hub builds one library for every Apple platform. Reachability
+    still follows conditioned dependencies: a target needed on any
+    platform must be built.
 
     Args:
         identity: The SwiftPM package identity.
@@ -248,27 +257,28 @@ def _swiftpm_target_edge(identity, model, target, by_name, pin_identities, hub_n
         hub_name: The `flutter.pub` hub name, for dep labels.
 
     Returns:
-        `struct(ok, error, labels, followed)`: `followed` names the
-        same-package targets for the reachability walk.
+        `struct(ok, error, labels, followed)`: `labels` holds
+        `struct(text, platforms)` entries with `platforms` None or the
+        `.when(platforms:)` list; `followed` names the same-package
+        targets for the reachability walk.
     """
     labels = []
     followed = []
     for dep in target.deps:
-        if getattr(dep, "condition", None) != None:
-            return struct(ok = False, error = "SwiftPM package {identity}: target {target} depends on {name} with a `condition:`, which has no Bazel translation.".format(identity = repr(identity), target = repr(target.name), name = repr(dep.name)), labels = [], followed = [])
+        platforms = dep.condition.platforms if getattr(dep, "condition", None) != None else None
         if dep.kind == "same":
             resolved = _swiftpm_resolve_same_dep(identity, model.targets, by_name, target.name, dep)
             if not resolved.ok:
                 return struct(ok = False, error = resolved.error, labels = [], followed = [])
             if resolved.target.kind == "testTarget":
                 return struct(ok = False, error = "SwiftPM package {identity}: target {target} depends on test target {name}, which is ignored.".format(identity = repr(identity), target = repr(target.name), name = repr(resolved.target.name)), labels = [], followed = [])
-            labels.append(":" + resolved.target.name + "_lib")
+            labels.append(struct(text = ":" + resolved.target.name + "_lib", platforms = platforms))
             followed.append(resolved.target.name)
         else:
             located = _swiftpm_product_dep_label(identity, hub_name, dep, model.pkg_deps, pin_identities)
             if not located.ok:
                 return struct(ok = False, error = located.error, labels = [], followed = [])
-            labels.append(located.label)
+            labels.append(struct(text = located.label, platforms = platforms))
     return struct(ok = True, error = "", labels = labels, followed = followed)
 
 def _swiftpm_walk_reachable(model, same_edges):
@@ -336,8 +346,9 @@ def swiftpm_reachable_targets(identity, model, pin_identities, hub_name):
     Returns:
         `struct(ok, error, names, edges)`: `names` lists reached regular
         targets in manifest order; `edges` maps each reached name to its
-        dep label list (`:other_lib` for same-package targets,
-        `@<hub>__swiftpm-<id>//:<product>` for products).
+        dep entry list (`struct(text, platforms)` with `:other_lib` for
+        same-package targets and `@<hub>__swiftpm-<id>//:<product>` for
+        products, `platforms` None or the `.when(platforms:)` list).
     """
     by_name = {}
     for target in model.targets:
@@ -379,21 +390,29 @@ def _swiftpm_build_string(text):
     """
     return "\"" + text.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
-def _swiftpm_emit_library(identity, model, target, edges, files, mode):
-    """Emit one `swift_library` for a reached target.
+def _swiftpm_emit_swift_library(identity, model, target, edges, files, mode):
+    """Emit one `swift_library` for a reached Swift target.
+
+    `swiftSettings` `.define` entries become `defines`, the upcoming and
+    experimental feature settings become `copts` flags, `linkerSettings`
+    become `linkopts`, and `.when(platforms:)`-gated settings and
+    dependencies render as `select()`s on the target platform's OS.
 
     Args:
         identity: The SwiftPM package identity.
         model: The parsed manifest model.
         target: The target struct.
-        edges: The dep label map from `swiftpm_reachable_targets`.
+        edges: The dep entry map from `swiftpm_reachable_targets`.
         files: `struct(dir, srcs)` with the target's directory and
             explicit Swift sources, package-root relative.
         mode: The language mode struct.
 
     Returns:
-        The `swift_library` block text.
+        `struct(ok, error, text)`.
     """
+    settings = swiftpm_target_setting_entries(target, files.dir, "swift")
+    if not settings.ok:
+        return struct(ok = False, error = "SwiftPM package {identity}: {detail}.".format(identity = repr(identity), detail = settings.detail), text = "")
     lines = ["swift_library("]
     lines.append("    name = " + _swiftpm_build_string(target.name + "_lib") + ",")
     lines.append("    srcs = [")
@@ -403,49 +422,142 @@ def _swiftpm_emit_library(identity, model, target, edges, files, mode):
     lines.append("    module_name = {module},".format(module = repr(swiftpm_c99name(target.name))))
     if model.tools_major > 5 or (model.tools_major == 5 and model.tools_minor >= 9):
         lines.append("    package_name = {package},".format(package = repr(identity)))
-    lines.append("    copts = [\"-swift-version\", {flag}],".format(flag = repr(_swiftpm_copts_flag(mode))))
-    if edges.get(target.name):
-        lines.append("    deps = [")
-        for label in edges[target.name]:
-            lines.append("        {label},".format(label = repr(label)))
-        lines.append("    ],")
+    gated_copts = [entry for entry in settings.copts if entry.platforms != None and sorted(entry.platforms) != ["ios", "macos"]]
+    if not gated_copts:
+        plain_copts = ["-swift-version", _swiftpm_copts_flag(mode)] + [entry.text for entry in settings.copts]
+        lines.append("    copts = [{items}],".format(items = ", ".join([repr(text) for text in plain_copts])))
+    else:
+        lists = swiftpm_render_list_attr("copts", ["-swift-version", _swiftpm_copts_flag(mode)], settings.copts)
+        lines.append(lists)
+    lists = swiftpm_render_list_attr("defines", [], settings.defines)
+    if lists:
+        lines.append(lists)
+    lists = swiftpm_render_list_attr("linkopts", [], settings.linkopts)
+    if lists:
+        lines.append(lists)
+    lists = swiftpm_render_list_attr("deps", [], edges.get(target.name, []))
+    if lists:
+        lines.append(lists)
     lines.append("    visibility = [\"//visibility:public\"],")
     lines.append(")")
-    return "\n".join(lines)
+    return struct(ok = True, error = "", text = "\n".join(lines))
+
+def _swiftpm_emit_clang_library(identity, target, edges, files):
+    """Emit one `cc_library`/`objc_library` for a reached C-family target.
+
+    Args:
+        identity: The SwiftPM package identity.
+        target: The target struct.
+        edges: The dep entry map from `swiftpm_reachable_targets`.
+        files: `struct(dir, srcs, c_srcs, public_hdrs, private_hdrs,
+            explicit_map, map_in_include)` with the target's directory,
+            sources, headers and explicit module map, package-root
+            relative.
+
+    Returns:
+        `struct(ok, error, text, rule, needs_hint)`: `rule` is
+        `"cc_library"` or `"objc_library"`; `needs_hint` when the target
+        has public headers and the emitter must load
+        `swift_interop_hint`.
+    """
+    module_name = swiftpm_c99name(target.name)
+    spec = swiftpm_clang_module_spec(target, files.dir, getattr(files, "c_srcs", []), getattr(files, "public_hdrs", []), getattr(files, "explicit_map", None))
+    if not spec.ok:
+        return struct(ok = False, error = "SwiftPM package {identity}: {detail}.".format(identity = repr(identity), detail = spec.detail), text = "", rule = "", needs_hint = False)
+    settings = swiftpm_target_setting_entries(target, files.dir, "clang")
+    if not settings.ok:
+        return struct(ok = False, error = "SwiftPM package {identity}: {detail}.".format(identity = repr(identity), detail = settings.detail), text = "", rule = "", needs_hint = False)
+    rule = swiftpm_clang_rule(getattr(files, "c_srcs", []))
+    explicit_map = getattr(files, "explicit_map", None) != None
+    includes = settings.includes
+    if explicit_map and getattr(files, "map_in_include", False):
+        # The explicit map lives under the public-headers directory: the
+        # quoted header includes in the sources resolve only with that
+        # directory on the search path, the way SwiftPM compiles such
+        # targets.
+        map_dir = files.explicit_map[:files.explicit_map.rfind("/")]
+        includes = [struct(text = map_dir, platforms = None)] + includes
+    if not explicit_map and spec.module_map != None:
+        # The generated umbrella map covers the public headers, which the
+        # sources include by basename: the umbrella directory goes on the
+        # search path the way SwiftPM compiles such targets.
+        includes = [struct(text = spec.umbrella_dir, platforms = None)] + includes
+    text = swiftpm_render_clang_library(
+        library_name = target.name + "_lib",
+        rule = rule,
+        srcs = sorted(getattr(files, "c_srcs", [])),
+        public_headers = sorted(getattr(files, "public_hdrs", [])),
+        private_headers = sorted(getattr(files, "private_hdrs", [])),
+        module_name = module_name if spec.module_map != None else "",
+        module_map = spec.module_map if explicit_map else None,
+        explicit_map = explicit_map,
+        c_only = settings.c_only,
+        cxx = settings.cxx,
+        linkopts = settings.linkopts,
+        includes = includes,
+        deps = edges.get(target.name, []),
+        tags = ["manual"],
+    )
+    return struct(ok = True, error = "", text = text, rule = rule, needs_hint = spec.module_map != None)
 
 def swiftpm_emit_build(identity, model, names, edges, files_by_target):
     """Emit the spoke BUILD file for one translated package.
 
-    One `swift_library` per reached target (named `<target>_lib`), one
+    One `swift_library` per reached Swift target (named `<target>_lib`),
+    one `cc_library`/`objc_library` per reached C-family target, one
     `alias` per single-target product (even when the product and target
     names differ), and one `swift_library_group` per multi-target
-    product.
+    product. A target mixing Swift and C-family sources fails: it has no
+    single Bazel rule. Rule loads beyond `swift_library` render only when
+    a reached target needs them, so Swift-only packages keep their exact
+    BUILD text.
 
     Args:
         identity: The SwiftPM package identity.
         model: The parsed manifest model.
         names: The reached target names from `swiftpm_reachable_targets`.
-        edges: The dep label map from `swiftpm_reachable_targets`.
+        edges: The dep entry map from `swiftpm_reachable_targets`.
         files_by_target: Dict of reached target name to `struct(dir,
-            srcs)`.
+            srcs)` (plus `c_srcs`, `public_hdrs`, `private_hdrs`,
+            `explicit_map` and `map_in_include` for C-family targets).
 
     Returns:
         `struct(ok, error, text)`.
     """
     mode = swiftpm_language_mode(model.tools_major, model.tools_minor, model.modes)
     by_name = {target.name: target for target in model.targets}
-    blocks = ["load(\"@rules_swift//swift:swift.bzl\", \"swift_library\", \"swift_library_group\")"]
+    loads = ["load(\"@rules_swift//swift:swift.bzl\", \"swift_library\", \"swift_library_group\")"]
+    blocks = []
     for name in names:
         if name not in files_by_target:
             return struct(ok = False, error = "SwiftPM package {identity}: target {name} has no resolved sources.".format(identity = repr(identity), name = repr(name)), text = "")
-        blocks.append(_swiftpm_emit_library(identity, model, by_name[name], edges, files_by_target[name], mode))
+        files = files_by_target[name]
+        c_srcs = getattr(files, "c_srcs", [])
+        if files.srcs and c_srcs:
+            return struct(ok = False, error = "SwiftPM package {identity}: target {name} mixes Swift and C-family sources, which has no Bazel translation.".format(identity = repr(identity), name = repr(name)), text = "")
+        if c_srcs:
+            emitted = _swiftpm_emit_clang_library(identity, by_name[name], edges, files)
+            if not emitted.ok:
+                return struct(ok = False, error = emitted.error, text = "")
+            if emitted.rule == "objc_library" and not "load(\"@rules_cc//cc:objc_library.bzl\", \"objc_library\")" in loads:
+                loads.append("load(\"@rules_cc//cc:objc_library.bzl\", \"objc_library\")")
+            if emitted.rule == "cc_library" and not "load(\"@rules_cc//cc:cc_library.bzl\", \"cc_library\")" in loads:
+                loads.append("load(\"@rules_cc//cc:cc_library.bzl\", \"cc_library\")")
+            if emitted.needs_hint and not "swift_interop_hint" in loads[0]:
+                loads[0] = "load(\"@rules_swift//swift:swift.bzl\", \"swift_interop_hint\", \"swift_library\", \"swift_library_group\")"
+            blocks.append(emitted.text)
+        else:
+            emitted = _swiftpm_emit_swift_library(identity, model, by_name[name], edges, files, mode)
+            if not emitted.ok:
+                return struct(ok = False, error = emitted.error, text = "")
+            blocks.append(emitted.text)
     for product in model.products:
         if len(product.targets) == 1:
             blocks.append("alias(\n    name = {name},\n    actual = {actual},\n    visibility = [\"//visibility:public\"],\n)".format(name = repr(product.name), actual = repr(":" + product.targets[0] + "_lib")))
         else:
             deps = [_swiftpm_build_string(":" + target_name + "_lib") for target_name in product.targets]
             blocks.append("swift_library_group(\n    name = {name},\n    deps = [\n        {deps},\n    ],\n    visibility = [\"//visibility:public\"],\n)".format(name = repr(product.name), deps = ",\n        ".join(deps)))
-    return struct(ok = True, error = "", text = "\n\n".join(blocks) + "\n")
+    return struct(ok = True, error = "", text = "\n\n".join(loads + blocks) + "\n")
 
 def translate_swiftpm_package(identity, hub_name, model, pin_identities, files_by_target):
     """Reach and emit a package in one call, for tests and the repo rule.

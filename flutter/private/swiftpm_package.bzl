@@ -12,8 +12,14 @@ writing the hand-written file as-is.
 
 load(":download.bzl", "pinned_download_and_extract")
 load(":flutter_pub_walk.bzl", "PUB_WALK_BOUND", "has_files_bound_error")
+load(":swiftpm_clang.bzl", "swiftpm_clang_module_spec", "swiftpm_generated_modulemap_content")
 load(":swiftpm_manifest.bzl", "parse_swiftpm_package")
-load(":swiftpm_translate.bzl", "swiftpm_reachable_targets", "translate_swiftpm_package")
+load(
+    ":swiftpm_translate.bzl",
+    "swiftpm_c99name",
+    "swiftpm_reachable_targets",
+    "translate_swiftpm_package",
+)
 
 _SWIFTPM_DEFAULT_DIRS = ["Sources", "Source", "src", "srcs"]
 
@@ -134,13 +140,40 @@ _SWIFTPM_CODE_EXTENSIONS = {
     "S": True,
 }
 
-def swiftpm_is_code_file(basename):
-    """Whether a non-Swift filename refuses the fetch as untranslatable code.
+_SWIFTPM_HEADER_SUFFIXES = [".h", ".hh", ".hpp", ".hxx", ".inc"]
 
-    C-family sources and headers plus module maps would be silently dropped
-    as code by the translator, so they fail the fetch. Any other file with no
-    Bazel translation — READMEs, licenses, notes, images, DocC input — is
-    skipped the way SwiftPM ignores unhandled files with a warning.
+_SWIFTPM_CLANG_SOURCE_SUFFIXES = [".c", ".cc", ".cpp", ".cxx", ".c++", ".C", ".cp", ".m", ".mm", ".M", ".s", ".S", ".asm"]
+
+def _swiftpm_file_kind(basename):
+    """Sort one filename into Swift, C-family, header, module map or skip.
+
+    Args:
+        basename: The file's basename (no directory).
+
+    Returns:
+        `"swift"`, `"clang"`, `"header"`, `"modulemap"` or `"skip"`.
+        Any other file with no Bazel translation — READMEs, licenses,
+        notes, images, DocC input — is skipped the way SwiftPM ignores
+        unhandled files with a warning.
+    """
+    if basename.endswith(".swift"):
+        return "swift"
+    if basename == "module.modulemap":
+        return "modulemap"
+    for suffix in _SWIFTPM_HEADER_SUFFIXES:
+        if basename.endswith(suffix):
+            return "header"
+    for suffix in _SWIFTPM_CLANG_SOURCE_SUFFIXES:
+        if basename.endswith(suffix):
+            return "clang"
+    return "skip"
+
+def swiftpm_is_code_file(basename):
+    """Whether a non-Swift filename is C-family code, a header or a module map.
+
+    The target file selector translates these instead of skipping them
+    the way it skips files with no Bazel translation (READMEs, licenses,
+    notes, images, DocC input), which SwiftPM ignores with a warning.
 
     Args:
         basename: The file's basename (no directory).
@@ -213,41 +246,84 @@ def _swiftpm_keep_existing(identity, target_name, kind, entries, rel_dir, tree):
             kept.append(full)
     return struct(ok = True, error = "", kept = kept)
 
-def _swiftpm_classify_source(identity, target_name, full, rel):
-    """Sort one listed file into Swift sources, skips and refusals.
+def _swiftpm_split_headers(identity, target, rel_dir, headers, files, dirs):
+    """Split headers into public and private, and find the explicit map.
+
+    The module map search follows SwiftPM's `ClangTarget.moduleMapPath`
+    order: `module.modulemap` at the target root wins; otherwise the
+    public-headers directory (`include/` by default, `publicHeadersPath`
+    when set). A `publicHeadersPath` makes the headers under it public; otherwise the
+    headers under `include/` are public when that directory exists, else
+    (a single-directory layout) the headers at the target root are.
+    Every other header is private: it still compiles, but Swift
+    importers do not see it.
 
     Args:
         identity: The SwiftPM package identity.
-        target_name: The target holding the file, for messages.
-        full: The repo-relative file path.
-        rel: The target-relative file path.
+        target: The target struct (`name`, `public_headers_path`).
+        rel_dir: The repo-relative target directory.
+        headers: The repo-relative header files.
+        files: Every file under the target directory (a dict set of
+            repo-relative paths).
+        dirs: Every directory under the target directory (a dict set of
+            repo-relative paths).
 
     Returns:
-        `struct(ok, error, keep)`: `keep` when the file is a Swift source.
+        `struct(ok, error, public_hdrs, private_hdrs, explicit_map,
+        map_in_include)`: `explicit_map` is the repo-relative explicit
+        map or None; `map_in_include` when it lives under the
+        public-headers directory rather than the target root.
     """
-    if _swiftpm_under_docc(rel):
-        return struct(ok = True, error = "", keep = False)
-    basename = full[full.rfind("/") + 1:]
-    if basename.endswith(".swift"):
-        return struct(ok = True, error = "", keep = True)
-    if swiftpm_is_code_file(basename):
-        return struct(ok = False, error = _swiftpm_repo_fail(identity, "target {target} holds a C-family source, header or module map with no Bazel translation ({path})".format(target = repr(target_name), path = repr(full))), keep = False)
-    return struct(ok = True, error = "", keep = False)
+    if target.public_headers_path:
+        bad = _swiftpm_check_entry(identity, target.name, target.public_headers_path, "`publicHeadersPath:`")
+        if bad:
+            return struct(ok = False, error = bad, public_hdrs = [], private_hdrs = [], explicit_map = None, map_in_include = False)
+        public_root = rel_dir + "/" + target.public_headers_path
+        public_hdrs = [header for header in headers if header.startswith(public_root + "/")]
+        private_hdrs = [header for header in headers if not header.startswith(public_root + "/")]
+        root_map = rel_dir + "/module.modulemap"
+        public_map = public_root + "/module.modulemap"
+        explicit_map = None
+        map_in_include = False
+        if root_map in files:
+            explicit_map = root_map
+        elif public_map in files:
+            explicit_map = public_map
+            map_in_include = True
+        return struct(ok = True, error = "", public_hdrs = sorted(public_hdrs), private_hdrs = sorted(private_hdrs), explicit_map = explicit_map, map_in_include = map_in_include)
+    include_dir = rel_dir + "/include"
+    if include_dir in dirs:
+        public_hdrs = [header for header in headers if header.startswith(include_dir + "/")]
+        private_hdrs = [header for header in headers if not header.startswith(include_dir + "/")]
+    else:
+        public_hdrs = [header for header in headers if "/" not in header[len(rel_dir) + 1:]]
+        private_hdrs = [header for header in headers if "/" in header[len(rel_dir) + 1:]]
+    root_map = rel_dir + "/module.modulemap"
+    include_map = include_dir + "/module.modulemap"
+    explicit_map = None
+    map_in_include = False
+    if root_map in files:
+        explicit_map = root_map
+    elif include_map in files:
+        explicit_map = include_map
+        map_in_include = True
+    return struct(ok = True, error = "", public_hdrs = sorted(public_hdrs), private_hdrs = sorted(private_hdrs), explicit_map = explicit_map, map_in_include = map_in_include)
 
-def swiftpm_select_target_sources(identity, target, rel_dir, files, dirs):
-    """Select one reached target's explicit Swift sources, purely.
+def swiftpm_select_target_files(identity, target, rel_dir, files, dirs):
+    """Select one reached target's Swift and C-family files, purely.
 
     `exclude:` and `sources:` entries that escape the target directory fail
     the fetch; entries naming nothing on disk drop out, the way SwiftPM warns
     and builds with the files that exist. Every remaining file under the
-    target directory contributes its `.swift` sources, except DocC catalog
-    contents and other files with no Bazel translation, which are skipped.
-    C-family sources and headers plus module maps fail the fetch, since the
-    translator would otherwise silently drop code SwiftPM compiles.
+    target directory contributes its `.swift` sources, its C-family sources
+    and headers (split into public and private, with the explicit module
+    map when the target ships one), except DocC catalog contents and other
+    files with no Bazel translation, which are skipped.
 
     Args:
         identity: The SwiftPM package identity.
-        target: The target struct (`name`, `exclude`, `sources`).
+        target: The target struct (`name`, `exclude`, `sources`,
+            `public_headers_path`).
         rel_dir: The repo-relative target directory.
         files: Every file under the target directory (a dict set of
             repo-relative paths).
@@ -255,31 +331,43 @@ def swiftpm_select_target_sources(identity, target, rel_dir, files, dirs):
             repo-relative paths).
 
     Returns:
-        `struct(ok, error, srcs)`: the sorted repo-relative `.swift` paths.
+        `struct(ok, error, srcs, c_srcs, public_hdrs, private_hdrs,
+        explicit_map, map_in_include)`: the sorted repo-relative paths;
+        `explicit_map` is None unless the target ships one.
     """
     excluded = _swiftpm_keep_existing(identity, target.name, "`exclude:`", target.exclude, rel_dir, struct(files = files, dirs = dirs))
     if not excluded.ok:
-        return struct(ok = False, error = excluded.error, srcs = [])
+        return struct(ok = False, error = excluded.error, srcs = [], c_srcs = [], public_hdrs = [], private_hdrs = [], explicit_map = None, map_in_include = False)
     listed = None
     if target.sources != None:
         narrowed = _swiftpm_keep_existing(identity, target.name, "`sources:`", target.sources, rel_dir, struct(files = files, dirs = dirs))
         if not narrowed.ok:
-            return struct(ok = False, error = narrowed.error, srcs = [])
+            return struct(ok = False, error = narrowed.error, srcs = [], c_srcs = [], public_hdrs = [], private_hdrs = [], explicit_map = None, map_in_include = False)
         listed = narrowed.kept
     srcs = []
+    c_srcs = []
+    headers = []
     for full in files.keys():
         if _swiftpm_is_under(full, excluded.kept):
             continue
         if listed != None and not _swiftpm_is_under(full, listed):
             continue
-        decided = _swiftpm_classify_source(identity, target.name, full, full[len(rel_dir) + 1:])
-        if not decided.ok:
-            return struct(ok = False, error = decided.error, srcs = [])
-        if decided.keep:
+        rel = full[len(rel_dir) + 1:]
+        if _swiftpm_under_docc(rel):
+            continue
+        kind = _swiftpm_file_kind(full[full.rfind("/") + 1:])
+        if kind == "swift":
             srcs.append(full)
-    if not srcs:
-        return struct(ok = False, error = _swiftpm_repo_fail(identity, "target {target} reaches zero Swift files".format(target = repr(target.name))), srcs = [])
-    return struct(ok = True, error = "", srcs = sorted(srcs))
+        elif kind == "clang":
+            c_srcs.append(full)
+        elif kind == "header":
+            headers.append(full)
+    if not srcs and not c_srcs:
+        return struct(ok = False, error = _swiftpm_repo_fail(identity, "target {target} reaches zero Swift files".format(target = repr(target.name))), srcs = [], c_srcs = [], public_hdrs = [], private_hdrs = [], explicit_map = None, map_in_include = False)
+    split = _swiftpm_split_headers(identity, target, rel_dir, headers, files, dirs)
+    if not split.ok:
+        return struct(ok = False, error = split.error, srcs = [], c_srcs = [], public_hdrs = [], private_hdrs = [], explicit_map = None, map_in_include = False)
+    return struct(ok = True, error = "", srcs = sorted(srcs), c_srcs = sorted(c_srcs), public_hdrs = split.public_hdrs, private_hdrs = split.private_hdrs, explicit_map = split.explicit_map, map_in_include = split.map_in_include)
 
 def _swiftpm_list_target_tree(ctx, identity, rel_dir):
     """List every file and directory under one target directory, bounded.
@@ -311,7 +399,7 @@ def _swiftpm_list_target_tree(ctx, identity, rel_dir):
     return struct(ok = True, error = "", files = files, dirs = dirs)
 
 def _swiftpm_collect_sources(ctx, identity, root, target):
-    """Resolve one reached target's directory and explicit `srcs` list.
+    """Resolve one reached target's directory and explicit file lists.
 
     Args:
         ctx: The repository context.
@@ -320,8 +408,10 @@ def _swiftpm_collect_sources(ctx, identity, root, target):
         target: The target struct.
 
     Returns:
-        `struct(ok, error, files)`: `files` is `struct(dir, srcs)` with
-        the repo-relative directory and Swift sources.
+        `struct(ok, error, files)`: `files` is `struct(dir, srcs, c_srcs,
+        public_hdrs, private_hdrs, explicit_map, map_in_include)` with
+        the repo-relative directory, Swift sources, C-family sources,
+        headers and explicit module map.
     """
     resolved = _swiftpm_resolve_target_dir(ctx, identity, root, target)
     if not resolved.ok:
@@ -329,10 +419,37 @@ def _swiftpm_collect_sources(ctx, identity, root, target):
     listed = _swiftpm_list_target_tree(ctx, identity, resolved.rel_dir)
     if not listed.ok:
         return struct(ok = False, error = listed.error, files = None)
-    selected = swiftpm_select_target_sources(identity, target, resolved.rel_dir, listed.files, listed.dirs)
+    selected = swiftpm_select_target_files(identity, target, resolved.rel_dir, listed.files, listed.dirs)
     if not selected.ok:
         return struct(ok = False, error = selected.error, files = None)
-    return struct(ok = True, error = "", files = struct(dir = resolved.rel_dir, srcs = selected.srcs))
+    return struct(ok = True, error = "", files = struct(dir = resolved.rel_dir, srcs = selected.srcs, c_srcs = selected.c_srcs, public_hdrs = selected.public_hdrs, private_hdrs = selected.private_hdrs, explicit_map = selected.explicit_map, map_in_include = selected.map_in_include))
+
+def _swiftpm_write_generated_map(identity, target, files):
+    """Write one C-family target's generated umbrella module map, if any.
+
+    Targets shipping an explicit `module.modulemap`, or with no public
+    headers at all (link-only), need no map. Anything else gets
+    `<umbrella>/module.modulemap` covering its public headers, which the
+    translated `cc_library`/`objc_library` points at through
+    `swift_interop_hint`.
+
+    Args:
+        identity: The SwiftPM package identity.
+        target: The target struct.
+        files: The collected files struct from `_swiftpm_collect_sources`.
+
+    Returns:
+        `struct(ok, error, path, content)`: `path` is "" when the target
+        needs no generated map.
+    """
+    if not files.c_srcs or files.explicit_map != None:
+        return struct(ok = True, error = "", path = "", content = "")
+    spec = swiftpm_clang_module_spec(target, files.dir, files.c_srcs, files.public_hdrs, None)
+    if not spec.ok:
+        return struct(ok = False, error = _swiftpm_repo_fail(identity, spec.detail), path = "", content = "")
+    if spec.module_map == None:
+        return struct(ok = True, error = "", path = "", content = "")
+    return struct(ok = True, error = "", path = spec.module_map, content = swiftpm_generated_modulemap_content(swiftpm_c99name(target.name), spec.umbrella_dir, files.public_hdrs))
 
 def _swiftpm_package_impl(ctx):
     identity = ctx.attr.identity
@@ -361,6 +478,11 @@ def _swiftpm_package_impl(ctx):
         if not collected.ok:
             fail(collected.error)
         files_by_target[name] = collected.files
+        generated = _swiftpm_write_generated_map(identity, by_name[name], collected.files)
+        if not generated.ok:
+            fail(generated.error)
+        if generated.path:
+            ctx.file(generated.path, generated.content)
     translated = translate_swiftpm_package(identity, ctx.attr.hub_name, parsed.model, ctx.attr.pin_identities, files_by_target)
     if not translated.ok:
         fail(translated.error)

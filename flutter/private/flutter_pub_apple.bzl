@@ -603,8 +603,8 @@ def select_apple_swiftpm_deps(plugin_name, manifest_text, manifest_dir, srcs_dir
     """Read one plugin manifest's SwiftPM product links for one platform.
 
     Parses the manifest with the lenient plugin entry point (target
-    settings with no Bazel translation, such as `resources` or
-    `swiftSettings`, are skipped: the spoke keeps its own source,
+    settings, such as `resources` or `swiftSettings`, are skipped: they
+    cannot change the dependency list, and the spoke keeps its own source,
     header and privacy-manifest detection), finds the plugin target the
     spoke builds, and resolves its `.product(name:package:)`
     dependencies (matched as in step 1) to the hub's pinned
