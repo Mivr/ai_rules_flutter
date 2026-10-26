@@ -114,6 +114,28 @@ def _raw_manifest_variants(raw_key, assets):
         variants.append(variant)
     return variants
 
+def _collapsed_claims(assets):
+    """The raw (`//`-keeping) claimant of each collapsed bundle key.
+
+    One raw key per collapsed path: `build_asset_manifest` lets a
+    collapsed file (or its variants) without its own declaration ride its
+    claimant's entry instead of gaining a key that would name a file the
+    entry did not declare.
+
+    Args:
+        assets: Every encoded bundle key.
+
+    Returns:
+        dict mapping each collapsed path to its raw claimant key.
+    """
+    collapsed_of = {}
+    for path in sorted(assets):
+        if "" in path.split("/"):
+            collapsed = _collapse_empty_segments(path)
+            if collapsed not in collapsed_of:
+                collapsed_of[collapsed] = path
+    return collapsed_of
+
 def build_asset_manifest(assets):
     """Build the asset manifest structure from a list of encoded asset keys.
 
@@ -146,12 +168,7 @@ def build_asset_manifest(assets):
     # file (or its variants) without its own declaration rides the raw
     # key's entry instead of gaining one.
     key_set = {path: True for path in assets}
-    collapsed_of = {}
-    for path in sorted(assets):
-        if "" in path.split("/"):
-            collapsed = _collapse_empty_segments(path)
-            if collapsed not in collapsed_of:
-                collapsed_of[collapsed] = path
+    collapsed_of = _collapsed_claims(assets)
 
     # Group by base path, sorted by the encoded key as flutter_tools sorts by
     # `entryUri.path`; only the emitted keys and variants are decoded.
@@ -241,6 +258,26 @@ def make_tree_shake(dart = None, flutter_sdk_files = None, const_finder = None, 
         tree_shake_key = tree_shake_key,
     )
 
+def _add_collapsed_copies(asset_paths, copies):
+    """Copy each `//`-keeping key's file under its collapsed key, if free.
+
+    An entry keeping an empty segment also bundles its collapsed file:
+    the manifest lists the collapsed variant (see
+    `build_asset_manifest`), so the copy must exist under the collapsed
+    key too, holding the same file flutter_tools read. The collapsed key
+    joins `copies` only, never `asset_paths`, so it gains no manifest key
+    of its own; a key another entry already claimed keeps its file.
+
+    Args:
+        asset_paths: The manifest bundle keys, in copy order.
+        copies: The dest-key-to-file map, extended in place.
+    """
+    for dest in asset_paths:
+        if "" in dest.split("/"):
+            collapsed = _collapse_empty_segments(dest)
+            if collapsed not in copies:
+                copies[collapsed] = copies[dest]
+
 def flutter_asset_bundle_action(ctx, content, shaking, output_dir):
     """Create an action that generates the flutter_assets/ tree artifact.
 
@@ -291,16 +328,9 @@ def flutter_asset_bundle_action(ctx, content, shaking, output_dir):
         copies[dest_path] = f.path
         extra_files.append(f)
 
-    # An entry keeping an empty segment also bundles its collapsed file:
-    # the manifest lists the collapsed variant (see
-    # `build_asset_manifest`), so the copy must exist under the collapsed
-    # key too, holding the same file flutter_tools read. A key another
-    # entry already claimed keeps its file.
-    for dest in asset_paths:
-        if "" in dest.split("/"):
-            collapsed = _collapse_empty_segments(dest)
-            if collapsed not in copies:
-                copies[collapsed] = copies[dest]
+    # An entry keeping an empty segment also bundles its collapsed file
+    # under the collapsed key, holding the same file flutter_tools read.
+    _add_collapsed_copies(asset_paths, copies)
 
     # Build manifest structure.
     manifest = build_asset_manifest(asset_paths)
