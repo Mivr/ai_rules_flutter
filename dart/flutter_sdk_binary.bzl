@@ -33,8 +33,45 @@ set DART=%RUNFILES_DIR%\\{dart}
 if defined BUILD_WORKING_DIRECTORY cd /d "%BUILD_WORKING_DIRECTORY%"
 :: Caller-home policy (RT37-flutter:02): keep the caller env so tool state
 :: resolves, and pass the analytics flag from //flutter/private:run_home.bzl
-:: so the CLI writes no telemetry into the caller's HOME.
-"%DART%" {suppress} %*
+:: so the CLI writes no telemetry into the caller's HOME. The flag is global
+:: and only valid in command form: :run_home_classify mirrors
+:: run_home_caller_home_exec in //flutter/private:run_home.bzl (and
+:: withSuppressedAnalytics in flutter/private/tools/run_home.dart). It scans
+:: %* in a subroutine, where shift leaves the caller's %* intact, skipping
+:: leading dash-arguments; an empty remainder or a first remainder ending in
+:: .dart/.dill/.snapshot/.aot/.jit (any case, via IF /I) is file form and
+:: passes through unchanged, as does an args list already holding the flag.
+call :run_home_classify %*
+if "%RUN_HOME_SUPPRESS%"=="1" (
+  "%DART%" {suppress} %*
+) else (
+  "%DART%" %*
+)
+goto :run_home_done
+:run_home_classify
+set "RUN_HOME_SUPPRESS=0"
+set "RUN_HOME_FIRST="
+:run_home_scan
+if "%~1"=="" goto :run_home_scanned
+if "%~1"=="--suppress-analytics" goto :run_home_scanned
+if "%~1"=="--no-suppress-analytics" goto :run_home_scanned
+if defined RUN_HOME_FIRST goto :run_home_shift
+set "RUN_HOME_ARG=%~1"
+if "%RUN_HOME_ARG:~0,1%"=="-" goto :run_home_shift
+set "RUN_HOME_FIRST=%~1"
+:run_home_shift
+shift
+goto :run_home_scan
+:run_home_scanned
+if not defined RUN_HOME_FIRST goto :eof
+if /I "%RUN_HOME_FIRST:~-5%"==".dart" goto :eof
+if /I "%RUN_HOME_FIRST:~-5%"==".dill" goto :eof
+if /I "%RUN_HOME_FIRST:~-9%"==".snapshot" goto :eof
+if /I "%RUN_HOME_FIRST:~-4%"==".aot" goto :eof
+if /I "%RUN_HOME_FIRST:~-4%"==".jit" goto :eof
+set "RUN_HOME_SUPPRESS=1"
+goto :eof
+:run_home_done
 """
 
 def _runfiles_path(f, workspace_name):

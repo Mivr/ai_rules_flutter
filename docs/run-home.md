@@ -8,9 +8,9 @@ after `bazel run //flutter:pub`).
 ## The two policies
 
 - Caller-home: the tool CLI must resolve the caller's `PUB_CACHE` and
-  credentials, so the parent environment is kept and the CLI takes the
-  global `--suppress-analytics` flag instead. Applies to `//dart:dart`
-  (SDK pass-through) and `//flutter:pub`.
+  credentials, so the parent environment is kept and a command-form CLI
+  takes the global `--suppress-analytics` flag instead. Applies to
+  `//dart:dart` (SDK pass-through) and `//flutter:pub`.
 - Private: the spawned program gets a fresh dir for `HOME`,
   `USERPROFILE`, `LOCALAPPDATA`, `APPDATA`, `XDG_CONFIG_HOME`,
   `XDG_CACHE_HOME`, and `XDG_DATA_HOME`, removed afterwards. Applies to
@@ -23,10 +23,19 @@ and tool CLIs are routed through the helper.
 ## The helper
 
 `flutter/private/tools/run_home.dart` is the single source: `homeEnvKeys`,
-`suppressAnalyticsFlag`, `withSuppressedAnalytics` (flag before the
-command, never duplicated), `createPrivateHome`, `privateHomeEnv`. The
-integration launchers' old per-launcher scrubs fold into it — there is one
-copy of the key list.
+`suppressAnalyticsFlag`, `withSuppressedAnalytics` (the flag before the
+command for command form only, never duplicated), `isFileForm`,
+`createPrivateHome`, `privateHomeEnv`. The integration launchers' old
+per-launcher scrubs fold into it — there is one copy of the key list.
+
+The flag is command-form only: the Dart VM rejects `--suppress-analytics`
+for file-form executions (`dart program.dart` exits 255), so file form —
+a program path, an empty argument list, or global flags only — passes
+through with the caller env kept. Telemetry the SDK itself writes on a
+file run is outside what the launcher can suppress, so the gate pins rc
+and output for file form while command-form rows pin clean canaries.
+Leading dash-arguments are skipped before deciding: `--verbose pub get`
+still suppresses, while `--enable-asserts hello.dart` stays untouched.
 
 Launchers that are shell templates cannot import Dart, so
 `flutter/private/run_home.bzl` carries the shell counterpart
