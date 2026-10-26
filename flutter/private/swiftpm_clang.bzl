@@ -146,28 +146,15 @@ def swiftpm_generated_modulemap_content(module_name, umbrella_header, public_dir
     lines.append("}")
     return "\n".join(lines) + "\n"
 
-def swiftpm_render_clang_library(
-        library_name,
-        rule,
-        srcs,
-        public_headers,
-        private_headers,
-        module_name,
-        module_map,
-        explicit_map,
-        c_only,
-        cxx,
-        linkopts,
-        includes,
-        deps,
-        tags):
+def swiftpm_render_clang_library(lib):
     """Render one C-family target's `cc_library`/`objc_library`.
 
-    The library carries the public and private headers in `hdrs` (Bazel
-    needs the private ones for the compile), the header search paths in
-    `includes` (hermetic in the spoke repository, where a `-I` in
-    `copts` would not rebase), and the module name — plus the explicit
-    map when the target ships one — in `aspect_hints` via a separate
+    The library carries the public headers in `hdrs` and the private
+    ones in `srcs`: they compile with the target's own sources but stay
+    invisible to dependents. The header search paths go in `includes`
+    (hermetic in the spoke repository, where a `-I` in `copts` would
+    not rebase), and the module name — plus the explicit map when the
+    target ships one — in `aspect_hints` via a separate
     `swift_interop_hint` target (a rule, so it needs its own `name`)
     so Swift importers see the same module SwiftPM
     computes. A target with no public headers gets no hint: it is
@@ -176,59 +163,55 @@ def swiftpm_render_clang_library(
     `select()`s on the target platform's OS.
 
     Args:
-        library_name: The Bazel library name.
-        rule: `"cc_library"` or `"objc_library"`.
-        srcs: The unconditional source labels.
-        public_headers: The unconditional public header labels.
-        private_headers: The unconditional private header labels.
-        module_name: The C99-mangled module name ("" for link-only).
-        module_map: The explicit map label, or None.
-        explicit_map: Whether `module_map` is an explicit map.
-        c_only: `struct(text, platforms)` C-only option entries.
-        cxx: `struct(text, platforms)` C++ option entries.
-        linkopts: `struct(text, platforms)` link option entries.
-        includes: `struct(text, platforms)` include entries.
-        deps: `struct(text, platforms)` dependency entries.
-        tags: The manual-tag list.
+        lib: `struct(library_name, rule, srcs, public_headers,
+            private_headers, module_name, module_map, explicit_map,
+            c_only, cxx, linkopts, includes, deps, tags)`: the Bazel
+            library name; `"cc_library"` or `"objc_library"`; the
+            unconditional source labels; the unconditional public and
+            private header labels; the C99-mangled module name (""
+            for link-only); the explicit map label, or None; whether
+            `module_map` is an explicit map; `struct(text, platforms)`
+            C-only, C++, link option, include and dependency entries;
+            the manual-tag list.
 
     Returns:
         The rule text (the caller loads `swift_interop_hint` when the
         library has a hint).
     """
-    lines = ["{rule}(".format(rule = rule), '    name = "{name}",'.format(name = library_name)]
+    lines = ["{rule}(".format(rule = lib.rule), '    name = "{name}",'.format(name = lib.library_name)]
     lines.append("    srcs = [")
-    for src in srcs:
+    for src in lib.srcs + lib.private_headers:
         lines.append("        {item},".format(item = repr(src)))
     lines.append("    ],")
     lines.append("    hdrs = [")
-    for header in public_headers + private_headers:
+    for header in lib.public_headers:
         lines.append("        {item},".format(item = repr(header)))
     lines.append("    ],")
-    lists = swiftpm_render_list_attr("conlyopts", [], c_only)
+    lists = swiftpm_render_list_attr("conlyopts", [], lib.c_only)
     if lists:
         lines.append(lists)
-    lists = swiftpm_render_list_attr("cxxopts", [], cxx)
+    lists = swiftpm_render_list_attr("cxxopts", [], lib.cxx)
     if lists:
         lines.append(lists)
-    lists = swiftpm_render_list_attr("includes", [], includes)
+    lists = swiftpm_render_list_attr("includes", [], lib.includes)
     if lists:
         lines.append(lists)
-    lists = swiftpm_render_list_attr("linkopts", [], linkopts)
+    lists = swiftpm_render_list_attr("linkopts", [], lib.linkopts)
     if lists:
         lines.append(lists)
-    if module_name:
-        lines.append("    aspect_hints = [\":{name}_interop_hint\"],".format(name = library_name))
-    lists = swiftpm_render_list_attr("deps", [], deps)
+    if lib.module_name:
+        lines.append("    aspect_hints = [\":{name}_interop_hint\"],".format(name = lib.library_name))
+    lists = swiftpm_render_list_attr("deps", [], lib.deps)
     if lists:
         lines.append(lists)
-    lines.append("    tags = [{tags}],".format(tags = ", ".join([repr(tag) for tag in tags])))
+    lines.append("    tags = [{tags}],".format(tags = ", ".join([repr(tag) for tag in lib.tags])))
     lines.append(")")
-    if module_name:
+    if lib.module_name:
         lines.append("")
         lines.append("swift_interop_hint(")
-        lines.append("    name = \"{name}_interop_hint\",".format(name = library_name))
-        lines.append("    module_name = {name},".format(name = repr(module_name)))
-        if explicit_map:
-            lines.append("    module_map = {map},".format(map = repr(module_map)))
+        lines.append("    name = \"{name}_interop_hint\",".format(name = lib.library_name))
+        lines.append("    module_name = {name},".format(name = repr(lib.module_name)))
+        if lib.explicit_map:
+            lines.append("    module_map = {map},".format(map = repr(lib.module_map)))
         lines.append(")")
     return "\n".join(lines)

@@ -2,6 +2,7 @@
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//flutter/private:swiftpm_manifest.bzl", "parse_swiftpm_package")
+load("//flutter/private:swiftpm_settings.bzl", "swiftpm_render_list_attr")
 load(
     "//flutter/private:swiftpm_translate.bzl",
     "swiftpm_c99name",
@@ -296,6 +297,9 @@ def swiftpm_translate_test_suite(name):
         _mixed_source_refusal_test,
         _mixed_c_family_translates_test,
         _assembly_refusal_names_file_test,
+        _private_headers_in_srcs_test,
+        _select_attr_separator_test,
+        _multi_select_emit_separator_test,
     )
     native.test_suite(
         name = name,
@@ -502,3 +506,51 @@ def _assembly_refusal_names_file_test_impl(ctx):
     return unittest.end(env)
 
 _assembly_refusal_names_file_test = unittest.make(_assembly_refusal_names_file_test_impl)
+
+def _private_headers_in_srcs_test_impl(ctx):
+    env = unittest.begin(ctx)
+    parsed = parse_swiftpm_package("shims", _CLANG_MANIFEST)
+    asserts.true(env, parsed.ok)
+    translated = translate_swiftpm_package("shims", "deps", parsed.model, ["shims"], _clang_files())
+    asserts.true(env, translated.ok)
+    asserts.true(env, "srcs = [\n        \"pkg/Sources/Shims/Shims.c\",\n        \"pkg/Sources/Shims/secret.h\",\n    ]," in translated.text)
+    asserts.true(env, "hdrs = [\n        \"pkg/Sources/Shims/include/Shims.h\",\n    ]," in translated.text)
+    return unittest.end(env)
+
+_private_headers_in_srcs_test = unittest.make(_private_headers_in_srcs_test_impl)
+
+def _select_attr_separator_test_impl(ctx):
+    env = unittest.begin(ctx)
+    rendered = swiftpm_render_list_attr("conlyopts", [], [struct(text = "-DFOO", platforms = ["ios"])])
+    asserts.true(env, rendered.endswith("}),"))
+    asserts.true(env, "    conlyopts = select({" in rendered)
+    rendered = swiftpm_render_list_attr("conlyopts", ["-DBASE"], [struct(text = "-DFOO", platforms = ["ios"])])
+    asserts.true(env, rendered.endswith("}),"))
+    asserts.true(env, "    ] +\n    select({" in rendered)
+    return unittest.end(env)
+
+_select_attr_separator_test = unittest.make(_select_attr_separator_test_impl)
+
+_MULTI_SELECT_MANIFEST = """// swift-tools-version:5.9
+import PackageDescription
+let package = Package(
+    name: "Multi",
+    products: [.library(name: "Multi", targets: ["Multi"])],
+    targets: [.target(name: "Multi", cSettings: [.define("GATED", .when(platforms: [.iOS]))], linkerSettings: [.linkedLibrary("z", .when(platforms: [.macOS]))])],
+)
+"""
+
+def _multi_select_emit_separator_test_impl(ctx):
+    env = unittest.begin(ctx)
+    parsed = parse_swiftpm_package("multi", _MULTI_SELECT_MANIFEST)
+    asserts.true(env, parsed.ok)
+    files = {
+        "Multi": struct(dir = "pkg/Sources/Multi", srcs = [], c_srcs = ["pkg/Sources/Multi/Multi.c"], public_hdrs = ["pkg/Sources/Multi/include/Multi.h"], private_hdrs = [], explicit_map = None, map_in_include = False),
+    }
+    translated = translate_swiftpm_package("multi", "deps", parsed.model, ["multi"], files)
+    asserts.true(env, translated.ok)
+    asserts.true(env, "}),\n    " in translated.text)
+    asserts.true(env, not ")}\n    " in translated.text.replace("}),\n    ", ""))
+    return unittest.end(env)
+
+_multi_select_emit_separator_test = unittest.make(_multi_select_emit_separator_test_impl)

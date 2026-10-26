@@ -485,7 +485,7 @@ def _swiftpm_emit_clang_library(identity, target, edges, files):
         # the sources include from: it goes on the search path the way
         # SwiftPM compiles such targets.
         includes = [struct(text = spec.include_dir, platforms = None)] + includes
-    text = swiftpm_render_clang_library(
+    text = swiftpm_render_clang_library(struct(
         library_name = target.name + "_lib",
         rule = rule,
         srcs = sorted(getattr(files, "c_srcs", [])),
@@ -500,8 +500,70 @@ def _swiftpm_emit_clang_library(identity, target, edges, files):
         includes = includes,
         deps = edges.get(target.name, []),
         tags = ["manual"],
-    )
+    ))
     return struct(ok = True, error = "", text = text, rule = rule, needs_hint = spec.module_map != None)
+
+def _swiftpm_clang_load_for(rule):
+    """The Bazel load line one C-family rule needs, if any.
+
+    Args:
+        rule: `"cc_library"`, `"objc_library"` or "".
+
+    Returns:
+        The load line, or "" when the rule needs none.
+    """
+    if rule == "objc_library":
+        return "load(\"@rules_cc//cc:objc_library.bzl\", \"objc_library\")"
+    if rule == "cc_library":
+        return "load(\"@rules_cc//cc:cc_library.bzl\", \"cc_library\")"
+    return ""
+
+def _swiftpm_emit_target_block(identity, model, by_name, target_name, edges, files, mode):
+    """Emit one reached target's `swift_library` or C-family library.
+
+    A target mixing Swift and C-family sources fails: it has no single
+    Bazel rule.
+
+    Args:
+        identity: The SwiftPM package identity.
+        model: The parsed manifest model.
+        by_name: The parsed targets indexed by exact name.
+        target_name: The reached target's name.
+        edges: The dep entry map from `swiftpm_reachable_targets`.
+        files: The target's collected files struct.
+        mode: The language mode struct.
+
+    Returns:
+        `struct(ok, error, text, rule, needs_hint)`: `rule` is
+        `"cc_library"`/`"objc_library"` for C-family targets, else "";
+        `needs_hint` when the emitter must load `swift_interop_hint`.
+    """
+    c_srcs = getattr(files, "c_srcs", [])
+    if files.srcs and c_srcs:
+        return struct(ok = False, error = "SwiftPM package {identity}: target {name} mixes Swift and C-family sources, which has no Bazel translation.".format(identity = repr(identity), name = repr(target_name)), text = "", rule = "", needs_hint = False)
+    if c_srcs:
+        emitted = _swiftpm_emit_clang_library(identity, by_name[target_name], edges, files)
+        if not emitted.ok:
+            return struct(ok = False, error = emitted.error, text = "", rule = "", needs_hint = False)
+        return struct(ok = True, error = "", text = emitted.text, rule = emitted.rule, needs_hint = emitted.needs_hint)
+    emitted = _swiftpm_emit_swift_library(identity, model, by_name[target_name], edges, files, mode)
+    if not emitted.ok:
+        return struct(ok = False, error = emitted.error, text = "", rule = "", needs_hint = False)
+    return struct(ok = True, error = "", text = emitted.text, rule = "", needs_hint = False)
+
+def _swiftpm_emit_product_block(product):
+    """Emit one product's `alias` or `swift_library_group`.
+
+    Args:
+        product: The parsed product struct (`name`, `targets`).
+
+    Returns:
+        The rule text.
+    """
+    if len(product.targets) == 1:
+        return "alias(\n    name = {name},\n    actual = {actual},\n    visibility = [\"//visibility:public\"],\n)".format(name = repr(product.name), actual = repr(":" + product.targets[0] + "_lib"))
+    deps = [_swiftpm_build_string(":" + target_name + "_lib") for target_name in product.targets]
+    return "swift_library_group(\n    name = {name},\n    deps = [\n        {deps},\n    ],\n    visibility = [\"//visibility:public\"],\n)".format(name = repr(product.name), deps = ",\n        ".join(deps))
 
 def swiftpm_emit_build(identity, model, names, edges, files_by_target):
     """Emit the spoke BUILD file for one translated package.
@@ -534,32 +596,17 @@ def swiftpm_emit_build(identity, model, names, edges, files_by_target):
     for name in names:
         if name not in files_by_target:
             return struct(ok = False, error = "SwiftPM package {identity}: target {name} has no resolved sources.".format(identity = repr(identity), name = repr(name)), text = "")
-        files = files_by_target[name]
-        c_srcs = getattr(files, "c_srcs", [])
-        if files.srcs and c_srcs:
-            return struct(ok = False, error = "SwiftPM package {identity}: target {name} mixes Swift and C-family sources, which has no Bazel translation.".format(identity = repr(identity), name = repr(name)), text = "")
-        if c_srcs:
-            emitted = _swiftpm_emit_clang_library(identity, by_name[name], edges, files)
-            if not emitted.ok:
-                return struct(ok = False, error = emitted.error, text = "")
-            if emitted.rule == "objc_library" and not "load(\"@rules_cc//cc:objc_library.bzl\", \"objc_library\")" in loads:
-                loads.append("load(\"@rules_cc//cc:objc_library.bzl\", \"objc_library\")")
-            if emitted.rule == "cc_library" and not "load(\"@rules_cc//cc:cc_library.bzl\", \"cc_library\")" in loads:
-                loads.append("load(\"@rules_cc//cc:cc_library.bzl\", \"cc_library\")")
-            if emitted.needs_hint and not "swift_interop_hint" in loads[0]:
-                loads[0] = "load(\"@rules_swift//swift:swift.bzl\", \"swift_interop_hint\", \"swift_library\", \"swift_library_group\")"
-            blocks.append(emitted.text)
-        else:
-            emitted = _swiftpm_emit_swift_library(identity, model, by_name[name], edges, files, mode)
-            if not emitted.ok:
-                return struct(ok = False, error = emitted.error, text = "")
-            blocks.append(emitted.text)
+        emitted = _swiftpm_emit_target_block(identity, model, by_name, name, edges, files_by_target[name], mode)
+        if not emitted.ok:
+            return struct(ok = False, error = emitted.error, text = "")
+        rule_load = _swiftpm_clang_load_for(emitted.rule)
+        if rule_load and rule_load not in loads:
+            loads.append(rule_load)
+        if emitted.needs_hint and not "swift_interop_hint" in loads[0]:
+            loads[0] = "load(\"@rules_swift//swift:swift.bzl\", \"swift_interop_hint\", \"swift_library\", \"swift_library_group\")"
+        blocks.append(emitted.text)
     for product in model.products:
-        if len(product.targets) == 1:
-            blocks.append("alias(\n    name = {name},\n    actual = {actual},\n    visibility = [\"//visibility:public\"],\n)".format(name = repr(product.name), actual = repr(":" + product.targets[0] + "_lib")))
-        else:
-            deps = [_swiftpm_build_string(":" + target_name + "_lib") for target_name in product.targets]
-            blocks.append("swift_library_group(\n    name = {name},\n    deps = [\n        {deps},\n    ],\n    visibility = [\"//visibility:public\"],\n)".format(name = repr(product.name), deps = ",\n        ".join(deps)))
+        blocks.append(_swiftpm_emit_product_block(product))
     return struct(ok = True, error = "", text = "\n\n".join(loads + blocks) + "\n")
 
 def translate_swiftpm_package(identity, hub_name, model, pin_identities, files_by_target):

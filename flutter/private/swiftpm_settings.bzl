@@ -435,6 +435,86 @@ def _swiftpm_setting_defined(who, target_name, category, array_name, dotted, arg
         return struct(ok = False, detail = condition.detail, setting = None)
     return struct(ok = True, detail = "", setting = struct(category = category, kind = dotted, name = name.text, value = value, condition = condition.value, line = line))
 
+def _swiftpm_gated_platforms(setting):
+    """The `.when(platforms:)` list for one parsed setting, or None.
+
+    Args:
+        setting: The parsed setting struct (`condition` None or
+            `struct(platforms)`).
+
+    Returns:
+        None when the setting is unconditional, else the platform list.
+    """
+    if setting.condition:
+        return setting.condition.platforms
+    return None
+
+def _swiftpm_fold_clang_list(target, target_dir, settings):
+    """Map one C-family setting list onto flag and include entries.
+
+    Args:
+        target: The parsed target struct, for messages.
+        target_dir: The repo-relative target directory.
+        settings: The parsed `cSettings` or `cxxSettings` list.
+
+    Returns:
+        `struct(ok, error, flags, includes)`: each list holds
+        `struct(text, platforms)`.
+    """
+    flags = []
+    includes = []
+    for setting in settings:
+        entry = _swiftpm_clang_entry(target, target_dir, setting)
+        if entry.error:
+            return struct(ok = False, error = entry.error, flags = [], includes = [])
+        gated = struct(text = entry.text, platforms = _swiftpm_gated_platforms(setting))
+        if entry.include:
+            includes.append(gated)
+        else:
+            flags.append(gated)
+    return struct(ok = True, error = "", flags = flags, includes = includes)
+
+def _swiftpm_fold_swift_list(target, settings, target_kind):
+    """Map one `swiftSettings` list onto define and copts entries.
+
+    Args:
+        target: The parsed target struct, for messages.
+        settings: The parsed `swiftSettings` list.
+        target_kind: `"swift"` or `"clang"`.
+
+    Returns:
+        `struct(ok, error, defines, copts)`: each list holds
+        `struct(text, platforms)`.
+    """
+    defines = []
+    copts = []
+    for setting in settings:
+        entry = _swiftpm_swift_entry(target, setting, target_kind)
+        if entry.error:
+            return struct(ok = False, error = entry.error, defines = [], copts = [])
+        platforms = _swiftpm_gated_platforms(setting)
+        if setting.kind == "define":
+            defines.append(struct(text = entry.text, platforms = platforms))
+        else:
+            for text in entry.texts:
+                copts.append(struct(text = text, platforms = platforms))
+    return struct(ok = True, error = "", defines = defines, copts = copts)
+
+def _swiftpm_fold_linker_list(settings):
+    """Map one `linkerSettings` list onto link option entries.
+
+    Args:
+        settings: The parsed `linkerSettings` list.
+
+    Returns:
+        The `struct(text, platforms)` entry list.
+    """
+    linkopts = []
+    for setting in settings:
+        for text in _swiftpm_linker_entry(setting):
+            linkopts.append(struct(text = text, platforms = _swiftpm_gated_platforms(setting)))
+    return linkopts
+
 def swiftpm_target_setting_entries(target, target_dir, target_kind):
     """Map one target's parsed settings onto Bazel flag entries.
 
@@ -464,42 +544,19 @@ def swiftpm_target_setting_entries(target, target_dir, target_kind):
         `platforms` None or `["ios"]`/`["macos"]` (or both, kept as one
         entry the renderer fans out).
     """
-    c_only = []
-    cxx = []
-    defines = []
-    copts = []
-    linkopts = []
-    includes = []
-    for setting in getattr(target, "c_settings", []):
-        entry = _swiftpm_clang_entry(target, target_dir, setting)
-        if entry.error:
-            return struct(ok = False, detail = entry.error, c_only = [], cxx = [], defines = [], copts = [], linkopts = [], includes = [])
-        if entry.include:
-            includes.append(struct(text = entry.text, platforms = setting.condition.platforms if setting.condition else None))
-        else:
-            c_only.append(struct(text = entry.text, platforms = setting.condition.platforms if setting.condition else None))
-    for setting in getattr(target, "cxx_settings", []):
-        entry = _swiftpm_clang_entry(target, target_dir, setting)
-        if entry.error:
-            return struct(ok = False, detail = entry.error, c_only = [], cxx = [], defines = [], copts = [], linkopts = [], includes = [])
-        if entry.include:
-            includes.append(struct(text = entry.text, platforms = setting.condition.platforms if setting.condition else None))
-        else:
-            cxx.append(struct(text = entry.text, platforms = setting.condition.platforms if setting.condition else None))
+    c_fold = _swiftpm_fold_clang_list(target, target_dir, getattr(target, "c_settings", []))
+    if not c_fold.ok:
+        return struct(ok = False, detail = c_fold.error, c_only = [], cxx = [], defines = [], copts = [], linkopts = [], includes = [])
+    cxx_fold = _swiftpm_fold_clang_list(target, target_dir, getattr(target, "cxx_settings", []))
+    if not cxx_fold.ok:
+        return struct(ok = False, detail = cxx_fold.error, c_only = [], cxx = [], defines = [], copts = [], linkopts = [], includes = [])
     if (len(getattr(target, "c_settings", [])) + len(getattr(target, "cxx_settings", []))) > 0 and target_kind == "swift":
         return struct(ok = False, detail = "{who} uses C-family settings on a Swift target, which has no Bazel translation".format(who = _swiftpm_setting_target(target.name)), c_only = [], cxx = [], defines = [], copts = [], linkopts = [], includes = [])
-    for setting in getattr(target, "swift_settings", []):
-        entry = _swiftpm_swift_entry(target, setting, target_kind)
-        if entry.error:
-            return struct(ok = False, detail = entry.error, c_only = [], cxx = [], defines = [], copts = [], linkopts = [], includes = [])
-        if setting.kind == "define":
-            defines.append(struct(text = entry.text, platforms = setting.condition.platforms if setting.condition else None))
-        else:
-            copts.extend([struct(text = text, platforms = setting.condition.platforms if setting.condition else None) for text in entry.texts])
-    for setting in getattr(target, "linker_settings", []):
-        entry = _swiftpm_linker_entry(setting)
-        linkopts.extend([struct(text = text, platforms = setting.condition.platforms if setting.condition else None) for text in entry])
-    return struct(ok = True, detail = "", c_only = c_only, cxx = cxx, defines = defines, copts = copts, linkopts = linkopts, includes = includes)
+    swift_fold = _swiftpm_fold_swift_list(target, getattr(target, "swift_settings", []), target_kind)
+    if not swift_fold.ok:
+        return struct(ok = False, detail = swift_fold.error, c_only = [], cxx = [], defines = [], copts = [], linkopts = [], includes = [])
+    linkopts = _swiftpm_fold_linker_list(getattr(target, "linker_settings", []))
+    return struct(ok = True, detail = "", c_only = c_fold.flags, cxx = cxx_fold.flags, defines = swift_fold.defines, copts = swift_fold.copts, linkopts = linkopts, includes = c_fold.includes + cxx_fold.includes)
 
 def _swiftpm_clang_entry(target, target_dir, setting):
     """Render one `cSettings`/`cxxSettings` entry as a flag or an include.
@@ -560,6 +617,59 @@ def _swiftpm_linker_entry(setting):
         return ["-framework", setting.name]
     return ["-l" + setting.name]
 
+def _swiftpm_partition_entries(base, entries):
+    """Split gated entries into plain, iOS-only and macOS-only buckets.
+
+    An unconditional entry, or one gated on both platforms, joins the
+    plain bucket: it holds on every Apple platform the hub builds.
+
+    Args:
+        base: The unconditional item strings.
+        entries: `struct(text, platforms)` items with `platforms` None or
+            a platform list.
+
+    Returns:
+        `struct(plain, ios, macos)`: the three item lists.
+    """
+    plain = [text for text in base]
+    ios = []
+    macos = []
+    for entry in entries:
+        if entry.platforms == None or sorted(entry.platforms) == ["ios", "macos"]:
+            plain.append(entry.text)
+        else:
+            if "ios" in entry.platforms:
+                ios.append(entry.text)
+            if "macos" in entry.platforms:
+                macos.append(entry.text)
+    return struct(plain = plain, ios = ios, macos = macos)
+
+def _swiftpm_render_select_lines(ios, macos):
+    """Render one `select()` on the target platform's OS.
+
+    Args:
+        ios: The iOS-only item strings.
+        macos: The macOS-only item strings.
+
+    Returns:
+        The `select()` text lines, ending with the trailing comma the
+        attribute list needs.
+    """
+    selects = ["    select({"]
+    if ios:
+        selects.append("        \"@platforms//os:ios\": [")
+        for text in ios:
+            selects.append("            {item},".format(item = repr(text)))
+        selects.append("        ],")
+    if macos:
+        selects.append("        \"@platforms//os:macos\": [")
+        for text in macos:
+            selects.append("            {item},".format(item = repr(text)))
+        selects.append("        ],")
+    selects.append("        \"//conditions:default\": [],")
+    selects.append("    }),")
+    return selects
+
 def swiftpm_render_list_attr(attr, base, entries):
     """Render a Bazel list attribute from base items plus gated entries.
 
@@ -578,41 +688,19 @@ def swiftpm_render_list_attr(attr, base, entries):
     Returns:
         "" when there is nothing to render, else the attribute text.
     """
-    plain = [text for text in base]
-    ios = []
-    macos = []
-    for entry in entries:
-        if entry.platforms == None or sorted(entry.platforms) == ["ios", "macos"]:
-            plain.append(entry.text)
-        else:
-            if "ios" in entry.platforms:
-                ios.append(entry.text)
-            if "macos" in entry.platforms:
-                macos.append(entry.text)
-    if not plain and not ios and not macos:
+    parts = _swiftpm_partition_entries(base, entries)
+    if not parts.plain and not parts.ios and not parts.macos:
         return ""
     lines = ["    {attr} = [".format(attr = attr)]
-    for text in plain:
+    for text in parts.plain:
         lines.append("        {item},".format(item = repr(text)))
     closing = "    ],"
     selects = []
-    if ios or macos:
-        selects.append("    select({")
-        if ios:
-            selects.append("        \"@platforms//os:ios\": [")
-            for text in ios:
-                selects.append("            {item},".format(item = repr(text)))
-            selects.append("        ],")
-        if macos:
-            selects.append("        \"@platforms//os:macos\": [")
-            for text in macos:
-                selects.append("            {item},".format(item = repr(text)))
-            selects.append("        ],")
-        selects.append("        \"//conditions:default\": [],")
-        selects.append("    })")
+    if parts.ios or parts.macos:
+        selects = _swiftpm_render_select_lines(parts.ios, parts.macos)
     if not selects:
         lines.append(closing)
         return "\n".join(lines)
-    if plain:
+    if parts.plain:
         return "\n".join(lines) + "\n" + closing[:-1] + " +\n" + "\n".join(selects)
-    return "    {attr} = ".format(attr = attr) + "\n".join(selects)
+    return "    {attr} = {first}".format(attr = attr, first = selects[0].lstrip()) + "\n" + "\n".join(selects[1:])
