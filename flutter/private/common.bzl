@@ -2214,7 +2214,7 @@ FLUTTER_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {
         default = False,
     ),
     "extra_gen_snapshot_options": attr.string_list(
-        doc = "Extra gen_snapshot flags. Only the allow-list in `flutter/private/flutter_aot_compile.bzl` may be used: flags that read or write no file and change neither the snapshot kind, outputs, target nor debugging info. Anything else fails analysis; use `obfuscate` and `split_debug_info` for the obfuscation map and symbols.",
+        doc = "Extra gen_snapshot flags. Only the allow-list in `flutter/private/flutter_aot_compile.bzl` may be used: flags that read or write no file and change neither the snapshot kind, outputs, target nor debugging info. Anything else fails analysis; use `obfuscate` and `split_debug_info` for the obfuscation map and symbols. `--no-obfuscate` fails with `obfuscate = True` and `--no-dwarf-stack-traces` fails with `split_debug_info = True`; remove the flag or set the attribute to False.",
     ),
     "track_widget_creation": attr.bool(
         doc = "If True, track widget creation locations for the DevTools widget inspector. Adds overhead; typically used only in debug/profile builds.",

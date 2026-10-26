@@ -209,7 +209,26 @@ def _classify_gen_snapshot_entry(label, entry, parts, value):
     _refuse_gen_snapshot_entry(label, entry)
     return struct(kind = "drop", flag = None, obfuscate = False, dwarf = False)
 
-def _check_gen_snapshot_options(label, entries):
+def _fail_gen_snapshot_conflict(label, entry, parts, want):
+    """Fails analysis when a negated flag contradicts the rule's attributes.
+
+    A negated `--no-obfuscate` / `--no-dwarf-stack-traces` next to the
+    attribute that enables it leaves the argv's last-wins order deciding
+    whether the declared outputs mean anything, so it fails closed instead.
+
+    Args:
+        label: The calling target's label, for the message.
+        entry: The raw string entry, for the message.
+        parts: The `_gen_snapshot_entry_parts` struct for the entry.
+        want: A struct with `obfuscate` and `split_debug_info`, the rule's
+            own attributes the negated flag would contradict.
+    """
+    if parts.base == "obfuscate" and parts.negated and want.obfuscate:
+        fail("%s: extra_gen_snapshot_options %r cannot be used with `obfuscate = True`: it turns off the obfuscation `obfuscate` enables; remove %r or set `obfuscate = False`" % (label, entry, entry))
+    if parts.base == "dwarf-stack-traces" and parts.negated and want.split_debug_info:
+        fail("%s: extra_gen_snapshot_options %r cannot be used with `split_debug_info = True`: it turns off the DWARF stack traces `split_debug_info` keeps; remove %r or set `split_debug_info = False`" % (label, entry, entry))
+
+def _check_gen_snapshot_options(label, entries, want):
     """Validates every `extra_gen_snapshot_options` entry at analysis.
 
     A `--name value` pair split across two entries is recognised as one flag
@@ -223,6 +242,8 @@ def _check_gen_snapshot_options(label, entries):
     Args:
         label: The calling target's label, for error messages.
         entries: The raw `extra_gen_snapshot_options` strings.
+        want: A struct with `obfuscate` and `split_debug_info`, the rule's
+            own attributes a negated entry must not contradict.
 
     Returns:
         A struct with `kept` (the canonical flags for the command line),
@@ -245,6 +266,7 @@ def _check_gen_snapshot_options(label, entries):
             continue
         entry = entries[i]
         parts = _gen_snapshot_entry_parts(label, entry)
+        _fail_gen_snapshot_conflict(label, entry, parts, want)
         value = parts.value
         if value == None and i + 1 < count and not entries[i + 1].startswith("-"):
             value = entries[i + 1]
@@ -282,7 +304,10 @@ def flutter_aot_gen_snapshot_flags(ctx, strip):
     architecture, nor the debugging-info output. Anything else fails analysis
     naming the target, the parameter and the flag; `--save-debugging-info`
     and `--save-obfuscation-map` fail naming `split_debug_info` and
-    `obfuscate` instead. `--strip` is accepted and ignored (the action's
+    `obfuscate` instead. `--no-obfuscate` fails with `obfuscate`, and
+    `--no-dwarf-stack-traces` fails with `split_debug_info`: the negated
+    flag would leave gen_snapshot's last-wins order deciding what the
+    declared outputs mean. `--strip` is accepted and ignored (the action's
     `strip` parameter carries it exactly once); `--no-strip` disables
     stripping and reports `strip = False`, and fails with `obfuscate`, which
     needs stripping.
@@ -309,7 +334,11 @@ def flutter_aot_gen_snapshot_flags(ctx, strip):
         A tuple of (extra_flags, extra_outputs, debug_info_output,
         obfuscation_map_output, strip).
     """
-    checked = _check_gen_snapshot_options(ctx.label, ctx.attr.extra_gen_snapshot_options)
+    checked = _check_gen_snapshot_options(
+        ctx.label,
+        ctx.attr.extra_gen_snapshot_options,
+        struct(obfuscate = ctx.attr.obfuscate, split_debug_info = ctx.attr.split_debug_info),
+    )
     extra_flags = checked.kept
     extra_outputs = []
     debug_info_output = None

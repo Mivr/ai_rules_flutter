@@ -22,6 +22,9 @@ properties every public path must keep:
 - `--no-strip` without `obfuscate` strips nothing and reports
   `strip = False`; with `obfuscate` it fails, since obfuscation needs
   stripping.
+- A negated `--no-obfuscate` / `--no-dwarf-stack-traces` that contradicts
+  `obfuscate` / `split_debug_info` fails analysis; without the attribute
+  the negated flag is still accepted.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
@@ -143,6 +146,26 @@ def _refuse_no_strip_obfuscate_test_impl(ctx):
     """`--no-strip` with `obfuscate` fails: obfuscation needs stripping."""
     env = analysistest.begin(ctx)
     asserts.expect_failure(env, "needs stripping")
+    return analysistest.end(env)
+
+def _refuse_no_obfuscate_test_impl(ctx):
+    """`--no-obfuscate` with `obfuscate` fails: the flags contradict."""
+    env = analysistest.begin(ctx)
+    asserts.expect_failure(env, "obfuscate = True")
+    return analysistest.end(env)
+
+def _refuse_no_dwarf_test_impl(ctx):
+    """`--no-dwarf-stack-traces` with `split_debug_info` fails: the flags contradict."""
+    env = analysistest.begin(ctx)
+    asserts.expect_failure(env, "split_debug_info = True")
+    return analysistest.end(env)
+
+def _no_obfuscate_accepted_test_impl(ctx):
+    """`--no-obfuscate` without `obfuscate` is still accepted."""
+    env = analysistest.begin(ctx)
+    argv = _aot_argv(env)
+    asserts.true(env, "--no-obfuscate" in argv, "expected --no-obfuscate, got %s" % (argv,))
+    _assert_no_obfuscation_map(env, argv, analysistest.target_under_test(env))
     return analysistest.end(env)
 
 def _assert_unstripped_argv(env, argv):
@@ -272,6 +295,18 @@ _refuse_snapshot_kind_test = analysistest.make(
 _refuse_no_strip_obfuscate_test = analysistest.make(
     _refuse_no_strip_obfuscate_test_impl,
     expect_failure = True,
+)
+_refuse_no_obfuscate_test = analysistest.make(
+    _refuse_no_obfuscate_test_impl,
+    expect_failure = True,
+)
+_refuse_no_dwarf_test = analysistest.make(
+    _refuse_no_dwarf_test_impl,
+    expect_failure = True,
+)
+_no_obfuscate_accepted_test = analysistest.make(
+    _no_obfuscate_accepted_test_impl,
+    config_settings = _FASTBUILD,
 )
 _no_strip_unstripped_test = analysistest.make(
     _no_strip_unstripped_test_impl,
@@ -407,6 +442,32 @@ def aot_flags_test_suite(name):
         extra_gen_snapshot_options = ["--no-strip"],
         tags = ["manual"],
     )
+    flutter_aot_target(
+        name = "_flags_no_obfuscate_target",
+        package_name = _PACKAGE,
+        main = _MAIN,
+        srcs = [_MAIN],
+        obfuscate = True,
+        extra_gen_snapshot_options = ["--obfuscate", "--no-obfuscate"],
+        tags = ["manual"],
+    )
+    flutter_aot_target(
+        name = "_flags_no_dwarf_target",
+        package_name = _PACKAGE,
+        main = _MAIN,
+        srcs = [_MAIN],
+        split_debug_info = True,
+        extra_gen_snapshot_options = ["--dwarf-stack-traces", "--no-dwarf-stack-traces"],
+        tags = ["manual"],
+    )
+    flutter_aot_target(
+        name = "_flags_neg_obfuscate_target",
+        package_name = _PACKAGE,
+        main = _MAIN,
+        srcs = [_MAIN],
+        extra_gen_snapshot_options = ["--no-obfuscate"],
+        tags = ["manual"],
+    )
 
     for fixture, options in {
         "_flags_application_write_profile_eq": ["--write-v8-snapshot-profile-to=/tmp/x.json"],
@@ -436,6 +497,29 @@ def aot_flags_test_suite(name):
         package_name = _PACKAGE,
         main = _MAIN,
         extra_gen_snapshot_options = ["--no-strip"],
+        tags = ["manual"],
+    )
+    flutter_application(
+        name = "_flags_application_no_obfuscate",
+        package_name = _PACKAGE,
+        main = _MAIN,
+        obfuscate = True,
+        extra_gen_snapshot_options = ["--obfuscate", "--no-obfuscate"],
+        tags = ["manual"],
+    )
+    flutter_application(
+        name = "_flags_application_no_dwarf",
+        package_name = _PACKAGE,
+        main = _MAIN,
+        split_debug_info = True,
+        extra_gen_snapshot_options = ["--dwarf-stack-traces", "--no-dwarf-stack-traces"],
+        tags = ["manual"],
+    )
+    flutter_application(
+        name = "_flags_application_neg_obfuscate",
+        package_name = _PACKAGE,
+        main = _MAIN,
+        extra_gen_snapshot_options = ["--no-obfuscate"],
         tags = ["manual"],
     )
 
@@ -492,6 +576,36 @@ def aot_flags_test_suite(name):
         target_under_test = ":_flags_application_no_strip_obfuscate",
         target_compatible_with = HOST_COMPATIBLE,
     )
+    _refuse_no_obfuscate_test(
+        name = name + "_refuse_no_obfuscate",
+        target_under_test = ":_flags_no_obfuscate_target",
+        target_compatible_with = HOST_COMPATIBLE,
+    )
+    _refuse_no_obfuscate_test(
+        name = name + "_application_refuse_no_obfuscate",
+        target_under_test = ":_flags_application_no_obfuscate",
+        target_compatible_with = HOST_COMPATIBLE,
+    )
+    _refuse_no_dwarf_test(
+        name = name + "_refuse_no_dwarf",
+        target_under_test = ":_flags_no_dwarf_target",
+        target_compatible_with = HOST_COMPATIBLE,
+    )
+    _refuse_no_dwarf_test(
+        name = name + "_application_refuse_no_dwarf",
+        target_under_test = ":_flags_application_no_dwarf",
+        target_compatible_with = HOST_COMPATIBLE,
+    )
+    _no_obfuscate_accepted_test(
+        name = name + "_no_obfuscate_accepted",
+        target_under_test = ":_flags_neg_obfuscate_target",
+        target_compatible_with = HOST_COMPATIBLE,
+    )
+    _no_obfuscate_accepted_test(
+        name = name + "_application_no_obfuscate_accepted",
+        target_under_test = ":_flags_application_neg_obfuscate",
+        target_compatible_with = HOST_COMPATIBLE,
+    )
     _no_strip_unstripped_test(
         name = name + "_no_strip_unstripped",
         target_under_test = ":_flags_no_strip_target",
@@ -539,6 +653,9 @@ def aot_flags_test_suite(name):
             ":" + name + "_refuse_debugging_info",
             ":" + name + "_refuse_snapshot_kind",
             ":" + name + "_refuse_no_strip_obfuscate",
+            ":" + name + "_refuse_no_obfuscate",
+            ":" + name + "_refuse_no_dwarf",
+            ":" + name + "_no_obfuscate_accepted",
             ":" + name + "_application_refuse_write_profile_eq",
             ":" + name + "_application_refuse_write_profile_sep",
             ":" + name + "_application_refuse_unknown",
@@ -546,6 +663,9 @@ def aot_flags_test_suite(name):
             ":" + name + "_application_refuse_debugging_info",
             ":" + name + "_application_refuse_snapshot_kind",
             ":" + name + "_application_refuse_no_strip_obfuscate",
+            ":" + name + "_application_refuse_no_obfuscate",
+            ":" + name + "_application_refuse_no_dwarf",
+            ":" + name + "_application_no_obfuscate_accepted",
             ":" + name + "_no_strip_unstripped",
             ":" + name + "_application_no_strip_unstripped",
             ":" + name + "_obfuscation_map",

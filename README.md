@@ -1306,7 +1306,7 @@ flutter_application(
 | `language_version` | The Dart language version, matching `pubspec.yaml`. |
 | `obfuscate` | Obfuscate Dart symbols in the AOT output. Pair with `split_debug_info`. Default `False`. |
 | `split_debug_info` | Write debug info to a separate `.symbols` file. Default `False`. |
-| `extra_gen_snapshot_options` | Extra flags for `gen_snapshot`: only the allow-list in `flutter/private/flutter_aot_compile.bzl`. |
+| `extra_gen_snapshot_options` | Extra flags for `gen_snapshot`: only the allow-list in `flutter/private/flutter_aot_compile.bzl`. `--no-obfuscate` fails with `obfuscate = True` and `--no-dwarf-stack-traces` fails with `split_debug_info = True`. |
 | `track_widget_creation` | Record widget creation locations for the DevTools inspector. Default `False`. |
 | `shaders` | Fragment shaders to compile with impellerc. Each file must sit under the target's package directory; it is bundled at its path relative to that directory, where `FragmentProgram.fromAsset` looks for it. See [Asset keys](#asset-keys). |
 | `shader_includes` | Files the `shaders` may `#include`. |
