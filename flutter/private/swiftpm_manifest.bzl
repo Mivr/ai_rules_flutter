@@ -337,10 +337,11 @@ def _swiftpm_parse_dep_condition(kwarg, target_name):
 
     Only `.when(platforms: [...])` translates: the hub builds one
     library for every Apple platform and the emitter keeps the gated
-    dependency only when building for a listed platform, so any other
-    shape (traits, configurations, other platforms) has no Bazel meaning
-    and fails. Failures name the holding target; the caller wraps them
-    with the package identity and line.
+    dependency only when building for a listed platform. Other
+    platforms are ignored (a list naming neither `.iOS` nor `.macOS`
+    drops the dependency on both), while any other shape (traits,
+    configurations) fails naming it. Failures name the holding target;
+    the caller wraps them with the package identity and line.
 
     Args:
         kwarg: The `condition:` kwarg struct, or None when absent.
@@ -361,17 +362,21 @@ def _swiftpm_parse_dep_condition(kwarg, target_name):
     kwargs = _swiftpm_split_kwargs(head.args)
     if not kwargs.ok:
         return struct(ok = False, detail = holder + kwargs.detail, value = None)
-    if len(kwargs.kwargs) != 1 or kwargs.kwargs[0].key != "platforms":
-        return struct(ok = False, detail = holder + "only `.when(platforms: [...])` conditions are supported", value = None)
+    foreign = [part.key for part in kwargs.kwargs if part.key != "platforms"]
+    if foreign:
+        return struct(ok = False, detail = holder + "build condition on `{key}:` has no Bazel translation (only `.when(platforms: [...])` conditions translate)".format(key = foreign[0]), value = None)
+    if len(kwargs.kwargs) != 1:
+        return struct(ok = False, detail = holder + "expected a build condition (`.when(platforms: [...])`)", value = None)
     array = _swiftpm_array_parts(kwargs.kwargs[0].value)
     if not array.ok:
         return struct(ok = False, detail = holder + array.detail, value = None)
     platforms = []
     for element in array.elements:
-        if len(element) == 2 and element[0].kind == "punct" and element[0].text == "." and element[1].kind == "word" and element[1].text in _SWIFTPM_CONDITION_PLATFORMS:
-            platforms.append(_SWIFTPM_CONDITION_PLATFORMS[element[1].text])
+        if len(element) == 2 and element[0].kind == "punct" and element[0].text == "." and element[1].kind == "word":
+            if element[1].text in _SWIFTPM_CONDITION_PLATFORMS:
+                platforms.append(_SWIFTPM_CONDITION_PLATFORMS[element[1].text])
         else:
-            return struct(ok = False, detail = holder + "unsupported condition platform (only `.iOS` and `.macOS` translate)", value = None)
+            return struct(ok = False, detail = holder + "expected `.when(platforms:)` entries naming platforms", value = None)
     return struct(ok = True, detail = "", value = struct(platforms = platforms))
 
 def _swiftpm_parse_same_dep(kwargs, target_name):

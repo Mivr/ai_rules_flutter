@@ -244,9 +244,11 @@ def _swiftpm_target_edge(identity, model, target, by_name, pin_identities, hub_n
 
     A dependency carrying a `condition:` keeps its listed platforms: the
     emitter renders it inside a `select()` on the target platform's OS,
-    so the hub builds one library for every Apple platform. Reachability
-    still follows conditioned dependencies: a target needed on any
-    platform must be built.
+    so the hub builds one library for every Apple platform. Platforms
+    other than iOS and macOS are ignored, and a dependency gated on
+    neither drops out of every rendered attribute. Reachability follows
+    only dependencies kept on some platform: a target needed on any
+    platform must be built, while a dropped one stays out.
 
     Args:
         identity: The SwiftPM package identity.
@@ -273,7 +275,8 @@ def _swiftpm_target_edge(identity, model, target, by_name, pin_identities, hub_n
             if resolved.target.kind == "testTarget":
                 return struct(ok = False, error = "SwiftPM package {identity}: target {target} depends on test target {name}, which is ignored.".format(identity = repr(identity), target = repr(target.name), name = repr(resolved.target.name)), labels = [], followed = [])
             labels.append(struct(text = ":" + resolved.target.name + "_lib", platforms = platforms))
-            followed.append(resolved.target.name)
+            if platforms == None or platforms:
+                followed.append(resolved.target.name)
         else:
             located = _swiftpm_product_dep_label(identity, hub_name, dep, model.pkg_deps, pin_identities)
             if not located.ok:

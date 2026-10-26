@@ -289,6 +289,7 @@ def swiftpm_translate_test_suite(name):
         _same_dep_onto_test_target_fails_test,
         _executable_target_refusal_test,
         _conditioned_dep_select_test,
+        _dropped_dep_stays_out_test,
         _swift_settings_emit_test,
         _clang_target_emit_test,
         _generated_map_emit_test,
@@ -330,6 +331,32 @@ let package = Package(
     return unittest.end(env)
 
 _conditioned_dep_select_test = unittest.make(_conditioned_dep_select_test_impl)
+
+_DROPPED_MANIFEST = """// swift-tools-version:5.9
+import PackageDescription
+let package = Package(
+    name: "Drop",
+    products: [.library(name: "Drop", targets: ["Drop"])],
+    targets: [.target(name: "Drop", dependencies: [.target(name: "Gone", condition: .when(platforms: [.tvOS])), .target(name: "Kept", condition: .when(platforms: [.tvOS, .macOS]))]), .target(name: "Gone"), .target(name: "Kept")],
+)
+"""
+
+def _dropped_dep_stays_out_test_impl(ctx):
+    env = unittest.begin(ctx)
+    parsed = parse_swiftpm_package("drop", _DROPPED_MANIFEST)
+    asserts.true(env, parsed.ok)
+    translated = translate_swiftpm_package("drop", "deps", parsed.model, ["drop"], {
+        "Drop": struct(dir = "d", srcs = ["d/a.swift"]),
+        "Kept": struct(dir = "d", srcs = ["d/k.swift"]),
+    })
+    asserts.true(env, translated.ok)
+    asserts.equals(env, ["Drop", "Kept"], translated.names)
+    asserts.true(env, not ":Gone_lib" in translated.text)
+    asserts.true(env, "\":Kept_lib\"" in translated.text)
+    asserts.true(env, "\"@platforms//os:macos\"" in translated.text)
+    return unittest.end(env)
+
+_dropped_dep_stays_out_test = unittest.make(_dropped_dep_stays_out_test_impl)
 
 _SETTINGS_MANIFEST = """// swift-tools-version:5.9
 import PackageDescription

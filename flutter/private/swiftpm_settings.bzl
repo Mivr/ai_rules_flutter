@@ -87,6 +87,10 @@ def swiftpm_parse_when_condition(target_name, value_tokens):
 def _swiftpm_setting_platform_list(who, value_tokens):
     """Read a `.when(platforms: [...])` platform array.
 
+    Only `.iOS` and `.macOS` survive: the hub builds one library for
+    every Apple platform, so any other platform is ignored (an entry
+    gated on no listed platform at all drops out everywhere).
+
     Args:
         who: The target prefix for messages.
         value_tokens: The array literal's token list.
@@ -102,10 +106,11 @@ def _swiftpm_setting_platform_list(who, value_tokens):
         return struct(ok = False, detail = "{who}: malformed `.when(platforms: [...])` condition".format(who = who), items = [])
     items = []
     for part in parts:
-        if len(part) == 2 and part[0].kind == "punct" and part[0].text == "." and part[1].kind == "word" and part[1].text in _SWIFTPM_SETTING_PLATFORMS:
-            items.append(_SWIFTPM_SETTING_PLATFORMS[part[1].text])
+        if len(part) == 2 and part[0].kind == "punct" and part[0].text == "." and part[1].kind == "word":
+            if part[1].text in _SWIFTPM_SETTING_PLATFORMS:
+                items.append(_SWIFTPM_SETTING_PLATFORMS[part[1].text])
         else:
-            return struct(ok = False, detail = "{who} uses an unsupported condition platform (only `.iOS` and `.macOS` translate)".format(who = who), items = [])
+            return struct(ok = False, detail = "{who}: expected `.when(platforms:)` entries naming platforms".format(who = who), items = [])
     return struct(ok = True, detail = "", items = items)
 
 def _swiftpm_setting_split_top(tokens):

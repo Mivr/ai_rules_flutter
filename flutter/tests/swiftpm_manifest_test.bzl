@@ -272,7 +272,6 @@ def _target_setting_refusals_test_impl(ctx):
         (".target(name: \"C\", cxxSettings: [.weird(\"x\")])", "target \"C\" uses `.weird(...)` in `cxxSettings`"),
         (".target(name: \"C\", swiftSettings: [.define(\"X\", to: \"1\")])", "unexpected `.define(...)` argument `to`"),
         (".target(name: \"C\", swiftSettings: [.define(\"X\", .when(configuration: .debug))])", "target \"C\" uses a build condition on `configuration:`"),
-        (".target(name: \"C\", linkerSettings: [.linkedLibrary(\"z\", .when(platforms: [.watchOS]))])", "target \"C\" uses an unsupported condition platform"),
         (".target(name: \"C\", linkerSettings: [.linkedLibrary(\"z\", .when(traits: [\"T\"]))])", "target \"C\" uses a build condition on `traits:`"),
         (".target(name: \"C\", cSettings: [.define(\"X\", .define(\"Y\"))])", "target \"C\": expected a build condition"),
     ]
@@ -290,8 +289,18 @@ def _condition_refusal_names_target_test_impl(ctx):
     parsed = parse_swiftpm_package("cond", manifest)
     asserts.true(env, not parsed.ok)
     asserts.true(env, "target \"C\":" in parsed.error)
-    asserts.true(env, "only `.when(platforms: [...])`" in parsed.error)
+    asserts.true(env, "build condition on `configuration:`" in parsed.error)
     asserts.true(env, "SwiftPM package \"cond\" (Package.swift line " in parsed.error)
+    return unittest.end(env)
+
+def _other_platforms_are_ignored_test_impl(ctx):
+    env = unittest.begin(ctx)
+    manifest = "// swift-tools-version: 5.9\nimport PackageDescription\nlet package = Package(name: \"P\", products: [.library(name: \"P\", targets: [\"C\"])], targets: [.target(name: \"C\", cSettings: [.define(\"X\", .when(platforms: [.linux]))], linkerSettings: [.linkedFramework(\"CFNetwork\", .when(platforms: [.iOS, .macOS, .tvOS, .watchOS]))])])\n"
+    parsed = parse_swiftpm_package("platforms", manifest)
+    asserts.true(env, parsed.ok)
+    target = parsed.model.targets[0]
+    asserts.equals(env, [], target.c_settings[0].condition.platforms)
+    asserts.equals(env, ["ios", "macos"], target.linker_settings[0].condition.platforms)
     return unittest.end(env)
 
 _PLUGIN_PACKAGE_SETTINGS = ', defaultLocalization: "en", pkgConfig: "libfoo", providers: [.apt(["libfoo-dev"]), .brew(["libfoo"])]'
@@ -377,6 +386,8 @@ def swiftpm_manifest_test_suite(name):
         _package_dep_still_refuses_unlocatable_test,
         _parses_condition_arguments_test,
         _condition_refusals_test,
+        _dropped_platform_dep_parses_test,
+        _other_platforms_are_ignored_test,
         _parses_target_settings_test,
         _target_setting_refusals_test,
         _condition_refusal_names_target_test,
@@ -413,8 +424,9 @@ def _parses_condition_arguments_test_impl(ctx):
 def _condition_refusals_test_impl(ctx):
     env = unittest.begin(ctx)
     cases = [
-        (".target(name: \"C\", dependencies: [.product(name: \"Dp\", package: \"Dep\", condition: .when(platforms: [.watchOS]))])", "unsupported condition platform"),
-        (".target(name: \"C\", dependencies: [.product(name: \"Dp\", package: \"Dep\", condition: .when(traits: [\"Trait\"]))])", "only `.when(platforms: [...])`"),
+        (".target(name: \"C\", dependencies: [.product(name: \"Dp\", package: \"Dep\", condition: .when(traits: [\"Trait\"]))])", "build condition on `traits:`"),
+        (".target(name: \"C\", dependencies: [.product(name: \"Dp\", package: \"Dep\", condition: .when(configuration: .debug))])", "build condition on `configuration:`"),
+        (".target(name: \"C\", dependencies: [.product(name: \"Dp\", package: \"Dep\", condition: .when(platforms: [.iOS], configuration: .debug))])", "build condition on `configuration:`"),
         (".target(name: \"C\", dependencies: [.product(name: \"Dp\", package: \"Dep\", condition: \"ios\")])", "expected a build condition"),
         (".target(name: \"C\", dependencies: [.product(name: \"Dp\", package: \"Dep\", extra: 1)])", "unknown `.product(...)` argument"),
     ]
@@ -425,5 +437,17 @@ def _condition_refusals_test_impl(ctx):
         asserts.true(env, detail in parsed.error)
     return unittest.end(env)
 
+def _dropped_platform_dep_parses_test_impl(ctx):
+    env = unittest.begin(ctx)
+    manifest = "// swift-tools-version: 5.9\nimport PackageDescription\nlet package = Package(name: \"Cond\", products: [.library(name: \"Cond\", targets: [\"C\"])], dependencies: [.package(url: \"https://example.com/Dep.git\", from: \"1.0.0\")], targets: [.target(name: \"C\", dependencies: [.product(name: \"Dp\", package: \"Dep\", condition: .when(platforms: [.watchOS])), .target(name: \"Help\", condition: .when(platforms: [.tvOS, .macOS]))])])\n"
+    parsed = parse_swiftpm_package("cond", manifest)
+    asserts.true(env, parsed.ok)
+    deps = parsed.model.targets[0].deps
+    asserts.equals(env, [], deps[0].condition.platforms)
+    asserts.equals(env, ["macos"], deps[1].condition.platforms)
+    return unittest.end(env)
+
 _parses_condition_arguments_test = unittest.make(_parses_condition_arguments_test_impl)
 _condition_refusals_test = unittest.make(_condition_refusals_test_impl)
+_dropped_platform_dep_parses_test = unittest.make(_dropped_platform_dep_parses_test_impl)
+_other_platforms_are_ignored_test = unittest.make(_other_platforms_are_ignored_test_impl)
