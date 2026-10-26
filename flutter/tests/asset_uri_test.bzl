@@ -808,108 +808,153 @@ def _empty_segment_forms_bundle_raw_test_impl(ctx):
     asserts.equals(env, "f/fm.png", variants[1]["asset"])
     return unittest.end(env)
 
-# -- mixed empty-segment entries beside overlapping plain ones -------------------
+# -- overlapping plain and empty-segment entries (RT38-flutter:02, B2) --------
 #
-# Round 2 of RT38-flutter:02. One package declares plain and empty-segment
-# entries whose collapsed paths coincide. flutter_tools keys every declared
-# entry by its own raw path; entries never merge or drop because their
-# collapsed paths name the same file. Only the copies coincide on disk.
+# rules_flutter's `pkg_assets` carries one bundle key per file, so when two
+# entries of one package give one file two different keys — only an empty
+# segment can do that — the spoke fetch fails, naming the package and the
+# empty-segment entry. A mixed list without such a pair bundles with
+# flutter_tools' own keys (oracle-checked below).
 
-_MIXED_OVERLAP_PUBSPEC = """\
+_OVERLAP_PLAIN_RAW_PUBSPEC = """\
+name: hpkg
+flutter:
+  assets:
+    - a/b.png
+    - a//b.png
+"""
+
+_OVERLAP_VARIANT_RAW_PUBSPEC = """\
 name: hpkg
 flutter:
   assets:
     - a/b.png
     - a//2.0x/b.png
+"""
+
+_OVERLAP_FILES = {
+    "a": ["a/b.png", "a/2.0x/b.png"],
+    "a/2.0x": ["a/2.0x/b.png"],
+}
+
+def _overlap_list_dir(directory):
+    """Fake package listing: collapsed names, as the spoke lister reads them."""
+    return struct(files = _OVERLAP_FILES.get(directory, []), error = "")
+
+def _overlap_plain_raw_refuses_test_impl(ctx):
+    """A plain entry beside its empty-segment twin fails the fetch.
+
+    `a/b.png` and `a//b.png` give the `a/b.png` file two bundle keys, which
+    `pkg_assets` cannot carry (RT38-flutter:02, amendment B2). The failure
+    names the package and the empty-segment entry and says the spelling is
+    not supported. Fails on the base, which bundles the mixture.
+    """
+    env = unittest.begin(ctx)
+    parsed = parse_flutter_assets_block(_OVERLAP_PLAIN_RAW_PUBSPEC)
+    asserts.equals(env, [], parsed.asset_errors)
+    assets = normalize_spoke_assets("hpkg", parsed.assets)
+    result = expand_pub_asset_entries(assets, _overlap_list_dir, "hpkg")
+    asserts.true(env, result.error != "", "the two-key mixture fails the fetch")
+    for want in ["hpkg", "a//b.png", "not supported"]:
+        asserts.true(env, want in result.error, result.error)
+    return unittest.end(env)
+
+def _overlap_variant_raw_refuses_test_impl(ctx):
+    """A plain entry beside a raw variant of its file fails the fetch.
+
+    `a//2.0x/b.png` reads the `a/2.0x/b.png` file that the `a/b.png` entry
+    already bundles as its variant, giving it a second key (RT38-flutter:02,
+    amendment B2). The failure names the package and the empty-segment entry
+    and says the spelling is not supported. Fails on the base, which bundles
+    the mixture.
+    """
+    env = unittest.begin(ctx)
+    parsed = parse_flutter_assets_block(_OVERLAP_VARIANT_RAW_PUBSPEC)
+    asserts.equals(env, [], parsed.asset_errors)
+    assets = normalize_spoke_assets("hpkg", parsed.assets)
+    result = expand_pub_asset_entries(assets, _overlap_list_dir, "hpkg")
+    asserts.true(env, result.error != "", "the two-key mixture fails the fetch")
+    for want in ["hpkg", "a//2.0x/b.png", "not supported"]:
+        asserts.true(env, want in result.error, result.error)
+    return unittest.end(env)
+
+_MIXED_PUBSPEC = """\
+name: hpkg
+flutter:
+  assets:
+    - c/d.png
     - e//em.png
-    - a//b.png
     - path: 'f//fm.png'
     - path: 'a%20b.png'
     - path: 'g/./h.png'
 """
 
-_MIXED_OVERLAP_FILES = {
-    "": ["a%20b.png", "a b.png"],
-    "a": ["a/b.png", "a/2.0x/b.png"],
-    "a/2.0x": ["a/2.0x/b.png"],
+_MIXED_FILES = {
+    "": ["a%20b.png"],
+    "c": ["c/d.png", "c/2.0x/d.png"],
+    "c/2.0x": ["c/2.0x/d.png"],
     "e": ["e/em.png"],
     "f": ["f/fm.png"],
     "g": ["g/h.png"],
 }
 
-def _mixed_overlap_list_dir(directory):
+def _mixed_list_dir(directory):
     """Fake package listing: collapsed names, as the spoke lister reads them."""
-    return struct(files = _MIXED_OVERLAP_FILES.get(directory, []), error = "")
+    return struct(files = _MIXED_FILES.get(directory, []), error = "")
 
-def _mixed_overlap_entries_keep_raw_keys_test_impl(ctx):
-    """Overlapping plain and empty-segment entries each keep a raw-keyed entry.
+def _mixed_without_overlap_bundles_test_impl(ctx):
+    """A mixed list with no two-key pair bundles flutter_tools' own keys.
 
     Oracle-checked against flutter_tools 3.47.7 (`ManifestAssetBundle.build`
-    over files `a/b.png`, `a/2.0x/b.png`, `e/em.png`, `f/fm.png`,
-    `a%20b.png`, `a b.png`, `g/h.png`): seven `packages/hpkg/` keys —
-    `a%20b.png` <- [`a%20b.png`], `a//2.0x/b.png` <- [`a//2.0x/b.png` dpr
-    2.0, `a/2.0x/b.png` dpr 2.0], `a//b.png` <- [`a//b.png`, `a/b.png`,
-    `a/2.0x/b.png` dpr 2.0], `a/b.png` <- [`a/b.png`, `a/2.0x/b.png` dpr
-    2.0], `e//em.png` <- [`e//em.png`, `e/em.png`], `f//fm.png` <-
-    [`f//fm.png`, `f/fm.png`], `g/h.png` <- [`g/h.png`]. The literal
-    `a b.png` file stays unbundled: the map-form `a%20b.png` entry reads
-    literally. The manifest input lists each expanded key once per copy, so
-    a file reached through two declarations still contributes one variant.
+    over files `c/d.png`, `c/2.0x/d.png`, `e/em.png`, `f/fm.png`,
+    `a%20b.png`, `g/h.png`): five `packages/hpkg/` keys — `a%20b.png` <-
+    [`a%20b.png`], `c/d.png` <- [`c/d.png`, `c/2.0x/d.png` dpr 2.0],
+    `e//em.png` <- [`e//em.png`, `e/em.png`], `f//fm.png` <- [`f//fm.png`,
+    `f/fm.png`], `g/h.png` <- [`g/h.png`]. The literal `a%20b.png` file
+    bundles under the re-encoded key: the map form reads literally.
     """
     env = unittest.begin(ctx)
-    parsed = parse_flutter_assets_block(_MIXED_OVERLAP_PUBSPEC)
+    parsed = parse_flutter_assets_block(_MIXED_PUBSPEC)
     asserts.equals(env, [], parsed.asset_errors)
     asserts.equals(
         env,
-        [False, False, False, False, True, True, True],
+        [False, False, True, True, True],
         [entry.is_map for entry in parsed.assets],
     )
     assets = normalize_spoke_assets("hpkg", parsed.assets)
     asserts.equals(
         env,
-        ["a/b.png", "a/2.0x/b.png", "e/em.png", "a/b.png", "f/fm.png", "a%20b.png", "g/h.png"],
+        ["c/d.png", "e/em.png", "f/fm.png", "a%20b.png", "g/h.png"],
         [entry.path for entry in assets],
     )
     asserts.equals(
         env,
-        ["a/b.png", "a//2.0x/b.png", "e//em.png", "a//b.png", "f//fm.png", "a%2520b.png", "g/h.png"],
+        ["c/d.png", "e//em.png", "f//fm.png", "a%2520b.png", "g/h.png"],
         [entry.key for entry in assets],
     )
-    result = expand_pub_asset_entries(assets, _mixed_overlap_list_dir, "hpkg")
+    result = expand_pub_asset_entries(assets, _mixed_list_dir, "hpkg")
     asserts.equals(env, "", result.error)
     asserts.equals(
         env,
-        ["a/b.png", "a/2.0x/b.png", "a/2.0x/b.png", "e/em.png", "a/b.png", "a/2.0x/b.png", "f/fm.png", "a%20b.png", "g/h.png"],
+        ["c/d.png", "c/2.0x/d.png", "e/em.png", "f/fm.png", "a%20b.png", "g/h.png"],
         [e.path for e in result.expanded],
     )
     asserts.equals(
         env,
-        ["a/b.png", "a/2.0x/b.png", "a//2.0x/b.png", "e//em.png", "a//b.png", "a/2.0x/b.png", "f//fm.png", "a%2520b.png", "g/h.png"],
+        ["c/d.png", "c/2.0x/d.png", "e//em.png", "f//fm.png", "a%2520b.png", "g/h.png"],
         [e.key for e in result.expanded],
     )
     manifest = build_asset_manifest([e.key for e in result.expanded])
     asserts.equals(
         env,
-        ["a%20b.png", "a//2.0x/b.png", "a//b.png", "a/b.png", "e//em.png", "f//fm.png", "g/h.png"],
+        ["a%20b.png", "c/d.png", "e//em.png", "f//fm.png", "g/h.png"],
         sorted(manifest.keys()),
     )
     asserts.equals(env, [{"asset": "a%20b.png"}], manifest["a%20b.png"])
-    variants = manifest["a//2.0x/b.png"]
+    variants = manifest["c/d.png"]
     asserts.equals(env, 2, len(variants))
-    asserts.equals(env, "a//2.0x/b.png", variants[0]["asset"])
-    asserts.equals(env, 2.0, variants[0]["dpr"])
-    asserts.equals(env, "a/2.0x/b.png", variants[1]["asset"])
-    asserts.equals(env, 2.0, variants[1]["dpr"])
-    variants = manifest["a//b.png"]
-    asserts.equals(env, 3, len(variants))
-    asserts.equals(env, "a//b.png", variants[0]["asset"])
-    asserts.equals(env, "a/b.png", variants[1]["asset"])
-    asserts.equals(env, "a/2.0x/b.png", variants[2]["asset"])
-    asserts.equals(env, 2.0, variants[2]["dpr"])
-    variants = manifest["a/b.png"]
-    asserts.equals(env, 2, len(variants))
-    asserts.equals(env, "a/b.png", variants[0]["asset"])
-    asserts.equals(env, "a/2.0x/b.png", variants[1]["asset"])
+    asserts.equals(env, "c/d.png", variants[0]["asset"])
+    asserts.equals(env, "c/2.0x/d.png", variants[1]["asset"])
     asserts.equals(env, 2.0, variants[1]["dpr"])
     variants = manifest["e//em.png"]
     asserts.equals(env, 2, len(variants))
@@ -954,9 +999,9 @@ _t19_test = unittest.make(_map_form_reads_literal_test_impl)
 _t20_test = unittest.make(_map_form_entries_bundle_literal_test_impl)
 _t21_test = unittest.make(_missing_literal_fails_fetch_test_impl)
 _t22_test = unittest.make(_empty_segment_forms_bundle_raw_test_impl)
-_t23_test = unittest.make(_mixed_overlap_entries_keep_raw_keys_test_impl)
-
-
+_t23_test = unittest.make(_overlap_plain_raw_refuses_test_impl)
+_t24_test = unittest.make(_overlap_variant_raw_refuses_test_impl)
+_t25_test = unittest.make(_mixed_without_overlap_bundles_test_impl)
 
 def asset_uri_test_suite(name):
     """Defines the asset-URI normalization unit and through tests.
@@ -990,4 +1035,6 @@ def asset_uri_test_suite(name):
         _t21_test,
         _t22_test,
         _t23_test,
+        _t24_test,
+        _t25_test,
     )

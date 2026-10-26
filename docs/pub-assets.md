@@ -62,7 +62,9 @@ stays in the key (`a//b.png` keys with `//`) while the decoded file
 collapses (`a/b.png`): the manifest entry is flutter_tools' own (the raw
 key, the collapsed path, the collapsed directory's variants, each variant
 with the dpr of its own parent directory), no key names an undeclared
-file, and the copies read the collapsed file.
+file, and the copies read the collapsed file. Two entries giving one file
+two bundle keys (`a/b.png` beside `a//b.png`) fail the same way, naming the
+empty-segment entry: `pkg_assets` carries one key per file.
 
 ## Walk bounds
 

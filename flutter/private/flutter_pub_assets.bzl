@@ -28,7 +28,7 @@ escaping `..`, an invalid escape, ...) refuses here, naming the package,
 its pubspec.yaml and the entry.
 """
 
-load(":asset_uri.bzl", "encode_asset_key")
+load(":asset_uri.bzl", "encode_asset_key", "spoke_asset_uri_error")
 load(":flutter_pub_walk.bzl", "PUB_WALK_BOUND")
 
 # Bound for every asset directory walk. Starlark has no `while`, so every
@@ -102,6 +102,35 @@ def missing_asset_error(package_name, entry_path):
         "flutter.pub spoke for \"{pkg}\": no file or variants found for " +
         "asset \"{entry}\"."
     ).format(pkg = package_name, entry = entry_path)
+
+def overlapping_bundle_key_error(package_name, raw_key, other_key):
+    """The fetch failure for two entries bundling one file under two keys.
+
+    rules_flutter's `pkg_assets` carries one bundle key per file, so when two
+    entries of one package give one file two different keys — only an empty
+    segment can do that (`a/b.png` beside `a//b.png`; `a/b.png` beside
+    `a//2.0x/b.png`, whose file is the first entry's variant) — the spoke
+    fetch fails instead of bundling under a key flutter_tools would not use.
+    Returns the message instead of failing so unit tests can assert it; the
+    caller `fail()`s with it. Names the package and the empty-segment entry,
+    and says the spelling is not supported, like every other entry refusal.
+
+    Args:
+        package_name: The pub package the entries come from.
+        raw_key: The empty-segment entry's raw bundle key (its declared
+            spelling, e.g. `a//b.png`).
+        other_key: The other bundle key claimed for the same file.
+
+    Returns:
+        The error string; the caller `fail()`s with it.
+    """
+    return spoke_asset_uri_error(
+        package_name,
+        raw_key,
+        "it bundles the same file as {other} under a different key".format(
+            other = repr(other_key),
+        ),
+    )
 
 def asset_entry_problem_error(package_name, problem):
     """The fetch failure for one malformed asset entry condition.
@@ -274,6 +303,35 @@ def _index_listed_files(directory, files):
         variants = {base: sorted(paths) for base, paths in variants.items()},
     )
 
+def _overlapping_bundle_key(expanded):
+    """The first file two entries bundle under different keys, if any.
+
+    `pkg_assets` maps each file to one bundle key, so one file claimed under
+    two keys cannot bundle: only an empty-segment entry can claim a second
+    key for a file (`a//b.png` for `a/b.png`; `a//2.0x/b.png` for the
+    `a/2.0x/b.png` variant another entry finds). A lone entry never triggers
+    this: its raw key and its collapsed files each name their own path.
+
+    Args:
+        expanded: Per-file entries in declaration order, each a
+            `struct(path, key, flavors, platforms)` with the decoded file and
+            the encoded bundle key.
+
+    Returns:
+        `struct(raw, other)` naming the empty-segment key and the other key
+        for the same file, or None when every file carries one key.
+    """
+    seen = {}
+    for entry in expanded:
+        if entry.path not in seen:
+            seen[entry.path] = entry.key
+        elif seen[entry.path] != entry.key:
+            first = seen[entry.path]
+            if "" in entry.key.split("/"):
+                return struct(raw = entry.key, other = first)
+            return struct(raw = first, other = entry.key)
+    return None
+
 def _asset_scope(list_dir, package_name):
     """Bundle one expansion's memoized listing reader and index cache.
 
@@ -397,8 +455,9 @@ def expand_pub_asset_entries(normalized_assets, list_dir, package_name = ""):
         `struct(path, key, flavors, platforms)` per bundled file (in
         declaration order, mains before their variants; `path` names the
         decoded file, `key` its encoded bundle key); `error` is "" or the
-        fetch failure naming the package and the entry or directory. The
-        caller `fail()`s on it.
+        fetch failure naming the package and the entry or directory, or the
+        empty-segment entry when two entries give one file two bundle keys
+        (see `overlapping_bundle_key_error`). The caller `fail()`s on it.
     """
     scope = _asset_scope(list_dir, package_name)
     expanded = []
@@ -409,6 +468,12 @@ def expand_pub_asset_entries(normalized_assets, list_dir, package_name = ""):
             error = _expand_file_entry(entry, scope, expanded)
         if error:
             return struct(expanded = [], error = error)
+    overlap = _overlapping_bundle_key(expanded)
+    if overlap != None:
+        return struct(
+            expanded = [],
+            error = overlapping_bundle_key_error(package_name, overlap.raw, overlap.other),
+        )
     return struct(expanded = expanded, error = "")
 
 def _ctx_readdir(ctx, directory):

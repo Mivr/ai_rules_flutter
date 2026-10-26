@@ -117,10 +117,9 @@ def _raw_manifest_variants(raw_key, assets):
 def _dedupe_bundle_keys(assets):
     """One copy of each encoded bundle key, in sorted order.
 
-    The same file reaches the bundle once per declaring entry (a plain
-    `a/b.png` entry and a raw `a//b.png` entry both carry `a/2.0x/b.png`),
-    while the copies map already collapses to one file per key. Grouping a
-    repeated key twice would list its variant twice; flutter_tools keeps one
+    The same file reaches the bundle once per declaring entry (two entries
+    declaring `a/b.png` both carry `a/2.0x/b.png`), while the copies map
+    already collapses to one file per key. Grouping a repeated key twice would list its variant twice; flutter_tools keeps one
     manifest entry per declaration key instead (`asset.dart:905-930`), so a
     repeat contributes nothing.
 
