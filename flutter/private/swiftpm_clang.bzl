@@ -19,25 +19,28 @@ with its hub format). Every detail names the target.
 
 load(":swiftpm_settings.bzl", "swiftpm_render_list_attr")
 
-def swiftpm_clang_module_spec(target, target_dir, sources, public_headers, explicit_map):
+def swiftpm_clang_module_spec(target, module_name, target_dir, sources, public_headers, explicit_map):
     """Compute one C-family target's module spec.
 
     The module map search walks the target directory the way SwiftPM's
     `ClangTarget.moduleMapPath` does: an explicit `module.modulemap` at
     the target root wins, otherwise the one in the public-headers
     directory (`include/` by default, `publicHeadersPath` when set),
-    used as-written; otherwise the `publicHeadersPath` directory (or the
-    target root for single-directory layouts, never `include/`) becomes
-    the umbrella directory of a generated map. Headers anywhere else — or
-    a map that needs search paths beyond the package — are refused, as is
-    an empty (headerless) target. Any mix of C, C++, Objective-C and
-    Objective-C++ sources translates to the one C-family library, the
-    way SwiftPM builds such targets; only assembly sources have no Bazel
-    translation, and the refusal names the file.
+    used as-written. Without an explicit map the public-headers
+    directory — `include/` unless `publicHeadersPath:` is set, never the
+    target root — gets a generated map: `<public>/<c99name>.h` is the
+    umbrella header when present, else `<public>/<c99name>/<c99name>.h`,
+    else the directory itself is the umbrella directory. A target with
+    no public headers at all is link-only and gets no map. Any mix of C,
+    C++, Objective-C and Objective-C++ sources translates to the one
+    C-family library, the way SwiftPM builds such targets; only assembly
+    sources have no Bazel translation, and the refusal names the file.
 
     Args:
         target: The parsed target struct (`name`, for messages,
-            `public_headers_path` for the umbrella directory).
+            `public_headers_path` for the public-headers directory).
+        module_name: The C99-mangled module name, for the umbrella
+            header lookup.
         target_dir: The repo-relative target directory.
         sources: The repo-relative C-family source files.
         public_headers: The repo-relative public header files.
@@ -45,21 +48,28 @@ def swiftpm_clang_module_spec(target, target_dir, sources, public_headers, expli
             None.
 
     Returns:
-        `struct(ok, detail, module_map, umbrella_dir)`: `module_map` is
-        the repo-relative map (explicit or generated) or None;
-        `umbrella_dir` is the generated map's umbrella directory or
-        None.
+        `struct(ok, detail, module_map, include_dir, umbrella_header)`:
+        `module_map` is the repo-relative map (explicit or generated) or
+        None; `include_dir` is the public-headers directory (for the
+        search path) or None; `umbrella_header` is the umbrella header
+        path relative to the public-headers directory, or None for the
+        umbrella-directory form.
     """
     who = "target " + repr(target.name)
     for source in sources:
         if _swiftpm_clang_language(source) == "asm":
-            return struct(ok = False, detail = "{who} has assembly source {file}, which has no Bazel translation".format(who = who, file = repr(source)), module_map = None, umbrella_dir = None)
+            return struct(ok = False, detail = "{who} has assembly source {file}, which has no Bazel translation".format(who = who, file = repr(source)), module_map = None, include_dir = None, umbrella_header = None)
     if explicit_map != None:
-        return struct(ok = True, detail = "", module_map = explicit_map, umbrella_dir = None)
+        return struct(ok = True, detail = "", module_map = explicit_map, include_dir = None, umbrella_header = None)
+    public_dir = target_dir + "/" + target.public_headers_path if target.public_headers_path else target_dir + "/include"
     if not public_headers:
-        return struct(ok = True, detail = "", module_map = None, umbrella_dir = None)
-    umbrella_dir = target_dir + "/" + target.public_headers_path if target.public_headers_path else target_dir
-    return struct(ok = True, detail = "", module_map = umbrella_dir + "/module.modulemap", umbrella_dir = umbrella_dir)
+        return struct(ok = True, detail = "", module_map = None, include_dir = None, umbrella_header = None)
+    umbrella_header = None
+    if public_dir + "/" + module_name + ".h" in public_headers:
+        umbrella_header = module_name + ".h"
+    elif public_dir + "/" + module_name + "/" + module_name + ".h" in public_headers:
+        umbrella_header = module_name + "/" + module_name + ".h"
+    return struct(ok = True, detail = "", module_map = public_dir + "/module.modulemap", include_dir = public_dir, umbrella_header = umbrella_header)
 
 def _swiftpm_clang_language(source):
     """Classify one source file by extension.
@@ -103,22 +113,35 @@ def swiftpm_clang_rule(sources):
             return "objc_library"
     return "cc_library"
 
-def swiftpm_generated_modulemap_content(module_name, umbrella_dir, public_headers):
+def swiftpm_generated_modulemap_content(module_name, umbrella_header, public_dir, public_headers):
     """Render a generated umbrella module map's contents.
+
+    Every path resolves relative to the directory the map file lives
+    in (the public-headers directory): an `umbrella header` line names
+    the umbrella header there, else `umbrella "."` names that same
+    directory and each `header` line names a public header relative to
+    it.
 
     Args:
         module_name: The C99-mangled module name.
-        umbrella_dir: The repo-relative umbrella directory.
+        umbrella_header: The umbrella header path relative to the
+            public-headers directory, or None for the umbrella-directory
+            form.
+        public_dir: The repo-relative public-headers directory, for
+            header paths.
         public_headers: The repo-relative public header files, all under
-            `umbrella_dir`.
+            `public_dir`.
 
     Returns:
-        The `module.modulemap` text, with one `header` line per public
-        header quoted with its path relative to the umbrella directory.
+        The `module.modulemap` text.
     """
-    lines = ["module {name} {{".format(name = module_name), "    umbrella \"{dir}\"".format(dir = umbrella_dir.split("/")[-1])]
-    for header in public_headers:
-        lines.append("    header \"{path}\"".format(path = header[len(umbrella_dir) + 1:]))
+    lines = ["module {name} {{".format(name = module_name)]
+    if umbrella_header:
+        lines.append("    umbrella header \"{path}\"".format(path = umbrella_header))
+    else:
+        lines.append("    umbrella \".\"")
+        for header in public_headers:
+            lines.append("    header \"{path}\"".format(path = header[len(public_dir) + 1:]))
     lines.append("    export *")
     lines.append("}")
     return "\n".join(lines) + "\n"

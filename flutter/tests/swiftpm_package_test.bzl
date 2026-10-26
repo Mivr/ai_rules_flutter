@@ -1,6 +1,7 @@
 """Unit tests for SwiftPM target file selection (skip, classify, entry drops)."""
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
+load("//flutter/private:swiftpm_clang.bzl", "swiftpm_clang_module_spec", "swiftpm_generated_modulemap_content")
 load("//flutter/private:swiftpm_manifest.bzl", "parse_swiftpm_package")
 load("//flutter/private:swiftpm_package.bzl", "swiftpm_is_code_file", "swiftpm_select_target_files")
 
@@ -132,7 +133,7 @@ def _classifies_c_family_files_test_impl(ctx):
     asserts.true(env, selected.map_in_include)
     return unittest.end(env)
 
-def _single_directory_headers_are_public_test_impl(ctx):
+def _root_headers_are_private_without_include_test_impl(ctx):
     env = unittest.begin(ctx)
     target = _only_target(_DOCS)
     rel_dir = "pkg/Sources/Docs"
@@ -146,10 +147,52 @@ def _single_directory_headers_are_public_test_impl(ctx):
     selected = swiftpm_select_target_files("docs", target, rel_dir, files, dirs)
     asserts.true(env, selected.ok)
     asserts.equals(env, [rel_dir + "/Docs.c"], selected.c_srcs)
-    asserts.equals(env, [rel_dir + "/Docs.h"], selected.public_hdrs)
-    asserts.equals(env, [rel_dir + "/Sub/helper.h"], selected.private_hdrs)
+    asserts.equals(env, [], selected.public_hdrs)
+    asserts.equals(env, [rel_dir + "/Docs.h", rel_dir + "/Sub/helper.h"], selected.private_hdrs)
     asserts.equals(env, rel_dir + "/module.modulemap", selected.explicit_map)
     asserts.true(env, not selected.map_in_include)
+    return unittest.end(env)
+
+def _spec_target(name, public_headers_path):
+    return struct(name = name, public_headers_path = public_headers_path)
+
+def _umbrella_header_order_test_impl(ctx):
+    env = unittest.begin(ctx)
+    target = _spec_target("Shims", "include")
+    rel_dir = "pkg/Sources/Shims"
+    headers = [rel_dir + "/include/Shims.h", rel_dir + "/include/detail.h"]
+    spec = swiftpm_clang_module_spec(target, "Shims", rel_dir, [rel_dir + "/Shims.c"], headers, None)
+    asserts.true(env, spec.ok)
+    asserts.equals(env, rel_dir + "/include/module.modulemap", spec.module_map)
+    asserts.equals(env, rel_dir + "/include", spec.include_dir)
+    asserts.equals(env, "Shims.h", spec.umbrella_header)
+    nested = [rel_dir + "/include/Shims/Shims.h"]
+    spec = swiftpm_clang_module_spec(target, "Shims", rel_dir, [rel_dir + "/Shims.c"], nested, None)
+    asserts.true(env, spec.ok)
+    asserts.equals(env, "Shims/Shims.h", spec.umbrella_header)
+    other = [rel_dir + "/include/Other.h"]
+    spec = swiftpm_clang_module_spec(target, "Shims", rel_dir, [rel_dir + "/Shims.c"], other, None)
+    asserts.true(env, spec.ok)
+    asserts.equals(env, None, spec.umbrella_header)
+    asserts.equals(env, rel_dir + "/include/module.modulemap", spec.module_map)
+    spec = swiftpm_clang_module_spec(target, "Shims", rel_dir, [rel_dir + "/Shims.c"], [], None)
+    asserts.true(env, spec.ok)
+    asserts.equals(env, None, spec.module_map)
+    asserts.equals(env, None, spec.include_dir)
+    return unittest.end(env)
+
+def _generated_map_paths_are_map_relative_test_impl(ctx):
+    env = unittest.begin(ctx)
+    asserts.equals(
+        env,
+        "module Shims {\n    umbrella header \"Shims.h\"\n    export *\n}\n",
+        swiftpm_generated_modulemap_content("Shims", "Shims.h", "pkg/Sources/Shims/include", ["pkg/Sources/Shims/include/Shims.h"]),
+    )
+    asserts.equals(
+        env,
+        "module Shims {\n    umbrella \".\"\n    header \"Other.h\"\n    header \"Sub/detail.h\"\n    export *\n}\n",
+        swiftpm_generated_modulemap_content("Shims", None, "pkg/Sources/Shims/include", ["pkg/Sources/Shims/include/Other.h", "pkg/Sources/Shims/include/Sub/detail.h"]),
+    )
     return unittest.end(env)
 
 def _stray_module_map_skipped_test_impl(ctx):
@@ -234,7 +277,9 @@ def _docc_swift_skipped_test_impl(ctx):
 _is_code_file_test = unittest.make(_is_code_file_test_impl)
 _skips_non_code_files_test = unittest.make(_skips_non_code_files_test_impl)
 _classifies_c_family_files_test = unittest.make(_classifies_c_family_files_test_impl)
-_single_directory_headers_are_public_test = unittest.make(_single_directory_headers_are_public_test_impl)
+_root_headers_are_private_test = unittest.make(_root_headers_are_private_without_include_test_impl)
+_umbrella_header_order_test = unittest.make(_umbrella_header_order_test_impl)
+_generated_map_paths_are_map_relative_test = unittest.make(_generated_map_paths_are_map_relative_test_impl)
 _stray_module_map_skipped_test = unittest.make(_stray_module_map_skipped_test_impl)
 _drops_missing_exclude_test = unittest.make(_drops_missing_exclude_test_impl)
 _drops_missing_sources_test = unittest.make(_drops_missing_sources_test_impl)
@@ -249,7 +294,9 @@ def swiftpm_package_test_suite(name):
         _is_code_file_test,
         _skips_non_code_files_test,
         _classifies_c_family_files_test,
-        _single_directory_headers_are_public_test,
+        _root_headers_are_private_test,
+        _umbrella_header_order_test,
+        _generated_map_paths_are_map_relative_test,
         _stray_module_map_skipped_test,
         _drops_missing_exclude_test,
         _drops_missing_sources_test,

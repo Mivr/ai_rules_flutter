@@ -246,16 +246,14 @@ def _swiftpm_keep_existing(identity, target_name, kind, entries, rel_dir, tree):
             kept.append(full)
     return struct(ok = True, error = "", kept = kept)
 
-def _swiftpm_split_headers(identity, target, rel_dir, headers, files, dirs):
+def _swiftpm_split_headers(identity, target, rel_dir, headers, files):
     """Split headers into public and private, and find the explicit map.
 
     The module map search follows SwiftPM's `ClangTarget.moduleMapPath`
     order: `module.modulemap` at the target root wins; otherwise the
     public-headers directory (`include/` by default, `publicHeadersPath`
-    when set). A `publicHeadersPath` makes the headers under it public; otherwise the
-    headers under `include/` are public when that directory exists, else
-    (a single-directory layout) the headers at the target root are.
-    Every other header is private: it still compiles, but Swift
+    when set). Only the headers under the public-headers directory are
+    public; every other header is private: it still compiles, but Swift
     importers do not see it.
 
     Args:
@@ -264,8 +262,6 @@ def _swiftpm_split_headers(identity, target, rel_dir, headers, files, dirs):
         rel_dir: The repo-relative target directory.
         headers: The repo-relative header files.
         files: Every file under the target directory (a dict set of
-            repo-relative paths).
-        dirs: Every directory under the target directory (a dict set of
             repo-relative paths).
 
     Returns:
@@ -279,35 +275,20 @@ def _swiftpm_split_headers(identity, target, rel_dir, headers, files, dirs):
         if bad:
             return struct(ok = False, error = bad, public_hdrs = [], private_hdrs = [], explicit_map = None, map_in_include = False)
         public_root = rel_dir + "/" + target.public_headers_path
-        public_hdrs = [header for header in headers if header.startswith(public_root + "/")]
-        private_hdrs = [header for header in headers if not header.startswith(public_root + "/")]
-        root_map = rel_dir + "/module.modulemap"
-        public_map = public_root + "/module.modulemap"
-        explicit_map = None
-        map_in_include = False
-        if root_map in files:
-            explicit_map = root_map
-        elif public_map in files:
-            explicit_map = public_map
-            map_in_include = True
-        return struct(ok = True, error = "", public_hdrs = sorted(public_hdrs), private_hdrs = sorted(private_hdrs), explicit_map = explicit_map, map_in_include = map_in_include)
-    include_dir = rel_dir + "/include"
-    if include_dir in dirs:
-        public_hdrs = [header for header in headers if header.startswith(include_dir + "/")]
-        private_hdrs = [header for header in headers if not header.startswith(include_dir + "/")]
     else:
-        public_hdrs = [header for header in headers if "/" not in header[len(rel_dir) + 1:]]
-        private_hdrs = [header for header in headers if "/" in header[len(rel_dir) + 1:]]
+        public_root = rel_dir + "/include"
+    public_hdrs = sorted([header for header in headers if header.startswith(public_root + "/")])
+    private_hdrs = sorted([header for header in headers if not header.startswith(public_root + "/")])
     root_map = rel_dir + "/module.modulemap"
-    include_map = include_dir + "/module.modulemap"
+    public_map = public_root + "/module.modulemap"
     explicit_map = None
     map_in_include = False
     if root_map in files:
         explicit_map = root_map
-    elif include_map in files:
-        explicit_map = include_map
+    elif public_map in files:
+        explicit_map = public_map
         map_in_include = True
-    return struct(ok = True, error = "", public_hdrs = sorted(public_hdrs), private_hdrs = sorted(private_hdrs), explicit_map = explicit_map, map_in_include = map_in_include)
+    return struct(ok = True, error = "", public_hdrs = public_hdrs, private_hdrs = private_hdrs, explicit_map = explicit_map, map_in_include = map_in_include)
 
 def swiftpm_select_target_files(identity, target, rel_dir, files, dirs):
     """Select one reached target's Swift and C-family files, purely.
@@ -364,7 +345,7 @@ def swiftpm_select_target_files(identity, target, rel_dir, files, dirs):
             headers.append(full)
     if not srcs and not c_srcs:
         return struct(ok = False, error = _swiftpm_repo_fail(identity, "target {target} reaches zero Swift files".format(target = repr(target.name))), srcs = [], c_srcs = [], public_hdrs = [], private_hdrs = [], explicit_map = None, map_in_include = False)
-    split = _swiftpm_split_headers(identity, target, rel_dir, headers, files, dirs)
+    split = _swiftpm_split_headers(identity, target, rel_dir, headers, files)
     if not split.ok:
         return struct(ok = False, error = split.error, srcs = [], c_srcs = [], public_hdrs = [], private_hdrs = [], explicit_map = None, map_in_include = False)
     return struct(ok = True, error = "", srcs = sorted(srcs), c_srcs = sorted(c_srcs), public_hdrs = split.public_hdrs, private_hdrs = split.private_hdrs, explicit_map = split.explicit_map, map_in_include = split.map_in_include)
@@ -429,8 +410,8 @@ def _swiftpm_write_generated_map(identity, target, files):
 
     Targets shipping an explicit `module.modulemap`, or with no public
     headers at all (link-only), need no map. Anything else gets
-    `<umbrella>/module.modulemap` covering its public headers, which the
-    translated `cc_library`/`objc_library` points at through
+    `<public>/module.modulemap` in its public-headers directory, which
+    the translated `cc_library`/`objc_library` points at through
     `swift_interop_hint`.
 
     Args:
@@ -444,12 +425,12 @@ def _swiftpm_write_generated_map(identity, target, files):
     """
     if not files.c_srcs or files.explicit_map != None:
         return struct(ok = True, error = "", path = "", content = "")
-    spec = swiftpm_clang_module_spec(target, files.dir, files.c_srcs, files.public_hdrs, None)
+    spec = swiftpm_clang_module_spec(target, swiftpm_c99name(target.name), files.dir, files.c_srcs, files.public_hdrs, None)
     if not spec.ok:
         return struct(ok = False, error = _swiftpm_repo_fail(identity, spec.detail), path = "", content = "")
     if spec.module_map == None:
         return struct(ok = True, error = "", path = "", content = "")
-    return struct(ok = True, error = "", path = spec.module_map, content = swiftpm_generated_modulemap_content(swiftpm_c99name(target.name), spec.umbrella_dir, files.public_hdrs))
+    return struct(ok = True, error = "", path = spec.module_map, content = swiftpm_generated_modulemap_content(swiftpm_c99name(target.name), spec.umbrella_header, spec.include_dir, files.public_hdrs))
 
 def _swiftpm_package_impl(ctx):
     identity = ctx.attr.identity

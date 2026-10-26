@@ -464,7 +464,7 @@ def _swiftpm_emit_clang_library(identity, target, edges, files):
         `swift_interop_hint`.
     """
     module_name = swiftpm_c99name(target.name)
-    spec = swiftpm_clang_module_spec(target, files.dir, getattr(files, "c_srcs", []), getattr(files, "public_hdrs", []), getattr(files, "explicit_map", None))
+    spec = swiftpm_clang_module_spec(target, module_name, files.dir, getattr(files, "c_srcs", []), getattr(files, "public_hdrs", []), getattr(files, "explicit_map", None))
     if not spec.ok:
         return struct(ok = False, error = "SwiftPM package {identity}: {detail}.".format(identity = repr(identity), detail = spec.detail), text = "", rule = "", needs_hint = False)
     settings = swiftpm_target_setting_entries(target, files.dir, "clang")
@@ -481,10 +481,10 @@ def _swiftpm_emit_clang_library(identity, target, edges, files):
         map_dir = files.explicit_map[:files.explicit_map.rfind("/")]
         includes = [struct(text = map_dir, platforms = None)] + includes
     if not explicit_map and spec.module_map != None:
-        # The generated umbrella map covers the public headers, which the
-        # sources include by basename: the umbrella directory goes on the
-        # search path the way SwiftPM compiles such targets.
-        includes = [struct(text = spec.umbrella_dir, platforms = None)] + includes
+        # The generated map lives in the public-headers directory, which
+        # the sources include from: it goes on the search path the way
+        # SwiftPM compiles such targets.
+        includes = [struct(text = spec.include_dir, platforms = None)] + includes
     text = swiftpm_render_clang_library(
         library_name = target.name + "_lib",
         rule = rule,
