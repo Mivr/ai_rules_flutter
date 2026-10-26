@@ -31,6 +31,8 @@
 # audit.tsv instead of re-enumerated (the script says so when the queries
 # fail, and enforces them when they succeed).
 @rules_flutter//dart:dart	pub token list	caller-home	run	SDK pass-through; dart CLI takes --suppress-analytics before the command, PUB_CACHE/creds resolve from caller env
+@rules_flutter//dart:dart	hello.dart	caller-home	run	SDK pass-through in file form; the program runs unchanged with no analytics flag (the VM rejects it), caller env kept; pins rc 0 and the probe output, not clean canaries
+@rules_flutter//dart:dart	--verbose pub token list	caller-home	run	SDK pass-through in command form behind a leading global flag; still suppresses, caller creds resolve
 @rules_flutter//flutter:pub	token list	caller-home	run	needs caller PUB_CACHE + pub-tokens.json; dart CLI takes --suppress-analytics, writes nothing under HOME
 //:widget_test	-	private	run	flutter_test launcher; flutter_tester spawns under a private HOME
 //:widget_prebuilt_test	-	private	run	same launcher path as flutter_test, prebuilt kernel
