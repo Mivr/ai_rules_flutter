@@ -33,6 +33,14 @@ flutter.pub(
         # https://github.com/attaswift/BigInt/archive/63feef7820abb1a8fb08587d7da56bb0b7db8751.tar.gz
         # (BigInt v6.0.1).
         "bigint": "55fc8a63f655a09d9216f2c9bc062c508f98d4eca4b8ebefaf295a3ea4ac8f22",
+        # `sha256sum` over
+        # https://github.com/apple/swift-algorithms/archive/f6919dfc309e7f1b56224378b11e28bab5bccc42.tar.gz
+        # (swift-algorithms v1.2.0).
+        "swift-algorithms": "a4b0ad3a0db2170d1c1a7f521aec9d7a1fd3a8180e7a51049d856ae27ab43b72",
+        # `sha256sum` over
+        # https://github.com/apple/swift-numerics/archive/0a5bc04095a675662cf24757cc0640aa2204253b.tar.gz
+        # (swift-numerics v1.0.2).
+        "swift-numerics": "2127f4ad551b0f1763595060eca64454884382907b14289844fbd2815c7635eb",
     },
 )
 
@@ -44,6 +52,6 @@ flutter.pub(
     lock = "//:pubspec.lock",
     swift_package_resolved = "//ios/Runner.xcworkspace/xcshareddata/swiftpm:Package.resolved",
 )
-use_repo(flutter, "deps", "deps__spm_bigint_plugin", "deps__swiftpm-bigint", "deps_unpinned", "deps_unpinned__spm_bigint_plugin", "deps_unpinned__swiftpm-bigint", "flutter_ios_engine", "flutter_toolchains")
+use_repo(flutter, "deps", "deps__spm_bigint_plugin", "deps__spm_graph_plugin", "deps__swiftpm-bigint", "deps__swiftpm-swift-algorithms", "deps__swiftpm-swift-numerics", "deps_unpinned", "deps_unpinned__spm_bigint_plugin", "deps_unpinned__spm_graph_plugin", "deps_unpinned__swiftpm-bigint", "deps_unpinned__swiftpm-swift-algorithms", "deps_unpinned__swiftpm-swift-numerics", "flutter_ios_engine", "flutter_toolchains")
 
 register_toolchains("@flutter_toolchains//:all")

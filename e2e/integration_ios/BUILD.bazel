@@ -44,6 +44,30 @@ flutter_integration_test(
     ],
 )
 
+# The transitive SwiftPM graph suite: proves a pub path plugin's
+# `Package.swift` products (swift-algorithms' Algorithms plus
+# swift-numerics' RealModule, down through its C `_NumericsShims`, from the
+# hub's pinned spokes) link into the plugin's Apple library. The native
+# method counts 2-combinations with Algorithms and evaluates `e` with
+# RealModule at run time, so the assertion below only passes when the whole
+# graph made it into the link.
+flutter_integration_test(
+    name = "plugin_spm_graph_test",
+    package_name = "integration_ios",
+    srcs = ["integration_test/plugin_spm_graph_test.dart"],
+    app_srcs = ["lib/main.dart"],
+    assets = ["assets/logo.png"],
+    platform = "ios",
+    deps = [
+        "//ios_greeting_plugin",
+        "@deps//:flutter",
+        "@deps//:flutter_test",
+        "@deps//:integration_test",
+        "@deps//:spm_graph_plugin",
+        "@rules_flutter//flutter:material_icons",
+    ],
+)
+
 # Red twin of `:app_test`: its expectation is wrong on purpose (see
 # integration_test/red_test.dart). `manual` so `bazel test //...` stays green;
 # the full-matrix workflow runs it by name and asserts the run FAILS, proving
@@ -76,6 +100,8 @@ build_test(
         ":__app_test_app",
         ":__plugin_spm_test_bootstrap",
         ":__plugin_spm_test_app",
+        ":__plugin_spm_graph_test_bootstrap",
+        ":__plugin_spm_graph_test_app",
     ],
 )
 
@@ -142,12 +168,32 @@ flutter_test(
 # reaches them there. The lint fixtures above are portable and carry the same
 # sources, so this lints them on every OS; the plugin's own library target
 # covers its lib/.
+# Host-side lint twin of `:plugin_spm_graph_test`: same portable split so
+# the analysis test below lints the transitive-graph plugin's Dart on
+# every OS.
+flutter_test(
+    name = "plugin_spm_graph_test_lint",
+    package_name = "integration_ios",
+    srcs = ["lib/main.dart"],
+    main = "integration_test/plugin_spm_graph_test.dart",
+    tags = ["manual"],
+    deps = [
+        "//ios_greeting_plugin",
+        "@deps//:flutter",
+        "@deps//:flutter_test",
+        "@deps//:integration_test",
+        "@deps//:spm_graph_plugin",
+        "@rules_flutter//flutter:material_icons",
+    ],
+)
+
 dart_analysis_test(
     name = "ios_dart_analysis_test",
     targets = [
         ":app_test_lint",
         ":app_test_red_lint",
         ":plugin_spm_test_lint",
+        ":plugin_spm_graph_test_lint",
         "//ios_greeting_plugin",
     ],
 )
