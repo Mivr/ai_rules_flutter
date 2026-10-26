@@ -493,6 +493,69 @@ void main() {
       },
     );
 
+    test('get_app_container shares the install bound by default', () {
+      const bounds = ios.IosLauncherBounds();
+      expect(bounds.installTimeout, const Duration(seconds: 180));
+      expect(bounds.appContainerTimeout, const Duration(seconds: 180));
+      expect(bounds.appContainerTimeout, bounds.installTimeout);
+    });
+
+    test(
+      'a hanging get_app_container runs under the container bound, not install',
+      () async {
+        final appDir = Directory('${tmp.path}/TestApp.app')..createSync();
+        final spawner = FakeSimctlSpawner(
+          {
+            ...bootStubs('udid-cold'),
+            'xcrun simctl get_app_container udid-cold com.example.testapp data':
+                const CannedSimctl(hang: true),
+          },
+          prefixAnswers: {
+            'xcrun simctl install udid-cold ': const CannedSimctl(),
+          },
+        );
+        final underTest = ios.IosPlatformLauncher(
+          appPath: appDir.path,
+          bundleId: 'com.example.testapp',
+          baseTempDir: tmp.path,
+          spawner: spawner,
+          launchProcess: (_, _, _) =>
+              fail('must not launch without the harness URL file'),
+          bounds: const ios.IosLauncherBounds(
+            installTimeout: Duration(seconds: 300),
+            appContainerTimeout: Duration(seconds: 2),
+          ),
+        );
+
+        await expectLater(
+          underTest.startTarget(4242),
+          throwsA(
+            isA<StateError>().having(
+              (e) => e.message,
+              'message',
+              allOf(
+                contains('iOS'),
+                contains('get_app_container'),
+                contains('timed out'),
+              ),
+            ),
+          ),
+        );
+        expect(
+          spawner.killed,
+          hasLength(1),
+          reason: 'the hung get_app_container child is killed past the container bound',
+        );
+        expect(
+          spawner.killed.single,
+          startsWith('xcrun simctl get_app_container '),
+        );
+      },
+      // The hang above must die with the 2 s container bound: a timeout here
+      // fails the test instead of waiting out a wrong bound.
+      timeout: const Timeout(Duration(seconds: 30)),
+    );
+
     test(
       'no available iOS runtime fails with the boot reason, never skips',
       () async {

@@ -74,7 +74,7 @@ IosPlatformLauncher iosLauncherFromEnv(
 /// Every call except the long-lived `launch` runs through the boot module's
 /// bounded helpers under one of these; past a deadline the child is killed and
 /// the run fails with one line naming the step and the bound. The install,
-/// terminate and uninstall bounds are at least the
+/// get_app_container, terminate and uninstall bounds are at least the
 /// `verify_ios_simulator_test.dart` budgets (180 s, 60 s, 60 s); the listing
 /// and boot bounds reuse the boot module's defaults.
 class IosLauncherBounds {
@@ -83,7 +83,7 @@ class IosLauncherBounds {
     this.bootBounds = defaultBootBounds,
     this.bootstatusTimeout = const Duration(seconds: 600),
     this.installTimeout = const Duration(seconds: 180),
-    this.appContainerTimeout = const Duration(seconds: 60),
+    this.appContainerTimeout = const Duration(seconds: 180),
     this.terminateTimeout = const Duration(seconds: 60),
     this.uninstallTimeout = const Duration(seconds: 60),
   });
@@ -101,6 +101,11 @@ class IosLauncherBounds {
   final Duration installTimeout;
 
   /// How long `simctl get_app_container` may take before the child is killed.
+  ///
+  /// Shares the install bound's 180 s default: resolving the container is an
+  /// installd/containermanager query issued right after install, and on a
+  /// cold simulator it is as slow as install (a cold-booted run saw it exceed
+  /// 60 s). Pass an explicit value to bound it differently.
   final Duration appContainerTimeout;
 
   /// How long `simctl terminate` may take before the child is killed.
