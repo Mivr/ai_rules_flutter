@@ -114,6 +114,27 @@ def _raw_manifest_variants(raw_key, assets):
         variants.append(variant)
     return variants
 
+def _dedupe_bundle_keys(assets):
+    """One copy of each encoded bundle key, in sorted order.
+
+    The same file reaches the bundle once per declaring entry (a plain
+    `a/b.png` entry and a raw `a//b.png` entry both carry `a/2.0x/b.png`),
+    while the copies map already collapses to one file per key. Grouping a
+    repeated key twice would list its variant twice; flutter_tools keeps one
+    manifest entry per declaration key instead (`asset.dart:905-930`), so a
+    repeat contributes nothing.
+
+    Args:
+        assets: The encoded bundle keys, possibly with repeats.
+
+    Returns:
+        The sorted keys with repeats removed.
+    """
+    seen = {}
+    for path in assets:
+        seen[path] = True
+    return sorted(seen.keys())
+
 def _collapsed_claims(assets):
     """The raw (`//`-keeping) claimant of each collapsed bundle key.
 
@@ -153,16 +174,24 @@ def build_asset_manifest(assets):
     The collapsed files ride that entry alone and never gain their own key,
     so no key names a file the entry did not declare. Every other key
     groups exactly as before. Each variant carries the dpr parsed from its
-    own parent directory.
+    own parent directory. A repeated key groups once: the copies map holds
+    one file per key, so a file reached through two declarations still
+    contributes one variant (see `_dedupe_bundle_keys`).
 
     Args:
         assets: list of encoded asset keys relative to the bundle root.
+            Repeats collapse to one entry each.
 
     Returns:
         dict mapping decoded logical key -> list of variant dicts with
         decoded `asset` paths.
     """
     manifest = {}
+
+    # One copy per key: the same file arrives once per declaring entry, but
+    # the copies map files it once, so grouping a repeat would list its
+    # variant twice.
+    assets = _dedupe_bundle_keys(assets)
 
     # Bundle keys claimed by a raw entry, by collapsed path: a collapsed
     # file (or its variants) without its own declaration rides the raw
