@@ -24,12 +24,19 @@ into bundle inputs, matching `flutter_tools` (`asset.dart`, `flutter_manifest.da
 
 Every entry kind that names a file (assets in both forms, shaders, font
 `asset:`) normalizes through one module (`flutter/private/asset_uri.bzl`),
-mirroring flutter_tools 3.47.7 (`Uri.parse` plus `Uri(pathSegments:)`):
+mirroring flutter_tools 3.47.7: a string-form entry reads as `Uri.parse`
+of the entry text, while a map-form (`path:`) asset or shader reads as
+`Uri(pathSegments: path.split('/'))` — every byte literal, so a `\` never
+separates and a `%XX` never decodes, while dot segments still resolve:
 
-- Entries decode `%XX` escapes, resolve `.` and `x/..`, then re-encode:
-  `./a.png` bundles `a.png`; `a b.png` bundles as `a%20b.png`, the key the
-  engine asks for. Non-ASCII names encode as UTF-8 (`%C3%A9` in the key
-  decodes to the file's accented letter).
+- String-form entries decode `%XX` escapes, resolve `.` and `x/..`, then
+  re-encode: `./a.png` bundles `a.png`; `a b.png` bundles as `a%20b.png`,
+  the key the engine asks for. Non-ASCII names encode as UTF-8 (`%C3%A9`
+  in the key decodes to the file's accented letter).
+- Map-form entries read literally: `- path: a%20b.png` bundles the
+  `a%20b.png` file (manifest `a%20b.png`, copy `a%2520b.png`), and
+  `- path: g/./h.png` bundles `g/h.png`. The entry's shape travels from
+  the parser to the normalizer, never guessed from the text.
 - Entries whose first segment is `packages` normalize like every other
   entry (`packages/d/./a.png` bundles as `packages/d/a.png`); a reference
   into another package normalizes to itself when plain, and plain entries
@@ -47,9 +54,15 @@ mirroring flutter_tools 3.47.7 (`Uri.parse` plus `Uri(pathSegments:)`):
 
 Spellings no engine build reads fail the fetch as not supported, naming the
 package, its pubspec.yaml and the entry (entry form, without a line number):
-query (`?`) and fragment (`#`) parts, absolute paths, backslashes, empty
-segments, `..` escaping the package, entries naming no file, escapes
-decoding to `/`, invalid UTF-8, and `:` (no Bazel target can name it).
+query (`?`) and fragment (`#`) parts, absolute paths, literal backslashes,
+`..` escaping the package, entries naming no file, escapes decoding to `/`,
+invalid UTF-8, and `:` (no Bazel target can name it). A raw backslash in a
+string-form entry separates the way `Uri.parse` reads it. An empty segment
+stays in the key (`a//b.png` keys with `//`) while the decoded file
+collapses (`a/b.png`): the manifest entry is flutter_tools' own (the raw
+key, the collapsed path, the collapsed directory's variants, each variant
+with the dpr of its own parent directory), no key names an undeclared
+file, and the copies read the collapsed file.
 
 ## Walk bounds
 
