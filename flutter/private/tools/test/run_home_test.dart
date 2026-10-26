@@ -1,3 +1,12 @@
+// Tagged `runfiles`: this test imports `package:runfiles` to read the shell
+// counterpart handed to it through the `RUN_HOME_BZL` runfiles path, supplied
+// via the `@rules_dart//dart/runfiles` dep its `dart_test` declares. A bare
+// `dart test` resolves only this package's pubspec, where that import does
+// not exist, so the file fails to load rather than failing a test.
+// Coverage comes from //flutter/private/tools:run_home_test.
+@Tags(['runfiles'])
+library;
+
 import 'dart:io';
 
 import 'package:runfiles/runfiles.dart';
