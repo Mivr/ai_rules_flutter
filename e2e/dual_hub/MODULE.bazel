@@ -19,7 +19,7 @@ unobserved; this workspace is where it is observed.
 module(name = "dual_hub_e2e")
 
 bazel_dep(name = "ai_rules_flutter", version = "0.0.0", repo_name = "rules_flutter")
-bazel_dep(name = "ai_rules_dart", version = "0.20.0", repo_name = "rules_dart")
+bazel_dep(name = "ai_rules_dart", version = "0.21.0", repo_name = "rules_dart")
 bazel_dep(name = "bazel_skylib", version = "1.9.2")
 
 local_path_override(
@@ -29,7 +29,7 @@ local_path_override(
 
 git_override(
     module_name = "ai_rules_dart",
-    commit = "4719b30a3c0286b3adfe97ee3d314fe16fe00cb0",
+    commit = "4cc0c0ab2ed8256bec5a1503cc2ab22e1bfe9875",
     remote = "https://github.com/Mivr/rules_dart.git",
 )
 
