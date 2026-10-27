@@ -103,7 +103,8 @@ jobs:
             cache-save: false
           # The version-floor fixture: full //... incl. the Android leg (the
           # runner's unzip/python3 satisfy the AAR extractors) and both
-          # Apple legs, all against the minimum rules_apple.
+          # Apple legs, all against every declared dependency floor, plus the
+          # resolved-graph assertion that names the transitive lifts.
           - workspace: min_versions
             shard: none
             cache-save: false

@@ -34,3 +34,6 @@ license(
 
 # Exported for //tools/readme_check, which reads the install block.
 exports_files(["README.md"])
+
+# Exported for the dependency-floor test, which reads the declared minimums.
+exports_files(["MODULE.bazel"])

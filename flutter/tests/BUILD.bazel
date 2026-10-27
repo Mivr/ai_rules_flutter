@@ -1,5 +1,5 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
-load("@rules_dart//dart:defs.bzl", "dart_test")
+load("@rules_dart//dart:defs.bzl", "dart_library", "dart_test")
 load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
 load("//flutter/private:flutter_aot_target.bzl", "flutter_aot_target")
 load(":action_inputs_test.bzl", "action_inputs_test_suite")
@@ -66,6 +66,19 @@ load(":unused_inputs_test.bzl", "unused_inputs_test_suite")
 load(":validation_test.bzl", "validation_test_suite")
 load(":versions_test.bzl", "versions_test_suite")
 load(":web_test.bzl", "web_test_suite")
+
+# The dependency-floor table is read by //flutter/tests:dependency_floors_test
+# and by e2e/min_versions, which resolves the same declared floors.
+exports_files(["dependency_floors.json"])
+
+# Parser shared by the root floor guard and e2e/min_versions, so both read
+# MODULE.bazel and the table the same way.
+dart_library(
+    name = "dependency_floors_lib",
+    package_name = "dependency_floors",
+    srcs = ["lib/dependency_floors_lib.dart"],
+    visibility = ["//visibility:public"],
+)
 
 # Static guards: the download guard discovers every `.bzl` under flutter/
 # and every MODULE.bazel at runtime from the workspace root (found through
@@ -140,6 +153,28 @@ dart_test(
         "no-sandbox",
     ],
     deps = [
+        "@dev_tool_deps//:test",
+    ],
+)
+
+# Dependency floors: every regular bazel_dep declares the checked-in minimum,
+# not the release this checkout compiles. Reads both files from data, so a
+# stale run cannot hide a declared bump.
+dart_test(
+    name = "dependency_floors_test",
+    size = "small",
+    data = [
+        "dependency_floors.json",
+        "dependency_floors_test.dart",
+        "//:MODULE.bazel",
+    ],
+    env = {
+        "FLOOR_TABLE": "$(rlocationpath :dependency_floors.json)",
+        "MODULE_BZL": "$(rlocationpath //:MODULE.bazel)",
+    },
+    main = "dependency_floors_test.dart",
+    deps = [
+        ":dependency_floors_lib",
         "@dev_tool_deps//:test",
     ],
 )

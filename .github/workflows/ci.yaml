@@ -43,11 +43,11 @@
 #     web_example
 #   e2e-linux-examples:  linux_example, cross_compile_example
 #   e2e-linux-integration: integration_web, integration_linux,
-#     integration_android (with KVM for the emulator), min_versions (Dart app
-#     plus the Android leg against the rules_android floor; the Apple legs
-#     skip themselves via target_compatible_with), android_no_go_sdk (Android
-#     leg with no go_sdk block, proving rules_flutter's pinned Go SDK is the
-#     default)
+#     integration_android (with KVM for the emulator), min_versions (Dart app,
+#     kernel and dart_test targets plus the Android leg against every declared
+#     dependency floor; the Apple legs skip themselves via
+#     target_compatible_with), android_no_go_sdk (Android leg with no go_sdk
+#     block, proving rules_flutter's pinned Go SDK is the default)
 #   e2e-coverage:        //tools/check_e2e_coverage (every e2e module in a
 #     workflow or with a recorded reason)
 #   web-smoke:           web_example through the installed binary
@@ -154,9 +154,9 @@ jobs:
       - name: bazel test Apple bundles (e2e/hello_world)
         working-directory: e2e/hello_world
         run: bazel test //:macos_bundle_build_test //:ios_bundle_build_test --test_output=errors
-      # The same Apple legs against the minimum supported rules_apple: the
-      # Linux job below already proves min_versions' Dart app and Android
-      # leg, so only the macOS-gated tests run here.
+      # The same Apple legs against the minimum supported dependency floors:
+      # the Linux job below already proves min_versions' Dart app, kernel,
+      # dart_test and Android leg, so only the macOS-gated tests run here.
       - name: bazel test Apple bundles (e2e/min_versions)
         working-directory: e2e/min_versions
         run: bazel test //:ios_build_test //:macos_build_test --test_output=errors

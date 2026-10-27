@@ -6,10 +6,27 @@ bazel_dep(name = "ai_rules_flutter", version = "0.0.0", repo_name = "rules_flutt
 bazel_dep(name = "ai_rules_dart", version = "0.21.0", repo_name = "rules_dart")
 bazel_dep(name = "rules_android", version = "0.8.0")
 bazel_dep(name = "rules_android_ndk", version = "0.1.5")
-bazel_dep(name = "rules_kotlin", version = "2.4.20")
-bazel_dep(name = "rules_java", version = "9.9.0")
-bazel_dep(name = "bazel_skylib", version = "1.9.2")
+
+# Every regular dependency is declared at the floor rules_flutter supports,
+# never at the release this repository compiles. The comments in the root
+# MODULE.bazel name the symbol that sets each floor; this workspace is the
+# proof that the set builds together. Some of these floors are lifted by
+# another module's own requirement (ai_rules_dart 0.21.0 asks for newer
+# rules_cc, bazel_skylib, package_metadata and rules_go; rules_android 0.8.0
+# asks for newer rules_java and rules_jvm_external, and the newer rules_cc
+# asks for newer apple_support). Those modules stay at the floor here and MVS
+# selects the lift, which `//:dependency_floors_test` asserts and attributes;
+# pinning them down with an override would hide the graph a consumer gets.
+bazel_dep(name = "bazel_skylib", version = "1.8.0")
+bazel_dep(name = "package_metadata", version = "0.0.5")
 bazel_dep(name = "platforms", version = "1.1.0")
+bazel_dep(name = "rules_cc", version = "0.2.20")
+bazel_dep(name = "apple_support", version = "2.2.0")
+bazel_dep(name = "rules_apple", version = "4.5.3")
+bazel_dep(name = "rules_swift", version = "3.5.0")
+bazel_dep(name = "rules_kotlin", version = "2.1.10")
+bazel_dep(name = "rules_java", version = "9.0.0")
+bazel_dep(name = "rules_jvm_external", version = "6.8")
 
 local_path_override(
     module_name = "ai_rules_flutter",
@@ -24,8 +41,11 @@ git_override(
 
 # Hermetic host C++ toolchain: CI images and bare hosts may have no
 # gcc/ar, and the local cc_configure detection fails without them (same
-# block as e2e/integration_android).
-bazel_dep(name = "llvm", version = "0.8.19", dev_dependency = True)
+# block as e2e/integration_android). llvm's floor is 0.8.17 (the xtool SDK
+# and the prebuilt-toolchain repos this workspace registers); llvm itself
+# asks for rules_cc 0.2.22, bazel_skylib 1.9.0 and rules_go 0.62.0, which
+# ai_rules_dart 0.21.0 lifts further.
+bazel_dep(name = "llvm", version = "0.8.17", dev_dependency = True)
 
 register_toolchains(
     "@llvm//toolchain:linux_aarch64_to_linux_aarch64",
@@ -39,20 +59,61 @@ register_toolchains(
     dev_dependency = True,
 )
 
-# The proven Apple floor, pinned exactly. rules_flutter's own MODULE.bazel
-# only states it as a minimum (>=4.5.3); without this pin MVS would lift
-# rules_apple to whatever else in the graph wants, and this workspace would
-# stop testing the floor. rules_swift and apple_support are deliberately NOT
-# pinned: they float to the graph's maxima, which is also what consumers get,
-# and rules_apple 4.5.3 accepts rules_swift at compatibility_level 3.
+# The floors that can bind are pinned exactly: a root `single_version_override`
+# makes MVS ignore any other requester, so this workspace keeps testing the
+# release rules_flutter promises instead of floating with the graph. The
+# Apple pair is the proven floor from the original workspace; rules_kotlin,
+# llvm, rules_android and platforms are the remaining floors no other module
+# asks to raise.
 #
-# rules_android is NOT floored here: flutter_android_app's signing overlay
-# reads `@rules_android//flags:apk_signing_method`, which exists only in
-# 0.8.0+ — with anything older every Android app fails at analysis. See the
-# floor comment in rules_flutter's MODULE.bazel.
+# The lifted floors are deliberately NOT overridden here: ai_rules_dart 0.21.0
+# asks for newer rules_cc, bazel_skylib, package_metadata and rules_go;
+# rules_android 0.8.0 asks for rules_java 9.3.0 and rules_jvm_external 6.9;
+# rules_cc 0.2.26 asks for apple_support 2.9.1. Forcing those below their
+# requester's floor would build a graph no consumer can get (and would hide a
+# real requirement), so they stay declared at the floor and
+# `//:dependency_floors_test` asserts the lifted value and its source. The
+# root `single_version_override`s keep rules_flutter's own CI on current
+# releases; consumers ignore both sets.
+single_version_override(
+    module_name = "platforms",
+    version = "1.1.0",
+)
+
 single_version_override(
     module_name = "rules_apple",
     version = "4.5.3",
+)
+
+single_version_override(
+    module_name = "rules_swift",
+    version = "3.5.0",
+)
+
+single_version_override(
+    module_name = "rules_android",
+    version = "0.8.0",
+)
+
+single_version_override(
+    module_name = "rules_kotlin",
+    version = "2.1.10",
+)
+
+single_version_override(
+    module_name = "llvm",
+    version = "0.8.17",
+)
+
+# The resolved-version proof: a repository rule reads each selected module's
+# own `MODULE.bazel` (and the root pin for the git-overridden rules_dart), so
+# `//:dependency_floors_test` asserts the graph Bazel actually built instead
+# of a checked-in model of it.
+resolved_module_versions = use_repo_rule("//:resolved_module_versions.bzl", "resolved_module_versions")
+
+resolved_module_versions(
+    name = "resolved_module_versions",
+    floors = "@rules_flutter//flutter/tests:dependency_floors.json",
 )
 
 # Pinned past the 0.1.5 release for 16KB page alignment (same as
@@ -154,8 +215,8 @@ register_toolchains("@androidndk//:all")
 # Fix protobuf version mismatch: rules_android pins protobuf-java 4.33.4
 # but the resolved protobuf module is 34.0 (gencode 4.34.0).  The root module's
 # maven.install tags take precedence, so we re-declare the two affected repos
-# with bumped protobuf jars.
-bazel_dep(name = "rules_jvm_external", version = "7.1")
+# with bumped protobuf jars. rules_jvm_external itself is already declared at
+# its 6.8 floor above; a second bazel_dep would be a duplicate repo name.
 
 maven = use_extension("@rules_jvm_external//:extensions.bzl", "maven")
 maven.install(

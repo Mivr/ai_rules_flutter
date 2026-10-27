@@ -71,26 +71,37 @@ The latest tag is the current stable release.
 
 ## Bazel Module Dependency Bumps
 
-**Trigger**: Periodic (monthly) or when a dep releases a version we need.
+**Trigger**: Monthly, or when a dependency releases a version we need.
 
 **Files**:
 
-- `MODULE.bazel` — `bazel_dep()` version strings
+- `MODULE.bazel` — the `bazel_dep()` version is the **minimum** this
+  repository supports, with a comment naming the symbol that sets it; the
+  root-only `single_version_override` below it names the current release the
+  repository compiles against
+- `flutter/tests/dependency_floors.json` — the same floor, current release,
+  resolved consumer version and lift attribution that the guard reads
 - Every `e2e/*/MODULE.bazel` and `e2e/_overlay_tests/*/MODULE.bazel` — these
-  declare their own `bazel_dep`s rather than inheriting the root's, so a root-only
-  bump leaves them behind. `bazel_skylib`, `rules_cc` and `apple_support` appear
-  in most; `rules_android`, `rules_kotlin`, `rules_java`, `rules_jvm_external`
-  and `rules_go` in the three Android ones; `llvm` only in
-  `cross_compile_example`
+  declare their own `bazel_dep`s rather than inheriting the root's, so a floor
+  change leaves them behind. `bazel_skylib`, `rules_cc` and `apple_support`
+  appear in most; `rules_android`, `rules_kotlin`, `rules_java`,
+  `rules_jvm_external` and `rules_go` in the three Android ones; `llvm` only
+  in `cross_compile_example`
 
 **Procedure**:
 
-1. For each `bazel_dep` in root `MODULE.bazel`, check latest version on BCR
-2. Update versions, skip any already current
-3. Mirror the same versions into the e2e workspaces that declare them
-4. Regenerate lock files
+1. Raise a floor only when the repository stops supporting the old version;
+   name the new symbol, package or attribute in the root comment and update
+   `flutter/tests/dependency_floors.json`
+2. Move the current-release `single_version_override` when a newer release is
+   adopted, and update the table's `current` entry
+3. Keep the e2e workspaces at the declared floors, not at the current
+   releases; `e2e/min_versions` proves the floors and the transitive lifts
+4. Regenerate the root lock file (the e2e locks are intentionally stale)
 
-**Verification**: `bazel build //...` passes.
+**Verification**: `bazel test //flutter/tests/...`,
+`cd e2e/min_versions && bazel test //...`, and the root lock passes with
+`--lockfile_mode=error`.
 
 **Automation**: `/bump-deps` slash command.
 

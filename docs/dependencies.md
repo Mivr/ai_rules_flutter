@@ -1,26 +1,97 @@
 # Dependencies
 
 Which Bazel modules `rules_flutter` pulls into a consumer's graph, for which
-feature, and what each costs. Floors below are what this repo's `MODULE.bazel`
-declares; higher versions resolve by MVS as usual, except where noted.
+feature, and what each costs. Every regular `bazel_dep` in `MODULE.bazel`
+declares the minimum this repository supports, not the release its own CI
+happens to compile; a comment beside each declaration names the symbol,
+package or attribute that sets that minimum. Bzlmod's Minimal Version Selection
+(MVS) then picks the highest version anywhere in the graph, so the values in
+the table below are floors a consumer can keep, not pins that force it
+forward.
 
-## By feature
+## Declared floors
 
-| Feature | Modules | Notes |
+| Module | Minimum | The symbol, package or attribute that sets it |
 |---|---|---|
-| Every app | `rules_dart` 0.11.1 (the `Mivr` fork release, see README.md), `bazel_skylib`, `platforms`, `package_metadata` | Dart compilation, hooks, codegen. |
-| iOS / macOS bundles | `rules_apple` ≥ 4.5.3, `rules_swift`, `apple_support`, `rules_cc` | 4.5.3 is the proven floor: `e2e/min_versions` pins it exactly and builds both Apple legs. `rules_swift`/`apple_support` float to the graph's maxima (4.5.3 accepts Swift at compatibility level 3). |
-| Android APK | `rules_android` 0.8.0, `rules_kotlin`, `rules_java`, `rules_jvm_external` 7.1, `rules_go` ≥ 0.59.0 | 0.8.0 is the floor (see below). `rules_go` stays a regular dependency because the Android proxy transition sets `go/config:pure`, which must resolve in every consumer; the pinned `go_sdk.download` (Go 1.26.2, checksummed) in `MODULE.bazel` is non-dev, so consumers without their own `go_sdk` block build the Android host tools with it — it sorts before `rules_android`'s bundled unpinned 1.22.4 whatever order the root lists the modules in, while a root `go_sdk` block still wins. `e2e/android_no_go_sdk` covers the no-block consumer. |
-| xtool Darwin backend (opt-in) | `llvm` 0.8.19, exec-host toolchain archive only | Needs only `flutter.darwin_sdk(url = ..., sha256 = ...)` or `flutter.darwin_sdk(path = ...)` in the root module — no other `MODULE.bazel` lines. Plain consumers fetch nothing (see below). |
-| Dev tool, `gen_l10n` | Resolved inside `rules_flutter` | `dev_tool_deps` and `gen_l10n_deps` are the ruleset's own `flutter.pub` hubs; consumers never name them. |
-| No feature | No `rules_python` | The iOS screenshot/tunnel helpers are `dart_binary` drivers over a host `python3` (a documented host prerequisite like Xcode), so neither this repo's graph nor any consumer's contains `rules_python` from us. |
+| `bazel_skylib` | 1.8.0 | `@bazel_skylib//:bzl_library.bzl`, `//rules:build_test.bzl`, `//rules:common_settings.bzl`, `//rules:expand_template.bzl`, `//rules:write_file.bzl` and `//lib:unittest.bzl`, loaded by our rules, tests and `ai_rules_dart`'s BUILD files. |
+| `package_metadata` | 0.0.5 | `@package_metadata//licenses/rules:license.bzl`, `@package_metadata//purl:purl.bzl` (`purl.bazel()`) and `@package_metadata//rules:package_metadata.bzl`, loaded by this module's root BUILD and by `ai_rules_dart`. |
+| `platforms` | 1.1.0 | `@platforms//:incompatible`, `@platforms//os:{android,ios,linux,macos,windows}` and `@platforms//cpu:{aarch64,arm64,x86_64}`, used by our platform definitions and `target_compatible_with` constraints. |
+| `rules_cc` | 0.2.20 | The opt-in native-asset C++ path: `@rules_cc//cc:cc_shared_library.bzl`, `@rules_cc//cc:objc_library.bzl`, `@rules_cc//cc/common:cc_shared_library_info.bzl` and `@rules_cc//cc:find_cc_toolchain.bzl`. |
+| `apple_support` | 2.2.0 | `@apple_support//constraints:{device,simulator}`, `@apple_support//platforms:ios_arm64` and the `@apple_support//crosstool:setup.bzl` `apple_cc_configure_extension` that `MODULE.bazel` joins. |
+| `rules_apple` | 4.5.3 | `@rules_apple//apple:ios.bzl`, `@rules_apple//apple:macos.bzl`, `@rules_apple//apple:versioning.bzl`, the framework/app-intent imports and the internal `AppleBundleInfo` constructor. |
+| `rules_swift` | 3.5.0 | `@rules_swift//swift:swift.bzl` (`swift_library`) and the `SwiftInfo`/`swift_interop_info` surface, at `compatibility_level = 3`. |
+| `rules_android` | 0.8.0 | `@rules_android//flags:apk_signing_method` through the `apk_signing_v*` config_settings; the `flags/` package does not exist in 0.7.2 or 0.7.3. |
+| `rules_kotlin` | 2.1.10 | `@rules_kotlin//kotlin:android.bzl` for `kt_android_library`, loaded by `flutter_android_app`. |
+| `rules_java` | 9.0.0 | `@rules_java//java:java_import.bzl`, `@rules_java//java/common:java_info.bzl` (`JavaInfo`) and the Java toolchain rules. |
+| `rules_jvm_external` | 6.8 | `@rules_jvm_external//:extensions.bzl` with `maven.install`/`maven.artifact`, `use_starlark_android_rules` and `aar_import_bzl_label`. |
+| `ai_rules_dart` (repo `rules_dart`) | 0.21.0 | `@rules_dart//dart:hooks.bzl`, `@rules_dart//dart/private:record_use.bzl` and `dart_codegen(package_name = ...)`; the `Mivr/rules_dart` fork release (a BCR entry is pending). |
+| `rules_go` | 0.59.0 | `@rules_go//go/config:pure` and the Bazel 9 `CcInfo` import in `go/private/rules/cross.bzl`; 0.50.0 through 0.58.3 fail to load on Bazel 9. |
+| `llvm` | 0.8.17 | `@llvm//extensions:llvm_toolchain_minimal.bzl` and the `llvm-toolchain-minimal-<os>-<cpu>` repos, on the opt-in xtool Darwin SDK path and for this repository's own hermetic tests. |
+
+`dev_dependency` declarations (`rules_multitool`, `buildifier_prebuilt`,
+`bazelrc-preset.bzl`) never reach a consumer and carry no floor.
+
+## Transitive MVS lifts
+
+A floor is what `rules_flutter` itself declares. When a dependency requires a
+higher version of one of our other dependencies, MVS selects that higher
+version; that is the dependency's requirement, not a bump caused by our
+declaration. These are the lifts in a consumer graph that has no other
+requirements:
+
+| Lifted module | Our floor | Resolved | Lifted by | Because |
+|---|---|---|---|---|
+| `bazel_skylib` | 1.8.0 | 1.9.2 | `ai_rules_dart` 0.21.0 | Its own `bazel_dep` asks for 1.9.2. `llvm` 0.8.17 asks for 1.9.0, which is lower. |
+| `package_metadata` | 0.0.5 | 0.0.13 | `ai_rules_dart` 0.21.0 | Its own `bazel_dep` asks for 0.0.13. |
+| `rules_cc` | 0.2.20 | 0.2.26 | `ai_rules_dart` 0.21.0 | Its own `bazel_dep` asks for 0.2.26. `llvm` 0.8.17 asks for 0.2.22, which is lower. |
+| `apple_support` | 2.2.0 | 2.9.1 | `rules_cc` 0.2.26 | `rules_cc` 0.2.25 and newer add a regular `bazel_dep` on `apple_support`; 0.2.26 asks for 2.9.1. `rules_cc` reaches that version through `ai_rules_dart` 0.21.0. |
+| `rules_java` | 9.0.0 | 9.3.0 | `rules_android` 0.8.0 | Its own `bazel_dep` asks for 9.3.0. |
+| `rules_jvm_external` | 6.8 | 6.9 | `rules_android` 0.8.0 | Its own `bazel_dep` asks for 6.9. |
+| `rules_go` | 0.59.0 | 0.64.2 | `ai_rules_dart` 0.21.0 | Its own `bazel_dep` asks for 0.64.2. `llvm` 0.8.17 asks for 0.62.0, which is lower. |
+
+Every other floor resolves at its declared version in that graph: `platforms`
+1.1.0, `rules_apple` 4.5.3, `rules_swift` 3.5.0, `rules_android` 0.8.0,
+`rules_kotlin` 2.1.10, `ai_rules_dart` 0.21.0 and `llvm` 0.8.17.
+
+The lift table is asserted, not just documented: `e2e/min_versions` declares
+every floor, pins the floors that can bind, and its
+`//:dependency_floors_test` reads each selected module's own `MODULE.bazel`
+through `@resolved_module_versions`. A lifted module is asserted at its lifted
+value and attributed to the module above, never presented as
+`rules_flutter`'s floor.
+
+## This repository's own builds
+
+This checkout and its `bazel test //flutter/...` stay on the current releases
+through root-only `single_version_override` lines in `MODULE.bazel`. Root
+overrides are ignored when the module is used as a dependency, so they cannot
+leak into a consumer graph:
+
+| Module | Current release |
+|---|---|
+| `bazel_skylib` | 1.9.2 |
+| `package_metadata` | 0.0.13 |
+| `rules_cc` | 0.2.26 |
+| `apple_support` | 2.9.1 |
+| `rules_apple` | 5.2.0 |
+| `rules_swift` | 4.1.2 |
+| `rules_kotlin` | 2.4.20 |
+| `rules_java` | 9.9.0 |
+| `rules_jvm_external` | 7.1 |
+| `rules_go` | 0.64.2 |
+| `llvm` | 0.8.19 |
+
+`platforms` 1.1.0, `rules_android` 0.8.0 and `ai_rules_dart` 0.21.0 are
+already current at their floor, so they need no override. The git override of
+`ai_rules_dart` at its 0.21.0 commit supplies the version the source
+`MODULE.bazel` intentionally leaves out.
 
 ## The version-floor trade-off
 
 Bazel's MVS picks the *maximum* of the versions in the graph, so a floor is a
 promise ("works at this version or newer"), not a pin. A consumer that names
-no version of a module gets our floor — and the floor's own transitive
-deps, which may be *older and heavier* than the current release's:
+no version of a module gets our floor — and the floor's own transitive deps,
+which may be *older and heavier* than the current release's:
 
 - An unpinned consumer resolves `rules_apple` 4.5.3, not 5.2.0 (that is what
   a plain consumer graph selects today). This repo's own builds stay on
@@ -39,11 +110,56 @@ deps, which may be *older and heavier* than the current release's:
   (0.50.0 through 0.58.3 fail to load: `go/private/rules/cross.bzl` uses the
   native `CcInfo` symbol Bazel 9 removed; the `rules_cc` import landed in
   0.59.0). In practice `rules_android` already imposes the same floor, and
-  the floor never binds anyway: `rules_dart`, `rules_flutter` and
-  `rules_android` all require 0.64.2, so every graph selects that
-  (`bazel mod explain rules_go` — verified even in the workspaces that
-  declare only the 0.59.0 minimum). The floor is a Bazel 9 load minimum, not
-  a tested configuration.
+  the floor never binds anyway: `ai_rules_dart` 0.21.0 requires 0.64.2, so
+  every graph selects that (`bazel mod explain rules_go` — verified even in
+  the workspaces that declare only the 0.59.0 minimum). The floor is a
+  Bazel 9 load minimum, not a tested configuration.
+- `rules_swift` and `apple_support` now have real floors (3.5.0 at
+  compatibility level 3, and 2.2.0). They do **not** float below those
+  versions: a consumer that declares nothing gets at least the floor, and
+  only another module's higher request lifts them. `ai_rules_dart` 0.21.0
+  lifts `apple_support` to 2.9.1 through `rules_cc` 0.2.26; that is the
+  transitive lift table above, not a floating default.
+
+## Opt-in paths and the error they can give
+
+Some floors are structural for an optional path, and an older version fails at
+analysis. Starlark cannot catch a missing external package or a symbol a `.bzl`
+load needs and turn it into a custom version error, so this repository keeps
+the path's floor at the version it needs instead of narrowing it:
+
+- **Android APK signing:** `flutter_android_app`'s overlay reads
+  `@rules_android//flags:apk_signing_method`, which exists only from
+  `rules_android` 0.8.0. A consumer on an older `rules_android` fails at
+  analysis with a missing-package error naming `@rules_android//flags`, not a
+  tailored version message. Mirroring the flag with our own default would
+  sign differently from the consumer's `android_binary`, so the floor stays
+  at 0.8.0.
+- **xtool Darwin SDK:** `flutter.darwin_sdk` resolves llvm's
+  `llvm-toolchain-minimal-<os>-<cpu>` repos through the extension and the
+  `@flutter_xtool_darwin_sdk` repo rule. An older `llvm` fails at analysis
+  when those repos or `@llvm//extensions:llvm_toolchain_minimal.bzl` cannot be
+  resolved. The floor stays at 0.8.17.
+- **Native-asset C++:** the opt-in native-asset path loads
+  `@rules_cc//cc:cc_shared_library.bzl` and `@rules_cc//cc:objc_library.bzl`
+  and compiles through the caller's C++ toolchain. An older `rules_cc` fails
+  at analysis with the `rules_cc` load or toolchain error, so the floor stays
+  at 0.2.20.
+
+These paths are opt-in, so the floor does not force an upgrade on a consumer
+that never builds them; it only says what rules_flutter supports when it does.
+
+## BCR
+
+`e2e/smoke` is the BCR test module (`.bcr/presubmit.yml`). It takes
+`ai_rules_flutter` through a `local_path_override` and names its own
+dependencies, so it resolves the public floors plus the transitive lifts
+above; the root-only `single_version_override` lines are not part of what BCR
+publishes and are ignored when `ai_rules_flutter` is a dependency. The
+`ai_rules_dart` fork itself has no BCR entry yet, so the BCR test module and
+the install instructions take it from the fork's GitHub release (see
+`README.md`). The published module therefore resolves the same graph a
+consumer gets, and the floor table here is what that graph is checked against.
 
 ## Heavy transitive repos, and who brings them
 
@@ -88,15 +204,14 @@ Concretely, a consumer that never opts into xtool pays:
 - the module-graph edge (`llvm` and its deps appear in `bazel mod deps`)
   and the small `llvm` ruleset-repo fetch (Bazel reads the extension `.bzl`
   during evaluation);
-- the version floors `llvm@0.8.19`'s own `MODULE.bazel` requires: without
-  the edge, MVS would select `bazel_lib@3.1.0` (highest other requesters:
-  `rules_kotlin`, `bazel_linux_packages`), `rules_python@1.7.0`
-  (`rules_apple`), and `rules_shell@0.6.1` (`rules_android`,
+- the version floors `llvm@0.8.17`'s own `MODULE.bazel` requires: without
+  the edge, MVS would select `bazel_lib@3.2.2` (highest other requesters:
+  `rules_kotlin`, `bazel_linux_packages`), `rules_python@1.8.0`
+  (`rules_apple`), and `rules_shell@0.8.0` (`rules_android`,
   `rules_apple`, `rules_jvm_external`, `buildifier_prebuilt`,
-  `bazel_linux_packages`); with it they resolve to `3.2.2`, `1.8.0` and
-  `0.8.0`. Verify with `bazel mod explain bazel_lib rules_python
-  rules_shell` — `llvm@0.8.19` is the requester naming the top version of
-  each;
+  `bazel_linux_packages`); with it they resolve to those versions. Verify
+  with `bazel mod explain bazel_lib rules_python rules_shell` —
+  `llvm@0.8.17` is the requester naming the top version of each;
 - four graph-only modules nothing else requests: `tar.bzl`, `with_cfg.bzl`,
   `zlib-ng` and `zstd` (no other resolved `MODULE.bazel` names them; only
   `tar.bzl` even materializes a repo, since the rest fetch solely on
