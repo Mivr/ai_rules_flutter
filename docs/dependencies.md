@@ -152,14 +152,15 @@ that never builds them; it only says what rules_flutter supports when it does.
 ## BCR
 
 `e2e/smoke` is the BCR test module (`.bcr/presubmit.yml`). It takes
-`ai_rules_flutter` through a `local_path_override` and names its own
-dependencies, so it resolves the public floors plus the transitive lifts
-above; the root-only `single_version_override` lines are not part of what BCR
-publishes and are ignored when `ai_rules_flutter` is a dependency. The
+`ai_rules_flutter` through a `local_path_override` and names its own current
+dependencies, so it checks that a consumer on those releases still resolves
+and builds; it does not pin the floors (that is `e2e/min_versions`' job). The
+root-only `single_version_override` lines are not part of what BCR publishes:
+Bazel applies them only to the root module's own resolution, and
+`e2e/smoke` is a different root, so they cannot leak into the BCR graph. The
 `ai_rules_dart` fork itself has no BCR entry yet, so the BCR test module and
 the install instructions take it from the fork's GitHub release (see
-`README.md`). The published module therefore resolves the same graph a
-consumer gets, and the floor table here is what that graph is checked against.
+`README.md`).
 
 ## Heavy transitive repos, and who brings them
 
