@@ -1,5 +1,8 @@
 import 'dart:ui' as ui;
 
+import 'package:android_only_plugin/android_only_plugin.dart';
+import 'package:dart_registration_plugin/dart_registration_plugin.dart';
+import 'package:ffi_plugin/ffi_plugin.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_ios/main.dart';
@@ -7,7 +10,41 @@ import 'package:integration_test/integration_test.dart';
 import 'package:ios_greeting_plugin/ios_greeting_plugin.dart';
 
 void main() {
+  // Captured when the integration test entrypoint's own `main()` starts. The
+  // engine runs the generated Dart plugin registrant before this, so only the
+  // plugin's `registerWith` event can be here; `testMain` follows it.
+  final startupEventsAtTestMain = <String>[
+    ...DartRegistrationPlugin.startupEvents,
+    testMainEvent,
+  ];
+
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+
+  testWidgets('runs the Dart plugin registerWith before main', (tester) async {
+    expect(startupEventsAtTestMain, <String>[registerEvent, testMainEvent]);
+    expect(DartRegistrationPlugin.isRegistered, isTrue);
+    expect(
+      DartRegistrationPlugin.greet(),
+      'registered by the generated Dart registrant',
+    );
+  });
+
+  testWidgets('calls the first-party FFI plugin through dart:ffi', (
+    tester,
+  ) async {
+    expect(FfiPlugin.answer(), 42);
+  });
+
+  testWidgets('builds and runs with the Android-only plugin in deps', (
+    tester,
+  ) async {
+    // The plugin is in this app's `deps` but has no iOS implementation; the
+    // app still boots, and its Dart package is part of the compiled graph.
+    expect(androidOnlyPluginMarker, 'android-only-plugin');
+    await tester.pumpWidget(const CounterApp());
+    await tester.pumpAndSettle();
+    expect(find.text('0'), findsOneWidget);
+  });
 
   testWidgets('shows the counter text and serves the bundled asset', (
     tester,
