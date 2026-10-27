@@ -151,31 +151,35 @@ def swiftpm_render_clang_library(lib):
 
     The library carries the public headers in `hdrs` and the private
     ones in `srcs`: they compile with the target's own sources but stay
-    invisible to dependents. The header search paths go in `includes`
-    (hermetic in the spoke repository, where a `-I` in `copts` would
-    not rebase), and the module name — plus the module map, explicit or
-    generated, so the one map Swift and clang use is SwiftPM's — in
-    `aspect_hints` via a separate `swift_interop_hint` target (a rule,
-    so it needs its own `name`) so Swift importers see the same module
-    SwiftPM computes. A target with no public headers gets no hint: it
-    is link-only. Lists render through `swiftpm_render_list_attr`, so
-    `.when(platforms:)`-gated settings and dependencies become
-    `select()`s on the target platform's OS.
+    invisible to dependents. The public header search paths go in
+    `includes` (hermetic in the spoke repository, where a `-I` in `copts`
+    would not rebase). A `.headerSearchPath` from `cSettings`/
+    `cxxSettings` is target-local in SwiftPM: its paths go on a separate
+    header-only library that the target reaches through
+    `implementation_deps`, so dependents never see them. The module name
+    — plus the module map, explicit or generated, so the one map Swift
+    and clang use is SwiftPM's — goes in `aspect_hints` via a separate
+    `swift_interop_hint` target (a rule, so it needs its own `name`) so
+    Swift importers see the same module SwiftPM computes. A target with
+    no public headers gets no hint: it is link-only. Lists render through
+    `swiftpm_render_list_attr`, so `.when(platforms:)`-gated settings and
+    dependencies become `select()`s on the target platform's OS.
 
     Args:
         lib: `struct(library_name, rule, srcs, public_headers,
             private_headers, module_name, module_map, explicit_map,
-            c_only, cxx, linkopts, includes, deps, tags)`: the Bazel
-            library name; `"cc_library"` or `"objc_library"`; the
-            unconditional source labels; the unconditional public and
-            private header labels; the C99-mangled module name (""
-            for link-only); the module map label — the explicit
-            `module.modulemap` when the target ships one, else the
-            generated `<public>/module.modulemap` the repo rule writes —
-            or None for link-only; whether `module_map` is an explicit
-            map (informational: both forms reach the hint the same way);
-            `struct(text, platforms)` C-only, C++, link option, include
-            and dependency entries; the manual-tag list.
+            c_only, cxx, linkopts, includes, private_includes, deps,
+            tags)`: the Bazel library name; `"cc_library"` or
+            `"objc_library"`; the unconditional source labels; the
+            unconditional public and private header labels; the
+            C99-mangled module name ("" for link-only); the module map
+            label — the explicit `module.modulemap` when the target ships
+            one, else the generated `<public>/module.modulemap` the repo
+            rule writes — or None for link-only; whether `module_map` is
+            an explicit map (informational: both forms reach the hint the
+            same way); `struct(text, platforms)` C-only, C++, link option,
+            public include, target-local include and dependency entries;
+            the manual-tag list.
 
     Returns:
         The rule text (the caller loads `swift_interop_hint` when the
@@ -204,11 +208,16 @@ def swiftpm_render_clang_library(lib):
         lines.append(lists)
     if lib.module_name:
         lines.append("    aspect_hints = [\":{name}_interop_hint\"],".format(name = lib.library_name))
+    if lib.private_includes:
+        lines.append("    implementation_deps = [\":{name}_private_headers\"],".format(name = lib.library_name))
     lists = swiftpm_render_list_attr("deps", [], lib.deps)
     if lists:
         lines.append(lists)
     lines.append("    tags = [{tags}],".format(tags = ", ".join([repr(tag) for tag in lib.tags])))
     lines.append(")")
+    if lib.private_includes:
+        lines.append("")
+        lines.extend(_swiftpm_render_private_headers_library(lib))
     if lib.module_name:
         lines.append("")
         lines.append("swift_interop_hint(")
@@ -218,3 +227,30 @@ def swiftpm_render_clang_library(lib):
             lines.append("    module_map = {map},".format(map = repr(lib.module_map)))
         lines.append(")")
     return "\n".join(lines)
+
+def _swiftpm_render_private_headers_library(lib):
+    """Render the target-local helper carrying `headerSearchPath` paths.
+
+    The helper holds the target's private headers and the search paths
+    from `cSettings`/`cxxSettings`. Its only dependent is the target
+    itself, through `implementation_deps`, so neither the headers nor the
+    paths reach another library or the app.
+
+    Args:
+        lib: The library struct described in `swiftpm_render_clang_library`.
+
+    Returns:
+        The helper rule's text lines.
+    """
+    lines = ["{rule}(".format(rule = lib.rule)]
+    lines.append("    name = \"{name}_private_headers\",".format(name = lib.library_name))
+    lines.append("    hdrs = [")
+    for header in lib.private_headers:
+        lines.append("        {item},".format(item = repr(header)))
+    lines.append("    ],")
+    lists = swiftpm_render_list_attr("includes", [], lib.private_includes)
+    if lists:
+        lines.append(lists)
+    lines.append("    tags = [{tags}],".format(tags = ", ".join([repr(tag) for tag in lib.tags])))
+    lines.append(")")
+    return lines

@@ -396,10 +396,12 @@ def _swiftpm_build_string(text):
 def _swiftpm_emit_swift_library(identity, model, target, edges, files, mode):
     """Emit one `swift_library` for a reached Swift target.
 
-    `swiftSettings` `.define` entries become `defines`, the upcoming and
-    experimental feature settings become `copts` flags, `linkerSettings`
-    become `linkopts`, and `.when(platforms:)`-gated settings and
-    dependencies render as `select()`s on the target platform's OS.
+    `swiftSettings` `.define` entries become target-local `-D` flags in
+    `copts` (never `defines`, which reaches every dependent), the
+    upcoming and experimental feature settings become `copts` flags,
+    `linkerSettings` become `linkopts`, and `.when(platforms:)`-gated
+    settings and dependencies render as `select()`s on the target
+    platform's OS.
 
     Args:
         identity: The SwiftPM package identity.
@@ -432,9 +434,6 @@ def _swiftpm_emit_swift_library(identity, model, target, edges, files, mode):
     else:
         lists = swiftpm_render_list_attr("copts", ["-swift-version", _swiftpm_copts_flag(mode)], settings.copts)
         lines.append(lists)
-    lists = swiftpm_render_list_attr("defines", [], settings.defines)
-    if lists:
-        lines.append(lists)
     lists = swiftpm_render_list_attr("linkopts", [], settings.linkopts)
     if lists:
         lines.append(lists)
@@ -452,7 +451,10 @@ def _swiftpm_emit_clang_library(identity, target, edges, files):
     generated, so the one map Swift and clang use is SwiftPM's: without
     it rules_swift would generate a different map from `hdrs` while the
     written map sat unreferenced (and implicitly visible through
-    `includes`) as a second definition of the same module.
+    `includes`) as a second definition of the same module. A
+    `.headerSearchPath` from target settings is target-local: it goes on
+    a private-headers helper the library reaches through
+    `implementation_deps`, so no dependent gets it on its include path.
 
     Args:
         identity: The SwiftPM package identity.
@@ -478,18 +480,19 @@ def _swiftpm_emit_clang_library(identity, target, edges, files):
         return struct(ok = False, error = "SwiftPM package {identity}: {detail}.".format(identity = repr(identity), detail = settings.detail), text = "", rule = "", needs_hint = False)
     rule = swiftpm_clang_rule(getattr(files, "c_srcs", []))
     explicit_map = getattr(files, "explicit_map", None) != None
-    includes = settings.includes
+    includes = []
     if explicit_map and getattr(files, "map_in_include", False):
         # The explicit map lives under the public-headers directory: the
         # quoted header includes in the sources resolve only with that
         # directory on the search path, the way SwiftPM compiles such
-        # targets.
+        # targets. This directory is public, so it propagates.
         map_dir = files.explicit_map[:files.explicit_map.rfind("/")]
-        includes = [struct(text = map_dir, platforms = None)] + includes
+        includes.append(struct(text = map_dir, platforms = None))
     if not explicit_map and spec.module_map != None:
         # The generated map lives in the public-headers directory, which
         # the sources include from: it goes on the search path the way
-        # SwiftPM compiles such targets.
+        # SwiftPM compiles such targets. This directory is public, so it
+        # propagates.
         includes = [struct(text = spec.include_dir, platforms = None)] + includes
     text = swiftpm_render_clang_library(struct(
         library_name = target.name + "_lib",
@@ -504,6 +507,7 @@ def _swiftpm_emit_clang_library(identity, target, edges, files):
         cxx = settings.cxx,
         linkopts = settings.linkopts,
         includes = includes,
+        private_includes = settings.private_includes,
         deps = edges.get(target.name, []),
         tags = ["manual"],
     ))

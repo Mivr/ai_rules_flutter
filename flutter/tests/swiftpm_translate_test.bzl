@@ -292,7 +292,9 @@ def swiftpm_translate_test_suite(name):
         _conditioned_dep_select_test,
         _dropped_dep_stays_out_test,
         _swift_settings_emit_test,
+        _swift_define_is_target_local_test,
         _clang_target_emit_test,
+        _header_search_path_is_target_local_test,
         _generated_map_emit_test,
         _generated_map_forms_emit_test,
         _mixed_source_refusal_test,
@@ -379,7 +381,8 @@ def _swift_settings_emit_test_impl(ctx):
     asserts.true(env, parsed.ok)
     translated = translate_swiftpm_package("set", "deps", parsed.model, ["set"], {"Set": struct(dir = "d", srcs = ["d/a.swift"])})
     asserts.true(env, translated.ok)
-    asserts.true(env, "\"SWIFT_FOO\"" in translated.text)
+    asserts.true(env, "\"-DSWIFT_FOO\"" in translated.text)
+    asserts.true(env, not "defines = [" in translated.text)
     asserts.true(env, "\"-enable-upcoming-feature\"" in translated.text)
     asserts.true(env, "\"Existentials\"" in translated.text)
     asserts.true(env, "\"@platforms//os:macos\"" in translated.text)
@@ -390,6 +393,33 @@ def _swift_settings_emit_test_impl(ctx):
     return unittest.end(env)
 
 _swift_settings_emit_test = unittest.make(_swift_settings_emit_test_impl)
+
+_SWIFT_DEFINE_LOCALITY_MANIFEST = """// swift-tools-version:5.9
+import PackageDescription
+let package = Package(
+    name: "Defs",
+    products: [.library(name: "Defs", targets: ["Defs"])],
+    targets: [.target(name: "Defs", dependencies: ["User"], swiftSettings: [.define("PLAIN_DEFINE"), .define("GATED_DEFINE", .when(platforms: [.iOS]))]), .target(name: "User")],
+)
+"""
+
+def _swift_define_is_target_local_test_impl(ctx):
+    env = unittest.begin(ctx)
+    parsed = parse_swiftpm_package("defs", _SWIFT_DEFINE_LOCALITY_MANIFEST)
+    asserts.true(env, parsed.ok)
+    translated = translate_swiftpm_package("defs", "deps", parsed.model, ["defs"], {
+        "Defs": struct(dir = "d", srcs = ["d/a.swift"]),
+        "User": struct(dir = "d", srcs = ["d/u.swift"]),
+    })
+    asserts.true(env, translated.ok)
+    asserts.true(env, "\"-DPLAIN_DEFINE\"" in translated.text)
+    asserts.true(env, not "defines = [" in translated.text)
+    asserts.true(env, "\"-DGATED_DEFINE\"" in translated.text)
+    asserts.true(env, "select({" in translated.text)
+    asserts.true(env, "\"@platforms//os:ios\"" in translated.text)
+    return unittest.end(env)
+
+_swift_define_is_target_local_test = unittest.make(_swift_define_is_target_local_test_impl)
 
 _CLANG_MANIFEST = """// swift-tools-version:5.9
 import PackageDescription
@@ -431,6 +461,58 @@ def _clang_target_emit_test_impl(ctx):
     return unittest.end(env)
 
 _clang_target_emit_test = unittest.make(_clang_target_emit_test_impl)
+
+_HEADER_LOCALITY_MANIFEST = """// swift-tools-version:5.9
+import PackageDescription
+let package = Package(
+    name: "Shims",
+    products: [.library(name: "Shims", targets: ["Shims"])],
+    targets: [.target(name: "Shims", cSettings: [.headerSearchPath("detail"), .headerSearchPath("gated", .when(platforms: [.macOS])), .define("PRIVATE_DEFINE")], cxxSettings: [.headerSearchPath("cxx_detail")])],
+)
+"""
+
+def _rule_block(text, name):
+    """Return the rendered rule block carrying `name = "<name>"`.
+
+    Args:
+        text: The generated BUILD text.
+        name: The rule name to find.
+
+    Returns:
+        The block, or "" when no block names it.
+    """
+    needle = "name = \"{name}\"".format(name = name)
+    for block in text.split("\n\n"):
+        if needle in block:
+            return block
+    return ""
+
+def _header_search_path_is_target_local_test_impl(ctx):
+    env = unittest.begin(ctx)
+    parsed = parse_swiftpm_package("shims", _HEADER_LOCALITY_MANIFEST)
+    asserts.true(env, parsed.ok)
+    files = {
+        "Shims": struct(dir = "pkg/Sources/Shims", srcs = [], c_srcs = ["pkg/Sources/Shims/Shims.c"], public_hdrs = ["pkg/Sources/Shims/include/Shims.h"], private_hdrs = ["pkg/Sources/Shims/secret.h", "pkg/Sources/Shims/detail/config.h"], explicit_map = None, map_in_include = False),
+    }
+    translated = translate_swiftpm_package("shims", "deps", parsed.model, ["shims"], files)
+    asserts.true(env, translated.ok)
+    main = _rule_block(translated.text, "Shims_lib")
+    helper = _rule_block(translated.text, "Shims_lib_private_headers")
+    asserts.true(env, main != "")
+    asserts.true(env, helper != "")
+    asserts.true(env, "implementation_deps = [\":Shims_lib_private_headers\"]" in main)
+    asserts.true(env, not "\"pkg/Sources/Shims/detail\"" in main)
+    asserts.true(env, not "\"pkg/Sources/Shims/gated\"" in main)
+    asserts.true(env, not "\"pkg/Sources/Shims/cxx_detail\"" in main)
+    asserts.true(env, "\"pkg/Sources/Shims/detail\"" in helper)
+    asserts.true(env, "\"pkg/Sources/Shims/gated\"" in helper)
+    asserts.true(env, "\"pkg/Sources/Shims/cxx_detail\"" in helper)
+    asserts.true(env, "\"@platforms//os:macos\"" in helper)
+    asserts.true(env, "\"pkg/Sources/Shims/include\"" in main)
+    asserts.true(env, "\"-DPRIVATE_DEFINE\"" in main)
+    return unittest.end(env)
+
+_header_search_path_is_target_local_test = unittest.make(_header_search_path_is_target_local_test_impl)
 
 _GENERATED_MANIFEST = """// swift-tools-version:5.9
 import PackageDescription
