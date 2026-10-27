@@ -30,9 +30,20 @@
 # load from a downstream workspace, so its entries are attested in
 # audit.tsv instead of re-enumerated (the script says so when the queries
 # fail, and enforces them when they succeed).
+@rules_flutter//dart:dart	-	private	run	SDK pass-through with no arguments; dartdev runs its front end, so a private HOME keeps telemetry out of the caller's directories
+@rules_flutter//dart:dart	--help	private	run	help flag alone; dartdev runs and may write telemetry, so the launcher uses a private HOME
+@rules_flutter//dart:dart	-h	private	run	short help flag alone; same private-HOME path as --help
+@rules_flutter//dart:dart	--verbose	private	run	verbose flag alone; --suppress-analytics does not stop this form's telemetry, so a private HOME is required
+@rules_flutter//dart:dart	-v	private	run	short verbose flag alone; same private-HOME path
+@rules_flutter//dart:dart	--help --verbose	private	run	help and verbose flags combined; private HOME, unchanged output
+@rules_flutter//dart:dart	--verbose --help	private	run	verbose and help flags combined; private HOME, unchanged output
+@rules_flutter//dart:dart	--version	private	run	version flag alone; private HOME, unchanged output and exit code
+@rules_flutter//dart:dart	--suppress-analytics --verbose	private	run	the reported hole: the flag alone does not stop --verbose telemetry, so a private HOME covers it
+@rules_flutter//dart:dart	help	caller-home	run	help command; the suppression flag is honoured, caller env kept
+@rules_flutter//dart:dart	help pub	caller-home	run	help command with a topic; suppression flag honoured
 @rules_flutter//dart:dart	pub token list	caller-home	run	SDK pass-through; dart CLI takes --suppress-analytics before the command, PUB_CACHE/creds resolve from caller env
-@rules_flutter//dart:dart	hello.dart	caller-home	run	SDK pass-through in file form; the program runs unchanged with no analytics flag (the VM rejects it), caller env kept; pins rc 0 and the probe output, not clean canaries
 @rules_flutter//dart:dart	--verbose pub token list	caller-home	run	SDK pass-through in command form behind a leading global flag; still suppresses, caller creds resolve
+@rules_flutter//dart:dart	hello.dart	private	run	SDK pass-through in file form; the VM rejects the flag, so a private HOME runs the program unchanged and the gate asserts clean canaries
 @rules_flutter//flutter:pub	token list	caller-home	run	needs caller PUB_CACHE + pub-tokens.json; dart CLI takes --suppress-analytics, writes nothing under HOME
 //:widget_test	-	private	run	flutter_test launcher; flutter_tester spawns under a private HOME
 //:widget_prebuilt_test	-	private	run	same launcher path as flutter_test, prebuilt kernel

@@ -3,52 +3,85 @@
 `flutter/private/tools/run_home.dart` is the source of truth; this file is
 its shell counterpart for launchers that are shell templates and cannot
 import Dart. `RUN_HOME_SUPPRESS_ANALYTICS` must equal the Dart
-`suppressAnalyticsFlag`, and the `RUN_HOME_SH` snippet must implement the
-same command-form-only rule as the Dart `withSuppressedAnalytics`:
-`//flutter/private/tools/test/run_home_test.dart` asserts the flag, the
-classification markers, and a shared table of cases agree, so update them
-together.
+`suppressAnalyticsFlag`, and `RUN_HOME_SH` must implement the same policy as
+the Dart `runHomePolicy`: command form keeps the caller env and prepends the
+analytics flag; a program file or an argv with no positional argument runs
+under a private home. `//flutter/private/tools/test/run_home_test.dart`
+asserts the flag, the classification markers, and a shared table of cases
+agree, so update them together.
 """
 
 RUN_HOME_SUPPRESS_ANALYTICS = "--suppress-analytics"
 
 RUN_HOME_SH = """\
-# run_home counterpart: exec a tool CLI keeping the caller env (so
-# PUB_CACHE and credentials resolve) while suppressing CLI telemetry
-# writes into the caller's HOME. Mirrors withSuppressedAnalytics in
-# flutter/private/tools/run_home.dart: the flag is global and only valid
-# in command form — the VM rejects it for file-form executions (exit 255),
-# which keep the caller env — so it is prepended only for command
-# form. Leading dash-arguments are skipped, then an empty remainder (a bare
-# CLI or global flags only, such as --version) or a first remainder ending
-# in .dart/.dill/.snapshot/.aot/.jit (any case) is file form.
-# An already-present --suppress-analytics/--no-suppress-analytics passes
-# through unchanged, never duplicated; nothing else is reordered.
-run_home_caller_home_exec() {
+# run_home counterpart: exec a tool CLI either in command form, keeping the
+# caller env (so PUB_CACHE and credentials resolve) and suppressing CLI
+# telemetry writes with the global flag, or under a fresh private home when
+# the flag cannot give that guarantee. Mirrors runHomePolicy in
+# flutter/private/tools/run_home.dart:
+# * a leading --no-suppress-analytics asks for analytics, so it runs under a
+#   private home and the caller's directories stay clean;
+# * a program file (first non-flag argument ending in
+#   .dart/.dill/.snapshot/.aot/.jit, any case) runs under a private home: the
+#   VM rejects the flag there (exit 255);
+# * an argv with no positional argument (a bare CLI or global flags only,
+#   such as --help or --verbose) also runs under a private home: dartdev
+#   writes telemetry for --verbose even when the flag is present;
+# * every other argv is command form: exec dart with --suppress-analytics
+#   before the command unless a leading --suppress-analytics is already
+#   there. Nothing is duplicated or reordered.
+RUN_HOME_PRIVATE_DIR=""
+run_home_private_exec() {
   local bin="$1"; shift
-  local arg
-  for arg in "$@"; do
-    if [[ "$arg" == "--suppress-analytics" || "$arg" == "--no-suppress-analytics" ]]; then
-      exec "$bin" "$@"
+  local dir rc
+  dir="$(mktemp -d "${TMPDIR:-/tmp}/run-home.XXXXXX")" || {
+    echo "run_home: cannot create a private home under ${TMPDIR:-/tmp}" >&2
+    exit 1
+  }
+  RUN_HOME_PRIVATE_DIR="$dir"
+  trap 'rm -rf "$RUN_HOME_PRIVATE_DIR"' EXIT
+  export HOME="$dir"
+  export USERPROFILE="$dir"
+  export APPDATA="$dir"
+  export LOCALAPPDATA="$dir"
+  export XDG_CONFIG_HOME="$dir"
+  export XDG_CACHE_HOME="$dir"
+  export XDG_DATA_HOME="$dir"
+  "$bin" "$@"
+  rc=$?
+  rm -rf "$RUN_HOME_PRIVATE_DIR"
+  trap - EXIT
+  exit "$rc"
+}
+
+run_home_exec() {
+  local bin="$1"; shift
+  local rest=("$@") i=0 n=$#
+  local arg first="" already=0 private=0
+  while (( i < n )) && [[ "${rest[i]}" == -* ]]; do
+    arg="${rest[i]}"
+    if [[ "$arg" == "--suppress-analytics" ]]; then
+      already=1
+    elif [[ "$arg" == "--no-suppress-analytics" ]]; then
+      private=1
     fi
-  done
-  local rest=("$@") i=0 first="" form="command"
-  while (( i < $# )) && [[ "${rest[i]}" == -* ]]; do
     (( ++i ))
   done
-  if (( i < $# )); then
+  if (( i < n )); then
     # tr, not ${var,,}: the launcher also runs under macOS bash 3.2.
     first="$(printf '%s' "${rest[i]}" | tr '[:upper:]' '[:lower:]')"
     case "$first" in
-      *.dart|*.dill|*.snapshot|*.aot|*.jit) form="file" ;;
+      *.dart|*.dill|*.snapshot|*.aot|*.jit) private=1 ;;
     esac
   else
-    form="file"
+    private=1
   fi
-  if [[ "$form" == "command" ]]; then
-    exec "$bin" --suppress-analytics "$@"
-  else
+  if (( private )); then
+    run_home_private_exec "$bin" "$@"
+  elif (( already )); then
     exec "$bin" "$@"
+  else
+    exec "$bin" --suppress-analytics "$@"
   fi
 }
 """

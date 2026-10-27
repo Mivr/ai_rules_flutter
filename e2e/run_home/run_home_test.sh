@@ -237,19 +237,6 @@ run_row() {
     fail "$label did not print the file-form probe output"
     row_failed=1
   fi
-  # File form keeps the caller env with no suppression flag (the VM rejects
-  # it), and the SDK writes its own $HOME/.dart-tool telemetry on file
-  # runs, so this row pins execution — rc 0 plus the probe output above —
-  # not clean canaries. Command-form rows below pin the hermeticity.
-  if [[ "$args" == *hello.dart* ]]; then
-    if [[ "$row_failed" -eq 0 ]]; then
-      echo "ok: $label ran the file-form probe"
-    else
-      echo "forensics for $label: stdout tail:" >&2
-      tail -n 30 "$out" >&2 || true
-    fi
-    return
-  fi
   for sub in home userprofile appdata localappdata xdg-config xdg-cache xdg-data; do
     snapshot_tree "$root/$sub" "$root/$sub.after"
     changes="$(unsanctioned_changes "$root/$sub.before" "$root/$sub.after")"

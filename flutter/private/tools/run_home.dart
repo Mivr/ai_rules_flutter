@@ -1,22 +1,31 @@
 /// Shared HOME-hermeticity helper for runnable targets (RT37-flutter:02).
 ///
-/// Every entry point a user can `bazel run` routes through here, with one of
-/// two policies:
+/// Every entry point a user can `bazel run` routes through here. The Dart CLI
+/// writes dartdev telemetry (`.dart-tool/CLIENT_ID`,
+/// `dart-flutter-telemetry*`, the dismissed-surveys file) whenever its front
+/// end runs, and the global `--suppress-analytics` flag stops that write only
+/// for command form. The launcher therefore uses one of two policies, chosen
+/// by [runHomePolicy]:
 ///
-/// * caller-home: the tool CLI must resolve the caller's `PUB_CACHE` and
-///   credentials, so the parent environment is kept and a command-form CLI
-///   takes the global [suppressAnalyticsFlag] instead
-///   (`withSuppressedAnalytics`). File-form executions (`dart program.dart`)
-///   pass through unchanged: the VM rejects the flag there (exit 255), so
-///   the program keeps the caller env and any telemetry the SDK itself
-///   writes on a file run is outside what the launcher can suppress.
-/// * private: the spawned program gets a fresh dir for every home-locating
-///   key ([privateHomeEnv]), removed afterwards (`createPrivateHome`).
+/// * caller-home-suppressed: a command (`dart pub ...`, `dart format ...`,
+///   `dart help`) keeps the caller's environment so `PUB_CACHE` and
+///   credentials resolve, and [suppressAnalyticsFlag] is placed before the
+///   command. The flag is global, so it must precede the command.
+/// * private: a program file (`dart program.dart`) and an argv with no
+///   positional argument at all (`dart`, `dart --help`, `dart --verbose`,
+///   `dart --version`) run under a fresh directory for every home-locating
+///   key ([privateHomeEnv]), removed afterwards ([createPrivateHome]). The VM
+///   rejects the suppression flag for a program file (exit 255), and dartdev
+///   still writes telemetry for `--verbose` even when the flag is present, so
+///   a private home is the guarantee that holds for both.
 ///
-/// User app/test code keeps the caller env; only rule-owned launchers and
-/// tool CLIs are routed through this library (plus its shell counterpart
-/// `RUN_HOME_SH` in `//flutter/private:run_home.bzl`, used where the
-/// launcher is a shell template).
+/// An argv that already carries [noSuppressAnalyticsFlag] states that the
+/// caller wants analytics; it still runs under a private home so the caller's
+/// directories stay untouched. User app/test code keeps the caller env; only
+/// rule-owned launchers and tool CLIs are routed through this library (plus
+/// its shell counterpart `RUN_HOME_SH` in
+/// `//flutter/private:run_home.bzl`, used where the launcher is a shell
+/// template).
 library;
 
 import 'dart:io';
@@ -38,17 +47,18 @@ const homeEnvKeys = <String>[
 ///
 /// Command-form only: the flag must precede the command (`dart
 /// --suppress-analytics pub ...`). The Dart VM rejects it for file-form
-/// executions (`dart program.dart` exits 255), which keep the caller env,
-/// so [withSuppressedAnalytics] leaves those invocations unchanged.
-/// Verified against the pinned toolchain: `dart --suppress-analytics
-/// --version` and `dart --suppress-analytics pub token list` both exit 0,
-/// write nothing under `$HOME`, and `token list` still prints the caller's
-/// `XDG_CONFIG_HOME/dart/pub-tokens.json` credentials.
+/// executions (`dart program.dart` exits 255), which run under a private home
+/// instead ([runHomePolicy]). Verified against the pinned toolchain: `dart
+/// --suppress-analytics pub token list` exits 0, writes nothing under
+/// `$HOME`, and still prints the caller's `XDG_CONFIG_HOME/dart/pub-tokens.json`
+/// credentials. `dart --suppress-analytics --verbose` still writes telemetry,
+/// so an argv with no command gets a private home rather than the flag alone.
 const suppressAnalyticsFlag = '--suppress-analytics';
 
 /// Explicit opt-out twin of [suppressAnalyticsFlag]: an argument list holding
-/// either flag already states its analytics policy and passes through
-/// unchanged, never duplicated.
+/// either flag already states its analytics policy. A leading opt-out routes
+/// the run to a private home so the caller's directories stay clean; the flag
+/// itself is never duplicated and nothing is reordered.
 const noSuppressAnalyticsFlag = '--no-suppress-analytics';
 
 /// Suffixes naming a runnable program file for the `dart` CLI, matched
@@ -61,44 +71,100 @@ const programFileSuffixes = <String>[
   '.jit',
 ];
 
-/// Whether [args] to the `dart` CLI is a file-form execution.
-///
-/// Skips leading arguments starting with `-` (global flags such as
-/// `--verbose` or `--enable-asserts), then an empty remainder (a bare CLI or
-/// global flags only, such as `--version`) or a first remainder ending,
-/// case-insensitively, in a [programFileSuffixes] entry (`program.dart`,
-/// `app.dill`, ...) is file form. Everything else names a command (`pub`,
-/// `format`, ...) whose run writes telemetry under HOME unless suppressed.
-/// Mirrors the corrected rules_dart classification (`isFileExecution` in
-/// `dart/private/tools/private_home.dart`, rules_dart task
-/// FD-herm-launcher-env); the shell launchers (`RUN_HOME_SH` in
-/// `//flutter/private:run_home.bzl` and the Windows `.bat` in
-/// `//dart:flutter_sdk_binary`) implement the same rule.
-bool isFileForm(List<String> args) {
-  var rest = args;
-  while (rest.isNotEmpty && rest.first.startsWith('-')) {
-    rest = rest.sublist(1);
+/// The home policy a launcher must apply for one `dart` argv.
+enum RunHomePolicy {
+  /// Command form: keep the caller env and prepend [suppressAnalyticsFlag].
+  callerHomeSuppressed,
+
+  /// Program file or flags with no command: use a fresh private home and
+  /// pass the arguments through unchanged.
+  privateHome,
+}
+
+/// The leading dash arguments of [args], before the first non-flag argument.
+List<String> _leadingFlags(List<String> args) {
+  final flags = <String>[];
+  for (final arg in args) {
+    if (!arg.startsWith('-')) break;
+    flags.add(arg);
   }
-  if (rest.isEmpty) return true;
-  final first = rest.first.toLowerCase();
+  return flags;
+}
+
+/// The arguments from the first non-flag argument onwards.
+List<String> _positionalArgs(List<String> args) =>
+    args.sublist(_leadingFlags(args).length);
+
+/// Whether [arg] names a program file for the `dart` CLI.
+bool _isProgramFile(String arg) {
+  final first = arg.toLowerCase();
   return programFileSuffixes.any(first.endsWith);
 }
 
-/// Returns [args] with [suppressAnalyticsFlag] inserted before the command,
-/// unless already present. The flag is global, so it must precede the
-/// command (`dart --suppress-analytics pub ...`); appending it after the
-/// command would make pub reject it. File-form executions ([isFileForm])
-/// pass through unchanged: the VM rejects the flag there (exit 255), so the
-/// program keeps the caller env and any telemetry the SDK itself writes on
-/// a file run is outside what the launcher can suppress. An [args] holding [suppressAnalyticsFlag] or
-/// [noSuppressAnalyticsFlag] passes through unchanged, never duplicated, and
-/// nothing else is ever reordered.
-List<String> withSuppressedAnalytics(List<String> args) {
-  if (args.contains(suppressAnalyticsFlag) ||
-      args.contains(noSuppressAnalyticsFlag)) {
-    return args;
+/// Whether [args] to the `dart` CLI run a program file.
+///
+/// Skips leading arguments starting with `-` (global flags such as
+/// `--enable-asserts`), then the first non-flag argument is a program file
+/// when it ends, case-insensitively, in a [programFileSuffixes] entry
+/// (`program.dart`, `app.dill`, ...). An argv with no positional argument is
+/// not a program file: the dart CLI then runs its front end (`dart`,
+/// `dart --help`, `dart --verbose`), which can write telemetry on its own.
+/// A command (`pub`, `format`, `help`, ...) is not a program file either.
+/// Mirrors the shell launcher (`RUN_HOME_SH` in
+/// `//flutter/private:run_home.bzl` and the Windows `.bat` in
+/// `//dart:flutter_sdk_binary`).
+bool isFileForm(List<String> args) {
+  final rest = _positionalArgs(args);
+  if (rest.isEmpty) return false;
+  return _isProgramFile(rest.first);
+}
+
+/// Whether [args] name a command the `dart` CLI handles in command form.
+///
+/// The remaining case after [isFileForm] and an argv with no positional
+/// argument: the first non-flag argument is a command such as `pub`, `format`
+/// or `help`.
+bool _isCommandForm(List<String> args) {
+  final rest = _positionalArgs(args);
+  return rest.isNotEmpty && !_isProgramFile(rest.first);
+}
+
+/// The home policy for [args] that guarantees nothing is written under the
+/// caller's home directories.
+///
+/// * A leading [noSuppressAnalyticsFlag] asks for analytics, so the run gets a
+///   private home; the flag is left where the caller put it.
+/// * An argv with no positional argument (`dart`, `dart --help`,
+///   `dart --verbose`, `dart --version`) gets a private home: dartdev runs and
+///   the flag does not stop every form (`--verbose` still writes telemetry).
+/// * A program file ([isFileForm]) gets a private home: the VM rejects the
+///   suppression flag (exit 255).
+/// * Everything else is command form ([_isCommandForm]): the caller env is
+///   kept and [withSuppressedAnalytics] prepends the flag.
+RunHomePolicy runHomePolicy(List<String> args) {
+  if (_leadingFlags(args).contains(noSuppressAnalyticsFlag)) {
+    return RunHomePolicy.privateHome;
   }
-  if (isFileForm(args)) return args;
+  if (isFileForm(args)) return RunHomePolicy.privateHome;
+  if (!_isCommandForm(args)) return RunHomePolicy.privateHome;
+  return RunHomePolicy.callerHomeSuppressed;
+}
+
+/// Returns [args] with [suppressAnalyticsFlag] inserted before the command,
+/// unless the run already carries an analytics policy.
+///
+/// The flag is global, so it must precede the command (`dart
+/// --suppress-analytics pub ...`); appending it after the command would make
+/// pub reject it. Only a [RunHomePolicy.callerHomeSuppressed] argv takes the
+/// flag. Program files and argv with no command ([runHomePolicy] returns a
+/// private home for those) pass through unchanged: the VM rejects the flag
+/// there (exit 255), and dartdev still writes telemetry for `--verbose` when
+/// the flag is present. An argv holding a leading [suppressAnalyticsFlag] or
+/// [noSuppressAnalyticsFlag] states its analytics policy already; nothing is
+/// duplicated and nothing else is ever reordered.
+List<String> withSuppressedAnalytics(List<String> args) {
+  if (runHomePolicy(args) != RunHomePolicy.callerHomeSuppressed) return args;
+  if (_leadingFlags(args).contains(suppressAnalyticsFlag)) return args;
   return <String>[suppressAnalyticsFlag, ...args];
 }
 

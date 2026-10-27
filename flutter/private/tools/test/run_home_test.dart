@@ -26,55 +26,115 @@ String _runHomeBzl() {
   return File(Runfiles.create().rlocation(rel)).readAsStringSync();
 }
 
-// The shared classification table (FF-herm-dart-fileform, ledger row
-// opus-2026-10-26:L-1): every row states the `dart` CLI arguments and the
-// exact argv the launcher must exec. The Dart unit test and the bash
-// launcher test below run this same table, and the Windows `.bat` in
+// The shared classification table (FF-herm-bare-telemetry): every row states
+// the `dart` CLI arguments, the home policy the launcher must apply, and the
+// exact argv the launcher must exec. The Dart unit test and the bash launcher
+// test below run this same table, and the Windows `.bat` in
 // `//dart:flutter_sdk_binary` mirrors it, so the three launchers agree.
-const _classificationTable = <({List<String> args, List<String> want})>[
-  // No args: file form, passes through unchanged.
-  (args: [], want: []),
-  // Global flags only: file form, unchanged (the VM rejects the flag).
-  (args: ['--version'], want: ['--version']),
-  (args: ['--verbose'], want: ['--verbose']),
-  // Program files: file form, unchanged.
-  (args: ['hello.dart'], want: ['hello.dart']),
-  (
-    args: ['--enable-asserts', 'hello.dart'],
-    want: ['--enable-asserts', 'hello.dart'],
-  ),
-  (args: ['HELLO.DART'], want: ['HELLO.DART']),
-  (args: ['app.dill'], want: ['app.dill']),
-  (args: ['APP.SNAPSHOT'], want: ['APP.SNAPSHOT']),
-  (args: ['app.aot'], want: ['app.aot']),
-  (args: ['app.jit'], want: ['app.jit']),
-  // Commands: the flag is prepended, nothing else reordered.
-  (
-    args: ['pub', 'get'],
-    want: ['--suppress-analytics', 'pub', 'get'],
-  ),
-  (
-    args: ['--verbose', 'pub', 'get'],
-    want: ['--suppress-analytics', '--verbose', 'pub', 'get'],
-  ),
-  (
-    args: ['-v', 'format', '.'],
-    want: ['--suppress-analytics', '-v', 'format', '.'],
-  ),
-  (
-    args: ['run', 'hello.dart'],
-    want: ['--suppress-analytics', 'run', 'hello.dart'],
-  ),
-  // An already-held flag passes through, never duplicated.
-  (
-    args: ['--suppress-analytics', 'pub', 'get'],
-    want: ['--suppress-analytics', 'pub', 'get'],
-  ),
-  (
-    args: ['--no-suppress-analytics', 'pub', 'get'],
-    want: ['--no-suppress-analytics', 'pub', 'get'],
-  ),
-];
+const _private = run_home.RunHomePolicy.privateHome;
+const _caller = run_home.RunHomePolicy.callerHomeSuppressed;
+
+const _classificationTable =
+    <
+      ({
+        List<String> args,
+        run_home.RunHomePolicy policy,
+        List<String> want,
+      })
+    >[
+      // No positional argument: dartdev runs its front end. The suppression flag
+      // covers some of these shapes but not `--verbose`, so the launcher uses a
+      // private home and leaves the arguments unchanged.
+      (args: [], policy: _private, want: []),
+      (args: ['--help'], policy: _private, want: ['--help']),
+      (args: ['-h'], policy: _private, want: ['-h']),
+      (args: ['--verbose'], policy: _private, want: ['--verbose']),
+      (args: ['-v'], policy: _private, want: ['-v']),
+      (
+        args: ['--help', '--verbose'],
+        policy: _private,
+        want: ['--help', '--verbose'],
+      ),
+      (
+        args: ['--verbose', '--help'],
+        policy: _private,
+        want: ['--verbose', '--help'],
+      ),
+      (args: ['--version'], policy: _private, want: ['--version']),
+      // The reported hole: the flag alone still lets `--verbose` write telemetry.
+      (
+        args: ['--suppress-analytics', '--verbose'],
+        policy: _private,
+        want: ['--suppress-analytics', '--verbose'],
+      ),
+      (
+        args: ['--suppress-analytics'],
+        policy: _private,
+        want: ['--suppress-analytics'],
+      ),
+      // Program files: private home, arguments unchanged (the VM rejects the
+      // analytics flag for a program file with exit 255).
+      (args: ['hello.dart'], policy: _private, want: ['hello.dart']),
+      (
+        args: ['--enable-asserts', 'hello.dart'],
+        policy: _private,
+        want: ['--enable-asserts', 'hello.dart'],
+      ),
+      (args: ['HELLO.DART'], policy: _private, want: ['HELLO.DART']),
+      (args: ['app.dill'], policy: _private, want: ['app.dill']),
+      (args: ['APP.SNAPSHOT'], policy: _private, want: ['APP.SNAPSHOT']),
+      (args: ['app.aot'], policy: _private, want: ['app.aot']),
+      (args: ['app.jit'], policy: _private, want: ['app.jit']),
+      // Commands: caller home, flag prepended, nothing else reordered.
+      (
+        args: ['help'],
+        policy: _caller,
+        want: ['--suppress-analytics', 'help'],
+      ),
+      (
+        args: ['help', 'pub'],
+        policy: _caller,
+        want: ['--suppress-analytics', 'help', 'pub'],
+      ),
+      (
+        args: ['pub', 'get'],
+        policy: _caller,
+        want: ['--suppress-analytics', 'pub', 'get'],
+      ),
+      (
+        args: ['--verbose', 'pub', 'get'],
+        policy: _caller,
+        want: ['--suppress-analytics', '--verbose', 'pub', 'get'],
+      ),
+      (
+        args: ['-v', 'format', '.'],
+        policy: _caller,
+        want: ['--suppress-analytics', '-v', 'format', '.'],
+      ),
+      (
+        args: ['run', 'hello.dart'],
+        policy: _caller,
+        want: ['--suppress-analytics', 'run', 'hello.dart'],
+      ),
+      // An already-held leading flag passes through, never duplicated.
+      (
+        args: ['--suppress-analytics', 'pub', 'get'],
+        policy: _caller,
+        want: ['--suppress-analytics', 'pub', 'get'],
+      ),
+      // An explicit opt-out asks for analytics, so the run uses a private home
+      // and the caller's directories stay clean.
+      (
+        args: ['--no-suppress-analytics', 'pub', 'get'],
+        policy: _private,
+        want: ['--no-suppress-analytics', 'pub', 'get'],
+      ),
+      (
+        args: ['--no-suppress-analytics'],
+        policy: _private,
+        want: ['--no-suppress-analytics'],
+      ),
+    ];
 
 // The `RUN_HOME_SH` snippet, extracted from the `.bzl` source so the bash
 // test below executes the shipped text, not a copy.
@@ -96,26 +156,31 @@ Future<bool> _bashAvailable() async {
   }
 }
 
-// Runs the shipped `RUN_HOME_SH` snippet over [args] through a stub `dart`
-// that records the argv it was execed with, and returns that argv.
-Future<List<String>> _bashArgv(
+/// Runs the shipped `RUN_HOME_SH` snippet over [args] through a stub `dart`
+/// that records the argv it was execed with and the `HOME` it saw. Returns
+/// both, so the caller can assert the argv and whether the run used the
+/// caller home or a private one.
+Future<({List<String> argv, String home})> _bashRun(
   Directory scratch,
   String snippet,
   List<String> args,
+  String callerHome,
 ) async {
   final stub = File('${scratch.path}/stub.sh');
   await stub.writeAsString(
     '#!/usr/bin/env bash\n'
     'echo stub-ran > "\$STUB_RAN"\n'
+    'printf \'%s\\n\' "\$HOME" > "\$STUB_HOME"\n'
     'if (( \$# > 0 )); then printf \'%s\\n\' "\$@" > "\$STUB_OUT";'
     ' else : > "\$STUB_OUT"; fi\n',
   );
   final driver = File('${scratch.path}/driver.sh');
   await driver.writeAsString(
-    '$snippet\nrun_home_caller_home_exec "\$STUB" "\$@"\n',
+    '$snippet\nrun_home_exec "\$STUB" "\$@"\n',
   );
   final out = File('${scratch.path}/out.txt');
   final ran = File('${scratch.path}/ran.txt');
+  final home = File('${scratch.path}/home.txt');
   expect((await Process.run('chmod', ['+x', stub.path])).exitCode, 0);
   final result = await Process.run(
     'bash',
@@ -124,11 +189,14 @@ Future<List<String>> _bashArgv(
       'STUB': stub.path,
       'STUB_OUT': out.path,
       'STUB_RAN': ran.path,
+      'STUB_HOME': home.path,
+      'HOME': callerHome,
+      'TMPDIR': scratch.path,
     },
   );
   expect(result.exitCode, 0, reason: 'bash driver failed: ${result.stderr}');
   expect(ran.existsSync(), isTrue, reason: 'the stub was never execed');
-  return out.readAsLinesSync();
+  return (argv: out.readAsLinesSync(), home: home.readAsStringSync().trim());
 }
 
 void main() {
@@ -155,6 +223,32 @@ void main() {
     });
   });
 
+  group('isFileForm', () {
+    test('is a program file only, never an empty or command argv', () {
+      expect(run_home.isFileForm(['hello.dart']), isTrue);
+      expect(run_home.isFileForm(['--enable-asserts', 'hello.dart']), isTrue);
+      expect(run_home.isFileForm(['HELLO.DART']), isTrue);
+      expect(run_home.isFileForm([]), isFalse);
+      expect(run_home.isFileForm(['--help']), isFalse);
+      expect(run_home.isFileForm(['--verbose']), isFalse);
+      expect(run_home.isFileForm(['help']), isFalse);
+      expect(run_home.isFileForm(['pub', 'get']), isFalse);
+      expect(run_home.isFileForm(['run', 'hello.dart']), isFalse);
+    });
+  });
+
+  group('runHomePolicy', () {
+    test('matches the shared table', () {
+      for (final row in _classificationTable) {
+        expect(
+          run_home.runHomePolicy(row.args),
+          row.policy,
+          reason: 'policy for args ${row.args}',
+        );
+      }
+    });
+  });
+
   group('withSuppressedAnalytics', () {
     test('inserts the flag before the command', () {
       expect(
@@ -174,11 +268,11 @@ void main() {
       );
     });
 
-    test('an empty argument list is file form and passes through', () {
+    test('an empty argument list is not file form and passes through', () {
       expect(run_home.withSuppressedAnalytics([]), isEmpty);
     });
 
-    test('command form takes the flag, file form passes through', () {
+    test('command form takes the flag, private-home form passes through', () {
       for (final row in _classificationTable) {
         expect(
           run_home.withSuppressedAnalytics(row.args),
@@ -197,13 +291,41 @@ void main() {
         final snippet = _runHomeSnippet();
         final scratch = Directory.systemTemp.createTempSync('run-home-bash-');
         try {
+          final caller = Directory('${scratch.path}/caller')..createSync();
+          final marker = File('${caller.path}/marker')
+            ..writeAsStringSync('caller home');
           for (final row in _classificationTable) {
-            expect(
-              await _bashArgv(scratch, snippet, row.args),
-              row.want,
-              reason: 'bash args ${row.args}',
+            final got = await _bashRun(
+              scratch,
+              snippet,
+              row.args,
+              caller.path,
             );
+            expect(got.argv, row.want, reason: 'bash args ${row.args}');
+            if (row.policy == run_home.RunHomePolicy.privateHome) {
+              expect(
+                got.home,
+                isNot(caller.path),
+                reason: 'private args ${row.args} kept the caller home',
+              );
+              expect(
+                Directory(got.home).existsSync(),
+                isFalse,
+                reason: 'private args ${row.args} left their home behind',
+              );
+            } else {
+              expect(
+                got.home,
+                caller.path,
+                reason: 'command args ${row.args} lost the caller home',
+              );
+            }
           }
+          expect(
+            caller.listSync().map((entry) => entry.path),
+            [marker.path],
+            reason: 'the launcher wrote under the caller home',
+          );
         } finally {
           scratch.deleteSync(recursive: true);
         }
@@ -239,7 +361,7 @@ void main() {
 
     test('the RUN_HOME_SH snippet passes the same flag', () {
       final bzl = _runHomeBzl();
-      final snippet = bzl.substring(bzl.indexOf('run_home_caller_home_exec()'));
+      final snippet = bzl.substring(bzl.indexOf('run_home_exec()'));
       // Both the already-present check and the insertion site spell the
       // flag literally, so a const-only change fails here until the
       // snippet follows.
@@ -247,12 +369,13 @@ void main() {
       expect(snippet, contains('exec '));
     });
 
-    test('the RUN_HOME_SH snippet classifies file form like the Dart', () {
+    test('the RUN_HOME_SH snippet classifies like the Dart table', () {
       final snippet = _runHomeSnippet();
-      // The already-present check covers both flags, leading dash-arguments
-      // are skipped, and the program suffixes match the Dart table.
+      // The leading check covers both flags, leading dash-arguments are
+      // skipped, and the program suffixes match the Dart table.
       expect(snippet, contains('"${run_home.noSuppressAnalyticsFlag}"'));
       expect(snippet, contains('== -*'));
+      expect(snippet, contains('run_home_private_exec'));
       for (final suffix in run_home.programFileSuffixes) {
         expect(snippet, contains(suffix));
       }
