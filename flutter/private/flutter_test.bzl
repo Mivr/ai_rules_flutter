@@ -74,7 +74,6 @@ load(
     "PLATFORM_CONSTRAINT_ATTRS",
     "check_unreplaced_hooks",
     "declare_flutter_assets_dir",
-    "detect_target_platform",
     "extract_library_tags_action",
     "flutter_build_assets",
     "flutter_compile_shaders",
@@ -107,13 +106,14 @@ load(
     _make_test_artifacts = "make_test_artifacts",
     _make_test_selection = "make_test_selection",
 )
+load("//flutter/private:platform_constraints.bzl", "target_platform_from_constraints")
 
 # Re-exported from `//flutter/private:flutter_test_common.bzl`, which holds the
 # bootstrap implementation both test rules share. Kept under this name so
 # existing loads of `make_bootstrap_content` from this module keep working.
 make_bootstrap_content = _make_bootstrap_content
 
-def _flutter_test_impl(ctx):
+def _flutter_test_sdk_info(ctx):
     flutter_toolchain = ctx.toolchains["@rules_flutter//flutter:toolchain_type"]
     flutter_sdk_info = flutter_toolchain.flutter_sdk_info
 
@@ -124,7 +124,9 @@ def _flutter_test_impl(ctx):
             "typically the case for cross-compile-only configurations — " +
             "build the test target with the host platform.",
         )
+    return flutter_sdk_info
 
+def _check_flutter_test_deps(ctx):
     if not _can_bootstrap(ctx.attr.deps):
         fail((
             "flutter_test target {name} must depend on package:flutter_test " +
@@ -140,26 +142,7 @@ def _flutter_test_impl(ctx):
     if hook_err != None:
         fail(hook_err)
 
-    # Tests always run on the host, but the platform still has to be resolved
-    # before the kernel compile: the frontend_server reads the native-assets
-    # manifest at compile time, and the manifest is keyed by `<os>_<arch>`.
-    is_macos = ctx.target_platform_has_constraint(
-        ctx.attr._macos_constraint[platform_common.ConstraintValueInfo],
-    )
-    is_ios = ctx.target_platform_has_constraint(
-        ctx.attr._ios_constraint[platform_common.ConstraintValueInfo],
-    )
-    is_linux = ctx.target_platform_has_constraint(
-        ctx.attr._linux_constraint[platform_common.ConstraintValueInfo],
-    )
-    is_windows = ctx.target_platform_has_constraint(
-        ctx.attr._windows_constraint[platform_common.ConstraintValueInfo],
-    )
-    is_android = ctx.target_platform_has_constraint(
-        ctx.attr._android_constraint[platform_common.ConstraintValueInfo],
-    )
-    target_platform = detect_target_platform(is_ios, is_macos, is_linux, is_windows, is_android)
-
+def _flutter_test_native_assets(ctx, flutter_sdk_info, target_platform):
     # Native Assets reach a test the same two ways they reach an application:
     # declared with `flutter_native_asset` and propagated on `FlutterInfo`, or
     # owned by a pub package and lifted off the Dart package graph. Deliberate
@@ -186,8 +169,13 @@ def _flutter_test_impl(ctx):
         # No bundle to resolve against — the libraries ship in runfiles.
         layout = "runfiles",
     )
-    bundled_code_assets = collect_bundled_code_asset_files(native_assets_list)
+    return struct(
+        list = native_assets_list,
+        manifest = native_assets_manifest,
+        bundled = collect_bundled_code_asset_files(native_assets_list),
+    )
 
+def _flutter_test_sources(ctx):
     # Per-target bootstrap. Imports the user's test via its `package:` URI when
     # `main` sits under `<lib_root>/lib/` and via `org-dartlang-app:///<stable_path>`
     # otherwise. Written by the shared helper, which also stages the golden
@@ -211,7 +199,14 @@ def _flutter_test_impl(ctx):
         lib_root,
         ctx.attr.language_version,
     )
+    return struct(
+        lib_root = lib_root,
+        bootstrap = bootstrap,
+        staged_comparator = staged_comparator,
+        packages = packages,
+    )
 
+def _flutter_test_kernel(ctx, flutter_sdk_info, sources, native_assets):
     # Compile bootstrap+test to kernel modularly when eligible, falling back
     # to whole-program compilation otherwise (e.g. per-test defines or code assets).
     # Both paths compile against the debug platform dill with assertions enabled
@@ -224,8 +219,8 @@ def _flutter_test_impl(ctx):
         ctx,
         flutter_sdk_info,
         own_files,
-        packages,
-        native_assets_list,
+        sources.packages,
+        native_assets.list,
     )
     base_dill = None
     if modular_tools != None:
@@ -233,19 +228,22 @@ def _flutter_test_impl(ctx):
             ctx,
             flutter_sdk_info,
             modular_tools,
-            bootstrap,
-            staged_comparator,
-            lib_root,
-            packages,
+            sources.bootstrap,
+            sources.staged_comparator,
+            sources.lib_root,
+            sources.packages,
             kernel_dill,
         )
     else:
-        all_srcs = list(ctx.files.srcs) + collect_transitive_srcs(ctx.attr.deps).to_list() + [ctx.file.main, bootstrap]
-        if staged_comparator:
-            all_srcs.append(staged_comparator)
+        all_srcs = list(ctx.files.srcs) + collect_transitive_srcs(ctx.attr.deps).to_list() + [
+            ctx.file.main,
+            sources.bootstrap,
+        ]
+        if sources.staged_comparator:
+            all_srcs.append(sources.staged_comparator)
         pc = compile_kernel_package_config(
             ctx,
-            packages,
+            sources.packages,
             all_srcs,
             roots = {ctx.attr.package_name: True} if ctx.attr.package_name else None,
         )
@@ -258,11 +256,11 @@ def _flutter_test_impl(ctx):
                 platform_dill = flutter_sdk_info.platform_kernel_dill,
             ),
             flutter_kernel_sources(
-                main = bootstrap,
-                entrypoint_uri = app_scheme_location(bootstrap).uri,
+                main = sources.bootstrap,
+                entrypoint_uri = app_scheme_location(sources.bootstrap).uri,
                 srcs = pc.srcs,
                 package_config = pc.config_file,
-                native_assets_manifest = native_assets_manifest,
+                native_assets_manifest = native_assets.manifest,
             ),
             flutter_kernel_outputs(output = kernel_dill),
             flutter_kernel_options(
@@ -273,6 +271,12 @@ def _flutter_test_impl(ctx):
             flutter_kernel_dills(),
         )
 
+    return struct(
+        kernel_dill = kernel_dill,
+        base_dill = base_dill,
+    )
+
+def _flutter_test_assets(ctx, flutter_sdk_info, kernel_dill):
     # Build a `flutter_assets/` tree for the test. Material widgets pull
     # `shaders/ink_sparkle.frag` at first paint, and pub-package fonts/assets
     # (e.g. MaterialIcons) need to land in the bundle for tests that resolve
@@ -294,7 +298,9 @@ def _flutter_test_impl(ctx):
             is_debug = True,
         ),
     )
+    return flutter_assets
 
+def _flutter_test_run(ctx, artifacts, native_assets):
     # The entrypoint's own `@Tags`, extracted at build time (see
     # `extract_library_tags_action`): the runner injects them as the root
     # group's metadata, so they inherit down to every test in the suite.
@@ -306,9 +312,9 @@ def _flutter_test_impl(ctx):
     runner = _flutter_test_runner(
         ctx = ctx,
         artifacts = _make_test_artifacts(
-            dill = kernel_dill,
-            base_dill = base_dill,
-            assets_dir = flutter_assets,
+            dill = artifacts.kernel_dill,
+            base_dill = artifacts.base_dill,
+            assets_dir = artifacts.flutter_assets,
             library_tags = library_tags,
         ),
         selection = _make_test_selection(
@@ -325,12 +331,16 @@ def _flutter_test_impl(ctx):
         # its `bundle_filename`, `bridge_dart_code_assets` under this rule's —
         # so what lands in runfiles is the File the manifest points at rather
         # than the `_solib_<arch>/` original.
-        extra_files = bundled_code_assets.to_list(),
+        extra_files = native_assets.bundled.to_list(),
     )
-    executable = runner.executable
-    runfiles = runner.runfiles
-    env_info = runner.env
+    return struct(
+        executable = runner.executable,
+        runfiles = runner.runfiles,
+        env = runner.env,
+        library_tags = library_tags,
+    )
 
+def _flutter_test_providers(ctx, sources, artifacts, runner):
     instrumented_files_info = coverage_common.instrumented_files_info(
         ctx,
         source_attributes = ["srcs", "main"],
@@ -345,11 +355,11 @@ def _flutter_test_impl(ctx):
 
     return [
         DefaultInfo(
-            executable = executable,
-            files = depset([executable] + generated_dart_srcs),
-            runfiles = runfiles,
+            executable = runner.executable,
+            files = depset([runner.executable] + generated_dart_srcs),
+            runfiles = runner.runfiles,
         ),
-        env_info,
+        runner.env,
         instrumented_files_info,
         # What lets rules_dart's analysis check a `flutter_test`. The test's
         # `main` belongs to no package's `lib/`, so no
@@ -384,7 +394,7 @@ def _flutter_test_impl(ctx):
             label = ctx.label,
             package = dart_package_identity(
                 package_name = ctx.attr.package_name,
-                lib_root = derive_lib_root(ctx.label.workspace_root, ctx.label.package),
+                lib_root = sources.lib_root,
                 # The same version the compile path above states. Analysis reading
                 # a different one than the compiler is the divergence this attr
                 # exists to close, reappearing one layer down.
@@ -404,12 +414,32 @@ def _flutter_test_impl(ctx):
         # `output_group` on one of these feeds the matching
         # `flutter_prebuilt_test` attr.
         OutputGroupInfo(
-            test_kernel = depset([kernel_dill]),
-            test_base_kernel = depset([base_dill]) if base_dill != None else depset(),
-            test_assets = depset([flutter_assets]),
-            test_library_tags = depset([library_tags]),
+            test_kernel = depset([artifacts.kernel_dill]),
+            test_base_kernel = depset([artifacts.base_dill]) if artifacts.base_dill != None else depset(),
+            test_assets = depset([artifacts.flutter_assets]),
+            test_library_tags = depset([runner.library_tags]),
         ),
     ]
+
+def _flutter_test_impl(ctx):
+    flutter_sdk_info = _flutter_test_sdk_info(ctx)
+    _check_flutter_test_deps(ctx)
+
+    # Tests always run on the host, but the platform still has to be resolved
+    # before the kernel compile: the frontend_server reads the native-assets
+    # manifest at compile time, and the manifest is keyed by `<os>_<arch>`.
+    target_platform = target_platform_from_constraints(ctx).target_platform
+
+    native_assets = _flutter_test_native_assets(ctx, flutter_sdk_info, target_platform)
+    sources = _flutter_test_sources(ctx)
+    kernel = _flutter_test_kernel(ctx, flutter_sdk_info, sources, native_assets)
+    artifacts = struct(
+        kernel_dill = kernel.kernel_dill,
+        base_dill = kernel.base_dill,
+        flutter_assets = _flutter_test_assets(ctx, flutter_sdk_info, kernel.kernel_dill),
+    )
+    runner = _flutter_test_run(ctx, artifacts, native_assets)
+    return _flutter_test_providers(ctx, sources, artifacts, runner)
 
 # flutter_test takes the compilation attrs plus the asset-bundle attrs.
 # Material widgets implicitly require `shaders/ink_sparkle.frag` and the
@@ -526,6 +556,8 @@ _TEST_ATTRS.update(PLATFORM_CONSTRAINT_ATTRS)
 _TEST_ATTRS.update(MODULAR_KERNEL_ATTRS)
 _TEST_ATTRS["_library_tags_tool"] = LIBRARY_TAGS_TOOL_ATTR
 _TEST_ATTRS["_tool"] = attr.label(
+    doc = "The test runner binary that hosts the `package:test` protocol " +
+          "and drives `flutter_tester`, built for the exec configuration.",
     default = Label("//flutter/private/tools:flutter_test_runner"),
     cfg = "exec",
 )
@@ -549,6 +581,8 @@ _TEST_ATTRS["_golden_comparator_src"] = attr.label(
 # Dart, not a choice any BUILD file makes — and it reaches only
 # `dart_analyzable_info`, so no compile action's inputs change.
 _TEST_ATTRS["_sky_engine"] = attr.label(
+    doc = "The `package:sky_engine` sources the analyzer needs to resolve " +
+          "`dart:ui` in a widget test; compilation does not use them.",
     default = Label("@flutter_sky_engine//:sky_engine"),
     providers = [DartInfo],
 )
