@@ -59,7 +59,32 @@ let package = Package(
 )
 """
 
-_CODE_NAMES = ["a.c", "a.cc", "a.cpp", "a.cxx", "a.m", "a.mm", "a.h", "a.hh", "a.hpp", "a.inc", "a.s", "a.S", "module.modulemap", "Custom.modulemap"]
+_EXCLUDE_RESOURCE = """// swift-tools-version:5.9
+import PackageDescription
+let package = Package(
+    name: "Docs",
+    products: [.library(name: "Docs", targets: ["Docs"])],
+    targets: [.target(name: "Docs", exclude: ["Assets.xcassets"])],
+)
+"""
+
+_CODE_NAMES = ["a.c", "a.cc", "a.cpp", "a.cxx", "a.c++", "a.C", "a.cp", "a.m", "a.mm", "a.M", "a.h", "a.hh", "a.hpp", "a.hxx", "a.inc", "a.s", "a.S", "a.asm", "module.modulemap", "Custom.modulemap"]
+
+# Every resource type SwiftPM processes without a `resources:` declaration,
+# paired with the leading path segment the refusal must name.
+_RESOURCE_PATHS = [
+    ("Main.xib", "Main.xib"),
+    ("Main.nib", "Main.nib"),
+    ("Main.storyboard/Info.plist", "Main.storyboard"),
+    ("Assets.xcassets/Contents.json", "Assets.xcassets"),
+    ("Model.xcdatamodeld/model.xcdatamodel/contents", "Model.xcdatamodeld"),
+    ("Model.xcdatamodel/contents", "Model.xcdatamodel"),
+    ("Mapping.xcmappingmodel/xcmapping.xml", "Mapping.xcmappingmodel"),
+    ("Shader.metal", "Shader.metal"),
+    ("Strings.xcstrings/Localizable.xcstrings", "Strings.xcstrings"),
+    ("PrivacyInfo.xcprivacy", "PrivacyInfo.xcprivacy"),
+    ("Base.lproj/Localizable.strings", "Base.lproj"),
+]
 
 _SKIPPED_NAMES = ["README.md", "LICENSE", "notes.txt", "logo.png", "data.json", "Guide.markdown", "CHANGELOG", "Makefile", "Docs.swift"]
 
@@ -274,6 +299,58 @@ def _docc_swift_skipped_test_impl(ctx):
     asserts.equals(env, [rel_dir + "/Docs.swift"], selected.srcs)
     return unittest.end(env)
 
+def _refuses_implicit_resources_test_impl(ctx):
+    env = unittest.begin(ctx)
+    target = _only_target(_DOCS)
+    rel_dir = "pkg/Sources/Docs"
+    for resource, named in _RESOURCE_PATHS:
+        files = {
+            rel_dir + "/Docs.swift": True,
+            rel_dir + "/" + resource: True,
+        }
+        selected = swiftpm_select_target_files("docs", target, rel_dir, files, {})
+        asserts.true(env, not selected.ok)
+        asserts.true(env, "no Bazel translation" in selected.error)
+        asserts.true(env, "Point at a hand-written BUILD file with swift_package_build_files" in selected.error)
+        asserts.true(env, "\"docs\"" in selected.error)
+        asserts.true(env, "\"Docs\"" in selected.error)
+        asserts.true(env, (rel_dir + "/" + named) in selected.error)
+
+    # A resource directory is refused even when it holds no file yet.
+    selected = swiftpm_select_target_files("docs", target, rel_dir, {rel_dir + "/Docs.swift": True}, {rel_dir + "/Empty.xcassets": True})
+    asserts.true(env, not selected.ok)
+    asserts.true(env, (rel_dir + "/Empty.xcassets") in selected.error)
+
+    # `sources:` narrows compilation but does not hide a resource SwiftPM
+    # still processes, while `exclude:` removes the resource and the refusal.
+    narrowed = swiftpm_select_target_files("p", _only_target(_SOURCES), "pkg/Sources/P", {
+        "pkg/Sources/P/Real.swift": True,
+        "pkg/Sources/P/Assets.xcassets/Contents.json": True,
+    }, {})
+    asserts.true(env, not narrowed.ok)
+    asserts.true(env, "pkg/Sources/P/Assets.xcassets" in narrowed.error)
+    excluded = swiftpm_select_target_files("docs", _only_target(_EXCLUDE_RESOURCE), rel_dir, {
+        rel_dir + "/Docs.swift": True,
+        rel_dir + "/Assets.xcassets/Contents.json": True,
+    }, {rel_dir + "/Assets.xcassets": True})
+    asserts.true(env, excluded.ok)
+    asserts.equals(env, [rel_dir + "/Docs.swift"], excluded.srcs)
+    excluded_flat = swiftpm_select_target_files("docs", _only_target(_EXCLUDE_RESOURCE), rel_dir, {
+        rel_dir + "/Docs.swift": True,
+        rel_dir + "/Assets.xcassets/Contents.json": True,
+    }, {})
+    asserts.true(env, excluded_flat.ok)
+    asserts.equals(env, [rel_dir + "/Docs.swift"], excluded_flat.srcs)
+
+    # DocC catalog contents stay ignored even when they look like resources.
+    docc = swiftpm_select_target_files("docs", target, rel_dir, {
+        rel_dir + "/Docs.swift": True,
+        rel_dir + "/Docs.docc/Assets.xcassets/Contents.json": True,
+    }, {rel_dir + "/Docs.docc": True, rel_dir + "/Docs.docc/Assets.xcassets": True})
+    asserts.true(env, docc.ok)
+    asserts.equals(env, [rel_dir + "/Docs.swift"], docc.srcs)
+    return unittest.end(env)
+
 _is_code_file_test = unittest.make(_is_code_file_test_impl)
 _skips_non_code_files_test = unittest.make(_skips_non_code_files_test_impl)
 _classifies_c_family_files_test = unittest.make(_classifies_c_family_files_test_impl)
@@ -286,6 +363,7 @@ _drops_missing_sources_test = unittest.make(_drops_missing_sources_test_impl)
 _all_missing_sources_zero_files_test = unittest.make(_all_missing_sources_zero_files_test_impl)
 _escape_still_refused_test = unittest.make(_escape_still_refused_test_impl)
 _docc_swift_skipped_test = unittest.make(_docc_swift_skipped_test_impl)
+_refuses_implicit_resources_test = unittest.make(_refuses_implicit_resources_test_impl)
 
 def swiftpm_package_test_suite(name):
     """Registers the target file selection unit tests."""
@@ -303,6 +381,7 @@ def swiftpm_package_test_suite(name):
         _all_missing_sources_zero_files_test,
         _escape_still_refused_test,
         _docc_swift_skipped_test,
+        _refuses_implicit_resources_test,
     )
     native.test_suite(
         name = name,

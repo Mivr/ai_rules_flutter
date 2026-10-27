@@ -125,55 +125,83 @@ def _swiftpm_resolve_target_dir(ctx, identity, root, target):
             return struct(ok = True, error = "", rel_dir = rel_dir)
     return struct(ok = False, error = _swiftpm_repo_fail(identity, "target {target} has no `path:` and none of {dirs} exist".format(target = repr(target.name), dirs = [base + "/" + target.name for base in _SWIFTPM_DEFAULT_DIRS])), rel_dir = "")
 
-_SWIFTPM_CODE_EXTENSIONS = {
-    "c": True,
-    "cc": True,
-    "cpp": True,
-    "cxx": True,
-    "m": True,
-    "mm": True,
-    "h": True,
-    "hh": True,
-    "hpp": True,
-    "inc": True,
-    "s": True,
-    "S": True,
+# One table sorts every target file by its extension. The source and header
+# spellings are the union the selector and `swiftpm_is_code_file` used to keep
+# apart; the resource spellings are the types SwiftPM processes without a
+# `resources:` declaration (`TargetSourcesBuilder`'s xcbuild rules and the
+# localization directories it treats the same way).
+_SWIFTPM_FILE_KINDS = {
+    "C": "clang",
+    "M": "clang",
+    "S": "clang",
+    "asm": "clang",
+    "c": "clang",
+    "c++": "clang",
+    "cc": "clang",
+    "cp": "clang",
+    "cpp": "clang",
+    "cxx": "clang",
+    "m": "clang",
+    "mm": "clang",
+    "s": "clang",
+    "h": "header",
+    "hh": "header",
+    "hpp": "header",
+    "hxx": "header",
+    "inc": "header",
+    "lproj": "resource",
+    "metal": "resource",
+    "modulemap": "modulemap",
+    "nib": "resource",
+    "storyboard": "resource",
+    "swift": "swift",
+    "xcassets": "resource",
+    "xcdatamodel": "resource",
+    "xcdatamodeld": "resource",
+    "xcmappingmodel": "resource",
+    "xcprivacy": "resource",
+    "xcstrings": "resource",
+    "xib": "resource",
 }
 
-_SWIFTPM_HEADER_SUFFIXES = [".h", ".hh", ".hpp", ".hxx", ".inc"]
+def _swiftpm_extension(basename):
+    """The extension after a basename's last dot, or "" when it has none.
 
-_SWIFTPM_CLANG_SOURCE_SUFFIXES = [".c", ".cc", ".cpp", ".cxx", ".c++", ".C", ".cp", ".m", ".mm", ".M", ".s", ".S", ".asm"]
+    Args:
+        basename: The file or directory basename (no directory).
+
+    Returns:
+        The extension without its dot, or "".
+    """
+    dot = basename.rfind(".")
+    if dot < 0:
+        return ""
+    return basename[dot + 1:]
 
 def _swiftpm_file_kind(basename):
-    """Sort one filename into Swift, C-family, header, module map or skip.
+    """Sort one basename into Swift, C-family, header, module map, resource or skip.
 
     Args:
         basename: The file's basename (no directory).
 
     Returns:
-        `"swift"`, `"clang"`, `"header"`, `"modulemap"` or `"skip"`.
-        Any other file with no Bazel translation — READMEs, licenses,
-        notes, images, DocC input — is skipped the way SwiftPM ignores
+        `"swift"`, `"clang"`, `"header"`, `"modulemap"`, `"resource"` or
+        `"skip"`. A resource is a type SwiftPM processes without a
+        `resources:` declaration, so the selector refuses it; any other
+        file with no Bazel translation — READMEs, licenses, notes,
+        images, DocC input — is skipped the way SwiftPM ignores
         unhandled files with a warning.
     """
-    if basename.endswith(".swift"):
-        return "swift"
-    if basename == "module.modulemap":
-        return "modulemap"
-    for suffix in _SWIFTPM_HEADER_SUFFIXES:
-        if basename.endswith(suffix):
-            return "header"
-    for suffix in _SWIFTPM_CLANG_SOURCE_SUFFIXES:
-        if basename.endswith(suffix):
-            return "clang"
-    return "skip"
+    return _SWIFTPM_FILE_KINDS.get(_swiftpm_extension(basename), "skip")
 
 def swiftpm_is_code_file(basename):
     """Whether a non-Swift filename is C-family code, a header or a module map.
 
     The target file selector translates these instead of skipping them
     the way it skips files with no Bazel translation (READMEs, licenses,
-    notes, images, DocC input), which SwiftPM ignores with a warning.
+    notes, images, DocC input), which SwiftPM ignores with a warning. It
+    shares `_SWIFTPM_FILE_KINDS` with `_swiftpm_file_kind`, so the public
+    predicate and the selector cannot disagree about an extension.
 
     Args:
         basename: The file's basename (no directory).
@@ -181,12 +209,74 @@ def swiftpm_is_code_file(basename):
     Returns:
         True for C-family sources and headers plus module maps.
     """
-    if basename.endswith(".modulemap"):
-        return True
-    dot = basename.rfind(".")
-    if dot < 0:
-        return False
-    return basename[dot + 1:] in _SWIFTPM_CODE_EXTENSIONS
+    return _swiftpm_file_kind(basename) in ["clang", "header", "modulemap"]
+
+def _swiftpm_resource_path(rel):
+    """The resource a target-relative path belongs to, or "".
+
+    SwiftPM's built-in rules process asset catalogs, interface-builder
+    files, Core Data models, Metal shaders, string catalogs, privacy
+    manifests and everything under a `.lproj` directory as resources
+    even when the manifest declares no `resources:`, which is why the
+    selector refuses them instead of dropping bytes SwiftPM bundles.
+
+    Args:
+        rel: The path relative to the target directory.
+
+    Returns:
+        The leading file or directory segment that is the resource, or
+        "" when the path holds no resource.
+    """
+    segments = rel.split("/")
+    for index, segment in enumerate(segments):
+        if _SWIFTPM_FILE_KINDS.get(_swiftpm_extension(segment), "") == "resource":
+            return "/".join(segments[:index + 1])
+    return ""
+
+def _swiftpm_resource_error(identity, target_name, path):
+    """The fetch failure for one implicitly processed resource.
+
+    Args:
+        identity: The SwiftPM package identity.
+        target_name: The target holding the resource, for messages.
+        path: The repo-relative resource path.
+
+    Returns:
+        The error string; the caller `fail()`s with it.
+    """
+    return _swiftpm_repo_fail(identity, "target {target} holds implicit resource {path}, which has no Bazel translation. Point at a hand-written BUILD file with swift_package_build_files[{identity}] = \"<label>\" to build it another way, or list the resource in the target's `exclude:`".format(
+        target = repr(target_name),
+        path = repr(path),
+        identity = repr(identity),
+    ))
+
+def _swiftpm_find_resource_error(identity, target_name, rel_dir, excluded, files, dirs):
+    """Find the first implicitly processed resource in a target tree.
+
+    Args:
+        identity: The SwiftPM package identity.
+        target_name: The target holding the resource, for messages.
+        rel_dir: The repo-relative target directory.
+        excluded: The repo-relative excluded paths.
+        files: Every file under the target directory (a dict set of
+            repo-relative paths).
+        dirs: Every directory under the target directory (a dict set of
+            repo-relative paths).
+
+    Returns:
+        The fetch failure for the first resource, or "" when the target
+        holds none.
+    """
+    for full in sorted(dirs.keys()) + sorted(files.keys()):
+        if _swiftpm_is_under(full, excluded):
+            continue
+        rel = full[len(rel_dir) + 1:]
+        if _swiftpm_under_docc(rel):
+            continue
+        resource = _swiftpm_resource_path(rel)
+        if resource:
+            return _swiftpm_resource_error(identity, target_name, rel_dir + "/" + resource)
+    return ""
 
 def _swiftpm_is_under(full, roots):
     """Whether a repo-relative path is one of `roots` or sits under one.
@@ -299,7 +389,13 @@ def swiftpm_select_target_files(identity, target, rel_dir, files, dirs):
     target directory contributes its `.swift` sources, its C-family sources
     and headers (split into public and private, with the explicit module
     map when the target ships one), except DocC catalog contents and other
-    files with no Bazel translation, which are skipped.
+    files with no Bazel translation, which are skipped. A resource SwiftPM
+    processes without a `resources:` declaration — an asset catalog,
+    interface-builder file, Core Data model, Metal shader, string catalog,
+    privacy manifest or `.lproj` content — fails the fetch naming the
+    resource, because the generated BUILD cannot bundle it; an `exclude:`
+    entry that removes it removes the refusal, and `sources:` does not hide
+    it because SwiftPM still processes resources outside the source list.
 
     Args:
         identity: The SwiftPM package identity.
@@ -325,6 +421,19 @@ def swiftpm_select_target_files(identity, target, rel_dir, files, dirs):
         if not narrowed.ok:
             return struct(ok = False, error = narrowed.error, srcs = [], c_srcs = [], public_hdrs = [], private_hdrs = [], explicit_map = None, map_in_include = False)
         listed = narrowed.kept
+    resource_excludes = excluded.kept + [rel_dir + "/" + entry for entry in target.exclude]
+    resource_error = _swiftpm_find_resource_error(identity, target.name, rel_dir, resource_excludes, files, dirs)
+    if resource_error:
+        return struct(
+            ok = False,
+            error = resource_error,
+            srcs = [],
+            c_srcs = [],
+            public_hdrs = [],
+            private_hdrs = [],
+            explicit_map = None,
+            map_in_include = False,
+        )
     srcs = []
     c_srcs = []
     headers = []
