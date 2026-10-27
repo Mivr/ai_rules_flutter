@@ -1,8 +1,8 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@rules_apple//apple:ios.bzl", "ios_application")
-load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test")
+load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test", "dart_test")
 load("@rules_flutter//flutter:defs.bzl", "flutter_integration_test", "flutter_test")
-load("@rules_flutter//flutter:ios.bzl", "flutter_ios_simulator_build_test")
+load("@rules_flutter//flutter:ios.bzl", "flutter_ios_registrant_gen", "flutter_ios_simulator_build_test")
 
 exports_files(["pubspec.lock"])
 
@@ -14,12 +14,35 @@ flutter_integration_test(
     assets = ["assets/logo.png"],
     platform = "ios",
     deps = [
+        "//android_only_plugin",
+        "//dart_registration_plugin",
+        "//ffi_plugin",
         "//ios_greeting_plugin",
         "@deps//:flutter",
         "@deps//:flutter_test",
         "@deps//:integration_test",
         "@rules_flutter//flutter:material_icons",
     ],
+)
+
+# The generated iOS native registrant for the app above, consumed on Linux by
+# `:plugin_registrant_filter_test`. It is also what the app itself generates
+# internally; naming it here makes the filtering assertion a portable test
+# instead of an Xcode-only one.
+flutter_ios_registrant_gen(
+    name = "app_test_registrant",
+    application = ":__app_test_app",
+)
+
+# Linux-runnable: the registrant has no import or registration call for the
+# Android-only plugin, while still registering the app's iOS plugin. A
+# filtering regression fails here before the macOS simulator leg.
+dart_test(
+    name = "plugin_registrant_filter_test",
+    args = ["$(rlocationpaths :app_test_registrant)"],
+    data = [":app_test_registrant"],
+    main = "test/plugin_registrant_filter_test.dart",
+    deps = ["@rules_dart//dart/runfiles"],
 )
 
 # The SwiftPM plugin suite: proves a pub path plugin's `Package.swift`
@@ -120,6 +143,9 @@ flutter_test(
     main = "integration_test/app_test.dart",
     tags = ["manual"],
     deps = [
+        "//android_only_plugin",
+        "//dart_registration_plugin",
+        "//ffi_plugin",
         "//ios_greeting_plugin",
         "@deps//:flutter",
         "@deps//:flutter_test",
@@ -192,8 +218,12 @@ dart_analysis_test(
     targets = [
         ":app_test_lint",
         ":app_test_red_lint",
+        ":plugin_registrant_filter_test",
         ":plugin_spm_test_lint",
         ":plugin_spm_graph_test_lint",
+        "//android_only_plugin",
+        "//dart_registration_plugin",
+        "//ffi_plugin",
         "//ios_greeting_plugin",
     ],
 )
