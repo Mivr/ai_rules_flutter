@@ -52,6 +52,30 @@ def _gradle_triple_end(text, pos, n, q):
             i += 1
     return n
 
+def _gradle_plain_quoted_end(text, pos, n, q):
+    """End of the short quoted literal opening at `pos`, templates left as text."""
+    i = pos + 1
+    for _ in range(n + 1):
+        if i >= n:
+            return n
+        c = text[i:i + 1]
+        if c == "\\" and i + 1 < n:
+            i += 2
+        elif c == q:
+            return i + 1
+        else:
+            i += 1
+    return n
+
+def _gradle_template_literal_end(text, pos, n):
+    """End of a literal opened inside a `${...}` body, `$` never re-scanned."""
+    if text[pos:pos + 2] == "$/":
+        return _gradle_dollar_slashy_end(text, pos, n)
+    q = text[pos:pos + 1]
+    if text[pos:pos + 3] == q + q + q:
+        return _gradle_triple_end(text, pos, n, q)
+    return _gradle_plain_quoted_end(text, pos, n, q)
+
 def _gradle_quoted_end(text, pos, n, q):
     """End of the short quoted literal opening at `pos`, templates honoured."""
     i = pos + 1
@@ -88,8 +112,11 @@ def _gradle_template_end(text, i, n):
         c = text[i:i + 1]
         if c == "\\" and i + 1 < n:
             i += 2
+        elif c == "$" and text[i + 1:i + 2] == "/":
+            end = _gradle_template_literal_end(text, i, n)
+            i = end if end > i else (i + 1)
         elif c == "'" or c == '"':
-            end = _gradle_segment_literal_end(text, i)
+            end = _gradle_template_literal_end(text, i, n)
             i = end if end > i else (i + 1)
         elif c == "{":
             depth += 1

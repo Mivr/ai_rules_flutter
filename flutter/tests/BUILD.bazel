@@ -30,6 +30,7 @@ load(":flutter_pubspec_test.bzl", "flutter_pubspec_test_suite")
 load(":flutter_sdk_package_test.bzl", "flutter_sdk_package_test_suite")
 load(":flutter_test_bootstrap_test.bzl", "flutter_test_bootstrap_test_suite")
 load(":gen_l10n_test.bzl", "gen_l10n_test_suite")
+load(":gradle_model_test.bzl", "gradle_model_test_suite")
 load(":ios_integration_test_test.bzl", "ios_integration_test_test_suite")
 load(":ios_test.bzl", "ios_test_suite")
 load(":language_version_test.bzl", "language_version_test_suite")
@@ -282,6 +283,8 @@ swiftpm_resolved_test_suite(name = "swiftpm_resolved_test")
 swiftpm_translate_test_suite(name = "swiftpm_translate_test")
 
 gen_l10n_test_suite(name = "gen_l10n_test")
+
+gradle_model_test_suite(name = "gradle_model_test")
 
 # Regression: `flutter_aot_target` with obfuscation and split debug info must
 # run gen_snapshot successfully and produce the debugging-info output.
