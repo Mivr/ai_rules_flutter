@@ -145,10 +145,15 @@ flutter_prebuilt_test = rule(
                   "`include_tags`.",
         ),
         "_tool": attr.label(
+            doc = "The test runner binary that hosts the `package:test` " +
+                  "protocol and drives `flutter_tester`, built for the exec " +
+                  "configuration.",
             default = Label("//flutter/private/tools:flutter_test_runner"),
             cfg = "exec",
         ),
         "_windows_constraint": attr.label(
+            doc = "Windows platform constraint value, matched against the " +
+                  "target platform.",
             default = "@platforms//os:windows",
         ),
     },

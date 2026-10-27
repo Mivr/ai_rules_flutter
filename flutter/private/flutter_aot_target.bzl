@@ -7,8 +7,9 @@ flutter_application.bzl). Supports macOS/iOS (Mach-O .dylib) and other
 platforms (ELF .so).
 """
 
-load("//flutter/private:common.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "FLUTTER_APPLICATION_ATTRS", "KERNEL_COMPILE_ATTRS", "PLATFORM_CONSTRAINT_ATTRS", "detect_target_platform", "flutter_build_mode", "flutter_compile_kernel", "make_kernel_inputs", "make_kernel_target", "resolve_flutter_sdk_info")
+load("//flutter/private:common.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "FLUTTER_APPLICATION_ATTRS", "KERNEL_COMPILE_ATTRS", "PLATFORM_CONSTRAINT_ATTRS", "flutter_build_mode", "flutter_compile_kernel", "make_kernel_inputs", "make_kernel_target", "resolve_flutter_sdk_info")
 load("//flutter/private:flutter_aot_compile.bzl", "flutter_aot_elf_action", "flutter_aot_gen_snapshot_flags", "flutter_aot_macho_action", "macho_snapshot_options")
+load("//flutter/private:platform_constraints.bzl", "target_platform_from_constraints")
 
 def _flutter_aot_target_impl(ctx):
     flutter_sdk_info = resolve_flutter_sdk_info(ctx)
@@ -36,22 +37,8 @@ def _flutter_aot_target_impl(ctx):
 
     # Detect the target platform so kernel compilation (plugin registration)
     # and the action key reflect it, mirroring flutter_application.
-    is_macos = ctx.target_platform_has_constraint(
-        ctx.attr._macos_constraint[platform_common.ConstraintValueInfo],
-    )
-    is_ios = ctx.target_platform_has_constraint(
-        ctx.attr._ios_constraint[platform_common.ConstraintValueInfo],
-    )
-    is_linux = ctx.target_platform_has_constraint(
-        ctx.attr._linux_constraint[platform_common.ConstraintValueInfo],
-    )
-    is_windows = ctx.target_platform_has_constraint(
-        ctx.attr._windows_constraint[platform_common.ConstraintValueInfo],
-    )
-    is_android = ctx.target_platform_has_constraint(
-        ctx.attr._android_constraint[platform_common.ConstraintValueInfo],
-    )
-    target_platform = detect_target_platform(is_ios, is_macos, is_linux, is_windows, is_android)
+    platform = target_platform_from_constraints(ctx)
+    target_platform = platform.target_platform
 
     # Step 1: Kernel compilation.
     kernel_dill = flutter_compile_kernel(
@@ -73,7 +60,7 @@ def _flutter_aot_target_impl(ctx):
     # unstripped DWARF would leak the original names.
     extra_flags, extra_outputs, debug_info_output, obfuscation_map_output, strip = flutter_aot_gen_snapshot_flags(ctx, strip)
 
-    if is_ios or is_macos:
+    if platform.is_ios or platform.is_macos:
         output = ctx.actions.declare_file(ctx.label.name + ".dylib")
         flutter_aot_macho_action(
             ctx = ctx,
