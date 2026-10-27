@@ -55,6 +55,7 @@ load(":rules_dart_floor_test.bzl", "rules_dart_floor_test_suite")
 load(":shader_compile_test.bzl", "shader_compile_test_suite")
 load(":shader_keys_test.bzl", "shader_keys_test_suite")
 load(":starlark_literal_test.bzl", "starlark_literal_test_suite")
+load(":swiftpm_local_settings_test.bzl", "swiftpm_local_settings_fixture")
 load(":swiftpm_manifest_test.bzl", "swiftpm_manifest_test_suite")
 load(":swiftpm_package_test.bzl", "swiftpm_package_test_suite")
 load(":swiftpm_resolved_test.bzl", "swiftpm_resolved_test_suite")
@@ -280,6 +281,17 @@ swiftpm_manifest_test_suite(name = "swiftpm_manifest_test")
 swiftpm_resolved_test_suite(name = "swiftpm_resolved_test")
 
 swiftpm_translate_test_suite(name = "swiftpm_translate_test")
+
+# Build-level twin of the translation tests: a C library whose
+# `.headerSearchPath` reaches its own sources through `implementation_deps`.
+# Its public consumer builds; `:swiftpm_local_settings_private_consumer`
+# includes a header under the private search path and must fail to build.
+swiftpm_local_settings_fixture(name = "swiftpm_local_settings")
+
+build_test(
+    name = "swiftpm_local_settings_build_test",
+    targets = [":swiftpm_local_settings_public_consumer"],
+)
 
 gen_l10n_test_suite(name = "gen_l10n_test")
 

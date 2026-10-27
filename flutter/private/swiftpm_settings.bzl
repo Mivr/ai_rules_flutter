@@ -450,7 +450,13 @@ def _swiftpm_gated_platforms(setting):
     return None
 
 def _swiftpm_fold_clang_list(target, target_dir, settings):
-    """Map one C-family setting list onto flag and include entries.
+    """Map one C-family setting list onto flag and private include entries.
+
+    `headerSearchPath` is target-local in SwiftPM: it reaches the target's
+    own sources only. The entries therefore stay out of the emitted
+    library's `includes` (which propagates to dependents) and go to a
+    private-headers helper the library reaches through
+    `implementation_deps`.
 
     Args:
         target: The parsed target struct, for messages.
@@ -458,24 +464,28 @@ def _swiftpm_fold_clang_list(target, target_dir, settings):
         settings: The parsed `cSettings` or `cxxSettings` list.
 
     Returns:
-        `struct(ok, error, flags, includes)`: each list holds
+        `struct(ok, error, flags, private_includes)`: each list holds
         `struct(text, platforms)`.
     """
     flags = []
-    includes = []
+    private_includes = []
     for setting in settings:
         entry = _swiftpm_clang_entry(target, target_dir, setting)
         if entry.error:
-            return struct(ok = False, error = entry.error, flags = [], includes = [])
+            return struct(ok = False, error = entry.error, flags = [], private_includes = [])
         gated = struct(text = entry.text, platforms = _swiftpm_gated_platforms(setting))
-        if entry.include:
-            includes.append(gated)
+        if entry.private_include:
+            private_includes.append(gated)
         else:
             flags.append(gated)
-    return struct(ok = True, error = "", flags = flags, includes = includes)
+    return struct(ok = True, error = "", flags = flags, private_includes = private_includes)
 
 def _swiftpm_fold_swift_list(target, settings, target_kind):
-    """Map one `swiftSettings` list onto define and copts entries.
+    """Map one `swiftSettings` list onto compiler flag entries.
+
+    A Swift `.define(X)` is `-DX` in the target's `copts`: SwiftPM applies
+    a Swift define to the declaring target only, while a `swift_library`
+    `defines` entry reaches every dependent's compile.
 
     Args:
         target: The parsed target struct, for messages.
@@ -483,22 +493,21 @@ def _swiftpm_fold_swift_list(target, settings, target_kind):
         target_kind: `"swift"` or `"clang"`.
 
     Returns:
-        `struct(ok, error, defines, copts)`: each list holds
+        `struct(ok, error, copts)`: each entry holds
         `struct(text, platforms)`.
     """
-    defines = []
     copts = []
     for setting in settings:
         entry = _swiftpm_swift_entry(target, setting, target_kind)
         if entry.error:
-            return struct(ok = False, error = entry.error, defines = [], copts = [])
+            return struct(ok = False, error = entry.error, copts = [])
         platforms = _swiftpm_gated_platforms(setting)
         if setting.kind == "define":
-            defines.append(struct(text = entry.text, platforms = platforms))
+            copts.append(struct(text = "-D" + entry.text, platforms = platforms))
         else:
             for text in entry.texts:
                 copts.append(struct(text = text, platforms = platforms))
-    return struct(ok = True, error = "", defines = defines, copts = copts)
+    return struct(ok = True, error = "", copts = copts)
 
 def _swiftpm_fold_linker_list(settings):
     """Map one `linkerSettings` list onto link option entries.
@@ -519,10 +528,11 @@ def swiftpm_target_setting_entries(target, target_dir, target_kind):
     """Map one target's parsed settings onto Bazel flag entries.
 
     `cSettings` entries become `conlyopts` (`.define` to `-Dname` /
-    `-Dname=value`) and `includes` (`.headerSearchPath`, rebased onto the
-    target directory so the entries stay hermetic inside the spoke
-    repository); `cxxSettings` likewise onto `cxxopts`; `swiftSettings`
-    `.define` onto Swift `defines` and the feature settings onto `copts`
+    `-Dname=value`) and `private_includes` (`.headerSearchPath`, rebased
+    onto the target directory so the entries stay hermetic inside the
+    spoke repository); `cxxSettings` likewise onto `cxxopts`;
+    `swiftSettings` `.define` onto `-Dname` in `copts` (target-local, the
+    way SwiftPM applies it) and the feature settings onto `copts`
     (`-enable-upcoming-feature` / `-enable-experimental-feature`);
     `linkerSettings` onto `linkopts` (`-framework <name>`, `-l<name>`).
     Every entry keeps its `.when(platforms:)` condition for `select()`
@@ -530,6 +540,11 @@ def swiftpm_target_setting_entries(target, target_dir, target_kind):
     refused naming it. `cSettings`/`cxxSettings` on a Swift target and
     Swift feature settings on a C-family target are refused: there is no
     compilation they could reach.
+
+    `private_includes` is separate from the emitted library's public
+    `includes`: a `.headerSearchPath` is target-local, so the renderer
+    puts it on a helper library reached through `implementation_deps`
+    instead of an attribute that propagates to dependents.
 
     Args:
         target: The parsed target struct (`name`, `c_settings`,
@@ -539,27 +554,27 @@ def swiftpm_target_setting_entries(target, target_dir, target_kind):
         target_kind: `"swift"` or `"clang"`.
 
     Returns:
-        `struct(ok, detail, c_only, cxx, defines, copts, linkopts,
-        includes)`: each list holds `struct(text, platforms)` with
+        `struct(ok, detail, c_only, cxx, copts, linkopts,
+        private_includes)`: each list holds `struct(text, platforms)` with
         `platforms` None or `["ios"]`/`["macos"]` (or both, kept as one
         entry the renderer fans out).
     """
     c_fold = _swiftpm_fold_clang_list(target, target_dir, getattr(target, "c_settings", []))
     if not c_fold.ok:
-        return struct(ok = False, detail = c_fold.error, c_only = [], cxx = [], defines = [], copts = [], linkopts = [], includes = [])
+        return struct(ok = False, detail = c_fold.error, c_only = [], cxx = [], copts = [], linkopts = [], private_includes = [])
     cxx_fold = _swiftpm_fold_clang_list(target, target_dir, getattr(target, "cxx_settings", []))
     if not cxx_fold.ok:
-        return struct(ok = False, detail = cxx_fold.error, c_only = [], cxx = [], defines = [], copts = [], linkopts = [], includes = [])
+        return struct(ok = False, detail = cxx_fold.error, c_only = [], cxx = [], copts = [], linkopts = [], private_includes = [])
     if (len(getattr(target, "c_settings", [])) + len(getattr(target, "cxx_settings", []))) > 0 and target_kind == "swift":
-        return struct(ok = False, detail = "{who} uses C-family settings on a Swift target, which has no Bazel translation".format(who = _swiftpm_setting_target(target.name)), c_only = [], cxx = [], defines = [], copts = [], linkopts = [], includes = [])
+        return struct(ok = False, detail = "{who} uses C-family settings on a Swift target, which has no Bazel translation".format(who = _swiftpm_setting_target(target.name)), c_only = [], cxx = [], copts = [], linkopts = [], private_includes = [])
     swift_fold = _swiftpm_fold_swift_list(target, getattr(target, "swift_settings", []), target_kind)
     if not swift_fold.ok:
-        return struct(ok = False, detail = swift_fold.error, c_only = [], cxx = [], defines = [], copts = [], linkopts = [], includes = [])
+        return struct(ok = False, detail = swift_fold.error, c_only = [], cxx = [], copts = [], linkopts = [], private_includes = [])
     linkopts = _swiftpm_fold_linker_list(getattr(target, "linker_settings", []))
-    return struct(ok = True, detail = "", c_only = c_fold.flags, cxx = cxx_fold.flags, defines = swift_fold.defines, copts = swift_fold.copts, linkopts = linkopts, includes = c_fold.includes + cxx_fold.includes)
+    return struct(ok = True, detail = "", c_only = c_fold.flags, cxx = cxx_fold.flags, copts = swift_fold.copts, linkopts = linkopts, private_includes = c_fold.private_includes + cxx_fold.private_includes)
 
 def _swiftpm_clang_entry(target, target_dir, setting):
-    """Render one `cSettings`/`cxxSettings` entry as a flag or an include.
+    """Render one `cSettings`/`cxxSettings` entry as a flag or a search path.
 
     Both C-family option lists render the same entries; the caller sorts
     them into `conlyopts` versus `cxxopts`.
@@ -570,18 +585,22 @@ def _swiftpm_clang_entry(target, target_dir, setting):
         setting: The parsed setting struct.
 
     Returns:
-        `struct(error, text, include)`: `include` when the entry is a
-        header search path for `includes`.
+        `struct(error, text, private_include)`: `private_include` when the
+        entry is a header search path the target alone may use.
     """
     who = _swiftpm_setting_target(target.name)
     if setting.kind == "headerSearchPath":
         for segment in setting.name.split("/"):
             if segment == "" or segment == "." or segment == "..":
-                return struct(error = "{who} uses `.headerSearchPath({path})`, which escapes the target directory".format(who = who, path = repr(setting.name)), text = "", include = False)
-        return struct(error = "", text = target_dir + "/" + setting.name, include = True)
+                return struct(
+                    error = "{who} uses `.headerSearchPath({path})`, which escapes the target directory".format(who = who, path = repr(setting.name)),
+                    text = "",
+                    private_include = False,
+                )
+        return struct(error = "", text = target_dir + "/" + setting.name, private_include = True)
     if setting.value:
-        return struct(error = "", text = "-D" + setting.name + "=" + setting.value, include = False)
-    return struct(error = "", text = "-D" + setting.name, include = False)
+        return struct(error = "", text = "-D" + setting.name + "=" + setting.value, private_include = False)
+    return struct(error = "", text = "-D" + setting.name, private_include = False)
 
 def _swiftpm_swift_entry(target, setting, target_kind):
     """Render one `swiftSettings` entry as a define or feature flags.
