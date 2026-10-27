@@ -2,6 +2,7 @@
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("//flutter:providers.bzl", "FlutterSdkInfo", "resolve_exec_dart", "resolve_exec_dart_vm", "resolve_flutter_sdk_info")
+load("//flutter:toolchain.bzl", "flutter_toolchain")
 load("//flutter/private:common.bzl", "KERNEL_COMPILE_ATTRS", "flutter_compile_kernel", "make_kernel_inputs", "make_kernel_target")
 load("//flutter/private:engine_helpers.bzl", "dart_binary_name", "dartaotruntime_binary_name", "engine_arch_for_os", "platform_to_arch", "platform_to_os")
 load("//flutter/private:flutter_kernel_module.bzl", "find_flutter_kernel_module_tools", "is_same_sdk")
@@ -14,6 +15,11 @@ def _provider_exists_test_impl(ctx):
         type(FlutterSdkInfo) == "Provider",
         "FlutterSdkInfo should be a Provider, got {}".format(type(FlutterSdkInfo)),
     )
+    return unittest.end(env)
+
+def _toolchain_rule_defined_test_impl(ctx):
+    env = unittest.begin(ctx)
+    asserts.true(env, flutter_toolchain != None, "flutter_toolchain should be defined")
     return unittest.end(env)
 
 def _resolve_flutter_sdk_info_test_impl(ctx):
@@ -482,6 +488,7 @@ _t3_test = unittest.make(_engine_arch_for_os_test_impl)
 _t4_test = unittest.make(_resolve_flutter_sdk_info_test_impl)
 _t5_test = unittest.make(_resolve_exec_dart_test_impl)
 _t6_test = unittest.make(_is_same_sdk_and_find_tools_test_impl)
+_t7_test = unittest.make(_toolchain_rule_defined_test_impl)
 
 def toolchain_test_suite(name):
     """Test suite for Flutter toolchain resolution and helper functions.
@@ -536,6 +543,7 @@ def toolchain_test_suite(name):
         _t4_test,
         _t5_test,
         _t6_test,
+        _t7_test,
     )
     native.test_suite(
         name = name,
