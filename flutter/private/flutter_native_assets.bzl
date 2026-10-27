@@ -40,7 +40,7 @@ discretion.
 """
 
 load("@rules_dart//dart:providers.bzl", "DartInfo")
-load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterNativeAssetInfo")
+load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterInfo", "FlutterNativeAssetInfo")
 
 # Map (target_os, arch) → the Target string Dart's
 # `Target.fromArchitectureAndOS` would produce. Keep this mirrored
@@ -305,6 +305,41 @@ def bridge_dart_code_assets(ctx, deps):
                     system_uri = asset.system_uri,
                 ))
     return lifted
+
+def collect_application_native_assets(ctx):
+    """Collects the native and data assets an application graph declares.
+
+    Declared `flutter_native_asset` targets propagate on `FlutterInfo`; a pub
+    package that owns a native library contributes it just by being depended
+    on. Declarations made here win, since they are the deliberate ones.
+
+    Args:
+        ctx: The application or integration-test rule's context.
+
+    Returns:
+        A struct with `list` (the `FlutterNativeAssetInfo` list) and
+        `data_assets` (the transitive data-asset depset).
+    """
+    transitive_native_asset_depsets = []
+    transitive_data_asset_depsets = []
+    for dep in ctx.attr.deps:
+        if FlutterInfo not in dep:
+            continue
+        info = dep[FlutterInfo]
+        transitive_native_asset_depsets.append(info.native_assets)
+        transitive_data_asset_depsets.append(info.data_assets)
+    transitive_native_assets = depset(transitive = transitive_native_asset_depsets)
+    native_assets_list = transitive_native_assets.to_list()
+    declared_ids = {asset.asset_id: True for asset in native_assets_list}
+    native_assets_list = native_assets_list + [
+        asset
+        for asset in bridge_dart_code_assets(ctx, ctx.attr.deps)
+        if asset.asset_id not in declared_ids
+    ]
+    return struct(
+        data_assets = depset(transitive = transitive_data_asset_depsets),
+        list = native_assets_list,
+    )
 
 # -- Tier 2 standalone rule ----------------------------------------------------
 

@@ -104,86 +104,80 @@ def _android_headless_runtime_pins_test_impl(ctx):
 
 def _bootstrap_with_integration_test_pkg_test_impl(ctx):
     env = unittest.begin(ctx)
-    src = make_web_integration_bootstrap_content(
+    substitutions = make_web_integration_bootstrap_content(
         _TEST_IMPORT,
         has_integration_test = True,
     )
-    asserts.true(env, "import 'package:integration_test/integration_test.dart';" in src)
-    asserts.true(env, "IntegrationTestWidgetsFlutterBinding.ensureInitialized();" in src)
-    asserts.false(env, "class _IntegrationTestBinding" in src)
-    asserts.true(env, "RemoteListener.start(() => _runTestMain);" in src)
-    asserts.true(env, "/__flutter_integration_ws__" in src)
-    asserts.true(env, "'type': 'uncaughtError'" in src)
+    asserts.equals(env, _TEST_IMPORT, substitutions["{test_import}"])
+    asserts.true(env, "import 'package:integration_test/integration_test.dart';" in substitutions["{binding_import}"])
+    asserts.equals(env, "IntegrationTestWidgetsFlutterBinding.ensureInitialized();", substitutions["{binding_init}"])
+    asserts.equals(env, "", substitutions["{binding_decl}"])
+    asserts.false(env, "{harness_url_prologue}" in substitutions)
     return unittest.end(env)
 
 def _bootstrap_without_integration_test_pkg_test_impl(ctx):
     env = unittest.begin(ctx)
-    src = make_web_integration_bootstrap_content(
+    substitutions = make_web_integration_bootstrap_content(
         _TEST_IMPORT,
         has_integration_test = False,
     )
-    asserts.false(env, "package:integration_test/integration_test.dart" in src)
-    asserts.true(env, "class _IntegrationTestBinding extends LiveTestWidgetsFlutterBinding" in src)
-    asserts.true(env, "_IntegrationTestBinding.ensureInitialized();" in src)
-    asserts.true(env, "RemoteListener.start(() => _runTestMain);" in src)
-    asserts.true(env, "/__flutter_integration_ws__" in src)
-    asserts.true(env, "'type': 'uncaughtError'" in src)
+    asserts.equals(env, _TEST_IMPORT, substitutions["{test_import}"])
+    asserts.false(env, "package:integration_test/integration_test.dart" in substitutions["{binding_import}"])
+    asserts.true(env, "class _IntegrationTestBinding extends LiveTestWidgetsFlutterBinding" in substitutions["{binding_decl}"])
+    asserts.equals(env, "_IntegrationTestBinding.ensureInitialized();", substitutions["{binding_init}"])
+    asserts.false(env, "{harness_url_prologue}" in substitutions)
     return unittest.end(env)
 
 def _linux_bootstrap_with_integration_test_pkg_test_impl(ctx):
     env = unittest.begin(ctx)
-    src = make_linux_integration_bootstrap_content(
+    substitutions = make_linux_integration_bootstrap_content(
         _TEST_IMPORT,
         has_integration_test = True,
     )
-    asserts.true(env, "import 'package:integration_test/integration_test.dart';" in src)
-    asserts.true(env, "IntegrationTestWidgetsFlutterBinding.ensureInitialized();" in src)
-    asserts.false(env, "class _IntegrationTestBinding" in src)
-    asserts.true(env, "FLUTTER_INTEGRATION_TEST_HARNESS_URL" in src)
-    asserts.true(env, "WebSocket.connect(wsUrl)" in src)
-    asserts.true(env, "'type': 'uncaughtError'" in src)
+    asserts.equals(env, _TEST_IMPORT, substitutions["{test_import}"])
+    asserts.true(env, "import 'package:integration_test/integration_test.dart';" in substitutions["{binding_import}"])
+    asserts.equals(env, "IntegrationTestWidgetsFlutterBinding.ensureInitialized();", substitutions["{binding_init}"])
+    asserts.equals(env, "", substitutions["{binding_decl}"])
+    asserts.true(env, "FLUTTER_INTEGRATION_TEST_HARNESS_URL" in substitutions["{harness_url_prologue}"])
     return unittest.end(env)
 
 def _linux_bootstrap_without_integration_test_pkg_test_impl(ctx):
     env = unittest.begin(ctx)
-    src = make_linux_integration_bootstrap_content(
+    substitutions = make_linux_integration_bootstrap_content(
         _TEST_IMPORT,
         has_integration_test = False,
     )
-    asserts.false(env, "package:integration_test/integration_test.dart" in src)
-    asserts.true(env, "class _IntegrationTestBinding extends LiveTestWidgetsFlutterBinding" in src)
-    asserts.true(env, "_IntegrationTestBinding.ensureInitialized();" in src)
-    asserts.true(env, "FLUTTER_INTEGRATION_TEST_HARNESS_URL" in src)
-    asserts.true(env, "WebSocket.connect(wsUrl)" in src)
-    asserts.true(env, "'type': 'uncaughtError'" in src)
+    asserts.equals(env, _TEST_IMPORT, substitutions["{test_import}"])
+    asserts.false(env, "package:integration_test/integration_test.dart" in substitutions["{binding_import}"])
+    asserts.true(env, "class _IntegrationTestBinding extends LiveTestWidgetsFlutterBinding" in substitutions["{binding_decl}"])
+    asserts.equals(env, "_IntegrationTestBinding.ensureInitialized();", substitutions["{binding_init}"])
+    asserts.true(env, "FLUTTER_INTEGRATION_TEST_HARNESS_URL" in substitutions["{harness_url_prologue}"])
     return unittest.end(env)
 
 def _android_bootstrap_with_integration_test_pkg_test_impl(ctx):
     env = unittest.begin(ctx)
-    src = make_android_integration_bootstrap_content(
+    substitutions = make_android_integration_bootstrap_content(
         _TEST_IMPORT,
         has_integration_test = True,
     )
-    asserts.true(env, "import 'package:integration_test/integration_test.dart';" in src)
-    asserts.true(env, "IntegrationTestWidgetsFlutterBinding.ensureInitialized();" in src)
-    asserts.false(env, "class _IntegrationTestBinding" in src)
-    asserts.true(env, "ws://127.0.0.1:38427/__flutter_integration_ws__" in src)
-    asserts.true(env, "WebSocket.connect(wsUrl)" in src)
-    asserts.true(env, "'type': 'uncaughtError'" in src)
+    asserts.equals(env, _TEST_IMPORT, substitutions["{test_import}"])
+    asserts.true(env, "import 'package:integration_test/integration_test.dart';" in substitutions["{binding_import}"])
+    asserts.equals(env, "IntegrationTestWidgetsFlutterBinding.ensureInitialized();", substitutions["{binding_init}"])
+    asserts.equals(env, "", substitutions["{binding_decl}"])
+    asserts.false(env, "{harness_url_prologue}" in substitutions)
     return unittest.end(env)
 
 def _android_bootstrap_without_integration_test_pkg_test_impl(ctx):
     env = unittest.begin(ctx)
-    src = make_android_integration_bootstrap_content(
+    substitutions = make_android_integration_bootstrap_content(
         _TEST_IMPORT,
         has_integration_test = False,
     )
-    asserts.false(env, "package:integration_test/integration_test.dart" in src)
-    asserts.true(env, "class _IntegrationTestBinding extends LiveTestWidgetsFlutterBinding" in src)
-    asserts.true(env, "_IntegrationTestBinding.ensureInitialized();" in src)
-    asserts.true(env, "ws://127.0.0.1:38427/__flutter_integration_ws__" in src)
-    asserts.true(env, "WebSocket.connect(wsUrl)" in src)
-    asserts.true(env, "'type': 'uncaughtError'" in src)
+    asserts.equals(env, _TEST_IMPORT, substitutions["{test_import}"])
+    asserts.false(env, "package:integration_test/integration_test.dart" in substitutions["{binding_import}"])
+    asserts.true(env, "class _IntegrationTestBinding extends LiveTestWidgetsFlutterBinding" in substitutions["{binding_decl}"])
+    asserts.equals(env, "_IntegrationTestBinding.ensureInitialized();", substitutions["{binding_init}"])
+    asserts.false(env, "{harness_url_prologue}" in substitutions)
     return unittest.end(env)
 
 _t0_test = unittest.make(_chrome_headless_shell_pins_test_impl)

@@ -19,8 +19,8 @@ load("@rules_dart//dart:utils.bzl", "dart_link_hook_actions", "link_hook_runner_
 load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterInfo")
 load("//flutter/private:common.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "FLUTTER_APPLICATION_ATTRS", "PLATFORM_CONSTRAINT_ATTRS", "check_unreplaced_hooks", "collect_binding_contracts", "collect_native_libs", "declare_flutter_assets_dir", "detect_target_platform", "flutter_build_assets", "flutter_build_mode", "flutter_compile_kernel", "flutter_compile_shaders", "host_target_arch", "launch_build_args", "make_bundle_inputs", "make_kernel_inputs", "make_kernel_target", "resolve_flutter_sdk_info", "shader_sources")
 load("//flutter/private:flutter_aot_compile.bzl", "flutter_aot_elf_action", "flutter_aot_gen_snapshot_flags", "flutter_aot_macho_action", "macho_snapshot_options")
-load("//flutter/private:flutter_info.bzl", "dedup_plugins")
-load("//flutter/private:flutter_native_assets.bzl", "bridge_dart_code_assets", "collect_bundled_code_asset_files", "write_native_assets_manifest")
+load("//flutter/private:flutter_info.bzl", "collect_flutter_plugin_deps")
+load("//flutter/private:flutter_native_assets.bzl", "collect_application_native_assets", "collect_bundled_code_asset_files", "write_native_assets_manifest")
 load("//flutter/private:native_sources.bzl", "collect_native_source_pairs")
 
 def _check_aot_supported(flutter_sdk_info, is_debug):
@@ -94,24 +94,8 @@ def _collect_transitive_assets(ctx):
     Returns:
       A `(native_assets_list, transitive_data_assets)` tuple.
     """
-    transitive_native_asset_depsets = []
-    transitive_data_asset_depsets = []
-    for dep in ctx.attr.deps:
-        if FlutterInfo not in dep:
-            continue
-        info = dep[FlutterInfo]
-        transitive_native_asset_depsets.append(info.native_assets)
-        transitive_data_asset_depsets.append(info.data_assets)
-    transitive_native_assets = depset(transitive = transitive_native_asset_depsets)
-    transitive_data_assets = depset(transitive = transitive_data_asset_depsets)
-    native_assets_list = transitive_native_assets.to_list()
-    declared_ids = {asset.asset_id: True for asset in native_assets_list}
-    native_assets_list = native_assets_list + [
-        asset
-        for asset in bridge_dart_code_assets(ctx, ctx.attr.deps)
-        if asset.asset_id not in declared_ids
-    ]
-    return native_assets_list, transitive_data_assets
+    assets = collect_application_native_assets(ctx)
+    return assets.list, assets.data_assets
 
 def _write_application_manifest(ctx, native_assets_list, target_platform, target_arch):
     """Declares and writes the `native_assets.json` manifest."""
@@ -223,28 +207,7 @@ def _aggregate_application_plugins(ctx):
     application is the end of the library graph and does not contribute to
     another one.
     """
-    all_dep_plugins = []
-    apple_plugin_lib_depsets = []
-    android_plugin_lib_depsets = []
-    linux_plugin_lib_depsets = []
-    windows_plugin_lib_depsets = []
-    apple_privacy_manifest_depsets = []
-    for dep in ctx.attr.deps:
-        if FlutterInfo in dep:
-            all_dep_plugins.extend(dep[FlutterInfo].plugins)
-            apple_plugin_lib_depsets.append(dep[FlutterInfo].apple_plugin_libraries)
-            android_plugin_lib_depsets.append(dep[FlutterInfo].android_plugin_libraries)
-            linux_plugin_lib_depsets.append(dep[FlutterInfo].linux_plugin_libraries)
-            windows_plugin_lib_depsets.append(dep[FlutterInfo].windows_plugin_libraries)
-            apple_privacy_manifest_depsets.append(dep[FlutterInfo].apple_privacy_manifests)
-    return struct(
-        all_plugins = dedup_plugins(all_dep_plugins),
-        apple_plugin_libraries = depset(transitive = apple_plugin_lib_depsets),
-        android_plugin_libraries = depset(transitive = android_plugin_lib_depsets),
-        linux_plugin_libraries = depset(transitive = linux_plugin_lib_depsets),
-        windows_plugin_libraries = depset(transitive = windows_plugin_lib_depsets),
-        apple_privacy_manifests = depset(transitive = apple_privacy_manifest_depsets),
-    )
+    return collect_flutter_plugin_deps(ctx.attr.deps)
 
 def _index_bundled_libraries(native_libs, bundled_code_assets):
     """Indexes every loose native library this app carries by path.
