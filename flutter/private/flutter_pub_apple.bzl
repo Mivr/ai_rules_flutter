@@ -14,7 +14,7 @@ SwiftPM product links a plugin's `Package.swift` declares. Split out of
 load(":flutter_pub_walk.bzl", "PUB_WALK_BOUND", "has_files_under_walk")
 load(":starlark_literal.bzl", "starlark_string_literal")
 load(":swiftpm_manifest.bzl", "parse_swiftpm_plugin_package")
-load(":swiftpm_resolved.bzl", "swiftpm_spoke_name")
+load(":swiftpm_resolved.bzl", "read_swiftpm_pins", "swiftpm_spoke_name")
 load(":swiftpm_translate.bzl", "swiftpm_locate_package_dep")
 
 # Apple source extensions we sweep into the per-platform plugin library.
@@ -658,20 +658,56 @@ def select_apple_swiftpm_deps(plugin_name, manifest_text, manifest_dir, srcs_dir
                 labels.append(label)
     return struct(ok = True, error = "", labels = labels)
 
-def _detect_apple_swiftpm_platform(ctx, package_name, platform, srcs_dirs, pins):
+def _apple_swiftpm_pins(ctx, resolved_label, hub_name):
+    """Read the hub's `Package.resolved` for one plugin's product links.
+
+    The label comes from the `flutter.pub` tag and is a repository
+    attribute of every pub spoke, but an unread label does not make a
+    spoke depend on the file. This function reads it only after a
+    `Package.swift` is found, so a pure-Dart spoke keeps its marker when
+    a pin is added, removed or gets a checksum. The checksum table stays
+    out of the read: a pin without a checksum still links its spoke and
+    fails when that spoke is fetched, naming the package.
+
+    Args:
+        ctx: The spoke's repository context.
+        resolved_label: The hub's `swift_package_resolved` label, or None.
+        hub_name: The `flutter.pub` hub name.
+
+    Returns:
+        `struct(resolved, pinned, unpinned, hub)` for the plugin's
+        manifest reader; `unpinned` stays empty because the resolved file
+        carries no checksum.
+    """
+    if resolved_label == None:
+        return struct(resolved = "", pinned = [], unpinned = {}, hub = hub_name)
+    label = str(resolved_label)
+    pins = read_swiftpm_pins(ctx.read(resolved_label), label)
+    if not pins.ok:
+        fail(pins.error)
+    return struct(
+        resolved = label,
+        pinned = sorted([pin.identity for pin in pins.pins]),
+        unpinned = {},
+        hub = hub_name,
+    )
+
+def _detect_apple_swiftpm_platform(ctx, package_name, platform, srcs_dirs, resolved_label, hub_name):
     """Collect one platform's SwiftPM product labels.
 
     Reads the platform's `<platform>/<pkg>/Package.swift` and the shared
-    `darwin/<pkg>/Package.swift` when present. A refusal fails the fetch:
-    the spoke never downloads anything itself.
+    `darwin/<pkg>/Package.swift` when present. The resolved file is read
+    only after a manifest is found, so a plugin without one never
+    depends on the hub's pin list. A refusal fails the fetch: the spoke
+    never downloads anything itself.
 
     Args:
         ctx: The spoke's repository context.
         package_name: The pub plugin name.
         platform: `"ios"` or `"macos"`.
         srcs_dirs: The platform's detected source directories.
-        pins: `struct(resolved, pinned, unpinned, hub)` (see
-            `_apple_swiftpm_dep_labels`).
+        resolved_label: The hub's `swift_package_resolved` label, or None.
+        hub_name: The `flutter.pub` hub name, for dep labels.
 
     Returns:
         The platform's spoke dep labels, deduplicated.
@@ -679,11 +715,14 @@ def _detect_apple_swiftpm_platform(ctx, package_name, platform, srcs_dirs, pins)
     labels = []
     if not srcs_dirs:
         return labels
+    pins = None
     seen = {}
     for manifest_dir in [platform + "/" + package_name, "darwin/" + package_name]:
         manifest = manifest_dir + "/Package.swift"
         if not ctx.path(manifest).exists:
             continue
+        if pins == None:
+            pins = _apple_swiftpm_pins(ctx, resolved_label, hub_name)
         selected = select_apple_swiftpm_deps(package_name, ctx.read(manifest), manifest_dir, srcs_dirs, platform, pins)
         if not selected.ok:
             fail(selected.error)
@@ -693,26 +732,22 @@ def _detect_apple_swiftpm_platform(ctx, package_name, platform, srcs_dirs, pins)
                 labels.append(label)
     return labels
 
-def detect_apple_swiftpm_deps(ctx, package_name, apple, resolved_label, pinned_identities, unpinned_errors, hub_name):
+def detect_apple_swiftpm_deps(ctx, package_name, apple, resolved_label, hub_name):
     """Link the plugin's `Package.swift` products for both Apple platforms.
 
     Args:
         ctx: The spoke's repository context.
         package_name: The pub plugin name.
         apple: The `detect_apple_plugin_sources` struct.
-        resolved_label: The hub's `swift_package_resolved` label, or ""
-            when unset.
-        pinned_identities: Identities pinned in the hub's resolved file.
-        unpinned_errors: Identity-to-refusal dict for unfetchable pins.
+        resolved_label: The hub's `swift_package_resolved` label, or None.
         hub_name: The `flutter.pub` hub name, for dep labels.
 
     Returns:
         `struct(macos, ios)`: The per-platform spoke dep label lists.
     """
-    pins = struct(resolved = resolved_label, pinned = pinned_identities, unpinned = unpinned_errors, hub = hub_name)
     return struct(
-        macos = _detect_apple_swiftpm_platform(ctx, package_name, "macos", apple.macos_srcs, pins),
-        ios = _detect_apple_swiftpm_platform(ctx, package_name, "ios", apple.ios_srcs, pins),
+        macos = _detect_apple_swiftpm_platform(ctx, package_name, "macos", apple.macos_srcs, resolved_label, hub_name),
+        ios = _detect_apple_swiftpm_platform(ctx, package_name, "ios", apple.ios_srcs, resolved_label, hub_name),
     )
 
 def _with_apple_swiftpm_platform_deps(content, package_name, platform, labels):

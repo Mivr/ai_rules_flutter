@@ -9,8 +9,10 @@ load(
     "is_swiftpm_identity",
     "is_swiftpm_revision",
     "is_swiftpm_sha256",
+    "pub_spoke_swiftpm_attrs",
     "read_swiftpm_pins",
     "swiftpm_github_parts",
+    "swiftpm_spoke_attrs",
     "swiftpm_spoke_name",
 )
 
@@ -246,6 +248,37 @@ def _config_checks_test_impl(ctx):
     asserts.true(env, "64 lowercase hex" in check_swiftpm_dicts({"bigint": "xyz"}, {}, ["bigint"], "//ios:Package.resolved"))
     return unittest.end(env)
 
+def _pub_spoke_attrs_test_impl(ctx):
+    env = unittest.begin(ctx)
+    attrs = pub_spoke_swiftpm_attrs(struct(swift_package_resolved = "//:Package.resolved"))
+    asserts.equals(env, "//:Package.resolved", str(attrs.package_resolved))
+    asserts.equals(env, ["package_resolved"], dir(attrs))
+    asserts.true(env, not hasattr(attrs, "swift_pinned_identities"))
+    asserts.true(env, not hasattr(attrs, "swift_unpinned_errors"))
+    attrs = pub_spoke_swiftpm_attrs(struct(swift_package_resolved = None))
+    asserts.equals(env, None, attrs.package_resolved)
+    return unittest.end(env)
+
+def _swiftpm_spoke_attrs_test_impl(ctx):
+    env = unittest.begin(ctx)
+    pin = struct(identity = "bigint")
+    classified = struct(url = "https://example.com/bigint.tar.gz", sha256 = _BIGINT_SHA, error = "")
+    attrs = swiftpm_spoke_attrs("deps", pin, classified, None)
+    asserts.equals(env, "deps__swiftpm-bigint", attrs.name)
+    asserts.equals(env, "bigint", attrs.identity)
+    asserts.equals(env, "deps", attrs.hub_name)
+    asserts.equals(env, classified.url, attrs.archive_url)
+    asserts.equals(env, _BIGINT_SHA, attrs.sha256)
+    asserts.equals(env, "", attrs.unpinned_error)
+    asserts.equals(env, None, attrs.build_file)
+
+    # Another pin added to the hub cannot reach this spoke: the arguments
+    # are a function of this pin alone, never of the hub's pin list.
+    same = swiftpm_spoke_attrs("deps", pin, classified, None)
+    asserts.equals(env, attrs, same)
+    asserts.true(env, not hasattr(attrs, "pin_identities"))
+    return unittest.end(env)
+
 _validators_test = unittest.make(_validators_test_impl)
 _location_parts_test = unittest.make(_location_parts_test_impl)
 _reads_v2_and_v3_test = unittest.make(_reads_v2_and_v3_test_impl)
@@ -258,6 +291,8 @@ _classify_pinned_test = unittest.make(_classify_pinned_test_impl)
 _classify_unpinned_names_the_fix_test = unittest.make(_classify_unpinned_names_the_fix_test_impl)
 _classify_bad_revision_and_location_test = unittest.make(_classify_bad_revision_and_location_test_impl)
 _config_checks_test = unittest.make(_config_checks_test_impl)
+_pub_spoke_attrs_test = unittest.make(_pub_spoke_attrs_test_impl)
+_swiftpm_spoke_attrs_test = unittest.make(_swiftpm_spoke_attrs_test_impl)
 
 def swiftpm_resolved_test_suite(name):
     """Registers the `Package.resolved` reader unit tests."""
@@ -275,6 +310,8 @@ def swiftpm_resolved_test_suite(name):
         _classify_unpinned_names_the_fix_test,
         _classify_bad_revision_and_location_test,
         _config_checks_test,
+        _pub_spoke_attrs_test,
+        _swiftpm_spoke_attrs_test,
     )
     native.test_suite(
         name = name,

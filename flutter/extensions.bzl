@@ -32,7 +32,7 @@ load("//flutter/private:flutter_sdk_package.bzl", "flutter_sdk_package")
 load("//flutter/private:pub_lock_sdks.bzl", "hosted_package_sha256", "parse_lock_sdk_constraints", "version_below_lower_bound")
 load("//flutter/private:rules_dart_floor.bzl", "check_rules_dart_floor")
 load("//flutter/private:swiftpm_package.bzl", "swiftpm_package")
-load("//flutter/private:swiftpm_resolved.bzl", "check_swiftpm_config_present", "check_swiftpm_dicts", "classify_swiftpm_pin", "read_swiftpm_pins", "swiftpm_spoke_name")
+load("//flutter/private:swiftpm_resolved.bzl", "check_swiftpm_config_present", "check_swiftpm_dicts", "classify_swiftpm_pin", "pub_spoke_swiftpm_attrs", "read_swiftpm_pins", "swiftpm_spoke_attrs")
 load("//flutter/private:toolchain_selection.bzl", "select_toolchain_source")
 load("//flutter/private:versions.bzl", "custom_engine_base_url", "custom_source_url", "flutter_source_sha256", "merge_custom_versions", "unknown_version_message")
 load("//flutter/private:xtool_darwin_sdk_repo.bzl", "resolve_darwin_sdk_from_modules")
@@ -532,7 +532,7 @@ def _classify_lock_packages(hub_name, lock_label, lock_pkgs):
             print("flutter.pub: skipping package \"{}\" (source: {}). Only hosted, path, and Flutter SDK packages are supported.".format(name, source))
     return hosted, path_pkgs, sdk_flutter, all_package_names
 
-def _create_hosted_spokes(hub_name, hosted, all_package_names, user_overlay_roots, pub_tag, ignore_hooks, swift_pins):
+def _create_hosted_spokes(hub_name, hosted, all_package_names, user_overlay_roots, pub_tag, ignore_hooks):
     """Creates one `flutter_pub_package` spoke per hosted package.
 
     flutter.pub() routes every hosted package through flutter_pub_package —
@@ -541,9 +541,11 @@ def _create_hosted_spokes(hub_name, hosted, all_package_names, user_overlay_root
     packages still emit a plain `dart_library`; the rule branches
     internally on whether a `flutter.plugin` block is present.
     Non-Flutter modules using `pub.pub()` keep using rules_dart's
-    `pub_lock_package` directly. `swift_pins` carries the hub's SwiftPM
-    pin state so plugin spokes can link their `Package.swift` products.
+    `pub_lock_package` directly. A plugin that ships a `Package.swift`
+    reads the hub's resolved file at fetch time, so no spoke carries
+    hub-wide pin state in its repository attributes.
     """
+    swiftpm_attrs = pub_spoke_swiftpm_attrs(pub_tag)
     for name, info in hosted.items():
         desc = info.get("description", {})
         version = info.get("version", "")
@@ -573,12 +575,10 @@ def _create_hosted_spokes(hub_name, hosted, all_package_names, user_overlay_root
             ignore_hook = name in ignore_hooks,
             android_maven_deps = pub_tag.android_maven_deps,
             android_maven_ignore = pub_tag.android_maven_ignore,
-            swift_resolved_label = swift_pins.resolved,
-            swift_pinned_identities = swift_pins.pinned,
-            swift_unpinned_errors = swift_pins.unpinned,
+            package_resolved = swiftpm_attrs.package_resolved,
         )
 
-def _create_path_spokes(hub_name, path_pkgs, all_package_names, user_overlay_roots, ignore_hooks, swift_pins):
+def _create_path_spokes(hub_name, path_pkgs, all_package_names, user_overlay_roots, pub_tag, ignore_hooks):
     """Creates one `flutter_pub_path_package` spoke per path dependency.
 
     The package directory is symlinked in from the workspace (resolved
@@ -586,9 +586,12 @@ def _create_path_spokes(hub_name, path_pkgs, all_package_names, user_overlay_roo
     for changes; the spoke then runs the same generator pipeline as a
     hosted package, so assets, fonts, shaders, and plugin metadata surface
     identically — including the `android/BUILD.bazel` stub the hub's
-    `all_android_plugin_libs` aggregator depends on uniformly. `swift_pins`
-    carries the hub's SwiftPM pin state for plugin `Package.swift` links.
+    `all_android_plugin_libs` aggregator depends on uniformly. A plugin
+    that ships a `Package.swift` reads the hub's resolved file at fetch
+    time, so no spoke carries hub-wide pin state in its repository
+    attributes.
     """
+    swiftpm_attrs = pub_spoke_swiftpm_attrs(pub_tag)
     for name, path_info in path_pkgs.items():
         flutter_pub_path_package(
             name = hub_name + "__" + name,
@@ -600,9 +603,7 @@ def _create_path_spokes(hub_name, path_pkgs, all_package_names, user_overlay_roo
             overlay_roots = user_overlay_roots + ["@rules_flutter//ext:BUILD.bazel"],
             code_assets = curated_code_assets(name, path_info.version),
             ignore_hook = name in ignore_hooks,
-            swift_resolved_label = swift_pins.resolved,
-            swift_pinned_identities = swift_pins.pinned,
-            swift_unpinned_errors = swift_pins.unpinned,
+            package_resolved = swiftpm_attrs.package_resolved,
         )
 
 def _create_sdk_spokes(hub_name, sdk_flutter, all_package_names, toolchain_info, merged, flutter_version):
@@ -652,11 +653,10 @@ def _create_swiftpm_spokes(hub_name, pub_tag, module_ctx):
         pub_tag: The `flutter.pub` tag.
         module_ctx: The module context, for reading the resolved file.
 
-    Returns:
-        `struct(resolved, pinned, unpinned)`: the resolved label ("" when
-        unset), every pin identity in the resolved file, and the
-        identity-to-refusal dict for pins that cannot be fetched. Pub
-        plugin spokes use it to link their `Package.swift` products.
+    The resolved file is read here for the extension's own checks, but
+    no hub-wide pin list reaches a spoke: each SwiftPM spoke gets only
+    its own pin, and pub plugin spokes read the resolved file lazily at
+    fetch time. A pin edit therefore never changes a pure-Dart spoke.
     """
     config_error = check_swiftpm_config_present(
         str(pub_tag.swift_package_resolved) if pub_tag.swift_package_resolved else None,
@@ -666,7 +666,7 @@ def _create_swiftpm_spokes(hub_name, pub_tag, module_ctx):
     if config_error:
         fail(config_error)
     if not pub_tag.swift_package_resolved:
-        return struct(resolved = "", pinned = [], unpinned = {})
+        return
     resolved_label = str(pub_tag.swift_package_resolved)
     pins = read_swiftpm_pins(module_ctx.read(pub_tag.swift_package_resolved), resolved_label)
     if not pins.ok:
@@ -679,23 +679,24 @@ def _create_swiftpm_spokes(hub_name, pub_tag, module_ctx):
     )
     if dicts_error:
         fail(dicts_error)
-    pin_identities = sorted([pin.identity for pin in pins.pins])
-    unpinned = {}
     for pin in pins.pins:
         classified = classify_swiftpm_pin(pin, pub_tag.swift_package_sha256, hub_name, resolved_label)
-        if not classified.ok:
-            unpinned[pin.identity] = classified.error
-        swiftpm_package(
-            name = swiftpm_spoke_name(hub_name, pin.identity),
-            identity = pin.identity,
-            hub_name = hub_name,
-            pin_identities = pin_identities,
-            archive_url = classified.url,
-            sha256 = classified.sha256,
-            unpinned_error = classified.error,
-            build_file = pub_tag.swift_package_build_files.get(pin.identity),
+        swiftpm_attrs = swiftpm_spoke_attrs(
+            hub_name,
+            pin,
+            classified,
+            pub_tag.swift_package_build_files.get(pin.identity),
         )
-    return struct(resolved = resolved_label, pinned = pin_identities, unpinned = unpinned)
+        swiftpm_package(
+            name = swiftpm_attrs.name,
+            identity = swiftpm_attrs.identity,
+            hub_name = swiftpm_attrs.hub_name,
+            archive_url = swiftpm_attrs.archive_url,
+            sha256 = swiftpm_attrs.sha256,
+            unpinned_error = swiftpm_attrs.unpinned_error,
+            build_file = swiftpm_attrs.build_file,
+        )
+    return
 
 def _register_pub_hub(module_ctx, pub_tag, selected_info, merged, user_overlay_roots):
     """Resolves one `flutter.pub` tag into spoke repos plus the hub repo."""
@@ -715,9 +716,9 @@ def _register_pub_hub(module_ctx, pub_tag, selected_info, merged, user_overlay_r
 
     hosted, path_pkgs, sdk_flutter, all_package_names = _classify_lock_packages(hub_name, pub_tag.lock, lock_pkgs)
     ignore_hooks = {pkg_name: True for pkg_name in pub_tag.ignore_hooks}
-    swift_pins = _create_swiftpm_spokes(hub_name, pub_tag, module_ctx)
-    _create_hosted_spokes(hub_name, hosted, all_package_names, user_overlay_roots, pub_tag, ignore_hooks, swift_pins)
-    _create_path_spokes(hub_name, path_pkgs, all_package_names, user_overlay_roots, ignore_hooks, swift_pins)
+    _create_swiftpm_spokes(hub_name, pub_tag, module_ctx)
+    _create_hosted_spokes(hub_name, hosted, all_package_names, user_overlay_roots, pub_tag, ignore_hooks)
+    _create_path_spokes(hub_name, path_pkgs, all_package_names, user_overlay_roots, pub_tag, ignore_hooks)
     _create_sdk_spokes(hub_name, sdk_flutter, all_package_names, toolchain_info, merged, toolchain_info.version)
 
     # Create hub repo with aliases for all packages plus the
