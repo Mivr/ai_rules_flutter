@@ -1,4 +1,5 @@
-/// Proves package-relative asset keys inside the Android bundle.
+/// Proves package-relative asset keys and resolution variants inside the
+/// Android bundle.
 ///
 /// `//apps/sub:sub_test` lives in Bazel package `//apps/sub`: its own
 /// `assets/sub.txt` must load at `assets/sub.txt` (relative to the listing
@@ -10,10 +11,18 @@
 /// The same package-relative rule covers the target's own `shaders`:
 /// `shaders/sub.frag` must load as `shaders/sub.frag`, which is where
 /// `FragmentProgram.fromAsset` looks for it.
+///
+/// The app's `assets/2.0x/logo.png` and `assets/2.5x/logo.png` are
+/// resolution variants of `assets/logo.png`, and the brand package's
+/// `packages/brand/assets/2.0x/brand.png` is a variant of
+/// `packages/brand/assets/brand.png`. `AssetImage` must pick the one its
+/// device pixel ratio asks for, and the loaded bytes carry that fixture's
+/// marker.
 library;
 
 import 'dart:ui';
 
+import 'package:flutter/painting.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
@@ -26,6 +35,13 @@ import 'package:sub/main.dart';
 /// Normalizing here keeps the assertion exact on every runner.
 Future<String> _assetText(String key) async =>
     (await rootBundle.loadString(key)).replaceAll('\r\n', '\n');
+
+/// Asserts the asset at [key] is the fixture whose marker is [marker].
+Future<void> _expectMarker(String key, String marker) async {
+  final data = await rootBundle.load(key);
+  final bytes = data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+  expect(String.fromCharCodes(bytes), contains(marker));
+}
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
@@ -43,6 +59,46 @@ void main() {
       await _assetText('packages/brand/assets/brand.txt'),
       equals('brand asset\n'),
     );
+  });
+
+  testWidgets('resolution variants resolve by device pixel ratio', (
+    tester,
+  ) async {
+    await tester.pumpWidget(const SubApp());
+    await tester.pumpAndSettle();
+
+    final logoMain = await const AssetImage('assets/logo.png')
+        .obtainKey(const ImageConfiguration());
+    expect(logoMain.name, 'assets/logo.png');
+    expect(logoMain.scale, 1.0);
+    await _expectMarker(logoMain.name, 'FF-ASSET-VARIANTS logo 1x');
+
+    final logo20 = await const AssetImage('assets/logo.png')
+        .obtainKey(const ImageConfiguration(devicePixelRatio: 2.0));
+    expect(logo20.name, 'assets/2.0x/logo.png');
+    expect(logo20.scale, 2.0);
+    await _expectMarker(logo20.name, 'FF-ASSET-VARIANTS logo 2.0x');
+
+    final logo25 = await const AssetImage('assets/logo.png')
+        .obtainKey(const ImageConfiguration(devicePixelRatio: 2.5));
+    expect(logo25.name, 'assets/2.5x/logo.png');
+    expect(logo25.scale, 2.5);
+    await _expectMarker(logo25.name, 'FF-ASSET-VARIANTS logo 2.5x');
+
+    final brandMain = await const AssetImage(
+      'assets/brand.png',
+      package: 'brand',
+    ).obtainKey(const ImageConfiguration());
+    expect(brandMain.name, 'packages/brand/assets/brand.png');
+    await _expectMarker(brandMain.name, 'FF-ASSET-VARIANTS brand 1x');
+
+    final brand20 = await const AssetImage(
+      'assets/brand.png',
+      package: 'brand',
+    ).obtainKey(const ImageConfiguration(devicePixelRatio: 2.0));
+    expect(brand20.name, 'packages/brand/assets/2.0x/brand.png');
+    expect(brand20.scale, 2.0);
+    await _expectMarker(brand20.name, 'FF-ASSET-VARIANTS brand 2.0x');
   });
 
   testWidgets('subpackage shader loads at its package-relative key', (

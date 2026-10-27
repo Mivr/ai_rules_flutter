@@ -94,6 +94,12 @@ bzl_library(
 )
 
 bzl_library(
+    name = "asset_variants",
+    srcs = ["asset_variants.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+)
+
+bzl_library(
     name = "flutter_asset_bundle",
     srcs = ["flutter_asset_bundle.bzl"],
     visibility = ["//flutter:__subpackages__"],
@@ -108,6 +114,7 @@ bzl_library(
     name = "flutter_asset_bundle_action",
     srcs = ["flutter_asset_bundle_action.bzl"],
     visibility = ["//flutter:__subpackages__"],
+    deps = [":asset_variants"],
 )
 
 bzl_library(

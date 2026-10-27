@@ -8,5 +8,9 @@ flutter_library(
     name = "brand",
     package_name = "brand",
     srcs = ["lib/brand.dart"],
-    assets = ["assets/brand.txt"],
+    assets = [
+        "assets/2.0x/brand.png",
+        "assets/brand.png",
+        "assets/brand.txt",
+    ],
 )

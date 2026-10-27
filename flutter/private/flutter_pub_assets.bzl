@@ -29,7 +29,13 @@ its pubspec.yaml and the entry.
 """
 
 load(":asset_uri.bzl", "encode_asset_key", "spoke_asset_uri_error")
+load(":asset_variants.bzl", _is_asset_variant_dir = "is_asset_variant_dir")
 load(":flutter_pub_walk.bzl", "PUB_WALK_BOUND")
+
+# Re-exported from `asset_variants.bzl`, the one place flutter_tools'
+# resolution-variant rule lives. Kept under its old name so existing loads
+# keep working.
+is_asset_variant_dir = _is_asset_variant_dir
 
 # Bound for every asset directory walk. Starlark has no `while`, so every
 # walk is a bounded `for`; reaching the bound fails loudly (see
@@ -37,31 +43,6 @@ load(":flutter_pub_walk.bzl", "PUB_WALK_BOUND")
 # shared pub spoke walk bound (`PUB_WALK_BOUND` in `flutter_pub_walk.bzl`),
 # kept under its old name so existing loads keep working.
 PUB_ASSET_LIST_BOUND = PUB_WALK_BOUND
-
-def is_asset_variant_dir(name):
-    """True when `name` is a resolution-variant directory, per flutter_tools.
-
-    Mirrors `_assetVariantDirectoryRegExp` (`/?(\\d+(\\.\\d*)?)x$`, matched
-    with `hasMatch`, so only the tail matters): `name` ends in `x` and the
-    stem ends in `<digits>` (`2x`) or `<digits>.` (`2.x`, the empty-fraction
-    `\\.\\d*` case). E.g. `2x`, `2.0x`, `1.5x` match; `sub`, `foo`, `x` do not.
-
-    Args:
-        name: A single directory basename (no slashes).
-
-    Returns:
-        True when flutter_tools would treat the directory as variants.
-    """
-    if len(name) < 2 or not name.endswith("x"):
-        return False
-    stem = name[:len(name) - 1]
-    if stem[len(stem) - 1] in "0123456789":
-        return True
-    return (
-        stem.endswith(".") and
-        len(stem) >= 2 and
-        stem[len(stem) - 2] in "0123456789"
-    )
 
 def walk_bound_error(package_name, directory, bound):
     """The fetch failure for an asset walk that reaches its bound.
