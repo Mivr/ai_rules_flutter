@@ -68,15 +68,15 @@ void main() {
     await tester.pumpAndSettle();
 
     final logoMain = await const AssetImage('assets/logo.png')
-        .obtainKey(const ImageConfiguration());
+        .obtainKey(ImageConfiguration.empty);
     expect(logoMain.name, 'assets/logo.png');
-    expect(logoMain.scale, 1.0);
+    expect(logoMain.scale, 1);
     await _expectMarker(logoMain.name, 'FF-ASSET-VARIANTS logo 1x');
 
     final logo20 = await const AssetImage('assets/logo.png')
-        .obtainKey(const ImageConfiguration(devicePixelRatio: 2.0));
+        .obtainKey(const ImageConfiguration(devicePixelRatio: 2));
     expect(logo20.name, 'assets/2.0x/logo.png');
-    expect(logo20.scale, 2.0);
+    expect(logo20.scale, 2);
     await _expectMarker(logo20.name, 'FF-ASSET-VARIANTS logo 2.0x');
 
     final logo25 = await const AssetImage('assets/logo.png')
@@ -88,16 +88,16 @@ void main() {
     final brandMain = await const AssetImage(
       'assets/brand.png',
       package: 'brand',
-    ).obtainKey(const ImageConfiguration());
+    ).obtainKey(ImageConfiguration.empty);
     expect(brandMain.name, 'packages/brand/assets/brand.png');
     await _expectMarker(brandMain.name, 'FF-ASSET-VARIANTS brand 1x');
 
     final brand20 = await const AssetImage(
       'assets/brand.png',
       package: 'brand',
-    ).obtainKey(const ImageConfiguration(devicePixelRatio: 2.0));
+    ).obtainKey(const ImageConfiguration(devicePixelRatio: 2));
     expect(brand20.name, 'packages/brand/assets/2.0x/brand.png');
-    expect(brand20.scale, 2.0);
+    expect(brand20.scale, 2);
     await _expectMarker(brand20.name, 'FF-ASSET-VARIANTS brand 2.0x');
   });
 
