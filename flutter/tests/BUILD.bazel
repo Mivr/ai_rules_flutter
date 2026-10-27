@@ -159,6 +159,32 @@ dart_test(
     ],
 )
 
+# Bootstrap template guard: the three `flutter_integration_test` bootstrap
+# templates keep the program text the Starlark unit tests cannot read (they see
+# only the substitutions), and every placeholder the rules substitute is still
+# there. Same discovery mechanism as the guards above.
+dart_test(
+    name = "integration_test_bootstrap_templates_test",
+    size = "small",
+    data = [
+        "integration_test_bootstrap_templates_test.dart",
+        "//flutter/private:integration_test_bootstrap_snippets.bzl",
+        "//flutter/private/integration_test_bootstrap:android_bootstrap.dart.tpl",
+        "//flutter/private/integration_test_bootstrap:linux_bootstrap.dart.tpl",
+        "//flutter/private/integration_test_bootstrap:web_bootstrap.dart.tpl",
+    ],
+    env = {"GUARD_ROOT_ANCHOR": "$(rlocationpath :integration_test_bootstrap_templates_test.dart)"},
+    env_inherit = ["BUILD_WORKSPACE_DIRECTORY"],
+    main = "integration_test_bootstrap_templates_test.dart",
+    tags = [
+        "external",
+        "no-sandbox",
+    ],
+    deps = [
+        "@dev_tool_deps//:test",
+    ],
+)
+
 # Dependency floors: every regular bazel_dep declares the checked-in minimum,
 # not the release this checkout compiles. Reads both files from data, so a
 # stale run cannot hide a declared bump.

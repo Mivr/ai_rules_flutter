@@ -35,7 +35,7 @@ load(
     "//flutter/private:flutter_integration_test_ios.bzl",
     "IOS_APP_KWARG_KEYS",
     "flutter_ios_integration_test",
-    "ios_integration_bootstrap_content",
+    "ios_integration_bootstrap_substitutions",
     "ios_integration_test_env",
     "ios_integration_test_tags",
 )
@@ -195,77 +195,79 @@ def _test_tags_test_impl(ctx):
 
 def _ios_bootstrap_with_integration_test_pkg_test_impl(ctx):
     env = unittest.begin(ctx)
-    src = ios_integration_bootstrap_content(
+    substitutions = ios_integration_bootstrap_substitutions(
         make_linux_integration_bootstrap_content(
             _TEST_IMPORT,
             has_integration_test = True,
         ),
     )
-    asserts.true(env, "import 'package:integration_test/integration_test.dart';" in src)
-    asserts.true(env, "IntegrationTestWidgetsFlutterBinding.ensureInitialized();" in src)
-    asserts.false(env, "class _IntegrationTestBinding" in src)
-    asserts.true(env, "FLUTTER_INTEGRATION_TEST_HARNESS_URL" in src)
-    asserts.true(env, "WebSocket.connect(wsUrl)" in src)
+    prologue = substitutions["{harness_url_prologue}"]
+    asserts.equals(env, _TEST_IMPORT, substitutions["{test_import}"])
+    asserts.true(env, "import 'package:integration_test/integration_test.dart';" in substitutions["{binding_import}"])
+    asserts.equals(env, "IntegrationTestWidgetsFlutterBinding.ensureInitialized();", substitutions["{binding_init}"])
+    asserts.equals(env, "", substitutions["{binding_decl}"])
+    asserts.true(env, "FLUTTER_INTEGRATION_TEST_HARNESS_URL" in prologue)
     asserts.false(
         env,
-        "ws://127.0.0.1" in src,
+        "ws://127.0.0.1" in prologue,
         "the iOS bootstrap takes the runner's per-launch URL; no fixed port",
     )
     asserts.false(
         env,
-        "38427" in src,
+        "38427" in prologue,
         "the iOS bootstrap takes the runner's per-launch URL; no fixed port",
     )
     asserts.true(
         env,
-        "Directory.systemTemp" in src,
+        "Directory.systemTemp" in prologue,
         "on iOS the environment is always empty, so the bootstrap falls " +
         "back to the launcher-written file under the container's tmp/",
     )
     asserts.true(
         env,
-        "flutter_integration_test_harness_url" in src,
+        "flutter_integration_test_harness_url" in prologue,
         "the bootstrap reads the file the launcher writes",
     )
     asserts.true(
         env,
-        "stderr.flush()" in src,
+        "stderr.flush()" in prologue,
         "the missing-URL failure flushes before exit",
     )
     return unittest.end(env)
 
 def _ios_bootstrap_without_integration_test_pkg_test_impl(ctx):
     env = unittest.begin(ctx)
-    src = ios_integration_bootstrap_content(
+    substitutions = ios_integration_bootstrap_substitutions(
         make_linux_integration_bootstrap_content(
             _TEST_IMPORT,
             has_integration_test = False,
         ),
     )
-    asserts.false(env, "package:integration_test/integration_test.dart" in src)
-    asserts.true(env, "class _IntegrationTestBinding extends LiveTestWidgetsFlutterBinding" in src)
-    asserts.true(env, "_IntegrationTestBinding.ensureInitialized();" in src)
-    asserts.true(env, "FLUTTER_INTEGRATION_TEST_HARNESS_URL" in src)
-    asserts.true(env, "WebSocket.connect(wsUrl)" in src)
+    prologue = substitutions["{harness_url_prologue}"]
+    asserts.equals(env, _TEST_IMPORT, substitutions["{test_import}"])
+    asserts.false(env, "package:integration_test/integration_test.dart" in substitutions["{binding_import}"])
+    asserts.true(env, "class _IntegrationTestBinding extends LiveTestWidgetsFlutterBinding" in substitutions["{binding_decl}"])
+    asserts.equals(env, "_IntegrationTestBinding.ensureInitialized();", substitutions["{binding_init}"])
+    asserts.true(env, "FLUTTER_INTEGRATION_TEST_HARNESS_URL" in prologue)
     asserts.false(
         env,
-        "ws://127.0.0.1" in src,
+        "ws://127.0.0.1" in prologue,
         "the iOS bootstrap takes the runner's per-launch URL; no fixed port",
     )
     asserts.true(
         env,
-        "Directory.systemTemp" in src,
+        "Directory.systemTemp" in prologue,
         "on iOS the environment is always empty, so the bootstrap falls " +
         "back to the launcher-written file under the container's tmp/",
     )
     asserts.true(
         env,
-        "flutter_integration_test_harness_url" in src,
+        "flutter_integration_test_harness_url" in prologue,
         "the bootstrap reads the file the launcher writes",
     )
     asserts.true(
         env,
-        "stderr.flush()" in src,
+        "stderr.flush()" in prologue,
         "the missing-URL failure flushes before exit",
     )
     return unittest.end(env)
@@ -273,23 +275,23 @@ def _ios_bootstrap_without_integration_test_pkg_test_impl(ctx):
 def _linux_bootstrap_has_no_file_fallback_test_impl(ctx):
     env = unittest.begin(ctx)
     for has_integration_test in (True, False):
-        src = make_linux_integration_bootstrap_content(
+        prologue = make_linux_integration_bootstrap_content(
             _TEST_IMPORT,
             has_integration_test = has_integration_test,
-        )
+        )["{harness_url_prologue}"]
         asserts.false(
             env,
-            "Directory.systemTemp" in src,
+            "Directory.systemTemp" in prologue,
             "the file fallback is iOS-only; the Linux bootstrap is unchanged",
         )
         asserts.false(
             env,
-            "flutter_integration_test_harness_url" in src,
+            "flutter_integration_test_harness_url" in prologue,
             "the file fallback is iOS-only; the Linux bootstrap is unchanged",
         )
         asserts.false(
             env,
-            "stderr.flush()" in src,
+            "stderr.flush()" in prologue,
             "the file fallback is iOS-only; the Linux bootstrap is unchanged",
         )
     return unittest.end(env)

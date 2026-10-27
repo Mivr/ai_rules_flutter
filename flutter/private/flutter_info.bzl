@@ -220,6 +220,45 @@ def dedup_plugins(all_plugins):
             unique.append(p)
     return unique
 
+def collect_flutter_plugin_deps(deps):
+    """Collects the plugin sets `deps` propagate on `FlutterInfo`.
+
+    An application and a platform integration-test rule both read the same
+    channels off their dependencies; collecting them here keeps one definition
+    of what a plugin dependency contributes.
+
+    Args:
+        deps: Targets that may provide `FlutterInfo`.
+
+    Returns:
+        A struct with `all_plugins` (deduplicated) and one depset per plugin
+        library kind, plus `apple_privacy_manifests`.
+    """
+    all_dep_plugins = []
+    apple_plugin_lib_depsets = []
+    android_plugin_lib_depsets = []
+    linux_plugin_lib_depsets = []
+    windows_plugin_lib_depsets = []
+    apple_privacy_manifest_depsets = []
+    for dep in deps:
+        if FlutterInfo not in dep:
+            continue
+        info = dep[FlutterInfo]
+        all_dep_plugins.extend(info.plugins)
+        apple_plugin_lib_depsets.append(info.apple_plugin_libraries)
+        android_plugin_lib_depsets.append(info.android_plugin_libraries)
+        linux_plugin_lib_depsets.append(info.linux_plugin_libraries)
+        windows_plugin_lib_depsets.append(info.windows_plugin_libraries)
+        apple_privacy_manifest_depsets.append(info.apple_privacy_manifests)
+    return struct(
+        all_plugins = dedup_plugins(all_dep_plugins),
+        android_plugin_libraries = depset(transitive = android_plugin_lib_depsets),
+        apple_plugin_libraries = depset(transitive = apple_plugin_lib_depsets),
+        apple_privacy_manifests = depset(transitive = apple_privacy_manifest_depsets),
+        linux_plugin_libraries = depset(transitive = linux_plugin_lib_depsets),
+        windows_plugin_libraries = depset(transitive = windows_plugin_lib_depsets),
+    )
+
 def flutter_info(deps = [], plugins = [], asset_channels = None, plugin_libraries = None, native_channels = None, pub_channels = None):
     """Builds a `FlutterInfo`, merging its dependencies' contributions.
 
