@@ -105,6 +105,20 @@ def _translates_groups_and_product_deps_test_impl(ctx):
     asserts.true(env, not "package_name" in translated.text)
     return unittest.end(env)
 
+def _translates_without_pin_list_test_impl(ctx):
+    env = unittest.begin(ctx)
+    parsed = parse_swiftpm_package("multi", _MULTI)
+    asserts.true(env, parsed.ok)
+    files = {
+        "One": struct(dir = "pkg/Sources/One", srcs = ["pkg/Sources/One/a.swift"]),
+        "Two": struct(dir = "pkg/Sources/Two", srcs = ["pkg/Sources/Two/b.swift"]),
+    }
+    translated = translate_swiftpm_package("multi", "deps", parsed.model, None, files)
+    asserts.true(env, translated.ok)
+    asserts.true(env, "\"@deps__swiftpm-swift-argument-parser//:ArgumentParser\"" in translated.text)
+    asserts.true(env, "\"@deps__swiftpm-realname//:Thing\"" in translated.text)
+    return unittest.end(env)
+
 def _unpinned_product_dep_fails_test_impl(ctx):
     env = unittest.begin(ctx)
     parsed = parse_swiftpm_package("multi", _MULTI)
@@ -262,6 +276,7 @@ _c99name_test = unittest.make(_c99name_test_impl)
 _language_mode_test = unittest.make(_language_mode_test_impl)
 _translates_bigint_test = unittest.make(_translates_bigint_test_impl)
 _translates_groups_and_product_deps_test = unittest.make(_translates_groups_and_product_deps_test_impl)
+_translates_without_pin_list_test = unittest.make(_translates_without_pin_list_test_impl)
 _unpinned_product_dep_fails_test = unittest.make(_unpinned_product_dep_fails_test_impl)
 _special_target_refusal_points_at_overrides_test = unittest.make(_special_target_refusal_points_at_overrides_test_impl)
 _unknown_target_dep_fails_test = unittest.make(_unknown_target_dep_fails_test_impl)
@@ -280,6 +295,7 @@ def swiftpm_translate_test_suite(name):
         _language_mode_test,
         _translates_bigint_test,
         _translates_groups_and_product_deps_test,
+        _translates_without_pin_list_test,
         _unpinned_product_dep_fails_test,
         _special_target_refusal_points_at_overrides_test,
         _unknown_target_dep_fails_test,

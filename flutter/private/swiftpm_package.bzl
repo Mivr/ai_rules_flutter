@@ -449,7 +449,7 @@ def _swiftpm_package_impl(ctx):
     parsed = parse_swiftpm_package(identity, ctx.read(root.root + "/" + manifest.filename))
     if not parsed.ok:
         fail(parsed.error)
-    reached = swiftpm_reachable_targets(identity, parsed.model, ctx.attr.pin_identities, ctx.attr.hub_name)
+    reached = swiftpm_reachable_targets(identity, parsed.model, None, ctx.attr.hub_name)
     if not reached.ok:
         fail(reached.error)
     by_name = {target.name: target for target in parsed.model.targets}
@@ -464,7 +464,7 @@ def _swiftpm_package_impl(ctx):
             fail(generated.error)
         if generated.path:
             ctx.file(generated.path, generated.content)
-    translated = translate_swiftpm_package(identity, ctx.attr.hub_name, parsed.model, ctx.attr.pin_identities, files_by_target)
+    translated = translate_swiftpm_package(identity, ctx.attr.hub_name, parsed.model, None, files_by_target)
     if not translated.ok:
         fail(translated.error)
     ctx.file("BUILD.bazel", translated.text)
@@ -477,7 +477,6 @@ swiftpm_package = repository_rule(
         "build_file": attr.label(allow_single_file = True, doc = "Label of a hand-written BUILD file replacing the generated one; Bazel resolves it in the module that wrote the flutter.pub tag. None (the default) translates the manifest. Skips the translation only, not the download."),
         "hub_name": attr.string(mandatory = True, doc = "The flutter.pub hub name, for cross-package dep labels."),
         "identity": attr.string(mandatory = True, doc = "The SwiftPM package identity (the spoke suffix)."),
-        "pin_identities": attr.string_list(doc = "Every identity pinned in Package.resolved, for dependency resolution."),
         "sha256": attr.string(doc = "The pinned SHA-256 of the archive (empty when unpinned, which fails before downloading)."),
         "unpinned_error": attr.string(default = "", doc = "The fetch failure for an unpinned entry; failing first keeps unpinned bytes out."),
     },

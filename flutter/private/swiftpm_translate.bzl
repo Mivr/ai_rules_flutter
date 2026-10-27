@@ -222,7 +222,11 @@ def _swiftpm_product_dep_label(identity, hub_name, dep, pkg_deps, pin_identities
         hub_name: The `flutter.pub` hub name, for dep labels.
         dep: The parsed product dependency reference.
         pkg_deps: The manifest's parsed `.package(...)` declarations.
-        pin_identities: The identities pinned in `Package.resolved`.
+        pin_identities: The identities pinned in `Package.resolved`, or
+            None when the caller has no hub-wide pin list. The repo rule
+            passes None: `Package.resolved` identities are lower-case, so
+            the manifest reference resolves without the list, and the
+            spoke's attributes carry no hub-wide pin state.
 
     Returns:
         `struct(ok, error, label)`.
@@ -230,6 +234,9 @@ def _swiftpm_product_dep_label(identity, hub_name, dep, pkg_deps, pin_identities
     located = swiftpm_locate_package_dep(identity, dep.package, pkg_deps)
     if not located.ok:
         return struct(ok = False, error = located.error, label = "")
+    if pin_identities == None:
+        canonical = located.dep_identity.lower()
+        return struct(ok = True, error = "", label = "@" + hub_name + "__swiftpm-" + canonical + "//:" + dep.name)
     canonical = None
     for pin_id in pin_identities:
         if pin_id.lower() == located.dep_identity.lower():
@@ -255,7 +262,8 @@ def _swiftpm_target_edge(identity, model, target, by_name, pin_identities, hub_n
         model: The parsed manifest model.
         target: The target struct.
         by_name: The parsed targets indexed by exact name.
-        pin_identities: The identities pinned in `Package.resolved`.
+        pin_identities: The identities pinned in `Package.resolved`, or
+            None when the caller has none (see `_swiftpm_product_dep_label`).
         hub_name: The `flutter.pub` hub name, for dep labels.
 
     Returns:
@@ -343,7 +351,11 @@ def swiftpm_reachable_targets(identity, model, pin_identities, hub_name):
     Args:
         identity: The SwiftPM package identity.
         model: The parsed manifest model.
-        pin_identities: The identities pinned in `Package.resolved`.
+        pin_identities: The identities pinned in `Package.resolved`, or
+            None when the caller has no hub-wide pin list. The repo rule
+            passes None so a pin added elsewhere does not change the
+            spoke's attributes; the manifest reference itself names the
+            identity.
         hub_name: The `flutter.pub` hub name, for dep labels.
 
     Returns:
@@ -622,7 +634,8 @@ def translate_swiftpm_package(identity, hub_name, model, pin_identities, files_b
         identity: The SwiftPM package identity.
         hub_name: The `flutter.pub` hub name, for dep labels.
         model: The parsed manifest model.
-        pin_identities: The identities pinned in `Package.resolved`.
+        pin_identities: The identities pinned in `Package.resolved`, or
+            None when the caller has no hub-wide pin list (the repo rule).
         files_by_target: Dict of target name to `struct(dir, srcs)`.
 
     Returns:

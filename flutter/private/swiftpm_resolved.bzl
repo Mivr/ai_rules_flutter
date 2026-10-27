@@ -650,6 +650,50 @@ def check_swiftpm_config_present(resolved, sha256_by_identity, build_files):
         return ""
     return "flutter.pub: {problems}; set `swift_package_resolved` first.".format(problems = "; ".join(problems))
 
+def pub_spoke_swiftpm_attrs(pub_tag):
+    """The SwiftPM repository arguments every pub spoke receives.
+
+    A pub spoke gets the hub's resolved-file label (a constant, never the
+    pin list or the identity-to-refusal dict) and reads it only if its
+    own package ships a `Package.swift`. Pure-Dart spokes therefore keep
+    their marker when a pin is added, removed or gets a checksum.
+
+    Args:
+        pub_tag: The `flutter.pub` tag.
+
+    Returns:
+        `struct(package_resolved)`: the resolved label, or None.
+    """
+    return struct(package_resolved = pub_tag.swift_package_resolved)
+
+def swiftpm_spoke_attrs(hub_name, pin, classified, build_file):
+    """The repository arguments one SwiftPM spoke receives.
+
+    Only that pin's own translation inputs are passed: its identity, its
+    resolved archive URL and checksum, its refusal and its optional
+    BUILD-file override. No hub-wide pin list travels with them, so a pin
+    added elsewhere leaves this spoke's attributes unchanged.
+
+    Args:
+        hub_name: The `flutter.pub` hub name.
+        pin: The pin struct from `read_swiftpm_pins`.
+        classified: The pin's `classify_swiftpm_pin` result.
+        build_file: The pin's `swift_package_build_files` override, or None.
+
+    Returns:
+        `struct(name, identity, hub_name, archive_url, sha256,
+        unpinned_error, build_file)`.
+    """
+    return struct(
+        name = swiftpm_spoke_name(hub_name, pin.identity),
+        identity = pin.identity,
+        hub_name = hub_name,
+        archive_url = classified.url,
+        sha256 = classified.sha256,
+        unpinned_error = classified.error,
+        build_file = build_file,
+    )
+
 def check_swiftpm_dicts(sha256_by_identity, build_files, pin_identities, resolved_label):
     """Validate the checksum/build-file dicts against the pins.
 

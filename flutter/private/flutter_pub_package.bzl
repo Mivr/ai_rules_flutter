@@ -1863,7 +1863,7 @@ def _build_plugin_spoke_content(ctx, pubspec, dep_labels, assets, unreplaced_hoo
         pkg_asset_flavors = assets.pkg_asset_flavors,
         pkg_shaders = assets.pkg_shaders,
     )
-    apple_swiftpm = detect_apple_swiftpm_deps(ctx, package_name, apple, ctx.attr.swift_resolved_label, ctx.attr.swift_pinned_identities, ctx.attr.swift_unpinned_errors, ctx.attr.hub_name)
+    apple_swiftpm = detect_apple_swiftpm_deps(ctx, package_name, apple, ctx.attr.package_resolved, ctx.attr.hub_name)
     build_content = with_apple_swiftpm_deps(build_content, package_name, apple_swiftpm.macos, apple_swiftpm.ios)
     return struct(build_content = build_content, android = android)
 
@@ -2370,17 +2370,13 @@ flutter_pub_package = repository_rule(
                   "make deliberately; it is never a default.",
             default = [],
         ),
-        "swift_resolved_label": attr.string(
-            doc = "Label of the hub's `swift_package_resolved` file, or empty when the hub sets none.",
-            default = "",
-        ),
-        "swift_pinned_identities": attr.string_list(
-            doc = "SwiftPM package identities pinned in the hub's resolved file.",
-            default = [],
-        ),
-        "swift_unpinned_errors": attr.string_dict(
-            doc = "Identity to fetch refusal for pins the hub cannot fetch.",
-            default = {},
+        "package_resolved": attr.label(
+            doc = "Label of the hub's `swift_package_resolved` file. A plugin " +
+                  "spoke that ships a `Package.swift` reads it to link its " +
+                  "SwiftPM products; an unread label keeps pure-Dart spokes " +
+                  "independent of the hub's pin list.",
+            allow_single_file = True,
+            default = None,
         ),
         "overlay_roots": attr.label_list(
             doc = "BUILD.bazel anchors for overlay trees. Each label points at " +
@@ -2430,17 +2426,12 @@ flutter_pub_path_package = repository_rule(
                   "`flutter_pub_package`.",
             default = False,
         ),
-        "swift_resolved_label": attr.string(
-            doc = "Label of the hub's `swift_package_resolved` file, or empty when the hub sets none.",
-            default = "",
-        ),
-        "swift_pinned_identities": attr.string_list(
-            doc = "SwiftPM package identities pinned in the hub's resolved file.",
-            default = [],
-        ),
-        "swift_unpinned_errors": attr.string_dict(
-            doc = "Identity to fetch refusal for pins the hub cannot fetch.",
-            default = {},
+        "package_resolved": attr.label(
+            doc = "Label of the hub's `swift_package_resolved` file, read " +
+                  "only when this package ships a `Package.swift` (same as " +
+                  "`flutter_pub_package`).",
+            allow_single_file = True,
+            default = None,
         ),
         "overlay_roots": attr.label_list(
             doc = "BUILD.bazel anchors for overlay trees, same as " +
