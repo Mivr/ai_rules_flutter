@@ -46,6 +46,7 @@ def _selected_version(rctx, root_source, module):
     """The version [module] resolves to in this workspace."""
     if module == "ai_rules_dart":
         return _version_from_bazel_dep(root_source, module)
+
     # Canonical repo names are independent of the root's apparent-name mapping:
     # a workspace that does not declare every module directly (the pre-fix
     # fixture does not) still has the selected module repo under `<name>+`.
