@@ -145,12 +145,11 @@ def _bundle_id_default_test_impl(ctx):
 
 def _transition_settings_test_impl(ctx):
     env = unittest.begin(ctx)
+    expected = dict(_DBG)
+    expected["//command_line_option:ios_multi_cpus"] = ["sim_arm64"]
     asserts.equals(
         env,
-        {
-            "//command_line_option:compilation_mode": "dbg",
-            "//command_line_option:ios_multi_cpus": ["sim_arm64"],
-        },
+        expected,
         ios_sim_debug_transition_impl({}, None),
     )
     return unittest.end(env)
