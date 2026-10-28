@@ -25,6 +25,8 @@ with its hub format). Every detail names the target and the offending
 setting or condition.
 """
 
+load(":swiftpm_paths.bzl", "swiftpm_normalize_relative_path")
+
 _SWIFTPM_SETTING_CATEGORIES = {
     "cSettings": "c",
     "cxxSettings": "cxx",
@@ -590,14 +592,15 @@ def _swiftpm_clang_entry(target, target_dir, setting):
     """
     who = _swiftpm_setting_target(target.name)
     if setting.kind == "headerSearchPath":
-        for segment in setting.name.split("/"):
-            if segment == "" or segment == "." or segment == "..":
-                return struct(
-                    error = "{who} uses `.headerSearchPath({path})`, which escapes the target directory".format(who = who, path = repr(setting.name)),
-                    text = "",
-                    private_include = False,
-                )
-        return struct(error = "", text = target_dir + "/" + setting.name, private_include = True)
+        normalized = swiftpm_normalize_relative_path(setting.name)
+        if not normalized.ok:
+            return struct(
+                error = "{who} uses `.headerSearchPath({path})`, which escapes the target directory".format(who = who, path = repr(setting.name)),
+                text = "",
+                private_include = False,
+            )
+        path = target_dir if normalized.path == "" else target_dir + "/" + normalized.path
+        return struct(error = "", text = path, private_include = True)
     if setting.value:
         return struct(error = "", text = "-D" + setting.name + "=" + setting.value, private_include = False)
     return struct(error = "", text = "-D" + setting.name, private_include = False)

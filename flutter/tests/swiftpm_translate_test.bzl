@@ -2,7 +2,7 @@
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//flutter/private:swiftpm_manifest.bzl", "parse_swiftpm_package")
-load("//flutter/private:swiftpm_settings.bzl", "swiftpm_render_list_attr")
+load("//flutter/private:swiftpm_settings.bzl", "swiftpm_render_list_attr", "swiftpm_target_setting_entries")
 load(
     "//flutter/private:swiftpm_translate.bzl",
     "swiftpm_c99name",
@@ -311,6 +311,7 @@ def swiftpm_translate_test_suite(name):
         _swift_define_is_target_local_test,
         _clang_target_emit_test,
         _header_search_path_is_target_local_test,
+        _header_search_path_is_normalized_test,
         _generated_map_emit_test,
         _generated_map_forms_emit_test,
         _mixed_source_refusal_test,
@@ -529,6 +530,40 @@ def _header_search_path_is_target_local_test_impl(ctx):
     return unittest.end(env)
 
 _header_search_path_is_target_local_test = unittest.make(_header_search_path_is_target_local_test_impl)
+
+_HEADER_SEARCH_NORMALIZED_MANIFEST = """// swift-tools-version:5.9
+import PackageDescription
+let package = Package(
+    name: "Shims",
+    products: [.library(name: "Shims", targets: ["Shims"])],
+    targets: [.target(name: "Shims", cSettings: [.headerSearchPath("./x"), .headerSearchPath("")])],
+)
+"""
+
+_HEADER_SEARCH_ESCAPE_MANIFEST = """// swift-tools-version:5.9
+import PackageDescription
+let package = Package(
+    name: "Shims",
+    products: [.library(name: "Shims", targets: ["Shims"])],
+    targets: [.target(name: "Shims", cSettings: [.headerSearchPath("../x")])],
+)
+"""
+
+def _header_search_path_is_normalized_test_impl(ctx):
+    env = unittest.begin(ctx)
+    parsed = parse_swiftpm_package("shims", _HEADER_SEARCH_NORMALIZED_MANIFEST)
+    asserts.true(env, parsed.ok)
+    entries = swiftpm_target_setting_entries(parsed.model.targets[0], "pkg/Sources/Shims", "clang")
+    asserts.true(env, entries.ok)
+    asserts.equals(env, ["pkg/Sources/Shims/x", "pkg/Sources/Shims"], [entry.text for entry in entries.private_includes if entry.platforms == None])
+    escaped = parse_swiftpm_package("shims", _HEADER_SEARCH_ESCAPE_MANIFEST)
+    asserts.true(env, escaped.ok)
+    entries = swiftpm_target_setting_entries(escaped.model.targets[0], "pkg/Sources/Shims", "clang")
+    asserts.true(env, not entries.ok)
+    asserts.true(env, "escapes the target directory" in entries.detail)
+    return unittest.end(env)
+
+_header_search_path_is_normalized_test = unittest.make(_header_search_path_is_normalized_test_impl)
 
 _GENERATED_MANIFEST = """// swift-tools-version:5.9
 import PackageDescription

@@ -14,6 +14,7 @@ load(":download.bzl", "pinned_download_and_extract")
 load(":flutter_pub_walk.bzl", "PUB_WALK_BOUND", "has_files_bound_error")
 load(":swiftpm_clang.bzl", "swiftpm_clang_module_spec", "swiftpm_generated_modulemap_content")
 load(":swiftpm_manifest.bzl", "parse_swiftpm_package")
+load(":swiftpm_paths.bzl", "swiftpm_normalize_relative_path")
 load(
     ":swiftpm_translate.bzl",
     "swiftpm_c99name",
@@ -36,21 +37,31 @@ def _swiftpm_repo_fail(identity, detail):
     return "SwiftPM package {identity}: {detail}.".format(identity = repr(identity), detail = detail)
 
 def _swiftpm_check_entry(identity, target_name, entry, kind):
-    """Refuse an exclude/sources entry that could escape the target dir.
+    """Normalize one path/sources/exclude entry and refuse only an escape.
+
+    SwiftPM drops empty and `.` segments and a trailing `/`, so those
+    spellings stay inside the target; only an absolute path or one whose
+    `..` reaches above the target is refused.
 
     Args:
         identity: The SwiftPM package identity.
         target_name: The target holding the entry, for messages.
         entry: The manifest entry string.
-        kind: `"exclude:"` or `"sources:"`, for messages.
+        kind: The manifest key, for messages.
 
     Returns:
-        "" or the fetch failure.
+        `struct(ok, error, path)`: `path` is the normalized entry (`""`
+        for the target directory itself), or `error` is the fetch failure.
     """
-    for segment in entry.split("/"):
-        if segment == "" or segment == "." or segment == "..":
-            return _swiftpm_repo_fail(identity, "target {target} has an {kind} entry {entry} escaping the target directory".format(target = repr(target_name), kind = kind, entry = repr(entry)))
-    return ""
+    normalized = swiftpm_normalize_relative_path(entry)
+    if not normalized.ok:
+        detail = "target {target} has an {kind} entry {entry} escaping the target directory".format(
+            target = repr(target_name),
+            kind = kind,
+            entry = repr(entry),
+        )
+        return struct(ok = False, error = _swiftpm_repo_fail(identity, detail), path = "")
+    return struct(ok = True, error = "", path = normalized.path)
 
 def _swiftpm_package_root(ctx, identity):
     """Read the archive's single top-level directory as the package root.
@@ -96,9 +107,10 @@ def _swiftpm_manifest_filename(ctx, identity, root):
 def _swiftpm_resolve_target_dir(ctx, identity, root, target):
     """Resolve one reached target's directory.
 
-    An explicit `path:` must name an existing directory inside the package
-    root; otherwise the first existing `Sources/<name>`, `Source/<name>`,
-    `src/<name>` or `srcs/<name>` wins.
+    An explicit `path:` is normalized first, so `.`, `./` and `""` name the
+    package root, and it must then name an existing directory inside that
+    root; an absent `path:` (None) instead takes the first existing
+    `Sources/<name>`, `Source/<name>`, `src/<name>` or `srcs/<name>`.
 
     Args:
         ctx: The repository context.
@@ -109,11 +121,11 @@ def _swiftpm_resolve_target_dir(ctx, identity, root, target):
     Returns:
         `struct(ok, error, rel_dir)`: the repo-relative directory.
     """
-    if target.path:
-        bad = _swiftpm_check_entry(identity, target.name, target.path, "`path:`")
-        if bad:
-            return struct(ok = False, error = bad, rel_dir = "")
-        rel_dir = root + "/" + target.path
+    if target.path != None:
+        checked = _swiftpm_check_entry(identity, target.name, target.path, "`path:`")
+        if not checked.ok:
+            return struct(ok = False, error = checked.error, rel_dir = "")
+        rel_dir = root if checked.path == "" else root + "/" + checked.path
         node = ctx.path(rel_dir)
         if not node.exists or not node.is_dir:
             return struct(ok = False, error = _swiftpm_repo_fail(identity, "target {target} names a missing directory in `path:` ({dir})".format(target = repr(target.name), dir = repr(target.path))), rel_dir = "")
@@ -324,17 +336,22 @@ def _swiftpm_keep_existing(identity, target_name, kind, entries, rel_dir, tree):
             `_swiftpm_list_target_tree`.
 
     Returns:
-        `struct(ok, error, kept)`: the repo-relative paths that exist.
+        `struct(ok, error, kept, all)`: `kept` holds the repo-relative
+        paths that exist (or the target directory itself for an entry
+        that normalizes away); `all` holds every normalized entry,
+        whether or not it exists.
     """
     kept = []
+    every = []
     for entry in entries:
-        bad = _swiftpm_check_entry(identity, target_name, entry, kind)
-        if bad:
-            return struct(ok = False, error = bad, kept = [])
-        full = rel_dir + "/" + entry
-        if full in tree.files or full in tree.dirs:
+        checked = _swiftpm_check_entry(identity, target_name, entry, kind)
+        if not checked.ok:
+            return struct(ok = False, error = checked.error, kept = [], all = [])
+        full = rel_dir if checked.path == "" else rel_dir + "/" + checked.path
+        every.append(full)
+        if checked.path == "" or full in tree.files or full in tree.dirs:
             kept.append(full)
-    return struct(ok = True, error = "", kept = kept)
+    return struct(ok = True, error = "", kept = kept, all = every)
 
 def _swiftpm_split_headers(identity, target, rel_dir, headers, files):
     """Split headers into public and private, and find the explicit map.
@@ -342,9 +359,10 @@ def _swiftpm_split_headers(identity, target, rel_dir, headers, files):
     The module map search follows SwiftPM's `ClangTarget.moduleMapPath`
     order: `module.modulemap` at the target root wins; otherwise the
     public-headers directory (`include/` by default, `publicHeadersPath`
-    when set). Only the headers under the public-headers directory are
-    public; every other header is private: it still compiles, but Swift
-    importers do not see it.
+    when set, including an explicit `""`/`"."` for the target directory).
+    Only the headers under the public-headers directory are public; every
+    other header is private: it still compiles, but Swift importers do not
+    see it.
 
     Args:
         identity: The SwiftPM package identity.
@@ -360,11 +378,11 @@ def _swiftpm_split_headers(identity, target, rel_dir, headers, files):
         map or None; `map_in_include` when it lives under the
         public-headers directory rather than the target root.
     """
-    if target.public_headers_path:
-        bad = _swiftpm_check_entry(identity, target.name, target.public_headers_path, "`publicHeadersPath:`")
-        if bad:
-            return struct(ok = False, error = bad, public_hdrs = [], private_hdrs = [], explicit_map = None, map_in_include = False)
-        public_root = rel_dir + "/" + target.public_headers_path
+    if target.public_headers_path != None:
+        checked = _swiftpm_check_entry(identity, target.name, target.public_headers_path, "`publicHeadersPath:`")
+        if not checked.ok:
+            return struct(ok = False, error = checked.error, public_hdrs = [], private_hdrs = [], explicit_map = None, map_in_include = False)
+        public_root = rel_dir if checked.path == "" else rel_dir + "/" + checked.path
     else:
         public_root = rel_dir + "/include"
     public_hdrs = sorted([header for header in headers if header.startswith(public_root + "/")])
@@ -421,7 +439,7 @@ def swiftpm_select_target_files(identity, target, rel_dir, files, dirs):
         if not narrowed.ok:
             return struct(ok = False, error = narrowed.error, srcs = [], c_srcs = [], public_hdrs = [], private_hdrs = [], explicit_map = None, map_in_include = False)
         listed = narrowed.kept
-    resource_excludes = excluded.kept + [rel_dir + "/" + entry for entry in target.exclude]
+    resource_excludes = excluded.all
     resource_error = _swiftpm_find_resource_error(identity, target.name, rel_dir, resource_excludes, files, dirs)
     if resource_error:
         return struct(
@@ -509,7 +527,12 @@ def _swiftpm_collect_sources(ctx, identity, root, target):
     listed = _swiftpm_list_target_tree(ctx, identity, resolved.rel_dir)
     if not listed.ok:
         return struct(ok = False, error = listed.error, files = None)
-    selected = swiftpm_select_target_files(identity, target, resolved.rel_dir, listed.files, listed.dirs)
+
+    # SwiftPM never treats the package manifest as a source, and a target
+    # whose `path:` is the package root (`.`) contains it.
+    manifest = root + "/Package.swift"
+    files = {path: True for path in listed.files.keys() if path != manifest}
+    selected = swiftpm_select_target_files(identity, target, resolved.rel_dir, files, listed.dirs)
     if not selected.ok:
         return struct(ok = False, error = selected.error, files = None)
     return struct(ok = True, error = "", files = struct(dir = resolved.rel_dir, srcs = selected.srcs, c_srcs = selected.c_srcs, public_hdrs = selected.public_hdrs, private_hdrs = selected.private_hdrs, explicit_map = selected.explicit_map, map_in_include = selected.map_in_include))

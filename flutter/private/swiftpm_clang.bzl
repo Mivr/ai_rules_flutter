@@ -17,6 +17,7 @@ Errors are bare details: the caller wraps them with the package identity
 with its hub format). Every detail names the target.
 """
 
+load(":swiftpm_paths.bzl", "swiftpm_normalize_relative_path")
 load(":swiftpm_settings.bzl", "swiftpm_render_list_attr")
 
 def swiftpm_clang_module_spec(target, module_name, target_dir, sources, public_headers, explicit_map):
@@ -27,11 +28,12 @@ def swiftpm_clang_module_spec(target, module_name, target_dir, sources, public_h
     the target root wins, otherwise the one in the public-headers
     directory (`include/` by default, `publicHeadersPath` when set),
     used as-written. Without an explicit map the public-headers
-    directory — `include/` unless `publicHeadersPath:` is set, never the
-    target root — gets a generated map: `<public>/<c99name>.h` is the
-    umbrella header when present, else `<public>/<c99name>/<c99name>.h`,
-    else the directory itself is the umbrella directory. A target with
-    no public headers at all is link-only and gets no map. Any mix of C,
+    directory — `include/` unless `publicHeadersPath:` is set, when an
+    explicit `""`/`"."` is the target root itself — gets a generated map:
+    `<public>/<c99name>.h` is the umbrella header when present, else
+    `<public>/<c99name>/<c99name>.h`, else the directory itself is the
+    umbrella directory. A target with no public headers at all is
+    link-only and gets no map. Any mix of C,
     C++, Objective-C and Objective-C++ sources translates to the one
     C-family library, the way SwiftPM builds such targets; only assembly
     sources have no Bazel translation, and the refusal names the file.
@@ -61,7 +63,19 @@ def swiftpm_clang_module_spec(target, module_name, target_dir, sources, public_h
             return struct(ok = False, detail = "{who} has assembly source {file}, which has no Bazel translation".format(who = who, file = repr(source)), module_map = None, include_dir = None, umbrella_header = None)
     if explicit_map != None:
         return struct(ok = True, detail = "", module_map = explicit_map, include_dir = None, umbrella_header = None)
-    public_dir = target_dir + "/" + target.public_headers_path if target.public_headers_path else target_dir + "/include"
+    if target.public_headers_path != None:
+        normalized = swiftpm_normalize_relative_path(target.public_headers_path)
+        if not normalized.ok:
+            return struct(
+                ok = False,
+                detail = "{who} has a `publicHeadersPath:` escaping the target directory".format(who = who),
+                module_map = None,
+                include_dir = None,
+                umbrella_header = None,
+            )
+        public_dir = target_dir if normalized.path == "" else target_dir + "/" + normalized.path
+    else:
+        public_dir = target_dir + "/include"
     if not public_headers:
         return struct(ok = True, detail = "", module_map = None, include_dir = None, umbrella_header = None)
     umbrella_header = None

@@ -14,6 +14,7 @@ SwiftPM product links a plugin's `Package.swift` declares. Split out of
 load(":flutter_pub_walk.bzl", "PUB_WALK_BOUND", "has_files_under_walk")
 load(":starlark_literal.bzl", "starlark_string_literal")
 load(":swiftpm_manifest.bzl", "parse_swiftpm_plugin_package")
+load(":swiftpm_paths.bzl", "swiftpm_normalize_relative_path")
 load(":swiftpm_resolved.bzl", "read_swiftpm_checksums", "read_swiftpm_pins", "swiftpm_spoke_name", "swiftpm_unpinned_errors")
 load(":swiftpm_translate.bzl", "swiftpm_locate_package_dep")
 
@@ -515,7 +516,11 @@ def _apple_swiftpm_plugin_target(model, manifest_dir, srcs_dirs):
     for target in model.targets:
         if target.kind != "target":
             continue
-        target_dir = manifest_dir + "/" + (target.path if target.path else "Sources/" + target.name)
+        declared = target.path if target.path != None else "Sources/" + target.name
+        normalized = swiftpm_normalize_relative_path(declared)
+        if not normalized.ok:
+            continue
+        target_dir = manifest_dir if normalized.path == "" else manifest_dir + "/" + normalized.path
         if target_dir in srcs_dirs:
             return target
     return None

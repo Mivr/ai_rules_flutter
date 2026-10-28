@@ -566,15 +566,16 @@ def _swiftpm_parse_target_kwargs(identity, kind, args, line, lenient):
 
     Returns:
         `struct(ok, error, target)`: `target` holds `kind`, `name`,
-        `deps`, `path` ("" when defaulted), `exclude`, `sources` (None
-        when unrestricted), `public_headers_path` ("" when defaulted),
-        the four build-setting lists (`c_settings`, `cxx_settings`,
-        `swift_settings`, `linker_settings`) and `line`.
+        `deps`, `path` (None when defaulted), `exclude`, `sources` (None
+        when unrestricted), `public_headers_path` (None when defaulted;
+        a string when explicit, including `""` for the target
+        directory), the four build-setting lists (`c_settings`,
+        `cxx_settings`, `swift_settings`, `linker_settings`) and `line`.
     """
     kwargs = _swiftpm_split_kwargs(args)
     if not kwargs.ok:
         return struct(ok = False, error = _swiftpm_fail(identity, line, kwargs.detail), target = None)
-    acc = {"name": "", "deps": [], "path": "", "exclude": [], "sources": None, "public_headers_path": "", "c_settings": [], "cxx_settings": [], "swift_settings": [], "linker_settings": []}
+    acc = {"name": "", "deps": [], "path": None, "exclude": [], "sources": None, "public_headers_path": None, "c_settings": [], "cxx_settings": [], "swift_settings": [], "linker_settings": []}
     for kwarg in kwargs.kwargs:
         applied = _swiftpm_apply_target_kwarg(identity, kind, kwarg, acc, lenient)
         if not applied.ok:
@@ -595,10 +596,10 @@ def _swiftpm_parse_target_element(identity, element, lenient):
         `struct(ok, error, target)`: regular `.target` declarations keep
         their full arguments; every other kind (`testTarget`,
         `executableTarget`, `binaryTarget`, `systemLibrary`, `plugin`,
-        `macro`) keeps only its kind and name, with empty
-        `public_headers_path` and build-setting lists. Test targets are
-        ignored by the translator; the rest are refused when a product
-        reaches them.
+        `macro`) keeps only its kind and name, with an absent `path` and
+        `public_headers_path` (None) and empty build-setting lists. Test
+        targets are ignored by the translator; the rest are refused when
+        a product reaches them.
     """
     line = element[0].line if element else 0
     head = _swiftpm_call_head(element)
@@ -610,7 +611,7 @@ def _swiftpm_parse_target_element(identity, element, lenient):
         named = _swiftpm_parse_special_target_name(identity, head.name, head.args, line)
         if not named.ok:
             return struct(ok = False, error = named.error, target = None)
-        return struct(ok = True, error = "", target = struct(kind = head.name, name = named.name, deps = [], path = "", exclude = [], sources = None, public_headers_path = "", c_settings = [], cxx_settings = [], swift_settings = [], linker_settings = [], line = line))
+        return struct(ok = True, error = "", target = struct(kind = head.name, name = named.name, deps = [], path = None, exclude = [], sources = None, public_headers_path = None, c_settings = [], cxx_settings = [], swift_settings = [], linker_settings = [], line = line))
     return struct(ok = False, error = _swiftpm_fail(identity, line, "unknown target kind `.{kind}(...)`".format(kind = head.name)), target = None)
 
 def _swiftpm_parse_special_target_name(identity, kind, args, line):

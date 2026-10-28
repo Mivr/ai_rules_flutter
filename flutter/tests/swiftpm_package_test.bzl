@@ -4,6 +4,7 @@ load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//flutter/private:swiftpm_clang.bzl", "swiftpm_clang_module_spec", "swiftpm_generated_modulemap_content")
 load("//flutter/private:swiftpm_manifest.bzl", "parse_swiftpm_package")
 load("//flutter/private:swiftpm_package.bzl", "swiftpm_is_code_file", "swiftpm_select_target_files")
+load("//flutter/private:swiftpm_paths.bzl", "swiftpm_normalize_relative_path")
 
 _DOCS = """// swift-tools-version:5.9
 import PackageDescription
@@ -108,6 +109,69 @@ let package = Package(
     name: "Shims",
     products: [.library(name: "Shims", targets: ["Shims"])],
     targets: [.target(name: "Shims", publicHeadersPath: "include")],
+)
+"""
+
+_PUBLIC_HEADERS_DOT = """// swift-tools-version:5.9
+import PackageDescription
+let package = Package(
+    name: "Shims",
+    products: [.library(name: "Shims", targets: ["Shims"])],
+    targets: [.target(name: "Shims", publicHeadersPath: ".")],
+)
+"""
+
+_PUBLIC_HEADERS_EMPTY = """// swift-tools-version:5.9
+import PackageDescription
+let package = Package(
+    name: "Shims",
+    products: [.library(name: "Shims", targets: ["Shims"])],
+    targets: [.target(name: "Shims", publicHeadersPath: "")],
+)
+"""
+
+_PUBLIC_HEADERS_SLASH = """// swift-tools-version:5.9
+import PackageDescription
+let package = Package(
+    name: "Shims",
+    products: [.library(name: "Shims", targets: ["Shims"])],
+    targets: [.target(name: "Shims", publicHeadersPath: "include/")],
+)
+"""
+
+_EXCLUDE_NORMALIZED = """// swift-tools-version:5.9
+import PackageDescription
+let package = Package(
+    name: "P",
+    products: [.library(name: "P", targets: ["P"])],
+    targets: [.target(name: "P", exclude: ["Resources/", "./Info.plist"])],
+)
+"""
+
+_SOURCES_NORMALIZED = """// swift-tools-version:5.9
+import PackageDescription
+let package = Package(
+    name: "P",
+    products: [.library(name: "P", targets: ["P"])],
+    targets: [.target(name: "P", sources: ["./Sub/"])],
+)
+"""
+
+_PATH_DOT = """// swift-tools-version:5.9
+import PackageDescription
+let package = Package(
+    name: "P",
+    products: [.library(name: "P", targets: ["P"])],
+    targets: [.target(name: "P", path: ".")],
+)
+"""
+
+_PATH_EMPTY = """// swift-tools-version:5.9
+import PackageDescription
+let package = Package(
+    name: "P",
+    products: [.library(name: "P", targets: ["P"])],
+    targets: [.target(name: "P", path: "")],
 )
 """
 
@@ -351,6 +415,101 @@ def _refuses_implicit_resources_test_impl(ctx):
     asserts.equals(env, [rel_dir + "/Docs.swift"], docc.srcs)
     return unittest.end(env)
 
+def _normalizes_relative_paths_test_impl(ctx):
+    env = unittest.begin(ctx)
+    cases = [
+        (".", ""),
+        ("./", ""),
+        ("", ""),
+        ("include/", "include"),
+        ("./x", "x"),
+        ("x/", "x"),
+        ("x/../y", "y"),
+        ("x/..", ""),
+    ]
+    for raw, expected in cases:
+        normalized = swiftpm_normalize_relative_path(raw)
+        asserts.true(env, normalized.ok)
+        asserts.equals(env, expected, normalized.path)
+    for raw in ["/absolute", "../x", "x/../../y"]:
+        normalized = swiftpm_normalize_relative_path(raw)
+        asserts.true(env, not normalized.ok)
+        asserts.true(env, normalized.error != "")
+    return unittest.end(env)
+
+def _normalized_public_headers_path_test_impl(ctx):
+    env = unittest.begin(ctx)
+    rel_dir = "pkg/Sources/Shims"
+    files = {
+        rel_dir + "/Shims.c": True,
+        rel_dir + "/Shims.h": True,
+        rel_dir + "/include/Other.h": True,
+        rel_dir + "/include/Shims.h": True,
+    }
+    dirs = {rel_dir + "/include": True}
+    for manifest in [_PUBLIC_HEADERS_DOT, _PUBLIC_HEADERS_EMPTY]:
+        selected = _select("shims", manifest, rel_dir, files, dirs)
+        asserts.true(env, selected.ok)
+        asserts.equals(env, [rel_dir + "/Shims.h", rel_dir + "/include/Other.h", rel_dir + "/include/Shims.h"], selected.public_hdrs)
+        asserts.equals(env, [], selected.private_hdrs)
+    selected = _select("shims", _PUBLIC_HEADERS_SLASH, rel_dir, files, dirs)
+    asserts.true(env, selected.ok)
+    asserts.equals(env, [rel_dir + "/include/Other.h", rel_dir + "/include/Shims.h"], selected.public_hdrs)
+    asserts.equals(env, [rel_dir + "/Shims.h"], selected.private_hdrs)
+    selected = _select("docs", _DOCS, rel_dir, {
+        rel_dir + "/Docs.c": True,
+        rel_dir + "/Docs.h": True,
+        rel_dir + "/include/Other.h": True,
+    }, dirs)
+    asserts.true(env, selected.ok)
+    asserts.equals(env, [rel_dir + "/include/Other.h"], selected.public_hdrs)
+    asserts.equals(env, [rel_dir + "/Docs.h"], selected.private_hdrs)
+
+    # An explicit empty publicHeadersPath is the target directory, so the
+    # generated map and its include path sit at the target root.
+    target = _only_target(_PUBLIC_HEADERS_EMPTY)
+    selected = _select("shims", _PUBLIC_HEADERS_EMPTY, rel_dir, files, dirs)
+    spec = swiftpm_clang_module_spec(target, "Shims", rel_dir, selected.c_srcs, selected.public_hdrs, selected.explicit_map)
+    asserts.true(env, spec.ok)
+    asserts.equals(env, rel_dir + "/module.modulemap", spec.module_map)
+    asserts.equals(env, rel_dir, spec.include_dir)
+    asserts.equals(env, "Shims.h", spec.umbrella_header)
+    return unittest.end(env)
+
+def _normalized_exclude_and_sources_entries_test_impl(ctx):
+    env = unittest.begin(ctx)
+    rel_dir = "pkg/Sources/P"
+    files = {
+        rel_dir + "/P.swift": True,
+        rel_dir + "/Info.plist": True,
+        rel_dir + "/Resources/Old.swift": True,
+        rel_dir + "/Sub/Kept.swift": True,
+    }
+    dirs = {
+        rel_dir + "/Resources": True,
+        rel_dir + "/Sub": True,
+    }
+    selected = _select("p", _EXCLUDE_NORMALIZED, rel_dir, files, dirs)
+    asserts.true(env, selected.ok)
+    asserts.equals(env, [rel_dir + "/P.swift", rel_dir + "/Sub/Kept.swift"], selected.srcs)
+    selected = _select("p", _SOURCES_NORMALIZED, rel_dir, files, dirs)
+    asserts.true(env, selected.ok)
+    asserts.equals(env, [rel_dir + "/Sub/Kept.swift"], selected.srcs)
+    return unittest.end(env)
+
+def _target_path_spellings_test_impl(ctx):
+    env = unittest.begin(ctx)
+    asserts.equals(env, None, _only_target(_DOCS).path)
+    asserts.equals(env, ".", _only_target(_PATH_DOT).path)
+    asserts.equals(env, "", _only_target(_PATH_EMPTY).path)
+    asserts.equals(env, "", swiftpm_normalize_relative_path(_only_target(_PATH_DOT).path).path)
+    asserts.equals(env, "", swiftpm_normalize_relative_path(_only_target(_PATH_EMPTY).path).path)
+    return unittest.end(env)
+
+_normalizes_relative_paths_test = unittest.make(_normalizes_relative_paths_test_impl)
+_normalized_public_headers_path_test = unittest.make(_normalized_public_headers_path_test_impl)
+_normalized_exclude_and_sources_entries_test = unittest.make(_normalized_exclude_and_sources_entries_test_impl)
+_target_path_spellings_test = unittest.make(_target_path_spellings_test_impl)
 _is_code_file_test = unittest.make(_is_code_file_test_impl)
 _skips_non_code_files_test = unittest.make(_skips_non_code_files_test_impl)
 _classifies_c_family_files_test = unittest.make(_classifies_c_family_files_test_impl)
@@ -369,6 +528,10 @@ def swiftpm_package_test_suite(name):
     """Registers the target file selection unit tests."""
     unittest.suite(
         name + "_unit",
+        _normalizes_relative_paths_test,
+        _normalized_public_headers_path_test,
+        _normalized_exclude_and_sources_entries_test,
+        _target_path_spellings_test,
         _is_code_file_test,
         _skips_non_code_files_test,
         _classifies_c_family_files_test,
