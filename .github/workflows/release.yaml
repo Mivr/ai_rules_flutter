@@ -1,3 +1,4 @@
+# Mivr/ai_rules_flutter workflow (moved from the frozen Mivr/rules_flutter fork on 2026-10-28).
 # Cut a release whenever a new tag is pushed to the repo.
 name: Release
 on:

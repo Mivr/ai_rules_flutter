@@ -1,3 +1,4 @@
+# Mivr/ai_rules_flutter workflow (moved from the frozen Mivr/rules_flutter fork on 2026-10-28).
 # Full-matrix workflow for rules_flutter ("pre-release").
 #
 # WHAT RUNS WHERE: the complete macOS e2e coverage that push CI (ci.yaml) no

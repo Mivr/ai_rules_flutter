@@ -1,3 +1,4 @@
+# Mivr/ai_rules_flutter workflow (moved from the frozen Mivr/rules_flutter fork on 2026-10-28).
 # Manual-only iOS build-cost bench (free macOS runners, no caches).
 #
 # Compares two rules_flutter commits (base_ref vs head_ref) on a generated
