@@ -45,6 +45,7 @@
 /e2e/integration_linux/ export-ignore
 /e2e/integration_web/ export-ignore
 /e2e/ios_example/ export-ignore
+/e2e/ios_framework/ export-ignore
 /e2e/linux_example/ export-ignore
 /e2e/macos_example/ export-ignore
 /e2e/min_versions/ export-ignore

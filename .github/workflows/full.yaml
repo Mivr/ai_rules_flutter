@@ -86,6 +86,12 @@ jobs:
           - workspace: ios_example
             shard: none
             cache-save: false
+          # The add-to-app xcframework lane: one plain application plus a
+          # first-party plugin, and a macOS-only test over the produced
+          # App, Flutter, registrant and plugin xcframeworks.
+          - workspace: ios_framework
+            shard: none
+            cache-save: false
           # The iOS simulator integration-test lane: `bazel test //...` runs
           # the green suite on the simulator plus the portable Dart-side
           # build test; the red twin and test.xml steps below run by name.

@@ -14,8 +14,10 @@ load(
     "flutter_ios_framework_gen",
     "flutter_ios_registrant_gen",
     "flutter_ios_runner_lib_gen",
+    "flutter_ios_xcframeworks",
 )
 load("//flutter/private:flutter_ios_application.bzl", "flutter_ios_framework", "flutter_ios_native_frameworks")
+load("//flutter/private:flutter_ios_xcframework.bzl", "validate_xcframework_application")
 load("//flutter/private:flutter_xtool_bundle.bzl", "flutter_darwin_xcframework_import", "flutter_xtool_ios_bundle")
 load("//flutter/private:ios_entitlements.bzl", "resolve_ios_entitlements")
 load(":apple_bundling.bzl", "fake_application", "fake_macho_binary", "fake_xcframework", "macho_verify_probe", "outputs_under_target_dir_test")
@@ -288,6 +290,46 @@ def _xtool_ios_app_actions_test_impl(ctx):
 
 _xtool_ios_app_actions_test = analysistest.make(_xtool_ios_app_actions_test_impl)
 
+def _ios_xcframework_surface_test_impl(ctx):
+    env = unittest.begin(ctx)
+    asserts.equals(env, ctx.attr.expected_kinds, ctx.attr.actual_kinds)
+    asserts.equals(env, ctx.attr.expected_application, ctx.attr.actual_application)
+    return unittest.end(env)
+
+_ios_xcframework_surface_test = unittest.make(
+    _ios_xcframework_surface_test_impl,
+    attrs = {
+        "actual_application": attr.string(mandatory = True),
+        "actual_kinds": attr.string_dict(mandatory = True),
+        "expected_application": attr.string(mandatory = True),
+        "expected_kinds": attr.string_dict(mandatory = True),
+    },
+)
+
+def _xcframework_application_probe_impl(ctx):
+    validate_xcframework_application(ctx.attr.application)
+    return [DefaultInfo()]
+
+_xcframework_application_probe = rule(
+    implementation = _xcframework_application_probe_impl,
+    attrs = {
+        "application": attr.label(
+            doc = "The application to validate; missing means the macro must refuse it.",
+        ),
+    },
+    doc = "Runs the add-to-app macro's application validation for an analysis test.",
+)
+
+def _xcframework_missing_application_impl(ctx):
+    env = analysistest.begin(ctx)
+    asserts.expect_failure(env, "application is required")
+    return analysistest.end(env)
+
+_xcframework_missing_application_test = analysistest.make(
+    _xcframework_missing_application_impl,
+    expect_failure = True,
+)
+
 # -- Bundling ------------------------------------------------------------------
 
 def _bundling_tests(name):
@@ -429,6 +471,48 @@ def _bundling_tests(name):
     _fake_xcode_config(
         name = name + "_fake_xcode_config",
         tags = ["manual"],
+    )
+
+    # Add-to-app xcframeworks macro surface: every target the public macro
+    # creates, and the application it was built over. The target itself is not
+    # analyzed here because its slices need a Darwin host; the analysis tests
+    # below the bundling fixtures cover the framework rule it composes.
+    before_xcframework = native.existing_rules().keys()
+    xcframework_name = name + "_ios_xcframeworks"
+    flutter_ios_xcframeworks(
+        name = xcframework_name,
+        application = ":" + name + "_fake_release_app",
+        tags = ["manual"],
+    )
+    after_xcframework = native.existing_rules()
+    created_xcframework = {
+        k: after_xcframework[k]["kind"]
+        for k in after_xcframework
+        if k not in before_xcframework
+    }
+    _ios_xcframework_surface_test(
+        name = name + "_ios_xcframeworks_surface",
+        actual_application = str(after_xcframework[xcframework_name]["application"]),
+        actual_kinds = created_xcframework,
+        expected_application = ":" + name + "_fake_release_app",
+        expected_kinds = {
+            xcframework_name: "flutter_ios_xcframework",
+            "__%s_device_app_framework" % xcframework_name: "flutter_ios_framework",
+            "__%s_sim_arm64_app_framework" % xcframework_name: "flutter_ios_framework",
+            "__%s_sim_x64_app_framework" % xcframework_name: "flutter_ios_framework",
+            "__%s_registrant" % xcframework_name: "flutter_ios_registrant",
+            "__%s_engine" % xcframework_name: "apple_dynamic_xcframework_import",
+            "__%s_plugins" % xcframework_name: "flutter_apple_plugins_aggregator",
+            "__%s_registrant_binary" % xcframework_name: "swift_binary",
+        },
+    )
+    _xcframework_application_probe(
+        name = name + "_xcframework_application_probe",
+        tags = ["manual"],
+    )
+    _xcframework_missing_application_test(
+        name = name + "_xcframework_missing_application",
+        target_under_test = ":" + name + "_xcframework_application_probe",
     )
 
     # Default backend (`rules_apple`) macro surface fixtures: verify target
@@ -717,6 +801,8 @@ def _bundling_tests(name):
     )
 
     return [
+        name + "_ios_xcframeworks_surface",
+        name + "_xcframework_missing_application",
         name + "_default_macro_surface",
         name + "_framework_gen_links_release",
         name + "_framework_gen_bundle_only_debug",

@@ -1,4 +1,4 @@
-load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_test")
+load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_library", "dart_test")
 load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
 load(":flutter_sdk_kernel_binary.bzl", "flutter_sdk_kernel_binary")
 
@@ -63,8 +63,19 @@ exports_files(
         "bazel_test_protocol.dart",
         "extract_library_tags.dart",
         "test_support.dart",
+        "lib/macho_reader.dart",
     ],
     visibility = ["//flutter:__subpackages__"],
+)
+
+# Shared by e2e workspaces that inspect the Mach-O slices an xcframework
+# carries. It stays a `dart_library` rather than a `dart_binary` so tests can
+# import it as a package instead of copying the reader.
+dart_library(
+    name = "macho_reader",
+    package_name = "rules_flutter_macho_reader",
+    srcs = ["lib/macho_reader.dart"],
+    visibility = ["//visibility:public"],
 )
 
 dart_binary(
