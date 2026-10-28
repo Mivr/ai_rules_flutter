@@ -66,6 +66,7 @@ load("//flutter/private:flutter_apple_plugin_library.bzl", _flutter_apple_plugin
 load("//flutter/private:flutter_apple_plugins_aggregator.bzl", _flutter_apple_plugins_aggregator = "flutter_apple_plugins_aggregator")
 load("//flutter/private:flutter_ios_application.bzl", _flutter_ios_application = "flutter_ios_application", _flutter_ios_framework_rule = "flutter_ios_framework", _flutter_ios_native_frameworks_rule = "flutter_ios_native_frameworks", _flutter_ios_privacy_manifests_rule = "flutter_ios_privacy_manifests")
 load("//flutter/private:flutter_ios_registrant.bzl", _flutter_ios_registrant_rule = "flutter_ios_registrant")
+load("//flutter/private:flutter_ios_xcframework.bzl", _flutter_ios_xcframeworks = "flutter_ios_xcframeworks")
 load("//flutter/private:flutter_plist_merge.bzl", _flutter_entitlements_merge = "flutter_entitlements_merge")
 load("//flutter/private:flutter_xtool_bundle.bzl", _flutter_darwin_xcframework_import = "flutter_darwin_xcframework_import", _flutter_xtool_bundle_version = "flutter_xtool_bundle_version", _flutter_xtool_ios_bundle = "flutter_xtool_ios_bundle")
 load("//flutter/private:ios_app.bzl", _IOS_DEFAULT_LAUNCH_STORYBOARD = "IOS_DEFAULT_LAUNCH_STORYBOARD", _IOS_DEFAULT_MAIN_STORYBOARD = "IOS_DEFAULT_MAIN_STORYBOARD", _flutter_ios_app = "flutter_ios_app", _flutter_ios_engine = "flutter_ios_engine")
@@ -91,6 +92,68 @@ flutter_xtool_ios_bundle = _flutter_xtool_ios_bundle
 # re-exported here so user BUILD files are unaffected.
 flutter_ios_engine = _flutter_ios_engine
 flutter_ios_app = _flutter_ios_app
+
+def flutter_ios_xcframeworks(name, application = None, minimum_os_version = IOS_MINIMUM_OS_VERSION, **kwargs):
+    """Builds the xcframework set an existing Xcode app links (add-to-app).
+
+    This is Flutter's documented embedding path: an app that already has an
+    Xcode project links `App.xcframework`, `Flutter.xcframework`,
+    `FlutterPluginRegistrant.xcframework` and one xcframework per native plugin,
+    instead of building an `ios_application` with Bazel.
+
+    The target's `DefaultInfo.files` are the xcframework bundle:
+
+    - `App.xcframework` with exactly two slices, `ios-arm64/App.framework` and
+      `ios-arm64_x86_64-simulator/App.framework`. Both carry an AOT snapshot;
+      the simulator slice is universal arm64 + x86_64.
+    - `Flutter.xcframework`, built from the pinned iOS engine the rules already
+      select for the configuration. Its files are symlinks to that engine, not
+      copies.
+    - `FlutterPluginRegistrant.xcframework`, a dynamic framework linked from
+      the application's generated `GeneratedPluginRegistrant.swift`.
+    - One `<Plugin>.xcframework` per native iOS plugin in the application's
+      transitive graph, named after the plugin's pub package.
+
+    The layout and every `Info.plist` are written by the rule, so no
+    `xcodebuild -create-xcframework` runs. Drag the xcframework directories
+    into the Xcode target's "Frameworks, Libraries, and Embedded Content" and
+    set them to "Embed & Sign".
+
+    Example:
+
+        load("@rules_flutter//flutter:ios.bzl", "flutter_ios_xcframeworks")
+
+        flutter_application(
+            name = "my_app",
+            main = "lib/main.dart",
+            deps = ["@deps//:flutter"],
+        )
+
+        flutter_ios_xcframeworks(
+            name = "my_app_xcframeworks",
+            application = ":my_app",
+        )
+
+    Args:
+        name: Target name. Its files are the xcframework set; see
+            `docs/ios-add-to-app.md`.
+        application: A `flutter_application` target (required). The
+            application's transitive native plugins become xcframeworks.
+        minimum_os_version: Minimum iOS deployment target written into every
+            framework plist (`App.framework` keeps its own from the framework
+            rule).
+        **kwargs: Common target attributes, for example `visibility`, `tags`
+            or `target_compatible_with`. `tags` defaults to `["manual"]`;
+            the target is macOS-only by default because the AOT slices need a
+            Darwin host. The internal device and simulator targets are
+            always `manual`.
+    """
+    _flutter_ios_xcframeworks(
+        name = name,
+        application = application,
+        minimum_os_version = minimum_os_version,
+        **kwargs
+    )
 
 # Simulator-debug (JIT) rebuild of an iOS app: `-c dbg` plus
 # `--ios_multi_cpus=sim_arm64` on the app only, so `bazel test //...` needs

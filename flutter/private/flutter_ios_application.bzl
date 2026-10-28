@@ -96,7 +96,7 @@ def _check_ios_simulator_aot(ctx, app_info, is_device):
     snapshot, so this bundle would launch to a white screen with the engine
     reporting "Engine run configuration was invalid".
     """
-    if app_info.aot_output and not is_device:
+    if app_info.aot_output and not is_device and not ctx.attr.allow_simulator_aot:
         fail(
             ("The iOS simulator runs debug builds only, and this is a %s " +
              "build. Build it with -c dbg, or for a device with " +
@@ -327,6 +327,10 @@ flutter_ios_framework = rule(
             "allow_non_macho": attr.string_list(
                 doc = "Explicit allow-list of binary or framework names allowed to pass through unpatched when they are not 64-bit or universal Mach-O binaries. A 64-bit or universal Mach-O binary is always patched (and stripped when requested); patch failures are errors even for allowed names.",
                 default = [],
+            ),
+            "allow_simulator_aot": attr.bool(
+                doc = "Allow an AOT snapshot for a simulator slice. Add-to-app xcframeworks set this so their `ios-arm64_x86_64-simulator` framework ships the same AOT snapshot shape as the device slice; ordinary simulator apps leave it false because the JIT-only simulator engine cannot load AOT code.",
+                default = False,
             ),
             "application": attr.label(
                 doc = "A flutter_ios_application target providing Flutter compilation outputs.",

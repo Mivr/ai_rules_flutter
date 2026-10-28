@@ -1,5 +1,19 @@
 load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
 
+# The arm64 simulator platform add-to-app xcframeworks build their simulator
+# slice from. The public `//flutter/platforms` set predates Apple silicon
+# simulators and names only `ios_x64`; keeping this one private avoids growing
+# the public platform surface for a rule that fuses the two into one slice.
+platform(
+    name = "ios_sim_arm64",
+    constraint_values = [
+        "@platforms//os:ios",
+        "@platforms//cpu:aarch64",
+        "@apple_support//constraints:simulator",
+    ],
+    visibility = ["//visibility:public"],
+)
+
 # Compilation mode config_settings for select() in macros.
 # compilation_mode is preserved across platform transitions (e.g. iOS).
 config_setting(
@@ -658,6 +672,20 @@ bzl_library(
     name = "xtool_sdk_render",
     srcs = ["xtool_sdk_render.bzl"],
     visibility = ["//flutter:__subpackages__"],
+)
+
+bzl_library(
+    name = "flutter_ios_xcframework",
+    srcs = ["flutter_ios_xcframework.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+    deps = [
+        ":flutter_apple_plugins_aggregator",
+        ":flutter_ios_application",
+        ":flutter_ios_registrant",
+        ":ios_app",
+        ":validation",
+        "//flutter:providers",
+    ],
 )
 
 bzl_library(
