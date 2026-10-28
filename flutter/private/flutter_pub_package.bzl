@@ -84,6 +84,7 @@ load(
     _gradle_parse_gradle_android_namespace = "parse_gradle_android_namespace",
 )
 load(":starlark_literal.bzl", "check_spoke_file_name", "decode_starlark_escapes", "starlark_string_literal")
+load(":swiftpm_resolved.bzl", "pub_spoke_package_resolved_attr", "pub_spoke_package_sha256_attr")
 
 def parse_gradle_android_namespace(content, language = "groovy"):
     """Extract `android.namespace` from a Gradle build script.
@@ -1863,7 +1864,7 @@ def _build_plugin_spoke_content(ctx, pubspec, dep_labels, assets, unreplaced_hoo
         pkg_asset_flavors = assets.pkg_asset_flavors,
         pkg_shaders = assets.pkg_shaders,
     )
-    apple_swiftpm = detect_apple_swiftpm_deps(ctx, package_name, apple, ctx.attr.package_resolved, ctx.attr.hub_name)
+    apple_swiftpm = detect_apple_swiftpm_deps(ctx, package_name, apple)
     build_content = with_apple_swiftpm_deps(build_content, package_name, apple_swiftpm.macos, apple_swiftpm.ios)
     return struct(build_content = build_content, android = android)
 
@@ -2370,14 +2371,8 @@ flutter_pub_package = repository_rule(
                   "make deliberately; it is never a default.",
             default = [],
         ),
-        "package_resolved": attr.label(
-            doc = "Label of the hub's `swift_package_resolved` file. A plugin " +
-                  "spoke that ships a `Package.swift` reads it to link its " +
-                  "SwiftPM products; an unread label keeps pure-Dart spokes " +
-                  "independent of the hub's pin list.",
-            allow_single_file = True,
-            default = None,
-        ),
+        "package_resolved": pub_spoke_package_resolved_attr,
+        "package_sha256": pub_spoke_package_sha256_attr,
         "overlay_roots": attr.label_list(
             doc = "BUILD.bazel anchors for overlay trees. Each label points at " +
                   "an `ext/BUILD.bazel` (or equivalent) that anchors a directory " +
@@ -2426,13 +2421,8 @@ flutter_pub_path_package = repository_rule(
                   "`flutter_pub_package`.",
             default = False,
         ),
-        "package_resolved": attr.label(
-            doc = "Label of the hub's `swift_package_resolved` file, read " +
-                  "only when this package ships a `Package.swift` (same as " +
-                  "`flutter_pub_package`).",
-            allow_single_file = True,
-            default = None,
-        ),
+        "package_resolved": pub_spoke_package_resolved_attr,
+        "package_sha256": pub_spoke_package_sha256_attr,
         "overlay_roots": attr.label_list(
             doc = "BUILD.bazel anchors for overlay trees, same as " +
                   "`flutter_pub_package`.",
