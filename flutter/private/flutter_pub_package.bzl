@@ -55,7 +55,9 @@ load(
 load(":flutter_pub_apple_local.bzl", "apply_apple_native_deps")
 load(
     ":flutter_pub_assets.bzl",
+    "build_pkg_shader_conditions",
     "check_asset_entry_problems",
+    "check_pub_asset_shader_conflict",
     "ctx_package_lister",
     "expand_pub_asset_entries",
 )
@@ -1181,7 +1183,9 @@ def _spoke_asset_inputs(ctx, package_name, asset_block):
 
     Returns `struct(fonts_json_str, font_files, pkg_assets,
     pkg_asset_platforms, pkg_asset_flavors, pkg_shaders,
-    has_contributions)`.
+    has_contributions)`. The condition dicts carry both `pkg_assets` and
+    `pkg_shaders` keys: shader entries have the same `platforms` / `flavors`
+    as asset entries and the spoke has one pair of condition attrs for both.
     """
     check_asset_entry_problems(package_name, asset_block.asset_errors)
     assets = normalize_spoke_assets(package_name, asset_block.assets)
@@ -1200,6 +1204,16 @@ def _spoke_asset_inputs(ctx, package_name, asset_block):
     pkg_assets_dict = build_pkg_assets_dict(expanded)
     pkg_asset_platforms, pkg_asset_flavors = _build_pkg_asset_conditions(expanded, package_name)
     pkg_shaders_dict = build_pkg_shaders_dict(shaders)
+    check_pub_asset_shader_conflict(package_name, pkg_assets_dict, pkg_shaders_dict)
+    shader_conditions = build_pkg_shader_conditions(shaders, asset_block.shaders, package_name)
+
+    # Both channels share the condition attrs: the generated spoke's
+    # `pkg_asset_platforms` / `pkg_asset_flavors` carry asset and shader keys
+    # alike. The cross-channel check above means no key is claimed twice.
+    pkg_asset_platforms = dict(pkg_asset_platforms)
+    pkg_asset_platforms.update(shader_conditions.platforms)
+    pkg_asset_flavors = dict(pkg_asset_flavors)
+    pkg_asset_flavors.update(shader_conditions.flavors)
     return struct(
         fonts_json_str = spoke_fonts.fonts_json_str,
         font_files = spoke_fonts.font_files,

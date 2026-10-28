@@ -31,3 +31,9 @@ flutter:
     - path: assets/union_android.txt
       platforms:
         - linux
+  shaders:
+    # A shader restricted to web must not be compiled or staged into the
+    # Android APK or the iOS simulator bundle.
+    - path: shaders/web_only.frag
+      platforms:
+        - web
