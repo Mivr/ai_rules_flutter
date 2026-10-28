@@ -61,6 +61,35 @@ so `//:app_device` itself stays in version control. It is tagged `manual`, so
 `bazel build //...` on a fresh clone never expands it and therefore never
 loads the missing `//device` package.
 
+### Unsigned device builds
+
+A device bundle that CI can build without a developer's profile is the shape
+`flutter build ios --no-codesign` produces. Set `signing = False` and leave
+`provisioning_profile` unset:
+
+```starlark
+flutter_ios_app(
+    name = "app_device_unsigned",
+    app_name = "Runner",
+    application = ":app_flutter",
+    bundle_id = "com.rulesflutter.ios.example",
+    signing = False,
+)
+```
+
+This is `//:app_device_unsigned` here, rebuilt `-c opt` for `arm64` by
+`//:app_device_unsigned_opt`; `verify_ios_device_app_test` inspects the
+result. It differs from the signed `//:app_device` in exactly the signing:
+no profile, no codesign action and no signing secret, which makes it
+buildable on any macOS CI machine. It proves the device bundle path; a
+device you want to run the app on still needs the signed target. The unsigned
+build also rejects a `provisioning_profile`, so the two paths cannot be
+mixed, and it is available only with `backend = "rules_apple"`.
+
+```sh
+bazel build //:app_device_unsigned_opt
+```
+
 ### Getting a provisioning profile
 
 This changes an Apple Developer account, so it is yours to do; no Bazel
