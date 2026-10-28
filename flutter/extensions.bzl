@@ -25,6 +25,7 @@ load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_lock")
 load("//flutter/private:artifact_urls.bzl", "source_strip_prefix")
 load("//flutter/private:flutter_gen_l10n_repo.bzl", "flutter_gen_l10n_repo")
 load("//flutter/private:flutter_pub_lock_hub.bzl", "flutter_pub_lock_hub")
+load("//flutter/private:flutter_pub_maven.bzl", "path_spoke_maven_inputs")
 load("//flutter/private:flutter_pub_overlays.bzl", "hub_overlay_roots")
 load("//flutter/private:flutter_pub_package.bzl", "flutter_pub_package", "flutter_pub_path_package", "is_maven_dep_label")
 load("//flutter/private:flutter_pub_path.bzl", "foreign_lock_path_error", "is_absolute_lock_path", "is_relative_path_dependency", "workspace_relative_lock_path")
@@ -593,6 +594,7 @@ def _create_path_spokes(hub_name, path_pkgs, all_package_names, user_overlay_roo
     in its repository attributes.
     """
     swiftpm_attrs = pub_spoke_swiftpm_attrs(pub_tag)
+    maven = path_spoke_maven_inputs(pub_tag)
     for name, path_info in path_pkgs.items():
         flutter_pub_path_package(
             name = hub_name + "__" + name,
@@ -604,6 +606,8 @@ def _create_path_spokes(hub_name, path_pkgs, all_package_names, user_overlay_roo
             overlay_roots = user_overlay_roots + ["@rules_flutter//ext:BUILD.bazel"],
             code_assets = curated_code_assets(name, path_info.version),
             ignore_hook = name in ignore_hooks,
+            android_maven_deps = maven.deps,
+            android_maven_ignore = maven.ignore,
             package_resolved = swiftpm_attrs.package_resolved,
             package_sha256 = swiftpm_attrs.package_sha256,
         )
