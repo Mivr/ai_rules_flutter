@@ -8,8 +8,8 @@
 > The goal is a fully autonomous Bazel rules workforce that keeps improving these rules, until they beat the
 > hand-written alternatives.
 >
-> Security reports: [GitHub private advisory](https://github.com/Mivr/rules_flutter/security/advisories/new), reviewed by the human owner [@Mivr](https://github.com/Mivr). Forked from [aran/rules_flutter](https://github.com/aran/rules_flutter),
-> with thanks.
+> Security reports: [GitHub private advisory](https://github.com/Mivr/ai_rules_flutter/security/advisories/new), reviewed by the human owner [@Mivr](https://github.com/Mivr). Continues [aran/rules_flutter](https://github.com/aran/rules_flutter) by Aran Donohue,
+> with many thanks: see [History and thanks](#history-and-thanks).
 
 # rules_flutter
 
@@ -17,7 +17,7 @@ Bazel rules for building Flutter apps.
 
 > **Status: alpha.** It works today, but the public API may still change. Feedback and contributions are welcome.
 
-rules_flutter compiles Dart to kernel or AOT native code, bundles assets, and packages the result for macOS, iOS, Android, Linux, Windows, and the web. It builds on [rules_dart](https://github.com/aran/rules_dart) for Dart compilation and hands platform packaging to the rulesets that already do it well: `rules_apple`, `rules_android`, and friends. It also ships a dev tool, `flutter_bazel`, that gives you hot reload, hot restart, and an HTTP channel for driving a running app from a script.
+rules_flutter compiles Dart to kernel or AOT native code, bundles assets, and packages the result for macOS, iOS, Android, Linux, Windows, and the web. It builds on [ai_rules_dart](https://github.com/Mivr/ai_rules_dart) for Dart compilation and hands platform packaging to the rulesets that already do it well: `rules_apple`, `rules_android`, and friends. It also ships a dev tool, `flutter_bazel`, that gives you hot reload, hot restart, and an HTTP channel for driving a running app from a script.
 
 ## Why build Flutter with Bazel
 
@@ -57,7 +57,7 @@ If `flutter build` works for you, here is what Bazel adds:
 
 ### MODULE.bazel
 
-`rules_flutter` is released from the [`Mivr/rules_flutter`](https://github.com/Mivr/rules_flutter) fork together with the [`Mivr/rules_dart`](https://github.com/Mivr/rules_dart) fork it builds on. Take both from the GitHub releases with `archive_override` in your root `MODULE.bazel`:
+`ai_rules_flutter` is released from this repository together with [`Mivr/ai_rules_dart`](https://github.com/Mivr/ai_rules_dart), which it builds on. Take both from the GitHub releases with `archive_override` in your root `MODULE.bazel`:
 
 ```starlark
 bazel_dep(name = "ai_rules_flutter", version = "0.20.0", repo_name = "rules_flutter")
@@ -65,14 +65,14 @@ bazel_dep(name = "ai_rules_dart", version = "0.18.0", repo_name = "rules_dart")
 
 archive_override(
     module_name = "ai_rules_flutter",
-    urls = ["https://github.com/Mivr/rules_flutter/releases/download/v0.20.0/rules_flutter-v0.20.0.tar.gz"],
+    urls = ["https://github.com/Mivr/ai_rules_flutter/releases/download/v0.20.0/rules_flutter-v0.20.0.tar.gz"],
     integrity = "sha256-1AyJQxzuzfL4p4A8wex8VUZerGOXIokNlhPv+2yYNug=",
     strip_prefix = "rules_flutter-0.20.0",
 )
 
 archive_override(
     module_name = "ai_rules_dart",
-    urls = ["https://github.com/Mivr/rules_dart/releases/download/v0.18.0/rules_dart-v0.18.0.tar.gz"],
+    urls = ["https://github.com/Mivr/ai_rules_dart/releases/download/v0.18.0/rules_dart-v0.18.0.tar.gz"],
     integrity = "sha256-9sFt975mhYbFlKNUJ0F9dExQzCu6yv9Dc+WEGsxVuO0=",
     strip_prefix = "rules_dart-0.18.0",
 )
@@ -111,9 +111,9 @@ Two extensions cover the rest. A root-registered custom release (an older stable
 
 #### Overriding `rules_dart`
 
-`rules_flutter` uses APIs from the [`Mivr/rules_dart`](https://github.com/Mivr/rules_dart) fork (`@rules_dart//dart:hooks.bzl`, `@rules_dart//dart/private:record_use.bzl`, and `dart_codegen(package_name = ...)`) that are not in the `rules_dart` releases on the Bazel Central Registry. Its floor is `ai_rules_dart` 0.21.0, the fork's release published on GitHub under that module name with `repo_name = "rules_dart"`, so a root module that overrides only `ai_rules_flutter` fails fast with a version error instead of a missing-symbol error at load. The block above gives the latest released, CI-tested pair: `ai_rules_flutter` 0.20.0 with `ai_rules_dart` 0.18.0. The `archive_override` pair in [MODULE.bazel](#modulebazel) above is the supported setup; every downloaded byte is verified against its `integrity` hash.
+`rules_flutter` uses APIs from [`ai_rules_dart`](https://github.com/Mivr/ai_rules_dart) (`@rules_dart//dart:hooks.bzl`, `@rules_dart//dart/private:record_use.bzl`, and `dart_codegen(package_name = ...)`) that are not in upstream's `rules_dart` releases on the Bazel Central Registry. Its floor is `ai_rules_dart` 0.21.0, released on GitHub under that module name with `repo_name = "rules_dart"`, so a root module that overrides only `ai_rules_flutter` fails fast with a version error instead of a missing-symbol error at load. The block above gives the latest released, CI-tested pair: `ai_rules_flutter` 0.20.0 with `ai_rules_dart` 0.18.0. The `archive_override` pair in [MODULE.bazel](#modulebazel) above is the supported setup; every downloaded byte is verified against its `integrity` hash.
 
-To live at the forks' heads instead of these releases (local development against a checkout of each fork's `main`), replace the two `archive_override` blocks with overrides onto your clones. Because Bzlmod ignores module overrides in non-root modules, the overrides go in your root `MODULE.bazel`:
+To live at the heads instead of these releases (local development against a checkout of each repository's `main`), replace the two `archive_override` blocks with overrides onto your clones. Because Bzlmod ignores module overrides in non-root modules, the overrides go in your root `MODULE.bazel`:
 
 ```starlark
 bazel_dep(name = "ai_rules_dart", version = "0.21.0", repo_name = "rules_dart")
@@ -121,7 +121,7 @@ bazel_dep(name = "ai_rules_dart", version = "0.21.0", repo_name = "rules_dart")
 git_override(
     module_name = "ai_rules_dart",
     commit = "4cc0c0ab2ed8256bec5a1503cc2ab22e1bfe9875",
-    remote = "https://github.com/Mivr/rules_dart.git",
+    remote = "https://github.com/Mivr/ai_rules_dart.git",
 )
 ```
 
@@ -2184,6 +2184,21 @@ The `e2e/` directory holds working workspaces, each with its own tests:
 | `e2e/dual_hub` | Two pub hubs in one workspace that disagree on a package version. |
 
 [docs/TESTING.md](docs/TESTING.md) describes how the repository itself is tested, including the manual checks that need a display or a device.
+
+## History and thanks
+
+`ai_rules_flutter` started as [aran/rules_flutter](https://github.com/aran/rules_flutter), written by
+[Aran Donohue](https://github.com/aran). He designed this rule set and wrote 323 of its commits: the toolchain,
+the platform packaging, `flutter.pub` and the `flutter_bazel` dev tool that everything here still builds on.
+Thank you, Aran. This project would not exist without your work, and its whole history is kept here with your
+name on every one of those commits.
+
+From October 15 to October 28, 2026 the rules were developed in the
+[Mivr/rules_flutter](https://github.com/Mivr/rules_flutter) fork. They continue here as a standalone project: every
+upstream and fork commit, every tag and every release is in this repository. The fork's closed issues stay where
+they are. New issues, releases and the BCR module `ai_rules_flutter` live here. Upstream's own rules continue at
+[aran/rules_flutter](https://github.com/aran/rules_flutter). We keep reading upstream and port its ideas with
+credit to their authors.
 
 ## License
 

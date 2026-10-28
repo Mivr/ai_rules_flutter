@@ -551,7 +551,7 @@ class ModuleTextTest(unittest.TestCase):
 
     GIT_PIN = ("git_override(\n"
                "    module_name = \"%s\",\n"
-               "    remote = \"https://github.com/Mivr/rules_dart.git\",\n"
+               "    remote = \"https://github.com/Mivr/ai_rules_dart.git\",\n"
                "    commit = \"%s\"\n"
                ")\n")
 
@@ -697,7 +697,7 @@ class ModuleTextTest(unittest.TestCase):
         "git_override(\n"
         "    module_name = \"rules_dart\",\n"
         "    commit = \"FIXTURE999\",\n"
-        "    remote = \"https://github.com/Mivr/rules_dart.git\",\n"
+        "    remote = \"https://github.com/Mivr/ai_rules_dart.git\",\n"
         ")\n"
         "\n"
         "register_toolchains(\n"
@@ -721,7 +721,7 @@ class ModuleTextTest(unittest.TestCase):
         "git_override(\n"
         "    module_name = \"rules_dart\",\n"
         "    commit = \"FIXTURE999\",\n"
-        "    remote = \"https://github.com/Mivr/rules_dart.git\",\n"
+        "    remote = \"https://github.com/Mivr/ai_rules_dart.git\",\n"
         ")\n"
         "\n"
     )

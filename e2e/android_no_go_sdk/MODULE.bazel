@@ -23,7 +23,7 @@ local_path_override(
 git_override(
     module_name = "ai_rules_dart",
     commit = "4cc0c0ab2ed8256bec5a1503cc2ab22e1bfe9875",
-    remote = "https://github.com/Mivr/rules_dart.git",
+    remote = "https://github.com/Mivr/ai_rules_dart.git",
 )
 
 # Hermetic host C++ toolchain: CI images and bare hosts may have no

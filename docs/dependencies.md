@@ -24,7 +24,7 @@ forward.
 | `rules_kotlin` | 2.1.10 | `@rules_kotlin//kotlin:android.bzl` for `kt_android_library`, loaded by `flutter_android_app`. |
 | `rules_java` | 9.0.0 | `@rules_java//java:java_import.bzl`, `@rules_java//java/common:java_info.bzl` (`JavaInfo`) and the Java toolchain rules. |
 | `rules_jvm_external` | 6.8 | `@rules_jvm_external//:extensions.bzl` with `maven.install`/`maven.artifact`, `use_starlark_android_rules` and `aar_import_bzl_label`. |
-| `ai_rules_dart` (repo `rules_dart`) | 0.21.0 | `@rules_dart//dart:hooks.bzl`, `@rules_dart//dart/private:record_use.bzl` and `dart_codegen(package_name = ...)`; the `Mivr/rules_dart` fork release (a BCR entry is pending). |
+| `ai_rules_dart` (repo `rules_dart`) | 0.21.0 | `@rules_dart//dart:hooks.bzl`, `@rules_dart//dart/private:record_use.bzl` and `dart_codegen(package_name = ...)`; the `Mivr/ai_rules_dart` release (a BCR entry is pending). |
 | `rules_go` | 0.59.0 | `@rules_go//go/config:pure` and the Bazel 9 `CcInfo` import in `go/private/rules/cross.bzl`; 0.50.0 through 0.58.3 fail to load on Bazel 9. |
 | `llvm` | 0.8.17 | `@llvm//extensions:llvm_toolchain_minimal.bzl` and the `llvm-toolchain-minimal-<os>-<cpu>` repos, on the opt-in xtool Darwin SDK path and for this repository's own hermetic tests. |
 

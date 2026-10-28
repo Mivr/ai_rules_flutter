@@ -21,7 +21,7 @@ sri_of() {
 }
 
 FLUTTER_INTEGRITY=$(sri_of "$ARCHIVE")
-FLUTTER_URL="https://github.com/Mivr/rules_flutter/releases/download/${TAG}/rules_flutter-${TAG}.tar.gz"
+FLUTTER_URL="https://github.com/Mivr/ai_rules_flutter/releases/download/${TAG}/rules_flutter-${TAG}.tar.gz"
 
 # Neither module is on the Bazel Central Registry, so consumers need the
 # `archive_override` for `ai_rules_dart` too. The version comes from the
@@ -34,14 +34,14 @@ if [[ -z "$DART_VERSION" ]]; then
 fi
 DART_TAG="v${DART_VERSION}"
 DART_ARCHIVE="rules_dart-${DART_TAG}.tar.gz"
-DART_URL="https://github.com/Mivr/rules_dart/releases/download/${DART_TAG}/${DART_ARCHIVE}"
+DART_URL="https://github.com/Mivr/ai_rules_dart/releases/download/${DART_TAG}/${DART_ARCHIVE}"
 DART_PREFIX="rules_dart-${DART_VERSION}"
 
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 curl --fail --show-error --location --output "$TMPDIR/$DART_ARCHIVE" "$DART_URL"
 DART_HEX=$(python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$TMPDIR/$DART_ARCHIVE")
-API_URL="https://api.github.com/repos/Mivr/rules_dart/releases/tags/${DART_TAG}"
+API_URL="https://api.github.com/repos/Mivr/ai_rules_dart/releases/tags/${DART_TAG}"
 RELEASE_JSON="$TMPDIR/release.json"
 # The release workflow sets no GH_TOKEN, so read the digest through the public
 # REST API instead. The token, when present, travels in a curl config on
