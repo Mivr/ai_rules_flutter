@@ -7,6 +7,9 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  intl: ^0.20.2
   spm_bigint_plugin:
     path: spm_bigint_plugin/
   spm_graph_plugin:
