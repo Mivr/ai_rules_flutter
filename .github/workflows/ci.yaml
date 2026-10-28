@@ -419,6 +419,43 @@ jobs:
             exit 1
           fi
           echo "$out" | grep -F "is not a declared input"
+      # Coverage check: every hostile fixture declared in web_test.bzl must be
+      # named by the must-fail step below, and that step must pin the guard
+      # message. Adding a spelling without a build, or dropping one from the
+      # step, turns this red even while `//...` stays green.
+      - name: Check every web-guard hostile fixture is covered
+        run: bazel run //tools/check_web_guard_coverage
+      # Web-guard hostile fixtures: each imports a file that exists on the
+      # host but is in no target's `srcs`, in a different URI spelling. They
+      # stay `manual`, so `//...` stays green; this step builds each one
+      # explicitly and requires the guard's refusal. A build that succeeds
+      # fails the job, and so does a failure that does not name the guard
+      # message, so a compiler crash cannot pass as red. Both compilers are
+      # covered: the default dart2wasm target and its dart2js twin.
+      - name: Web-guard hostile imports fail on the guard refusal
+        run: |
+          for target in \
+            //flutter/tests:_web_guard_hostile_file \
+            //flutter/tests:_web_guard_hostile_file_js \
+            //flutter/tests:_web_guard_hostile_relative \
+            //flutter/tests:_web_guard_hostile_relative_js \
+            //flutter/tests:_web_guard_hostile_app_scheme \
+            //flutter/tests:_web_guard_hostile_app_scheme_js \
+            //flutter/tests:_web_guard_hostile_double_slash \
+            //flutter/tests:_web_guard_hostile_double_slash_js \
+            //flutter/tests:_web_guard_hostile_schemeless \
+            //flutter/tests:_web_guard_hostile_schemeless_js; do
+            if out=$(bazel build "$target" 2>&1); then
+              echo "$out"
+              echo "expected $target to fail on the web guard, but it succeeded"
+              exit 1
+            fi
+            if ! echo "$out" | grep -F "is not a declared input"; then
+              echo "$out"
+              echo "expected $target to fail with the web guard refusal"
+              exit 1
+            fi
+          done
       - name: Report cache sizes
         if: always()
         run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true
