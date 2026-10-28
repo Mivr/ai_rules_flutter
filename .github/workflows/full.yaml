@@ -98,6 +98,12 @@ jobs:
           - workspace: codegen
             shard: none
             cache-save: false
+          # The add-to-app xcframework lane: one plain application plus a
+          # first-party plugin, and a macOS-only test over the produced
+          # App, Flutter, registrant and plugin xcframeworks.
+          - workspace: ios_framework
+            shard: none
+            cache-save: false
           # The real-plugin fetch matrix (POD-2). The Linux fetch half runs
           # in e2e-linux-nightly; this leg builds the plugins expected.json
           # records as "ok", one at a time, and reports every result.
