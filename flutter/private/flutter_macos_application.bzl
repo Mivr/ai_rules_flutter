@@ -187,6 +187,15 @@ def _flutter_macos_framework_impl(ctx):
     `macho_edit.dart`, used directly and via `xtool_pack.dart`), which
     recreate the `Versions/Current`, `App`, and `Resources` symlinks exactly.
 
+    The assembly runs in `<App.framework.zip>.stage`, a staging directory that
+    the assemble step clears before every run. That directory is deliberately
+    not a declared output, so Bazel neither owns nor forwards it; the tool
+    removes `App.framework` (or `--output-dir` itself when it ends in
+    `.framework`) before it copies anything, including stale files, directories
+    and symlinks at any depth. `App.framework.zip` therefore holds exactly the
+    current action inputs even when the action runs unsandboxed or a cache
+    replays an earlier result.
+
     Returning `AppleBundleInfo(archive = framework_zip)` causes rules_apple's
     `macos_additional_contents_partial` to merge `App.framework.zip` via
     `bundle_merge_zips` (which preserves `S_IFLNK` symlinks) rather than
@@ -210,7 +219,9 @@ def _flutter_macos_framework_impl(ctx):
     # share an output. The assembly staging directory is deliberately NOT a
     # declared output: a tree artifact carrying the version links must never
     # reach a consumer, because Bazel's input staging materializes directory
-    # symlinks as real directories (see the rule docstring).
+    # symlinks as real directories (see the rule docstring). It is a staging
+    # directory the assemble step clears before every run, so `outputs` stays
+    # `[framework_zip]` and no stale stage content can enter the zip.
     framework_zip = ctx.actions.declare_file("%s/App.framework.zip" % ctx.label.name)
     stage_dir = framework_zip.path + ".stage"
     prepared_binary = _prepare_macos_framework_binary(ctx, dart_exe, dart_vm_files, app_info, is_debug, stub_arch, minimum_os_version)
@@ -291,7 +302,13 @@ flutter_macos_framework = rule(
         "@rules_flutter//flutter:toolchain_type",
         config_common.toolchain_type("@rules_dart//dart:exec_tools_toolchain_type", mandatory = False),
     ],
-    doc = "Assembles the Flutter AOT dylib and assets into App.framework for macOS.",
+    doc = (
+        "Assembles the Flutter AOT dylib and assets into App.framework for macOS. " +
+        "The framework is assembled in a staging directory beside the zip " +
+        "(`<App.framework.zip>.stage`) that every run clears before use, so the " +
+        "shipped zip always holds exactly the current inputs; the staging tree " +
+        "is not an output and never reaches a consumer."
+    ),
 )
 
 # -- flutter_macos_native_libs (dylib staging for additional_contents) -------

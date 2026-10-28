@@ -126,6 +126,28 @@ void runCopyAssets(List<String> args) {
   );
 }
 
+/// Deletes [directory] and everything under it, if it exists.
+///
+/// A directory is removed recursively, including symlinks: the links are
+/// deleted as links and never followed, so a stale link cannot reach a path
+/// outside the staging tree. A file or link that sits where the directory
+/// belongs is deleted too, so the caller always starts from an absent path.
+void removeDirectoryTreeSync(Directory directory) {
+  final type = FileSystemEntity.typeSync(directory.path, followLinks: false);
+  if (type == FileSystemEntityType.notFound) {
+    return;
+  }
+  if (type == FileSystemEntityType.directory) {
+    directory.deleteSync(recursive: true);
+    return;
+  }
+  if (type == FileSystemEntityType.link) {
+    Link(directory.path).deleteSync();
+    return;
+  }
+  File(directory.path).deleteSync();
+}
+
 /// Creates a symlink at [linkPath] pointing to [target], replacing any existing entry.
 void createSymlinkReplacingSync(String linkPath, String target) {
   final link = Link(linkPath);
@@ -225,6 +247,11 @@ void runAssembleMacosFramework(List<String> args) {
   final fwDir = outputDirPath.endsWith('.framework')
       ? Directory(outputDirPath)
       : Directory('$outputDirPath/App.framework');
+
+  // The output directory is a staging directory, not a fresh sandbox: local
+  // and standalone spawn strategies reuse it between runs. Clear the
+  // framework tree first so the zip can only ever hold this run's inputs.
+  removeDirectoryTreeSync(fwDir);
   final fwDirName = fwDir.uri.pathSegments.where((s) => s.isNotEmpty).last;
   final fwName = fwDirName.substring(0, fwDirName.length - '.framework'.length);
   final versionADir = Directory('${fwDir.path}/Versions/A');

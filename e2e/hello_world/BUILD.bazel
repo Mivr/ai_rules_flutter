@@ -69,10 +69,14 @@ flutter_asset_bundle(
 
 # -- Recommended: flutter_application with local sources ----------------------
 
+# `assets/stage_clean*.txt` is the macOS rebuild fixture: the glob makes a
+# deleted file undeclared without editing this BUILD file, so
+# `verify_macos_stage_clean_test` can build, remove it, and rebuild.
 flutter_application(
     name = "hello_world_app",
     package_name = "hello_world",
     srcs = ["lib/common_widgets.dart"],
+    assets = glob(["assets/stage_clean*.txt"]),
     main = "lib/main.dart",
     deps = [
         "@deps//:cupertino_icons",
@@ -854,6 +858,35 @@ build_test(
     name = "macos_bundle_build_test",
     target_compatible_with = ["@platforms//os:macos"],
     targets = [":hello_world_macos"],
+)
+
+# macOS rebuild guard: under a local framework strategy the staging directory
+# survives between builds, so an asset removed from the app must not survive in
+# the new App.framework.zip. The test drives real builds in a private output
+# base, so it is `external` (never a replayed cached pass) and `no-sandbox` (it
+# reaches the workspace through its runfiles anchor). The macOS leg of
+# full.yaml runs `bazel test //...`; other hosts cannot build a macOS app.
+dart_test(
+    name = "verify_macos_stage_clean_test",
+    size = "enormous",
+    data = ["test/verify_macos_stage_clean_test.dart"],
+    env = {
+        "GUARD_ROOT_ANCHOR": "$(rlocationpath :test/verify_macos_stage_clean_test.dart)",
+    },
+    env_inherit = [
+        "BUILD_WORKSPACE_DIRECTORY",
+        "BAZEL",
+    ],
+    main = "test/verify_macos_stage_clean_test.dart",
+    tags = [
+        "external",
+        "no-sandbox",
+    ],
+    target_compatible_with = ["@platforms//os:macos"],
+    deps = [
+        "@deps//:test",
+        "@rules_dart//dart/runfiles",
+    ],
 )
 
 flutter_ios_simulator_build_test(

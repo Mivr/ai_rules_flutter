@@ -3941,6 +3941,104 @@ void main() {
     );
 
     test(
+      'assemble-macos-framework clears stale staging entries before it assembles',
+      () {
+        final dylibBytes = macho.generateStubMachO(
+          arch: 'arm64',
+          platform: macho.platformMacos,
+          minOs: macho.parsePackedVersion('15.0'),
+          sdkVersion: macho.parsePackedVersion('15.0'),
+          installName: '@rpath/App.framework/Versions/A/App',
+        );
+        final binFile = File('${tempDir.path}/stale_App_bin')
+          ..writeAsBytesSync(dylibBytes);
+        final plistFile = File('${tempDir.path}/stale_Info.plist')
+          ..writeAsStringSync('<plist version="1.0"><dict/></plist>');
+        final assetsDir = Directory('${tempDir.path}/stale_assets')
+          ..createSync(recursive: true);
+        File('${assetsDir.path}/fresh.txt').writeAsStringSync('fresh');
+
+        final wrapperDir = '${tempDir.path}/stale_wrapper';
+        final outside = Directory('${tempDir.path}/stale_outside')
+          ..createSync(recursive: true);
+        File('${outside.path}/keep.txt').writeAsStringSync('keep');
+        final staleDir = Directory(
+          '$wrapperDir/App.framework/Versions/A/Resources/flutter_assets/'
+          'stale_dir',
+        )..createSync(recursive: true);
+        final staleAssets =
+            '$wrapperDir/App.framework/Versions/A/Resources/flutter_assets';
+        File('$staleAssets/stale.txt').writeAsStringSync('stale');
+        File('${staleDir.path}/nested.txt').writeAsStringSync('nested');
+        Link('$staleAssets/stale_link').createSync('stale.txt');
+        Link('$staleAssets/stale_dir_link').createSync(outside.path);
+        File(
+          '$wrapperDir/App.framework/Versions/A/Resources/stale_plist',
+        ).writeAsStringSync('stale');
+        final outputZip = '${tempDir.path}/stale_App.framework.zip';
+
+        macho.main([
+          'assemble-macos-framework',
+          '--binary',
+          binFile.path,
+          '--info-plist',
+          plistFile.path,
+          '--assets',
+          assetsDir.path,
+          '--output-dir',
+          wrapperDir,
+          '--output-zip',
+          outputZip,
+        ]);
+
+        bool exists(String path) =>
+            FileSystemEntity.typeSync(path, followLinks: false) !=
+            FileSystemEntityType.notFound;
+        final fwPath = '$wrapperDir/App.framework';
+        expect(exists('$staleAssets/stale.txt'), isFalse);
+        expect(exists(staleDir.path), isFalse);
+        expect(exists('$staleAssets/stale_link'), isFalse);
+        expect(exists('$staleAssets/stale_dir_link'), isFalse);
+        expect(
+          File('${outside.path}/keep.txt').readAsStringSync(),
+          'keep',
+          reason: 'clearing the stage followed a stale link outside it',
+        );
+        expect(
+          exists('$fwPath/Versions/A/Resources/stale_plist'),
+          isFalse,
+        );
+        expect(File('$staleAssets/fresh.txt').readAsStringSync(), 'fresh');
+
+        final zipEntries = macho.readFrameworkZipEntries(
+          File(outputZip).readAsBytesSync(),
+        );
+        expect(
+          zipEntries.where((e) => e.path.contains('stale')),
+          isEmpty,
+          reason: 'the zip kept an entry from the pre-populated staging tree',
+        );
+
+        final extractedRoot = Directory('${tempDir.path}/stale_extracted')
+          ..createSync(recursive: true);
+        macho.extractFrameworkZip(
+          File(outputZip).readAsBytesSync(),
+          extractedRoot,
+        );
+        final extractedAssets =
+            '${extractedRoot.path}/App.framework/Versions/A/Resources/'
+            'flutter_assets';
+        expect(exists('$extractedAssets/stale.txt'), isFalse);
+        expect(exists('$extractedAssets/stale_dir'), isFalse);
+        expect(exists('$extractedAssets/stale_link'), isFalse);
+        expect(
+          File('$extractedAssets/fresh.txt').readAsStringSync(),
+          'fresh',
+        );
+      },
+    );
+
+    test(
       'extractFrameworkZip recreates the versioned layout with real symlinks',
       () {
         final dylibBytes = macho.generateStubMachO(
