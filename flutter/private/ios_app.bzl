@@ -393,6 +393,61 @@ def _ios_emit_xtool_bundle(name, bundle, invalid_version_error, discovered_main_
         **forwarded_kwargs
     )
 
+def _ios_apply_signing_options(name, backend, signing, provisioning_profile, kwargs):
+    """Applies `signing` to the bundle's pass-through attributes.
+
+    Signing defaults to true, so the caller's `features` and
+    `provisioning_profile` pass through untouched. An unsigned build is the
+    one `flutter build ios --no-codesign` produces: rules_apple's
+    `disable_legacy_signing` feature suppresses every codesign action, and a
+    provisioning profile would contradict the request.
+
+    Args:
+        name: The app target name, for the error message.
+        backend: Apple bundling backend.
+        signing: Whether the app is code signed.
+        provisioning_profile: The caller's provisioning profile label, or None.
+        kwargs: Pass-through attributes; mutated to merge the feature.
+    """
+    if signing:
+        return
+    if backend == "xtool":
+        fail("%s: unsigned device builds are supported only by the 'rules_apple' backend, not 'xtool'" % name)
+    if provisioning_profile:
+        fail("%s: signing = False conflicts with provisioning_profile = %r; an unsigned build cannot name a profile" %
+             (name, provisioning_profile))
+    features = kwargs.pop("features", [])
+    if "disable_legacy_signing" not in features:
+        features = features + ["disable_legacy_signing"]
+    kwargs["features"] = features
+
+def _ios_bundle_context(name, app_name, backend, signing, provisioning_profile, kwargs):
+    """Resolves the display name, tags, visibility and signing attributes.
+
+    Args:
+        name: The app target name.
+        app_name: The caller's display name, or None to use `name`.
+        backend: Apple bundling backend.
+        signing: Whether the app is code signed.
+        provisioning_profile: The caller's provisioning profile label, or None.
+        kwargs: Pass-through attributes to `ios_application`.
+
+    Returns:
+        A struct with the resolved `display_name`, `tags`, `internal_tags` and
+        `visibility`.
+    """
+    display_name = app_name or name
+    tags = kwargs.pop("tags", ["manual"])
+    internal_tags = tags if "manual" in tags else tags + ["manual"]
+    visibility = kwargs.pop("visibility", None)
+    _ios_apply_signing_options(name, backend, signing, provisioning_profile, kwargs)
+    return struct(
+        display_name = display_name,
+        tags = tags,
+        internal_tags = internal_tags,
+        visibility = visibility,
+    )
+
 def flutter_ios_app(
         name,
         application,
@@ -406,6 +461,7 @@ def flutter_ios_app(
         entitlements = None,
         additional_entitlements = [],
         provisioning_profile = None,
+        signing = True,
         app_icons = None,
         resources = [],
         runner_deps = [],
@@ -426,10 +482,12 @@ def flutter_ios_app(
     Generate these with: `flutter create --platforms=ios .`
 
     Simulator builds need no code signing. Device builds require
-    `provisioning_profile`; without it `ios_application` fails at analysis
-    with "The provisioning_profile attribute must be set for device builds
-    on this platform (ios)". See the README's "Running an iOS example on a
-    physical device" for how to obtain one without an Xcode project.
+    `provisioning_profile` unless `signing = False`, which builds the same
+    device bundle unsigned; without a profile and with signing on,
+    `ios_application` fails at analysis with "The provisioning_profile
+    attribute must be set for device builds on this platform (ios)". See the
+    README's "Running an iOS example on a physical device" for how to obtain
+    a profile without an Xcode project.
 
     Non-release builds carry two extra `Info.plist` keys —
     `NSBonjourServices` and `NSLocalNetworkUsageDescription` — so the engine
@@ -486,6 +544,15 @@ def flutter_ios_app(
             `local_provisioning_profile` target) to sign a device build
             with. Required for device builds (`--ios_multi_cpus=arm64`) and
             unused by simulator builds.
+        signing: Whether to code sign the bundle. Defaults to `True`, which
+            keeps the existing `provisioning_profile` requirement for a
+            device build. `False` builds the unsigned device app
+            `flutter build ios --no-codesign` produces: rules_apple's
+            `disable_legacy_signing` feature is added to any `features` the
+            caller passes, so no codesign action runs and no profile or
+            signing secret is needed. An unsigned build rejects a
+            `provisioning_profile` and is supported only by
+            `backend = "rules_apple"`.
         app_icons: The app icon, as the files of an `.appiconset` or of an
             Icon Composer `.icon` bundle. Defaults to the conventional
             `ios/Runner/Assets.xcassets/AppIcon.appiconset` that
@@ -546,10 +613,7 @@ def flutter_ios_app(
     if backend not in ("rules_apple", "xtool"):
         fail("flutter_ios_app: backend must be 'rules_apple' or 'xtool', got %r" % backend)
 
-    display_name = app_name or name
-    tags = kwargs.pop("tags", ["manual"])
-    internal_tags = tags if "manual" in tags else tags + ["manual"]
-    visibility = kwargs.pop("visibility", None)
+    meta = _ios_bundle_context(name, app_name, backend, signing, provisioning_profile, kwargs)
     validate_minimum_os_version(
         "flutter_ios_app",
         name,
@@ -571,7 +635,7 @@ def flutter_ios_app(
     # pipeline still injects `get-task-allow=true` for debug builds.
     # `False` ships none although the file exists — see
     # `resolve_ios_entitlements` for the device build that needs it.
-    entitlements = _ios_resolve_entitlements(name, entitlements, additional_entitlements, internal_tags)
+    entitlements = _ios_resolve_entitlements(name, entitlements, additional_entitlements, meta.internal_tags)
 
     # The app icon: the conventional catalog `flutter create` writes, unless
     # the caller named something else. Discovered for the same reason the
@@ -586,22 +650,22 @@ def flutter_ios_app(
 
     # -- Internal targets (all __{name}_ prefixed) --
 
-    engine_target = _ios_build_frameworks(name, application, minimum_os_version, allow_non_macho, backend, engine, exclude_plugins, internal_tags)
+    engine_target = _ios_build_frameworks(name, application, minimum_os_version, allow_non_macho, backend, engine, exclude_plugins, meta.internal_tags)
 
-    _ios_build_native_frameworks(name, application, minimum_os_version, allow_non_macho, internal_tags)
+    _ios_build_native_frameworks(name, application, minimum_os_version, allow_non_macho, meta.internal_tags)
 
     # 7. Discover runner Swift sources and build swift_library.
     runner_srcs = _ios_discover_runner_srcs(srcs)
     discovered_main_storyboard = native.glob(["ios/Runner/Base.lproj/Main.storyboard"], allow_empty = True)
-    _ios_build_runner(name, struct(application = application, backend = backend, engine_target = engine_target, srcs = runner_srcs, module_name = module_name, deps = runner_deps, internal_tags = internal_tags, discovered_main_storyboard = discovered_main_storyboard))
+    _ios_build_runner(name, struct(application = application, backend = backend, engine_target = engine_target, srcs = runner_srcs, module_name = module_name, deps = runner_deps, internal_tags = meta.internal_tags, discovered_main_storyboard = discovered_main_storyboard))
 
     # 8. Info.plist — preprocess to resolve Xcode variables that rules_apple
     #    doesn't handle.
-    actual_info_plist = _ios_resolve_info_plist(name, info_plist, module_name, internal_tags)
+    actual_info_plist = _ios_resolve_info_plist(name, info_plist, module_name, meta.internal_tags)
 
     # 9. Version — create default apple_bundle_version if not provided (rules_apple),
     #    or resolve/convert apple_bundle_version on xtool without Apple toolchains.
-    version, invalid_version_error = _ios_resolve_version(name, backend, version, internal_tags, kwargs)
+    version, invalid_version_error = _ios_resolve_version(name, backend, version, meta.internal_tags, kwargs)
 
     # 10. Resolve launch storyboard. On xtool, storyboards discovered in the
     #     conventional `flutter create` layout are forwarded so the rule
@@ -625,11 +689,11 @@ def flutter_ios_app(
     #      Flutter engine to register the VM service via mDNS. Matches
     #      flutter_tools' xcode_backend.dart, which only adds them for
     #      non-release configurations.
-    selected_infoplists = _ios_dev_infoplists(name, actual_info_plist, internal_tags)
+    selected_infoplists = _ios_dev_infoplists(name, actual_info_plist, meta.internal_tags)
 
     # 11. Final bundle target — rules_apple (default) or explicit opt-in xtool.
     bundle = struct(
-        display_name = display_name,
+        display_name = meta.display_name,
         bundle_id = bundle_id,
         families = families,
         minimum_os_version = minimum_os_version,
@@ -640,8 +704,8 @@ def flutter_ios_app(
         resources = resources,
         entitlements = entitlements,
         provisioning_profile = provisioning_profile,
-        tags = tags,
-        visibility = visibility,
+        tags = meta.tags,
+        visibility = meta.visibility,
         kwargs = kwargs,
     )
     if backend == "rules_apple":

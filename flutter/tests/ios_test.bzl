@@ -1039,6 +1039,91 @@ def _xtool_ios_validation_tests(name):
         name + "_xtool_unsupported_kwarg_fails",
     ]
 
+def _ios_signing_surface_test_impl(ctx):
+    env = unittest.begin(ctx)
+    asserts.equals(env, ctx.attr.expected_features, ctx.attr.actual_features)
+    asserts.equals(env, ctx.attr.expected_tags, ctx.attr.actual_tags)
+    return unittest.end(env)
+
+_ios_signing_surface_test = unittest.make(
+    _ios_signing_surface_test_impl,
+    attrs = {
+        "actual_features": attr.string_list(mandatory = True),
+        "actual_tags": attr.string_list(mandatory = True),
+        "expected_features": attr.string_list(mandatory = True),
+        "expected_tags": attr.string_list(mandatory = True),
+    },
+)
+
+def _signing_tests(name):
+    """Declare the signed and unsigned device app fixtures and their tests.
+
+    Args:
+      name: Prefix for every target declared here.
+
+    Returns:
+      The test target names.
+    """
+    fake_application(
+        name = name + "_signing_app",
+        debug = False,
+        macho_aot = True,
+        tags = ["manual"],
+    )
+    runtime_srcs = [
+        "@rules_flutter//flutter/private/runners/ios:AppDelegate.swift",
+        "@rules_flutter//flutter/private/runners/ios:SceneDelegate.swift",
+    ]
+    info_plist = "@rules_flutter//flutter/private/runners/ios:Info.plist"
+
+    signed = name + "_signed_ios_app"
+    flutter_ios_app(
+        name = signed,
+        application = ":" + name + "_signing_app",
+        bundle_id = "com.example.signed.ios",
+        srcs = runtime_srcs,
+        info_plist = info_plist,
+        entitlements = False,
+        app_icons = [],
+        features = ["caller_feature"],
+        tags = ["manual"],
+    )
+
+    unsigned = name + "_unsigned_ios_app"
+    flutter_ios_app(
+        name = unsigned,
+        application = ":" + name + "_signing_app",
+        bundle_id = "com.example.unsigned.ios",
+        srcs = runtime_srcs,
+        info_plist = info_plist,
+        entitlements = False,
+        app_icons = [],
+        features = ["caller_feature"],
+        signing = False,
+        tags = ["manual"],
+    )
+
+    after = native.existing_rules()
+    _ios_signing_surface_test(
+        name = name + "_signed_signing_surface",
+        actual_features = after[signed]["features"],
+        actual_tags = after[signed]["tags"],
+        expected_features = ["caller_feature"],
+        expected_tags = ["manual"],
+    )
+    _ios_signing_surface_test(
+        name = name + "_unsigned_signing_surface",
+        actual_features = after[unsigned]["features"],
+        actual_tags = after[unsigned]["tags"],
+        expected_features = ["caller_feature", "disable_legacy_signing"],
+        expected_tags = ["manual"],
+    )
+
+    return [
+        name + "_signed_signing_surface",
+        name + "_unsigned_signing_surface",
+    ]
+
 def ios_test_suite(name):
     """Declares the iOS entitlement and bundling tests.
 
@@ -1046,9 +1131,10 @@ def ios_test_suite(name):
         name: The test_suite name.
     """
     _resolve_test(name = name + "_resolve")
+    tests = [name + "_resolve"] + _bundling_tests(name) + _registrant_tests(name) + _signing_tests(name)
     native.test_suite(
         name = name,
-        tests = [":" + t for t in [name + "_resolve"] + _bundling_tests(name) + _registrant_tests(name)],
+        tests = [":" + t for t in tests],
     )
 
 def _ios_registrant_swift_groups_test_impl(ctx):
