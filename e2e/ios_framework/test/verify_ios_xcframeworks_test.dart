@@ -139,7 +139,7 @@ List<File> _externalEngineFiles(String srcDir, String workspace) {
   final out = <File>[];
   for (final entity in Directory(srcDir).listSync()) {
     if (entity is! Directory) continue;
-    final name = entity.uri.pathSegments.last;
+    final name = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
     if (name == workspace || name == '_main') continue;
     if (name.contains('flutter_ios_engine')) {
       out.addAll(_allFiles(entity));
