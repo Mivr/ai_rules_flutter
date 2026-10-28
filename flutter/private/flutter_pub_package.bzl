@@ -54,6 +54,7 @@ load(
     "covering_entry",
     "covering_entry_lookup",
 )
+load(":flutter_pub_maven.bzl", _maven_deps_attr = "maven_deps_attr", _maven_ignore_attr = "maven_ignore_attr")
 load(
     ":flutter_pub_mirror.bzl",
     "detect_case_insensitive_host",
@@ -2354,23 +2355,8 @@ flutter_pub_package = repository_rule(
                   "cleanly and dying at runtime on an unresolved native symbol.",
             default = False,
         ),
-        "android_maven_deps": attr.string_dict(
-            doc = "`group:artifact` -> Bazel label additions to the built-in " +
-                  "Gradle-to-`@rules_android_maven` mapping, from " +
-                  "`flutter.pub(android_maven_deps)`. A plugin's " +
-                  "`android/build.gradle*` runtime dependency whose " +
-                  "coordinate is in neither table fails the fetch; mapping " +
-                  "it here is the fix for external artifacts.",
-            default = {},
-        ),
-        "android_maven_ignore": attr.string_list(
-            doc = "`group:artifact` coordinates that need no Bazel label, " +
-                  "from `flutter.pub(android_maven_ignore)`. A coordinate " +
-                  "listed here is left out of the spoke's deps instead of " +
-                  "failing the fetch as unknown. This is a declaration you " +
-                  "make deliberately; it is never a default.",
-            default = [],
-        ),
+        "android_maven_deps": _maven_deps_attr,
+        "android_maven_ignore": _maven_ignore_attr,
         "package_resolved": pub_spoke_package_resolved_attr,
         "package_sha256": pub_spoke_package_sha256_attr,
         "overlay_roots": attr.label_list(
@@ -2421,6 +2407,8 @@ flutter_pub_path_package = repository_rule(
                   "`flutter_pub_package`.",
             default = False,
         ),
+        "android_maven_deps": _maven_deps_attr,
+        "android_maven_ignore": _maven_ignore_attr,
         "package_resolved": pub_spoke_package_resolved_attr,
         "package_sha256": pub_spoke_package_sha256_attr,
         "overlay_roots": attr.label_list(

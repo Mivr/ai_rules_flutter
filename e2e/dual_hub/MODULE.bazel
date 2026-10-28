@@ -36,6 +36,7 @@ git_override(
 flutter = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter")
 flutter.pub(
     name = "hub_a",
+    android_maven_ignore = ["com.example:shared-android"],
     lock = "//hub_a:pubspec.lock",
 )
 flutter.pub(
