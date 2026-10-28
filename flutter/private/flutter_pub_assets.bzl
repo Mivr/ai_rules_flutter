@@ -30,6 +30,7 @@ its pubspec.yaml and the entry.
 
 load(":asset_uri.bzl", "encode_asset_key", "spoke_asset_uri_error")
 load(":flutter_pub_walk.bzl", "PUB_WALK_BOUND")
+load(":flutter_pubspec.bzl", "asset_flavor_error")
 
 # Bound for every asset directory walk. Starlark has no `while`, so every
 # walk is a bounded `for`; reaching the bound fails loudly (see
@@ -582,3 +583,134 @@ def ctx_package_lister(ctx, package_name, bound = PUB_ASSET_LIST_BOUND):
         package_name,
         bound,
     )
+
+def _sorted_flavor_set(flavors):
+    """The deduplicated, sorted flavor names, for order-insensitive comparison."""
+    seen = {}
+    for flavor in flavors:
+        seen[flavor] = True
+    return sorted(seen.keys())
+
+def merge_pub_asset_conditions(expanded, package_name):
+    """Merge per-file `flutter.assets` entries the way flutter_tools does.
+
+    flutter_tools keeps one entry per declaration and bundles a file when ANY
+    of its entries survives filtering, so every entry for one file merges:
+    any entry without `platforms` makes the file unconditional, otherwise the
+    file's platforms are the union of its entries' lists. Entries for one
+    file whose flavor sets differ conflict (compared as sets, so order does
+    not matter); the caller fails the fetch with the returned message.
+
+    Args:
+        expanded: Per-file entries from
+            `expand_pub_asset_entries(...).expanded`.
+        package_name: The pub package the entries come from, for the conflict
+            message.
+
+    Returns:
+        A `struct(platforms, flavors, conflict)`: the merged condition dicts
+        (same shapes `_build_pkg_asset_conditions` returns) and the fetch
+        failure naming the package, the file and both flavor lists, or `""`
+        when the entries agree. A file with one entry keeps its declared
+        order, so single-entry spokes render byte-identically to before.
+    """
+    by_path = {}
+    order = []
+    for entry in expanded:
+        key = ":" + entry.path
+        if key not in by_path:
+            by_path[key] = []
+            order.append(key)
+        by_path[key].append(entry)
+    platforms = {}
+    flavors = {}
+    for key in order:
+        entries = by_path[key]
+        first = entries[0]
+        for other in entries[1:]:
+            if _sorted_flavor_set(other.flavors) != _sorted_flavor_set(first.flavors):
+                return struct(
+                    platforms = {},
+                    flavors = {},
+                    conflict = asset_flavor_error(
+                        package_name,
+                        first.path,
+                        first.flavors,
+                        other.flavors,
+                    ),
+                )
+        if first.flavors:
+            flavors[key] = list(first.flavors)
+        union = {}
+        unconditional = False
+        for entry in entries:
+            if not entry.platforms:
+                unconditional = True
+                break
+            for platform in entry.platforms:
+                union[platform] = True
+        if unconditional:
+            continue
+        if len(entries) == 1:
+            platforms[key] = list(first.platforms)
+        else:
+            platforms[key] = sorted(union.keys())
+    return struct(platforms = platforms, flavors = flavors, conflict = "")
+
+def build_pkg_shader_conditions(normalized_shaders, parsed_shaders, package_name):
+    """Build the condition dicts for a spoke's `pkg_shaders` entries.
+
+    A shader entry carries the same `platforms` / `flavors` conditions as an
+    asset entry, keyed the same way (`":" + path`), because the spoke passes
+    both channels through `pkg_asset_platforms` / `pkg_asset_flavors`.
+    Normalization keeps one entry per parsed entry in order, so the two lists
+    pair by index; entries for one file merge exactly as asset entries do
+    (`merge_pub_asset_conditions`), including the flavor-conflict refusal.
+
+    Args:
+        normalized_shaders: `struct(path, key)` entries from
+            `normalize_spoke_shaders`.
+        parsed_shaders: The parsed `struct(path, is_map, flavors, platforms)`
+            entries they came from, in the same order.
+        package_name: The pub package the entries come from, for the conflict
+            message.
+
+    Returns:
+        A `struct(platforms, flavors)` of condition dicts (empty when the
+        shaders are unconditional); fails the fetch on a flavor conflict.
+    """
+    entries = []
+    for index, entry in enumerate(normalized_shaders):
+        parsed = parsed_shaders[index]
+        entries.append(struct(
+            path = entry.path,
+            flavors = parsed.flavors,
+            platforms = parsed.platforms,
+        ))
+    merged = merge_pub_asset_conditions(entries, package_name)
+    if merged.conflict:
+        fail(merged.conflict)
+    return struct(platforms = merged.platforms, flavors = merged.flavors)
+
+def check_pub_asset_shader_conflict(package_name, pkg_assets, pkg_shaders):
+    """Fail the spoke fetch when one file is both a pub asset and a pub shader.
+
+    flutter_tools bundles an asset and a shader through different channels
+    with different keys, but a rules_flutter bundle stages the same file once
+    and would let one channel silently stand in for the other. Both channels
+    share the condition attrs, so one file in both also has no single set of
+    conditions. Naming the package, the file and both sections states the
+    fix: list it in one section only.
+
+    Args:
+        package_name: The pub package the entries come from.
+        pkg_assets: The spoke's `":" + path` asset dict.
+        pkg_shaders: The spoke's `":" + path` shader dict.
+    """
+    for key in pkg_shaders:
+        if key in pkg_assets:
+            fail((
+                "flutter.pub spoke for \"{pkg}\": pubspec.yaml lists {path} " +
+                "as both a `flutter.assets` file and a `flutter.shaders` " +
+                "entry; list it in one section only."
+            ).format(pkg = package_name, path = key[1:]))

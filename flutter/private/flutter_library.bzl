@@ -34,6 +34,66 @@ def pub_asset_matches_target(flavors, platforms, target_platform, flavor = None)
         return True
     return target_platform in platforms
 
+def pub_shader_matches_target(entry, target_platform):
+    """Whether a pub shader contribution belongs in this target's bundle.
+
+    Shader entries carry the same `platforms` / `flavors` conditions as
+    assets, so the one asset predicate decides them too: flavor first, then
+    platform, with the `tester` exception. A contribution from an older spoke
+    states no conditions and stays unconditional. `None` lists every shader
+    (the dev tool's workspace metadata, which names no bundle platform).
+
+    Args:
+        entry: A `pub_shaders` contribution struct.
+        target_platform: The bundle's platform, or None to skip filtering.
+
+    Returns:
+        True when the shader belongs in the bundle.
+    """
+    if target_platform == None:
+        return True
+    return pub_asset_matches_target(
+        getattr(entry, "flavors", []),
+        getattr(entry, "platforms", []),
+        target_platform,
+    )
+
+def dedupe_shader_jobs(ctx, jobs):
+    """Fold shader jobs by bundle path, merging duplicate `#include` sets.
+
+    One package can reach a target along several paths; the same file at
+    the same bundle path is one shader. Two different files claiming one
+    bundle path fail here: one would otherwise overwrite the other. A job
+    that only adds includes widens the survivor's set, so no compilation
+    misses a header it may `#include`.
+
+    Args:
+        ctx: The bundling target's context, for the failure message.
+        jobs: Shader jobs as `struct(bundle_path, file, includes)`.
+
+    Returns:
+        A dict from bundle path to the surviving job.
+    """
+    by_path = {}
+    for job in jobs:
+        seen = by_path.get(job.bundle_path)
+        if seen == None:
+            by_path[job.bundle_path] = job
+        elif seen.file != job.file:
+            fail("%s: two shaders are bundled at %s: %s and %s." % (
+                ctx.label,
+                job.bundle_path,
+                seen.file.short_path,
+                job.file.short_path,
+            ))
+        elif job.includes and tuple(job.includes) != tuple(seen.includes):
+            by_path[job.bundle_path] = struct(
+                bundle_path = seen.bundle_path,
+                file = seen.file,
+                includes = tuple(depset(list(seen.includes) + list(job.includes)).to_list()),
+            )
+    return by_path
+
 def _entry_conditions(decoded_path, pkg_asset_platforms, pkg_asset_flavors):
     """The `(platforms, flavors)` condition lists for one asset path.
 
@@ -104,9 +164,10 @@ def build_pub_contributions(package_name, fonts_json, font_files_dict, pkg_asset
             this package's shaders may `#include`. Each shader carries them
             as `includes` to its compile.
         pkg_asset_platforms: dict[str, list[str]] — `ctx.attr.pkg_asset_platforms`,
-            `":" + path` to the entry's `platforms`. Absent = unconditional.
+            `":" + path` to an asset or shader entry's `platforms`. Absent =
+            unconditional.
         pkg_asset_flavors: dict[str, list[str]] — `ctx.attr.pkg_asset_flavors`,
-            same shape for the entry's `flavors`.
+            same shape for an asset or shader entry's `flavors`.
 
     Returns:
         Tuple of (extra_pub_fonts, extra_pub_assets, extra_pub_shaders) lists.
@@ -164,14 +225,45 @@ def build_pub_contributions(package_name, fonts_json, font_files_dict, pkg_asset
         files = target.files.to_list()
         if len(files) != 1:
             fail("pkg_shaders entry %s must resolve to exactly one File; got %d" % (target.label, len(files)))
+        norm = _normalize_attr_value(package_name, "pkg_shaders", shader_path)
+        platforms, flavors = _entry_conditions(norm.decoded, pkg_asset_platforms, pkg_asset_flavors)
         extra_pub_shaders.append(struct(
             package_name = package_name,
-            shader_path = _normalize_attr_value(package_name, "pkg_shaders", shader_path).key,
+            shader_path = norm.key,
             file = files[0],
             includes = tuple(shader_includes),
+            platforms = tuple(platforms),
+            flavors = tuple(flavors),
         ))
 
     return (extra_pub_fonts, extra_pub_assets, extra_pub_shaders)
+
+def check_asset_shader_conflict(label, assets, shaders):
+    """Fail analysis when one file is listed both as an asset and as a shader.
+
+    An asset and a shader are different channels: the bundle stages the file
+    once and the manifest and shader compiler each expect to own it. A pub
+    asset directory can also cover a file that the same package's
+    `flutter.shaders` lists, so this check runs over both the target's own
+    `assets` / `shaders` and its `pkg_assets` / `pkg_shaders` contributions.
+    The message names both entries, so the fix is one editor jump away.
+
+    Args:
+        label: The `flutter_library` label, for the failure.
+        assets: Structs with `file` and `entry` (the asset spelling to name).
+        shaders: Structs with `file` and `entry` (the shader spelling to
+            name).
+    """
+    by_file = {}
+    for asset in assets:
+        by_file[asset.file] = asset
+    for shader in shaders:
+        asset = by_file.get(shader.file)
+        if asset != None:
+            fail((
+                "%s: %s and %s are the same file; list it as an asset or as " +
+                "a shader, not both."
+            ) % (label, asset.entry, shader.entry))
 
 def _pub_family_origin(deps, entry):
     """The first direct dep whose `FlutterInfo.pub_fonts` carries a family entry.
@@ -451,6 +543,20 @@ def _flutter_library_impl(ctx):
         ctx.attr.pkg_asset_flavors,
     )
 
+    # A file listed as both an asset and a shader has two owners; refuse it
+    # for the target's own channels and for a pub asset directory that
+    # covers a declared shader alike.
+    check_asset_shader_conflict(
+        ctx.label,
+        [struct(file = f, entry = "`assets` entry \"%s\"" % f.short_path) for f in ctx.files.assets],
+        [struct(file = f, entry = "`shaders` entry \"%s\"" % f.short_path) for f in ctx.files.shaders],
+    )
+    check_asset_shader_conflict(
+        ctx.label,
+        [struct(file = e.file, entry = "`pkg_assets` entry \"%s\"" % e.asset_path) for e in extra_pub_assets],
+        [struct(file = e.file, entry = "`pkg_shaders` entry \"%s\"" % e.shader_path) for e in extra_pub_shaders],
+    )
+
     # `resources` names the non-Dart remainder of `lib/`; a Dart source there
     # is a mis-filed `srcs` entry, and identical paths with identical
     # extensions would otherwise collide silently. Mirrors `dart_library`.
@@ -590,10 +696,10 @@ flutter_library = rule(
             allow_files = True,
         ),
         "pkg_asset_platforms": attr.string_list_dict(
-            doc = "Per-asset `platforms` conditions (mirrors the `platforms` key of `flutter.assets` entries). Maps the `\":\" + path` label string of a `pkg_assets` entry to its platform list. An entry listed here bundles only on those platforms (`tester` bundles every platform entry); an entry absent here is unconditional.",
+            doc = "Per-entry `platforms` conditions (mirrors the `platforms` key of `flutter.assets` and `flutter.shaders` entries). Maps the `\":\" + path` label string of a `pkg_assets` or `pkg_shaders` entry to its platform list. An entry listed here bundles and compiles only on those platforms (`tester` keeps every platform entry); an entry absent here is unconditional.",
         ),
         "pkg_asset_flavors": attr.string_list_dict(
-            doc = "Per-asset `flavors` conditions (mirrors the `flavors` key of `flutter.assets` entries). Same shape as `pkg_asset_platforms`. Rules_flutter selects no flavor yet, so an entry listed here bundles nowhere.",
+            doc = "Per-entry `flavors` conditions (mirrors the `flavors` key of `flutter.assets` and `flutter.shaders` entries). Same shape as `pkg_asset_platforms`. Rules_flutter selects no flavor yet, so an entry listed here bundles nowhere.",
         ),
         "_sky_engine": SKY_ENGINE_ATTR,
         "shader_includes": attr.label_list(

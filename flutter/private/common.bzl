@@ -27,7 +27,7 @@ load(
     "compile_flutter_modular_app_kernel",
     "flutter_modular_test_tools",
 )
-load("//flutter/private:flutter_library.bzl", "aggregate_pub_contributions", "build_pub_contributions", "resolve_font_subset_tools")
+load("//flutter/private:flutter_library.bzl", "aggregate_pub_contributions", "build_pub_contributions", "dedupe_shader_jobs", "pub_shader_matches_target", "resolve_font_subset_tools")
 load("//flutter/private:flutter_shader_compile.bzl", "flutter_shader_compile_action", "shader_compile_tools")
 load("//flutter/private:native_sources.bzl", "native_sources_aspect")
 load("//flutter/private:plugin_registrant.bzl", "generate_dart_plugin_registrant", "generate_dev_plugin_registrants")
@@ -1080,36 +1080,7 @@ def collect_sdk_shader_srcs(deps):
         return depset(transitive = transitive_depsets).to_list()
     return []
 
-def _dedupe_shader_jobs(ctx, jobs):
-    """Fold shader jobs by bundle path, merging duplicate `#include` sets.
-
-    One package can reach a target along several paths; the same file at
-    the same bundle path is one shader. Two different files claiming one
-    bundle path fail here: one would otherwise overwrite the other. A job
-    that only adds includes widens the survivor's set, so no compilation
-    misses a header it may `#include`.
-    """
-    by_path = {}
-    for job in jobs:
-        seen = by_path.get(job.bundle_path)
-        if seen == None:
-            by_path[job.bundle_path] = job
-        elif seen.file != job.file:
-            fail("%s: two shaders are bundled at %s: %s and %s." % (
-                ctx.label,
-                job.bundle_path,
-                seen.file.short_path,
-                job.file.short_path,
-            ))
-        elif job.includes and tuple(job.includes) != tuple(seen.includes):
-            by_path[job.bundle_path] = struct(
-                bundle_path = seen.bundle_path,
-                file = seen.file,
-                includes = tuple(depset(list(seen.includes) + list(job.includes)).to_list()),
-            )
-    return by_path
-
-def _shader_jobs(ctx):
+def _shader_jobs(ctx, target_platform = None):
     """Every shader this target bundles, as struct(bundle_path, file, includes).
 
     The target's own shaders are keyed like its assets: relative to the
@@ -1123,6 +1094,21 @@ def _shader_jobs(ctx):
     shader outside the listing target's package fails here rather than
     guessing a key, and two shaders claiming one bundle path fail here: one
     would otherwise overwrite the other.
+
+    Package shaders are filtered with `pub_shader_matches_target`: a
+    `flutter.shaders` entry restricted to other platforms is neither
+    compiled nor staged, matching `flutter build`. `target_platform` None
+    lists every shader, for callers that describe the workspace rather than
+    one bundle.
+
+    Args:
+        ctx: Rule context with `shaders`, `shader_includes`, `deps` and
+            `label` attributes.
+        target_platform: The bundle's platform (`android`, `ios`, ...), or
+            None to list shaders for every platform.
+
+    Returns:
+        The deduplicated shader jobs, in first-reached order.
     """
     jobs = []
     user_includes = tuple(getattr(ctx.files, "shader_includes", []))
@@ -1143,6 +1129,8 @@ def _shader_jobs(ctx):
     # listing, not W. The union lists each contribution once in
     # first-reached order, so bundles without a repeat keep today's jobs.
     for entry in depset(transitive = [dep[FlutterInfo].pub_shaders for dep in ctx.attr.deps if FlutterInfo in dep]).to_list():
+        if not pub_shader_matches_target(entry, target_platform):
+            continue
         prefix = "packages/{}/".format(entry.package_name) if entry.package_name else ""
         jobs.append(struct(
             bundle_path = prefix + entry.shader_path,
@@ -1152,15 +1140,25 @@ def _shader_jobs(ctx):
 
     # One package can reach a target along several paths; the same file at
     # the same bundle path is one shader.
-    return _dedupe_shader_jobs(ctx, jobs).values()
+    return dedupe_shader_jobs(ctx, jobs).values()
 
-def shader_sources(ctx):
+def shader_sources(ctx, target_platform = None):
     """The workspace files behind each bundled shader, for the dev tool.
 
     `{bundle path: [workspace-relative path]}`: the shader and what it may
     `#include`, where those are source files of this workspace. A shader from
     another repository maps to an empty list; it is still a shader, which is
     what the dev tool needs to know to make the app reload it.
+
+    Args:
+        ctx: Rule context with `shaders`, `shader_includes`, `deps` and
+            `label` attributes.
+        target_platform: The bundle's platform, so shaders restricted to other
+            platforms stay out just as they are not compiled; None lists
+            every shader.
+
+    Returns:
+        The bundle-path-to-source-paths map.
     """
     return {
         job.bundle_path: [
@@ -1168,7 +1166,7 @@ def shader_sources(ctx):
             for f in [job.file] + list(job.includes)
             if f.is_source and not f.short_path.startswith("../")
         ]
-        for job in _shader_jobs(ctx)
+        for job in _shader_jobs(ctx, target_platform)
     }
 
 def _collect_dep_compiled_shaders(ctx, target_platform, compiled):
@@ -1203,7 +1201,7 @@ def _compile_missing_shaders(ctx, flutter_sdk_info, target_platform, require_sks
         shader_lib = flutter_sdk_info.shader_lib,
         compile_tool = ctx.executable._shader_compile_tool,
     )
-    for job in _shader_jobs(ctx):
+    for job in _shader_jobs(ctx, target_platform):
         if job.bundle_path not in compiled:
             # Named by the bundle path, which is unique, so no two outputs meet.
             out_path = job.bundle_path.replace("../", "_external/")
@@ -2048,8 +2046,21 @@ def _aspect_target_platform(ctx, fixed_platform):
     )
     return detect_target_platform(is_ios, is_macos, is_linux, is_windows, is_android)
 
-def _aspect_direct_jobs(ctx, shader_includes):
-    """The uncompiled shader jobs owned directly by the aspect's target."""
+def _aspect_direct_jobs(ctx, shader_includes, target_platform):
+    """The uncompiled shader jobs owned directly by the aspect's target.
+
+    Package shaders carry `platforms` / `flavors` conditions from their
+    `flutter.shaders` entries, so entries for other platforms are skipped
+    here before any compile action is registered.
+
+    Args:
+        ctx: The aspect context.
+        shader_includes: The target's own `shader_includes` files.
+        target_platform: The platform this aspect compiles for.
+
+    Returns:
+        The shader jobs this target owns directly.
+    """
     direct_jobs = []
 
     # 1. Direct shaders from `shaders` attribute (e.g. on @flutter_sdk//:flutter or a flutter_library)
@@ -2071,8 +2082,12 @@ def _aspect_direct_jobs(ctx, shader_includes):
             pkg_assets_dict = {},
             pkg_shaders_dict = ctx.rule.attr.pkg_shaders,
             shader_includes = shader_includes,
+            pkg_asset_platforms = getattr(ctx.rule.attr, "pkg_asset_platforms", {}),
+            pkg_asset_flavors = getattr(ctx.rule.attr, "pkg_asset_flavors", {}),
         )
         for entry in pub_shaders:
+            if not pub_shader_matches_target(entry, target_platform):
+                continue
             prefix = "packages/{}/".format(entry.package_name) if entry.package_name else ""
             direct_jobs.append(struct(
                 bundle_path = prefix + entry.shader_path,
@@ -2090,7 +2105,7 @@ def _compile_aspect_direct_jobs(ctx, flutter_sdk_info, target_platform, direct_j
             shader_lib = flutter_sdk_info.shader_lib,
             compile_tool = ctx.executable._shader_compile_tool,
         )
-        by_path = _dedupe_shader_jobs(ctx, direct_jobs)
+        by_path = dedupe_shader_jobs(ctx, direct_jobs)
 
         for job in by_path.values():
             out_path = job.bundle_path.replace("../", "_external/")
@@ -2124,7 +2139,7 @@ def _aspect_transitive_shaders(ctx):
 def _shader_aspect_impl(ctx, fixed_platform):
     target_platform = _aspect_target_platform(ctx, fixed_platform)
     shader_includes = tuple(getattr(ctx.rule.files, "shader_includes", [])) if hasattr(ctx.rule.files, "shader_includes") else ()
-    direct_jobs = _aspect_direct_jobs(ctx, shader_includes)
+    direct_jobs = _aspect_direct_jobs(ctx, shader_includes, target_platform)
     flutter_toolchain = ctx.toolchains["@rules_flutter//flutter:toolchain_type"] if "@rules_flutter//flutter:toolchain_type" in ctx.toolchains else None
     flutter_sdk_info = flutter_toolchain.flutter_sdk_info if flutter_toolchain else None
     direct_compiled = _compile_aspect_direct_jobs(ctx, flutter_sdk_info, target_platform, direct_jobs)

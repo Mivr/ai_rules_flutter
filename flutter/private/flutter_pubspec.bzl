@@ -743,9 +743,10 @@ def _parse_shaders(raw, lines, locator):
     whose `path` is not a string are each a refusal; an empty map is
     silently no entry, exactly as flutter_tools reads it. A map entry's
     `flavors` / `platforms` run the same condition checks an asset entry's
-    do (`_entry_condition_problems`), with the same messages; a `path`
-    entry that reads keeps only its path (shader bundling takes no
-    conditions), but the fetch still fails on the problems first.
+    do (`_entry_condition_problems`), with the same messages, and travel
+    with the entry so the bundler can filter it like an asset. A `path`
+    entry that reads keeps its conditions; the fetch still fails on the
+    problems first.
 
     Args:
         raw: The raw `flutter.shaders` YAML value (None when absent).
@@ -754,8 +755,9 @@ def _parse_shaders(raw, lines, locator):
             line.
 
     Returns:
-        A `(shaders, problems)` tuple of `struct(path, is_map)` entries and
-        refusal structs for `asset_errors`.
+        A `(shaders, problems)` tuple of
+        `struct(path, is_map, flavors, platforms)` entries and refusal
+        structs for `asset_errors`.
     """
     if raw == None:
         return ([], [])
@@ -770,8 +772,11 @@ def _parse_shaders(raw, lines, locator):
         if path == None:
             continue
         if type(entry) == "dict":
-            problems.extend(_entry_condition_problems(path, entry, lines, elocator)[2])
-        out.append(struct(path = path, is_map = is_map))
+            (flavors, platforms, condition_problems) = _entry_condition_problems(path, entry, lines, elocator)
+            problems.extend(condition_problems)
+            out.append(struct(path = path, is_map = is_map, flavors = flavors, platforms = platforms))
+        else:
+            out.append(struct(path = path, is_map = is_map, flavors = [], platforms = []))
     return (out, problems)
 
 def _deferred_assets_check(lines):
@@ -801,16 +806,18 @@ def parse_flutter_assets_block(content):
         struct(
             fonts:    list[struct(family, fonts=list[struct(asset, weight, style)])],
             assets:   list[struct(path, is_map, flavors, platforms)],
-            shaders:  list[struct(path, is_map)],
+            shaders:  list[struct(path, is_map, flavors, platforms)],
             uses_material_design: bool,
             asset_errors: list[struct(path, key, detail, line)],
         )
 
     `weight` and `style` on a font are None when unset. `flavors`/`platforms`
-    are the modern-shape asset conditions the bundler filters on
+    are the modern-shape entry conditions the bundler filters on
     (`pub_asset_matches_target` checks flavor first, then platform, with the
     `tester` exception, exactly like flutter_tools' `matchesFlavor` /
-    `matchesPlatform`); an unknown platform fails the spoke fetch.
+    `matchesPlatform`); an unknown platform fails the spoke fetch. Asset and
+    shader entries carry the same condition fields, because flutter_tools
+    validates and filters both with the same asset code.
     `asset_errors` collects the entries flutter_tools would refuse: a
     non-string pubspec root key, a non-string `name`, a `flutter.assets`
     / `flutter.shaders` / `flutter.fonts` section that is present but

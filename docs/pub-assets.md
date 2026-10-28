@@ -20,6 +20,29 @@ into bundle inputs, matching `flutter_tools` (`asset.dart`, `flutter_manifest.da
 - Asset walks are bounded; a walk that reaches its bound fails the fetch,
   naming the package and the directory, instead of bundling part of the tree.
 
+## Shaders and their conditions
+
+A `flutter.shaders` entry is a file entry with the same `path`, `platforms`
+and `flavors` keys as an asset entry; flutter_tools validates both sections
+with the same asset code. rules_flutter carries those conditions through
+the pub spoke into `FlutterInfo.pub_shaders` and filters each bundle with
+the same `pub_asset_matches_target` predicate it uses for assets: flavor
+first, then platform, with the `tester` exception. A shader with no
+conditions bundles everywhere, exactly as before. A shader restricted to
+other platforms is neither compiled with `impellerc` nor staged in that
+bundle, so `shaders: [{path: shaders/web_only.frag, platforms: [web]}]`
+ships only in web bundles and never in an Android APK or iOS bundle.
+
+An unknown platform name or a non-list `platforms` / `flavors` on a shader
+fails the spoke fetch with the same refusal an asset entry gets, naming the
+package, the entry and the field. An entry from an older spoke that carries
+no condition fields is unconditional.
+
+A file belongs to one channel. When a `flutter_library`'s `assets` (or a pub
+asset directory that expands to the file) covers `shaders/x.frag` while its
+`shaders` lists the same file, analysis fails naming both entries: list it
+as an asset or as a shader, not both.
+
 ## Entry spellings and bundle keys
 
 Every entry kind that names a file (assets in both forms, shaders, font

@@ -6,11 +6,15 @@
 /// (`platforms: [ios]`), `assets/web_only.txt` (`platforms: [web]`),
 /// `assets/paid_only.txt` (`flavors: [paid]`) and
 /// `assets/union_android.txt` (one entry for `[android]`, one for `[linux]`,
-/// so it ships on the union: Android and Linux). The test lists the APK's
-/// zip entries and asserts
+/// so it ships on the union: Android and Linux). The package's
+/// `shaders/web_only.frag` is restricted to `platforms: [web]`, so it is
+/// neither compiled nor staged here. The test lists the APK's zip entries
+/// and asserts
 /// `assets/flutter_assets/packages/platform_assets/assets/` holds `any.txt`,
 /// `android_only.txt` and `union_android.txt` but neither `web_only.txt`,
-/// `ios_only.txt` nor `paid_only.txt`, and that `AssetManifest.bin` agrees.
+/// `ios_only.txt` nor `paid_only.txt`, that no
+/// `packages/platform_assets/shaders/web_only.frag` entry exists, and that
+/// `AssetManifest.bin` agrees.
 ///
 /// The archive is parsed by hand (central directory walk, raw inflate via
 /// `dart:io`'s `ZLibCodec` when the manifest entry is deflated): no `unzip`
@@ -117,6 +121,14 @@ void main() {
       if (e.name.startsWith(prefix)) e.name.substring(prefix.length),
   };
   print('platform_assets entries in APK: ${names.toList()..sort()}');
+  const shaderPrefix =
+      'assets/flutter_assets/packages/platform_assets/shaders/';
+  final shaderNames = <String>{
+    for (final e in entries)
+      if (e.name.startsWith(shaderPrefix))
+        e.name.substring(shaderPrefix.length),
+  };
+  print('platform_assets shaders in APK: ${shaderNames.toList()..sort()}');
 
   var failed = false;
   void check(String description, bool condition, String detail) {
@@ -159,6 +171,11 @@ void main() {
     !names.contains('paid_only.txt'),
     'assets/flutter_assets/$prefix/paid_only.txt needs a flavor that '
         'does not exist yet',
+  );
+  check(
+    'web-only shader is not in the Android APK',
+    !shaderNames.contains('web_only.frag'),
+    '${shaderPrefix}web_only.frag must stay web-only',
   );
 
   // AssetManifest.bin must agree with the tree: the manifest is

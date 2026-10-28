@@ -540,10 +540,10 @@ flutter_plugin = rule(
             allow_files = True,
         ),
         "pkg_asset_platforms": attr.string_list_dict(
-            doc = "Per-asset `platforms` conditions. Same shape as `flutter_library.pkg_asset_platforms`.",
+            doc = "Per-entry `platforms` conditions, for `pkg_assets` and `pkg_shaders` alike. Same shape as `flutter_library.pkg_asset_platforms`.",
         ),
         "pkg_asset_flavors": attr.string_list_dict(
-            doc = "Per-asset `flavors` conditions. Same shape as `flutter_library.pkg_asset_flavors`.",
+            doc = "Per-entry `flavors` conditions, for `pkg_assets` and `pkg_shaders` alike. Same shape as `flutter_library.pkg_asset_flavors`.",
         ),
         "shader_includes": attr.label_list(
             doc = "Files this package's `pkg_shaders` may `#include` (e.g. " +

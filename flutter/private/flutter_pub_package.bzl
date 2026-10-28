@@ -30,7 +30,7 @@ surface small).
 load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version", "make_dart_library_build_content")
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_deps", "parse_pubspec_sdk_constraint", "pubspec_sdk_constraint_error")
 load("//flutter/private:flutter_pub_scan.bzl", "fetch_hosted_archive", "scan_hosted_archive", "walk_hosted_package")
-load("//flutter/private:flutter_pubspec.bzl", "asset_flavor_error", "parse_flutter_assets_block", "parse_flutter_plugin_block", "parse_pubspec")
+load("//flutter/private:flutter_pubspec.bzl", "parse_flutter_assets_block", "parse_flutter_plugin_block", "parse_pubspec")
 load(":asset_uri.bzl", "normalize_spoke_asset_block", "normalize_spoke_assets", "normalize_spoke_fonts", "normalize_spoke_shaders")
 load(
     ":flutter_pub_apple.bzl",
@@ -45,9 +45,12 @@ load(
 )
 load(
     ":flutter_pub_assets.bzl",
+    "build_pkg_shader_conditions",
     "check_asset_entry_problems",
+    "check_pub_asset_shader_conflict",
     "ctx_package_lister",
     "expand_pub_asset_entries",
+    _merge_pub_asset_conditions = "merge_pub_asset_conditions",
 )
 load(
     ":flutter_pub_cover.bzl",
@@ -253,78 +256,9 @@ def build_pkg_assets_dict(expanded):
     """
     return {":" + entry.path: entry.key for entry in expanded}
 
-def _sorted_flavor_set(flavors):
-    """The deduplicated, sorted flavor names, for order-insensitive comparison."""
-    seen = {}
-    for flavor in flavors:
-        seen[flavor] = True
-    return sorted(seen.keys())
-
-def merge_pub_asset_conditions(expanded, package_name):
-    """Merge per-file `flutter.assets` entries the way flutter_tools does.
-
-    flutter_tools keeps one entry per declaration and bundles a file when ANY
-    of its entries survives filtering, so every entry for one file merges:
-    any entry without `platforms` makes the file unconditional, otherwise the
-    file's platforms are the union of its entries' lists. Entries for one
-    file whose flavor sets differ conflict (compared as sets, so order does
-    not matter); the caller fails the fetch with the returned message.
-
-    Args:
-        expanded: Per-file entries from
-            `expand_pub_asset_entries(...).expanded`.
-        package_name: The pub package the entries come from, for the conflict
-            message.
-
-    Returns:
-        A `struct(platforms, flavors, conflict)`: the merged condition dicts
-        (same shapes `_build_pkg_asset_conditions` returns) and the fetch
-        failure naming the package, the file and both flavor lists, or `""`
-        when the entries agree. A file with one entry keeps its declared
-        order, so single-entry spokes render byte-identically to before.
-    """
-    by_path = {}
-    order = []
-    for entry in expanded:
-        key = ":" + entry.path
-        if key not in by_path:
-            by_path[key] = []
-            order.append(key)
-        by_path[key].append(entry)
-    platforms = {}
-    flavors = {}
-    for key in order:
-        entries = by_path[key]
-        first = entries[0]
-        for other in entries[1:]:
-            if _sorted_flavor_set(other.flavors) != _sorted_flavor_set(first.flavors):
-                return struct(
-                    platforms = {},
-                    flavors = {},
-                    conflict = asset_flavor_error(
-                        package_name,
-                        first.path,
-                        first.flavors,
-                        other.flavors,
-                    ),
-                )
-        if first.flavors:
-            flavors[key] = list(first.flavors)
-        union = {}
-        unconditional = False
-        for entry in entries:
-            if not entry.platforms:
-                unconditional = True
-                break
-            for platform in entry.platforms:
-                union[platform] = True
-        if unconditional:
-            continue
-        if len(entries) == 1:
-            platforms[key] = list(first.platforms)
-        else:
-            platforms[key] = sorted(union.keys())
-    return struct(platforms = platforms, flavors = flavors, conflict = "")
+# Kept loadable from this module, where it lived before the move to
+# `flutter_pub_assets.bzl`; existing loads name this file.
+merge_pub_asset_conditions = _merge_pub_asset_conditions
 
 def _build_pkg_asset_conditions(expanded, package_name):
     """Build the `pkg_asset_platforms` / `pkg_asset_flavors` dicts.
@@ -1700,7 +1634,9 @@ def _spoke_asset_inputs(ctx, package_name, asset_block):
 
     Returns `struct(fonts_json_str, font_files, pkg_assets,
     pkg_asset_platforms, pkg_asset_flavors, pkg_shaders,
-    has_contributions)`.
+    has_contributions)`. The condition dicts carry both `pkg_assets` and
+    `pkg_shaders` keys: shader entries have the same `platforms` / `flavors`
+    as asset entries and the spoke has one pair of condition attrs for both.
     """
     check_asset_entry_problems(package_name, asset_block.asset_errors)
     assets = normalize_spoke_assets(package_name, asset_block.assets)
@@ -1719,6 +1655,16 @@ def _spoke_asset_inputs(ctx, package_name, asset_block):
     pkg_assets_dict = build_pkg_assets_dict(expanded)
     pkg_asset_platforms, pkg_asset_flavors = _build_pkg_asset_conditions(expanded, package_name)
     pkg_shaders_dict = build_pkg_shaders_dict(shaders)
+    check_pub_asset_shader_conflict(package_name, pkg_assets_dict, pkg_shaders_dict)
+    shader_conditions = build_pkg_shader_conditions(shaders, asset_block.shaders, package_name)
+
+    # Both channels share the condition attrs: the generated spoke's
+    # `pkg_asset_platforms` / `pkg_asset_flavors` carry asset and shader keys
+    # alike. The cross-channel check above means no key is claimed twice.
+    pkg_asset_platforms = dict(pkg_asset_platforms)
+    pkg_asset_platforms.update(shader_conditions.platforms)
+    pkg_asset_flavors = dict(pkg_asset_flavors)
+    pkg_asset_flavors.update(shader_conditions.flavors)
     return struct(
         fonts_json_str = spoke_fonts.fonts_json_str,
         font_files = spoke_fonts.font_files,

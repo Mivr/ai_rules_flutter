@@ -16,7 +16,8 @@
 ///   and the asset manifest lists it;
 /// * `.../assets/ios_only.txt` is present and listed, while
 ///   `android_only.txt`, `web_only.txt` and `union_android.txt` are absent
-///   from both the files and the asset manifest;
+///   from both the files and the asset manifest, and the web-only pub
+///   shader `shaders/web_only.frag` is absent too;
 /// * `FontManifest.json` lists the family
 ///   `packages/cupertino_icons/CupertinoIcons` with its font file present
 ///   in the bundle, and lists `MaterialIcons`;
@@ -57,6 +58,9 @@ const _absentAssets = [
   'packages/platform_assets/assets/web_only.txt',
   'packages/platform_assets/assets/union_android.txt',
 ];
+
+/// A pub shader restricted to web, which no iOS bundle may compile or stage.
+const _absentShaders = ['packages/platform_assets/shaders/web_only.frag'];
 
 /// Font families the bundle's `FontManifest.json` must name.
 const _cupertinoFamily = 'packages/cupertino_icons/CupertinoIcons';
@@ -408,6 +412,20 @@ void _checkPlatformAssets(
       check(
         'the asset manifest omitting $asset',
         !manifestText.contains(asset),
+        'a manifest key the bundle omits',
+      );
+    }
+  }
+  for (final shader in _absentShaders) {
+    check(
+      '$shader absent from the iOS bundle files',
+      !files.containsKey('$assetsDir/$shader'),
+      'a file at $assetsDir/$shader the iOS bundle must not carry',
+    );
+    if (manifestText != null) {
+      check(
+        'the asset manifest omitting $shader',
+        !manifestText.contains(shader),
         'a manifest key the bundle omits',
       );
     }

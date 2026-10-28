@@ -1107,11 +1107,13 @@ flutter:
 """
 
 def _shader_conditions_load_test_impl(ctx):
-    """A shader entry with string-list conditions stays accepted."""
+    """A shader entry with string-list conditions stays accepted and keeps them."""
     env = unittest.begin(ctx)
     result = _assert_accepted(env, _SHADER_CONDITIONS_OK_PUBSPEC)
     asserts.equals(env, 1, len(result.shaders))
     asserts.equals(env, "s.frag", result.shaders[0].path)
+    asserts.equals(env, ["android"], result.shaders[0].platforms)
+    asserts.equals(env, ["prod"], result.shaders[0].flavors)
     return unittest.end(env)
 
 # -- font file entries without `asset` (RT31-flutter:02) ----------------------------------------
