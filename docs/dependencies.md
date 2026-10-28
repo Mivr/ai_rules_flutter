@@ -60,6 +60,13 @@ through `@resolved_module_versions`. A lifted module is asserted at its lifted
 value and attributed to the module above, never presented as
 `rules_flutter`'s floor.
 
+That workspace also downloads its Android SDK and NDK from Google with
+checked-in sha256 values (`e2e/min_versions/android_repositories.bzl`) instead
+of reading `ANDROID_HOME`/`ANDROID_NDK_HOME`. The floor build is therefore the
+same on a developer host, a CI image with a preinstalled SDK, and the gate,
+whose clean environment exports neither variable; the NDK repository is empty
+on non-Linux hosts, where only the Apple legs run.
+
 ## This repository's own builds
 
 This checkout and its `bazel test //flutter/...` stay on the current releases

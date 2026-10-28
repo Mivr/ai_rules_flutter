@@ -65,7 +65,11 @@ void main() {
     );
   }
 
-  const fixtures = {'ai_rules_flutter', 'rules_android_ndk'};
+  // Workspace-only fixtures, not rules_flutter floors: the module under test,
+  // the archive-pinned NDK extension and rules_android's SDK-template shell
+  // dependency that `//:android_repositories.bzl` maps for its generated
+  // repository.
+  const fixtures = {'ai_rules_flutter', 'rules_android_ndk', 'rules_shell'};
   for (final dep in deps) {
     if (fixtures.contains(dep.name)) continue;
     _check(

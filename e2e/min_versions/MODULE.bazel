@@ -7,6 +7,12 @@ bazel_dep(name = "ai_rules_dart", version = "0.21.0", repo_name = "rules_dart")
 bazel_dep(name = "rules_android", version = "0.8.0")
 bazel_dep(name = "rules_android_ndk", version = "0.1.5")
 
+# rules_android's SDK template loads rules_shell; the repository rule below
+# generates that package from this root module, so the mapping must be a
+# direct (dev-only) edge here. Other modules in this graph already select
+# 0.8.0, so this fixture declaration lifts nothing.
+bazel_dep(name = "rules_shell", version = "0.8.0", dev_dependency = True)
+
 # Every regular dependency is declared at the floor rules_flutter supports,
 # never at the release this repository compiles. The comments in the root
 # MODULE.bazel name the symbol that sets each floor; this workspace is the
@@ -172,7 +178,8 @@ go_sdk.download(
     version = "1.26.2",
 )
 
-# rules_android: download android build tools and discover local SDK.
+# rules_android's remote Android tools (aapt2, the resource merger and friends
+# are downloaded by the extension below).
 #
 # Host prerequisites for the Android leg: rules_android's AAR extractors run
 # `unzip` (shell) and `python3` (shebang) from the action environment, which
@@ -189,6 +196,24 @@ remote_android_extensions = use_extension(
 )
 use_repo(remote_android_extensions, "android_tools")
 
+# rules_android's SDK BUILD uses rules_java's remote tooling, so the generated
+# repository needs that repo in this root's mapping too.
+rules_java_toolchains = use_extension("@rules_java//java:extensions.bzl", "toolchains")
+use_repo(rules_java_toolchains, "remote_java_tools")
+
+# The Android SDK and NDK are downloaded from Google with pinned sha256
+# values by `//:android_repositories.bzl`, not read from `ANDROID_HOME` /
+# `ANDROID_NDK_HOME`. The gate and a bare host export neither variable, and
+# this workspace is the proof that the floors build there; CI images no
+# longer change what the Android leg compiles against. `override_repo`
+# replaces the repos rules_android/rules_android_ndk declare, so their own
+# toolchain defaults (including `@androidsdk//:fail`) see the pinned packages.
+# The NDK repository is empty on non-Linux hosts, where only the Apple legs
+# run.
+android_sdk = use_repo_rule("//:android_repositories.bzl", "android_sdk")
+
+android_sdk(name = "android_sdk_dist")
+
 android_sdk_repository_extension = use_extension(
     "@rules_android//rules/android_sdk_repository:rule.bzl",
     "android_sdk_repository_extension",
@@ -196,19 +221,30 @@ android_sdk_repository_extension = use_extension(
 android_sdk_repository_extension.configure(api_level = 35)
 use_repo(android_sdk_repository_extension, "androidsdk")
 
+override_repo(
+    android_sdk_repository_extension,
+    androidsdk = "android_sdk_dist",
+)
+
 register_toolchains(
     "@androidsdk//:sdk-toolchain",
     "@androidsdk//:all",
 )
 
-# Android NDK: provides the CC toolchain for Android-configured actions
-# (the engine strip runs under the Android platform). Same as
-# e2e/integration_android.
+android_ndk = use_repo_rule("//:android_repositories.bzl", "android_ndk")
+
+android_ndk(name = "android_ndk_dist")
+
 android_ndk_repository_extension = use_extension(
     "@rules_android_ndk//:extension.bzl",
     "android_ndk_repository_extension",
 )
 use_repo(android_ndk_repository_extension, "androidndk")
+
+override_repo(
+    android_ndk_repository_extension,
+    androidndk = "android_ndk_dist",
+)
 
 register_toolchains("@androidndk//:all")
 
