@@ -238,17 +238,14 @@ class _Library {
 
 /// Parses the `AvailableLibraries` dictionaries of an xcframework plist.
 List<_Library> _parseAvailableLibraries(String text) {
-  final block = RegExp(
-    r'<key>\s*AvailableLibraries\s*</key>\s*<array>(.*?)</array>',
-    dotAll: true,
-  ).firstMatch(text);
-  if (block == null) {
+  final at = text.indexOf('<key>AvailableLibraries</key>');
+  if (at < 0) {
     _abort('FAIL: expected AvailableLibraries in App.xcframework/Info.plist');
   }
   final dicts = RegExp(
     r'<dict>(.*?)</dict>',
     dotAll: true,
-  ).allMatches(block.group(1)!);
+  ).allMatches(text.substring(at));
   final libraries = <_Library>[];
   for (final dict in dicts) {
     final body = dict.group(1)!;
