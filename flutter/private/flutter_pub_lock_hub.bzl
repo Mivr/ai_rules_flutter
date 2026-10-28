@@ -3,9 +3,12 @@
 Mirrors `rules_dart//dart/pub:pub_lock_hub.bzl`'s top-level alias
 structure (`@<hub>//:pkg` → `@<hub>__<pkg>//:<pkg>`) and additionally
 emits an `android/BUILD.bazel` containing the
-`all_android_plugin_libs` aggregator. The aggregator is a
-`kt_android_library` whose deps are every spoke's `android:lib` target
-(see `flutter_pub_package`'s `make_android_subpackage_build_content`).
+`all_android_plugin_libs` aggregator, plus
+`swift_package_sha256.json` with the hub's SwiftPM checksum table. The
+aggregator is a `kt_android_library` whose deps are every spoke's
+`android:lib` target (see `flutter_pub_package`'s
+`make_android_subpackage_build_content`). A plugin pub spoke reads the
+checksum table lazily, only after finding its own `Package.swift`.
 
 `flutter_android_app` depends on `@<hub>//android:all_android_plugin_libs`
 to compile every transitively-needed plugin's Kotlin/Java sources into
@@ -25,6 +28,11 @@ this one. `pub.pub()` (in non-Flutter modules) keeps using
 
 def _flutter_pub_lock_hub_impl(ctx):
     spoke_prefix = ctx.attr.spoke_prefix if ctx.attr.spoke_prefix else ctx.attr.hub_name
+
+    # SwiftPM checksum state for the pub spokes: a plugin spoke reads this
+    # file (and only this file) after it finds its own `Package.swift`, so
+    # the checksum table never reaches a pure-Dart spoke's attributes.
+    ctx.file("swift_package_sha256.json", json.encode(ctx.attr.swift_package_sha256))
 
     # Top-level aliases — same shape as rules_dart's pub_lock_hub.
     aliases = []
@@ -92,6 +100,13 @@ flutter_pub_lock_hub = repository_rule(
         "packages": attr.string_list(
             doc = "All hosted package names to create aliases and Android-aggregator deps for.",
             mandatory = True,
+        ),
+        "swift_package_sha256": attr.string_dict(
+            doc = "The hub's `swift_package_sha256` map, written to " +
+                  "`swift_package_sha256.json` for a plugin spoke that links " +
+                  "a SwiftPM pin. Reading is lazy: a pure-Dart spoke never " +
+                  "reads the file, so its marker stays independent of it.",
+            default = {},
         ),
     },
     doc = "Creates a Flutter pub hub repo with both the standard top-level package aliases " +

@@ -4,9 +4,28 @@ load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load(
     "//flutter/private:flutter_pub_apple.bzl",
     "apple_plugin_targets",
+    "apple_swiftpm_pins",
     "select_apple_swiftpm_deps",
     "with_apple_swiftpm_deps",
 )
+
+_BIGINT_SHA = "55fc8a63f655a09d9216f2c9bc062c508f98d4eca4b8ebefaf295a3ea4ac8f22"
+
+_BIGINT_RESOLVED = """{
+  "pins" : [
+    {
+      "identity" : "bigint",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/attaswift/BigInt.git",
+      "state" : {
+        "revision" : "63feef7820abb1a8fb08587d7da56bb0b7db8751",
+        "version" : "6.0.1"
+      }
+    }
+  ],
+  "version" : 3
+}
+"""
 
 _BIGINT_MANIFEST = """// swift-tools-version: 5.9
 import PackageDescription
@@ -328,6 +347,52 @@ def _unpinned_package_fails_test_impl(ctx):
     asserts.true(env, "Package.resolved" in selected.error)
     return unittest.end(env)
 
+def _missing_checksum_refuses_the_plugin_test_impl(ctx):
+    env = unittest.begin(ctx)
+    built = apple_swiftpm_pins(
+        _BIGINT_RESOLVED,
+        "{}",
+        "//ios:Package.resolved",
+        "@deps_unpinned//:swift_package_sha256.json",
+        "deps_unpinned",
+    )
+    asserts.true(env, built.ok)
+    assertions = select_apple_swiftpm_deps(
+        "spm_bigint_plugin",
+        _BIGINT_MANIFEST,
+        "ios/spm_bigint_plugin",
+        ["ios/spm_bigint_plugin/Sources/spm_bigint_plugin"],
+        "ios",
+        built.pins,
+    )
+    asserts.true(env, not assertions.ok)
+    asserts.true(env, 'Flutter plugin "spm_bigint_plugin"' in assertions.error)
+    asserts.true(env, "ios/spm_bigint_plugin/Package.swift" in assertions.error)
+    asserts.true(env, 'has no `swift_package_sha256["bigint"]` entry' in assertions.error)
+    return unittest.end(env)
+
+def _pinned_checksum_still_links_the_product_test_impl(ctx):
+    env = unittest.begin(ctx)
+    built = apple_swiftpm_pins(
+        _BIGINT_RESOLVED,
+        '{"bigint": "' + _BIGINT_SHA + '"}',
+        "//ios:Package.resolved",
+        "@deps//:swift_package_sha256.json",
+        "deps",
+    )
+    asserts.true(env, built.ok)
+    selected = select_apple_swiftpm_deps(
+        "spm_bigint_plugin",
+        _BIGINT_MANIFEST,
+        "ios/spm_bigint_plugin",
+        ["ios/spm_bigint_plugin/Sources/spm_bigint_plugin"],
+        "ios",
+        built.pins,
+    )
+    asserts.true(env, selected.ok)
+    asserts.equals(env, ["@deps__swiftpm-bigint//:BigInt"], selected.labels)
+    return unittest.end(env)
+
 def _unfetchable_pin_reports_its_reason_test_impl(ctx):
     env = unittest.begin(ctx)
     reason = "deps__swiftpm-bigint: SwiftPM package \"bigint\" cannot be fetched: test reason."
@@ -441,6 +506,8 @@ _conditional_dependencies_still_refused_test = unittest.make(_conditional_depend
 _undeclared_package_fails_test = unittest.make(_undeclared_package_fails_test_impl)
 _path_package_fails_test = unittest.make(_path_package_fails_test_impl)
 _unpinned_package_fails_test = unittest.make(_unpinned_package_fails_test_impl)
+_missing_checksum_refuses_the_plugin_test = unittest.make(_missing_checksum_refuses_the_plugin_test_impl)
+_pinned_checksum_still_links_the_product_test = unittest.make(_pinned_checksum_still_links_the_product_test_impl)
 _unfetchable_pin_reports_its_reason_test = unittest.make(_unfetchable_pin_reports_its_reason_test_impl)
 _missing_resolved_fails_test = unittest.make(_missing_resolved_fails_test_impl)
 _unreadable_manifest_without_packages_builds_on_test = unittest.make(_unreadable_manifest_without_packages_builds_on_test_impl)
@@ -462,6 +529,8 @@ def flutter_pub_apple_test_suite(name):
         _undeclared_package_fails_test,
         _path_package_fails_test,
         _unpinned_package_fails_test,
+        _missing_checksum_refuses_the_plugin_test,
+        _pinned_checksum_still_links_the_product_test,
         _unfetchable_pin_reports_its_reason_test,
         _missing_resolved_fails_test,
         _unreadable_manifest_without_packages_builds_on_test,

@@ -575,6 +575,66 @@ def read_swiftpm_pins(content, label):
         pins.append(struct(identity = identity, kind = kind, location = location, revision = revision))
     return struct(ok = True, error = "", pins = pins)
 
+def read_swiftpm_checksums(content, label):
+    """Read the hub's SwiftPM checksum table.
+
+    A plugin spoke reads this table lazily, only after finding its own
+    `Package.swift`, so a pure-Dart spoke never depends on it. The file
+    is written by the hub rule from the `swift_package_sha256` tag and
+    holds identity-to-digest entries.
+
+    Args:
+        content: The file content.
+        label: The checksum-file label, for messages.
+
+    Returns:
+        `struct(ok, error, sha256_by_identity)`: the map on success, or
+        the failure naming the file and the first malformed entry.
+    """
+    bad = _swiftpm_check_json(content, label)
+    if bad:
+        return struct(ok = False, error = bad, sha256_by_identity = {})
+    data = json.decode(content)
+    if type(data) != "dict":
+        return struct(ok = False, error = "{label} must hold a JSON object.".format(label = label), sha256_by_identity = {})
+    sha256_by_identity = {}
+    for identity in data.keys():
+        digest = data[identity]
+        if type(identity) != "string" or not is_swiftpm_identity(identity):
+            return struct(
+                ok = False,
+                error = "{label} holds an unusable package identity ({identity}): identities are lowercase letters, digits, `.`, `_` and `-`.".format(label = label, identity = repr(identity)),
+                sha256_by_identity = {},
+            )
+        if type(digest) != "string" or not is_swiftpm_sha256(digest):
+            return struct(
+                ok = False,
+                error = "{label} holds an invalid checksum for {identity}: expected 64 lowercase hex characters.".format(label = label, identity = repr(identity)),
+                sha256_by_identity = {},
+            )
+        sha256_by_identity[identity] = digest
+    return struct(ok = True, error = "", sha256_by_identity = sha256_by_identity)
+
+def swiftpm_unpinned_errors(pins, sha256_by_identity, hub_name, resolved_label):
+    """Build the identity-to-refusal map a plugin reader consults.
+
+    Args:
+        pins: The pin structs from `read_swiftpm_pins`.
+        sha256_by_identity: The `swift_package_sha256` map.
+        hub_name: The `flutter.pub` hub name, for messages.
+        resolved_label: The resolved label, for messages.
+
+    Returns:
+        Identity-to-refusal dict for every pin that cannot be fetched;
+        an empty dict when every pin is pinned.
+    """
+    unpinned = {}
+    for pin in pins:
+        classified = classify_swiftpm_pin(pin, sha256_by_identity, hub_name, resolved_label)
+        if not classified.ok:
+            unpinned[pin.identity] = classified.error
+    return unpinned
+
 def classify_swiftpm_pin(pin, sha256_by_identity, hub_name, resolved_label):
     """Decide how one pin fetches: pinned download or fail-closed refusal.
 
@@ -650,21 +710,53 @@ def check_swiftpm_config_present(resolved, sha256_by_identity, build_files):
         return ""
     return "flutter.pub: {problems}; set `swift_package_resolved` first.".format(problems = "; ".join(problems))
 
+# Shared by `flutter_pub_package` and `flutter_pub_path_package`. Kept
+# here so the pub-package rule file does not grow another copy of the
+# same attribute documentation.
+pub_spoke_package_resolved_attr = attr.label(
+    doc = "Label of the hub's `swift_package_resolved` file. A plugin " +
+          "spoke that ships a `Package.swift` reads it to link its " +
+          "SwiftPM products; an unread label keeps pure-Dart spokes " +
+          "independent of the hub's pin list. The path-package rule uses " +
+          "the same attribute.",
+    allow_single_file = True,
+    default = None,
+)
+
+pub_spoke_package_sha256_attr = attr.label(
+    doc = "Label of the hub's SwiftPM checksum table, read only together " +
+          "with `package_resolved` when this package ships a " +
+          "`Package.swift`. A plugin that links a pin with no entry fails " +
+          "its fetch naming the plugin, the manifest and the missing " +
+          "`swift_package_sha256` entry.",
+    allow_single_file = True,
+    default = None,
+)
+
 def pub_spoke_swiftpm_attrs(pub_tag):
     """The SwiftPM repository arguments every pub spoke receives.
 
-    A pub spoke gets the hub's resolved-file label (a constant, never the
-    pin list or the identity-to-refusal dict) and reads it only if its
-    own package ships a `Package.swift`. Pure-Dart spokes therefore keep
-    their marker when a pin is added, removed or gets a checksum.
+    A pub spoke gets two constant labels: the hub's resolved file and the
+    hub's checksum table. Neither value is the pin list or the map
+    itself, and both are read only if the package ships a
+    `Package.swift`. Pure-Dart spokes therefore keep their marker when a
+    pin or a checksum is added, removed or changed.
 
     Args:
         pub_tag: The `flutter.pub` tag.
 
     Returns:
-        `struct(package_resolved)`: the resolved label, or None.
+        `struct(package_resolved, package_sha256)`: the resolved label and
+        the checksum-file label, or None for each when unset.
     """
-    return struct(package_resolved = pub_tag.swift_package_resolved)
+    resolved = pub_tag.swift_package_resolved
+    hub_name = getattr(pub_tag, "name", "")
+    if resolved == None or not hub_name:
+        return struct(package_resolved = resolved, package_sha256 = None)
+    return struct(
+        package_resolved = resolved,
+        package_sha256 = "@%s//:swift_package_sha256.json" % hub_name,
+    )
 
 def swiftpm_spoke_attrs(hub_name, pin, classified, build_file):
     """The repository arguments one SwiftPM spoke receives.

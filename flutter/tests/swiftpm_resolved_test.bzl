@@ -10,10 +10,12 @@ load(
     "is_swiftpm_revision",
     "is_swiftpm_sha256",
     "pub_spoke_swiftpm_attrs",
+    "read_swiftpm_checksums",
     "read_swiftpm_pins",
     "swiftpm_github_parts",
     "swiftpm_spoke_attrs",
     "swiftpm_spoke_name",
+    "swiftpm_unpinned_errors",
 )
 
 _BIGINT_REV = "63feef7820abb1a8fb08587d7da56bb0b7db8751"
@@ -248,15 +250,70 @@ def _config_checks_test_impl(ctx):
     asserts.true(env, "64 lowercase hex" in check_swiftpm_dicts({"bigint": "xyz"}, {}, ["bigint"], "//ios:Package.resolved"))
     return unittest.end(env)
 
+def _checksum_table_test_impl(ctx):
+    env = unittest.begin(ctx)
+    label = "//:swift_package_sha256.json"
+    table = read_swiftpm_checksums('{"bigint": "' + _BIGINT_SHA + '"}', label)
+    asserts.true(env, table.ok)
+    asserts.equals(env, "", table.error)
+    asserts.equals(env, _BIGINT_SHA, table.sha256_by_identity["bigint"])
+
+    bad_json = read_swiftpm_checksums("{not json", label)
+    asserts.true(env, not bad_json.ok)
+    asserts.true(env, label in bad_json.error)
+    bad_digest = read_swiftpm_checksums('{"bigint": "xyz"}', label)
+    asserts.true(env, not bad_digest.ok)
+    asserts.true(env, "invalid checksum" in bad_digest.error)
+    asserts.true(env, label in bad_digest.error)
+    return unittest.end(env)
+
+def _unpinned_errors_name_the_missing_checksum_test_impl(ctx):
+    env = unittest.begin(ctx)
+    pins = read_swiftpm_pins(_V3, "//ios:Package.resolved")
+    unpinned = swiftpm_unpinned_errors(pins.pins, {}, "deps_unpinned", "//ios:Package.resolved")
+    asserts.true(env, "bigint" in unpinned)
+    asserts.true(env, 'has no `swift_package_sha256["bigint"]` entry' in unpinned["bigint"])
+    pinned = swiftpm_unpinned_errors(pins.pins, {"bigint": _BIGINT_SHA}, "deps", "//ios:Package.resolved")
+    asserts.equals(env, {}, pinned)
+    return unittest.end(env)
+
 def _pub_spoke_attrs_test_impl(ctx):
     env = unittest.begin(ctx)
-    attrs = pub_spoke_swiftpm_attrs(struct(swift_package_resolved = "//:Package.resolved"))
+    attrs = pub_spoke_swiftpm_attrs(struct(lock = "//:pubspec.lock", name = "rules_flutter", swift_package_resolved = "//:Package.resolved"))
     asserts.equals(env, "//:Package.resolved", str(attrs.package_resolved))
-    asserts.equals(env, ["package_resolved"], dir(attrs))
+    asserts.equals(env, "@rules_flutter//:swift_package_sha256.json", str(attrs.package_sha256))
+    asserts.equals(env, ["package_resolved", "package_sha256"], dir(attrs))
     asserts.true(env, not hasattr(attrs, "swift_pinned_identities"))
     asserts.true(env, not hasattr(attrs, "swift_unpinned_errors"))
-    attrs = pub_spoke_swiftpm_attrs(struct(swift_package_resolved = None))
+    asserts.true(env, not hasattr(attrs, "swift_package_sha256"))
+    attrs = pub_spoke_swiftpm_attrs(struct(lock = "//:pubspec.lock", name = "rules_flutter", swift_package_resolved = None))
     asserts.equals(env, None, attrs.package_resolved)
+    asserts.equals(env, None, attrs.package_sha256)
+    return unittest.end(env)
+
+def _pub_spoke_attrs_ignore_pin_and_checksum_state_test_impl(ctx):
+    env = unittest.begin(ctx)
+
+    # A pin or a checksum lives only in the hub's files, never in a pub
+    # spoke's attributes: both tags produce the same constant labels, so a
+    # pure-Dart spoke keeps its marker when either file changes.
+    first = pub_spoke_swiftpm_attrs(struct(
+        lock = "//:pubspec.lock",
+        name = "rules_flutter",
+        swift_package_resolved = "//:Package.resolved",
+        swift_package_sha256 = {"bigint": _BIGINT_SHA},
+        swift_package_build_files = {"bigint": "//:BigInt.BUILD"},
+    ))
+    second = pub_spoke_swiftpm_attrs(struct(
+        lock = "//:pubspec.lock",
+        name = "rules_flutter",
+        swift_package_resolved = "//:Package.resolved",
+        swift_package_sha256 = {},
+        swift_package_build_files = {},
+    ))
+    asserts.equals(env, first, second)
+    asserts.equals(env, ["package_resolved", "package_sha256"], dir(first))
+    asserts.equals(env, "@rules_flutter//:swift_package_sha256.json", str(first.package_sha256))
     return unittest.end(env)
 
 def _swiftpm_spoke_attrs_test_impl(ctx):
@@ -291,7 +348,10 @@ _classify_pinned_test = unittest.make(_classify_pinned_test_impl)
 _classify_unpinned_names_the_fix_test = unittest.make(_classify_unpinned_names_the_fix_test_impl)
 _classify_bad_revision_and_location_test = unittest.make(_classify_bad_revision_and_location_test_impl)
 _config_checks_test = unittest.make(_config_checks_test_impl)
+_checksum_table_test = unittest.make(_checksum_table_test_impl)
+_unpinned_errors_name_the_missing_checksum_test = unittest.make(_unpinned_errors_name_the_missing_checksum_test_impl)
 _pub_spoke_attrs_test = unittest.make(_pub_spoke_attrs_test_impl)
+_pub_spoke_attrs_ignore_pin_and_checksum_state_test = unittest.make(_pub_spoke_attrs_ignore_pin_and_checksum_state_test_impl)
 _swiftpm_spoke_attrs_test = unittest.make(_swiftpm_spoke_attrs_test_impl)
 
 def swiftpm_resolved_test_suite(name):
@@ -310,7 +370,10 @@ def swiftpm_resolved_test_suite(name):
         _classify_unpinned_names_the_fix_test,
         _classify_bad_revision_and_location_test,
         _config_checks_test,
+        _checksum_table_test,
+        _unpinned_errors_name_the_missing_checksum_test,
         _pub_spoke_attrs_test,
+        _pub_spoke_attrs_ignore_pin_and_checksum_state_test,
         _swiftpm_spoke_attrs_test,
     )
     native.test_suite(

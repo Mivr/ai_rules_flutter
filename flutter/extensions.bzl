@@ -542,8 +542,8 @@ def _create_hosted_spokes(hub_name, hosted, all_package_names, user_overlay_root
     internally on whether a `flutter.plugin` block is present.
     Non-Flutter modules using `pub.pub()` keep using rules_dart's
     `pub_lock_package` directly. A plugin that ships a `Package.swift`
-    reads the hub's resolved file at fetch time, so no spoke carries
-    hub-wide pin state in its repository attributes.
+    reads the hub's resolved file and checksum table at fetch time, so no
+    spoke carries hub-wide pin state in its repository attributes.
     """
     swiftpm_attrs = pub_spoke_swiftpm_attrs(pub_tag)
     for name, info in hosted.items():
@@ -576,6 +576,7 @@ def _create_hosted_spokes(hub_name, hosted, all_package_names, user_overlay_root
             android_maven_deps = pub_tag.android_maven_deps,
             android_maven_ignore = pub_tag.android_maven_ignore,
             package_resolved = swiftpm_attrs.package_resolved,
+            package_sha256 = swiftpm_attrs.package_sha256,
         )
 
 def _create_path_spokes(hub_name, path_pkgs, all_package_names, user_overlay_roots, pub_tag, ignore_hooks):
@@ -587,9 +588,9 @@ def _create_path_spokes(hub_name, path_pkgs, all_package_names, user_overlay_roo
     hosted package, so assets, fonts, shaders, and plugin metadata surface
     identically — including the `android/BUILD.bazel` stub the hub's
     `all_android_plugin_libs` aggregator depends on uniformly. A plugin
-    that ships a `Package.swift` reads the hub's resolved file at fetch
-    time, so no spoke carries hub-wide pin state in its repository
-    attributes.
+    that ships a `Package.swift` reads the hub's resolved file and
+    checksum table at fetch time, so no spoke carries hub-wide pin state
+    in its repository attributes.
     """
     swiftpm_attrs = pub_spoke_swiftpm_attrs(pub_tag)
     for name, path_info in path_pkgs.items():
@@ -604,6 +605,7 @@ def _create_path_spokes(hub_name, path_pkgs, all_package_names, user_overlay_roo
             code_assets = curated_code_assets(name, path_info.version),
             ignore_hook = name in ignore_hooks,
             package_resolved = swiftpm_attrs.package_resolved,
+            package_sha256 = swiftpm_attrs.package_sha256,
         )
 
 def _create_sdk_spokes(hub_name, sdk_flutter, all_package_names, toolchain_info, merged, flutter_version):
@@ -655,8 +657,9 @@ def _create_swiftpm_spokes(hub_name, pub_tag, module_ctx):
 
     The resolved file is read here for the extension's own checks, but
     no hub-wide pin list reaches a spoke: each SwiftPM spoke gets only
-    its own pin, and pub plugin spokes read the resolved file lazily at
-    fetch time. A pin edit therefore never changes a pure-Dart spoke.
+    its own pin, and pub plugin spokes read the resolved file and
+    checksum table lazily at fetch time. A pin or checksum edit
+    therefore never changes a pure-Dart spoke.
     """
     config_error = check_swiftpm_config_present(
         str(pub_tag.swift_package_resolved) if pub_tag.swift_package_resolved else None,
@@ -716,10 +719,6 @@ def _register_pub_hub(module_ctx, pub_tag, selected_info, merged, user_overlay_r
 
     hosted, path_pkgs, sdk_flutter, all_package_names = _classify_lock_packages(hub_name, pub_tag.lock, lock_pkgs)
     ignore_hooks = {pkg_name: True for pkg_name in pub_tag.ignore_hooks}
-    _create_swiftpm_spokes(hub_name, pub_tag, module_ctx)
-    _create_hosted_spokes(hub_name, hosted, all_package_names, user_overlay_roots, pub_tag, ignore_hooks)
-    _create_path_spokes(hub_name, path_pkgs, all_package_names, user_overlay_roots, pub_tag, ignore_hooks)
-    _create_sdk_spokes(hub_name, sdk_flutter, all_package_names, toolchain_info, merged, toolchain_info.version)
 
     # Create hub repo with aliases for all packages plus the
     # Android plugin-libs aggregator. flutter.pub() always uses
@@ -728,12 +727,19 @@ def _register_pub_hub(module_ctx, pub_tag, selected_info, merged, user_overlay_r
     # macro needs `@<hub>//android:all_android_plugin_libs` to
     # auto-wire transitively-collected plugin Kotlin/Java into
     # the final APK. Non-Flutter pub.pub() consumers keep using
-    # rules_dart's plain hub.
+    # rules_dart's plain hub. It is created before the spokes because
+    # a plugin spoke receives the hub's checksum file as a label.
     flutter_pub_lock_hub(
         name = hub_name,
         hub_name = hub_name,
         packages = sorted(all_package_names),
+        swift_package_sha256 = pub_tag.swift_package_sha256,
     )
+
+    _create_swiftpm_spokes(hub_name, pub_tag, module_ctx)
+    _create_hosted_spokes(hub_name, hosted, all_package_names, user_overlay_roots, pub_tag, ignore_hooks)
+    _create_path_spokes(hub_name, path_pkgs, all_package_names, user_overlay_roots, pub_tag, ignore_hooks)
+    _create_sdk_spokes(hub_name, sdk_flutter, all_package_names, toolchain_info, merged, toolchain_info.version)
 
 def _overlay_roots_of_module(mod):
     """Overlay roots one module declares, in tag order."""
