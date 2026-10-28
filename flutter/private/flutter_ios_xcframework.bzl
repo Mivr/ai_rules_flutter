@@ -25,7 +25,10 @@ load("@bazel_skylib//lib:dicts.bzl", "dicts")
 load("@rules_swift//swift:swift.bzl", "swift_binary")
 load("//flutter:providers.bzl", "FlutterApplicationInfo", "resolve_exec_dart_vm")
 load("//flutter/private:constants.bzl", "IOS_MINIMUM_OS_VERSION")
-load("//flutter/private:flutter_apple_plugins_aggregator.bzl", _flutter_apple_plugins_aggregator = "flutter_apple_plugins_aggregator")
+load(
+    "//flutter/private:flutter_apple_plugins_aggregator.bzl",
+    _flutter_apple_plugins_aggregator = "flutter_apple_plugins_aggregator",
+)
 load("//flutter/private:flutter_ios_application.bzl", _flutter_ios_framework_rule = "flutter_ios_framework")
 load("//flutter/private:flutter_ios_registrant.bzl", _flutter_ios_registrant_rule = "flutter_ios_registrant")
 load("//flutter/private:ios_app.bzl", _flutter_ios_engine = "flutter_ios_engine")
@@ -377,9 +380,36 @@ def _registrant_xcframework(ctx):
     arm64_patched = ctx.actions.declare_file("__%s_registrant_sim_arm64" % ctx.label.name)
     x64_patched = ctx.actions.declare_file("__%s_registrant_sim_x64" % ctx.label.name)
     install_name = "@rpath/FlutterPluginRegistrant.framework/FlutterPluginRegistrant"
-    _patch_binary(ctx, dart_exe, dart_vm_files, _single_binary(ctx.attr.device_registrant), device_patched, "ios", ctx.attr.minimum_os_version, install_name)
-    _patch_binary(ctx, dart_exe, dart_vm_files, _single_binary(ctx.attr.sim_arm64_registrant), arm64_patched, "iossim", ctx.attr.minimum_os_version, install_name)
-    _patch_binary(ctx, dart_exe, dart_vm_files, _single_binary(ctx.attr.sim_x64_registrant), x64_patched, "iossim", ctx.attr.minimum_os_version, install_name)
+    _patch_binary(
+        ctx,
+        dart_exe,
+        dart_vm_files,
+        _single_binary(ctx.attr.device_registrant),
+        device_patched,
+        "ios",
+        ctx.attr.minimum_os_version,
+        install_name,
+    )
+    _patch_binary(
+        ctx,
+        dart_exe,
+        dart_vm_files,
+        _single_binary(ctx.attr.sim_arm64_registrant),
+        arm64_patched,
+        "iossim",
+        ctx.attr.minimum_os_version,
+        install_name,
+    )
+    _patch_binary(
+        ctx,
+        dart_exe,
+        dart_vm_files,
+        _single_binary(ctx.attr.sim_x64_registrant),
+        x64_patched,
+        "iossim",
+        ctx.attr.minimum_os_version,
+        install_name,
+    )
 
     outputs = []
     device_dir = root + "/%s/FlutterPluginRegistrant.framework" % _IOS_DEVICE
@@ -619,7 +649,9 @@ def flutter_ios_xcframeworks(name, application = None, minimum_os_version = IOS_
         sim_x64_registrant = ":__%s_registrant_binary" % name,
         engine = select({
             Label("@rules_flutter//flutter/private:dbg"): Label("@flutter_ios_engine//:Flutter_xcframework_debug"),
-            Label("@rules_flutter//flutter/private:profile"): Label("@flutter_ios_engine_profile//:Flutter_xcframework"),
+            Label("@rules_flutter//flutter/private:profile"): Label(
+                "@flutter_ios_engine_profile//:Flutter_xcframework",
+            ),
             "//conditions:default": Label("@flutter_ios_engine//:Flutter_xcframework"),
         }),
         minimum_os_version = minimum_os_version,
