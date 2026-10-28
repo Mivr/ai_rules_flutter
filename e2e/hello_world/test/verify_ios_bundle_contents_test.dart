@@ -20,7 +20,10 @@
 ///   from both the files and the asset manifest;
 /// * `FontManifest.json` lists the family
 ///   `packages/cupertino_icons/CupertinoIcons` with its font file present
-///   in the bundle, and lists `MaterialIcons`;
+///   in the bundle, lists `MaterialIcons`, and carries the app's own
+///   `HelloSans` entry exactly as declared (regular face, then the bold face
+///   with `weight` 700) with both bundled files byte-identical to the
+///   committed ones;
 /// * the debug payload `flutter_assets/kernel_blob.bin` is
 ///   present and non-empty.
 ///
@@ -62,6 +65,18 @@ const _absentAssets = [
 /// Font families the bundle's `FontManifest.json` must name.
 const _cupertinoFamily = 'packages/cupertino_icons/CupertinoIcons';
 const _materialFamily = 'MaterialIcons';
+
+/// The app's own family, declared through `flutter_font_family` and bundled
+/// bare as the root pubspec's fonts are.
+const _helloFamily = 'HelloSans';
+const _regularFont = 'fonts/HelloSans-Regular.ttf';
+const _boldFont = 'fonts/HelloSans-Bold.ttf';
+
+/// The `HelloSans` entry `FontManifest.json` must carry, in order.
+const _helloFonts = [
+  {'asset': _regularFont},
+  {'asset': _boldFont, 'weight': 700},
+];
 
 /// Records one expectation: [description] names what the bundle should
 /// hold, [ok] whether it does, and [found] what is there instead.
@@ -110,6 +125,11 @@ void main() {
     exit(1);
   }
   final committedBytes = committed.readAsBytesSync();
+  final committedFonts = <String, Uint8List>{
+    _regularFont: File('$testSrcDir/$testWorkspace/$_regularFont')
+        .readAsBytesSync(),
+    _boldFont: File('$testSrcDir/$testWorkspace/$_boldFont').readAsBytesSync(),
+  };
   final assetsDir = '$appDir/flutter_assets';
   final manifestText = _manifestText(files, assetsDir);
 
@@ -133,7 +153,7 @@ void main() {
   }
   _checkAnyAsset(files, assetsDir, committedBytes, manifestText, check);
   _checkPlatformAssets(files, assetsDir, manifestText, check);
-  _checkFontManifest(files, assetsDir, check);
+  _checkFontManifest(files, assetsDir, committedFonts, check);
   _checkKernel(files, assetsDir, check);
 
   if (failed) exit(1);
@@ -416,10 +436,11 @@ void _checkPlatformAssets(
 }
 
 /// `FontManifest.json` names the pub icon families whose every asset file
-/// is bundled alongside.
+/// is bundled alongside, and the app's own `HelloSans` entry with its bytes.
 void _checkFontManifest(
   Map<String, Uint8List> files,
   String assetsDir,
+  Map<String, Uint8List> committedFonts,
   _Check check,
 ) {
   final raw = files['$assetsDir/FontManifest.json'];
@@ -453,6 +474,52 @@ void _checkFontManifest(
   }
   _checkFontFamily(families, files, assetsDir, _cupertinoFamily, check);
   _checkFontFamily(families, files, assetsDir, _materialFamily, check);
+  _checkHelloSans(families, files, assetsDir, committedFonts, check);
+}
+
+/// The app's `HelloSans` entry is exactly the declaration, and each asset
+/// carries the committed file's bytes.
+void _checkHelloSans(
+  List<dynamic> families,
+  Map<String, Uint8List> files,
+  String assetsDir,
+  Map<String, Uint8List> committedFonts,
+  _Check check,
+) {
+  Map<dynamic, dynamic>? entry;
+  for (final item in families) {
+    if (item is Map && item['family'] == _helloFamily) {
+      entry = item;
+      break;
+    }
+  }
+  if (entry == null) {
+    check(
+      'a FontManifest.json family $_helloFamily',
+      false,
+      'families ${[for (final e in families)
+        if (e is Map) e['family'] else e]}',
+    );
+    return;
+  }
+  final declared = entry['fonts'];
+  check(
+    'the $_helloFamily entry ${jsonEncode(_helloFonts)}',
+    jsonEncode(declared) == jsonEncode(_helloFonts),
+    'fonts ${jsonEncode(declared)}',
+  );
+  for (final asset in [_regularFont, _boldFont]) {
+    final bundled = files['$assetsDir/$asset'];
+    final committed = committedFonts[asset]!;
+    check(
+      'bundled $asset byte-identical to the committed file '
+      '(${committed.length} bytes)',
+      bundled != null && _bytesEqual(bundled, committed),
+      bundled == null
+          ? 'no file at $assetsDir/$asset'
+          : '${bundled.length} bytes instead of ${committed.length}',
+    );
+  }
 }
 
 /// The [family] entry exists and every font asset it names is a bundle file.
