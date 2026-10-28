@@ -15,6 +15,7 @@ load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_library
 load("@rules_flutter//flutter:web.bzl", "flutter_web_bundle")
 load("@rules_java//java:java_import.bzl", "java_import")
 load("@rules_kotlin//kotlin:android.bzl", "kt_android_library")
+load(":apk_modes.bzl", "debug_build", "profile_build")
 
 exports_files(["pubspec.lock"])
 
@@ -41,6 +42,7 @@ flutter_application(
     srcs = glob(["lib/**/*.dart"]),
     main = "lib/main.dart",
     native_deps = [":add"],
+    track_widget_creation = True,
     deps = [
         "@deps//:flutter",
         "@rules_flutter//flutter:material_icons",
@@ -69,6 +71,74 @@ flutter_android_app(
     # compilation mode. Verified from inside the built APK by
     # :verify_android_permissions_test.
     permissions = ["android.permission.INTERNET"],
+)
+
+# =============================================================================
+# Profile and widget-tracking proofs
+#
+# `:app_profile` is built behind `profile_build`, which sets `-c opt`, the
+# `//flutter:profile` build setting and the arm64 Android platform. It shares
+# `:app_flutter` and declares no `permissions`: the profile APK gets INTERNET
+# from android/app/src/profile/AndroidManifest.xml, and `:app_release_check`
+# built from the same main manifest does not. `:app_profile_apk` also forwards
+# the pinned profile engine jar so the test can hash the `libflutter.so` the
+# APK packages.
+#
+# `:app_flutter` sets `track_widget_creation = True` explicitly; the twin
+# `:app_flutter_untracked` has the same sources and deps with the flag off.
+# The debug APK twins let the test read each compiled kernel.
+# =============================================================================
+
+flutter_android_app(
+    name = "app_profile",
+    package_name = "com.example.flutterapp.profile",
+    application = ":app_flutter",
+)
+
+flutter_android_app(
+    name = "app_release_check",
+    package_name = "com.example.flutterapp.releasecheck",
+    application = ":app_flutter",
+)
+
+profile_build(
+    name = "app_profile_apk",
+    testonly = True,
+    targets = [
+        ":app_profile",
+        "@flutter_android_engine_arm64_profile//:stripped",
+    ],
+)
+
+flutter_application(
+    name = "app_flutter_untracked",
+    package_name = "android_example",
+    srcs = glob(["lib/**/*.dart"]),
+    main = "lib/main.dart",
+    native_deps = [":add"],
+    track_widget_creation = False,
+    deps = [
+        "@deps//:flutter",
+        "@rules_flutter//flutter:material_icons",
+    ],
+)
+
+flutter_android_app(
+    name = "app_untracked",
+    package_name = "com.example.flutterapp.untracked",
+    application = ":app_flutter_untracked",
+)
+
+debug_build(
+    name = "app_debug_apk",
+    testonly = True,
+    targets = [":app"],
+)
+
+debug_build(
+    name = "app_untracked_debug_apk",
+    testonly = True,
+    targets = [":app_untracked"],
 )
 
 # =============================================================================
@@ -223,8 +293,40 @@ dart_test(
 # debug variant overlay.
 dart_test(
     name = "verify_android_permissions_test",
+    srcs = ["test/axml.dart"],
     data = [":app"],
     main = "test/verify_android_permissions_test.dart",
+)
+
+# The profile APK, the pinned profile and release engine jars, and the release
+# twin built from the same main manifest: the APK's libflutter.so must be the
+# pinned profile engine and differ from the release engine, its libapp.so must
+# be an aarch64 AOT ELF without the `product` feature, and INTERNET must come
+# from the profile variant manifest while the release APK omits it.
+dart_test(
+    name = "verify_android_profile_apk_test",
+    srcs = [
+        "test/android_test_support.dart",
+        "test/axml.dart",
+    ],
+    data = [
+        ":app_profile_apk",
+        ":app_release_check",
+        "@flutter_android_engine_arm64//:stripped",
+    ],
+    main = "test/verify_android_profile_apk_test.dart",
+)
+
+# The debug APK twins: the tracking-on kernel carries the pinned SDK's
+# widget-creation marker, the tracking-off kernel does not.
+dart_test(
+    name = "verify_android_widget_tracking_test",
+    srcs = ["test/android_test_support.dart"],
+    data = [
+        ":app_debug_apk",
+        ":app_untracked_debug_apk",
+    ],
+    main = "test/verify_android_widget_tracking_test.dart",
 )
 
 dart_test(

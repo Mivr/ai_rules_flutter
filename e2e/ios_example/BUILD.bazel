@@ -38,6 +38,7 @@ flutter_application(
     assets = glob(["assets/**"]),
     main = "lib/main.dart",
     min_os_version = IOS_MINIMUM_OS_VERSION,
+    track_widget_creation = True,
     deps = [
         "@deps//:flutter",
         "@rules_flutter//flutter:material_icons",
@@ -260,6 +261,85 @@ ios_device_opt_bundle(
 )
 
 # =============================================================================
+# Profile device framework (what a profile engineer runs on a phone)
+#
+# Profile mode is `-c opt` plus the `//flutter:profile` build setting. The
+# application needs its own `package_name` for the same reason the release
+# applications do, and carries `track_widget_creation = False` explicitly:
+# this target proves the engine and snapshot mode, not the tracking flag.
+#
+# `:app_profile_device` sets `profile = True` on the transition, so the
+# `flutter_ios_engine` select resolves the pinned profile engine and
+# gen_snapshot. The bundle forwards the App.framework and that engine's
+# Flutter.framework from the same configuration; the profile test hashes the
+# engine symlink against both pinned engines.
+# =============================================================================
+
+flutter_application(
+    name = "app_flutter_profile",
+    package_name = "ios_example_profile",
+    assets = glob(["assets/**"]),
+    main = "lib/main.dart",
+    min_os_version = IOS_MINIMUM_OS_VERSION,
+    track_widget_creation = False,
+    deps = [
+        "@deps//:flutter",
+        "@rules_flutter//flutter:material_icons",
+    ],
+)
+
+flutter_ios_framework_gen(
+    name = "app_profile_framework",
+    application = ":app_flutter_profile",
+)
+
+ios_device_opt_bundle(
+    name = "app_profile_device",
+    testonly = True,
+    application = ":app_flutter_profile",
+    engine = ":app_engine",
+    framework = ":app_profile_framework",
+    profile = True,
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
+# =============================================================================
+# Widget-creation tracking twins
+#
+# `:app_flutter` sets `track_widget_creation = True` explicitly; the twin
+# `:app_flutter_untracked` has the same main, assets and deps with the flag
+# off. `flutter_ios_simulator_build` builds each for the simulator in debug
+# mode; the tracking test reads both bundled kernels and asserts the pinned
+# SDK's creation-location marker is in the True twin only.
+# =============================================================================
+
+flutter_application(
+    name = "app_flutter_untracked",
+    package_name = "ios_example_untracked",
+    assets = glob(["assets/**"]),
+    main = "lib/main.dart",
+    min_os_version = IOS_MINIMUM_OS_VERSION,
+    track_widget_creation = False,
+    deps = [
+        "@deps//:flutter",
+        "@rules_flutter//flutter:material_icons",
+    ],
+)
+
+flutter_ios_app(
+    name = "app_untracked",
+    application = ":app_flutter_untracked",
+    bundle_id = "com.rulesflutter.ios.example.untracked",
+)
+
+flutter_ios_simulator_build(
+    name = "app_untracked_simulator",
+    testonly = True,
+    target_compatible_with = ["@platforms//os:macos"],
+    targets = [":app_untracked"],
+)
+
+# =============================================================================
 # Approach 2: Bazel-generated runner (flutter_ios_runner_lib_gen)
 #
 # For users without `flutter create` output. Uses template files from
@@ -454,12 +534,46 @@ dart_test(
 # like the checks above: it runs on the macOS leg of full.yaml.
 dart_test(
     name = "verify_ios_release_framework_test",
+    srcs = ["test/macho_snapshot.dart"],
     data = [
         ":app_release_device",
         ":app_release_plain_device",
         ":app_simulator",
     ],
     main = "test/verify_ios_release_framework_test.dart",
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
+# The device profile framework beside the pinned profile and release engines:
+# an arm64 iOS Mach-O whose snapshot lacks the `product` feature, linking an
+# engine byte-identical to the pinned profile one and different from the
+# pinned release one. macOS-only, like the release check above.
+dart_test(
+    name = "verify_ios_profile_framework_test",
+    srcs = [
+        "test/ios_test_support.dart",
+        "test/macho_snapshot.dart",
+    ],
+    data = [
+        ":app_profile_device",
+        "@flutter_ios_engine//:Flutter_xcframework",
+        "@flutter_ios_engine_profile//:Flutter_xcframework",
+    ],
+    main = "test/verify_ios_profile_framework_test.dart",
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
+# The two tracking twins' simulator kernels: the True twin carries the pinned
+# SDK's widget-creation marker, the False twin does not. macOS-only because
+# simulator bundles are built by the macOS leg of full.yaml.
+dart_test(
+    name = "verify_ios_widget_tracking_test",
+    srcs = ["test/ios_test_support.dart"],
+    data = [
+        ":app_simulator",
+        ":app_untracked_simulator",
+    ],
+    main = "test/verify_ios_widget_tracking_test.dart",
     target_compatible_with = ["@platforms//os:macos"],
 )
 
