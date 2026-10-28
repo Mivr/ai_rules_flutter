@@ -325,6 +325,7 @@ bzl_library(
     deps = [
         ":common",
         ":flutter_aot_compile",
+        ":flutter_font_family",
         ":flutter_info",
         ":flutter_native_assets",
         ":native_sources",
@@ -432,6 +433,16 @@ bzl_library(
         ":artifact_urls",
         ":download",
         ":local_sdk",
+    ],
+)
+
+bzl_library(
+    name = "flutter_font_family",
+    srcs = ["flutter_font_family.bzl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":asset_uri",
+        ":flutter_manifest_validate",
     ],
 )
 
@@ -598,6 +609,7 @@ bzl_library(
     deps = [
         ":asset_keys",
         ":asset_uri",
+        ":flutter_font_family",
         ":flutter_info",
         "//flutter:providers",
         "@rules_dart//dart:providers",
