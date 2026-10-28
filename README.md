@@ -574,6 +574,49 @@ ios_application(
 
 </details>
 
+#### Add-to-app xcframeworks
+
+`flutter_ios_xcframeworks` produces the xcframework set Flutter's add-to-app
+docs ask an existing Xcode project to link, without building an
+`ios_application` with Bazel:
+
+```starlark
+load("@rules_flutter//flutter:ios.bzl", "flutter_ios_xcframeworks")
+
+flutter_application(
+    name = "my_app",
+    main = "lib/main.dart",
+    deps = ["@deps//:flutter"],
+)
+
+flutter_ios_xcframeworks(
+    name = "my_app_xcframeworks",
+    application = ":my_app",
+)
+```
+
+The target's files are four kinds of xcframework:
+
+- **`App.xcframework`** has exactly two slices: `ios-arm64/App.framework` for a
+  device and `ios-arm64_x86_64-simulator/App.framework` for the simulator.
+  Both carry an AOT snapshot; the simulator slice is universal arm64 +
+  x86_64.
+- **`Flutter.xcframework`** is the pinned engine the rules already select for
+  the configuration. Its files are links to that engine, not copies.
+- **`FlutterPluginRegistrant.xcframework`** links the application's generated
+  `GeneratedPluginRegistrant.swift`.
+- **One `<Plugin>.xcframework` per native iOS plugin** in the application's
+  transitive graph.
+
+The layout and every `Info.plist` are written by the rule, so no
+`xcodebuild -create-xcframework` runs. Drag the directories into the Xcode
+target's "Frameworks, Libraries, and Embedded Content" and set them to
+"Embed & Sign". The target is `manual` and macOS-only by default because the
+AOT slices need a Darwin host.
+
+See [Add-to-app iOS xcframeworks](docs/ios-add-to-app.md) for the full
+attribute reference, the slice layout and the e2e proof.
+
 #### Running on an iOS device
 
 Simulator builds need no code signing. Device builds need a provisioning profile, which is per-developer and should stay out of version control. `flutter_ios_app` takes it directly:
