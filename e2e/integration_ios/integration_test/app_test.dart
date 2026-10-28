@@ -3,8 +3,10 @@ import 'dart:ui' as ui;
 import 'package:android_only_plugin/android_only_plugin.dart';
 import 'package:dart_registration_plugin/dart_registration_plugin.dart';
 import 'package:ffi_plugin/ffi_plugin.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:integration_ios/l10n/app_localizations.dart';
 import 'package:integration_ios/main.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:ios_greeting_plugin/ios_greeting_plugin.dart';
@@ -33,6 +35,66 @@ void main() {
     tester,
   ) async {
     expect(FfiPlugin.answer(), 42);
+  });
+
+  testWidgets('forwards a define with a comma and an equals sign', (
+    tester,
+  ) async {
+    expect(
+      const String.fromEnvironment('COV79_GREETING'),
+      'hello, world=ok',
+    );
+
+    await tester.pumpWidget(const CounterApp());
+  });
+
+  testWidgets('renders the generated Spanish message under Locale es', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        localizationsDelegates: Cov79Localizations.localizationsDelegates,
+        supportedLocales: Cov79Localizations.supportedLocales,
+        home: Builder(
+          builder: (context) => Localizations.override(
+            context: context,
+            locale: const Locale('es'),
+            child: Builder(
+              builder: (context) => Text(
+                Cov79Localizations.of(context).cov79Greeting,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('¡Hola desde el simulador de iOS!'), findsOneWidget);
+    expect(
+      Cov79Localizations.supportedLocales,
+      containsAll(<Locale>[const Locale('en'), const Locale('es')]),
+    );
+  });
+
+  testWidgets('loads and paints the committed Impeller shader', (
+    tester,
+  ) async {
+    final program = await ui.FragmentProgram.fromAsset('shaders/ink_stub.frag');
+    final shader = program.fragmentShader();
+
+    await tester.pumpWidget(
+      Directionality(
+        textDirection: TextDirection.ltr,
+        child: CustomPaint(
+          size: const Size(16, 16),
+          painter: _InkPainter(shader),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('builds and runs with the Android-only plugin in deps', (
@@ -88,4 +150,21 @@ void main() {
       expectedBundleId,
     );
   });
+}
+
+class _InkPainter extends CustomPainter {
+  _InkPainter(this.shader);
+
+  final ui.FragmentShader shader;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    shader
+      ..setFloat(0, size.width)
+      ..setFloat(1, size.height);
+    canvas.drawRect(Offset.zero & size, Paint()..shader = shader);
+  }
+
+  @override
+  bool shouldRepaint(_InkPainter oldDelegate) => oldDelegate.shader != shader;
 }
