@@ -18,7 +18,7 @@ load(
     "flutter_ios_simulator_build_test",
 )
 load("@rules_swift//swift:swift.bzl", "swift_library")
-load(":ios_device_opt.bzl", "ios_device_opt_bundle")
+load(":ios_device_opt.bzl", "ios_device_opt_app", "ios_device_opt_bundle")
 load(":simulator_mode_test.bzl", "simulator_fastbuild_refused_test")
 
 exports_files(["pubspec.lock"])
@@ -133,6 +133,30 @@ flutter_ios_app(
     application = ":app_flutter",
     bundle_id = "com.rulesflutter.ios.example",
     provisioning_profile = "//device:profile",
+)
+
+# The same app for a physical device, unsigned: what
+# `flutter build ios --no-codesign` produces. No `//device` package and no
+# signing secret, so CI can build the device bundle rather than leaving it to
+# a developer with a profile. `:app_device_unsigned_opt` rebuilds this app
+# `-c opt` for `arm64`, and `:verify_ios_device_app_test` inspects the result.
+flutter_ios_app(
+    name = "app_device_unsigned",
+    app_name = "Runner",
+    application = ":app_flutter",
+    bundle_id = "com.rulesflutter.ios.example",
+    signing = False,
+)
+
+# The unsigned device app as a physical iPhone builds it: `-c opt` for a device
+# (`arm64`), reached through the transition so the test runner itself stays in
+# the default configuration. Non-manual, so `bazel test //...` expands it;
+# macOS-only, like the release framework checks below.
+ios_device_opt_app(
+    name = "app_device_unsigned_opt",
+    testonly = True,
+    app = ":app_device_unsigned",
+    target_compatible_with = ["@platforms//os:macos"],
 )
 
 # An app that ships App Intents. The library goes to `runner_deps` so the runner
@@ -454,12 +478,26 @@ dart_test(
 # like the checks above: it runs on the macOS leg of full.yaml.
 dart_test(
     name = "verify_ios_release_framework_test",
+    srcs = ["test/ios_bundle_reader.dart"],
     data = [
         ":app_release_device",
         ":app_release_plain_device",
         ":app_simulator",
     ],
     main = "test/verify_ios_release_framework_test.dart",
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
+# The unsigned physical-device app built `-c opt` for `arm64`: the runner and
+# App.framework binary are arm64 iOS Mach-O, no profile is embedded, no
+# `_CodeSignature/CodeResources` or `LC_CODE_SIGNATURE` exists, Info.plist says
+# iPhoneOS, and App.framework carries a product (AOT) snapshot. macOS-only,
+# like the checks above: it runs on the macOS leg of full.yaml.
+dart_test(
+    name = "verify_ios_device_app_test",
+    srcs = ["test/ios_bundle_reader.dart"],
+    data = [":app_device_unsigned_opt"],
+    main = "test/verify_ios_device_app_test.dart",
     target_compatible_with = ["@platforms//os:macos"],
 )
 

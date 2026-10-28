@@ -1,18 +1,21 @@
-"""Transition a release iOS framework dependency to a device, optimized build.
+"""Transition a release iOS framework or app dependency to a device, optimized build.
 
 A physical iPhone runs the release/AOT engine, so a release proof must build
-the framework with `-c opt --ios_multi_cpus=arm64` on the iOS device
-platform. `flutter_application` reads the target platform's constraints to
-decide between iOS and macOS, and nothing else here moves the build off the
+the framework or the whole app with `-c opt --ios_multi_cpus=arm64` on the iOS
+device platform. `flutter_application` reads the target platform's constraints
+to decide between iOS and macOS, and nothing else here moves the build off the
 host platform (an `ios_application` would do that through rules_apple's own
 split transition), so the transition sets `//command_line_option:platforms`
 to `@apple_support//platforms:ios_arm64` as well. Applying all of that via a
-transition on just the framework and its application keeps the surrounding
-`dart_test` runner in the default configuration.
+transition on just the framework or app keeps the surrounding `dart_test`
+runner in the default configuration.
 
-The rule also forwards the application's `debug_info` output group (the
-`.symbols` file `split_debug_info` writes) from that same transitioned build,
-so the test reads the symbols of the very build it inspects.
+`ios_device_opt_bundle` also forwards the application's `debug_info` output
+group (the `.symbols` file `split_debug_info` writes) from that same
+transitioned build, so the test reads the symbols of the very build it
+inspects. `ios_device_opt_app` forwards the files of an `ios_application`
+built the same way, which needs no signing when the app sets
+`signing = False`.
 """
 
 load("@rules_apple//apple:providers.bzl", "AppleDynamicFrameworkInfo")
@@ -64,4 +67,25 @@ ios_device_opt_bundle = rule(
         ),
     },
     doc = "Re-exposes a release App.framework and its .symbols built for the device (AOT).",
+)
+
+def _ios_device_opt_app_impl(ctx):
+    # A 1:1 transition makes `app` a single-element list. `ios_application`
+    # carries its archive in DefaultInfo, as the simulator rebuild rule does.
+    return [DefaultInfo(files = ctx.attr.app[0][DefaultInfo].files)]
+
+ios_device_opt_app = rule(
+    implementation = _ios_device_opt_app_impl,
+    attrs = {
+        "app": attr.label(
+            cfg = _ios_device_opt_transition,
+            mandatory = True,
+            doc = "The ios_application to rebuild for the device in release.",
+        ),
+        "_allowlist_function_transition": attr.label(
+            default = "@bazel_tools//tools/allowlists/function_transition_allowlist",
+            doc = "Allowlist for the function transition on `app`.",
+        ),
+    },
+    doc = "Re-exposes an iOS app built for the device in release (AOT, arm64).",
 )
