@@ -88,6 +88,22 @@ void main() {
     expect(resolved, bazel.path);
   });
 
+  test('a bare BAZEL name not on PATH fails with the value it tried', () {
+    final dir = _tempDir();
+    expect(
+      () => resolveBazelClient(
+        environment: {'BAZEL': 'bazel', 'PATH': dir.path},
+        step: 'nested build',
+      ),
+      throwsA(
+        isA<ToolUnavailable>()
+            .having((error) => error.tool, 'tool', 'bazel')
+            .having((error) => error.tried, 'tried', 'BAZEL=bazel')
+            .having((error) => error.step, 'step', 'nested build'),
+      ),
+    );
+  });
+
   test('missing bazel fails with the tool and value it tried', () {
     final dir = _tempDir();
     expect(
@@ -157,6 +173,29 @@ void main() {
                 contains('not executable'),
               )
               .having((error) => error.step, 'step', 'nested build'),
+        ),
+      );
+    });
+
+    test('a non-executable unzip on PATH is named when none is usable', () {
+      final dir = _tempDir();
+      final file = _fakeFile(dir, 'unzip');
+      expect(
+        () => resolveHostTool(
+          tool: 'unzip',
+          environment: {'PATH': dir.path},
+          step: 'unzip App.framework.zip',
+        ),
+        throwsA(
+          isA<ToolUnavailable>()
+              .having((error) => error.tool, 'tool', 'unzip')
+              .having((error) => error.tried, 'tried', contains(file.path))
+              .having(
+                (error) => error.tried,
+                'tried says not executable',
+                contains('not executable'),
+              )
+              .having((error) => error.step, 'step', 'unzip App.framework.zip'),
         ),
       );
     });
