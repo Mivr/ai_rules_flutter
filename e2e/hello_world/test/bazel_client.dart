@@ -111,6 +111,11 @@ ProcessResult runHostTool({
 
 /// Resolves an [variable] value that is either an executable path or the name
 /// of an executable on `PATH`.
+///
+/// A bare name is searched on `PATH` and never returned as-is, so the test
+/// never spawns a name it has not resolved to a path. A value that names a
+/// path is used only when it is executable; otherwise it fails like a missing
+/// `PATH` hit, naming the value tried.
 String _resolveOverride({
   required String tool,
   required String variable,
@@ -118,14 +123,13 @@ String _resolveOverride({
   required Map<String, String> environment,
   required String step,
 }) {
-  if (_isExecutable(value)) {
-    return value;
-  }
   if (!_namesAPath(value)) {
     final found = _findOnPath(value, environment['PATH']);
     if (found != null) {
       return found;
     }
+  } else if (_isExecutable(value)) {
+    return value;
   }
   throw ToolUnavailable(tool: tool, tried: '$variable=$value', step: step);
 }
