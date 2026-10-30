@@ -498,20 +498,35 @@ def _mixed_plugin_swift_header_test_impl(ctx):
 def _mixed_plugin_objc_input_test_impl(ctx):
     """The ObjC half compiles against the Swift module's generated header.
 
-    Bazel's C++ compile action exposes headers through the compilation
-    context rather than its Starlark `inputs` list, so the test proves the
-    dependency twice: the ObjC target's own CcInfo carries the generated
-    header, and the target registers the compile action for its `.m` source.
+    Starlark's view of an analysis action (`action.inputs`) lists the source
+    and module-map inputs the rule declares directly, not the headers the
+    C++ rules pull from `CcCompilationContext` when they form the final
+    compile command (`bazel aquery` shows those). So this test proves the
+    observable facts the compile command is built from: the ObjC target's
+    CcInfo carries the Swift module's generated header, the header's
+    directory is a quote include path (so the plain-basename `#import`
+    resolves from a source `.m`), and the target registers an ObjC compile
+    action for its `.m` source.
     """
     env = analysistest.begin(ctx)
     tut = analysistest.target_under_test(env)
-    headers = [f.basename for f in tut[CcInfo].compilation_context.headers.to_list()]
+    header_files = [
+        f
+        for f in tut[CcInfo].compilation_context.headers.to_list()
+        if f.basename == ctx.attr.expected_header_basename
+    ]
+    asserts.equals(
+        env,
+        [ctx.attr.expected_header_basename],
+        [f.basename for f in header_files],
+    )
+    quote_includes = tut[CcInfo].compilation_context.quote_includes.to_list()
     asserts.true(
         env,
-        ctx.attr.expected_header_basename in headers,
-        "Expected %s in the ObjC target's CcInfo headers, got: %s" % (
-            ctx.attr.expected_header_basename,
-            headers,
+        bool(header_files) and header_files[0].dirname in quote_includes,
+        "Expected %s in the ObjC target's quote include paths, got: %s" % (
+            header_files[0].dirname if header_files else ctx.attr.expected_header_basename,
+            quote_includes,
         ),
     )
 
@@ -813,6 +828,7 @@ def _apple_plugin_analysis_tests(
     mixed_kinds = {
         "_" + fixtures.mixed + "__objc_module": "objc_library",
         "_" + fixtures.mixed + "__swift": "swift_library",
+        "_" + fixtures.mixed + "__swift_include": "_swift_generated_header_include",
         "_" + fixtures.mixed + "__objc": "objc_library",
         "_" + fixtures.mixed + "__flutter_framework": framework_kind,
         fixtures.mixed: "flutter_apple_plugin_bundle",
