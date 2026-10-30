@@ -10,6 +10,7 @@ Usage: see flutter/ios.bzl for public API.
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
 load("@rules_apple//apple:apple.bzl", "apple_dynamic_framework_import", "apple_dynamic_xcframework_import")
 load("@rules_apple//apple:ios.bzl", "ios_application")
+load("@rules_apple//apple:resources.bzl", "apple_resource_group")
 load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
 load("@rules_swift//swift:swift.bzl", "swift_library")
 load("//flutter/private:constants.bzl", _IOS_MINIMUM_OS_VERSION = "IOS_MINIMUM_OS_VERSION")
@@ -167,11 +168,16 @@ def _ios_build_frameworks(name, application, minimum_os_version, allow_non_macho
     )
 
     # 3. Assemble App.framework from the AOT dylib (or debug stub + kernel).
+    #    On rules_apple a debug build leaves flutter_assets out of the
+    #    framework so the import processor does not re-copy the kernel on
+    #    every Dart edit. The xtool bundle reads the assets from the framework
+    #    it receives, so it keeps the base layout.
     _flutter_ios_framework_rule(
         name = "__%s_app_framework" % name,
         application = "__%s_intermediates" % name,
         minimum_os_version = minimum_os_version,
         allow_non_macho = allow_non_macho,
+        split_debug_assets = backend == "rules_apple",
         tags = internal_tags,
     )
 
@@ -180,6 +186,23 @@ def _ios_build_frameworks(name, application, minimum_os_version, allow_non_macho
     #    (the stub binary only exists for rules_apple compatibility and isn't
     #    loaded at runtime — Flutter uses the JIT kernel blob instead).
     if backend == "rules_apple":
+        # 4a. Read the split debug assets out of the framework's output group
+        #     and let the bundle place them at the app root. The strip prefix
+        #     is this target's own framework directory, so the directory
+        #     arrives as `flutter_assets/...` beside the app binary. An AOT
+        #     build's output group is empty and no root copy is added.
+        native.filegroup(
+            name = "__%s_split_debug_assets" % name,
+            srcs = [":__%s_app_framework" % name],
+            output_group = "flutter_assets",
+            tags = internal_tags,
+        )
+        apple_resource_group(
+            name = "__%s_split_debug_assets_group" % name,
+            structured_resources = [":__%s_split_debug_assets" % name],
+            strip_structured_resources_prefixes = ["__%s_app_framework/App.framework" % name],
+            tags = internal_tags,
+        )
         apple_dynamic_framework_import(
             name = "__%s_app_bundle" % name,
             framework_imports = ["__%s_app_framework" % name],
@@ -351,6 +374,13 @@ def _ios_build_runner(name, runner):
 
 def _ios_emit_rules_apple_bundle(name, bundle):
     """Emits the final rules_apple ios_application bundle target."""
+
+    # A debug build carries the split flutter_assets at the app root; an AOT
+    # build keeps them inside App.framework and gets no root copy.
+    root_assets = select({
+        Label("@rules_flutter//flutter/private:dbg"): ["__%s_split_debug_assets_group" % name],
+        "//conditions:default": [],
+    })
     ios_application(
         name = name,
         bundle_id = bundle.bundle_id,
@@ -363,7 +393,7 @@ def _ios_emit_rules_apple_bundle(name, bundle):
         launch_storyboard = bundle.actual_launch_storyboard,
         provisioning_profile = bundle.provisioning_profile,
         app_icons = bundle.app_icons,
-        resources = bundle.resources + ["__%s_privacy_manifests" % name],
+        resources = bundle.resources + ["__%s_privacy_manifests" % name] + root_assets,
         deps = [
             "__%s_runner" % name,
             "__%s_app_bundle" % name,

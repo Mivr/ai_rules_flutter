@@ -14,6 +14,7 @@ Usage: see flutter/ios.bzl for public API.
 
 load("@apple_support//lib:apple_support.bzl", "apple_support")
 load("@bazel_skylib//lib:dicts.bzl", "dicts")
+load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 
 # framework_import_support is rules_apple-internal, but it is the only way to
 # construct AppleFrameworkImportInfo (its init is banned) for the N transitive
@@ -237,10 +238,23 @@ def _assemble_ios_debug_assets(ctx, dart_exe, dart_vm_files, flutter_sdk_info, f
         progress_message = "Assembling debug App.framework with kernel and VM snapshots",
     )
 
-def _ios_framework_result(ctx, framework_files, framework_binary):
-    """Builds the App.framework providers for the assembled files."""
+def _ios_framework_result(ctx, framework_files, framework_binary, split_assets):
+    """Builds the App.framework providers for the assembled files.
+
+    Args:
+        ctx: The rule context.
+        framework_files: The files inside App.framework this target exports.
+        framework_binary: The framework's App binary, which names its directory.
+        split_assets: The debug assets directory moved out of the framework, or
+            None when the framework keeps its assets. It is published as the
+            `flutter_assets` output group so an app can place it at its root.
+
+    Returns:
+        The target's providers.
+    """
     return [
         DefaultInfo(files = depset(framework_files)),
+        OutputGroupInfo(flutter_assets = depset([split_assets] if split_assets else [])),
         framework_import_support.framework_import_info_with_dependencies(
             build_archs = [apple_support.target_arch_from_rule_ctx(ctx)],
             deps = [],
@@ -255,6 +269,32 @@ def _ios_framework_result(ctx, framework_files, framework_binary):
         ),
     ]
 
+def _ios_split_debug_assets(ctx, aot_output):
+    """Whether this build moves the debug assets out of App.framework.
+
+    The split is only meaningful for a JIT (debug) build: an AOT build's
+    `flutter_assets` stays inside the framework, so the request leaves both the
+    files and the output group at their base behaviour. The xtool bundle reads
+    the assets from the framework it receives and has no seam for a root copy,
+    so asking for the split there is refused instead of dropping the assets.
+
+    Args:
+        ctx: The rule context.
+        aot_output: The application's AOT output, or None for a JIT build.
+
+    Returns:
+        True when the framework exports its assets through the output group.
+    """
+    if not ctx.attr.split_debug_assets:
+        return False
+    if ctx.attr._apple_backend[BuildSettingInfo].value == "xtool":
+        fail(
+            "flutter_ios_framework: %s: 'split_debug_assets' is not supported on the 'xtool' backend; " %
+            ctx.label +
+            "flutter_xtool_ios_bundle takes the assets from App.framework and cannot place them at the app root",
+        )
+    return aot_output == None
+
 def _flutter_ios_framework_impl(ctx):
     """Assembles Flutter artifacts into App.framework individual files.
 
@@ -265,11 +305,17 @@ def _flutter_ios_framework_impl(ctx):
     In debug mode a stub dylib is created because rules_apple's framework
     processor requires a binary. bundle_only=True prevents linking so the
     stub is never loaded — the engine uses kernel_blob.bin instead.
+
+    With `split_debug_assets = True` a debug build leaves `flutter_assets` out
+    of the framework and publishes it as the `flutter_assets` output group, so
+    an app can copy it to its root and skip re-processing it on every Dart
+    edit. An AOT build ignores the request and keeps the base layout.
     """
     app_info = ctx.attr.application[FlutterApplicationInfo]
     flutter_sdk_info = ctx.toolchains["@rules_flutter//flutter:toolchain_type"].flutter_sdk_info
     flutter_assets = app_info.flutter_assets
     minimum_os_version = ctx.attr.minimum_os_version
+    split_assets = _ios_split_debug_assets(ctx, app_info.aot_output)
 
     # Every output under a directory named after this target. Without it two
     # apps in one package would both declare `App.framework/Info.plist` and the
@@ -316,8 +362,10 @@ def _flutter_ios_framework_impl(ctx):
         _stub_ios_app_binary(ctx, dart_exe, dart_vm_files, framework_binary, stub_arch, vtool_platform, minimum_os_version)
         _assemble_ios_debug_assets(ctx, dart_exe, dart_vm_files, flutter_sdk_info, flutter_assets, app_info.kernel_dill, framework_assets)
 
-    framework_files = [framework_binary, framework_plist, framework_assets]
-    return _ios_framework_result(ctx, framework_files, framework_binary)
+    framework_files = [framework_binary, framework_plist]
+    if not split_assets:
+        framework_files.append(framework_assets)
+    return _ios_framework_result(ctx, framework_files, framework_binary, framework_assets if split_assets else None)
 
 flutter_ios_framework = rule(
     implementation = _flutter_ios_framework_impl,
@@ -336,6 +384,15 @@ flutter_ios_framework = rule(
             "minimum_os_version": attr.string(
                 doc = "Minimum iOS deployment target version.",
                 default = IOS_MINIMUM_OS_VERSION,
+            ),
+            "split_debug_assets": attr.bool(
+                doc = "Leave the debug (JIT) flutter_assets out of App.framework and publish it as the `flutter_assets` output group instead, for an app that copies it to the bundle root. Ignored by an AOT build, and refused on the xtool backend.",
+                default = False,
+            ),
+            "_apple_backend": attr.label(
+                default = Label("//flutter/settings:apple_backend"),
+                providers = [BuildSettingInfo],
+                doc = "The Apple bundling backend selected for this build, so an xtool request can be refused.",
             ),
             "_macho_edit": attr.label(
                 default = Label("//flutter/private/tools:macho_edit"),
