@@ -33,6 +33,7 @@ from ab import (
 )
 from sol_test import FAKE_BAZEL
 from sol_test import STUB_GEN
+from run_rep import CONFIG_ORDER
 import sol
 
 
@@ -139,13 +140,14 @@ class LockStepTest(unittest.TestCase):
         data = generate_committed_lock(
             self.pristine, self.lock_out, run)
         self.assertEqual(data, b"lock-bytes-v1")
-        # Both configs evaluated on the lock output base, then shutdown.
+        # Every config evaluated on the lock output base, then shutdown.
         kinds = ["build" if "build" in a else
                  "shutdown" if "shutdown" in a else "?" for a in run.calls]
-        self.assertEqual(kinds, ["build", "build", "shutdown"])
+        self.assertEqual(kinds, ["build"] * len(CONFIG_ORDER)
+                         + ["shutdown"])
         bases = [a[a.index("--output_base=" + self.lock_out)]
                  for a in run.calls]
-        self.assertEqual(len(bases), 3)
+        self.assertEqual(len(bases), len(CONFIG_ORDER) + 1)
         # Unmeasured: nothing written under results.
         self.assertEqual(os.listdir(self.results), [])
         # Its output base is gone afterwards.
