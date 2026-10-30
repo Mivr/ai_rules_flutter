@@ -1,0 +1,16 @@
+{
+  "firebase_core": "declares Android dependencies rules_flutter cannot translate to Bazel labels",
+  "firebase_auth": "declares Android dependencies rules_flutter cannot translate to Bazel labels",
+  "cloud_firestore": "declares Android dependencies rules_flutter cannot translate to Bazel labels",
+  "firebase_messaging": "declares Android dependencies rules_flutter cannot translate to Bazel labels",
+  "google_maps_flutter_ios": "ok",
+  "google_sign_in_ios": "sets no `swift_package_resolved`",
+  "sentry_flutter": "declares Android dependencies rules_flutter cannot translate to Bazel labels",
+  "image_picker_ios": "ok",
+  "webview_flutter_wkwebview": "ok",
+  "url_launcher_ios": "ok",
+  "permission_handler_apple": "ok",
+  "flutter_inappwebview_ios": "ok",
+  "google_mlkit_commons": "declares Android dependencies rules_flutter cannot translate to Bazel labels",
+  "stripe_ios": "sets no `swift_package_resolved`"
+}

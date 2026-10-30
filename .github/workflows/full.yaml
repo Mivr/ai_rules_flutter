@@ -93,6 +93,13 @@ jobs:
           - workspace: integration_ios
             shard: none
             cache-save: false
+          # The real-plugin fetch matrix (POD-2). The Linux fetch half runs
+          # in e2e-linux-nightly; this leg builds the plugins expected.json
+          # records as "ok", one at a time, and reports every result. Its
+          # image_picker_ios build is expected to fail until POD-1 lands.
+          - workspace: ios_plugin_matrix
+            shard: none
+            cache-save: false
           - workspace: plugin_example
             shard: macos-plugin
             cache-save: true
@@ -144,6 +151,16 @@ jobs:
       - name: bazel test //... (e2e/${{ matrix.workspace }})
         working-directory: e2e/${{ matrix.workspace }}
         run: bazel test //... --test_output=errors
+      # The macOS half of POD-2: build each plugin expected.json records as
+      # "ok" as the spoke's generated device library, one at a time. The step
+      # fails when image_picker_ios builds (its Swift target must keep failing
+      # on the header from the unbuilt image_picker_ios_objc target until
+      # POD-1 lands); the other results are printed and recorded without
+      # gating yet, so a later item flips them in build_expected.json.
+      - name: iOS plugin build matrix (e2e/ios_plugin_matrix)
+        if: matrix.workspace == 'ios_plugin_matrix'
+        working-directory: e2e/ios_plugin_matrix
+        run: python3 run_matrix.py --mode build
       # The simulator runtime behind `manual`: `//...` never picks up
       # `:verify_ios_simulator_test`, so the ffi_example leg runs it by name.
       # No `continue-on-error`: a failing simulator run fails the job.
@@ -324,6 +341,13 @@ jobs:
             exit 1
           fi
           grep -F 'cycle in ' cycle_break_output.log
+      # The Linux half of POD-2: one `bazel query` per pinned real plugin in
+      # e2e/ios_plugin_matrix, compared with expected.json. No
+      # continue-on-error: a change that fixes or breaks a plugin fails the
+      # job, and a later item flips the expectation.
+      - name: iOS plugin fetch matrix (e2e/ios_plugin_matrix)
+        working-directory: e2e/ios_plugin_matrix
+        run: python3 run_matrix.py
       - name: Report cache sizes
         if: always()
         run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true
