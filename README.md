@@ -234,6 +234,22 @@ A `path:` entry with `relative: true` in the lock is resolved against the lock f
 
 The lock must belong to the root module. A `relative: true` path resolves in the lock-owning module, and module-extension label attributes already resolve in the defining module while the spoke's `workspace_root` is always the root module, so a lock owned by a non-root module has no repository-local root to resolve against; resolving it in the consumer workspace would silently link the wrong directory. A path dependency locked by another module therefore fails the extension evaluation, naming the hub, the package, and the owning module — declare the `path:` dependency in the root module's own lock instead.
 
+### Breaking a repository cycle
+
+When pub resolves two packages that depend on each other — `dio` and `dio_web_adapter` are the common pair — one Bazel repository per package forms a repository cycle: `flutter.pub` creates a spoke for each, and each spoke names the other's spoke in `deps`. `cycle_breaks` drops only the named spoke-to-spoke edges; both packages still get their spokes, hub aliases, and `android:all_android_plugin_libs` entries.
+
+```starlark
+flutter.pub(
+    name = "deps",
+    lock = "//:pubspec.lock",
+    cycle_breaks = {"dio": ["dio_web_adapter"]},
+)
+```
+
+Each key and listed dependency must name a package in the lock: a key that does not is rejected at extension evaluation, naming `flutter.pub(cycle_breaks = ...)` and the entry. A listed dependency the key's own `pubspec.yaml` does not declare fails that spoke's fetch with the same naming. An empty list drops nothing.
+
+Dropping an edge is safe only when the dependency is reached through a conditional import for a platform this build does not target: the Dart code that needs it is not compiled, so the missing edge removes only the Bazel repository cycle. If the build does target that platform, the break removes a library the code needs and the build fails. This attribute is an interim escape hatch; the merged-spoke design will make `cycle_breaks` unnecessary.
+
 ### Platform- and flavor-conditional assets
 
 A pub package's `flutter.assets` entries may carry `platforms` and `flavors` lists, and the bundle keeps exactly what `flutter_tools` keeps (verified against Flutter 3.47.7: `asset.dart` `matchesFlavor` at line 1532 runs before `matchesPlatform` at line 1544 in `ManifestAssetBundle`, lines 1119–1128; `TargetPlatform.osName` in `build_info.dart`, line 701). Flavor is checked first: a flavor-restricted entry bundles only when a flavor is selected, and rules_flutter selects none yet, so flavor-restricted entries bundle nowhere — on every platform, `tester` included. Then platform: an empty list or the `tester` platform keeps the asset, anything else must name the target platform. So an Android build bundles `android`-listed entries but not `web`-listed ones, while a widget test bundles every platform's entries (but still no flavor-restricted ones).
