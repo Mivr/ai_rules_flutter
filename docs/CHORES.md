@@ -96,12 +96,17 @@ The latest tag is the current stable release.
 2. Move the current-release `single_version_override` when a newer release is
    adopted, and update the table's `current` entry
 3. Keep the e2e workspaces at the declared floors, not at the current
-   releases; `e2e/min_versions` proves the floors and the transitive lifts
+   releases; `e2e/min_versions` proves the floors and the transitive lifts. On
+   Linux `//...` builds the Dart app, the resolved-graph test and the Android
+   leg; on macOS it builds the Dart app, that test and both Apple legs, while
+   the Linux-only Android leg is reported incompatible.
 4. Regenerate the root lock file (the e2e locks are intentionally stale)
 
 **Verification**: `bazel test //flutter/tests/...`,
 `cd e2e/min_versions && bazel test //...`, and the root lock passes with
-`--lockfile_mode=error`.
+`--lockfile_mode=error`. The Android leg's floor proof is
+`cd e2e/min_versions && bazel test //:android_build_test` on Linux, which the
+Linux job runs.
 
 **Automation**: `/bump-deps` slash command.
 

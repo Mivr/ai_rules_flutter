@@ -159,6 +159,26 @@ dart_test(
     ],
 )
 
+# Android floor-leg guard: `e2e/min_versions`' `android_build_test` must keep
+# building `:app_android` and stay compatible with Linux only, so macOS skips
+# it without a C++ toolchain while Linux still builds it. Same discovery
+# mechanism as the guards above.
+dart_test(
+    name = "min_versions_android_guard_test",
+    size = "small",
+    data = ["min_versions_android_guard_test.dart"],
+    env = {"GUARD_ROOT_ANCHOR": "$(rlocationpath :min_versions_android_guard_test.dart)"},
+    env_inherit = ["BUILD_WORKSPACE_DIRECTORY"],
+    main = "min_versions_android_guard_test.dart",
+    tags = [
+        "external",
+        "no-sandbox",
+    ],
+    deps = [
+        "@dev_tool_deps//:test",
+    ],
+)
+
 # Bootstrap template guard: the three `flutter_integration_test` bootstrap
 # templates keep the program text the Starlark unit tests cannot read (they see
 # only the substitutions), and every placeholder the rules substitute is still

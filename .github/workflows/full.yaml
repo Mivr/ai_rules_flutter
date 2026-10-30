@@ -102,10 +102,11 @@ jobs:
           - workspace: codegen
             shard: none
             cache-save: false
-          # The version-floor fixture: full //... incl. the Android leg (the
-          # runner's unzip/python3 satisfy the AAR extractors) and both
-          # Apple legs, all against every declared dependency floor, plus the
-          # resolved-graph assertion that names the transitive lifts.
+          # The version-floor fixture on macOS: both Apple legs, the Dart app
+          # and the resolved-graph assertion against every declared dependency
+          # floor. The Android leg is Linux-only, so //... reports it
+          # incompatible here; the Linux job builds it (the runner's
+          # unzip/python3 satisfy the AAR extractors).
           - workspace: min_versions
             shard: none
             cache-save: false

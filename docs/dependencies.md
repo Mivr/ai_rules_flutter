@@ -64,8 +64,10 @@ That workspace also downloads its Android SDK and NDK from Google with
 checked-in sha256 values (`e2e/min_versions/android_repositories.bzl`) instead
 of reading `ANDROID_HOME`/`ANDROID_NDK_HOME`. The floor build is therefore the
 same on a developer host, a CI image with a preinstalled SDK, and the gate,
-whose clean environment exports neither variable; the NDK repository is empty
-on non-Linux hosts, where only the Apple legs run.
+whose clean environment exports neither variable. The NDK repository is empty
+on non-Linux hosts, where `//:android_build_test` is reported incompatible, so
+macOS proves the Apple legs, the Dart app and the resolved floor table while
+the Linux job builds the Android leg against the same floors.
 
 ## This repository's own builds
 
