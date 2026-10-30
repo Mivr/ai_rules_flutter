@@ -18,7 +18,16 @@ load(
 load("//flutter/private:flutter_ios_application.bzl", "flutter_ios_framework", "flutter_ios_native_frameworks")
 load("//flutter/private:flutter_xtool_bundle.bzl", "flutter_darwin_xcframework_import", "flutter_xtool_ios_bundle")
 load("//flutter/private:ios_entitlements.bzl", "resolve_ios_entitlements")
-load(":apple_bundling.bzl", "fake_application", "fake_macho_binary", "fake_xcframework", "macho_verify_probe", "outputs_under_target_dir_test")
+load(
+    ":apple_bundling.bzl",
+    "apple_plugin_fixtures",
+    "fake_application",
+    "fake_macho_binary",
+    "fake_xcframework",
+    "ios_apple_plugin_analysis_tests",
+    "macho_verify_probe",
+    "outputs_under_target_dir_test",
+)
 
 def _ios_device_transition_impl(_settings, _attr):
     return {
@@ -1321,3 +1330,18 @@ def _registrant_tests(name):
         name + "_reg_typo_fails",
         name + "_excl_app_registrant_groups",
     ]
+
+def ios_apple_plugin_test_suite(name):
+    """Declares the iOS Apple plugin shape tests.
+
+    Args:
+        name: The test_suite name.
+    """
+    fixtures = apple_plugin_fixtures(name, "ios")
+    native.test_suite(
+        name = name,
+        tests = [
+            ":" + t
+            for t in ios_apple_plugin_analysis_tests(name, fixtures)
+        ],
+    )

@@ -154,6 +154,11 @@ jobs:
       - name: bazel test Apple bundles (e2e/hello_world)
         working-directory: e2e/hello_world
         run: bazel test //:macos_bundle_build_test //:ios_bundle_build_test --test_output=errors
+      # A real ObjC compile against a Swift module's generated header. It
+      # cannot run on Linux, where the ObjC half does not compile.
+      - name: bazel test mixed ObjC + Swift plugin (e2e/plugin_example)
+        working-directory: e2e/plugin_example
+        run: bazel test //mixed_plugin:mixed_plugin_build_test --test_output=errors
       # The same Apple legs against the minimum supported dependency floors:
       # the Linux job below already proves min_versions' Dart app, kernel,
       # dart_test and Android leg, so only the macOS-gated tests run here.

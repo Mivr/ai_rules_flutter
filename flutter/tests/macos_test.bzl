@@ -20,7 +20,16 @@ load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
 load("//flutter/private:flutter_macos_application.bzl", "flutter_macos_framework", "flutter_macos_native_libs")
 load("//flutter/private:flutter_xtool_bundle.bzl", "flutter_darwin_xcframework_import", "flutter_xtool_macos_bundle")
 load("//flutter/private:validation.bzl", "is_valid_bundle_id", "minimum_os_version_is_below")
-load(":apple_bundling.bzl", "fake_application", "fake_macho_binary", "fake_xcframework", "macho_verify_probe", "outputs_under_target_dir_test")
+load(
+    ":apple_bundling.bzl",
+    "apple_plugin_fixtures",
+    "fake_application",
+    "fake_macho_binary",
+    "fake_xcframework",
+    "macho_verify_probe",
+    "macos_apple_plugin_analysis_tests",
+    "outputs_under_target_dir_test",
+)
 
 def _macos_arm64_transition_impl(_settings, _attr):
     return {
@@ -1453,5 +1462,20 @@ def macos_test_suite(name):
             ":" + t
             for t in [name + "_bundle_id", name + "_minimum_os_version"] +
                      _bundling_tests(name)
+        ],
+    )
+
+def macos_apple_plugin_test_suite(name):
+    """Declares the macOS Apple plugin shape tests.
+
+    Args:
+        name: The test_suite name.
+    """
+    fixtures = apple_plugin_fixtures(name, "macos")
+    native.test_suite(
+        name = name,
+        tests = [
+            ":" + t
+            for t in macos_apple_plugin_analysis_tests(name, fixtures)
         ],
     )
