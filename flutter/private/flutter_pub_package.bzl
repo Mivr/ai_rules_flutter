@@ -29,6 +29,7 @@ surface small).
 
 load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version", "make_dart_library_build_content")
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_deps", "parse_pubspec_sdk_constraint", "pubspec_sdk_constraint_error")
+load("//flutter/private:flutter_pub_cycle_breaks.bzl", "apply_cycle_breaks")
 load("//flutter/private:flutter_pub_scan.bzl", "fetch_hosted_archive", "scan_hosted_archive", "walk_hosted_package")
 load("//flutter/private:flutter_pubspec.bzl", "asset_flavor_error", "parse_flutter_assets_block", "parse_flutter_plugin_block", "parse_pubspec")
 load(":asset_uri.bzl", "normalize_spoke_asset_block", "normalize_spoke_assets", "normalize_spoke_fonts", "normalize_spoke_shaders")
@@ -2213,9 +2214,16 @@ def _flutter_pub_path_package_impl(ctx):
 def _generate_spoke(ctx):
     """Runs the shared spoke pipeline: pubspec in, BUILD content out."""
     pubspec = _read_spoke_pubspec(ctx)
+    cycle_result = apply_cycle_breaks(
+        ctx.attr.package_name,
+        pubspec.bazel_deps,
+        ctx.attr.cycle_breaks,
+    )
+    if cycle_result.error:
+        fail(cycle_result.error)
 
     # Build full label strings for sibling spoke repos.
-    dep_labels = _spoke_dep_labels(ctx, pubspec.bazel_deps, pubspec.asset_block)
+    dep_labels = _spoke_dep_labels(ctx, cycle_result.dependencies, pubspec.asset_block)
 
     # Pre-compute the pub-asset attr inputs once. Used by either branch
     # below (plugin vs library).
@@ -2339,6 +2347,14 @@ flutter_pub_package = repository_rule(
             doc = "All hosted package names in the lock file (for dep filtering).",
             default = [],
         ),
+        "cycle_breaks": attr.string_list(
+            doc = "Dependency names whose spoke-to-spoke edge is left out of " +
+                  "this package's `deps`. The extension passes the " +
+                  "`flutter.pub(cycle_breaks = ...)` value for this package; " +
+                  "each entry must name a dependency this package's own " +
+                  "pubspec declares. Empty drops nothing.",
+            default = [],
+        ),
         "code_assets": attr.string_list(
             doc = "Labels of `dart_code_asset` targets standing in for this " +
                   "package's build hook. Resolved by the extension from " +
@@ -2395,6 +2411,11 @@ flutter_pub_path_package = repository_rule(
         ),
         "lock_packages": attr.string_list(
             doc = "All package names in the lock file (for dep filtering).",
+            default = [],
+        ),
+        "cycle_breaks": attr.string_list(
+            doc = "Dependency names whose spoke-to-spoke edge is left out of " +
+                  "this package's `deps`, same as `flutter_pub_package`.",
             default = [],
         ),
         "code_assets": attr.string_list(

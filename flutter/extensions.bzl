@@ -24,6 +24,7 @@ load("@rules_dart//dart/ext:registry.bzl", "curated_code_assets")
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_lock")
 load("//flutter/private:artifact_urls.bzl", "source_strip_prefix")
 load("//flutter/private:flutter_gen_l10n_repo.bzl", "flutter_gen_l10n_repo")
+load("//flutter/private:flutter_pub_cycle_breaks.bzl", "cycle_breaks_lock_error")
 load("//flutter/private:flutter_pub_lock_hub.bzl", "flutter_pub_lock_hub")
 load("//flutter/private:flutter_pub_maven.bzl", "path_spoke_maven_inputs")
 load("//flutter/private:flutter_pub_overlays.bzl", "hub_overlay_roots")
@@ -157,6 +158,24 @@ _flutter_pub = tag_class(
                   "Suppresses the unreplaced-hook error for them. This is a " +
                   "declaration you make deliberately; it is never a default.",
             default = [],
+        ),
+        "cycle_breaks": attr.string_list_dict(
+            doc = "Package name -> dependency names whose pubspec edge is " +
+                  "left out of that package's spoke `deps`, so two locked " +
+                  "packages that depend on each other (for example `dio` <-> " +
+                  "`dio_web_adapter`) no longer form a Bazel repository " +
+                  "cycle. Both packages keep their spokes, hub aliases and " +
+                  "`android:all_android_plugin_libs` entries; only the named " +
+                  "spoke-to-spoke edge is dropped. Dropping an edge is safe " +
+                  "only when the dependency is reached through a conditional " +
+                  "import for a platform this build does not target. Every " +
+                  "key and listed dependency must name a package in the lock, " +
+                  "and each listed dependency must be one the key's own " +
+                  "pubspec declares; anything else fails evaluation or the " +
+                  "spoke fetch. It is an interim escape hatch: the " +
+                  "merged-spoke design will make it unnecessary. Empty by " +
+                  "default and never given a built-in default.",
+            default = {},
         ),
         "android_maven_deps": attr.string_dict(
             doc = "`group:artifact` -> Bazel label additions to the built-in " +
@@ -564,6 +583,7 @@ def _create_hosted_spokes(hub_name, hosted, all_package_names, user_overlay_root
             base_url = desc.get("url", "https://pub.dev") if type(desc) == "dict" else "https://pub.dev",
             hub_name = hub_name,
             lock_packages = all_package_names,
+            cycle_breaks = pub_tag.cycle_breaks.get(name, []),
             overlay_roots = user_overlay_roots + ["@rules_flutter//ext:BUILD.bazel"],
             # rules_dart's curated registry is the single source of
             # truth for which pub package a Bazel-built native library
@@ -603,6 +623,7 @@ def _create_path_spokes(hub_name, path_pkgs, all_package_names, user_overlay_roo
             version = path_info.version,
             hub_name = hub_name,
             lock_packages = all_package_names,
+            cycle_breaks = pub_tag.cycle_breaks.get(name, []),
             overlay_roots = user_overlay_roots + ["@rules_flutter//ext:BUILD.bazel"],
             code_assets = curated_code_assets(name, path_info.version),
             ignore_hook = name in ignore_hooks,
@@ -722,6 +743,9 @@ def _register_pub_hub(module_ctx, pub_tag, selected_info, merged, user_overlay_r
     _check_pub_flutter_floor(lock_content, toolchain_info, pub_tag)
 
     hosted, path_pkgs, sdk_flutter, all_package_names = _classify_lock_packages(hub_name, pub_tag.lock, lock_pkgs)
+    cycle_error = cycle_breaks_lock_error(pub_tag.cycle_breaks, all_package_names)
+    if cycle_error:
+        fail(cycle_error)
     ignore_hooks = {pkg_name: True for pkg_name in pub_tag.ignore_hooks}
 
     # Create hub repo with aliases for all packages plus the

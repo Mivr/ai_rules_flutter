@@ -147,6 +147,12 @@ bzl_library(
 )
 
 bzl_library(
+    name = "flutter_pub_cycle_breaks",
+    srcs = ["flutter_pub_cycle_breaks.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+)
+
+bzl_library(
     name = "flutter_android_application",
     srcs = ["flutter_android_application.bzl"],
     visibility = ["//flutter:__subpackages__"],
