@@ -390,8 +390,22 @@ def android_bundle_archives(target_files):
 
 
 def web_bundle_roots(target_files):
-    """Declared web build output directories among a target's outputs."""
-    return sorted({path for path in target_files if os.path.isdir(path)})
+    """The declared web deployment root among a target's output directories.
+
+    A web build declares its bundle as a tree artifact, but a debug build
+    also declares DDC staging directories beside it. The deployment root
+    is the directory that carries the built index.html; a listing that
+    declares exactly one directory has that directory as its root
+    whatever it holds. Several directories with no deployment root are
+    not a bundle, so the caller fails loudly instead of hashing staging
+    trees.
+    """
+    dirs = sorted({path for path in target_files if os.path.isdir(path)})
+    roots = [path for path in dirs
+             if os.path.isfile(os.path.join(path, "index.html"))]
+    if roots or len(dirs) != 1:
+        return roots
+    return dirs
 
 
 def archive_entry_hashes(archive_path):

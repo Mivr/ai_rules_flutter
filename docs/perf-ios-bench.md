@@ -251,6 +251,11 @@ mode with `ab` set fails at once with a clear message):
   lockfile, treatment the committed one. The `lockfile` input must be
   `none` here.
 
+The A/B comparison stays on the two iOS configurations (`IOS_CONFIGS` in
+`tools/perf/run_rep.py`): the Android and Web configurations are SOL-only
+series, so `ios-ab.json` and the A/B lock build are exactly what they were
+before those series existed.
+
 With `ab` on the run writes `ios-ab.json` (artifact `ios-ab`, 3-day
 retention) instead of `ios-sol.json`:
 
@@ -431,9 +436,10 @@ those files) — compared by entry path and content, so archive metadata
 such as zip timestamps is not part of the proof. Android hashes every
 entry of each declared `.apk`/`.aab` archive the same way (zip
 timestamps, extra fields and entry order ignored); Web hashes every
-file under each declared web build output directory at its relative
-path. A listing with no bundle fails loudly instead of globbing. A
-step that exits non-zero,
+file under the declared web build output directory at its relative
+path — the directory carrying the built `index.html`, not the DDC
+staging directories a debug build also declares. A listing with no
+bundle fails loudly instead of globbing. A step that exits non-zero,
 times out or cannot start — or any verify entry that differs
 afterwards — reports `identical: false` with no SOL number, plus the
 step (mnemonic, exit, last stderr lines) and the differing entries

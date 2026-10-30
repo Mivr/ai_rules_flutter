@@ -616,6 +616,46 @@ class VerifyFilesTest(unittest.TestCase):
                          ["assets/fonts/font.ttf", "index.html",
                           "main.dart.js"])
 
+    def test_plan_web_debug_hashes_only_the_deployment_root(self):
+        # A debug web build also declares DDC staging directories beside
+        # the bundle; only the bundle that carries index.html is the
+        # deployment output the proof covers.
+        root = os.path.join(self.tmp, "execroot")
+        bundle = os.path.join(root, "bazel-out", "x", "bin", "app",
+                              "app_web_web")
+        staging = os.path.join(root, "bazel-out", "x", "bin", "app",
+                               "app_web_dev")
+        os.makedirs(bundle)
+        os.makedirs(staging)
+        for path, body in [(os.path.join(bundle, "index.html"), b"page"),
+                           (os.path.join(bundle, "main.dart.js"), b"js"),
+                           (os.path.join(staging, "main.dart"), b"staged")]:
+            with open(path, "wb") as fh:
+                fh.write(body)
+        capture = FakeCapture(root, [bundle, staging])
+        plan = plan_verify_snapshot(capture, self.tmp, self.tmp, root,
+                                    "web_debug", True)
+        snapshot = read_verify_snapshot(plan)
+        self.assertEqual(sorted(k.split("::", 1)[1] for k in snapshot),
+                         ["index.html", "main.dart.js"])
+
+    def test_plan_web_without_deployment_root_fails(self):
+        # Several declared directories and none carrying index.html are
+        # staging trees, not a web build output: fail loudly.
+        root = os.path.join(self.tmp, "execroot")
+        first = os.path.join(root, "bazel-out", "x", "bin", "app", "one")
+        second = os.path.join(root, "bazel-out", "x", "bin", "app", "two")
+        os.makedirs(first)
+        os.makedirs(second)
+        for path in (os.path.join(first, "a.dart"),
+                     os.path.join(second, "b.dart")):
+            with open(path, "wb") as fh:
+                fh.write(b"staged")
+        capture = FakeCapture(root, [first, second])
+        with self.assertRaisesRegex(RuntimeError, "no bundle"):
+            plan_verify_snapshot(capture, self.tmp, self.tmp, root,
+                                 "web_debug", True)
+
     def test_plan_android_without_archive_fails(self):
         root = os.path.join(self.tmp, "execroot")
         dill = os.path.join(root, "bazel-out", "x", "app.dill")
