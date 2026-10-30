@@ -7,6 +7,7 @@ load(":android_pure_go_test.bzl", "android_pure_go_test_suite")
 load(":android_release_signing_test.bzl", "android_release_signing_test_suite")
 load(":aot_flags_test.bzl", "aot_flags_test_suite")
 load(":app_entrypoint_test.bzl", "app_entrypoint_test_suite")
+load(":apple_objc_deps_test.bzl", "apple_objc_deps_test_suite")
 load(":artifact_urls_test.bzl", "artifact_urls_test_suite")
 load(":asset_bundle_test.bzl", "asset_bundle_test_suite")
 load(":asset_keys_test.bzl", "asset_keys_test_suite")
@@ -323,6 +324,8 @@ local_sdk_test_suite(name = "local_sdk_test")
 profile_mode_test_suite(name = "profile_mode_test")
 
 app_entrypoint_test_suite(name = "app_entrypoint_test")
+
+apple_objc_deps_test_suite(name = "apple_objc_deps_test")
 
 pub_lock_sdks_test_suite(name = "pub_lock_sdks_test")
 

@@ -1,5 +1,7 @@
+load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@rules_apple//apple:ios.bzl", "ios_application")
 load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_test")
 load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_library")
 load(
@@ -7,6 +9,7 @@ load(
     "IOS_DEFAULT_LAUNCH_STORYBOARD",
     "IOS_DEFAULT_MAIN_STORYBOARD",
     "IOS_MINIMUM_OS_VERSION",
+    "flutter_apple_plugin_library",
     "flutter_ios_app",
     "flutter_ios_engine",
     "flutter_ios_framework_gen",
@@ -19,6 +22,7 @@ load(
 )
 load("@rules_swift//swift:swift.bzl", "swift_library")
 load(":ios_device_opt.bzl", "ios_device_opt_bundle")
+load(":plugin_dep/plugin_ios_build.bzl", "plugin_ios_build")
 load(":simulator_mode_test.bzl", "simulator_fastbuild_refused_test")
 
 exports_files(["pubspec.lock"])
@@ -350,6 +354,47 @@ ios_application(
 # =============================================================================
 # Tests
 # =============================================================================
+
+# A plugin's inner ObjC target must see a public header from a declared dep.
+# The build test is macOS-only; its transition builds the fixture for iOS,
+# where the Flutter framework import comes from. A Linux `bazel test //...`
+# reports the suite's targets incompatible.
+cc_library(
+    name = "plugin_dep_headers",
+    srcs = ["plugin_dep/greeting.c"],
+    hdrs = ["plugin_dep/greeting.h"],
+    target_compatible_with = ["@platforms//os:ios"],
+)
+
+flutter_apple_plugin_library(
+    name = "plugin_objc_dep_library",
+    srcs = ["plugin_dep/greeting_plugin.m"],
+    module_name = "plugin_objc_dep",
+    platform = "ios",
+    target_compatible_with = ["@platforms//os:ios"],
+    deps = [":plugin_dep_headers"],
+)
+
+plugin_ios_build(
+    name = "plugin_objc_dep_ios_build",
+    target = ":plugin_objc_dep_library",
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
+build_test(
+    name = "plugin_objc_dep_headers_build_test",
+    target_compatible_with = ["@platforms//os:macos"],
+    targets = [":plugin_objc_dep_ios_build"],
+)
+
+# The suite named for the proof expands to the macOS-only build test. Naming
+# the build test directly would make an explicit `bazel test` on Linux fail
+# ("incompatible and explicitly requested") instead of skipping it; through
+# the suite the same command reports the target skipped.
+test_suite(
+    name = "plugin_objc_dep_headers_test",
+    tests = [":plugin_objc_dep_headers_build_test"],
+)
 
 flutter_ios_simulator_build_test(
     name = "ios_app_build_test",
