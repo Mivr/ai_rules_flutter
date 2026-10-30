@@ -297,6 +297,27 @@ jobs:
             echo "failing workspaces:$failed"
             exit 1
           fi
+      # Cycle-break proof: e2e/pub_cycle_breaks holds one lock whose
+      # `cycle_a` and `cycle_b` path packages each declare the other, plus an
+      # app depending on both. `deps` breaks only `cycle_a`'s edge to
+      # `cycle_b`, so that spoke resolves. `deps_cycle` is the same lock with
+      # no break, so its `cycle_a` must fail with a cycle; the grep pins the
+      # failure text so a different error cannot pass as red. `cquery`, not
+      # `query`, is what forces dependency analysis: plain `query` reads the
+      # BUILD file and never follows the deps edge that closes the cycle. No
+      # `continue-on-error`: either unexpected result fails the job.
+      - name: Cycle-breaks resolve the broken hub and leave the raw twin red
+        working-directory: e2e/pub_cycle_breaks
+        run: |
+          bazel query @deps__cycle_a//:all
+          status=0
+          bazel cquery @deps_cycle__cycle_a//:all >cycle_break_output.log 2>&1 || status=$?
+          cat cycle_break_output.log
+          if [ "$status" -eq 0 ]; then
+            echo "expected the unbroken twin to fail with a cycle, but it passed"
+            exit 1
+          fi
+          grep -F 'cycle in ' cycle_break_output.log
       - name: Report cache sizes
         if: always()
         run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true
