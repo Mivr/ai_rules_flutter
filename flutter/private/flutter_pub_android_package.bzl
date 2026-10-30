@@ -642,7 +642,11 @@ def detect_android_plugin_sources(ctx, plugin_block):
         if android_src_dir or android_has_resources:
             android_extra_maven_labels = resolve_plugin_maven_deps(ctx, android_build.path, android_build.content)
             android_manifest = _detect_android_manifest(ctx)
-            android_consumer_proguard_specs = detect_consumer_proguard_specs(ctx, android_build.path, android_build.content)
+            android_consumer_proguard_specs = detect_consumer_proguard_specs(
+                ctx,
+                android_build.path,
+                android_build.content,
+            )
 
     return struct(
         src_dir = android_src_dir,

@@ -465,7 +465,110 @@ def _classify_lock_packages(hub_name, lock_label, lock_pkgs):
             print("flutter.pub: skipping package \"{}\" (source: {}). Only hosted, path, and Flutter SDK packages are supported.".format(name, source))
     return hosted, path_pkgs, sdk_flutter, all_package_names
 
-def _create_hosted_spokes(hub_name, hosted, all_package_names, user_overlay_roots, pub_tag, ignore_hooks):
+def _overlay_version_candidates(version):
+    """The version-specificity ladder an overlay lookup walks for a package.
+
+    Args:
+        version: The locked package version string.
+
+    Returns:
+        `<major>.<minor>.<patch>`, `<major>.<minor>`, `<major>` and the bare
+        package directory, in that order.
+    """
+    parts = version.split(".")
+    candidates = []
+    if len(parts) >= 3:
+        candidates.append("{}.{}.{}".format(parts[0], parts[1], parts[2]))
+    if len(parts) >= 2:
+        candidates.append("{}.{}".format(parts[0], parts[1]))
+    if len(parts) >= 1 and parts[0]:
+        candidates.append(parts[0])
+    candidates.append("")
+    return candidates
+
+def _overlay_template_path(module_ctx, overlay_label, package_name, version, relpath):
+    """The first overlay template path for one package and version, or None.
+
+    Mirrors the spoke's own ladder (`<pkg>/<version>/<relpath>` down to
+    `<pkg>/<relpath>`) only to answer whether an overlay replaces the spoke;
+    it neither reads the template nor substitutes into it.
+
+    Args:
+        module_ctx: The module extension context.
+        overlay_label: One overlay root label.
+        package_name: The pub package the overlay belongs to.
+        version: The locked package version string.
+        relpath: The template path inside the package, e.g. `BUILD.bazel.tpl`.
+
+    Returns:
+        The template's `Path`, or None when no candidate exists.
+    """
+    anchor = module_ctx.path(_overlay_root_label(overlay_label))
+    pkg_dir = anchor.dirname.get_child(package_name)
+    for candidate in _overlay_version_candidates(version):
+        tpl = pkg_dir.get_child(candidate) if candidate else pkg_dir
+        for part in relpath.split("/"):
+            tpl = tpl.get_child(part)
+        if tpl.exists:
+            return tpl
+    return None
+
+_BUNDLED_OVERLAY_ROOT = "@rules_flutter//ext:BUILD.bazel"
+
+def _spoke_overlay_roots(user_overlay_roots):
+    """The full overlay root list a spoke resolves, bundled root included.
+
+    Args:
+        user_overlay_roots: Roots from `flutter.plugin_overlays`, in order.
+
+    Returns:
+        The user roots followed by the bundled `@rules_flutter//ext` root.
+    """
+    return user_overlay_roots + [_BUNDLED_OVERLAY_ROOT]
+
+def _overlay_root_label(overlay_label):
+    """Resolve an overlay root to a label `module_ctx.path` can read.
+
+    Tag roots arrive as `Label` objects. The bundled root is the one string
+    in the list, written in the consumer-visible `@rules_flutter` spelling;
+    inside this module the same tree is `//ext`, so resolve it that way
+    rather than asking `module_ctx.path` to interpret the string as a path.
+
+    Args:
+        overlay_label: A `Label` from a tag, or the bundled root string.
+
+    Returns:
+        A `Label` naming the overlay root's anchor file.
+    """
+    if type(overlay_label) == "string":
+        if overlay_label != _BUNDLED_OVERLAY_ROOT:
+            fail("flutter.pub: unexpected overlay root string " + repr(overlay_label))
+        return Label("//ext:BUILD.bazel")
+    return overlay_label
+
+def _overlay_replaces_spoke(module_ctx, overlay_roots, package_name, version):
+    """Whether an overlay supplies the package's top-level BUILD template.
+
+    An overlay spoke never aliases an Android repository: it emits the
+    overlay's own `android/BUILD.bazel.tpl` when present and the empty stub
+    otherwise. Creating a repository it cannot reference would be dead
+    state, so the extension skips it for every overlaid package.
+
+    Args:
+        module_ctx: The module extension context.
+        overlay_roots: Candidate overlay root labels, in precedence order.
+        package_name: The pub package the overlay belongs to.
+        version: The locked package version string.
+
+    Returns:
+        True when the first matching overlay root has a top-level template.
+    """
+    for overlay_label in overlay_roots:
+        if _overlay_template_path(module_ctx, overlay_label, package_name, version, "BUILD.bazel.tpl"):
+            return True
+    return False
+
+def _create_hosted_spokes(hub_name, hosted, all_package_names, user_overlay_roots, pub_tag, ignore_hooks, module_ctx):
     """Creates one `flutter_pub_package` spoke per hosted package.
 
     flutter.pub() routes every hosted package through flutter_pub_package —
@@ -478,11 +581,19 @@ def _create_hosted_spokes(hub_name, hosted, all_package_names, user_overlay_root
     reads the hub's resolved file and checksum table at fetch time, so no
     spoke carries hub-wide pin state in its repository attributes.
 
-    Each package also gets a `<hub>-android-<package>` repository holding
-    its Gradle model. It is declared here but fetched only when an Android
-    target analyses the spoke's `android:lib` alias; a package with no
-    Android platform never references it.
+    A package that an overlay replaces gets no Android repository: its
+    spoke emits the overlay's Android template or the empty stub, never an
+    alias. Every other package also gets a `<hub>-android-<package>`
+    repository holding its Gradle model. It is declared here but fetched
+    only when an Android target analyses the spoke's `android:lib` alias; a
+    package with no Android platform never references it.
+
+    A hosted package's pubspec is not available at extension time (only the
+    lock is), so its Android repository is declared for the spoke to choose
+    from lazily; the spoke references it only when the pubspec declares the
+    `android` platform.
     """
+    overlay_roots = _spoke_overlay_roots(user_overlay_roots)
     for name, info in hosted.items():
         desc = info.get("description", {})
         version = info.get("version", "")
@@ -504,7 +615,7 @@ def _create_hosted_spokes(hub_name, hosted, all_package_names, user_overlay_root
             lock_packages = all_package_names,
             cycle_breaks = pub_tag.cycle_breaks.get(name, []),
             plugin_defines = pub_tag.ios_plugin_defines.get(name, []),
-            overlay_roots = user_overlay_roots + ["@rules_flutter//ext:BUILD.bazel"],
+            overlay_roots = overlay_roots,
             # rules_dart's curated registry is the single source of
             # truth for which pub package a Bazel-built native library
             # stands in for, and at which versions. Consulting it here
@@ -522,16 +633,17 @@ def _create_hosted_spokes(hub_name, hosted, all_package_names, user_overlay_root
             plugin_native_deps = swiftpm_attrs.plugin_deps,
             pubspec_lock = pub_tag.lock,
         )
-        flutter_pub_android_package(
-            name = android_package_repo_name(hub_name, name),
-            package_name = name,
-            version = version,
-            hub_name = hub_name,
-            sha256 = sha256,
-            base_url = base_url,
-            android_maven_deps = pub_tag.android_maven_deps,
-            android_maven_ignore = pub_tag.android_maven_ignore,
-        )
+        if not _overlay_replaces_spoke(module_ctx, overlay_roots, name, version):
+            flutter_pub_android_package(
+                name = android_package_repo_name(hub_name, name),
+                package_name = name,
+                version = version,
+                hub_name = hub_name,
+                sha256 = sha256,
+                base_url = base_url,
+                android_maven_deps = pub_tag.android_maven_deps,
+                android_maven_ignore = pub_tag.android_maven_ignore,
+            )
 
 def _workspace_root_of_lock(module_ctx, lock_label):
     """The workspace root holding a root-module lock file.
@@ -598,6 +710,7 @@ def _create_path_spokes(hub_name, path_pkgs, all_package_names, user_overlay_roo
     """
     maven = path_spoke_maven_inputs(pub_tag)
     workspace_root = _workspace_root_of_lock(module_ctx, pub_tag.lock)
+    overlay_roots = _spoke_overlay_roots(user_overlay_roots)
     for name, path_info in path_pkgs.items():
         swiftpm_attrs = pub_spoke_swiftpm_attrs(pub_tag, include_ios_native_deps = True, plugin_name = name)
         flutter_pub_path_package(
@@ -609,7 +722,7 @@ def _create_path_spokes(hub_name, path_pkgs, all_package_names, user_overlay_roo
             lock_packages = all_package_names,
             cycle_breaks = pub_tag.cycle_breaks.get(name, []),
             plugin_defines = pub_tag.ios_plugin_defines.get(name, []),
-            overlay_roots = user_overlay_roots + ["@rules_flutter//ext:BUILD.bazel"],
+            overlay_roots = overlay_roots,
             code_assets = curated_code_assets(name, path_info.version),
             ignore_hook = name in ignore_hooks,
             android_maven_deps = maven.deps,
@@ -620,7 +733,10 @@ def _create_path_spokes(hub_name, path_pkgs, all_package_names, user_overlay_roo
             plugin_native_deps = swiftpm_attrs.plugin_deps,
             pubspec_lock = pub_tag.lock,
         )
-        if _path_package_declares_android(module_ctx, workspace_root, path_info.path):
+        if (
+            _path_package_declares_android(module_ctx, workspace_root, path_info.path) and
+            not _overlay_replaces_spoke(module_ctx, overlay_roots, name, path_info.version)
+        ):
             flutter_pub_android_package(
                 name = android_package_repo_name(hub_name, name),
                 package_name = name,
@@ -774,7 +890,7 @@ def _register_pub_hub(module_ctx, pub_tag, selected_info, merged, user_overlay_r
     )
 
     _create_swiftpm_spokes(hub_name, pub_tag, module_ctx)
-    _create_hosted_spokes(hub_name, hosted, all_package_names, user_overlay_roots, pub_tag, ignore_hooks)
+    _create_hosted_spokes(hub_name, hosted, all_package_names, user_overlay_roots, pub_tag, ignore_hooks, module_ctx)
     _create_path_spokes(hub_name, path_pkgs, all_package_names, user_overlay_roots, pub_tag, ignore_hooks, module_ctx)
     _create_sdk_spokes(hub_name, sdk_flutter, all_package_names, toolchain_info, merged, toolchain_info.version)
 
