@@ -1103,6 +1103,38 @@ def _signing_tests(name):
         tags = ["manual"],
     )
 
+    xtool_unsigned = name + "_xtool_unsigned_ios_app"
+    flutter_ios_app(
+        name = xtool_unsigned,
+        application = ":" + name + "_fake_release_app",
+        bundle_id = "com.example.unsigned.xtool",
+        srcs = runtime_srcs,
+        info_plist = info_plist,
+        engine = ":" + name + "_fake_ios_xcframework",
+        entitlements = False,
+        app_icons = [],
+        features = ["caller_feature"],
+        signing = False,
+        backend = "xtool",
+        tags = ["manual"],
+    )
+
+    xtool_zsign = name + "_xtool_unsigned_zsign_ios_app"
+    flutter_ios_app(
+        name = xtool_zsign,
+        application = ":" + name + "_fake_release_app",
+        bundle_id = "com.example.unsigned.zsign",
+        srcs = runtime_srcs,
+        info_plist = info_plist,
+        engine = ":" + name + "_fake_ios_xcframework",
+        entitlements = False,
+        app_icons = [],
+        zsign = ":" + name + "_fake_ios_runner_bin",
+        signing = False,
+        backend = "xtool",
+        tags = ["manual"],
+    )
+
     after = native.existing_rules()
     _ios_signing_surface_test(
         name = name + "_signed_signing_surface",
@@ -1112,16 +1144,36 @@ def _signing_tests(name):
         expected_tags = ["manual"],
     )
     _ios_signing_surface_test(
-        name = name + "_unsigned_signing_surface",
-        actual_features = after[unsigned]["features"],
-        actual_tags = after[unsigned]["tags"],
-        expected_features = ["caller_feature", "disable_legacy_signing"],
+        name = name + "_xtool_unsigned_signing_surface",
+        actual_features = after[xtool_unsigned]["features"],
+        actual_tags = after[xtool_unsigned]["tags"],
+        expected_features = ["caller_feature"],
         expected_tags = ["manual"],
+    )
+    _ios_expect_failure_test(
+        name = name + "_unsigned_fails",
+        target_under_test = ":" + unsigned,
+        expected_substrings = [
+            "cannot build this app unsigned",
+            "'rules_apple' backend",
+            "'provisioning_profile' for every device build",
+            "an unsigned device bundle is not available on that backend",
+        ],
+    )
+    _ios_expect_failure_test(
+        name = name + "_xtool_unsigned_zsign_fails",
+        target_under_test = ":" + xtool_zsign,
+        expected_substrings = [
+            "signing = False conflicts with 'zsign'",
+            "an unsigned build cannot use attributes that ask for signing",
+        ],
     )
 
     return [
         name + "_signed_signing_surface",
-        name + "_unsigned_signing_surface",
+        name + "_xtool_unsigned_signing_surface",
+        name + "_unsigned_fails",
+        name + "_xtool_unsigned_zsign_fails",
     ]
 
 def ios_test_suite(name):
