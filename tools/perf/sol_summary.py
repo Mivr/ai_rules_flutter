@@ -310,6 +310,8 @@ def summarize_configs(results_dir, meta, configs):
 
 def write_summary(path, summary):
     """Writes one summary JSON file, newline-terminated and sorted."""
+    parent = os.path.dirname(os.path.abspath(path))
+    os.makedirs(parent, exist_ok=True)
     with open(path, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
 
