@@ -7,6 +7,13 @@
 /// shows an action's output on success. Every other line, errors above all,
 /// passes through unchanged, as does the exit code.
 ///
+/// Before the compiler runs, every `@<file>` in its argv is expanded as a
+/// define flagfile: each non-empty line is one argument, preserving its text,
+/// and a line that is not a `-D` argument fails with the file and line number.
+/// A nested `@<file>` expands recursively; a missing, unreadable or cyclic
+/// file fails naming the chain. This keeps define values out of the action
+/// command line while the compiler still receives them as ordinary flags.
+///
 /// Before the compiler runs, every declared source's directives are checked
 /// against the declared inputs (`directive_guard.dart`): a directive that
 /// names no declared file — a `file:` URI in any spelling, any other
@@ -53,6 +60,110 @@ library;
 import 'dart:io';
 
 import 'directive_guard.dart';
+
+/// Reads one flagfile as raw lines, empty lines included.
+typedef FlagfileReader = List<String> Function(String path);
+
+/// Reads [path] as raw lines, keeping empty lines so a refusal can name the
+/// 1-based line number a reader sees in the file.
+List<String> readFlagfileLines(String path) => File(path).readAsLinesSync();
+
+/// Expands every `@<file>` argument in [argv] as a define flagfile.
+///
+/// Each non-empty line of a flagfile is one argv element, preserving its text
+/// exactly: no shell word splitting and no quote stripping. A line naming
+/// another `@<file>` is expanded recursively. A line that is not a nested
+/// reference must start with `-D`; such a line is already a spelled compiler
+/// argument, so no `-D` prefix is added. [readFile] substitutes the filesystem
+/// in tests.
+List<String> expandDefineFlagfiles(
+  List<String> argv, {
+  FlagfileReader? readFile,
+}) {
+  final read = readFile ?? readFlagfileLines;
+  final out = <String>[];
+  for (final arg in argv) {
+    if (arg.startsWith('@')) {
+      out.addAll(expandDefineFlagfile(arg.substring(1), readFile: read));
+    } else {
+      out.add(arg);
+    }
+  }
+  return out;
+}
+
+/// Expands one define flagfile named [path], recursively.
+///
+/// [chain] names the files that included this one, so a missing, unreadable or
+/// cyclic file fails with the whole chain. A line that does not start with
+/// `-D` fails with the file and its 1-based line number. [readFile] substitutes
+/// the filesystem in tests.
+List<String> expandDefineFlagfile(
+  String path, {
+  FlagfileReader? readFile,
+  List<String> chain = const [],
+}) {
+  final read = readFile ?? readFlagfileLines;
+  return _expandDefineFlagfile(path, read, chain, <String>{});
+}
+
+List<String> _expandDefineFlagfile(
+  String path,
+  FlagfileReader read,
+  List<String> chain,
+  Set<String> visiting,
+) {
+  final identity = File(path).absolute.path;
+  final fileChain = [...chain, path];
+  if (!visiting.add(identity)) {
+    throw FormatException(
+      'define flagfile cycle: ${fileChain.join(' -> ')}',
+    );
+  }
+  try {
+    final lines = _readDefineFlagfile(path, read, fileChain);
+    final out = <String>[];
+    for (var index = 0; index < lines.length; index++) {
+      final line = lines[index];
+      if (line.isEmpty) continue;
+      if (line.startsWith('@')) {
+        out.addAll(
+          _expandDefineFlagfile(
+            line.substring(1),
+            read,
+            fileChain,
+            visiting,
+          ),
+        );
+      } else if (line.startsWith('-D')) {
+        out.add(line);
+      } else {
+        throw FormatException(
+          'define flagfile $path line ${index + 1}: expected an argument '
+          'starting with -D, got "$line"',
+        );
+      }
+    }
+    return out;
+  } finally {
+    visiting.remove(identity);
+  }
+}
+
+List<String> _readDefineFlagfile(
+  String path,
+  FlagfileReader read,
+  List<String> chain,
+) {
+  try {
+    return read(path);
+  } on FileSystemException catch (e) {
+    throw FormatException(
+      'define flagfile chain ${chain.join(' -> ')}: cannot read $path: '
+      '${e.message}',
+    );
+  }
+}
 
 const _uuid =
     '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}';
@@ -557,8 +668,9 @@ int? _refuseUndeclaredReads(
 /// objects. The sources' directives are refused before the compiler runs
 /// when they name an undeclared file, and the compiler's own read set is
 /// verified against the manifest after it runs — including that it names a
-/// declared source and the entrypoint. Nothing is read from the
-/// compile argv: flags after `--` run the compiler unchanged, and never
+/// declared source and the entrypoint. Nothing is read from the compile
+/// argv for allowances: flags after `--` run the compiler unchanged, except
+/// that `@<file>` arguments are expanded as define flagfiles first and never
 /// widen what it may read.
 Future<int> runFiltered(
   List<String> argv,
@@ -587,6 +699,14 @@ Future<int> runFiltered(
       if (path.endsWith('.dart')) path,
   ];
 
+  final List<String> cmdArgs;
+  try {
+    cmdArgs = expandDefineFlagfiles(parsed.cmdArgs);
+  } on FormatException catch (e) {
+    err.writeln('kernel_filter: ${e.message}');
+    return 2;
+  }
+
   final directiveRefusal = _refuseDisallowedDirectives(
     sources,
     inputs.fsRoots,
@@ -596,7 +716,7 @@ Future<int> runFiltered(
 
   final result = await Process.run(
     parsed.executable,
-    withForcedDependencyReport(parsed.cmdArgs),
+    withForcedDependencyReport(cmdArgs),
   );
   if (result.exitCode != 0) {
     return _reportCompilerFailure(result, out, err);

@@ -545,9 +545,7 @@ def collect_native_libs(native_deps):
     """
     libs = []
     for dep in native_deps:
-        for f in dep[DefaultInfo].files.to_list():
-            if f.extension in ("so", "dylib", "dll"):
-                libs.append(f)
+        libs.extend([f for f in dep[DefaultInfo].files.to_list() if f.extension in ("so", "dylib", "dll")])
     return libs
 
 def resolve_dev_generated_sources(paths, candidates):
@@ -596,9 +594,8 @@ def collect_binding_contracts(native_deps):
     pairs = []
     for dep in native_deps:
         if FlutterNativeLibraryInfo in dep:
-            info = dep[FlutterNativeLibraryInfo]
-            contract = tuple(info.binding_contract.to_list())
-            for lib in info.libraries.to_list():
+            contract = tuple(dep[FlutterNativeLibraryInfo].binding_contract.to_list())
+            for lib in dep[FlutterNativeLibraryInfo].libraries.to_list():
                 pairs.append(struct(library = lib, contract = contract))
         else:
             for f in dep[DefaultInfo].files.to_list():
@@ -786,19 +783,21 @@ def _kernel_compile_flags(ctx, track_widget_creation, mode, aot, assets_dir, pla
     """Merge frontend flags and defines for a kernel compile."""
 
     # Collect extra frontend_server flags from build flag attrs.
-    extra_frontend_flags = []
-    if track_widget_creation:
-        extra_frontend_flags.append("--track-widget-creation")
+    extra_frontend_flags = ["--track-widget-creation"] if track_widget_creation else []
 
     # Merge defines with mode-specific Dart VM flags. user_defines (attr +
     # extra_dart_defines flag, no mode keys) is surfaced in the return struct
     # so dev-config writers can replay it on the dev tool's frontend_server.
     user_defines = merge_dart_defines(ctx)
     all_defines = list(user_defines)
-    if mode == "profile":
-        all_defines.append("dart.vm.profile=true")
-    elif aot:
-        all_defines.append("dart.vm.product=true")
+
+    # Only `flutter_application` declares `define_flagfiles`; every other rule
+    # that shares this helper compiles exactly as it did before. The files are
+    # carried as File objects so the compile action can pass each as `@<path>`
+    # and declare it as an input without reading its contents at analysis.
+    define_flagfiles = getattr(ctx.files, "define_flagfiles", [])
+    mode_defines = ["dart.vm.profile=true"] if mode == "profile" else ["dart.vm.product=true"] if aot else []
+    all_defines.extend(mode_defines)
 
     # A debug app describes its own build to itself. `ext.rules_flutter.buildInfo`
     # hands this straight back to the dev tool, which needs it because
@@ -824,7 +823,12 @@ def _kernel_compile_flags(ctx, track_widget_creation, mode, aot, assets_dir, pla
             # which platform-filtered plugin registrant its reloads need.
             "targetPlatform": target_platform,
         }))
-    return struct(extra_frontend = extra_frontend_flags, user_defines = user_defines, all_defines = all_defines)
+    return struct(
+        extra_frontend = extra_frontend_flags,
+        user_defines = user_defines,
+        all_defines = all_defines,
+        define_flagfiles = define_flagfiles,
+    )
 
 def make_kernel_target(aot = None, platform_dill = None, target_platform = None, frontend_server_target = "flutter"):
     """Which kernel to compile: AOT or JIT, which platform dill, for which platform, through which frontend.
@@ -891,7 +895,8 @@ def _use_modular_kernel(plan, agent, reg, flags):
         plan.frontend_server_target == "flutter" and
         not reg.registrant and not agent.agent and
         not plan.native_assets_manifest and not plan.recorded_uses and
-        not flags.extra_frontend and not flags.all_defines
+        not flags.extra_frontend and not flags.all_defines and
+        not flags.define_flagfiles
     )
 
 def _modular_tools_or_none(ctx, flutter_sdk_info, packages):
@@ -955,6 +960,7 @@ def _compile_full_kernel(ctx, flutter_sdk_info, st, agent, reg, flags, plan):
         flutter_kernel_options(
             aot = plan.aot,
             defines = flags.all_defines,
+            define_flagfiles = flags.define_flagfiles,
             target = plan.frontend_server_target,
             extra_flags = flags.extra_frontend,
         ),
@@ -1606,11 +1612,8 @@ def compute_desktop_bundle_copies(artifacts, libs):
     elif artifacts.aot_output_path:
         copies.append({"src": artifacts.aot_output_path, "dst": artifacts.aot_dst})
 
-    for src_path, basename in libs.engine_basenames:
-        copies.append({"src": src_path, "dst": libs.engine_dst_prefix + basename})
-
-    for src_path, basename in libs.native_basenames:
-        copies.append({"src": src_path, "dst": libs.native_dst_prefix + basename})
+    copies.extend([{"src": p, "dst": libs.engine_dst_prefix + b} for p, b in libs.engine_basenames])
+    copies.extend([{"src": p, "dst": libs.native_dst_prefix + b} for p, b in libs.native_basenames])
 
     return copies
 
@@ -1653,6 +1656,15 @@ ANDROID_ABIS = {
     ),
 }
 
+def _android_abi(abi):
+    """The `ANDROID_ABIS` record for `abi`, failing when it is unsupported."""
+    if abi not in ANDROID_ABIS:
+        fail("Unsupported Android ABI '{}'. Supported: {}.".format(
+            abi,
+            ", ".join(ANDROID_ABIS.keys()),
+        ))
+    return ANDROID_ABIS[abi]
+
 def android_platform_for_abi(abi):
     """The Bazel platform label Android rules build for, given an ABI.
 
@@ -1662,12 +1674,7 @@ def android_platform_for_abi(abi):
     Returns:
         A Label for the platform under //flutter/platforms.
     """
-    if abi not in ANDROID_ABIS:
-        fail("Unsupported Android ABI '{}'. Supported: {}.".format(
-            abi,
-            ", ".join(ANDROID_ABIS.keys()),
-        ))
-    return ANDROID_ABIS[abi].platform
+    return _android_abi(abi).platform
 
 def android_elf_machine_for_abi(abi):
     """The ELF e_machine value native libraries must have for an ABI.
@@ -1678,12 +1685,7 @@ def android_elf_machine_for_abi(abi):
     Returns:
         The e_machine value as an int (e.g. 183 for EM_AARCH64).
     """
-    if abi not in ANDROID_ABIS:
-        fail("Unsupported Android ABI '{}'. Supported: {}.".format(
-            abi,
-            ", ".join(ANDROID_ABIS.keys()),
-        ))
-    return ANDROID_ABIS[abi].elf_machine
+    return _android_abi(abi).elf_machine
 
 def host_target_arch(ctx, flutter_sdk_info):
     """Best-effort target architecture string for Native Assets.
@@ -2073,9 +2075,8 @@ def _aspect_direct_jobs(ctx, shader_includes):
             shader_includes = shader_includes,
         )
         for entry in pub_shaders:
-            prefix = "packages/{}/".format(entry.package_name) if entry.package_name else ""
             direct_jobs.append(struct(
-                bundle_path = prefix + entry.shader_path,
+                bundle_path = ("packages/{}/".format(entry.package_name) if entry.package_name else "") + entry.shader_path,
                 file = entry.file,
                 includes = entry.includes,
             ))
@@ -2196,6 +2197,15 @@ FLUTTER_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {
         doc = FLUTTER_DEPS_DOC,
         providers = [DartInfo],
         aspects = [flutter_app_shader_aspect],
+    ),
+    "define_flagfiles": attr.label_list(
+        doc = "Files of Dart environment defines, one already-spelled " +
+              "`-Dname=value` argument per line. Each file is passed to the " +
+              "kernel compile as `@<file>` and declared as an action input, so " +
+              "its values stay out of the action command line and `bazel " +
+              "aquery` while a change to its content changes the action key. " +
+              "Unset, every action is unchanged.",
+        allow_files = True,
     ),
     "assets": attr.label_list(
         doc = "Asset files to include in the bundle.",

@@ -380,8 +380,8 @@ def _add_kernel_target_args(args, platform_dill, target, package_config, output)
     args.add("--output-dill", output)
     args.add("--verbosity=error")
 
-def _add_kernel_mode_args(ctx, args, aot, defines):
-    """Appends the compilation-mode argv: AOT flags, asserts and defines."""
+def _add_kernel_mode_args(ctx, args, aot, defines, define_flagfiles):
+    """Appends the compilation-mode argv: AOT flags, asserts, defines and flagfiles."""
     if aot:
         args.add("--aot")
         args.add("--tfa")
@@ -395,6 +395,8 @@ def _add_kernel_mode_args(ctx, args, aot, defines):
 
     for d in defines:
         args.add("-D" + d)
+    for flagfile in define_flagfiles:
+        args.add("@" + flagfile.path)
 
 def _mount_kernel_sources(ctx, args, compile_sources, output, filesystem_roots):
     """Stages generated inputs and mounts the roots the compile resolves under.
@@ -485,6 +487,7 @@ def _kernel_action_inputs(inputs, mount):
         direct_inputs.append(inputs.native_assets_manifest)
     if inputs.import_dill != None:
         direct_inputs.append(inputs.import_dill)
+    direct_inputs.extend(inputs.define_flagfiles)
     outputs = [inputs.output]
     if inputs.recorded_uses != None:
         outputs.append(inputs.recorded_uses)
@@ -669,7 +672,13 @@ def flutter_kernel_compile_action(ctx, tools, sources, outputs, options, dills, 
         sources.package_config,
         outputs.output,
     )
-    _add_kernel_mode_args(ctx, args, options.aot, options.defines)
+    _add_kernel_mode_args(
+        ctx,
+        args,
+        options.aot,
+        options.defines,
+        options.define_flagfiles,
+    )
 
     compile_sources = [sources.main] if dills.from_dill != None else [sources.main] + sources.srcs
     mount = _mount_kernel_sources(
@@ -682,6 +691,7 @@ def flutter_kernel_compile_action(ctx, tools, sources, outputs, options, dills, 
     inputs = struct(
         compile_sources = compile_sources,
         dart_plugin_registrant_uri = sources.dart_plugin_registrant_uri,
+        define_flagfiles = options.define_flagfiles,
         entrypoint_uri = entrypoint_uri,
         extra_flags = options.extra_flags,
         from_dill = dills.from_dill,

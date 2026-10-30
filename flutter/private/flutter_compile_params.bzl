@@ -99,6 +99,7 @@ def flutter_kernel_outputs(output, recorded_uses = None):
 def flutter_kernel_options(
         aot = False,
         defines = [],
+        define_flagfiles = [],
         extra_flags = [],
         target = "flutter",
         vm_flags = []):
@@ -109,6 +110,12 @@ def flutter_kernel_options(
       defines: Environment declarations; each entry becomes a `-D` flag. Each
         entry must be single-line: a line break would split the worker's param
         file into extra argv elements.
+      define_flagfiles: Files of environment declarations, each line an
+        already-spelled `-Dname=value` argument. Each `File` is appended to the
+        compiler argv as `@<path>` after the `defines` flags and declared as an
+        action input; its contents are never read at analysis. `kernel_filter`
+        and the incremental worker expand the files recursively and refuse a
+        line that is not a `-D` argument.
       extra_flags: Additional `frontend_server` flags: only `--incremental`
         and `--track-widget-creation`, which read no file and cannot change
         which files the compile reads. Each entry must be a bare `--flag`
@@ -144,6 +151,7 @@ def flutter_kernel_options(
     return struct(
         aot = aot,
         defines = defines,
+        define_flagfiles = define_flagfiles,
         extra_flags = extra_flags,
         target = target,
         vm_flags = vm_flags,

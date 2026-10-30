@@ -14,6 +14,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'kernel_filter.dart';
+
 /// The multi-root scheme a staged file is compiled under.
 const incrAppSchemeRoot = 'org-dartlang-app:///';
 
@@ -88,36 +90,60 @@ List<String> stripWorkerArgv0(List<String> argv) {
   return (manifestPath: manifestPath, command: argv.sublist(j + 1));
 }
 
-/// Expands `@<flagfile>` entries in [argv] the way Bazel parameter files
-/// arrive: each non-empty line of the file is one argument, in order.
-/// Multiline param files shell-quote arguments holding whitespace with single
-/// quotes, so a line wrapped in exactly one pair of quotes unwraps; anything
-/// else passes through untouched. [readFile] reads a flagfile's lines; it
-/// takes the working directory so tests can substitute a fake filesystem.
+/// Expands the outer Bazel parameter-file entries in [argv], then every
+/// define flagfile those entries name.
+///
+/// The outer `@<file>` is the parameter file Bazel hands the worker: each
+/// non-empty line is one argument, in order. Multiline Bazel parameter files
+/// shell-quote arguments holding whitespace with single quotes, so a line
+/// wrapped in exactly one pair of quotes unwraps; anything else passes through
+/// untouched. An expanded entry naming another `@<file>` is a define flagfile:
+/// it expands recursively under [expandDefineFlagfile]'s rules, so a line that
+/// is not a `-D` argument, a missing or unreadable file and a cycle all fail
+/// with the file chain and, for a bad line, its 1-based line number.
+///
+/// [readFile] reads a flagfile's lines; it takes the working directory so
+/// tests can substitute a fake filesystem.
 List<String> expandWorkerFlagfiles(
   List<String> argv, {
-  List<String> Function(String path)? readFile,
+  FlagfileReader? readFile,
 }) {
-  final read = readFile ?? _readFlagfileLines;
+  final read = readFile ?? readFlagfileLines;
   final out = <String>[];
   for (final a in argv) {
-    if (a.startsWith('@')) {
-      for (final line in read(a.substring(1))) {
-        out.add(_unquoteParamLine(line));
-      }
-    } else {
+    if (!a.startsWith('@')) {
       out.add(a);
+      continue;
+    }
+    final outerPath = a.substring(1);
+    final lines = _readOuterParamFile(outerPath, read);
+    for (final line in lines) {
+      if (line.isEmpty) continue;
+      final arg = _unquoteParamLine(line);
+      if (arg.startsWith('@')) {
+        out.addAll(
+          expandDefineFlagfile(
+            arg.substring(1),
+            readFile: read,
+            chain: [outerPath],
+          ),
+        );
+      } else {
+        out.add(arg);
+      }
     }
   }
   return out;
 }
 
-List<String> _readFlagfileLines(String path) {
-  final lines = <String>[];
-  for (final line in File(path).readAsLinesSync()) {
-    if (line.isNotEmpty) lines.add(line);
+List<String> _readOuterParamFile(String path, FlagfileReader read) {
+  try {
+    return read(path);
+  } on FileSystemException catch (e) {
+    throw FormatException(
+      'Bazel parameter file $path: cannot read it: ${e.message}',
+    );
   }
-  return lines;
 }
 
 /// Strips one pair of surrounding single quotes when the inside holds no
