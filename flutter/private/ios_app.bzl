@@ -321,7 +321,8 @@ def _ios_build_runner(name, runner):
         runner: Struct with `application`, `backend`, `engine_target`,
             `srcs` (discovered runner Swift sources), `registrant_srcs` (the
             generated registrant, or none), `copts` (the caller's
-            `swift_copts`), `module_name`, `deps` (extra runner deps),
+            `swift_copts`, left unset when empty), `module_name`, `deps`
+            (extra runner deps),
             `internal_tags`, and `discovered_main_storyboard`.
     """
     _flutter_apple_plugins_aggregator(
@@ -337,7 +338,10 @@ def _ios_build_runner(name, runner):
             srcs = runner.srcs + runner.registrant_srcs,
             data = runner.discovered_main_storyboard,
             module_name = runner.module_name,
-            copts = runner.copts,
+            # An empty `swift_copts` leaves the attribute unset, so the
+            # runner `swift_library` an app declares today is unchanged.
+            # Only a caller's flags add the attribute.
+            copts = runner.copts if runner.copts else None,
             tags = runner.internal_tags,
             deps = [
                 runner.engine_target,
