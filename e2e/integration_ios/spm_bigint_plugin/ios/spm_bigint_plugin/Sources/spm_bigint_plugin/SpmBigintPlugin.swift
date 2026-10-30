@@ -1,3 +1,8 @@
+#if PLUGIN_FLAG
+#else
+#error("PLUGIN_FLAG did not reach the plugin's Swift compile")
+#endif
+
 import BigInt
 import Flutter
 import UIKit
@@ -14,7 +19,9 @@ public class SpmBigintPlugin: NSObject, FlutterPlugin {
     // Computed with the linked BigInt product at run time, so the test
     // proves the product made it into this library's link.
     case "computeBig":
-      result("\(BigUInt(2).power(100)) \(BigInt("-0", radix: 10)!)")
+      result(
+        "\(BigUInt(2).power(100)) \(BigInt("-0", radix: 10)!) \(SpmBigintPluginFlag())"
+      )
     default:
       result(FlutterMethodNotImplemented)
     }

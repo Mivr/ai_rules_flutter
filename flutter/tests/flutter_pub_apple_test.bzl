@@ -8,6 +8,7 @@ load(
     "select_apple_swiftpm_deps",
     "with_apple_swiftpm_deps",
 )
+load("//flutter/private:starlark_literal.bzl", "starlark_string_literal")
 
 _BIGINT_SHA = "55fc8a63f655a09d9216f2c9bc062c508f98d4eca4b8ebefaf295a3ea4ac8f22"
 
@@ -495,6 +496,28 @@ def _deps_render_on_both_backends_test_impl(ctx):
     asserts.equals(env, 2, len(patched.split("    visibility = [")) - 1)
     return unittest.end(env)
 
+def _plugin_defines_render_on_both_backends_test_impl(ctx):
+    env = unittest.begin(ctx)
+    srcs_dirs = ["ios/spm_bigint_plugin/Sources/spm_bigint_plugin"]
+    base = apple_plugin_targets("spm_bigint_plugin", srcs_dirs, [], "ios")
+    defines = ["PERMISSION_CAMERA=1", "PERMISSION_MICROPHONE"]
+    content = apple_plugin_targets(
+        "spm_bigint_plugin",
+        srcs_dirs,
+        [],
+        "ios",
+        plugin_defines = defines,
+    )
+    defines_block = "    plugin_defines = {},\n".format(starlark_string_literal(defines))
+    asserts.equals(env, 2, content.count(defines_block))
+    asserts.equals(
+        env,
+        base.replace("    includes = [],\n", "    includes = [],\n" + defines_block),
+        content,
+    )
+    asserts.equals(env, base, apple_plugin_targets("spm_bigint_plugin", srcs_dirs, [], "ios"))
+    return unittest.end(env)
+
 _products_resolve_to_pinned_labels_test = unittest.make(_products_resolve_to_pinned_labels_test_impl)
 _conditions_filter_per_platform_test = unittest.make(_conditions_filter_per_platform_test_impl)
 _flutterframework_product_is_skipped_test = unittest.make(_flutterframework_product_is_skipped_test_impl)
@@ -513,6 +536,7 @@ _missing_resolved_fails_test = unittest.make(_missing_resolved_fails_test_impl)
 _unreadable_manifest_without_packages_builds_on_test = unittest.make(_unreadable_manifest_without_packages_builds_on_test_impl)
 _manifests_without_links_resolve_empty_test = unittest.make(_manifests_without_links_resolve_empty_test_impl)
 _deps_render_on_both_backends_test = unittest.make(_deps_render_on_both_backends_test_impl)
+_plugin_defines_render_on_both_backends_test = unittest.make(_plugin_defines_render_on_both_backends_test_impl)
 
 def flutter_pub_apple_test_suite(name):
     """Registers the Apple plugin spoke SwiftPM link unit tests."""
@@ -536,6 +560,7 @@ def flutter_pub_apple_test_suite(name):
         _unreadable_manifest_without_packages_builds_on_test,
         _manifests_without_links_resolve_empty_test,
         _deps_render_on_both_backends_test,
+        _plugin_defines_render_on_both_backends_test,
     )
     native.test_suite(
         name = name,

@@ -10,7 +10,11 @@ load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("//flutter:ios.bzl", "flutter_apple_plugin_library")
-load("//flutter/private:flutter_apple_plugin_library.bzl", "objc_copts_xtool_refusal")
+load(
+    "//flutter/private:flutter_apple_plugin_library.bzl",
+    "objc_copts_xtool_refusal",
+    "plugin_defines_xtool_refusal",
+)
 
 def _objc_target_surface_test_impl(ctx):
     """The ObjC target gets the plugin deps and `objc_copts`; Swift gets neither `objc_copts`."""
@@ -63,6 +67,44 @@ def _objc_copts_xtool_refusal_test_impl(ctx):
 
 _objc_copts_xtool_refusal_test = unittest.make(
     _objc_copts_xtool_refusal_test_impl,
+    attrs = {
+        "plugin_name": attr.string(mandatory = True),
+    },
+)
+
+def _plugin_defines_surface_test_impl(ctx):
+    """The ObjC compile sees every define; Swift sees only value-less names."""
+    env = unittest.begin(ctx)
+    for flag in ctx.attr.required_objc:
+        asserts.true(env, flag in ctx.attr.objc_copts, "%s missing from ObjC: %s" % (flag, ctx.attr.objc_copts))
+    for flag in ctx.attr.required_swift:
+        asserts.true(env, flag in ctx.attr.swift_copts, "%s missing from Swift: %s" % (flag, ctx.attr.swift_copts))
+    for flag in ctx.attr.forbidden_swift:
+        asserts.false(env, flag in ctx.attr.swift_copts, "%s reached Swift: %s" % (flag, ctx.attr.swift_copts))
+    return unittest.end(env)
+
+_plugin_defines_surface_test = unittest.make(
+    _plugin_defines_surface_test_impl,
+    attrs = {
+        "forbidden_swift": attr.string_list(default = []),
+        "objc_copts": attr.string_list(mandatory = True),
+        "required_objc": attr.string_list(default = []),
+        "required_swift": attr.string_list(default = []),
+        "swift_copts": attr.string_list(mandatory = True),
+    },
+)
+
+def _plugin_defines_xtool_refusal_test_impl(ctx):
+    """The xtool refusal names the target, `ios_plugin_defines` and the backend."""
+    env = unittest.begin(ctx)
+    message = plugin_defines_xtool_refusal(ctx.attr.plugin_name)
+    asserts.true(env, ctx.attr.plugin_name in message, "the refusal must name the plugin: %s" % message)
+    asserts.true(env, "ios_plugin_defines" in message, "the refusal must name ios_plugin_defines: %s" % message)
+    asserts.true(env, "xtool" in message, "the refusal must name the xtool backend: %s" % message)
+    return unittest.end(env)
+
+_plugin_defines_xtool_refusal_test = unittest.make(
+    _plugin_defines_xtool_refusal_test_impl,
     attrs = {
         "plugin_name": attr.string(mandatory = True),
     },
@@ -157,6 +199,90 @@ def apple_objc_deps_test_suite(name):
         expected_swift_copts = ["-DSAMPLE_SWIFT=1"],
     )
 
+    # A pure-ObjC plugin: every define reaches the ObjC compile, while only
+    # the value-less name reaches Swift (a Swift condition carries no value).
+    defines_plugin = name + "_plugin_defines_objc_plugin"
+    flutter_apple_plugin_library(
+        name = defines_plugin,
+        srcs = [name + "_Sample.m"],
+        module_name = "apple_objc_defines",
+        platform = "ios",
+        copts = ["-DSAMPLE_SWIFT=1"],
+        plugin_defines = ["PERMISSION_CAMERA=1", "PERMISSION_MICROPHONE"],
+        tags = ["manual"],
+    )
+    after = native.existing_rules()
+    _plugin_defines_surface_test(
+        name = name + "_plugin_defines_objc_surface",
+        objc_copts = [str(c) for c in after["_" + defines_plugin + "__objc"]["copts"]],
+        required_objc = ["-DSAMPLE_SWIFT=1", "-DPERMISSION_CAMERA=1", "-DPERMISSION_MICROPHONE"],
+        swift_copts = [str(c) for c in after[defines_plugin]["copts"]],
+        required_swift = ["-DSAMPLE_SWIFT=1", "-DPERMISSION_MICROPHONE"],
+        forbidden_swift = ["-DPERMISSION_CAMERA", "-DPERMISSION_CAMERA=1"],
+    )
+
+    # A mixed plugin: its ObjC half gets objc_copts and every define, its
+    # Swift half only the value-less one.
+    write_file(
+        name = name + "_mixed_swift",
+        out = name + "_Mixed.swift",
+        content = [
+            "public func sample_mixed() -> Int {",
+            "  return 1",
+            "}",
+        ],
+        tags = ["manual"],
+    )
+    mixed_plugin = name + "_plugin_defines_mixed_plugin"
+    flutter_apple_plugin_library(
+        name = mixed_plugin,
+        srcs = [name + "_Sample.m", name + "_Mixed.swift"],
+        module_name = "apple_defines_mixed",
+        platform = "ios",
+        copts = ["-DSAMPLE_SWIFT=1"],
+        objc_copts = ["-DSAMPLE_MIXED_OBJC=1"],
+        plugin_defines = ["PERMISSION_CAMERA=1", "PERMISSION_MICROPHONE"],
+        tags = ["manual"],
+    )
+    after = native.existing_rules()
+    _plugin_defines_surface_test(
+        name = name + "_plugin_defines_mixed_surface",
+        objc_copts = [str(c) for c in after["_" + mixed_plugin + "__objc"]["copts"]],
+        required_objc = [
+            "-DSAMPLE_SWIFT=1",
+            "-DSAMPLE_MIXED_OBJC=1",
+            "-DPERMISSION_CAMERA=1",
+            "-DPERMISSION_MICROPHONE",
+        ],
+        swift_copts = [str(c) for c in after["_" + mixed_plugin + "__swift"]["copts"]],
+        required_swift = ["-DSAMPLE_SWIFT=1", "-DPERMISSION_MICROPHONE"],
+        forbidden_swift = ["-DSAMPLE_MIXED_OBJC=1", "-DPERMISSION_CAMERA", "-DPERMISSION_CAMERA=1"],
+    )
+
+    # A value-less entry reaches both compiles.
+    flag_plugin = name + "_plugin_defines_flag_plugin"
+    flutter_apple_plugin_library(
+        name = flag_plugin,
+        srcs = [name + "_Sample.m"],
+        module_name = "apple_defines_flag",
+        platform = "ios",
+        plugin_defines = ["PLUGIN_FLAG"],
+        tags = ["manual"],
+    )
+    after = native.existing_rules()
+    _plugin_defines_surface_test(
+        name = name + "_plugin_defines_flag_surface",
+        objc_copts = [str(c) for c in after["_" + flag_plugin + "__objc"]["copts"]],
+        required_objc = ["-DPLUGIN_FLAG"],
+        swift_copts = [str(c) for c in after[flag_plugin]["copts"]],
+        required_swift = ["-DPLUGIN_FLAG"],
+    )
+
+    _plugin_defines_xtool_refusal_test(
+        name = name + "_plugin_defines_xtool_refusal",
+        plugin_name = name + "_plugin_defines_xtool",
+    )
+
     # An empty objc_copts on xtool is accepted: this target would fail the
     # package load otherwise.
     flutter_apple_plugin_library(
@@ -180,6 +306,10 @@ def apple_objc_deps_test_suite(name):
         tests = [
             ":" + name + "_objc_copts_surface",
             ":" + name + "_plain_surface",
+            ":" + name + "_plugin_defines_objc_surface",
+            ":" + name + "_plugin_defines_mixed_surface",
+            ":" + name + "_plugin_defines_flag_surface",
+            ":" + name + "_plugin_defines_xtool_refusal",
             ":" + name + "_xtool_objc_copts_refusal",
         ],
     )

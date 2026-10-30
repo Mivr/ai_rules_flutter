@@ -195,7 +195,7 @@ def glob_block(srcs_dirs, extensions):
     excl_quoted = ["        " + starlark_string_literal(e) + "," for e in excludes]
     return "glob(\n        [\n{}\n        ],\n        exclude = [\n{}\n        ],\n        allow_empty = True,\n    )".format("\n".join(quoted), "\n".join(excl_quoted))
 
-def apple_plugin_targets(name, srcs_dirs, include_dirs, platform):
+def apple_plugin_targets(name, srcs_dirs, include_dirs, platform, plugin_defines = []):
     """The `flutter_apple_plugin_library` pair (device + xtool) for one platform.
 
     Args:
@@ -203,20 +203,26 @@ def apple_plugin_targets(name, srcs_dirs, include_dirs, platform):
         srcs_dirs: Package-relative source directories.
         include_dirs: Header search paths for the library.
         platform: `"ios"` or `"macos"`.
+        plugin_defines: Preprocessor defines for both generated libraries, in
+            the order given. Empty emits no attribute, so the text matches
+            the pre-`ios_plugin_defines` output byte for byte.
 
     Returns:
         The rendered device + xtool library targets.
     """
 
     # `name` is a lock package name (refused quotable at classification) and
-    # `platform` is a fixed literal at every call site; `srcs` globs and the
-    # `includes` list render through the escaping helper.
+    # `platform` is a fixed literal at every call site; `srcs` globs, the
+    # `includes` list and the defines render through the escaping helper.
+    defines_block = ""
+    if plugin_defines:
+        defines_block = "    plugin_defines = {},\n".format(starlark_string_literal(plugin_defines))
     return """
 flutter_apple_plugin_library(
     name = "{name}_apple_{platform}",
     srcs = {srcs},
     includes = {includes},
-    module_name = "{name}",
+{defines}    module_name = "{name}",
     platform = "{platform}",
     visibility = ["//visibility:public"],
 )
@@ -225,7 +231,7 @@ flutter_apple_plugin_library(
     name = "{name}_apple_{platform}_xtool",
     srcs = {srcs},
     includes = {includes},
-    module_name = "{name}",
+{defines}    module_name = "{name}",
     platform = "{platform}",
     backend = "xtool",
     visibility = ["//visibility:public"],
@@ -234,6 +240,7 @@ flutter_apple_plugin_library(
         platform = platform,
         srcs = glob_block(srcs_dirs, _APPLE_SRC_EXTENSIONS),
         includes = starlark_string_literal(include_dirs),
+        defines = defines_block,
     )
 
 def plugin_apple_libs_arg(name, apple_macos_srcs_dirs, apple_ios_srcs_dirs):
@@ -449,7 +456,15 @@ def plugin_extra_loads(apple_macos_srcs_dirs, apple_ios_srcs_dirs, linux_src_dir
         extra_loads.append('load("@rules_flutter//flutter:windows.bzl", "flutter_windows_plugin_library")')
     return "\n".join(extra_loads)
 
-def plugin_extra_targets(name, apple_macos_srcs_dirs, apple_ios_srcs_dirs, apple_macos_include_dirs, apple_ios_include_dirs, linux_src_dir, windows_src_dir):
+def plugin_extra_targets(
+        name,
+        apple_macos_srcs_dirs,
+        apple_ios_srcs_dirs,
+        apple_macos_include_dirs,
+        apple_ios_include_dirs,
+        linux_src_dir,
+        windows_src_dir,
+        plugin_defines = []):
     """The per-platform plugin library targets, joined for the template.
 
     NOTE: Android Kotlin/Java sources are NOT compiled in the top-level
@@ -471,6 +486,8 @@ def plugin_extra_targets(name, apple_macos_srcs_dirs, apple_ios_srcs_dirs, apple
         apple_ios_include_dirs: SwiftPM-style public-header dirs (iOS).
         linux_src_dir: Linux C/C++ source dir, or "".
         windows_src_dir: Windows C/C++ source dir, or "".
+        plugin_defines: Preprocessor defines for the Apple libraries, in the
+            order given. Empty emits no attribute.
 
     Returns:
         The rendered per-platform library targets joined with newlines.
@@ -482,6 +499,7 @@ def plugin_extra_targets(name, apple_macos_srcs_dirs, apple_ios_srcs_dirs, apple
             apple_macos_srcs_dirs,
             apple_macos_include_dirs,
             "macos",
+            plugin_defines,
         ))
     if apple_ios_srcs_dirs:
         extra_targets.append(apple_plugin_targets(
@@ -489,6 +507,7 @@ def plugin_extra_targets(name, apple_macos_srcs_dirs, apple_ios_srcs_dirs, apple
             apple_ios_srcs_dirs,
             apple_ios_include_dirs,
             "ios",
+            plugin_defines,
         ))
     if linux_src_dir:
         extra_targets.append(desktop_plugin_target(name, linux_src_dir, "linux"))

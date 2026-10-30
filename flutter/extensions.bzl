@@ -30,6 +30,7 @@ load("//flutter/private:flutter_pub_maven.bzl", "path_spoke_maven_inputs")
 load("//flutter/private:flutter_pub_overlays.bzl", "hub_overlay_roots")
 load("//flutter/private:flutter_pub_package.bzl", "flutter_pub_package", "flutter_pub_path_package", "is_maven_dep_label")
 load("//flutter/private:flutter_pub_path.bzl", "foreign_lock_path_error", "is_absolute_lock_path", "is_relative_path_dependency", "workspace_relative_lock_path")
+load("//flutter/private:flutter_pub_plugin_defines.bzl", "ios_plugin_defines_lock_error")
 load("//flutter/private:flutter_sdk_package.bzl", "flutter_sdk_package")
 load("//flutter/private:pub_lock_sdks.bzl", "hosted_package_sha256", "parse_lock_sdk_constraints", "version_below_lower_bound")
 load("//flutter/private:rules_dart_floor.bzl", "check_rules_dart_floor")
@@ -225,6 +226,16 @@ _flutter_pub = tag_class(
                   "manifest uses constructs with no Bazel translation. " +
                   "Empty by default.",
             allow_files = True,
+            default = {},
+        ),
+        "ios_plugin_defines": attr.string_list_dict(
+            doc = "Flutter plugin name -> preprocessor defines for that plugin's Apple " +
+                  "libraries, the Bazel analogue of a Podfile `post_install` " +
+                  "GCC_PREPROCESSOR_DEFINITIONS edit (for example " +
+                  "`{\"permission_handler_apple\": [\"PERMISSION_CAMERA=1\"]}`). `NAME` " +
+                  "reaches C-family and Swift sources; `NAME=VALUE` reaches C-family " +
+                  "sources only, because Swift conditions carry no value. A key naming no " +
+                  "Apple plugin in the lock fails the extension evaluation.",
             default = {},
         ),
     },
@@ -584,6 +595,7 @@ def _create_hosted_spokes(hub_name, hosted, all_package_names, user_overlay_root
             hub_name = hub_name,
             lock_packages = all_package_names,
             cycle_breaks = pub_tag.cycle_breaks.get(name, []),
+            plugin_defines = pub_tag.ios_plugin_defines.get(name, []),
             overlay_roots = user_overlay_roots + ["@rules_flutter//ext:BUILD.bazel"],
             # rules_dart's curated registry is the single source of
             # truth for which pub package a Bazel-built native library
@@ -624,6 +636,7 @@ def _create_path_spokes(hub_name, path_pkgs, all_package_names, user_overlay_roo
             hub_name = hub_name,
             lock_packages = all_package_names,
             cycle_breaks = pub_tag.cycle_breaks.get(name, []),
+            plugin_defines = pub_tag.ios_plugin_defines.get(name, []),
             overlay_roots = user_overlay_roots + ["@rules_flutter//ext:BUILD.bazel"],
             code_assets = curated_code_assets(name, path_info.version),
             ignore_hook = name in ignore_hooks,
@@ -746,6 +759,9 @@ def _register_pub_hub(module_ctx, pub_tag, selected_info, merged, user_overlay_r
     cycle_error = cycle_breaks_lock_error(pub_tag.cycle_breaks, all_package_names)
     if cycle_error:
         fail(cycle_error)
+    defines_error = ios_plugin_defines_lock_error(pub_tag.ios_plugin_defines, all_package_names)
+    if defines_error:
+        fail(defines_error)
     ignore_hooks = {pkg_name: True for pkg_name in pub_tag.ignore_hooks}
 
     # Create hub repo with aliases for all packages plus the
