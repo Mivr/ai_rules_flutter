@@ -15,10 +15,12 @@ if [ "$status" -eq 0 ]; then
   exit 1
 fi
 
-# Analysing the aggregator also needs the Android SDK. On a host without it
-# the toolchain refusal can come first, so fetch the plugin repository alone
-# to read the model's own refusal; the aggregator step above still failed.
-if ! grep -Fq 'lazy_plugin' <<<"$out" && grep -Eq 'aapt2|androidsdk|Android SDK' <<<"$out"; then
+# Analysing the aggregator also needs the Android SDK, so on a host without
+# it (or with a partial one) the toolchain refusal can come before the model
+# is read. Whenever the aggregator step above did not reach the plugin's own
+# refusal, fetch that repository alone: its fetch reads the Gradle model and
+# fails on the coordinate without needing the Android SDK at all.
+if ! grep -Fq 'com.example:lazy-unmapped' <<<"$out"; then
   set +e
   out=$(bazel fetch @deps-android-lazy_plugin//android:lib 2>&1)
   status=$?
