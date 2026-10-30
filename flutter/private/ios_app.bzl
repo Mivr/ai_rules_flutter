@@ -393,33 +393,101 @@ def _ios_emit_xtool_bundle(name, bundle, invalid_version_error, discovered_main_
         **forwarded_kwargs
     )
 
-def _ios_apply_signing_options(name, backend, signing, provisioning_profile, kwargs):
-    """Applies `signing` to the bundle's pass-through attributes.
+def _ios_unsigned_error_impl(ctx):
+    """Fails analysis with the unsigned-build error the macro selected."""
+    fail(ctx.attr.message)
 
-    Signing defaults to true, so the caller's `features` and
-    `provisioning_profile` pass through untouched. An unsigned build is the
-    one `flutter build ios --no-codesign` produces: rules_apple's
-    `disable_legacy_signing` feature suppresses every codesign action, and a
-    provisioning profile would contradict the request.
+_ios_unsigned_error = rule(
+    implementation = _ios_unsigned_error_impl,
+    attrs = {
+        "message": attr.string(
+            mandatory = True,
+            doc = "The analysis-time failure text, including the app target's name.",
+        ),
+    },
+    doc = "Stands in for a bundle target that cannot be built, failing analysis with a named error.",
+)
+
+# Attributes that ask for code signing. With `signing = False` they contradict
+# the request, so the macro refuses them instead of silently dropping them.
+_SIGNING_ATTRIBUTES = (
+    "certificate",
+    "certificate_password",
+    "certificate_password_env",
+    "certificate_password_file",
+    "zsign",
+)
+
+def _ios_unsigned_conflict(name, kwargs):
+    """Returns the analysis error for signing attributes passed to an unsigned build.
+
+    Args:
+        name: The app target name, for the error message.
+        kwargs: Pass-through attributes, read for signing-only attributes.
+
+    Returns:
+        The conflict message, or None when no signing attribute is present.
+    """
+    conflicts = [key for key in _SIGNING_ATTRIBUTES if key in kwargs]
+    if not conflicts:
+        return None
+    return (
+        "%s: signing = False conflicts with %s; an unsigned build cannot use attributes that ask for signing" %
+        (name, ", ".join(["'%s'" % key for key in conflicts]))
+    )
+
+def _ios_apply_signing_options(name, backend, signing, provisioning_profile, kwargs):
+    """Resolves the analysis-time failure an unsigned build must raise, if any.
+
+    Signing defaults to true, so nothing is checked and the caller's `features`
+    pass through untouched. On `xtool`, an unsigned build keeps that feature
+    list as well: its packer writes an unsigned bundle, and rules_apple's
+    signing features have no meaning there. A rules_apple device build always
+    requires a `provisioning_profile`, so an unsigned one is refused with a
+    named analysis error instead of reaching rules_apple's own failure. On
+    `xtool`, a `provisioning_profile` beside `signing = False` is the same
+    contradiction it always was, and attributes that ask for signing are a
+    conflict reported at analysis.
 
     Args:
         name: The app target name, for the error message.
         backend: Apple bundling backend.
         signing: Whether the app is code signed.
         provisioning_profile: The caller's provisioning profile label, or None.
-        kwargs: Pass-through attributes; mutated to merge the feature.
+        kwargs: Pass-through attributes, read for signing-only attributes.
+
+    Returns:
+        The analysis-time failure message for an unsigned build, or None.
     """
     if signing:
-        return
-    if backend == "xtool":
-        fail("%s: unsigned device builds are supported only by the 'rules_apple' backend, not 'xtool'" % name)
+        return None
+    if backend == "rules_apple":
+        return (
+            "%s: cannot build this app unsigned on the 'rules_apple' backend: " +
+            "rules_apple requires a 'provisioning_profile' for every device build, " +
+            "and an unsigned device bundle is not available on that backend; " +
+            "use backend = \"xtool\" for an unsigned device bundle"
+        ) % name
     if provisioning_profile:
         fail("%s: signing = False conflicts with provisioning_profile = %r; an unsigned build cannot name a profile" %
              (name, provisioning_profile))
-    features = kwargs.pop("features", [])
-    if "disable_legacy_signing" not in features:
-        features = features + ["disable_legacy_signing"]
-    kwargs["features"] = features
+    return _ios_unsigned_conflict(name, kwargs)
+
+def _ios_emit_unsigned_error(name, meta, kwargs):
+    """Emits the failing target that stands in for an unbuildable unsigned app.
+
+    Args:
+        name: The app target name.
+        meta: The bundle context, carrying the failure message, tags and visibility.
+        kwargs: Pass-through attributes, read for `testonly`.
+    """
+    _ios_unsigned_error(
+        name = name,
+        message = meta.unsigned_error,
+        tags = meta.tags,
+        visibility = meta.visibility,
+        testonly = kwargs.get("testonly", False),
+    )
 
 def _ios_bundle_context(name, app_name, backend, signing, provisioning_profile, kwargs):
     """Resolves the display name, tags, visibility and signing attributes.
@@ -433,19 +501,20 @@ def _ios_bundle_context(name, app_name, backend, signing, provisioning_profile, 
         kwargs: Pass-through attributes to `ios_application`.
 
     Returns:
-        A struct with the resolved `display_name`, `tags`, `internal_tags` and
-        `visibility`.
+        A struct with the resolved `display_name`, `tags`, `internal_tags`,
+        `visibility` and the `unsigned_error` analysis message, if any.
     """
     display_name = app_name or name
     tags = kwargs.pop("tags", ["manual"])
     internal_tags = tags if "manual" in tags else tags + ["manual"]
     visibility = kwargs.pop("visibility", None)
-    _ios_apply_signing_options(name, backend, signing, provisioning_profile, kwargs)
+    unsigned_error = _ios_apply_signing_options(name, backend, signing, provisioning_profile, kwargs)
     return struct(
         display_name = display_name,
         tags = tags,
         internal_tags = internal_tags,
         visibility = visibility,
+        unsigned_error = unsigned_error,
     )
 
 def flutter_ios_app(
@@ -482,12 +551,13 @@ def flutter_ios_app(
     Generate these with: `flutter create --platforms=ios .`
 
     Simulator builds need no code signing. Device builds require
-    `provisioning_profile` unless `signing = False`, which builds the same
-    device bundle unsigned; without a profile and with signing on,
-    `ios_application` fails at analysis with "The provisioning_profile
-    attribute must be set for device builds on this platform (ios)". See the
-    README's "Running an iOS example on a physical device" for how to obtain
-    a profile without an Xcode project.
+    `provisioning_profile`: rules_apple adds a provisioning-profile step to
+    every device build, so without a profile `ios_application` fails at
+    analysis with "The provisioning_profile attribute must be set for device
+    builds on this platform (ios)". `signing = False` is refused at analysis on
+    that backend for the same reason; an unsigned device bundle is the `xtool`
+    backend's output. See the README's "Running an iOS example on a physical
+    device" for how to obtain a profile without an Xcode project.
 
     Non-release builds carry two extra `Info.plist` keys —
     `NSBonjourServices` and `NSLocalNetworkUsageDescription` — so the engine
@@ -545,14 +615,14 @@ def flutter_ios_app(
             with. Required for device builds (`--ios_multi_cpus=arm64`) and
             unused by simulator builds.
         signing: Whether to code sign the bundle. Defaults to `True`, which
-            keeps the existing `provisioning_profile` requirement for a
-            device build. `False` builds the unsigned device app
-            `flutter build ios --no-codesign` produces: rules_apple's
-            `disable_legacy_signing` feature is added to any `features` the
-            caller passes, so no codesign action runs and no profile or
-            signing secret is needed. An unsigned build rejects a
-            `provisioning_profile` and is supported only by
-            `backend = "rules_apple"`.
+            keeps the `provisioning_profile` requirement for a device build.
+            `False` is refused at analysis on the `rules_apple` backend,
+            whose device pipeline always requires a `provisioning_profile`;
+            an unsigned device bundle is the `xtool` backend's output. On
+            `xtool`, `False` keeps the caller's `features` unchanged and
+            rejects a `provisioning_profile` and any signing attribute
+            (`zsign`, `certificate`, `certificate_password_file`,
+            `certificate_password_env`, `certificate_password`).
         app_icons: The app icon, as the files of an `.appiconset` or of an
             Icon Composer `.icon` bundle. Defaults to the conventional
             `ios/Runner/Assets.xcassets/AppIcon.appiconset` that
@@ -621,6 +691,9 @@ def flutter_ios_app(
         _IOS_MINIMUM_OS_VERSION,
         "iOS",
     )
+    if meta.unsigned_error:
+        _ios_emit_unsigned_error(name, meta, kwargs)
+        return
 
     module_name = runner_module_name("flutter_ios_app", name)
 

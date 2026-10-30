@@ -13,9 +13,7 @@ runner in the default configuration.
 `ios_device_opt_bundle` also forwards the application's `debug_info` output
 group (the `.symbols` file `split_debug_info` writes) from that same
 transitioned build, so the test reads the symbols of the very build it
-inspects. `ios_device_opt_app` forwards the files of an `ios_application`
-built the same way, which needs no signing when the app sets
-`signing = False`.
+inspects.
 """
 
 load("@rules_apple//apple:providers.bzl", "AppleDynamicFrameworkInfo")
@@ -67,25 +65,4 @@ ios_device_opt_bundle = rule(
         ),
     },
     doc = "Re-exposes a release App.framework and its .symbols built for the device (AOT).",
-)
-
-def _ios_device_opt_app_impl(ctx):
-    # A 1:1 transition makes `app` a single-element list. `ios_application`
-    # carries its archive in DefaultInfo, as the simulator rebuild rule does.
-    return [DefaultInfo(files = ctx.attr.app[0][DefaultInfo].files)]
-
-ios_device_opt_app = rule(
-    implementation = _ios_device_opt_app_impl,
-    attrs = {
-        "app": attr.label(
-            cfg = _ios_device_opt_transition,
-            mandatory = True,
-            doc = "The ios_application to rebuild for the device in release.",
-        ),
-        "_allowlist_function_transition": attr.label(
-            default = "@bazel_tools//tools/allowlists/function_transition_allowlist",
-            doc = "Allowlist for the function transition on `app`.",
-        ),
-    },
-    doc = "Re-exposes an iOS app built for the device in release (AOT, arm64).",
 )
