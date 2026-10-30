@@ -612,6 +612,51 @@ _apple_plugin_swift_attrs_test = unittest.make(
     },
 )
 
+def _apple_plugin_bridging_copts_test_impl(ctx):
+    """A bridging header gets the framework Clang includes; no header gets none."""
+    env = unittest.begin(ctx)
+    framework_copts = [
+        "-Xcc",
+        "-include",
+        "-Xcc",
+        "Foundation/Foundation.h",
+        "-Xcc",
+        "-include",
+        "-Xcc",
+        ctx.attr.platform_framework,
+    ]
+    bridging_copts = ctx.attr.bridging_copts
+    asserts.equals(env, [ctx.attr.probe_copt], bridging_copts[:1])
+    asserts.equals(env, framework_copts, bridging_copts[1:len(framework_copts) + 1])
+    asserts.equals(
+        env,
+        ["-import-objc-header"],
+        bridging_copts[len(framework_copts) + 1:len(framework_copts) + 2],
+    )
+    asserts.true(
+        env,
+        len(bridging_copts) == len(framework_copts) + 3 and ctx.attr.expected_header in bridging_copts[-1],
+        "expected %s after -import-objc-header: %s" % (ctx.attr.expected_header, bridging_copts),
+    )
+    asserts.equals(
+        env,
+        [],
+        [copt for copt in ctx.attr.mixed_swift_copts if copt == "-Xcc"],
+        "a plugin without a bridging header must get no -Xcc include",
+    )
+    return unittest.end(env)
+
+_apple_plugin_bridging_copts_test = unittest.make(
+    _apple_plugin_bridging_copts_test_impl,
+    attrs = {
+        "bridging_copts": attr.string_list(mandatory = True),
+        "expected_header": attr.string(mandatory = True),
+        "mixed_swift_copts": attr.string_list(mandatory = True),
+        "platform_framework": attr.string(mandatory = True),
+        "probe_copt": attr.string(mandatory = True),
+    },
+)
+
 def _created_rules(before, after):
     """Return the `{name: kind}` map of rules created between two snapshots."""
     return {name: after[name]["kind"] for name in after if name not in before}
@@ -701,6 +746,33 @@ def apple_plugin_fixtures(name, platform):
     mixed_kinds = _created_rules(before, mixed_rules)
     mixed_swift = mixed_rules["_" + mixed + "__swift"]
 
+    bridging = prefix + "_bridging"
+    bridging_module = bridging + "_module"
+    write_file(
+        name = bridging + "_swift_src",
+        out = bridging + ".swift",
+        content = ["import Flutter", "public class BridgingPlugin {}"],
+    )
+    write_file(
+        name = bridging + "_header",
+        out = bridging_module + "-Bridging-Header.h",
+        content = ["#pragma once"],
+    )
+
+    before = native.existing_rules().keys()
+    flutter_apple_plugin_library(
+        name = bridging,
+        srcs = [
+            ":" + bridging + ".swift",
+            bridging_module + "-Bridging-Header.h",
+        ],
+        module_name = bridging_module,
+        platform = platform,
+        copts = ["-DPLUGIN_BRIDGING=1"],
+        tags = ["manual"],
+    )
+    bridging_swift = native.existing_rules()[bridging]
+
     return struct(
         pure_swift = pure_swift,
         pure_objc = pure_objc,
@@ -708,6 +780,9 @@ def apple_plugin_fixtures(name, platform):
         mixed_module = module,
         mixed_swift_generates_header = mixed_swift["generates_header"],
         mixed_swift_generated_header_name = mixed_swift["generated_header_name"],
+        mixed_swift_copts = mixed_swift["copts"],
+        bridging_module = bridging_module,
+        bridging_swift_copts = bridging_swift["copts"],
         pure_swift_kinds = pure_swift_kinds,
         pure_objc_kinds = pure_objc_kinds,
         mixed_kinds = mixed_kinds,
@@ -792,9 +867,16 @@ def _apple_plugin_analysis_tests(
       The test target names.
     """
     header = fixtures.mixed_module + "-Swift.h"
+    if platform == "ios":
+        platform_framework = "UIKit/UIKit.h"
+    elif platform == "macos":
+        platform_framework = "AppKit/AppKit.h"
+    else:
+        fail("apple_plugin_fixtures: platform must be 'ios' or 'macos', got '%s'" % platform)
     swift_header_name = name + "_mixed_swift_header"
     objc_input_name = name + "_mixed_objc_header_input"
     public_name = name + "_mixed_public_providers"
+    bridging_name = name + "_bridging_header_copts"
     swift_header_test(
         name = swift_header_name,
         target_under_test = ":_" + fixtures.mixed + "__swift",
@@ -813,6 +895,14 @@ def _apple_plugin_analysis_tests(
         expected_platform = platform,
         expected_sdk_dylibs = ["sqlite3"],
         expected_sdk_frameworks = ["AVFoundation"],
+    )
+    _apple_plugin_bridging_copts_test(
+        name = bridging_name,
+        bridging_copts = fixtures.bridging_swift_copts,
+        expected_header = fixtures.bridging_module + "-Bridging-Header.h",
+        mixed_swift_copts = fixtures.mixed_swift_copts,
+        platform_framework = platform_framework,
+        probe_copt = "-DPLUGIN_BRIDGING=1",
     )
 
     pure_swift_kinds = {
@@ -863,6 +953,7 @@ def _apple_plugin_analysis_tests(
         swift_header_name,
         objc_input_name,
         public_name,
+        bridging_name,
         attrs_name,
         surface_name,
         pure_swift_name,
