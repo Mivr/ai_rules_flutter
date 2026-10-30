@@ -598,6 +598,7 @@ def _create_hosted_spokes(hub_name, hosted, all_package_names, user_overlay_root
             android_maven_ignore = pub_tag.android_maven_ignore,
             package_resolved = swiftpm_attrs.package_resolved,
             package_sha256 = swiftpm_attrs.package_sha256,
+            pubspec_lock = pub_tag.lock,
         )
 
 def _create_path_spokes(hub_name, path_pkgs, all_package_names, user_overlay_roots, pub_tag, ignore_hooks):
@@ -631,6 +632,7 @@ def _create_path_spokes(hub_name, path_pkgs, all_package_names, user_overlay_roo
             android_maven_ignore = maven.ignore,
             package_resolved = swiftpm_attrs.package_resolved,
             package_sha256 = swiftpm_attrs.package_sha256,
+            pubspec_lock = pub_tag.lock,
         )
 
 def _create_sdk_spokes(hub_name, sdk_flutter, all_package_names, toolchain_info, merged, flutter_version):

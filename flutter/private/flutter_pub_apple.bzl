@@ -11,14 +11,33 @@ SwiftPM product links a plugin's `Package.swift` declares. Split out of
 `flutter_pub_package.bzl` loads the pieces its pipeline still needs.
 """
 
+load(":flutter_pub_apple_deps.bzl", _select_apple_swiftpm_deps = "select_apple_swiftpm_deps")
 load(":flutter_pub_walk.bzl", "PUB_WALK_BOUND", "has_files_under_walk")
 load(":starlark_literal.bzl", "starlark_string_literal")
-load(":swiftpm_manifest.bzl", "parse_swiftpm_plugin_package")
-load(":swiftpm_resolved.bzl", "read_swiftpm_checksums", "read_swiftpm_pins", "swiftpm_spoke_name", "swiftpm_unpinned_errors")
-load(":swiftpm_translate.bzl", "swiftpm_locate_package_dep")
+load(":swiftpm_resolved.bzl", "read_swiftpm_checksums", "read_swiftpm_pins", "swiftpm_unpinned_errors")
 
 # Apple source extensions we sweep into the per-platform plugin library.
 _APPLE_SRC_EXTENSIONS = ("swift", "m", "mm", "h")
+
+def select_apple_swiftpm_deps(plugin_name, manifest_text, manifest_dir, srcs_dirs, platform, pins):
+    """Read one plugin manifest's SwiftPM product links for one platform.
+
+    Kept here as the public entry point `flutter_pub_apple.bzl` has always
+    exported; the resolver itself lives in `flutter_pub_apple_deps.bzl`.
+
+    Args:
+        plugin_name: The pub plugin name, for messages.
+        manifest_text: The `Package.swift` text.
+        manifest_dir: The manifest's package-relative directory.
+        srcs_dirs: The platform's detected source directories.
+        platform: `"ios"` or `"macos"`, for condition filtering.
+        pins: The hub's pin struct for this plugin.
+
+    Returns:
+        `struct(ok, error, labels)`: the spoke dep labels in manifest
+        order, deduplicated.
+    """
+    return _select_apple_swiftpm_deps(plugin_name, manifest_text, manifest_dir, srcs_dirs, platform, pins)
 
 def _ctx_has_files_readdir(ctx, relative_path):
     """A `has_files_under_walk` reader over one spoke directory via `ctx.path`.
@@ -496,169 +515,7 @@ def plugin_extra_targets(name, apple_macos_srcs_dirs, apple_ios_srcs_dirs, apple
         extra_targets.append(desktop_plugin_target(name, windows_src_dir, "windows"))
     return "\n".join(extra_targets)
 
-def _apple_swiftpm_plugin_target(model, manifest_dir, srcs_dirs):
-    """Find the manifest target the spoke builds from this manifest.
-
-    The plugin's target is the one whose source directory (its `path:`,
-    else the default `Sources/<name>`) is one of the `Sources/<pkg>`
-    directories the spoke emits for this platform.
-
-    Args:
-        model: The parsed manifest model.
-        manifest_dir: The manifest's package-relative directory.
-        srcs_dirs: The platform's detected source directories.
-
-    Returns:
-        The matching target struct, or None when the manifest builds
-        nothing the spoke emits.
-    """
-    for target in model.targets:
-        if target.kind != "target":
-            continue
-        target_dir = manifest_dir + "/" + (target.path if target.path else "Sources/" + target.name)
-        if target_dir in srcs_dirs:
-            return target
-    return None
-
-def _apple_is_flutterframework_skip(dep, pkg_deps):
-    """True when a product dep names the template's FlutterFramework path package.
-
-    Flutter's plugin template declares `.package(name: "FlutterFramework",
-    path: ...)` and links it the Xcode way; the rules link Flutter
-    themselves, so that product is skipped. The match is name-first, as
-    in step 1: only when the manifest's first `FlutterFramework`-named
-    declaration is the path one does the skip apply.
-
-    Args:
-        dep: The parsed product dependency reference.
-        pkg_deps: The manifest's parsed `.package(...)` declarations.
-
-    Returns:
-        True when the product resolves to the template path package.
-    """
-    if dep.package.lower() != "flutterframework":
-        return False
-    for decl in pkg_deps:
-        if decl.name and decl.name.lower() == "flutterframework":
-            return decl.ref_kind == "path"
-    return False
-
-def _apple_keeps_product_dep(dep, pkg_deps, platform):
-    """True when this platform links one plugin-target product dep.
-
-    Drops the products the spoke never links: a `condition:` excluding
-    this platform and the template's `FlutterFramework` path product
-    (the rules link Flutter themselves). Same-package dependencies
-    never reach here: only `.product` references are passed in.
-
-    Args:
-        dep: The parsed product dependency reference.
-        pkg_deps: The manifest's parsed `.package(...)` declarations.
-        platform: `"ios"` or `"macos"`, for condition filtering.
-
-    Returns:
-        True when the spoke links this product on this platform.
-    """
-    if getattr(dep, "condition", None) != None and platform not in dep.condition.platforms:
-        return False
-    if _apple_is_flutterframework_skip(dep, pkg_deps):
-        return False
-    return True
-
-def _apple_swiftpm_dep_labels(plugin_name, manifest_dir, dep, pkg_deps, platform, pins):
-    """Resolve one plugin-target product dep to spoke labels.
-
-    Args:
-        plugin_name: The pub plugin name, for messages.
-        manifest_dir: The manifest's package-relative directory.
-        dep: The parsed product dependency reference.
-        pkg_deps: The manifest's parsed `.package(...)` declarations.
-        platform: `"ios"` or `"macos"`, for condition filtering.
-        pins: `struct(resolved, pinned, unpinned, hub)`: the hub's
-            resolved label, the pinned identities, the
-            identity-to-refusal dict for unfetchable pins, and the hub
-            name for dep labels.
-
-    Returns:
-        `struct(ok, error, labels)`: `labels` holds zero (skipped) or one
-        `@<hub>__swiftpm-<identity>//:<product>` label.
-    """
-    if not _apple_keeps_product_dep(dep, pkg_deps, platform):
-        return struct(ok = True, error = "", labels = [])
-    located = swiftpm_locate_package_dep(plugin_name, dep.package, pkg_deps)
-    if not located.ok:
-        return struct(ok = False, error = located.error, labels = [])
-    canonical = None
-    for pin_id in pins.pinned:
-        if pin_id.lower() == located.dep_identity.lower():
-            canonical = pin_id
-            break
-    if canonical == None:
-        return struct(ok = False, error = "Flutter plugin {plugin}: its `{manifest}/Package.swift` needs SwiftPM package {identity}, which is not pinned in the hub's `Package.resolved` ({resolved}): re-resolve the app with Xcode so the pin lands in the resolved file.".format(plugin = repr(plugin_name), manifest = manifest_dir, identity = repr(located.dep_identity), resolved = pins.resolved), labels = [])
-    if canonical in pins.unpinned:
-        return struct(ok = False, error = "Flutter plugin {plugin}: its `{manifest}/Package.swift` needs SwiftPM package {identity}: {reason}".format(plugin = repr(plugin_name), manifest = manifest_dir, identity = repr(located.dep_identity), reason = pins.unpinned[canonical]), labels = [])
-    return struct(ok = True, error = "", labels = ["@" + swiftpm_spoke_name(pins.hub, canonical) + "//:" + dep.name])
-
-def select_apple_swiftpm_deps(plugin_name, manifest_text, manifest_dir, srcs_dirs, platform, pins):
-    """Read one plugin manifest's SwiftPM product links for one platform.
-
-    Parses the manifest with the lenient plugin entry point (target
-    settings, such as `resources` or `swiftSettings`, are skipped: they
-    cannot change the dependency list, and the spoke keeps its own source,
-    header and privacy-manifest detection), finds the plugin target the
-    spoke builds, and resolves its `.product(name:package:)`
-    dependencies (matched as in step 1) to the hub's pinned
-    repositories, keeping only the products whose `condition:` allows
-    this platform. Same-package dependencies and the template's
-    `FlutterFramework` path product are skipped, so a manifest from
-    Flutter's plugin template links nothing. A manifest the parser
-    cannot read fails only when its text declares a package dependency
-    at all (contains `.package(`): a dependency-free manifest keeps
-    building exactly as today. The resolved-file refusal applies only
-    when a product this platform actually links needs a SwiftPM
-    package, and names that package.
-
-    Args:
-        plugin_name: The pub plugin name, for messages.
-        manifest_text: The `Package.swift` text.
-        manifest_dir: The manifest's package-relative directory.
-        srcs_dirs: The platform's detected source directories.
-        platform: `"ios"` or `"macos"`, for condition filtering.
-        pins: `struct(resolved, pinned, unpinned, hub)` (see
-            `_apple_swiftpm_dep_labels`).
-
-    Returns:
-        `struct(ok, error, labels)`: the spoke dep labels in manifest
-        order, deduplicated.
-    """
-    parsed = parse_swiftpm_plugin_package(plugin_name, manifest_text)
-    if not parsed.ok:
-        if ".package(" not in manifest_text:
-            return struct(ok = True, error = "", labels = [])
-        return struct(ok = False, error = parsed.error, labels = [])
-    target = _apple_swiftpm_plugin_target(parsed.model, manifest_dir, srcs_dirs)
-    if target == None:
-        return struct(ok = True, error = "", labels = [])
-    products = [dep for dep in target.deps if dep.kind == "product" and _apple_keeps_product_dep(dep, parsed.model.pkg_deps, platform)]
-    if not products:
-        return struct(ok = True, error = "", labels = [])
-    if not pins.resolved:
-        located = swiftpm_locate_package_dep(plugin_name, products[0].package, parsed.model.pkg_deps)
-        identity = located.dep_identity if located.ok else products[0].package
-        return struct(ok = False, error = "Flutter plugin {plugin}: its `{manifest}/Package.swift` needs SwiftPM package {identity}, but the `flutter.pub` hub {hub} sets no `swift_package_resolved`: point it at the app's `Package.resolved`.".format(plugin = repr(plugin_name), manifest = manifest_dir, identity = repr(identity), hub = repr(pins.hub)), labels = [])
-    labels = []
-    seen = {}
-    for dep in products:
-        resolved = _apple_swiftpm_dep_labels(plugin_name, manifest_dir, dep, parsed.model.pkg_deps, platform, pins)
-        if not resolved.ok:
-            return struct(ok = False, error = resolved.error, labels = [])
-        for label in resolved.labels:
-            if label not in seen:
-                seen[label] = True
-                labels.append(label)
-    return struct(ok = True, error = "", labels = labels)
-
-def apple_swiftpm_pins(resolved_content, checksums_content, resolved_label, checksums_label, hub_name):
+def apple_swiftpm_pins(resolved_content, checksums_content, resolved_label, checksums_label, hub_name, lock_packages = [], lock_label = ""):
     """Assemble one plugin's view of the hub's SwiftPM pins.
 
     The resolved file supplies the pinned identities and revisions; the
@@ -673,11 +530,13 @@ def apple_swiftpm_pins(resolved_content, checksums_content, resolved_label, chec
         resolved_label: The resolved label, for messages.
         checksums_label: The checksum-file label, for messages.
         hub_name: The `flutter.pub` hub name.
+        lock_packages: The package names in the hub's `pubspec.lock`.
+        lock_label: The hub's `pubspec.lock` label, for messages.
 
     Returns:
         `struct(ok, error, pins)`: `pins` is
-        `struct(resolved, pinned, unpinned, hub)` for the plugin's
-        manifest reader.
+        `struct(resolved, pinned, unpinned, hub, lock_packages,
+        lock_label)` for the plugin's manifest reader.
     """
     pins = read_swiftpm_pins(resolved_content, resolved_label)
     if not pins.ok:
@@ -696,6 +555,8 @@ def apple_swiftpm_pins(resolved_content, checksums_content, resolved_label, chec
             pinned = sorted([pin.identity for pin in pins.pins]),
             unpinned = swiftpm_unpinned_errors(pins.pins, sha256_by_identity, hub_name, resolved_label),
             hub = hub_name,
+            lock_packages = lock_packages,
+            lock_label = lock_label,
         ),
     )
 
@@ -717,18 +578,35 @@ def _apple_swiftpm_pins(ctx, resolved_label, checksums_label, hub_name):
         hub_name: The `flutter.pub` hub name.
 
     Returns:
-        `struct(resolved, pinned, unpinned, hub)` for the plugin's
-        manifest reader.
+        `struct(resolved, pinned, unpinned, hub, lock_packages, lock_label)`
+        for the plugin's manifest reader.
     """
+    lock_packages = ctx.attr.lock_packages
+    lock_label = str(ctx.attr.pubspec_lock) if ctx.attr.pubspec_lock != None else ""
     if resolved_label == None:
-        return struct(resolved = "", pinned = [], unpinned = {}, hub = hub_name)
+        return struct(
+            resolved = "",
+            pinned = [],
+            unpinned = {},
+            hub = hub_name,
+            lock_packages = lock_packages,
+            lock_label = lock_label,
+        )
     label = str(resolved_label)
     checksums_content = None
     checksums_text = ""
     if checksums_label != None:
         checksums_content = ctx.read(checksums_label)
         checksums_text = str(checksums_label)
-    built = apple_swiftpm_pins(ctx.read(resolved_label), checksums_content, label, checksums_text, hub_name)
+    built = apple_swiftpm_pins(
+        ctx.read(resolved_label),
+        checksums_content,
+        label,
+        checksums_text,
+        hub_name,
+        lock_packages,
+        lock_label,
+    )
     if not built.ok:
         fail(built.error)
     return built.pins
