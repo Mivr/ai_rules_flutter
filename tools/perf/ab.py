@@ -43,9 +43,9 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from run_rep import (  # noqa: E402
-    CONFIG_ORDER,
     CONFIGS,
     DEFAULT_MIN_CLEAN_ACTIONS,
+    IOS_CONFIGS,
     SCENARIOS,
     shutdown,
 )
@@ -191,7 +191,7 @@ def generate_committed_lock(pristine, lock_out, run):
     """
     remove_tree(lock_out)
     try:
-        for config in CONFIG_ORDER:
+        for config in IOS_CONFIGS:
             proc = run(lock_build_argv(lock_out, config), cwd=pristine)
             if proc.returncode != 0:
                 raise RuntimeError(
@@ -274,7 +274,7 @@ def ratio_for_flow(results_control, results_treatment, config, scenario,
 def summarize_arm_flows(results_arm):
     """{flow: flow record} medians over one arm's repeats (sol schema)."""
     flows = {}
-    for config in CONFIG_ORDER:
+    for config in IOS_CONFIGS:
         for scenario, _ in SCENARIOS:
             flow = sol.flow_id(config, scenario)
             records = sol.load_sol_records(results_arm, config, scenario)
@@ -290,7 +290,7 @@ def summarize_ab(results_control, results_treatment, meta):
     control_flows = summarize_arm_flows(results_control)
     treatment_flows = summarize_arm_flows(results_treatment)
     ratios = {}
-    for config in CONFIG_ORDER:
+    for config in IOS_CONFIGS:
         for scenario, _ in SCENARIOS:
             flow = sol.flow_id(config, scenario)
             ratios[flow] = ratio_for_flow(results_control,
@@ -391,7 +391,7 @@ def main_run(cmd):
         argv, cwd, cmd.time_bin)
     cmd.measure_warm = (lambda argv, cwd, server_pid:
                         warm_server.measure(argv, cwd, server_pid))
-    configs = list(cmd.config) if cmd.config else list(CONFIG_ORDER)
+    configs = list(cmd.config) if cmd.config else list(IOS_CONFIGS)
     unknown = [c for c in configs if c not in CONFIGS]
     if unknown:
         raise ValueError("unknown config(s): %s" % ", ".join(unknown))
