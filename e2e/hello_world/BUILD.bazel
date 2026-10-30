@@ -860,15 +860,31 @@ build_test(
     targets = [":hello_world_macos"],
 )
 
+# Unit tests for `test/bazel_client.dart`, the resolver the macOS stage-clean
+# test uses for its nested `bazel` and `unzip`. They run on every host: each
+# creates a temporary directory and a fake executable, and none runs a real
+# Bazel. The macOS lane of full.yaml proves the rebuild assertion itself.
+dart_test(
+    name = "bazel_client_test",
+    size = "small",
+    srcs = ["test/bazel_client.dart"],
+    main = "test/bazel_client_test.dart",
+    deps = ["@deps//:test"],
+)
+
 # macOS rebuild guard: under a local framework strategy the staging directory
 # survives between builds, so an asset removed from the app must not survive in
 # the new App.framework.zip. The test drives real builds in a private output
 # base, so it is `external` (never a replayed cached pass) and `no-sandbox` (it
 # reaches the workspace through its runfiles anchor). The macOS leg of
 # full.yaml runs `bazel test //...`; other hosts cannot build a macOS app.
+# `PATH` is inherited with `BAZEL`: Bazel sanitizes a test's environment, so
+# the test resolves its nested client from one of those two, never a bare
+# spawn against the default environment.
 dart_test(
     name = "verify_macos_stage_clean_test",
     size = "enormous",
+    srcs = ["test/bazel_client.dart"],
     data = ["test/verify_macos_stage_clean_test.dart"],
     env = {
         "GUARD_ROOT_ANCHOR": "$(rlocationpath :test/verify_macos_stage_clean_test.dart)",
@@ -876,6 +892,7 @@ dart_test(
     env_inherit = [
         "BUILD_WORKSPACE_DIRECTORY",
         "BAZEL",
+        "PATH",
     ],
     main = "test/verify_macos_stage_clean_test.dart",
     tags = [
