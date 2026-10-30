@@ -528,7 +528,7 @@ flutter_ios_app(
 | `entitlements` | Replaces the entitlements wiring. By default the macro uses `ios/Runner/Runner.entitlements` if it exists. An app with no entitlements file is fine. |
 | `additional_entitlements` | Entitlement plist files merged into the base in every compilation mode. Works even when the app has no entitlements file. See [Release builds and permissions](#release-builds-and-permissions). |
 | `provisioning_profile` | A `.mobileprovision` file, usually a `local_provisioning_profile` target. Required for device builds, unused by simulator builds. See [Running on an iOS device](#running-on-an-ios-device). |
-| `signing` | Whether to code sign the bundle. Defaults to `True`. `False` builds an unsigned device app the way `flutter build ios --no-codesign` does; it rejects `provisioning_profile` and needs the `rules_apple` backend. See [Unsigned device builds](#unsigned-device-builds). |
+| `signing` | Whether to code sign the bundle. Defaults to `True`. On `rules_apple`, a device build always needs a `provisioning_profile`, so `False` is refused at analysis; an unsigned device bundle is the `xtool` backend's output. See [Unsigned device builds](#unsigned-device-builds). |
 | `app_icons` | Defaults to the `AppIcon.appiconset` in `ios/Runner/Assets.xcassets`. See [App icons](#app-icons). |
 | `runner_deps` | `swift_library` targets linked into the runner. See [App Intents](#app-intents). |
 | `exclude_plugins` | Plugin module names left out of the registrant. iOS only: the Android, Linux, macOS and Windows registrants take no such attribute and always register every collected native plugin. See [iOS plugin registrant](#ios-plugin-registrant). |
@@ -644,18 +644,32 @@ Deleting the file is the wrong fix. It is the app's real answer for the profile 
 
 #### Unsigned device builds
 
-CI can build and inspect a device app without a signing credential by setting `signing = False`:
+`rules_apple` builds a device app only with a `provisioning_profile`: its device
+pipeline adds a provisioning-profile step to every build, and no feature turns
+that step off. `signing = False` therefore fails at analysis on that backend,
+with an error naming the target and saying that rules_apple requires a
+`provisioning_profile` for every device build.
+
+An unsigned device bundle is the `xtool` backend's output:
 
 ```starlark
 flutter_ios_app(
     name = "my_app_ios_device_unsigned",
     application = ":my_app",
     bundle_id = "com.example.myapp",
+    backend = "xtool",
     signing = False,
 )
 ```
 
-This is the bundle `flutter build ios --no-codesign` produces: rules_apple's `disable_legacy_signing` feature suppresses the codesign actions, so no profile is embedded and no `LC_CODE_SIGNATURE` is written. It rejects `provisioning_profile` and is available only with the `rules_apple` backend. Use it to prove the device bundle on CI; running on a device still needs the signed target above. `e2e/ios_example` builds one as `:app_device_unsigned` and checks it with `verify_ios_device_app_test`.
+This is the bundle shape `flutter build ios --no-codesign` produces: no profile
+embedded and no `LC_CODE_SIGNATURE` written. On `xtool`, `signing = False`
+keeps any `features` the caller passes unchanged and rejects a
+`provisioning_profile` and every signing attribute (`zsign`, `certificate`,
+`certificate_password_file`, `certificate_password_env`,
+`certificate_password`), because those ask for signing. Running on a device
+still needs the signed target above. The `xtool` backend cannot build the
+examples in this repository: it rejects their storyboards and asset catalog.
 
 **Getting a profile.** This is an Apple Developer account operation, and the rules cannot do it for you. You need a development profile whose App ID matches your `bundle_id`, installed under `~/Library/Developer/Xcode/UserData/Provisioning Profiles/`. Either create the App ID and a profile in the developer portal, download it, and double-click it, or let Xcode do it from any project with the right bundle id and automatic signing:
 
