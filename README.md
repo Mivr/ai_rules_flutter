@@ -1741,6 +1741,48 @@ These are what `flutter_application` is made of. Most apps never need them.
 | `flutter_native_library` | Pairs a native library with its binding contract. See [Hot reload across a native rebuild](#hot-reload-across-a-native-rebuild). |
 | `flutter_native_asset`, `flutter_data_asset` | Declare Dart Native Assets, from `@rules_flutter//flutter:native_assets.bzl`. A data asset is bundled at `flutter_assets/packages/<package>/<name>`. |
 
+#### flutter_apple_xcframework_import
+
+Imports one prebuilt Apple framework, either an `.xcframework` or a plain
+`.framework`, for an iOS or macOS app. It is the supported path for a
+vendored framework and for the frameworks a binary pod or SwiftPM binary
+target brings, and it needs no `backend` argument: the same
+`@rules_flutter//flutter/settings:apple_backend` setting that chooses the app
+backend chooses the import.
+
+```starlark
+load("@rules_flutter//flutter:ios.bzl", "flutter_apple_xcframework_import")
+
+flutter_apple_xcframework_import(
+    name = "tinykit",
+    framework = "TinyKit.xcframework",
+    linkage = "static",
+)
+```
+
+The signature is `flutter_apple_xcframework_import(name, framework, linkage =
+"static", alwayslink = False, sdk_frameworks = [], weak_sdk_frameworks = [],
+sdk_dylibs = [])`.
+
+`framework` names the files of the single `.xcframework` or `.framework`
+directory, usually a `filegroup`. The label's spelling decides the shape, so
+the macro never resolves its files at load time. `linkage` is `"static"`
+(default) or `"dynamic"`; it picks `apple_static_xcframework_import` or
+`apple_dynamic_xcframework_import` for an xcframework, and
+`apple_static_framework_import` or `apple_dynamic_framework_import` for a
+plain framework. `alwayslink`, `sdk_frameworks`, `weak_sdk_frameworks` and
+`sdk_dylibs` are forwarded to a static `rules_apple` import. Use
+`alwayslink = True` for a framework whose Objective-C categories must load
+(`-ObjC`).
+
+On the xtool backend the import is `flutter_darwin_xcframework_import` for
+either shape, with `linkage = "dynamic"` becoming `is_dynamic = True`. A
+label that names neither shape, a `linkage` other than the two values, or an
+argument that backend cannot carry fails analysis with a message naming the
+argument; the dynamic `rules_apple` imports take neither `alwayslink` nor an
+SDK framework or dylib list, and the xtool backend links prebuilt frameworks
+with `-F`/`-framework` and carries none of them either.
+
 #### Composing your own compile rules (`flutter:utils.bzl`)
 
 A rule in another module can run the same kernel compile `flutter_application` uses, loading only `@rules_flutter//flutter:utils.bzl`:

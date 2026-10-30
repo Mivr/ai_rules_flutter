@@ -653,6 +653,13 @@ bzl_library(
 )
 
 bzl_library(
+    name = "flutter_apple_xcframework_import",
+    srcs = ["flutter_apple_xcframework_import.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+    deps = [":flutter_xtool_bundle"],
+)
+
+bzl_library(
     name = "xtool_version",
     srcs = ["xtool_version.bzl"],
     visibility = ["//flutter:__subpackages__"],

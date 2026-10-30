@@ -62,6 +62,7 @@ load("@rules_swift//swift:swift.bzl", "swift_library")
 load("//flutter/private:constants.bzl", _MACOS_MINIMUM_OS_VERSION = "MACOS_MINIMUM_OS_VERSION")
 load("//flutter/private:flutter_apple_plugin_library.bzl", _flutter_apple_plugin_library_macro = "flutter_apple_plugin_library", _flutter_xtool_apple_plugin_library = "flutter_xtool_apple_plugin_library")
 load("//flutter/private:flutter_apple_plugins_aggregator.bzl", _flutter_apple_plugins_aggregator = "flutter_apple_plugins_aggregator")
+load("//flutter/private:flutter_apple_xcframework_import.bzl", _flutter_apple_xcframework_import = "flutter_apple_xcframework_import")
 load("//flutter/private:flutter_macos_application.bzl", _flutter_macos_framework_rule = "flutter_macos_framework", _flutter_macos_native_libs_rule = "flutter_macos_native_libs", _flutter_macos_privacy_manifests_rule = "flutter_macos_privacy_manifests")
 load("//flutter/private:flutter_macos_registrant.bzl", _flutter_macos_registrant_rule = "flutter_macos_registrant")
 load("//flutter/private:flutter_plist_merge.bzl", _flutter_entitlements_merge = "flutter_entitlements_merge")
@@ -79,6 +80,11 @@ flutter_entitlements_merge = _flutter_entitlements_merge
 
 # Host-agnostic xtool framework import, versioning, and macOS bundle rules.
 flutter_darwin_xcframework_import = _flutter_darwin_xcframework_import
+
+# Imports one prebuilt .xcframework or .framework on the selected Apple
+# backend, for iOS and macOS alike.
+flutter_apple_xcframework_import = _flutter_apple_xcframework_import
+
 flutter_xtool_bundle_version = _flutter_xtool_bundle_version
 flutter_xtool_macos_bundle = _flutter_xtool_macos_bundle
 

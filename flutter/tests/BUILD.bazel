@@ -18,6 +18,7 @@ load(":compile_api_test.bzl", "compile_api_test_suite")
 load(":cpp_client_wrapper_test.bzl", "cpp_client_wrapper_test_suite")
 load(":custom_kernel_defines_test.bzl", "custom_kernel_defines_test_suite")
 load(":define_flagfiles_test.bzl", "define_flagfiles_test_suite")
+load(":flutter_apple_xcframework_import_test.bzl", "flutter_apple_xcframework_import_test_suite")
 load(":flutter_application_test.bzl", "flutter_application_test_suite")
 load(":flutter_info_test.bzl", "flutter_info_test_suite")
 load(":flutter_integration_test_test.bzl", "flutter_integration_test_test_suite")
@@ -79,6 +80,21 @@ load(":web_test.bzl", "web_test_suite")
 # The dependency-floor table is read by //flutter/tests:dependency_floors_test
 # and by e2e/min_versions, which resolves the same declared floors.
 exports_files(["dependency_floors.json"])
+
+# The checked-in TinyKit fixtures the Apple framework-import tests and the iOS
+# integration workspace consume. Both are tiny static frameworks: no download
+# and no build step fetches or compiles them.
+filegroup(
+    name = "TinyKit.xcframework",
+    srcs = glob(["fixtures/TinyKit.xcframework/**"]),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "TinyKit.framework",
+    srcs = glob(["fixtures/TinyKit.framework/**"]),
+    visibility = ["//visibility:public"],
+)
 
 # Parser shared by the root floor guard and e2e/min_versions, so both read
 # MODULE.bazel and the table the same way.
@@ -355,6 +371,8 @@ shader_keys_test_suite(name = "shader_keys_test")
 toolchains_repo_test_suite(name = "toolchains_repo_test")
 
 flutter_application_test_suite(name = "flutter_application_test")
+
+flutter_apple_xcframework_import_test_suite(name = "flutter_apple_xcframework_import_test")
 
 native_assets_test_suite(name = "native_assets_test")
 
