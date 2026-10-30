@@ -10,6 +10,7 @@ import 'package:integration_ios/l10n/app_localizations.dart';
 import 'package:integration_ios/main.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:ios_greeting_plugin/ios_greeting_plugin.dart';
+import 'package:xcframework_plugin/xcframework_plugin.dart';
 
 void main() {
   // Captured when the integration test entrypoint's own `main()` starts. The
@@ -35,6 +36,12 @@ void main() {
     tester,
   ) async {
     expect(FfiPlugin.answer(), 42);
+  });
+
+  testWidgets('calls tinykit_answer through the imported framework', (
+    tester,
+  ) async {
+    expect(await const XcframeworkPlugin().tinykitAnswer(), 42);
   });
 
   testWidgets('forwards a define with a comma and an equals sign', (

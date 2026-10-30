@@ -282,6 +282,13 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "3.2.0"
+  xcframework_plugin:
+    dependency: "direct main"
+    description:
+      path: xcframework_plugin
+      relative: true
+    source: path
+    version: "0.0.1"
 sdks:
   dart: ">=3.13.0 <4.0.0"
   flutter: ">=3.18.0-18.0.pre.54"
