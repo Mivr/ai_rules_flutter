@@ -13,10 +13,11 @@ void main() {
     await tester.pumpAndSettle();
 
     // Computed at run time by the BigInt product linked into the
-    // plugin's Apple library: 2^100, then BigInt("-0").
+    // plugin's Apple library: 2^100, then BigInt("-0"), then the marker
+    // the plugin's Objective-C and Swift compiles both saw `PLUGIN_FLAG`.
     expect(
       await const SpmBigintPlugin().computeBig(),
-      '1267650600228229401496703205376 0',
+      '1267650600228229401496703205376 0 PLUGIN_FLAG',
     );
   });
 }

@@ -30,6 +30,7 @@ surface small).
 load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version", "make_dart_library_build_content")
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_deps", "parse_pubspec_sdk_constraint", "pubspec_sdk_constraint_error")
 load("//flutter/private:flutter_pub_cycle_breaks.bzl", "apply_cycle_breaks", "spoke_dep_labels")
+load("//flutter/private:flutter_pub_plugin_defines.bzl", "check_plugin_defines", "plugin_defines_attr")
 load("//flutter/private:flutter_pub_scan.bzl", "fetch_hosted_archive", "scan_hosted_archive", "walk_hosted_package")
 load("//flutter/private:flutter_pubspec.bzl", "asset_flavor_error", "parse_flutter_assets_block", "parse_flutter_plugin_block", "parse_pubspec")
 load(":asset_uri.bzl", "normalize_spoke_asset_block", "normalize_spoke_assets", "normalize_spoke_fonts", "normalize_spoke_shaders")
@@ -593,7 +594,8 @@ def make_flutter_plugin_build_content(
         pkg_shaders = {},
         pkg_asset_platforms = {},
         pkg_asset_flavors = {},
-        version = ""):
+        version = "",
+        plugin_defines = []):
     """Generate BUILD content for a Flutter plugin spoke.
 
     Emits a `flutter_plugin` plus optional per-platform
@@ -636,6 +638,8 @@ def make_flutter_plugin_build_content(
             `make_dart_library_build_content`: its sole use is agreement
             checking when one package name arrives from two hubs, and an
             unstated version never conflicts with a stated one.
+        plugin_defines: Preprocessor defines for this plugin's Apple
+            libraries, in the order given. Empty emits no attribute.
 
     Returns:
         BUILD.bazel content as a string.
@@ -646,12 +650,7 @@ def make_flutter_plugin_build_content(
     """
     deps_block = _spoke_deps_block(deps)
 
-    extra_loads = _plugin_extra_loads(
-        apple_macos_srcs_dirs,
-        apple_ios_srcs_dirs,
-        linux_src_dir,
-        windows_src_dir,
-    )
+    extra_loads = _plugin_extra_loads(apple_macos_srcs_dirs, apple_ios_srcs_dirs, linux_src_dir, windows_src_dir)
     extra_targets = _plugin_extra_targets(
         name,
         apple_macos_srcs_dirs,
@@ -660,6 +659,7 @@ def make_flutter_plugin_build_content(
         apple_ios_include_dirs,
         linux_src_dir,
         windows_src_dir,
+        plugin_defines,
     )
 
     # NB: Android sources are no longer surfaced via a top-level filegroup.
@@ -1609,8 +1609,7 @@ def _read_spoke_pubspec(ctx):
     version, and the parsed `flutter.plugin` / `flutter` asset blocks
     (absent-pubspec defaults when no pubspec was extracted).
     """
-    bazel_deps = []
-    language_version = ""
+    bazel_deps, language_version = [], ""
     plugin_block = struct(
         present = False,
         platforms = {},
@@ -1759,8 +1758,7 @@ def _detect_desktop_plugin_sources(ctx, package_name, plugin_block):
     """
     linux_info = plugin_block.platforms.get("linux", {})
     windows_info = plugin_block.platforms.get("windows", {})
-    linux_src_dir = ""
-    windows_src_dir = ""
+    linux_src_dir, windows_src_dir = "", ""
     if linux_info and linux_info.get("pluginClass", ""):
         linux_src_dir = _detect_desktop_source_dir(ctx, package_name, "linux")
     if windows_info and windows_info.get("pluginClass", ""):
@@ -1848,6 +1846,7 @@ def _build_plugin_spoke_content(ctx, pubspec, dep_labels, assets, unreplaced_hoo
         pkg_asset_platforms = assets.pkg_asset_platforms,
         pkg_asset_flavors = assets.pkg_asset_flavors,
         pkg_shaders = assets.pkg_shaders,
+        plugin_defines = ctx.attr.plugin_defines,
     )
     apple_swiftpm = detect_apple_swiftpm_deps(ctx, package_name, apple)
     build_content = with_apple_swiftpm_deps(build_content, package_name, apple_swiftpm.macos, apple_swiftpm.ios)
@@ -2225,6 +2224,8 @@ def _generate_spoke(ctx):
         dep_labels,
     )
 
+    check_plugin_defines(ctx, ctx.attr.package_name, pubspec.plugin_block, bool(overlay_content))
+
     if overlay_content:
         _write_overlay_spoke(ctx, overlay_content, overlay_android_content)
         return
@@ -2327,6 +2328,7 @@ flutter_pub_package = repository_rule(
             default = [],
         ),
         "cycle_breaks": attr.string_list(doc = "Dependency names whose spoke-to-spoke edge is left out of this package's `deps`; each must be a dependency its own pubspec declares. Empty drops nothing.", default = []),
+        "plugin_defines": plugin_defines_attr,
         "code_assets": attr.string_list(
             doc = "Labels of `dart_code_asset` targets standing in for this " +
                   "package's build hook. Resolved by the extension from " +
@@ -2386,6 +2388,7 @@ flutter_pub_path_package = repository_rule(
             default = [],
         ),
         "cycle_breaks": attr.string_list(doc = "Dependency names whose spoke-to-spoke edge is left out of this package's `deps`, same as `flutter_pub_package`.", default = []),
+        "plugin_defines": plugin_defines_attr,
         "code_assets": attr.string_list(
             doc = "Labels of `dart_code_asset` targets standing in for this " +
                   "package's build hook, same as `flutter_pub_package`.",

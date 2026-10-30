@@ -117,6 +117,8 @@ def _merge_plugin_sdk_lists(ctx, sdk_frameworks, sdk_dylibs):
     return frameworks, dylibs
 
 def _flutter_xtool_apple_plugin_library_impl(ctx):
+    if ctx.attr.plugin_defines:
+        fail(plugin_defines_xtool_refusal(ctx.label.name))
     srcs = _classify_plugin_srcs(ctx.files.srcs)
     include_dirs = _plugin_include_dirs(ctx.label.package, ctx.attr.includes, srcs.include_dirs)
 
@@ -188,6 +190,13 @@ flutter_xtool_apple_plugin_library = rule(
             default = [],
             doc = "Dependencies providing CcInfo or SwiftInfo.",
         ),
+        "plugin_defines": attr.string_list(
+            default = [],
+            doc = "Preprocessor defines for the plugin's Apple libraries. " +
+                  "The xtool backend refuses a non-empty list because it " +
+                  "compiles every source in one swiftc invocation with no " +
+                  "define flags.",
+        ),
     },
     provides = [
         DefaultInfo,
@@ -222,6 +231,7 @@ def _emit_xtool_plugin_branch(spec):
         sdk_frameworks = spec.sdk_frameworks,
         sdk_dylibs = spec.sdk_dylibs,
         deps = [":" + spec.framework_target] + list(spec.deps),
+        plugin_defines = spec.plugin_defines,
         tags = spec.tags,
         target_compatible_with = spec.target_compatible_with,
         visibility = spec.visibility,
@@ -253,6 +263,22 @@ def objc_copts_xtool_refusal(name):
         "separate ObjC compile to pass them to"
     )
 
+def plugin_defines_xtool_refusal(name):
+    """The message for `plugin_defines` on the `xtool` backend, naming the plugin target."""
+    return (
+        "flutter_apple_plugin_library: %s: plugin_defines is not supported on the xtool backend; " % name +
+        "it compiles every source in one swiftc invocation with no define flags. " +
+        "Remove flutter.pub(ios_plugin_defines = ...), or build with backend = \"rules_apple\"."
+    )
+
+def _plugin_define_copts(defines):
+    """The C-family `-D` flags for a plugin's define entries, in order."""
+    return ["-D" + define for define in defines]
+
+def _plugin_swift_define_copts(defines):
+    """The Swift `-D` flags: only value-less entries, because a condition has no value."""
+    return ["-D" + define for define in defines if "=" not in define]
+
 def _emit_plugin_objc_target(spec, objc_files, headers):
     """Emit the inner `objc_library`; return `(objc_module_name, dep_label_or_None)`."""
     if not objc_files:
@@ -268,7 +294,7 @@ def _emit_plugin_objc_target(spec, objc_files, headers):
         sdk_dylibs = spec.sdk_dylibs,
         module_name = objc_module_name,
         enable_modules = True,
-        copts = list(spec.copts) + list(spec.objc_copts),
+        copts = list(spec.copts) + list(spec.objc_copts) + _plugin_define_copts(spec.plugin_defines),
         deps = [":" + spec.framework_target] + list(spec.deps),
         tags = spec.internal_tags,
         target_compatible_with = spec.target_compatible_with,
@@ -367,7 +393,7 @@ def _emit_plugin_mixed_objc_target(spec, objc_files, headers, swift_deps):
         includes = spec.includes,
         sdk_frameworks = spec.sdk_frameworks,
         sdk_dylibs = spec.sdk_dylibs,
-        copts = spec.copts,
+        copts = list(spec.copts) + list(spec.objc_copts) + _plugin_define_copts(spec.plugin_defines),
         deps = [":" + spec.framework_target] + swift_deps,
         tags = spec.internal_tags,
         target_compatible_with = spec.target_compatible_with,
@@ -384,7 +410,7 @@ def _plugin_bridging_copts(spec, headers):
     view class without importing the framework still parses. A plugin with no
     bridging header gets its own copts unchanged.
     """
-    extra_copts = list(spec.copts)
+    extra_copts = list(spec.copts) + _plugin_swift_define_copts(spec.plugin_defines)
     for h in headers:
         if h.endswith("%s-Bridging-Header.h" % spec.module_name):
             if spec.platform == "ios":
@@ -519,6 +545,7 @@ def flutter_apple_plugin_library(
         deps = [],
         copts = [],
         objc_copts = [],
+        plugin_defines = [],
         includes = [],
         sdk_frameworks = [],
         sdk_dylibs = [],
@@ -547,6 +574,11 @@ def flutter_apple_plugin_library(
             only, appended after `copts`. They never reach the `swift_library`.
             The `xtool` backend refuses a non-empty list, because it has no
             separate ObjC compile.
+        plugin_defines: Preprocessor defines for that plugin's Apple
+            libraries, each `NAME` or `NAME=VALUE`. Every entry reaches the
+            C-family compile as `-D<entry>`; only a value-less `NAME` reaches
+            the Swift compile, as `-D<NAME>`, because a Swift condition has no
+            value. The `xtool` backend refuses a non-empty list.
         includes: Header search paths forwarded to the inner `objc_library`.
         sdk_frameworks: Apple SDK frameworks to link (e.g. `["AVFoundation"]`).
         sdk_dylibs: Apple SDK dynamic libraries to link (e.g. `["c++"]`,
@@ -586,6 +618,7 @@ def flutter_apple_plugin_library(
         deps = deps,
         copts = copts,
         objc_copts = objc_copts,
+        plugin_defines = plugin_defines,
         includes = includes,
         sdk_frameworks = sdk_frameworks,
         sdk_dylibs = sdk_dylibs,

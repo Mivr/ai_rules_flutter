@@ -390,6 +390,73 @@ def _plugin_spoke_carries_resources_test_impl(ctx):
 
 plugin_spoke_carries_resources_test = unittest.make(_plugin_spoke_carries_resources_test_impl)
 
+def _plugin_defines_reach_the_generated_build_test_impl(ctx):
+    """A plugin spoke carries its defines into both generated Apple calls."""
+    env = unittest.begin(ctx)
+
+    base = make_flutter_plugin_build_content(
+        name = "permission_handler_apple",
+        deps = [],
+        language_version = "3.4",
+        code_assets = [],
+        has_unreplaced_hook = "",
+        plugin_platforms_json = '{"ios":{"pluginClass":"PermissionHandlerPlugin"}}',
+        apple_macos_srcs_dirs = [],
+        apple_ios_srcs_dirs = ["ios/Classes"],
+        apple_macos_include_dirs = [],
+        apple_ios_include_dirs = [],
+        apple_macos_privacy_manifests = [],
+        apple_ios_privacy_manifests = [],
+        linux_src_dir = "",
+        windows_src_dir = "",
+    )
+    defines = ["PERMISSION_CAMERA=1", "PERMISSION_MICROPHONE"]
+    content = make_flutter_plugin_build_content(
+        name = "permission_handler_apple",
+        deps = [],
+        language_version = "3.4",
+        code_assets = [],
+        has_unreplaced_hook = "",
+        plugin_platforms_json = '{"ios":{"pluginClass":"PermissionHandlerPlugin"}}',
+        apple_macos_srcs_dirs = [],
+        apple_ios_srcs_dirs = ["ios/Classes"],
+        apple_macos_include_dirs = [],
+        apple_ios_include_dirs = [],
+        apple_macos_privacy_manifests = [],
+        apple_ios_privacy_manifests = [],
+        linux_src_dir = "",
+        windows_src_dir = "",
+        plugin_defines = defines,
+    )
+    defines_block = "    plugin_defines = {},\n".format(starlark_string_literal(defines))
+    asserts.equals(env, 2, content.count(defines_block))
+    asserts.equals(
+        env,
+        base.replace("    includes = [],\n", "    includes = [],\n" + defines_block),
+        content,
+    )
+    asserts.equals(env, base, make_flutter_plugin_build_content(
+        name = "permission_handler_apple",
+        deps = [],
+        language_version = "3.4",
+        code_assets = [],
+        has_unreplaced_hook = "",
+        plugin_platforms_json = '{"ios":{"pluginClass":"PermissionHandlerPlugin"}}',
+        apple_macos_srcs_dirs = [],
+        apple_ios_srcs_dirs = ["ios/Classes"],
+        apple_macos_include_dirs = [],
+        apple_ios_include_dirs = [],
+        apple_macos_privacy_manifests = [],
+        apple_ios_privacy_manifests = [],
+        linux_src_dir = "",
+        windows_src_dir = "",
+    ))
+    return unittest.end(env)
+
+plugin_defines_reach_the_generated_build_test = unittest.make(
+    _plugin_defines_reach_the_generated_build_test_impl,
+)
+
 def _library_spoke_carries_resources_test_impl(ctx):
     """A flutter_library spoke keeps lib/'s non-Dart remainder alongside its declared assets.
 
@@ -2287,6 +2354,7 @@ def flutter_pub_package_test_suite(name):
         no_resources_subpackage_test,
         empty_subpackage_test,
         plugin_spoke_carries_resources_test,
+        plugin_defines_reach_the_generated_build_test,
         library_spoke_carries_resources_test,
         spoke_with_shaders_declares_their_includes_test,
         maven_labels_known_and_unknown_test,
