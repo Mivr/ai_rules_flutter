@@ -116,6 +116,18 @@ class FlowIdTest(unittest.TestCase):
         self.assertEqual(flow_id("sim_debug", "app_edit"), "ios-debug-app")
         self.assertEqual(flow_id("sim_debug", "core_edit"), "ios-debug-body")
 
+    def test_android_and_web_flows(self):
+        expected = {
+            "android_release": "android-release",
+            "android_debug": "android-debug",
+            "web_release": "web-release",
+            "web_debug": "web-debug",
+        }
+        for config, prefix in expected.items():
+            self.assertEqual(flow_id(config, "clean"), prefix + "-clean")
+            self.assertEqual(flow_id(config, "app_edit"), prefix + "-app")
+            self.assertEqual(flow_id(config, "core_edit"), prefix + "-body")
+
     def test_unknown_raises(self):
         with self.assertRaises(KeyError):
             flow_id("nope", "clean")
@@ -552,6 +564,79 @@ class VerifyFilesTest(unittest.TestCase):
         os.remove(os.path.join(inner, "App"))
         dangling = app_dir_hashes(self.bundle)
         self.assertIsNone(dangling["App-alias"])
+
+    def write_apk(self, path, stamp=(2020, 1, 1, 0, 0, 0),
+                  extra=b""):
+        import zipfile
+        with zipfile.ZipFile(path, "w") as archive:
+            for entry in ("classes.dex", "lib/arm64-v8a/libapp.so"):
+                info = zipfile.ZipInfo(entry, date_time=stamp)
+                info.extra = extra
+                archive.writestr(info, b"apk-bytes-for-" + entry.encode())
+
+    def test_apk_payload_ignores_zip_metadata(self):
+        first = os.path.join(self.tmp, "first.apk")
+        second = os.path.join(self.tmp, "second.apk")
+        self.write_apk(first, stamp=(2020, 1, 1, 0, 0, 0))
+        self.write_apk(second, stamp=(2026, 5, 6, 7, 8, 0),
+                       extra=b"\xfe\xca\x02\x00ab")
+        self.assertNotEqual(sha256_file(first), sha256_file(second))
+        self.assertEqual(sol.archive_entry_hashes(first),
+                         sol.archive_entry_hashes(second))
+        self.assertIn("classes.dex", sol.archive_entry_hashes(first))
+
+    def test_plan_android_reads_every_apk_entry(self):
+        root = os.path.join(self.tmp, "execroot")
+        os.makedirs(root)
+        apk = os.path.join(root, "app_android.apk")
+        self.write_apk(apk)
+        capture = FakeCapture(root, [apk])
+        plan = plan_verify_snapshot(capture, self.tmp, self.tmp, root,
+                                    "android_release", True)
+        snapshot = read_verify_snapshot(plan)
+        self.assertEqual(len(snapshot), 2)
+        self.assertTrue(all("::classes.dex" in k or
+                            "::lib/arm64-v8a/libapp.so" in k
+                            for k in snapshot))
+
+    def test_plan_web_reads_every_output_file(self):
+        root = os.path.join(self.tmp, "execroot")
+        os.makedirs(os.path.join(root, "assets", "fonts"))
+        for rel in ["index.html", "main.dart.js",
+                    os.path.join("assets", "fonts", "font.ttf")]:
+            path = os.path.join(root, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "wb") as fh:
+                fh.write(rel.encode())
+        capture = FakeCapture(root, [root])
+        plan = plan_verify_snapshot(capture, self.tmp, self.tmp, root,
+                                    "web_release", True)
+        snapshot = read_verify_snapshot(plan)
+        self.assertEqual(sorted(k.split("::", 1)[1] for k in snapshot),
+                         ["assets/fonts/font.ttf", "index.html",
+                          "main.dart.js"])
+
+    def test_plan_android_without_archive_fails(self):
+        root = os.path.join(self.tmp, "execroot")
+        dill = os.path.join(root, "bazel-out", "x", "app.dill")
+        os.makedirs(os.path.dirname(dill))
+        with open(dill, "wb") as fh:
+            fh.write(b"dill")
+        capture = FakeCapture(root, ["bazel-out/x/app.dill"])
+        with self.assertRaisesRegex(RuntimeError, "no bundle"):
+            plan_verify_snapshot(capture, self.tmp, self.tmp, root,
+                                 "android_release", True)
+
+    def test_plan_web_without_directory_fails(self):
+        root = os.path.join(self.tmp, "execroot")
+        dill = os.path.join(root, "bazel-out", "x", "app.dill")
+        os.makedirs(os.path.dirname(dill))
+        with open(dill, "wb") as fh:
+            fh.write(b"dill")
+        capture = FakeCapture(root, ["bazel-out/x/app.dill"])
+        with self.assertRaisesRegex(RuntimeError, "no bundle"):
+            plan_verify_snapshot(capture, self.tmp, self.tmp, root,
+                                 "web_release", True)
 
     def test_plan_rejects_bundle_less_listing(self):
         # Declared outputs only, never a glob over bazel-out: a listing
@@ -1263,6 +1348,62 @@ class SummarizeSolTest(unittest.TestCase):
         self.assertEqual(summary["flows"]["ios-debug-clean"],
                          {"error": "missing repeats"})
         self.assertEqual(summary["meta"]["repeats"], 1)
+
+    def test_platform_summaries_write_android_and_web_files(self):
+        android_flows = {
+            "android-release-clean", "android-release-app",
+            "android-release-body", "android-debug-clean",
+            "android-debug-app", "android-debug-body",
+        }
+        web_flows = {
+            "web-release-clean", "web-release-app", "web-release-body",
+            "web-debug-clean", "web-debug-app", "web-debug-body",
+        }
+        for config, prefix in [("android_release", "android-release"),
+                               ("android_debug", "android-debug"),
+                               ("web_release", "web-release"),
+                               ("web_debug", "web-debug")]:
+            for scenario, suffix in [("clean", "clean"),
+                                     ("app_edit", "app"),
+                                     ("core_edit", "body")]:
+                self.write_records(config, scenario, [sol_record(
+                    "%s-%s" % (prefix, suffix), 1.0, 0.9, True)])
+        summary = summarize_sol(
+            self.tmp, {"sha": "1" * 40, "repeats": 1,
+                       "target_loc": 20000, "seed": 1})
+        self.assertEqual(set(summary["flows"]), android_flows | web_flows)
+        with open(os.path.join(self.tmp, "android-sol.json"),
+                  encoding="utf-8") as fh:
+            android = json.load(fh)
+        with open(os.path.join(self.tmp, "web-sol.json"),
+                  encoding="utf-8") as fh:
+            web = json.load(fh)
+        self.assertEqual(set(android["flows"]), android_flows)
+        self.assertEqual(set(web["flows"]), web_flows)
+        self.assertEqual(android["unit"], "cpu_seconds")
+        self.assertEqual(android["rules_flutter"], "1" * 40)
+
+    def test_ios_only_summary_is_base_ios_sol(self):
+        self.write_records("device_release", "clean",
+                           [sol_record("ios-release-clean", 1.0, 0.9,
+                                       True)])
+        self.write_records("sim_debug", "app_edit",
+                           [sol_record("ios-debug-app", 0.5, 0.4, True)])
+        summary = summarize_sol(
+            self.tmp, {"sha": "2" * 40, "repeats": 1,
+                       "target_loc": 20000, "seed": 1})
+        expected = {
+            "ios-release-clean", "ios-release-app", "ios-release-body",
+            "ios-debug-clean", "ios-debug-app", "ios-debug-body",
+        }
+        self.assertEqual(set(summary["flows"]), expected)
+        self.assertEqual(set(summary), {"rules_flutter", "unit",
+                                        "runner", "flows", "meta"})
+        with open(os.path.join(self.tmp, "ios-sol.json"),
+                  encoding="utf-8") as fh:
+            on_disk = json.load(fh)
+        self.assertEqual(set(on_disk["flows"]), expected)
+        self.assertEqual(on_disk["flows"]["ios-release-clean"]["bazel"], 1.0)
 
     def test_empty_results(self):
         summary = summarize_sol(

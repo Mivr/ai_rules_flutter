@@ -12,8 +12,8 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import run_rep
-from run_rep import (CONFIGS, DEFAULT_MIN_CLEAN_ACTIONS, RunOptions,
-                     make_writable_tree, real_run, run_rep)
+from run_rep import (CONFIG_ORDER, CONFIGS, DEFAULT_MIN_CLEAN_ACTIONS,
+                     RunOptions, make_writable_tree, real_run, run_rep)
 
 
 class Proc:
@@ -103,6 +103,31 @@ class ConfigTableTest(unittest.TestCase):
         self.assertIn("dbg", " ".join(sim_flags))
         self.assertIn("--ios_multi_cpus=sim_arm64", sim_flags)
 
+    def test_new_platform_configs_in_order(self):
+        self.assertEqual(
+            list(CONFIG_ORDER),
+            ["device_release", "sim_debug", "android_release",
+             "android_debug", "web_release", "web_debug"])
+        expected = {
+            "android_release": ("//app:app_android", ["-c", "opt"]),
+            "android_debug": ("//app:app_android", ["-c", "dbg"]),
+            "web_release": ("//app:app_web", ["-c", "opt"]),
+            "web_debug": ("//app:app_web", ["-c", "dbg"]),
+        }
+        for config, (target, flags) in expected.items():
+            self.assertEqual(CONFIGS[config]["target"], target)
+            self.assertEqual(CONFIGS[config]["build_flags"], flags)
+
+    def test_ios_configs_unchanged(self):
+        self.assertEqual(CONFIGS["device_release"], {
+            "target": "//app:__app_framework_framework",
+            "build_flags": ["-c", "opt", "--ios_multi_cpus=arm64"],
+        })
+        self.assertEqual(CONFIGS["sim_debug"], {
+            "target": "//app:app_ios",
+            "build_flags": ["-c", "dbg", "--ios_multi_cpus=sim_arm64"],
+        })
+
     def test_unknown_config_rejected(self):
         with self.assertRaises(ValueError):
             run_rep("/tools", "/pristine", "/work", "/out", "/dest", 1,
@@ -164,10 +189,10 @@ class OrderingTest(unittest.TestCase):
     def test_builds_before_replays_and_shutdown_last(self):
         fake, records = self.drive()
         kinds = fake.kinds()
-        # Two configs x three scenarios.
-        self.assertEqual(kinds.count("build"), 6)
-        self.assertEqual(kinds.count("replay"), 6)
-        self.assertEqual(sorted(records), ["device_release", "sim_debug"])
+        # Every config x three scenarios.
+        self.assertEqual(kinds.count("build"), 3 * len(CONFIGS))
+        self.assertEqual(kinds.count("replay"), 3 * len(CONFIGS))
+        self.assertEqual(sorted(records), sorted(CONFIGS))
         for config, record in records.items():
             self.assertEqual(sorted(record["logs"]),
                              ["app_edit", "clean", "core_edit"])
@@ -179,7 +204,7 @@ class OrderingTest(unittest.TestCase):
             if kind == "shutdown":
                 per_config.append(current)
                 current = []
-        self.assertEqual(len(per_config), 2)
+        self.assertEqual(len(per_config), len(CONFIGS))
         for kinds_one in per_config:
             self.assertEqual(kinds_one[-1], "shutdown")
             first_replay = kinds_one.index("replay")
@@ -191,7 +216,7 @@ class OrderingTest(unittest.TestCase):
         self.drive()
         self.assertEqual(
             self.resets,
-            [(self.pristine, self.work)] * 2)
+            [(self.pristine, self.work)] * len(CONFIGS))
         self.assertTrue(os.path.isfile(
             os.path.join(self.work, "marker.txt")))
 
@@ -201,29 +226,26 @@ class OrderingTest(unittest.TestCase):
                  for argv in fake.calls if argv[0] == "bazel"]
         self.assertTrue(bases)
         self.assertEqual(sorted(set(bases)),
-                         ["/fake/out/device_release",
-                          "/fake/out/sim_debug"])
+                         sorted("/fake/out/" + c for c in CONFIGS))
         # No shared server between configs: every config's builds,
         # info and shutdown use its own base.
         self.assertEqual(
             self.chmods,
-            [os.path.join(self.execroot, "device_release", "bazel-out"),
-             os.path.join(self.execroot, "sim_debug", "bazel-out")])
+            [os.path.join(self.execroot, c, "bazel-out")
+             for c in CONFIG_ORDER])
 
     def test_build_flags_reach_bazel(self):
         fake, _ = self.drive()
         builds = [argv for argv in fake.calls
                   if argv[0] == "bazel" and "build" in argv]
-        self.assertEqual(len(builds), 6)
+        self.assertEqual(len(builds), 3 * len(CONFIGS))
         for argv in builds:
-            if "//app:__app_framework_framework" in argv:
-                self.assertIn("-c", argv)
-                self.assertIn("opt", argv)
-                self.assertIn("--ios_multi_cpus=arm64", argv)
-            else:
-                self.assertIn("//app:app_ios", argv)
-                self.assertIn("dbg", argv)
-                self.assertIn("--ios_multi_cpus=sim_arm64", argv)
+            matched = any(
+                spec["target"] in argv
+                and all(flag in argv for flag in spec["build_flags"])
+                for spec in CONFIGS.values())
+            self.assertTrue(matched, "build names no known target/flags: %r"
+                            % (argv,))
 
     def test_results_layout_has_config(self):
         self.drive()

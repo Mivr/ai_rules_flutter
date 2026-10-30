@@ -386,10 +386,35 @@ class GenerationTest(unittest.TestCase):
             app_build = fh.read()
         for target in ["flutter_application", "flutter_ios_app",
                        "flutter_ios_framework_gen",
-                       "flutter_ios_simulator_build_test"]:
+                       "flutter_ios_simulator_build_test",
+                       "flutter_android_app", "flutter_web_app"]:
             self.assertIn(target, app_build)
         self.assertIn("name = \"app_framework\"", app_build)
-        self.assertNotIn("android", app_build.lower())
+        self.assertIn("name = \"app_android\"", app_build)
+        self.assertIn("name = \"app_web\"", app_build)
+
+    def test_android_and_web_scaffolding_registered(self):
+        out, _ = self.generate("platforms")
+        with open(os.path.join(out, "MODULE.bazel"),
+                  encoding="utf-8") as fh:
+            module = fh.read()
+        self.assertIn("android_sdk_repository_extension.configure(", module)
+        self.assertIn("api_level = 35", module)
+        self.assertIn("use_repo(android_sdk_repository_extension, "
+                      "\"androidsdk\")", module)
+        self.assertIn("\"@androidsdk//:sdk-toolchain\"", module)
+        self.assertIn("\"@androidsdk//:all\"", module)
+        self.assertIn("use_repo(android_ndk_repository_extension, "
+                      "\"androidndk\")", module)
+        self.assertIn("register_toolchains(\"@androidndk//:all\")", module)
+        for rel in [
+                "app/android/app/src/main/AndroidManifest.xml",
+                "app/android/app/src/main/kotlin/com/example/bench/"
+                "MainActivity.kt",
+                "app/android/app/src/debug/AndroidManifest.xml",
+                "app/android/app/src/main/res/values/styles.xml",
+        ]:
+            self.assertTrue(os.path.isfile(os.path.join(out, rel)), rel)
 
     def test_generated_workspace_has_default_lockfile_mode(self):
         out, _ = self.generate("nolock")
