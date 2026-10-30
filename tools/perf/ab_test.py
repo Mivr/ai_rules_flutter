@@ -33,7 +33,7 @@ from ab import (
 )
 from sol_test import FAKE_BAZEL
 from sol_test import STUB_GEN
-from run_rep import CONFIG_ORDER
+from run_rep import CONFIG_ORDER, IOS_CONFIGS
 import sol
 
 
@@ -140,14 +140,13 @@ class LockStepTest(unittest.TestCase):
         data = generate_committed_lock(
             self.pristine, self.lock_out, run)
         self.assertEqual(data, b"lock-bytes-v1")
-        # Every config evaluated on the lock output base, then shutdown.
+        # Both configs evaluated on the lock output base, then shutdown.
         kinds = ["build" if "build" in a else
                  "shutdown" if "shutdown" in a else "?" for a in run.calls]
-        self.assertEqual(kinds, ["build"] * len(CONFIG_ORDER)
-                         + ["shutdown"])
+        self.assertEqual(kinds, ["build", "build", "shutdown"])
         bases = [a[a.index("--output_base=" + self.lock_out)]
                  for a in run.calls]
-        self.assertEqual(len(bases), len(CONFIG_ORDER) + 1)
+        self.assertEqual(len(bases), 3)
         # Unmeasured: nothing written under results.
         self.assertEqual(os.listdir(self.results), [])
         # Its output base is gone afterwards.
@@ -687,6 +686,29 @@ class WorkflowTest(unittest.TestCase):
         text = self.text()
         self.assertIn("control", text)
         self.assertIn("treatment", text)
+
+
+class IosScopeTest(unittest.TestCase):
+    """The A/B bench keeps its iOS-only scope when SOL gains platforms."""
+
+    def test_ab_flow_set_stays_ios(self):
+        tmp = tempfile.mkdtemp(prefix="ab-ios-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        flows = summarize_arm_flows(tmp)
+        self.assertEqual(set(flows), {
+            "ios-release-clean", "ios-release-app", "ios-release-body",
+            "ios-debug-clean", "ios-debug-app", "ios-debug-body",
+        })
+
+    def test_lock_builds_only_the_ios_configs(self):
+        # CONFIG_ORDER carries the Android and Web SOL benches; the A/B
+        # lock build and ios-ab.json stay on the two iOS configurations.
+        self.assertEqual(len(CONFIG_ORDER), 6)
+        self.assertEqual(list(IOS_CONFIGS), ["device_release", "sim_debug"])
+        targets = {lock_build_argv("/lock", config)[-2]
+                   for config in IOS_CONFIGS}
+        self.assertEqual(targets, {"//app:__app_framework_framework",
+                                   "//app:app_ios"})
 
 
 if __name__ == "__main__":

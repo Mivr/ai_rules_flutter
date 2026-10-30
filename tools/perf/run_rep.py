@@ -31,6 +31,9 @@ Configurations (fixed table ``CONFIGS``):
 - ``web_release`` / ``web_debug``: the generated Web app
   (``//app:app_web``) built with ``-c opt`` or ``-c dbg``.
 
+``IOS_CONFIGS`` keeps the first two names for the A/B bench (``ab.py``),
+which does not measure the Android or Web series.
+
 Each configuration gets its own output base under the given root (no
 shared server between configs). Results land in
 <results-ref-dir>/<config>/<scenario>/rep<N>/{execlog.json, replay.json},
@@ -90,6 +93,11 @@ CONFIG_ORDER = [
     "web_release",
     "web_debug",
 ]
+
+# The A/B bench (ab.py) still compares the iOS configurations only, as it
+# did before Android and Web joined the SOL bench; it iterates this table
+# so its lock build and ios-ab.json flow set stay exactly what they were.
+IOS_CONFIGS = ["device_release", "sim_debug"]
 
 # A clean bench build always executes dozens of actions (kernel compiles
 # per package, AOT, framework assembly or the full app link). Fewer than
