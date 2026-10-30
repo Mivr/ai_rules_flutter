@@ -28,11 +28,25 @@ def _path_maven_ctx(mapping, ignore):
     )
 
 _BUILD_FILE = "android/build.gradle"
+_KOTLIN_BUILD_FILE = "android/build.gradle.kts"
 
 _MAPPED_CONTENT = """\
 dependencies {
     implementation 'com.example:ignored:1.0'
     implementation 'com.example:mapped:2.0'
+}
+"""
+
+_KOTLIN_MAPPED_CONTENT = """\
+dependencies {
+    implementation("com.example:ignored:1.0")
+    implementation("com.example:mapped:2.0")
+}
+"""
+
+_BUILTIN_CONTENT = """\
+dependencies {
+    implementation 'androidx.annotation:annotation:1.9.1'
 }
 """
 
@@ -43,7 +57,11 @@ dependencies {
 """
 
 def _path_maven_inputs_test_impl(ctx):
-    """The ignored coordinate is omitted and the mapped one becomes its label."""
+    """A path spoke translates its Gradle deps exactly as the hosted rule does.
+
+    The ignored coordinate is omitted, the mapped one becomes its label in
+    both Groovy and Kotlin DSL, and the built-in table still applies.
+    """
     env = unittest.begin(ctx)
     inputs = path_spoke_maven_inputs(struct(
         android_maven_deps = {"com.example:mapped": "@rules_android_maven//:com_example_mapped"},
@@ -56,6 +74,24 @@ def _path_maven_inputs_test_impl(ctx):
             _path_maven_ctx(inputs.deps, inputs.ignore),
             _BUILD_FILE,
             _MAPPED_CONTENT,
+        ),
+    )
+    asserts.equals(
+        env,
+        ["@rules_android_maven//:com_example_mapped"],
+        resolve_plugin_maven_deps(
+            _path_maven_ctx(inputs.deps, inputs.ignore),
+            _KOTLIN_BUILD_FILE,
+            _KOTLIN_MAPPED_CONTENT,
+        ),
+    )
+    asserts.equals(
+        env,
+        ["@rules_android_maven//:androidx_annotation_annotation"],
+        resolve_plugin_maven_deps(
+            _path_maven_ctx({}, []),
+            _BUILD_FILE,
+            _BUILTIN_CONTENT,
         ),
     )
     return unittest.end(env)
