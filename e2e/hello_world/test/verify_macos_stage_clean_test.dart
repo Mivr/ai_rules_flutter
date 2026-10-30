@@ -14,6 +14,13 @@
 /// is restored on every exit path. `full.yaml` runs `bazel test //...` in this
 /// workspace on macOS; the target is incompatible elsewhere because building
 /// a macOS app needs Xcode.
+///
+/// The nested Bazel client comes from `BAZEL` when it is set and non-empty,
+/// otherwise from `bazel` on the inherited `PATH`; the target declares both in
+/// `env_inherit` because Bazel sanitizes a test's environment. `unzip` is
+/// resolved through the same inherited `PATH`. `//:bazel_client_test` unit
+/// tests that resolver on every host; the rebuild assertion below is what the
+/// macOS lane of `full.yaml` proves.
 library;
 
 import 'dart:io';
@@ -21,12 +28,17 @@ import 'dart:io';
 import 'package:runfiles/runfiles.dart';
 import 'package:test/test.dart';
 
+import 'bazel_client.dart';
+
 /// The asset the test removes between the two builds.
 const _assetRelPath = 'assets/stage_clean.txt';
 
 /// Runs only the framework action unsandboxed, so its staging directory is
 /// the real output directory and survives the next build.
 const _localFramework = '--strategy=FlutterMacOSFramework=local';
+
+/// The teardown step that releases the private output base.
+const _shutdownStep = 'shutdown of the private Bazel server';
 
 /// Whether [root] is the hello_world example workspace root.
 bool _looksLikeRoot(String root) =>
@@ -60,11 +72,21 @@ String? _workspaceRoot() {
 
 /// Runs [args] against a private output base so the nested builds do not
 /// contend with the Bazel server running this test.
-ProcessResult _bazel(String root, String outputBase, List<String> args) {
+ProcessResult _bazel(
+  String root,
+  String outputBase,
+  List<String> args,
+  String step,
+) {
+  final client = resolveBazelClient(
+    environment: Platform.environment,
+    step: step,
+  );
   final argv = ['--output_base=$outputBase', '--max_idle_secs=60', ...args];
-  return Process.runSync(
-    Platform.environment['BAZEL'] ?? 'bazel',
-    argv,
+  return runHostTool(
+    executable: client,
+    args: argv,
+    step: step,
     workingDirectory: root,
   );
 }
@@ -81,35 +103,38 @@ void _expectOk(ProcessResult result, String step) {
 }
 
 /// Extracts the framework zip at [zipPath] under [dest].
-void _extractZip(String zipPath, Directory dest) {
-  final args = ['-q', '-o', zipPath, '-d', dest.path];
-  final result = Process.runSync('unzip', args);
-  _expectOk(result, 'unzip $zipPath');
+void _extractZip(String zipPath, Directory dest, String step) {
+  final unzip = resolveHostTool(
+    tool: 'unzip',
+    environment: Platform.environment,
+    step: step,
+  );
+  final result = runHostTool(
+    executable: unzip,
+    args: ['-q', '-o', zipPath, '-d', dest.path],
+    step: step,
+  );
+  _expectOk(result, step);
 }
 
 /// Builds `//:hello_world_macos` with only the framework action local.
 void _buildMacosApp(String root, String outputBase, String step) {
-  _expectOk(
-    _bazel(root, outputBase, [
-      'build',
-      '//:hello_world_macos',
-      _localFramework,
-    ]),
-    step,
-  );
+  const args = ['build', '//:hello_world_macos', _localFramework];
+  _expectOk(_bazel(root, outputBase, args, step), step);
 }
 
 /// The `App.framework.zip` the framework action writes in [outputBase].
 String _frameworkZipPath(String root, String outputBase) {
-  final result = _bazel(root, outputBase, ['info', 'bazel-bin']);
-  _expectOk(result, 'bazel info bazel-bin');
+  final step = 'bazel info bazel-bin';
+  final result = _bazel(root, outputBase, ['info', 'bazel-bin'], step);
+  _expectOk(result, step);
   final bin = '${result.stdout}'.trim();
   return '$bin/__hello_world_macos_app_framework/App.framework.zip';
 }
 
 /// Extracts [zipPath] under a fresh [dest] and returns its `App.framework`.
-String _extractFramework(Directory dest, String zipPath) {
-  _extractZip(zipPath, dest);
+String _extractFramework(Directory dest, String zipPath, String step) {
+  _extractZip(zipPath, dest, step);
   return '${dest.path}/App.framework';
 }
 
@@ -132,17 +157,27 @@ void main() {
     final tmp = Directory.systemTemp.createTempSync('macos_stage_clean_');
     final outputBase = '${tmp.path}/output_base';
     addTearDown(() {
-      _bazel(root, outputBase, ['shutdown']);
-      if (tmp.existsSync()) {
-        tmp.deleteSync(recursive: true);
-      }
+      // Restore the asset before touching Bazel: a failed client resolution or
+      // shutdown must not leave the workspace without the file the next run
+      // needs.
       asset.parent.createSync(recursive: true);
       asset.writeAsStringSync(original);
+      try {
+        _bazel(root, outputBase, ['shutdown'], _shutdownStep);
+      } finally {
+        if (tmp.existsSync()) {
+          tmp.deleteSync(recursive: true);
+        }
+      }
     });
 
     _buildMacosApp(root, outputBase, 'first build');
     final zipPath = _frameworkZipPath(root, outputBase);
-    final first = _extractFramework(Directory('${tmp.path}/first'), zipPath);
+    final first = _extractFramework(
+      Directory('${tmp.path}/first'),
+      zipPath,
+      'unzip first App.framework.zip',
+    );
     expect(
       _hasAsset(first, _assetRelPath),
       isTrue,
@@ -158,7 +193,11 @@ void main() {
       outputBase,
       'local rebuild after removing $_assetRelPath',
     );
-    final second = _extractFramework(Directory('${tmp.path}/second'), zipPath);
+    final second = _extractFramework(
+      Directory('${tmp.path}/second'),
+      zipPath,
+      'unzip rebuilt App.framework.zip',
+    );
     expect(
       _hasAsset(second, _assetRelPath),
       isFalse,
