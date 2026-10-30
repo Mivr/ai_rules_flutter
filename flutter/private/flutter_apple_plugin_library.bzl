@@ -368,11 +368,34 @@ def _emit_plugin_mixed_objc_target(spec, objc_files, headers, swift_deps):
     return ":" + target
 
 def _plugin_bridging_copts(spec, headers):
-    """Find the `<module>-Bridging-Header.h` and return `(header_or_None, copts)`."""
+    """Find the `<module>-Bridging-Header.h` and return `(header_or_None, copts)`.
+
+    A found header also gets the Clang includes a CocoaPods prefix header
+    supplies: `Foundation/Foundation.h`, then `UIKit/UIKit.h` on iOS or
+    `AppKit/AppKit.h` on macOS, so a plugin header that names `NSObject` or a
+    view class without importing the framework still parses. A plugin with no
+    bridging header gets its own copts unchanged.
+    """
     extra_copts = list(spec.copts)
     for h in headers:
         if h.endswith("%s-Bridging-Header.h" % spec.module_name):
+            if spec.platform == "ios":
+                framework_header = "UIKit/UIKit.h"
+            elif spec.platform == "macos":
+                framework_header = "AppKit/AppKit.h"
+            else:
+                fail(
+                    "flutter_apple_plugin_library: platform must be 'ios' or 'macos', got '%s'" % spec.platform,
+                )
             extra_copts.extend([
+                "-Xcc",
+                "-include",
+                "-Xcc",
+                "Foundation/Foundation.h",
+                "-Xcc",
+                "-include",
+                "-Xcc",
+                framework_header,
                 "-import-objc-header",
                 "$(execpath %s)" % h,
             ])
