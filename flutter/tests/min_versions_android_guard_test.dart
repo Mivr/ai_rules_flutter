@@ -38,6 +38,36 @@ String? _workspaceRoot() {
   return null;
 }
 
+/// [text] with every `#` comment replaced by spaces, keeping string literals
+/// and newlines so a commented-out attribute cannot satisfy the guard.
+String _withoutComments(String text) {
+  final out = StringBuffer();
+  String? quote;
+  for (var i = 0; i < text.length; i++) {
+    final ch = text[i];
+    if (quote != null) {
+      out.write(ch);
+      if (ch == r'\' && i + 1 < text.length) {
+        out.write(text[++i]);
+      } else if (ch == quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (ch == '#') {
+      while (i < text.length && text[i] != '\n') {
+        out.write(' ');
+        i++;
+      }
+      if (i < text.length) out.write('\n');
+      continue;
+    }
+    if (ch == '"' || ch == "'") quote = ch;
+    out.write(ch);
+  }
+  return out.toString();
+}
+
 /// The text of the call whose opening `(` is at [open], with nested brackets
 /// and string literals skipped so a `)` inside an attribute cannot end it
 /// early. Null when the text ends inside the call.
@@ -78,12 +108,12 @@ String? _callText(String text, int open) {
 /// named more than once.
 String? _targetBlock(String text, String target) {
   String? block;
-  final names = RegExp(r'\bname\s*=\s*"([^"]*)"');
+  final names = RegExp(r'''\bname\s*=\s*(["'])(.*?)\1''');
   for (final match in RegExp(r'\bbuild_test\s*\(').allMatches(text)) {
     final call = _callText(text, match.end - 1);
     if (call == null) continue;
     final found = names.allMatches(call).toList();
-    if (found.length != 1 || found.single.group(1) != target) continue;
+    if (found.length != 1 || found.single.group(2) != target) continue;
     if (block != null) return null;
     block = call;
   }
@@ -97,8 +127,8 @@ List<String> _strings(String block, String attribute) {
   ).firstMatch(block);
   if (match == null) return <String>[];
   return RegExp(
-    r'"([^"]*)"',
-  ).allMatches(match.group(1)!).map((item) => item.group(1)!).toList();
+    r'''(["'])(.*?)\1''',
+  ).allMatches(match.group(1)!).map((item) => item.group(2)!).toList();
 }
 
 void main() {
@@ -115,7 +145,8 @@ void main() {
     return;
   }
   test('$target builds :app_android on Linux only', () {
-    final block = _targetBlock(File('$root/$path').readAsStringSync(), target);
+    final text = _withoutComments(File('$root/$path').readAsStringSync());
+    final block = _targetBlock(text, target);
     if (block == null) {
       fail('$path: no single build_test target named $target');
     }
