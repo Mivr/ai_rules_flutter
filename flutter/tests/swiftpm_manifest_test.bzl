@@ -394,6 +394,13 @@ def swiftpm_manifest_test_suite(name):
         _refusal_names_identity_file_and_line_test,
         _tools_line_refusals_test,
         _statement_refusals_test,
+        _folds_firebase_auth_manifest_test,
+        _folds_firebase_auth_package_manifest_test,
+        _folds_url_interpolation_test,
+        _manifest_constant_refusals_test,
+        _manifest_constant_hints_test,
+        _constant_before_declaration_test,
+        _other_interpolations_still_refused_test,
     )
     native.test_suite(
         name = name,
@@ -447,7 +454,197 @@ def _dropped_platform_dep_parses_test_impl(ctx):
     asserts.equals(env, ["macos"], deps[1].condition.platforms)
     return unittest.end(env)
 
+_FIREBASE_AUTH_MANIFEST = """// swift-tools-version: 5.9
+// The swift-tools-version declares the minimum version of Swift required to build this package.
+
+// Copyright 2024, the Chromium project authors.  Please see the AUTHORS file
+// for details. All rights reserved. Use of this source code is governed by a
+// BSD-style license that can be found in the LICENSE file.
+
+import PackageDescription
+
+let libraryVersion = "7.0.1"
+let firebaseSdkVersion: Version = "13.1.1"
+
+let package = Package(
+  name: "firebase_auth",
+  platforms: [
+    .iOS("15.0")
+  ],
+  products: [
+    .library(name: "firebase-auth", targets: ["firebase_auth"])
+  ],
+  dependencies: [
+    .package(url: "https://github.com/firebase/firebase-ios-sdk", exact: firebaseSdkVersion),
+    .package(name: "firebase_core", path: "../firebase_core"),
+    .package(name: "FlutterFramework", path: "../FlutterFramework"),
+  ],
+  targets: [
+    .target(
+      name: "firebase_auth",
+      dependencies: [
+        .product(name: "FirebaseAuth", package: "firebase-ios-sdk"),
+        .product(name: "firebase-core", package: "firebase_core"),
+        .product(name: "FlutterFramework", package: "FlutterFramework"),
+      ],
+      resources: [
+        .process("Resources")
+      ],
+      cSettings: [
+        .define("LIBRARY_VERSION", to: "\\\"\\(libraryVersion)\\\""),
+        .define("LIBRARY_NAME", to: "\\\"flutter-fire-auth\\\""),
+      ]
+    )
+  ]
+)
+"""
+
+# The strict (package) entry point refuses `resources:`, so the same manifest
+# drops that one target argument and keeps the C settings.
+_FIREBASE_AUTH_PACKAGE_MANIFEST = _FIREBASE_AUTH_MANIFEST.replace("""      resources: [
+        .process("Resources")
+      ],
+""", "")
+
+def _folds_firebase_auth_manifest_test_impl(ctx):
+    env = unittest.begin(ctx)
+    parsed = parse_swiftpm_plugin_package("firebase_auth", _FIREBASE_AUTH_MANIFEST)
+    asserts.true(env, parsed.ok)
+    asserts.equals(env, "", parsed.error)
+    asserts.equals(env, 3, len(parsed.model.pkg_deps))
+    asserts.equals(env, "https://github.com/firebase/firebase-ios-sdk", parsed.model.pkg_deps[0].ref)
+    asserts.equals(env, "url", parsed.model.pkg_deps[0].ref_kind)
+    asserts.equals(env, "firebase_auth", parsed.model.targets[0].name)
+    asserts.equals(env, 3, len(parsed.model.targets[0].deps))
+    return unittest.end(env)
+
+def _folds_firebase_auth_package_manifest_test_impl(ctx):
+    env = unittest.begin(ctx)
+    parsed = parse_swiftpm_package("firebase_auth", _FIREBASE_AUTH_PACKAGE_MANIFEST)
+    asserts.true(env, parsed.ok)
+    asserts.equals(env, "", parsed.error)
+    settings = parsed.model.targets[0].c_settings
+    asserts.equals(env, 2, len(settings))
+    asserts.equals(env, ("define", "LIBRARY_VERSION", "\\\"7.0.1\\\""), (settings[0].kind, settings[0].name, settings[0].value))
+    asserts.equals(env, ("define", "LIBRARY_NAME", "\\\"flutter-fire-auth\\\""), (settings[1].kind, settings[1].name, settings[1].value))
+    return unittest.end(env)
+
+_MAPBOX_CONSTANT_MANIFEST = """// swift-tools-version: 5.9
+import PackageDescription
+
+let mapboxMapsPackage: String = "mapbox-maps-ios"
+let mapboxMapsVersion: Version = "11.0.0"
+
+let package = Package(
+    name: "mapbox",
+    products: [.library(name: "mapbox", targets: ["mapbox"])],
+    dependencies: [
+        .package(url: "https://github.com/mapbox/\\(mapboxMapsPackage).git", exact: mapboxMapsVersion),
+    ],
+    targets: [.target(name: "mapbox")],
+)
+"""
+
+def _folds_url_interpolation_test_impl(ctx):
+    env = unittest.begin(ctx)
+    parsed = parse_swiftpm_package("mapbox", _MAPBOX_CONSTANT_MANIFEST)
+    asserts.true(env, parsed.ok)
+    asserts.equals(env, "", parsed.error)
+    asserts.equals(env, 1, len(parsed.model.pkg_deps))
+    asserts.equals(env, "https://github.com/mapbox/mapbox-maps-ios.git", parsed.model.pkg_deps[0].ref)
+    return unittest.end(env)
+
+_REFUSAL_PREFIX = """// swift-tools-version: 5.9
+import PackageDescription
+"""
+
+_REFUSAL_PACKAGE = """let package = Package(name: "P", targets: [.target(name: "P")])
+"""
+
+def _manifest_constant_refusals_test_impl(ctx):
+    env = unittest.begin(ctx)
+    cases = [
+        ("var version = \"1\"\n", "variables are not supported"),
+        ("func helper() {}\n", "unsupported top-level statement"),
+        ("let versions = [\"1\"]\n", "variables are not supported"),
+        ("let version = enabled ? \"1\" : \"2\"\n", "variables are not supported"),
+        ("let version = ProcessInfo.processInfo.environment[\"V\"]\n", "variables are not supported"),
+        ("let version: Int = 1\n", "variables are not supported"),
+    ]
+    for case in cases:
+        parsed = parse_swiftpm_plugin_package("firebase_auth", _REFUSAL_PREFIX + case[0] + _REFUSAL_PACKAGE)
+        asserts.true(env, not parsed.ok)
+        asserts.true(env, case[1] in parsed.error)
+    folded = parse_swiftpm_plugin_package("firebase_auth", _REFUSAL_PREFIX + """let version = "1.0.0"
+let package = Package(name: "P", dependencies: [.package(url: "https://example.com/Dep.git", exact: version)], targets: [.target(name: "P")])
+""")
+    asserts.true(env, folded.ok)
+    asserts.equals(env, "https://example.com/Dep.git", folded.model.pkg_deps[0].ref)
+    return unittest.end(env)
+
+def _manifest_constant_hints_test_impl(ctx):
+    env = unittest.begin(ctx)
+    manifest = _REFUSAL_PREFIX + "var version = \"1\"\n" + _REFUSAL_PACKAGE
+    plugin = parse_swiftpm_plugin_package("firebase_auth", manifest)
+    asserts.true(env, not plugin.ok)
+    asserts.true(env, "variables are not supported" in plugin.error)
+    asserts.true(env, "flutter.pub(ios_plugin_deps = {\"firebase_auth\": \"<label>\"})" in plugin.error)
+    package = parse_swiftpm_package("firebase_auth", manifest)
+    asserts.true(env, not package.ok)
+    asserts.true(env, "variables are not supported" in package.error)
+    asserts.true(env, "flutter.pub(swift_package_build_files = {\"firebase_auth\": \"<label>\"})" in package.error)
+    return unittest.end(env)
+
+_BEFORE_DECLARATION = """// swift-tools-version: 5.9
+import PackageDescription
+let package = Package(name: "P", dependencies: [.package(url: "https://example.com/Dep.git", exact: laterVersion)], targets: [.target(name: "P")])
+let laterVersion = "1.0.0"
+"""
+
+_UNKNOWN_USE = """// swift-tools-version: 5.9
+import PackageDescription
+let package = Package(name: "P", dependencies: [.package(url: "https://example.com/Dep.git", exact: missingVersion)], targets: [.target(name: "P")])
+"""
+
+def _constant_before_declaration_test_impl(ctx):
+    env = unittest.begin(ctx)
+    parsed = parse_swiftpm_package("pkg", _BEFORE_DECLARATION)
+    asserts.true(env, not parsed.ok)
+    asserts.true(env, "laterVersion" in parsed.error)
+    asserts.true(env, "Package.swift line 3" in parsed.error)
+    asserts.true(env, "a constant must be declared before use" in parsed.error)
+    unknown = parse_swiftpm_package("pkg", _UNKNOWN_USE)
+    asserts.true(env, not unknown.ok)
+    asserts.true(env, "missingVersion" in unknown.error)
+    asserts.true(env, "Package.swift line 3" in unknown.error)
+    asserts.true(env, "a constant must be declared before use" in unknown.error)
+    return unittest.end(env)
+
+def _other_interpolations_still_refused_test_impl(ctx):
+    env = unittest.begin(ctx)
+    cases = [
+        ".package(url: \"https://example.com/\\(foo.bar).git\", exact: \"1.0.0\")",
+        ".package(url: \"https://example.com/\\(unknownName).git\", exact: \"1.0.0\")",
+        ".package(url: \"https://example.com/\\(helper()).git\", exact: \"1.0.0\")",
+    ]
+    for case in cases:
+        manifest = "// swift-tools-version: 5.9\nimport PackageDescription\nlet package = Package(name: \"P\", dependencies: [" + case + "], targets: [.target(name: \"P\")])\n"
+        parsed = parse_swiftpm_plugin_package("pkg", manifest)
+        asserts.true(env, not parsed.ok)
+        asserts.true(env, "string interpolation is not supported" in parsed.error)
+    folded = parse_swiftpm_plugin_package("pkg", "// swift-tools-version: 5.9\nimport PackageDescription\nlet name = \"Dep\"\nlet package = Package(name: \"P\", dependencies: [.package(url: \"https://example.com/\\(name).git\", exact: \"1.0.0\")], targets: [.target(name: \"P\")])\n")
+    asserts.true(env, folded.ok)
+    asserts.equals(env, "https://example.com/Dep.git", folded.model.pkg_deps[0].ref)
+    return unittest.end(env)
+
 _parses_condition_arguments_test = unittest.make(_parses_condition_arguments_test_impl)
 _condition_refusals_test = unittest.make(_condition_refusals_test_impl)
 _dropped_platform_dep_parses_test = unittest.make(_dropped_platform_dep_parses_test_impl)
 _other_platforms_are_ignored_test = unittest.make(_other_platforms_are_ignored_test_impl)
+_folds_firebase_auth_manifest_test = unittest.make(_folds_firebase_auth_manifest_test_impl)
+_folds_firebase_auth_package_manifest_test = unittest.make(_folds_firebase_auth_package_manifest_test_impl)
+_folds_url_interpolation_test = unittest.make(_folds_url_interpolation_test_impl)
+_manifest_constant_refusals_test = unittest.make(_manifest_constant_refusals_test_impl)
+_manifest_constant_hints_test = unittest.make(_manifest_constant_hints_test_impl)
+_constant_before_declaration_test = unittest.make(_constant_before_declaration_test_impl)
+_other_interpolations_still_refused_test = unittest.make(_other_interpolations_still_refused_test_impl)

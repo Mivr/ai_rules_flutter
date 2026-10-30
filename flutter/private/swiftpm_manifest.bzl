@@ -2,10 +2,12 @@
 
 Reads the manifest subset `flutter.pub` translates (see the README section
 "iOS native (SwiftPM) dependencies"): the tools-version first line, `import
-PackageDescription`, and one literal `let package = Package(...)`. Anything
-else — another top-level statement, `#if`, string interpolation, variables,
-or a mutation of `package` — fails with a message naming the identity,
-`Package.swift`, the line and the construct.
+PackageDescription`, three top-level string/`Version`/`String` literal
+constants folded by `swiftpm_manifest_consts.bzl`, and one literal `let
+package = Package(...)`. Anything else — another top-level statement, `#if`,
+any other string interpolation, other variables, or a mutation of `package` —
+fails with a message naming the identity, `Package.swift`, the line and the
+construct.
 
 Like the Gradle readers, the parser is iterative: tokens from
 `swiftpm_manifest_lex.bzl` are split into top-level statements and
@@ -13,6 +15,11 @@ comma-separated argument lists by depth-counting loops. Starlark call depth
 stays constant no matter how deeply the manifest nests.
 """
 
+load(
+    ":swiftpm_manifest_consts.bzl",
+    "fold_manifest_constants",
+    "swiftpm_split_statements",
+)
 load(
     ":swiftpm_manifest_lex.bzl",
     "lex_swiftpm_manifest",
@@ -38,6 +45,30 @@ def _swiftpm_fail(identity, line, detail):
         detail = detail,
     )
 
+_SWIFTPM_VARIABLE_REFUSAL = "variables are not supported: the manifest must declare one literal `let package = Package(...)`"
+
+_SWIFTPM_PLUGIN_DEPS_HINT = " For a plugin manifest, list its native dependencies with flutter.pub(ios_plugin_deps = {{{identity}: \"<label>\"}})"
+
+_SWIFTPM_PACKAGE_BUILD_HINT = " For a package manifest, replace its translation with flutter.pub(swift_package_build_files = {{{identity}: \"<label>\"}})"
+
+def _swiftpm_variable_refusal(identity, line, lenient):
+    """The refusal for a top-level variable, with the entry point's fix hint.
+
+    Args:
+        identity: The SwiftPM package identity.
+        line: The 1-based line number.
+        lenient: When True, the plugin entry point's hint; else the package
+            entry point's hint.
+
+    Returns:
+        The error string; the caller `fail()`s with it.
+    """
+    if lenient:
+        hint = _SWIFTPM_PLUGIN_DEPS_HINT.format(identity = repr(identity))
+    else:
+        hint = _SWIFTPM_PACKAGE_BUILD_HINT.format(identity = repr(identity))
+    return _swiftpm_fail(identity, line, _SWIFTPM_VARIABLE_REFUSAL + hint)
+
 def _swiftpm_token_text(tokens, index):
     """The text of token `index`, or "" past the end.
 
@@ -51,40 +82,6 @@ def _swiftpm_token_text(tokens, index):
     if index < 0 or index >= len(tokens):
         return ""
     return tokens[index].text
-
-def _swiftpm_split_statements(tokens):
-    """Split tokens into top-level statements.
-
-    Statements end at a newline or `;` at paren/bracket depth 0. Empty
-    statements are dropped. Depth never goes negative: a stray closer just
-    stays in its statement, which the dispatcher refuses.
-
-    Args:
-        tokens: The lexed token list.
-
-    Returns:
-        A list of token lists.
-    """
-    statements = []
-    current = []
-    depth = 0
-    for tok in tokens:
-        if tok.kind == "nl" or (tok.kind == "punct" and tok.text == ";"):
-            if depth == 0:
-                if current:
-                    statements.append(current)
-                    current = []
-            else:
-                current.append(tok)
-        else:
-            if tok.kind == "punct" and (tok.text == "(" or tok.text == "["):
-                depth += 1
-            elif tok.kind == "punct" and (tok.text == ")" or tok.text == "]") and depth > 0:
-                depth -= 1
-            current.append(tok)
-    if current:
-        statements.append(current)
-    return statements
 
 def _swiftpm_match_paren(tokens, open_idx):
     """Find the `)` matching the `(` at `open_idx`.
@@ -874,7 +871,7 @@ def _swiftpm_parse_statement(identity, seg, acc, lenient):
             modes = acc.modes + parsed.model.modes,
         ))
     if seg and seg[0].kind == "word" and (seg[0].text == "let" or seg[0].text == "var"):
-        return struct(ok = False, error = _swiftpm_fail(identity, line, "variables are not supported: the manifest must declare one literal `let package = Package(...)`"), acc = acc)
+        return struct(ok = False, error = _swiftpm_variable_refusal(identity, line, lenient), acc = acc)
     if seg and seg[0].kind == "word" and seg[0].text == "package":
         return struct(ok = False, error = _swiftpm_fail(identity, line, "`package` must not be mutated after its declaration"), acc = acc)
     return struct(ok = False, error = _swiftpm_fail(identity, line, "unsupported top-level statement `{snippet}`: the manifest holds `import PackageDescription` and one literal `let package = Package(...)`".format(snippet = snippet)), acc = acc)
@@ -927,17 +924,20 @@ def _swiftpm_parse_text(identity, text, lenient):
     lexed = lex_swiftpm_manifest(text, identity)
     if not lexed.ok:
         return struct(ok = False, error = lexed.error, model = None)
-    for tok in lexed.tokens:
+    folded = fold_manifest_constants(identity, lexed.tokens)
+    if not folded.ok:
+        return struct(ok = False, error = folded.error, model = None)
+    for tok in folded.tokens:
         if tok.kind == "directive":
             return struct(ok = False, error = _swiftpm_fail(identity, tok.line, "conditional compilation (`{directive}`) is not supported".format(directive = tok.text)), model = None)
         if tok.kind == "str" and tok.interp:
             return struct(ok = False, error = _swiftpm_fail(identity, tok.line, "string interpolation is not supported"), model = None)
     acc = struct(has_package = False, products = [], targets = [], pkg_deps = [], modes = [])
-    for seg in _swiftpm_split_statements(lexed.tokens):
-        folded = _swiftpm_parse_statement(identity, seg, acc, lenient)
-        if not folded.ok:
-            return struct(ok = False, error = folded.error, model = None)
-        acc = folded.acc
+    for seg in swiftpm_split_statements(folded.tokens):
+        parsed_statement = _swiftpm_parse_statement(identity, seg, acc, lenient)
+        if not parsed_statement.ok:
+            return struct(ok = False, error = parsed_statement.error, model = None)
+        acc = parsed_statement.acc
     if not acc.has_package:
         return struct(ok = False, error = _swiftpm_fail(identity, first.line_no, "no `let package = Package(...)` declaration"), model = None)
     dup = _swiftpm_check_duplicates(identity, acc.products, acc.targets)
