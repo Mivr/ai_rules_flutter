@@ -710,7 +710,14 @@ Future<void> runPersistentWorker({
 Future<void> main(List<String> argv) async {
   if (argv.contains('--persistent_worker')) {
     await runPersistentWorker();
-  } else {
-    exit(await runOneShotWorker(expandWorkerFlagfiles(stripWorkerArgv0(argv))));
+    return;
   }
+  final List<String> expanded;
+  try {
+    expanded = expandWorkerFlagfiles(stripWorkerArgv0(argv));
+  } on FormatException catch (e) {
+    stderr.writeln('incr_fkc_worker: ${e.message}');
+    exit(2);
+  }
+  exit(await runOneShotWorker(expanded));
 }

@@ -200,6 +200,113 @@ void main() {
         ['-Dname=a b', '--c', "'a'b"],
       );
     });
+
+    test('expands a define flagfile named by the parameter file', () {
+      final dir = Directory.systemTemp.createTempSync('incr_nested_');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final inner = File('${dir.path}/inner.defines')
+        ..writeAsStringSync('-DSECOND=two\n');
+      final nested = File('${dir.path}/nested.defines')
+        ..writeAsStringSync('-DFIRST=one\n@${inner.path}\n');
+      File(
+        '${dir.path}/args',
+      ).writeAsStringSync('--sentinel\n@${nested.path}\n');
+      expect(
+        expandWorkerFlagfiles(['@${dir.path}/args']),
+        ['--sentinel', '-DFIRST=one', '-DSECOND=two'],
+      );
+    });
+
+    test('refuses a nested line that is not a define, with its number', () {
+      final dir = Directory.systemTemp.createTempSync('incr_badline_');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final bad = File('${dir.path}/bad.defines')
+        ..writeAsStringSync('\n-DOK=1\nNOT_A_DEFINE\n');
+      File('${dir.path}/args').writeAsStringSync('@${bad.path}\n');
+      expect(
+        () => expandWorkerFlagfiles(['@${dir.path}/args']),
+        throwsA(
+          predicate(
+            (Object? error) =>
+                error is FormatException &&
+                error.message.contains(bad.path) &&
+                error.message.contains('line 3'),
+            'names the flagfile and the 1-based line',
+          ),
+        ),
+      );
+    });
+
+    test('refuses a missing nested flagfile with the chain', () {
+      final dir = Directory.systemTemp.createTempSync('incr_missing_');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final missing = File('${dir.path}/missing.defines');
+      final outer = File('${dir.path}/args')
+        ..writeAsStringSync('@${missing.path}\n');
+      expect(
+        () => expandWorkerFlagfiles(['@${outer.path}']),
+        throwsA(
+          predicate(
+            (Object? error) =>
+                error is FormatException &&
+                error.message.contains(outer.path) &&
+                error.message.contains(missing.path),
+            'names the chain of files',
+          ),
+        ),
+      );
+    });
+
+    test('refuses an unreadable nested flagfile with the chain', () {
+      final dir = Directory.systemTemp.createTempSync('incr_unreadable_');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final outer = '${dir.path}/args';
+      final secret = '${dir.path}/secret.defines';
+      expect(
+        () => expandWorkerFlagfiles(
+          ['@$outer'],
+          readFile: (path) {
+            if (path == secret) {
+              throw FileSystemException('denied', path);
+            }
+            return ['@$secret'];
+          },
+        ),
+        throwsA(
+          predicate(
+            (Object? error) =>
+                error is FormatException &&
+                error.message.contains(outer) &&
+                error.message.contains(secret) &&
+                error.message.contains('denied'),
+            'names the chain of files',
+          ),
+        ),
+      );
+    });
+
+    test('refuses a nested cycle with the chain', () {
+      final dir = Directory.systemTemp.createTempSync('incr_cycle_');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final first = File('${dir.path}/first.defines')
+        ..writeAsStringSync('@${dir.path}/second.defines\n');
+      final second = File('${dir.path}/second.defines')
+        ..writeAsStringSync('@${dir.path}/first.defines\n');
+      File('${dir.path}/args').writeAsStringSync('@${first.path}\n');
+      expect(
+        () => expandWorkerFlagfiles(['@${dir.path}/args']),
+        throwsA(
+          predicate(
+            (Object? error) =>
+                error is FormatException &&
+                error.message.contains('cycle') &&
+                error.message.contains(first.path) &&
+                error.message.contains(second.path),
+            'names the cycle chain',
+          ),
+        ),
+      );
+    });
   });
 
   group('splitWorkerArgv', () {
