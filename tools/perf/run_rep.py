@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One bench repeat for the iOS perf workflow: builds, then replays.
+"""One bench repeat for the Flutter perf workflow: builds, then replays.
 
 Ordering is the point. Per repeat, for each requested bench configuration,
 this driver resets the workspace from a pristine copy, runs all three
@@ -26,6 +26,10 @@ Configurations (fixed table ``CONFIGS``):
   inner loop), built with ``-c dbg --ios_multi_cpus=sim_arm64``. The
   simulator runs debug builds only, and simulator bundles need no
   provisioning profile.
+- ``android_release`` / ``android_debug``: the generated Android app
+  (``//app:app_android``) built with ``-c opt`` or ``-c dbg``.
+- ``web_release`` / ``web_debug``: the generated Web app
+  (``//app:app_web``) built with ``-c opt`` or ``-c dbg``.
 
 Each configuration gets its own output base under the given root (no
 shared server between configs). Results land in
@@ -61,8 +65,31 @@ CONFIGS = {
         "target": "//app:app_ios",
         "build_flags": ["-c", "dbg", "--ios_multi_cpus=sim_arm64"],
     },
+    "android_release": {
+        "target": "//app:app_android",
+        "build_flags": ["-c", "opt"],
+    },
+    "android_debug": {
+        "target": "//app:app_android",
+        "build_flags": ["-c", "dbg"],
+    },
+    "web_release": {
+        "target": "//app:app_web",
+        "build_flags": ["-c", "opt"],
+    },
+    "web_debug": {
+        "target": "//app:app_web",
+        "build_flags": ["-c", "dbg"],
+    },
 }
-CONFIG_ORDER = ["device_release", "sim_debug"]
+CONFIG_ORDER = [
+    "device_release",
+    "sim_debug",
+    "android_release",
+    "android_debug",
+    "web_release",
+    "web_debug",
+]
 
 # A clean bench build always executes dozens of actions (kernel compiles
 # per package, AOT, framework assembly or the full app link). Fewer than
