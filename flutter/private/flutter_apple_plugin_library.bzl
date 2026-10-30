@@ -289,12 +289,65 @@ def _emit_plugin_objc_module_target(spec, headers):
     )
     return ":" + target
 
-def _emit_plugin_mixed_objc_target(spec, objc_files, headers, swift_target):
+def _swift_generated_header_include_impl(ctx):
+    """Publish the generated header's directory as a quote include path."""
+    headers = [
+        header
+        for header in ctx.attr.swift[CcInfo].compilation_context.headers.to_list()
+        if header.basename == ctx.attr.header_name
+    ]
+    if len(headers) != 1:
+        fail(
+            "flutter_apple_plugin_library: expected exactly one generated header %s on %s, got %s" % (
+                ctx.attr.header_name,
+                ctx.attr.swift.label,
+                [header.path for header in headers],
+            ),
+        )
+    return [CcInfo(
+        compilation_context = cc_common.create_compilation_context(
+            quote_includes = depset([headers[0].dirname]),
+        ),
+    )]
+
+_swift_generated_header_include = rule(
+    implementation = _swift_generated_header_include_impl,
+    attrs = {
+        "header_name": attr.string(
+            mandatory = True,
+            doc = "Basename of the Swift module's generated Objective-C header.",
+        ),
+        "swift": attr.label(
+            mandatory = True,
+            providers = [CcInfo],
+            doc = "The `swift_library` whose generated header the ObjC sources import.",
+        ),
+    },
+    doc = "Adds the directory of a Swift module's generated header to the quote " +
+          "include path, so ObjC sources import it by its plain basename.",
+)
+
+def _emit_plugin_swift_header_include_target(spec, swift_target):
+    """Emit the target that makes `<module_name>-Swift.h` findable by basename."""
+    target = "_%s__swift_include" % spec.name
+    _swift_generated_header_include(
+        name = target,
+        header_name = "%s-Swift.h" % spec.module_name,
+        swift = swift_target,
+        tags = spec.internal_tags,
+        target_compatible_with = spec.target_compatible_with,
+        visibility = ["//visibility:private"],
+    )
+    return ":" + target
+
+def _emit_plugin_mixed_objc_target(spec, objc_files, headers, swift_deps):
     """Emit the ObjC half of a mixed plugin; it depends on the Swift module.
 
     Depending on the Swift library makes `<module_name>-Swift.h` a declared
-    input of every ObjC compile, so `#import "<module_name>-Swift.h"` resolves
-    by its basename. The implementation library deliberately has no Clang
+    input of every ObjC compile; the companion include target contributes the
+    header's directory as a quote include path, so
+    `#import "<module_name>-Swift.h"` resolves by its basename from a source
+    `.m`/`.mm` file. The implementation library deliberately has no Clang
     module of its own: `<module_name>_objc` names the headers-only module the
     Swift half imports, and two targets cannot publish the same module name.
     """
@@ -307,7 +360,7 @@ def _emit_plugin_mixed_objc_target(spec, objc_files, headers, swift_target):
         sdk_frameworks = spec.sdk_frameworks,
         sdk_dylibs = spec.sdk_dylibs,
         copts = spec.copts,
-        deps = [":" + spec.framework_target, swift_target],
+        deps = [":" + spec.framework_target] + swift_deps,
         tags = spec.internal_tags,
         target_compatible_with = spec.target_compatible_with,
         visibility = ["//visibility:private"],
@@ -365,6 +418,11 @@ def _emit_plugin_swift_target(
         generates_header: Whether to publish `<module_name>-Swift.h`.
         kwargs: Extra attributes forwarded from the public macro.
     """
+    swift_kwargs = dict(kwargs)
+    if generates_header:
+        swift_kwargs["generates_header"] = True
+        swift_kwargs["generated_header_name"] = "%s-Swift.h" % spec.module_name
+
     swift_library(
         name = target_name,
         srcs = swift_files,
@@ -372,12 +430,10 @@ def _emit_plugin_swift_target(
         copts = extra_copts,
         deps = deps,
         swiftc_inputs = [bridging_header] if bridging_header else [],
-        generates_header = generates_header,
-        generated_header_name = "%s-Swift.h" % spec.module_name if generates_header else "",
         tags = spec.tags,
         target_compatible_with = spec.target_compatible_with,
         visibility = spec.visibility,
-        **kwargs
+        **swift_kwargs
     )
 
 def _emit_plugin_bundle_target(spec, deps, swift_files, objc_files, headers):
@@ -415,7 +471,13 @@ def _emit_mixed_plugin(spec, swift_files, objc_files, headers, kwargs):
         kwargs,
     )
 
-    objc_target = _emit_plugin_mixed_objc_target(spec, objc_files, headers, ":" + swift_target)
+    swift_include = _emit_plugin_swift_header_include_target(spec, ":" + swift_target)
+    objc_target = _emit_plugin_mixed_objc_target(
+        spec,
+        objc_files,
+        headers,
+        [":" + swift_target, swift_include],
+    )
     _emit_plugin_bundle_target(spec, [":" + swift_target, objc_target], swift_files, objc_files, headers)
 
 def flutter_apple_plugin_library(
