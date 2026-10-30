@@ -78,3 +78,29 @@ def apply_cycle_breaks(package_name, declared_dependencies, broken_dependencies)
         ]),
         error = "",
     )
+
+def spoke_dep_labels(ctx, bazel_deps, asset_block):
+    """Sibling-spoke labels for the package's own pubspec dependencies.
+
+    If the pubspec declares `uses-material-design: true`, the spoke depends
+    on `@rules_flutter//flutter:material_icons` so the bundled font travels
+    through the deps graph automatically — same channel any other pub
+    package's font flows through. Cross-package mismatch (app says false,
+    pub dep says true) becomes structurally impossible.
+
+    Args:
+        ctx: The spoke's repository context.
+        bazel_deps: The dependency names left after the cycle breaks.
+        asset_block: The parsed `flutter` asset block.
+
+    Returns:
+        The sibling-spoke labels for `bazel_deps`, plus the material-icons
+        label when the pubspec asks for material design.
+    """
+    dep_labels = [
+        "@{hub}__{dep}//:{dep}".format(hub = ctx.attr.hub_name, dep = dep)
+        for dep in bazel_deps
+    ]
+    if asset_block.uses_material_design:
+        dep_labels = dep_labels + ["@rules_flutter//flutter:material_icons"]
+    return dep_labels
