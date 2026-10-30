@@ -24,6 +24,7 @@ load("@rules_dart//dart/ext:registry.bzl", "curated_code_assets")
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_lock")
 load("//flutter/private:artifact_urls.bzl", "source_strip_prefix")
 load("//flutter/private:flutter_gen_l10n_repo.bzl", "flutter_gen_l10n_repo")
+load("//flutter/private:flutter_pub_android_package.bzl", "android_package_repo_name", "flutter_pub_android_package")
 load("//flutter/private:flutter_pub_cycle_breaks.bzl", "cycle_breaks_lock_error")
 load("//flutter/private:flutter_pub_lock_hub.bzl", "flutter_pub_lock_hub")
 load("//flutter/private:flutter_pub_maven.bzl", "path_spoke_maven_inputs")
@@ -33,6 +34,7 @@ load("//flutter/private:flutter_pub_path.bzl", "foreign_lock_path_error", "is_ab
 load("//flutter/private:flutter_pub_plugin_defines.bzl", "ios_plugin_defines_lock_error")
 load("//flutter/private:flutter_pub_plugin_deps.bzl", "ios_plugin_deps_lock_error")
 load("//flutter/private:flutter_pub_tag.bzl", "flutter_pub_tag", "validate_swift_package_product_deps")
+load("//flutter/private:flutter_pubspec.bzl", "parse_flutter_plugin_block")
 load("//flutter/private:flutter_sdk_package.bzl", "flutter_sdk_package")
 load("//flutter/private:pub_lock_sdks.bzl", "hosted_package_sha256", "parse_lock_sdk_constraints", "version_below_lower_bound")
 load("//flutter/private:rules_dart_floor.bzl", "check_rules_dart_floor")
@@ -475,10 +477,16 @@ def _create_hosted_spokes(hub_name, hosted, all_package_names, user_overlay_root
     `pub_lock_package` directly. A plugin that ships a `Package.swift`
     reads the hub's resolved file and checksum table at fetch time, so no
     spoke carries hub-wide pin state in its repository attributes.
+
+    Each package also gets a `<hub>-android-<package>` repository holding
+    its Gradle model. It is declared here but fetched only when an Android
+    target analyses the spoke's `android:lib` alias; a package with no
+    Android platform never references it.
     """
     for name, info in hosted.items():
         desc = info.get("description", {})
         version = info.get("version", "")
+        base_url = desc.get("url", "https://pub.dev") if type(desc) == "dict" else "https://pub.dev"
 
         # Hosted packages are fetched by checksum only. An entry with
         # no sha256 is a lock that predates the field, or was edited
@@ -491,7 +499,7 @@ def _create_hosted_spokes(hub_name, hosted, all_package_names, user_overlay_root
             package_name = name,
             version = version,
             sha256 = sha256,
-            base_url = desc.get("url", "https://pub.dev") if type(desc) == "dict" else "https://pub.dev",
+            base_url = base_url,
             hub_name = hub_name,
             lock_packages = all_package_names,
             cycle_breaks = pub_tag.cycle_breaks.get(name, []),
@@ -514,8 +522,62 @@ def _create_hosted_spokes(hub_name, hosted, all_package_names, user_overlay_root
             plugin_native_deps = swiftpm_attrs.plugin_deps,
             pubspec_lock = pub_tag.lock,
         )
+        flutter_pub_android_package(
+            name = android_package_repo_name(hub_name, name),
+            package_name = name,
+            version = version,
+            hub_name = hub_name,
+            sha256 = sha256,
+            base_url = base_url,
+            android_maven_deps = pub_tag.android_maven_deps,
+            android_maven_ignore = pub_tag.android_maven_ignore,
+        )
 
-def _create_path_spokes(hub_name, path_pkgs, all_package_names, user_overlay_roots, pub_tag, ignore_hooks):
+def _workspace_root_of_lock(module_ctx, lock_label):
+    """The workspace root holding a root-module lock file.
+
+    A path dependency is workspace-relative, so the Android repository
+    probe needs the root, not the lock's own directory. The lock is known
+    to belong to the root module (see `foreign_lock_path_error`), so walk
+    up its label's package components from the file's directory.
+
+    Args:
+        module_ctx: The module extension context.
+        lock_label: The tag's lock label, in the root module.
+
+    Returns:
+        The absolute workspace root path string.
+    """
+    root = str(module_ctx.path(lock_label).dirname)
+    package = lock_label.package
+    if package:
+        for _segment in package.split("/"):
+            root = root.rpartition("/")[0]
+    return root
+
+def _path_package_declares_android(module_ctx, workspace_root, package_dir):
+    """Whether a path package's pubspec declares the `android` platform.
+
+    The extension reads only this package's own pubspec, so a path package
+    with no Android platform gets no Android repository at all. A missing
+    pubspec reads as no Android platform; the path spoke's fetch reports
+    the real problem.
+
+    Args:
+        module_ctx: The module extension context.
+        workspace_root: The absolute workspace root.
+        package_dir: The workspace-relative package directory.
+
+    Returns:
+        True when `flutter.plugin.platforms.android` is present.
+    """
+    pubspec_path = workspace_root + "/" + package_dir + "/pubspec.yaml"
+    if not module_ctx.path(pubspec_path).exists:
+        return False
+    plugin_block = parse_flutter_plugin_block(module_ctx.read(pubspec_path))
+    return bool(plugin_block.platforms.get("android", {}))
+
+def _create_path_spokes(hub_name, path_pkgs, all_package_names, user_overlay_roots, pub_tag, ignore_hooks, module_ctx):
     """Creates one `flutter_pub_path_package` spoke per path dependency.
 
     The package directory is symlinked in from the workspace (resolved
@@ -527,8 +589,15 @@ def _create_path_spokes(hub_name, path_pkgs, all_package_names, user_overlay_roo
     that ships a `Package.swift` reads the hub's resolved file and
     checksum table at fetch time, so no spoke carries hub-wide pin state
     in its repository attributes.
+
+    A path package that declares the `android` platform also gets a
+    `<hub>-android-<package>` repository; one with no Android platform gets
+    none. Its fetch links only the declared `android` platform directory,
+    with the path spoke's confinement rules, and only a target that reaches
+    the spoke's `android:lib` alias fetches it.
     """
     maven = path_spoke_maven_inputs(pub_tag)
+    workspace_root = _workspace_root_of_lock(module_ctx, pub_tag.lock)
     for name, path_info in path_pkgs.items():
         swiftpm_attrs = pub_spoke_swiftpm_attrs(pub_tag, include_ios_native_deps = True, plugin_name = name)
         flutter_pub_path_package(
@@ -551,6 +620,16 @@ def _create_path_spokes(hub_name, path_pkgs, all_package_names, user_overlay_roo
             plugin_native_deps = swiftpm_attrs.plugin_deps,
             pubspec_lock = pub_tag.lock,
         )
+        if _path_package_declares_android(module_ctx, workspace_root, path_info.path):
+            flutter_pub_android_package(
+                name = android_package_repo_name(hub_name, name),
+                package_name = name,
+                version = path_info.version,
+                hub_name = hub_name,
+                path = path_info.path,
+                android_maven_deps = maven.deps,
+                android_maven_ignore = maven.ignore,
+            )
 
 def _create_sdk_spokes(hub_name, sdk_flutter, all_package_names, toolchain_info, merged, flutter_version):
     """Creates one `flutter_sdk_package` spoke per Flutter SDK package.
@@ -696,7 +775,7 @@ def _register_pub_hub(module_ctx, pub_tag, selected_info, merged, user_overlay_r
 
     _create_swiftpm_spokes(hub_name, pub_tag, module_ctx)
     _create_hosted_spokes(hub_name, hosted, all_package_names, user_overlay_roots, pub_tag, ignore_hooks)
-    _create_path_spokes(hub_name, path_pkgs, all_package_names, user_overlay_roots, pub_tag, ignore_hooks)
+    _create_path_spokes(hub_name, path_pkgs, all_package_names, user_overlay_roots, pub_tag, ignore_hooks, module_ctx)
     _create_sdk_spokes(hub_name, sdk_flutter, all_package_names, toolchain_info, merged, toolchain_info.version)
 
 def _overlay_roots_of_module(mod):

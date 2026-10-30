@@ -652,6 +652,14 @@ jobs:
           check_refusal evil_esc 'pub package "evil_esc": symlink "lib/evil.dart" escapes the package (points at "../../outside.txt")'
           check_refusal evil_path_abs 'pub package "evil_path_abs": entry "/abs.dart" escapes the package'
           check_refusal evil_path_dotdot 'pub package "evil_path_dotdot": entry "../outside.dart" escapes the package'
+      # Lazy Android path: the Dart build must resolve the plugin's spoke
+      # without reading its Gradle build (which names an unmapped coordinate),
+      # and reaching the hub's Android aggregator must then fail closed on
+      # that coordinate. The script runs the positive build first, so it
+      # cannot pass by making the fail-closed fetch fail for another reason.
+      - name: pub_android_lazy reads Gradle only on the Android path
+        working-directory: e2e/pub_android_lazy
+        run: bash check_android_fail_closed.sh
       - name: Report cache sizes
         if: always()
         run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true

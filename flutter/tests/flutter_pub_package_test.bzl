@@ -12,6 +12,7 @@ The fixture shapes mirror real pub.dev plugins:
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("@rules_dart//dart/pub:yaml_parser.bzl", "pubspec_sdk_constraint_error")
+load("//flutter/private:flutter_pub_android_package.bzl", "android_package_repo_name", "android_spoke_alias_content")
 load(
     "//flutter/private:flutter_pub_package.bzl",
     "apply_overlay_substitutions",
@@ -2330,6 +2331,60 @@ spoke_sdk_constraint_refusal_test = unittest.make(
     _spoke_sdk_constraint_refusal_test_impl,
 )
 
+def _android_package_repo_name_is_deterministic_test_impl(ctx):
+    """One Android repository name per hub and package, derived only from them."""
+    env = unittest.begin(ctx)
+
+    name = android_package_repo_name("deps", "lazy_plugin")
+    asserts.equals(env, "deps-android-lazy_plugin", name)
+    asserts.equals(env, name, android_package_repo_name("deps", "lazy_plugin"))
+
+    # The separator cannot appear in a pub package name, so an Android
+    # repository never collides with a spoke even when the package's own
+    # name starts with `android`.
+    asserts.true(
+        env,
+        android_package_repo_name("deps", "android_plugin") != "deps__android_plugin",
+    )
+    asserts.true(
+        env,
+        android_package_repo_name("deps", "android_plugin") != android_package_repo_name("deps", "plugin"),
+    )
+    asserts.true(
+        env,
+        android_package_repo_name("other", "lazy_plugin") != name,
+    )
+
+    return unittest.end(env)
+
+android_package_repo_name_is_deterministic_test = unittest.make(
+    _android_package_repo_name_is_deterministic_test_impl,
+)
+
+def _android_spoke_alias_is_label_only_test_impl(ctx):
+    """The spoke's android/BUILD.bazel names the Android repository, no model.
+
+    Reading the Gradle build here is the defect: this file must stay a pure
+    label alias so a non-Android fetch never parses or analyses the Android
+    repository.
+    """
+    env = unittest.begin(ctx)
+
+    repo = android_package_repo_name("deps", "lazy_plugin")
+    content = android_spoke_alias_content(repo)
+
+    asserts.false(env, "load(" in content, content)
+    asserts.false(env, "kt_android_library" in content, content)
+    asserts.false(env, "srcs" in content, content)
+    asserts.true(env, 'name = "lib"' in content, content)
+    asserts.true(env, '"@' + repo + '//android:lib"' in content, content)
+
+    return unittest.end(env)
+
+android_spoke_alias_is_label_only_test = unittest.make(
+    _android_spoke_alias_is_label_only_test_impl,
+)
+
 def flutter_pub_package_test_suite(name):
     unittest.suite(
         name,
@@ -2387,4 +2442,6 @@ def flutter_pub_package_test_suite(name):
         maven_dep_label_validation_test,
         hostile_label_renders_inert_test,
         spoke_sdk_constraint_refusal_test,
+        android_package_repo_name_is_deterministic_test,
+        android_spoke_alias_is_label_only_test,
     )

@@ -1,0 +1,10 @@
+load("@rules_dart//dart:defs.bzl", "dart_binary")
+
+# A Dart-only consumer. Reaching this target fetches the plugin's spoke but
+# must never fetch or analyse its Android repository; the plugin's Gradle
+# build names an untranslatable coordinate on purpose (see MODULE.bazel).
+dart_binary(
+    name = "app",
+    main = "lib/main.dart",
+    deps = ["@deps//:lazy_plugin"],
+)
