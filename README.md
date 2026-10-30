@@ -594,6 +594,46 @@ ios_application(
 )
 ```
 
+`flutter_ios_framework_gen` keeps `flutter_assets` inside `App.framework` in
+every build. A debug build that assembles its own bundle can leave the assets
+out of the framework, so rules_apple's imported-framework processor does not
+re-copy the kernel on every Dart edit. Call the `flutter_ios_framework` rule
+directly with `split_debug_assets = True`, take its `flutter_assets` output
+group, and add the files to the app root with an `apple_resource_group`:
+
+```starlark
+load("@rules_apple//apple:resources.bzl", "apple_resource_group")
+load("@rules_flutter//flutter/private:flutter_ios_application.bzl", "flutter_ios_framework")
+
+flutter_ios_framework(
+    name = "my_framework_split",
+    application = ":my_app",
+    split_debug_assets = True,
+)
+
+filegroup(
+    name = "my_split_assets",
+    srcs = [":my_framework_split"],
+    output_group = "flutter_assets",
+)
+
+apple_resource_group(
+    name = "my_split_assets_group",
+    structured_resources = [":my_split_assets"],
+    strip_structured_resources_prefixes = ["my_framework_split/App.framework"],
+)
+
+ios_application(
+    name = "my_ios_app",
+    resources = [":my_split_assets_group"],
+    # ...plus the deps shown above.
+)
+```
+
+A debug app then has `Runner.app/flutter_assets/...` at its root. An AOT
+(release or profile) build ignores the request: its assets stay inside
+`App.framework` and the output group is empty.
+
 </details>
 
 #### Running on an iOS device
