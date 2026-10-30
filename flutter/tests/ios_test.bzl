@@ -300,6 +300,46 @@ _xtool_ios_app_actions_test = analysistest.make(_xtool_ios_app_actions_test_impl
 
 # -- Bundling ------------------------------------------------------------------
 
+def _default_macro_kinds(fg_name, eng_name, reg_name, rl_name, pl_name, app_name):
+    """The targets the default rules_apple macro surface creates.
+
+    Args:
+      fg_name: The public framework-gen target name.
+      eng_name: The public engine target name.
+      reg_name: The public registrant target name.
+      rl_name: The public runner-library target name.
+      pl_name: The public plugin-library target name.
+      app_name: The app target name.
+
+    Returns:
+      A target name to rule kind dictionary.
+    """
+    return {
+        "__%s_intermediates" % fg_name: "flutter_ios_application",
+        "__%s_framework" % fg_name: "flutter_ios_framework",
+        fg_name: "apple_dynamic_framework_import",
+        eng_name: "apple_dynamic_xcframework_import",
+        reg_name: "flutter_ios_registrant",
+        "_%s__apple_plugins_aggregator" % rl_name: "flutter_apple_plugins_aggregator",
+        rl_name: "swift_library",
+        "_%s__flutter_framework" % pl_name: "apple_dynamic_xcframework_import",
+        pl_name: "swift_library",
+        "__%s_registrant" % app_name: "flutter_ios_registrant",
+        "__%s_intermediates" % app_name: "flutter_ios_application",
+        "__%s_app_framework" % app_name: "flutter_ios_framework",
+        "__%s_split_debug_assets" % app_name: "filegroup",
+        "__%s_split_debug_assets_group" % app_name: "apple_resource_group",
+        "__%s_app_bundle" % app_name: "apple_dynamic_framework_import",
+        "__%s_engine" % app_name: "apple_dynamic_xcframework_import",
+        "__%s_native_frameworks" % app_name: "flutter_ios_native_frameworks",
+        "__%s_privacy_manifests" % app_name: "flutter_ios_privacy_manifests",
+        "__%s_apple_plugins" % app_name: "flutter_apple_plugins_aggregator",
+        "__%s_runner" % app_name: "swift_library",
+        "__%s_version" % app_name: "apple_bundle_version",
+        "__%s_info_plist_dev" % app_name: "flutter_plist_merge",
+        app_name: "ios_application",
+    }
+
 def _bundling_tests(name):
     """Declare the bundling fixtures and the tests over them.
 
@@ -505,29 +545,7 @@ def _bundling_tests(name):
         for k, kind in created_default.items()
         if "xtool" in k or "xtool" in kind or kind == "flutter_darwin_xcframework_import"
     ]
-    expected_default_kinds = {
-        "__%s_intermediates" % fg_name: "flutter_ios_application",
-        "__%s_framework" % fg_name: "flutter_ios_framework",
-        fg_name: "apple_dynamic_framework_import",
-        eng_name: "apple_dynamic_xcframework_import",
-        reg_name: "flutter_ios_registrant",
-        "_%s__apple_plugins_aggregator" % rl_name: "flutter_apple_plugins_aggregator",
-        rl_name: "swift_library",
-        "_%s__flutter_framework" % pl_name: "apple_dynamic_xcframework_import",
-        pl_name: "swift_library",
-        "__%s_registrant" % app_name: "flutter_ios_registrant",
-        "__%s_intermediates" % app_name: "flutter_ios_application",
-        "__%s_app_framework" % app_name: "flutter_ios_framework",
-        "__%s_app_bundle" % app_name: "apple_dynamic_framework_import",
-        "__%s_engine" % app_name: "apple_dynamic_xcframework_import",
-        "__%s_native_frameworks" % app_name: "flutter_ios_native_frameworks",
-        "__%s_privacy_manifests" % app_name: "flutter_ios_privacy_manifests",
-        "__%s_apple_plugins" % app_name: "flutter_apple_plugins_aggregator",
-        "__%s_runner" % app_name: "swift_library",
-        "__%s_version" % app_name: "apple_bundle_version",
-        "__%s_info_plist_dev" % app_name: "flutter_plist_merge",
-        app_name: "ios_application",
-    }
+    expected_default_kinds = _default_macro_kinds(fg_name, eng_name, reg_name, rl_name, pl_name, app_name)
     _ios_macro_surface_test(
         name = name + "_default_macro_surface",
         actual_kinds = created_default,
