@@ -244,6 +244,14 @@ def _emit_apple_framework_import(spec):
             visibility = ["//visibility:private"],
         )
 
+def objc_copts_xtool_refusal(name):
+    """The message for `objc_copts` on the `xtool` backend, naming the plugin target."""
+    return (
+        "flutter_apple_plugin_library: %s: objc_copts is not supported on the xtool backend; " % name +
+        "the backend compiles every source in one swiftc invocation, so there is no " +
+        "separate ObjC compile to pass them to"
+    )
+
 def _emit_plugin_objc_target(spec, objc_files, headers):
     """Emit the inner `objc_library`; return `(objc_module_name, dep_label_or_None)`."""
     if not objc_files:
@@ -259,8 +267,8 @@ def _emit_plugin_objc_target(spec, objc_files, headers):
         sdk_dylibs = spec.sdk_dylibs,
         module_name = objc_module_name,
         enable_modules = True,
-        copts = spec.copts,
-        deps = [":" + spec.framework_target],
+        copts = list(spec.copts) + list(spec.objc_copts),
+        deps = [":" + spec.framework_target] + list(spec.deps),
         tags = spec.internal_tags,
         target_compatible_with = spec.target_compatible_with,
         visibility = ["//visibility:private"],
@@ -304,6 +312,7 @@ def flutter_apple_plugin_library(
         platform = "macos",
         deps = [],
         copts = [],
+        objc_copts = [],
         includes = [],
         sdk_frameworks = [],
         sdk_dylibs = [],
@@ -323,8 +332,15 @@ def flutter_apple_plugin_library(
         srcs: Swift, ObjC, and header source files.
         module_name: Swift module name. Defaults to `name`.
         platform: `"macos"` or `"ios"`. Picks the Flutter framework dep.
-        deps: Additional swift_library / cc_library deps (other plugins).
-        copts: Additional Swift compile options.
+        deps: Additional swift_library / cc_library deps (other plugins), also
+            given to the inner `objc_library` so its sources see their public
+            headers and modules.
+        copts: Additional Swift compile options, also passed to the inner
+            `objc_library` as today.
+        objc_copts: C and ObjC compile options for the inner `objc_library`
+            only, appended after `copts`. They never reach the `swift_library`.
+            The `xtool` backend refuses a non-empty list, because it has no
+            separate ObjC compile.
         includes: Header search paths forwarded to the inner `objc_library`.
         sdk_frameworks: Apple SDK frameworks to link (e.g. `["AVFoundation"]`).
         sdk_dylibs: Apple SDK dynamic libraries to link (e.g. `["c++"]`,
@@ -341,6 +357,8 @@ def flutter_apple_plugin_library(
         fail("flutter_apple_plugin_library: platform must be 'macos' or 'ios', got '%s'" % platform)
     if backend not in ("rules_apple", "xtool"):
         fail("flutter_apple_plugin_library: backend must be 'rules_apple' or 'xtool', got %r" % backend)
+    if backend == "xtool" and objc_copts:
+        fail(objc_copts_xtool_refusal(name))
 
     if tags == None:
         tags = ["manual"]
@@ -361,6 +379,7 @@ def flutter_apple_plugin_library(
         platform = platform,
         deps = deps,
         copts = copts,
+        objc_copts = objc_copts,
         includes = includes,
         sdk_frameworks = sdk_frameworks,
         sdk_dylibs = sdk_dylibs,
