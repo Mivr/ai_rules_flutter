@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Speed-of-light (SOL) cost for the iOS perf bench.
+"""Speed-of-light (SOL) cost for the Flutter perf bench.
 
-For each bench configuration (``device_release``, ``sim_debug``) and each
-scenario (``clean``, ``app_edit``, ``core_edit``) this tool measures two
-numbers in the same unit, whole-tree user+sys CPU seconds:
+For each bench configuration (iOS, Android and Web; release and debug) and
+each scenario (``clean``, ``app_edit``, ``core_edit``) this tool measures
+two numbers in the same unit, whole-tree user+sys CPU seconds:
 
 - the Bazel cost: for ``clean``, the whole ``bazel --batch build``
   process tree (Bazel's own work plus every action), measured with wait4
@@ -38,7 +38,9 @@ and hashed after. device_release hashes the App.framework binary;
 sim_debug hashes every file in the final app bundle's payload (an
 .ipa archive's entries, or every file under an .app directory),
 compared by entry path and content: archive metadata such as zip
-timestamps is not part of the proof. The verify set comes from
+timestamps is not part of the proof. Android hashes every entry of each
+declared .apk/.aab archive the same way; Web hashes every file under
+each declared web output directory. The verify set comes from
 declared outputs only, never a glob over bazel-out. A step that exits
 non-zero, times out or cannot start — a step that would start while an
 input is still a moved-aside output no earlier step re-created — or
@@ -62,7 +64,7 @@ the ``ios-profile`` artifact (no build outputs).
 
 Subcommands: ``run`` measures repeats, ``chain`` runs one chain (an
 unmeasured child process), ``summarize`` writes medians into
-ios-sol.json.
+``<platform>-sol.json`` (``ios``, ``android`` or ``web``).
 """
 
 import argparse
@@ -104,19 +106,34 @@ from run_rep import (  # noqa: E402
     reset_work,
     shutdown,
 )
-from summarize import summarize_values  # noqa: E402
 from traceprofile import parse_jvm_profile  # noqa: E402
 import warm_server  # noqa: E402
+from sol_summary import (  # noqa: E402
+    BATCH_METHOD,
+    WARM_METHOD,
+    _CONFIG_PLATFORM,
+    _RECORD,
+    collect_runner_info,
+    configs_for_platform,
+    flow_id,
+    load_sol_records,
+    pick_unit,
+    present_platforms,
+    rep_sort_key,
+    summarize_bazel_parts,
+    summarize_configs,
+    summarize_flow,
+    summarize_host_tools,
+    summarize_jvm,
+    summarize_profile,
+    summarize_sol,
+    summarize_worker_steps,
+    write_platform_summaries,
+    write_summary,
+)
 
-_FLOW_PREFIX = {"device_release": "ios-release", "sim_debug": "ios-debug"}
-_FLOW_SUFFIX = {"clean": "clean", "app_edit": "app", "core_edit": "body"}
 _EDITS = dict(SCENARIOS)
 _CHAIN_REPORT = "chain.json"
-_RECORD = "record.json"
-
-BATCH_METHOD = "batch"
-WARM_METHOD = warm_server.METHOD
-
 
 def startup_options(out_base):
     """Bazel startup options shared by every command on one output base."""
@@ -158,11 +175,6 @@ def build_argv(out_base, config, log_path, profile_path, batch):
     if profile_path is not None:
         argv.append("--profile=" + profile_path)
     return argv
-
-
-def flow_id(config, scenario):
-    """ios-sol.json flow id, e.g. device_release+core_edit=ios-release-body."""
-    return "%s-%s" % (_FLOW_PREFIX[config], _FLOW_SUFFIX[scenario])
 
 
 def out_base_of(args, config):
@@ -371,20 +383,32 @@ def sim_bundle_archives(target_files):
     return sorted(path for path in target_files if path.endswith(".ipa"))
 
 
-def ipa_entry_hashes(ipa_path):
-    """{entry path: hex digest} of an .ipa archive's payload.
+def android_bundle_archives(target_files):
+    """Declared Android .apk or .aab archives among a target's outputs."""
+    return sorted(path for path in target_files
+                  if path.endswith(".apk") or path.endswith(".aab"))
 
-    Only entry paths and contents prove the chain's work: archive
-    metadata (timestamps, permissions, entry order) is not part of the
-    proof, so an archive whose bytes differ only in metadata still
+
+def web_bundle_roots(target_files):
+    """Declared web build output directories among a target's outputs."""
+    return sorted({path for path in target_files if os.path.isdir(path)})
+
+
+def archive_entry_hashes(archive_path):
+    """{entry path: hex digest} of a bundle archive's payload.
+
+    Covers .ipa payloads as well as Android .apk/.aab archives. Only
+    entry paths and contents prove the chain's work: archive metadata
+    (timestamps, permissions, extra fields, entry order) is not part of
+    the proof, so an archive whose bytes differ only in metadata still
     matches. An unreadable archive or one holding no files fails loudly.
     """
     import zipfile
     try:
-        archive = zipfile.ZipFile(ipa_path, "r")
+        archive = zipfile.ZipFile(archive_path, "r")
     except (OSError, zipfile.BadZipFile) as exc:
         raise RuntimeError("sol cannot read bundle archive %s (%s)"
-                           % (ipa_path, exc))
+                           % (archive_path, exc))
     try:
         entries = {}
         for info in archive.infolist():
@@ -396,14 +420,17 @@ def ipa_entry_hashes(ipa_path):
             except (OSError, zipfile.BadZipFile, KeyError,
                     RuntimeError) as exc:
                 raise RuntimeError("sol cannot read entry %s of %s (%s)"
-                                   % (info.filename, ipa_path, exc))
+                                   % (info.filename, archive_path, exc))
             entries[info.filename] = digest
     finally:
         archive.close()
     if not entries:
         raise RuntimeError("sol bundle archive %s holds no files"
-                           % ipa_path)
+                           % archive_path)
     return entries
+
+
+ipa_entry_hashes = archive_entry_hashes
 
 
 def app_dir_hashes(app_dir):
@@ -446,24 +473,62 @@ def plan_verify_snapshot(capture, work, out_base, execroot, config,
     target's listed outputs. sim_debug hashes the final app bundle's
     payload: every entry of each listed .ipa archive, and every file
     under each listed .app directory (the kernel blob and the
-    App.framework binary are among those files). Anything else —
-    no bundle among the listed outputs — fails loudly instead of
-    globbing bazel-out, whose leftovers are not this build's outputs.
-    Returns an opaque plan; read_verify_snapshot reads it right now.
+    App.framework binary are among those files). Android configurations
+    hash every entry of each declared .apk/.aab archive, ignoring zip
+    metadata. Web configurations hash every file under each declared
+    web output directory. Anything else — no bundle among the listed
+    outputs — fails loudly instead of globbing bazel-out, whose
+    leftovers are not this build's outputs. Returns an opaque plan;
+    read_verify_snapshot reads it right now.
     """
     spec = CONFIGS[config]
     listed = query_target_files(capture, work, out_base, spec["target"],
                                 spec["build_flags"], batch)
-    if config == "device_release":
+    platform = _CONFIG_PLATFORM[config]
+    if platform == "ios" and config == "device_release":
         found = device_verify_files(listed)
         if not found:
             raise RuntimeError("sol found no verify files for %s" % config)
         return ("files", found)
+    if platform == "android":
+        archives = android_bundle_archives(listed)
+        if not archives:
+            raise RuntimeError(
+                "sol found no bundle for %s (declared Android APK/AAB)"
+                % config)
+        return ("archives", archives, execroot)
+    if platform == "web":
+        roots = web_bundle_roots(listed)
+        if not roots:
+            raise RuntimeError(
+                "sol found no bundle for %s (declared web output "
+                "directory)" % config)
+        return ("tree", roots, execroot)
     archives = sim_bundle_archives(listed)
     bundles = sim_bundle_roots(listed)
     if not archives and not bundles:
         raise RuntimeError("sol found no app bundle for %s" % config)
     return ("bundles", archives, bundles, execroot)
+
+
+def _archive_snapshot(archives, base):
+    """{bundle path::entry: digest} over every declared archive's payload."""
+    snapshot = {}
+    for archive in archives:
+        prefix = os.path.relpath(archive, base) + "::"
+        for entry, digest in archive_entry_hashes(archive).items():
+            snapshot[prefix + entry] = digest
+    return snapshot
+
+
+def _tree_snapshot(roots, base):
+    """{bundle path::relative file: digest} over every declared tree."""
+    snapshot = {}
+    for root in roots:
+        prefix = os.path.relpath(root, base) + "::"
+        for entry, digest in app_dir_hashes(root).items():
+            snapshot[prefix + entry] = digest
+    return snapshot
 
 
 def read_verify_snapshot(plan):
@@ -475,17 +540,18 @@ def read_verify_snapshot(plan):
     """
     if plan[0] == "files":
         return snapshot_hashes(plan[1])
-    _, archives, bundles, execroot = plan
-    base = os.path.abspath(execroot)
-    snapshot = {}
-    for archive in archives:
-        prefix = os.path.relpath(archive, base) + "::"
-        for entry, digest in ipa_entry_hashes(archive).items():
-            snapshot[prefix + entry] = digest
-    for bundle in bundles:
-        prefix = os.path.relpath(bundle, base) + "::"
-        for entry, digest in app_dir_hashes(bundle).items():
-            snapshot[prefix + entry] = digest
+    if plan[0] == "archives":
+        _, archives, execroot = plan
+        snapshot = _archive_snapshot(archives,
+                                     os.path.abspath(execroot))
+    elif plan[0] == "tree":
+        _, roots, execroot = plan
+        snapshot = _tree_snapshot(roots, os.path.abspath(execroot))
+    else:
+        _, archives, bundles, execroot = plan
+        base = os.path.abspath(execroot)
+        snapshot = _archive_snapshot(archives, base)
+        snapshot.update(_tree_snapshot(bundles, base))
     if not snapshot:
         raise RuntimeError("sol bundle payload is empty")
     return snapshot
@@ -1282,246 +1348,6 @@ def run_sol_rep(args, rep, configs):
     return (records, had_errors)
 
 
-def rep_sort_key(name):
-    """Numeric-aware sort for repN directories (rep10 follows rep9)."""
-    if name.startswith("rep") and name[3:].isdigit():
-        return (0, int(name[3:]), name)
-    return (1, 0, name)
-
-
-def load_sol_records(results_dir, config, scenario):
-    """Per-repeat record dicts for one config and scenario."""
-    scenario_dir = os.path.join(results_dir, "sol", config, scenario)
-    records = []
-    if not os.path.isdir(scenario_dir):
-        return records
-    for rep in sorted(os.listdir(scenario_dir), key=rep_sort_key):
-        path = os.path.join(scenario_dir, rep, _RECORD)
-        if not os.path.isfile(path):
-            continue
-        with open(path, encoding="utf-8") as fh:
-            records.append(json.load(fh))
-    return records
-
-
-def pick_unit(collected):
-    """One unit for the artifact: always cpu_seconds.
-
-    Both numbers are whole-tree user+sys CPU seconds on every host (a
-    macOS instruction counter describes the timed child alone, never
-    its process tree, so it cannot measure a build). Per-step
-    instruction detail may live in chain.json; it is never the flow
-    number.
-    """
-    del collected
-    return "cpu_seconds"
-
-
-def summarize_jvm(rep_jvms):
-    """Median jvm record over repeats: total and per-phase CPU."""
-    totals = [jvm.get("total") for jvm in rep_jvms
-              if jvm.get("total") is not None]
-    names = set()
-    for jvm in rep_jvms:
-        names.update((jvm.get("phases") or {}).keys())
-    phases = {}
-    for name in sorted(names):
-        vals = [jvm["phases"][name] for jvm in rep_jvms
-                if name in (jvm.get("phases") or {})]
-        phases[name] = summarize_values(vals)["median"]
-    return {"total": summarize_values(totals)["median"], "phases": phases}
-
-
-def summarize_host_tools(rep_hosts):
-    """Median host_tools record over repeats (no command lines)."""
-    totals = [host.get("total") for host in rep_hosts
-              if host.get("total") is not None]
-    names = set()
-    for host in rep_hosts:
-        names.update((host.get("by_mnemonic") or {}).keys())
-    by_mnemonic = {}
-    for name in sorted(names):
-        vals = [host["by_mnemonic"][name] for host in rep_hosts
-                if name in (host.get("by_mnemonic") or {})]
-        by_mnemonic[name] = summarize_values(vals)["median"]
-    labels = set()
-    for host in rep_hosts:
-        labels.update((host.get("by_target") or {}).keys())
-    medians = {}
-    for label in labels:
-        vals = [host["by_target"][label] for host in rep_hosts
-                if label in (host.get("by_target") or {})]
-        medians[label] = summarize_values(vals)["median"]
-    top = sorted(medians.items(),
-                 key=lambda item: (-item[1], item[0]))[:10]
-    failed = []
-    for host in rep_hosts:
-        for entry in host.get("failed") or []:
-            if entry not in failed and len(failed) < 10:
-                failed.append(entry)
-    return {"total": summarize_values(totals)["median"],
-            "by_mnemonic": by_mnemonic,
-            "top_targets": [[label, cpu] for label, cpu in top],
-            "failed": failed}
-
-
-def summarize_profile(records, bazel_median, sol_median, identical):
-    """Per-flow profile: jvm/host medians, gap SOL, raw residual.
-
-    The gap SOL is the flow SOL number; a flow without one uses the
-    chain's measured CPU in its place (sol_source says which). residual
-    is the raw bazel - jvm - sol - host_tools value, never clamped, so
-    the parts always sum to the Bazel number; None while any part is
-    missing.
-    """
-    jvms = []
-    hosts = []
-    chain_cpus = []
-    for record in records:
-        profile = record.get("profile") or {}
-        jvm = profile.get("jvm") or {}
-        jvms.append({"total": jvm.get("total"),
-                     "phases": jvm.get("phases") or {}})
-        host = profile.get("host_tools") or {}
-        hosts.append({"total": host.get("total"),
-                      "by_mnemonic": host.get("by_mnemonic") or {},
-                      "by_target": host.get("by_target") or {},
-                      "failed": host.get("failed") or []})
-        if profile.get("sol_cpu_s") is not None:
-            chain_cpus.append(profile["sol_cpu_s"])
-    if identical and sol_median is not None:
-        gap, source = sol_median, "sol"
-    else:
-        gap, source = summarize_values(chain_cpus)["median"], "chain-cpu"
-    parts = [bazel_median, summarize_jvm(jvms)["total"], gap,
-             summarize_host_tools(hosts)["total"]]
-    residual = None
-    if all(part is not None for part in parts):
-        residual = parts[0] - parts[1] - parts[2] - parts[3]
-    return {"jvm": summarize_jvm(jvms), "host_tools": summarize_host_tools(
-        hosts), "sol_cpu_s": gap, "sol_source": source,
-        "residual": residual}
-
-
-def summarize_bazel_parts(records):
-    """Median per-part CPU over repeats for a warm-server flow.
-
-    Each part's median is over the repeats' user+sys CPU for that part
-    (client / server_self / server_reaped / descendants); parts with no
-    sample stay out.
-    """
-    parts = {}
-    for name in ("client", "server_self", "server_reaped",
-                 "descendants"):
-        vals = []
-        for record in records:
-            breakdown = record.get("bazel_parts") or {}
-            part = breakdown.get(name) or {}
-            if (part.get("user_s") is not None
-                    and part.get("sys_s") is not None):
-                vals.append(part["user_s"] + part["sys_s"])
-        if vals:
-            parts[name] = summarize_values(vals)["median"]
-    return parts
-
-
-def summarize_worker_steps(records):
-    """Merged worker-step counts over repeats (first value per mnemonic)."""
-    merged = {}
-    for record in records:
-        for mnemonic, count in (
-                record.get("worker_steps") or {}).items():
-            if mnemonic not in merged:
-                merged[mnemonic] = count
-    return merged
-
-
-def summarize_flow(records, unit):
-    """Median costs over repeats; no SOL number unless all repeats match."""
-    del unit
-    identical = all(record["identical"] for record in records)
-    methods = {record.get("method") for record in records}
-    if len(methods) == 1 and None not in methods:
-        method = records[0]["method"]
-    elif records[0].get("scenario") == "clean":
-        method = BATCH_METHOD
-    else:
-        method = WARM_METHOD
-    bazel = summarize_values([record["bazel"]["cpu_s"] for record in records
-                              if record["bazel"]["cpu_s"] is not None])
-    sol_vals = [record["sol"]["cpu_s"] for record in records
-                if record["sol"] is not None
-                and record["sol"].get("cpu_s") is not None]
-    sol = summarize_values(sol_vals) if identical else summarize_values([])
-    reasons = []
-    for record in records:
-        if record.get("reason") not in reasons:
-            reasons.append(record.get("reason"))
-    flow = {"method": method,
-            "bazel": bazel["median"],
-            "sol": sol["median"] if identical else None,
-            "identical": identical,
-            "reason": "ok" if identical else "; ".join(reasons),
-            "chain": records[0].get("chain"),
-            "worker_steps": summarize_worker_steps(records),
-            "profile": summarize_profile(records, bazel["median"],
-                                         sol["median"] if identical else None,
-                                         identical),
-            "spread": {"n": len(records),
-                       "bazel": [bazel["min"], bazel["max"]],
-                       "sol": [sol["min"], sol["max"]] if identical else None}}
-    if method == WARM_METHOD:
-        flow["bazel_parts"] = summarize_bazel_parts(records)
-    return flow
-
-
-def collect_runner_info():
-    """Runner fingerprint; the Xcode probe fails open (Linux CI)."""
-    info = {"system": platform.system(), "release": platform.release(),
-            "machine": platform.machine(), "cpu_count": os.cpu_count()}
-    try:
-        proc = subprocess.run(
-            ["xcodebuild", "-version"],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            timeout=60,
-            check=False,
-            text=True,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return info
-    if proc.returncode == 0 and proc.stdout.strip():
-        info["xcode"] = proc.stdout.strip().splitlines()[0]
-    return info
-
-
-def summarize_sol(results_dir, meta):
-    """ios-sol.json dict: medians per flow in one unit, proof flags."""
-    collected = {}
-    for config in CONFIG_ORDER:
-        for scenario, _ in SCENARIOS:
-            records = load_sol_records(results_dir, config, scenario)
-            if records:
-                collected[flow_id(config, scenario)] = records
-    unit = pick_unit(collected)
-    flows = {}
-    for config in CONFIG_ORDER:
-        for scenario, _ in SCENARIOS:
-            flow = flow_id(config, scenario)
-            if flow in collected:
-                flows[flow] = summarize_flow(collected[flow], unit)
-            else:
-                flows[flow] = {"error": "missing repeats"}
-    flags = meta.get("bazel_flags", [])
-    return {"rules_flutter": meta["sha"], "unit": unit,
-            "runner": collect_runner_info(), "flows": flows,
-            "meta": {"repeats": meta["repeats"],
-                     "target_loc": meta["target_loc"], "seed": meta["seed"],
-                     "bazel_flags": list(flags),
-                     "lockfile": meta.get("lockfile", "none")}}
-
-
 def main_run(cmd):
     cmd.run = real_run
     cmd.capture = capture_bazel_output
@@ -1557,9 +1383,24 @@ def main_summarize(cmd):
             "bazel_flags": validate_bazel_flags(
                 parse_bazel_flags(cmd.bazel_flags)),
             "lockfile": cmd.lockfile}
-    summary = summarize_sol(cmd.results, meta)
-    with open(cmd.out, "w", encoding="utf-8", newline="\n") as fh:
-        fh.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+    platforms = present_platforms(cmd.results)
+    configs = [config for platform in platforms
+               for config in configs_for_platform(platform)]
+    summary = summarize_sol(cmd.results, meta, configs)
+    summaries = write_platform_summaries(cmd.results, meta, configs)
+    out_dir = os.path.dirname(os.path.abspath(cmd.out))
+    for platform, platform_summary in summaries.items():
+        write_summary(os.path.join(out_dir, platform + "-sol.json"),
+                      platform_summary)
+    out_name = os.path.basename(cmd.out)
+    primary = None
+    for platform, platform_summary in summaries.items():
+        if out_name == platform + "-sol.json":
+            primary = platform_summary
+            break
+    if primary is None:
+        primary = summaries.get("ios", summary)
+    write_summary(cmd.out, primary)
     for flow in sorted(summary["flows"]):
         entry = summary["flows"][flow]
         if "error" in entry:
@@ -1573,7 +1414,8 @@ def main_summarize(cmd):
 
 def build_parser():
     parser = argparse.ArgumentParser(
-        description="Measure iOS speed-of-light costs (see module docstring).")
+        description="Measure Flutter speed-of-light costs (see module "
+                    "docstring).")
     sub = parser.add_subparsers(dest="command", required=True)
     run = sub.add_parser("run", help="measure one repeat over configs")
     run.add_argument("--tools", required=True)
@@ -1601,7 +1443,8 @@ def build_parser():
                        help="build execroot to replay in")
     chain.add_argument("--report", required=True, help="chain report path")
     chain.add_argument("--timeout", type=float, default=1800.0)
-    summ = sub.add_parser("summarize", help="write ios-sol.json medians")
+    summ = sub.add_parser("summarize",
+                          help="write <platform>-sol.json medians")
     summ.add_argument("--results", required=True)
     summ.add_argument("--sha", required=True,
                       help="full rules_flutter commit sha being measured")
@@ -1613,7 +1456,8 @@ def build_parser():
                       "for this run (recorded in meta)")
     summ.add_argument("--lockfile", default="none",
                       help="none or committed (recorded in meta)")
-    summ.add_argument("--out", required=True, help="ios-sol.json path")
+    summ.add_argument("--out", required=True,
+                      help="platform sol json path")
     return parser
 
 

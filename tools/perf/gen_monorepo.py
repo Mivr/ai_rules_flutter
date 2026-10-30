@@ -15,11 +15,11 @@ Dart lines of code (``target_loc``), mirroring the manager referee's
   own package and from dependencies, ``part`` files in every eighth library).
   The same inputs give a byte-identical tree.
 - One ``flutter_library`` per package plus an ``app/`` package with a
-  ``flutter_application`` and the Tier-1 iOS app targets
+  ``flutter_application`` and the Tier-1 iOS, Android and Web app targets
   (``flutter_ios_app`` + an explicit ``flutter_ios_framework_gen``
-  App.framework target + simulator build test). This bench measures iOS only,
-  so unlike the referee generator there is no Android app and no
-  ``flutter_test`` targets unless ``--test-ratio`` asks for them.
+  App.framework target + simulator build test, ``flutter_android_app`` and
+  ``flutter_web_app``). Unlike the referee generator there is no
+  ``flutter_test`` target unless ``--test-ratio`` asks for them.
 - Reachability (generator v2): each package entry calls its direct
   dependencies' entries and every own file's functions (including the
   value functions the bench edits) and constructs every own file's
@@ -34,10 +34,13 @@ Dart lines of code (``target_loc``), mirroring the manager referee's
 Only the Python 3 standard library is used. Generation streams files to disk
 (one file in memory at a time) so large workspaces stay fast.
 
-Scaffolding (MODULE.bazel, pub files, .bazelrc, the ``ios/Runner/`` scaffold
-the Tier-1 ``flutter_ios_app`` discovers) is derived from the
-``e2e/hello_world`` fixture of the ``--rules-flutter`` checkout, so hermetic
-pins can never drift from what ``rules_flutter`` main verifies.
+Scaffolding (MODULE.bazel, pub files, .bazelrc, the ``ios/Runner/``
+scaffold the Tier-1 ``flutter_ios_app`` discovers and the
+``android/app/src/main/`` scaffold ``flutter_android_app`` discovers) is
+derived from the ``e2e/hello_world`` fixture of the ``--rules-flutter``
+checkout, so hermetic pins can never drift from what ``rules_flutter``
+main verifies. The Android scaffold itself is written by the generator so
+it exists with or without the fixture.
 
 The generated workspace models a consumer's iOS workspace, not this repo's
 own checkout: its ``.bazelrc`` carries no ``--lockfile_mode`` flag at all
@@ -56,6 +59,12 @@ import re
 import shutil
 import sys
 from typing import NamedTuple, Optional
+
+from gen_files import write_plain
+from gen_platform_apps import (
+    write_android_scaffolding,
+    write_app_build,
+)
 
 MASK64 = (1 << 64) - 1
 
@@ -800,15 +809,6 @@ def select_package_count(opts):
 # Scaffolding.
 
 
-def write_plain(out_dir, rel, content):
-    full = os.path.join(out_dir, rel)
-    parent = os.path.dirname(full)
-    if parent:
-        os.makedirs(parent, exist_ok=True)
-    with open(full, "w", encoding="utf-8", newline="\n") as fh:
-        fh.write(content)
-
-
 def read_bazel_version_or(rules_flutter_dir, fallback="9.3.0"):
     try:
         with open(os.path.join(rules_flutter_dir, ".bazelversion"),
@@ -1188,16 +1188,45 @@ def fallback_module_text(flutter_name, dart_name, flutter_path,
         + "bazel_dep(name = \"rules_apple\", version = \"5.2.0\")\n"
         + "bazel_dep(name = \"rules_swift\", version = \"4.1.2\")\n"
         + "bazel_dep(name = \"platforms\", version = \"1.1.0\")\n"
+        + "bazel_dep(name = \"rules_android\", version = \"0.8.0\")\n"
+        + "bazel_dep(name = \"rules_android_ndk\", version = \"0.1.5\")\n"
+        + "bazel_dep(name = \"rules_kotlin\", version = \"2.4.20\")\n"
+        + "bazel_dep(name = \"rules_java\", version = \"9.9.0\")\n"
+        + "bazel_dep(name = \"rules_jvm_external\", version = \"7.1\")\n"
         + "\n"
         + local_path_override(flutter_name, flutter_path)
         + (dart_override or "")
         + extra_overrides
-        + "flutter = use_extension(\"@rules_flutter//flutter:extensions.bzl\", \"flutter\")\n"
+        + "remote_android_extensions = use_extension(\n"
+        "    \"@rules_android//bzlmod_extensions:android_extensions.bzl\",\n"
+        "    \"remote_android_tools_extensions\",\n"
+        ")\n"
+        "use_repo(remote_android_extensions, \"android_tools\")\n"
+        "\n"
+        "android_sdk_repository_extension = use_extension(\n"
+        "    \"@rules_android//rules/android_sdk_repository:rule.bzl\",\n"
+        "    \"android_sdk_repository_extension\",\n"
+        ")\n"
+        "android_sdk_repository_extension.configure(api_level = 35)\n"
+        "use_repo(android_sdk_repository_extension, \"androidsdk\")\n"
+        "register_toolchains(\n"
+        "    \"@androidsdk//:sdk-toolchain\",\n"
+        "    \"@androidsdk//:all\",\n"
+        ")\n"
+        "\n"
+        "android_ndk_repository_extension = use_extension(\n"
+        "    \"@rules_android_ndk//:extension.bzl\",\n"
+        "    \"android_ndk_repository_extension\",\n"
+        ")\n"
+        "use_repo(android_ndk_repository_extension, \"androidndk\")\n"
+        "register_toolchains(\"@androidndk//:all\")\n"
+        "\n"
+        "flutter = use_extension(\"@rules_flutter//flutter:extensions.bzl\", \"flutter\")\n"
         "flutter.toolchain(flutter_version = \"3.47.7\")\n"
         "flutter.pub(\n"
         "    name = \"deps\",\n"
         "    lock = \"//:pubspec.lock\",\n)\n"
-        "use_repo(flutter, \"deps\", \"flutter_ios_engine\", \"flutter_toolchains\", \"flutter_web_sdk\")\n"
+        "use_repo(flutter, \"deps\", \"flutter_android_engine_arm64\", \"flutter_ios_engine\", \"flutter_toolchains\", \"flutter_web_sdk\")\n"
         "\n"
         "register_toolchains(\"@flutter_toolchains//:all\")\n"
     )
@@ -1381,73 +1410,6 @@ def copy_fixture_dir(out_dir, rules_flutter_dir, fixture_rel, dest_rel):
     copy_dir_sorted(src, os.path.join(out_dir, dest_rel))
 
 
-def write_app_build(out_dir, top_layer):
-    """app/BUILD.bazel: VM application, analyzer library, Tier-1 iOS app.
-
-    flutter_ios_app tags every internal target "manual" itself, so iOS stays
-    out of a Linux //... (the ios/Runner/ scaffold it discovers is copied
-    from the hello_world fixture). Five top-level targets: the shared
-    flutter_application, its analyzer library, the full Tier-1 simulator/
-    device app, an explicit public App.framework target (Tier-2
-    flutter_ios_framework_gen over the same application, so the bench's
-    device_release config builds a stable public label instead of the
-    macro's private __app_ios_app_framework), and the simulator build test.
-    """
-    app_deps = "".join("        \"//packages/pkg%d\",\n" % a for a in top_layer)
-    build = (
-        "load(\"@rules_flutter//flutter:defs.bzl\", \"flutter_application\", \"flutter_library\")\n"
-        "load(\"@rules_flutter//flutter:ios.bzl\", \"flutter_ios_app\", \"flutter_ios_framework_gen\", \"flutter_ios_simulator_build_test\")\n"
-        "\n"
-        "flutter_application(\n"
-        "    name = \"app\",\n"
-        "    package_name = \"app\",\n"
-        "    main = \"lib/main.dart\",\n"
-        "    deps = [\n"
-        "%s" % app_deps
-        + "        \"@deps//:flutter\",\n"
-        "    ],\n"
-        ")\n"
-        "\n"
-        "# The app rule is a bundle and carries no DartInfo, so the sources are\n"
-        "# declared once more as a library for the analyzer to stage.\n"
-        "flutter_library(\n"
-        "    name = \"app_lib\",\n"
-        "    package_name = \"app\",\n"
-        "    srcs = glob([\"lib/**/*.dart\"]),\n"
-        "    deps = [\n"
-        "%s" % app_deps
-        + "        \"@deps//:flutter\",\n"
-        "    ],\n"
-        ")\n"
-        "\n"
-        "# iOS, Tier-1 style: the macro discovers ios/Runner/ from `flutter create`\n"
-        "# and tags every internal target \"manual\" itself, so a Linux `//...`\n"
-        "# skips the whole stack without any explicit constraint here.\n"
-        "flutter_ios_app(\n"
-        "    name = \"app_ios\",\n"
-        "    app_name = \"Bench\",\n"
-        "    application = \":app\",\n"
-        "    bundle_id = \"com.example.bench\",\n"
-        ")\n"
-        "\n"
-        "# Explicit public App.framework target for the device_release bench\n"
-        "# config: AOT gen_snapshot for arm64 plus framework assembly, with no\n"
-        "# ios_application, so no signing and no provisioning profile.\n"
-        "flutter_ios_framework_gen(\n"
-        "    name = \"app_framework\",\n"
-        "    application = \":app\",\n"
-        ")\n"
-        "\n"
-        "flutter_ios_simulator_build_test(\n"
-        "    name = \"app_ios_sim\",\n"
-        "    targets = [\":app_ios\"],\n"
-        "    target_compatible_with = [\"@platforms//os:macos\"],\n"
-        ")\n"
-    )
-    write_plain(out_dir, "app/BUILD.bazel", build)
-    return 5
-
-
 class _ScaffoldFiles(NamedTuple):
     """Workspace locations the scaffolding files are written to."""
 
@@ -1457,7 +1419,7 @@ class _ScaffoldFiles(NamedTuple):
 
 
 def _write_root_files(files):
-    """MODULE, pub files, bazelrc, analysis config and the ios scaffold."""
+    """MODULE, pub files, bazelrc, analysis config and platform scaffolds."""
     out_dir = files.out_dir
     rules_flutter_dir = files.rules_flutter_dir
     overrides = files.overrides
@@ -1493,6 +1455,7 @@ def _write_root_files(files):
         ")\n")
     copy_fixture_dir(
         out_dir, rules_flutter_dir, ["e2e", "hello_world", "ios"], "app/ios")
+    write_android_scaffolding(out_dir)
 
 
 def _package_build_text(package, deps):

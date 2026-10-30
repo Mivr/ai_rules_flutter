@@ -9,7 +9,7 @@ artifact.
 ## What it measures
 
 For each of `base_ref` and `head_ref` (rules_flutter commits, wired through
-`local_path_override` in the generated `MODULE.bazel`), in each of two
+`local_path_override` in the generated `MODULE.bazel`), in each of six
 configurations (fixed table `CONFIGS` in `tools/perf/run_rep.py`, recorded
 in the summary metadata):
 
@@ -32,6 +32,12 @@ in the summary metadata):
   `-c dbg --ios_multi_cpus=sim_arm64` (the developer inner loop; the
   simulator runs debug builds only, and simulator bundles need no
   provisioning profile).
+- `android_release` / `android_debug`: the generated Android app
+  `//app:app_android` (`flutter_android_app`, the APK) with `-c opt`
+  or `-c dbg`.
+- `web_release` / `web_debug`: the generated Web app
+  `//app:app_web` (`flutter_web_app`, the deployment directory) with
+  `-c opt` or `-c dbg`.
 
 Per configuration the three scenarios run against a freshly reset
 workspace copy:
@@ -327,7 +333,8 @@ case: the same SDK tools run by hand for the same edit. Dispatch the same
 workflow with `mode=sol` (Actions > "iOS perf bench" > Run workflow >
 `mode: sol`); only `head_ref` is checked out, generated and built.
 
-Per configuration (`device_release`, `sim_debug`) and scenario (`clean`,
+Per configuration (`device_release`, `sim_debug`, `android_release`,
+`android_debug`, `web_release`, `web_debug`) and scenario (`clean`,
 `app_edit`, `core_edit` — the same edits compare mode applies), `sol`
 mode measures two numbers in the same unit, whole-tree user+sys CPU
 seconds:
@@ -421,8 +428,12 @@ every file in the final app bundle's payload — every entry of each
 listed `.ipa` archive, and every file under each listed `.app`
 directory (the kernel blob and the App.framework binary are among
 those files) — compared by entry path and content, so archive metadata
-such as zip timestamps is not part of the proof. A listing with no
-bundle fails loudly instead of globbing. A step that exits non-zero,
+such as zip timestamps is not part of the proof. Android hashes every
+entry of each declared `.apk`/`.aab` archive the same way (zip
+timestamps, extra fields and entry order ignored); Web hashes every
+file under each declared web build output directory at its relative
+path. A listing with no bundle fails loudly instead of globbing. A
+step that exits non-zero,
 times out or cannot start — or any verify entry that differs
 afterwards — reports `identical: false` with no SOL number, plus the
 step (mnemonic, exit, last stderr lines) and the differing entries
@@ -439,7 +450,10 @@ output is captured stdout-only (Bazel's stderr carries JVM warnings
 that once corrupted a parsed path), and every parsed line must resolve
 to an existing path under the output base.
 
-Medians over `repeats` go to one small artifact, `ios-sol.json`:
+Medians over `repeats` go to one small artifact per platform: the iOS
+configurations write `ios-sol.json` (unchanged), Android writes
+`android-sol.json` and Web writes `web-sol.json`, each with the same
+schema:
 
 ```json
 {
@@ -467,7 +481,9 @@ Medians over `repeats` go to one small artifact, `ios-sol.json`:
 ```
 
 Flow ids are `ios-release-{clean,app,body}` (device_release; `body` is
-the core_edit) and `ios-debug-{clean,app,body}` (sim_debug). Each flow
+the core_edit), `ios-debug-{clean,app,body}` (sim_debug),
+`android-release-{clean,app,body}`, `android-debug-{clean,app,body}`,
+`web-release-{clean,app,body}` and `web-debug-{clean,app,body}`. Each flow
 carries a small `chain` record — steps run per mnemonic with their CPU
 seconds, spawns left out per reason, any failed step, any ordering
 failure (step plus the still-moved-aside input), any differing verify
