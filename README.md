@@ -532,6 +532,9 @@ flutter_ios_app(
 | `app_icons` | Defaults to the `AppIcon.appiconset` in `ios/Runner/Assets.xcassets`. See [App icons](#app-icons). |
 | `runner_deps` | `swift_library` targets linked into the runner. See [App Intents](#app-intents). |
 | `exclude_plugins` | Plugin module names left out of the registrant. iOS only: the Android, Linux, macOS and Windows registrants take no such attribute and always register every collected native plugin. See [iOS plugin registrant](#ios-plugin-registrant). |
+| `generated_registrant` | Whether the macro generates the Swift plugin registrant and wires it into the app. Defaults to `True`. `False` defines no registrant target and leaves the app's own registrant, listed in `additional_deps`, to register the plugins. See [iOS plugin registrant](#ios-plugin-registrant). |
+| `swift_copts` | Extra flags for the runner's `swift_library`, appended after the flags the macro sets itself. `rules_apple` only; a non-empty list on the `xtool` backend fails at analysis. See [iOS plugin registrant](#ios-plugin-registrant). |
+| `additional_deps` | Labels appended to the final bundle's `deps`, after the runner, `App.framework` and the native frameworks, so a library that implements the app's own registrant is linked into the app. Not added to the runner; `runner_deps` does that. See [iOS plugin registrant](#ios-plugin-registrant). |
 
 `rules_apple`'s `ios_application` handles the transition to iOS arm64.
 
@@ -701,7 +704,7 @@ flutter_ios_simulator_build_test(
 
 #### iOS plugin registrant
 
-The registrant is always `GeneratedPluginRegistrant.swift`: the runner is Swift and calls it directly. Apps whose runner is Objective-C (`AppDelegate.m`) need the Objective-C registrant instead, which is a composable-rules build: `language = "objc"` on `flutter_ios_registrant_gen` emits `GeneratedPluginRegistrant.h` and `GeneratedPluginRegistrant.m` matching the flutter tool's own template, exposed through the `hdrs` and `srcs` output groups. Wire the groups into your own library — `includes` names the registrant's output directory so other sources can use `#import "GeneratedPluginRegistrant.h"` (the `.m` needs no flag: it imports its sibling header with quotes):
+By default the registrant is `GeneratedPluginRegistrant.swift`: the runner is Swift and calls it directly. Apps whose runner is Objective-C (`AppDelegate.m`) need the Objective-C registrant instead, which is a composable-rules build: `language = "objc"` on `flutter_ios_registrant_gen` emits `GeneratedPluginRegistrant.h` and `GeneratedPluginRegistrant.m` matching the flutter tool's own template, exposed through the `hdrs` and `srcs` output groups. Wire the groups into your own library — `includes` names the registrant's output directory so other sources can use `#import "GeneratedPluginRegistrant.h"` (the `.m` needs no flag: it imports its sibling header with quotes):
 
 ```starlark
 load("@rules_cc//cc:objc_library.bzl", "objc_library")
@@ -733,6 +736,49 @@ flutter_ios_app(
     exclude_plugins = ["deferred_plugin"],
 )
 ```
+
+##### Supplying your own registrant
+
+An app that registers its plugins itself — an Objective-C runner, or a Swift runner with its own registrant — turns the generated one off and links its library into the bundle. `generated_registrant = False` defines no `__<name>_registrant` target and adds no registrant source to the runner: on `rules_apple` the runner `swift_library` takes only the app's sources, and on `xtool` the bundle is built without a `registrant`. `additional_deps` appends labels to the final bundle's `deps` after the runner, `App.framework` and the native frameworks, so the library that implements the registrant is linked into the app. It is separate from `runner_deps`, which is for libraries the runner's own sources import.
+
+```starlark
+load("@rules_cc//cc:objc_library.bzl", "objc_library")
+
+# The app's own Objective-C registrant. `generated_registrant = False`
+# leaves it out of the runner, and `additional_deps` links it into the app.
+objc_library(
+    name = "own_registrant",
+    srcs = ["CustomPluginRegistrant.m"],
+    hdrs = ["CustomPluginRegistrant.h"],
+    includes = ["."],
+)
+
+# A bridging header the Swift runner imports. Listing it here makes the
+# header an input of the runner's compile action.
+objc_library(
+    name = "bridging_header",
+    hdrs = ["Runner-Bridging-Header.h"],
+)
+
+flutter_ios_app(
+    name = "my_objc_ios_app",
+    application = ":my_app",
+    bundle_id = "com.example.myapp",
+    generated_registrant = False,
+    additional_deps = [":own_registrant"],
+    runner_deps = [":bridging_header"],
+    swift_copts = [
+        "-import-objc-header",
+        "$(execpath :Runner-Bridging-Header.h)",
+    ],
+)
+```
+
+`swift_copts` is appended to the runner `swift_library`'s `copts` after the flags the macro sets itself. It is supported on the `rules_apple` backend only: the `xtool` bundle rule compiles the runner itself, so a non-empty `swift_copts` there fails at analysis with an error naming the attribute instead of being dropped.
+
+A file named by a `$(execpath ...)` flag must also be an input of the runner, for example through a target listed in `runner_deps`, because an undeclared input fails the sandbox.
+
+`exclude_plugins` only edits a registrant the macro generates, so combining it with `generated_registrant = False` is an analysis error naming both attributes.
 
 ### App icons
 

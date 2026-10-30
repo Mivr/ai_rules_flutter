@@ -5,6 +5,7 @@ load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_apple//apple:providers.bzl", "AppleFrameworkImportInfo")
 load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
+load("@rules_cc//cc:objc_library.bzl", "objc_library")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load(
     "//flutter:ios.bzl",
@@ -1176,6 +1177,245 @@ def _signing_tests(name):
         name + "_xtool_unsigned_zsign_fails",
     ]
 
+def _xtool_registrant_seam_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    actions = analysistest.target_actions(env)
+    runner_actions = [a for a in actions if a.mnemonic == "FlutterXtoolRunner"]
+    asserts.equals(env, 1, len(runner_actions))
+    inputs = [f.short_path for f in runner_actions[0].inputs.to_list()]
+    registrant_inputs = [p for p in inputs if p.endswith("_native_plugin_registrant.swift")]
+    asserts.equals(
+        env,
+        ctx.attr.expect_registrant,
+        len(registrant_inputs) == 1,
+        "expected the generated registrant in the runner inputs: %s" % registrant_inputs,
+    )
+    own_registrant = [p for p in inputs if p.endswith("_AppRegistrant.h")]
+    asserts.equals(
+        env,
+        ctx.attr.expect_own_registrant,
+        len(own_registrant) == 1,
+        "expected the app's own registrant library in the runner inputs: %s" % own_registrant,
+    )
+    return analysistest.end(env)
+
+_xtool_registrant_seam_test = analysistest.make(
+    _xtool_registrant_seam_test_impl,
+    attrs = {
+        "expect_own_registrant": attr.bool(mandatory = True),
+        "expect_registrant": attr.bool(mandatory = True),
+    },
+)
+
+def _ios_seam_surface_test_impl(ctx):
+    env = unittest.begin(ctx)
+    for absent in ctx.attr.absent_targets:
+        asserts.false(
+            env,
+            absent in ctx.attr.present_rules,
+            "%s must not be declared when the macro does not generate a registrant" % absent,
+        )
+    asserts.equals(env, ctx.attr.expected_deps, ctx.attr.actual_deps)
+    asserts.equals(env, ctx.attr.expected_copts, ctx.attr.actual_copts)
+    asserts.equals(env, [], ctx.attr.registrant_srcs, "the runner carries a registrant source")
+    return unittest.end(env)
+
+_ios_seam_surface_test = unittest.make(
+    _ios_seam_surface_test_impl,
+    attrs = {
+        "absent_targets": attr.string_list(mandatory = True),
+        "actual_copts": attr.string_list(mandatory = True),
+        "actual_deps": attr.string_list(mandatory = True),
+        "expected_copts": attr.string_list(mandatory = True),
+        "expected_deps": attr.string_list(mandatory = True),
+        "present_rules": attr.string_list(mandatory = True),
+        "registrant_srcs": attr.string_list(mandatory = True),
+    },
+)
+
+def _registrant_seam_tests(name):
+    """Declare the app-supplied-registrant fixtures and the tests over them.
+
+    Args:
+      name: Prefix for every target declared here.
+
+    Returns:
+      The test target names.
+    """
+    runtime_srcs = [
+        "@rules_flutter//flutter/private/runners/ios:AppDelegate.swift",
+        "@rules_flutter//flutter/private/runners/ios:SceneDelegate.swift",
+    ]
+    info_plist = "@rules_flutter//flutter/private/runners/ios:Info.plist"
+    own_header = name + "_own_registrant_h"
+    own_source = name + "_own_registrant_m"
+    write_file(
+        name = own_header,
+        out = name + "_AppRegistrant.h",
+        content = ["#pragma once"],
+        tags = ["manual"],
+    )
+    write_file(
+        name = own_source,
+        out = name + "_AppRegistrant.m",
+        content = [
+            "#import \"" + name + "_AppRegistrant.h\"",
+            "void FlutterRegisterPlugins(void) {}",
+        ],
+        tags = ["manual"],
+    )
+
+    # A filegroup reaches the xtool runner as sources and headers. A real
+    # `objc_library` would analyse here only with the Apple CC toolchain,
+    # which the Linux gate does not have; the rules_apple fixture below
+    # names one, because its bundle is analysed on macOS.
+    native.filegroup(
+        name = name + "_own_registrant_files",
+        srcs = [
+            ":" + own_source,
+            ":" + own_header,
+        ],
+        tags = ["manual"],
+    )
+
+    seam_xtool = name + "_seam_xtool_ios_app"
+    flutter_ios_app(
+        name = seam_xtool,
+        application = ":" + name + "_fake_release_app",
+        bundle_id = "com.example.seam.xtool",
+        srcs = runtime_srcs,
+        info_plist = info_plist,
+        entitlements = False,
+        app_icons = [],
+        engine = ":" + name + "_fake_ios_xcframework",
+        generated_registrant = False,
+        swift_copts = [],
+        additional_deps = [":" + name + "_own_registrant_files"],
+        backend = "xtool",
+        tags = ["manual"],
+    )
+    _xtool_registrant_seam_test(
+        name = name + "_seam_xtool_no_registrant",
+        target_under_test = ":" + seam_xtool,
+        expect_registrant = False,
+        expect_own_registrant = True,
+    )
+
+    default_xtool = name + "_seam_default_xtool_ios_app"
+    flutter_ios_app(
+        name = default_xtool,
+        application = ":" + name + "_fake_release_app",
+        bundle_id = "com.example.seam.defaultxtool",
+        srcs = runtime_srcs,
+        info_plist = info_plist,
+        entitlements = False,
+        app_icons = [],
+        engine = ":" + name + "_fake_ios_xcframework",
+        backend = "xtool",
+        tags = ["manual"],
+    )
+    _xtool_registrant_seam_test(
+        name = name + "_seam_xtool_generated_registrant",
+        target_under_test = ":" + default_xtool,
+        expect_registrant = True,
+        expect_own_registrant = False,
+    )
+
+    conflict = name + "_seam_conflict_ios_app"
+    flutter_ios_app(
+        name = conflict,
+        application = ":" + name + "_fake_release_app",
+        bundle_id = "com.example.seam.conflict",
+        srcs = runtime_srcs,
+        info_plist = info_plist,
+        entitlements = False,
+        app_icons = [],
+        engine = ":" + name + "_fake_ios_xcframework",
+        generated_registrant = False,
+        exclude_plugins = ["sample_plugin"],
+        backend = "xtool",
+        tags = ["manual"],
+    )
+    _ios_expect_failure_test(
+        name = name + "_seam_conflict_fails",
+        target_under_test = ":" + conflict,
+        expected_substrings = ["generated_registrant", "exclude_plugins"],
+    )
+
+    swift_copts_app = name + "_seam_xtool_swift_copts_ios_app"
+    flutter_ios_app(
+        name = swift_copts_app,
+        application = ":" + name + "_fake_release_app",
+        bundle_id = "com.example.seam.swiftcopts",
+        srcs = runtime_srcs,
+        info_plist = info_plist,
+        entitlements = False,
+        app_icons = [],
+        engine = ":" + name + "_fake_ios_xcframework",
+        swift_copts = ["-import-objc-header", "ios/Runner/Bridging-Header.h"],
+        backend = "xtool",
+        tags = ["manual"],
+    )
+    _ios_expect_failure_test(
+        name = name + "_seam_xtool_swift_copts_fails",
+        target_under_test = ":" + swift_copts_app,
+        expected_substrings = ["flutter_ios_app", swift_copts_app, "swift_copts"],
+    )
+
+    # rules_apple is where the attributes take effect; its bundle only
+    # analyses on macOS, so this test reads the targets the macro declared.
+    # The ObjC registrant library is declared but never analysed here, which
+    # is why this fixture can name the rule the contract describes.
+    objc_library(
+        name = name + "_own_registrant_lib",
+        srcs = [":" + own_source],
+        hdrs = [":" + own_header],
+        tags = ["manual"],
+    )
+    apple = name + "_seam_apple_ios_app"
+    flutter_ios_app(
+        name = apple,
+        application = ":" + name + "_fake_release_app",
+        bundle_id = "com.example.seam.apple",
+        srcs = runtime_srcs,
+        info_plist = info_plist,
+        entitlements = False,
+        app_icons = [],
+        generated_registrant = False,
+        swift_copts = ["-import-objc-header", "ios/Runner/Bridging-Header.h"],
+        additional_deps = [":" + name + "_own_registrant_lib"],
+        tags = ["manual"],
+    )
+    after = native.existing_rules()
+    runner = after["__%s_runner" % apple]
+    runner_srcs = [str(s) for s in runner["srcs"]]
+    _ios_seam_surface_test(
+        name = name + "_seam_apple_surface",
+        absent_targets = [
+            "__%s_registrant" % apple,
+            "__%s_registrant" % seam_xtool,
+        ],
+        present_rules = after.keys(),
+        actual_deps = [str(d) for d in after[apple]["deps"]],
+        expected_deps = [
+            ":__%s_runner" % apple,
+            ":__%s_app_bundle" % apple,
+            ":__%s_native_frameworks" % apple,
+            ":" + name + "_own_registrant_lib",
+        ],
+        actual_copts = [str(c) for c in runner["copts"]],
+        expected_copts = ["-import-objc-header", "ios/Runner/Bridging-Header.h"],
+        registrant_srcs = [s for s in runner_srcs if s.endswith("_registrant")],
+    )
+
+    return [
+        name + "_seam_xtool_no_registrant",
+        name + "_seam_xtool_generated_registrant",
+        name + "_seam_conflict_fails",
+        name + "_seam_xtool_swift_copts_fails",
+        name + "_seam_apple_surface",
+    ]
+
 def ios_test_suite(name):
     """Declares the iOS entitlement and bundling tests.
 
@@ -1183,7 +1423,7 @@ def ios_test_suite(name):
         name: The test_suite name.
     """
     _resolve_test(name = name + "_resolve")
-    tests = [name + "_resolve"] + _bundling_tests(name) + _registrant_tests(name) + _signing_tests(name)
+    tests = [name + "_resolve"] + _bundling_tests(name) + _registrant_tests(name) + _signing_tests(name) + _registrant_seam_tests(name)
     native.test_suite(
         name = name,
         tests = [":" + t for t in tests],

@@ -116,20 +116,48 @@ def _ios_discover_app_icons(app_icons, backend):
         )
     return app_icons
 
-def _ios_build_frameworks(name, application, minimum_os_version, allow_non_macho, backend, engine, exclude_plugins, internal_tags):
+def _ios_registrant_settings(generated_registrant, exclude_plugins):
+    """Groups the plugin-registrant options the app passes down.
+
+    Args:
+        generated_registrant: Whether the macro generates the Swift registrant.
+        exclude_plugins: Plugin module names left out of the generated registrant.
+
+    Returns:
+        A struct with `generated` and `exclude_plugins`.
+    """
+    return struct(
+        generated = generated_registrant,
+        exclude_plugins = exclude_plugins,
+    )
+
+def _ios_build_frameworks(name, application, minimum_os_version, allow_non_macho, backend, engine, registrant, internal_tags):
     """Emits the registrant, intermediates, App.framework and engine targets.
+
+    Args:
+        name: The app name; internal targets derive from it.
+        application: The flutter_application target.
+        minimum_os_version: Minimum iOS version.
+        allow_non_macho: Binary names allowed through unpatched.
+        backend: Apple bundling backend.
+        engine: The caller's engine target, or None to generate one.
+        registrant: The registrant settings struct.
+        internal_tags: Tags for the generated targets.
 
     Returns:
       The engine target label to link the runner against.
     """
 
-    # 1. Generate iOS Swift plugin registrant.
-    _flutter_ios_registrant_rule(
-        name = "__%s_registrant" % name,
-        application = application,
-        exclude_plugins = exclude_plugins,
-        tags = internal_tags,
-    )
+    # 1. Generate iOS Swift plugin registrant. An app that supplies its own
+    #    registrant, through `generated_registrant = False` and an
+    #    `additional_deps` library, names no target here at all.
+    if registrant.generated:
+        _flutter_ios_registrant_rule(
+            name = "__%s_registrant" % name,
+            application = application,
+            exclude_plugins = registrant.exclude_plugins,
+            tags = internal_tags,
+        )
 
     # 2. Extract intermediates (AOT dylib + flutter_assets + native_libs).
     _flutter_ios_application(
@@ -291,9 +319,10 @@ def _ios_build_runner(name, runner):
     Args:
         name: The app name; internal targets derive from it.
         runner: Struct with `application`, `backend`, `engine_target`,
-            `srcs` (discovered runner Swift sources), `module_name`,
-            `deps` (extra runner deps), `internal_tags`, and
-            `discovered_main_storyboard`.
+            `srcs` (discovered runner Swift sources), `registrant_srcs` (the
+            generated registrant, or none), `copts` (the caller's
+            `swift_copts`), `module_name`, `deps` (extra runner deps),
+            `internal_tags`, and `discovered_main_storyboard`.
     """
     _flutter_apple_plugins_aggregator(
         name = "__%s_apple_plugins" % name,
@@ -305,9 +334,10 @@ def _ios_build_runner(name, runner):
     if runner.backend == "rules_apple":
         swift_library(
             name = "__%s_runner" % name,
-            srcs = runner.srcs + ["__%s_registrant" % name],
+            srcs = runner.srcs + runner.registrant_srcs,
             data = runner.discovered_main_storyboard,
             module_name = runner.module_name,
+            copts = runner.copts,
             tags = runner.internal_tags,
             deps = [
                 runner.engine_target,
@@ -334,7 +364,7 @@ def _ios_emit_rules_apple_bundle(name, bundle):
             "__%s_runner" % name,
             "__%s_app_bundle" % name,
             "__%s_native_frameworks" % name,
-        ],
+        ] + bundle.additional_deps,
         tags = bundle.tags,
         visibility = bundle.visibility,
         **bundle.kwargs
@@ -376,9 +406,9 @@ def _ios_emit_xtool_bundle(name, bundle, invalid_version_error, discovered_main_
         launch_storyboard = bundle.actual_launch_storyboard,
         app_icons = bundle.app_icons if bundle.app_icons != None else [],
         srcs = runner_srcs,
-        registrant = ":__%s_registrant" % name,
+        registrant = bundle.registrant,
         plugins = [":__%s_apple_plugins" % name],
-        deps = runner_deps,
+        deps = runner_deps + bundle.additional_deps,
         frameworks = [
             ":__%s_app_framework" % name,
             engine_target,
@@ -393,12 +423,12 @@ def _ios_emit_xtool_bundle(name, bundle, invalid_version_error, discovered_main_
         **forwarded_kwargs
     )
 
-def _ios_unsigned_error_impl(ctx):
-    """Fails analysis with the unsigned-build error the macro selected."""
+def _ios_analysis_error_impl(ctx):
+    """Fails analysis with the error the macro selected."""
     fail(ctx.attr.message)
 
-_ios_unsigned_error = rule(
-    implementation = _ios_unsigned_error_impl,
+_ios_analysis_error = rule(
+    implementation = _ios_analysis_error_impl,
     attrs = {
         "message": attr.string(
             mandatory = True,
@@ -435,6 +465,35 @@ def _ios_unsigned_conflict(name, kwargs):
         "%s: signing = False conflicts with %s; an unsigned build cannot use attributes that ask for signing" %
         (name, ", ".join(["'%s'" % key for key in conflicts]))
     )
+
+def _ios_attribute_error(name, registrant, backend, swift_copts):
+    """Returns the analysis error for a registrant or Swift-flag conflict, if any.
+
+    `exclude_plugins` edits the registrant the macro generates, so it cannot
+    be combined with `generated_registrant = False`. The xtool bundle rule
+    compiles the runner itself and has no seam for caller Swift flags, so a
+    non-empty `swift_copts` is refused there instead of being dropped.
+
+    Args:
+        name: The app target name, for the error message.
+        registrant: The registrant settings struct.
+        backend: Apple bundling backend.
+        swift_copts: The caller's extra runner Swift flags.
+
+    Returns:
+        The conflict message, or None when the attributes do not conflict.
+    """
+    if not registrant.generated and registrant.exclude_plugins:
+        return (
+            "flutter_ios_app: %s: 'generated_registrant' = False conflicts with 'exclude_plugins'; " +
+            "exclude_plugins only edits a registrant the macro does not generate"
+        ) % name
+    if backend == "xtool" and swift_copts:
+        return (
+            "flutter_ios_app: %s: 'swift_copts' is not supported on the 'xtool' backend; " +
+            "the xtool bundle rule compiles the runner itself and cannot take caller Swift flags"
+        ) % name
+    return None
 
 def _ios_apply_signing_options(name, backend, signing, provisioning_profile, kwargs):
     """Resolves the analysis-time failure an unsigned build must raise, if any.
@@ -473,17 +532,18 @@ def _ios_apply_signing_options(name, backend, signing, provisioning_profile, kwa
              (name, provisioning_profile))
     return _ios_unsigned_conflict(name, kwargs)
 
-def _ios_emit_unsigned_error(name, meta, kwargs):
-    """Emits the failing target that stands in for an unbuildable unsigned app.
+def _ios_emit_error(name, meta, kwargs, message):
+    """Emits the failing target that stands in for an unbuildable app.
 
     Args:
         name: The app target name.
-        meta: The bundle context, carrying the failure message, tags and visibility.
+        meta: The bundle context, carrying tags and visibility.
         kwargs: Pass-through attributes, read for `testonly`.
+        message: The analysis-time error text.
     """
-    _ios_unsigned_error(
+    _ios_analysis_error(
         name = name,
-        message = meta.unsigned_error,
+        message = message,
         tags = meta.tags,
         visibility = meta.visibility,
         testonly = kwargs.get("testonly", False),
@@ -537,6 +597,9 @@ def flutter_ios_app(
         srcs = None,
         engine = None,
         exclude_plugins = [],
+        generated_registrant = True,
+        swift_copts = [],
+        additional_deps = [],
         allow_non_macho = [],
         backend = "rules_apple",
         **kwargs):
@@ -655,7 +718,33 @@ def flutter_ios_app(
             registrant. A name that is not a native iOS plugin of the
             application is an error, listing the valid names. iOS-only:
             the Android, Linux, macOS and Windows registrants always
-            register every collected native plugin.
+            register every collected native plugin. It only edits a
+            registrant the macro generates, so combining it with
+            `generated_registrant = False` is an analysis error naming both.
+        generated_registrant: Whether the macro generates the Swift plugin
+            registrant and wires it into the app. Defaults to `True`, which
+            is the behaviour every existing app already has. `False` defines
+            no `__<name>_registrant` target and adds no registrant source to
+            the runner: the app supplies its own registrant library through
+            `additional_deps`, as an Objective-C app with an
+            `AppDelegate.m` does. On the `xtool` backend the bundle gets no
+            `registrant` either.
+        swift_copts: Extra flags for the generated runner `swift_library`,
+            appended after the flags the macro sets itself. Use it for an
+            Objective-C bridging header (`-import-objc-header`) or any other
+            flag the app's own sources need. Supported on the `rules_apple`
+            backend only: the `xtool` bundle rule compiles the runner itself,
+            so a non-empty list there fails at analysis instead of being
+            dropped. A file named by a `$(execpath ...)` flag must also be an
+            input of the runner, for example through a target listed in
+            `runner_deps`, because an undeclared input fails the sandbox.
+        additional_deps: Extra labels appended to the final bundle's `deps`,
+            after the runner, `App.framework` and the native frameworks (or,
+            on `xtool`, after the bundle's runner deps). An `objc_library`
+            that implements the app's own registrant belongs here: it is
+            linked into the app, not into the runner. This is separate from
+            `runner_deps`, which adds libraries the runner's own sources
+            import.
         allow_non_macho: Explicit allow-list of binary or framework names
             allowed to pass through unpatched when they are not 64-bit or
             universal Mach-O binaries. A 64-bit or universal Mach-O binary
@@ -691,8 +780,10 @@ def flutter_ios_app(
         _IOS_MINIMUM_OS_VERSION,
         "iOS",
     )
-    if meta.unsigned_error:
-        _ios_emit_unsigned_error(name, meta, kwargs)
+    registrant = _ios_registrant_settings(generated_registrant, exclude_plugins)
+    error = _ios_attribute_error(name, registrant, backend, swift_copts) or meta.unsigned_error
+    if error:
+        _ios_emit_error(name, meta, kwargs, error)
         return
 
     module_name = runner_module_name("flutter_ios_app", name)
@@ -723,14 +814,14 @@ def flutter_ios_app(
 
     # -- Internal targets (all __{name}_ prefixed) --
 
-    engine_target = _ios_build_frameworks(name, application, minimum_os_version, allow_non_macho, backend, engine, exclude_plugins, meta.internal_tags)
+    engine_target = _ios_build_frameworks(name, application, minimum_os_version, allow_non_macho, backend, engine, registrant, meta.internal_tags)
 
     _ios_build_native_frameworks(name, application, minimum_os_version, allow_non_macho, meta.internal_tags)
 
     # 7. Discover runner Swift sources and build swift_library.
     runner_srcs = _ios_discover_runner_srcs(srcs)
     discovered_main_storyboard = native.glob(["ios/Runner/Base.lproj/Main.storyboard"], allow_empty = True)
-    _ios_build_runner(name, struct(application = application, backend = backend, engine_target = engine_target, srcs = runner_srcs, module_name = module_name, deps = runner_deps, internal_tags = meta.internal_tags, discovered_main_storyboard = discovered_main_storyboard))
+    _ios_build_runner(name, struct(application = application, backend = backend, engine_target = engine_target, srcs = runner_srcs, registrant_srcs = ["__%s_registrant" % name] if generated_registrant else [], copts = swift_copts, module_name = module_name, deps = runner_deps, internal_tags = meta.internal_tags, discovered_main_storyboard = discovered_main_storyboard))
 
     # 8. Info.plist — preprocess to resolve Xcode variables that rules_apple
     #    doesn't handle.
@@ -777,6 +868,8 @@ def flutter_ios_app(
         resources = resources,
         entitlements = entitlements,
         provisioning_profile = provisioning_profile,
+        registrant = ":__%s_registrant" % name if generated_registrant else None,
+        additional_deps = additional_deps,
         tags = meta.tags,
         visibility = meta.visibility,
         kwargs = kwargs,
