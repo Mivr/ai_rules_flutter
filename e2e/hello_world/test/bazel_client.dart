@@ -72,15 +72,13 @@ String resolveHostTool({
     }
   }
   final pathValue = environment['PATH'];
-  final found = _findOnPath(tool, pathValue);
-  if (found != null) {
-    return found;
+  final lookup = _lookupOnPath(tool, pathValue);
+  if (lookup.found != null) {
+    return lookup.found!;
   }
   throw ToolUnavailable(
     tool: tool,
-    tried: pathValue == null || pathValue.isEmpty
-        ? 'PATH is not set'
-        : 'no $tool on PATH=$pathValue',
+    tried: _pathFailure(tool, pathValue, lookup.skipped),
     step: step,
   );
 }
@@ -135,10 +133,24 @@ String _resolveOverride({
 /// Whether [value] names a path rather than a bare executable name.
 bool _namesAPath(String value) => value.contains('/') || value.contains(r'\');
 
-/// The first executable [tool] in [pathValue], in `PATH` order.
-String? _findOnPath(String tool, String? pathValue) {
+/// The outcome of one `PATH` search: the executable found, and the files that
+/// were present but not executable.
+class _PathLookup {
+  /// Creates a lookup that found [found] and skipped [skipped].
+  _PathLookup(this.found, this.skipped);
+
+  /// The executable path, or null when the search found none.
+  final String? found;
+
+  /// Existing candidates that could not be executed, in `PATH` order.
+  final List<String> skipped;
+}
+
+/// Searches [pathValue] for the first executable [tool], in `PATH` order.
+_PathLookup _lookupOnPath(String tool, String? pathValue) {
+  final skipped = <String>[];
   if (pathValue == null || pathValue.isEmpty) {
-    return null;
+    return _PathLookup(null, skipped);
   }
   final separator = Platform.isWindows ? ';' : ':';
   for (final directory in pathValue.split(separator)) {
@@ -147,11 +159,35 @@ String? _findOnPath(String tool, String? pathValue) {
     }
     for (final candidate in _candidates(directory, tool)) {
       if (_isExecutable(candidate)) {
-        return candidate;
+        return _PathLookup(candidate, skipped);
+      }
+      if (FileSystemEntity.typeSync(candidate) !=
+          FileSystemEntityType.notFound) {
+        skipped.add(candidate);
       }
     }
   }
-  return null;
+  return _PathLookup(null, skipped);
+}
+
+/// The first executable [tool] in [pathValue], in `PATH` order.
+String? _findOnPath(String tool, String? pathValue) =>
+    _lookupOnPath(tool, pathValue).found;
+
+/// The `tried` text for a `PATH` search that found no executable.
+String _pathFailure(
+  String tool,
+  String? pathValue,
+  List<String> skipped,
+) {
+  if (pathValue == null || pathValue.isEmpty) {
+    return 'PATH is not set and no $tool override was given';
+  }
+  if (skipped.isEmpty) {
+    return 'no $tool on PATH=$pathValue';
+  }
+  return 'no executable $tool on PATH=$pathValue; '
+      'not executable: ${skipped.join(', ')}';
 }
 
 /// The file names [tool] may carry inside [directory] on this host.
