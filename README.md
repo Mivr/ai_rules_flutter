@@ -1594,6 +1594,8 @@ flutter_plugin(
 
 A plugin's native code is its own target. Swift goes in a `flutter_apple_plugin_library` per platform, passed as `apple_libs`. Kotlin or Java goes in a `flutter_android_plugin_library` passed as `android_libs` on `flutter_plugin` (or listed directly in `flutter_android_app(deps = ...)`), which packages it, registers its plugin class and merges its `manifest` (receivers, services, permissions) into the app's. Its `flutter_engine` is a `flutter_android_engine(neverlink = True)`: the plugin compiles against the engine and the app ships its own, of the app's ABI. `e2e/plugin_example/glass_plugin` and `e2e/integration_android/android_greeting_plugin` show both.
 
+A plugin may mix Objective-C and Swift in one `flutter_apple_plugin_library`. The Swift half compiles into the `<module_name>` module and publishes `<module_name>-Swift.h`; the Objective-C half compiles after it and reaches Swift with `#import "<module_name>-Swift.h"`. Only the declarations Swift marks `@objc` appear in that header. In the other direction, Swift reaches the plugin's Objective-C declarations through a `<module_name>-Bridging-Header.h` or by importing the headers-only `<module_name>_objc` Clang module. The public target still carries both halves' objects, headers, `SwiftInfo` and `FlutterApplePluginInfo`, so `apple_libs` on `flutter_plugin` and the runner link them unchanged. Pure-Swift and pure-ObjC plugins keep their single-layer shape. `e2e/plugin_example/mixed_plugin` is the build fixture.
+
 `e2e/ffi_example` shows a plugin built on Native Assets, `e2e/ffi_plugin_example` one with a Dart plugin class and `native_deps`, and `e2e/plugin_example` one with a Dart plugin class only.
 
 ### Asset keys

@@ -32,13 +32,13 @@ load(":flutter_test_bootstrap_test.bzl", "flutter_test_bootstrap_test_suite")
 load(":gen_l10n_test.bzl", "gen_l10n_test_suite")
 load(":gradle_model_test.bzl", "gradle_model_test_suite")
 load(":ios_integration_test_test.bzl", "ios_integration_test_test_suite")
-load(":ios_test.bzl", "ios_test_suite")
+load(":ios_test.bzl", "ios_apple_plugin_test_suite", "ios_test_suite")
 load(":language_version_test.bzl", "language_version_test_suite")
 load(":linux_integration_runner_test.bzl", "linux_integration_runner_test_suite")
 load(":linux_runner_defines_test.bzl", "linux_runner_defines_test_suite")
 load(":linux_sysroot_link_test.bzl", "linux_sysroot_link_test_suite")
 load(":local_sdk_test.bzl", "local_sdk_test_suite")
-load(":macos_test.bzl", "macos_test_suite")
+load(":macos_test.bzl", "macos_apple_plugin_test_suite", "macos_test_suite")
 load(":manifest_merge_test.bzl", "manifest_merge_test_suite")
 load(":modular_api_test.bzl", "modular_api_test_suite")
 load(":native_assets_test.bzl", "bridge_probe", "native_assets_test_suite")
@@ -262,9 +262,13 @@ asset_uri_test_suite(name = "asset_uri_test")
 
 ios_test_suite(name = "ios_test")
 
+ios_apple_plugin_test_suite(name = "ios_apple_plugin_test")
+
 ios_integration_test_test_suite(name = "ios_integration_test_test")
 
 macos_test_suite(name = "macos_test")
+
+macos_apple_plugin_test_suite(name = "macos_apple_plugin_test")
 
 manifest_merge_test_suite(name = "manifest_merge_test")
 

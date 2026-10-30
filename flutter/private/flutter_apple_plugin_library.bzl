@@ -28,6 +28,7 @@ load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_swift//swift:swift.bzl", "SwiftInfo", "swift_library")
 load("//flutter:providers.bzl", "FlutterDarwinFrameworkInfo", _FlutterApplePluginInfo = "FlutterApplePluginInfo")
+load(":flutter_apple_plugins_aggregator.bzl", _flutter_apple_plugin_bundle = "flutter_apple_plugin_bundle")
 load(":flutter_xtool_bundle.bzl", "flutter_darwin_xcframework_import")
 
 FlutterApplePluginInfo = _FlutterApplePluginInfo
@@ -267,6 +268,52 @@ def _emit_plugin_objc_target(spec, objc_files, headers):
     )
     return objc_module_name, ":" + objc_target
 
+def _emit_plugin_objc_module_target(spec, headers):
+    """Emit the headers-only ObjC module the Swift half imports.
+
+    The module carries the plugin's public headers under
+    `<module_name>_objc`, so Swift can `import "<module_name>_objc"` without
+    depending on the implementation library that needs the Swift header.
+    """
+    target = "_%s__objc_module" % spec.name
+    objc_library(
+        name = target,
+        hdrs = headers,
+        includes = spec.includes,
+        module_name = "%s_objc" % spec.module_name,
+        enable_modules = True,
+        deps = [":" + spec.framework_target],
+        tags = spec.internal_tags,
+        target_compatible_with = spec.target_compatible_with,
+        visibility = ["//visibility:private"],
+    )
+    return ":" + target
+
+def _emit_plugin_mixed_objc_target(spec, objc_files, headers, swift_target):
+    """Emit the ObjC half of a mixed plugin; it depends on the Swift module.
+
+    Depending on the Swift library makes `<module_name>-Swift.h` a declared
+    input of every ObjC compile, so `#import "<module_name>-Swift.h"` resolves
+    by its basename. The implementation library deliberately has no Clang
+    module of its own: `<module_name>_objc` names the headers-only module the
+    Swift half imports, and two targets cannot publish the same module name.
+    """
+    target = "_%s__objc" % spec.name
+    objc_library(
+        name = target,
+        srcs = objc_files,
+        hdrs = headers,
+        includes = spec.includes,
+        sdk_frameworks = spec.sdk_frameworks,
+        sdk_dylibs = spec.sdk_dylibs,
+        copts = spec.copts,
+        deps = [":" + spec.framework_target, swift_target],
+        tags = spec.internal_tags,
+        target_compatible_with = spec.target_compatible_with,
+        visibility = ["//visibility:private"],
+    )
+    return ":" + target
+
 def _plugin_bridging_copts(spec, headers):
     """Find the `<module>-Bridging-Header.h` and return `(header_or_None, copts)`."""
     extra_copts = list(spec.copts)
@@ -296,6 +343,80 @@ def _plugin_swift_srcs(spec, swift_files, objc_module_name):
         target_compatible_with = spec.target_compatible_with,
     )
     return [":" + placeholder_target]
+
+def _emit_plugin_swift_target(
+        spec,
+        target_name,
+        swift_files,
+        deps,
+        extra_copts,
+        bridging_header,
+        generates_header,
+        kwargs):
+    """Emit a plugin `swift_library`, optionally publishing its ObjC header.
+
+    Args:
+        spec: The plugin's struct of shared attributes.
+        target_name: Name for the `swift_library`.
+        swift_files: Swift source files (or the placeholder target).
+        deps: Labels the Swift compile depends on.
+        extra_copts: The plugin's copts plus any bridging-header flags.
+        bridging_header: The `<module>-Bridging-Header.h`, or `None`.
+        generates_header: Whether to publish `<module_name>-Swift.h`.
+        kwargs: Extra attributes forwarded from the public macro.
+    """
+    swift_library(
+        name = target_name,
+        srcs = swift_files,
+        module_name = spec.module_name,
+        copts = extra_copts,
+        deps = deps,
+        swiftc_inputs = [bridging_header] if bridging_header else [],
+        generates_header = generates_header,
+        generated_header_name = "%s-Swift.h" % spec.module_name if generates_header else "",
+        tags = spec.tags,
+        target_compatible_with = spec.target_compatible_with,
+        visibility = spec.visibility,
+        **kwargs
+    )
+
+def _emit_plugin_bundle_target(spec, deps, swift_files, objc_files, headers):
+    """Emit the public target that merges the Swift and ObjC halves."""
+    _flutter_apple_plugin_bundle(
+        name = spec.name,
+        deps = deps,
+        module_name = spec.module_name,
+        platform = spec.platform,
+        swift_srcs = swift_files,
+        objc_srcs = objc_files,
+        headers = headers,
+        sdk_frameworks = spec.sdk_frameworks,
+        sdk_dylibs = spec.sdk_dylibs,
+        tags = spec.tags,
+        target_compatible_with = spec.target_compatible_with,
+        visibility = spec.visibility,
+    )
+
+def _emit_mixed_plugin(spec, swift_files, objc_files, headers, kwargs):
+    """Emit the two-layer ObjC/Swift build for a plugin with both halves."""
+    objc_module = _emit_plugin_objc_module_target(spec, headers)
+    bridging_header, extra_copts = _plugin_bridging_copts(spec, headers)
+
+    swift_target = "_%s__swift" % spec.name
+    swift_deps = [":" + spec.framework_target, objc_module] + list(spec.deps)
+    _emit_plugin_swift_target(
+        spec,
+        swift_target,
+        swift_files,
+        swift_deps,
+        extra_copts,
+        bridging_header,
+        True,
+        kwargs,
+    )
+
+    objc_target = _emit_plugin_mixed_objc_target(spec, objc_files, headers, ":" + swift_target)
+    _emit_plugin_bundle_target(spec, [":" + swift_target, objc_target], swift_files, objc_files, headers)
 
 def flutter_apple_plugin_library(
         name,
@@ -379,6 +500,10 @@ def flutter_apple_plugin_library(
     swift_files, objc_files, headers = _split_srcs(srcs)
     _emit_apple_framework_import(spec)
 
+    if swift_files and objc_files:
+        _emit_mixed_plugin(spec, swift_files, objc_files, headers, kwargs)
+        return
+
     swift_deps = [":" + spec.framework_target] + list(deps)
 
     objc_module_name, objc_dep = _emit_plugin_objc_target(spec, objc_files, headers)
@@ -388,15 +513,13 @@ def flutter_apple_plugin_library(
     bridging_header, extra_copts = _plugin_bridging_copts(spec, headers)
     swift_files = _plugin_swift_srcs(spec, swift_files, objc_module_name)
 
-    swift_library(
-        name = name,
-        srcs = swift_files,
-        module_name = module_name,
-        copts = extra_copts,
-        deps = swift_deps,
-        swiftc_inputs = [bridging_header] if bridging_header else [],
-        tags = tags,
-        target_compatible_with = target_compatible_with,
-        visibility = visibility,
-        **kwargs
+    _emit_plugin_swift_target(
+        spec,
+        name,
+        swift_files,
+        swift_deps,
+        extra_copts,
+        bridging_header,
+        False,
+        kwargs,
     )

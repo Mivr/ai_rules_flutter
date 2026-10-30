@@ -5,12 +5,14 @@ Flutter build produces, so their applications are fakes: compiling a real one
 per fixture would cost minutes and need a device SDK.
 """
 
-load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
+load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
 
 # buildifier: disable=bzl-visibility
 load("@rules_apple//apple/internal:providers.bzl", "AppleBundleInfo")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_swift//swift:swift.bzl", "SwiftInfo")
+load("//flutter:macos.bzl", "flutter_apple_plugin_library")
 load("//flutter:providers.bzl", "FlutterApplePluginInfo", "FlutterApplicationInfo", "resolve_exec_dart_vm")
 
 def _write_fake_macho(ctx, dart_exe, dart_vm_files, out_file, install_name):
@@ -462,3 +464,431 @@ macho_verify_probe = rule(
     ],
     doc = "Verifies a built Mach-O binary, framework, or archive using @llvm//tools:llvm-objdump.",
 )
+
+# -- Apple plugin shapes -------------------------------------------------------
+#
+# A mixed plugin has two halves that cannot depend on each other: the Swift
+# half publishes `<module_name>-Swift.h`, the ObjC half needs it. These tests
+# pin the resulting shape: the Swift target generates the header, the ObjC
+# compile declares it as an input, and the public target still merges both
+# halves' providers.
+
+def _mixed_plugin_swift_header_test_impl(ctx):
+    """The Swift half publishes the plugin's `<module_name>-Swift.h`."""
+    env = analysistest.begin(ctx)
+    tut = analysistest.target_under_test(env)
+    if CcInfo not in tut:
+        asserts.true(env, False, "Expected CcInfo on %s" % tut.label)
+        return analysistest.end(env)
+
+    headers = [f.basename for f in tut[CcInfo].compilation_context.headers.to_list()]
+    asserts.true(
+        env,
+        ctx.attr.expected_header_name in headers,
+        "Expected %s in the Swift library's CcInfo headers, got: %s" % (ctx.attr.expected_header_name, headers),
+    )
+    files = [f.basename for f in tut[DefaultInfo].files.to_list()]
+    asserts.true(
+        env,
+        ctx.attr.expected_header_name in files,
+        "Expected %s among the Swift library's outputs, got: %s" % (ctx.attr.expected_header_name, files),
+    )
+    return analysistest.end(env)
+
+def _mixed_plugin_objc_input_test_impl(ctx):
+    """The ObjC half compiles against the Swift module's generated header.
+
+    Bazel's C++ compile action exposes headers through the compilation
+    context rather than its Starlark `inputs` list, so the test proves the
+    dependency twice: the ObjC target's own CcInfo carries the generated
+    header, and the target registers the compile action for its `.m` source.
+    """
+    env = analysistest.begin(ctx)
+    tut = analysistest.target_under_test(env)
+    headers = [f.basename for f in tut[CcInfo].compilation_context.headers.to_list()]
+    asserts.true(
+        env,
+        ctx.attr.expected_header_basename in headers,
+        "Expected %s in the ObjC target's CcInfo headers, got: %s" % (
+            ctx.attr.expected_header_basename,
+            headers,
+        ),
+    )
+
+    compiled = []
+    for action in analysistest.target_actions(env):
+        if action.mnemonic not in ("ObjcCompile", "CppCompile"):
+            continue
+        compiled.extend([f.basename for f in action.outputs.to_list() if f.basename.endswith(".o")])
+    asserts.true(
+        env,
+        bool(compiled),
+        "Expected an ObjC compile action on %s, got: %s" % (
+            tut.label,
+            [action.mnemonic for action in analysistest.target_actions(env)],
+        ),
+    )
+    return analysistest.end(env)
+
+def _apple_plugin_public_test_impl(ctx):
+    """The public target merges both halves and keeps the plugin providers."""
+    env = analysistest.begin(ctx)
+    tut = analysistest.target_under_test(env)
+    if CcInfo not in tut or SwiftInfo not in tut or FlutterApplePluginInfo not in tut:
+        asserts.true(
+            env,
+            False,
+            "Expected CcInfo, SwiftInfo and FlutterApplePluginInfo on %s" % tut.label,
+        )
+        return analysistest.end(env)
+
+    info = tut[FlutterApplePluginInfo]
+    asserts.equals(env, ctx.attr.expected_module_name, info.module_name)
+    asserts.equals(env, ctx.attr.expected_platform, info.platform)
+    asserts.equals(env, ctx.attr.expected_sdk_frameworks, list(info.sdk_frameworks))
+    asserts.equals(env, ctx.attr.expected_sdk_dylibs, list(info.sdk_dylibs))
+    asserts.true(env, len(tut[DefaultInfo].files.to_list()) > 0, "Expected output files")
+
+    headers = [h.basename for h in tut[CcInfo].compilation_context.headers.to_list()]
+    for expected in ctx.attr.expected_header_basenames:
+        asserts.true(
+            env,
+            expected in headers,
+            "Expected %s in the public target's CcInfo headers, got: %s" % (expected, headers),
+        )
+    return analysistest.end(env)
+
+def _apple_plugin_surface_test_impl(ctx):
+    """The fixture created exactly the base target set for its shape."""
+    env = unittest.begin(ctx)
+    asserts.equals(env, ctx.attr.expected_kinds, ctx.attr.observed_kinds)
+    return unittest.end(env)
+
+_apple_plugin_surface_test = unittest.make(
+    _apple_plugin_surface_test_impl,
+    attrs = {
+        "expected_kinds": attr.string_dict(mandatory = True),
+        "observed_kinds": attr.string_dict(mandatory = True),
+    },
+)
+
+def _apple_plugin_swift_attrs_test_impl(ctx):
+    """The Swift half sets `generates_header` and a stable header name."""
+    env = unittest.begin(ctx)
+    asserts.true(
+        env,
+        ctx.attr.observed_generates_header,
+        "Expected the mixed plugin's Swift library to set generates_header",
+    )
+    asserts.equals(
+        env,
+        ctx.attr.expected_header_name,
+        ctx.attr.observed_header_name,
+        "the Swift library must name the generated header explicitly",
+    )
+    return unittest.end(env)
+
+_apple_plugin_swift_attrs_test = unittest.make(
+    _apple_plugin_swift_attrs_test_impl,
+    attrs = {
+        "expected_header_name": attr.string(mandatory = True),
+        "observed_generates_header": attr.bool(mandatory = True),
+        "observed_header_name": attr.string(mandatory = True),
+    },
+)
+
+def _created_rules(before, after):
+    """Return the `{name: kind}` map of rules created between two snapshots."""
+    return {name: after[name]["kind"] for name in after if name not in before}
+
+def apple_plugin_fixtures(name, platform):
+    """Declare pure-Swift, pure-ObjC and mixed plugin fixtures for one platform.
+
+    Args:
+      name: Prefix for the fixtures.
+      platform: `"ios"` or `"macos"`.
+
+    Returns:
+      A struct of the fixture labels, module name and the target kinds each
+      macro created.
+    """
+    prefix = "%s_%s" % (name, platform)
+    module = prefix + "_module"
+    pure_swift = prefix + "_pure_swift"
+    pure_objc = prefix + "_pure_objc"
+    mixed = prefix + "_mixed"
+
+    write_file(
+        name = pure_swift + "_src",
+        out = pure_swift + ".swift",
+        content = ["import Flutter", "public class PureSwiftPlugin {}"],
+    )
+    write_file(
+        name = pure_objc + "_src",
+        out = pure_objc + ".m",
+        content = ["#import <Foundation/Foundation.h>"],
+    )
+    write_file(
+        name = mixed + "_swift_src",
+        out = mixed + "_swift.swift",
+        content = [
+            "import Flutter",
+            "import %s_objc" % module,
+            "@objc public class MixedPlugin: NSObject {}",
+        ],
+    )
+    write_file(
+        name = mixed + "_objc_src",
+        out = mixed + "_objc.m",
+        content = ['#import "%s-Swift.h"' % module],
+    )
+    write_file(
+        name = mixed + "_header",
+        out = mixed + ".h",
+        content = ["#pragma once"],
+    )
+
+    before = native.existing_rules().keys()
+    flutter_apple_plugin_library(
+        name = pure_swift,
+        srcs = [":" + pure_swift + ".swift"],
+        module_name = pure_swift + "_module",
+        platform = platform,
+        tags = ["manual"],
+    )
+    pure_swift_kinds = _created_rules(before, native.existing_rules())
+
+    before = native.existing_rules().keys()
+    flutter_apple_plugin_library(
+        name = pure_objc,
+        srcs = [":" + pure_objc + ".m"],
+        module_name = pure_objc + "_module",
+        platform = platform,
+        tags = ["manual"],
+    )
+    pure_objc_kinds = _created_rules(before, native.existing_rules())
+
+    before = native.existing_rules().keys()
+    flutter_apple_plugin_library(
+        name = mixed,
+        srcs = [
+            ":" + mixed + "_swift.swift",
+            ":" + mixed + "_objc.m",
+            ":" + mixed + ".h",
+        ],
+        module_name = module,
+        platform = platform,
+        sdk_frameworks = ["AVFoundation"],
+        sdk_dylibs = ["sqlite3"],
+        tags = ["manual"],
+    )
+    mixed_rules = native.existing_rules()
+    mixed_kinds = _created_rules(before, mixed_rules)
+    mixed_swift = mixed_rules["_" + mixed + "__swift"]
+
+    return struct(
+        pure_swift = pure_swift,
+        pure_objc = pure_objc,
+        mixed = mixed,
+        mixed_module = module,
+        mixed_swift_generates_header = mixed_swift["generates_header"],
+        mixed_swift_generated_header_name = mixed_swift["generated_header_name"],
+        pure_swift_kinds = pure_swift_kinds,
+        pure_objc_kinds = pure_objc_kinds,
+        mixed_kinds = mixed_kinds,
+    )
+
+def _apple_plugin_config_settings(platform):
+    """The config settings that analyze an Apple plugin fixture off a Mac."""
+    return {
+        "//command_line_option:extra_execution_platforms": [str(Label("//flutter/platforms:macos_arm64"))],
+        "//command_line_option:platforms": str(Label("//flutter/platforms:%s_arm64" % platform)),
+        "//command_line_option:xcode_version_config": str(Label("//flutter/tests:ios_test_fake_xcode_config")),
+        str(Label("//flutter:profile")): False,
+    }
+
+_IOS_APPLE_PLUGIN_TEST_SETTINGS = _apple_plugin_config_settings("ios")
+_MACOS_APPLE_PLUGIN_TEST_SETTINGS = _apple_plugin_config_settings("macos")
+
+_ios_mixed_plugin_swift_header_test = analysistest.make(
+    _mixed_plugin_swift_header_test_impl,
+    attrs = {"expected_header_name": attr.string(mandatory = True)},
+    config_settings = _IOS_APPLE_PLUGIN_TEST_SETTINGS,
+)
+_ios_mixed_plugin_objc_input_test = analysistest.make(
+    _mixed_plugin_objc_input_test_impl,
+    attrs = {"expected_header_basename": attr.string(mandatory = True)},
+    config_settings = _IOS_APPLE_PLUGIN_TEST_SETTINGS,
+)
+_ios_apple_plugin_public_test = analysistest.make(
+    _apple_plugin_public_test_impl,
+    attrs = {
+        "expected_header_basenames": attr.string_list(mandatory = True),
+        "expected_module_name": attr.string(mandatory = True),
+        "expected_platform": attr.string(mandatory = True),
+        "expected_sdk_dylibs": attr.string_list(mandatory = True),
+        "expected_sdk_frameworks": attr.string_list(mandatory = True),
+    },
+    config_settings = _IOS_APPLE_PLUGIN_TEST_SETTINGS,
+)
+
+_macos_mixed_plugin_swift_header_test = analysistest.make(
+    _mixed_plugin_swift_header_test_impl,
+    attrs = {"expected_header_name": attr.string(mandatory = True)},
+    config_settings = _MACOS_APPLE_PLUGIN_TEST_SETTINGS,
+)
+_macos_mixed_plugin_objc_input_test = analysistest.make(
+    _mixed_plugin_objc_input_test_impl,
+    attrs = {"expected_header_basename": attr.string(mandatory = True)},
+    config_settings = _MACOS_APPLE_PLUGIN_TEST_SETTINGS,
+)
+_macos_apple_plugin_public_test = analysistest.make(
+    _apple_plugin_public_test_impl,
+    attrs = {
+        "expected_header_basenames": attr.string_list(mandatory = True),
+        "expected_module_name": attr.string(mandatory = True),
+        "expected_platform": attr.string(mandatory = True),
+        "expected_sdk_dylibs": attr.string_list(mandatory = True),
+        "expected_sdk_frameworks": attr.string_list(mandatory = True),
+    },
+    config_settings = _MACOS_APPLE_PLUGIN_TEST_SETTINGS,
+)
+
+def _apple_plugin_analysis_tests(
+        name,
+        fixtures,
+        platform,
+        framework_kind,
+        swift_header_test,
+        objc_input_test,
+        public_test):
+    """Declare the analysis tests over one platform's plugin fixtures.
+
+    Args:
+      name: Prefix for the test targets.
+      fixtures: The struct returned by `apple_plugin_fixtures`.
+      platform: `"ios"` or `"macos"`.
+      framework_kind: The framework-import rule kind the backend emits.
+      swift_header_test: The platform's generated-header analysis rule.
+      objc_input_test: The platform's ObjC-input analysis rule.
+      public_test: The platform's public-provider analysis rule.
+
+    Returns:
+      The test target names.
+    """
+    header = fixtures.mixed_module + "-Swift.h"
+    swift_header_name = name + "_mixed_swift_header"
+    objc_input_name = name + "_mixed_objc_header_input"
+    public_name = name + "_mixed_public_providers"
+    swift_header_test(
+        name = swift_header_name,
+        target_under_test = ":_" + fixtures.mixed + "__swift",
+        expected_header_name = header,
+    )
+    objc_input_test(
+        name = objc_input_name,
+        target_under_test = ":_" + fixtures.mixed + "__objc",
+        expected_header_basename = header,
+    )
+    public_test(
+        name = public_name,
+        target_under_test = ":" + fixtures.mixed,
+        expected_header_basenames = [fixtures.mixed + ".h", header],
+        expected_module_name = fixtures.mixed_module,
+        expected_platform = platform,
+        expected_sdk_dylibs = ["sqlite3"],
+        expected_sdk_frameworks = ["AVFoundation"],
+    )
+
+    pure_swift_kinds = {
+        fixtures.pure_swift: "swift_library",
+        "_" + fixtures.pure_swift + "__flutter_framework": framework_kind,
+    }
+    pure_objc_kinds = {
+        "_" + fixtures.pure_objc + "__swift_placeholder": "_write_file",
+        "_" + fixtures.pure_objc + "__objc": "objc_library",
+        "_" + fixtures.pure_objc + "__flutter_framework": framework_kind,
+        fixtures.pure_objc: "swift_library",
+    }
+    mixed_kinds = {
+        "_" + fixtures.mixed + "__objc_module": "objc_library",
+        "_" + fixtures.mixed + "__swift": "swift_library",
+        "_" + fixtures.mixed + "__objc": "objc_library",
+        "_" + fixtures.mixed + "__flutter_framework": framework_kind,
+        fixtures.mixed: "flutter_apple_plugin_bundle",
+    }
+    attrs_name = name + "_mixed_swift_attrs"
+    _apple_plugin_swift_attrs_test(
+        name = attrs_name,
+        expected_header_name = header,
+        observed_generates_header = fixtures.mixed_swift_generates_header,
+        observed_header_name = fixtures.mixed_swift_generated_header_name,
+    )
+    surface_name = name + "_mixed_surface"
+    _apple_plugin_surface_test(
+        name = surface_name,
+        expected_kinds = mixed_kinds,
+        observed_kinds = fixtures.mixed_kinds,
+    )
+    pure_swift_name = name + "_pure_swift_surface"
+    _apple_plugin_surface_test(
+        name = pure_swift_name,
+        expected_kinds = pure_swift_kinds,
+        observed_kinds = fixtures.pure_swift_kinds,
+    )
+    pure_objc_name = name + "_pure_objc_surface"
+    _apple_plugin_surface_test(
+        name = pure_objc_name,
+        expected_kinds = pure_objc_kinds,
+        observed_kinds = fixtures.pure_objc_kinds,
+    )
+
+    return [
+        swift_header_name,
+        objc_input_name,
+        public_name,
+        attrs_name,
+        surface_name,
+        pure_swift_name,
+        pure_objc_name,
+    ]
+
+def ios_apple_plugin_analysis_tests(name, fixtures):
+    """Declare the iOS plugin analysis tests over `fixtures`.
+
+    Args:
+      name: Prefix for the test targets.
+      fixtures: The struct returned by `apple_plugin_fixtures`.
+
+    Returns:
+      The test target names.
+    """
+    return _apple_plugin_analysis_tests(
+        name,
+        fixtures,
+        "ios",
+        "apple_dynamic_xcframework_import",
+        _ios_mixed_plugin_swift_header_test,
+        _ios_mixed_plugin_objc_input_test,
+        _ios_apple_plugin_public_test,
+    )
+
+def macos_apple_plugin_analysis_tests(name, fixtures):
+    """Declare the macOS plugin analysis tests over `fixtures`.
+
+    Args:
+      name: Prefix for the test targets.
+      fixtures: The struct returned by `apple_plugin_fixtures`.
+
+    Returns:
+      The test target names.
+    """
+    return _apple_plugin_analysis_tests(
+        name,
+        fixtures,
+        "macos",
+        "apple_dynamic_framework_import",
+        _macos_mixed_plugin_swift_header_test,
+        _macos_mixed_plugin_objc_input_test,
+        _macos_apple_plugin_public_test,
+    )
