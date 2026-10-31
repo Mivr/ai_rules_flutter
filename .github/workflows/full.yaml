@@ -378,7 +378,8 @@ jobs:
   # The dev tool's iOS simulator e2e cases: the simulator runtime the manager
   # measured on macos-latest ships every device Shutdown, and the dev tool —
   # like `flutter run` — only uses one already booted, so every iOS case fails
-  # fast without one. The job boots a simulator first, then runs the iOS cases
+  # fast without one. The job warms the e2e app targets into the shared disk
+  # cache, boots a simulator, then runs the iOS cases
   # of the three e2e files holding them through the suite's own runner with
   # `--require-ran=iOS`, which fails the job when no iOS test actually
   # executed rather than letting an all-skipped run exit 0. `--name=iOS`
@@ -404,6 +405,9 @@ jobs:
   #   one the dev tool itself runs on) onto PATH for every step after. The
   #   export serves this step's own `dart --version` print; `$GITHUB_PATH`
   #   serves the steps after.
+  # - `warm_ios_e2e.dart` pre-builds the e2e apps into the shared disk cache
+  #   before the timed test steps run, and shuts down each workspace's Bazel
+  #   server so no idle server consumes runner memory.
   # - `ios_simulator_boot.dart` boots the newest available iOS runtime's
   #   iPhone and waits for `bootstatus`, exiting non-zero when there is
   #   nothing to boot on rather than skipping.
@@ -432,6 +436,8 @@ jobs:
           echo "$dart_bin" >> "$GITHUB_PATH"
           export PATH="$dart_bin:$PATH"
           dart --version
+      - name: Warm the iOS simulator e2e builds
+        run: dart run tools/dev_tool/tool/warm_ios_e2e.dart
       - name: Boot an iOS simulator
         run: dart flutter/private/tools/ios_simulator_boot.dart
       - name: Dev tool iOS simulator e2e

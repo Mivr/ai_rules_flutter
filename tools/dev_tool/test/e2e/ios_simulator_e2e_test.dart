@@ -4,18 +4,18 @@ import 'dart:io';
 import 'package:test/test.dart';
 
 import 'dev_tool_e2e_harness.dart';
+import 'editable_workspace.dart';
 
 void main() {
-  final workspace = e2eWorkspace('ios_example');
-
   group(
     'iOS Simulator e2e',
     () {
       test(
         'HTTP control channel screenshot captures Flutter UI',
         () async {
+          final ws = await editableWorkspace('ios_example');
           final dt = await startDevTool(
-            workspace: workspace,
+            workspace: ws.root,
             target: ':app',
             device: 'ios-simulator',
           );
