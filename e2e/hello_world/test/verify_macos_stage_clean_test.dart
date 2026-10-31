@@ -37,8 +37,13 @@ const _assetRelPath = 'assets/stage_clean.txt';
 /// the real output directory and survives the next build.
 const _localFramework = '--strategy=FlutterMacOSFramework=local';
 
-/// The teardown step that releases the private output base.
+/// The teardown steps that release the private output base.
 const _shutdownStep = 'shutdown of the private Bazel server';
+const _cleanupStep = 'removal of the private output base';
+
+/// Where the framework action writes its zip inside a configuration.
+const _frameworkZipRel =
+    'bin/__hello_world_macos_app_framework/App.framework.zip';
 
 /// Whether [root] is the hello_world example workspace root.
 bool _looksLikeRoot(String root) =>
@@ -124,12 +129,27 @@ void _buildMacosApp(String root, String outputBase, String step) {
 }
 
 /// The `App.framework.zip` the framework action writes in [outputBase].
+///
+/// The macOS app builds under a platform transition, so the zip lands in a
+/// transitioned configuration's `bin`, not in `bazel info bazel-bin`. Exactly
+/// one configuration under the output path must hold it.
 String _frameworkZipPath(String root, String outputBase) {
-  const step = 'bazel info bazel-bin';
-  final result = _bazel(root, outputBase, ['info', 'bazel-bin'], step);
+  const step = 'bazel info output_path';
+  final result = _bazel(root, outputBase, ['info', 'output_path'], step);
   _expectOk(result, step);
-  final bin = '${result.stdout}'.trim();
-  return '$bin/__hello_world_macos_app_framework/App.framework.zip';
+  final outputPath = Directory('${result.stdout}'.trim());
+  final found = [
+    for (final config in outputPath.listSync().whereType<Directory>())
+      if (File('${config.path}/$_frameworkZipRel').existsSync())
+        '${config.path}/$_frameworkZipRel',
+  ];
+  if (found.length != 1) {
+    throw StateError(
+      'expected one $_frameworkZipRel under ${outputPath.path}, '
+      'found ${found.length}: $found',
+    );
+  }
+  return found.single;
 }
 
 /// Extracts [zipPath] under a fresh [dest] and returns its `App.framework`.
@@ -166,6 +186,16 @@ void main() {
         _bazel(root, outputBase, ['shutdown'], _shutdownStep);
       } finally {
         if (tmp.existsSync()) {
+          // Bazel leaves read-only directories in the output base.
+          runHostTool(
+            executable: resolveHostTool(
+              tool: 'chmod',
+              environment: Platform.environment,
+              step: _cleanupStep,
+            ),
+            args: ['-R', 'u+w', tmp.path],
+            step: _cleanupStep,
+          );
           tmp.deleteSync(recursive: true);
         }
       }
