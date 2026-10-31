@@ -38,7 +38,11 @@ if ! grep -Fq 'com.example:lazy-unmapped:1.0' lazy_plugin/android/build.gradle; 
   echo "fixture lost the unmapped coordinate"
   exit 1
 fi
-for needle in 'lazy_plugin' 'android/build.gradle' 'com.example:lazy-unmapped'; do
+for needle in \
+  'lazy_plugin' \
+  'android/build.gradle' \
+  'declares Android dependencies rules_flutter cannot translate to Bazel labels' \
+  'com.example:lazy-unmapped'; do
   if ! grep -Fq "$needle" <<<"$out"; then
     echo "Android fetch failed without the expected diagnostic: $needle"
     echo "$out"

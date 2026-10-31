@@ -352,6 +352,9 @@ jobs:
       - name: iOS plugin fetch matrix (e2e/ios_plugin_matrix)
         working-directory: e2e/ios_plugin_matrix
         run: python3 run_matrix.py
+      - name: iOS plugin Android refusal (e2e/ios_plugin_matrix)
+        working-directory: e2e/ios_plugin_matrix
+        run: bash check_android_refusal.sh
       - name: Report cache sizes
         if: always()
         run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true

@@ -27,12 +27,13 @@ network or workspace.
 `expected.json` is the contract's data: when a later item fixes a refusal, edit
 its entry there; do not add plugin names to the runner.
 
-On this base the FlutterFire plugins, `sentry_flutter` and
-`google_mlkit_commons` are refused by the Android Gradle reader before their
-Apple sources are read, so `expected.json` records that measured refusal.
-`google_sign_in_ios` and `stripe_ios` reach the Apple layer and refuse because
-the hub sets no `swift_package_resolved`. A change that fixes either layer
-changes the query output and fails this matrix until the entry is updated.
+Because Android Gradle evaluation is deferred to the lazy Android repository,
+the spoke query evaluates only the Apple layer. Seven plugins (`firebase_core`,
+`firebase_auth`, `cloud_firestore`, `firebase_messaging`, `google_sign_in_ios`,
+`sentry_flutter`, and `stripe_ios`) refuse because the hub sets no
+`swift_package_resolved`. The other seven resolve cleanly (`ok`). The deferred
+Android Gradle refusal is checked by `check_android_refusal.sh` when building
+an Android target (`@deps__google_mlkit_commons//android:lib`).
 
 ## Build mode (macOS)
 
