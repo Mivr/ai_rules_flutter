@@ -6,7 +6,7 @@ that a consumer analyzes without an Apple SDK. The `rules_apple` provider
 shape is asserted on macOS only, where the Apple toolchain exists.
 """
 
-load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
+load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@rules_apple//apple:providers.bzl", "AppleDynamicFrameworkInfo", "AppleFrameworkImportInfo")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
@@ -197,7 +197,7 @@ def _bad_shape_message():
     """The exact error for a label that names neither framework shape."""
     return (
         'flutter_apple_xcframework_import: "framework" must name one ' +
-        '.xcframework or .framework directory, got ' +
+        ".xcframework or .framework directory, got " +
         '"//flutter/tests:not_a_framework".'
     )
 
@@ -231,7 +231,7 @@ def _xtool_error_message(attribute):
         The message text.
     """
     return (
-        'flutter_apple_xcframework_import: the xtool backend links prebuilt frameworks ' +
+        "flutter_apple_xcframework_import: the xtool backend links prebuilt frameworks " +
         'with -F/-framework and cannot carry "%s". Build with backend = "rules_apple" ' +
         "on macOS, or drop the argument."
     ) % attribute
