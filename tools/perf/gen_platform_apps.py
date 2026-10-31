@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Generated app BUILD targets and Android scaffolding for the bench."""
 
 from gen_files import write_plain
