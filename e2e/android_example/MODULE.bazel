@@ -221,6 +221,7 @@ maven.install(
         "com.google.truth.extensions:truth-proto-extension:1.4.0",
         "org.mockito:mockito-core:5.4.0",
     ],
+    lock_file = "//:rules_android_maven_install.json",
     repositories = [
         "https://maven.google.com",
         "https://repo1.maven.org/maven2",

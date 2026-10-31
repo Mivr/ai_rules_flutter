@@ -235,3 +235,11 @@ Concretely, a consumer that never opts into xtool pays:
 An opting-in consumer configures only the SDK — a nonexistent bundle path
 fails the fetch on the path error before any LLVM download starts
 (`e2e/xtool_sdk_invalid` pins this red path in CI).
+
+## Android Maven lock files (`rules_android_maven`)
+
+Android builds resolve artifacts through `rules_android_maven`, a `maven.install` defined across `rules_android`, `rules_flutter`, and consumer workspaces.
+
+To ensure hermetic builds and prevent unchecksummed downloads, consumers should pin this install at the root of their workspace by adding `lock_file = "//:rules_android_maven_install.json",` to their `maven.install(name = "rules_android_maven", ...)` (or declaring one with just the name) and generating the lock with `bazel run @rules_android_maven//:pin`.
+
+`rules_flutter` intentionally does not ship a lock file in its own `MODULE.bazel`. Under `rules_jvm_external` (6.9 `private/extensions/maven.bzl:630-637` and 7.1 `private/extensions/maven.bzl:784-793`), a dependency module's lock file is only used when the consumer's root module declares no same-named install; a root module's install always replaces the lock entry (defaulting to none if the root does not set `lock_file`). As a result, a library-level lock would silently stop applying as soon as a consumer adds or bumps an artifact. Additionally, `rules_jvm_external` allows only one module in the graph to pin an install name (6.9 `:653-661`, 7.1 `:810-817`). Root-level pinning guarantees that the merged artifact graph carries complete SHA-256 checksums and enforces `fail_if_repin_required`.

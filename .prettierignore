@@ -32,3 +32,6 @@ flutter/tests/resources_fixture/
 # Markdown is wrapped by hand, and prettier rewrites a code span that wraps
 # across lines as emphasis.
 *.md
+
+# Generated Android Maven lock files must stay byte-for-byte as written by pin.
+rules_android_maven_install.json
