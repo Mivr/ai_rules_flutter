@@ -71,12 +71,16 @@ flutter_asset_bundle(
 
 # `assets/stage_clean*.txt` is the macOS rebuild fixture: the glob makes a
 # deleted file undeclared without editing this BUILD file, so
-# `verify_macos_stage_clean_test` can build, remove it, and rebuild.
+# `verify_macos_stage_clean_test` can build, remove it, and rebuild. The
+# rebuild sees no match, hence `allow_empty`.
 flutter_application(
     name = "hello_world_app",
     package_name = "hello_world",
     srcs = ["lib/common_widgets.dart"],
-    assets = glob(["assets/stage_clean*.txt"]),
+    assets = glob(
+        ["assets/stage_clean*.txt"],
+        allow_empty = True,
+    ),
     main = "lib/main.dart",
     deps = [
         "@deps//:cupertino_icons",
