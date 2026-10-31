@@ -40,6 +40,8 @@ from gen_monorepo import (
     module_bazel_text,
     pad_file,
     render_lib_file,
+    strip_lock_path_packages,
+    strip_pubspec_path_deps,
 )
 
 
@@ -997,6 +999,124 @@ class HelperTest(unittest.TestCase):
             with open(os.path.join(out, "packages/pkg0/BUILD.bazel"),
                       encoding="utf-8") as fh:
                 self.assertNotIn("flutter_test(", fh.read())
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+PUBSPEC_YAML_WITH_PATHS = (
+    "name: hello_world\n"
+    "publish_to: none\n"
+    "\n"
+    "environment:\n"
+    "  sdk: ^3.13.0\n"
+    "\n"
+    "dependencies:\n"
+    "  flutter:\n"
+    "    sdk: flutter\n"
+    "  cupertino_icons: ^1.0.8\n"
+    "  path_probe:\n"
+    "    path: path_probe\n"
+    "  platform_assets:\n"
+    "    path: platform_assets\n"
+    "  unversioned_path:\n"
+    "    path: unversioned_path\n"
+    "dev_dependencies:\n"
+    "  very_good_analysis: ^10.3.0\n"
+    "  flutter_test:\n"
+    "    sdk: flutter\n"
+)
+
+
+LOCK_WITH_PATHS = (
+    "packages:\n"
+    "  async:\n"
+    "    dependency: transitive\n"
+    "    description:\n"
+    "      name: async\n"
+    "      sha256: \"e2eb0491ba5ddb6177742d2da23904574082139b07c1e33b8503b9f46f3e1a37\"\n"
+    "      url: \"https://pub.dev\"\n"
+    "    source: hosted\n"
+    "    version: \"2.13.1\"\n"
+    "  unversioned_path:\n"
+    "    dependency: \"direct main\"\n"
+    "    description:\n"
+    "      path: \"unversioned_path\"\n"
+    "      relative: true\n"
+    "    source: path\n"
+    "    version: \"1.0.0\"\n"
+    "  platform_assets:\n"
+    "    dependency: \"direct main\"\n"
+    "    description:\n"
+    "      path: \"platform_assets\"\n"
+    "      relative: true\n"
+    "    source: path\n"
+    "    version: \"0.1.0\"\n"
+    "  path:\n"
+    "    dependency: transitive\n"
+    "    description:\n"
+    "      name: path\n"
+    "      sha256: \"75cca69d1490965be98c73ceaea117e8a04dd21217b37b292c9ddbec0d955bc5\"\n"
+    "      url: \"https://pub.dev\"\n"
+    "    source: hosted\n"
+    "    version: \"1.9.1\"\n"
+    "sdks:\n"
+    "  dart: \">=3.13.0 <4.0.0\"\n"
+    "  flutter: \">=3.18.0-18.0.pre.54\"\n"
+)
+
+
+class PathDepStripTest(unittest.TestCase):
+    """The generated workspace must not name fixture path dependencies."""
+
+    def test_strip_pubspec_path_deps(self):
+        out = strip_pubspec_path_deps(PUBSPEC_YAML_WITH_PATHS)
+        self.assertNotIn("path_probe", out)
+        self.assertNotIn("platform_assets", out)
+        self.assertNotIn("unversioned_path", out)
+        self.assertIn("cupertino_icons: ^1.0.8", out)
+        self.assertIn("very_good_analysis: ^10.3.0", out)
+        self.assertIn("flutter:\n    sdk: flutter", out)
+        self.assertIn("dev_dependencies:", out)
+
+    def test_strip_lock_path_packages(self):
+        out = strip_lock_path_packages(LOCK_WITH_PATHS)
+        self.assertIn("async", out)
+        self.assertIn("path:", out)  # the hosted `path` package stays
+        self.assertNotIn("unversioned_path", out)
+        self.assertNotIn("platform_assets", out)
+        self.assertIn("sdks:", out)
+        self.assertIn('dart: ">=3.13.0 <4.0.0"', out)
+
+    def test_generated_workspace_drops_fixture_path_deps(self):
+        tmp = tempfile.mkdtemp(prefix="gen-mono-path-")
+        try:
+            rules = os.path.join(tmp, "rules")
+            hello = os.path.join(rules, "e2e", "hello_world")
+            os.makedirs(hello)
+            with open(os.path.join(hello, "MODULE.bazel"), "w",
+                      encoding="utf-8", newline="\n") as fh:
+                fh.write("module(name = \"rules_flutter_hello_world\")\n"
+                         "local_path_override(\n"
+                         "    module_name = \"rules_flutter\",\n"
+                         "    path = \"../..\",\n"
+                         ")\n")
+            with open(os.path.join(hello, "pubspec.yaml"), "w",
+                      encoding="utf-8", newline="\n") as fh:
+                fh.write(PUBSPEC_YAML_WITH_PATHS)
+            with open(os.path.join(hello, "pubspec.lock"), "w",
+                      encoding="utf-8", newline="\n") as fh:
+                fh.write(LOCK_WITH_PATHS)
+            out = os.path.join(tmp, "ws")
+            generate_flutter_monorepo(out, rules, [], small_opts())
+            with open(os.path.join(out, "pubspec.yaml"),
+                      encoding="utf-8") as fh:
+                self.assertNotIn("path:", fh.read())
+            with open(os.path.join(out, "pubspec.lock"),
+                      encoding="utf-8") as fh:
+                lock = fh.read()
+            self.assertNotIn("source: path", lock)
+            self.assertNotIn("unversioned_path", lock)
+            self.assertIn("sdks:", lock)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
