@@ -440,8 +440,8 @@ dart_test(
 # The workspace's own asset plus the manifests describing it, as the engine
 # on the simulator loads them: `verify_ios_bundle_assets_test` unzips the
 # same `app.ipa` the plist test reads and checks the asset bytes, the decoded
-# `AssetManifest.bin` keys and the `FontManifest.json` font files under
-# `App.framework/flutter_assets/`.
+# `AssetManifest.bin` keys and the `FontManifest.json` font files under the
+# app root's `flutter_assets/` (a debug app keeps none in `App.framework`).
 dart_test(
     name = "verify_ios_bundle_assets_test",
     data = [

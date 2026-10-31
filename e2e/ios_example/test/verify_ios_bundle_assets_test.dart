@@ -3,8 +3,9 @@
 /// simulator actually loads them.
 ///
 /// Reads the same `app.ipa` that `verify_ios_info_plist_test` reads, and
-/// inspects the bundle the engine loads,
-/// `Payload/app.app/Frameworks/App.framework/flutter_assets/`:
+/// inspects the bundle the engine loads. A debug app keeps its assets at the
+/// app root, `Payload/app.app/flutter_assets/`, where the engine falls back
+/// to them, and `App.framework` carries none:
 ///
 /// * `assets/message.txt` is there, and its bytes equal the committed
 ///   `assets/message.txt`, read through `data` (never copied into this file);
@@ -76,13 +77,21 @@ void main() {
     }
 
     final payload = Directory('${tmpDir.path}/Payload/app.app');
-    final flutterAssets = Directory(
-      '${payload.path}/Frameworks/App.framework/flutter_assets',
-    );
+    final flutterAssets = Directory('${payload.path}/flutter_assets');
     if (!flutterAssets.existsSync()) {
       stderr.writeln(
         'FAIL: expected the engine-loaded assets at ${flutterAssets.path}; '
         'the bundle holds: ${_childNames(payload)}',
+      );
+      exit(1);
+    }
+    final frameworkAssets = Directory(
+      '${payload.path}/Frameworks/App.framework/flutter_assets',
+    );
+    if (frameworkAssets.existsSync()) {
+      stderr.writeln(
+        'FAIL: expected no debug assets inside App.framework, found '
+        '${frameworkAssets.path}',
       );
       exit(1);
     }

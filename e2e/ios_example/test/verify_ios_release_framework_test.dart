@@ -330,9 +330,8 @@ _FontPair _readDebugFont(File ipa) {
     if (unzipped.exitCode != 0) {
       abort('FAIL: could not extract ${ipa.path}: ${unzipped.stderr}');
     }
-    final font = File(
-      '${tmp.path}/Payload/app.app/Frameworks/App.framework/$_fontSuffix',
-    );
+    // A debug app keeps its assets at the app root, not in App.framework.
+    final font = File('${tmp.path}/Payload/app.app/$_fontSuffix');
     if (!font.existsSync()) {
       abort(
         'FAIL: expected the debug icon font at ${font.path}; '
