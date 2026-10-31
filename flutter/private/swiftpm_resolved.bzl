@@ -523,8 +523,6 @@ def swiftpm_check_json(text, label):
         return "Cannot parse {label} as JSON: {detail}.".format(label = label, detail = checked.detail)
     return ""
 
-_swiftpm_check_json = swiftpm_check_json
-
 def read_swiftpm_pins(content, label):
     """Read the pins out of a `Package.resolved` file.
 
@@ -538,7 +536,7 @@ def read_swiftpm_pins(content, label):
         empty) kind, location and revision: every pin gets a repository, and
         the spoke fetch refuses it before any download.
     """
-    bad = _swiftpm_check_json(content, label)
+    bad = swiftpm_check_json(content, label)
     if bad:
         return struct(ok = False, error = bad, pins = [])
     data = json.decode(content)
@@ -593,7 +591,7 @@ def read_swiftpm_checksums(content, label):
         `struct(ok, error, sha256_by_identity)`: the map on success, or
         the failure naming the file and the first malformed entry.
     """
-    bad = _swiftpm_check_json(content, label)
+    bad = swiftpm_check_json(content, label)
     if bad:
         return struct(ok = False, error = bad, sha256_by_identity = {})
     data = json.decode(content)
@@ -728,7 +726,7 @@ def read_ios_native_deps(content, label, hub_name):
         `struct(ok, error, product_deps)`: `product_deps` maps
         `<identity>:<product>` to a canonical label string.
     """
-    bad = _swiftpm_check_json(content, label)
+    bad = swiftpm_check_json(content, label)
     if bad:
         return struct(
             ok = False,

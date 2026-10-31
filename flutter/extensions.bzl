@@ -25,7 +25,8 @@ load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_lock")
 load("//flutter/private:artifact_urls.bzl", "source_strip_prefix")
 load("//flutter/private:flutter_gen_l10n_repo.bzl", "flutter_gen_l10n_repo")
 load("//flutter/private:flutter_pub_android_package.bzl", "android_package_repo_name", "flutter_pub_android_package")
-load("//flutter/private:flutter_pub_apple_pods.bzl", "precompute_hub_apple_pods")
+load("//flutter/private:flutter_pub_apple_pods.bzl", "hub_cocoapods_attrs")
+load("//flutter/private:flutter_pub_apple_pods_hub.bzl", "read_hub_podfile_lock")
 load("//flutter/private:flutter_pub_cycle_breaks.bzl", "cycle_breaks_lock_error")
 load("//flutter/private:flutter_pub_lock_hub.bzl", "flutter_pub_lock_hub")
 load("//flutter/private:flutter_pub_maven.bzl", "path_spoke_maven_inputs")
@@ -37,7 +38,6 @@ load("//flutter/private:flutter_pub_plugin_deps.bzl", "ios_plugin_deps_lock_erro
 load("//flutter/private:flutter_pub_tag.bzl", "flutter_pub_tag", "validate_swift_package_product_deps")
 load("//flutter/private:flutter_pubspec.bzl", "parse_flutter_plugin_block")
 load("//flutter/private:flutter_sdk_package.bzl", "flutter_sdk_package")
-load("//flutter/private:podfile_lock.bzl", "read_podfile_lock")
 load("//flutter/private:pub_lock_sdks.bzl", "hosted_package_sha256", "parse_lock_sdk_constraints", "version_below_lower_bound")
 load("//flutter/private:rules_dart_floor.bzl", "check_rules_dart_floor")
 load("//flutter/private:swiftpm_package.bzl", "swiftpm_package")
@@ -847,15 +847,7 @@ def _create_swiftpm_spokes(hub_name, pub_tag, module_ctx):
 def _register_pub_hub(module_ctx, pub_tag, selected_info, merged, user_overlay_roots):
     """Resolves one `flutter.pub` tag into spoke repos plus the hub repo."""
     hub_name = pub_tag.name
-
-    podfile = None
-    lock_label = ""
-    if hasattr(pub_tag, "ios_podfile_lock") and pub_tag.ios_podfile_lock != None:
-        lock_label = str(pub_tag.ios_podfile_lock)
-        lock_text = module_ctx.read(pub_tag.ios_podfile_lock)
-        podfile = read_podfile_lock(lock_text, lock_label)
-        if not podfile.ok:
-            fail(podfile.error)
+    podfile, lock_label = read_hub_podfile_lock(module_ctx, pub_tag)
 
     validate_swift_package_product_deps(hub_name, pub_tag.swift_package_product_deps)
     _fail_on_invalid_maven_deps(hub_name, pub_tag.android_maven_deps)
@@ -881,19 +873,7 @@ def _register_pub_hub(module_ctx, pub_tag, selected_info, merged, user_overlay_r
     if deps_error:
         fail(deps_error)
     ignore_hooks = {pkg_name: True for pkg_name in pub_tag.ignore_hooks}
-
-    raw_pod_deps = pub_tag.ios_pod_deps if hasattr(pub_tag, "ios_pod_deps") else {}
-    ios_pod_deps = {k: str(raw_pod_deps[k]) for k in sorted(raw_pod_deps)}
-    raw_pod_ignore = pub_tag.ios_pod_ignore if hasattr(pub_tag, "ios_pod_ignore") else []
-    ios_pod_ignore = sorted(raw_pod_ignore)
-    ios_pods = precompute_hub_apple_pods(
-        hub_name = hub_name,
-        all_package_names = all_package_names,
-        podfile = podfile,
-        lock_label = lock_label,
-        ios_pod_deps = ios_pod_deps,
-        ios_pod_ignore = ios_pod_ignore,
-    )
+    pod_hub = hub_cocoapods_attrs(hub_name, all_package_names, podfile, lock_label, pub_tag)
 
     # Create hub repo with aliases for all packages plus the
     # Android plugin-libs aggregator. flutter.pub() always uses
@@ -913,9 +893,9 @@ def _register_pub_hub(module_ctx, pub_tag, selected_info, merged, user_overlay_r
             key: str(pub_tag.swift_package_product_deps[key])
             for key in sorted(pub_tag.swift_package_product_deps)
         },
-        ios_pod_deps = ios_pod_deps,
-        ios_pod_ignore = ios_pod_ignore,
-        ios_pods = json.encode(ios_pods),
+        ios_pod_deps = pod_hub.ios_pod_deps,
+        ios_pod_ignore = pod_hub.ios_pod_ignore,
+        ios_pods = pod_hub.ios_pods_json,
     )
 
     _create_swiftpm_spokes(hub_name, pub_tag, module_ctx)

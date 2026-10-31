@@ -28,6 +28,7 @@ this one. `pub.pub()` (in non-Flutter modules) keeps using
 """
 
 def _flutter_pub_lock_hub_impl(ctx):
+    """Emits the Flutter pub hub BUILD aliases, Android aggregator, and native-dep JSON files."""
     spoke_prefix = ctx.attr.spoke_prefix if ctx.attr.spoke_prefix else ctx.attr.hub_name
 
     # SwiftPM checksum state for the pub spokes: a plugin spoke reads this
@@ -38,7 +39,7 @@ def _flutter_pub_lock_hub_impl(ctx):
     # SwiftPM product mappings and CocoaPods pod resolutions for the pub
     # spokes. Each label is already canonical (the extension serialised it
     # from the module that wrote the tag), so a spoke's generated BUILD file
-    # can name it directly. Keys are inserted sorted so the file is deterministic.
+    # can name it directly. Keys are sorted so the output is deterministic.
     product_deps = {}
     for key in sorted(ctx.attr.swift_package_product_deps):
         product_deps[key] = ctx.attr.swift_package_product_deps[key]
