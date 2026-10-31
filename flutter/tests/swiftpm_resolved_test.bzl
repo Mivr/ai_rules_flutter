@@ -282,13 +282,15 @@ def _pub_spoke_attrs_test_impl(ctx):
     attrs = pub_spoke_swiftpm_attrs(struct(lock = "//:pubspec.lock", name = "rules_flutter", swift_package_resolved = "//:Package.resolved"))
     asserts.equals(env, "//:Package.resolved", str(attrs.package_resolved))
     asserts.equals(env, "@rules_flutter//:swift_package_sha256.json", str(attrs.package_sha256))
-    asserts.equals(env, ["package_resolved", "package_sha256"], dir(attrs))
+    asserts.equals(env, ["package_resolved", "package_sha256", "podfile_lock"], dir(attrs))
+    asserts.equals(env, None, attrs.podfile_lock)
     asserts.true(env, not hasattr(attrs, "swift_pinned_identities"))
     asserts.true(env, not hasattr(attrs, "swift_unpinned_errors"))
     asserts.true(env, not hasattr(attrs, "swift_package_sha256"))
     attrs = pub_spoke_swiftpm_attrs(struct(lock = "//:pubspec.lock", name = "rules_flutter", swift_package_resolved = None))
     asserts.equals(env, None, attrs.package_resolved)
     asserts.equals(env, None, attrs.package_sha256)
+    asserts.equals(env, None, attrs.podfile_lock)
     return unittest.end(env)
 
 def _pub_spoke_attrs_ignore_pin_and_checksum_state_test_impl(ctx):
@@ -312,7 +314,7 @@ def _pub_spoke_attrs_ignore_pin_and_checksum_state_test_impl(ctx):
         swift_package_build_files = {},
     ))
     asserts.equals(env, first, second)
-    asserts.equals(env, ["package_resolved", "package_sha256"], dir(first))
+    asserts.equals(env, ["package_resolved", "package_sha256", "podfile_lock"], dir(first))
     asserts.equals(env, "@rules_flutter//:swift_package_sha256.json", str(first.package_sha256))
     return unittest.end(env)
 

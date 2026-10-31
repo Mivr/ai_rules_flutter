@@ -808,6 +808,14 @@ pub_spoke_plugin_native_deps_attr = attr.label(
     default = None,
 )
 
+pub_spoke_podfile_lock_attr = attr.label(
+    doc = "Label of the hub's `ios_podfile_lock` file. An Apple plugin " +
+          "spoke reads it in CocoaPods mode to learn its native pod " +
+          "dependencies. Unset (the default) means SwiftPM mode.",
+    allow_single_file = True,
+    default = None,
+)
+
 def pub_spoke_swiftpm_rule_attrs(attrs):
     """Add the SwiftPM file labels every pub-spoke repository rule declares.
 
@@ -819,12 +827,13 @@ def pub_spoke_swiftpm_rule_attrs(attrs):
 
     Returns:
         The same dict with `package_resolved`, `package_sha256`,
-        `ios_native_deps` and `plugin_native_deps` added.
+        `ios_native_deps`, `plugin_native_deps` and `podfile_lock` added.
     """
     attrs["package_resolved"] = pub_spoke_package_resolved_attr
     attrs["package_sha256"] = pub_spoke_package_sha256_attr
     attrs["ios_native_deps"] = pub_spoke_ios_native_deps_attr
     attrs["plugin_native_deps"] = pub_spoke_plugin_native_deps_attr
+    attrs["podfile_lock"] = pub_spoke_podfile_lock_attr
     return attrs
 
 def pub_spoke_swiftpm_attrs(pub_tag, include_ios_native_deps = False, plugin_name = ""):
@@ -848,31 +857,30 @@ def pub_spoke_swiftpm_attrs(pub_tag, include_ios_native_deps = False, plugin_nam
         plugin_name: The pub package name to look up in `ios_plugin_deps`.
 
     Returns:
-        `struct(package_resolved, package_sha256[, ios_native_deps][, plugin_deps])`:
-        the resolved label, the checksum-file label, the native-deps-file label
-        when requested, and the plugin's mapped native dependency label.
+        `struct(package_resolved, package_sha256, podfile_lock[, ios_native_deps][, plugin_deps])`:
+        the resolved label, the checksum-file label, the CocoaPods lock
+        label when declared, the native-deps-file label when requested, and
+        the plugin's mapped native dependency label. Each is None when
+        unset; the native-deps label is constant for every spoke of a named
+        hub.
     """
     resolved = pub_tag.swift_package_resolved
-    hub_name = pub_tag.name if hasattr(pub_tag, "name") else ""
-    sha256 = ("@%s//:swift_package_sha256.json" % hub_name) if hub_name and resolved != None else None
-    native_deps = ("@%s//:ios_native_deps.json" % hub_name) if hub_name else None
-    include_native = include_ios_native_deps or hasattr(pub_tag, "swift_package_product_deps")
+    hub_name = getattr(pub_tag, "name", "")
+    include_native_deps = include_ios_native_deps or hasattr(pub_tag, "swift_package_product_deps")
     include_plugin = plugin_name != "" or hasattr(pub_tag, "ios_plugin_deps")
-    plugin_deps = (
-        pub_tag.ios_plugin_deps.get(plugin_name) if hasattr(pub_tag, "ios_plugin_deps") and plugin_name else None
-    )
-    if include_native and include_plugin:
-        return struct(
-            package_resolved = resolved,
-            package_sha256 = sha256,
-            ios_native_deps = native_deps,
-            plugin_deps = plugin_deps,
-        )
-    if include_native:
-        return struct(package_resolved = resolved, package_sha256 = sha256, ios_native_deps = native_deps)
+    sha256 = ("@%s//:swift_package_sha256.json" % hub_name) if (hub_name and resolved != None) else None
+    out = {
+        "package_resolved": resolved,
+        "package_sha256": sha256,
+        "podfile_lock": getattr(pub_tag, "ios_podfile_lock", None),
+    }
+    if include_native_deps:
+        out["ios_native_deps"] = ("@%s//:ios_native_deps.json" % hub_name) if hub_name else None
     if include_plugin:
-        return struct(package_resolved = resolved, package_sha256 = sha256, plugin_deps = plugin_deps)
-    return struct(package_resolved = resolved, package_sha256 = sha256)
+        out["plugin_deps"] = (
+            pub_tag.ios_plugin_deps.get(plugin_name) if hasattr(pub_tag, "ios_plugin_deps") and plugin_name else None
+        )
+    return struct(**out)
 
 def swiftpm_spoke_attrs(hub_name, pin, classified, build_file):
     """The repository arguments one SwiftPM spoke receives.

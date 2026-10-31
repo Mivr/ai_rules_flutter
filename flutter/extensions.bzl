@@ -36,6 +36,7 @@ load("//flutter/private:flutter_pub_plugin_deps.bzl", "ios_plugin_deps_lock_erro
 load("//flutter/private:flutter_pub_tag.bzl", "flutter_pub_tag", "validate_swift_package_product_deps")
 load("//flutter/private:flutter_pubspec.bzl", "parse_flutter_plugin_block")
 load("//flutter/private:flutter_sdk_package.bzl", "flutter_sdk_package")
+load("//flutter/private:podfile_lock.bzl", "read_podfile_lock")
 load("//flutter/private:pub_lock_sdks.bzl", "hosted_package_sha256", "parse_lock_sdk_constraints", "version_below_lower_bound")
 load("//flutter/private:rules_dart_floor.bzl", "check_rules_dart_floor")
 load("//flutter/private:swiftpm_package.bzl", "swiftpm_package")
@@ -631,6 +632,7 @@ def _create_hosted_spokes(hub_name, hosted, all_package_names, user_overlay_root
             package_sha256 = swiftpm_attrs.package_sha256,
             ios_native_deps = swiftpm_attrs.ios_native_deps,
             plugin_native_deps = swiftpm_attrs.plugin_deps,
+            podfile_lock = swiftpm_attrs.podfile_lock,
             pubspec_lock = pub_tag.lock,
         )
         if not _overlay_replaces_spoke(module_ctx, overlay_roots, name, version):
@@ -731,6 +733,7 @@ def _create_path_spokes(hub_name, path_pkgs, all_package_names, user_overlay_roo
             package_sha256 = swiftpm_attrs.package_sha256,
             ios_native_deps = swiftpm_attrs.ios_native_deps,
             plugin_native_deps = swiftpm_attrs.plugin_deps,
+            podfile_lock = swiftpm_attrs.podfile_lock,
             pubspec_lock = pub_tag.lock,
         )
         if (
@@ -843,6 +846,13 @@ def _create_swiftpm_spokes(hub_name, pub_tag, module_ctx):
 def _register_pub_hub(module_ctx, pub_tag, selected_info, merged, user_overlay_roots):
     """Resolves one `flutter.pub` tag into spoke repos plus the hub repo."""
     hub_name = pub_tag.name
+
+    if getattr(pub_tag, "ios_podfile_lock", None) != None:
+        lock_label = str(pub_tag.ios_podfile_lock)
+        lock_text = module_ctx.read(pub_tag.ios_podfile_lock)
+        podfile = read_podfile_lock(lock_text, lock_label)
+        if not podfile.ok:
+            fail(podfile.error)
 
     validate_swift_package_product_deps(hub_name, pub_tag.swift_package_product_deps)
     _fail_on_invalid_maven_deps(hub_name, pub_tag.android_maven_deps)

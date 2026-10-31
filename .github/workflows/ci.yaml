@@ -410,6 +410,21 @@ jobs:
             exit 1
           fi
           echo "$out" | grep -F 'bad_sdk_type in bad_sdk_type/pubspec.yaml: invalid environment.sdk constraint "3.5"'
+      # Podfile.lock evaluation red path: e2e/podfile_lock_red carries a
+      # tab-indented Podfile.lock fixture. Hub registration must fail on the
+      # reader's tab refusal at evaluation, before toolchain selection or
+      # download. Both greps pin the refusal and line so a skip or an unlocated
+      # error cannot pass as red.
+      - name: Tab-indented Podfile.lock fails at hub evaluation
+        working-directory: e2e/podfile_lock_red
+        run: |
+          if out=$(bazel query @red_deps//... 2>&1); then
+            echo "$out"
+            echo "expected the tab-indented Podfile.lock query to fail, but it succeeded"
+            exit 1
+          fi
+          echo "$out" | grep -F "Podfile.lock line 2"
+          echo "$out" | grep -F "an indentation tab is not part of the Podfile.lock YAML subset rules_flutter reads"
       # Compile-soundness red path: the entrypoint imports a sibling that
       # exists on disk but is never declared, so executing the compile must
       # fail on the guard's refusal — never with a built dill. The target is

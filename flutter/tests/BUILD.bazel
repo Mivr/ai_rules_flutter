@@ -58,6 +58,7 @@ load(":path_package_test.bzl", "path_package_test_suite")
 load(":platform_bundle_test.bzl", "platform_bundle_test_suite")
 load(":plist_merge_test.bzl", "plist_merge_test_suite")
 load(":plugin_registrant_test.bzl", "plugin_registrant_test_suite")
+load(":podfile_lock_test.bzl", "podfile_lock_test_suite")
 load(":profile_mode_test.bzl", "profile_mode_test_suite")
 load(":pub_lock_sdks_test.bzl", "pub_lock_sdks_test_suite")
 load(":pubspec_errors_test.bzl", "pubspec_errors_test_suite")
@@ -410,6 +411,8 @@ swiftpm_plugin_local_test_suite(name = "swiftpm_plugin_local_test")
 swiftpm_manifest_test_suite(name = "swiftpm_manifest_test")
 
 swiftpm_resolved_test_suite(name = "swiftpm_resolved_test")
+
+podfile_lock_test_suite(name = "podfile_lock_test")
 
 swiftpm_translate_test_suite(name = "swiftpm_translate_test")
 

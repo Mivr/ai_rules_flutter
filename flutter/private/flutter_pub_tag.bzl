@@ -192,6 +192,20 @@ flutter_pub_tag = tag_class(
                   "default.",
             default = {},
         ),
+        "ios_podfile_lock": attr.label(
+            doc = "Label of the app's CocoaPods `Podfile.lock` (for " +
+                  "example `//app/ios:Podfile.lock`). Setting it puts the " +
+                  "hub in CocoaPods mode: every Apple plugin's native " +
+                  "dependencies are the pods its entry in this lock lists " +
+                  "(CocoaPods' own resolution of every podspec, Ruby logic, " +
+                  "`ENV` and `$` globals included), and every pod version " +
+                  "comes from this lock. A plugin with no entry that ships " +
+                  "a `Package.swift` falls back to its SwiftPM product " +
+                  "dependencies, as Flutter's mixed mode does. " +
+                  "rules_flutter never runs `pod`: your `pod install` " +
+                  "writes this file. Unset (the default) means SwiftPM mode.",
+            allow_single_file = True,
+        ),
     },
     doc = "Resolves a `pubspec.lock` into one spoke repository per package " +
           "plus a hub alias. Requires a `flutter.toolchain` for the Flutter " +
