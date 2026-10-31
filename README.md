@@ -339,6 +339,22 @@ Every entry reaches that plugin's C-family compiles (a pure Objective-C plugin, 
 
 `permission_handler_apple` 9.6.4 reads these defines (from its `PermissionHandlerEnums.h`; the pub archive's SHA-256 is `b69e6b8300f9584af5ab81b41cdaa544e1b45e6fca0a30b0f9a9a120d90fc8a5`): `PERMISSION_APP_TRACKING_TRANSPARENCY`, `PERMISSION_ASSISTANT`, `PERMISSION_BLUETOOTH`, `PERMISSION_CAMERA`, `PERMISSION_CONTACTS`, `PERMISSION_CRITICAL_ALERTS`, `PERMISSION_EVENTS`, `PERMISSION_EVENTS_FULL_ACCESS`, `PERMISSION_LOCATION`, `PERMISSION_MEDIA_LIBRARY`, `PERMISSION_MICROPHONE`, `PERMISSION_NOTIFICATIONS`, `PERMISSION_PHOTOS`, `PERMISSION_PHOTOS_ADD_ONLY`, `PERMISSION_REMINDERS`, `PERMISSION_SENSORS`, `PERMISSION_SPEECH_RECOGNIZER`.
 
+### iOS plugin native dependencies (`ios_plugin_deps`)
+
+When a plugin's native Apple dependencies are computed by a program rather than a readable manifest, map the plugin's pub package name to one Bazel target holding every native dependency its Apple code needs:
+
+```starlark
+flutter.pub(
+    name = "deps",
+    lock = "//:pubspec.lock",
+    ios_plugin_deps = {
+        "google_sign_in_ios": "//third_party/google_sign_in:apple_deps",
+    },
+)
+```
+
+Labels resolve in the module that writes the tag. Each mapped plugin spoke receives only its own label, skips reading `<platform>/<pkg>/Package.swift`, `darwin/<pkg>/Package.swift`, `Package.resolved` and the hub's native-deps table, and links that target on both `rules_apple` and `xtool` for every Apple platform where the plugin ships sources while still compiling the plugin's own sources. A key naming no locked package fails evaluation; a key whose package has no iOS or macOS Apple sources, or uses an overlay `BUILD`, fails the spoke fetch because the dependency would reach nothing.
+
 ### Regenerating pubspec.lock
 
 Bazel reads `pubspec.lock` and never writes it. To regenerate it, use the Flutter toolchain the rules pin rather than a Flutter installed on your machine:
