@@ -35,18 +35,33 @@ def _flutter_pub_lock_hub_impl(ctx):
     # the checksum table never reaches a pure-Dart spoke's attributes.
     ctx.file("swift_package_sha256.json", json.encode(ctx.attr.swift_package_sha256))
 
-    # SwiftPM product mappings for the pub spokes. Each label is already
-    # canonical (the extension serialised it from the module that wrote the
-    # tag), so a spoke's generated BUILD file can name it directly. Keys are
-    # inserted sorted so the file is deterministic.
+    # SwiftPM product mappings and CocoaPods pod resolutions for the pub
+    # spokes. Each label is already canonical (the extension serialised it
+    # from the module that wrote the tag), so a spoke's generated BUILD file
+    # can name it directly. Keys are inserted sorted so the file is deterministic.
     product_deps = {}
     for key in sorted(ctx.attr.swift_package_product_deps):
         product_deps[key] = ctx.attr.swift_package_product_deps[key]
+
+    ios_pod_deps = {}
+    for key in sorted(ctx.attr.ios_pod_deps):
+        ios_pod_deps[key] = ctx.attr.ios_pod_deps[key]
+
+    ios_pod_ignore = sorted(ctx.attr.ios_pod_ignore)
+
+    ios_pods_raw = json.decode(ctx.attr.ios_pods) if ctx.attr.ios_pods else {}
+    ios_pods = {}
+    for key in sorted(ios_pods_raw):
+        ios_pods[key] = ios_pods_raw[key]
+
     ctx.file(
         "ios_native_deps.json",
         json.encode({
-            "version": 1,
+            "ios_pod_deps": ios_pod_deps,
+            "ios_pod_ignore": ios_pod_ignore,
+            "ios_pods": ios_pods,
             "swift_package_product_deps": product_deps,
+            "version": 1,
         }),
     )
 
@@ -131,6 +146,18 @@ flutter_pub_lock_hub = repository_rule(
                   "without a product dependency never reads the file, so its " +
                   "marker stays independent of it.",
             default = {},
+        ),
+        "ios_pod_deps": attr.string_dict(
+            doc = "Canonical labels for CocoaPods pod mapping.",
+            default = {},
+        ),
+        "ios_pod_ignore": attr.string_list(
+            doc = "Pod names to drop.",
+            default = [],
+        ),
+        "ios_pods": attr.string(
+            doc = "JSON-encoded precomputed pod resolution mapping.",
+            default = "{}",
         ),
     },
     doc = "Creates a Flutter pub hub repo with both the standard top-level package aliases " +

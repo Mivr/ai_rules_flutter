@@ -25,6 +25,7 @@ load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_lock")
 load("//flutter/private:artifact_urls.bzl", "source_strip_prefix")
 load("//flutter/private:flutter_gen_l10n_repo.bzl", "flutter_gen_l10n_repo")
 load("//flutter/private:flutter_pub_android_package.bzl", "android_package_repo_name", "flutter_pub_android_package")
+load("//flutter/private:flutter_pub_apple_pods.bzl", "precompute_hub_apple_pods")
 load("//flutter/private:flutter_pub_cycle_breaks.bzl", "cycle_breaks_lock_error")
 load("//flutter/private:flutter_pub_lock_hub.bzl", "flutter_pub_lock_hub")
 load("//flutter/private:flutter_pub_maven.bzl", "path_spoke_maven_inputs")
@@ -847,6 +848,8 @@ def _register_pub_hub(module_ctx, pub_tag, selected_info, merged, user_overlay_r
     """Resolves one `flutter.pub` tag into spoke repos plus the hub repo."""
     hub_name = pub_tag.name
 
+    podfile = None
+    lock_label = ""
     if hasattr(pub_tag, "ios_podfile_lock") and pub_tag.ios_podfile_lock != None:
         lock_label = str(pub_tag.ios_podfile_lock)
         lock_text = module_ctx.read(pub_tag.ios_podfile_lock)
@@ -879,6 +882,19 @@ def _register_pub_hub(module_ctx, pub_tag, selected_info, merged, user_overlay_r
         fail(deps_error)
     ignore_hooks = {pkg_name: True for pkg_name in pub_tag.ignore_hooks}
 
+    raw_pod_deps = pub_tag.ios_pod_deps if hasattr(pub_tag, "ios_pod_deps") else {}
+    ios_pod_deps = {k: str(raw_pod_deps[k]) for k in sorted(raw_pod_deps)}
+    raw_pod_ignore = pub_tag.ios_pod_ignore if hasattr(pub_tag, "ios_pod_ignore") else []
+    ios_pod_ignore = sorted(raw_pod_ignore)
+    ios_pods = precompute_hub_apple_pods(
+        hub_name = hub_name,
+        all_package_names = all_package_names,
+        podfile = podfile,
+        lock_label = lock_label,
+        ios_pod_deps = ios_pod_deps,
+        ios_pod_ignore = ios_pod_ignore,
+    )
+
     # Create hub repo with aliases for all packages plus the
     # Android plugin-libs aggregator. flutter.pub() always uses
     # `flutter_pub_lock_hub` (not rules_dart's plain
@@ -897,6 +913,9 @@ def _register_pub_hub(module_ctx, pub_tag, selected_info, merged, user_overlay_r
             key: str(pub_tag.swift_package_product_deps[key])
             for key in sorted(pub_tag.swift_package_product_deps)
         },
+        ios_pod_deps = ios_pod_deps,
+        ios_pod_ignore = ios_pod_ignore,
+        ios_pods = json.encode(ios_pods),
     )
 
     _create_swiftpm_spokes(hub_name, pub_tag, module_ctx)

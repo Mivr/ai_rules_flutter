@@ -182,6 +182,28 @@ flutter_pub_tag = tag_class(
                   "the plugin's own sources still build. Empty by default.",
             default = {},
         ),
+        "ios_pod_deps": attr.string_keyed_label_dict(
+            doc = "CocoaPods pod name -> label of the Bazel target that " +
+                  "provides it. It applies to every plugin in CocoaPods " +
+                  "mode, and in SwiftPM mode to plugins without a " +
+                  "`Package.swift`. A key may name a subspec " +
+                  "(`\"Firebase/Auth\"`), which wins over its root pod " +
+                  "(`\"Firebase\"`). The mapping wins over binary pods, the " +
+                  "built-in pod-to-SwiftPM table and every version check: " +
+                  "you take the version decision. A pod that resolves " +
+                  "nowhere fails the fetch of the plugin that needs it, " +
+                  "naming the plugin, the pod and this attribute. Labels " +
+                  "resolve in the module that writes this tag.",
+            default = {},
+        ),
+        "ios_pod_ignore": attr.string_list(
+            doc = "Pod names (root or `Root/Subspec`) that need no Bazel " +
+                  "target and must not fail the fetch. This is a " +
+                  "declaration you make deliberately; it is never a " +
+                  "default. `Flutter` and `FlutterMacOS` are always " +
+                  "skipped because the rules link the engine themselves.",
+            default = [],
+        ),
         "swift_package_product_deps": attr.string_keyed_label_dict(
             doc = "`<identity>:<product>` -> label of the Bazel target that " +
                   "provides that SwiftPM product. A plugin's `Package.swift` " +

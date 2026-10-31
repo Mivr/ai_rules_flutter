@@ -16,6 +16,7 @@ load(
     _apple_swiftpm_synthetic_manifest = "apple_swiftpm_synthetic_manifest",
     _select_apple_swiftpm_deps = "select_apple_swiftpm_deps",
 )
+load(":flutter_pub_apple_pods.bzl", "detect_apple_cocoapods_deps")
 load(":flutter_pub_plugin_deps.bzl", "mapped_apple_plugin_deps")
 load(":flutter_pub_walk.bzl", "PUB_WALK_BOUND", "has_files_under_walk")
 load(":starlark_literal.bzl", "starlark_string_literal")
@@ -1020,6 +1021,9 @@ def detect_apple_swiftpm_deps(ctx, package_name, apple):
     )
     if mapped.mapped:
         return struct(macos = mapped.macos, ios = mapped.ios)
+
+    if hasattr(ctx.attr, "podfile_lock") and ctx.attr.podfile_lock != None:
+        return detect_apple_cocoapods_deps(ctx, package_name, apple, _detect_apple_swiftpm_platform)
 
     resolved_label = ctx.attr.package_resolved
     checksums_label = ctx.attr.package_sha256

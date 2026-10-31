@@ -505,7 +505,7 @@ def _swiftpm_json_check_tokens(tokens):
         return struct(ok = True, detail = "")
     return struct(ok = False, detail = "an incomplete document")
 
-def _swiftpm_check_json(text, label):
+def swiftpm_check_json(text, label):
     """Fail malformed JSON naming the resolved file.
 
     Args:
@@ -522,6 +522,8 @@ def _swiftpm_check_json(text, label):
     if not checked.ok:
         return "Cannot parse {label} as JSON: {detail}.".format(label = label, detail = checked.detail)
     return ""
+
+_swiftpm_check_json = swiftpm_check_json
 
 def read_swiftpm_pins(content, label):
     """Read the pins out of a `Package.resolved` file.
