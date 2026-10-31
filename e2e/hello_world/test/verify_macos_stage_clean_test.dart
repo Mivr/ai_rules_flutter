@@ -125,7 +125,7 @@ void _buildMacosApp(String root, String outputBase, String step) {
 
 /// The `App.framework.zip` the framework action writes in [outputBase].
 String _frameworkZipPath(String root, String outputBase) {
-  final step = 'bazel info bazel-bin';
+  const step = 'bazel info bazel-bin';
   final result = _bazel(root, outputBase, ['info', 'bazel-bin'], step);
   _expectOk(result, step);
   final bin = '${result.stdout}'.trim();
