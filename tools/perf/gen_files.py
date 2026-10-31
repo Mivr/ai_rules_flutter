@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Small file-writing helper shared by the monorepo generator modules."""
 
 import os

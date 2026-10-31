@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Summary stage for the Flutter perf bench.
 
 Turns per-repeat record.json files into one medians artifact per platform

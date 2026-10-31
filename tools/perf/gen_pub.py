@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Generated-workspace pubspec files with the fixture's path deps stripped.
 
 The hello_world fixture's pubspec.lock and pubspec.yaml name path
