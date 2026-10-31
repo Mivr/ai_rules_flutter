@@ -2217,7 +2217,8 @@ def _generate_spoke(ctx):
         dep_labels,
     )
 
-    apple = _detect_apple_plugin_sources(ctx, ctx.attr.package_name, pubspec.plugin_block)
+    has_deps = bool(ctx.attr.plugin_native_deps) and not overlay_content
+    apple = _detect_apple_plugin_sources(ctx, ctx.attr.package_name, pubspec.plugin_block) if has_deps else None
     check_plugin_defines(ctx, ctx.attr.package_name, pubspec.plugin_block, bool(overlay_content))
     check_plugin_native_deps(ctx, ctx.attr.package_name, apple, bool(overlay_content))
 

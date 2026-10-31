@@ -13,6 +13,7 @@ SwiftPM product links a plugin's `Package.swift` declares. Split out of
 
 load(
     ":flutter_pub_apple_deps.bzl",
+    _apple_swiftpm_synthetic_manifest = "apple_swiftpm_synthetic_manifest",
     _select_apple_swiftpm_deps = "select_apple_swiftpm_deps",
 )
 load(":flutter_pub_plugin_deps.bzl", "mapped_apple_plugin_deps")
@@ -719,69 +720,6 @@ def apple_swiftpm_manifest_products(plugin_name, manifest_text, manifest_dir, sr
     ]
     return struct(ok = True, error = "", products = products, pkg_deps = parsed.model.pkg_deps, target = target)
 
-def _apple_swiftpm_package_dep_text(decl):
-    """Render one manifest `.package(...)` declaration for the resolver.
-
-    Args:
-        decl: The parsed `.package(...)` declaration.
-
-    Returns:
-        The SwiftPM declaration text, with string values JSON-quoted.
-    """
-    parts = []
-    if decl.name:
-        parts.append("name: " + json.encode(decl.name))
-    if decl.ref:
-        parts.append(decl.ref_kind + ": " + json.encode(decl.ref))
-    return ".package(" + ", ".join(parts) + ")"
-
-def _apple_swiftpm_product_dep_text(dep):
-    """Render one `.product(name:package:)` dependency for the resolver.
-
-    Args:
-        dep: The parsed product dependency reference.
-
-    Returns:
-        The SwiftPM dependency text, with string values JSON-quoted.
-    """
-    return ".product(name: " + json.encode(dep.name) + ", package: " + json.encode(dep.package) + ")"
-
-def _apple_swiftpm_synthetic_manifest(target, pkg_deps, dep):
-    """Build a one-product manifest the unchanged pin resolver can read.
-
-    The resolver lives in `flutter_pub_apple_deps.bzl` and takes a whole
-    manifest. Handing it the same target with only this unmapped product
-    keeps its pin, checksum, path-package and refusal behaviour exactly,
-    while the mapping for the other products is applied here.
-
-    Args:
-        target: The manifest target the spoke builds.
-        pkg_deps: The manifest's parsed `.package(...)` declarations.
-        dep: The one product dependency to resolve.
-
-    Returns:
-        A `Package.swift` text declaring that target and product.
-    """
-    packages = ", ".join([_apple_swiftpm_package_dep_text(decl) for decl in pkg_deps])
-    path_line = ""
-    if target.path:
-        path_line = "            path: " + json.encode(target.path) + ",\n"
-    return (
-        "// swift-tools-version: 5.9\n" +
-        "import PackageDescription\n\n" +
-        "let package = Package(\n" +
-        "    name: " + json.encode(target.name) + ",\n" +
-        "    dependencies: [" + packages + "],\n" +
-        "    targets: [\n" +
-        "        .target(\n" +
-        "            name: " + json.encode(target.name) + ",\n" +
-        path_line +
-        "            dependencies: [" + _apple_swiftpm_product_dep_text(dep) + "],\n" +
-        "        ),\n" +
-        "    ],\n" +
-        ")\n"
-    )
-
 def _apple_swiftpm_labels_for_products(plugin_name, manifest_dir, srcs_dirs, platform, pins, prepared, product_deps):
     """Resolve one manifest's kept product dependencies to spoke labels.
 
@@ -1074,7 +1012,7 @@ def detect_apple_swiftpm_deps(ctx, package_name, apple):
     Returns:
         `struct(macos, ios)`: The per-platform spoke dep label lists.
     """
-    plugin_deps = getattr(ctx.attr, "plugin_native_deps", None)
+    plugin_deps = ctx.attr.plugin_native_deps if hasattr(ctx.attr, "plugin_native_deps") else None
     mapped = mapped_apple_plugin_deps(
         str(plugin_deps) if plugin_deps else None,
         apple.macos_srcs,

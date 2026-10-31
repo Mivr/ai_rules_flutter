@@ -429,3 +429,66 @@ def select_apple_swiftpm_deps(plugin_name, manifest_text, manifest_dir, srcs_dir
                 seen[label] = True
                 labels.append(label)
     return struct(ok = True, error = "", labels = labels)
+
+def _apple_swiftpm_package_dep_text(decl):
+    """Render one manifest `.package(...)` declaration for the resolver.
+
+    Args:
+        decl: The parsed `.package(...)` declaration.
+
+    Returns:
+        The SwiftPM declaration text, with string values JSON-quoted.
+    """
+    parts = []
+    if decl.name:
+        parts.append("name: " + json.encode(decl.name))
+    if decl.ref:
+        parts.append(decl.ref_kind + ": " + json.encode(decl.ref))
+    return ".package(" + ", ".join(parts) + ")"
+
+def _apple_swiftpm_product_dep_text(dep):
+    """Render one `.product(name:package:)` dependency for the resolver.
+
+    Args:
+        dep: The parsed product dependency reference.
+
+    Returns:
+        The SwiftPM dependency text, with string values JSON-quoted.
+    """
+    return ".product(name: " + json.encode(dep.name) + ", package: " + json.encode(dep.package) + ")"
+
+def apple_swiftpm_synthetic_manifest(target, pkg_deps, dep):
+    """Build a one-product manifest the unchanged pin resolver can read.
+
+    The resolver lives in `flutter_pub_apple_deps.bzl` and takes a whole
+    manifest. Handing it the same target with only this unmapped product
+    keeps its pin, checksum, path-package and refusal behaviour exactly,
+    while the mapping for the other products is applied in the caller.
+
+    Args:
+        target: The manifest target the spoke builds.
+        pkg_deps: The manifest's parsed `.package(...)` declarations.
+        dep: The one product dependency to resolve.
+
+    Returns:
+        A `Package.swift` text declaring that target and product.
+    """
+    packages = ", ".join([_apple_swiftpm_package_dep_text(decl) for decl in pkg_deps])
+    path_line = ""
+    if target.path:
+        path_line = "            path: " + json.encode(target.path) + ",\n"
+    return (
+        "// swift-tools-version: 5.9\n" +
+        "import PackageDescription\n\n" +
+        "let package = Package(\n" +
+        "    name: " + json.encode(target.name) + ",\n" +
+        "    dependencies: [" + packages + "],\n" +
+        "    targets: [\n" +
+        "        .target(\n" +
+        "            name: " + json.encode(target.name) + ",\n" +
+        path_line +
+        "            dependencies: [" + _apple_swiftpm_product_dep_text(dep) + "],\n" +
+        "        ),\n" +
+        "    ],\n" +
+        ")\n"
+    )

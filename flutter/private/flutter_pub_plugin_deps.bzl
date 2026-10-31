@@ -83,7 +83,7 @@ def check_plugin_native_deps(ctx, package_name, apple, uses_overlay):
         None; fails the fetch with the matching refusal when the dependency
         cannot reach a compile.
     """
-    label = getattr(ctx.attr, "plugin_native_deps", None)
+    label = ctx.attr.plugin_native_deps if hasattr(ctx.attr, "plugin_native_deps") else None
     error = plugin_native_deps_overlay_error(package_name, label, uses_overlay)
     if not error and label:
         macos_srcs = apple.macos_srcs if apple and hasattr(apple, "macos_srcs") else []

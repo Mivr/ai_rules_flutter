@@ -4,6 +4,7 @@ load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load(
     "//flutter/private:flutter_pub_apple.bzl",
     "apple_plugin_targets",
+    "detect_apple_swiftpm_deps",
     "with_apple_swiftpm_deps",
 )
 load("//flutter/private:flutter_pub_apple_deps.bzl", "select_apple_swiftpm_deps")
@@ -59,7 +60,8 @@ def _with_apple_swiftpm_deps_renders_target_test_impl(ctx):
         apple_plugin_targets(pkg, ["ios/two_plat/Sources/two_plat"], [], "ios")
     )
     label = "@mapped//:dep"
-    patched = with_apple_swiftpm_deps(content, pkg, [], [label])
+    mapped = mapped_apple_plugin_deps(label, [], ["ios/two_plat/Sources/two_plat"])
+    patched = with_apple_swiftpm_deps(content, pkg, mapped.macos, mapped.ios)
 
     asserts.equals(env, 2, len(patched.split(label)) - 1)
     macos_device = patched.split('name = "two_plat_apple_macos",')[1].split("visibility = [")[0]
@@ -152,20 +154,57 @@ def _pub_spoke_swiftpm_attrs_test_impl(ctx):
         swift_package_resolved = "//:Package.resolved",
         ios_plugin_deps = {"plugin_a": "//:dep_a"},
     )
-    attrs_a = pub_spoke_swiftpm_attrs(pub_tag, plugin_name = "plugin_a")
-    attrs_b = pub_spoke_swiftpm_attrs(pub_tag, plugin_name = "plugin_b")
+    unmapped_tag = struct(
+        lock = "//:pubspec.lock",
+        name = "rules_flutter",
+        swift_package_resolved = "//:Package.resolved",
+        ios_plugin_deps = {},
+    )
+    attrs_a = pub_spoke_swiftpm_attrs(pub_tag, include_ios_native_deps = True, plugin_name = "plugin_a")
+    attrs_b = pub_spoke_swiftpm_attrs(pub_tag, include_ios_native_deps = True, plugin_name = "plugin_b")
+    attrs_b_unmapped = pub_spoke_swiftpm_attrs(
+        unmapped_tag,
+        include_ios_native_deps = True,
+        plugin_name = "plugin_b",
+    )
 
     asserts.equals(env, "//:dep_a", attrs_a.plugin_deps)
     asserts.equals(env, None, attrs_b.plugin_deps)
+    asserts.equals(env, attrs_b_unmapped, attrs_b)
     asserts.equals(env, attrs_a.package_resolved, attrs_b.package_resolved)
     asserts.equals(env, attrs_a.package_sha256, attrs_b.package_sha256)
     return unittest.end(env)
 
 _pub_spoke_swiftpm_attrs_test = unittest.make(_pub_spoke_swiftpm_attrs_test_impl)
 
+def _detect_apple_swiftpm_deps_short_circuits_test_impl(ctx):
+    """detect_apple_swiftpm_deps returns mapped labels without reading manifests or hub files."""
+    env = unittest.begin(ctx)
+    fake_ctx = struct(attr = struct(plugin_native_deps = "@mapped//:dep"))
+    apple = struct(macos_srcs = [], ios_srcs = ["ios/Classes"])
+    detected = detect_apple_swiftpm_deps(fake_ctx, "computed_plugin", apple)
+    asserts.equals(env, [], detected.macos)
+    asserts.equals(env, ["@mapped//:dep"], detected.ios)
+    return unittest.end(env)
+
+_detect_apple_swiftpm_deps_short_circuits_test = unittest.make(
+    _detect_apple_swiftpm_deps_short_circuits_test_impl,
+)
+
 def _unmapped_missing_resolved_keeps_refusal_test_impl(ctx):
     """An unmapped plugin with no swift_package_resolved keeps existing refusal."""
     env = unittest.begin(ctx)
+    pub_tag = struct(
+        lock = "//:pubspec.lock",
+        name = "deps",
+        swift_package_resolved = None,
+        ios_plugin_deps = {"other_plugin": "//:other_dep"},
+    )
+    attrs = pub_spoke_swiftpm_attrs(pub_tag, include_ios_native_deps = True, plugin_name = "spm_bigint_plugin")
+    asserts.equals(env, None, attrs.plugin_deps)
+    mapped = mapped_apple_plugin_deps(attrs.plugin_deps, [], ["ios/spm_bigint_plugin/Sources/spm_bigint_plugin"])
+    asserts.false(env, mapped.mapped)
+
     manifest = """// swift-tools-version: 5.9
 import PackageDescription
 
@@ -222,5 +261,6 @@ def ios_plugin_deps_test_suite(name):
         _apple_error_test,
         _overlay_error_test,
         _pub_spoke_swiftpm_attrs_test,
+        _detect_apple_swiftpm_deps_short_circuits_test,
         _unmapped_missing_resolved_keeps_refusal_test,
     )
