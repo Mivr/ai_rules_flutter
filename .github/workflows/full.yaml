@@ -297,6 +297,10 @@ jobs:
           test -d "$ndk" || { echo "no NDK under $ANDROID_HOME/ndk"; exit 1; }
           echo "build --repo_env=ANDROID_HOME=$ANDROID_HOME" >> ~/.bazelrc
           echo "build --repo_env=ANDROID_NDK_HOME=$ndk" >> ~/.bazelrc
+          # Tests that run a nested Bazel (verify_macos_stage_clean_test) never read
+          # ~/.bazelrc; they inherit these two through env_inherit instead.
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$ndk" >> "$GITHUB_ENV"
       - name: bazel test //... (shard workspaces)
         run: |
           failed=""

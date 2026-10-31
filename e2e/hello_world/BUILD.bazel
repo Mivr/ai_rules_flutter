@@ -889,10 +889,14 @@ dart_test(
     env = {
         "GUARD_ROOT_ANCHOR": "$(rlocationpath :test/verify_macos_stage_clean_test.dart)",
     },
+    # The nested build loads this workspace's rules_android_ndk extension, which needs the
+    # host's Android paths like the outer build does.
     env_inherit = [
         "BUILD_WORKSPACE_DIRECTORY",
         "BAZEL",
         "PATH",
+        "ANDROID_HOME",
+        "ANDROID_NDK_HOME",
     ],
     main = "test/verify_macos_stage_clean_test.dart",
     tags = [
