@@ -31,6 +31,7 @@ load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version", "m
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_deps", "parse_pubspec_sdk_constraint", "pubspec_sdk_constraint_error")
 load("//flutter/private:flutter_pub_cycle_breaks.bzl", "apply_cycle_breaks", "spoke_dep_labels")
 load("//flutter/private:flutter_pub_plugin_defines.bzl", "check_plugin_defines", "plugin_defines_attr")
+load("//flutter/private:flutter_pub_plugin_deps.bzl", "check_plugin_native_deps")
 load("//flutter/private:flutter_pub_scan.bzl", "fetch_hosted_archive", "scan_hosted_archive", "walk_hosted_package")
 load("//flutter/private:flutter_pubspec.bzl", "asset_flavor_error", "parse_flutter_assets_block", "parse_flutter_plugin_block", "parse_pubspec")
 load(":asset_uri.bzl", "normalize_spoke_asset_block", "normalize_spoke_assets", "normalize_spoke_fonts", "normalize_spoke_shaders")
@@ -50,11 +51,7 @@ load(
     "ctx_package_lister",
     "expand_pub_asset_entries",
 )
-load(
-    ":flutter_pub_cover.bzl",
-    "covering_entry",
-    "covering_entry_lookup",
-)
+load(":flutter_pub_cover.bzl", "covering_entry", "covering_entry_lookup")
 load(":flutter_pub_maven.bzl", _maven_deps_attr = "maven_deps_attr", _maven_ignore_attr = "maven_ignore_attr")
 load(
     ":flutter_pub_mirror.bzl",
@@ -1631,9 +1628,7 @@ def _read_spoke_pubspec(ctx):
         all_deps = parse_pubspec_deps(pubspec_content)
         available = {p: True for p in ctx.attr.lock_packages}
         bazel_deps = sorted([d for d in all_deps if d in available])
-        language_version = derive_language_version(
-            parse_pubspec_sdk_constraint(pubspec_content),
-        )
+        language_version = derive_language_version(parse_pubspec_sdk_constraint(pubspec_content))
         plugin_block = parse_flutter_plugin_block(pubspec_content)
         asset_block = parse_flutter_assets_block(pubspec_content)
     return struct(
@@ -2222,7 +2217,9 @@ def _generate_spoke(ctx):
         dep_labels,
     )
 
+    apple = _detect_apple_plugin_sources(ctx, ctx.attr.package_name, pubspec.plugin_block)
     check_plugin_defines(ctx, ctx.attr.package_name, pubspec.plugin_block, bool(overlay_content))
+    check_plugin_native_deps(ctx, ctx.attr.package_name, apple, bool(overlay_content))
 
     if overlay_content:
         _write_overlay_spoke(ctx, overlay_content, overlay_android_content)

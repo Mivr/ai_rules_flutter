@@ -175,6 +175,13 @@ flutter_pub_tag = tag_class(
                   "Apple plugin in the lock fails the extension evaluation.",
             default = {},
         ),
+        "ios_plugin_deps": attr.string_keyed_label_dict(
+            doc = "Flutter plugin name -> label of one target holding every native " +
+                  "dependency the plugin's Apple code needs. Replaces reading the " +
+                  "plugin's lock entry, podspec or `Package.swift` dependency list; " +
+                  "the plugin's own sources still build. Empty by default.",
+            default = {},
+        ),
         "swift_package_product_deps": attr.string_keyed_label_dict(
             doc = "`<identity>:<product>` -> label of the Bazel target that " +
                   "provides that SwiftPM product. A plugin's `Package.swift` " +
