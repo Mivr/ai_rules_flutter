@@ -615,6 +615,7 @@ def flutter_apple_plugin_library(
         swift_deps.append(objc_dep)
 
     bridging_header, extra_copts = _plugin_bridging_copts(spec, headers)
+
     # A header-less ObjC target gets no clang module, so there is nothing to re-export.
     swift_files = _plugin_swift_srcs(spec, swift_files, objc_module_name if headers else "")
 
