@@ -15,6 +15,7 @@ load(
     ":flutter_pub_apple_deps.bzl",
     _select_apple_swiftpm_deps = "select_apple_swiftpm_deps",
 )
+load(":flutter_pub_plugin_deps.bzl", "mapped_apple_plugin_deps")
 load(":flutter_pub_walk.bzl", "PUB_WALK_BOUND", "has_files_under_walk")
 load(":starlark_literal.bzl", "starlark_string_literal")
 load(":swiftpm_manifest.bzl", "parse_swiftpm_plugin_package")
@@ -1073,6 +1074,15 @@ def detect_apple_swiftpm_deps(ctx, package_name, apple):
     Returns:
         `struct(macos, ios)`: The per-platform spoke dep label lists.
     """
+    plugin_deps = getattr(ctx.attr, "plugin_native_deps", None)
+    mapped = mapped_apple_plugin_deps(
+        str(plugin_deps) if plugin_deps else None,
+        apple.macos_srcs,
+        apple.ios_srcs,
+    )
+    if mapped.mapped:
+        return struct(macos = mapped.macos, ios = mapped.ios)
+
     resolved_label = ctx.attr.package_resolved
     checksums_label = ctx.attr.package_sha256
     native_deps_label = ctx.attr.ios_native_deps

@@ -31,6 +31,7 @@ load("//flutter/private:flutter_pub_overlays.bzl", "hub_overlay_roots")
 load("//flutter/private:flutter_pub_package.bzl", "flutter_pub_package", "flutter_pub_path_package", "is_maven_dep_label")
 load("//flutter/private:flutter_pub_path.bzl", "foreign_lock_path_error", "is_absolute_lock_path", "is_relative_path_dependency", "workspace_relative_lock_path")
 load("//flutter/private:flutter_pub_plugin_defines.bzl", "ios_plugin_defines_lock_error")
+load("//flutter/private:flutter_pub_plugin_deps.bzl", "ios_plugin_deps_lock_error")
 load("//flutter/private:flutter_pub_tag.bzl", "flutter_pub_tag", "validate_swift_package_product_deps")
 load("//flutter/private:flutter_sdk_package.bzl", "flutter_sdk_package")
 load("//flutter/private:pub_lock_sdks.bzl", "hosted_package_sha256", "parse_lock_sdk_constraints", "version_below_lower_bound")
@@ -475,7 +476,6 @@ def _create_hosted_spokes(hub_name, hosted, all_package_names, user_overlay_root
     reads the hub's resolved file and checksum table at fetch time, so no
     spoke carries hub-wide pin state in its repository attributes.
     """
-    swiftpm_attrs = pub_spoke_swiftpm_attrs(pub_tag, include_ios_native_deps = True)
     for name, info in hosted.items():
         desc = info.get("description", {})
         version = info.get("version", "")
@@ -484,6 +484,7 @@ def _create_hosted_spokes(hub_name, hosted, all_package_names, user_overlay_root
         # no sha256 is a lock that predates the field, or was edited
         # by hand; refuse it rather than download unverified bytes.
         sha256 = hosted_package_sha256(name, info, pub_tag.lock)
+        swiftpm_attrs = pub_spoke_swiftpm_attrs(pub_tag, include_ios_native_deps = True, plugin_name = name)
 
         flutter_pub_package(
             name = hub_name + "__" + name,
@@ -510,6 +511,7 @@ def _create_hosted_spokes(hub_name, hosted, all_package_names, user_overlay_root
             package_resolved = swiftpm_attrs.package_resolved,
             package_sha256 = swiftpm_attrs.package_sha256,
             ios_native_deps = swiftpm_attrs.ios_native_deps,
+            plugin_native_deps = swiftpm_attrs.plugin_deps,
             pubspec_lock = pub_tag.lock,
         )
 
@@ -526,9 +528,9 @@ def _create_path_spokes(hub_name, path_pkgs, all_package_names, user_overlay_roo
     checksum table at fetch time, so no spoke carries hub-wide pin state
     in its repository attributes.
     """
-    swiftpm_attrs = pub_spoke_swiftpm_attrs(pub_tag, include_ios_native_deps = True)
     maven = path_spoke_maven_inputs(pub_tag)
     for name, path_info in path_pkgs.items():
+        swiftpm_attrs = pub_spoke_swiftpm_attrs(pub_tag, include_ios_native_deps = True, plugin_name = name)
         flutter_pub_path_package(
             name = hub_name + "__" + name,
             package_name = name,
@@ -546,6 +548,7 @@ def _create_path_spokes(hub_name, path_pkgs, all_package_names, user_overlay_roo
             package_resolved = swiftpm_attrs.package_resolved,
             package_sha256 = swiftpm_attrs.package_sha256,
             ios_native_deps = swiftpm_attrs.ios_native_deps,
+            plugin_native_deps = swiftpm_attrs.plugin_deps,
             pubspec_lock = pub_tag.lock,
         )
 
@@ -666,6 +669,9 @@ def _register_pub_hub(module_ctx, pub_tag, selected_info, merged, user_overlay_r
     defines_error = ios_plugin_defines_lock_error(pub_tag.ios_plugin_defines, all_package_names)
     if defines_error:
         fail(defines_error)
+    deps_error = ios_plugin_deps_lock_error(pub_tag.ios_plugin_deps, all_package_names)
+    if deps_error:
+        fail(deps_error)
     ignore_hooks = {pkg_name: True for pkg_name in pub_tag.ignore_hooks}
 
     # Create hub repo with aliases for all packages plus the

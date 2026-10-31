@@ -38,6 +38,7 @@ load(":flutter_test_bootstrap_test.bzl", "flutter_test_bootstrap_test_suite")
 load(":gen_l10n_test.bzl", "gen_l10n_test_suite")
 load(":gradle_model_test.bzl", "gradle_model_test_suite")
 load(":ios_integration_test_test.bzl", "ios_integration_test_test_suite")
+load(":ios_plugin_deps_test.bzl", "ios_plugin_deps_test_suite")
 load(":ios_split_debug_assets_test.bzl", "ios_split_debug_assets_test_suite")
 load(":ios_test.bzl", "ios_apple_plugin_test_suite", "ios_test_suite")
 load(":language_version_test.bzl", "language_version_test_suite")
@@ -289,6 +290,8 @@ ios_test_suite(name = "ios_test")
 ios_split_debug_assets_test_suite(name = "ios_split_debug_assets_test")
 
 ios_apple_plugin_test_suite(name = "ios_apple_plugin_test")
+
+ios_plugin_deps_test_suite(name = "ios_plugin_deps_test")
 
 ios_integration_test_test_suite(name = "ios_integration_test_test")
 

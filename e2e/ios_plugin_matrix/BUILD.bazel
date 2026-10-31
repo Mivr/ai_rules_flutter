@@ -6,6 +6,11 @@ load("@bazel_skylib//rules:build_test.bzl", "build_test")
 
 exports_files(["pubspec.lock"])
 
+filegroup(
+    name = "mapped_apple_deps",
+    visibility = ["//visibility:public"],
+)
+
 build_test(
     name = "workspace_test",
     targets = ["//:pubspec.lock"],

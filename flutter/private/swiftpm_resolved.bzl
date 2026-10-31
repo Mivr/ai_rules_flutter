@@ -801,6 +801,13 @@ pub_spoke_ios_native_deps_attr = attr.label(
     default = None,
 )
 
+pub_spoke_plugin_native_deps_attr = attr.label(
+    doc = "Target providing native Apple dependencies for this plugin spoke, " +
+          "from `flutter.pub(ios_plugin_deps = ...)`. When set, replaces " +
+          "reading the plugin's lock entry, podspec or Package.swift.",
+    default = None,
+)
+
 def pub_spoke_swiftpm_rule_attrs(attrs):
     """Add the SwiftPM file labels every pub-spoke repository rule declares.
 
@@ -811,19 +818,21 @@ def pub_spoke_swiftpm_rule_attrs(attrs):
         attrs: The rule's own attribute dict.
 
     Returns:
-        The same dict with `package_resolved`, `package_sha256` and
-        `ios_native_deps` added.
+        The same dict with `package_resolved`, `package_sha256`,
+        `ios_native_deps` and `plugin_native_deps` added.
     """
     attrs["package_resolved"] = pub_spoke_package_resolved_attr
     attrs["package_sha256"] = pub_spoke_package_sha256_attr
     attrs["ios_native_deps"] = pub_spoke_ios_native_deps_attr
+    attrs["plugin_native_deps"] = pub_spoke_plugin_native_deps_attr
     return attrs
 
-def pub_spoke_swiftpm_attrs(pub_tag, include_ios_native_deps = False):
+def pub_spoke_swiftpm_attrs(pub_tag, include_ios_native_deps = False, plugin_name = ""):
     """The SwiftPM repository arguments every pub spoke receives.
 
     A pub spoke gets constant labels: the hub's resolved file and checksum
-    table, plus the hub's iOS native-deps map when the caller asks for it.
+    table, plus the hub's iOS native-deps map when the caller asks for it,
+    and the plugin's own mapped native dependencies when set.
     None of the values is the pin list or the map itself, and all are
     read only if the package ships a `Package.swift` (the map only when
     it also has a product dependency). Pure-Dart spokes therefore keep
@@ -836,28 +845,35 @@ def pub_spoke_swiftpm_attrs(pub_tag, include_ios_native_deps = False):
             `ios_native_deps.json` label. The extension passes True for
             every pub spoke; a tag that itself declares
             `swift_package_product_deps` also gets it.
+        plugin_name: The pub package name to look up in `ios_plugin_deps`.
 
     Returns:
-        `struct(package_resolved, package_sha256[, ios_native_deps])`:
-        the resolved label, the checksum-file label, and the
-        native-deps-file label when requested. Each is None when unset;
-        the native-deps label is constant for every spoke of a named hub.
+        `struct(package_resolved, package_sha256[, ios_native_deps][, plugin_deps])`:
+        the resolved label, the checksum-file label, the native-deps-file label
+        when requested, and the plugin's mapped native dependency label.
     """
     resolved = pub_tag.swift_package_resolved
     hub_name = getattr(pub_tag, "name", "")
     include_native_deps = include_ios_native_deps or hasattr(pub_tag, "swift_package_product_deps")
+    has_plugin_deps = plugin_name != "" or hasattr(pub_tag, "ios_plugin_deps") or include_native_deps
+    plugin_deps_dict = getattr(pub_tag, "ios_plugin_deps", {}) if hasattr(pub_tag, "ios_plugin_deps") else {}
+    plugin_deps = plugin_deps_dict.get(plugin_name) if plugin_deps_dict and plugin_name else None
+
     if not hub_name:
+        fields = {"package_resolved": resolved, "package_sha256": None}
         if include_native_deps:
-            return struct(package_resolved = resolved, package_sha256 = None, ios_native_deps = None)
-        return struct(package_resolved = resolved, package_sha256 = None)
+            fields["ios_native_deps"] = None
+        if has_plugin_deps:
+            fields["plugin_deps"] = plugin_deps
+        return struct(**fields)
+
     sha256 = ("@%s//:swift_package_sha256.json" % hub_name) if resolved != None else None
+    fields = {"package_resolved": resolved, "package_sha256": sha256}
     if include_native_deps:
-        return struct(
-            package_resolved = resolved,
-            package_sha256 = sha256,
-            ios_native_deps = "@%s//:ios_native_deps.json" % hub_name,
-        )
-    return struct(package_resolved = resolved, package_sha256 = sha256)
+        fields["ios_native_deps"] = "@%s//:ios_native_deps.json" % hub_name
+    if has_plugin_deps:
+        fields["plugin_deps"] = plugin_deps
+    return struct(**fields)
 
 def swiftpm_spoke_attrs(hub_name, pin, classified, build_file):
     """The repository arguments one SwiftPM spoke receives.
