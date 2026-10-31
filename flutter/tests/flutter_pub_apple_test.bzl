@@ -28,6 +28,8 @@ _BIGINT_RESOLVED = """{
 }
 """
 
+_BIGINT_MAP_HINT = ' Map it with flutter.pub(swift_package_product_deps = {"bigint:BigInt": "<label>"}).'
+
 _BIGINT_MANIFEST = """// swift-tools-version: 5.9
 import PackageDescription
 
@@ -518,7 +520,133 @@ def _plugin_defines_render_on_both_backends_test_impl(ctx):
     asserts.equals(env, base, apple_plugin_targets("spm_bigint_plugin", srcs_dirs, [], "ios"))
     return unittest.end(env)
 
+def _mapped_product_resolves_without_pins_test_impl(ctx):
+    env = unittest.begin(ctx)
+    mapped = select_apple_swiftpm_deps(
+        "spm_bigint_plugin",
+        _BIGINT_MANIFEST,
+        "ios/spm_bigint_plugin",
+        ["ios/spm_bigint_plugin/Sources/spm_bigint_plugin"],
+        "ios",
+        _pins(resolved = ""),
+        {"bigint:BigInt": "//:bigint_group"},
+    )
+    asserts.true(env, mapped.ok)
+    asserts.equals(env, ["//:bigint_group"], mapped.labels)
+
+    # A resolved file that does not pin the package cannot override the map.
+    mapped_over_unpinned = select_apple_swiftpm_deps(
+        "spm_bigint_plugin",
+        _BIGINT_MANIFEST,
+        "ios/spm_bigint_plugin",
+        ["ios/spm_bigint_plugin/Sources/spm_bigint_plugin"],
+        "ios",
+        _pins(pinned = []),
+        {"bigint:BigInt": "//:bigint_group"},
+    )
+    asserts.true(env, mapped_over_unpinned.ok)
+    asserts.equals(env, ["//:bigint_group"], mapped_over_unpinned.labels)
+    return unittest.end(env)
+
+def _unmapped_product_without_resolved_keeps_refusal_test_impl(ctx):
+    env = unittest.begin(ctx)
+    selected = select_apple_swiftpm_deps(
+        "spm_bigint_plugin",
+        _BIGINT_MANIFEST,
+        "ios/spm_bigint_plugin",
+        ["ios/spm_bigint_plugin/Sources/spm_bigint_plugin"],
+        "ios",
+        _pins(resolved = ""),
+    )
+    asserts.true(env, not selected.ok)
+    asserts.true(env, "swift_package_resolved" in selected.error)
+    asserts.true(env, selected.error.endswith(_BIGINT_MAP_HINT))
+    return unittest.end(env)
+
+def _unpinned_product_gains_the_mapping_hint_test_impl(ctx):
+    env = unittest.begin(ctx)
+    selected = select_apple_swiftpm_deps(
+        "spm_bigint_plugin",
+        _BIGINT_MANIFEST,
+        "ios/spm_bigint_plugin",
+        ["ios/spm_bigint_plugin/Sources/spm_bigint_plugin"],
+        "ios",
+        _pins(pinned = []),
+    )
+    asserts.true(env, not selected.ok)
+    asserts.true(env, "Package.resolved" in selected.error)
+    asserts.true(env, selected.error.endswith(_BIGINT_MAP_HINT))
+    return unittest.end(env)
+
+def _conditioned_out_product_is_not_mapped_test_impl(ctx):
+    env = unittest.begin(ctx)
+    selected = select_apple_swiftpm_deps(
+        "spm_bigint_plugin",
+        _CONDITIONED_MANIFEST,
+        "ios/spm_bigint_plugin",
+        ["ios/spm_bigint_plugin/Sources/spm_bigint_plugin"],
+        "ios",
+        _pins(pinned = ["bigint"]),
+        {"maconly:MacOnly": "//:mac_group"},
+    )
+    asserts.true(env, selected.ok)
+    asserts.equals(env, ["@deps__swiftpm-bigint//:BigInt"], selected.labels)
+    return unittest.end(env)
+
+def _mapping_identity_case_insensitive_product_exact_test_impl(ctx):
+    env = unittest.begin(ctx)
+    mapped = select_apple_swiftpm_deps(
+        "spm_bigint_plugin",
+        _BIGINT_MANIFEST,
+        "ios/spm_bigint_plugin",
+        ["ios/spm_bigint_plugin/Sources/spm_bigint_plugin"],
+        "ios",
+        _pins(resolved = ""),
+        {"BigInt:BigInt": "//:bigint_group"},
+    )
+    asserts.true(env, mapped.ok)
+    asserts.equals(env, ["//:bigint_group"], mapped.labels)
+
+    wrong_product_case = select_apple_swiftpm_deps(
+        "spm_bigint_plugin",
+        _BIGINT_MANIFEST,
+        "ios/spm_bigint_plugin",
+        ["ios/spm_bigint_plugin/Sources/spm_bigint_plugin"],
+        "ios",
+        _pins(resolved = ""),
+        {"bigint:BIGINT": "//:bigint_group"},
+    )
+    asserts.true(env, not wrong_product_case.ok)
+    asserts.true(env, wrong_product_case.error.endswith(_BIGINT_MAP_HINT))
+    return unittest.end(env)
+
+def _unfetchable_pin_keeps_reason_without_hint_test_impl(ctx):
+    env = unittest.begin(ctx)
+    reason = "deps__swiftpm-bigint: SwiftPM package \"bigint\" cannot be fetched: test reason."
+    selected = select_apple_swiftpm_deps(
+        "spm_bigint_plugin",
+        _BIGINT_MANIFEST,
+        "ios/spm_bigint_plugin",
+        ["ios/spm_bigint_plugin/Sources/spm_bigint_plugin"],
+        "ios",
+        _pins(unpinned = {"bigint": reason}),
+    )
+    asserts.true(env, not selected.ok)
+    asserts.true(env, reason in selected.error)
+    asserts.true(env, "Map it with" not in selected.error)
+    return unittest.end(env)
+
 _products_resolve_to_pinned_labels_test = unittest.make(_products_resolve_to_pinned_labels_test_impl)
+_mapped_product_resolves_without_pins_test = unittest.make(_mapped_product_resolves_without_pins_test_impl)
+_unmapped_product_without_resolved_keeps_refusal_test = unittest.make(
+    _unmapped_product_without_resolved_keeps_refusal_test_impl,
+)
+_unpinned_product_gains_the_mapping_hint_test = unittest.make(_unpinned_product_gains_the_mapping_hint_test_impl)
+_conditioned_out_product_is_not_mapped_test = unittest.make(_conditioned_out_product_is_not_mapped_test_impl)
+_mapping_identity_case_insensitive_product_exact_test = unittest.make(
+    _mapping_identity_case_insensitive_product_exact_test_impl,
+)
+_unfetchable_pin_keeps_reason_without_hint_test = unittest.make(_unfetchable_pin_keeps_reason_without_hint_test_impl)
 _conditions_filter_per_platform_test = unittest.make(_conditions_filter_per_platform_test_impl)
 _flutterframework_product_is_skipped_test = unittest.make(_flutterframework_product_is_skipped_test_impl)
 _template_manifest_builds_without_link_test = unittest.make(_template_manifest_builds_without_link_test_impl)
@@ -543,6 +671,12 @@ def flutter_pub_apple_test_suite(name):
     unittest.suite(
         name + "_unit",
         _products_resolve_to_pinned_labels_test,
+        _mapped_product_resolves_without_pins_test,
+        _unmapped_product_without_resolved_keeps_refusal_test,
+        _unpinned_product_gains_the_mapping_hint_test,
+        _conditioned_out_product_is_not_mapped_test,
+        _mapping_identity_case_insensitive_product_exact_test,
+        _unfetchable_pin_keeps_reason_without_hint_test,
         _conditions_filter_per_platform_test,
         _flutterframework_product_is_skipped_test,
         _template_manifest_builds_without_link_test,

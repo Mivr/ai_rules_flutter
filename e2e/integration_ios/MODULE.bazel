@@ -45,6 +45,18 @@ flutter.pub(
     },
 )
 
+# Mapped twin of `deps`: the same lock, no resolved file and no sha256 at all.
+# Its BigInt product comes from `//:bigint_product`, the Bazel target that
+# already builds the product, so no pin or checksum can supply it.
+flutter.pub(
+    name = "deps_mapped",
+    ios_plugin_defines = {"spm_bigint_plugin": ["PLUGIN_FLAG"]},
+    lock = "//:pubspec.lock",
+    swift_package_product_deps = {
+        "bigint:BigInt": "//:bigint_product",
+    },
+)
+
 # Red-path twin of `deps`: the same lock and resolved file but no sha256, so
 # `@deps_unpinned__swiftpm-bigint` fails at fetch time. The full.yaml
 # integration_ios leg queries it and asserts the failure.
@@ -53,6 +65,42 @@ flutter.pub(
     lock = "//:pubspec.lock",
     swift_package_resolved = "//ios/Runner.xcworkspace/xcshareddata/swiftpm:Package.resolved",
 )
-use_repo(flutter, "deps", "deps__spm_bigint_plugin", "deps__spm_graph_plugin", "deps__swiftpm-bigint", "deps__swiftpm-swift-algorithms", "deps__swiftpm-swift-numerics", "deps_unpinned", "deps_unpinned__spm_bigint_plugin", "deps_unpinned__spm_graph_plugin", "deps_unpinned__swiftpm-bigint", "deps_unpinned__swiftpm-swift-algorithms", "deps_unpinned__swiftpm-swift-numerics", "flutter_ios_engine", "flutter_toolchains")
+use_repo(flutter, "deps", "deps__spm_bigint_plugin", "deps__spm_graph_plugin", "deps__swiftpm-bigint", "deps__swiftpm-swift-algorithms", "deps__swiftpm-swift-numerics", "deps_mapped", "deps_mapped__spm_bigint_plugin", "deps_unpinned", "deps_unpinned__spm_bigint_plugin", "deps_unpinned__spm_graph_plugin", "deps_unpinned__swiftpm-bigint", "deps_unpinned__swiftpm-swift-algorithms", "deps_unpinned__swiftpm-swift-numerics", "flutter_ios_engine", "flutter_toolchains")
 
 register_toolchains("@flutter_toolchains//:all")
+
+# The greeting plugin on the mapped hub: the same Dart code and iOS Swift
+# source as `//ios_greeting_plugin`, but every Flutter package comes from
+# `deps_mapped`. That keeps the app, the greeting plugin and
+# `spm_bigint_plugin` on one hub, so their Flutter SDK assets do not collide.
+new_local_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:local.bzl", "new_local_repository")
+
+new_local_repository(
+    name = "mapped_greeting_plugin",
+    build_file_content = """load("@rules_flutter//flutter:defs.bzl", "flutter_plugin")
+load("@rules_flutter//flutter:macos.bzl", "flutter_apple_plugin_library")
+
+flutter_apple_plugin_library(
+    name = "ios_greeting_plugin_apple_ios",
+    srcs = ["ios/Classes/IosGreetingPlugin.swift"],
+    module_name = "ios_greeting_plugin",
+    platform = "ios",
+    visibility = ["//visibility:public"],
+)
+
+flutter_plugin(
+    name = "ios_greeting_plugin",
+    package_name = "ios_greeting_plugin",
+    srcs = ["lib/ios_greeting_plugin.dart"],
+    apple_libs = select({
+        "@platforms//os:ios": [":ios_greeting_plugin_apple_ios"],
+        "//conditions:default": [],
+    }),
+    platforms = ["ios"],
+    plugin_class = "IosGreetingPlugin",
+    visibility = ["//visibility:public"],
+    deps = ["@deps_mapped//:flutter"],
+)
+""",
+    path = "ios_greeting_plugin",
+)

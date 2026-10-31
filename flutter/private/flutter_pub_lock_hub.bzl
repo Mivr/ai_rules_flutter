@@ -4,7 +4,8 @@ Mirrors `rules_dart//dart/pub:pub_lock_hub.bzl`'s top-level alias
 structure (`@<hub>//:pkg` → `@<hub>__<pkg>//:<pkg>`) and additionally
 emits an `android/BUILD.bazel` containing the
 `all_android_plugin_libs` aggregator, plus
-`swift_package_sha256.json` with the hub's SwiftPM checksum table. The
+`swift_package_sha256.json` with the hub's SwiftPM checksum table and
+`ios_native_deps.json` with the hub's SwiftPM product mapping. The
 aggregator is a `kt_android_library` whose deps are every spoke's
 `android:lib` target (see `flutter_pub_package`'s
 `make_android_subpackage_build_content`). A plugin pub spoke reads the
@@ -33,6 +34,21 @@ def _flutter_pub_lock_hub_impl(ctx):
     # file (and only this file) after it finds its own `Package.swift`, so
     # the checksum table never reaches a pure-Dart spoke's attributes.
     ctx.file("swift_package_sha256.json", json.encode(ctx.attr.swift_package_sha256))
+
+    # SwiftPM product mappings for the pub spokes. Each label is already
+    # canonical (the extension serialised it from the module that wrote the
+    # tag), so a spoke's generated BUILD file can name it directly. Keys are
+    # inserted sorted so the file is deterministic.
+    product_deps = {}
+    for key in sorted(ctx.attr.swift_package_product_deps):
+        product_deps[key] = ctx.attr.swift_package_product_deps[key]
+    ctx.file(
+        "ios_native_deps.json",
+        json.encode({
+            "version": 1,
+            "swift_package_product_deps": product_deps,
+        }),
+    )
 
     # Top-level aliases — same shape as rules_dart's pub_lock_hub.
     aliases = []
@@ -106,6 +122,14 @@ flutter_pub_lock_hub = repository_rule(
                   "`swift_package_sha256.json` for a plugin spoke that links " +
                   "a SwiftPM pin. Reading is lazy: a pure-Dart spoke never " +
                   "reads the file, so its marker stays independent of it.",
+            default = {},
+        ),
+        "swift_package_product_deps": attr.string_dict(
+            doc = "Canonical labels for the hub's `swift_package_product_deps` " +
+                  "map, written to `ios_native_deps.json` for a plugin spoke " +
+                  "that links a SwiftPM product. Reading is lazy: a spoke " +
+                  "without a product dependency never reads the file, so its " +
+                  "marker stays independent of it.",
             default = {},
         ),
     },

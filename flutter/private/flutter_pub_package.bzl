@@ -87,7 +87,7 @@ load(
     _gradle_parse_gradle_android_namespace = "parse_gradle_android_namespace",
 )
 load(":starlark_literal.bzl", "check_spoke_file_name", "decode_starlark_escapes", "starlark_string_literal")
-load(":swiftpm_resolved.bzl", "pub_spoke_package_resolved_attr", "pub_spoke_package_sha256_attr")
+load(":swiftpm_resolved.bzl", "pub_spoke_swiftpm_rule_attrs")
 
 def parse_gradle_android_namespace(content, language = "groovy"):
     """Extract `android.namespace` from a Gradle build script.
@@ -2302,7 +2302,7 @@ flutter_test_package = rule(
 
 flutter_pub_package = repository_rule(
     implementation = _flutter_pub_package_impl,
-    attrs = dict({
+    attrs = dict(pub_spoke_swiftpm_rule_attrs({
         "package_name": attr.string(
             doc = "The pub.dev package name.",
             mandatory = True,
@@ -2347,8 +2347,6 @@ flutter_pub_package = repository_rule(
         ),
         "android_maven_deps": _maven_deps_attr,
         "android_maven_ignore": _maven_ignore_attr,
-        "package_resolved": pub_spoke_package_resolved_attr,
-        "package_sha256": pub_spoke_package_sha256_attr,
         "overlay_roots": attr.label_list(
             doc = "BUILD.bazel anchors for overlay trees. Each label points at " +
                   "an `ext/BUILD.bazel` (or equivalent) that anchors a directory " +
@@ -2359,13 +2357,13 @@ flutter_pub_package = repository_rule(
             allow_files = True,
             default = [],
         ),
-    }, pubspec_lock = attr.label(doc = "Hub `pubspec.lock` label.", allow_single_file = True, default = None)),
+    }), pubspec_lock = attr.label(doc = "Hub `pubspec.lock` label.", allow_single_file = True, default = None)),
     doc = "Downloads a single Flutter pub package and emits a `flutter_plugin` (when `flutter.plugin` is present) or a plain `dart_library` (otherwise). When Apple sources are detected, also emits per-platform `flutter_apple_plugin_library` sub-targets. Honors per-package overlay BUILD.bazel.tpl overrides under `overlay_roots`. The `flutter pub get` analog of `pub_lock_package`.",
 )
 
 flutter_pub_path_package = repository_rule(
     implementation = _flutter_pub_path_package_impl,
-    attrs = dict({
+    attrs = dict(pub_spoke_swiftpm_rule_attrs({
         "package_name": attr.string(
             doc = "The pub package name.",
             mandatory = True,
@@ -2401,14 +2399,12 @@ flutter_pub_path_package = repository_rule(
         ),
         "android_maven_deps": _maven_deps_attr,
         "android_maven_ignore": _maven_ignore_attr,
-        "package_resolved": pub_spoke_package_resolved_attr,
-        "package_sha256": pub_spoke_package_sha256_attr,
         "overlay_roots": attr.label_list(
             doc = "BUILD.bazel anchors for overlay trees, same as " +
                   "`flutter_pub_package`.",
             allow_files = True,
             default = [],
         ),
-    }, pubspec_lock = attr.label(doc = "Hub `pubspec.lock` label.", allow_single_file = True, default = None)),
+    }), pubspec_lock = attr.label(doc = "Hub `pubspec.lock` label.", allow_single_file = True, default = None)),
     doc = "Symlinks a workspace-local `path:` pub package into a spoke and emits the same `flutter_plugin` / `flutter_library` / `dart_library` the hosted rule would. The `flutter pub get` analog for path dependencies: hermetic (workspace-relative only, watched for changes) and fail-closed on anything resolving outside the workspace's real root; the package's pubspec `name` and `version` must match the lock entry, since overlays and code assets are selected by lock name and version.",
 )
