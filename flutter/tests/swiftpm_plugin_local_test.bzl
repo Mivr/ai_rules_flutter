@@ -1,6 +1,16 @@
 """Unit tests for a plugin manifest's local (same-package) targets."""
 
-load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
+load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
+load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
+load("@rules_cc//cc/common:objc_info.bzl", "ObjcInfo")
+load("@rules_swift//swift:swift.bzl", "SwiftInfo")
+load("//flutter:providers.bzl", "FlutterApplePluginInfo")
+load(
+    "//flutter/private:flutter_apple_plugin_library.bzl",
+    "flutter_apple_plugin_library",
+    "flutter_apple_plugin_objc_library",
+)
 load("//flutter/private:flutter_pub_apple.bzl", "apple_plugin_targets")
 load(
     "//flutter/private:flutter_pub_apple_local.bzl",
@@ -432,6 +442,351 @@ _binary_target_refusal_test = unittest.make(_binary_target_refusal_test_impl)
 _parser_keeps_target_settings_test = unittest.make(_parser_keeps_target_settings_test_impl)
 _parser_skips_untranslated_args_test = unittest.make(_parser_skips_untranslated_args_test_impl)
 
+def _apple_test_config_settings(platform):
+    """Config settings that analyze an Apple target off macOS."""
+    return {
+        "//command_line_option:extra_execution_platforms": [str(Label("//flutter/platforms:macos_arm64"))],
+        "//command_line_option:platforms": str(Label("//flutter/platforms:%s_arm64" % platform)),
+        "//command_line_option:xcode_version_config": str(Label("//flutter/tests:ios_test_fake_xcode_config")),
+        str(Label("//flutter:profile")): False,
+    }
+
+def _spm_objc_module_test_impl(ctx):
+    """Asserts provider presence, Clang module name, modulemap, and public headers."""
+    env = analysistest.begin(ctx)
+    tut = analysistest.target_under_test(env)
+
+    asserts.true(env, CcInfo in tut, "Expected CcInfo on %s" % tut.label)
+    asserts.true(env, ObjcInfo in tut, "Expected ObjcInfo on %s" % tut.label)
+    asserts.true(env, SwiftInfo in tut, "Expected SwiftInfo on %s" % tut.label)
+    asserts.true(
+        env,
+        FlutterApplePluginInfo in tut,
+        "Expected FlutterApplePluginInfo on %s" % tut.label,
+    )
+
+    if SwiftInfo not in tut:
+        return analysistest.end(env)
+
+    matching = [
+        m
+        for m in tut[SwiftInfo].direct_modules
+        if m.name == ctx.attr.expected_module_name and m.clang != None
+    ]
+    asserts.equals(
+        env,
+        1,
+        len(matching),
+        "Expected one Clang module '%s' in direct_modules, got: %s" % (
+            ctx.attr.expected_module_name,
+            [m.name for m in tut[SwiftInfo].direct_modules],
+        ),
+    )
+    if matching:
+        clang = matching[0].clang
+        asserts.true(env, clang.module_map != None, "Expected non-None module_map")
+        if clang.module_map != None:
+            map_path = clang.module_map.path if hasattr(clang.module_map, "path") else str(clang.module_map)
+            asserts.true(
+                env,
+                map_path.endswith("module.modulemap"),
+                "Expected module_map ending in 'module.modulemap', got %s" % map_path,
+            )
+        headers = [h.basename for h in clang.compilation_context.headers.to_list()]
+        asserts.true(
+            env,
+            ctx.attr.expected_header_basename in headers,
+            "Expected '%s' in Clang compilation_context headers, got: %s" % (
+                ctx.attr.expected_header_basename,
+                headers,
+            ),
+        )
+    return analysistest.end(env)
+
+def _spm_swift_consumer_test_impl(ctx):
+    """Asserts transitive Clang module and SwiftCompile modulemap + header inputs."""
+    env = analysistest.begin(ctx)
+    tut = analysistest.target_under_test(env)
+
+    asserts.true(env, SwiftInfo in tut, "Expected SwiftInfo on %s" % tut.label)
+    if SwiftInfo in tut:
+        transitive_clang_names = [
+            m.name
+            for m in tut[SwiftInfo].transitive_modules.to_list()
+            if m.clang != None
+        ]
+        asserts.true(
+            env,
+            ctx.attr.expected_module_name in transitive_clang_names,
+            "Expected '%s' in transitive Clang modules, got: %s" % (
+                ctx.attr.expected_module_name,
+                transitive_clang_names,
+            ),
+        )
+
+    compile_actions = [
+        a
+        for a in analysistest.target_actions(env)
+        if a.mnemonic == "SwiftCompile"
+    ]
+    asserts.true(env, bool(compile_actions), "Expected a SwiftCompile action on %s" % tut.label)
+    if compile_actions:
+        input_basenames = [f.basename for f in compile_actions[0].inputs.to_list()]
+        asserts.true(
+            env,
+            "module.modulemap" in input_basenames,
+            "Expected 'module.modulemap' in SwiftCompile action inputs, got: %s" % input_basenames,
+        )
+        asserts.true(
+            env,
+            ctx.attr.expected_header_basename in input_basenames,
+            "Expected '%s' in SwiftCompile action inputs, got: %s" % (
+                ctx.attr.expected_header_basename,
+                input_basenames,
+            ),
+        )
+    return analysistest.end(env)
+
+def _spm_headerless_objc_test_impl(ctx):
+    """Asserts headerless ObjC target provides providers and no direct Clang module."""
+    env = analysistest.begin(ctx)
+    tut = analysistest.target_under_test(env)
+
+    asserts.true(env, CcInfo in tut, "Expected CcInfo on %s" % tut.label)
+    asserts.true(env, ObjcInfo in tut, "Expected ObjcInfo on %s" % tut.label)
+    asserts.true(env, SwiftInfo in tut, "Expected SwiftInfo on %s" % tut.label)
+    asserts.true(
+        env,
+        FlutterApplePluginInfo in tut,
+        "Expected FlutterApplePluginInfo on %s" % tut.label,
+    )
+
+    if SwiftInfo in tut:
+        direct_clang = [m for m in tut[SwiftInfo].direct_modules if m.clang != None]
+        asserts.equals(
+            env,
+            [],
+            direct_clang,
+            "Expected no direct Clang module for headerless ObjC target, got: %s" % [
+                m.name
+                for m in direct_clang
+            ],
+        )
+    return analysistest.end(env)
+
+def _spm_mixed_plugin_test_impl(ctx):
+    """Asserts mixed plugin direct_modules and no duplicate synthesized Clang module."""
+    env = analysistest.begin(ctx)
+    tut = analysistest.target_under_test(env)
+
+    asserts.true(env, SwiftInfo in tut, "Expected SwiftInfo on %s" % tut.label)
+    if SwiftInfo in tut:
+        direct_names = [m.name for m in tut[SwiftInfo].direct_modules]
+        asserts.equals(
+            env,
+            [ctx.attr.expected_mixed_module],
+            direct_names,
+            "Expected direct_modules to equal [%s], got: %s" % (
+                ctx.attr.expected_mixed_module,
+                direct_names,
+            ),
+        )
+        objc_target_name = "_" + tut.label.name + "__objc"
+        for m in tut[SwiftInfo].transitive_modules.to_list():
+            if m.clang != None:
+                asserts.true(
+                    env,
+                    m.name != objc_target_name and not m.name.endswith("__objc"),
+                    "Transitive Clang module unexpectedly synthesized from %s: %s" % (
+                        objc_target_name,
+                        m.name,
+                    ),
+                )
+    return analysistest.end(env)
+
+_ios_spm_objc_module_test = analysistest.make(
+    _spm_objc_module_test_impl,
+    attrs = {
+        "expected_header_basename": attr.string(mandatory = True),
+        "expected_module_name": attr.string(mandatory = True),
+    },
+    config_settings = _apple_test_config_settings("ios"),
+)
+
+_macos_spm_objc_module_test = analysistest.make(
+    _spm_objc_module_test_impl,
+    attrs = {
+        "expected_header_basename": attr.string(mandatory = True),
+        "expected_module_name": attr.string(mandatory = True),
+    },
+    config_settings = _apple_test_config_settings("macos"),
+)
+
+_ios_spm_swift_consumer_test = analysistest.make(
+    _spm_swift_consumer_test_impl,
+    attrs = {
+        "expected_header_basename": attr.string(mandatory = True),
+        "expected_module_name": attr.string(mandatory = True),
+    },
+    config_settings = _apple_test_config_settings("ios"),
+)
+
+_macos_spm_swift_consumer_test = analysistest.make(
+    _spm_swift_consumer_test_impl,
+    attrs = {
+        "expected_header_basename": attr.string(mandatory = True),
+        "expected_module_name": attr.string(mandatory = True),
+    },
+    config_settings = _apple_test_config_settings("macos"),
+)
+
+_ios_spm_headerless_objc_test = analysistest.make(
+    _spm_headerless_objc_test_impl,
+    config_settings = _apple_test_config_settings("ios"),
+)
+
+_ios_spm_mixed_plugin_test = analysistest.make(
+    _spm_mixed_plugin_test_impl,
+    attrs = {
+        "expected_mixed_module": attr.string(mandatory = True),
+    },
+    config_settings = _apple_test_config_settings("ios"),
+)
+
+def _register_spm_fixture_files(name):
+    """Writes source and header fixtures for SPM plugin analysis tests."""
+    hdr_file = name + "_spm_objc_plugin_value.h"
+    objc_src = name + "_spm_objc_plugin_value.m"
+    swift_src = name + "_spm_objc_swift_plugin.swift"
+    headerless_src = name + "_spm_headerless.m"
+    mixed_swift_src = name + "_spm_mixed.swift"
+    mixed_objc_src = name + "_spm_mixed.m"
+    mixed_hdr_src = name + "_spm_mixed.h"
+
+    write_file(
+        name = name + "_spm_objc_hdr_file",
+        out = hdr_file,
+        content = ["#pragma once", "int spm_answer(void);"],
+    )
+    write_file(
+        name = name + "_spm_objc_src_file",
+        out = objc_src,
+        content = ["#include \"" + hdr_file + "\"", "int spm_answer(void) { return 42; }"],
+    )
+    write_file(
+        name = name + "_spm_swift_src_file",
+        out = swift_src,
+        content = [
+            "import Flutter",
+            "import spm_objc_plugin_objc",
+            "public class SpmSwiftPlugin: NSObject {}",
+        ],
+    )
+    write_file(
+        name = name + "_spm_headerless_src_file",
+        out = headerless_src,
+        content = ["int headerless_value(void) { return 1; }"],
+    )
+    write_file(
+        name = name + "_spm_mixed_swift_src_file",
+        out = mixed_swift_src,
+        content = ["import Flutter", "public class SpmMixedPlugin: NSObject {}"],
+    )
+    write_file(
+        name = name + "_spm_mixed_objc_src_file",
+        out = mixed_objc_src,
+        content = ["#import \"" + mixed_hdr_src + "\"", "int mixed_func(void) { return 3; }"],
+    )
+    write_file(
+        name = name + "_spm_mixed_hdr_src_file",
+        out = mixed_hdr_src,
+        content = ["#pragma once"],
+    )
+
+    return struct(
+        hdr_file = hdr_file,
+        headerless_src = headerless_src,
+        mixed_hdr_src = mixed_hdr_src,
+        mixed_objc_src = mixed_objc_src,
+        mixed_swift_src = mixed_swift_src,
+        objc_src = objc_src,
+        swift_src = swift_src,
+    )
+
+def _register_spm_plugin_analysis_tests(name):
+    """Instantiate Apple analysis fixtures and test targets for local SPM packages."""
+    files = _register_spm_fixture_files(name)
+    tests = []
+    for platform, objc_test, consumer_test in [
+        ("ios", _ios_spm_objc_module_test, _ios_spm_swift_consumer_test),
+        ("macos", _macos_spm_objc_module_test, _macos_spm_swift_consumer_test),
+    ]:
+        objc_target = "%s_%s_spm_objc_plugin_objc" % (name, platform)
+        swift_target = "%s_%s_spm_objc_plugin_swift" % (name, platform)
+        objc_test_name = "%s_%s_objc_module_test" % (name, platform)
+        consumer_test_name = "%s_%s_swift_consumer_test" % (name, platform)
+
+        flutter_apple_plugin_objc_library(
+            name = objc_target,
+            hdrs = [":" + files.hdr_file],
+            module_name = "spm_objc_plugin_objc",
+            platform = platform,
+            srcs = [":" + files.objc_src],
+        )
+        flutter_apple_plugin_library(
+            name = swift_target,
+            deps = [":" + objc_target],
+            module_name = "spm_objc_plugin",
+            platform = platform,
+            srcs = [":" + files.swift_src],
+            tags = ["manual"],
+        )
+        objc_test(
+            name = objc_test_name,
+            expected_header_basename = files.hdr_file,
+            expected_module_name = "spm_objc_plugin_objc",
+            target_under_test = ":" + objc_target,
+        )
+        consumer_test(
+            name = consumer_test_name,
+            expected_header_basename = files.hdr_file,
+            expected_module_name = "spm_objc_plugin_objc",
+            target_under_test = ":" + swift_target,
+        )
+        tests.extend([":" + objc_test_name, ":" + consumer_test_name])
+
+    headerless_target = name + "_headerless_spm_objc"
+    headerless_test_name = name + "_headerless_objc_test"
+    flutter_apple_plugin_objc_library(
+        name = headerless_target,
+        hdrs = [],
+        module_name = "spm_headerless_objc",
+        platform = "ios",
+        srcs = [":" + files.headerless_src],
+    )
+    _ios_spm_headerless_objc_test(
+        name = headerless_test_name,
+        target_under_test = ":" + headerless_target,
+    )
+    tests.append(":" + headerless_test_name)
+
+    mixed_target = name + "_mixed_spm_plugin"
+    mixed_test_name = name + "_mixed_plugin_test"
+    flutter_apple_plugin_library(
+        name = mixed_target,
+        module_name = "spm_mixed_plugin",
+        platform = "ios",
+        srcs = [":" + files.mixed_swift_src, ":" + files.mixed_objc_src, ":" + files.mixed_hdr_src],
+        tags = ["manual"],
+    )
+    _ios_spm_mixed_plugin_test(
+        name = mixed_test_name,
+        expected_mixed_module = "spm_mixed_plugin",
+        target_under_test = ":" + mixed_target,
+    )
+    tests.append(":" + mixed_test_name)
+    return tests
+
 def swiftpm_plugin_local_test_suite(name):
     """Registers the plugin-local target unit tests."""
     unittest.suite(
@@ -451,7 +806,8 @@ def swiftpm_plugin_local_test_suite(name):
         _binary_dependency_refusal_test,
         _xtool_appends_local_files_test,
     )
+    analysis_tests = _register_spm_plugin_analysis_tests(name)
     native.test_suite(
         name = name,
-        tests = [":" + name + "_unit"],
+        tests = [":" + name + "_unit"] + analysis_tests,
     )

@@ -653,7 +653,7 @@ def flutter_apple_plugin_objc_library(
     )
     _flutter_apple_plugin_bundle(
         name = name,
-        deps = [":_%s__objc" % name],
+        clang_module_deps = [":_%s__objc" % name],
         module_name = module_name,
         platform = platform,
         swift_srcs = [],

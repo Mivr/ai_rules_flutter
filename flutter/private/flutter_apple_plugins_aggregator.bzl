@@ -5,7 +5,8 @@ runner's swift_library or xtool runner compilation can depend on it.
 
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
-load("@rules_swift//swift:swift.bzl", "SwiftInfo")
+load("@rules_cc//cc/common:objc_info.bzl", "ObjcInfo", "new_objc_provider")
+load("@rules_swift//swift:swift.bzl", "SwiftInfo", "swift_clang_module_aspect")
 load("//flutter:providers.bzl", "FlutterApplePluginInfo", "FlutterApplicationInfo")
 
 def _append_unique(acc, values):
@@ -93,11 +94,14 @@ flutter_apple_plugins_aggregator = rule(
 def _flutter_apple_plugin_bundle_impl(ctx):
     """Merge the Swift and ObjC halves into the public plugin target."""
     cc_infos = []
+    objc_infos = []
     swift_infos = []
     dep_files = []
-    for dep in ctx.attr.deps:
+    for dep in ctx.attr.deps + ctx.attr.clang_module_deps:
         if CcInfo in dep:
             cc_infos.append(dep[CcInfo])
+        if ObjcInfo in dep:
+            objc_infos.append(dep[ObjcInfo])
         if SwiftInfo in dep:
             swift_infos.append(dep[SwiftInfo])
         dep_files.append(dep[DefaultInfo].files)
@@ -105,7 +109,8 @@ def _flutter_apple_plugin_bundle_impl(ctx):
     return [
         DefaultInfo(files = depset(transitive = dep_files)),
         cc_common.merge_cc_infos(cc_infos = cc_infos),
-        SwiftInfo(swift_infos = swift_infos),
+        new_objc_provider(providers = objc_infos),
+        SwiftInfo(direct_swift_infos = swift_infos),
         FlutterApplePluginInfo(
             module_name = ctx.attr.module_name,
             platform = ctx.attr.platform,
@@ -121,50 +126,56 @@ def _flutter_apple_plugin_bundle_impl(ctx):
 flutter_apple_plugin_bundle = rule(
     implementation = _flutter_apple_plugin_bundle_impl,
     attrs = {
+        "clang_module_deps": attr.label_list(
+            aspects = [swift_clang_module_aspect],
+            default = [],
+            doc = "C-family dependencies whose Clang module SwiftInfo must be synthesized.",
+        ),
         "deps": attr.label_list(
             default = [],
             doc = "The Swift library and the ObjC implementation library to merge.",
-        ),
-        "module_name": attr.string(
-            default = "",
-            doc = "Swift/Clang module name reported to FlutterApplePluginInfo.",
-        ),
-        "platform": attr.string(
-            default = "macos",
-            values = ["macos", "ios"],
-            doc = "Target Apple platform ('ios' or 'macos').",
-        ),
-        "swift_srcs": attr.label_list(
-            allow_files = True,
-            default = [],
-            doc = "Swift source files reported to FlutterApplePluginInfo.",
-        ),
-        "objc_srcs": attr.label_list(
-            allow_files = True,
-            default = [],
-            doc = "Objective-C/C++ source files reported to FlutterApplePluginInfo.",
         ),
         "headers": attr.label_list(
             allow_files = True,
             default = [],
             doc = "Plugin header files reported to FlutterApplePluginInfo.",
         ),
-        "sdk_frameworks": attr.string_list(
+        "module_name": attr.string(
+            default = "",
+            doc = "Swift/Clang module name reported to FlutterApplePluginInfo.",
+        ),
+        "objc_srcs": attr.label_list(
+            allow_files = True,
             default = [],
-            doc = "Apple SDK frameworks reported to FlutterApplePluginInfo.",
+            doc = "Objective-C/C++ source files reported to FlutterApplePluginInfo.",
+        ),
+        "platform": attr.string(
+            default = "macos",
+            doc = "Target Apple platform ('ios' or 'macos').",
+            values = ["macos", "ios"],
         ),
         "sdk_dylibs": attr.string_list(
             default = [],
             doc = "Apple SDK dynamic libraries reported to FlutterApplePluginInfo.",
         ),
+        "sdk_frameworks": attr.string_list(
+            default = [],
+            doc = "Apple SDK frameworks reported to FlutterApplePluginInfo.",
+        ),
+        "swift_srcs": attr.label_list(
+            allow_files = True,
+            default = [],
+            doc = "Swift source files reported to FlutterApplePluginInfo.",
+        ),
     },
     provides = [
         DefaultInfo,
         CcInfo,
+        ObjcInfo,
         SwiftInfo,
         FlutterApplePluginInfo,
     ],
     doc = "Merges the Swift and ObjC halves of a mixed Apple plugin " +
-          "into the public target's DefaultInfo, CcInfo, SwiftInfo and " +
+          "into the public target's DefaultInfo, CcInfo, ObjcInfo, SwiftInfo and " +
           "FlutterApplePluginInfo.",
 )
