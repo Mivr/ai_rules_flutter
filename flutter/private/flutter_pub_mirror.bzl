@@ -262,7 +262,7 @@ def cycle_refusal(package_name, link_rel, link_real):
         "is finite."
     )
 
-def make_link_scope(package_name, package_realpath, workspace_realpath, case_insensitive, linked):
+def make_link_scope(package_name, package_realpath, workspace_realpath, case_insensitive, linked, dest_prefix = ""):
     """Bundle the values every path-spoke link step reads.
 
     Args:
@@ -271,9 +271,10 @@ def make_link_scope(package_name, package_realpath, workspace_realpath, case_ins
         workspace_realpath: The resolved workspace root, for confinement.
         case_insensitive: True when the host proves case-insensitive.
         linked: Dict of already-linked spoke paths, updated in place.
+        dest_prefix: Destination subdirectory inside repo (empty for spoke root).
 
     Returns:
-        A struct carrying the five values together.
+        A struct carrying the values together.
     """
     return struct(
         package_name = package_name,
@@ -281,6 +282,7 @@ def make_link_scope(package_name, package_realpath, workspace_realpath, case_ins
         workspace_realpath = workspace_realpath,
         case_insensitive = case_insensitive,
         linked = linked,
+        dest_prefix = dest_prefix,
     )
 
 def _spoke_entry_parts(package_name, entry_path):
@@ -312,7 +314,7 @@ def _spoke_entry_parts(package_name, entry_path):
              "\" which names no file or directory.")
     return parts
 
-def _link_new_symlink(ctx, node, repo_rel, linked):
+def _link_new_symlink(ctx, node, repo_rel, linked, dest_prefix = ""):
     """Symlink one file unless an earlier entry already linked it.
 
     Overlapping declarations (a shader inside a declared asset dir, a file
@@ -323,15 +325,16 @@ def _link_new_symlink(ctx, node, repo_rel, linked):
     fails the fetch rather than becoming one directory symlink (whose
     writes would land in the user's tree).
     """
-    if repo_rel in linked:
+    target = (dest_prefix + "/" + repo_rel) if dest_prefix else repo_rel
+    if target in linked:
         return
     if node.is_dir:
         fail("flutter.pub repo rule: refusing to symlink directory \"" +
-             repo_rel + "\"; directories mirror file by file so generated " +
+             target + "\"; directories mirror file by file so generated " +
              "files land in the spoke, never in the user's source tree.")
-    ctx.symlink(node, repo_rel)
+    ctx.symlink(node, target)
     ctx.watch(node)
-    linked[repo_rel] = True
+    linked[target] = True
 
 def _workspace_target_node(ctx, scope, target_realpath, link_rel):
     """Resolve a confined link target back to a workspace-side node.
@@ -396,7 +399,7 @@ def _mirror_link_child(ctx, child, child_rel, child_real, scope, seen, tree_root
         if child.basename in _PATH_SPOKE_SKIP_FILES:
             ctx.watch(child)
             return ""
-        _link_new_symlink(ctx, child, child_rel, scope.linked)
+        _link_new_symlink(ctx, child, child_rel, scope.linked, getattr(scope, "dest_prefix", ""))
         return ""
     if link_target_is_cycle(seen, child_real, scope.case_insensitive):
         return cycle_refusal(scope.package_name, child_rel, child_real)
@@ -497,7 +500,7 @@ def mirror_tree_bounded(ctx, stack, scope, bound):
             if name in _PATH_SPOKE_SKIP_FILES:
                 ctx.watch(child)
                 continue
-            _link_new_symlink(ctx, child, child_rel, scope.linked)
+            _link_new_symlink(ctx, child, child_rel, scope.linked, getattr(scope, "dest_prefix", ""))
     if stack:
         return struct(leftover = True, error = "")
     return struct(leftover = False, error = "")
@@ -596,7 +599,7 @@ def _link_top_level_shader_includes(ctx, src, scope):
         if not paths_match(str(child.realpath), scope.package_realpath + "/" + name, scope.case_insensitive):
             _mirror_single_link(ctx, child, name, str(child.realpath), scope, ())
             continue
-        _link_new_symlink(ctx, child, name, scope.linked)
+        _link_new_symlink(ctx, child, name, scope.linked, getattr(scope, "dest_prefix", ""))
 
 def _watch_scoped_entry(ctx, src, entry_path, scope):
     """Watch a declared entry and resolve it to its link triple.
@@ -649,7 +652,7 @@ def _link_scoped_dir_entry(ctx, src, entry_path, scope, apply_skip = True):
     if node.is_dir:
         _link_scoped_tree(ctx, node, repo_rel, scope, PUB_WALK_BOUND, apply_skip)
         return
-    _link_new_symlink(ctx, node, repo_rel, scope.linked)
+    _link_new_symlink(ctx, node, repo_rel, scope.linked, getattr(scope, "dest_prefix", ""))
 
 def link_scoped_file_entry(ctx, src, entry_path, scope, apply_skip = True):
     """Link one declared file entry (pubspec, hook, asset, font, shader).
@@ -682,7 +685,7 @@ def link_scoped_file_entry(ctx, src, entry_path, scope, apply_skip = True):
     if node.basename in _PATH_SPOKE_SKIP_FILES:
         ctx.watch(node)
         return
-    _link_new_symlink(ctx, node, repo_rel, scope.linked)
+    _link_new_symlink(ctx, node, repo_rel, scope.linked, getattr(scope, "dest_prefix", ""))
 
 def _link_asset_variant_files(ctx, src, entry_path, scope, variant_cache):
     """Link the resolution variants of one declared file entry.

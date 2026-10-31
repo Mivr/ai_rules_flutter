@@ -320,31 +320,13 @@ jobs:
           fi
       # Cycle-break proof: e2e/pub_cycle_breaks holds one lock whose
       # `cycle_a` and `cycle_b` path packages each declare the other, plus an
-      # app depending on both. `deps` breaks only `cycle_a`'s edge to
-      # `cycle_b`, so that spoke resolves. `deps_cycle` is the same lock with
-      # no break, so its `cycle_a` must fail with a cycle; the grep pins the
-      # failure text so a different error cannot pass as red. `query` proves
-      # the broken hub loads. It reads a package but does not follow the
-      # target's `deps`, so when it returns green the step runs the same
-      # target through `cquery`, which analyzes the dependency graph and must
-      # report the cycle. No `continue-on-error`: either unexpected result
-      # fails the job.
-      - name: Cycle-breaks resolve the broken hub and leave the raw twin red
+      # app depending on both. `deps` breaks `cycle_a`'s edge to `cycle_b` via
+      # cycle_breaks; `deps_cycle` is the same lock with no cycle_breaks,
+      # which automatically merges into `deps_cycle__scc__cycle_a__cycle_b`.
+      - name: Cycle-breaks and automatic SCC spoke resolution
         working-directory: e2e/pub_cycle_breaks
         run: |
-          bazel query @deps__cycle_a//:all
-          status=0
-          bazel query @deps_cycle__cycle_a//:all >cycle_break_output.log 2>&1 || status=$?
-          if [ "$status" -eq 0 ]; then
-            status=0
-            bazel cquery @deps_cycle__cycle_a//:all >cycle_break_output.log 2>&1 || status=$?
-          fi
-          cat cycle_break_output.log
-          if [ "$status" -eq 0 ]; then
-            echo "expected the unbroken twin to fail with a cycle, but it passed"
-            exit 1
-          fi
-          grep -F 'cycle in ' cycle_break_output.log
+          bazel cquery @deps//:cycle_app && bazel cquery @deps_cycle//:cycle_app && bazel cquery @deps_cycle__scc__cycle_a__cycle_b//:all
       # The Linux half of POD-2: one `bazel query` per pinned real plugin in
       # e2e/ios_plugin_matrix, compared with expected.json. No
       # continue-on-error: a change that fixes or breaks a plugin fails the

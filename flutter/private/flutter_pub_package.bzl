@@ -28,11 +28,25 @@ surface small).
 """
 
 load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version", "make_dart_library_build_content")
+load("@rules_dart//dart/pub:pub_scc.bzl", "spoke_planned_deps_error")
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_deps", "parse_pubspec_sdk_constraint", "pubspec_sdk_constraint_error")
+load(
+    ":flutter_pub_package_helpers.bzl",
+    _build_pkg_asset_conditions = "build_pkg_asset_conditions",
+    _check_pubspec_identity_mismatch = "check_pubspec_identity_mismatch",
+    _format_pub_asset_attrs_impl = "format_pub_asset_attrs",
+    _make_android_native_build_unsupported_content = "make_android_native_build_unsupported_content",
+    _malformed_pub_version_refusal = "malformed_pub_version_refusal",
+    _merge_pub_asset_conditions = "merge_pub_asset_conditions",
+    _missing_pubspec_refusal = "missing_pubspec_refusal",
+    _parse_pubspec_identity = "parse_pubspec_identity",
+    _pubspec_name_refusal = "pubspec_name_refusal",
+    _pubspec_version_refusal = "pubspec_version_refusal",
+)
 load("//flutter/private:flutter_pub_cycle_breaks.bzl", "apply_cycle_breaks", "spoke_dep_labels")
 load("//flutter/private:flutter_pub_plugin_defines.bzl", "check_plugin_defines", "plugin_defines_attr")
 load("//flutter/private:flutter_pub_scan.bzl", "fetch_hosted_archive", "scan_hosted_archive", "walk_hosted_package")
-load("//flutter/private:flutter_pubspec.bzl", "asset_flavor_error", "parse_flutter_assets_block", "parse_flutter_plugin_block", "parse_pubspec")
+load("//flutter/private:flutter_pubspec.bzl", "parse_flutter_assets_block", "parse_flutter_plugin_block")
 load(":asset_uri.bzl", "normalize_spoke_asset_block", "normalize_spoke_assets", "normalize_spoke_fonts", "normalize_spoke_shaders")
 load(
     ":flutter_pub_apple.bzl",
@@ -66,7 +80,6 @@ load(
     "outside_workspace_refusal",
     "path_spoke_resolves_outside",
 )
-load(":flutter_pub_semver.bzl", "parse_pub_version", "pub_version_text")
 load(
     ":flutter_pub_walk.bzl",
     "PUB_WALK_BOUND",
@@ -184,30 +197,6 @@ def _detect_android_manifest(ctx):
         return "android/src/main/AndroidManifest.xml"
     return ""
 
-def _make_android_native_build_unsupported_content(package_name, version):
-    """Generate an `android/BUILD.bazel` that fails at load time.
-
-    Emitted for plugins whose Gradle build compiles native code for Android
-    (externalNativeBuild) when no overlay provides a Bazel translation.
-    Android builds load this file through the hub's
-    `android/all_android_plugin_libs` aggregator and fail with a clear
-    message; non-Android platforms never load it and are unaffected.
-    """
-    message = (
-        "package:{pkg} {version} compiles native code for Android via " +
-        "Gradle's externalNativeBuild, which rules_flutter cannot " +
-        "translate automatically. An APK built without that library would " +
-        "crash at plugin registration, so this is a hard error. Provide a " +
-        "plugin overlay for {pkg} (flutter.plugin_overlays in MODULE.bazel) " +
-        "that compiles the package's native sources with cc_shared_library " +
-        "and ships them through flutter_plugin.native_deps — see " +
-        "@rules_flutter//ext/jni for the canonical example."
-    ).format(pkg = package_name, version = version)
-
-    # The message names a classified package name and a lock version; the
-    # whole text still renders as one escaped literal, never spliced raw.
-    return "fail(" + starlark_string_literal(message) + ")\n"
-
 def encode_spoke_fonts(parsed_fonts):
     """The spoke's font attrs from normalized `flutter.fonts` entries.
 
@@ -255,101 +244,6 @@ def build_pkg_assets_dict(expanded):
     """
     return {":" + entry.path: entry.key for entry in expanded}
 
-def _sorted_flavor_set(flavors):
-    """The deduplicated, sorted flavor names, for order-insensitive comparison."""
-    seen = {}
-    for flavor in flavors:
-        seen[flavor] = True
-    return sorted(seen.keys())
-
-def merge_pub_asset_conditions(expanded, package_name):
-    """Merge per-file `flutter.assets` entries the way flutter_tools does.
-
-    flutter_tools keeps one entry per declaration and bundles a file when ANY
-    of its entries survives filtering, so every entry for one file merges:
-    any entry without `platforms` makes the file unconditional, otherwise the
-    file's platforms are the union of its entries' lists. Entries for one
-    file whose flavor sets differ conflict (compared as sets, so order does
-    not matter); the caller fails the fetch with the returned message.
-
-    Args:
-        expanded: Per-file entries from
-            `expand_pub_asset_entries(...).expanded`.
-        package_name: The pub package the entries come from, for the conflict
-            message.
-
-    Returns:
-        A `struct(platforms, flavors, conflict)`: the merged condition dicts
-        (same shapes `_build_pkg_asset_conditions` returns) and the fetch
-        failure naming the package, the file and both flavor lists, or `""`
-        when the entries agree. A file with one entry keeps its declared
-        order, so single-entry spokes render byte-identically to before.
-    """
-    by_path = {}
-    order = []
-    for entry in expanded:
-        key = ":" + entry.path
-        if key not in by_path:
-            by_path[key] = []
-            order.append(key)
-        by_path[key].append(entry)
-    platforms = {}
-    flavors = {}
-    for key in order:
-        entries = by_path[key]
-        first = entries[0]
-        for other in entries[1:]:
-            if _sorted_flavor_set(other.flavors) != _sorted_flavor_set(first.flavors):
-                return struct(
-                    platforms = {},
-                    flavors = {},
-                    conflict = asset_flavor_error(
-                        package_name,
-                        first.path,
-                        first.flavors,
-                        other.flavors,
-                    ),
-                )
-        if first.flavors:
-            flavors[key] = list(first.flavors)
-        union = {}
-        unconditional = False
-        for entry in entries:
-            if not entry.platforms:
-                unconditional = True
-                break
-            for platform in entry.platforms:
-                union[platform] = True
-        if unconditional:
-            continue
-        if len(entries) == 1:
-            platforms[key] = list(first.platforms)
-        else:
-            platforms[key] = sorted(union.keys())
-    return struct(platforms = platforms, flavors = flavors, conflict = "")
-
-def _build_pkg_asset_conditions(expanded, package_name):
-    """Build the `pkg_asset_platforms` / `pkg_asset_flavors` dicts.
-
-    Same keys as `pkg_assets` (`":" + path`), but only for entries that
-    actually restrict: unconditional files stay out of both dicts, so the
-    emitted attrs stay empty for packages without conditions. Entries for
-    one file merge (see `merge_pub_asset_conditions`); conflicting flavors
-    fail the spoke fetch.
-
-    Args:
-        expanded: Per-file entries from
-            `expand_pub_asset_entries(...).expanded`.
-        package_name: The pub package the entries come from.
-
-    Returns:
-        A `(platforms, flavors)` tuple of dicts.
-    """
-    merged = merge_pub_asset_conditions(expanded, package_name)
-    if merged.conflict:
-        fail(merged.conflict)
-    return (merged.platforms, merged.flavors)
-
 def build_pkg_shaders_dict(parsed_shaders):
     """Build the `pkg_shaders` dict from normalized shader entries.
 
@@ -357,31 +251,6 @@ def build_pkg_shaders_dict(parsed_shaders):
     files, encoded bundle keys as values (`asset.dart:1425-1428`).
     """
     return {":" + entry.path: entry.key for entry in parsed_shaders}
-
-def _format_label_dict_literal(d, indent = "        "):
-    """Render `{":foo": "foo", ":bar": "bar"}` as a multi-line BUILD source dict."""
-    if not d:
-        return "{}"
-    keys = sorted(d.keys())
-
-    # Keys and values are asset, font and shader paths from the pubspec and
-    # the file-system walk: attacker-controlled for hosted packages. Each
-    # renders through the escaping helper, so the dict parses back exactly.
-    lines = ["{indent}{k}: {v},".format(indent = indent, k = starlark_string_literal(k), v = starlark_string_literal(d[k])) for k in keys]
-    return "{\n" + "\n".join(lines) + "\n" + indent[:-4] + "}"
-
-def _format_string_list_dict_literal(d, indent = "        "):
-    """Render `{":foo": ["a", "b"]}` as a multi-line BUILD source dict."""
-    if not d:
-        return "{}"
-    lines = []
-    for k in sorted(d.keys()):
-        # Keys are walked asset paths (see above); values are flavor and
-        # platform names from the pubspec, helper-rendered for the same
-        # reason: a flavor name may hold any string the pubspec declares.
-        values = ", ".join([starlark_string_literal(v) for v in d[k]])
-        lines.append("{indent}{k}: [{values}],".format(indent = indent, k = starlark_string_literal(k), values = values))
-    return "{\n" + "\n".join(lines) + "\n" + indent[:-4] + "}"
 
 # File extensions a shader may `#include`: the spoke links them beside a
 # top-level declared shader so its scoped include glob resolves.
@@ -414,27 +283,25 @@ def scoped_shader_includes_block(shader_paths):
             lines.append("        " + starlark_string_literal(pattern) + ",")
     return "    shader_includes = glob(\n        [\n{}\n        ],\n        allow_empty = True,\n    ),".format("\n".join(lines))
 
-def _format_pub_asset_attrs(fonts_json_str, font_files, pkg_assets, pkg_shaders, pkg_asset_platforms = {}, pkg_asset_flavors = {}):
+def _format_pub_asset_attrs(
+        fonts_json_str,
+        font_files,
+        pkg_assets,
+        pkg_shaders,
+        pkg_asset_platforms = {},
+        pkg_asset_flavors = {}):
     """Render the pub-asset attrs as BUILD source, omitting empty ones."""
-    parts = []
-    if fonts_json_str:
-        parts.append("    fonts_json = " + starlark_string_literal(fonts_json_str) + ",")
-    if font_files:
-        parts.append("    font_files = {},".format(_format_label_dict_literal(font_files)))
-    if pkg_assets:
-        parts.append("    pkg_assets = {},".format(_format_label_dict_literal(pkg_assets)))
-    if pkg_asset_platforms:
-        parts.append("    pkg_asset_platforms = {},".format(_format_string_list_dict_literal(pkg_asset_platforms)))
-    if pkg_asset_flavors:
-        parts.append("    pkg_asset_flavors = {},".format(_format_string_list_dict_literal(pkg_asset_flavors)))
+    res = _format_pub_asset_attrs_impl(
+        fonts_json_str,
+        font_files,
+        pkg_assets,
+        pkg_shaders,
+        pkg_asset_platforms,
+        pkg_asset_flavors,
+    )
     if pkg_shaders:
-        parts.append("    pkg_shaders = {},".format(_format_label_dict_literal(pkg_shaders)))
-
-        # What the shaders may `#include`: GLSL beside a declared shader, so
-        # only the declared shaders' own directories resolve — never the
-        # whole package, where `example/build/` output would become includes.
-        parts.append(scoped_shader_includes_block(sorted(pkg_shaders.values())))
-    return ("\n".join(parts) + "\n") if parts else ""
+        res += scoped_shader_includes_block(sorted(pkg_shaders.values())) + "\n"
+    return res
 
 def _format_code_asset_attrs(code_assets, has_unreplaced_hook):
     """Render the `code_assets` / `has_unreplaced_hook` attrs for a spoke.
@@ -1989,126 +1856,6 @@ def _fail_on_outside_package_path(ctx, package_name, segments, workspace_realpat
         if path_spoke_resolves_outside(workspace_realpath, target_realpath, case_insensitive):
             fail(outside_workspace_refusal(package_name, "/".join(prefix), target_realpath))
 
-def parse_pubspec_identity(content):
-    """The `(name, version)` identity a path spoke verifies against its lock entry.
-
-    A path package's overlays and curated code assets are selected by the
-    lock key and the lock's version, so the spoke must check that the
-    package's own pubspec.yaml agrees — otherwise a directory whose
-    pubspec names another package, or whose version moved since the lock
-    was resolved, gets another package's overlay and native code assets.
-
-    A pubspec with no `version:` field (or an empty one) reads as
-    `"0.0.0"` — exactly how `pub get` locks it (pub's `Version.none`), so
-    unversioned `publish_to: none` packages agree with the lock. The
-    comparison itself is semantic (see `parse_pub_version`): quoting,
-    surrounding whitespace and the YAML scalar type do not matter.
-
-    Args:
-        content: Full pubspec.yaml content as a string.
-
-    Returns:
-        A `struct(name, version)` of strings; the name is `""` when
-        absent, unparsable, or not a scalar, and the version is `"0.0.0"`
-        when unstated. A missing pubspec therefore never matches a lock
-        key and fails closed at the caller's comparison.
-    """
-    pubspec = parse_pubspec(content)
-    name = pubspec.get("name", "")
-    version = pub_version_text(pubspec.get("version", ""))
-    return struct(
-        name = "" if name == None else str(name),
-        version = "0.0.0" if version == "" else version,
-    )
-
-def missing_pubspec_refusal(hub_name, package_name):
-    """The fetch refusal for a path package with no readable pubspec name.
-
-    Returns the message instead of failing so unit tests can assert it; the
-    caller `fail()`s with it. Names the hub and the lock key.
-    """
-    return (
-        "flutter.pub hub \"" + hub_name + "\": path dependency \"" +
-        package_name + "\" has no readable pubspec.yaml naming the " +
-        "package. Overlays and code assets are selected by lock name; " +
-        "re-resolve the lock so the package carries a pubspec that " +
-        "agrees with it."
-    )
-
-def pubspec_name_refusal(hub_name, package_name, actual):
-    """The fetch refusal for a path package whose pubspec names another package.
-
-    Returns the message instead of failing so unit tests can assert it; the
-    caller `fail()`s with it. Names the hub, the lock key, and both values.
-    """
-    return (
-        "flutter.pub hub \"" + hub_name + "\": path dependency \"" +
-        package_name + "\" names itself \"" + actual + "\" in its " +
-        "pubspec.yaml but the lock calls it \"" + package_name + "\". " +
-        "Overlays and code assets are selected by lock name; re-resolve " +
-        "the lock (or rename the package) so the two agree."
-    )
-
-def pubspec_version_refusal(hub_name, package_name, locked, actual):
-    """The fetch refusal for a path package whose version moved since the lock.
-
-    Returns the message instead of failing so unit tests can assert it; the
-    caller `fail()`s with it. Names the hub, the lock key, and both values.
-    A pubspec with no `version:` field reads as `0.0.0` (the way `pub get`
-    locks it), so an unversioned package shows `0.0.0` on the pubspec side
-    here when the lock moved on.
-    """
-    return (
-        "flutter.pub hub \"" + hub_name + "\": path dependency \"" +
-        package_name + "\" locks version \"" + locked + "\" but its " +
-        "pubspec.yaml says \"" + actual + "\" (a pubspec with no " +
-        "`version:` field reads as \"0.0.0\", the way `pub get` locks " +
-        "it). Overlays and code assets are selected by lock version; " +
-        "re-resolve the lock so the two agree."
-    )
-
-def malformed_pub_version_refusal(hub_name, package_name, bad_value):
-    """The fetch refusal for a path package with an unparsable version.
-
-    Either side can be bad: the lock entry or the package's own pubspec.
-    Returns the message instead of failing so unit tests can assert it; the
-    caller `fail()`s with it. Names the hub, the lock key, and the bad value.
-    """
-    return (
-        "flutter.pub hub \"" + hub_name + "\": path dependency \"" +
-        package_name + "\" has malformed version \"" + bad_value + "\" " +
-        "in its pubspec.yaml or the lock entry. Versions are " +
-        "major.minor.patch with optional -pre-release and +build (a " +
-        "pubspec with no `version:` field reads as \"0.0.0\"); fix the " +
-        "version or re-resolve the lock."
-    )
-
-def _fail_on_pubspec_identity_mismatch(hub_name, package_name, lock_version, pubspec_text):
-    """Fail when the package's pubspec name or version disagrees with the lock.
-
-    Overlays and curated code assets are selected by the lock key and the
-    lock's version, so a directory whose pubspec names another package, or
-    whose version moved since the lock was resolved, must not silently get
-    another package's overlay and native code assets. Each mismatch fails
-    naming the hub, the lock key, and both values, telling the user to
-    re-resolve. The two versions compare as parsed semantic versions (a
-    missing pubspec version reads as `0.0.0`, like `pub get` locks it); an
-    unparsable version on either side fails naming the bad value.
-    """
-    identity = parse_pubspec_identity(pubspec_text)
-    if not pubspec_text.strip() or not identity.name:
-        fail(missing_pubspec_refusal(hub_name, package_name))
-    if identity.name != package_name:
-        fail(pubspec_name_refusal(hub_name, package_name, identity.name))
-    locked = parse_pub_version(lock_version)
-    if not locked.ok:
-        fail(malformed_pub_version_refusal(hub_name, package_name, locked.text))
-    actual = parse_pub_version(identity.version)
-    if not actual.ok:
-        fail(malformed_pub_version_refusal(hub_name, package_name, actual.text))
-    if actual.canonical != locked.canonical:
-        fail(pubspec_version_refusal(hub_name, package_name, locked.text, actual.text))
-
 def link_path_package(ctx):
     """Symlinks a workspace-local `path:` package into the spoke, hermetically.
 
@@ -2177,7 +1924,7 @@ def link_path_package(ctx):
     link_scoped_file_entry(ctx, src, "pubspec.yaml", scope)
     pubspec_node = ctx.path("pubspec.yaml")
     pubspec_text = ctx.read(pubspec_node) if pubspec_node.exists else ""
-    _fail_on_pubspec_identity_mismatch(ctx.attr.hub_name, package_name, ctx.attr.version, pubspec_text)
+    _check_pubspec_identity_mismatch(ctx.attr.hub_name, package_name, ctx.attr.version, pubspec_text)
     link_spoke_contents(
         ctx,
         src,
@@ -2197,6 +1944,18 @@ def _generate_spoke(ctx):
     cycle_result = apply_cycle_breaks(ctx.attr.package_name, pubspec.bazel_deps, ctx.attr.cycle_breaks)
     if cycle_result.error:
         fail(cycle_result.error)
+
+    rule_name = "flutter_pub_package" if hasattr(ctx.attr, "base_url") else "flutter_pub_path_package"
+    planned = ctx.attr.planned_deps if getattr(ctx.attr, "plan_covers_package", False) else None
+    planned_err = spoke_planned_deps_error(
+        rule_name,
+        ctx.name,
+        ctx.attr.package_name,
+        planned,
+        cycle_result.dependencies,
+    )
+    if planned_err:
+        fail(planned_err)
 
     # Build full label strings for sibling spoke repos.
     dep_labels = spoke_dep_labels(ctx, cycle_result.dependencies, pubspec.asset_block)
@@ -2325,6 +2084,9 @@ flutter_pub_package = repository_rule(
             doc = "All hosted package names in the lock file (for dep filtering).",
             default = [],
         ),
+        "planned_deps": attr.string_list(doc = "Dependency names cycle planning used.", default = []),
+        "plan_covers_package": attr.bool(doc = "Whether cycle planning covered this package.", default = False),
+        "scc_targets": attr.string_dict(doc = "Package name to merged repository target.", default = {}),
         "cycle_breaks": attr.string_list(doc = "Dependency names whose spoke-to-spoke edge is left out of this package's `deps`; each must be a dependency its own pubspec declares. Empty drops nothing.", default = []),
         "plugin_defines": plugin_defines_attr,
         "code_assets": attr.string_list(
@@ -2383,6 +2145,9 @@ flutter_pub_path_package = repository_rule(
             doc = "All package names in the lock file (for dep filtering).",
             default = [],
         ),
+        "planned_deps": attr.string_list(doc = "Dependency names cycle planning used.", default = []),
+        "plan_covers_package": attr.bool(doc = "Whether cycle planning covered this package.", default = False),
+        "scc_targets": attr.string_dict(doc = "Package name to merged repository target.", default = {}),
         "cycle_breaks": attr.string_list(doc = "Dependency names whose spoke-to-spoke edge is left out of this package's `deps`, same as `flutter_pub_package`.", default = []),
         "plugin_defines": plugin_defines_attr,
         "code_assets": attr.string_list(
@@ -2406,3 +2171,13 @@ flutter_pub_path_package = repository_rule(
     }), pubspec_lock = attr.label(doc = "Hub `pubspec.lock` label.", allow_single_file = True, default = None)),
     doc = "Symlinks a workspace-local `path:` pub package into a spoke and emits the same `flutter_plugin` / `flutter_library` / `dart_library` the hosted rule would. The `flutter pub get` analog for path dependencies: hermetic (workspace-relative only, watched for changes) and fail-closed on anything resolving outside the workspace's real root; the package's pubspec `name` and `version` must match the lock entry, since overlays and code assets are selected by lock name and version.",
 )
+
+build_pkg_asset_conditions = _build_pkg_asset_conditions
+check_pubspec_identity_mismatch = _check_pubspec_identity_mismatch
+make_android_native_build_unsupported_content = _make_android_native_build_unsupported_content
+malformed_pub_version_refusal = _malformed_pub_version_refusal
+merge_pub_asset_conditions = _merge_pub_asset_conditions
+missing_pubspec_refusal = _missing_pubspec_refusal
+parse_pubspec_identity = _parse_pubspec_identity
+pubspec_name_refusal = _pubspec_name_refusal
+pubspec_version_refusal = _pubspec_version_refusal

@@ -158,10 +158,14 @@ def _flutter_sdk_package_impl(repository_ctx):
         )
 
     # Build dep labels pointing to sibling spoke repos.
-    dep_labels = ["@{hub}__{dep}//:{dep}".format(
-        hub = repository_ctx.attr.hub_name,
-        dep = dep,
-    ) for dep in bazel_deps]
+    scc_targets = getattr(repository_ctx.attr, "scc_targets", {})
+    dep_labels = [
+        scc_targets[dep] if dep in scc_targets else "@{hub}__{dep}//:{dep}".format(
+            hub = repository_ctx.attr.hub_name,
+            dep = dep,
+        )
+        for dep in bazel_deps
+    ]
 
     repository_ctx.file("BUILD.bazel", make_flutter_sdk_build_content(
         name = package_name,
@@ -232,6 +236,10 @@ flutter_sdk_package = repository_rule(
         "lock_packages": attr.string_list(
             doc = "All package names in the lock file (for dep filtering).",
             default = [],
+        ),
+        "scc_targets": attr.string_dict(
+            doc = "Package name to merged repository target.",
+            default = {},
         ),
     },
 )

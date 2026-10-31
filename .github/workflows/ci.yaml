@@ -165,6 +165,9 @@ jobs:
       - name: bazel test Apple bundles (e2e/min_versions)
         working-directory: e2e/min_versions
         run: bazel test //:ios_build_test //:macos_build_test --test_output=errors
+      - name: bazel test pub_scc (e2e/pub_scc)
+        working-directory: e2e/pub_scc
+        run: bazel test //... --test_output=errors
       - name: Report cache sizes
         if: always()
         run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true
@@ -576,11 +579,11 @@ jobs:
           path: ${{ env.DISK_CACHE_DIR }}
           key: ${{ env.DISK_CACHE_KEY }}
   e2e-linux-small:
-    name: E2E Linux small (smoke, dual_hub, ffi_example, ffi_plugin_example, web_example)
+    name: E2E Linux small (smoke, dual_hub, ffi_example, ffi_plugin_example, web_example, pub_scc)
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      WORKSPACES: smoke dual_hub ffi_example ffi_plugin_example web_example
+      WORKSPACES: smoke dual_hub ffi_example ffi_plugin_example web_example pub_scc
       DISK_CACHE_DIR: ~/.cache/bazel-disk
       DISK_CACHE_SHARD: linux-small
     steps:

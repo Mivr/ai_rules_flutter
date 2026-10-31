@@ -99,20 +99,20 @@ flutter_pub_tag = tag_class(
         ),
         "cycle_breaks": attr.string_list_dict(
             doc = "Package name -> dependency names whose pubspec edge is " +
-                  "left out of that package's spoke `deps`, so two locked " +
-                  "packages that depend on each other (for example `dio` <-> " +
-                  "`dio_web_adapter`) no longer form a Bazel repository " +
-                  "cycle. Both packages keep their spokes, hub aliases and " +
-                  "`android:all_android_plugin_libs` entries; only the named " +
-                  "spoke-to-spoke edge is dropped. Dropping an edge is safe " +
-                  "only when the dependency is reached through a conditional " +
-                  "import for a platform this build does not target. Every " +
-                  "key and listed dependency must name a package in the lock, " +
-                  "and each listed dependency must be one the key's own " +
-                  "pubspec declares; anything else fails evaluation or the " +
-                  "spoke fetch. It is an interim escape hatch: the " +
-                  "merged-spoke design will make it unnecessary. Empty by " +
-                  "default and never given a built-in default.",
+                  "left out of that package's spoke `deps`. flutter.pub now " +
+                  "merges pub dependency cycles into a single spoke " +
+                  "automatically, so cycle_breaks is no longer needed for " +
+                  "cycles (and remains only as an optional edge-dropping " +
+                  "override when explicitly desired). Both packages keep their " +
+                  "spokes, hub aliases and `android:all_android_plugin_libs` " +
+                  "entries; only the named spoke-to-spoke edge is dropped. " +
+                  "Dropping an edge is safe only when the dependency is reached " +
+                  "through a conditional import for a platform this build does " +
+                  "not target. Every key and listed dependency must name a " +
+                  "package in the lock, and each listed dependency must be one " +
+                  "the key's own pubspec declares; anything else fails " +
+                  "evaluation or the spoke fetch. Empty by default and never " +
+                  "given a built-in default.",
             default = {},
         ),
         "android_maven_deps": attr.string_dict(

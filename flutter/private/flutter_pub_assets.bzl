@@ -582,3 +582,5 @@ def ctx_package_lister(ctx, package_name, bound = PUB_ASSET_LIST_BOUND):
         package_name,
         bound,
     )
+
+asset_lister = _asset_lister

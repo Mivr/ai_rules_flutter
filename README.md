@@ -120,7 +120,7 @@ bazel_dep(name = "ai_rules_dart", version = "0.21.0", repo_name = "rules_dart")
 
 git_override(
     module_name = "ai_rules_dart",
-    commit = "4cc0c0ab2ed8256bec5a1503cc2ab22e1bfe9875",
+    commit = "3da688c1b905b0d2c807f2b18bbd86c5634276ad",
     remote = "https://github.com/Mivr/ai_rules_dart.git",
 )
 ```
@@ -236,7 +236,7 @@ The lock must belong to the root module. A `relative: true` path resolves in the
 
 ### Breaking a repository cycle
 
-When pub resolves two packages that depend on each other — `dio` and `dio_web_adapter` are the common pair — one Bazel repository per package forms a repository cycle: `flutter.pub` creates a spoke for each, and each spoke names the other's spoke in `deps`. `cycle_breaks` drops only the named spoke-to-spoke edges; both packages still get their spokes, hub aliases, and `android:all_android_plugin_libs` entries.
+When pub resolves two packages that depend on each other — `dio` and `dio_web_adapter` are the common pair — one Bazel repository per package forms a repository cycle: `flutter.pub` creates a spoke for each, and each spoke names the other's spoke in `deps`. `flutter.pub` now merges pub dependency cycles into a single spoke automatically, so `cycle_breaks` is no longer needed for cycles (and remains only as an optional edge-dropping override when explicitly desired). `cycle_breaks` drops only the named spoke-to-spoke edges; both packages still get their spokes, hub aliases, and `android:all_android_plugin_libs` entries.
 
 ```starlark
 flutter.pub(
@@ -248,7 +248,7 @@ flutter.pub(
 
 Each key and listed dependency must name a package in the lock: a key that does not is rejected at extension evaluation, naming `flutter.pub(cycle_breaks = ...)` and the entry. A listed dependency the key's own `pubspec.yaml` does not declare fails that spoke's fetch with the same naming. An empty list drops nothing.
 
-Dropping an edge is safe only when the dependency is reached through a conditional import for a platform this build does not target: the Dart code that needs it is not compiled, so the missing edge removes only the Bazel repository cycle. If the build does target that platform, the break removes a library the code needs and the build fails. This attribute is an interim escape hatch; the merged-spoke design will make `cycle_breaks` unnecessary.
+Dropping an edge is safe only when the dependency is reached through a conditional import for a platform this build does not target: the Dart code that needs it is not compiled, so the missing edge removes only the Bazel repository cycle. If the build does target that platform, the break removes a library the code needs and the build fails.
 
 ### Platform- and flavor-conditional assets
 

@@ -52,6 +52,7 @@
 /e2e/plugin_example/ export-ignore
 /e2e/pub_flutter_shape_red/ export-ignore
 /e2e/pub_hosted_escape/ export-ignore
+/e2e/pub_scc/ export-ignore
 /e2e/run_home/ export-ignore
 /e2e/web_example/ export-ignore
 /e2e/windows_example/ export-ignore

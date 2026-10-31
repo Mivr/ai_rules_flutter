@@ -27,6 +27,83 @@ this one. `pub.pub()` (in non-Flutter modules) keeps using
 `pub_lock_hub`.
 """
 
+def make_flutter_pub_hub_build_content(packages, spoke_prefix, scc_targets = {}):
+    """Generate root BUILD.bazel content for a flutter.pub hub repo.
+
+    Args:
+        packages: List of all package names in the lock scope.
+        spoke_prefix: Prefix for spoke repo names.
+        scc_targets: Dict of package name to merged repository target label.
+
+    Returns:
+        Generated BUILD.bazel content string.
+    """
+    aliases = []
+    for pkg in packages:
+        actual = scc_targets[pkg] if pkg in scc_targets else "@{spoke}__{pkg}//:{pkg}".format(
+            spoke = spoke_prefix,
+            pkg = pkg,
+        )
+        aliases.append("""\
+alias(
+    name = "{pkg}",
+    actual = "{actual}",
+    visibility = ["//visibility:public"],
+)""".format(
+            pkg = pkg,
+            actual = actual,
+        ))
+    return "\n\n".join(aliases) + "\n"
+
+def make_flutter_pub_hub_android_build_content(packages, spoke_prefix, scc_targets = {}):
+    """Generate android/BUILD.bazel content for a flutter.pub hub repo.
+
+    Args:
+        packages: List of all package names in the lock scope.
+        spoke_prefix: Prefix for spoke repo names.
+        scc_targets: Dict of package name to merged repository target label.
+
+    Returns:
+        Generated android/BUILD.bazel content string.
+    """
+    android_deps = []
+    for pkg in packages:
+        if pkg in scc_targets:
+            scc_repo = scc_targets[pkg].partition("//")[0]
+            android_deps.append('"{repo}//{pkg}/android:lib"'.format(
+                repo = scc_repo,
+                pkg = pkg,
+            ))
+        else:
+            android_deps.append('"@{spoke}__{pkg}//android:lib"'.format(
+                spoke = spoke_prefix,
+                pkg = pkg,
+            ))
+    deps_block = ",\n        ".join(android_deps)
+    if deps_block:
+        deps_block = "\n        " + deps_block + ",\n    "
+
+    return """\
+load("@rules_kotlin//kotlin:android.bzl", "kt_android_library")
+
+# Aggregator — re-exports every spoke's `android:lib`. Spokes without
+# Android sources contribute empty libraries (a no-op at link time).
+# The `flutter_android_app` Tier-1 macro adds this label to its
+# `android_binary.deps`, ensuring every Flutter plugin's Kotlin/Java
+# is on the runtime classpath without per-plugin manual wiring.
+#
+# `exports = [...]` (rather than `deps = [...]`) is required by
+# rules_android: a `kt_android_library` without `srcs` or
+# `resource_files` may not declare `deps` directly — the supported way
+# to forward dependencies is `exports`.
+kt_android_library(
+    name = "all_android_plugin_libs",
+    srcs = [],
+    visibility = ["//visibility:public"],
+    exports = [{deps}],
+)
+""".format(deps = deps_block)
+
 def _flutter_pub_lock_hub_impl(ctx):
     spoke_prefix = ctx.attr.spoke_prefix if ctx.attr.spoke_prefix else ctx.attr.hub_name
 
@@ -50,56 +127,13 @@ def _flutter_pub_lock_hub_impl(ctx):
         }),
     )
 
-    # Top-level aliases — same shape as rules_dart's pub_lock_hub.
-    aliases = []
-    for pkg in ctx.attr.packages:
-        aliases.append("""\
-alias(
-    name = "{pkg}",
-    actual = "@{spoke}__{pkg}//:{pkg}",
-    visibility = ["//visibility:public"],
-)""".format(
-            pkg = pkg,
-            spoke = spoke_prefix,
-        ))
-    ctx.file("BUILD.bazel", "\n\n".join(aliases) + "\n")
-
-    # `android/all_android_plugin_libs` aggregator. Every spoke
-    # unconditionally exposes `android:lib`, so the deps list is just
-    # the package list mapped to `@<hub>__<pkg>//android:lib`.
-    android_deps = [
-        '"@{spoke}__{pkg}//android:lib"'.format(
-            spoke = spoke_prefix,
-            pkg = pkg,
-        )
-        for pkg in ctx.attr.packages
-    ]
-    deps_block = ",\n        ".join(android_deps)
-    if deps_block:
-        deps_block = "\n        " + deps_block + ",\n    "
-
+    ctx.file(
+        "BUILD.bazel",
+        make_flutter_pub_hub_build_content(ctx.attr.packages, spoke_prefix, ctx.attr.scc_targets),
+    )
     ctx.file(
         "android/BUILD.bazel",
-        """\
-load("@rules_kotlin//kotlin:android.bzl", "kt_android_library")
-
-# Aggregator — re-exports every spoke's `android:lib`. Spokes without
-# Android sources contribute empty libraries (a no-op at link time).
-# The `flutter_android_app` Tier-1 macro adds this label to its
-# `android_binary.deps`, ensuring every Flutter plugin's Kotlin/Java
-# is on the runtime classpath without per-plugin manual wiring.
-#
-# `exports = [...]` (rather than `deps = [...]`) is required by
-# rules_android: a `kt_android_library` without `srcs` or
-# `resource_files` may not declare `deps` directly — the supported way
-# to forward dependencies is `exports`.
-kt_android_library(
-    name = "all_android_plugin_libs",
-    srcs = [],
-    visibility = ["//visibility:public"],
-    exports = [{deps}],
-)
-""".format(deps = deps_block),
+        make_flutter_pub_hub_android_build_content(ctx.attr.packages, spoke_prefix, ctx.attr.scc_targets),
     )
 
 flutter_pub_lock_hub = repository_rule(
@@ -116,6 +150,10 @@ flutter_pub_lock_hub = repository_rule(
         "packages": attr.string_list(
             doc = "All hosted package names to create aliases and Android-aggregator deps for.",
             mandatory = True,
+        ),
+        "scc_targets": attr.string_dict(
+            doc = "Package name to merged repository target, for dependencies on cycle members.",
+            default = {},
         ),
         "swift_package_sha256": attr.string_dict(
             doc = "The hub's `swift_package_sha256` map, written to " +
