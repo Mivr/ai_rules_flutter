@@ -6,8 +6,13 @@ resolution in CocoaPods mode with mixed-mode `Package.swift` fallback and
 fail-closed refusals.
 """
 
+load(
+    "//flutter/private:flutter_pub_apple_pods_hub.bzl",
+    "make_pod_resolution",
+    "pod_resolution_to_dict",
+    "read_ios_pod_native_deps",
+)
 load("//flutter/private:podfile_lock.bzl", "read_podfile_lock")
-load("//flutter/private:swiftpm_resolved.bzl", "swiftpm_check_json")
 
 def format_message_9(plugin = None, lock_label = None, package = None):
     """Format Message 9 when a plugin has iOS sources but no lock entry and no Package.swift.
@@ -15,19 +20,19 @@ def format_message_9(plugin = None, lock_label = None, package = None):
     Args:
         plugin: The Flutter plugin package name.
         lock_label: The string label of Podfile.lock.
-        package: Alias for plugin.
+        package: Optional alias for plugin.
 
     Returns:
         The formatted refusal error message string.
     """
-    p = plugin if plugin != None else package
+    pkg = plugin if plugin != None else package
     return (
         'Flutter plugin "{plugin}" has iOS sources but {lock_label} lists no pod for it ' +
         '(expected an EXTERNAL SOURCES entry ".symlinks/plugins/{plugin}/ios"), and the ' +
-        'plugin ships no Package.swift to fall back to. Run pod install for the app so the ' +
-        'lock lists every plugin, or list the plugin\'s dependencies with ' +
+        "plugin ships no Package.swift to fall back to. Run pod install for the app so the " +
+        "lock lists every plugin, or list the plugin's dependencies with " +
         'flutter.pub(ios_plugin_deps = {{"{plugin}": "<label>"}}).'
-    ).format(plugin = p, lock_label = lock_label)
+    ).format(plugin = pkg, lock_label = lock_label)
 
 def format_message_11(plugin = None, pod = "", version = "", lock_label = "", reason = "", package = None):
     """Format Message 11 when a CocoaPods pod dependency cannot be resolved.
@@ -38,21 +43,21 @@ def format_message_11(plugin = None, pod = "", version = "", lock_label = "", re
         version: The locked version string, or "".
         lock_label: The string label of Podfile.lock.
         reason: Optional refusal reason, or "".
-        package: Alias for plugin.
+        package: Optional alias for plugin.
 
     Returns:
         The formatted refusal error message string.
     """
-    p = plugin if plugin != None else package
+    pkg = plugin if plugin != None else package
     version_in_lock = ("(" + version + " in " + lock_label + ")") if version else ("(in " + lock_label + ")")
     reason_suffix = (": " + reason) if reason else ""
     return (
         'Flutter plugin "{plugin}" depends on pod "{pod}" {version_in_lock}, ' +
-        'which no Bazel target provides{reason_suffix}. ' +
+        "which no Bazel target provides{reason_suffix}. " +
         'Map it with flutter.pub(ios_pod_deps = {{"{pod}": "<label>"}}) ' +
         'or declare it unneeded with flutter.pub(ios_pod_ignore = ["{pod}"]).'
     ).format(
-        plugin = p,
+        plugin = pkg,
         pod = pod,
         version_in_lock = version_in_lock,
         reason_suffix = reason_suffix,
@@ -84,86 +89,44 @@ def resolve_swiftpm_pod_stub(_pod = "", _root = "", _version = ""):
     """
     return None
 
-def make_pod_resolution(
-        kind,
-        label = "",
-        package = "",
-        hub = "",
-        pod = "",
-        version = "",
-        lock_label = "",
-        reason = ""):
-    """Create a pod resolution result struct.
+def _podfile_maps(podfile):
+    """Extract `(plugin_pods, pods_map)` from a parsed podfile struct or dict."""
+    if podfile == None:
+        return {}, {}
+    if type(podfile) == "dict":
+        return podfile.get("plugin_pods", {}), podfile.get("pods", {})
+    plugin_pods = podfile.plugin_pods if hasattr(podfile, "plugin_pods") else {}
+    pods_map = podfile.pods if hasattr(podfile, "pods") else {}
+    return plugin_pods, pods_map
 
-    Args:
-        kind: One of "skip", "label", "plugin", "drop", "unresolved".
-        label: Resolved Bazel target label string, or "".
-        package: Flutter plugin pub package name, or "".
-        hub: Hub name, or "".
-        pod: CocoaPods pod name, or "".
-        version: Locked version string, or "".
-        lock_label: Label string of the Podfile.lock, or "".
-        reason: Refusal reason string, or "".
+def _locked_pod_version(pods_map, pod, root):
+    """Read the locked version for `pod` (falling back to `root`, else `""`)."""
+    entry = pods_map.get(pod)
+    if entry == None:
+        entry = pods_map.get(root)
+    if entry == None:
+        return ""
+    if type(entry) == "dict":
+        return entry.get("version", "")
+    return entry.version if hasattr(entry, "version") else ""
 
-    Returns:
-        A struct with the resolution fields.
-    """
-    return struct(
-        kind = kind,
-        label = label,
-        package = package,
-        hub = hub,
-        pod = pod,
-        version = version,
-        lock_label = lock_label,
-        reason = reason,
-        ok = (kind != "unresolved"),
-        error = reason,
-    )
-
-def pod_resolution_to_dict(res):
-    """Convert a pod resolution struct to a deterministic JSON dict.
-
-    Args:
-        res: The resolution struct from `make_pod_resolution`.
-
-    Returns:
-        A dict with sorted keys suitable for JSON encoding.
-    """
-    return {
-        "hub": res.hub,
-        "kind": res.kind,
-        "label": res.label,
-        "lock_label": res.lock_label,
-        "package": res.package,
-        "pod": res.pod,
-        "reason": res.reason,
-        "version": res.version,
-    }
-
-def _pod_resolution_from_dict(d):
-    """Convert a JSON dict to a pod resolution struct.
-
-    Args:
-        d: The resolution dict.
-
-    Returns:
-        A struct with the resolution fields.
-    """
-    kind = d.get("kind", "")
-    reason = d.get("reason", "")
-    return struct(
-        hub = d.get("hub", ""),
-        kind = kind,
-        label = d.get("label", ""),
-        lock_label = d.get("lock_label", ""),
-        package = d.get("package", ""),
-        pod = d.get("pod", ""),
-        reason = reason,
-        version = d.get("version", ""),
-        ok = (kind != "unresolved"),
-        error = reason,
-    )
+def _entry_dep_names(entry):
+    """Return dependency pod names from one `podfile.pods` entry."""
+    if type(entry) == "dict":
+        deps = entry.get("deps", [])
+    else:
+        deps = entry.deps if hasattr(entry, "deps") else []
+    names = []
+    for dep in deps:
+        if type(dep) == "dict":
+            dep_name = dep.get("name", "")
+        elif hasattr(dep, "name"):
+            dep_name = dep.name
+        else:
+            dep_name = str(dep)
+        if dep_name:
+            names.append(dep_name)
+    return names
 
 def resolve_pod(
         pod,
@@ -187,47 +150,35 @@ def resolve_pod(
     Args:
         pod: Pod name (e.g. "Firebase/Auth" or "path_provider_foundation").
         hub_name: The flutter.pub hub name.
-        all_package_names: List or dict of packages in pubspec.lock.
+        all_package_names: List, tuple or dict of packages in pubspec.lock.
         podfile: Parsed Podfile.lock struct or None.
         lock_label: String label of the Podfile.lock.
         ios_pod_deps: Dict mapping pod name to canonical Bazel label string.
-        ios_pod_ignore: List or dict of pod names to drop.
-        platform: Platform string ("ios" or "macos").
+        ios_pod_ignore: List, tuple or dict of pod names to drop.
+        platform: Platform string ("ios", "macos", or "" when precomputing).
 
     Returns:
         A pod resolution struct created with make_pod_resolution.
     """
     root = pod.partition("/")[0]
-
-    # Step 1: Engine pods
     if pod in ("Flutter", "FlutterMacOS") or root in ("Flutter", "FlutterMacOS"):
         return make_pod_resolution(kind = "skip", pod = pod)
 
-    # Step 2: ios_pod_deps
     if pod in ios_pod_deps:
         return make_pod_resolution(kind = "label", label = str(ios_pod_deps[pod]), pod = pod)
     if root in ios_pod_deps:
         return make_pod_resolution(kind = "label", label = str(ios_pod_deps[root]), pod = pod)
 
-    # Step 3: Flutter plugin pod
-    plugin_pods = {}
-    pods_map = {}
-    if podfile != None:
-        if hasattr(podfile, "plugin_pods"):
-            plugin_pods = podfile.plugin_pods
-        elif type(podfile) == "dict":
-            plugin_pods = podfile.get("plugin_pods", {})
-        if hasattr(podfile, "pods"):
-            pods_map = podfile.pods
-        elif type(podfile) == "dict":
-            pods_map = podfile.get("pods", {})
-
-    pkg = plugin_pods.get(root)
-    pkg_in_pubspec = (pkg in all_package_names) if (pkg and all_package_names) else False
-    if pkg and pkg_in_pubspec:
-        plugin_label = (
-            "@{hub}__{pkg}//:{pkg}_apple_{plat}".format(hub = hub_name, pkg = pkg, plat = platform)
-        ) if (hub_name and platform) else ""
+    plugin_pods, pods_map = _podfile_maps(podfile)
+    pkg = plugin_pods.get(root, "")
+    if pkg and pkg in all_package_names:
+        plugin_label = ""
+        if hub_name and platform:
+            plugin_label = "@{hub}__{pkg}//:{pkg}_apple_{plat}".format(
+                hub = hub_name,
+                pkg = pkg,
+                plat = platform,
+            )
         return make_pod_resolution(
             kind = "plugin",
             label = plugin_label,
@@ -236,35 +187,17 @@ def resolve_pod(
             pod = pod,
         )
 
-    # Step 4: ios_pod_ignore
-    ignore_set = {p: True for p in ios_pod_ignore} if type(ios_pod_ignore) == "list" else ios_pod_ignore
-    if pod in ignore_set or root in ignore_set:
+    if pod in ios_pod_ignore or root in ios_pod_ignore:
         return make_pod_resolution(kind = "drop", pod = pod)
 
-    # Version lookup for steps 5-7
-    version = ""
-    if pod in pods_map:
-        entry = pods_map[pod]
-        version = entry.version if hasattr(entry, "version") else (
-            entry.get("version", "") if type(entry) == "dict" else ""
-        )
-    elif root in pods_map:
-        entry = pods_map[root]
-        version = entry.version if hasattr(entry, "version") else (
-            entry.get("version", "") if type(entry) == "dict" else ""
-        )
-
-    # Step 5: Binary-pod stub
+    version = _locked_pod_version(pods_map, pod, root)
     binary_res = resolve_binary_pod_stub(pod, root, version)
     if binary_res != None:
         return binary_res
-
-    # Step 6: Pod-to-SwiftPM table stub
     swiftpm_res = resolve_swiftpm_pod_stub(pod, root, version)
     if swiftpm_res != None:
         return swiftpm_res
 
-    # Step 7: Refusal
     return make_pod_resolution(
         kind = "unresolved",
         pod = pod,
@@ -298,297 +231,104 @@ def precompute_hub_apple_pods(
     """
     if not podfile:
         return {}
-    pods_map = podfile.pods if hasattr(podfile, "pods") else (
-        podfile.get("pods", {}) if type(podfile) == "dict" else {}
-    )
-
+    _, pods_map = _podfile_maps(podfile)
     all_pods = {}
     for name, entry in pods_map.items():
         all_pods[name] = True
-        deps = entry.deps if hasattr(entry, "deps") else (
-            entry.get("deps", []) if type(entry) == "dict" else []
-        )
-        for dep in deps:
-            dep_name = dep.name if hasattr(dep, "name") else (
-                dep.get("name", "") if type(dep) == "dict" else str(dep)
-            )
-            if dep_name:
-                all_pods[dep_name] = True
+        for dep_name in _entry_dep_names(entry):
+            all_pods[dep_name] = True
 
+    package_set = {pkg: True for pkg in all_package_names}
+    ignore_set = {item: True for item in ios_pod_ignore}
     resolved = {}
     for pod in sorted(all_pods.keys()):
         res = resolve_pod(
             pod = pod,
             hub_name = hub_name,
-            all_package_names = all_package_names,
+            all_package_names = package_set,
             podfile = podfile,
             lock_label = lock_label,
             ios_pod_deps = ios_pod_deps,
-            ios_pod_ignore = ios_pod_ignore,
+            ios_pod_ignore = ignore_set,
             platform = "",
         )
         resolved[pod] = pod_resolution_to_dict(res)
     return resolved
 
-def _validate_pod_deps(data, label, hub_name):
-    """Validate and return the ios_pod_deps map.
+def hub_cocoapods_attrs(hub_name, all_package_names, podfile, lock_label, pub_tag):
+    """Serialise CocoaPods tag inputs and precompute hub pod resolutions.
 
     Args:
-        data: The decoded JSON dict.
-        label: The file label string.
-        hub_name: The hub name string.
+        hub_name: The `flutter.pub` hub name.
+        all_package_names: Packages present in `pubspec.lock`.
+        podfile: Parsed `Podfile.lock` struct, or None in SwiftPM mode.
+        lock_label: Canonical label string of `ios_podfile_lock`, or "".
+        pub_tag: The `flutter.pub` tag struct.
 
     Returns:
-        struct(ok, error, pod_deps).
+        `struct(ios_pod_deps, ios_pod_ignore, ios_pods_json)` for the hub rule.
     """
-    ios_pod_deps = data.get("ios_pod_deps", None)
-    if type(ios_pod_deps) != "dict":
-        return struct(
-            ok = False,
-            error = "flutter.pub hub {hub}: {label} has no `ios_pod_deps` object.".format(
-                hub = repr(hub_name),
-                label = label,
-            ),
-            pod_deps = {},
-        )
-    for k in ios_pod_deps:
-        if type(k) != "string" or type(ios_pod_deps[k]) != "string":
-            return struct(
-                ok = False,
-                error = (
-                    "flutter.pub hub {hub}: {label} maps a non-string key " +
-                    "to a non-string label in `ios_pod_deps`."
-                ).format(
-                    hub = repr(hub_name),
-                    label = label,
-                ),
-                pod_deps = {},
-            )
-    return struct(ok = True, error = "", pod_deps = ios_pod_deps)
-
-def _validate_pod_ignore(data, label, hub_name):
-    """Validate and return the ios_pod_ignore list.
-
-    Args:
-        data: The decoded JSON dict.
-        label: The file label string.
-        hub_name: The hub name string.
-
-    Returns:
-        struct(ok, error, pod_ignore).
-    """
-    ios_pod_ignore = data.get("ios_pod_ignore", None)
-    if type(ios_pod_ignore) != "list":
-        return struct(
-            ok = False,
-            error = "flutter.pub hub {hub}: {label} has no `ios_pod_ignore` list.".format(
-                hub = repr(hub_name),
-                label = label,
-            ),
-            pod_ignore = [],
-        )
-    for item in ios_pod_ignore:
-        if type(item) != "string":
-            return struct(
-                ok = False,
-                error = "flutter.pub hub {hub}: {label} contains a non-string element in `ios_pod_ignore`.".format(
-                    hub = repr(hub_name),
-                    label = label,
-                ),
-                pod_ignore = [],
-            )
-    return struct(ok = True, error = "", pod_ignore = ios_pod_ignore)
-
-def _parse_ios_pods(data, label, hub_name):
-    """Validate and parse the ios_pods dictionary.
-
-    Args:
-        data: The decoded JSON dict.
-        label: The file label string.
-        hub_name: The hub name string.
-
-    Returns:
-        struct(ok, error, ios_pods).
-    """
-    ios_pods_raw = data.get("ios_pods", None)
-    if type(ios_pods_raw) != "dict":
-        return struct(
-            ok = False,
-            error = "flutter.pub hub {hub}: {label} has no `ios_pods` object.".format(
-                hub = repr(hub_name),
-                label = label,
-            ),
-            ios_pods = {},
-        )
-    ios_pods = {}
-    for pod_name in ios_pods_raw:
-        if type(pod_name) != "string" or type(ios_pods_raw[pod_name]) != "dict":
-            return struct(
-                ok = False,
-                error = "flutter.pub hub {hub}: {label} contains an invalid entry in `ios_pods`.".format(
-                    hub = repr(hub_name),
-                    label = label,
-                ),
-                ios_pods = {},
-            )
-        ios_pods[pod_name] = _pod_resolution_from_dict(ios_pods_raw[pod_name])
-    return struct(ok = True, error = "", ios_pods = ios_pods)
-
-def read_ios_pod_native_deps(content, label, hub_name):
-    """Read a hub's `ios_native_deps.json` CocoaPods entries.
-
-    Validates that the file contains version 1 and valid `ios_pod_deps`,
-    `ios_pod_ignore`, and `ios_pods` structures.
-
-    Args:
-        content: The file text.
-        label: The file label string, for error reporting.
-        hub_name: The flutter.pub hub name, for error reporting.
-
-    Returns:
-        `struct(ok, error, ios_pods, ios_pod_deps, ios_pod_ignore, product_deps)`.
-    """
-    bad = swiftpm_check_json(content, label)
-    if bad:
-        return struct(
-            ok = False,
-            error = "flutter.pub hub {hub}: {bad}".format(hub = repr(hub_name), bad = bad),
-            ios_pods = {},
-            ios_pod_deps = {},
-            ios_pod_ignore = [],
-            product_deps = {},
-        )
-    data = json.decode(content)
-    if type(data) != "dict":
-        return struct(
-            ok = False,
-            error = "flutter.pub hub {hub}: {label} must hold a JSON object.".format(
-                hub = repr(hub_name),
-                label = label,
-            ),
-            ios_pods = {},
-            ios_pod_deps = {},
-            ios_pod_ignore = [],
-            product_deps = {},
-        )
-    if data.get("version", 0) != 1:
-        return struct(
-            ok = False,
-            error = (
-                "flutter.pub hub {hub}: {label} has an unsupported version " +
-                "({version}): only version 1 parses."
-            ).format(hub = repr(hub_name), label = label, version = repr(data.get("version", 0))),
-            ios_pods = {},
-            ios_pod_deps = {},
-            ios_pod_ignore = [],
-            product_deps = {},
-        )
-    pod_deps_res = _validate_pod_deps(data, label, hub_name)
-    if not pod_deps_res.ok:
-        return struct(
-            ok = False,
-            error = pod_deps_res.error,
-            ios_pods = {},
-            ios_pod_deps = {},
-            ios_pod_ignore = [],
-            product_deps = {},
-        )
-    pod_ignore_res = _validate_pod_ignore(data, label, hub_name)
-    if not pod_ignore_res.ok:
-        return struct(
-            ok = False,
-            error = pod_ignore_res.error,
-            ios_pods = {},
-            ios_pod_deps = {},
-            ios_pod_ignore = [],
-            product_deps = {},
-        )
-    pods_res = _parse_ios_pods(data, label, hub_name)
-    if not pods_res.ok:
-        return struct(
-            ok = False,
-            error = pods_res.error,
-            ios_pods = {},
-            ios_pod_deps = {},
-            ios_pod_ignore = [],
-            product_deps = {},
-        )
+    raw_deps = pub_tag.ios_pod_deps if hasattr(pub_tag, "ios_pod_deps") else {}
+    ios_pod_deps = {key: str(raw_deps[key]) for key in sorted(raw_deps)}
+    raw_ignore = pub_tag.ios_pod_ignore if hasattr(pub_tag, "ios_pod_ignore") else []
+    ios_pod_ignore = sorted(raw_ignore)
+    ios_pods = precompute_hub_apple_pods(
+        hub_name = hub_name,
+        all_package_names = all_package_names,
+        podfile = podfile,
+        lock_label = lock_label,
+        ios_pod_deps = ios_pod_deps,
+        ios_pod_ignore = ios_pod_ignore,
+    )
     return struct(
-        ok = True,
-        error = "",
-        ios_pods = pods_res.ios_pods,
-        ios_pod_deps = pod_deps_res.pod_deps,
-        ios_pod_ignore = pod_ignore_res.pod_ignore,
-        product_deps = data.get("swift_package_product_deps", {}),
+        ios_pod_deps = ios_pod_deps,
+        ios_pod_ignore = ios_pod_ignore,
+        ios_pods_json = json.encode(ios_pods),
     )
 
-read_ios_native_deps = read_ios_pod_native_deps
-
 def _collect_matching_lock_entries(podfile, package_name):
-    """Find all PODS entries belonging to package_name, sorted by line number.
-
-    Args:
-        podfile: The parsed podfile struct.
-        package_name: Flutter plugin package name.
-
-    Returns:
-        List of pod entries sorted by entry.line.
-    """
+    """Find all PODS entries belonging to `package_name`, sorted by `entry.line`."""
     matched = []
     for pod_name, entry in podfile.pods.items():
         root = pod_name.partition("/")[0]
         if podfile.plugin_pods.get(root) == package_name:
             matched.append((entry.line, pod_name))
-    return [podfile.pods[p] for _, p in sorted(matched)]
+    return [podfile.pods[pod_name] for _, pod_name in sorted(matched)]
 
 def _filter_kept_deps(matching_entries, podfile, package_name):
-    """Collect kept dependencies in lock order, skipping engine and self edges.
-
-    Args:
-        matching_entries: List of matching pod entries.
-        podfile: The parsed podfile struct.
-        package_name: Flutter plugin package name.
-
-    Returns:
-        List of pod dependency names.
-    """
+    """Collect kept dependencies in lock order, skipping engine and self edges."""
     kept = []
     for entry in matching_entries:
-        deps = entry.deps if hasattr(entry, "deps") else (
-            entry.get("deps", []) if type(entry) == "dict" else []
-        )
-        for dep in deps:
-            dep_name = dep.name if hasattr(dep, "name") else (
-                dep.get("name", "") if type(dep) == "dict" else str(dep)
-            )
+        for dep_name in _entry_dep_names(entry):
             dep_root = dep_name.partition("/")[0]
             if dep_name in ("Flutter", "FlutterMacOS") or dep_root in ("Flutter", "FlutterMacOS"):
                 continue
-            if dep_root == package_name or podfile.plugin_pods.get(dep_root) == package_name:
+            if podfile.plugin_pods.get(dep_root) == package_name:
                 continue
             kept.append(dep_name)
     return kept
 
-def _resolve_spoke_deps_for_platform(
-        kept_deps,
-        platform,
-        hub_data,
-        package_name,
-        lock_label,
-        hub_name,
-        podfile,
-        fail_fn):
+def _infer_spoke_hub_name(ctx, native_deps_label):
+    """Read `ctx.attr.hub_name`, falling back to the repo of `native_deps_label`."""
+    hub_name = ctx.attr.hub_name if hasattr(ctx.attr, "hub_name") else ""
+    if hub_name or native_deps_label == None:
+        return hub_name
+    label_str = str(native_deps_label)
+    if label_str.startswith("@@"):
+        return label_str[2:].partition("//")[0]
+    if label_str.startswith("@"):
+        return label_str[1:].partition("//")[0]
+    return ""
+
+def _resolve_spoke_deps_for_platform(kept_deps, platform, hub_data, spoke, fail_fn):
     """Resolve kept dependencies for one platform through precomputed hub data.
 
     Args:
-        kept_deps: List of pod names.
+        kept_deps: List of pod names in lock order.
         platform: Platform string ("ios" or "macos").
-        hub_data: Hub data struct from read_ios_pod_native_deps.
-        package_name: Flutter plugin package name.
-        lock_label: String label of Podfile.lock.
-        hub_name: Flutter.pub hub name.
-        podfile: Parsed Podfile.lock struct.
-        fail_fn: Failure function to call on unresolved pod.
+        hub_data: Hub data struct from `read_ios_pod_native_deps`.
+        spoke: `struct(package_name, lock_label, hub_name, podfile)`.
+        fail_fn: Failure function to call on an unresolved pod.
 
     Returns:
         `(labels, error_string)` tuple.
@@ -596,15 +336,14 @@ def _resolve_spoke_deps_for_platform(
     seen = {}
     labels = []
     for dep in kept_deps:
-        if dep in hub_data.ios_pods:
-            pod_res = hub_data.ios_pods[dep]
-        else:
+        pod_res = hub_data.ios_pods.get(dep)
+        if pod_res == None:
             pod_res = resolve_pod(
                 pod = dep,
-                hub_name = hub_name,
+                hub_name = spoke.hub_name,
                 all_package_names = (),
-                podfile = podfile,
-                lock_label = lock_label,
+                podfile = spoke.podfile,
+                lock_label = spoke.lock_label,
                 ios_pod_deps = hub_data.ios_pod_deps,
                 ios_pod_ignore = hub_data.ios_pod_ignore,
                 platform = platform,
@@ -613,82 +352,77 @@ def _resolve_spoke_deps_for_platform(
             continue
         if pod_res.kind == "label":
             target = pod_res.label
-            if target not in seen:
-                seen[target] = True
-                labels.append(target)
         elif pod_res.kind == "plugin":
-            hub = pod_res.hub if pod_res.hub else hub_name
+            hub = pod_res.hub if pod_res.hub else spoke.hub_name
             target = "@{hub}__{pkg}//:{pkg}_apple_{plat}".format(
                 hub = hub,
                 pkg = pod_res.package,
                 plat = platform,
             )
-            if target not in seen:
-                seen[target] = True
-                labels.append(target)
-        elif pod_res.kind == "unresolved":
+        else:
+            ref_lock = spoke.lock_label if spoke.lock_label else pod_res.lock_label
             err_msg = format_message_11(
-                package_name,
+                spoke.package_name,
                 dep,
                 pod_res.version,
-                lock_label,
+                ref_lock,
                 pod_res.reason,
             )
             fail_fn(err_msg)
             return labels, err_msg
+        if target not in seen:
+            seen[target] = True
+            labels.append(target)
     return labels, ""
 
-def _resolve_spoke_from_lock(
-        ctx,
-        matching_entries,
-        podfile,
-        package_name,
-        lock_label,
-        apple,
-        fail_fn):
-    """Resolve Apple dependencies from matching Podfile.lock entries.
+def _read_spoke_hub_data(ctx, fail_fn):
+    """Read and validate `ctx.attr.ios_native_deps` for a spoke with pod deps."""
+    native_deps_label = ctx.attr.ios_native_deps if hasattr(ctx.attr, "ios_native_deps") else None
+    hub_name = _infer_spoke_hub_name(ctx, native_deps_label)
+    if native_deps_label == None:
+        err = (
+            "flutter.pub hub {hub}: missing `ios_native_deps` attribute in " +
+            "CocoaPods mode: regenerate the hub."
+        ).format(hub = repr(hub_name))
+        fail_fn(err)
+        return None, hub_name
+    label_str = str(native_deps_label)
+    if hasattr(ctx, "path") and not ctx.path(native_deps_label).exists:
+        err = (
+            "flutter.pub hub {hub}: its iOS native-deps file {label} is " +
+            "missing: regenerate the hub."
+        ).format(hub = repr(hub_name), label = label_str)
+        fail_fn(err)
+        return None, hub_name
+    hub_data = read_ios_pod_native_deps(ctx.read(native_deps_label), label_str, hub_name)
+    if not hub_data.ok:
+        fail_fn(hub_data.error)
+        return None, hub_name
+    return hub_data, hub_name
 
-    Args:
-        ctx: Spoke repository context.
-        matching_entries: List of matching pod entries.
-        podfile: The parsed podfile struct.
-        package_name: Flutter plugin package name.
-        lock_label: String label of Podfile.lock.
-        apple: Struct with macos_srcs and ios_srcs.
-        fail_fn: Function to invoke on error.
-
-    Returns:
-        `struct(macos, ios)`.
-    """
-    kept_deps = _filter_kept_deps(matching_entries, podfile, package_name)
+def _resolve_spoke_from_lock(ctx, matching_entries, spoke, apple, fail_fn):
+    """Resolve Apple dependencies from matching Podfile.lock entries."""
+    kept_deps = _filter_kept_deps(matching_entries, spoke.podfile, spoke.package_name)
     if not kept_deps:
         return struct(macos = [], ios = [])
 
-    native_deps_label = ctx.attr.ios_native_deps
-    hub_name = ctx.attr.hub_name if hasattr(ctx.attr, "hub_name") else ""
-    if not hub_name and native_deps_label:
-        label_str = str(native_deps_label)
-        if label_str.startswith("@@"):
-            hub_name = label_str[2:].partition("//")[0]
-        elif label_str.startswith("@"):
-            hub_name = label_str[1:].partition("//")[0]
-
-    native_content = ctx.read(native_deps_label)
-    hub_data = read_ios_pod_native_deps(native_content, str(native_deps_label), hub_name)
-    if not hub_data.ok:
-        fail_fn(hub_data.error)
+    hub_data, hub_name = _read_spoke_hub_data(ctx, fail_fn)
+    if hub_data == None:
         return struct(macos = [], ios = [])
 
+    spoke_with_hub = struct(
+        package_name = spoke.package_name,
+        lock_label = spoke.lock_label,
+        hub_name = hub_name,
+        podfile = spoke.podfile,
+    )
     macos_labels = []
     if apple.macos_srcs:
         macos_labels, err = _resolve_spoke_deps_for_platform(
             kept_deps,
             "macos",
             hub_data,
-            package_name,
-            lock_label,
-            hub_name,
-            podfile,
+            spoke_with_hub,
             fail_fn,
         )
         if err:
@@ -700,10 +434,7 @@ def _resolve_spoke_from_lock(
             kept_deps,
             "ios",
             hub_data,
-            package_name,
-            lock_label,
-            hub_name,
-            podfile,
+            spoke_with_hub,
             fail_fn,
         )
         if err:
@@ -711,28 +442,18 @@ def _resolve_spoke_from_lock(
 
     return struct(macos = macos_labels, ios = ios_labels)
 
-def _mixed_mode_swiftpm_fallback(
-        ctx,
-        package_name,
-        apple,
-        detect_swiftpm_platform,
-        manifest_presence):
-    """Run SwiftPM fallback for platforms that ship a Package.swift.
+def _spoke_swiftpm_pin_attrs(ctx):
+    """Extract optional SwiftPM pin and hub attributes from a spoke context."""
+    return struct(
+        resolved = ctx.attr.package_resolved if hasattr(ctx.attr, "package_resolved") else None,
+        checksums = ctx.attr.package_sha256 if hasattr(ctx.attr, "package_sha256") else None,
+        native_deps = ctx.attr.ios_native_deps if hasattr(ctx.attr, "ios_native_deps") else None,
+        hub_name = ctx.attr.hub_name if hasattr(ctx.attr, "hub_name") else "",
+    )
 
-    Args:
-        ctx: Spoke repository context.
-        package_name: Pub plugin package name.
-        apple: Struct with macos_srcs and ios_srcs.
-        detect_swiftpm_platform: Fallback function for mixed-mode SwiftPM.
-        manifest_presence: Struct with ios, darwin, macos booleans.
-
-    Returns:
-        `struct(macos, ios)`.
-    """
-    resolved_label = ctx.attr.package_resolved if hasattr(ctx.attr, "package_resolved") else None
-    checksums_label = ctx.attr.package_sha256 if hasattr(ctx.attr, "package_sha256") else None
-    native_deps_label = ctx.attr.ios_native_deps if hasattr(ctx.attr, "ios_native_deps") else None
-    hub_name = ctx.attr.hub_name if hasattr(ctx.attr, "hub_name") else ""
+def _mixed_mode_swiftpm_fallback(ctx, package_name, apple, detect_swiftpm_platform, manifest_presence):
+    """Run SwiftPM fallback for platforms that ship a Package.swift."""
+    pins = _spoke_swiftpm_pin_attrs(ctx)
 
     macos_labels = []
     if apple.macos_srcs and (manifest_presence.macos or manifest_presence.darwin):
@@ -741,10 +462,10 @@ def _mixed_mode_swiftpm_fallback(
             package_name,
             "macos",
             apple.macos_srcs,
-            resolved_label,
-            checksums_label,
-            native_deps_label,
-            hub_name,
+            pins.resolved,
+            pins.checksums,
+            pins.native_deps,
+            pins.hub_name,
         )
 
     ios_labels = []
@@ -754,20 +475,15 @@ def _mixed_mode_swiftpm_fallback(
             package_name,
             "ios",
             apple.ios_srcs,
-            resolved_label,
-            checksums_label,
-            native_deps_label,
-            hub_name,
+            pins.resolved,
+            pins.checksums,
+            pins.native_deps,
+            pins.hub_name,
         )
 
     return struct(macos = macos_labels, ios = ios_labels)
 
-def detect_apple_cocoapods_deps(
-        ctx,
-        package_name,
-        apple,
-        detect_swiftpm_platform,
-        fail_fn = fail):
+def detect_apple_cocoapods_deps(ctx, package_name, apple, detect_swiftpm_platform, fail_fn = fail):
     """Resolve Apple dependencies in CocoaPods mode.
 
     Args:
@@ -783,32 +499,31 @@ def detect_apple_cocoapods_deps(
     if not apple.macos_srcs and not apple.ios_srcs:
         return struct(macos = [], ios = [])
 
-    lock_label = str(ctx.attr.podfile_lock)
-    lock_content = ctx.read(ctx.attr.podfile_lock)
-    podfile = read_podfile_lock(lock_content, lock_label)
+    podfile_lock_attr = ctx.attr.podfile_lock if hasattr(ctx.attr, "podfile_lock") else None
+    if podfile_lock_attr == None:
+        return struct(macos = [], ios = [])
+
+    lock_label = str(podfile_lock_attr)
+    podfile = read_podfile_lock(ctx.read(podfile_lock_attr), lock_label)
     if not podfile.ok:
         fail_fn(podfile.error)
         return struct(macos = [], ios = [])
 
     matching_entries = _collect_matching_lock_entries(podfile, package_name)
     if matching_entries:
-        return _resolve_spoke_from_lock(
-            ctx,
-            matching_entries,
-            podfile,
-            package_name,
-            lock_label,
-            apple,
-            fail_fn,
+        spoke = struct(
+            package_name = package_name,
+            lock_label = lock_label,
+            hub_name = "",
+            podfile = podfile,
         )
+        return _resolve_spoke_from_lock(ctx, matching_entries, spoke, apple, fail_fn)
 
-    # No matching lock entry: check for pure-CocoaPods refusal or mixed-mode fallback.
     manifest_presence = struct(
         ios = ctx.path("ios/" + package_name + "/Package.swift").exists,
         darwin = ctx.path("darwin/" + package_name + "/Package.swift").exists,
         macos = ctx.path("macos/" + package_name + "/Package.swift").exists,
     )
-
     if apple.ios_srcs and not manifest_presence.ios and not manifest_presence.darwin:
         fail_fn(format_message_9(package_name, lock_label))
         return struct(macos = [], ios = [])
