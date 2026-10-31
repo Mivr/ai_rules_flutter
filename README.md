@@ -274,6 +274,25 @@ A plugin dependency found in neither table fails the spoke fetch naming the pack
 
 The parser reads the build script statement by statement (comments stripped outside string literals; statements split on newlines, `;`, `{` and `}` at bracket depth 0, so a parenthesised call spanning lines reads as one statement), so layout is insignificant: a single-line `dependencies { implementation '...' }`, two declarations on one line separated by `;`, and Gradle's `add('implementation', '...')` (single- or double-quoted, both DSLs) all resolve. Only `dependencies` blocks outside `buildscript` count. `apply from:` scripts in every DSL spelling (`apply from: 'x.gradle'`, `apply(from: 'x.gradle')`, `apply(from = "x.gradle.kts")`) are read when the path stays inside the package, recursively, with cycle detection and a depth cap. The Android namespace is read from the same statement model (`namespace` in any `android` block, even on one line or nested, or top-level `android.namespace = ...`; the last declaration wins; commented-out or string-embedded declarations never count). Anything unmodellable fails the fetch instead of dropping the dependency: nested blocks such as `constraints {}`, `dependencies` mentions outside the block form (`project.dependencies.add(...)`), map notation, catalog refs, variables, interpolated coordinates, an unbalanced bracket, a non-literal namespace, and `apply from:` with a URL, an absolute or escaping path, a missing file, or a non-literal argument. The plugin's Android namespace must be a valid Java package name, and every `android_maven_deps` value must be a label (`@...` or `//...`); anything else fails naming the plugin or the key.
 
+#### Pinning Maven dependencies
+
+Every Android build should pin `@rules_android_maven` to avoid resolving artifacts dynamically with Coursier on every cold fetch. To pin the merged install in your root workspace:
+
+1. Add `lock_file = "//:rules_android_maven_install.json",` to your own `maven.install(name = "rules_android_maven", ...)` declaration (or declare one with just the name if your root adds no extra artifacts):
+
+```starlark
+maven = use_extension("@rules_jvm_external//:extensions.bzl", "maven")
+maven.install(
+    name = "rules_android_maven",
+    lock_file = "//:rules_android_maven_install.json",
+)
+use_repo(maven, "rules_android_maven")
+```
+
+2. Run `bazel run @rules_android_maven//:pin` to generate the lock file, and check it in.
+
+`rules_flutter` does not ship a lock file in its own `MODULE.bazel`: under `rules_jvm_external` (6.9 `private/extensions/maven.bzl:630-637` and 7.1 `private/extensions/maven.bzl:784-793`), a dependency module's lock is used only when the consumer's root declares no same-named install, and a root install always replaces it (with none when the root declares no lock). A library lock would therefore stop applying as soon as a consumer adds or bumps an artifact. Furthermore, `rules_jvm_external` permits only one module to pin a given install name (:653-661). Pinning at the workspace root ensures hermetic, sha256-verified downloads for the union of all declared artifacts.
+
 ### iOS native (SwiftPM) dependencies
 
 An iOS app's SwiftPM pins (`ios/.../xcshareddata/swiftpm/Package.resolved`, versions 2 and 3) become one spoke repository per pin, holding the pinned sources and a BUILD file translated from the package's `Package.swift`:

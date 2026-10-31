@@ -50,4 +50,6 @@ extend-exclude = [
   "**/*.xib",
   "**/*.pbxproj",
   "**/tls_fixture.dart",
+  # Generated Android Maven lock files must stay byte-for-byte as written by pin.
+  "**/rules_android_maven_install.json",
 ]
