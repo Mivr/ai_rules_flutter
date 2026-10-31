@@ -65,7 +65,17 @@ def _handle_pods(state, stripped, indent, line_num, label):
         state.pods[entry.name] = struct(version = entry.version, line = line_num)
         state.pod_deps[entry.name] = []
         state.current["pod"] = entry.name
+        state.current["has_colon"] = entry.has_colon
+        state.current["entry_line"] = line_num
+        state.current["entry_text"] = stripped
         return ""
+
+    if state.current["pod"] and not state.current["has_colon"]:
+        return make_refusal(
+            label,
+            state.current["entry_line"],
+            '"{text}" is not a "<name> (<version>):" PODS entry'.format(text = state.current["entry_text"]),
+        )
 
     if indent == 4 and state.current["pod"]:
         dep = parse_pods_dep(stripped)
@@ -80,7 +90,7 @@ def _handle_pods(state, stripped, indent, line_num, label):
         )
         return ""
 
-    if not state.current["pod"] or stripped.endswith(":"):
+    if not state.current["pod"] or stripped.endswith(":") or indent < 2:
         return make_refusal(
             label,
             line_num,
@@ -158,6 +168,9 @@ def _handle_top_level(state, stripped, line_num, label):
         )
     state.current["section"] = top_key
     state.current["pod"] = ""
+    state.current["has_colon"] = False
+    state.current["entry_line"] = 0
+    state.current["entry_text"] = ""
     state.current["repo"] = ""
     state.current["ext_pod"] = ""
     state.current["checkout_pod"] = ""
@@ -220,7 +233,16 @@ def read_podfile_lock(text, label):
         spec_repos = {},
         checksums = {},
         checkout = {},
-        current = {"section": "", "pod": "", "repo": "", "ext_pod": "", "checkout_pod": ""},
+        current = {
+            "section": "",
+            "pod": "",
+            "has_colon": False,
+            "entry_line": 0,
+            "entry_text": "",
+            "repo": "",
+            "ext_pod": "",
+            "checkout_pod": "",
+        },
     )
 
     for line_idx in range(len(lines)):

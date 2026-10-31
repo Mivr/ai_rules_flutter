@@ -872,8 +872,9 @@ def pub_spoke_swiftpm_attrs(pub_tag, include_ios_native_deps = False, plugin_nam
     out = {
         "package_resolved": resolved,
         "package_sha256": sha256,
-        "podfile_lock": getattr(pub_tag, "ios_podfile_lock", None),
     }
+    if hasattr(pub_tag, "ios_podfile_lock") or include_native_deps:
+        out["podfile_lock"] = getattr(pub_tag, "ios_podfile_lock", None)
     if include_native_deps:
         out["ios_native_deps"] = ("@%s//:ios_native_deps.json" % hub_name) if hub_name else None
     if include_plugin:

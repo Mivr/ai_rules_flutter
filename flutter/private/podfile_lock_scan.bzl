@@ -164,35 +164,45 @@ def parse_mapping_line(stripped):
     return struct(key = key, kind = kind, value = unquote(sep.val))
 
 def parse_pods_entry(stripped):
-    """Parse a `- <name> (<version>):` or quoted `- "<name> (<version>)":` line.
+    """Parse a `- <name> (<version>)` or `- <name> (<version>):` entry line.
+
+    Either form may be bare or quoted (`- "<name> (<version>)"`,
+    `- "<name> (<version>):"`, `- "<name> (<version>)":`).
 
     Args:
         stripped: The line text stripped of leading indentation.
 
     Returns:
-        `struct(ok, name, version)` where `ok` is True on success, False if
-        the line is not a valid entry.
+        `struct(ok, name, version, has_colon)` where `ok` is True on success,
+        False if the line is not a valid entry.
     """
     if not stripped.startswith("- "):
-        return struct(ok = False, name = "", version = "")
+        return struct(ok = False, name = "", version = "", has_colon = False)
     rest = stripped[2:].strip()
-    if not rest.endswith(":"):
-        return struct(ok = False, name = "", version = "")
-    inner = unquote(rest[:-1].strip())
+    if not rest:
+        return struct(ok = False, name = "", version = "", has_colon = False)
+    has_colon = False
+    if rest.endswith(":"):
+        has_colon = True
+        rest = rest[:-1].strip()
+    inner = unquote(rest)
+    if inner.endswith(":"):
+        has_colon = True
+        inner = inner[:-1].strip()
     if not inner.endswith(")"):
-        return struct(ok = False, name = "", version = "")
+        return struct(ok = False, name = "", version = "", has_colon = False)
     open_paren = inner.rfind(" (")
     if open_paren <= 0:
-        return struct(ok = False, name = "", version = "")
+        return struct(ok = False, name = "", version = "", has_colon = False)
     name = unquote(inner[:open_paren].strip())
     version = inner[open_paren + 2:-1].strip()
     if not name or not version:
-        return struct(ok = False, name = "", version = "")
+        return struct(ok = False, name = "", version = "", has_colon = False)
     if (name.find("(") != -1 or name.find(")") != -1 or
         version.find("(") != -1 or version.find(")") != -1 or
-        name.find(":") != -1):
-        return struct(ok = False, name = "", version = "")
-    return struct(ok = True, name = name, version = version)
+        name.find(":") != -1 or version.find(":") != -1):
+        return struct(ok = False, name = "", version = "", has_colon = False)
+    return struct(ok = True, name = name, version = version, has_colon = has_colon)
 
 def parse_pods_dep(stripped):
     """Parse a `- <name>` or `- <name> (<requirement>)` dependency line.

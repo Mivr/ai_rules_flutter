@@ -20,6 +20,7 @@ _SYNTHETIC_LOCK = """PODS:
   - Firebase/CoreOnly (12.19.3):
     - FirebaseCore (= 12.19.3)
   - FirebaseCore (12.19.3):
+  - Flutter (1.0.0)
   - google_maps_flutter_ios (0.0.1):
     - Flutter
     - GoogleMaps (= 10.15.0)
@@ -108,6 +109,18 @@ def _synthetic_lock_parses_test_impl(ctx):
     asserts.equals(env, "12.19.3", fb_core.version)
     asserts.equals(env, [], fb_core.deps)
     asserts.equals(env, 9, fb_core.line)
+
+    flutter_pod = res.pods.get("Flutter")
+    asserts.true(env, flutter_pod != None)
+    asserts.equals(env, "1.0.0", flutter_pod.version)
+    asserts.equals(env, [], flutter_pod.deps)
+    asserts.equals(env, 10, flutter_pod.line)
+
+    gmaps = res.pods.get("google_maps_flutter_ios")
+    asserts.true(env, gmaps != None)
+    asserts.equals(env, "0.0.1", gmaps.version)
+    asserts.equals(env, 11, gmaps.line)
+
     return unittest.end(env)
 
 def _quoted_subspec_test_impl(ctx):
@@ -315,6 +328,24 @@ def _refusals_pods_test_impl(ctx):
         res.error,
     )
 
+    colonless_with_deps = "PODS:\n  - Flutter (1.0.0)\n    - SomeDep\n"
+    res = read_podfile_lock(colonless_with_deps, _LOCK_LABEL)
+    asserts.false(env, res.ok)
+    asserts.equals(
+        env,
+        _LOCK_LABEL + ' (Podfile.lock line 2): "- Flutter (1.0.0)" is not a "<name> (<version>):" PODS entry.',
+        res.error,
+    )
+
+    quoted_colonless_with_deps = 'PODS:\n  - "Flutter (1.0.0)"\n    - SomeDep\n'
+    res = read_podfile_lock(quoted_colonless_with_deps, _LOCK_LABEL)
+    asserts.false(env, res.ok)
+    asserts.equals(
+        env,
+        _LOCK_LABEL + ' (Podfile.lock line 2): "- "Flutter (1.0.0)"" is not a "<name> (<version>):" PODS entry.',
+        res.error,
+    )
+
     return unittest.end(env)
 
 def _empty_and_ignored_sections_test_impl(ctx):
@@ -351,6 +382,15 @@ def _dependency_free_entry_test_impl(ctx):
     asserts.equals(env, "0.0.1", res.pods["pod_bigint_plugin"].version)
     asserts.equals(env, [], res.pods["pod_bigint_plugin"].deps)
     asserts.equals(env, 2, res.pods["pod_bigint_plugin"].line)
+
+    dep_free_colonless = "PODS:\n  - pod_bigint_plugin (0.0.1)\n"
+    res2 = read_podfile_lock(dep_free_colonless, _LOCK_LABEL)
+    asserts.true(env, res2.ok)
+    asserts.equals(env, "", res2.error)
+    asserts.true(env, "pod_bigint_plugin" in res2.pods)
+    asserts.equals(env, "0.0.1", res2.pods["pod_bigint_plugin"].version)
+    asserts.equals(env, [], res2.pods["pod_bigint_plugin"].deps)
+    asserts.equals(env, 2, res2.pods["pod_bigint_plugin"].line)
     return unittest.end(env)
 
 def _pub_spoke_podfile_lock_attrs_test_impl(ctx):
@@ -360,7 +400,7 @@ def _pub_spoke_podfile_lock_attrs_test_impl(ctx):
     asserts.true(env, "podfile_lock" in rule_attrs)
     asserts.equals(env, pub_spoke_podfile_lock_attr, rule_attrs["podfile_lock"])
 
-    attrs_unset = pub_spoke_swiftpm_attrs(struct(swift_package_resolved = None))
+    attrs_unset = pub_spoke_swiftpm_attrs(struct(swift_package_resolved = None, ios_podfile_lock = None))
     asserts.equals(env, None, attrs_unset.podfile_lock)
 
     attrs_set = pub_spoke_swiftpm_attrs(struct(
