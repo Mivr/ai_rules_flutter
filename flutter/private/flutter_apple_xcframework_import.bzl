@@ -113,7 +113,7 @@ def _xtool_error(attribute):
         The message text.
     """
     return (
-        'flutter_apple_xcframework_import: the xtool backend links prebuilt frameworks ' +
+        "flutter_apple_xcframework_import: the xtool backend links prebuilt frameworks " +
         'with -F/-framework and cannot carry "%s". Build with backend = "rules_apple" ' +
         "on macOS, or drop the argument."
     ) % attribute
