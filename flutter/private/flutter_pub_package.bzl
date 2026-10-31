@@ -1373,8 +1373,9 @@ def _rewrite_cat_genrules(content, package_name = "", template = "", bound = PUB
     if _WRITE_FILE_LOAD not in text:
         load_idx = text.find("load(")
         if load_idx >= 0:
-            return text[:load_idx] + _WRITE_FILE_LOAD + text[load_idx:]
-        return _WRITE_FILE_LOAD + text
+            text = text[:load_idx] + _WRITE_FILE_LOAD + text[load_idx:]
+        else:
+            text = _WRITE_FILE_LOAD + text
     return text
 
 def apply_overlay_substitutions(content, hub_name, package_name, version, language_version, deps, template = ""):
@@ -2298,8 +2299,6 @@ flutter_test_package = rule(
 )
 """
 
-_pubspec_lock_attr = attr.label(doc = "Hub `pubspec.lock` label, for refusals.", allow_single_file = True, default = None)
-
 flutter_pub_package = repository_rule(
     implementation = _flutter_pub_package_impl,
     attrs = dict({
@@ -2358,7 +2357,7 @@ flutter_pub_package = repository_rule(
             allow_files = True,
             default = [],
         ),
-    }, pubspec_lock = _pubspec_lock_attr),
+    }, pubspec_lock = attr.label(doc = "Hub `pubspec.lock` label.", allow_single_file = True, default = None)),
     doc = "Downloads a single Flutter pub package and emits a `flutter_plugin` (when `flutter.plugin` is present) or a plain `dart_library` (otherwise). When Apple sources are detected, also emits per-platform `flutter_apple_plugin_library` sub-targets. Honors per-package overlay BUILD.bazel.tpl overrides under `overlay_roots`. The `flutter pub get` analog of `pub_lock_package`.",
 )
 
@@ -2407,6 +2406,6 @@ flutter_pub_path_package = repository_rule(
             allow_files = True,
             default = [],
         ),
-    }, pubspec_lock = _pubspec_lock_attr),
+    }, pubspec_lock = attr.label(doc = "Hub `pubspec.lock` label.", allow_single_file = True, default = None)),
     doc = "Symlinks a workspace-local `path:` pub package into a spoke and emits the same `flutter_plugin` / `flutter_library` / `dart_library` the hosted rule would. The `flutter pub get` analog for path dependencies: hermetic (workspace-relative only, watched for changes) and fail-closed on anything resolving outside the workspace's real root; the package's pubspec `name` and `version` must match the lock entry, since overlays and code assets are selected by lock name and version.",
 )

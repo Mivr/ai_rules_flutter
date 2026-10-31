@@ -16,28 +16,12 @@ load(":flutter_pub_walk.bzl", "PUB_WALK_BOUND", "has_files_under_walk")
 load(":starlark_literal.bzl", "starlark_string_literal")
 load(":swiftpm_resolved.bzl", "read_swiftpm_checksums", "read_swiftpm_pins", "swiftpm_unpinned_errors")
 
+# `flutter_pub_apple_deps.bzl` owns the resolver; this alias keeps the symbol
+# exported from the file its callers already load.
+select_apple_swiftpm_deps = _select_apple_swiftpm_deps
+
 # Apple source extensions we sweep into the per-platform plugin library.
 _APPLE_SRC_EXTENSIONS = ("swift", "m", "mm", "h")
-
-def select_apple_swiftpm_deps(plugin_name, manifest_text, manifest_dir, srcs_dirs, platform, pins):
-    """Read one plugin manifest's SwiftPM product links for one platform.
-
-    Kept here as the public entry point `flutter_pub_apple.bzl` has always
-    exported; the resolver itself lives in `flutter_pub_apple_deps.bzl`.
-
-    Args:
-        plugin_name: The pub plugin name, for messages.
-        manifest_text: The `Package.swift` text.
-        manifest_dir: The manifest's package-relative directory.
-        srcs_dirs: The platform's detected source directories.
-        platform: `"ios"` or `"macos"`, for condition filtering.
-        pins: The hub's pin struct for this plugin.
-
-    Returns:
-        `struct(ok, error, labels)`: the spoke dep labels in manifest
-        order, deduplicated.
-    """
-    return _select_apple_swiftpm_deps(plugin_name, manifest_text, manifest_dir, srcs_dirs, platform, pins)
 
 def _ctx_has_files_readdir(ctx, relative_path):
     """A `has_files_under_walk` reader over one spoke directory via `ctx.path`.
