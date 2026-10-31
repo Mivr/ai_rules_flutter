@@ -278,6 +278,13 @@ dart_test(
     deps = _TEST_DEPS,
 )
 
+dart_test(
+    name = "warm_ios_e2e_test",
+    srcs = ["tool/warm_ios_e2e.dart"],
+    main = "test/warm_ios_e2e_test.dart",
+    deps = _TEST_DEPS + _PATH_DEP,
+)
+
 # The Dart in this package that belongs to no package's `lib/` and to no test
 # target: every file under `test/e2e/`, and every script under `tool/` that is
 # not already carried by a test's `srcs`. Nothing analyzed any of it. Closing
@@ -327,7 +334,10 @@ dart_binary(
     name = "loose_sources",
     srcs = glob(["test/e2e/**/*.dart"]) + glob(
         ["tool/**/*.dart"],
-        exclude = ["tool/e2e.dart"],
+        exclude = [
+            "tool/e2e.dart",
+            "tool/warm_ios_e2e.dart",
+        ],
     ) + [
         "test/test_lifetime.dart",
         "test/tls_fixture.dart",
