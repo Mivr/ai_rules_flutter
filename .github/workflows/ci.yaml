@@ -461,6 +461,27 @@ jobs:
               exit 1
             fi
           done
+      # Maven lock enforcement red path: changing an artifact version in an
+      # Android workspace's rules_android_maven install while keeping its
+      # checked-in lock must fail fetch on rules_jvm_external's input signature
+      # check, proving the lock is enforced.
+      - name: Modified rules_android_maven install fails on invalid input signature
+        run: |
+          trap 'rm -rf e2e/hello_world_tmp; (cd e2e/hello_world_tmp 2>/dev/null && bazel shutdown || true)' EXIT
+          cp -r e2e/hello_world e2e/hello_world_tmp
+          sed -i 's/"androidx.privacysandbox.tools:tools:1.0.0-alpha06"/"androidx.privacysandbox.tools:tools:1.0.0-alpha07"/' e2e/hello_world_tmp/MODULE.bazel
+          cd e2e/hello_world_tmp
+          if out=$(bazel fetch @rules_android_maven//:all 2>&1); then
+            echo "$out"
+            echo "expected fetch with changed artifact version to fail, but it succeeded"
+            exit 1
+          fi
+          echo "$out"
+          echo "$out" | grep -F "invalid input signature"
+          bazel shutdown
+          cd ../..
+          rm -rf e2e/hello_world_tmp
+          trap - EXIT
       - name: Report cache sizes
         if: always()
         run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true
@@ -1066,6 +1087,8 @@ jobs:
           cache-save: false
       - name: Check every e2e module is covered or reasoned
         run: bazel run //tools/check_e2e_coverage
+      - name: Check rules_android_maven pins in Android workspaces
+        run: bazel run //tools/check_maven_pins
   conclusion:
     name: Conclusion
     needs: [e2e-macos-apple, e2e-macos-toolchain, unit-tests, e2e-linux-app, e2e-linux-small, e2e-linux-examples, e2e-linux-integration, e2e-windows, e2e-coverage, dart-tool-tests, pre-commit, web-smoke]

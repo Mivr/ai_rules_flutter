@@ -1,0 +1,18 @@
+load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_test")
+
+# Fails when an Android workspace install of rules_android_maven has no
+# checked-in, valid sha256-pinned lock file:
+# `bazel run //tools/check_maven_pins` from the repo root.
+dart_binary(
+    name = "check_maven_pins",
+    srcs = ["pins.dart"],
+    main = "check_maven_pins.dart",
+)
+
+dart_test(
+    name = "pins_test",
+    size = "small",
+    srcs = ["pins.dart"],
+    main = "test/pins_test.dart",
+    deps = ["@dev_tool_deps//:test"],
+)
