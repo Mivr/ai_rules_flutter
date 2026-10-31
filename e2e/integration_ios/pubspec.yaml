@@ -14,6 +14,8 @@ dependencies:
     path: spm_bigint_plugin/
   spm_graph_plugin:
     path: spm_graph_plugin/
+  spm_objc_plugin:
+    path: spm_objc_plugin/
   xcframework_plugin:
     path: xcframework_plugin/
 

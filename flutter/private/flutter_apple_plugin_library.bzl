@@ -230,7 +230,7 @@ def _emit_xtool_plugin_branch(spec):
         includes = spec.includes,
         sdk_frameworks = spec.sdk_frameworks,
         sdk_dylibs = spec.sdk_dylibs,
-        deps = [":" + spec.framework_target] + list(spec.deps),
+        deps = [":" + spec.framework_target] + spec.deps,
         plugin_defines = spec.plugin_defines,
         tags = spec.tags,
         target_compatible_with = spec.target_compatible_with,
@@ -537,6 +537,135 @@ def _emit_mixed_plugin(spec, swift_files, objc_files, headers, kwargs):
     )
     _emit_plugin_bundle_target(spec, [":" + swift_target, objc_target], swift_files, objc_files, headers)
 
+def flutter_apple_plugin_objc_settings(
+        includes = [],
+        conlyopts = [],
+        cxxopts = [],
+        linkopts = [],
+        private_includes = [],
+        sdk_frameworks = [],
+        sdk_dylibs = []):
+    """Assemble the translated settings of one ObjC-only local library.
+
+    BUILD files cannot spell `struct(...)` directly, so the generated
+    spoke calls this helper to pass the settings as one parameter object.
+
+    Args:
+        includes: Public header search directories.
+        conlyopts: C-only compile options (`conlyopts`).
+        cxxopts: C++ compile options (`cxxopts`).
+        linkopts: Link options from `linkerSettings`.
+        private_includes: Target-local `.headerSearchPath` directories.
+        sdk_frameworks: Apple SDK frameworks to link and report.
+        sdk_dylibs: Apple SDK dynamic libraries to link and report.
+
+    Returns:
+        The settings struct `flutter_apple_plugin_objc_library` takes.
+    """
+    return struct(
+        includes = includes,
+        conlyopts = conlyopts,
+        cxxopts = cxxopts,
+        linkopts = linkopts,
+        private_includes = private_includes,
+        sdk_frameworks = sdk_frameworks,
+        sdk_dylibs = sdk_dylibs,
+    )
+
+def flutter_apple_plugin_objc_library(
+        name,
+        srcs = [],
+        hdrs = [],
+        module_name = None,
+        platform = "macos",
+        deps = [],
+        settings = None,
+        visibility = None):
+    """Build a plugin-local C-family target as an ObjC-only library.
+
+    The inner `objc_library` carries `module_name`, the Flutter framework
+    import, and the target's translated settings (public includes,
+    `conlyopts`/`cxxopts` from `.define`, `linkopts` from
+    `linkerSettings`, and target-local `.headerSearchPath` directories).
+    The named target forwards CcInfo/SwiftInfo and exposes
+    `FlutterApplePluginInfo`, so the aggregator and
+    `flutter_plugin(apple_libs = ...)` accept it exactly like a Swift
+    local target.
+
+    Args:
+        name: Target name. Pass to the primary library's `deps`.
+        srcs: Compilable C-family sources plus private headers.
+        hdrs: Public headers.
+        module_name: The target's `c99name`, used as the clang module.
+        platform: `"macos"` or `"ios"`. Picks the Flutter framework dep.
+        deps: Same-package local libraries this target depends on.
+        settings: `struct(includes, conlyopts, cxxopts, linkopts,
+            private_includes, sdk_frameworks, sdk_dylibs)` of translated
+            target settings.
+        visibility: Target visibility.
+    """
+    if platform not in ("macos", "ios"):
+        fail("flutter_apple_plugin_objc_library: platform must be 'macos' or 'ios', got '%s'" % platform)
+    if module_name == None:
+        module_name = name
+    if settings == None:
+        settings = flutter_apple_plugin_objc_settings()
+    target_compatible_with = ["@platforms//os:%s" % platform]
+    framework_target = "_%s__flutter_framework" % name
+    spec = struct(
+        framework_target = framework_target,
+        platform = platform,
+        engine_imports = _apple_plugin_engine_imports(platform, None),
+        internal_tags = ["manual"],
+        target_compatible_with = target_compatible_with,
+    )
+    _emit_apple_framework_import(spec)
+    objc_deps = [":" + framework_target] + deps
+    private_target = "_%s__private_headers" % name
+    implementation_deps = []
+    private_includes = settings.private_includes
+    if type(private_includes) != "list" or private_includes:
+        objc_library(
+            name = private_target,
+            includes = private_includes,
+            tags = ["manual"],
+            target_compatible_with = target_compatible_with,
+            visibility = ["//visibility:private"],
+        )
+        implementation_deps.append(":" + private_target)
+    objc_library(
+        name = "_%s__objc" % name,
+        srcs = srcs,
+        hdrs = hdrs,
+        includes = settings.includes,
+        conlyopts = settings.conlyopts,
+        cxxopts = settings.cxxopts,
+        linkopts = settings.linkopts,
+        sdk_frameworks = settings.sdk_frameworks,
+        sdk_dylibs = settings.sdk_dylibs,
+        module_name = module_name,
+        enable_modules = True,
+        deps = objc_deps,
+        implementation_deps = implementation_deps,
+        tags = ["manual"],
+        target_compatible_with = target_compatible_with,
+        visibility = ["//visibility:private"],
+    )
+    _flutter_apple_plugin_bundle(
+        name = name,
+        deps = [":_%s__objc" % name],
+        module_name = module_name,
+        platform = platform,
+        swift_srcs = [],
+        objc_srcs = srcs,
+        headers = hdrs,
+        sdk_frameworks = settings.sdk_frameworks,
+        sdk_dylibs = settings.sdk_dylibs,
+        tags = ["manual"],
+        target_compatible_with = target_compatible_with,
+        visibility = visibility,
+    )
+
 def flutter_apple_plugin_library(
         name,
         srcs = [],
@@ -641,11 +770,14 @@ def flutter_apple_plugin_library(
         _emit_mixed_plugin(spec, swift_files, objc_files, headers, kwargs)
         return
 
-    swift_deps = [":" + spec.framework_target] + list(deps)
+    swift_deps = [":" + spec.framework_target] + deps
 
     objc_module_name, objc_dep = _emit_plugin_objc_target(spec, objc_files, headers)
     if objc_dep:
-        swift_deps.append(objc_dep)
+        if type(swift_deps) == "list":
+            swift_deps.append(objc_dep)
+        else:
+            swift_deps = swift_deps + [objc_dep]
 
     bridging_header, extra_copts = _plugin_bridging_copts(spec, headers)
 

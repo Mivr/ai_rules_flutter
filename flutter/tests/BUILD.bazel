@@ -67,6 +67,7 @@ load(":starlark_literal_test.bzl", "starlark_literal_test_suite")
 load(":swiftpm_local_settings_test.bzl", "swiftpm_local_settings_fixture")
 load(":swiftpm_manifest_test.bzl", "swiftpm_manifest_test_suite")
 load(":swiftpm_package_test.bzl", "swiftpm_package_test_suite")
+load(":swiftpm_plugin_local_test.bzl", "swiftpm_plugin_local_test_suite")
 load(":swiftpm_resolved_test.bzl", "swiftpm_resolved_test_suite")
 load(":swiftpm_translate_test.bzl", "swiftpm_translate_test_suite")
 load(":toolchain_selection_test.bzl", "toolchain_selection_test_suite")
@@ -400,6 +401,8 @@ validation_test_suite(name = "validation_test")
 starlark_literal_test_suite(name = "starlark_literal_test")
 
 swiftpm_package_test_suite(name = "swiftpm_package_test")
+
+swiftpm_plugin_local_test_suite(name = "swiftpm_plugin_local_test")
 
 swiftpm_manifest_test_suite(name = "swiftpm_manifest_test")
 

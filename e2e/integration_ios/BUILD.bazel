@@ -120,6 +120,27 @@ flutter_integration_test(
     ],
 )
 
+# The plugin-local target suite: proves a Swift target of the plugin's own
+# `Package.swift` builds and links the separate ObjC target it imports. The
+# native method returns a value only that ObjC target computes, so the
+# assertion below fails when the spoke globs only the primary directory.
+flutter_integration_test(
+    name = "plugin_spm_objc_test",
+    package_name = "integration_ios",
+    srcs = ["integration_test/plugin_spm_objc_test.dart"],
+    app_srcs = ["lib/main.dart"],
+    assets = ["assets/logo.png"],
+    platform = "ios",
+    deps = [
+        "//ios_greeting_plugin",
+        "@deps//:flutter",
+        "@deps//:flutter_test",
+        "@deps//:integration_test",
+        "@deps//:spm_objc_plugin",
+        "@rules_flutter//flutter:material_icons",
+    ],
+)
+
 # The transitive SwiftPM graph suite: proves a pub path plugin's
 # `Package.swift` products (swift-algorithms' Algorithms plus
 # swift-numerics' RealModule, down through its C `_NumericsShims`, from the
@@ -180,6 +201,8 @@ build_test(
         ":__plugin_spm_test_app",
         ":__plugin_spm_graph_test_bootstrap",
         ":__plugin_spm_graph_test_app",
+        ":__plugin_spm_objc_test_bootstrap",
+        ":__plugin_spm_objc_test_app",
     ],
 )
 
@@ -274,6 +297,25 @@ flutter_test(
     ],
 )
 
+# Host-side lint twin of `:plugin_spm_objc_test`: same portable split so
+# the analysis test below lints the plugin-local target fixture's Dart on
+# every OS.
+flutter_test(
+    name = "plugin_spm_objc_test_lint",
+    package_name = "integration_ios",
+    srcs = ["lib/main.dart"],
+    main = "integration_test/plugin_spm_objc_test.dart",
+    tags = ["manual"],
+    deps = [
+        "//ios_greeting_plugin",
+        "@deps//:flutter",
+        "@deps//:flutter_test",
+        "@deps//:integration_test",
+        "@deps//:spm_objc_plugin",
+        "@rules_flutter//flutter:material_icons",
+    ],
+)
+
 dart_analysis_test(
     name = "ios_dart_analysis_test",
     targets = [
@@ -282,6 +324,7 @@ dart_analysis_test(
         ":plugin_registrant_filter_test",
         ":plugin_spm_test_lint",
         ":plugin_spm_graph_test_lint",
+        ":plugin_spm_objc_test_lint",
         "//android_only_plugin",
         "//dart_registration_plugin",
         "//ffi_plugin",

@@ -36,8 +36,6 @@ load("//flutter/private:flutter_pubspec.bzl", "asset_flavor_error", "parse_flutt
 load(":asset_uri.bzl", "normalize_spoke_asset_block", "normalize_spoke_assets", "normalize_spoke_fonts", "normalize_spoke_shaders")
 load(
     ":flutter_pub_apple.bzl",
-    "detect_apple_swiftpm_deps",
-    "with_apple_swiftpm_deps",
     _detect_apple_plugin_sources = "detect_apple_plugin_sources",
     _has_files_under = "has_files_under",
     _plugin_apple_libs_arg = "plugin_apple_libs_arg",
@@ -45,6 +43,7 @@ load(
     _plugin_extra_targets = "plugin_extra_targets",
     _plugin_privacy_files_arg = "plugin_privacy_files_arg",
 )
+load(":flutter_pub_apple_local.bzl", "apply_apple_native_deps")
 load(
     ":flutter_pub_assets.bzl",
     "check_asset_entry_problems",
@@ -1848,8 +1847,7 @@ def _build_plugin_spoke_content(ctx, pubspec, dep_labels, assets, unreplaced_hoo
         pkg_shaders = assets.pkg_shaders,
         plugin_defines = ctx.attr.plugin_defines,
     )
-    apple_swiftpm = detect_apple_swiftpm_deps(ctx, package_name, apple)
-    build_content = with_apple_swiftpm_deps(build_content, package_name, apple_swiftpm.macos, apple_swiftpm.ios)
+    build_content = apply_apple_native_deps(ctx, package_name, apple, build_content)
     return struct(build_content = build_content, android = android)
 
 def _build_library_spoke_content(ctx, pubspec, dep_labels, assets, unreplaced_hook):
