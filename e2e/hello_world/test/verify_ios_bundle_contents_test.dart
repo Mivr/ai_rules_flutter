@@ -11,7 +11,8 @@
 ///
 /// * the app's `Info.plist` carries `CFBundleShortVersionString` `2.3.4`
 ///   and `CFBundleVersion` `42` from `:hello_world_ios_app_version`;
-/// * `App.framework/flutter_assets/packages/platform_assets/assets/any.txt`
+/// * `flutter_assets/packages/platform_assets/assets/any.txt` at the app root
+///   (a debug app keeps its assets there, not in `App.framework`)
 ///   is present with the committed file's bytes (staged through `data`),
 ///   and the asset manifest lists it;
 /// * `.../assets/ios_only.txt` is present and listed, while
@@ -20,7 +21,7 @@
 /// * `FontManifest.json` lists the family
 ///   `packages/cupertino_icons/CupertinoIcons` with its font file present
 ///   in the bundle, and lists `MaterialIcons`;
-/// * the debug payload `App.framework/flutter_assets/kernel_blob.bin` is
+/// * the debug payload `flutter_assets/kernel_blob.bin` is
 ///   present and non-empty.
 ///
 /// The archive is walked in memory (central directory, raw inflate via
@@ -109,7 +110,7 @@ void main() {
     exit(1);
   }
   final committedBytes = committed.readAsBytesSync();
-  final assetsDir = '$appDir/Frameworks/App.framework/flutter_assets';
+  final assetsDir = '$appDir/flutter_assets';
   final manifestText = _manifestText(files, assetsDir);
 
   var failed = false;
