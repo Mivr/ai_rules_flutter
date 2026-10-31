@@ -3,8 +3,19 @@ load("@rules_apple//apple:ios.bzl", "ios_application")
 load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test", "dart_test")
 load("@rules_flutter//flutter:defs.bzl", "flutter_gen_l10n", "flutter_integration_test", "flutter_test")
 load("@rules_flutter//flutter:ios.bzl", "flutter_ios_registrant_gen", "flutter_ios_simulator_build_test")
+load("@rules_swift//swift:swift.bzl", "swift_library_group")
 
 exports_files(["pubspec.lock"])
+
+# The product `deps_mapped` points at: a Bazel-built Swift library group over
+# the translated BigInt product. The mapped hub carries no pin, checksum or
+# resolved file, so the plugin's `BigInt` dependency reaches this target.
+swift_library_group(
+    name = "bigint_product",
+    tags = ["manual"],
+    visibility = ["//visibility:public"],
+    deps = ["@deps__swiftpm-bigint//:BigInt"],
+)
 
 # The generated localizations `:app_test` compiles into the app and renders
 # under `Locale('es')`, so an iOS-only regression in gen-l10n output or in the
@@ -87,6 +98,27 @@ flutter_integration_test(
     ],
 )
 
+# The mapped twin of `:plugin_spm_test`: `deps_mapped` has no resolved file
+# and no checksum table, so the plugin's BigInt product can only come from
+# `//:bigint_product` through `swift_package_product_deps`. The same Dart
+# assertion computes 2^100 at run time.
+flutter_integration_test(
+    name = "plugin_spm_mapped_test",
+    package_name = "integration_ios",
+    srcs = ["integration_test/plugin_spm_test.dart"],
+    app_srcs = ["lib/main.dart"],
+    assets = ["assets/logo.png"],
+    platform = "ios",
+    deps = [
+        "@deps_mapped//:flutter",
+        "@deps_mapped//:flutter_test",
+        "@deps_mapped//:integration_test",
+        "@deps_mapped//:spm_bigint_plugin",
+        "@mapped_greeting_plugin//:ios_greeting_plugin",
+        "@rules_flutter//flutter:material_icons",
+    ],
+)
+
 # The transitive SwiftPM graph suite: proves a pub path plugin's
 # `Package.swift` products (swift-algorithms' Algorithms plus
 # swift-numerics' RealModule, down through its C `_NumericsShims`, from the
@@ -141,6 +173,8 @@ build_test(
     targets = [
         ":__app_test_bootstrap",
         ":__app_test_app",
+        ":__plugin_spm_mapped_test_bootstrap",
+        ":__plugin_spm_mapped_test_app",
         ":__plugin_spm_test_bootstrap",
         ":__plugin_spm_test_app",
         ":__plugin_spm_graph_test_bootstrap",

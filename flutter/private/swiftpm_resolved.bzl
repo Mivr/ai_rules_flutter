@@ -710,6 +710,64 @@ def check_swiftpm_config_present(resolved, sha256_by_identity, build_files):
         return ""
     return "flutter.pub: {problems}; set `swift_package_resolved` first.".format(problems = "; ".join(problems))
 
+def read_ios_native_deps(content, label, hub_name):
+    """Read a hub's `ios_native_deps.json` into its product mapping.
+
+    The file is the hub's own output, so a missing, malformed or
+    wrong-shaped file means a broken hub, never an empty mapping: every
+    failure names the hub and the file.
+
+    Args:
+        content: The file text.
+        label: The file label, for messages.
+        hub_name: The `flutter.pub` hub name, for messages.
+
+    Returns:
+        `struct(ok, error, product_deps)`: `product_deps` maps
+        `<identity>:<product>` to a canonical label string.
+    """
+    bad = _swiftpm_check_json(content, label)
+    if bad:
+        return struct(
+            ok = False,
+            error = "flutter.pub hub {hub}: {bad}".format(hub = repr(hub_name), bad = bad),
+            product_deps = {},
+        )
+    data = json.decode(content)
+    if type(data) != "dict":
+        return struct(
+            ok = False,
+            error = "flutter.pub hub {hub}: {label} must hold a JSON object.".format(hub = repr(hub_name), label = label),
+            product_deps = {},
+        )
+    if data.get("version", 0) != 1:
+        return struct(
+            ok = False,
+            error = (
+                "flutter.pub hub {hub}: {label} has an unsupported version " +
+                "({version}): only version 1 parses."
+            ).format(hub = repr(hub_name), label = label, version = repr(data.get("version", 0))),
+            product_deps = {},
+        )
+    product_deps = data.get("swift_package_product_deps", None)
+    if type(product_deps) != "dict":
+        return struct(
+            ok = False,
+            error = (
+                "flutter.pub hub {hub}: {label} has no " +
+                "`swift_package_product_deps` object."
+            ).format(hub = repr(hub_name), label = label),
+            product_deps = {},
+        )
+    for key in product_deps:
+        if type(key) != "string" or type(product_deps[key]) != "string":
+            return struct(
+                ok = False,
+                error = "flutter.pub hub {hub}: {label} maps a non-string key to a non-string label.".format(hub = repr(hub_name), label = label),
+                product_deps = {},
+            )
+    return struct(ok = True, error = "", product_deps = product_deps)
+
 # Shared by `flutter_pub_package` and `flutter_pub_path_package`. Kept
 # here so the pub-package rule file does not grow another copy of the
 # same attribute documentation.
@@ -733,30 +791,73 @@ pub_spoke_package_sha256_attr = attr.label(
     default = None,
 )
 
-def pub_spoke_swiftpm_attrs(pub_tag):
+pub_spoke_ios_native_deps_attr = attr.label(
+    doc = "Label of the hub's `ios_native_deps.json`, read only when this " +
+          "package ships a `Package.swift` with at least one product " +
+          "dependency. A pure-Dart spoke, or an Apple plugin with no " +
+          "manifest or no product dependency, never reads it, so adding, " +
+          "removing or changing a mapping leaves its marker unchanged.",
+    allow_single_file = True,
+    default = None,
+)
+
+def pub_spoke_swiftpm_rule_attrs(attrs):
+    """Add the SwiftPM file labels every pub-spoke repository rule declares.
+
+    Kept beside the attribute declarations, so both pub spoke rules share
+    one copy and `flutter_pub_package.bzl` stays at its size.
+
+    Args:
+        attrs: The rule's own attribute dict.
+
+    Returns:
+        The same dict with `package_resolved`, `package_sha256` and
+        `ios_native_deps` added.
+    """
+    attrs["package_resolved"] = pub_spoke_package_resolved_attr
+    attrs["package_sha256"] = pub_spoke_package_sha256_attr
+    attrs["ios_native_deps"] = pub_spoke_ios_native_deps_attr
+    return attrs
+
+def pub_spoke_swiftpm_attrs(pub_tag, include_ios_native_deps = False):
     """The SwiftPM repository arguments every pub spoke receives.
 
-    A pub spoke gets two constant labels: the hub's resolved file and the
-    hub's checksum table. Neither value is the pin list or the map
-    itself, and both are read only if the package ships a
-    `Package.swift`. Pure-Dart spokes therefore keep their marker when a
-    pin or a checksum is added, removed or changed.
+    A pub spoke gets constant labels: the hub's resolved file and checksum
+    table, plus the hub's iOS native-deps map when the caller asks for it.
+    None of the values is the pin list or the map itself, and all are
+    read only if the package ships a `Package.swift` (the map only when
+    it also has a product dependency). Pure-Dart spokes therefore keep
+    their marker when a pin, a checksum or a mapping is added, removed or
+    changed.
 
     Args:
         pub_tag: The `flutter.pub` tag.
+        include_ios_native_deps: Whether to add the hub's
+            `ios_native_deps.json` label. The extension passes True for
+            every pub spoke; a tag that itself declares
+            `swift_package_product_deps` also gets it.
 
     Returns:
-        `struct(package_resolved, package_sha256)`: the resolved label and
-        the checksum-file label, or None for each when unset.
+        `struct(package_resolved, package_sha256[, ios_native_deps])`:
+        the resolved label, the checksum-file label, and the
+        native-deps-file label when requested. Each is None when unset;
+        the native-deps label is constant for every spoke of a named hub.
     """
     resolved = pub_tag.swift_package_resolved
     hub_name = getattr(pub_tag, "name", "")
-    if resolved == None or not hub_name:
+    include_native_deps = include_ios_native_deps or hasattr(pub_tag, "swift_package_product_deps")
+    if not hub_name:
+        if include_native_deps:
+            return struct(package_resolved = resolved, package_sha256 = None, ios_native_deps = None)
         return struct(package_resolved = resolved, package_sha256 = None)
-    return struct(
-        package_resolved = resolved,
-        package_sha256 = "@%s//:swift_package_sha256.json" % hub_name,
-    )
+    sha256 = ("@%s//:swift_package_sha256.json" % hub_name) if resolved != None else None
+    if include_native_deps:
+        return struct(
+            package_resolved = resolved,
+            package_sha256 = sha256,
+            ios_native_deps = "@%s//:ios_native_deps.json" % hub_name,
+        )
+    return struct(package_resolved = resolved, package_sha256 = sha256)
 
 def swiftpm_spoke_attrs(hub_name, pin, classified, build_file):
     """The repository arguments one SwiftPM spoke receives.

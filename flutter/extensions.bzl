@@ -31,6 +31,7 @@ load("//flutter/private:flutter_pub_overlays.bzl", "hub_overlay_roots")
 load("//flutter/private:flutter_pub_package.bzl", "flutter_pub_package", "flutter_pub_path_package", "is_maven_dep_label")
 load("//flutter/private:flutter_pub_path.bzl", "foreign_lock_path_error", "is_absolute_lock_path", "is_relative_path_dependency", "workspace_relative_lock_path")
 load("//flutter/private:flutter_pub_plugin_defines.bzl", "ios_plugin_defines_lock_error")
+load("//flutter/private:flutter_pub_tag.bzl", "flutter_pub_tag", "validate_swift_package_product_deps")
 load("//flutter/private:flutter_sdk_package.bzl", "flutter_sdk_package")
 load("//flutter/private:pub_lock_sdks.bzl", "hosted_package_sha256", "parse_lock_sdk_constraints", "version_below_lower_bound")
 load("//flutter/private:rules_dart_floor.bzl", "check_rules_dart_floor")
@@ -140,108 +141,6 @@ flutter_version = tag_class(
     doc = "Registers a custom Flutter release missing from the built-in " +
           "version table, so `flutter.toolchain` can download it by tag. " +
           "Root-module-only.",
-)
-
-_flutter_pub = tag_class(
-    attrs = {
-        "name": attr.string(
-            doc = "Repository name for the resolved packages hub.",
-            mandatory = True,
-        ),
-        "lock": attr.label(
-            doc = "The pubspec.lock file to parse.",
-            mandatory = True,
-            allow_single_file = True,
-        ),
-        "ignore_hooks": attr.string_list(
-            doc = "Pub package names whose `hook/build.dart` is knowingly " +
-                  "irrelevant to this build (its native code is never reached). " +
-                  "Suppresses the unreplaced-hook error for them. This is a " +
-                  "declaration you make deliberately; it is never a default.",
-            default = [],
-        ),
-        "cycle_breaks": attr.string_list_dict(
-            doc = "Package name -> dependency names whose pubspec edge is " +
-                  "left out of that package's spoke `deps`, so two locked " +
-                  "packages that depend on each other (for example `dio` <-> " +
-                  "`dio_web_adapter`) no longer form a Bazel repository " +
-                  "cycle. Both packages keep their spokes, hub aliases and " +
-                  "`android:all_android_plugin_libs` entries; only the named " +
-                  "spoke-to-spoke edge is dropped. Dropping an edge is safe " +
-                  "only when the dependency is reached through a conditional " +
-                  "import for a platform this build does not target. Every " +
-                  "key and listed dependency must name a package in the lock, " +
-                  "and each listed dependency must be one the key's own " +
-                  "pubspec declares; anything else fails evaluation or the " +
-                  "spoke fetch. It is an interim escape hatch: the " +
-                  "merged-spoke design will make it unnecessary. Empty by " +
-                  "default and never given a built-in default.",
-            default = {},
-        ),
-        "android_maven_deps": attr.string_dict(
-            doc = "`group:artifact` -> Bazel label additions to the built-in " +
-                  "mapping from a plugin's `android/build.gradle*` runtime " +
-                  "dependencies to `@rules_android_maven` labels. A plugin dep " +
-                  "found in neither table fails the spoke fetch; mapping it " +
-                  "here is the fix for external artifacts. The label must " +
-                  "resolve in the workspace's `rules_android_maven` install.",
-            default = {},
-        ),
-        "android_maven_ignore": attr.string_list(
-            doc = "`group:artifact` coordinates that need no Bazel label and " +
-                  "must not fail the spoke fetch as unknown. This is a " +
-                  "declaration you make deliberately; it is never a default.",
-            default = [],
-        ),
-        "swift_package_resolved": attr.label(
-            doc = "Label of the Xcode `Package.resolved` file pinning the " +
-                  "app's SwiftPM dependencies " +
-                  "(`ios/.../xcshareddata/swiftpm/Package.resolved`). Each " +
-                  "pin becomes a `<hub>__swiftpm-<identity>` spoke holding " +
-                  "the pinned sources and a BUILD file translated from its " +
-                  "`Package.swift`. Unset (the default) means no SwiftPM " +
-                  "spokes. See the README section \"iOS native (SwiftPM) " +
-                  "dependencies\".",
-            allow_single_file = True,
-        ),
-        "swift_package_sha256": attr.string_dict(
-            doc = "SwiftPM package identity -> SHA-256 hex digest of the " +
-                  "pinned source archive (the `github.com/<owner>/<repo>/archive/" +
-                  "`revision`.tar.gz` the pin resolves to). Every pin needs " +
-                  "an entry: a pin without one fails its spoke fetch before " +
-                  "any download, and computing the digest with " +
-                  "`sha256sum` over the downloaded archive is the fix.",
-            default = {},
-        ),
-        "swift_package_build_files": attr.string_keyed_label_dict(
-            doc = "SwiftPM package identity -> label of a hand-written BUILD " +
-                  "file replacing the generated one for that package. Each " +
-                  "label resolves in the module that writes this tag (like " +
-                  "`lock` and `swift_package_resolved`), so `//third_party:" +
-                  "pkg.BUILD` in the root MODULE.bazel names the root " +
-                  "module's file. The override skips the manifest " +
-                  "translation only: the pinned archive still downloads, so " +
-                  "the identity keeps needing its `swift_package_sha256` " +
-                  "entry. It is the escape hatch for packages whose " +
-                  "manifest uses constructs with no Bazel translation. " +
-                  "Empty by default.",
-            allow_files = True,
-            default = {},
-        ),
-        "ios_plugin_defines": attr.string_list_dict(
-            doc = "Flutter plugin name -> preprocessor defines for that plugin's Apple " +
-                  "libraries, the Bazel analogue of a Podfile `post_install` " +
-                  "GCC_PREPROCESSOR_DEFINITIONS edit (for example " +
-                  "`{\"permission_handler_apple\": [\"PERMISSION_CAMERA=1\"]}`). `NAME` " +
-                  "reaches C-family and Swift sources; `NAME=VALUE` reaches C-family " +
-                  "sources only, because Swift conditions carry no value. A key naming no " +
-                  "Apple plugin in the lock fails the extension evaluation.",
-            default = {},
-        ),
-    },
-    doc = "Resolves a `pubspec.lock` into one spoke repository per package " +
-          "plus a hub alias. Requires a `flutter.toolchain` for the Flutter " +
-          "SDK packages in the lock.",
 )
 
 _flutter_plugin_overlays = tag_class(
@@ -576,7 +475,7 @@ def _create_hosted_spokes(hub_name, hosted, all_package_names, user_overlay_root
     reads the hub's resolved file and checksum table at fetch time, so no
     spoke carries hub-wide pin state in its repository attributes.
     """
-    swiftpm_attrs = pub_spoke_swiftpm_attrs(pub_tag)
+    swiftpm_attrs = pub_spoke_swiftpm_attrs(pub_tag, include_ios_native_deps = True)
     for name, info in hosted.items():
         desc = info.get("description", {})
         version = info.get("version", "")
@@ -610,6 +509,7 @@ def _create_hosted_spokes(hub_name, hosted, all_package_names, user_overlay_root
             android_maven_ignore = pub_tag.android_maven_ignore,
             package_resolved = swiftpm_attrs.package_resolved,
             package_sha256 = swiftpm_attrs.package_sha256,
+            ios_native_deps = swiftpm_attrs.ios_native_deps,
             pubspec_lock = pub_tag.lock,
         )
 
@@ -626,7 +526,7 @@ def _create_path_spokes(hub_name, path_pkgs, all_package_names, user_overlay_roo
     checksum table at fetch time, so no spoke carries hub-wide pin state
     in its repository attributes.
     """
-    swiftpm_attrs = pub_spoke_swiftpm_attrs(pub_tag)
+    swiftpm_attrs = pub_spoke_swiftpm_attrs(pub_tag, include_ios_native_deps = True)
     maven = path_spoke_maven_inputs(pub_tag)
     for name, path_info in path_pkgs.items():
         flutter_pub_path_package(
@@ -645,6 +545,7 @@ def _create_path_spokes(hub_name, path_pkgs, all_package_names, user_overlay_roo
             android_maven_ignore = maven.ignore,
             package_resolved = swiftpm_attrs.package_resolved,
             package_sha256 = swiftpm_attrs.package_sha256,
+            ios_native_deps = swiftpm_attrs.ios_native_deps,
             pubspec_lock = pub_tag.lock,
         )
 
@@ -745,6 +646,7 @@ def _register_pub_hub(module_ctx, pub_tag, selected_info, merged, user_overlay_r
     """Resolves one `flutter.pub` tag into spoke repos plus the hub repo."""
     hub_name = pub_tag.name
 
+    validate_swift_package_product_deps(hub_name, pub_tag.swift_package_product_deps)
     _fail_on_invalid_maven_deps(hub_name, pub_tag.android_maven_deps)
     lock_content = module_ctx.read(pub_tag.lock)
     lock_pkgs = parse_pubspec_lock(lock_content)
@@ -780,6 +682,10 @@ def _register_pub_hub(module_ctx, pub_tag, selected_info, merged, user_overlay_r
         hub_name = hub_name,
         packages = sorted(all_package_names),
         swift_package_sha256 = pub_tag.swift_package_sha256,
+        swift_package_product_deps = {
+            key: str(pub_tag.swift_package_product_deps[key])
+            for key in sorted(pub_tag.swift_package_product_deps)
+        },
     )
 
     _create_swiftpm_spokes(hub_name, pub_tag, module_ctx)
@@ -845,7 +751,7 @@ flutter = module_extension(
     tag_classes = {
         "toolchain": flutter_toolchain,
         "version": flutter_version,
-        "pub": _flutter_pub,
+        "pub": flutter_pub_tag,
         "plugin_overlays": _flutter_plugin_overlays,
         "darwin_sdk": _flutter_darwin_sdk,
     },
