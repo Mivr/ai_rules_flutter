@@ -40,6 +40,9 @@ from gen_monorepo import (
     module_bazel_text,
     pad_file,
     render_lib_file,
+)
+from gen_pub import (
+    copy_pub_files,
     strip_lock_path_packages,
     strip_pubspec_path_deps,
 )
@@ -1086,6 +1089,23 @@ class PathDepStripTest(unittest.TestCase):
         self.assertNotIn("platform_assets", out)
         self.assertIn("sdks:", out)
         self.assertIn('dart: ">=3.13.0 <4.0.0"', out)
+
+    def test_copy_pub_files_writes_fallback_without_fixture(self):
+        tmp = tempfile.mkdtemp(prefix="gen-mono-pubfall-")
+        try:
+            out = os.path.join(tmp, "ws")
+            os.makedirs(out)
+            copy_pub_files(out, os.path.join(tmp, "no-rules"))
+            with open(os.path.join(out, "pubspec.yaml"),
+                      encoding="utf-8") as fh:
+                self.assertEqual(
+                    fh.read(),
+                    "name: bench_monorepo\nenvironment:\n  sdk: ^3.9.0\n")
+            with open(os.path.join(out, "pubspec.lock"),
+                      encoding="utf-8") as fh:
+                self.assertIn("packages: {}", fh.read())
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
     def test_generated_workspace_drops_fixture_path_deps(self):
         tmp = tempfile.mkdtemp(prefix="gen-mono-path-")
