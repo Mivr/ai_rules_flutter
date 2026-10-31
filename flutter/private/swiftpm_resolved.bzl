@@ -857,15 +857,15 @@ def pub_spoke_swiftpm_attrs(pub_tag, include_ios_native_deps = False, plugin_nam
         plugin_name: The pub package name to look up in `ios_plugin_deps`.
 
     Returns:
-        `struct(package_resolved, package_sha256, podfile_lock[, ios_native_deps][, plugin_deps])`:
+        `struct(package_resolved, package_sha256[, podfile_lock][, ios_native_deps][, plugin_deps])`:
         the resolved label, the checksum-file label, the CocoaPods lock
-        label when declared, the native-deps-file label when requested, and
-        the plugin's mapped native dependency label. Each is None when
-        unset; the native-deps label is constant for every spoke of a named
-        hub.
+        label when the tag declares one or native deps are requested, the
+        native-deps-file label when requested, and the plugin's mapped
+        native dependency label. Each is None when unset; the native-deps
+        label is constant for every spoke of a named hub.
     """
     resolved = pub_tag.swift_package_resolved
-    hub_name = getattr(pub_tag, "name", "")
+    hub_name = pub_tag.name if hasattr(pub_tag, "name") else ""
     include_native_deps = include_ios_native_deps or hasattr(pub_tag, "swift_package_product_deps")
     include_plugin = plugin_name != "" or hasattr(pub_tag, "ios_plugin_deps")
     sha256 = ("@%s//:swift_package_sha256.json" % hub_name) if (hub_name and resolved != None) else None
@@ -874,7 +874,7 @@ def pub_spoke_swiftpm_attrs(pub_tag, include_ios_native_deps = False, plugin_nam
         "package_sha256": sha256,
     }
     if hasattr(pub_tag, "ios_podfile_lock") or include_native_deps:
-        out["podfile_lock"] = getattr(pub_tag, "ios_podfile_lock", None)
+        out["podfile_lock"] = pub_tag.ios_podfile_lock if hasattr(pub_tag, "ios_podfile_lock") else None
     if include_native_deps:
         out["ios_native_deps"] = ("@%s//:ios_native_deps.json" % hub_name) if hub_name else None
     if include_plugin:

@@ -13,6 +13,7 @@ load(
     "parse_mapping_line",
     "parse_pods_dep",
     "parse_pods_entry",
+    "starts_with_flow_or_anchor",
     "unquote",
 )
 
@@ -33,6 +34,9 @@ _CHECKOUT_KINDS = {
     "http": True,
     "svn": True,
 }
+
+_TAB_DETAIL = "an indentation tab is not part of the Podfile.lock YAML subset rules_flutter reads"
+_FLOW_DETAIL = "flow syntax and anchors are not part of the Podfile.lock YAML subset rules_flutter reads"
 
 def _make_failure(error):
     """Build a failure struct with empty maps."""
@@ -70,7 +74,7 @@ def _handle_pods(state, stripped, indent, line_num, label):
         state.current["entry_text"] = stripped
         return ""
 
-    if state.current["pod"] and not state.current["has_colon"]:
+    if indent > 2 and state.current["pod"] and not state.current["has_colon"]:
         return make_refusal(
             label,
             state.current["entry_line"],
@@ -114,26 +118,34 @@ def _handle_spec_repos(state, stripped, indent):
         if repo and pod:
             state.spec_repos[pod] = repo
 
+def _plugin_pkg_from_path(path):
+    """Extract pub package name from `.symlinks/plugins/<pkg>/<ios|darwin|macos>`, or `""`."""
+    prefix = ".symlinks/plugins/"
+    if not path.startswith(prefix):
+        return ""
+    parts = path[len(prefix):].split("/")
+    if len(parts) == 2 and parts[1] in ("ios", "darwin", "macos") and parts[0] not in ("", ".", ".."):
+        return parts[0]
+    return ""
+
 def _handle_external_sources(state, stripped, indent):
     """Handle a line inside the EXTERNAL SOURCES section."""
     if indent == 2:
         kv = parse_mapping_line(stripped)
         state.current["ext_pod"] = kv.key
-    elif indent > 2:
-        pod = state.current["ext_pod"]
-        if not pod:
-            return
-        kv = parse_mapping_line(stripped)
-        if kv.kind == "path":
-            prefix = ".symlinks/plugins/"
-            if kv.value.startswith(prefix):
-                sub = kv.value[len(prefix):]
-                parts = sub.split("/")
-                if len(parts) == 2 and parts[1] in ("ios", "darwin", "macos") and len(parts[0]) > 0:
-                    state.plugin_pods[pod] = parts[0]
-        elif kv.kind in _CHECKOUT_KINDS:
-            if pod not in state.checkout:
-                state.checkout[pod] = kv.kind
+        return
+    if indent <= 2 or not state.current["ext_pod"]:
+        return
+    pod = state.current["ext_pod"]
+    kv = parse_mapping_line(stripped)
+    if not kv.is_symbol:
+        return
+    if kv.kind == "path":
+        pkg = _plugin_pkg_from_path(kv.value)
+        if pkg:
+            state.plugin_pods[pod] = pkg
+    elif kv.kind in _CHECKOUT_KINDS and pod not in state.checkout:
+        state.checkout[pod] = kv.kind
 
 def _handle_checkout_options(state, stripped, indent):
     """Handle a line inside the CHECKOUT OPTIONS section."""
@@ -145,22 +157,21 @@ def _handle_checkout_options(state, stripped, indent):
         if not pod:
             return
         kv = parse_mapping_line(stripped)
-        if kv.kind in _CHECKOUT_KINDS:
-            if pod not in state.checkout:
-                state.checkout[pod] = kv.kind
+        if kv.is_symbol and kv.kind in _CHECKOUT_KINDS and pod not in state.checkout:
+            state.checkout[pod] = kv.kind
 
 def _handle_spec_checksums(state, stripped, indent):
     """Handle a line inside the SPEC CHECKSUMS section."""
     if indent == 2:
         kv = parse_mapping_line(stripped)
-        if kv.key and kv.value:
+        if kv.has_kv and kv.key and kv.value:
             state.checksums[kv.key] = kv.value
 
 def _handle_top_level(state, stripped, line_num, label):
     """Handle a top-level section header."""
     kv = parse_mapping_line(stripped)
-    top_key = kv.key
-    if top_key not in _ALLOWED_TOP_LEVEL:
+    top_key = kv.key if kv.has_kv else stripped
+    if not kv.has_kv or top_key not in _ALLOWED_TOP_LEVEL:
         return make_refusal(
             label,
             line_num,
@@ -201,6 +212,33 @@ def _dispatch_section(state, stripped, indent, line_num, label):
         line_num,
         '"{key}" is not a Podfile.lock top-level key rules_flutter reads'.format(key = kv.key),
     )
+
+def _scan_line(state, raw_line, line_num, label):
+    """Process one raw line of `Podfile.lock`, returning `""` or refusal text."""
+    if raw_line.endswith("\r"):
+        raw_line = raw_line[:-1]
+    if has_indent_tab(raw_line):
+        return make_refusal(label, line_num, _TAB_DETAIL)
+    stripped = raw_line.strip()
+    if not stripped:
+        return ""
+    if starts_with_flow_or_anchor(stripped):
+        return make_refusal(label, line_num, _FLOW_DETAIL)
+    indent = count_indent(raw_line)
+    is_pods_list_item = (
+        state.current["section"] == "PODS" and
+        (stripped == "-" or stripped.startswith("- ") or stripped.startswith("-\t"))
+    )
+    if indent == 0 and not is_pods_list_item:
+        err = _handle_top_level(state, stripped, line_num, label)
+        if err:
+            return err
+        if has_flow_or_anchor(stripped):
+            return make_refusal(label, line_num, _FLOW_DETAIL)
+        return ""
+    if has_flow_or_anchor(stripped):
+        return make_refusal(label, line_num, _FLOW_DETAIL)
+    return _dispatch_section(state, stripped, indent, line_num, label)
 
 def _build_pods_map(state):
     """Convert state pods and deps into final structs."""
@@ -246,37 +284,7 @@ def read_podfile_lock(text, label):
     )
 
     for line_idx in range(len(lines)):
-        line_num = line_idx + 1
-        raw_line = lines[line_idx]
-        if raw_line.endswith("\r"):
-            raw_line = raw_line[:-1]
-
-        if has_indent_tab(raw_line):
-            return _make_failure(make_refusal(
-                label,
-                line_num,
-                "an indentation tab is not part of the Podfile.lock YAML subset rules_flutter reads",
-            ))
-
-        stripped = raw_line.strip()
-        if not stripped:
-            continue
-
-        if has_flow_or_anchor(stripped):
-            return _make_failure(make_refusal(
-                label,
-                line_num,
-                "flow syntax and anchors are not part of the Podfile.lock YAML subset rules_flutter reads",
-            ))
-
-        indent = count_indent(raw_line)
-        if indent == 0 and not (state.current["section"] == "PODS" and stripped.startswith("- ")):
-            err = _handle_top_level(state, stripped, line_num, label)
-            if err:
-                return _make_failure(err)
-            continue
-
-        err = _dispatch_section(state, stripped, indent, line_num, label)
+        err = _scan_line(state, lines[line_idx], line_idx + 1, label)
         if err:
             return _make_failure(err)
 

@@ -5,6 +5,8 @@ pure, bounded line inspection: checking indentation tabs, detecting flow syntax
 and anchors, counting indentation, and parsing pod entry and dependency lines.
 """
 
+_FLOW_OR_ANCHOR_CHARS = ("[", "]", "{", "}", "&", "*")
+
 def make_refusal(label, line_num, detail):
     """Format a standard refusal error naming the label and 1-based line.
 
@@ -40,6 +42,25 @@ def has_indent_tab(line):
             return False
     return False
 
+def starts_with_flow_or_anchor(stripped):
+    """Whether `stripped` itself begins with flow syntax or an anchor/alias.
+
+    Args:
+        stripped: The line content stripped of leading and trailing whitespace.
+
+    Returns:
+        True if `stripped` starts with `[`, `]`, `{`, `}`, `&`, or `*`.
+    """
+    return bool(stripped) and stripped[0] in _FLOW_OR_ANCHOR_CHARS
+
+def _mapping_value_has_flow(text):
+    """Whether `text` is a mapping whose value starts with flow or anchor syntax."""
+    sep = find_mapping_separator(text)
+    if not sep.has_kv or not sep.val:
+        return False
+    val = sep.val.lstrip()
+    return starts_with_flow_or_anchor(val)
+
 def has_flow_or_anchor(stripped):
     """Whether `stripped` starts a key or value with flow syntax or an anchor.
 
@@ -50,28 +71,14 @@ def has_flow_or_anchor(stripped):
         True if flow syntax (`[`, `]`, `{`, `}`) or anchor/alias (`&`, `*`)
         appears where a key or value begins.
     """
-    if not stripped:
-        return False
-    if stripped[0] in ("[", "]", "{", "}", "&", "*"):
+    if starts_with_flow_or_anchor(stripped):
         return True
-    if stripped.startswith("- "):
+    if stripped.startswith("-") and len(stripped) > 1 and stripped[1] in (" ", "\t"):
         item = stripped[2:].lstrip()
         if not item:
             return False
-        if item[0] in ("[", "]", "{", "}", "&", "*"):
-            return True
-        item_sep = find_mapping_separator(item)
-        if item_sep.has_kv and item_sep.val:
-            val = item_sep.val.lstrip()
-            if val and val[0] in ("[", "]", "{", "}", "&", "*"):
-                return True
-        return False
-    sep = find_mapping_separator(stripped)
-    if sep.has_kv and sep.val:
-        val = sep.val.lstrip()
-        if val and val[0] in ("[", "]", "{", "}", "&", "*"):
-            return True
-    return False
+        return starts_with_flow_or_anchor(item) or _mapping_value_has_flow(item)
+    return _mapping_value_has_flow(stripped)
 
 def count_indent(line):
     """Count leading spaces of `line`.
@@ -105,6 +112,40 @@ def unquote(scalar):
             return s[1:-1]
     return s
 
+def _unquote_strict(scalar):
+    """Unquote a scalar, rejecting unbalanced or internal quotes.
+
+    Args:
+        scalar: Stripped scalar text.
+
+    Returns:
+        `struct(ok, text)`.
+    """
+    if not scalar:
+        return struct(ok = False, text = "")
+    if scalar[0] in ('"', "'") or scalar[-1] in ('"', "'"):
+        quote = scalar[0]
+        if len(scalar) < 2 or quote not in ('"', "'") or scalar[-1] != quote:
+            return struct(ok = False, text = "")
+        inner = scalar[1:-1]
+        if inner.find(quote) != -1:
+            return struct(ok = False, text = "")
+        return struct(ok = True, text = inner)
+    if scalar.find('"') != -1 or scalar.find("'") != -1:
+        return struct(ok = False, text = "")
+    return struct(ok = True, text = scalar)
+
+def _split_quoted_key(s, quote):
+    """Split a mapping line whose key starts with `quote`."""
+    close_q = s.find(quote, 1)
+    if close_q == -1:
+        return struct(has_kv = False, key = s, val = "")
+    key = s[1:close_q]
+    after = s[close_q + 1:].lstrip()
+    if after == ":" or (len(after) >= 2 and after[0] == ":" and after[1] in (" ", "\t")):
+        return struct(has_kv = True, key = key, val = after[1:].strip())
+    return struct(has_kv = False, key = s, val = "")
+
 def find_mapping_separator(s):
     """Find the key and value of a YAML mapping in `s`.
 
@@ -122,52 +163,51 @@ def find_mapping_separator(s):
     """
     if not s:
         return struct(has_kv = False, key = "", val = "")
-    if s.startswith('"'):
-        close_q = s.find('"', 1)
-        if close_q != -1:
-            key = s[1:close_q]
-            after = s[close_q + 1:].lstrip()
-            if after.startswith(":"):
-                return struct(has_kv = True, key = key, val = after[1:].strip())
-            return struct(has_kv = False, key = key, val = "")
-    if s.startswith("'"):
-        close_q = s.find("'", 1)
-        if close_q != -1:
-            key = s[1:close_q]
-            after = s[close_q + 1:].lstrip()
-            if after.startswith(":"):
-                return struct(has_kv = True, key = key, val = after[1:].strip())
-            return struct(has_kv = False, key = key, val = "")
-    if s.endswith(":"):
-        return struct(has_kv = True, key = s[:-1].strip(), val = "")
+    if s[0] in ('"', "'"):
+        return _split_quoted_key(s, s[0])
     start_pos = 1 if s.startswith(":") else 0
     n = len(s)
     for i in range(start_pos, n):
-        if s[i] == ":":
-            if i == n - 1 or s[i + 1] in (" ", "\t"):
-                return struct(has_kv = True, key = s[:i].strip(), val = s[i + 1:].strip())
+        if s[i] == ":" and (i == n - 1 or s[i + 1] in (" ", "\t")):
+            return struct(has_kv = True, key = s[:i].strip(), val = s[i + 1:].strip())
     return struct(has_kv = False, key = s.strip(), val = "")
 
 def parse_mapping_line(stripped):
-    """Parse a YAML mapping line into key, kind and value.
+    """Parse a YAML mapping line into mapping flag, key, kind and value.
 
     Args:
         stripped: A mapping line stripped of indentation.
 
     Returns:
-        `struct(key, kind, value)`: `key` as written, `kind` without leading
-        colon, and unquoted `value`.
+        `struct(has_kv, key, is_symbol, kind, value)`.
     """
     sep = find_mapping_separator(stripped)
     key = unquote(sep.key)
-    kind = key[1:] if key.startswith(":") else key
-    return struct(key = key, kind = kind, value = unquote(sep.val))
+    is_symbol = key.startswith(":")
+    kind = key[1:] if is_symbol else key
+    return struct(
+        has_kv = sep.has_kv,
+        key = key,
+        is_symbol = is_symbol,
+        kind = kind,
+        value = unquote(sep.val),
+    )
+
+def _is_valid_pod_token(token, allow_spaces = False):
+    """Whether `token` is non-empty and free of delimiter characters."""
+    if not token or token.startswith("-"):
+        return False
+    bad_chars = ("(", ")", ":", '"', "'", "\t") if allow_spaces else (" ", "\t", "(", ")", ":", '"', "'")
+    for ch in bad_chars:
+        if token.find(ch) != -1:
+            return False
+    return True
 
 def parse_pods_entry(stripped):
     """Parse a `- <name> (<version>)` or `- <name> (<version>):` entry line.
 
     Either form may be bare or quoted (`- "<name> (<version>)"`,
-    `- "<name> (<version>):"`, `- "<name> (<version>)":`).
+    `- "<name> (<version>)":`).
 
     Args:
         stripped: The line text stripped of leading indentation.
@@ -179,28 +219,19 @@ def parse_pods_entry(stripped):
     if not stripped.startswith("- "):
         return struct(ok = False, name = "", version = "", has_colon = False)
     rest = stripped[2:].strip()
-    if not rest:
-        return struct(ok = False, name = "", version = "", has_colon = False)
-    has_colon = False
-    if rest.endswith(":"):
-        has_colon = True
+    has_colon = rest.endswith(":")
+    if has_colon:
         rest = rest[:-1].strip()
-    inner = unquote(rest)
-    if inner.endswith(":"):
-        has_colon = True
-        inner = inner[:-1].strip()
-    if not inner.endswith(")"):
+    unquoted = _unquote_strict(rest)
+    if not unquoted.ok or not unquoted.text.endswith(")"):
         return struct(ok = False, name = "", version = "", has_colon = False)
+    inner = unquoted.text
     open_paren = inner.rfind(" (")
     if open_paren <= 0:
         return struct(ok = False, name = "", version = "", has_colon = False)
-    name = unquote(inner[:open_paren].strip())
-    version = inner[open_paren + 2:-1].strip()
-    if not name or not version:
-        return struct(ok = False, name = "", version = "", has_colon = False)
-    if (name.find("(") != -1 or name.find(")") != -1 or
-        version.find("(") != -1 or version.find(")") != -1 or
-        name.find(":") != -1 or version.find(":") != -1):
+    name = inner[:open_paren]
+    version = inner[open_paren + 2:-1]
+    if not _is_valid_pod_token(name) or not _is_valid_pod_token(version):
         return struct(ok = False, name = "", version = "", has_colon = False)
     return struct(ok = True, name = name, version = version, has_colon = has_colon)
 
@@ -216,23 +247,19 @@ def parse_pods_dep(stripped):
     """
     if not stripped.startswith("- "):
         return struct(ok = False, name = "", requirement = "")
-    rest = unquote(stripped[2:].strip())
+    unquoted = _unquote_strict(stripped[2:].strip())
+    if not unquoted.ok:
+        return struct(ok = False, name = "", requirement = "")
+    rest = unquoted.text
     if rest.endswith(")"):
         open_paren = rest.rfind(" (")
         if open_paren <= 0:
             return struct(ok = False, name = "", requirement = "")
-        name = unquote(rest[:open_paren].strip())
+        name = rest[:open_paren]
         req = rest[open_paren + 2:-1].strip()
-        if not name or not req:
-            return struct(ok = False, name = "", requirement = "")
-        if (name.find("(") != -1 or name.find(")") != -1 or
-            req.find("(") != -1 or req.find(")") != -1 or
-            name.find(":") != -1 or req.find(":") != -1):
+        if not _is_valid_pod_token(name) or not _is_valid_pod_token(req, allow_spaces = True):
             return struct(ok = False, name = "", requirement = "")
         return struct(ok = True, name = name, requirement = req)
-    if rest.find("(") != -1 or rest.find(")") != -1 or rest.find(":") != -1:
+    if not _is_valid_pod_token(rest):
         return struct(ok = False, name = "", requirement = "")
-    name = unquote(rest)
-    if not name:
-        return struct(ok = False, name = "", requirement = "")
-    return struct(ok = True, name = name, requirement = "")
+    return struct(ok = True, name = rest, requirement = "")

@@ -847,7 +847,7 @@ def _register_pub_hub(module_ctx, pub_tag, selected_info, merged, user_overlay_r
     """Resolves one `flutter.pub` tag into spoke repos plus the hub repo."""
     hub_name = pub_tag.name
 
-    if getattr(pub_tag, "ios_podfile_lock", None) != None:
+    if hasattr(pub_tag, "ios_podfile_lock") and pub_tag.ios_podfile_lock != None:
         lock_label = str(pub_tag.ios_podfile_lock)
         lock_text = module_ctx.read(pub_tag.ios_podfile_lock)
         podfile = read_podfile_lock(lock_text, lock_label)
