@@ -853,27 +853,26 @@ def pub_spoke_swiftpm_attrs(pub_tag, include_ios_native_deps = False, plugin_nam
         when requested, and the plugin's mapped native dependency label.
     """
     resolved = pub_tag.swift_package_resolved
-    hub_name = getattr(pub_tag, "name", "")
-    include_native_deps = include_ios_native_deps or hasattr(pub_tag, "swift_package_product_deps")
-    has_plugin_deps = plugin_name != "" or hasattr(pub_tag, "ios_plugin_deps") or include_native_deps
-    plugin_deps_dict = getattr(pub_tag, "ios_plugin_deps", {}) if hasattr(pub_tag, "ios_plugin_deps") else {}
-    plugin_deps = plugin_deps_dict.get(plugin_name) if plugin_deps_dict and plugin_name else None
-
-    if not hub_name:
-        fields = {"package_resolved": resolved, "package_sha256": None}
-        if include_native_deps:
-            fields["ios_native_deps"] = None
-        if has_plugin_deps:
-            fields["plugin_deps"] = plugin_deps
-        return struct(**fields)
-
-    sha256 = ("@%s//:swift_package_sha256.json" % hub_name) if resolved != None else None
-    fields = {"package_resolved": resolved, "package_sha256": sha256}
-    if include_native_deps:
-        fields["ios_native_deps"] = "@%s//:ios_native_deps.json" % hub_name
-    if has_plugin_deps:
-        fields["plugin_deps"] = plugin_deps
-    return struct(**fields)
+    hub_name = pub_tag.name if hasattr(pub_tag, "name") else ""
+    sha256 = ("@%s//:swift_package_sha256.json" % hub_name) if hub_name and resolved != None else None
+    native_deps = ("@%s//:ios_native_deps.json" % hub_name) if hub_name else None
+    include_native = include_ios_native_deps or hasattr(pub_tag, "swift_package_product_deps")
+    include_plugin = plugin_name != "" or hasattr(pub_tag, "ios_plugin_deps")
+    plugin_deps = (
+        pub_tag.ios_plugin_deps.get(plugin_name) if hasattr(pub_tag, "ios_plugin_deps") and plugin_name else None
+    )
+    if include_native and include_plugin:
+        return struct(
+            package_resolved = resolved,
+            package_sha256 = sha256,
+            ios_native_deps = native_deps,
+            plugin_deps = plugin_deps,
+        )
+    if include_native:
+        return struct(package_resolved = resolved, package_sha256 = sha256, ios_native_deps = native_deps)
+    if include_plugin:
+        return struct(package_resolved = resolved, package_sha256 = sha256, plugin_deps = plugin_deps)
+    return struct(package_resolved = resolved, package_sha256 = sha256)
 
 def swiftpm_spoke_attrs(hub_name, pin, classified, build_file):
     """The repository arguments one SwiftPM spoke receives.
