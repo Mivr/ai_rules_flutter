@@ -1,0 +1,18 @@
+load("@rules_dart//dart:defs.bzl", "dart_test")
+
+dart_test(
+    name = "bzl_library_guard_test",
+    size = "small",
+    data = ["bzl_library_guard_test.dart"],
+    env = {
+        "GUARD_ROOT_ANCHOR": "$(rlocationpath :bzl_library_guard_test.dart)",
+    },
+    main = "bzl_library_guard_test.dart",
+    tags = [
+        "external",
+        "no-sandbox",
+    ],
+    deps = [
+        "@dev_tool_deps//:test",
+    ],
+)
