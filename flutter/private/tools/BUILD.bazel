@@ -1,3 +1,4 @@
+load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
 load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_test")
 load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
 load(":flutter_sdk_kernel_binary.bzl", "flutter_sdk_kernel_binary")
@@ -587,4 +588,13 @@ dart_test(
     main = "test/incr_fkc_scratch_test.dart",
     target_compatible_with = HOST_COMPATIBLE,
     deps = ["@dev_tool_deps//:test"],
+)
+
+bzl_library(
+    name = "flutter_sdk_kernel_binary",
+    srcs = ["flutter_sdk_kernel_binary.bzl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@rules_dart//dart:utils",
+    ],
 )

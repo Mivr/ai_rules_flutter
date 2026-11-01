@@ -1,0 +1,163 @@
+starlark_doc_extract(
+    name = "android.doc_extract",
+    src = "//flutter:android.bzl",
+    tags = ["manual"],
+    deps = [
+        "//flutter:android",
+    ],
+)
+
+starlark_doc_extract(
+    name = "defs.doc_extract",
+    src = "//flutter:defs.bzl",
+    tags = ["manual"],
+    deps = [
+        "//flutter:defs",
+    ],
+)
+
+starlark_doc_extract(
+    name = "dev_files.doc_extract",
+    src = "//flutter:dev_files.bzl",
+    tags = ["manual"],
+    deps = [
+        "//flutter:dev_files",
+    ],
+)
+
+starlark_doc_extract(
+    name = "extensions.doc_extract",
+    src = "//flutter:extensions.bzl",
+    tags = ["manual"],
+    deps = [
+        "//flutter:extensions",
+    ],
+)
+
+starlark_doc_extract(
+    name = "ios.doc_extract",
+    src = "//flutter:ios.bzl",
+    tags = ["manual"],
+    deps = [
+        "//flutter:ios",
+    ],
+)
+
+starlark_doc_extract(
+    name = "linux.doc_extract",
+    src = "//flutter:linux.bzl",
+    tags = ["manual"],
+    deps = [
+        "//flutter:linux",
+    ],
+)
+
+starlark_doc_extract(
+    name = "macos.doc_extract",
+    src = "//flutter:macos.bzl",
+    tags = ["manual"],
+    deps = [
+        "//flutter:macos",
+    ],
+)
+
+starlark_doc_extract(
+    name = "native_assets.doc_extract",
+    src = "//flutter:native_assets.bzl",
+    tags = ["manual"],
+    deps = [
+        "//flutter:native_assets",
+    ],
+)
+
+starlark_doc_extract(
+    name = "native_hot_patch.doc_extract",
+    src = "//flutter:native_hot_patch.bzl",
+    tags = ["manual"],
+    deps = [
+        "//flutter:native_hot_patch",
+    ],
+)
+
+starlark_doc_extract(
+    name = "providers.doc_extract",
+    src = "//flutter:providers.bzl",
+    tags = ["manual"],
+    deps = [
+        "//flutter:providers",
+    ],
+)
+
+starlark_doc_extract(
+    name = "repositories.doc_extract",
+    src = "//flutter:repositories.bzl",
+    tags = ["manual"],
+    deps = [
+        "//flutter:repositories",
+    ],
+)
+
+starlark_doc_extract(
+    name = "toolchain.doc_extract",
+    src = "//flutter:toolchain.bzl",
+    tags = ["manual"],
+    deps = [
+        "//flutter:toolchain",
+    ],
+)
+
+starlark_doc_extract(
+    name = "utils.doc_extract",
+    src = "//flutter:utils.bzl",
+    tags = ["manual"],
+    deps = [
+        "//flutter:utils",
+    ],
+)
+
+starlark_doc_extract(
+    name = "web.doc_extract",
+    src = "//flutter:web.bzl",
+    tags = ["manual"],
+    deps = [
+        "//flutter:web",
+    ],
+)
+
+starlark_doc_extract(
+    name = "windows.doc_extract",
+    src = "//flutter:windows.bzl",
+    tags = ["manual"],
+    deps = [
+        "//flutter:windows",
+    ],
+)
+
+_DOC_EXTRACTS = [
+    name
+    for name in [
+        ":android.doc_extract",
+        ":defs.doc_extract",
+        ":dev_files.doc_extract",
+        ":extensions.doc_extract",
+        ":ios.doc_extract",
+        ":linux.doc_extract",
+        ":macos.doc_extract",
+        ":native_assets.doc_extract",
+        ":native_hot_patch.doc_extract",
+        ":providers.doc_extract",
+        ":repositories.doc_extract",
+        ":toolchain.doc_extract",
+        ":utils.doc_extract",
+        ":web.doc_extract",
+        ":windows.doc_extract",
+    ]
+]
+
+_ = len(_DOC_EXTRACTS) == 15 or fail("Expected exactly 15 starlark_doc_extract targets under //docs, got " + str(len(_DOC_EXTRACTS)))
+
+filegroup(
+    name = "all_doc_extracts",
+    srcs = _DOC_EXTRACTS,
+    visibility = ["//visibility:public"],
+)

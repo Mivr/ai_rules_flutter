@@ -1,3 +1,4 @@
+load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
 load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_library", "dart_test")
 load(":source_repo.bzl", "SOURCE_REPO")
 
@@ -347,4 +348,10 @@ dart_binary(
     main = "tool/e2e.dart",
     visibility = ["//visibility:private"],
     deps = _TEST_DEPS + _PATH_DEP + ["@dev_tool_deps//:vm_service"],
+)
+
+bzl_library(
+    name = "source_repo",
+    srcs = ["source_repo.bzl"],
+    visibility = ["//visibility:public"],
 )
