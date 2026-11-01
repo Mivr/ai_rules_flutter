@@ -44,7 +44,7 @@ def plan_hub_sccs(module_ctx, hub_name, hosted, path_pkgs, all_package_names, pu
             for pkg_name, deps in hosted_deps.items():
                 package_deps[pkg_name] = deps
         if path_pkgs:
-            path_deps = collect_path_deps(module_ctx, hub_name, path_pkgs)
+            path_deps = collect_path_deps(module_ctx, hub_name, path_pkgs, pub_tag.lock)
             for pkg_name, deps in path_deps.items():
                 package_deps[pkg_name] = deps
     return plan_flutter_pub_sccs(

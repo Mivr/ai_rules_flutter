@@ -68,12 +68,20 @@ load(
     "check_pubspec_identity_mismatch",
 )
 load(
+    "//flutter/private:flutter_pub_path.bzl",
+    "is_absolute_lock_path",
+)
+load(
     "//flutter/private:flutter_pub_plugin_defines.bzl",
     "check_plugin_defines",
 )
 load(
     "//flutter/private:flutter_pub_plugin_deps.bzl",
     "check_plugin_native_deps",
+)
+load(
+    "//flutter/private:flutter_pub_scc.bzl",
+    "normalize_realpath",
 )
 load(
     "//flutter/private:flutter_pub_scc_build.bzl",
@@ -122,18 +130,20 @@ def _fetch_hosted_scc_member(ctx, member, name):
 def _link_path_scc_member(ctx, member, name):
     """Confines and mirrors a workspace-local path SCC member under `<name>/`."""
     rel = member.get("path", "")
-    if rel.startswith("/") or rel in ("", "."):
+    if is_absolute_lock_path(rel) or rel in ("", "."):
         fail('flutter.pub SCC member "%s": invalid path %r' % (name, rel))
-    segments = rel.split("/")
+    segments = rel.replace("\\", "/").split("/")
     if ".." in segments or "." in segments or "" in segments:
         fail('flutter.pub SCC member "%s": path %r escapes workspace' % (name, rel))
     src = ctx.workspace_root.get_child(*segments)
     if not src.exists:
         fail('flutter.pub SCC member "%s": path %r does not exist' % (name, rel))
-    ws_real = str(ctx.workspace_root.realpath)
-    case_insensitive = detect_case_insensitive_host(ctx, segments)
+    ws_real = normalize_realpath(ctx.workspace_root.realpath)
+    src_real = normalize_realpath(src.realpath)
+    is_win = hasattr(ctx, "os") and "win" in ctx.os.name.lower()
+    case_insensitive = is_win or detect_case_insensitive_host(ctx, segments)
     fail_on_outside_package_path(ctx, name, segments, ws_real, case_insensitive)
-    scope = make_link_scope(name, str(src.realpath), ws_real, case_insensitive, {}, dest_prefix = name)
+    scope = make_link_scope(name, src_real, ws_real, case_insensitive, {}, dest_prefix = name)
     link_scoped_file_entry(ctx, src, "pubspec.yaml", scope)
     pubspec_node = ctx.path(name + "/pubspec.yaml")
     pubspec_text = ctx.read(pubspec_node) if pubspec_node.exists else ""
