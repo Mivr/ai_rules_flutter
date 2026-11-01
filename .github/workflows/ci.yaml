@@ -289,6 +289,23 @@ jobs:
           echo "build --disk_cache=$dir" >> ~/.bazelrc
       - name: bazel test //... (root unit tests)
         run: bazel test //... --test_output=errors
+      - name: Unbaselined lint diagnostic fails analysis
+        run: |
+          if out=$(bazel test //flutter/tests/lint_baseline_fixture:red 2>&1); then
+            echo "$out"
+            echo "expected unbaselined lint to fail, but it succeeded"
+            exit 1
+          fi
+          echo "$out" | grep -F "flutter/tests/lint_baseline_fixture/lib/red.dart" || {
+            echo "$out"
+            echo "expected output to mention workspace path"
+            exit 1
+          }
+          echo "$out" | grep -F "avoid_print" || {
+            echo "$out"
+            echo "expected output to mention avoid_print"
+            exit 1
+          }
       # Digest red path: e2e/digest_mismatch fetches a real engine artifact
       # (sky_engine.zip) with a deliberately wrong checksum. The fetch must
       # fail, and the failure must be Bazel's checksum comparison — the grep
