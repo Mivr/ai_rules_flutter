@@ -174,7 +174,7 @@ use_repo(
 
 git_override(
     module_name = "ai_rules_dart",
-    commit = "3da688c1b905b0d2c807f2b18bbd86c5634276ad",
+    commit = "a52341d1a87c8443e32cf4d688bed7f32175848d",
     remote = "https://github.com/Mivr/ai_rules_dart.git",
 )
 
