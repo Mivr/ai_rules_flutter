@@ -806,7 +806,15 @@ def select_apple_swiftpm_deps(plugin_name, manifest_text, manifest_dir, srcs_dir
         product_deps,
     )
 
-def apple_swiftpm_pins(resolved_content, checksums_content, resolved_label, checksums_label, hub_name, lock_packages = [], lock_label = ""):
+def apple_swiftpm_pins(
+        resolved_content,
+        checksums_content,
+        resolved_label,
+        checksums_label,
+        hub_name,
+        lock_packages = [],
+        lock_label = "",
+        scc_targets = {}):
     """Assemble one plugin's view of the hub's SwiftPM pins.
 
     The resolved file supplies the pinned identities and revisions; the
@@ -823,11 +831,12 @@ def apple_swiftpm_pins(resolved_content, checksums_content, resolved_label, chec
         hub_name: The `flutter.pub` hub name.
         lock_packages: The package names in the hub's `pubspec.lock`.
         lock_label: The hub's `pubspec.lock` label, for messages.
+        scc_targets: Mapping `package -> "@<scc_repo>//:<package>"` for SCC members.
 
     Returns:
         `struct(ok, error, pins)`: `pins` is
         `struct(resolved, pinned, unpinned, hub, lock_packages,
-        lock_label)` for the plugin's manifest reader.
+        lock_label, scc_targets)` for the plugin's manifest reader.
     """
     pins = read_swiftpm_pins(resolved_content, resolved_label)
     if not pins.ok:
@@ -848,6 +857,7 @@ def apple_swiftpm_pins(resolved_content, checksums_content, resolved_label, chec
             hub = hub_name,
             lock_packages = lock_packages,
             lock_label = lock_label,
+            scc_targets = scc_targets,
         ),
     )
 
@@ -869,11 +879,12 @@ def _apple_swiftpm_pins(ctx, resolved_label, checksums_label, hub_name):
         hub_name: The `flutter.pub` hub name.
 
     Returns:
-        `struct(resolved, pinned, unpinned, hub, lock_packages, lock_label)`
+        `struct(resolved, pinned, unpinned, hub, lock_packages, lock_label, scc_targets)`
         for the plugin's manifest reader.
     """
     lock_packages = ctx.attr.lock_packages
     lock_label = str(ctx.attr.pubspec_lock) if ctx.attr.pubspec_lock != None else ""
+    scc_targets = ctx.attr.scc_targets if hasattr(ctx.attr, "scc_targets") else {}
     if resolved_label == None:
         return struct(
             resolved = "",
@@ -882,6 +893,7 @@ def _apple_swiftpm_pins(ctx, resolved_label, checksums_label, hub_name):
             hub = hub_name,
             lock_packages = lock_packages,
             lock_label = lock_label,
+            scc_targets = scc_targets,
         )
     label = str(resolved_label)
     checksums_content = None
@@ -897,6 +909,7 @@ def _apple_swiftpm_pins(ctx, resolved_label, checksums_label, hub_name):
         hub_name,
         lock_packages,
         lock_label,
+        scc_targets,
     )
     if not built.ok:
         fail(built.error)

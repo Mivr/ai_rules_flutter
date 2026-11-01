@@ -236,6 +236,14 @@ def _apple_sibling_plugin_label(plugin_name, manifest_dir, decl, platform, pins)
             ),
             labels = [],
         )
+    scc_targets = pins.scc_targets if hasattr(pins, "scc_targets") and pins.scc_targets else {}
+    if canonical in scc_targets:
+        scc_repo = scc_targets[canonical].partition("//:")[0]
+        return struct(
+            ok = True,
+            error = "",
+            labels = [scc_repo + "//:" + canonical + "_apple_" + platform],
+        )
     return struct(
         ok = True,
         error = "",

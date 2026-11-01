@@ -1,14 +1,14 @@
-"""Cycle-break proof: one lock, two hubs, and a raw repository cycle.
+"""Cycle-break proof: one lock, two hubs, and automatic SCC merging.
 
 `cycle_a` and `cycle_b` are workspace-relative path packages that each
 declare the other, exactly the shape a lock takes when pub resolves two
 packages against each other through conditional imports. `cycle_app` depends
 on both, so both spokes are reachable from an app target.
 
-`deps` breaks only `cycle_a`'s edge to `cycle_b`; `deps_cycle` is the same
-lock with no `cycle_breaks`. The full-matrix workflow queries
-`@deps__cycle_a//:all` and requires it to resolve, then queries the twin
-`@deps_cycle__cycle_a//:all` and requires the repository-cycle failure.
+`deps` breaks `cycle_a`'s edge to `cycle_b` with `cycle_breaks`; `deps_cycle`
+is the same lock with no `cycle_breaks`. `flutter.pub` automatically detects
+the SCC between `cycle_a` and `cycle_b` and emits the merged spoke
+`deps_cycle__scc__cycle_a__cycle_b`.
 """
 
 module(name = "rules_flutter_pub_cycle_breaks")
@@ -23,7 +23,7 @@ local_path_override(
 
 git_override(
     module_name = "ai_rules_dart",
-    commit = "4cc0c0ab2ed8256bec5a1503cc2ab22e1bfe9875",
+    commit = "3da688c1b905b0d2c807f2b18bbd86c5634276ad",
     remote = "https://github.com/Mivr/ai_rules_dart.git",
 )
 
@@ -45,7 +45,6 @@ use_repo(
     "deps__cycle_app",
     "deps__cycle_b",
     "deps_cycle",
-    "deps_cycle__cycle_a",
     "deps_cycle__cycle_app",
-    "deps_cycle__cycle_b",
+    "deps_cycle__scc__cycle_a__cycle_b",
 )

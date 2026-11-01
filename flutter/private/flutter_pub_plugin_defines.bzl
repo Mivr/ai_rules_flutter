@@ -31,7 +31,7 @@ def check_plugin_defines(ctx, package_name, plugin_block, uses_overlay):
         None; fails the fetch with the matching refusal when the list cannot
         reach a compile.
     """
-    defines = ctx.attr.plugin_defines
+    defines = ctx.attr.plugin_defines if hasattr(ctx.attr, "plugin_defines") else []
     error = plugin_defines_overlay_error(package_name, defines, uses_overlay)
     if not error and defines:
         apple = detect_apple_plugin_sources(ctx, package_name, plugin_block)
