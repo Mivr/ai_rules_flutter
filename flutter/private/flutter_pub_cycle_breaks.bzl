@@ -79,7 +79,7 @@ def apply_cycle_breaks(package_name, declared_dependencies, broken_dependencies)
         error = "",
     )
 
-def spoke_dep_labels(ctx, bazel_deps, asset_block):
+def spoke_dep_labels(ctx, bazel_deps, asset_block, scc_targets = None):
     """Sibling-spoke labels for the package's own pubspec dependencies.
 
     If the pubspec declares `uses-material-design: true`, the spoke depends
@@ -92,15 +92,20 @@ def spoke_dep_labels(ctx, bazel_deps, asset_block):
         ctx: The spoke's repository context.
         bazel_deps: The dependency names left after the cycle breaks.
         asset_block: The parsed `flutter` asset block.
+        scc_targets: Optional dict mapping package name to merged SCC target
+            label (`@<scc_repo>//:<pkg>`). Defaults to `ctx.attr.scc_targets`.
 
     Returns:
         The sibling-spoke labels for `bazel_deps`, plus the material-icons
         label when the pubspec asks for material design.
     """
+    resolved_scc = scc_targets
+    if resolved_scc == None:
+        resolved_scc = ctx.attr.scc_targets if hasattr(ctx.attr, "scc_targets") else {}
     dep_labels = [
-        "@{hub}__{dep}//:{dep}".format(hub = ctx.attr.hub_name, dep = dep)
+        resolved_scc[dep] if dep in resolved_scc else "@{hub}__{dep}//:{dep}".format(hub = ctx.attr.hub_name, dep = dep)
         for dep in bazel_deps
     ]
-    if asset_block.uses_material_design:
+    if asset_block and hasattr(asset_block, "uses_material_design") and asset_block.uses_material_design:
         dep_labels = dep_labels + ["@rules_flutter//flutter:material_icons"]
     return dep_labels

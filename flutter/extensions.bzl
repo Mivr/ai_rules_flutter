@@ -30,11 +30,21 @@ load("//flutter/private:flutter_pub_apple_pods_hub.bzl", "read_hub_podfile_lock"
 load("//flutter/private:flutter_pub_cycle_breaks.bzl", "cycle_breaks_lock_error")
 load("//flutter/private:flutter_pub_lock_hub.bzl", "flutter_pub_lock_hub")
 load("//flutter/private:flutter_pub_maven.bzl", "path_spoke_maven_inputs")
-load("//flutter/private:flutter_pub_overlays.bzl", "hub_overlay_roots")
+load(
+    "//flutter/private:flutter_pub_overlays.bzl",
+    "hub_overlay_roots",
+    "overlay_replaces_spoke",
+    "spoke_overlay_roots",
+)
 load("//flutter/private:flutter_pub_package.bzl", "flutter_pub_package", "flutter_pub_path_package", "is_maven_dep_label")
 load("//flutter/private:flutter_pub_path.bzl", "foreign_lock_path_error", "is_absolute_lock_path", "is_relative_path_dependency", "workspace_relative_lock_path")
 load("//flutter/private:flutter_pub_plugin_defines.bzl", "ios_plugin_defines_lock_error")
 load("//flutter/private:flutter_pub_plugin_deps.bzl", "ios_plugin_deps_lock_error")
+load(
+    "//flutter/private:flutter_pub_scc_plan.bzl",
+    "create_scc_spokes",
+    "plan_hub_sccs",
+)
 load("//flutter/private:flutter_pub_tag.bzl", "flutter_pub_tag", "validate_swift_package_product_deps")
 load("//flutter/private:flutter_pubspec.bzl", "parse_flutter_plugin_block")
 load("//flutter/private:flutter_sdk_package.bzl", "flutter_sdk_package")
@@ -467,135 +477,25 @@ def _classify_lock_packages(hub_name, lock_label, lock_pkgs):
             print("flutter.pub: skipping package \"{}\" (source: {}). Only hosted, path, and Flutter SDK packages are supported.".format(name, source))
     return hosted, path_pkgs, sdk_flutter, all_package_names
 
-def _overlay_version_candidates(version):
-    """The version-specificity ladder an overlay lookup walks for a package.
+def _create_hosted_spokes(plan, hosted, user_overlay_roots, pub_tag, ignore_hooks, module_ctx):
+    """Creates one `flutter_pub_package` spoke per singleton hosted package.
 
-    Args:
-        version: The locked package version string.
-
-    Returns:
-        `<major>.<minor>.<patch>`, `<major>.<minor>`, `<major>` and the bare
-        package directory, in that order.
-    """
-    parts = version.split(".")
-    candidates = []
-    if len(parts) >= 3:
-        candidates.append("{}.{}.{}".format(parts[0], parts[1], parts[2]))
-    if len(parts) >= 2:
-        candidates.append("{}.{}".format(parts[0], parts[1]))
-    if len(parts) >= 1 and parts[0]:
-        candidates.append(parts[0])
-    candidates.append("")
-    return candidates
-
-def _overlay_template_path(module_ctx, overlay_label, package_name, version, relpath):
-    """The first overlay template path for one package and version, or None.
-
-    Mirrors the spoke's own ladder (`<pkg>/<version>/<relpath>` down to
-    `<pkg>/<relpath>`) only to answer whether an overlay replaces the spoke;
-    it neither reads the template nor substitutes into it.
-
-    Args:
-        module_ctx: The module extension context.
-        overlay_label: One overlay root label.
-        package_name: The pub package the overlay belongs to.
-        version: The locked package version string.
-        relpath: The template path inside the package, e.g. `BUILD.bazel.tpl`.
-
-    Returns:
-        The template's `Path`, or None when no candidate exists.
-    """
-    anchor = module_ctx.path(_overlay_root_label(overlay_label))
-    pkg_dir = anchor.dirname.get_child(package_name)
-    for candidate in _overlay_version_candidates(version):
-        tpl = pkg_dir.get_child(candidate) if candidate else pkg_dir
-        for part in relpath.split("/"):
-            tpl = tpl.get_child(part)
-        if tpl.exists:
-            return tpl
-    return None
-
-_BUNDLED_OVERLAY_ROOT = "@rules_flutter//ext:BUILD.bazel"
-
-def _spoke_overlay_roots(user_overlay_roots):
-    """The full overlay root list a spoke resolves, bundled root included.
-
-    Args:
-        user_overlay_roots: Roots from `flutter.plugin_overlays`, in order.
-
-    Returns:
-        The user roots followed by the bundled `@rules_flutter//ext` root.
-    """
-    return user_overlay_roots + [_BUNDLED_OVERLAY_ROOT]
-
-def _overlay_root_label(overlay_label):
-    """Resolve an overlay root to a label `module_ctx.path` can read.
-
-    Tag roots arrive as `Label` objects. The bundled root is the one string
-    in the list, written in the consumer-visible `@rules_flutter` spelling;
-    inside this module the same tree is `//ext`, so resolve it that way
-    rather than asking `module_ctx.path` to interpret the string as a path.
-
-    Args:
-        overlay_label: A `Label` from a tag, or the bundled root string.
-
-    Returns:
-        A `Label` naming the overlay root's anchor file.
-    """
-    if type(overlay_label) == "string":
-        if overlay_label != _BUNDLED_OVERLAY_ROOT:
-            fail("flutter.pub: unexpected overlay root string " + repr(overlay_label))
-        return Label("//ext:BUILD.bazel")
-    return overlay_label
-
-def _overlay_replaces_spoke(module_ctx, overlay_roots, package_name, version):
-    """Whether an overlay supplies the package's top-level BUILD template.
-
-    An overlay spoke never aliases an Android repository: it emits the
-    overlay's own `android/BUILD.bazel.tpl` when present and the empty stub
-    otherwise. Creating a repository it cannot reference would be dead
-    state, so the extension skips it for every overlaid package.
-
-    Args:
-        module_ctx: The module extension context.
-        overlay_roots: Candidate overlay root labels, in precedence order.
-        package_name: The pub package the overlay belongs to.
-        version: The locked package version string.
-
-    Returns:
-        True when the first matching overlay root has a top-level template.
-    """
-    for overlay_label in overlay_roots:
-        if _overlay_template_path(module_ctx, overlay_label, package_name, version, "BUILD.bazel.tpl"):
-            return True
-    return False
-
-def _create_hosted_spokes(hub_name, hosted, all_package_names, user_overlay_roots, pub_tag, ignore_hooks, module_ctx):
-    """Creates one `flutter_pub_package` spoke per hosted package.
-
-    flutter.pub() routes every hosted package through flutter_pub_package —
-    the `flutter pub get` analog — so plugins surface their
-    `flutter.plugin.platforms` metadata via FlutterInfo. Pure-Dart
-    packages still emit a plain `dart_library`; the rule branches
-    internally on whether a `flutter.plugin` block is present.
-    Non-Flutter modules using `pub.pub()` keep using rules_dart's
-    `pub_lock_package` directly. A plugin that ships a `Package.swift`
-    reads the hub's resolved file and checksum table at fetch time, so no
-    spoke carries hub-wide pin state in its repository attributes.
+    flutter.pub() routes every singleton hosted package through
+    flutter_pub_package — the `flutter pub get` analog — so plugins surface
+    their `flutter.plugin.platforms` metadata via FlutterInfo. Pure-Dart
+    packages still emit a plain `dart_library`; the rule branches internally
+    on whether a `flutter.plugin` block is present. Multi-package SCC members
+    are emitted together by `create_scc_spokes`.
 
     A package that an overlay replaces gets no Android repository: its
     spoke emits the overlay's Android template or the empty stub, never an
-    alias. Every other package also gets a `<hub>-android-<package>`
-    repository holding its Gradle model. It is declared here but fetched
-    only when an Android target analyses the spoke's `android:lib` alias; a
-    package with no Android platform never references it.
-
-    A hosted package's pubspec is not available at extension time (only the
-    lock is), so its Android repository is declared for the spoke to choose
-    from lazily; the spoke references it only when the pubspec declares the
-    `android` platform.
+    alias. Every other hosted package (singleton or SCC member) gets a
+    `<hub>-android-<package>` repository holding its Gradle model, fetched
+    only when an Android target analyses the spoke's `android:lib` alias.
     """
-    overlay_roots = _spoke_overlay_roots(user_overlay_roots)
+    hub_name = plan.hub_name
+    overlay_roots = spoke_overlay_roots(user_overlay_roots)
+    singleton_set = {pkg: True for pkg in plan.singletons}
     for name, info in hosted.items():
         desc = info.get("description", {})
         version = info.get("version", "")
@@ -605,38 +505,34 @@ def _create_hosted_spokes(hub_name, hosted, all_package_names, user_overlay_root
         # no sha256 is a lock that predates the field, or was edited
         # by hand; refuse it rather than download unverified bytes.
         sha256 = hosted_package_sha256(name, info, pub_tag.lock)
-        swiftpm_attrs = pub_spoke_swiftpm_attrs(pub_tag, include_ios_native_deps = True, plugin_name = name)
-
-        flutter_pub_package(
-            name = hub_name + "__" + name,
-            package_name = name,
-            version = version,
-            sha256 = sha256,
-            base_url = base_url,
-            hub_name = hub_name,
-            lock_packages = all_package_names,
-            cycle_breaks = pub_tag.cycle_breaks.get(name, []),
-            plugin_defines = pub_tag.ios_plugin_defines.get(name, []),
-            overlay_roots = overlay_roots,
-            # rules_dart's curated registry is the single source of
-            # truth for which pub package a Bazel-built native library
-            # stands in for, and at which versions. Consulting it here
-            # is what makes a Flutter app depending on, say, `drift`
-            # get `sqlite3`'s library without naming it: the asset
-            # lands on the package that owns it, so it propagates
-            # through the Dart graph exactly as pub's own would.
-            code_assets = curated_code_assets(name, version),
-            ignore_hook = name in ignore_hooks,
-            android_maven_deps = pub_tag.android_maven_deps,
-            android_maven_ignore = pub_tag.android_maven_ignore,
-            package_resolved = swiftpm_attrs.package_resolved,
-            package_sha256 = swiftpm_attrs.package_sha256,
-            ios_native_deps = swiftpm_attrs.ios_native_deps,
-            plugin_native_deps = swiftpm_attrs.plugin_deps,
-            podfile_lock = swiftpm_attrs.podfile_lock,
-            pubspec_lock = pub_tag.lock,
-        )
-        if not _overlay_replaces_spoke(module_ctx, overlay_roots, name, version):
+        if name in singleton_set:
+            swiftpm_attrs = pub_spoke_swiftpm_attrs(pub_tag, include_ios_native_deps = True, plugin_name = name)
+            flutter_pub_package(
+                name = hub_name + "__" + name,
+                package_name = name,
+                version = version,
+                sha256 = sha256,
+                base_url = base_url,
+                hub_name = hub_name,
+                lock_packages = plan.all_package_names,
+                planned_deps = plan.planned_deps.get(name, []),
+                plan_covers_package = name in plan.planned_deps,
+                scc_targets = plan.scc_targets,
+                cycle_breaks = pub_tag.cycle_breaks.get(name, []),
+                plugin_defines = pub_tag.ios_plugin_defines.get(name, []),
+                overlay_roots = overlay_roots,
+                code_assets = curated_code_assets(name, version),
+                ignore_hook = name in ignore_hooks,
+                android_maven_deps = pub_tag.android_maven_deps,
+                android_maven_ignore = pub_tag.android_maven_ignore,
+                package_resolved = swiftpm_attrs.package_resolved,
+                package_sha256 = swiftpm_attrs.package_sha256,
+                ios_native_deps = swiftpm_attrs.ios_native_deps,
+                plugin_native_deps = swiftpm_attrs.plugin_deps,
+                podfile_lock = swiftpm_attrs.podfile_lock,
+                pubspec_lock = pub_tag.lock,
+            )
+        if not overlay_replaces_spoke(module_ctx, overlay_roots, name, version):
             flutter_pub_android_package(
                 name = android_package_repo_name(hub_name, name),
                 package_name = name,
@@ -692,54 +588,48 @@ def _path_package_declares_android(module_ctx, workspace_root, package_dir):
     plugin_block = parse_flutter_plugin_block(module_ctx.read(pubspec_path))
     return bool(plugin_block.platforms.get("android", {}))
 
-def _create_path_spokes(hub_name, path_pkgs, all_package_names, user_overlay_roots, pub_tag, ignore_hooks, module_ctx):
-    """Creates one `flutter_pub_path_package` spoke per path dependency.
+def _create_path_spokes(plan, path_pkgs, user_overlay_roots, pub_tag, ignore_hooks, module_ctx):
+    """Creates one `flutter_pub_path_package` spoke per singleton path dependency.
 
-    The package directory is symlinked in from the workspace (resolved
-    against the lock file's directory at classification time) and watched
-    for changes; the spoke then runs the same generator pipeline as a
-    hosted package, so assets, fonts, shaders, and plugin metadata surface
-    identically — including the `android/BUILD.bazel` stub the hub's
-    `all_android_plugin_libs` aggregator depends on uniformly. A plugin
-    that ships a `Package.swift` reads the hub's resolved file and
-    checksum table at fetch time, so no spoke carries hub-wide pin state
-    in its repository attributes.
-
-    A path package that declares the `android` platform also gets a
-    `<hub>-android-<package>` repository; one with no Android platform gets
-    none. Its fetch links only the declared `android` platform directory,
-    with the path spoke's confinement rules, and only a target that reaches
-    the spoke's `android:lib` alias fetches it.
+    A path package (singleton or SCC member) that declares the `android`
+    platform also gets a `<hub>-android-<package>` repository; one with no
+    Android platform gets none.
     """
+    hub_name = plan.hub_name
     maven = path_spoke_maven_inputs(pub_tag)
     workspace_root = _workspace_root_of_lock(module_ctx, pub_tag.lock)
-    overlay_roots = _spoke_overlay_roots(user_overlay_roots)
+    overlay_roots = spoke_overlay_roots(user_overlay_roots)
+    singleton_set = {pkg: True for pkg in plan.singletons}
     for name, path_info in path_pkgs.items():
-        swiftpm_attrs = pub_spoke_swiftpm_attrs(pub_tag, include_ios_native_deps = True, plugin_name = name)
-        flutter_pub_path_package(
-            name = hub_name + "__" + name,
-            package_name = name,
-            path = path_info.path,
-            version = path_info.version,
-            hub_name = hub_name,
-            lock_packages = all_package_names,
-            cycle_breaks = pub_tag.cycle_breaks.get(name, []),
-            plugin_defines = pub_tag.ios_plugin_defines.get(name, []),
-            overlay_roots = overlay_roots,
-            code_assets = curated_code_assets(name, path_info.version),
-            ignore_hook = name in ignore_hooks,
-            android_maven_deps = maven.deps,
-            android_maven_ignore = maven.ignore,
-            package_resolved = swiftpm_attrs.package_resolved,
-            package_sha256 = swiftpm_attrs.package_sha256,
-            ios_native_deps = swiftpm_attrs.ios_native_deps,
-            plugin_native_deps = swiftpm_attrs.plugin_deps,
-            podfile_lock = swiftpm_attrs.podfile_lock,
-            pubspec_lock = pub_tag.lock,
-        )
+        if name in singleton_set:
+            swiftpm_attrs = pub_spoke_swiftpm_attrs(pub_tag, include_ios_native_deps = True, plugin_name = name)
+            flutter_pub_path_package(
+                name = hub_name + "__" + name,
+                package_name = name,
+                path = path_info.path,
+                version = path_info.version,
+                hub_name = hub_name,
+                lock_packages = plan.all_package_names,
+                planned_deps = plan.planned_deps.get(name, []),
+                plan_covers_package = name in plan.planned_deps,
+                scc_targets = plan.scc_targets,
+                cycle_breaks = pub_tag.cycle_breaks.get(name, []),
+                plugin_defines = pub_tag.ios_plugin_defines.get(name, []),
+                overlay_roots = overlay_roots,
+                code_assets = curated_code_assets(name, path_info.version),
+                ignore_hook = name in ignore_hooks,
+                android_maven_deps = maven.deps,
+                android_maven_ignore = maven.ignore,
+                package_resolved = swiftpm_attrs.package_resolved,
+                package_sha256 = swiftpm_attrs.package_sha256,
+                ios_native_deps = swiftpm_attrs.ios_native_deps,
+                plugin_native_deps = swiftpm_attrs.plugin_deps,
+                podfile_lock = swiftpm_attrs.podfile_lock,
+                pubspec_lock = pub_tag.lock,
+            )
         if (
             _path_package_declares_android(module_ctx, workspace_root, path_info.path) and
-            not _overlay_replaces_spoke(module_ctx, overlay_roots, name, path_info.version)
+            not overlay_replaces_spoke(module_ctx, overlay_roots, name, path_info.version)
         ):
             flutter_pub_android_package(
                 name = android_package_repo_name(hub_name, name),
@@ -751,7 +641,7 @@ def _create_path_spokes(hub_name, path_pkgs, all_package_names, user_overlay_roo
                 android_maven_ignore = maven.ignore,
             )
 
-def _create_sdk_spokes(hub_name, sdk_flutter, all_package_names, toolchain_info, merged, flutter_version):
+def _create_sdk_spokes(plan, sdk_flutter, toolchain_info, merged, flutter_version):
     """Creates one `flutter_sdk_package` spoke per Flutter SDK package.
 
     In download mode each pins the same framework source tarball, so the
@@ -759,6 +649,7 @@ def _create_sdk_spokes(hub_name, sdk_flutter, all_package_names, toolchain_info,
     travel with the release. In local mode each symlinks the package out
     of the local SDK tree instead.
     """
+    hub_name = plan.hub_name
     if toolchain_info.local_path:
         for name in sdk_flutter.keys():
             flutter_sdk_package(
@@ -766,7 +657,8 @@ def _create_sdk_spokes(hub_name, sdk_flutter, all_package_names, toolchain_info,
                 package_name = name,
                 local_path = toolchain_info.local_path,
                 hub_name = hub_name,
-                lock_packages = all_package_names,
+                lock_packages = plan.all_package_names,
+                scc_targets = plan.scc_targets,
             )
         return
     sdk_source_sha256 = flutter_source_sha256(flutter_version, merged.versions)
@@ -778,7 +670,8 @@ def _create_sdk_spokes(hub_name, sdk_flutter, all_package_names, toolchain_info,
             flutter_version = flutter_version,
             sha256 = sdk_source_sha256,
             hub_name = hub_name,
-            lock_packages = all_package_names,
+            lock_packages = plan.all_package_names,
+            scc_targets = plan.scc_targets,
             source_url = sdk_source_url,
             source_strip_prefix = source_strip_prefix(flutter_version, sdk_source_url),
         )
@@ -844,7 +737,7 @@ def _create_swiftpm_spokes(hub_name, pub_tag, module_ctx):
         )
     return
 
-def _register_pub_hub(module_ctx, pub_tag, selected_info, merged, user_overlay_roots):
+def _register_pub_hub(module_ctx, pub_tag, selected_info, merged, user_overlay_roots, facts_state):
     """Resolves one `flutter.pub` tag into spoke repos plus the hub repo."""
     hub_name = pub_tag.name
     podfile, lock_label = read_hub_podfile_lock(module_ctx, pub_tag)
@@ -854,8 +747,6 @@ def _register_pub_hub(module_ctx, pub_tag, selected_info, merged, user_overlay_r
     lock_content = module_ctx.read(pub_tag.lock)
     lock_pkgs = parse_pubspec_lock(lock_content)
 
-    # Determine the Flutter version to use for SDK packages.
-    # Use the default toolchain version; fail if no toolchain is registered.
     toolchain_info = selected_info.get(_DEFAULT_NAME)
     if not toolchain_info:
         fail("flutter.pub() requires a flutter.toolchain() to be registered.")
@@ -872,22 +763,23 @@ def _register_pub_hub(module_ctx, pub_tag, selected_info, merged, user_overlay_r
     deps_error = ios_plugin_deps_lock_error(pub_tag.ios_plugin_deps, all_package_names)
     if deps_error:
         fail(deps_error)
+    plan = plan_hub_sccs(
+        module_ctx,
+        hub_name,
+        hosted,
+        path_pkgs,
+        all_package_names,
+        pub_tag,
+        facts_state,
+    )
     ignore_hooks = {pkg_name: True for pkg_name in pub_tag.ignore_hooks}
     pod_hub = hub_cocoapods_attrs(hub_name, all_package_names, podfile, lock_label, pub_tag)
 
-    # Create hub repo with aliases for all packages plus the
-    # Android plugin-libs aggregator. flutter.pub() always uses
-    # `flutter_pub_lock_hub` (not rules_dart's plain
-    # `pub_lock_hub`) because the Tier-1 `flutter_android_app`
-    # macro needs `@<hub>//android:all_android_plugin_libs` to
-    # auto-wire transitively-collected plugin Kotlin/Java into
-    # the final APK. Non-Flutter pub.pub() consumers keep using
-    # rules_dart's plain hub. It is created before the spokes because
-    # a plugin spoke receives the hub's checksum file as a label.
     flutter_pub_lock_hub(
         name = hub_name,
         hub_name = hub_name,
         packages = sorted(all_package_names),
+        scc_targets = plan.scc_targets,
         swift_package_sha256 = pub_tag.swift_package_sha256,
         swift_package_product_deps = {
             key: str(pub_tag.swift_package_product_deps[key])
@@ -899,9 +791,10 @@ def _register_pub_hub(module_ctx, pub_tag, selected_info, merged, user_overlay_r
     )
 
     _create_swiftpm_spokes(hub_name, pub_tag, module_ctx)
-    _create_hosted_spokes(hub_name, hosted, all_package_names, user_overlay_roots, pub_tag, ignore_hooks, module_ctx)
-    _create_path_spokes(hub_name, path_pkgs, all_package_names, user_overlay_roots, pub_tag, ignore_hooks, module_ctx)
-    _create_sdk_spokes(hub_name, sdk_flutter, all_package_names, toolchain_info, merged, toolchain_info.version)
+    _create_hosted_spokes(plan, hosted, user_overlay_roots, pub_tag, ignore_hooks, module_ctx)
+    _create_path_spokes(plan, path_pkgs, user_overlay_roots, pub_tag, ignore_hooks, module_ctx)
+    create_scc_spokes(plan, hosted, path_pkgs, user_overlay_roots, pub_tag)
+    _create_sdk_spokes(plan, sdk_flutter, toolchain_info, merged, toolchain_info.version)
 
 def _overlay_roots_of_module(mod):
     """Overlay roots one module declares, in tag order."""
@@ -941,10 +834,19 @@ def _toolchain_extension(module_ctx):
         if mod.is_root:
             root_overlay_roots.extend(_overlay_roots_of_module(mod))
 
+    facts_state = struct(facts = {}, recorded = [])
+
     # Handle flutter.pub() tags — resolve pubspec.lock with Flutter SDK support.
     for mod in module_ctx.modules:
         for pub_tag in mod.tags.pub:
-            _register_pub_hub(module_ctx, pub_tag, selected_info, merged, hub_overlay_roots(root_overlay_roots, _overlay_roots_of_module(mod), mod.is_root))
+            _register_pub_hub(
+                module_ctx,
+                pub_tag,
+                selected_info,
+                merged,
+                hub_overlay_roots(root_overlay_roots, _overlay_roots_of_module(mod), mod.is_root),
+                facts_state,
+            )
 
     # Don't declare root_module_direct_deps: flutter_register_toolchains creates
     # many repos (iOS, Android, web, desktop, cross-compile per platform) and
@@ -954,6 +856,8 @@ def _toolchain_extension(module_ctx):
     # the full set makes tidy force repos they don't. Letting users maintain
     # their own use_repo lists (rules_python does the same) is the right
     # tradeoff for an extension with this many optional outputs.
+    if facts_state.recorded:
+        return module_ctx.extension_metadata(facts = facts_state.facts)
     return module_ctx.extension_metadata(reproducible = True)
 
 flutter = module_extension(
@@ -965,7 +869,5 @@ flutter = module_extension(
         "plugin_overlays": _flutter_plugin_overlays,
         "darwin_sdk": _flutter_darwin_sdk,
     },
-    os_dependent = False,
-    arch_dependent = False,
     doc = "Installs a Flutter SDK toolchain and optionally resolves pub dependencies including Flutter SDK packages.",
 )

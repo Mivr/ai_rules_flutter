@@ -320,6 +320,32 @@ def _infer_spoke_hub_name(ctx, native_deps_label):
         return label_str[1:].partition("//")[0]
     return ""
 
+def _plugin_pod_target(pod_res, spoke, platform):
+    """Return the Apple plugin target string for a plugin pod resolution.
+
+    Args:
+        pod_res: Resolution struct with `package` and optional `hub`.
+        spoke: Spoke struct with `hub_name` and optional `scc_targets`.
+        platform: Platform string ("ios" or "macos").
+
+    Returns:
+        The target label string.
+    """
+    scc_targets = spoke.scc_targets if hasattr(spoke, "scc_targets") and spoke.scc_targets else {}
+    if pod_res.package in scc_targets:
+        scc_repo = scc_targets[pod_res.package].partition("//:")[0]
+        return "{repo}//:{pkg}_apple_{plat}".format(
+            repo = scc_repo,
+            pkg = pod_res.package,
+            plat = platform,
+        )
+    hub = pod_res.hub if pod_res.hub else spoke.hub_name
+    return "@{hub}__{pkg}//:{pkg}_apple_{plat}".format(
+        hub = hub,
+        pkg = pod_res.package,
+        plat = platform,
+    )
+
 def _resolve_spoke_deps_for_platform(kept_deps, platform, hub_data, spoke, fail_fn):
     """Resolve kept dependencies for one platform through precomputed hub data.
 
@@ -353,12 +379,7 @@ def _resolve_spoke_deps_for_platform(kept_deps, platform, hub_data, spoke, fail_
         if pod_res.kind == "label":
             target = pod_res.label
         elif pod_res.kind == "plugin":
-            hub = pod_res.hub if pod_res.hub else spoke.hub_name
-            target = "@{hub}__{pkg}//:{pkg}_apple_{plat}".format(
-                hub = hub,
-                pkg = pod_res.package,
-                plat = platform,
-            )
+            target = _plugin_pod_target(pod_res, spoke, platform)
         else:
             ref_lock = spoke.lock_label if spoke.lock_label else pod_res.lock_label
             err_msg = format_message_11(
@@ -415,6 +436,7 @@ def _resolve_spoke_from_lock(ctx, matching_entries, spoke, apple, fail_fn):
         lock_label = spoke.lock_label,
         hub_name = hub_name,
         podfile = spoke.podfile,
+        scc_targets = ctx.attr.scc_targets if hasattr(ctx.attr, "scc_targets") else {},
     )
     macos_labels = []
     if apple.macos_srcs:
