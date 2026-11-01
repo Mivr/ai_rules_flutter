@@ -289,23 +289,38 @@ jobs:
           echo "build --disk_cache=$dir" >> ~/.bazelrc
       - name: bazel test //... (root unit tests)
         run: bazel test //... --test_output=errors
+      # Lint-baseline red path: //flutter/tests/lint_baseline_fixture:red is a
+      # manual flutter_library with one unbaselined avoid_print diagnostic.
+      # Testing a library with no test targets exits 4 when dart_analyze
+      # succeeds, so both 0 and 4 count as an unexpected pass; both summary
+      # and source modes must fail with the baseline verdict.
       - name: Unbaselined lint diagnostic fails analysis
         run: |
-          if out=$(bazel test //flutter/tests/lint_baseline_fixture:red 2>&1); then
-            echo "$out"
-            echo "expected unbaselined lint to fail, but it succeeded"
-            exit 1
-          fi
-          echo "$out" | grep -F "flutter/tests/lint_baseline_fixture/lib/red.dart" || {
-            echo "$out"
-            echo "expected output to mention workspace path"
-            exit 1
-          }
-          echo "$out" | grep -F "avoid_print" || {
-            echo "$out"
-            echo "expected output to mention avoid_print"
-            exit 1
-          }
+          log="$(mktemp)"
+          trap 'rm -f "$log"' EXIT
+          for mode in summary source; do
+            rc=0
+            if [ "$mode" = summary ]; then
+              bazel test //flutter/tests/lint_baseline_fixture:red >"$log" 2>&1 || rc=$?
+            else
+              bazel test --@rules_dart//dart:analyzer_summaries=false //flutter/tests/lint_baseline_fixture:red >"$log" 2>&1 || rc=$?
+            fi
+            if [ "$rc" -eq 0 ] || [ "$rc" -eq 4 ]; then
+              cat "$log"
+              echo "expected unbaselined lint to fail analysis in $mode mode, got exit $rc"
+              exit 1
+            fi
+            for expected in \
+              "flutter/tests/lint_baseline_fixture/lib/red.dart" \
+              "avoid_print" \
+              "observed 1, ceiling 0"; do
+              if ! grep -F -q "$expected" "$log"; then
+                cat "$log"
+                echo "expected $mode output to mention [$expected]"
+                exit 1
+              fi
+            done
+          done
       # Digest red path: e2e/digest_mismatch fetches a real engine artifact
       # (sky_engine.zip) with a deliberately wrong checksum. The fetch must
       # fail, and the failure must be Bazel's checksum comparison — the grep

@@ -1,3 +1,5 @@
+"""Fixtures for the lint baseline acceptance checks."""
+
 load("//flutter:defs.bzl", "flutter_library")
 
 # Green control: 2 avoid_print violations baselined at 2 in analysis_baseline.json.
