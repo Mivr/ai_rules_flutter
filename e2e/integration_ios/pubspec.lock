@@ -159,6 +159,13 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "3.2.0"
+  pod_bigint_plugin:
+    dependency: "direct main"
+    description:
+      path: pod_bigint_plugin
+      relative: true
+    source: path
+    version: "0.0.1"
   process:
     dependency: transitive
     description:

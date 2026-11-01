@@ -65,7 +65,64 @@ flutter.pub(
     lock = "//:pubspec.lock",
     swift_package_resolved = "//ios/Runner.xcworkspace/xcshareddata/swiftpm:Package.resolved",
 )
-use_repo(flutter, "deps", "deps__spm_bigint_plugin", "deps__spm_graph_plugin", "deps__spm_objc_plugin", "deps__swiftpm-bigint", "deps__swiftpm-swift-algorithms", "deps__swiftpm-swift-numerics", "deps__xcframework_plugin", "deps_mapped", "deps_mapped__spm_bigint_plugin", "deps_unpinned", "deps_unpinned__spm_bigint_plugin", "deps_unpinned__spm_graph_plugin", "deps_unpinned__spm_objc_plugin", "deps_unpinned__swiftpm-bigint", "deps_unpinned__swiftpm-swift-algorithms", "deps_unpinned__swiftpm-swift-numerics", "flutter_ios_engine", "flutter_toolchains")
+
+# CocoaPods mode hub: reads committed Podfile.lock and maps BigInt to the
+# translated BigInt product from the swiftpm-bigint spoke.
+flutter.pub(
+    name = "deps_pods",
+    ios_pod_deps = {
+        "BigInt": "@deps__swiftpm-bigint//:BigInt",
+    },
+    ios_podfile_lock = "//:ios/Podfile.lock",
+    lock = "//:pubspec.lock",
+)
+
+# Unmapped twin of `deps_pods`: no ios_pod_deps and no ios_pod_ignore, so
+# querying @deps_pods_unmapped__pod_bigint_plugin fails at fetch time with Message 11.
+flutter.pub(
+    name = "deps_pods_unmapped",
+    ios_podfile_lock = "//:ios/Podfile.lock",
+    lock = "//:pubspec.lock",
+)
+
+# Wrong-library twin of `deps_pods`: maps BigInt to //:wrong_bigint_stub, proving
+# ios_pod_deps controls what pod_bigint_plugin links.
+flutter.pub(
+    name = "deps_pods_wrong",
+    ios_pod_deps = {
+        "BigInt": "//:wrong_bigint_stub",
+    },
+    ios_podfile_lock = "//:ios/Podfile.lock",
+    lock = "//:pubspec.lock",
+)
+use_repo(
+    flutter,
+    "deps",
+    "deps__spm_bigint_plugin",
+    "deps__spm_graph_plugin",
+    "deps__spm_objc_plugin",
+    "deps__swiftpm-bigint",
+    "deps__swiftpm-swift-algorithms",
+    "deps__swiftpm-swift-numerics",
+    "deps__xcframework_plugin",
+    "deps_mapped",
+    "deps_mapped__spm_bigint_plugin",
+    "deps_pods",
+    "deps_pods__pod_bigint_plugin",
+    "deps_pods_unmapped",
+    "deps_pods_unmapped__pod_bigint_plugin",
+    "deps_pods_wrong",
+    "deps_pods_wrong__pod_bigint_plugin",
+    "deps_unpinned",
+    "deps_unpinned__spm_bigint_plugin",
+    "deps_unpinned__spm_graph_plugin",
+    "deps_unpinned__spm_objc_plugin",
+    "deps_unpinned__swiftpm-bigint",
+    "deps_unpinned__swiftpm-swift-algorithms",
+    "deps_unpinned__swiftpm-swift-numerics",
+    "flutter_ios_engine",
+    "flutter_toolchains",
+)
 
 register_toolchains("@flutter_toolchains//:all")
 

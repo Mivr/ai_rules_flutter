@@ -425,6 +425,19 @@ jobs:
           fi
           echo "$out" | grep -F "Podfile.lock line 2"
           echo "$out" | grep -F "an indentation tab is not part of the Podfile.lock YAML subset rules_flutter reads"
+      # CocoaPods unmapped pod red path: deps_pods_unmapped carries no mapping
+      # and no ignore entry for BigInt, so querying the spoke fails at fetch
+      # time with Message 11.
+      - name: CocoaPods unmapped pod fails at fetch time (e2e/integration_ios)
+        working-directory: e2e/integration_ios
+        run: |
+          if out=$(bazel query @deps_pods_unmapped__pod_bigint_plugin//:all 2>&1); then
+            echo "$out"
+            echo "expected the unmapped CocoaPods spoke query to fail, but it succeeded"
+            exit 1
+          fi
+          echo "$out" | grep -F 'Flutter plugin "pod_bigint_plugin" depends on pod "BigInt" (6.0.1 in '
+          echo "$out" | grep -F ':ios/Podfile.lock), which no Bazel target provides. Map it with flutter.pub(ios_pod_deps = {"BigInt": "<label>"}) or declare it unneeded with flutter.pub(ios_pod_ignore = ["BigInt"]).'
       # Compile-soundness red path: the entrypoint imports a sibling that
       # exists on disk but is never declared, so executing the compile must
       # fail on the guard's refusal — never with a built dill. The target is

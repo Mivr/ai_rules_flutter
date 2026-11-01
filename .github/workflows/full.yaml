@@ -226,6 +226,33 @@ jobs:
           grep -F 'Flutter plugin "spm_bigint_plugin"' swiftpm_unpinned_output.log
           grep -F 'ios/spm_bigint_plugin/Package.swift' swiftpm_unpinned_output.log
           grep -F 'has no `swift_package_sha256["bigint"]` entry' swiftpm_unpinned_output.log
+      - name: CocoaPods wrong-library probe (e2e/integration_ios)
+        if: matrix.workspace == 'integration_ios'
+        working-directory: e2e/integration_ios
+        run: |
+          status=0
+          bazel test //:plugin_pod_wrong_test --test_output=errors >plugin_pod_wrong_output.log 2>&1 || status=$?
+          cat plugin_pod_wrong_output.log
+          if [ "$status" -eq 0 ]; then
+            echo "expected the wrong-library integration test to fail, but it passed"
+            exit 1
+          fi
+          xml="$(bazel info bazel-testlogs)/plugin_pod_wrong_test/test.xml"
+          grep -F '<testsuite name="integration_test/plugin_pod_test.dart"' "$xml"
+          grep -F '<failure' "$xml"
+      - name: CocoaPods unmapped pod red path (e2e/integration_ios)
+        if: matrix.workspace == 'integration_ios'
+        working-directory: e2e/integration_ios
+        run: |
+          status=0
+          bazel query @deps_pods_unmapped__pod_bigint_plugin//:all >cocoapods_unmapped_output.log 2>&1 || status=$?
+          cat cocoapods_unmapped_output.log
+          if [ "$status" -eq 0 ]; then
+            echo "expected the unmapped CocoaPods spoke query to fail, but it passed"
+            exit 1
+          fi
+          grep -F 'Flutter plugin "pod_bigint_plugin" depends on pod "BigInt" (6.0.1 in ' cocoapods_unmapped_output.log
+          grep -F ':ios/Podfile.lock), which no Bazel target provides. Map it with flutter.pub(ios_pod_deps = {"BigInt": "<label>"}) or declare it unneeded with flutter.pub(ios_pod_ignore = ["BigInt"]).' cocoapods_unmapped_output.log
       - name: Report cache sizes
         if: always()
         run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true

@@ -3,9 +3,23 @@ load("@rules_apple//apple:ios.bzl", "ios_application")
 load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test", "dart_test")
 load("@rules_flutter//flutter:defs.bzl", "flutter_gen_l10n", "flutter_integration_test", "flutter_test")
 load("@rules_flutter//flutter:ios.bzl", "flutter_ios_registrant_gen", "flutter_ios_simulator_build_test")
-load("@rules_swift//swift:swift.bzl", "swift_library_group")
+load("@rules_swift//swift:swift.bzl", "swift_library", "swift_library_group")
 
-exports_files(["pubspec.lock"])
+exports_files([
+    "ios/Podfile.lock",
+    "pubspec.lock",
+])
+
+# The wrong-library stub: provides a minimal BigInt module whose APIs return
+# deliberately wrong values, so `:plugin_pod_wrong_test` fails its runtime
+# assertion and proves `ios_pod_deps` controls what `pod_bigint_plugin` links.
+swift_library(
+    name = "wrong_bigint_stub",
+    srcs = ["wrong_bigint_stub.swift"],
+    module_name = "BigInt",
+    tags = ["manual"],
+    visibility = ["//visibility:public"],
+)
 
 # The product `deps_mapped` points at: a Bazel-built Swift library group over
 # the translated BigInt product. The mapped hub carries no pin, checksum or
@@ -165,6 +179,43 @@ flutter_integration_test(
     ],
 )
 
+# The CocoaPods plugin suite: proves a pub path plugin's CocoaPods pod
+# dependency (BigInt, mapped to @deps__swiftpm-bigint//:BigInt via
+# `ios_pod_deps`) links into the plugin's Apple library. The native
+# method computes 2^100 with BigInt at run time, so the assertion below
+# only passes when the mapped pod made it into the link.
+flutter_integration_test(
+    name = "plugin_pod_test",
+    package_name = "integration_ios",
+    srcs = ["integration_test/plugin_pod_test.dart"],
+    platform = "ios",
+    deps = [
+        "@deps_pods//:flutter",
+        "@deps_pods//:flutter_test",
+        "@deps_pods//:integration_test",
+        "@deps_pods//:pod_bigint_plugin",
+        "@rules_flutter//flutter:material_icons",
+    ],
+)
+
+# The wrong-library probe twin of `:plugin_pod_test`: `deps_pods_wrong` maps
+# BigInt to `//:wrong_bigint_stub`, so the same test compiles and links
+# cleanly on macOS and fails the runtime 2^100 assertion.
+flutter_integration_test(
+    name = "plugin_pod_wrong_test",
+    package_name = "integration_ios",
+    srcs = ["integration_test/plugin_pod_test.dart"],
+    platform = "ios",
+    tags = ["manual"],
+    deps = [
+        "@deps_pods_wrong//:flutter",
+        "@deps_pods_wrong//:flutter_test",
+        "@deps_pods_wrong//:integration_test",
+        "@deps_pods_wrong//:pod_bigint_plugin",
+        "@rules_flutter//flutter:material_icons",
+    ],
+)
+
 # Red twin of `:app_test`: its expectation is wrong on purpose (see
 # integration_test/red_test.dart). `manual` so `bazel test //...` stays green;
 # the full-matrix workflow runs it by name and asserts the run FAILS, proving
@@ -193,16 +244,20 @@ flutter_integration_test(
 build_test(
     name = "ios_dart_side_build_test",
     targets = [
-        ":__app_test_bootstrap",
         ":__app_test_app",
-        ":__plugin_spm_mapped_test_bootstrap",
-        ":__plugin_spm_mapped_test_app",
-        ":__plugin_spm_test_bootstrap",
-        ":__plugin_spm_test_app",
-        ":__plugin_spm_graph_test_bootstrap",
+        ":__app_test_bootstrap",
+        ":__plugin_pod_test_app",
+        ":__plugin_pod_test_bootstrap",
+        ":__plugin_pod_wrong_test_app",
+        ":__plugin_pod_wrong_test_bootstrap",
         ":__plugin_spm_graph_test_app",
-        ":__plugin_spm_objc_test_bootstrap",
+        ":__plugin_spm_graph_test_bootstrap",
+        ":__plugin_spm_mapped_test_app",
+        ":__plugin_spm_mapped_test_bootstrap",
         ":__plugin_spm_objc_test_app",
+        ":__plugin_spm_objc_test_bootstrap",
+        ":__plugin_spm_test_app",
+        ":__plugin_spm_test_bootstrap",
     ],
 )
 
@@ -297,6 +352,22 @@ flutter_test(
     ],
 )
 
+# Host-side lint twin of `:plugin_pod_test`: portable flutter_test so the
+# analysis test below lints the CocoaPods plugin's test Dart on every OS.
+flutter_test(
+    name = "plugin_pod_test_lint",
+    package_name = "integration_ios",
+    main = "integration_test/plugin_pod_test.dart",
+    tags = ["manual"],
+    deps = [
+        "@deps_pods//:flutter",
+        "@deps_pods//:flutter_test",
+        "@deps_pods//:integration_test",
+        "@deps_pods//:pod_bigint_plugin",
+        "@rules_flutter//flutter:material_icons",
+    ],
+)
+
 # Host-side lint twin of `:plugin_spm_objc_test`: same portable split so
 # the analysis test below lints the plugin-local target fixture's Dart on
 # every OS.
@@ -321,10 +392,11 @@ dart_analysis_test(
     targets = [
         ":app_test_lint",
         ":app_test_red_lint",
+        ":plugin_pod_test_lint",
         ":plugin_registrant_filter_test",
-        ":plugin_spm_test_lint",
         ":plugin_spm_graph_test_lint",
         ":plugin_spm_objc_test_lint",
+        ":plugin_spm_test_lint",
         "//android_only_plugin",
         "//dart_registration_plugin",
         "//ffi_plugin",
