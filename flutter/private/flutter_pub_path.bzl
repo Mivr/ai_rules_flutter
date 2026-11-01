@@ -123,7 +123,7 @@ def workspace_relative_lock_path(hub_name, package_name, lock_label, entry_path)
     lock_dir = lock_label.name.rpartition("/")[0]
     if lock_dir:
         parts.extend(lock_dir.split("/"))
-    parts.extend(entry_path.split("/"))
+    parts.extend(entry_path.replace("\\", "/").split("/"))
     out = []
     for part in parts:
         if part in ("", "."):

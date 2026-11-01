@@ -32,11 +32,18 @@ load(
     "make_flutter_pub_hub_build_content",
 )
 load(
+    "//flutter/private:flutter_pub_path.bzl",
+    "workspace_relative_lock_path",
+)
+load(
     "//flutter/private:flutter_pub_scc.bzl",
+    "collect_path_deps",
     "hosted_fact_key",
     "lookup_fact_deps",
+    "normalize_realpath",
     "parser_texts_digest",
     "plan_flutter_pub_sccs",
+    "resolve_path_pubspec",
     "scc_member_deps_error",
     "scc_members_connectivity_error",
     "scc_planned_deps_error",
@@ -466,6 +473,165 @@ def root_content_snippet(content):
     """Helper to return content stripped of leading/trailing space for sub-checks."""
     return content.strip()
 
+def _ci_entry(entries, seg):
+    """Looks up `seg` in `entries` with NTFS case-insensitivity."""
+    if seg in entries:
+        return seg, entries[seg]
+    target = seg.lower()
+    for k, v in entries.items():
+        if k.lower() == target:
+            return k, v
+    return None, None
+
+def _win_node_children(val):
+    """Returns direct child dictionary for a mock directory or metadata struct."""
+    if type(val) == "struct":
+        return getattr(val, "children", {})
+    if type(val) == "dict":
+        return val
+    return {}
+
+def _walk_win_children(rel_parts, node_val, more):
+    """Walks `more` child path segments case-insensitively from `(rel_parts, node_val)`."""
+    cur_parts = list(rel_parts)
+    cur_val = node_val
+    for idx in range(len(more)):
+        seg = more[idx]
+        matched_k, matched_v = _ci_entry(_win_node_children(cur_val), seg)
+        cur_parts.append(matched_k if matched_k != None else seg)
+        cur_val = matched_v
+        if cur_val == None:
+            cur_parts.extend(more[idx + 1:])
+            break
+    return cur_parts, cur_val
+
+def _make_win_fs_node(root_real, rel_parts, node_val):
+    """Creates a mock NTFS `path` node for Windows `collect_path_deps` tests."""
+    rel = "/".join(rel_parts)
+    default_real = (root_real.rstrip("/") + "/" + rel) if rel else root_real
+    is_meta = type(node_val) == "struct"
+    is_dir = type(node_val) == "dict" or (is_meta and getattr(node_val, "is_dir", False))
+    real = getattr(node_val, "realpath", default_real) if is_meta else default_real
+    text = getattr(node_val, "text", "") if is_meta else (node_val if type(node_val) == "string" else "")
+    kids = _win_node_children(node_val)
+
+    def get_child(*more):
+        """Resolves child segments case-insensitively."""
+        next_parts, next_val = _walk_win_children(rel_parts, node_val, more)
+        return _make_win_fs_node(root_real, next_parts, next_val)
+
+    def readdir():
+        """Lists direct directory children with their true casing."""
+        return [_make_win_fs_node(root_real, rel_parts + [k], kids[k]) for k in sorted(kids.keys())]
+
+    return struct(
+        basename = rel_parts[-1] if rel_parts else "",
+        dirname = None,
+        exists = node_val != None,
+        is_dir = is_dir,
+        realpath = real,
+        text = text,
+        get_child = get_child,
+        readdir = readdir,
+    )
+
+def _windows_path_pubspec_test_impl(ctx):
+    """Windows NTFS `build/` dirs, backslashes, mixed-case drives, and CRLF pubspecs succeed."""
+    env = unittest.begin(ctx)
+
+    win_root_real = "D:\\a\\ai_rules_flutter\\e2e\\hello_world"
+    crlf_pubspec = (
+        "name: win_pkg\r\n" +
+        "version: 0.1.0\r\n" +
+        "environment:\r\n" +
+        "  sdk: ^3.4.0\r\n" +
+        "dependencies:\r\n" +
+        "  path_probe:\r\n" +
+        "    path: ../../path_probe\r\n" +
+        "  meta: ^1.11.0\r\n"
+    )
+    ws_tree = {
+        "BUILD.bazel": "# root package\r\n",
+        "MODULE.bazel": 'module(name = "hello_world")\r\n',
+        "path_probe": {
+            "build": {"output.txt": "artifact"},
+            "lib": {"path_probe.dart": ""},
+            "pubspec.yaml": "name: path_probe\r\nversion: 0.1.0\r\ndependencies:\r\n  collection: ^1.18.0\r\n",
+        },
+        "packages": {
+            "win_pkg": struct(
+                is_dir = True,
+                realpath = "d:/a/AI_Rules_Flutter/e2e/hello_world/packages/win_pkg",
+                children = {
+                    "pubspec.yaml": struct(
+                        is_dir = False,
+                        realpath = "d:\\a\\AI_Rules_Flutter\\e2e\\hello_world\\packages\\win_pkg\\pubspec.yaml",
+                        text = crlf_pubspec,
+                    ),
+                },
+            ),
+        },
+        "escaped": struct(
+            is_dir = True,
+            realpath = "D:\\outside\\escaped",
+            children = {"pubspec.yaml": "name: escaped\r\n"},
+        ),
+    }
+    ws_root = _make_win_fs_node(win_root_real, [], ws_tree)
+
+    # Confirm the NTFS reproducer: `path_probe/BUILD` matches `path_probe/build` (a directory).
+    asserts.true(env, ws_root.get_child("path_probe", "BUILD").exists)
+    asserts.true(env, ws_root.get_child("path_probe", "BUILD").is_dir)
+
+    def mock_path(_label):
+        """Returns the lock file path whose `.dirname` is `ws_root`."""
+        return struct(dirname = ws_root)
+
+    def mock_read(target):
+        """Fails if passed a `Label` (matching Bazel PackageLookup on non-packages)."""
+        if type(target) == "Label":
+            fail("Unexpected Label passed to module_ctx.read: %s" % target)
+        return target.text
+
+    mock_module_ctx = struct(
+        os = struct(name = "windows amd64"),
+        path = mock_path,
+        read = mock_read,
+    )
+    path_pkgs = {
+        "path_probe": struct(path = "path_probe", version = "0.1.0"),
+        "win_pkg": struct(path = "packages\\win_pkg", version = "0.1.0"),
+    }
+    collected = collect_path_deps(mock_module_ctx, "deps", path_pkgs, Label("//:pubspec.lock"))
+    asserts.equals(env, ["collection"], collected["path_probe"])
+    asserts.equals(env, ["meta", "path_probe"], collected["win_pkg"])
+
+    asserts.equals(
+        env,
+        "packages/win_pkg",
+        workspace_relative_lock_path("deps", "win_pkg", Label("//:pubspec.lock"), "packages\\win_pkg"),
+    )
+
+    _check_windows_refusals(env, ws_root, win_root_real)
+    return unittest.end(env)
+
+def _check_windows_refusals(env, ws_root, win_root_real):
+    """Verifies Windows absolute paths, escapes, outside junctions, and root drives."""
+    for bad_abs in ("D:/outside", "C:\\outside", "\\\\server\\share\\pkg"):
+        res = resolve_path_pubspec(ws_root, win_root_real, "deps", "bad", bad_abs, "windows")
+        asserts.true(env, res.error != None and "invalid path" in res.error, str(res.error))
+
+    esc = resolve_path_pubspec(ws_root, win_root_real, "deps", "bad", "..\\outside", "windows")
+    asserts.true(env, esc.error != None and "escapes workspace" in esc.error, str(esc.error))
+
+    junc = resolve_path_pubspec(ws_root, win_root_real, "deps", "escaped", "escaped", "windows")
+    asserts.true(env, junc.error != None and "resolves outside workspace" in junc.error, str(junc.error))
+
+    asserts.equals(env, "D:", normalize_realpath("D:\\"))
+    drive_root = _make_win_fs_node("D:/", [], {"pkg": {"pubspec.yaml": "name: pkg\r\n"}})
+    ok_drive = resolve_path_pubspec(drive_root, "D:/", "deps", "pkg", "pkg", "windows")
+    asserts.equals(env, None, ok_drive.error)
+
 _hub_build_content_empty_scc_test = unittest.make(_hub_build_content_empty_scc_test_impl)
 _hub_build_content_with_sccs_test = unittest.make(_hub_build_content_with_sccs_test_impl)
 _spoke_dep_labels_routing_test = unittest.make(_spoke_dep_labels_routing_test_impl)
@@ -474,6 +640,7 @@ _cycle_breaks_before_scc_3cycle_test = unittest.make(_cycle_breaks_before_scc_3c
 _merged_spoke_build_2cycle_test = unittest.make(_merged_spoke_build_2cycle_test_impl)
 _merged_spoke_android_and_overlay_test = unittest.make(_merged_spoke_android_and_overlay_test_impl)
 _merged_spoke_build_3cycle_test = unittest.make(_merged_spoke_build_3cycle_test_impl)
+_windows_path_pubspec_test = unittest.make(_windows_path_pubspec_test_impl)
 
 def flutter_pub_scc_test_suite(name):
     """Defines the flutter.pub SCC planner and spoke test suite."""
@@ -487,4 +654,5 @@ def flutter_pub_scc_test_suite(name):
         _merged_spoke_build_2cycle_test,
         _merged_spoke_android_and_overlay_test,
         _merged_spoke_build_3cycle_test,
+        _windows_path_pubspec_test,
     )
