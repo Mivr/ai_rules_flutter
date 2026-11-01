@@ -78,6 +78,7 @@ Future<void> main(List<String> args) async {
 const String _cleanReport = 'home=False planted=False site=True';
 
 void main() {
+  _dartBinaryTests();
   group('guarded host-Python launch', () {
     late Directory workDir;
     late String? python;
@@ -419,17 +420,16 @@ Future<String> _pythonPrint(
 }
 
 /// The SDK `dart` that runs test kernels, for driving a nested launcher.
-String _dartBinary() {
-  final key = Platform.environment['RULES_DART_DART'];
-  if (key != null && key.isNotEmpty) {
-    return File(Runfiles.create().rlocation(key)).absolute.path;
+String _dartBinary([Map<String, String>? environment]) {
+  final env = environment ?? Platform.environment;
+  final key = env['IOS_SCREENSHOT_DART_RLOCATION'];
+  if (key == null || key.isEmpty) {
+    throw StateError(
+      'IOS_SCREENSHOT_DART_RLOCATION is not set; '
+      'the test needs @rules_dart//dart in `data`',
+    );
   }
-  final found = _findOnPath(['dart']);
-  if (found != null) return found;
-  throw StateError(
-    'could not find a dart binary: RULES_DART_DART is $key and '
-    'no dart is on PATH',
-  );
+  return File(Runfiles.create().rlocation(key)).absolute.path;
 }
 
 /// The `python_host.dart` source the nested driver imports.
@@ -444,15 +444,87 @@ String _libSource() {
   return File(Runfiles.create().rlocation(key)).absolute.path;
 }
 
-/// The first [names] entry found on PATH, or null when there is none.
-String? _findOnPath(List<String> names) {
-  final separator = Platform.isWindows ? ';' : ':';
-  for (final dir in (Platform.environment['PATH'] ?? '').split(separator)) {
-    if (dir.isEmpty) continue;
-    for (final name in names) {
-      final candidate = '$dir/$name${Platform.isWindows ? '.exe' : ''}';
-      if (FileSystemEntity.isFileSync(candidate)) return candidate;
-    }
+/// Registers tests verifying that [_dartBinary] resolves solely from runfiles.
+void _dartBinaryTests() {
+  group('_dartBinary', () {
+    test('resolves Dart SDK executable from runfiles without PATH', () async {
+      final rlocation = Platform.environment['IOS_SCREENSHOT_DART_RLOCATION'];
+      expect(rlocation, isNotNull);
+      expect(rlocation, isNotEmpty);
+      final dartPath = _dartBinary();
+      expect(File(dartPath).existsSync(), isTrue);
+      final result = await Process.run(
+        dartPath,
+        ['--version'],
+        environment: {'PATH': ''},
+      );
+      expect(result.exitCode, equals(0));
+      final versionOutput = '${result.stdout}${result.stderr}';
+      expect(versionOutput, contains('Dart SDK version'));
+    });
+
+    test('throws StateError when rlocation variable is absent', () {
+      final tempDir = _createDummyDartDir();
+      addTearDown(() => tempDir.deleteSync(recursive: true));
+      final legacyDartKey = ['RULES', 'DART', 'DART'].join('_');
+      final dummyDart = Platform.isWindows
+          ? '${tempDir.path}/dart.exe'
+          : '${tempDir.path}/dart';
+      final env = {
+        legacyDartKey: dummyDart,
+        'PATH': tempDir.path,
+      };
+      expect(
+        () => _dartBinary(env),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            allOf(
+              contains('IOS_SCREENSHOT_DART_RLOCATION'),
+              contains('@rules_dart//dart'),
+            ),
+          ),
+        ),
+      );
+    });
+
+    test('throws StateError when rlocation variable is empty', () {
+      final tempDir = _createDummyDartDir();
+      addTearDown(() => tempDir.deleteSync(recursive: true));
+      final legacyDartKey = ['RULES', 'DART', 'DART'].join('_');
+      final dummyDart = Platform.isWindows
+          ? '${tempDir.path}/dart.exe'
+          : '${tempDir.path}/dart';
+      final env = {
+        'IOS_SCREENSHOT_DART_RLOCATION': '',
+        legacyDartKey: dummyDart,
+        'PATH': tempDir.path,
+      };
+      expect(
+        () => _dartBinary(env),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            allOf(
+              contains('IOS_SCREENSHOT_DART_RLOCATION'),
+              contains('@rules_dart//dart'),
+            ),
+          ),
+        ),
+      );
+    });
+  });
+}
+
+/// Creates a temporary directory containing dummy `dart` executables.
+Directory _createDummyDartDir() {
+  final tempDir = Directory.systemTemp.createTempSync('dart_dummy_');
+  File('${tempDir.path}/dart').writeAsStringSync('');
+  File('${tempDir.path}/dart.exe').writeAsStringSync('');
+  if (!Platform.isWindows) {
+    Process.runSync('chmod', ['+x', '${tempDir.path}/dart']);
   }
-  return null;
+  return tempDir;
 }

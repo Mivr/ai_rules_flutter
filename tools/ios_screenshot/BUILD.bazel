@@ -30,10 +30,14 @@ dart_test(
     name = "python_host_test",
     srcs = glob(["lib/**/*.dart"]),
     # The `PYTHONHOME` tests drive the launchers from a child `dart` process
-    # (ambient variables cannot be set for the test's own process), so the
-    # launcher source travels in runfiles for the child's import.
-    data = ["lib/python_host.dart"],
+    # (ambient variables cannot be set for the test's own process), so both the
+    # resolved Dart SDK executable and the launcher source travel in runfiles.
+    data = [
+        "lib/python_host.dart",
+        "@rules_dart//dart",
+    ],
     env = {
+        "IOS_SCREENSHOT_DART_RLOCATION": "$(rlocationpath @rules_dart//dart)",
         "IOS_SCREENSHOT_PYTHON_HOST_RLOCATION": "$(rlocationpath lib/python_host.dart)",
     },
     main = "test/python_host_test.dart",
