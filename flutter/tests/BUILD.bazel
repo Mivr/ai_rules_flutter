@@ -208,6 +208,23 @@ dart_test(
     ],
 )
 
+# Gate 07 reproducibility canary guard: verifies e2e/repro_canary fixture and its CI job.
+dart_test(
+    name = "repro_canary_guard_test",
+    size = "small",
+    data = ["repro_canary_guard_test.dart"],
+    env = {"GUARD_ROOT_ANCHOR": "$(rlocationpath :repro_canary_guard_test.dart)"},
+    env_inherit = ["BUILD_WORKSPACE_DIRECTORY"],
+    main = "repro_canary_guard_test.dart",
+    tags = [
+        "external",
+        "no-sandbox",
+    ],
+    deps = [
+        "@dev_tool_deps//:test",
+    ],
+)
+
 # Bootstrap template guard: the three `flutter_integration_test` bootstrap
 # templates keep the program text the Starlark unit tests cannot read (they see
 # only the substitutions), and every placeholder the rules substitute is still
