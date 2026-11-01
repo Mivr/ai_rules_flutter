@@ -1,0 +1,16 @@
+{
+  "firebase_core": "depends on pod \"Firebase/CoreOnly\" (12.19.3...which no Bazel target provides. Map it with flutter.pub(ios_pod_deps =",
+  "firebase_auth": "depends on pod \"Firebase/Auth\" (12.19.3...which no Bazel target provides. Map it with flutter.pub(ios_pod_deps =",
+  "cloud_firestore": "depends on pod \"Firebase/Firestore\" (12.19.3...which no Bazel target provides. Map it with flutter.pub(ios_pod_deps =",
+  "firebase_messaging": "depends on pod \"Firebase/Messaging\" (12.19.3...which no Bazel target provides. Map it with flutter.pub(ios_pod_deps =",
+  "google_maps_flutter_ios": "depends on pod \"GoogleMaps\" (10.15.0...which no Bazel target provides. Map it with flutter.pub(ios_pod_deps =",
+  "google_sign_in_ios": "depends on pod \"GoogleSignIn\" (9.0.0...which no Bazel target provides. Map it with flutter.pub(ios_pod_deps =",
+  "sentry_flutter": "sets no `swift_package_resolved`",
+  "image_picker_ios": "ok",
+  "webview_flutter_wkwebview": "ok",
+  "url_launcher_ios": "ok",
+  "permission_handler_apple": "ok",
+  "flutter_inappwebview_ios": "depends on pod \"OrderedSet\" (6.0.3...which no Bazel target provides. Map it with flutter.pub(ios_pod_deps =",
+  "google_mlkit_commons": "depends on pod \"MLKitVision\" (10.0.0...which no Bazel target provides. Map it with flutter.pub(ios_pod_deps =",
+  "stripe_ios": "depends on pod \"Stripe\" (26.13.0...which no Bazel target provides. Map it with flutter.pub(ios_pod_deps ="
+}
