@@ -43,27 +43,34 @@ an Android target (`@deps__google_mlkit_commons//android:lib`).
 ### CocoaPods mode (`run_pods_matrix.py`)
 
 ```sh
-bazel --max_idle_secs=60 query @deps_pods__url_launcher_ios//:all
-python3 run_pods_matrix.py            # --mode fetch is the default
+bazel query @deps_pods__url_launcher_ios//:all
+python3 run_pods_matrix.py               # --mode fetch is the default
+python3 run_pods_matrix.py --mode fetch
 python3 run_pods_matrix.py --self-test
 ```
 
-Fetch mode reads `expected_pods.json` and runs `bazel query @deps_pods__<plugin>//:all`
-once per pinned plugin. An `ok` entry needs exit 0. A refusal entry needs a
-non-zero exit and its substring in the combined output.
+Fetch mode reads `expected_pods.json` and runs
+`bazel query @deps_pods__<plugin>//:all` once per pinned plugin. An `ok` entry
+needs exit 0. A refusal entry needs a non-zero exit and its case-sensitive
+substring in the combined output.
 
 `Podfile.lock` covers the thirteen podspec-shipping plugins in `pubspec.lock`
 (excluding `sentry_flutter`, which ships no podspec and falls back to
-`Package.swift`). Four engine-only plugins resolve cleanly (`ok`), nine plugins
-refuse with Message 11 naming the unresolved pod and locked version, and
+`darwin/sentry_flutter/Package.swift`). Four engine-only plugins
+(`image_picker_ios`, `webview_flutter_wkwebview`, `url_launcher_ios`, and
+`permission_handler_apple`) resolve cleanly (`ok`), nine plugins refuse with
+Message 11 naming the unresolved pod and locked version (`firebase_auth` fails
+on `Firebase/Auth` after resolving sibling `firebase_core`), and
 `sentry_flutter` falls back to its SwiftPM manifest and refuses because
 `deps_pods` sets no `swift_package_resolved`.
 
 `expected_pods.json` records these measured results. When a later item resolves
 a pod dependency, edit its entry in `expected_pods.json`.
 
-`--self-test` exercises the comparator and build logic offline, verifying
-refusal matching, case sensitivity, and that the iOS build platform is passed.
+`--self-test` exercises fetch and build comparison logic offline (including
+refusal matching, case sensitivity, `RECORD` handling for ungated builds, and
+passing `--platforms=@rules_flutter//flutter/platforms:ios_arm64`), and runs as
+`:run_pods_matrix_test` under `bazel test //...`.
 
 ## Build mode (macOS)
 
@@ -93,17 +100,18 @@ result is known.
 python3 run_pods_matrix.py --mode build
 ```
 
-Build mode reads the plugins `expected_pods.json` records as `ok` and builds each
-spoke's device library for the iOS platform:
+Build mode reads `expected_pods.json` and `build_expected_pods.json`, building
+each fetch-`ok` spoke's iOS device library for the `ios_arm64` target platform:
 
 ```sh
-bazel --max_idle_secs=60 build --platforms=@rules_flutter//flutter/platforms:ios_arm64 @deps_pods__<plugin>//:<plugin>_apple_ios
+bazel build --platforms=@rules_flutter//flutter/platforms:ios_arm64 @deps_pods__<plugin>//:<plugin>_apple_ios
 ```
 
 `build_expected_pods.json` names the builds that gate the step today (initially
-empty `{}` so ungated plugins print `RECORD` without failing the step). A later
-item adds expectations to `build_expected_pods.json` as build results become
-known.
+empty `{}` so ungated `ok` plugins print `RECORD` without failing the step).
+When a plugin is added to `build_expected_pods.json`, `ok` requires exit 0 and
+any failure string requires a non-zero exit with a case-sensitive substring
+match.
 
 ## Regenerating the lock
 
