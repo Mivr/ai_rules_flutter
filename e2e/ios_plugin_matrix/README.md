@@ -1,15 +1,20 @@
-# iOS real-plugin matrix (POD-2)
+# iOS real-plugin matrix (POD-2, POD-11)
 
 This workspace pins fourteen real Flutter plugins and records what the pinned
-rules_flutter checkout does with each one today. It turns the design's "today"
-column into a measurement, so a change that fixes or breaks a real plugin fails
-a gate instead of going unnoticed.
+rules_flutter checkout does with each one today in both SwiftPM mode (POD-2)
+and CocoaPods mode (POD-11). It turns the design's "today" column into a
+measurement, so a change that fixes or breaks a real plugin fails a gate
+instead of going unnoticed.
 
 `pubspec.yaml` pins the versions; `pubspec.lock` is resolved with the pinned
-Flutter toolchain, and every hosted entry carries its sha256. The single
-`flutter.pub` hub is named `deps`, so a plugin's spoke is `@deps__<plugin>`.
+Flutter toolchain, and every hosted entry carries its sha256. The SwiftPM-mode
+`flutter.pub` hub is named `deps`, so its spoke is `@deps__<plugin>`.
+The CocoaPods-mode hub is named `deps_pods` (`ios_podfile_lock = "//:Podfile.lock"`),
+so its spoke is `@deps_pods__<plugin>`.
 
 ## Fetch mode (Linux)
+
+### SwiftPM mode (`run_matrix.py`)
 
 ```sh
 bazel --max_idle_secs=60 query @deps__url_launcher_ios//:all
@@ -35,7 +40,34 @@ the spoke query evaluates only the Apple layer. Seven plugins (`firebase_core`,
 Android Gradle refusal is checked by `check_android_refusal.sh` when building
 an Android target (`@deps__google_mlkit_commons//android:lib`).
 
+### CocoaPods mode (`run_pods_matrix.py`)
+
+```sh
+bazel --max_idle_secs=60 query @deps_pods__url_launcher_ios//:all
+python3 run_pods_matrix.py            # --mode fetch is the default
+python3 run_pods_matrix.py --self-test
+```
+
+Fetch mode reads `expected_pods.json` and runs `bazel query @deps_pods__<plugin>//:all`
+once per pinned plugin. An `ok` entry needs exit 0. A refusal entry needs a
+non-zero exit and its substring in the combined output.
+
+`Podfile.lock` covers the thirteen podspec-shipping plugins in `pubspec.lock`
+(excluding `sentry_flutter`, which ships no podspec and falls back to
+`Package.swift`). Four engine-only plugins resolve cleanly (`ok`), nine plugins
+refuse with Message 11 naming the unresolved pod and locked version, and
+`sentry_flutter` falls back to its SwiftPM manifest and refuses because
+`deps_pods` sets no `swift_package_resolved`.
+
+`expected_pods.json` records these measured results. When a later item resolves
+a pod dependency, edit its entry in `expected_pods.json`.
+
+`--self-test` exercises the comparator and build logic offline, verifying
+refusal matching, case sensitivity, and that the iOS build platform is passed.
+
 ## Build mode (macOS)
+
+### SwiftPM mode (`run_matrix.py`)
 
 ```sh
 python3 run_matrix.py --mode build
@@ -54,6 +86,24 @@ bazel --max_idle_secs=60 build @deps__<plugin>//:<plugin>_apple_ios
 target's pigeon header. The other builds are printed and recorded without
 gating yet; a later item adds them to `build_expected.json` when their expected
 result is known.
+
+### CocoaPods mode (`run_pods_matrix.py`)
+
+```sh
+python3 run_pods_matrix.py --mode build
+```
+
+Build mode reads the plugins `expected_pods.json` records as `ok` and builds each
+spoke's device library for the iOS platform:
+
+```sh
+bazel --max_idle_secs=60 build --platforms=@rules_flutter//flutter/platforms:ios_arm64 @deps_pods__<plugin>//:<plugin>_apple_ios
+```
+
+`build_expected_pods.json` names the builds that gate the step today (initially
+empty `{}` so ungated plugins print `RECORD` without failing the step). A later
+item adds expectations to `build_expected_pods.json` as build results become
+known.
 
 ## Regenerating the lock
 

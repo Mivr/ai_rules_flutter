@@ -161,6 +161,10 @@ jobs:
         if: matrix.workspace == 'ios_plugin_matrix'
         working-directory: e2e/ios_plugin_matrix
         run: python3 run_matrix.py --mode build
+      - name: iOS plugin CocoaPods build matrix (e2e/ios_plugin_matrix)
+        if: matrix.workspace == 'ios_plugin_matrix'
+        working-directory: e2e/ios_plugin_matrix
+        run: python3 run_pods_matrix.py --mode build
       # The simulator runtime behind `manual`: `//...` never picks up
       # `:verify_ios_simulator_test`, so the ffi_example leg runs it by name.
       # No `continue-on-error`: a failing simulator run fails the job.
@@ -352,6 +356,9 @@ jobs:
       - name: iOS plugin fetch matrix (e2e/ios_plugin_matrix)
         working-directory: e2e/ios_plugin_matrix
         run: python3 run_matrix.py
+      - name: iOS plugin CocoaPods fetch matrix (e2e/ios_plugin_matrix)
+        working-directory: e2e/ios_plugin_matrix
+        run: python3 run_pods_matrix.py
       - name: iOS plugin Android refusal (e2e/ios_plugin_matrix)
         working-directory: e2e/ios_plugin_matrix
         run: bash check_android_refusal.sh
