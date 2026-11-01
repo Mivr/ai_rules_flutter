@@ -1250,9 +1250,48 @@ jobs:
         run: bazel run //tools/check_e2e_coverage
       - name: Check rules_android_maven pins in Android workspaces
         run: bazel run //tools/check_maven_pins
+  reproducibility:
+    name: Reproducibility canary
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+        with:
+          repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
+          cache-save: false
+      - name: Verify canary output differs across distinct output bases
+        working-directory: e2e/repro_canary
+        run: |
+          bazel --output_base=/tmp/repro_canary_a build //:canary
+          if [ ! -s bazel-bin/canary.bin ]; then
+            echo "e2e/repro_canary: output missing or empty in run A" >&2
+            exit 1
+          fi
+          sum_a=$(sha256sum bazel-bin/canary.bin | awk '{print $1}')
+
+          bazel --output_base=/tmp/repro_canary_b build //:canary
+          if [ ! -s bazel-bin/canary.bin ]; then
+            echo "e2e/repro_canary: output missing or empty in run B" >&2
+            exit 1
+          fi
+          sum_b=$(sha256sum bazel-bin/canary.bin | awk '{print $1}')
+
+          if [ -z "$sum_a" ] || [ -z "$sum_b" ]; then
+            echo "e2e/repro_canary: sha256 checksum missing or empty" >&2
+            exit 1
+          fi
+
+          echo "Run A sha256: $sum_a"
+          echo "Run B sha256: $sum_b"
+
+          if [ "$sum_a" = "$sum_b" ]; then
+            echo "e2e/repro_canary: canary outputs are equal across distinct output bases ($sum_a)" >&2
+            exit 1
+          fi
   conclusion:
     name: Conclusion
-    needs: [e2e-macos-apple, e2e-macos-toolchain, unit-tests, e2e-linux-app, e2e-linux-small, e2e-linux-examples, e2e-linux-pub-scc, e2e-linux-integration, e2e-windows, e2e-coverage, dart-tool-tests, pre-commit, web-smoke]
+    needs: [e2e-macos-apple, e2e-macos-toolchain, unit-tests, e2e-linux-app, e2e-linux-small, e2e-linux-examples, e2e-linux-pub-scc, e2e-linux-integration, e2e-windows, e2e-coverage, dart-tool-tests, pre-commit, web-smoke, reproducibility]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
