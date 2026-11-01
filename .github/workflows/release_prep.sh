@@ -94,6 +94,23 @@ if [[ "$EXPECTED_DIGEST" != "sha256:${DART_HEX}" ]]; then
 fi
 DART_INTEGRITY=$(sri_of "$TMPDIR/$DART_ARCHIVE")
 
+DOCS_DIR="$TMPDIR/docs"
+TARGETS_FILE="$TMPDIR/doc_targets"
+bazel --output_base="$DOCS_DIR" query --output=label --output_file="$TARGETS_FILE" 'kind("starlark_doc_extract rule", //...)'
+if [[ ! -s "$TARGETS_FILE" ]]; then
+  echo "release_prep: query 'kind(\"starlark_doc_extract rule\", //...)' found no targets" >&2
+  exit 1
+fi
+bazel --output_base="$DOCS_DIR" build --target_pattern_file="$TARGETS_FILE"
+DOCS_ARCHIVE="${ARCHIVE%.tar.gz}.docs.tar.gz"
+tar --create --auto-compress \
+  --directory "$(bazel --output_base="$DOCS_DIR" info bazel-bin)" \
+  --file "$DOCS_ARCHIVE" .
+if [[ ! -f "$DOCS_ARCHIVE" || ! -s "$DOCS_ARCHIVE" ]]; then
+  echo "release_prep: query 'kind(\"starlark_doc_extract rule\", //...)' produced empty or missing archive ${DOCS_ARCHIVE}" >&2
+  exit 1
+fi
+
 cat <<EOF
 Add to your \`MODULE.bazel\` file:
 
