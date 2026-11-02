@@ -7,6 +7,7 @@ dart_test(
     env = {
         "GUARD_ROOT_ANCHOR": "$(rlocationpath :bzl_library_guard_test.dart)",
     },
+    env_inherit = ["BUILD_WORKSPACE_DIRECTORY"],
     main = "bzl_library_guard_test.dart",
     tags = [
         "external",
