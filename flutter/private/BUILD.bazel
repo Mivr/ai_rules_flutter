@@ -622,6 +622,24 @@ bzl_library(
 )
 
 bzl_library(
+    name = "flutter_apple_plugin_library_helpers",
+    srcs = ["flutter_apple_plugin_library_helpers.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+)
+
+bzl_library(
+    name = "podspec_read_ruby",
+    srcs = ["podspec_read_ruby.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+)
+
+bzl_library(
+    name = "podspec_read",
+    srcs = ["podspec_read.bzl"],
+    visibility = ["//flutter:__subpackages__"],
+)
+
+bzl_library(
     name = "flutter_pub_apple_local",
     srcs = ["flutter_pub_apple_local.bzl"],
     visibility = ["//flutter:__subpackages__"],

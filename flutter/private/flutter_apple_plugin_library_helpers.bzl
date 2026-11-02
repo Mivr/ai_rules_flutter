@@ -151,6 +151,7 @@ def weak_sdk_frameworks_xtool_refusal(name):
     )
 
 def _flutter_xtool_apple_plugin_library_impl(ctx):
+    """Build CcInfo, SwiftInfo, and FlutterApplePluginInfo for the xtool backend."""
     if ctx.attr.plugin_defines:
         fail(plugin_defines_xtool_refusal(ctx.label.name))
     if ctx.attr.weak_sdk_frameworks:
@@ -249,6 +250,7 @@ flutter_xtool_apple_plugin_library = rule(
 )
 
 def _swift_generated_header_include_impl(ctx):
+    """Publish the generated header's directory as a quote include path."""
     headers = [
         header
         for header in ctx.attr.swift[CcInfo].compilation_context.headers.to_list()

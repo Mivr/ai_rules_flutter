@@ -68,6 +68,7 @@ def _apple_plugin_engine_imports(platform, engine):
     return [engine] if engine else [Label("@flutter_ios_engine//:Flutter_xcframework")]
 
 def _emit_xtool_plugin_branch(spec):
+    """Emit the framework import and host-agnostic plugin target on the `xtool` backend."""
     flutter_darwin_xcframework_import(
         name = spec.framework_target,
         framework_name = "FlutterMacOS" if spec.platform == "macos" else "Flutter",
@@ -93,6 +94,7 @@ def _emit_xtool_plugin_branch(spec):
     )
 
 def _emit_apple_framework_import(spec):
+    """Emit the Flutter engine framework import target for the `rules_apple` backend."""
     if spec.platform == "macos":
         apple_dynamic_framework_import(
             name = spec.framework_target,
@@ -393,8 +395,8 @@ def flutter_apple_plugin_objc_library(
         platform: `"macos"` or `"ios"`. Picks the Flutter framework dep.
         deps: Same-package local libraries this target depends on.
         settings: `struct(includes, conlyopts, cxxopts, linkopts,
-            private_includes, sdk_frameworks, sdk_dylibs)` of translated
-            target settings.
+            private_includes, sdk_frameworks, weak_sdk_frameworks,
+            sdk_dylibs)` of translated target settings.
         visibility: Target visibility.
     """
     if platform not in ("macos", "ios"):
@@ -435,7 +437,7 @@ def flutter_apple_plugin_objc_library(
         cxxopts = settings.cxxopts,
         linkopts = settings.linkopts,
         sdk_frameworks = settings.sdk_frameworks,
-        weak_sdk_frameworks = getattr(settings, "weak_sdk_frameworks", []),
+        weak_sdk_frameworks = settings.weak_sdk_frameworks if hasattr(settings, "weak_sdk_frameworks") else [],
         sdk_dylibs = settings.sdk_dylibs,
         module_name = module_name,
         enable_modules = True,
@@ -460,19 +462,17 @@ def flutter_apple_plugin_objc_library(
         visibility = visibility,
     )
 
-def _validate_plugin_args(name, platform, backend, objc_copts, weak_sdk_frameworks):
-    """Validate backend and argument compatibility."""
+def _validate_plugin_args(name, platform, backend, objc_copts):
+    """Validate platform, backend, and macro-only argument compatibility."""
     if platform not in ("macos", "ios"):
         fail("flutter_apple_plugin_library: platform must be 'macos' or 'ios', got '%s'" % platform)
     if backend not in ("rules_apple", "xtool"):
         fail("flutter_apple_plugin_library: backend must be 'rules_apple' or 'xtool', got %r" % backend)
     if backend == "xtool" and objc_copts:
         fail(objc_copts_xtool_refusal(name))
-    if backend == "xtool" and weak_sdk_frameworks:
-        fail(weak_sdk_frameworks_xtool_refusal(name))
 
-def _emit_pure_swift_linkopts(spec, kwargs):
-    """Inject SDK framework and dylib linkopts for pure-Swift plugins."""
+def _with_pure_swift_linkopts(spec, extra_attrs):
+    """Return a copy of `extra_attrs` adding SDK framework and dylib linkopts."""
     swift_linkopts = []
     for fw in spec.sdk_frameworks:
         swift_linkopts.extend(["-framework", fw])
@@ -480,16 +480,22 @@ def _emit_pure_swift_linkopts(spec, kwargs):
         swift_linkopts.extend(["-weak_framework", fw])
     for dylib in spec.sdk_dylibs:
         swift_linkopts.append("-l" + dylib)
+    out = dict(extra_attrs)
     if swift_linkopts:
-        kwargs["linkopts"] = list(kwargs.get("linkopts", [])) + swift_linkopts
+        if "linkopts" in out:
+            prev = out["linkopts"]
+            out["linkopts"] = (list(prev) if type(prev) == "list" else prev) + swift_linkopts
+        else:
+            out["linkopts"] = swift_linkopts
+    return out
 
-def _emit_rules_apple_plugin(spec, kwargs):
-    """Emit the rules_apple target graph for a plugin spoke."""
+def _emit_rules_apple_plugin(spec, extra_attrs):
+    """Emit the `rules_apple` target graph for a plugin library."""
     swift_files, objc_files, headers = _split_srcs(spec.srcs)
     _emit_apple_framework_import(spec)
 
     if swift_files and objc_files:
-        _emit_mixed_plugin(spec, swift_files, objc_files, headers, kwargs)
+        _emit_mixed_plugin(spec, swift_files, objc_files, headers, extra_attrs)
         return
 
     swift_deps = [":" + spec.framework_target] + spec.deps
@@ -502,10 +508,11 @@ def _emit_rules_apple_plugin(spec, kwargs):
             swift_deps = swift_deps + [objc_dep]
 
     bridging_header, extra_copts = _plugin_bridging_copts(spec, headers)
+
+    # A header-less ObjC target gets no clang module, so there is nothing to re-export.
     swift_files = _plugin_swift_srcs(spec, swift_files, objc_module_name if headers else "")
 
-    if swift_files and not objc_files:
-        _emit_pure_swift_linkopts(spec, kwargs)
+    swift_attrs = _with_pure_swift_linkopts(spec, extra_attrs) if not objc_files else extra_attrs
 
     _emit_plugin_swift_target(
         spec,
@@ -515,7 +522,7 @@ def _emit_rules_apple_plugin(spec, kwargs):
         extra_copts,
         bridging_header,
         False,
-        kwargs,
+        swift_attrs,
     )
 
 def flutter_apple_plugin_library(
@@ -574,7 +581,7 @@ def flutter_apple_plugin_library(
             is only built when something depends on it.
         **kwargs: Forwarded to the underlying swift_library.
     """
-    _validate_plugin_args(name, platform, backend, objc_copts, weak_sdk_frameworks)
+    _validate_plugin_args(name, platform, backend, objc_copts)
 
     if tags == None:
         tags = ["manual"]
