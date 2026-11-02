@@ -229,6 +229,7 @@ bzl_library(
         "//flutter/private:flutter_android_registrant",
         "@bazel_skylib//rules:expand_template",
         "@bazel_skylib//rules:write_file",
+        "@rules_java//java:core_rules",
     ],
 )
 
@@ -312,6 +313,8 @@ bzl_library(
         "//flutter/private:ios_sim_debug",
         "@bazel_skylib//rules:build_test",
         "@bazel_skylib//rules:expand_template",
+        "@rules_apple//apple",
+        "@rules_swift//swift",
     ],
 )
 
@@ -343,6 +346,7 @@ bzl_library(
         "//flutter/private:flutter_xtool_bundle",
         "//flutter/private:macos_app",
         "@bazel_skylib//rules:expand_template",
+        "@rules_swift//swift",
     ],
 )
 

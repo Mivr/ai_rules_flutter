@@ -102,6 +102,9 @@ bzl_library(
     name = "cc_runner_compile",
     srcs = ["cc_runner_compile.bzl"],
     visibility = ["//visibility:public"],
+    deps = [
+        "@rules_cc//cc/common",
+    ],
 )
 
 bzl_library(
@@ -178,6 +181,8 @@ bzl_library(
     deps = [
         ":common",
         "@bazel_skylib//rules:common_settings",
+        "@rules_android//providers:providers_bzl",
+        "@rules_java//java/common",
     ],
 )
 
@@ -195,6 +200,10 @@ bzl_library(
     name = "flutter_android_binary_proxy",
     srcs = ["flutter_android_binary_proxy.bzl"],
     visibility = ["//visibility:public"],
+    deps = [
+        "@rules_android//providers:providers_bzl",
+        "@rules_java//java/common",
+    ],
 )
 
 bzl_library(
@@ -203,6 +212,9 @@ bzl_library(
     visibility = ["//visibility:public"],
     deps = [
         ":common",
+        "@rules_cc//cc:action_names_bzl",
+        "@rules_cc//cc:find_cc_toolchain_bzl",
+        "@rules_cc//cc/common",
     ],
 )
 
@@ -224,6 +236,7 @@ bzl_library(
     visibility = ["//visibility:public"],
     deps = [
         ":flutter_android_registrant",
+        "@rules_android//providers:providers_bzl",
     ],
 )
 
@@ -245,6 +258,8 @@ bzl_library(
         ":flutter_android_application",
         ":plugin_registrant",
         "//flutter:providers",
+        "@rules_android//providers:providers_bzl",
+        "@rules_java//java/common",
     ],
 )
 
@@ -274,6 +289,10 @@ bzl_library(
         ":flutter_xtool_bundle",
         "//flutter:providers",
         "@bazel_skylib//rules:write_file",
+        "@rules_apple//apple",
+        "@rules_cc//cc:core_rules",
+        "@rules_cc//cc/common",
+        "@rules_swift//swift",
     ],
 )
 
@@ -283,6 +302,8 @@ bzl_library(
     visibility = ["//visibility:public"],
     deps = [
         "//flutter:providers",
+        "@rules_cc//cc/common",
+        "@rules_swift//swift",
     ],
 )
 
@@ -292,6 +313,7 @@ bzl_library(
     visibility = ["//visibility:public"],
     deps = [
         ":flutter_xtool_bundle",
+        "@rules_apple//apple",
     ],
 )
 
@@ -306,6 +328,7 @@ bzl_library(
         ":flutter_native_assets",
         ":native_sources",
         "//flutter:providers",
+        "@apple_support//lib:apple_support",
         "@bazel_skylib//lib:dicts",
         "@rules_dart//dart:utils",
     ],
@@ -473,6 +496,7 @@ bzl_library(
         "@bazel_skylib//rules:write_file",
         "@rules_dart//dart:providers",
         "@rules_dart//dart:utils",
+        "@rules_java//java:core_rules",
     ],
 )
 
@@ -513,6 +537,7 @@ bzl_library(
         ":constants",
         ":flutter_native_assets",
         "//flutter:providers",
+        "@apple_support//lib:apple_support",
         "@bazel_skylib//lib:dicts",
         "@bazel_skylib//rules:common_settings",
     ],
@@ -597,6 +622,7 @@ bzl_library(
     visibility = ["//visibility:public"],
     deps = [
         ":engine_helpers",
+        "@rules_cc//cc/common",
     ],
 )
 
@@ -637,6 +663,7 @@ bzl_library(
     deps = [
         ":constants",
         "//flutter:providers",
+        "@apple_support//lib:apple_support",
         "@bazel_skylib//lib:dicts",
     ],
 )
@@ -681,6 +708,7 @@ bzl_library(
         ":flutter_info",
         ":native_sources",
         "//flutter:providers",
+        "@rules_cc//cc/common:cc_shared_library_info_bzl",
     ],
 )
 
@@ -721,8 +749,12 @@ bzl_library(
         ":flutter_library",
         ":native_sources",
         "//flutter:providers",
+        "@rules_android//providers:providers_bzl",
+        "@rules_cc//cc/common",
         "@rules_dart//dart:providers",
         "@rules_dart//dart:utils",
+        "@rules_java//java/common",
+        "@rules_swift//swift",
     ],
 )
 
@@ -1111,6 +1143,7 @@ bzl_library(
     visibility = ["//visibility:public"],
     deps = [
         ":engine_helpers",
+        "@rules_cc//cc/common",
     ],
 )
 
@@ -1142,6 +1175,7 @@ bzl_library(
         ":flutter_xtool_bundle_pack",
         ":xtool_import",
         ":xtool_version",
+        "@apple_support//lib:apple_support",
         "@bazel_skylib//lib:dicts",
     ],
 )
@@ -1155,6 +1189,7 @@ bzl_library(
         ":xtool_import",
         ":xtool_version",
         "//flutter:providers",
+        "@rules_cc//cc/common",
     ],
 )
 
@@ -1247,6 +1282,11 @@ bzl_library(
         ":validation",
         ":xtool_version",
         "@bazel_skylib//rules:expand_template",
+        "@rules_apple//apple",
+        "@rules_apple//apple:ios",
+        "@rules_apple//apple:resources",
+        "@rules_apple//apple:versioning",
+        "@rules_swift//swift",
     ],
 )
 
@@ -1293,6 +1333,10 @@ bzl_library(
         ":validation",
         ":xtool_version",
         "@bazel_skylib//rules:expand_template",
+        "@rules_apple//apple",
+        "@rules_apple//apple:macos",
+        "@rules_apple//apple:versioning",
+        "@rules_swift//swift",
     ],
 )
 
@@ -1476,6 +1520,9 @@ bzl_library(
         ":artifact_urls",
         ":download",
         ":xtool_sdk_render",
+        "@rules_cc//cc:action_names_bzl",
+        "@rules_cc//cc:defs_bzl",
+        "@rules_cc//cc/common",
     ],
 )
 
@@ -1485,7 +1532,9 @@ bzl_library(
     visibility = ["//visibility:public"],
     deps = [
         "//flutter:providers",
+        "@apple_support//lib:apple_support",
         "@bazel_skylib//lib:dicts",
+        "@rules_cc//cc/common",
     ],
 )
 
