@@ -1,17 +1,19 @@
-# //flutter:android.bzl has no starlark_doc_extract target: rules_android 0.8.0's
-# android/BUILD declares no targets and rules_kotlin 2.4.20's release
-# kotlin/BUILD.bazel leaves android.bzl out of every target, so no bzl_library
-# can cover @rules_android//android:rules.bzl or
-# @rules_kotlin//kotlin:android.bzl and starlark_doc_extract refuses the
-# closure.
-
-starlark_doc_extract(
-    name = "defs.doc_extract",
-    src = "//flutter:defs.bzl",
-    deps = [
-        "//flutter:defs",
-    ],
-)
+# Five public `flutter/*.bzl` entries have no `starlark_doc_extract` target:
+# `starlark_doc_extract` refuses a load closure that reaches a Starlark module
+# with no `bzl_library` target.
+#
+# - `android.bzl`, `defs.bzl`, `linux.bzl` and `web.bzl`: their closures load
+#   `@rules_android//android:rules.bzl` and `@rules_kotlin//kotlin:android.bzl`.
+#   rules_android 0.8.0's `android/BUILD` declares no targets, and
+#   rules_kotlin 2.4.20's release `kotlin/BUILD` leaves `android.bzl` out of
+#   every target, so no `bzl_library` can cover them.
+# - `extensions.bzl`: its closure loads `@rules_dart//dart/pub:pub_scan.bzl`,
+#   `@rules_dart//dart/pub/private:version.bzl` and
+#   `@rules_dart//dart/pub/private:pub_scc_verify.bzl`, which have no
+#   `bzl_library` at the pinned rules_dart.
+#
+# Each of the five keeps its `bzl_library` and its `exports_files` entry in
+# `flutter/BUILD.bazel`; only the doc extract is omitted here.
 
 starlark_doc_extract(
     name = "dev_files.doc_extract",
@@ -22,26 +24,10 @@ starlark_doc_extract(
 )
 
 starlark_doc_extract(
-    name = "extensions.doc_extract",
-    src = "//flutter:extensions.bzl",
-    deps = [
-        "//flutter:extensions",
-    ],
-)
-
-starlark_doc_extract(
     name = "ios.doc_extract",
     src = "//flutter:ios.bzl",
     deps = [
         "//flutter:ios",
-    ],
-)
-
-starlark_doc_extract(
-    name = "linux.doc_extract",
-    src = "//flutter:linux.bzl",
-    deps = [
-        "//flutter:linux",
     ],
 )
 
@@ -102,14 +88,6 @@ starlark_doc_extract(
 )
 
 starlark_doc_extract(
-    name = "web.doc_extract",
-    src = "//flutter:web.bzl",
-    deps = [
-        "//flutter:web",
-    ],
-)
-
-starlark_doc_extract(
     name = "windows.doc_extract",
     src = "//flutter:windows.bzl",
     deps = [
@@ -123,8 +101,8 @@ _DOC_EXTRACT_TARGETS = sorted([
     if r["kind"] == "starlark_doc_extract"
 ])
 
-_ = len(_DOC_EXTRACT_TARGETS) == 14 or fail(
-    "Expected 14 starlark_doc_extract targets in //docs, got %d" % len(
+_ = len(_DOC_EXTRACT_TARGETS) == 10 or fail(
+    "Expected 10 starlark_doc_extract targets in //docs, got %d" % len(
         _DOC_EXTRACT_TARGETS,
     ),
 )
@@ -132,11 +110,8 @@ _ = len(_DOC_EXTRACT_TARGETS) == 14 or fail(
 filegroup(
     name = "all_doc_extracts",
     srcs = [
-        ":defs.doc_extract",
         ":dev_files.doc_extract",
-        ":extensions.doc_extract",
         ":ios.doc_extract",
-        ":linux.doc_extract",
         ":macos.doc_extract",
         ":native_assets.doc_extract",
         ":native_hot_patch.doc_extract",
@@ -144,7 +119,6 @@ filegroup(
         ":repositories.doc_extract",
         ":toolchain.doc_extract",
         ":utils.doc_extract",
-        ":web.doc_extract",
         ":windows.doc_extract",
     ],
     visibility = ["//visibility:public"],
