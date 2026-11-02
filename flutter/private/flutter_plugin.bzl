@@ -416,6 +416,7 @@ def _flutter_plugin_impl(ctx):
     )
     return _plugin_dart_infos(ctx, package_name, lib_root) + [_plugin_flutter_info(ctx, package_name, plugin, extra)]
 
+# rule_test_coverage: no-actions
 flutter_plugin = rule(
     implementation = _flutter_plugin_impl,
     attrs = {

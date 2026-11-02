@@ -57,7 +57,6 @@ Two tiers of API:
 """
 
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
-load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
 load("@rules_apple//apple:apple.bzl", "apple_dynamic_framework_import")
 load("@rules_swift//swift:swift.bzl", "swift_library")
 load("//flutter/private:constants.bzl", _IOS_MINIMUM_OS_VERSION = "IOS_MINIMUM_OS_VERSION")
@@ -84,10 +83,12 @@ IOS_DEFAULT_MAIN_STORYBOARD = _IOS_DEFAULT_MAIN_STORYBOARD
 flutter_entitlements_merge = _flutter_entitlements_merge
 
 # Host-agnostic xtool xcframework import, versioning, and iOS bundle rules.
+# rule_test_coverage: no-actions
 flutter_darwin_xcframework_import = _flutter_darwin_xcframework_import
 
 # Imports one prebuilt .xcframework or .framework on the selected Apple
 # backend, for iOS and macOS alike.
+# rule_test_coverage: no-actions
 flutter_apple_xcframework_import = _flutter_apple_xcframework_import
 
 flutter_xtool_bundle_version = _flutter_xtool_bundle_version
@@ -95,6 +96,7 @@ flutter_xtool_ios_bundle = _flutter_xtool_ios_bundle
 
 # Tier 1 app assembly and engine import live in flutter/private/ios_app.bzl;
 # re-exported here so user BUILD files are unaffected.
+# rule_test_coverage: no-actions
 flutter_ios_engine = _flutter_ios_engine
 flutter_ios_app = _flutter_ios_app
 
@@ -103,6 +105,7 @@ flutter_ios_app = _flutter_ios_app
 # no flags. Used by `flutter_integration_test(platform = "ios")`; also handy
 # for hand-rolled simulator tests. See `flutter_ios_simulator_build` below
 # for the `-c dbg`-only variant.
+# rule_test_coverage: no-actions
 ios_sim_debug_app = _ios_sim_debug_app
 
 # -- Composable rules (Tier 2) ------------------------------------------------
@@ -180,6 +183,7 @@ flutter_apple_plugin_library = _flutter_apple_plugin_library_macro
 # Aggregates per-plugin Apple swift_libraries from a flutter_application's
 # transitive dep graph. Pass to runner_lib_gen `application` to thread plugin
 # Swift modules + link inputs into the runner.
+# rule_test_coverage: no-actions
 flutter_apple_plugins_aggregator = _flutter_apple_plugins_aggregator
 
 def flutter_ios_framework_gen(name, application, minimum_os_version = IOS_MINIMUM_OS_VERSION, **kwargs):
@@ -224,6 +228,31 @@ def flutter_ios_framework_gen(name, application, minimum_os_version = IOS_MINIMU
         **kwargs
     )
 
+def _flutter_ios_info_plist_impl(ctx):
+    out = ctx.actions.declare_file(ctx.label.name + "/Info.plist")
+    ctx.actions.expand_template(
+        template = ctx.file._template,
+        output = out,
+        substitutions = {
+            "APP_NAME": ctx.attr.app_name,
+            "MODULE_NAME": ctx.attr.module_name,
+        },
+    )
+    return [DefaultInfo(files = depset([out] + ctx.files.extra_plists))]
+
+_flutter_ios_info_plist = rule(
+    implementation = _flutter_ios_info_plist_impl,
+    attrs = {
+        "app_name": attr.string(mandatory = True),
+        "extra_plists": attr.label_list(allow_files = True, default = []),
+        "module_name": attr.string(default = "Runner"),
+        "_template": attr.label(
+            default = "@rules_flutter//flutter/private/runners/ios:Info.plist",
+            allow_single_file = True,
+        ),
+    },
+)
+
 def flutter_ios_info_plist_gen(name, app_name, module_name = "Runner", **kwargs):
     """Generates an iOS Info.plist from the default Bazel template.
 
@@ -244,21 +273,11 @@ def flutter_ios_info_plist_gen(name, app_name, module_name = "Runner", **kwargs)
     tags = kwargs.pop("tags", ["manual"])
     visibility = kwargs.pop("visibility", None)
 
-    expand_template(
-        name = "__%s_plist" % name,
-        template = "@rules_flutter//flutter/private/runners/ios:Info.plist",
-        out = name + "/Info.plist",
-        substitutions = {
-            "APP_NAME": app_name,
-            "MODULE_NAME": module_name,
-        },
-        tags = tags,
-        **kwargs
-    )
-
-    native.filegroup(
+    _flutter_ios_info_plist(
         name = name,
-        srcs = ["__%s_plist" % name] + select({
+        app_name = app_name,
+        module_name = module_name,
+        extra_plists = select({
             "@rules_flutter//flutter:release": [],
             "//conditions:default": [
                 "@rules_flutter//flutter/private/runners/ios:DartVmServiceMdns.plist",
@@ -266,6 +285,7 @@ def flutter_ios_info_plist_gen(name, app_name, module_name = "Runner", **kwargs)
         }),
         tags = tags,
         visibility = visibility,
+        **kwargs
     )
 
 def flutter_ios_runner_lib_gen(name, registrant, engine, application = None, module_name = "Runner", backend = "rules_apple", **kwargs):
@@ -339,6 +359,7 @@ def flutter_ios_runner_lib_gen(name, registrant, engine, application = None, mod
 
 # -- Convenience macro (Tier 1) -----------------------------------------------
 
+# rule_test_coverage: no-actions
 def flutter_ios_simulator_build(name, targets, **kwargs):
     """Builds iOS apps for the simulator in debug mode, whatever `-c` says.
 
@@ -359,6 +380,7 @@ def flutter_ios_simulator_build(name, targets, **kwargs):
         **kwargs
     )
 
+# rule_test_coverage: no-actions
 def flutter_ios_simulator_build_test(name, targets, **kwargs):
     """A build test of iOS simulator apps, built with `-c dbg`.
 

@@ -28,6 +28,7 @@ def _flutter_windows_plugin_library_impl(ctx):
         DefaultInfo(files = depset(ctx.files.srcs + ctx.files.hdrs)),
     ]
 
+# rule_test_coverage: no-actions
 flutter_windows_plugin_library = rule(
     implementation = _flutter_windows_plugin_library_impl,
     attrs = {

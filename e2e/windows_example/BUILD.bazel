@@ -7,6 +7,7 @@ load(
     "flutter_windows_app",
     "flutter_windows_bundle",
     "flutter_windows_engine",
+    "flutter_windows_plugin_library",
     "flutter_windows_registrant_gen",
     "flutter_windows_runner_lib_gen",
 )
@@ -103,11 +104,20 @@ flutter_windows_bundle(
 # Tests
 # =============================================================================
 
+flutter_windows_plugin_library(
+    name = "e2e_windows_plugin_library",
+    srcs = ["custom_runner/custom_runner.cc"],
+    target_compatible_with = ["@platforms//os:windows"],
+)
+
 build_test(
     name = "windows_app_build_test",
     size = "small",
     target_compatible_with = ["@platforms//os:windows"],
-    targets = [":app"],
+    targets = [
+        ":app",
+        ":e2e_windows_plugin_library",
+    ],
 )
 
 build_test(

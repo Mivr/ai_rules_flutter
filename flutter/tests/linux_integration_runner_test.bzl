@@ -73,6 +73,11 @@ def _linux_integration_runner_compiles_test_impl(ctx):
         "FlutterLinuxBundle" in mnemonics,
         "the Linux integration test must assemble its desktop bundle, got %s" % (mnemonics,),
     )
+    bundle = [a for a in analysistest.target_actions(env) if a.mnemonic == "FlutterLinuxBundle"][0]
+    asserts.true(env, len(bundle.argv) > 0)
+    asserts.true(env, any(["bundle" in arg or "--output" in arg or "--assets" in arg for arg in bundle.argv]))
+    bundle_inputs = [f.basename for f in bundle.inputs.to_list()]
+    asserts.true(env, any([f.endswith(".so") or f.endswith(".json") or f == "icudtl.dat" for f in bundle_inputs]))
     return analysistest.end(env)
 
 _linux_runner_defaults_test = unittest.make(_linux_runner_defaults_test_impl)

@@ -5,10 +5,14 @@ load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
 load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test", "dart_test")
 load(
     "@rules_flutter//flutter:android.bzl",
+    "flutter_android_apk_overlay",
     "flutter_android_app",
     "flutter_android_bundle",
     "flutter_android_engine",
     "flutter_android_manifest_gen",
+    "flutter_android_manifest_merge",
+    "flutter_android_permissions_manifest",
+    "flutter_android_registrant",
     "flutter_android_runner_lib_gen",
 )
 load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_library")
@@ -196,10 +200,39 @@ build_test(
     targets = [":app"],
 )
 
+flutter_android_permissions_manifest(
+    name = "e2e_permissions_manifest",
+    permissions = ["android.permission.INTERNET"],
+)
+
+flutter_android_manifest_merge(
+    name = "e2e_manifest_merge",
+    base = ":bazel_runner_manifest",
+    overlay = ":e2e_permissions_manifest",
+)
+
+flutter_android_registrant(
+    name = "e2e_registrant",
+    application = ":app_flutter",
+)
+
+flutter_android_apk_overlay(
+    name = "e2e_apk_overlay",
+    binary = ":app_bazel_runner",
+    flutter_assets = ":app_flutter_assets",
+    native_libs_jar = ":app_native_libs_jar",
+)
+
 build_test(
     name = "android_bazel_runner_build_test",
     size = "small",
-    targets = [":app_bazel_runner"],
+    targets = [
+        ":app_bazel_runner",
+        ":e2e_apk_overlay",
+        ":e2e_manifest_merge",
+        ":e2e_permissions_manifest",
+        ":e2e_registrant",
+    ],
 )
 
 build_test(

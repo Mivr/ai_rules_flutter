@@ -1,6 +1,7 @@
 """Analysis tests for `web_dir`, the directory served at a web bundle's root."""
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
+load("@rules_dart//dart:providers.bzl", "DartAnalyzableInfo")
 load("//flutter:web.bzl", "flutter_web_app")
 load("//flutter/private:flutter_web_application.bzl", "flutter_web_bundle")
 load(":action_content.bzl", "written_json")
@@ -68,6 +69,10 @@ def _app_discovers_from_web_dir_test_impl(ctx):
                 index[0]["template"].endswith("web_dir/web_apps/second/index.html"),
                 "index.html must be templated from web_dir: %s" % index[0]["template"],
             )
+    tut = analysistest.target_under_test(env)
+    asserts.true(env, DefaultInfo in tut)
+    asserts.true(env, DartAnalyzableInfo in tut)
+    asserts.equals(env, "web_dir", tut[DartAnalyzableInfo].dart_info.package_name)
     return analysistest.end(env)
 
 _app_discovers_from_web_dir_test = analysistest.make(_app_discovers_from_web_dir_test_impl)

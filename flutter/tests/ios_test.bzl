@@ -176,6 +176,14 @@ def _ios_framework_import_test_impl(ctx):
             "Expected debug App.framework to be bundle_only (not linked), got: %s" % linked_dylibs,
         )
 
+    actions = analysistest.target_actions(env)
+    action_mnemonics = [a.mnemonic for a in actions]
+    asserts.true(env, "CppModuleMap" in action_mnemonics)
+    if ctx.attr.expect_linked:
+        asserts.true(env, "SolibSymlink" in action_mnemonics)
+        solib_actions = [a for a in actions if a.mnemonic == "SolibSymlink"]
+        asserts.true(env, any([f.basename == "App" for f in solib_actions[0].inputs.to_list()]))
+
     return analysistest.end(env)
 
 def _fake_xcode_config_impl(_ctx):
@@ -1467,6 +1475,10 @@ def _ios_registrant_swift_groups_test_impl(ctx):
         "Expected the Swift registrant, got: %s" % [f.short_path for f in swift_files],
     )
     asserts.equals(env, 1, len(tut[DefaultInfo].files.to_list()))
+    actions = analysistest.target_actions(env)
+    write_actions = [a for a in actions if a.mnemonic == "FileWrite"]
+    asserts.equals(env, 1, len(write_actions))
+    asserts.true(env, any([f.basename.endswith("_native_plugin_registrant.swift") for f in write_actions[0].outputs.to_list()]))
     return analysistest.end(env)
 
 _ios_registrant_swift_groups_test = analysistest.make(_ios_registrant_swift_groups_test_impl)
@@ -1496,6 +1508,12 @@ def _ios_registrant_objc_groups_test_impl(ctx):
         getattr(groups, "swift", None),
         "The ObjC registrant must not expose a swift output group",
     )
+    actions = analysistest.target_actions(env)
+    write_actions = [a for a in actions if a.mnemonic == "FileWrite"]
+    asserts.equals(env, 2, len(write_actions))
+    out_names = [f.basename for a in write_actions for f in a.outputs.to_list()]
+    asserts.true(env, "GeneratedPluginRegistrant.h" in out_names)
+    asserts.true(env, "GeneratedPluginRegistrant.m" in out_names)
     return analysistest.end(env)
 
 _ios_registrant_objc_groups_test = analysistest.make(_ios_registrant_objc_groups_test_impl)

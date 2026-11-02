@@ -32,6 +32,7 @@ def _engine_framework_select():
         "//conditions:default": [Label("@flutter_macos_engine//:engine_library")],
     })
 
+# rule_test_coverage: no-actions
 def flutter_macos_engine(name, backend = "rules_apple", **kwargs):
     """Imports the FlutterMacOS.framework engine for the build mode.
 

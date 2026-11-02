@@ -134,6 +134,8 @@ def _fake_application_impl(ctx):
 
     asset_manifest = ctx.actions.declare_file(ctx.label.name + "/_staging/AssetManifest.bin")
     ctx.actions.write(asset_manifest, "")
+    icu_data = ctx.actions.declare_file(ctx.label.name + "/icudtl.dat")
+    ctx.actions.write(icu_data, "ICU")
     flutter_assets = ctx.actions.declare_directory(ctx.label.name + "/flutter_assets")
     ctx.actions.run(
         executable = dart_exe,
@@ -194,9 +196,12 @@ def _fake_application_impl(ctx):
         flutter_assets = flutter_assets,
         native_libs = [libs[path] for path in ctx.attr.native_libs],
         bundled_code_assets = depset([libs[path] for path in ctx.attr.code_assets]),
-        apple_privacy_manifests = depset(),
+        apple_privacy_manifests = depset(ctx.files.apple_privacy_manifests),
         plugins = plugins,
         apple_plugin_libraries = depset(apple_plugin_libs),
+        linux_plugin_libraries = depset(),
+        windows_plugin_libraries = depset(),
+        icu_data = icu_data,
     )]
 
 fake_application = rule(
@@ -204,6 +209,7 @@ fake_application = rule(
     attrs = {
         "apple_libs": attr.label_list(),
         "apple_plugin_libraries": attr.label_list(),
+        "apple_privacy_manifests": attr.label_list(allow_files = True),
         "code_assets": attr.string_list(),
         "debug": attr.bool(default = False),
         "fat_macho": attr.bool(default = False),

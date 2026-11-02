@@ -34,6 +34,7 @@ def _ios_sim_debug_app_impl(ctx):
     # A 1:1 transition makes `app` a single-element list.
     return [DefaultInfo(files = ctx.attr.app[0][DefaultInfo].files)]
 
+# rule_test_coverage: no-actions
 ios_sim_debug_app = rule(
     implementation = _ios_sim_debug_app_impl,
     attrs = {

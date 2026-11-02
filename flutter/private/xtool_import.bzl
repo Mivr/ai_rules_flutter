@@ -201,6 +201,7 @@ def _flutter_darwin_xcframework_import_impl(ctx):
         ),
     ]
 
+# rule_test_coverage: no-actions
 flutter_darwin_xcframework_import = rule(
     implementation = _flutter_darwin_xcframework_import_impl,
     attrs = dicts.add(

@@ -46,6 +46,7 @@ def _flutter_data_asset_impl(ctx):
         flutter_info,
     ]
 
+# rule_test_coverage: no-actions
 flutter_data_asset = rule(
     implementation = _flutter_data_asset_impl,
     attrs = {
