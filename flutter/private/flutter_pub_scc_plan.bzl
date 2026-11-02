@@ -13,6 +13,30 @@ load("//flutter/private:flutter_pub_scc_spoke.bzl", "flutter_pub_scc_package")
 load("//flutter/private:pub_lock_sdks.bzl", "hosted_package_sha256")
 load("//flutter/private:swiftpm_resolved.bzl", "pub_spoke_swiftpm_attrs")
 
+_INTERNAL_HUB_NAMES = {
+    "dev_tool_deps": True,
+    "gen_l10n_deps": True,
+}
+
+_RULES_FLUTTER_REPO = Label("//:MODULE.bazel").repo_name
+
+def _is_internal_hub(hub_name, pub_tag):
+    """Checks whether a hub is an internal rules_flutter hub.
+
+    Args:
+        hub_name: The hub repository name string.
+        pub_tag: The `flutter.pub` tag struct.
+
+    Returns:
+        True if the hub is an internal rules_flutter hub, False otherwise.
+    """
+    if hub_name not in _INTERNAL_HUB_NAMES:
+        return False
+    lock = getattr(pub_tag, "lock", None)
+    if lock == None:
+        return False
+    return getattr(lock, "repo_name", None) == _RULES_FLUTTER_REPO
+
 def plan_hub_sccs(module_ctx, hub_name, hosted, path_pkgs, all_package_names, pub_tag, facts_state):
     """Collects hosted/path pubspec deps (caching hosted in facts) and plans SCCs.
 
@@ -28,6 +52,16 @@ def plan_hub_sccs(module_ctx, hub_name, hosted, path_pkgs, all_package_names, pu
     Returns:
         The SCC plan struct from `plan_flutter_pub_sccs`.
     """
+    if _is_internal_hub(hub_name, pub_tag):
+        return struct(
+            hub_name = hub_name,
+            all_package_names = all_package_names,
+            singletons = sorted(all_package_names),
+            merged = {},
+            sccs = [],
+            scc_targets = {},
+            planned_deps = {},
+        )
     package_deps = {}
     if len(hosted) + len(path_pkgs) >= 2 or bool(pub_tag.cycle_breaks):
         if hosted:

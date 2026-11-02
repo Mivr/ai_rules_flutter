@@ -11404,7 +11404,7 @@
     },
     "@@ai_rules_flutter+//flutter:extensions.bzl%flutter": {
       "general": {
-        "bzlTransitiveDigest": "YyluxipwhRco+D+uI2yyZWAJlmrxxS9c/tAPPKMRHTY=",
+        "bzlTransitiveDigest": "ANs20pPgkghRJ4WfGRkupVwdbaPpw4s1YxUJyNlOFTI=",
         "usagesDigest": "QiaavrIeqpSQVaNXiFWcxauAsb3lzsjdS/EeHrPd9II=",
         "recordedInputs": [
           "REPO_MAPPING:ai_rules_dart+,dart_pub_scanner ai_rules_dart++dart+dart_pub_scanner",
@@ -19557,10 +19557,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "meta"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -19664,21 +19662,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "_fe_analyzer_shared",
-                "collection",
-                "convert",
-                "crypto",
-                "glob",
-                "meta",
-                "package_config",
-                "path",
-                "pub_semver",
-                "source_span",
-                "watcher",
-                "yaml"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -19783,7 +19768,7 @@
                 "yaml_edit"
               ],
               "planned_deps": [],
-              "plan_covers_package": true,
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -19887,11 +19872,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "collection",
-                "meta"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -19995,11 +19977,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "source_span",
-                "string_scanner"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -20103,12 +20082,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "logging",
-                "path",
-                "webkit_inspection_protocol"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -20212,11 +20187,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "args",
-                "yaml"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -20321,7 +20293,7 @@
                 "yaml_edit"
               ],
               "planned_deps": [],
-              "plan_covers_package": true,
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -20426,7 +20398,7 @@
                 "yaml_edit"
               ],
               "planned_deps": [],
-              "plan_covers_package": true,
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -20530,10 +20502,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "typed_data"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -20637,20 +20607,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "args",
-                "cli_config",
-                "glob",
-                "logging",
-                "meta",
-                "package_config",
-                "path",
-                "source_maps",
-                "stack_trace",
-                "vm_service",
-                "yaml"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -20754,10 +20712,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "typed_data"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -20862,7 +20818,7 @@
                 "yaml_edit"
               ],
               "planned_deps": [],
-              "plan_covers_package": true,
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -20966,10 +20922,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "meta"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -21073,31 +21027,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "args",
-                "async",
-                "browser_launcher",
-                "collection",
-                "dap",
-                "dds_service_extensions",
-                "devtools_shared",
-                "dtd",
-                "extension_discovery",
-                "http_multi_server",
-                "json_rpc_2",
-                "meta",
-                "mime",
-                "path",
-                "shelf",
-                "shelf_proxy",
-                "shelf_static",
-                "shelf_web_socket",
-                "sse",
-                "stream_channel",
-                "vm_service",
-                "web_socket_channel"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -21201,11 +21132,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "dap",
-                "vm_service"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -21309,23 +21237,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "args",
-                "collection",
-                "dtd",
-                "extension_discovery",
-                "file",
-                "meta",
-                "path",
-                "shelf",
-                "sse",
-                "vm_service",
-                "web_socket_channel",
-                "webkit_inspection_protocol",
-                "yaml",
-                "yaml_edit"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -21429,14 +21342,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "dart_service_protocol_shared",
-                "json_rpc_2",
-                "stream_channel",
-                "unified_analytics",
-                "web_socket_channel"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -21540,37 +21447,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "async",
-                "collection",
-                "crypto",
-                "dds",
-                "file",
-                "http",
-                "http_multi_server",
-                "logging",
-                "meta",
-                "package_config",
-                "path",
-                "pool",
-                "pub_semver",
-                "shelf",
-                "shelf_packages_handler",
-                "shelf_proxy",
-                "shelf_static",
-                "shelf_web_socket",
-                "source_maps",
-                "sse",
-                "stack_trace",
-                "stream_channel",
-                "vm_service",
-                "vm_service_interface",
-                "web",
-                "web_socket",
-                "web_socket_channel",
-                "webkit_inspection_protocol"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -21674,10 +21552,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "yaml"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -21781,11 +21657,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "meta",
-                "path"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -21889,11 +21762,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "async",
-                "path"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -21997,14 +21867,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "async",
-                "collection",
-                "file",
-                "path",
-                "string_scanner"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -22108,13 +21972,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "async",
-                "http_parser",
-                "meta",
-                "web"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -22218,10 +22077,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "async"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -22325,13 +22182,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "collection",
-                "source_span",
-                "string_scanner",
-                "typed_data"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -22435,12 +22287,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "meta",
-                "path",
-                "string_scanner"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -22544,11 +22392,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "stack_trace",
-                "stream_channel"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -22653,7 +22498,7 @@
                 "yaml_edit"
               ],
               "planned_deps": [],
-              "plan_covers_package": true,
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -22757,14 +22602,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "async",
-                "meta",
-                "stack_trace",
-                "term_glyph",
-                "test_api"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -22869,7 +22708,7 @@
                 "yaml_edit"
               ],
               "planned_deps": [],
-              "plan_covers_package": true,
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -22974,7 +22813,7 @@
                 "yaml_edit"
               ],
               "planned_deps": [],
-              "plan_covers_package": true,
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -23078,10 +22917,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "meta"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -23186,7 +23023,7 @@
                 "yaml_edit"
               ],
               "planned_deps": [],
-              "plan_covers_package": true,
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -23290,10 +23127,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "path"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -23398,7 +23233,7 @@
                 "yaml_edit"
               ],
               "planned_deps": [],
-              "plan_covers_package": true,
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -23503,7 +23338,7 @@
                 "yaml_edit"
               ],
               "planned_deps": [],
-              "plan_covers_package": true,
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -23607,11 +23442,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "async",
-                "stack_trace"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -23715,10 +23547,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "collection"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -23823,7 +23653,7 @@
                 "yaml_edit"
               ],
               "planned_deps": [],
-              "plan_covers_package": true,
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -23927,15 +23757,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "async",
-                "collection",
-                "http_parser",
-                "path",
-                "stack_trace",
-                "stream_channel"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -24039,12 +23862,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "path",
-                "shelf",
-                "shelf_static"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -24148,12 +23967,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "http",
-                "path",
-                "shelf"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -24257,14 +24072,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "convert",
-                "http_parser",
-                "mime",
-                "path",
-                "shelf"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -24368,12 +24177,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "shelf",
-                "stream_channel",
-                "web_socket_channel"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -24477,12 +24282,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "path",
-                "source_maps",
-                "stack_trace"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -24586,10 +24387,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "source_span"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -24693,12 +24492,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "collection",
-                "path",
-                "term_glyph"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -24802,16 +24597,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "async",
-                "collection",
-                "logging",
-                "pool",
-                "shelf",
-                "stream_channel",
-                "web"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -24915,10 +24702,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "path"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -25022,10 +24807,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "async"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -25129,10 +24912,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "source_span"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -25237,7 +25018,7 @@
                 "yaml_edit"
               ],
               "planned_deps": [],
-              "plan_covers_package": true,
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -25341,34 +25122,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "analyzer",
-                "async",
-                "boolean_selector",
-                "collection",
-                "coverage",
-                "http_multi_server",
-                "io",
-                "matcher",
-                "node_preamble",
-                "package_config",
-                "path",
-                "pool",
-                "shelf",
-                "shelf_packages_handler",
-                "shelf_static",
-                "shelf_web_socket",
-                "source_span",
-                "stack_trace",
-                "stream_channel",
-                "test_api",
-                "test_core",
-                "typed_data",
-                "web_socket_channel",
-                "webkit_inspection_protocol",
-                "yaml"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -25472,18 +25227,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "async",
-                "boolean_selector",
-                "collection",
-                "meta",
-                "source_span",
-                "stack_trace",
-                "stream_channel",
-                "string_scanner",
-                "term_glyph"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -25587,30 +25332,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "analyzer",
-                "args",
-                "async",
-                "boolean_selector",
-                "collection",
-                "coverage",
-                "frontend_server_client",
-                "glob",
-                "io",
-                "meta",
-                "package_config",
-                "path",
-                "pool",
-                "source_map_stack_trace",
-                "source_maps",
-                "source_span",
-                "stack_trace",
-                "stream_channel",
-                "test_api",
-                "vm_service",
-                "yaml"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -25714,10 +25437,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "collection"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -25821,15 +25542,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "clock",
-                "convert",
-                "file",
-                "http",
-                "meta",
-                "platform"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -25934,7 +25648,7 @@
                 "yaml_edit"
               ],
               "planned_deps": [],
-              "plan_covers_package": true,
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -26038,10 +25752,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "vm_service"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -26145,11 +25857,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "async",
-                "path"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -26254,7 +25963,7 @@
                 "yaml_edit"
               ],
               "planned_deps": [],
-              "plan_covers_package": true,
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -26358,10 +26067,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "web"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -26465,14 +26172,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "async",
-                "crypto",
-                "stream_channel",
-                "web",
-                "web_socket"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -26576,10 +26277,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "logging"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -26683,12 +26382,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "collection",
-                "source_span",
-                "string_scanner"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -26792,13 +26487,8 @@
                 "yaml",
                 "yaml_edit"
               ],
-              "planned_deps": [
-                "collection",
-                "meta",
-                "source_span",
-                "yaml"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -26876,7 +26566,7 @@
                 "yaml"
               ],
               "planned_deps": [],
-              "plan_covers_package": true,
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -26927,7 +26617,7 @@
                 "yaml"
               ],
               "planned_deps": [],
-              "plan_covers_package": true,
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -26977,11 +26667,8 @@
                 "term_glyph",
                 "yaml"
               ],
-              "planned_deps": [
-                "meta",
-                "path"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -27031,12 +26718,8 @@
                 "term_glyph",
                 "yaml"
               ],
-              "planned_deps": [
-                "clock",
-                "meta",
-                "path"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -27087,7 +26770,7 @@
                 "yaml"
               ],
               "planned_deps": [],
-              "plan_covers_package": true,
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -27138,7 +26821,7 @@
                 "yaml"
               ],
               "planned_deps": [],
-              "plan_covers_package": true,
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -27189,7 +26872,7 @@
                 "yaml"
               ],
               "planned_deps": [],
-              "plan_covers_package": true,
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -27239,12 +26922,8 @@
                 "term_glyph",
                 "yaml"
               ],
-              "planned_deps": [
-                "file",
-                "path",
-                "platform"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -27294,12 +26973,8 @@
                 "term_glyph",
                 "yaml"
               ],
-              "planned_deps": [
-                "collection",
-                "path",
-                "term_glyph"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -27349,10 +27024,8 @@
                 "term_glyph",
                 "yaml"
               ],
-              "planned_deps": [
-                "path"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -27402,10 +27075,8 @@
                 "term_glyph",
                 "yaml"
               ],
-              "planned_deps": [
-                "source_span"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -27456,7 +27127,7 @@
                 "yaml"
               ],
               "planned_deps": [],
-              "plan_covers_package": true,
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -27506,12 +27177,8 @@
                 "term_glyph",
                 "yaml"
               ],
-              "planned_deps": [
-                "collection",
-                "source_span",
-                "string_scanner"
-              ],
-              "plan_covers_package": true,
+              "planned_deps": [],
+              "plan_covers_package": false,
               "scc_targets": {},
               "cycle_breaks": [],
               "plugin_defines": [],
@@ -28312,28 +27979,11 @@
       ]
     },
     "@@ai_rules_flutter+//flutter:extensions.bzl%flutter": {
-      "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/_fe_analyzer_shared/105.0.0/9a3386eea899815698dd55995277cf7cb8572ee52b399a6edfb7ae2b50e5fc19": [
-        "meta"
-      ],
       "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/_fe_analyzer_shared/93.0.0/8d7ff3948166b8ec5da0fbb5962000926b8e02f2ed9b3e51d1738905fbd4c98d": [
         "meta",
         "source_span"
       ],
       "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/analyzer/10.0.1/de7148ed2fcec579b19f122c1800933dfa028f6d9fd38a152b04b1516cec120b": [
-        "_fe_analyzer_shared",
-        "collection",
-        "convert",
-        "crypto",
-        "glob",
-        "meta",
-        "package_config",
-        "path",
-        "pub_semver",
-        "source_span",
-        "watcher",
-        "yaml"
-      ],
-      "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/analyzer/14.1.0/62993bed6eadbe9596c5c20d5c167e7bc563c5fe266657a04ddeb93bdb84f4c9": [
         "_fe_analyzer_shared",
         "collection",
         "convert",
@@ -28356,18 +28006,12 @@
         "source_span",
         "string_scanner"
       ],
-      "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/browser_launcher/1.1.3/ca2557663d3033845f2ef2b60f94fc249528324fd1affddccb7c63ac0ccd6c67": [
-        "logging",
-        "path",
-        "webkit_inspection_protocol"
-      ],
       "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/characters/1.4.1/faf38497bda5ead2a8c7615f4f7939df04333478bf32e4173fcb06d428b5716b": [],
       "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/cli_config/0.2.0/ac20a183a07002b700f0c25e61b7ee46b23c309d76ab7b7640a028f18e4d99ec": [
         "args",
         "yaml"
       ],
       "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/clock/1.1.2/fddb70d9b5277016c77a80201021d40a2247104d9f4aa7bab7157b7e3f05b84b": [],
-      "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/clock/1.1.3/e51d50bca3217c9a9fa2b41a30e4a38971133f5f9ec7a3d57bae095007f1d28e": [],
       "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/collection/1.19.1/2f5709ae4d3d59dd8f7cd309b4e023046b57d8a6c82130785d2b0e5868084e76": [],
       "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/convert/3.1.2/b30acd5944035672bc15c6b7a8b47d773e41e2f17de064350988c5d02adb1c68": [
         "typed_data"
@@ -28385,111 +28029,10 @@
         "vm_service",
         "yaml"
       ],
-      "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/coverage/1.15.1/956a3de0725ca232ad353565a8290d3357592bf4250f6f298a185e2d949c5d3d": [
-        "args",
-        "cli_config",
-        "glob",
-        "logging",
-        "meta",
-        "package_config",
-        "path",
-        "source_maps",
-        "stack_trace",
-        "vm_service",
-        "yaml"
-      ],
       "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/crypto/3.0.7/c8ea0233063ba03258fbcf2ca4d6dadfefe14f02fab57702265467a19f27fadf": [
         "typed_data"
       ],
       "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/cupertino_icons/1.0.9/41e005c33bd814be4d3096aff55b1908d419fde52ca656c8c47719ec745873cd": [],
-      "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/dap/1.4.0/42b0b083a09c59a118741769e218fc3738980ab591114f09d1026241d2b9c290": [],
-      "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/dart_service_protocol_shared/0.0.3/1737875c176d7e3d87bb3a359182828b542fe20a0b34198b8d31a81af5c7a76d": [
-        "meta"
-      ],
-      "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/dds/5.4.0/f8e875dcd7b5e5073a7bfe54095144c70487f18e2f8e47fa51c09dd67eccfb0c": [
-        "args",
-        "async",
-        "browser_launcher",
-        "collection",
-        "dap",
-        "dds_service_extensions",
-        "devtools_shared",
-        "dtd",
-        "extension_discovery",
-        "http_multi_server",
-        "json_rpc_2",
-        "meta",
-        "mime",
-        "path",
-        "shelf",
-        "shelf_proxy",
-        "shelf_static",
-        "shelf_web_socket",
-        "sse",
-        "stream_channel",
-        "vm_service",
-        "web_socket_channel"
-      ],
-      "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/dds_service_extensions/2.1.0/afe0fce921953ac0c5bb276bccd7e36fa5035d7769567d122523fdd09beb4d03": [
-        "dap",
-        "vm_service"
-      ],
-      "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/devtools_shared/13.1.0/13df2c17d5f21dd7c92d08145386d45e1153364c04e531e994afb0ee7b67554b": [
-        "args",
-        "collection",
-        "dtd",
-        "extension_discovery",
-        "file",
-        "meta",
-        "path",
-        "shelf",
-        "sse",
-        "vm_service",
-        "web_socket_channel",
-        "webkit_inspection_protocol",
-        "yaml",
-        "yaml_edit"
-      ],
-      "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/dtd/4.0.0/09ddb228b3d1478a093556357692a4c203ff4f9d5f8cda05dfdca0ff3fb7c5d3": [
-        "dart_service_protocol_shared",
-        "json_rpc_2",
-        "stream_channel",
-        "unified_analytics",
-        "web_socket_channel"
-      ],
-      "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/dwds/27.1.1/d2fe0b3608330627871d7b0e070ffb4f356087a3e19fea64fa58f95a2c2871d6": [
-        "async",
-        "collection",
-        "crypto",
-        "dds",
-        "file",
-        "http",
-        "http_multi_server",
-        "logging",
-        "meta",
-        "package_config",
-        "path",
-        "pool",
-        "pub_semver",
-        "shelf",
-        "shelf_packages_handler",
-        "shelf_proxy",
-        "shelf_static",
-        "shelf_web_socket",
-        "source_maps",
-        "sse",
-        "stack_trace",
-        "stream_channel",
-        "vm_service",
-        "vm_service_interface",
-        "web",
-        "web_socket",
-        "web_socket_channel",
-        "webkit_inspection_protocol"
-      ],
-      "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/extension_discovery/2.1.0/de1fce715ab013cdfb00befc3bdf0914bea5e409c3a567b7f8f144bc061611a7": [
-        "yaml"
-      ],
       "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/fake_async/1.3.3/5368f224a74523e8d2e7399ea1638b37aecfca824a3cc4dfdf77bf1fa905ac44": [
         "clock",
         "collection"
@@ -28513,12 +28056,6 @@
         "path",
         "string_scanner"
       ],
-      "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/http/1.6.0/87721a4a50b19c7f1d49001e51409bddc46303966ce89a65af4f4e6004896412": [
-        "async",
-        "http_parser",
-        "meta",
-        "web"
-      ],
       "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/http_multi_server/3.2.2/aa6199f908078bb1c5efb8d8638d4ae191aac11b311132c3ef48ce352fb52ef8": [
         "async"
       ],
@@ -28533,19 +28070,10 @@
         "meta",
         "path"
       ],
-      "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/intl/0.20.3/1ca20c894b1717686a2319b8548763d812bc0aabdac580420a44c5178c57a867": [
-        "clock",
-        "meta",
-        "path"
-      ],
       "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/io/1.0.5/dfd5a80599cf0165756e3181807ed3e77daf6dd4137caaad72d0b7931597650b": [
         "meta",
         "path",
         "string_scanner"
-      ],
-      "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/json_rpc_2/4.1.0/82dfd37d3b2e5030ae4729e1d7f5538cbc45eb1c73d618b9272931facac3bec1": [
-        "stack_trace",
-        "stream_channel"
       ],
       "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/leak_tracker/11.0.2/33e2e26bdd85a0112ec15400c8cbffea70d0f9c3407491f672a2fad47915e2de": [
         "clock",
@@ -28574,42 +28102,23 @@
         "term_glyph",
         "test_api"
       ],
-      "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/matcher/0.12.20/31bd099b47c10cd1aeb55146a2d46ce0277630ecef3f7dae54ad7873f36696cd": [
-        "async",
-        "meta",
-        "stack_trace",
-        "term_glyph",
-        "test_api"
-      ],
       "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/material_color_utilities/0.13.0/9c337007e82b1889149c82ed242ed1cb24a66044e30979c44912381e9be4c48b": [
         "collection"
       ],
       "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/meta/1.18.0/1741988757a65eb6b36abe716829688cf01910bbf91c34354ff7ec1c3de2b349": [],
-      "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/meta/1.18.3/c82594181e3312f3d0695fc95aaaf7758d75b8d4ae2bbecf223b9fd5109a059d": [],
-      "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/meta/1.19.0/307249ce4ff29d58a18e97f6345f539382eb9c9c29ecda628900f31de0443dd9": [],
       "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/mime/2.0.0/41a20518f0cb1256669420fdba0cd90d21561e560ac240f26ef8322e45bb7ed6": [],
-      "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/multicast_dns/0.3.3+1/134668a9605c747322d8c3eb0e89a4c0cbdedb29f8d2d5ae29d14daef724987b": [
-        "meta"
-      ],
       "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/node_preamble/2.0.2/6e7eac89047ab8a8d26cf16127b5ed26de65209847630400f9aefd7cd5c730db": [],
       "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/package_config/2.2.0/f096c55ebb7deb7e384101542bfba8c52696c1b56fca2eb62827989ef2353bbc": [
         "path"
       ],
       "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/path/1.9.1/75cca69d1490965be98c73ceaea117e8a04dd21217b37b292c9ddbec0d955bc5": [],
-      "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/platform/3.1.6/5d6b1b0036a5f331ebc77c850ebc8506cbc1e9416c27e59b439f917a902a4984": [],
       "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/pool/1.5.2/978783255c543aa3586a1b3c21f6e9d720eb315376a915872c61ef8b5c20177d": [
         "async",
         "stack_trace"
       ],
-      "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/process/5.0.5/c6248e4526673988586e8c00bb22a49210c258dc91df5227d5da9748ecf79744": [
-        "file",
-        "path",
-        "platform"
-      ],
       "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/pub_semver/2.2.0/5bfcf68ca79ef689f8990d1160781b4bad40a3bd5e5218ad4076ddb7f4081585": [
         "collection"
       ],
-      "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/runfiles/0.4.6/d3f05faf1ba0dbb5aba9fa74698cbdfebb1d0eb26cd45030585c8d17e785e618": [],
       "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/shelf/1.4.2/e7dd780a7ffb623c57850b33f43309312fc863fb6aa3d276a754bb299839ef12": [
         "async",
         "collection",
@@ -28622,11 +28131,6 @@
         "path",
         "shelf",
         "shelf_static"
-      ],
-      "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/shelf_proxy/1.0.5/0c3a7b2b4c111cae8a6d9077701e0622c6013d38a780373ac359d6d45b3aa10b": [
-        "http",
-        "path",
-        "shelf"
       ],
       "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/shelf_static/1.1.3/c87c3875f91262785dade62d135760c2c69cb217ac759485334c5857ad89f6e3": [
         "convert",
@@ -28652,15 +28156,6 @@
         "collection",
         "path",
         "term_glyph"
-      ],
-      "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/sse/4.2.0/a9a804dbde8bfd369da3b4aa241d44d63a6486a97388c54ec166073d88c52302": [
-        "async",
-        "collection",
-        "logging",
-        "pool",
-        "shelf",
-        "stream_channel",
-        "web"
       ],
       "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/stack_trace/1.12.1/8b27215b45d22309b5cddda1aa2b19bdfec9df0e765f2de506401c071d38d1b1": [
         "path"
@@ -28699,45 +28194,7 @@
         "webkit_inspection_protocol",
         "yaml"
       ],
-      "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/test/1.31.2/0d5ba5602ec3baa28c8ce365e1efc5575969c765f45c554a3e167dc7945b9c30": [
-        "analyzer",
-        "async",
-        "boolean_selector",
-        "collection",
-        "coverage",
-        "http_multi_server",
-        "io",
-        "matcher",
-        "node_preamble",
-        "package_config",
-        "path",
-        "pool",
-        "shelf",
-        "shelf_packages_handler",
-        "shelf_static",
-        "shelf_web_socket",
-        "source_span",
-        "stack_trace",
-        "stream_channel",
-        "test_api",
-        "test_core",
-        "typed_data",
-        "web_socket_channel",
-        "webkit_inspection_protocol",
-        "yaml"
-      ],
       "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/test_api/0.7.11/949a932224383300f01be9221c39180316445ecb8e7547f70a41a35bf421fb9e": [
-        "async",
-        "boolean_selector",
-        "collection",
-        "meta",
-        "source_span",
-        "stack_trace",
-        "stream_channel",
-        "string_scanner",
-        "term_glyph"
-      ],
-      "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/test_api/0.7.13/475610b2aa23c19687cce2961e44b0cc57cafe220f67c2b80201231b2a07fbe7": [
         "async",
         "boolean_selector",
         "collection",
@@ -28771,46 +28228,12 @@
         "vm_service",
         "yaml"
       ],
-      "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/test_core/0.6.19/a39c204a4fc7a7ccb04a2b985e359fda3cc37e45e0b8ac61c3fb1a05aa832132": [
-        "analyzer",
-        "args",
-        "async",
-        "boolean_selector",
-        "collection",
-        "coverage",
-        "frontend_server_client",
-        "glob",
-        "io",
-        "meta",
-        "package_config",
-        "path",
-        "pool",
-        "source_map_stack_trace",
-        "source_maps",
-        "source_span",
-        "stack_trace",
-        "stream_channel",
-        "test_api",
-        "vm_service",
-        "yaml"
-      ],
       "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/typed_data/1.4.0/f9049c039ebfeb4cf7a7104a675823cd72dba8297f264b6637062516699fa006": [
         "collection"
-      ],
-      "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/unified_analytics/8.0.16/0917e37f5cd9d70dfd23889b6738b160affc6021861403524ceca94ab5fb0e21": [
-        "clock",
-        "convert",
-        "file",
-        "http",
-        "meta",
-        "platform"
       ],
       "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/vector_math/2.2.0/d530bd74fea330e6e364cda7a85019c434070188383e1cd8d9777ee586914c5b": [],
       "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/very_good_analysis/10.3.0/481af67ab5877af20325251dc215a4ebac7666a1c8cf09198ffd457bc612b33d": [],
       "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/vm_service/15.2.0/0016aef94fc66495ac78af5859181e3f3bf2026bd8eecc72b9565601e19ab360": [],
-      "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/vm_service_interface/2.0.1/503c92c26cf9f77d688bf8fca27fa9ec40450adbf02ec1ec5f12828ded508ac0": [
-        "vm_service"
-      ],
       "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/watcher/1.2.1/1398c9f081a753f9226febe8900fce8f7d0a67163334e1c94a2438339d79d635": [
         "async",
         "path"
@@ -28833,12 +28256,6 @@
         "collection",
         "source_span",
         "string_scanner"
-      ],
-      "pub.scc.v2.1b26e6d1a6ca208f0004bc28/hosted/yaml_edit/2.2.4/07c9e63ba42519745182b88ca12264a7ba2484d8239958778dfe4d44fe760488": [
-        "collection",
-        "meta",
-        "source_span",
-        "yaml"
       ]
     },
     "@@rules_go+//go:extensions.bzl%go_sdk": {

@@ -695,6 +695,23 @@ jobs:
           case "$dir" in "~"*) dir="$HOME${dir#\~}";; esac
           mkdir -p "$dir"
           echo "build --disk_cache=$dir" >> ~/.bazelrc
+      # Offline hermeticity proof: with MODULE.bazel.lock removed, an empty
+      # repository cache, and pub.dev + storage.googleapis.com blocked, fetching
+      # local_toolchains and local_linux-x64's dart_sdk_files (fake_sdk omits
+      # license files aliased by @local_linux-x64//...) must succeed and leave
+      # no flutter extension entry in the freshly written lockfile.
+      - name: smoke offline fetch stays lazy and reproducible
+        working-directory: e2e/smoke
+        run: |
+          empty_cache="$(mktemp -d)"
+          cfg="$(mktemp)"
+          bak="$(mktemp)"
+          cp MODULE.bazel.lock "$bak"
+          trap 'status=$?; cp "$bak" MODULE.bazel.lock; rm -rf "$empty_cache" "$cfg" "$bak"; exit $status' EXIT
+          rm MODULE.bazel.lock
+          printf 'block pub.dev\nblock storage.googleapis.com\n' > "$cfg"
+          bazel fetch @local_toolchains//... @local_linux-x64//:dart_sdk_files --lockfile_mode=update --repository_cache="$empty_cache" --downloader_config="$cfg"
+          ! grep -Fq 'flutter:extensions.bzl%flutter' MODULE.bazel.lock
       - name: bazel test //... (shard workspaces)
         run: |
           failed=""

@@ -29,6 +29,7 @@ load(":flutter_pub_apple_deps_test.bzl", "flutter_pub_apple_deps_test_suite")
 load(":flutter_pub_apple_pods_test.bzl", "flutter_pub_apple_pods_test_suite")
 load(":flutter_pub_apple_test.bzl", "flutter_pub_apple_test_suite")
 load(":flutter_pub_cycle_breaks_test.bzl", "flutter_pub_cycle_breaks_test_suite")
+load(":flutter_pub_internal_hubs_test.bzl", "flutter_pub_internal_hubs_test_suite")
 load(":flutter_pub_overlays_test.bzl", "flutter_pub_overlays_test_suite")
 load(":flutter_pub_package_test.bzl", "flutter_pub_package_test_suite")
 load(":flutter_pub_plugin_defines_test.bzl", "flutter_pub_plugin_defines_test_suite")
@@ -256,6 +257,22 @@ dart_test(
     ],
 )
 
+dart_test(
+    name = "flutter_pub_internal_hubs_guard_test",
+    size = "medium",
+    data = ["flutter_pub_internal_hubs_guard_test.dart"],
+    env = {"GUARD_ROOT_ANCHOR": "$(rlocationpath :flutter_pub_internal_hubs_guard_test.dart)"},
+    env_inherit = ["BUILD_WORKSPACE_DIRECTORY"],
+    main = "flutter_pub_internal_hubs_guard_test.dart",
+    tags = [
+        "external",
+        "no-sandbox",
+    ],
+    deps = [
+        "@dev_tool_deps//:test",
+    ],
+)
+
 action_inputs_test_suite(name = "action_inputs_test")
 
 android_pure_go_test_suite(name = "android_pure_go_test")
@@ -459,3 +476,5 @@ build_test(
 aot_flags_test_suite(name = "aot_flags_test")
 
 flutter_pub_scc_test_suite(name = "flutter_pub_scc_test")
+
+flutter_pub_internal_hubs_test_suite(name = "flutter_pub_internal_hubs_test")
