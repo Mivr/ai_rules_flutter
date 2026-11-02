@@ -170,6 +170,8 @@ use_repo(
     "llvm-toolchain-minimal-darwin-arm64",
     "llvm-toolchain-minimal-linux-amd64",
     "llvm-toolchain-minimal-linux-arm64",
+    "llvm-toolchain-minimal-windows-amd64",
+    "llvm-toolchain-minimal-windows-arm64",
 )
 
 git_override(
