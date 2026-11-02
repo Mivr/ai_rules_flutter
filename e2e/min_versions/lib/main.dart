@@ -1,6 +1,9 @@
+import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 
 void main() {
+  // Direct use of a hosted flutter.pub package pinned in pubspec.lock.
+  const _ = ListEquality<int>();
   runApp(const MinVersionsApp());
 }
 

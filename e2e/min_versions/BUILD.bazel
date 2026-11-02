@@ -21,7 +21,10 @@ flutter_application(
     package_name = "min_versions",
     srcs = glob(["lib/**/*.dart"]),
     main = "lib/main.dart",
-    deps = ["@deps//:flutter"],
+    deps = [
+        "@deps//:collection",
+        "@deps//:flutter",
+    ],
 )
 
 # The kernel path on its own, next to the full application target: the floor
@@ -31,7 +34,10 @@ flutter_kernel_target(
     package_name = "min_versions",
     srcs = glob(["lib/**/*.dart"]),
     main = "lib/main.dart",
-    deps = ["@deps//:flutter"],
+    deps = [
+        "@deps//:collection",
+        "@deps//:flutter",
+    ],
 )
 
 build_test(
