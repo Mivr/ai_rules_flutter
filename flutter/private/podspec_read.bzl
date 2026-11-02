@@ -256,6 +256,36 @@ def _trimmed_stmt_tokens(state):
     mod_pos = state["mod_pos"]
     return state["stmt"][:mod_pos] if mod_pos >= 0 else state["stmt"]
 
+def _finished_statement(state, next_idx):
+    """Build a finished-statement result struct from accumulated `state`."""
+    return struct(is_block = False, tokens = _trimmed_stmt_tokens(state), next_idx = next_idx)
+
+def _boundary_action(t, prev, state, tokens, n, j):
+    """Classify a depth-0, pre-assignment statement token, or `None` to keep scanning.
+
+    Returns `struct(kind = "cont")` to drop the token and keep scanning, or
+    `struct(kind = "done", result = ...)` to finish a statement or open a
+    `do`/`{` block. `None` means the token belongs in the statement being
+    accumulated.
+    """
+    term = _is_stmt_terminator(t, prev)
+    if term == "cont":
+        return struct(kind = "cont")
+    if term == "after":
+        return struct(kind = "done", result = _finished_statement(state, j + 1))
+    if term == "before":
+        return struct(kind = "done", result = _finished_statement(state, j))
+    if state["assign_pos"] < 0 and _is_block_opener_token(t, prev):
+        closer = "end" if t.text == "do" else "}"
+        next_j = _consume_block_params(tokens, n, j + 1)
+        return struct(kind = "done", result = struct(
+            is_block = True,
+            header = state["stmt"],
+            closer = closer,
+            next_idx = next_j,
+        ))
+    return None
+
 def _read_statement_or_block_open(tokens, n, idx):
     """Scan one statement or `do`/`{` block header starting at `tokens[idx]`."""
     state = {"stmt": [], "assign_pos": -1, "rhs_end": 0, "mod_pos": -1}
@@ -267,18 +297,12 @@ def _read_statement_or_block_open(tokens, n, idx):
             break
         t = tokens[j]
         if depth == 0 and state["rhs_end"] == 0:
-            term = _is_stmt_terminator(t, prev)
-            if term == "cont":
-                j += 1
-                continue
-            if term == "after":
-                return struct(is_block = False, tokens = _trimmed_stmt_tokens(state), next_idx = j + 1)
-            if term == "before":
-                return struct(is_block = False, tokens = _trimmed_stmt_tokens(state), next_idx = j)
-            if state["assign_pos"] < 0 and _is_block_opener_token(t, prev):
-                closer = "end" if t.text == "do" else "}"
-                next_j = _consume_block_params(tokens, n, j + 1)
-                return struct(is_block = True, header = state["stmt"], closer = closer, next_idx = next_j)
+            action = _boundary_action(t, prev, state, tokens, n, j)
+            if action != None:
+                if action.kind == "cont":
+                    j += 1
+                    continue
+                return action.result
         if depth == 0:
             _update_rhs_state(t, prev, state)
         depth = _update_bracket_depth(t, state["assign_pos"] >= 0, depth)
@@ -286,7 +310,7 @@ def _read_statement_or_block_open(tokens, n, idx):
             state["stmt"].append(t)
             prev = t
         j += 1
-    return struct(is_block = False, tokens = _trimmed_stmt_tokens(state), next_idx = j)
+    return _finished_statement(state, j)
 
 def _should_skip_opened_block(header, platform):
     """True when `header` opens a `test_spec`, `app_spec`, or inactive platform `subspec`."""
@@ -599,21 +623,6 @@ def _discover_platform_podspec_paths(ctx, plugin, platform, shared_darwin):
         if darwin_spec:
             paths.append(darwin_spec)
     return paths
-
-def discover_platform_podspec(ctx, plugin, platform, shared_darwin):
-    """Find the primary `.podspec` path for `platform`, or `None` when absent.
-
-    Args:
-        ctx: Repository context.
-        plugin: Pub plugin name string.
-        platform: `"ios"` or `"macos"`.
-        shared_darwin: Bool indicating `sharedDarwinSource`.
-
-    Returns:
-        Repository-relative `.podspec` path string, or `None`.
-    """
-    paths = _discover_platform_podspec_paths(ctx, plugin, platform, shared_darwin)
-    return paths[0] if paths else None
 
 def detect_apple_privacy_manifests(ctx, source_dirs):
     """Find each plugin source dir's `PrivacyInfo.xcprivacy` file.
