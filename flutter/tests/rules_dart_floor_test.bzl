@@ -23,7 +23,7 @@ def _new_reader(_content):
 def _floor_version_test_impl(ctx):
     """The floor constant tracks MODULE.bazel's ai_rules_dart floor."""
     env = unittest.begin(ctx)
-    asserts.equals(env, "0.21.0", RULES_DART_FLOOR)
+    asserts.equals(env, "0.24.0", RULES_DART_FLOOR)
     return unittest.end(env)
 
 def _old_reader_error_test_impl(ctx):
@@ -31,7 +31,7 @@ def _old_reader_error_test_impl(ctx):
     env = unittest.begin(ctx)
     err = rules_dart_floor_error(_old_reader)
     asserts.true(env, err != None, "an accepting reader must report the floor error")
-    for part in ["ai_rules_dart", "0.21.0", "archive_override", "git_override", "local_path_override", "single_version_override"]:
+    for part in ["ai_rules_dart", "0.24.0", "archive_override", "git_override", "local_path_override", "single_version_override"]:
         asserts.true(env, part in err, "floor message must name " + part)
     return unittest.end(env)
 

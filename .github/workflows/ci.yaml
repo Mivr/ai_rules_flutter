@@ -559,6 +559,44 @@ jobs:
           (cd "$tmp_ws" && bazel shutdown)
           rm -rf "$tmp_ws"
           trap - EXIT
+      # Release archive loading at min_versions floors: prove every package
+      # shipped in the release archive (including @rules_flutter//lint) loads
+      # cleanly against the declared floor graph.
+      - name: Release archive packages load against min_versions floor
+        run: |
+          archive_dir="$(mktemp -d)"
+          trap '(cd e2e/min_versions 2>/dev/null && bazel shutdown) >/dev/null 2>&1 || true; rm -rf "$archive_dir"' EXIT
+          git archive HEAD | tar -x -C "$archive_dir"
+          (cd e2e/min_versions && bazel query --override_module=ai_rules_flutter="$archive_dir" @rules_flutter//...)
+          (cd e2e/min_versions && bazel shutdown) >/dev/null 2>&1 || true
+          rm -rf "$archive_dir"
+          trap - EXIT
+      # Pre-0.24.0 red path: lowering ai_rules_dart to v0.21.0 must fail
+      # on the missing pub_scc.bzl symbol.
+      - name: Pre-0.24.0 rules_dart fails on pub_scc.bzl
+        run: |
+          tmp_ws="$(mktemp -d "$PWD/e2e/_min_versions_red.XXXXXX")"
+          trap '(cd "$tmp_ws" 2>/dev/null && bazel shutdown) >/dev/null 2>&1 || true; rm -rf "$tmp_ws"' EXIT
+          cp -R e2e/min_versions/. "$tmp_ws/"
+          rm -f "$tmp_ws"/bazel-*
+          sed -i 's/version = "0.24.0", repo_name = "rules_dart"/version = "0.21.0", repo_name = "rules_dart"/' "$tmp_ws/MODULE.bazel"
+          sed -i 's|https://github.com/Mivr/ai_rules_dart/releases/download/v0.24.0/rules_dart-v0.24.0.tar.gz|https://github.com/Mivr/ai_rules_dart/releases/download/v0.21.0/rules_dart-v0.21.0.tar.gz|' "$tmp_ws/MODULE.bazel"
+          sed -i 's/754206762da10037166ae6a0cde472584312b22541de3a28d07e500120c609cd/2c8796f98b39667be2b258b860e86c8b99ab7837aeec280180221c777ac69a9f/' "$tmp_ws/MODULE.bazel"
+          sed -i 's/rules_dart-0.24.0/rules_dart-0.21.0/' "$tmp_ws/MODULE.bazel"
+          grep -Fq "rules_dart-v0.21.0.tar.gz" "$tmp_ws/MODULE.bazel"
+          if out=$(cd "$tmp_ws" && bazel query @deps//... 2>&1); then
+            echo "$out"
+            echo "expected pre-0.24.0 rules_dart query to fail, but it succeeded"
+            exit 1
+          fi
+          if ! echo "$out" | grep -F "pub_scc.bzl"; then
+            echo "$out"
+            echo "expected query failure to mention pub_scc.bzl"
+            exit 1
+          fi
+          (cd "$tmp_ws" && bazel shutdown) >/dev/null 2>&1 || true
+          rm -rf "$tmp_ws"
+          trap - EXIT
       - name: Report cache sizes
         if: always()
         run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true

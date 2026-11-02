@@ -21,6 +21,8 @@
 /dev/ export-ignore
 /references/ export-ignore
 /renovate.json export-ignore
+/tools/BUILD.bazel export-ignore
+/tools/changelog/ export-ignore
 /e2e/_compare/ export-ignore
 /e2e/_linux_test/ export-ignore
 /e2e/_macos_test/ export-ignore
@@ -45,12 +47,15 @@
 /e2e/integration_linux/ export-ignore
 /e2e/integration_web/ export-ignore
 /e2e/ios_example/ export-ignore
+/e2e/ios_plugin_matrix/ export-ignore
 /e2e/linux_example/ export-ignore
 /e2e/macos_example/ export-ignore
 /e2e/min_versions/ export-ignore
 /e2e/multi_window_example/ export-ignore
 /e2e/plugin_example/ export-ignore
+/e2e/podfile_lock_red/ export-ignore
 /e2e/pub_android_lazy/ export-ignore
+/e2e/pub_cycle_breaks/ export-ignore
 /e2e/pub_flutter_shape_red/ export-ignore
 /e2e/pub_hosted_escape/ export-ignore
 /e2e/pub_scc/ export-ignore
