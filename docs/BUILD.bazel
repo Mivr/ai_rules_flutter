@@ -1,10 +1,9 @@
-starlark_doc_extract(
-    name = "android.doc_extract",
-    src = "//flutter:android.bzl",
-    deps = [
-        "//flutter:android",
-    ],
-)
+# //flutter:android.bzl has no starlark_doc_extract target: rules_android 0.8.0's
+# android/BUILD declares no targets and rules_kotlin 2.4.20's release
+# kotlin/BUILD.bazel leaves android.bzl out of every target, so no bzl_library
+# can cover @rules_android//android:rules.bzl or
+# @rules_kotlin//kotlin:android.bzl and starlark_doc_extract refuses the
+# closure.
 
 starlark_doc_extract(
     name = "defs.doc_extract",
@@ -124,14 +123,29 @@ _DOC_EXTRACT_TARGETS = sorted([
     if r["kind"] == "starlark_doc_extract"
 ])
 
-_ = len(_DOC_EXTRACT_TARGETS) == 15 or fail(
-    "Expected 15 starlark_doc_extract targets in //docs, got %d" % len(
+_ = len(_DOC_EXTRACT_TARGETS) == 14 or fail(
+    "Expected 14 starlark_doc_extract targets in //docs, got %d" % len(
         _DOC_EXTRACT_TARGETS,
     ),
 )
 
 filegroup(
     name = "all_doc_extracts",
-    srcs = _DOC_EXTRACT_TARGETS,
+    srcs = [
+        ":defs.doc_extract",
+        ":dev_files.doc_extract",
+        ":extensions.doc_extract",
+        ":ios.doc_extract",
+        ":linux.doc_extract",
+        ":macos.doc_extract",
+        ":native_assets.doc_extract",
+        ":native_hot_patch.doc_extract",
+        ":providers.doc_extract",
+        ":repositories.doc_extract",
+        ":toolchain.doc_extract",
+        ":utils.doc_extract",
+        ":web.doc_extract",
+        ":windows.doc_extract",
+    ],
     visibility = ["//visibility:public"],
 )
