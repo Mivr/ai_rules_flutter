@@ -584,7 +584,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      WORKSPACES: hello_world codegen
       DISK_CACHE_DIR: ~/.cache/bazel-disk
       DISK_CACHE_SHARD: linux-app
     steps:
@@ -609,27 +608,14 @@ jobs:
           case "$dir" in "~"*) dir="$HOME${dir#\~}";; esac
           mkdir -p "$dir"
           echo "build --disk_cache=$dir" >> ~/.bazelrc
-      # --test_output=errors so a failure's assertion reaches this log. Without
-      # it the output stays in a test.log on the runner and is discarded with
-      # the machine. Every workspace runs; a failure is recorded and the loop
-      # continues, then the step fails.
-      - name: bazel test //... (shard workspaces)
-        run: |
-          failed=""
-          for ws in $WORKSPACES; do
-            echo "::group::e2e/$ws"
-            if (cd "e2e/$ws" && bazel test //... --test_output=errors); then
-              echo "PASS e2e/$ws"
-            else
-              echo "FAIL e2e/$ws"
-              failed="$failed $ws"
-            fi
-            echo "::endgroup::"
-          done
-          if [ -n "$failed" ]; then
-            echo "failing workspaces:$failed"
-            exit 1
-          fi
+      # Each workspace's e2e.yaml passes --test_output=errors so a failure's
+      # assertion reaches this log, while //tools/e2e_runner stages the
+      # workspace in isolation, rejects Bazel exit code 4, and enforces
+      # min_tests_executed.
+      - name: Run e2e/hello_world
+        run: bazel run //tools/e2e_runner -- --workspace=e2e/hello_world --bazel=bazel
+      - name: Run e2e/codegen
+        run: bazel run //tools/e2e_runner -- --workspace=e2e/codegen --bazel=bazel
       # Red path for release signing: the wrong-password twin of the
       # release-signed app must fail in apksigner (not in analysis), proving
       # the keystore attributes reach the signing action. grep -F pins the
@@ -678,7 +664,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      WORKSPACES: smoke dual_hub ffi_example ffi_plugin_example web_example
       DISK_CACHE_DIR: ~/.cache/bazel-disk
       DISK_CACHE_SHARD: linux-small
     steps:
@@ -720,23 +705,16 @@ jobs:
           printf 'block pub.dev\nblock storage.googleapis.com\n' > "$cfg"
           bazel fetch @local_toolchains//... @local_linux-x64//:dart_sdk_files --lockfile_mode=update --repository_cache="$empty_cache" --downloader_config="$cfg"
           ! grep -Fq 'flutter:extensions.bzl%flutter' MODULE.bazel.lock
-      - name: bazel test //... (shard workspaces)
-        run: |
-          failed=""
-          for ws in $WORKSPACES; do
-            echo "::group::e2e/$ws"
-            if (cd "e2e/$ws" && bazel test //... --test_output=errors); then
-              echo "PASS e2e/$ws"
-            else
-              echo "FAIL e2e/$ws"
-              failed="$failed $ws"
-            fi
-            echo "::endgroup::"
-          done
-          if [ -n "$failed" ]; then
-            echo "failing workspaces:$failed"
-            exit 1
-          fi
+      - name: Run e2e/smoke
+        run: bazel run //tools/e2e_runner -- --workspace=e2e/smoke --bazel=bazel
+      - name: Run e2e/dual_hub
+        run: bazel run //tools/e2e_runner -- --workspace=e2e/dual_hub --bazel=bazel
+      - name: Run e2e/ffi_example
+        run: bazel run //tools/e2e_runner -- --workspace=e2e/ffi_example --bazel=bazel
+      - name: Run e2e/ffi_plugin_example
+        run: bazel run //tools/e2e_runner -- --workspace=e2e/ffi_plugin_example --bazel=bazel
+      - name: Run e2e/web_example
+        run: bazel run //tools/e2e_runner -- --workspace=e2e/web_example --bazel=bazel
       - name: dual_hub source tree unchanged by the dirlink fetch
         run: |
           if [ -n "$(git status --porcelain -- e2e/dual_hub)" ]; then
@@ -800,7 +778,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
-      WORKSPACES: integration_web integration_linux integration_android min_versions android_no_go_sdk
       DISK_CACHE_DIR: ~/.cache/bazel-disk
       DISK_CACHE_SHARD: linux-integration
     steps:
@@ -830,23 +807,16 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - name: bazel test //... (shard workspaces)
-        run: |
-          failed=""
-          for ws in $WORKSPACES; do
-            echo "::group::e2e/$ws"
-            if (cd "e2e/$ws" && bazel test //... --test_output=errors); then
-              echo "PASS e2e/$ws"
-            else
-              echo "FAIL e2e/$ws"
-              failed="$failed $ws"
-            fi
-            echo "::endgroup::"
-          done
-          if [ -n "$failed" ]; then
-            echo "failing workspaces:$failed"
-            exit 1
-          fi
+      - name: Run e2e/integration_web
+        run: bazel run //tools/e2e_runner -- --workspace=e2e/integration_web --bazel=bazel
+      - name: Run e2e/integration_linux
+        run: bazel run //tools/e2e_runner -- --workspace=e2e/integration_linux --bazel=bazel
+      - name: Run e2e/integration_android
+        run: bazel run //tools/e2e_runner -- --workspace=e2e/integration_android --bazel=bazel
+      - name: Run e2e/min_versions
+        run: bazel run //tools/e2e_runner -- --workspace=e2e/min_versions --bazel=bazel
+      - name: Run e2e/android_no_go_sdk
+        run: bazel run //tools/e2e_runner -- --workspace=e2e/android_no_go_sdk --bazel=bazel
       - name: run_home hermeticity gate (RT37-flutter:02)
         working-directory: e2e/run_home
         run: ./run_home_test.sh
@@ -880,7 +850,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      WORKSPACES: linux_example cross_compile_example
       DISK_CACHE_DIR: ~/.cache/bazel-disk
       DISK_CACHE_SHARD: linux-examples
     steps:
@@ -905,23 +874,10 @@ jobs:
           case "$dir" in "~"*) dir="$HOME${dir#\~}";; esac
           mkdir -p "$dir"
           echo "build --disk_cache=$dir" >> ~/.bazelrc
-      - name: bazel test //... (shard workspaces)
-        run: |
-          failed=""
-          for ws in $WORKSPACES; do
-            echo "::group::e2e/$ws"
-            if (cd "e2e/$ws" && bazel test //... --test_output=errors); then
-              echo "PASS e2e/$ws"
-            else
-              echo "FAIL e2e/$ws"
-              failed="$failed $ws"
-            fi
-            echo "::endgroup::"
-          done
-          if [ -n "$failed" ]; then
-            echo "failing workspaces:$failed"
-            exit 1
-          fi
+      - name: Run e2e/linux_example
+        run: bazel run //tools/e2e_runner -- --workspace=e2e/linux_example --bazel=bazel
+      - name: Run e2e/cross_compile_example
+        run: bazel run //tools/e2e_runner -- --workspace=e2e/cross_compile_example --bazel=bazel
       - name: Report cache sizes
         if: always()
         run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true
@@ -947,7 +903,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      WORKSPACES: pub_scc
       DISK_CACHE_DIR: ~/.cache/bazel-disk
       DISK_CACHE_SHARD: linux-pub-scc
     steps:
@@ -972,23 +927,8 @@ jobs:
           case "$dir" in "~"*) dir="$HOME${dir#\~}";; esac
           mkdir -p "$dir"
           echo "build --disk_cache=$dir" >> ~/.bazelrc
-      - name: bazel test //... (shard workspaces)
-        run: |
-          failed=""
-          for ws in $WORKSPACES; do
-            echo "::group::e2e/$ws"
-            if (cd "e2e/$ws" && bazel test //... --test_output=errors); then
-              echo "PASS e2e/$ws"
-            else
-              echo "FAIL e2e/$ws"
-              failed="$failed $ws"
-            fi
-            echo "::endgroup::"
-          done
-          if [ -n "$failed" ]; then
-            echo "failing workspaces:$failed"
-            exit 1
-          fi
+      - name: Run e2e/pub_scc
+        run: bazel run //tools/e2e_runner -- --workspace=e2e/pub_scc --bazel=bazel
       - name: Report cache sizes
         if: always()
         run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true
@@ -1055,13 +995,12 @@ jobs:
         run: |
           $ndk = $env:ANDROID_NDK_HOME ?? $env:ANDROID_NDK_ROOT
           "ANDROID_NDK_HOME=$($ndk -replace '\\','/')" >> $env:GITHUB_ENV
-      # --test_output=errors so a failure's assertion reaches this log. Without
-      # it the output stays in a test.log on the runner and is discarded with
-      # the machine.
-      - name: bazel test //... (e2e/hello_world)
+      # Off Windows, run e2e/hello_world through //tools/e2e_runner over its
+      # e2e.yaml spec; the Windows step below keeps its short output root and
+      # -no-windows-ci tag filters.
+      - name: Run e2e/hello_world
         if: runner.os != 'Windows'
-        working-directory: e2e/hello_world
-        run: bazel test //... --test_output=errors
+        run: bazel run //tools/e2e_runner -- --workspace=e2e/hello_world --bazel=bazel
       # On Windows, Bazel's default output root lives under a long per-user
       # temp path; nested runfiles (e.g. the hermetic Python interpreter's
       # _socket.pyd used by rules_android's aar_embedded_jars_extractor) then
