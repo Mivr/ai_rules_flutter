@@ -5,8 +5,9 @@
 /// `e2e/_overlay_tests/link_hooks`), never by leaf name: two nested modules
 /// may share a leaf name, and keying by leaf would let one shadow the other.
 /// Workflow references are leaf names (`working-directory: e2e/<leaf>`, a
-/// `workspace: <leaf>` matrix entry, a `WORKSPACES:` token); a module counts
-/// as covered when its leaf is referenced.
+/// `workspace: <leaf>` matrix entry, a `WORKSPACES:` token, or a
+/// `bazel run //tools/e2e_runner` `--workspace=e2e/<leaf>` argument); a module
+/// counts as covered when its leaf is referenced.
 library;
 
 import 'dart:io';
@@ -37,6 +38,12 @@ final RegExp _workspaceRef = RegExp(
 );
 final RegExp _matrixRef = RegExp(r'workspace:\s*([A-Za-z0-9_-]+)');
 final RegExp _workspacesRef = RegExp(r'WORKSPACES:\s*(.+)');
+final RegExp _runnerInvocation = RegExp(
+  r'\bbazel(?:\.exe|isk)?\b[^\n;&|]*?\brun\b[^\n;&|]*?//tools/e2e_runner(?::e2e_runner)?(?=\s|$)[^\n;&|]*',
+);
+final RegExp _runnerWorkspaceArg = RegExp(
+  r'(?:^|\s)[\x22\x27]?--workspace(?:=|\s+)[\x22\x27]?e2e/([A-Za-z0-9_./-]+)',
+);
 
 /// Drops `#` comments; workflows carry no `#` inside quoted strings.
 String stripComments(String text) =>
@@ -96,8 +103,24 @@ Set<String> findCoveredModules(Directory workflowsDir) {
         if (bare.isNotEmpty && bare != r'$WORKSPACES') covered.add(bare);
       }
     }
+    _collectRunnerWorkspaces(text, covered);
   }
   return covered;
+}
+
+void _collectRunnerWorkspaces(String text, Set<String> covered) {
+  final String unfolded = text.replaceAll(RegExp(r'\\\r?\n\s*'), ' ');
+  for (final RegExpMatch inv in _runnerInvocation.allMatches(unfolded)) {
+    final String cmd = inv.group(0)!;
+    for (final RegExpMatch arg in _runnerWorkspaceArg.allMatches(cmd)) {
+      final List<String> parts = arg
+          .group(1)!
+          .split('/')
+          .where((s) => s.isNotEmpty)
+          .toList();
+      if (parts.isNotEmpty) covered.add(parts.last);
+    }
+  }
 }
 
 /// Error strings for the coverage check: a module in no workflow without a

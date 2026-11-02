@@ -76,6 +76,8 @@ void main() {
     });
   });
 
+  _registerRunnerCoverageTests(() => root);
+
   group('checkCoverage', () {
     test('passes when every module is covered or reasoned', () {
       expect(
@@ -115,5 +117,44 @@ void main() {
         ),
       );
     });
+  });
+}
+
+void _registerRunnerCoverageTests(Directory Function() getRoot) {
+  group('e2e_runner workflow references', () {
+    test(
+      'recognises //tools/e2e_runner --workspace=e2e/<name> and fails ghost',
+      () {
+        final Directory root = getRoot();
+        final workflowsDir = Directory('${root.path}/.github/workflows');
+        File('${workflowsDir.path}/runner.yaml').writeAsStringSync(r'''
+jobs:
+  linux:
+    steps:
+      # Commented runner invocation must be ignored:
+      # - run: bazel run //tools/e2e_runner -- --workspace=e2e/commented
+      - run: bazel run //tools/other_tool -- --workspace=e2e/ignored_other
+      - run: bazel run //tools/e2e_runner -- --workspace=e2e/bar --bazel=bazel
+      - run: |
+          bazel --max_idle_secs=60 run //tools/e2e_runner:e2e_runner -- \
+            --bazel=bazel \
+            --workspace=e2e/ghost
+''');
+        final Set<String> covered = findCoveredModules(workflowsDir);
+        expect(covered, {'foo', 'dup', 'bar', 'ghost'});
+
+        final modules = {'e2e/foo', 'e2e/bar', 'e2e/a/dup', 'e2e/b/dup'};
+        final List<String> errors = checkCoverage(
+          modules: modules,
+          covered: covered,
+          reasons: const {},
+        );
+        expect(errors, hasLength(1));
+        expect(
+          errors.single,
+          contains("workflow references e2e module 'ghost'"),
+        );
+      },
+    );
   });
 }

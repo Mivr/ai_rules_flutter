@@ -7,7 +7,9 @@
 /// level deeper (`e2e/_overlay_tests/*/`). A module counts as covered when a
 /// workflow under `.github/workflows/` references its leaf name outside of
 /// comments, either as `working-directory: e2e/<leaf>`, a `workspace: <leaf>`
-/// matrix entry, or a `WORKSPACES:` list token. Anything else must appear in
+/// matrix entry, a `WORKSPACES:` list token, or a
+/// `bazel run //tools/e2e_runner` `--workspace=e2e/<leaf>` argument. Anything
+/// else must appear in
 /// [uncoveredReasons] with a one-line reason saying why it has no workflow.
 /// A reason for a module that IS covered is also an error, so the table
 /// cannot go stale: removing a module from every workflow without recording
