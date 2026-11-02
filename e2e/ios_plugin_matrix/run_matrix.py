@@ -4,7 +4,8 @@
 Fetch mode reads ``expected.json`` and runs one ``bazel query`` per pinned
 plugin, comparing the result with the recorded expectation. Build mode reads
 the plugins ``expected.json`` records as ``ok`` and builds each spoke's device
-library; ``build_expected.json`` names the builds that are gated today.
+library for the iOS device platform; ``build_expected.json`` names the builds
+that are gated today, each by ``ok`` or a compile-error substring.
 
 The runner holds no plugin names: both modes are driven entirely by the JSON
 data files beside it, so a later item changes a behaviour by editing one entry
@@ -14,6 +15,8 @@ and not this file.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import subprocess
 import sys
@@ -27,6 +30,10 @@ BUILD_EXPECTED_PATH = ROOT / "build_expected.json"
 BAZEL = ("bazel", "--max_idle_secs=60")
 FETCH_TARGET = "@deps__{plugin}//:all"
 BUILD_TARGET = "@deps__{plugin}//:{plugin}_apple_ios"
+IOS_ARM64_PLATFORM = "--platforms=@rules_flutter//flutter/platforms:ios_arm64"
+IOS_ARM64_CPU = "--ios_multi_cpus=arm64"
+IOS_BUILD_FLAGS = (IOS_ARM64_PLATFORM, IOS_ARM64_CPU)
+OUTPUT_TAIL_LINES = 30
 
 
 @dataclass(frozen=True)
@@ -101,6 +108,23 @@ def compare(expected: str, outcome: Outcome) -> tuple[bool, str]:
     return True, ""
 
 
+def build_command(plugin: str) -> list[str]:
+    """The Bazel arguments that build one plugin's generated iOS device library."""
+    return ["build", *IOS_BUILD_FLAGS, BUILD_TARGET.format(plugin=plugin)]
+
+
+def print_build_failure(args: list[str], outcome: Outcome) -> None:
+    """Print a failing build's command and the tail of its combined output."""
+    print(f"build command: {' '.join([*BAZEL, *args])}")
+    lines = outcome.output.splitlines()
+    print(f"build output (last {OUTPUT_TAIL_LINES} lines):")
+    if not lines:
+        print("<no output>")
+        return
+    for line in lines[-OUTPUT_TAIL_LINES:]:
+        print(line)
+
+
 def run_fetch(expected: dict[str, str], runner: Runner) -> list[Result]:
     """Query every pinned plugin once and compare each result with its expectation."""
     results = []
@@ -112,18 +136,19 @@ def run_fetch(expected: dict[str, str], runner: Runner) -> list[Result]:
 
 
 def run_build(expected: dict[str, str], gated: dict[str, str], runner: Runner) -> list[Result]:
-    """Build every expected-ok plugin, gating only the entries build_expected.json names."""
+    """Build every expected-ok plugin for iOS, gating only the entries build_expected.json names."""
     plugins = [name for name, value in expected.items() if value == "ok"]
     results = []
     for plugin in plugins:
-        outcome = runner(["build", BUILD_TARGET.format(plugin=plugin)])
-        actual = "ok" if outcome.returncode == 0 else "fail"
+        args = build_command(plugin)
+        outcome = runner(args)
+        if outcome.returncode != 0:
+            print_build_failure(args, outcome)
         if plugin not in gated:
+            actual = "ok" if outcome.returncode == 0 else "fail"
             results.append(Result(plugin, "RECORD", f"build {actual}"))
             continue
-        want = gated[plugin]
-        ok = actual == want
-        detail = "" if ok else f"expected build {want}, got {actual}"
+        ok, detail = compare(gated[plugin], outcome)
         results.append(Result(plugin, "PASS" if ok else "FAIL", detail))
     for plugin in gated:
         if plugin not in plugins:
@@ -143,8 +168,64 @@ def report(results: list[Result], mode: str) -> int:
     return 1 if failed else 0
 
 
+def _run_build_captured(gated: dict[str, str], outcome: Outcome) -> tuple[list[Result], str]:
+    """Run one fake build with stdout captured, returning its results and printed text."""
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        results = run_build({"alpha_plugin": "ok"}, gated, lambda _args: outcome)
+    return results, buffer.getvalue()
+
+
+def _self_test_build_cases() -> tuple[list[str], int]:
+    """Exercise build flags, substring gating and failure output with fake outcomes."""
+    errors: list[str] = []
+    command = build_command("alpha_plugin")
+    if IOS_ARM64_PLATFORM not in command:
+        errors.append(f"build command lacks {IOS_ARM64_PLATFORM!r}: {command}")
+    if IOS_ARM64_CPU not in command:
+        errors.append(f"build command lacks {IOS_ARM64_CPU!r}: {command}")
+
+    compile_error = "ios/Classes/Foo.swift:12:9: error: cannot find 'FLTMaxSize' in scope"
+    table = [
+        ("compile error with the gated substring", "error:", Outcome(1, compile_error), "PASS"),
+        ("compile error that exited 0", "error:", Outcome(0, compile_error), "FAIL"),
+        (
+            "incompatible platform refusal",
+            "error:",
+            Outcome(1, "ERROR: target is not compatible with target platform @platforms//os:ios"),
+            "FAIL",
+        ),
+        (
+            "missing target refusal",
+            "error:",
+            Outcome(1, "ERROR: no such target '@deps__alpha_plugin//:alpha_plugin_apple_ios'"),
+            "FAIL",
+        ),
+        ("empty gated substring", "", Outcome(1, compile_error), "FAIL"),
+        ("gated ok with exit 0", "ok", Outcome(0, ""), "PASS"),
+        ("gated ok with a non-zero exit", "ok", Outcome(1, "ERROR: analysis failed"), "FAIL"),
+    ]
+    for name, want, outcome, expected_status in table:
+        results, _ = _run_build_captured({"alpha_plugin": want}, outcome)
+        if results[0].status != expected_status:
+            errors.append(f"{name}: expected {expected_status}, got {results[0].status} ({results[0].detail})")
+
+    recorded, _ = _run_build_captured({}, Outcome(1, "compile failed"))
+    if recorded[0].status != "RECORD" or recorded[0].detail != "build fail":
+        errors.append(f"ungated failing build must RECORD build fail: {recorded}")
+
+    tail_source = "\n".join(f"line {number}" for number in range(1, OUTPUT_TAIL_LINES + 6))
+    tail_source += f"\n{compile_error}"
+    _, printed = _run_build_captured({"alpha_plugin": "error:"}, Outcome(1, tail_source))
+    if "build command: " not in printed or "@deps__alpha_plugin//:alpha_plugin_apple_ios" not in printed:
+        errors.append(f"failing build did not print its command: {printed!r}")
+    if "line 1\n" in printed or compile_error not in printed:
+        errors.append(f"failing build did not print the output tail: {printed!r}")
+    return errors, len(table) + 1
+
+
 def self_test() -> int:
-    """Exercise the comparator with fake outcomes; no Bazel, network or workspace needed."""
+    """Exercise fetch and build comparisons with fake outcomes; no Bazel, network or workspace needed."""
     cases = [
         ("matching ok", "ok", Outcome(0, ""), True),
         ("false ok", "ok", Outcome(1, "fetch refused"), False),
@@ -158,11 +239,13 @@ def self_test() -> int:
         got, detail = compare(expected, outcome)
         if got != want:
             failures.append(f"{name}: expected {want}, got {got} ({detail})")
+    build_failures, build_case_count = _self_test_build_cases()
+    failures.extend(build_failures)
     if failures:
         for failure in failures:
             print(f"SELF-TEST FAIL {failure}")
         return 1
-    print(f"SELF-TEST OK ({len(cases)} cases)")
+    print(f"SELF-TEST OK ({len(cases) + build_case_count} cases)")
     return 0
 
 
