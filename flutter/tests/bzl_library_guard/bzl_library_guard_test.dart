@@ -832,6 +832,32 @@ void _validateSingleDocExtract(
   }
 }
 
+void _checkAllDocExtractsFilegroup(
+  _CallNode? filegroup,
+  List<String> defaultVisibility,
+  List<String> expectedStems,
+  List<String> problems,
+) {
+  if (filegroup == null) {
+    problems.add('Missing filegroup //docs:all_doc_extracts');
+    return;
+  }
+  final vis = filegroup.listAttrs['visibility'] ?? defaultVisibility;
+  if (!vis.contains('//visibility:public')) {
+    problems.add('//docs:all_doc_extracts is not publicly visible');
+  }
+  final srcs = filegroup.listAttrs['srcs'];
+  if (srcs != null) {
+    final expectedSrcs = <String>[
+      for (final stem in expectedStems) ':$stem.doc_extract',
+    ];
+    if (srcs.length != expectedSrcs.length ||
+        !srcs.toSet().containsAll(expectedSrcs)) {
+      problems.add('//docs:all_doc_extracts srcs must list the 14 extracts');
+    }
+  }
+}
+
 void _verifyDocsExtracts(_WorkspaceGraph graph) {
   final docsPkg = graph.packages['docs'];
   if (docsPkg == null) {
@@ -839,29 +865,37 @@ void _verifyDocsExtracts(_WorkspaceGraph graph) {
   }
   final problems = <String>[];
   final docExtracts = <String, _CallNode>{};
-  var hasAllFilegroup = false;
+  _CallNode? allFilegroup;
   for (final call in docsPkg.calls) {
     if (call.callee == 'starlark_doc_extract') {
       final name = call.stringAttrs['name'];
       if (name != null) docExtracts[name] = call;
     } else if (call.callee == 'filegroup' &&
         call.stringAttrs['name'] == 'all_doc_extracts') {
-      final vis = call.listAttrs['visibility'] ?? docsPkg.defaultVisibility;
-      hasAllFilegroup = vis.contains('//visibility:public');
+      allFilegroup = call;
     }
   }
-  if (docExtracts.length != _publicEntryStems.length) {
+  final expectedStems = _publicEntryStems
+      .where((stem) => stem != 'android')
+      .toList();
+  if (docExtracts.containsKey('android.doc_extract')) {
+    problems.add('//docs:android.doc_extract must not be declared');
+  }
+  if (docExtracts.length != expectedStems.length) {
     final count = docExtracts.length;
     problems.add(
-      'Expected 15 starlark_doc_extract targets in //docs, got $count',
+      'Expected 14 starlark_doc_extract targets in //docs, got $count',
     );
   }
-  for (final stem in _publicEntryStems) {
+  for (final stem in expectedStems) {
     _validateSingleDocExtract(stem, docExtracts, problems);
   }
-  if (!hasAllFilegroup) {
-    problems.add('Missing public filegroup //docs:all_doc_extracts');
-  }
+  _checkAllDocExtractsFilegroup(
+    allFilegroup,
+    docsPkg.defaultVisibility,
+    expectedStems,
+    problems,
+  );
   expect(problems, isEmpty, reason: problems.join('\n'));
 }
 
@@ -892,7 +926,7 @@ void main() {
   });
 
   test(
-    'docs declares 15 starlark_doc_extract targets and all_doc_extracts',
+    'docs declares 14 starlark_doc_extract targets and all_doc_extracts',
     () {
       _verifyDocsExtracts(graph);
     },
