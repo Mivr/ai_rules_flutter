@@ -1,6 +1,55 @@
-"""Static reader for CocoaPods plugin .podspec files (POD-12)."""
+"""Static reader and spoke wiring for CocoaPods plugin .podspec files (POD-12)."""
 
-load("//flutter/private:starlark_literal.bzl", "starlark_string_literal")
+load(
+    ":podspec_read_ruby.bzl",
+    "format_rhs_raw",
+    "lex_podspec",
+    "parse_resource_bundles_tokens",
+    "parse_string_list_tokens",
+)
+load(":starlark_literal.bzl", "starlark_string_literal")
+
+_CONT_OPS = (
+    "=",
+    "+=",
+    ",",
+    "=>",
+    "+",
+    "-",
+    "*",
+    "&&",
+    "||",
+    ".",
+    "?",
+    ":",
+)
+
+_CLAUSE_CLOSERS = ("end", "else", "elsif", "when", "rescue", "ensure")
+
+_END_OPENERS = (
+    "if",
+    "unless",
+    "case",
+    "begin",
+    "while",
+    "until",
+    "for",
+    "def",
+    "class",
+    "module",
+)
+
+_STMT_SKIP_RECVS = (
+    "if",
+    "unless",
+    "elsif",
+    "else",
+    "case",
+    "when",
+    "begin",
+    "end",
+    "return",
+)
 
 def podspec_unsupported_field_error(plugin, podspec_path, line, field, raw_value):
     """Format Message 5 for an untranslated podspec field.
@@ -26,26 +75,10 @@ def podspec_unsupported_field_error(plugin, podspec_path, line, field, raw_value
     )
 
 def _normalize_library_name(lib):
-    """Normalize CocoaPods library name by stripping 'lib' prefix if len > 3."""
+    """Normalize CocoaPods library name by stripping 'lib' prefix when len > 3."""
     if len(lib) > 3 and lib.startswith("lib"):
         return lib[3:]
     return lib
-
-def _strip_quotes(s):
-    """Strip matching enclosing single or double quotes."""
-    s = s.strip()
-    if len(s) >= 2 and ((s[0] == "'" and s[-1] == "'") or (s[0] == '"' and s[-1] == '"')):
-        return s[1:-1]
-    return s
-
-def _is_single_quoted_string(s):
-    """Whether s is a single string literal wrapped in matching quotes."""
-    s = s.strip()
-    if len(s) >= 2 and ((s[0] == "'" and s[-1] == "'") or (s[0] == '"' and s[-1] == '"')):
-        quote = s[0]
-        first_close = s.find(quote, 1)
-        return first_close == len(s) - 1
-    return False
 
 def _has_glob_wildcard(s):
     """Check if string contains glob wildcards (*, ?, {, [)."""
@@ -54,177 +87,34 @@ def _has_glob_wildcard(s):
             return True
     return False
 
-def _parse_comma_separated_strings(inner):
-    """Parse comma-separated single-quoted strings."""
-    items = []
-    for part in inner.split(","):
-        p = part.strip()
-        if not p:
-            continue
-        if not _is_single_quoted_string(p):
-            return None
-        items.append(_strip_quotes(p))
-    return items
+def _is_valid_privacy_relpath(path_str):
+    """True when `path_str` is a safe relative `.xcprivacy` path with no globs or `..`."""
+    if not path_str.endswith(".xcprivacy") or _has_glob_wildcard(path_str):
+        return False
+    if path_str.startswith("/") or "\\" in path_str:
+        return False
+    segments = path_str.split("/")
+    if ":" in segments[0]:
+        return False
+    kept = []
+    for idx in range(len(segments)):
+        seg = segments[idx]
+        if seg == "" or seg == "..":
+            return False
+        if seg == "." and idx > 0:
+            return False
+        if seg != ".":
+            kept.append(seg)
+    return len(kept) > 0
 
-def _parse_string_list_or_single(raw_val):
-    """Parse a single string, array of strings, or %w[...] literal into a list of strings."""
-    v = raw_val.strip()
-    if v.startswith("%w[") and v.endswith("]"):
-        inner = v[3:-1].strip()
-        if not inner:
-            return []
-        return [_strip_quotes(word) for word in inner.split()]
-
-    if v.startswith("[") and v.endswith("]"):
-        inner = v[1:-1].strip()
-        if not inner:
-            return []
-        return _parse_comma_separated_strings(inner)
-
-    if _is_single_quoted_string(v):
-        return [_strip_quotes(v)]
-
-    if "," in v:
-        return _parse_comma_separated_strings(v)
-
-    return None
-
-def _parse_resource_bundles_hash(raw_val):
-    """Parse resource_bundles hash { 'k' => ['v'] } or { 'k' => 'v' }."""
-    v = raw_val.strip()
-    if not (v.startswith("{") and v.endswith("}")):
-        return None
-    inner = v[1:-1].strip()
-    if not inner:
-        return []
-
-    manifests = []
-
-    # Split entries by '=>'
-    pairs = inner.split("=>")
-    if len(pairs) < 2:
-        return None
-
-    for i in range(1, len(pairs)):
-        curr_val_chunk = pairs[i].strip()
-        if i < len(pairs) - 1:
-            comma_idx = curr_val_chunk.rfind(",")
-            if comma_idx < 0:
-                return None
-            val_str = curr_val_chunk[:comma_idx].strip()
-        else:
-            val_str = curr_val_chunk.rstrip(",").strip()
-
-        parsed_items = _parse_string_list_or_single(val_str)
-        if parsed_items == None:
-            return None
-        for item in parsed_items:
-            if not item.endswith(".xcprivacy") or _has_glob_wildcard(item):
-                return None
-            manifests.append(item)
-
-    return manifests
-
-def _detect_heredoc_tag(line):
-    """Detect heredoc opener (<<-TAG, <<~TAG, <<TAG) on line."""
-    idx = line.find("<<")
-    if idx < 0:
-        return None
-    rest = line[idx + 2:]
-    strip_mode = False
-    if rest.startswith("-") or rest.startswith("~"):
-        strip_mode = True
-        rest = rest[1:]
-    rest = rest.strip()
-    if not rest:
-        return None
-    tag = ""
-    for ch in rest.elems():
-        if ch.isalnum() or ch == "_":
-            tag += ch
-        else:
-            break
-    if not tag:
-        return None
-    return struct(tag = tag, strip = strip_mode)
-
-def _strip_ruby_comments(line):
-    """Strip Ruby '#' comments not inside quotes or interpolation."""
-    in_single = False
-    in_double = False
-    interp_depth = 0
-    chars = line.elems()
-    for i in range(len(chars)):
-        c = chars[i]
-        if c == "'" and not in_double:
-            in_single = not in_single
-        elif c == '"' and not in_single:
-            in_double = not in_double
-        elif in_double and c == "#" and i + 1 < len(chars) and chars[i + 1] == "{":
-            interp_depth += 1
-        elif in_double and interp_depth > 0 and c == "}":
-            interp_depth -= 1
-        elif c == "#" and not in_single and not in_double and interp_depth == 0:
-            return line[:i]
-    return line
-
-def _classify_block_boundary(line):
-    """Check if line opens or closes a Ruby block."""
-    stripped = line.strip()
-    if stripped == "end" or stripped.startswith("end ") or stripped.startswith("end;"):
-        return struct(kind = "end", is_spec = False)
-
-    is_spec = ".test_spec" in stripped or ".app_spec" in stripped
-    if (
-        stripped.startswith("def ") or
-        stripped.startswith("begin") or
-        stripped.startswith("case ") or
-        stripped.startswith("class ") or
-        stripped.startswith("module ") or
-        stripped.startswith("if ") or
-        stripped.startswith("unless ") or
-        " do" in stripped or
-        " do|" in stripped
-    ):
-        return struct(kind = "open", is_spec = is_spec)
-
-    return None
-
-def _extract_statement_parts(stmt):
-    """Extract (recv, scope, attr, is_assign, raw_rhs) from statement."""
-    clean = stmt.strip()
-    op = None
-    if "+=" in clean:
-        op = "+="
-    elif "=" in clean:
-        op = "="
-
-    if op:
-        lhs, _, raw_rhs = clean.partition(op)
-        lhs = lhs.strip()
-        raw_rhs = raw_rhs.strip()
-        dots = lhs.split(".")
-        if len(dots) == 2:
-            return struct(recv = dots[0], scope = "", attr = dots[1], is_assign = True, raw_rhs = raw_rhs)
-        if len(dots) == 3:
-            return struct(recv = dots[0], scope = dots[1], attr = dots[2], is_assign = True, raw_rhs = raw_rhs)
-        return None
-
-    # Method call syntax: recv.attr val
-    space_idx = clean.find(" ")
-    if space_idx > 0:
-        lhs = clean[:space_idx].strip()
-        raw_rhs = clean[space_idx:].strip()
-        dots = lhs.split(".")
-        if len(dots) == 2:
-            return struct(recv = dots[0], scope = "", attr = dots[1], is_assign = False, raw_rhs = raw_rhs)
-        if len(dots) == 3:
-            return struct(recv = dots[0], scope = dots[1], attr = dots[2], is_assign = False, raw_rhs = raw_rhs)
-
-    return None
+def _accumulate_unique(target_list, new_items):
+    """Append `new_items` to `target_list` preserving first-seen declaration order."""
+    for item in new_items:
+        if item not in target_list:
+            target_list.append(item)
 
 def _is_scope_active(scope, platform):
-    """Check if scope applies to platform."""
+    """True when podspec platform scope (`""`, `"ios"`, `"osx"`, `"macos"`) matches `platform`."""
     if not scope:
         return True
     if scope == "ios":
@@ -233,85 +123,311 @@ def _is_scope_active(scope, platform):
         return platform == "macos"
     return False
 
-def _accumulate_unique(target_list, new_items):
-    """Append new_items to target_list without duplicates."""
-    for item in new_items:
-        if item not in target_list:
-            target_list.append(item)
+def _after_dot(prev):
+    """True when the preceding non-newline token is `.` or `::`."""
+    return prev != None and prev.kind == "op" and prev.text in (".", "::")
 
-def _handle_resources(v, line_num, plugin, path, attr_name, privacy_manifests):
-    """Handle resources/resource field."""
-    parsed = _parse_string_list_or_single(v)
-    if parsed != None and len(parsed) > 0:
+def _is_skipping(block_stack):
+    """True when any active enclosing block on `block_stack` skips statements."""
+    for entry in block_stack:
+        if entry.skip:
+            return True
+    return False
+
+def _consume_block_params(tokens, n, idx):
+    """Advance past optional `| param1, param2 |` block parameter list at `idx`."""
+    if idx >= n or tokens[idx].kind != "op" or tokens[idx].text != "|":
+        return idx
+    j = idx + 1
+    for _ in range(n - idx):
+        if j >= n or tokens[j].kind == "nl":
+            return j
+        if tokens[j].kind == "op" and tokens[j].text == "|":
+            return j + 1
+        j += 1
+    return j
+
+def _classify_header_token(t, prev, stop_on_do):
+    """Return `"cont"`, `"after"`, `"do"`, `"before"`, or `""` for header token `t`."""
+    if t.kind == "nl":
+        if prev != None and prev.kind == "op" and prev.text in _CONT_OPS:
+            return "cont"
+        return "after"
+    if t.kind == "op" and t.text == ";":
+        return "after"
+    if t.kind == "op" and t.text == "}":
+        return "before"
+    if t.kind == "word" and not _after_dot(prev):
+        if t.text == "then":
+            return "after"
+        if stop_on_do and t.text == "do":
+            return "do"
+        if t.text == "end":
+            return "before"
+    return ""
+
+def _skip_condition_header(tokens, n, idx, stop_on_do):
+    """Advance past an `if`/`unless`/`elsif`/`case`/`when`/`def` header to its body."""
+    j = idx + 1
+    depth = 0
+    prev = None
+    for _ in range(n - idx):
+        if j >= n:
+            break
+        t = tokens[j]
+        if depth == 0:
+            action = _classify_header_token(t, prev, stop_on_do)
+            if action == "cont":
+                j += 1
+                continue
+            if action == "after":
+                return j + 1
+            if action == "do":
+                return _consume_block_params(tokens, n, j + 1)
+            if action == "before":
+                return j
+        depth = _update_bracket_depth(t, True, depth)
+        if t.kind != "nl":
+            prev = t
+        j += 1
+    return j
+
+def _update_bracket_depth(t, assign_seen, depth):
+    """Compute updated bracket/brace/paren nesting depth for token `t`."""
+    if t.kind != "op":
+        return depth
+    if t.text in ("(", "[") or (t.text == "{" and (assign_seen or depth > 0)):
+        return depth + 1
+    if t.text in (")", "]") or (t.text == "}" and depth > 0):
+        return max(0, depth - 1)
+    return depth
+
+def _is_modifier_keyword(t, prev, stmt_len, assign_pos, modifier_pos):
+    """True when `t` starts a trailing `if` or `unless` modifier after an RHS value."""
+    if modifier_pos >= 0 or stmt_len <= assign_pos + 1:
+        return False
+    if t.kind != "word" or t.text not in ("if", "unless") or _after_dot(prev):
+        return False
+    return not (prev != None and prev.kind == "op" and prev.text in _CONT_OPS)
+
+def _is_block_opener_token(t, prev):
+    """True when `t` opens a `do` or `{` block before any `=` assignment."""
+    if t.kind == "word" and t.text == "do" and not _after_dot(prev):
+        return True
+    return t.kind == "op" and t.text == "{"
+
+def _is_stmt_terminator(t, prev):
+    """Return `"after"` (`NL`/`;`), `"before"` (`end`/`else`/`}`), `"cont"`, or `""`."""
+    if t.kind == "nl":
+        if prev != None and prev.kind == "op" and prev.text in _CONT_OPS:
+            return "cont"
+        return "after"
+    if t.kind == "op" and t.text == ";":
+        return "after"
+    if t.kind == "word" and t.text in _CLAUSE_CLOSERS and not _after_dot(prev):
+        return "before"
+    if t.kind == "op" and t.text == "}":
+        return "before"
+    return ""
+
+def _update_rhs_state(t, prev, state):
+    """Update `assign_pos`, `rhs_end`, and `mod_pos` at bracket depth 0."""
+    stmt_len = len(state["stmt"])
+    if state["rhs_end"] > 0:
+        if t.kind == "word" and not _after_dot(prev):
+            if t.text in _END_OPENERS or t.text == "do":
+                state["rhs_end"] += 1
+            elif t.text == "end":
+                state["rhs_end"] -= 1
+        return
+    if state["assign_pos"] < 0:
+        if t.kind == "op" and t.text in ("=", "+="):
+            state["assign_pos"] = stmt_len
+        return
+    if stmt_len == state["assign_pos"] + 1 and t.kind == "word" and t.text in _END_OPENERS and not _after_dot(prev):
+        state["rhs_end"] = 1
+    elif t.kind == "word" and t.text == "do" and not _after_dot(prev):
+        state["rhs_end"] = 1
+    elif _is_modifier_keyword(t, prev, stmt_len, state["assign_pos"], state["mod_pos"]):
+        state["mod_pos"] = stmt_len
+
+def _trimmed_stmt_tokens(state):
+    """Return accumulated statement tokens with any trailing `if`/`unless` modifier removed."""
+    mod_pos = state["mod_pos"]
+    return state["stmt"][:mod_pos] if mod_pos >= 0 else state["stmt"]
+
+def _read_statement_or_block_open(tokens, n, idx):
+    """Scan one statement or `do`/`{` block header starting at `tokens[idx]`."""
+    state = {"stmt": [], "assign_pos": -1, "rhs_end": 0, "mod_pos": -1}
+    depth = 0
+    prev = None
+    j = idx
+    for _ in range(n - idx + 1):
+        if j >= n:
+            break
+        t = tokens[j]
+        if depth == 0 and state["rhs_end"] == 0:
+            term = _is_stmt_terminator(t, prev)
+            if term == "cont":
+                j += 1
+                continue
+            if term == "after":
+                return struct(is_block = False, tokens = _trimmed_stmt_tokens(state), next_idx = j + 1)
+            if term == "before":
+                return struct(is_block = False, tokens = _trimmed_stmt_tokens(state), next_idx = j)
+            if state["assign_pos"] < 0 and _is_block_opener_token(t, prev):
+                closer = "end" if t.text == "do" else "}"
+                next_j = _consume_block_params(tokens, n, j + 1)
+                return struct(is_block = True, header = state["stmt"], closer = closer, next_idx = next_j)
+        if depth == 0:
+            _update_rhs_state(t, prev, state)
+        depth = _update_bracket_depth(t, state["assign_pos"] >= 0, depth)
+        if t.kind != "nl":
+            state["stmt"].append(t)
+            prev = t
+        j += 1
+    return struct(is_block = False, tokens = _trimmed_stmt_tokens(state), next_idx = j)
+
+def _should_skip_opened_block(header, platform):
+    """True when `header` opens a `test_spec`, `app_spec`, or inactive platform `subspec`."""
+    for idx in range(len(header) - 1):
+        if header[idx].kind == "op" and header[idx].text == "." and header[idx + 1].kind == "word":
+            if header[idx + 1].text in ("test_spec", "app_spec"):
+                return True
+    if (
+        len(header) >= 5 and
+        header[0].kind == "word" and
+        header[1].kind == "op" and header[1].text == "." and
+        header[2].kind == "word" and
+        header[3].kind == "op" and header[3].text == "." and
+        header[4].kind == "word" and header[4].text == "subspec"
+    ):
+        return not _is_scope_active(header[2].text, platform)
+    return False
+
+def _parse_attr_assignment(stmt_tokens):
+    """Parse `<recv>[.<scope>].<attr> (=|+=) <rhs>` from `stmt_tokens`, or `None`."""
+    m = len(stmt_tokens)
+    if m < 4 or stmt_tokens[0].kind != "word" or stmt_tokens[0].text in _STMT_SKIP_RECVS:
+        return None
+    if stmt_tokens[1].kind != "op" or stmt_tokens[1].text != "." or stmt_tokens[2].kind != "word":
+        return None
+    if stmt_tokens[3].kind == "op" and stmt_tokens[3].text in ("=", "+="):
+        return struct(
+            scope = "",
+            attr = stmt_tokens[2].text,
+            line = stmt_tokens[0].line,
+            rhs = stmt_tokens[4:],
+        )
+    if (
+        m >= 6 and
+        stmt_tokens[3].kind == "op" and stmt_tokens[3].text == "." and
+        stmt_tokens[4].kind == "word" and
+        stmt_tokens[5].kind == "op" and stmt_tokens[5].text in ("=", "+=")
+    ):
+        return struct(
+            scope = stmt_tokens[2].text,
+            attr = stmt_tokens[4].text,
+            line = stmt_tokens[0].line,
+            rhs = stmt_tokens[6:],
+        )
+    return None
+
+def _handle_link_field(rhs_tokens, raw_rhs, meta, target_list, is_library):
+    """Parse and accumulate `frameworks`, `weak_frameworks`, or `libraries`."""
+    parsed = parse_string_list_tokens(rhs_tokens)
+    if parsed == None:
+        fail(podspec_unsupported_field_error(meta.plugin, meta.path, meta.line, meta.attr, raw_rhs))
+    if is_library:
+        parsed = [_normalize_library_name(x) for x in parsed]
+    _accumulate_unique(target_list, parsed)
+
+def _handle_resources(rhs_tokens, raw_rhs, meta, privacy_manifests):
+    """Parse `resources` / `resource`, keeping `.xcprivacy`-only lists and refusing others."""
+    parsed = parse_string_list_tokens(rhs_tokens)
+    if parsed != None:
         all_privacy = True
-        for p in parsed:
-            if not p.endswith(".xcprivacy") or _has_glob_wildcard(p):
+        for item in parsed:
+            if not _is_valid_privacy_relpath(item):
                 all_privacy = False
                 break
         if all_privacy:
             _accumulate_unique(privacy_manifests, parsed)
             return
-    fail(podspec_unsupported_field_error(plugin, path, line_num, attr_name, v))
+    fail(podspec_unsupported_field_error(meta.plugin, meta.path, meta.line, meta.attr, raw_rhs))
 
-def _handle_resource_bundles(v, line_num, plugin, path, attr_name, privacy_manifests):
-    """Handle resource_bundles field."""
-    parsed = _parse_resource_bundles_hash(v)
-    if parsed != None and len(parsed) > 0:
-        _accumulate_unique(privacy_manifests, parsed)
-        return
-    fail(podspec_unsupported_field_error(plugin, path, line_num, attr_name, v))
+def _handle_resource_bundles(rhs_tokens, raw_rhs, meta, privacy_manifests):
+    """Parse `resource_bundles`, keeping `.xcprivacy`-only hashes and refusing others."""
+    parsed = parse_resource_bundles_tokens(rhs_tokens)
+    if parsed != None:
+        all_privacy = True
+        for item in parsed:
+            if not _is_valid_privacy_relpath(item):
+                all_privacy = False
+                break
+        if all_privacy:
+            _accumulate_unique(privacy_manifests, parsed)
+            return
+    fail(podspec_unsupported_field_error(meta.plugin, meta.path, meta.line, meta.attr, raw_rhs))
 
-def _handle_link_field(v, line_num, plugin, path, attr_name, target_list, is_library):
-    """Handle frameworks/libraries literal list."""
-    parsed = _parse_string_list_or_single(v)
-    if parsed == None:
-        fail(podspec_unsupported_field_error(plugin, path, line_num, attr_name, v))
-    if is_library:
-        parsed = [_normalize_library_name(x) for x in parsed]
-    _accumulate_unique(target_list, parsed)
-
-def _check_heredoc_line(heredoc, raw_line):
-    """Check if raw_line terminates current heredoc."""
-    stripped = raw_line.strip() if heredoc.strip else raw_line
-    if stripped == heredoc.tag:
-        return None
-    return heredoc
-
-def _update_block_stack(block_stack, clean_line):
-    """Update block nesting stack from clean_line."""
-    b_boundary = _classify_block_boundary(clean_line)
-    if b_boundary:
-        if b_boundary.kind == "open":
-            block_stack.append(b_boundary.is_spec)
-        elif b_boundary.kind == "end" and block_stack:
-            block_stack.pop()
-
-def _dispatch_statement_attr(attr, val, stmt_line, plugin, podspec_path, collected):
-    """Dispatch an attribute assignment to the appropriate handler."""
+def _dispatch_statement_attr(assign, content, plugin, podspec_path, collected):
+    """Dispatch a recognized podspec attribute assignment to its POD-12 handler."""
+    attr = assign.attr
+    raw_rhs = format_rhs_raw(content, assign.rhs)
+    meta = struct(plugin = plugin, path = podspec_path, line = assign.line, attr = attr)
     if attr in ("vendored_frameworks", "vendored_framework", "vendored_libraries", "vendored_library"):
-        fail(podspec_unsupported_field_error(plugin, podspec_path, stmt_line, attr, val))
+        fail(podspec_unsupported_field_error(plugin, podspec_path, assign.line, attr, raw_rhs))
     elif attr in ("frameworks", "framework"):
-        _handle_link_field(val, stmt_line, plugin, podspec_path, attr, collected.frameworks, False)
+        _handle_link_field(assign.rhs, raw_rhs, meta, collected.frameworks, False)
     elif attr in ("weak_frameworks", "weak_framework"):
-        _handle_link_field(val, stmt_line, plugin, podspec_path, attr, collected.weak_frameworks, False)
+        _handle_link_field(assign.rhs, raw_rhs, meta, collected.weak_frameworks, False)
     elif attr in ("libraries", "library"):
-        _handle_link_field(val, stmt_line, plugin, podspec_path, attr, collected.libraries, True)
+        _handle_link_field(assign.rhs, raw_rhs, meta, collected.libraries, True)
     elif attr in ("resources", "resource"):
-        _handle_resources(val, stmt_line, plugin, podspec_path, attr, collected.privacy_manifests)
+        _handle_resources(assign.rhs, raw_rhs, meta, collected.privacy_manifests)
     elif attr == "resource_bundles":
-        _handle_resource_bundles(val, stmt_line, plugin, podspec_path, attr, collected.privacy_manifests)
+        _handle_resource_bundles(assign.rhs, raw_rhs, meta, collected.privacy_manifests)
+
+def _step_keyword_at_stmt_start(tokens, n, idx, block_stack):
+    """Handle statement-leading block keywords (`end`, `}`, `else`, `elsif`, `if`, ...)."""
+    tok = tokens[idx]
+    if tok.kind == "nl" or (tok.kind == "op" and tok.text == ";"):
+        return idx + 1
+    if tok.kind == "op" and tok.text == "}":
+        if block_stack and block_stack[-1].closer == "}":
+            block_stack.pop()
+        return idx + 1
+    if tok.kind != "word":
+        return -1
+    kw = tok.text
+    if kw == "end":
+        if block_stack and block_stack[-1].closer == "end":
+            block_stack.pop()
+        return idx + 1
+    if kw in ("else", "ensure"):
+        return idx + 1
+    if kw in ("elsif", "when", "rescue"):
+        return _skip_condition_header(tokens, n, idx, False)
+    if kw == "begin":
+        block_stack.append(struct(closer = "end", skip = _is_skipping(block_stack)))
+        return idx + 1
+    if kw in _END_OPENERS:
+        block_stack.append(struct(closer = "end", skip = _is_skipping(block_stack)))
+        return _skip_condition_header(tokens, n, idx, kw in ("while", "until", "for"))
+    return -1
 
 def read_plugin_podspec(text, podspec_path, plugin, platform):
-    """Statically parse a plugin podspec for link settings and privacy manifests.
+    """Statically parse a plugin `.podspec` for SDK link settings and privacy manifests.
 
     Args:
-        text: Full podspec text string.
-        podspec_path: Relative path string of the podspec.
-        plugin: Plugin name string.
-        platform: Target platform ('ios' or 'macos').
+        text: Full `.podspec` text string.
+        podspec_path: Repository-relative path string of the `.podspec`.
+        plugin: Pub plugin name string.
+        platform: Target Apple platform (`"ios"` or `"macos"`).
 
     Returns:
-        struct(frameworks, weak_frameworks, libraries, privacy_manifests, ...).
+        `struct(frameworks, weak_frameworks, libraries, privacy_manifests,
+        sdk_frameworks, weak_sdk_frameworks, sdk_dylibs)`.
     """
     frameworks = []
     weak_frameworks = []
@@ -323,56 +439,28 @@ def read_plugin_podspec(text, podspec_path, plugin, platform):
         libraries = libraries,
         privacy_manifests = privacy_manifests,
     )
-
-    lines = text.split("\n")
-    heredoc = None
+    tokens = lex_podspec(text)
+    n = len(tokens)
     block_stack = []
-
-    accum_stmt = ""
-    accum_start_line = 0
-
-    for i in range(len(lines)):
-        line_num = i + 1
-        raw_line = lines[i]
-
-        if heredoc:
-            heredoc = _check_heredoc_line(heredoc, raw_line)
+    idx = 0
+    for _ in range(n + 1):
+        if idx >= n:
+            break
+        kw_next = _step_keyword_at_stmt_start(tokens, n, idx, block_stack)
+        if kw_next >= 0:
+            idx = kw_next
             continue
-
-        hdoc_info = _detect_heredoc_tag(raw_line)
-        if hdoc_info:
-            heredoc = hdoc_info
-
-        clean_line = _strip_ruby_comments(raw_line).strip()
-        if not clean_line:
+        item = _read_statement_or_block_open(tokens, n, idx)
+        idx = item.next_idx
+        if item.is_block:
+            skip = _is_skipping(block_stack) or _should_skip_opened_block(item.header, platform)
+            block_stack.append(struct(closer = item.closer, skip = skip))
             continue
-
-        _update_block_stack(block_stack, clean_line)
-        in_skipped_spec = True in block_stack
-
-        if accum_stmt:
-            accum_stmt += " " + clean_line
-        else:
-            accum_stmt = clean_line
-            accum_start_line = line_num
-
-        open_b = accum_stmt.count("[") - accum_stmt.count("]")
-        open_c = accum_stmt.count("{") - accum_stmt.count("}")
-        if open_b > 0 or open_c > 0:
+        if _is_skipping(block_stack) or not item.tokens:
             continue
-
-        full_stmt = accum_stmt
-        stmt_line = accum_start_line
-        accum_stmt = ""
-
-        if in_skipped_spec:
-            continue
-
-        parsed = _extract_statement_parts(full_stmt)
-        if not parsed or not _is_scope_active(parsed.scope, platform):
-            continue
-
-        _dispatch_statement_attr(parsed.attr, parsed.raw_rhs, stmt_line, plugin, podspec_path, collected)
+        assign = _parse_attr_assignment(item.tokens)
+        if assign != None and _is_scope_active(assign.scope, platform):
+            _dispatch_statement_attr(assign, text, plugin, podspec_path, collected)
 
     return struct(
         frameworks = frameworks,
@@ -384,19 +472,44 @@ def read_plugin_podspec(text, podspec_path, plugin, platform):
         sdk_dylibs = libraries,
     )
 
+def resolve_podspec_privacy_path(podspec_dir, rel_path, plugin, podspec_path):
+    """Resolve a podspec `.xcprivacy` path relative to `podspec_dir`, rejecting traversal.
+
+    Args:
+        podspec_dir: Directory containing the `.podspec` (e.g. `"ios"` or `"darwin"`).
+        rel_path: Relative path declared in the `.podspec`.
+        plugin: Pub plugin name string.
+        podspec_path: Repository-relative `.podspec` path string.
+
+    Returns:
+        Normalized repository-relative path string.
+    """
+    if not _is_valid_privacy_relpath(rel_path):
+        fail(
+            'Flutter plugin "%s": %s declares invalid privacy manifest path %r ' % (
+                plugin,
+                podspec_path,
+                rel_path,
+            ) + '(must be a relative path without ".." segments)',
+        )
+    segs = [s for s in rel_path.split("/") if s and s != "."]
+    prefix = [s for s in podspec_dir.split("/") if s and s != "."]
+    return "/".join(prefix + segs)
+
 def splice_apple_podspec_link_settings(content, plugin, apple):
-    """Splice SDK link settings into a rendered spoke BUILD file.
+    """Splice non-empty SDK link attributes into a rendered spoke BUILD file.
 
     Args:
         content: Spoke BUILD content string.
-        plugin: Plugin name string.
-        apple: Struct from detect_apple_plugin_sources.
+        plugin: Pub plugin name string.
+        apple: Struct carrying `ios_podspec` and `macos_podspec`.
 
     Returns:
         Patched BUILD content string.
     """
     for platform in ("ios", "macos"):
-        podspec = getattr(apple, platform + "_podspec", None)
+        attr_name = platform + "_podspec"
+        podspec = getattr(apple, attr_name) if hasattr(apple, attr_name) else None
         if not podspec:
             continue
         lines = []
@@ -409,7 +522,6 @@ def splice_apple_podspec_link_settings(content, plugin, apple):
         if not lines:
             continue
         insert_text = "\n".join(lines) + "\n"
-
         for suffix in ("", "_xtool"):
             marker = '    name = "%s_apple_%s%s",\n' % (plugin, platform, suffix)
             head, sep, tail = content.partition(marker)
@@ -419,46 +531,107 @@ def splice_apple_podspec_link_settings(content, plugin, apple):
             if not vis_sep:
                 continue
             content = head + sep + block + "\n" + insert_text + "    visibility = " + vis_tail
-
     return content
 
-def _scan_directory_podspecs(ctx, plugin, dir_path):
-    """Scan dir_path for *.podspec files, failing on multiples."""
-    dir_node = ctx.path(dir_path)
-    if not dir_node.exists:
-        return None
-    if hasattr(dir_node, "readdir"):
-        podspecs = [c.basename for c in dir_node.readdir() if c.basename.endswith(".podspec")]
-    else:
-        single = dir_path + "/" + plugin + ".podspec"
-        podspecs = [plugin + ".podspec"] if ctx.path(single).exists else []
+def _has_darwin_srcs(srcs):
+    """True when `srcs` includes a shared `darwin/` source directory."""
+    for src in srcs:
+        if src == "darwin" or src.startswith("darwin/"):
+            return True
+    return False
 
+def apply_apple_podspec_link_settings(ctx, content, plugin, apple):
+    """Ensure podspecs are validated before dep resolution and splice SDK link settings.
+
+    Args:
+        ctx: The spoke's repository context.
+        content: Rendered spoke BUILD content string.
+        plugin: Pub plugin name string.
+        apple: Struct from `detect_apple_plugin_sources` (or minimal `macos_srcs`/`ios_srcs` test struct).
+
+    Returns:
+        Patched BUILD content string.
+    """
+    resolved_apple = apple
+    if not hasattr(apple, "ios_podspec") and not hasattr(apple, "macos_podspec"):
+        macos_srcs = apple.macos_srcs if hasattr(apple, "macos_srcs") else []
+        ios_srcs = apple.ios_srcs if hasattr(apple, "ios_srcs") else []
+        resolved_apple = detect_apple_podspecs(
+            ctx,
+            plugin,
+            macos_srcs,
+            ios_srcs,
+            _has_darwin_srcs(macos_srcs),
+            _has_darwin_srcs(ios_srcs),
+        )
+    return splice_apple_podspec_link_settings(content, plugin, resolved_apple)
+
+def _scan_directory_podspecs(ctx, plugin, dir_path):
+    """Scan `dir_path` for `*.podspec` files, failing naming sorted filenames on multiples."""
+    dir_node = ctx.path(dir_path)
+    podspecs = []
+    if dir_node.exists and hasattr(dir_node, "readdir"):
+        podspecs = sorted([
+            c.basename
+            for c in dir_node.readdir()
+            if not (hasattr(c, "is_dir") and c.is_dir) and c.basename.endswith(".podspec")
+        ])
+    if not podspecs:
+        single = dir_path + "/" + plugin + ".podspec"
+        if ctx.path(single).exists:
+            podspecs = [plugin + ".podspec"]
     if len(podspecs) > 1:
-        fail('Flutter plugin "%s": multiple podspecs found in %s: %s' % (plugin, dir_path, ", ".join(podspecs)))
+        fail('Flutter plugin "%s": multiple podspecs found in %s: %s' % (
+            plugin,
+            dir_path,
+            ", ".join(podspecs),
+        ))
     if len(podspecs) == 1:
         return dir_path + "/" + podspecs[0]
     return None
 
+def _discover_platform_podspec_paths(ctx, plugin, platform, shared_darwin):
+    """Find active `.podspec` path(s) for `platform` (`<platform>/`, plus `darwin/` when applicable)."""
+    plat_spec = _scan_directory_podspecs(ctx, plugin, platform)
+    paths = [plat_spec] if plat_spec else []
+    if shared_darwin or not plat_spec:
+        darwin_spec = _scan_directory_podspecs(ctx, plugin, "darwin")
+        if darwin_spec:
+            paths.append(darwin_spec)
+    return paths
+
 def discover_platform_podspec(ctx, plugin, platform, shared_darwin):
-    """Find the single .podspec for a given platform.
+    """Find the primary `.podspec` path for `platform`, or `None` when absent.
 
     Args:
         ctx: Repository context.
-        plugin: Plugin name string.
-        platform: 'ios' or 'macos'.
-        shared_darwin: bool indicating shared Darwin layout.
+        plugin: Pub plugin name string.
+        platform: `"ios"` or `"macos"`.
+        shared_darwin: Bool indicating `sharedDarwinSource`.
 
     Returns:
-        Relative podspec path string or None.
+        Repository-relative `.podspec` path string, or `None`.
     """
-    if shared_darwin:
-        darwin_spec = _scan_directory_podspecs(ctx, plugin, "darwin")
-        if darwin_spec:
-            return darwin_spec
-    return _scan_directory_podspecs(ctx, plugin, platform)
+    paths = _discover_platform_podspec_paths(ctx, plugin, platform, shared_darwin)
+    return paths[0] if paths else None
 
 def detect_apple_privacy_manifests(ctx, source_dirs):
     """Find each plugin source dir's `PrivacyInfo.xcprivacy` file.
+
+    Apple requires every framework to ship a privacy manifest since
+    iOS 17.4 / macOS 14.4; App Store submission walks the bundle for
+    `*.xcprivacy` files and aggregates them into the app's privacy
+    report. CocoaPods/SwiftPM bundle them automatically as framework
+    resources; we mirror by collecting them here and threading them
+    through to `flutter_plugin`'s `apple_privacy_files` select.
+
+    Two source-tree layouts occur in plugins before podspec lookup:
+
+    * **Pattern A** (e.g. `package_info_plus`, `share_plus`):
+      `<source_dir>/PrivacyInfo.xcprivacy`.
+    * **Pattern B** (e.g. `path_provider_foundation`, `record_ios`,
+      `webview_flutter_wkwebview`):
+      `<source_dir>/Resources/PrivacyInfo.xcprivacy`.
 
     Args:
         ctx: Repository context.
@@ -477,6 +650,40 @@ def detect_apple_privacy_manifests(ctx, source_dirs):
                 manifests[relpath] = True
     return sorted(manifests.keys())
 
+def _read_platform_podspecs(ctx, plugin, platform, srcs, shared_darwin):
+    """Read and merge podspec(s) and existing privacy manifests for one Apple platform."""
+    manifests = {m: True for m in detect_apple_privacy_manifests(ctx, srcs)}
+    if not srcs:
+        return None, sorted(manifests.keys())
+    spec_paths = _discover_platform_podspec_paths(ctx, plugin, platform, shared_darwin)
+    if not spec_paths:
+        return None, sorted(manifests.keys())
+    frameworks = []
+    weak_frameworks = []
+    libraries = []
+    raw_manifests = []
+    for spec_path in spec_paths:
+        spec_dir = spec_path[:spec_path.rfind("/")]
+        parsed = read_plugin_podspec(ctx.read(spec_path), spec_path, plugin, platform)
+        _accumulate_unique(frameworks, parsed.frameworks)
+        _accumulate_unique(weak_frameworks, parsed.weak_frameworks)
+        _accumulate_unique(libraries, parsed.libraries)
+        _accumulate_unique(raw_manifests, parsed.privacy_manifests)
+        for rel_m in parsed.privacy_manifests:
+            full_p = resolve_podspec_privacy_path(spec_dir, rel_m, plugin, spec_path)
+            if ctx.path(full_p).exists:
+                manifests[full_p] = True
+    merged_podspec = struct(
+        frameworks = frameworks,
+        weak_frameworks = weak_frameworks,
+        libraries = libraries,
+        privacy_manifests = raw_manifests,
+        sdk_frameworks = frameworks,
+        weak_sdk_frameworks = weak_frameworks,
+        sdk_dylibs = libraries,
+    )
+    return merged_podspec, sorted(manifests.keys())
+
 def detect_apple_podspecs(
         ctx,
         plugin,
@@ -484,44 +691,36 @@ def detect_apple_podspecs(
         ios_srcs,
         macos_shared_darwin,
         ios_shared_darwin):
-    """Detect and parse platform podspecs, merging privacy manifests.
+    """Detect and parse platform podspecs, merging existing `.xcprivacy` manifests.
 
     Args:
         ctx: Repository context.
-        plugin: Plugin name string.
+        plugin: Pub plugin name string.
         macos_srcs: List of macOS source dirs.
         ios_srcs: List of iOS source dirs.
-        macos_shared_darwin: bool for macOS sharedDarwinSource.
-        ios_shared_darwin: bool for iOS sharedDarwinSource.
+        macos_shared_darwin: Bool for macOS `sharedDarwinSource`.
+        ios_shared_darwin: Bool for iOS `sharedDarwinSource`.
 
     Returns:
-        struct(macos_podspec, ios_podspec, macos_manifests, ios_manifests).
+        `struct(macos_podspec, ios_podspec, macos_manifests, ios_manifests)`.
     """
-    macos_manifests = detect_apple_privacy_manifests(ctx, macos_srcs)
-    m_spec_path = discover_platform_podspec(ctx, plugin, "macos", macos_shared_darwin) if macos_srcs else None
-    macos_podspec = None
-    if m_spec_path:
-        m_dir = m_spec_path[:m_spec_path.rfind("/")]
-        macos_podspec = read_plugin_podspec(ctx.read(m_spec_path), m_spec_path, plugin, "macos")
-        for m in macos_podspec.privacy_manifests:
-            full_p = m_dir + "/" + m
-            if ctx.path(full_p).exists and full_p not in macos_manifests:
-                macos_manifests.append(full_p)
-
-    ios_manifests = detect_apple_privacy_manifests(ctx, ios_srcs)
-    i_spec_path = discover_platform_podspec(ctx, plugin, "ios", ios_shared_darwin) if ios_srcs else None
-    ios_podspec = None
-    if i_spec_path:
-        i_dir = i_spec_path[:i_spec_path.rfind("/")]
-        ios_podspec = read_plugin_podspec(ctx.read(i_spec_path), i_spec_path, plugin, "ios")
-        for m in ios_podspec.privacy_manifests:
-            full_p = i_dir + "/" + m
-            if ctx.path(full_p).exists and full_p not in ios_manifests:
-                ios_manifests.append(full_p)
-
+    macos_podspec, macos_manifests = _read_platform_podspecs(
+        ctx,
+        plugin,
+        "macos",
+        macos_srcs,
+        macos_shared_darwin,
+    )
+    ios_podspec, ios_manifests = _read_platform_podspecs(
+        ctx,
+        plugin,
+        "ios",
+        ios_srcs,
+        ios_shared_darwin,
+    )
     return struct(
         macos_podspec = macos_podspec,
         ios_podspec = ios_podspec,
-        macos_manifests = sorted(macos_manifests),
-        ios_manifests = sorted(ios_manifests),
+        macos_manifests = macos_manifests,
+        ios_manifests = ios_manifests,
     )

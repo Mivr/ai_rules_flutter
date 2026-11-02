@@ -22,7 +22,7 @@ load(
     "with_apple_swiftpm_deps",
 )
 load(":flutter_pub_walk.bzl", "PUB_WALK_BOUND", "has_files_bound_error")
-load(":podspec_read.bzl", "splice_apple_podspec_link_settings")
+load(":podspec_read.bzl", "apply_apple_podspec_link_settings")
 load(":starlark_literal.bzl", "starlark_string_literal")
 load(":swiftpm_manifest.bzl", "parse_swiftpm_package")
 load(":swiftpm_manifest_lex.bzl", "lex_swiftpm_manifest", "swiftpm_first_content_line")
@@ -986,7 +986,7 @@ def apply_apple_native_deps(ctx, plugin, apple, content):
     Returns:
         The BUILD content with both kinds of Apple dependency wired in.
     """
-    content = splice_apple_podspec_link_settings(content, plugin, apple)
+    content = apply_apple_podspec_link_settings(ctx, content, plugin, apple)
     swiftpm = detect_apple_swiftpm_deps(ctx, plugin, apple)
     content = with_apple_swiftpm_deps(content, plugin, swiftpm.macos, swiftpm.ios)
     local = detect_apple_local_targets(ctx, plugin, apple)
