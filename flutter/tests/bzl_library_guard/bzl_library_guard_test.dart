@@ -85,6 +85,17 @@ const List<String> _publicEntryStems = <String>[
   'windows',
 ];
 
+/// Public entry stems with no `starlark_doc_extract` target in `//docs`: their
+/// load closures reach a Starlark module with no `bzl_library` at the pinned
+/// dependency versions (see `docs/BUILD.bazel`).
+const Set<String> _docExtractExemptStems = <String>{
+  'android',
+  'defs',
+  'extensions',
+  'linux',
+  'web',
+};
+
 enum _TokKind { ident, string, punct }
 
 class _Tok {
@@ -853,7 +864,7 @@ void _checkAllDocExtractsFilegroup(
     ];
     if (srcs.length != expectedSrcs.length ||
         !srcs.toSet().containsAll(expectedSrcs)) {
-      problems.add('//docs:all_doc_extracts srcs must list the 14 extracts');
+      problems.add('//docs:all_doc_extracts srcs must list the 10 extracts');
     }
   }
 }
@@ -876,15 +887,17 @@ void _verifyDocsExtracts(_WorkspaceGraph graph) {
     }
   }
   final expectedStems = _publicEntryStems
-      .where((stem) => stem != 'android')
+      .where((stem) => !_docExtractExemptStems.contains(stem))
       .toList();
-  if (docExtracts.containsKey('android.doc_extract')) {
-    problems.add('//docs:android.doc_extract must not be declared');
+  for (final stem in _docExtractExemptStems) {
+    if (docExtracts.containsKey('$stem.doc_extract')) {
+      problems.add('//docs:$stem.doc_extract must not be declared');
+    }
   }
   if (docExtracts.length != expectedStems.length) {
     final count = docExtracts.length;
     problems.add(
-      'Expected 14 starlark_doc_extract targets in //docs, got $count',
+      'Expected 10 starlark_doc_extract targets in //docs, got $count',
     );
   }
   for (final stem in expectedStems) {
@@ -926,7 +939,7 @@ void main() {
   });
 
   test(
-    'docs declares 14 starlark_doc_extract targets and all_doc_extracts',
+    'docs declares 10 starlark_doc_extract targets and all_doc_extracts',
     () {
       _verifyDocsExtracts(graph);
     },
