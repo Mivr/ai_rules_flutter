@@ -22,6 +22,7 @@ load(
     "with_apple_swiftpm_deps",
 )
 load(":flutter_pub_walk.bzl", "PUB_WALK_BOUND", "has_files_bound_error")
+load(":podspec_read.bzl", "splice_apple_podspec_link_settings")
 load(":starlark_literal.bzl", "starlark_string_literal")
 load(":swiftpm_manifest.bzl", "parse_swiftpm_package")
 load(":swiftpm_manifest_lex.bzl", "lex_swiftpm_manifest", "swiftpm_first_content_line")
@@ -985,6 +986,7 @@ def apply_apple_native_deps(ctx, plugin, apple, content):
     Returns:
         The BUILD content with both kinds of Apple dependency wired in.
     """
+    content = splice_apple_podspec_link_settings(content, plugin, apple)
     swiftpm = detect_apple_swiftpm_deps(ctx, plugin, apple)
     content = with_apple_swiftpm_deps(content, plugin, swiftpm.macos, swiftpm.ios)
     local = detect_apple_local_targets(ctx, plugin, apple)
@@ -1017,10 +1019,8 @@ def _local_target_block(content, plugin, platform, suffix):
     """
     marker = '    name = "%s_apple_%s%s",\n' % (plugin, platform, suffix)
     head, sep, tail = content.partition(marker)
-    if not sep:
-        return struct(found = False, head = "", block = "", tail = "")
     block, vis_sep, vis_tail = tail.partition("\n    visibility = ")
-    if not vis_sep:
+    if not sep or not vis_sep:
         return struct(found = False, head = "", block = "", tail = "")
     return struct(found = True, head = head + sep, block = block, tail = vis_sep + vis_tail)
 

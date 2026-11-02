@@ -19,6 +19,7 @@ load(
 load(":flutter_pub_apple_pods.bzl", "detect_apple_cocoapods_deps")
 load(":flutter_pub_plugin_deps.bzl", "mapped_apple_plugin_deps")
 load(":flutter_pub_walk.bzl", "PUB_WALK_BOUND", "has_files_under_walk")
+load(":podspec_read.bzl", "detect_apple_podspecs")
 load(":starlark_literal.bzl", "starlark_string_literal")
 load(":swiftpm_manifest.bzl", "parse_swiftpm_plugin_package")
 load(":swiftpm_resolved.bzl", "read_ios_native_deps", "read_swiftpm_checksums", "read_swiftpm_pins", "swiftpm_unpinned_errors")
@@ -139,37 +140,6 @@ def _detect_apple_include_dirs(ctx, source_dirs, package_name):
             if ctx.path(nested).exists:
                 include_dirs.append(nested)
     return include_dirs
-
-def _detect_apple_privacy_manifests(ctx, source_dirs):
-    """Find each plugin source dir's `PrivacyInfo.xcprivacy` file.
-
-    Apple requires every framework to ship a privacy manifest since
-    iOS 17.4 / macOS 14.4; App Store submission walks the bundle for
-    `*.xcprivacy` files and aggregates them into the app's privacy
-    report. CocoaPods/SwiftPM bundle them automatically as framework
-    resources; we mirror by collecting them here and threading them
-    through to `flutter_apple_plugin_library`'s `privacy_manifests`
-    attr (which forwards to the inner objc/swift_library `data`).
-
-    Two layouts occur in real plugins:
-
-    * **Pattern A** (e.g. `package_info_plus`, `share_plus`):
-      `<source_dir>/PrivacyInfo.xcprivacy`.
-    * **Pattern B** (e.g. `path_provider_foundation`, `record_ios`,
-      `webview_flutter_wkwebview`):
-      `<source_dir>/Resources/PrivacyInfo.xcprivacy`.
-
-    Returns a sorted, deduplicated list of relative paths.
-    """
-    manifests = {}
-    for src_dir in source_dirs:
-        for relpath in (
-            src_dir + "/PrivacyInfo.xcprivacy",
-            src_dir + "/Resources/PrivacyInfo.xcprivacy",
-        ):
-            if ctx.path(relpath).exists:
-                manifests[relpath] = True
-    return sorted(manifests.keys())
 
 def glob_block(srcs_dirs, extensions):
     """Format a `glob([...])` expression covering the given extensions.
@@ -344,8 +314,6 @@ def detect_apple_plugin_sources(ctx, package_name, plugin_block):
     apple_ios_srcs_dirs = []
     apple_macos_include_dirs = []
     apple_ios_include_dirs = []
-    apple_macos_privacy_manifests = []
-    apple_ios_privacy_manifests = []
 
     macos_info = plugin_block.platforms.get("macos", {})
     ios_info = plugin_block.platforms.get("ios", {})
@@ -364,10 +332,6 @@ def detect_apple_plugin_sources(ctx, package_name, plugin_block):
             apple_macos_srcs_dirs,
             package_name,
         )
-        apple_macos_privacy_manifests = _detect_apple_privacy_manifests(
-            ctx,
-            apple_macos_srcs_dirs,
-        )
 
     if ios_info and ios_info.get("pluginClass", ""):
         apple_ios_srcs_dirs = _detect_apple_source_dirs(
@@ -381,18 +345,25 @@ def detect_apple_plugin_sources(ctx, package_name, plugin_block):
             apple_ios_srcs_dirs,
             package_name,
         )
-        apple_ios_privacy_manifests = _detect_apple_privacy_manifests(
-            ctx,
-            apple_ios_srcs_dirs,
-        )
+
+    podspecs = detect_apple_podspecs(
+        ctx,
+        package_name,
+        apple_macos_srcs_dirs,
+        apple_ios_srcs_dirs,
+        macos_shared_darwin,
+        ios_shared_darwin,
+    )
 
     return struct(
         macos_srcs = apple_macos_srcs_dirs,
         ios_srcs = apple_ios_srcs_dirs,
         macos_includes = apple_macos_include_dirs,
         ios_includes = apple_ios_include_dirs,
-        macos_manifests = apple_macos_privacy_manifests,
-        ios_manifests = apple_ios_privacy_manifests,
+        macos_manifests = podspecs.macos_manifests,
+        ios_manifests = podspecs.ios_manifests,
+        macos_podspec = podspecs.macos_podspec,
+        ios_podspec = podspecs.ios_podspec,
     )
 
 # Plugin template renderers moved out of `flutter_pub_package.bzl` (which

@@ -24,14 +24,24 @@ Usage:
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_apple//apple:apple.bzl", "apple_dynamic_framework_import", "apple_dynamic_xcframework_import")
 load("@rules_cc//cc:objc_library.bzl", "objc_library")
-load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
-load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
-load("@rules_swift//swift:swift.bzl", "SwiftInfo", "swift_library")
-load("//flutter:providers.bzl", "FlutterDarwinFrameworkInfo", _FlutterApplePluginInfo = "FlutterApplePluginInfo")
+load("@rules_swift//swift:swift.bzl", "swift_library")
+load("//flutter:providers.bzl", _FlutterApplePluginInfo = "FlutterApplePluginInfo")
+load(
+    ":flutter_apple_plugin_library_helpers.bzl",
+    _emit_plugin_swift_header_include_target = "emit_plugin_swift_header_include_target",
+    _flutter_xtool_apple_plugin_library = "flutter_xtool_apple_plugin_library",
+    _objc_copts_xtool_refusal = "objc_copts_xtool_refusal",
+    _plugin_defines_xtool_refusal = "plugin_defines_xtool_refusal",
+    _weak_sdk_frameworks_xtool_refusal = "weak_sdk_frameworks_xtool_refusal",
+)
 load(":flutter_apple_plugins_aggregator.bzl", _flutter_apple_plugin_bundle = "flutter_apple_plugin_bundle")
 load(":flutter_xtool_bundle.bzl", "flutter_darwin_xcframework_import")
 
 FlutterApplePluginInfo = _FlutterApplePluginInfo
+flutter_xtool_apple_plugin_library = _flutter_xtool_apple_plugin_library
+objc_copts_xtool_refusal = _objc_copts_xtool_refusal
+plugin_defines_xtool_refusal = _plugin_defines_xtool_refusal
+weak_sdk_frameworks_xtool_refusal = _weak_sdk_frameworks_xtool_refusal
 
 def _split_srcs(srcs):
     """Split srcs into (swift_files, objc_files, headers).
@@ -50,162 +60,6 @@ def _split_srcs(srcs):
         elif f.endswith(".h"):
             headers.append(f)
     return swift_files, objc_files, headers
-
-def _classify_plugin_srcs(files):
-    """Split rule srcs into a struct of swift, objc and header Files plus include dirs."""
-    swift_files = []
-    objc_files = []
-    headers = []
-    include_dirs = {}
-    for f in files:
-        if f.path.endswith(".swift"):
-            swift_files.append(f)
-        elif f.path.endswith(".m") or f.path.endswith(".mm") or f.path.endswith(".c") or f.path.endswith(".cc") or f.path.endswith(".cpp"):
-            objc_files.append(f)
-        elif f.path.endswith(".h"):
-            headers.append(f)
-            include_dirs[f.dirname] = True
-    return struct(swift = swift_files, objc = objc_files, headers = headers, include_dirs = include_dirs)
-
-def _plugin_include_dirs(package, includes, include_dirs):
-    """Fold package-relative `includes` into the header-dir set from sources."""
-    for inc in includes:
-        if package:
-            include_dirs["%s/%s" % (package, inc)] = True
-        else:
-            include_dirs[inc] = True
-    return include_dirs
-
-def _write_plugin_modulemap(ctx, module_name, headers):
-    """Write the plugin's modulemap covering its headers."""
-    modulemap_file = ctx.actions.declare_file("%s.modulemap" % ctx.label.name)
-    mm_lines = ["module %s {" % module_name]
-    for h in headers:
-        mm_lines.append('  header "%s"' % h.basename)
-    mm_lines.append("  export *")
-    mm_lines.append("}")
-    ctx.actions.write(
-        output = modulemap_file,
-        content = "\n".join(mm_lines) + "\n",
-    )
-    return modulemap_file
-
-def _collect_plugin_dep_infos(ctx):
-    """Collect CcInfo, SwiftInfo and framework files from the plugin's deps."""
-    return struct(
-        cc_infos = [dep[CcInfo] for dep in ctx.attr.deps if CcInfo in dep],
-        swift_infos = [dep[SwiftInfo] for dep in ctx.attr.deps if SwiftInfo in dep],
-        framework_files = [
-            dep[FlutterDarwinFrameworkInfo].framework_files
-            for dep in ctx.attr.deps
-            if FlutterDarwinFrameworkInfo in dep and not dep.label.name.endswith("__flutter_framework")
-        ],
-    )
-
-def _merge_plugin_sdk_lists(ctx, sdk_frameworks, sdk_dylibs):
-    """Union the rule's SDK frameworks/dylibs with the ones plugin deps declare."""
-    frameworks = list(sdk_frameworks)
-    dylibs = list(sdk_dylibs)
-    for dep in ctx.attr.deps:
-        if FlutterApplePluginInfo in dep:
-            for fw in dep[FlutterApplePluginInfo].sdk_frameworks:
-                if fw not in frameworks:
-                    frameworks.append(fw)
-            for dylib in dep[FlutterApplePluginInfo].sdk_dylibs:
-                if dylib not in dylibs:
-                    dylibs.append(dylib)
-    return frameworks, dylibs
-
-def _flutter_xtool_apple_plugin_library_impl(ctx):
-    if ctx.attr.plugin_defines:
-        fail(plugin_defines_xtool_refusal(ctx.label.name))
-    srcs = _classify_plugin_srcs(ctx.files.srcs)
-    include_dirs = _plugin_include_dirs(ctx.label.package, ctx.attr.includes, srcs.include_dirs)
-
-    module_name = ctx.attr.module_name if ctx.attr.module_name else ctx.label.name
-    modulemap_file = _write_plugin_modulemap(ctx, module_name, srcs.headers)
-
-    all_plugin_files = srcs.swift + srcs.objc + srcs.headers + [modulemap_file]
-    own_cc_info = CcInfo(
-        compilation_context = cc_common.create_compilation_context(
-            headers = depset(all_plugin_files),
-            direct_public_headers = srcs.headers,
-            direct_textual_headers = srcs.swift + srcs.objc + [modulemap_file],
-            includes = depset(include_dirs.keys()),
-        ),
-    )
-    dep_infos = _collect_plugin_dep_infos(ctx)
-    merged_cc_info = cc_common.merge_cc_infos(
-        direct_cc_infos = [own_cc_info],
-        cc_infos = dep_infos.cc_infos,
-    )
-    sdk_frameworks, sdk_dylibs = _merge_plugin_sdk_lists(ctx, ctx.attr.sdk_frameworks, ctx.attr.sdk_dylibs)
-
-    return [
-        DefaultInfo(files = depset(all_plugin_files, transitive = dep_infos.framework_files)),
-        merged_cc_info,
-        SwiftInfo(swift_infos = dep_infos.swift_infos),
-        FlutterApplePluginInfo(
-            module_name = module_name,
-            platform = ctx.attr.platform,
-            swift_srcs = depset(srcs.swift),
-            objc_srcs = depset(srcs.objc),
-            headers = depset(srcs.headers),
-            modulemap = modulemap_file,
-            sdk_frameworks = tuple(sdk_frameworks),
-            sdk_dylibs = tuple(sdk_dylibs),
-        ),
-    ]
-
-flutter_xtool_apple_plugin_library = rule(
-    implementation = _flutter_xtool_apple_plugin_library_impl,
-    attrs = {
-        "srcs": attr.label_list(
-            allow_files = True,
-            default = [],
-            doc = "Swift, Objective-C, and header source files for the plugin.",
-        ),
-        "module_name": attr.string(
-            default = "",
-            doc = "Module name for the plugin.",
-        ),
-        "platform": attr.string(
-            default = "macos",
-            values = ["macos", "ios"],
-            doc = "Target Apple platform ('ios' or 'macos').",
-        ),
-        "includes": attr.string_list(
-            default = [],
-            doc = "Header search paths relative to the package.",
-        ),
-        "sdk_frameworks": attr.string_list(
-            default = [],
-            doc = "Apple SDK frameworks to link.",
-        ),
-        "sdk_dylibs": attr.string_list(
-            default = [],
-            doc = "Apple SDK dynamic libraries to link.",
-        ),
-        "deps": attr.label_list(
-            default = [],
-            doc = "Dependencies providing CcInfo or SwiftInfo.",
-        ),
-        "plugin_defines": attr.string_list(
-            default = [],
-            doc = "Preprocessor defines for the plugin's Apple libraries. " +
-                  "The xtool backend refuses a non-empty list because it " +
-                  "compiles every source in one swiftc invocation with no " +
-                  "define flags.",
-        ),
-    },
-    provides = [
-        DefaultInfo,
-        CcInfo,
-        SwiftInfo,
-        FlutterApplePluginInfo,
-    ],
-    doc = "Host-agnostic Apple plugin library rule for the xtool backend.",
-)
 
 def _apple_plugin_engine_imports(platform, engine):
     """The Flutter framework import labels for an Apple plugin platform."""
@@ -229,6 +83,7 @@ def _emit_xtool_plugin_branch(spec):
         platform = spec.platform,
         includes = spec.includes,
         sdk_frameworks = spec.sdk_frameworks,
+        weak_sdk_frameworks = spec.weak_sdk_frameworks,
         sdk_dylibs = spec.sdk_dylibs,
         deps = [":" + spec.framework_target] + spec.deps,
         plugin_defines = spec.plugin_defines,
@@ -255,22 +110,6 @@ def _emit_apple_framework_import(spec):
             visibility = ["//visibility:private"],
         )
 
-def objc_copts_xtool_refusal(name):
-    """The message for `objc_copts` on the `xtool` backend, naming the plugin target."""
-    return (
-        "flutter_apple_plugin_library: %s: objc_copts is not supported on the xtool backend; " % name +
-        "the backend compiles every source in one swiftc invocation, so there is no " +
-        "separate ObjC compile to pass them to"
-    )
-
-def plugin_defines_xtool_refusal(name):
-    """The message for `plugin_defines` on the `xtool` backend, naming the plugin target."""
-    return (
-        "flutter_apple_plugin_library: %s: plugin_defines is not supported on the xtool backend; " % name +
-        "it compiles every source in one swiftc invocation with no define flags. " +
-        "Remove flutter.pub(ios_plugin_defines = ...), or build with backend = \"rules_apple\"."
-    )
-
 def _plugin_define_copts(defines):
     """The C-family `-D` flags for a plugin's define entries, in order."""
     return ["-D" + define for define in defines]
@@ -291,6 +130,7 @@ def _emit_plugin_objc_target(spec, objc_files, headers):
         hdrs = headers,
         includes = spec.includes,
         sdk_frameworks = spec.sdk_frameworks,
+        weak_sdk_frameworks = spec.weak_sdk_frameworks,
         sdk_dylibs = spec.sdk_dylibs,
         module_name = objc_module_name,
         enable_modules = True,
@@ -323,57 +163,6 @@ def _emit_plugin_objc_module_target(spec, headers):
     )
     return ":" + target
 
-def _swift_generated_header_include_impl(ctx):
-    """Publish the generated header's directory as a quote include path."""
-    headers = [
-        header
-        for header in ctx.attr.swift[CcInfo].compilation_context.headers.to_list()
-        if header.basename == ctx.attr.header_name
-    ]
-    if len(headers) != 1:
-        fail(
-            "flutter_apple_plugin_library: expected exactly one generated header %s on %s, got %s" % (
-                ctx.attr.header_name,
-                ctx.attr.swift.label,
-                [header.path for header in headers],
-            ),
-        )
-    return [CcInfo(
-        compilation_context = cc_common.create_compilation_context(
-            quote_includes = depset([headers[0].dirname]),
-        ),
-    )]
-
-_swift_generated_header_include = rule(
-    implementation = _swift_generated_header_include_impl,
-    attrs = {
-        "header_name": attr.string(
-            mandatory = True,
-            doc = "Basename of the Swift module's generated Objective-C header.",
-        ),
-        "swift": attr.label(
-            mandatory = True,
-            providers = [CcInfo],
-            doc = "The `swift_library` whose generated header the ObjC sources import.",
-        ),
-    },
-    doc = "Adds the directory of a Swift module's generated header to the quote " +
-          "include path, so ObjC sources import it by its plain basename.",
-)
-
-def _emit_plugin_swift_header_include_target(spec, swift_target):
-    """Emit the target that makes `<module_name>-Swift.h` findable by basename."""
-    target = "_%s__swift_include" % spec.name
-    _swift_generated_header_include(
-        name = target,
-        header_name = "%s-Swift.h" % spec.module_name,
-        swift = swift_target,
-        tags = spec.internal_tags,
-        target_compatible_with = spec.target_compatible_with,
-        visibility = ["//visibility:private"],
-    )
-    return ":" + target
-
 def _emit_plugin_mixed_objc_target(spec, objc_files, headers, swift_deps):
     """Emit the ObjC half of a mixed plugin; it depends on the Swift module.
 
@@ -392,6 +181,7 @@ def _emit_plugin_mixed_objc_target(spec, objc_files, headers, swift_deps):
         hdrs = headers,
         includes = spec.includes,
         sdk_frameworks = spec.sdk_frameworks,
+        weak_sdk_frameworks = spec.weak_sdk_frameworks,
         sdk_dylibs = spec.sdk_dylibs,
         copts = list(spec.copts) + list(spec.objc_copts) + _plugin_define_copts(spec.plugin_defines),
         deps = [":" + spec.framework_target] + swift_deps,
@@ -544,6 +334,7 @@ def flutter_apple_plugin_objc_settings(
         linkopts = [],
         private_includes = [],
         sdk_frameworks = [],
+        weak_sdk_frameworks = [],
         sdk_dylibs = []):
     """Assemble the translated settings of one ObjC-only local library.
 
@@ -557,6 +348,7 @@ def flutter_apple_plugin_objc_settings(
         linkopts: Link options from `linkerSettings`.
         private_includes: Target-local `.headerSearchPath` directories.
         sdk_frameworks: Apple SDK frameworks to link and report.
+        weak_sdk_frameworks: Apple SDK weak frameworks to link and report.
         sdk_dylibs: Apple SDK dynamic libraries to link and report.
 
     Returns:
@@ -569,6 +361,7 @@ def flutter_apple_plugin_objc_settings(
         linkopts = linkopts,
         private_includes = private_includes,
         sdk_frameworks = sdk_frameworks,
+        weak_sdk_frameworks = weak_sdk_frameworks,
         sdk_dylibs = sdk_dylibs,
     )
 
@@ -642,6 +435,7 @@ def flutter_apple_plugin_objc_library(
         cxxopts = settings.cxxopts,
         linkopts = settings.linkopts,
         sdk_frameworks = settings.sdk_frameworks,
+        weak_sdk_frameworks = getattr(settings, "weak_sdk_frameworks", []),
         sdk_dylibs = settings.sdk_dylibs,
         module_name = module_name,
         enable_modules = True,
@@ -666,6 +460,64 @@ def flutter_apple_plugin_objc_library(
         visibility = visibility,
     )
 
+def _validate_plugin_args(name, platform, backend, objc_copts, weak_sdk_frameworks):
+    """Validate backend and argument compatibility."""
+    if platform not in ("macos", "ios"):
+        fail("flutter_apple_plugin_library: platform must be 'macos' or 'ios', got '%s'" % platform)
+    if backend not in ("rules_apple", "xtool"):
+        fail("flutter_apple_plugin_library: backend must be 'rules_apple' or 'xtool', got %r" % backend)
+    if backend == "xtool" and objc_copts:
+        fail(objc_copts_xtool_refusal(name))
+    if backend == "xtool" and weak_sdk_frameworks:
+        fail(weak_sdk_frameworks_xtool_refusal(name))
+
+def _emit_pure_swift_linkopts(spec, kwargs):
+    """Inject SDK framework and dylib linkopts for pure-Swift plugins."""
+    swift_linkopts = []
+    for fw in spec.sdk_frameworks:
+        swift_linkopts.extend(["-framework", fw])
+    for fw in spec.weak_sdk_frameworks:
+        swift_linkopts.extend(["-weak_framework", fw])
+    for dylib in spec.sdk_dylibs:
+        swift_linkopts.append("-l" + dylib)
+    if swift_linkopts:
+        kwargs["linkopts"] = list(kwargs.get("linkopts", [])) + swift_linkopts
+
+def _emit_rules_apple_plugin(spec, kwargs):
+    """Emit the rules_apple target graph for a plugin spoke."""
+    swift_files, objc_files, headers = _split_srcs(spec.srcs)
+    _emit_apple_framework_import(spec)
+
+    if swift_files and objc_files:
+        _emit_mixed_plugin(spec, swift_files, objc_files, headers, kwargs)
+        return
+
+    swift_deps = [":" + spec.framework_target] + spec.deps
+
+    objc_module_name, objc_dep = _emit_plugin_objc_target(spec, objc_files, headers)
+    if objc_dep:
+        if type(swift_deps) == "list":
+            swift_deps.append(objc_dep)
+        else:
+            swift_deps = swift_deps + [objc_dep]
+
+    bridging_header, extra_copts = _plugin_bridging_copts(spec, headers)
+    swift_files = _plugin_swift_srcs(spec, swift_files, objc_module_name if headers else "")
+
+    if swift_files and not objc_files:
+        _emit_pure_swift_linkopts(spec, kwargs)
+
+    _emit_plugin_swift_target(
+        spec,
+        spec.name,
+        swift_files,
+        swift_deps,
+        extra_copts,
+        bridging_header,
+        False,
+        kwargs,
+    )
+
 def flutter_apple_plugin_library(
         name,
         srcs = [],
@@ -677,6 +529,7 @@ def flutter_apple_plugin_library(
         plugin_defines = [],
         includes = [],
         sdk_frameworks = [],
+        weak_sdk_frameworks = [],
         sdk_dylibs = [],
         engine = None,
         backend = "rules_apple",
@@ -710,6 +563,7 @@ def flutter_apple_plugin_library(
             value. The `xtool` backend refuses a non-empty list.
         includes: Header search paths forwarded to the inner `objc_library`.
         sdk_frameworks: Apple SDK frameworks to link (e.g. `["AVFoundation"]`).
+        weak_sdk_frameworks: Apple SDK weak frameworks to link (e.g. `["MetricKit"]`).
         sdk_dylibs: Apple SDK dynamic libraries to link (e.g. `["c++"]`,
             `["sqlite3"]`).
         engine: Optional override for the Flutter engine framework label.
@@ -720,12 +574,7 @@ def flutter_apple_plugin_library(
             is only built when something depends on it.
         **kwargs: Forwarded to the underlying swift_library.
     """
-    if platform not in ("macos", "ios"):
-        fail("flutter_apple_plugin_library: platform must be 'macos' or 'ios', got '%s'" % platform)
-    if backend not in ("rules_apple", "xtool"):
-        fail("flutter_apple_plugin_library: backend must be 'rules_apple' or 'xtool', got %r" % backend)
-    if backend == "xtool" and objc_copts:
-        fail(objc_copts_xtool_refusal(name))
+    _validate_plugin_args(name, platform, backend, objc_copts, weak_sdk_frameworks)
 
     if tags == None:
         tags = ["manual"]
@@ -750,6 +599,7 @@ def flutter_apple_plugin_library(
         plugin_defines = plugin_defines,
         includes = includes,
         sdk_frameworks = sdk_frameworks,
+        weak_sdk_frameworks = weak_sdk_frameworks,
         sdk_dylibs = sdk_dylibs,
         engine_imports = _apple_plugin_engine_imports(platform, engine),
         framework_target = "_%s__flutter_framework" % name,
@@ -761,36 +611,5 @@ def flutter_apple_plugin_library(
 
     if backend == "xtool":
         _emit_xtool_plugin_branch(spec)
-        return
-
-    swift_files, objc_files, headers = _split_srcs(srcs)
-    _emit_apple_framework_import(spec)
-
-    if swift_files and objc_files:
-        _emit_mixed_plugin(spec, swift_files, objc_files, headers, kwargs)
-        return
-
-    swift_deps = [":" + spec.framework_target] + deps
-
-    objc_module_name, objc_dep = _emit_plugin_objc_target(spec, objc_files, headers)
-    if objc_dep:
-        if type(swift_deps) == "list":
-            swift_deps.append(objc_dep)
-        else:
-            swift_deps = swift_deps + [objc_dep]
-
-    bridging_header, extra_copts = _plugin_bridging_copts(spec, headers)
-
-    # A header-less ObjC target gets no clang module, so there is nothing to re-export.
-    swift_files = _plugin_swift_srcs(spec, swift_files, objc_module_name if headers else "")
-
-    _emit_plugin_swift_target(
-        spec,
-        name,
-        swift_files,
-        swift_deps,
-        extra_copts,
-        bridging_header,
-        False,
-        kwargs,
-    )
+    else:
+        _emit_rules_apple_plugin(spec, kwargs)
