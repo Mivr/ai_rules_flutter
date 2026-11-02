@@ -532,20 +532,24 @@ jobs:
       # check, proving the lock is enforced.
       - name: Modified rules_android_maven install fails on invalid input signature
         run: |
-          trap 'rm -rf e2e/hello_world_tmp; (cd e2e/hello_world_tmp 2>/dev/null && bazel shutdown || true)' EXIT
-          cp -r e2e/hello_world e2e/hello_world_tmp
-          sed -i 's/"androidx.privacysandbox.tools:tools:1.0.0-alpha06"/"androidx.privacysandbox.tools:tools:1.0.0-alpha07"/' e2e/hello_world_tmp/MODULE.bazel
-          cd e2e/hello_world_tmp
-          if out=$(bazel fetch @rules_android_maven//:all 2>&1); then
+          tmp_ws="$PWD/e2e/hello_world_tmp"
+          rm -rf "$tmp_ws"
+          trap '(cd "$tmp_ws" 2>/dev/null && bazel shutdown) >/dev/null 2>&1 || true; rm -rf "$tmp_ws"' EXIT
+          cp -r e2e/hello_world "$tmp_ws"
+          sed -i 's/"androidx.privacysandbox.tools:tools:1.0.0-alpha06"/"androidx.privacysandbox.tools:tools:1.0.0-alpha07"/' "$tmp_ws/MODULE.bazel"
+          grep -Fq '"androidx.privacysandbox.tools:tools:1.0.0-alpha07"' "$tmp_ws/MODULE.bazel"
+          if out=$(cd "$tmp_ws" && bazel fetch @rules_android_maven//:all 2>&1); then
             echo "$out"
             echo "expected fetch with changed artifact version to fail, but it succeeded"
             exit 1
           fi
-          echo "$out"
-          echo "$out" | grep -F "invalid input signature"
-          bazel shutdown
-          cd ../..
-          rm -rf e2e/hello_world_tmp
+          if ! echo "$out" | grep -F "invalid input signature"; then
+            echo "$out"
+            echo "expected fetch to fail with rules_jvm_external invalid input signature"
+            exit 1
+          fi
+          (cd "$tmp_ws" && bazel shutdown)
+          rm -rf "$tmp_ws"
           trap - EXIT
       - name: Report cache sizes
         if: always()
