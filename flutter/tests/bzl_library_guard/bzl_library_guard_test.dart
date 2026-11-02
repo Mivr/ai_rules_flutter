@@ -28,29 +28,42 @@ const Map<String, String> _rulesDartTargets = <String, String>{
   '@rules_dart//dart/pub:yaml_parser.bzl': '@rules_dart//dart/pub:yaml_parser',
 };
 
-/// External ruleset `.bzl` loads that expose a public `bzl_library` target.
-const Map<String, String> _externalRuleTargets = <String, String>{
-  '@apple_support//lib:apple_support.bzl': '@apple_support//lib:apple_support',
-  '@rules_android//providers:providers.bzl':
-      '@rules_android//providers:providers_bzl',
-  '@rules_apple//apple:apple.bzl': '@rules_apple//apple:apple',
-  '@rules_apple//apple:ios.bzl': '@rules_apple//apple:ios',
-  '@rules_apple//apple:macos.bzl': '@rules_apple//apple:macos',
-  '@rules_apple//apple:resources.bzl': '@rules_apple//apple:resources',
-  '@rules_apple//apple:versioning.bzl': '@rules_apple//apple:versioning',
-  '@rules_cc//cc:action_names.bzl': '@rules_cc//cc:action_names_bzl',
-  '@rules_cc//cc:defs.bzl': '@rules_cc//cc:defs_bzl',
-  '@rules_cc//cc:find_cc_toolchain.bzl': '@rules_cc//cc:find_cc_toolchain_bzl',
-  '@rules_cc//cc:objc_library.bzl': '@rules_cc//cc:core_rules',
-  '@rules_cc//cc/common:cc_common.bzl': '@rules_cc//cc/common:common',
-  '@rules_cc//cc/common:cc_info.bzl': '@rules_cc//cc/common:common',
-  '@rules_cc//cc/common:cc_shared_library_info.bzl':
-      '@rules_cc//cc/common:cc_shared_library_info_bzl',
-  '@rules_cc//cc/common:objc_info.bzl': '@rules_cc//cc/common:common',
-  '@rules_java//java:java_import.bzl': '@rules_java//java:core_rules',
-  '@rules_java//java/common:java_common.bzl': '@rules_java//java/common:common',
-  '@rules_java//java/common:java_info.bzl': '@rules_java//java/common:common',
-  '@rules_swift//swift:swift.bzl': '@rules_swift//swift:swift',
+/// External ruleset `.bzl` loads that expose public `bzl_library` targets.
+///
+/// `@rules_cc//cc/common:cc_shared_library_info_bzl` omits its transitive
+/// `@rules_cc//cc/private:visibility_bzl` dependency, which
+/// `@rules_cc//cc/common:common` provides publicly.
+const Map<String, List<String>> _externalRuleTargets = <String, List<String>>{
+  '@apple_support//lib:apple_support.bzl': [
+    '@apple_support//lib:apple_support',
+  ],
+  '@rules_android//providers:providers.bzl': [
+    '@rules_android//providers:providers_bzl',
+  ],
+  '@rules_apple//apple:apple.bzl': ['@rules_apple//apple:apple'],
+  '@rules_apple//apple:ios.bzl': ['@rules_apple//apple:ios'],
+  '@rules_apple//apple:macos.bzl': ['@rules_apple//apple:macos'],
+  '@rules_apple//apple:resources.bzl': ['@rules_apple//apple:resources'],
+  '@rules_apple//apple:versioning.bzl': ['@rules_apple//apple:versioning'],
+  '@rules_cc//cc:action_names.bzl': ['@rules_cc//cc:action_names_bzl'],
+  '@rules_cc//cc:defs.bzl': ['@rules_cc//cc:defs_bzl'],
+  '@rules_cc//cc:find_cc_toolchain.bzl': [
+    '@rules_cc//cc:find_cc_toolchain_bzl',
+  ],
+  '@rules_cc//cc:objc_library.bzl': ['@rules_cc//cc:core_rules'],
+  '@rules_cc//cc/common:cc_common.bzl': ['@rules_cc//cc/common:common'],
+  '@rules_cc//cc/common:cc_info.bzl': ['@rules_cc//cc/common:common'],
+  '@rules_cc//cc/common:cc_shared_library_info.bzl': [
+    '@rules_cc//cc/common:cc_shared_library_info_bzl',
+    '@rules_cc//cc/common:common',
+  ],
+  '@rules_cc//cc/common:objc_info.bzl': ['@rules_cc//cc/common:common'],
+  '@rules_java//java:java_import.bzl': ['@rules_java//java:core_rules'],
+  '@rules_java//java/common:java_common.bzl': [
+    '@rules_java//java/common:common',
+  ],
+  '@rules_java//java/common:java_info.bzl': ['@rules_java//java/common:common'],
+  '@rules_swift//swift:swift.bzl': ['@rules_swift//swift:swift'],
 };
 
 /// Expected public `.bzl` entry stems under `//flutter`.
@@ -674,17 +687,18 @@ String? _sameRepoFileFromLoad(String rawLoad, String currentPkg) {
   return null;
 }
 
-String? _resolveExternalDepTarget(String rawLoad, String currentPkg) {
+Iterable<String> _resolveExternalDepTargets(String rawLoad, String currentPkg) {
   if (rawLoad.startsWith('@bazel_skylib//')) {
     final target = rawLoad.endsWith('.bzl')
         ? rawLoad.substring(0, rawLoad.length - 4)
         : rawLoad;
-    return _canonicalizeDep(target, currentPkg);
+    return <String>[_canonicalizeDep(target, currentPkg)];
   }
   if (rawLoad.startsWith('@rules_dart//')) {
-    return _rulesDartTargets[rawLoad];
+    final target = _rulesDartTargets[rawLoad];
+    return target == null ? const <String>[] : <String>[target];
   }
-  return _externalRuleTargets[rawLoad];
+  return _externalRuleTargets[rawLoad] ?? const <String>[];
 }
 
 (Set<String>, List<String>) _expectedDepsForFile(
@@ -711,8 +725,7 @@ String? _resolveExternalDepTarget(String rawLoad, String currentPkg) {
       }
       continue;
     }
-    final externalTarget = _resolveExternalDepTarget(rawLoad, currentPkg);
-    if (externalTarget != null) requiredDeps.add(externalTarget);
+    requiredDeps.addAll(_resolveExternalDepTargets(rawLoad, currentPkg));
   }
   return (requiredDeps, loadErrors);
 }
