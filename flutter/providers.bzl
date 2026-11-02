@@ -398,6 +398,7 @@ FlutterApplePluginInfo = provider(
         "headers": "depset[File]: Header Files.",
         "modulemap": "File or None: Generated Clang modulemap file.",
         "sdk_frameworks": "list[str]: Linked Apple SDK frameworks.",
+        "weak_sdk_frameworks": "list[str]: Linked Apple SDK weak frameworks.",
         "sdk_dylibs": "list[str]: Linked Apple SDK dylibs.",
     },
 )
