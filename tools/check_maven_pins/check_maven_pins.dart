@@ -8,20 +8,20 @@ import 'dart:io';
 
 import 'pins.dart';
 
+/// CLI entry point for checking `rules_android_maven` lock files.
 void main(List<String> args) {
-  final rootPath =
+  final String rootPath =
       Platform.environment['BUILD_WORKSPACE_DIRECTORY'] ??
       Directory.current.path;
 
-  final sep = Platform.pathSeparator;
-  if (!File('$rootPath${sep}MODULE.bazel').existsSync() ||
-      !Directory('$rootPath${sep}e2e').existsSync()) {
+  if (!File('$rootPath/MODULE.bazel').existsSync() ||
+      !Directory('$rootPath/e2e').existsSync()) {
     stderr.writeln('error: run //tools/check_maven_pins from the repo root');
     exit(2);
   }
 
-  final workspaces = args.isNotEmpty ? args : null;
-  final errors = checkAllWorkspaces(
+  final List<String>? workspaces = args.isNotEmpty ? args : null;
+  final List<String> errors = checkAllWorkspaces(
     rootPath: rootPath,
     workspaces: workspaces,
   );
@@ -33,6 +33,8 @@ void main(List<String> args) {
     exit(1);
   }
 
-  final count = workspaces?.length ?? defaultAndroidWorkspaces.length;
-  print('ok: $count Android workspaces have valid rules_android_maven locks');
+  final int count = workspaces?.length ?? defaultAndroidWorkspaces.length;
+  stdout.writeln(
+    'ok: $count Android workspaces have valid rules_android_maven locks',
+  );
 }
