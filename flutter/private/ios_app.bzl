@@ -48,6 +48,7 @@ def _engine_xcframework_select():
         "//conditions:default": [Label("@flutter_ios_engine//:Flutter_xcframework")],
     })
 
+# rule_test_coverage: no-actions
 def flutter_ios_engine(name, backend = "rules_apple", **kwargs):
     """Imports the Flutter.xcframework engine, auto-selecting debug or release.
 

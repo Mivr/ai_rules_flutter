@@ -65,6 +65,7 @@ def _flutter_apple_plugins_aggregator_impl(ctx):
         ),
     ]
 
+# rule_test_coverage: no-actions
 flutter_apple_plugins_aggregator = rule(
     implementation = _flutter_apple_plugins_aggregator_impl,
     attrs = {

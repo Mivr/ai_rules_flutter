@@ -67,6 +67,7 @@ flutter_integration_test = _flutter_integration_test
 
 # -- Composable rules (Tier 2) ------------------------------------------------
 
+# rule_test_coverage: no-actions
 flutter_linux_engine = _flutter_linux_engine_rule
 flutter_linux_registrant_gen = _flutter_linux_registrant
 
@@ -74,8 +75,10 @@ flutter_linux_registrant_gen = _flutter_linux_registrant
 # runner to compile + link. For pub.dev plugins, flutter_pub_package emits
 # this automatically; expose it here so users can wire a monorepo plugin's
 # BUILD.bazel without going through the ext/ overlay system.
+# rule_test_coverage: no-actions
 flutter_linux_plugin_library = _flutter_linux_plugin_library
 
+# rule_test_coverage: no-actions
 def flutter_linux_runner_lib_gen(name, engine, registrant, application = None, gtk_app_id = "com.example.flutter", window_title = "Flutter", srcs = [], hdrs = [], **kwargs):
     """Compiles a GTK Linux runner binary from template or custom sources.
 

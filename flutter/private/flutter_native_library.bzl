@@ -93,6 +93,7 @@ def _flutter_native_library_impl(ctx):
         ),
     ]
 
+# rule_test_coverage: no-actions
 flutter_native_library = rule(
     implementation = _flutter_native_library_impl,
     doc = """A `native_deps` entry that declares what its bindings were built against.

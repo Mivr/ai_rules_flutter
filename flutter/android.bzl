@@ -229,6 +229,7 @@ def flutter_android_plugin_library(name, flutter_engine = None, tags = None, **k
 # flutter_android_app; expose for Tier-2 control.
 flutter_android_registrant = _flutter_android_registrant
 
+# rule_test_coverage: no-actions
 def flutter_android_engine(name, android_abi = "arm64", neverlink = False, **kwargs):
     """Imports the Flutter engine (flutter.jar) as a java_import target.
 

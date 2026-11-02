@@ -79,10 +79,12 @@ MACOS_MINIMUM_OS_VERSION = _MACOS_MINIMUM_OS_VERSION
 flutter_entitlements_merge = _flutter_entitlements_merge
 
 # Host-agnostic xtool framework import, versioning, and macOS bundle rules.
+# rule_test_coverage: no-actions
 flutter_darwin_xcframework_import = _flutter_darwin_xcframework_import
 
 # Imports one prebuilt .xcframework or .framework on the selected Apple
 # backend, for iOS and macOS alike.
+# rule_test_coverage: no-actions
 flutter_apple_xcframework_import = _flutter_apple_xcframework_import
 
 flutter_xtool_bundle_version = _flutter_xtool_bundle_version
@@ -90,6 +92,7 @@ flutter_xtool_macos_bundle = _flutter_xtool_macos_bundle
 
 # Tier 1 app assembly and engine import live in flutter/private/macos_app.bzl;
 # re-exported here so user BUILD files are unaffected.
+# rule_test_coverage: no-actions
 flutter_macos_engine = _flutter_macos_engine
 flutter_macos_app = _flutter_macos_app
 
@@ -146,6 +149,7 @@ def flutter_macos_native_libs_gen(name, minimum_os_version = MACOS_MINIMUM_OS_VE
         **kwargs
     )
 
+# rule_test_coverage: no-actions
 def flutter_macos_privacy_manifests_gen(name, **kwargs):
     """Exposes plugin privacy manifests. See `flutter_macos_privacy_manifests`.
 
@@ -166,6 +170,7 @@ flutter_apple_plugin_library = _flutter_apple_plugin_library_macro
 # Aggregates per-plugin Apple swift_libraries from a flutter_application's
 # transitive dep graph. Pass to runner_lib_gen `application` to thread plugin
 # Swift modules + link inputs into the runner.
+# rule_test_coverage: no-actions
 flutter_apple_plugins_aggregator = _flutter_apple_plugins_aggregator
 
 def flutter_macos_info_plist_gen(name, app_name, **kwargs):

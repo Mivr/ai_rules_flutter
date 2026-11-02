@@ -8,7 +8,15 @@ load(
     "flutter_library",
     "flutter_test",
 )
-load("@rules_flutter//flutter:ios.bzl", "flutter_ios_registrant_gen", "flutter_ios_simulator_build_test")
+load(
+    "@rules_flutter//flutter:ios.bzl",
+    "flutter_apple_plugins_aggregator",
+    "flutter_darwin_xcframework_import",
+    "flutter_ios_registrant_gen",
+    "flutter_ios_simulator_build_test",
+    "flutter_xtool_bundle_version",
+    "flutter_xtool_ios_bundle",
+)
 load("@rules_swift//swift:swift.bzl", "swift_library", "swift_library_group")
 
 exports_files([
@@ -252,6 +260,31 @@ flutter_integration_test(
     ],
 )
 
+flutter_apple_plugins_aggregator(
+    name = "e2e_apple_plugins_aggregator",
+    application = ":__app_test_app",
+    platform = "ios",
+)
+
+flutter_darwin_xcframework_import(
+    name = "e2e_darwin_xcframework_import",
+    framework_name = "WrongBigInt",
+    xcframework_imports = ["lib/main.dart"],
+)
+
+flutter_xtool_bundle_version(
+    name = "e2e_xtool_bundle_version",
+    build_version = "1.0.0",
+    short_version_string = "1.0",
+)
+
+flutter_xtool_ios_bundle(
+    name = "e2e_xtool_ios_bundle",
+    app_name = "IntegrationIos",
+    bundle_id = "com.example.integrationIos",
+    executable = "lib/main.dart",
+)
+
 # Linux-runnable proof that the workspace loads and its Dart side compiles:
 # the bootstrap and the kernel application are portable, while the
 # Apple-toolchain targets (and the test targets above) skip off macOS via
@@ -274,6 +307,10 @@ build_test(
         ":__plugin_spm_objc_test_bootstrap",
         ":__plugin_spm_test_app",
         ":__plugin_spm_test_bootstrap",
+        ":e2e_apple_plugins_aggregator",
+        ":e2e_darwin_xcframework_import",
+        ":e2e_xtool_bundle_version",
+        ":e2e_xtool_ios_bundle",
     ],
 )
 

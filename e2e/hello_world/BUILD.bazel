@@ -26,7 +26,7 @@ load(
     "flutter_ios_simulator_build_test",
 )
 load("@rules_flutter//flutter:linux.bzl", "flutter_linux_app")
-load("@rules_flutter//flutter:macos.bzl", "flutter_macos_app")
+load("@rules_flutter//flutter:macos.bzl", "flutter_macos_app", "flutter_xtool_macos_bundle")
 load("@rules_flutter//flutter:web.bzl", "flutter_web_app")
 load("@rules_flutter//flutter:windows.bzl", "flutter_windows_app")
 load(":android_apk_overlay_test.bzl", "android_apk_overlay_test_suite")
@@ -114,6 +114,14 @@ flutter_macos_app(
     app_name = "Hello World",
     application = ":hello_world_app",
     bundle_id = "com.example.helloworld",
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
+flutter_xtool_macos_bundle(
+    name = "hello_world_xtool_macos_bundle",
+    app_name = "Hello World",
+    bundle_id = "com.example.helloworld",
+    executable = "lib/main.dart",
     target_compatible_with = ["@platforms//os:macos"],
 )
 
@@ -900,7 +908,10 @@ build_test(
     name = "macos_bundle_build_test",
     size = "small",
     target_compatible_with = ["@platforms//os:macos"],
-    targets = [":hello_world_macos"],
+    targets = [
+        ":hello_world_macos",
+        ":hello_world_xtool_macos_bundle",
+    ],
 )
 
 # Unit tests for `test/bazel_client.dart`, the resolver the macOS stage-clean

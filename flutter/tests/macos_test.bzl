@@ -907,6 +907,12 @@ def _macos_framework_bundle_info_test_impl(ctx):
         FlutterDarwinFrameworkInfo in tut,
         "Expected FlutterDarwinFrameworkInfo on flutter_macos_framework for xtool bundling",
     )
+    actions = analysistest.target_actions(env)
+    fw_actions = [a for a in actions if a.mnemonic == "FlutterMacOSFramework"]
+    asserts.equals(env, 1, len(fw_actions))
+    asserts.true(env, any([arg.endswith(".framework.zip") for arg in fw_actions[0].argv]))
+    input_names = [f.basename for f in fw_actions[0].inputs.to_list()]
+    asserts.true(env, "Info.plist" in input_names)
     return analysistest.end(env)
 
 _macos_framework_bundle_info_test = analysistest.make(_macos_framework_bundle_info_test_impl)
@@ -992,6 +998,10 @@ def _xtool_bundle_framework_archive_test_impl(ctx):
         saw_archive,
         "Expected a --framework App.framework.zip argument on the xtool bundle/runner actions",
     )
+    tut = analysistest.target_under_test(env)
+    asserts.true(env, DefaultInfo in tut)
+    default_files = [f.basename for f in tut[DefaultInfo].files.to_list()]
+    asserts.true(env, any([f.endswith(".app.zip") for f in default_files]))
     return analysistest.end(env)
 
 _xtool_bundle_framework_archive_test = analysistest.make(_xtool_bundle_framework_archive_test_impl)

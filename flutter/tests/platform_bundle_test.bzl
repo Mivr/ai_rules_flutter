@@ -265,6 +265,10 @@ _fake_android_app = rule(
 def _android_registrant_transition_test_impl(ctx):
     """flutter_android_registrant transitions application to the target Android ABI platform."""
     env = analysistest.begin(ctx)
+    tut = analysistest.target_under_test(env)
+    asserts.true(env, DefaultInfo in tut)
+    default_files = [f.basename for f in tut[DefaultInfo].files.to_list()]
+    asserts.true(env, "GeneratedPluginRegistrant.java" in default_files)
     actions = analysistest.target_actions(env)
     asserts.equals(env, 1, len(actions))
     asserts.true(

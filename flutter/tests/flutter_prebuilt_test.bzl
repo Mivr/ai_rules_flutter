@@ -55,6 +55,10 @@ def _prebuilt_no_compile_test_impl(ctx):
             [a.mnemonic for a in actions]
         ),
     )
+    symlink_actions = [a for a in actions if a.mnemonic == "ExecutableSymlink"]
+    asserts.equals(env, 1, len(symlink_actions))
+    symlink_inputs = [f.basename for f in symlink_actions[0].inputs.to_list()]
+    asserts.true(env, "flutter_test_runner" in symlink_inputs)
 
     # The runner contract is still fully wired: the kernel, its assets, the
     # engine and ICU data reach the test through runfiles, which is what the

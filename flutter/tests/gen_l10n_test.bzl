@@ -67,6 +67,9 @@ def _declared_arbs_argv_test_impl(ctx):
         ],
         out_names,
     )
+    tut = analysistest.target_under_test(env)
+    asserts.true(env, DefaultInfo in tut)
+    asserts.equals(env, out_names, sorted([f.basename for f in tut[DefaultInfo].files.to_list()]))
     return analysistest.end(env)
 
 def _mixed_source_and_generated_arbs_test_impl(ctx):

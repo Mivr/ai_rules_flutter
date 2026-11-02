@@ -141,6 +141,7 @@ bazel_dep(name = "rules_go", version = "0.59.0")
 bazel_dep(name = "rules_multitool", version = "1.11.1", dev_dependency = True)
 bazel_dep(name = "buildifier_prebuilt", version = "10.1.0", dev_dependency = True)
 bazel_dep(name = "bazelrc-preset.bzl", version = "1.9.2", dev_dependency = True)
+bazel_dep(name = "rules_testing", version = "0.9.0", dev_dependency = True)
 
 # LLVM backs the opt-in xtool Darwin SDK backend (`flutter.darwin_sdk`): the
 # `@flutter_xtool_darwin_sdk` repo symlinks the hermetic LLVM `bin`/`lib` trees

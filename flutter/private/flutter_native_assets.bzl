@@ -355,6 +355,7 @@ def _flutter_native_assets_manifest_impl(ctx):
         )
     return [DefaultInfo(files = depset([app_info.native_assets_manifest]))]
 
+# rule_test_coverage: no-actions
 flutter_native_assets_manifest = rule(
     implementation = _flutter_native_assets_manifest_impl,
     attrs = {

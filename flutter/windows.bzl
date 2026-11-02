@@ -61,6 +61,7 @@ load("//flutter/private:flutter_windows_registrant.bzl", _flutter_windows_regist
 
 # -- Composable rules (Tier 2) ------------------------------------------------
 
+# rule_test_coverage: no-actions
 flutter_windows_engine = _flutter_windows_engine_rule
 flutter_windows_registrant_gen = _flutter_windows_registrant
 
@@ -68,8 +69,10 @@ flutter_windows_registrant_gen = _flutter_windows_registrant
 # runner to compile + link. For pub.dev plugins, flutter_pub_package emits
 # this automatically; expose it here so users can wire a monorepo plugin's
 # BUILD.bazel without going through the ext/ overlay system.
+# rule_test_coverage: no-actions
 flutter_windows_plugin_library = _flutter_windows_plugin_library
 
+# rule_test_coverage: no-actions
 def flutter_windows_runner_lib_gen(name, engine, registrant, application = None, srcs = [], hdrs = [], **kwargs):
     """Compiles a Win32 runner binary from template or custom sources.
 

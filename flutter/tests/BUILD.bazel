@@ -5,6 +5,7 @@ load("//flutter/private:flutter_aot_target.bzl", "flutter_aot_target")
 load(":action_inputs_test.bzl", "action_inputs_test_suite")
 load(":android_pure_go_test.bzl", "android_pure_go_test_suite")
 load(":android_release_signing_test.bzl", "android_release_signing_test_suite")
+load(":android_rules_test.bzl", "android_rules_test_suite")
 load(":aot_flags_test.bzl", "aot_flags_test_suite")
 load(":app_entrypoint_test.bzl", "app_entrypoint_test_suite")
 load(":apple_objc_deps_test.bzl", "apple_objc_deps_test_suite")
@@ -18,6 +19,7 @@ load(":compile_api_test.bzl", "compile_api_test_suite")
 load(":cpp_client_wrapper_test.bzl", "cpp_client_wrapper_test_suite")
 load(":custom_kernel_defines_test.bzl", "custom_kernel_defines_test_suite")
 load(":define_flagfiles_test.bzl", "define_flagfiles_test_suite")
+load(":defs_rules_test.bzl", "defs_rules_test_suite")
 load(":flutter_apple_xcframework_import_test.bzl", "flutter_apple_xcframework_import_test_suite")
 load(":flutter_application_test.bzl", "flutter_application_test_suite")
 load(":flutter_info_test.bzl", "flutter_info_test_suite")
@@ -42,16 +44,20 @@ load(":gen_l10n_test.bzl", "gen_l10n_test_suite")
 load(":gradle_model_test.bzl", "gradle_model_test_suite")
 load(":ios_integration_test_test.bzl", "ios_integration_test_test_suite")
 load(":ios_plugin_deps_test.bzl", "ios_plugin_deps_test_suite")
+load(":ios_rules_test.bzl", "ios_rules_test_suite")
 load(":ios_split_debug_assets_test.bzl", "ios_split_debug_assets_test_suite")
 load(":ios_test.bzl", "ios_apple_plugin_test_suite", "ios_test_suite")
 load(":language_version_test.bzl", "language_version_test_suite")
 load(":linux_integration_runner_test.bzl", "linux_integration_runner_test_suite")
+load(":linux_rules_test.bzl", "linux_rules_test_suite")
 load(":linux_runner_defines_test.bzl", "linux_runner_defines_test_suite")
 load(":linux_sysroot_link_test.bzl", "linux_sysroot_link_test_suite")
 load(":local_sdk_test.bzl", "local_sdk_test_suite")
+load(":macos_rules_test.bzl", "macos_rules_test_suite")
 load(":macos_test.bzl", "macos_apple_plugin_test_suite", "macos_test_suite")
 load(":manifest_merge_test.bzl", "manifest_merge_test_suite")
 load(":modular_api_test.bzl", "modular_api_test_suite")
+load(":native_assets_rules_test.bzl", "native_assets_rules_test_suite")
 load(":native_assets_test.bzl", "bridge_probe", "native_assets_test_suite")
 load(":native_hot_patch_test.bzl", "native_hot_patch_test_suite")
 load(":native_sources_test.bzl", "native_sources_test_suite")
@@ -84,7 +90,9 @@ load(":toolchains_repo_test.bzl", "toolchains_repo_test_suite")
 load(":unused_inputs_test.bzl", "unused_inputs_test_suite")
 load(":validation_test.bzl", "validation_test_suite")
 load(":versions_test.bzl", "versions_test_suite")
+load(":web_rules_test.bzl", "web_rules_test_suite")
 load(":web_test.bzl", "web_test_suite")
+load(":windows_rules_test.bzl", "windows_rules_test_suite")
 
 # The dependency-floor table is read by //flutter/tests:dependency_floors_test
 # and by e2e/min_versions, which resolves the same declared floors.
@@ -317,6 +325,8 @@ action_inputs_test_suite(name = "action_inputs_test")
 
 android_pure_go_test_suite(name = "android_pure_go_test")
 
+android_rules_test_suite(name = "android_rules_test")
+
 android_release_signing_test_suite(name = "android_release_signing_test")
 
 versions_test_suite(name = "versions_test")
@@ -355,15 +365,23 @@ ios_apple_plugin_test_suite(name = "ios_apple_plugin_test")
 
 ios_plugin_deps_test_suite(name = "ios_plugin_deps_test")
 
+ios_rules_test_suite(name = "ios_rules_test")
+
 ios_integration_test_test_suite(name = "ios_integration_test_test")
 
 macos_test_suite(name = "macos_test")
+
+macos_rules_test_suite(name = "macos_rules_test")
 
 macos_apple_plugin_test_suite(name = "macos_apple_plugin_test")
 
 manifest_merge_test_suite(name = "manifest_merge_test")
 
 plist_merge_test_suite(name = "plist_merge_test")
+
+defs_rules_test_suite(name = "defs_rules_test")
+
+web_rules_test_suite(name = "web_rules_test")
 
 web_test_suite(name = "web_test")
 
@@ -415,6 +433,10 @@ platform_bundle_test_suite(name = "platform_bundle_test")
 
 linux_runner_defines_test_suite(name = "linux_runner_defines_test")
 
+linux_rules_test_suite(name = "linux_rules_test")
+
+windows_rules_test_suite(name = "windows_rules_test")
+
 linux_integration_runner_test_suite(name = "linux_integration_runner_test")
 
 linux_sysroot_link_test_suite(name = "linux_sysroot_link_test")
@@ -440,6 +462,8 @@ toolchains_repo_test_suite(name = "toolchains_repo_test")
 flutter_application_test_suite(name = "flutter_application_test")
 
 flutter_apple_xcframework_import_test_suite(name = "flutter_apple_xcframework_import_test")
+
+native_assets_rules_test_suite(name = "native_assets_rules_test")
 
 native_assets_test_suite(name = "native_assets_test")
 

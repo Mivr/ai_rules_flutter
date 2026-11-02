@@ -632,6 +632,7 @@ def _flutter_library_impl(ctx):
         ),
     ]
 
+# rule_test_coverage: no-actions
 flutter_library = rule(
     implementation = _flutter_library_impl,
     attrs = {
