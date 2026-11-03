@@ -243,14 +243,26 @@ def _flutter_ios_info_plist_impl(ctx):
 _flutter_ios_info_plist = rule(
     implementation = _flutter_ios_info_plist_impl,
     attrs = {
-        "app_name": attr.string(mandatory = True),
-        "extra_plists": attr.label_list(allow_files = True, default = []),
-        "module_name": attr.string(default = "Runner"),
+        "app_name": attr.string(
+            doc = "Display name substituted for `APP_NAME` in the template.",
+            mandatory = True,
+        ),
+        "extra_plists": attr.label_list(
+            allow_files = True,
+            default = [],
+            doc = "Additional plist fragments exposed alongside the expanded `Info.plist`.",
+        ),
+        "module_name": attr.string(
+            default = "Runner",
+            doc = "Swift module name substituted for `MODULE_NAME` in the template.",
+        ),
         "_template": attr.label(
-            default = "@rules_flutter//flutter/private/runners/ios:Info.plist",
             allow_single_file = True,
+            default = "@rules_flutter//flutter/private/runners/ios:Info.plist",
+            doc = "Base iOS `Info.plist` template expanded for the target.",
         ),
     },
+    doc = "Expands the default iOS `Info.plist` template and exposes it alongside any mode-specific plist fragments.",
 )
 
 def flutter_ios_info_plist_gen(name, app_name, module_name = "Runner", **kwargs):
