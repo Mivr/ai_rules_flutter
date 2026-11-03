@@ -497,6 +497,37 @@ jobs:
             exit 1
           fi
           echo "$out" | grep -F "is not a declared input"
+      # The other two compile-api negatives are `manual` too, so `bazel test
+      # //flutter/tests/...` never builds them; this step builds each one
+      # explicitly. The incremental negative imports an undeclared sibling,
+      # which the directive guard refuses before the compiler runs, so it
+      # keeps the default spawn strategy. The `package:` negative passes the
+      # guard (the URI does not escape); under the default sandbox the
+      # compiler fails earlier with `File not found`, so that build runs with
+      # `--spawn_strategy=local`: the compiler reads the file off the exec
+      # root and the post-compile read-set check refuses it. A build that
+      # succeeds fails the job, and so does a failure that does not name the
+      # refusal, so a compiler crash cannot pass as red.
+      - name: Undeclared-input compile negatives fail on the refusal
+        run: |
+          if out=$(bazel build //flutter/tests:_compile_api_build_negative_incremental 2>&1); then
+            echo "$out"
+            echo "expected the incremental undeclared-import compile to fail, but it succeeded"
+            exit 1
+          fi
+          echo "$out" | grep -F "is not a declared input"
+          if out=$(bazel build --spawn_strategy=local //flutter/tests:_compile_api_build_negative_pkg 2>&1); then
+            echo "$out"
+            echo "expected the undeclared package: read to fail, but it succeeded"
+            exit 1
+          fi
+          echo "$out" | grep -F "is not a declared input"
+      # Coverage check: every manual `_compile_api_build_negative_*` target in
+      # compile_api_test.bzl must be named by a must-fail step that greps the
+      # refusal. Deleting the step above, or dropping its grep, turns this red
+      # even while `//...` stays green.
+      - name: Check every compile-api negative is covered
+        run: bazel run //tools/check_compile_api_coverage
       # Coverage check: every hostile fixture declared in web_test.bzl must be
       # named by the must-fail step below, and that step must pin the guard
       # message. Adding a spelling without a build, or dropping one from the
