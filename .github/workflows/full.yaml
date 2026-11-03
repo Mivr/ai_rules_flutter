@@ -95,8 +95,10 @@ jobs:
             cache-save: false
           # The real-plugin fetch matrix (POD-2). The Linux fetch half runs
           # in e2e-linux-nightly; this leg builds the plugins expected.json
-          # records as "ok", one at a time, and reports every result. Its
-          # image_picker_ios build is expected to fail until POD-1 lands.
+          # records as "ok", one at a time, and reports every result.
+          # build_expected.json gates image_picker_ios as "ok" (exit 0, since
+          # POD-1 builds its image_picker_ios_objc target); the other
+          # expected-ok plugins are printed and recorded without gating yet.
           - workspace: ios_plugin_matrix
             shard: none
             cache-save: false
@@ -153,10 +155,11 @@ jobs:
         run: bazel test //... --test_output=errors
       # The macOS half of POD-2: build each plugin expected.json records as
       # "ok" as the spoke's generated device library, one at a time. The step
-      # fails when image_picker_ios builds (its Swift target must keep failing
-      # on the header from the unbuilt image_picker_ios_objc target until
-      # POD-1 lands); the other results are printed and recorded without
-      # gating yet, so a later item flips them in build_expected.json.
+      # fails when image_picker_ios does not build: build_expected.json gates
+      # it as "ok", requiring exit 0, because POD-1 builds its
+      # image_picker_ios_objc target. The other expected-ok plugins are
+      # printed and recorded without gating yet, so a later item flips them
+      # in build_expected.json.
       - name: iOS plugin build matrix (e2e/ios_plugin_matrix)
         if: matrix.workspace == 'ios_plugin_matrix'
         working-directory: e2e/ios_plugin_matrix

@@ -91,17 +91,15 @@ The platform and CPU flags live in `run_matrix.py`, so the offline self-test
 sees the exact build command; `.bazelrc` and the workflow pass none.
 
 `build_expected.json` names the builds that gate the step today. An entry maps
-a plugin to `ok` to require exit 0, or to a case-sensitive substring of a
-compiler diagnostic. The single entry, `image_picker_ios`, carries the
-substring `error:`: it is expected to fail to compile until POD-1 builds its
-`image_picker_ios_objc` target, because its Swift code uses `FLTMaxSize` from
-that target's pigeon header. A gated failure passes only when the build exits
-non-zero and prints `error:`, the shape swiftc and clang give
-(`<file>:<line>:<col>: error:`); a Bazel analysis refusal such as an
-incompatible platform or a missing target does not satisfy it. A failing build
-prints its command and the last 30 lines of its output. The other builds are
-printed and recorded without gating yet; a later item adds them to
-`build_expected.json` when their expected result is known.
+a plugin to `ok` to require exit 0; any other value is a case-sensitive
+substring of a compiler diagnostic such as `<file>:<line>:<col>: error:`,
+which requires a non-zero exit and rejects a Bazel `ERROR:` analysis refusal.
+The single entry, `image_picker_ios`, maps to `ok`: it requires exit 0 now
+that POD-1 builds its `image_picker_ios_objc` target alongside its Swift
+target. A failing build prints its command and the last 30 lines of its output.
+The other expected-ok plugins are printed as `RECORD` without gating yet; a
+later item adds them to `build_expected.json` when their expected result is
+known.
 
 ### CocoaPods mode (`run_pods_matrix.py`)
 
