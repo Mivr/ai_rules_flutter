@@ -33,11 +33,16 @@ repos:
         # A patch's blank context lines are a single space; stripping it
         # stops the hunk from applying.
         exclude: \.patch$
-  # Check formatting and lint for starlark code
+  # Check formatting and lint for starlark code. These hooks are the only
+  # buildifier entry point. Both read the warning set from the root
+  # `.buildifier.json`. The format hook runs with linting off, so formatting
+  # never rewrites a lint finding. The lint hook keeps its upstream
+  # `-lint=warn` default and reports findings without changing a file.
   - repo: https://github.com/keith/pre-commit-buildifier
     rev: 10.1.0
     hooks:
       - id: buildifier
+        args: [-lint=off]
       - id: buildifier-lint
   # The commit policy in AGENTS.md: a conventional-commit subject, and a
   # `Changelog:` trailer on user-visible commits.
