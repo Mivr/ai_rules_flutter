@@ -261,7 +261,7 @@ jobs:
   unit-tests:
     name: Unit tests
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 150
     env:
       DISK_CACHE_DIR: ~/.cache/bazel-disk
       DISK_CACHE_SHARD: linux-unit
@@ -289,6 +289,17 @@ jobs:
           echo "build --disk_cache=$dir" >> ~/.bazelrc
       - name: bazel test //... (root unit tests)
         run: bazel test //... --test_output=errors
+      - name: bazel test //... 5x flake sweep (root unit tests, pull requests)
+        if: github.event_name == 'pull_request'
+        timeout-minutes: 75
+        run: |
+          set -o pipefail
+          log="$RUNNER_TEMP/flake_sweep.log"
+          bazel test //... --flaky_test_attempts=1 --runs_per_test=5 --runs_per_test_detects_flakes --nocache_test_results --test_tag_filters=-manual --test_output=errors 2>&1 | tee "$log"
+          if grep -E '(^|[[:space:]])FLAKY([,[:space:]]|$)' "$log"; then
+            echo "::error::a test was FLAKY across 5 runs"
+            exit 1
+          fi
       # The updater drops rules_dart's analyzer/format aspects, so the golden
       # is the same whether this check or the Dart corpus tests run first.
       - name: Corpus action graph matches the checked-in golden
@@ -620,7 +631,7 @@ jobs:
   e2e-linux-app:
     name: E2E Linux app (hello_world, codegen)
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 180
     env:
       DISK_CACHE_DIR: ~/.cache/bazel-disk
       DISK_CACHE_SHARD: linux-app
@@ -652,6 +663,24 @@ jobs:
       # min_tests_executed.
       - name: Run e2e/hello_world
         run: bazel run //tools/e2e_runner -- --workspace=e2e/hello_world --bazel=bazel
+      # Nightly only: 10 runs of every flutter_test target in a random case
+      # order. The resolved seed is printed in each log, so a FLAKY or failing
+      # order repeats with --test_arg=--test-randomize-ordering-seed=<seed>.
+      # Only flutter_test and flutter_prebuilt_test targets take the seed
+      # argument; the rest of the workspace is covered by the run above.
+      - name: bazel test flutter_test targets 10x flake sweep (e2e/hello_world, nightly)
+        if: github.event_name == 'schedule'
+        working-directory: e2e/hello_world
+        timeout-minutes: 120
+        run: |
+          set -o pipefail
+          log="$RUNNER_TEMP/flake_nightly.log"
+          targets=$(bazel query 'kind("flutter_(prebuilt_)?test rule", //...) except attr(tags, "manual", //...)')
+          bazel test $targets --runs_per_test=10 --runs_per_test_detects_flakes --nocache_test_results --test_arg=--test-randomize-ordering-seed=random --local_test_jobs=$((2 * $(nproc))) --test_output=errors 2>&1 | tee "$log"
+          if grep -E '(^|[[:space:]])FLAKY([,[:space:]]|$)' "$log"; then
+            echo "::error::a flutter_test target was FLAKY across 10 randomized runs"
+            exit 1
+          fi
       - name: Run e2e/codegen
         run: bazel run //tools/e2e_runner -- --workspace=e2e/codegen --bazel=bazel
       # Red path for release signing: the wrong-password twin of the
