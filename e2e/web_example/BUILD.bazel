@@ -144,31 +144,37 @@ flutter_web_bundle(
 
 build_test(
     name = "wasm_build_test",
+    size = "small",
     targets = [":app_wasm"],
 )
 
 build_test(
     name = "dev_boot_build_test",
+    size = "small",
     targets = [":app_dev_boot"],
 )
 
 build_test(
     name = "wasm_subpath_build_test",
+    size = "small",
     targets = [":app_wasm_subpath"],
 )
 
 build_test(
     name = "js_build_test",
+    size = "small",
     targets = [":app_js"],
 )
 
 build_test(
     name = "no_pwa_build_test",
+    size = "small",
     targets = [":app_no_pwa"],
 )
 
 dart_test(
     name = "verify_index_html_test",
+    size = "small",
     data = [
         ":app_js",
         ":app_wasm",
@@ -179,6 +185,7 @@ dart_test(
 
 dart_test(
     name = "verify_service_worker_test",
+    size = "small",
     data = [
         ":app_js",
         ":app_no_pwa",
@@ -255,6 +262,7 @@ flutter_web_app(
 
 build_test(
     name = "tuned_build_test",
+    size = "small",
     targets = [":app_tuned"],
 )
 
@@ -273,11 +281,13 @@ flutter_web_app(
 
 build_test(
     name = "profile_build_test",
+    size = "small",
     targets = [":app_profile"],
 )
 
 dart_test(
     name = "verify_compiler_flags_test",
+    size = "small",
     data = [
         # The negative half of the `useLocalCanvasKit` check: a build that
         # never asked for it must not carry it, or the positive assertion

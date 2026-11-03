@@ -10,6 +10,7 @@ load(
     "resolve_wrapper_main_import",
     "synthesize_app_package",
 )
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 def _wrapper_import_depth_4_test_impl(ctx):
     """Wrapper at bazel-out/k8-fastbuild/bin/my_app/ (depth=4) to my_app/lib/main.dart."""
@@ -284,7 +285,7 @@ _t9_test = unittest.make(_package_lib_prefix_test_impl)
 _t10_test = unittest.make(_synthesize_app_package_roots_at_its_own_package_test_impl)
 
 def common_test_suite(name):
-    unittest.suite(
+    small_unittest_suite(
         name,
         _t0_test,
         _t1_test,

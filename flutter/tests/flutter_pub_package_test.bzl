@@ -33,6 +33,7 @@ load(
 )
 load("//flutter/private:gradle.bzl", "gradle_android_namespaces", "gradle_build_file_choice", "gradle_collect_files", "gradle_scan_namespaces", "gradle_scan_native", "gradle_scan_proguard")
 load("//flutter/private:starlark_literal.bzl", "starlark_string_literal")
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 # Verbatim shape of record_android 1.5.1's android/build.gradle (trimmed):
 # Groovy DSL, namespace assignment, no dependencies block at all.
@@ -2386,7 +2387,7 @@ android_spoke_alias_is_label_only_test = unittest.make(
 )
 
 def flutter_pub_package_test_suite(name):
-    unittest.suite(
+    small_unittest_suite(
         name,
         spokes_state_their_resolved_version_test,
         spoke_without_a_version_states_none_test,

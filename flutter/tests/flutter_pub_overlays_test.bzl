@@ -9,6 +9,7 @@ and never the root's hubs.
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//flutter/private:flutter_pub_overlays.bzl", "hub_overlay_roots")
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 def _root_hub_uses_only_root_roots_test_impl(ctx):
     """A root hub sees the root's roots even when a dependency overlays too."""
@@ -84,7 +85,7 @@ def flutter_pub_overlays_test_suite(name):
     Args:
         name: Test suite name.
     """
-    unittest.suite(
+    small_unittest_suite(
         name,
         dep_hub_sees_root_first_test,
         dep_overlays_never_reach_other_hubs_test,

@@ -67,6 +67,7 @@ load(
 load("//flutter/private:flutter_pub_path.bzl", "foreign_lock_path_error", "is_absolute_lock_path", "is_relative_path_dependency", "workspace_relative_lock_path")
 load("//flutter/private:flutter_pub_semver.bzl", "parse_pub_version")
 load("//flutter/private:flutter_pubspec.bzl", "parse_flutter_plugin_block")
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 def _tree_lookup(tree, rel, fold):
     """The node at `rel` in a nested-dict tree, optionally folding case.
@@ -1316,7 +1317,7 @@ def path_package_test_suite(name):
     Args:
         name: Test suite name.
     """
-    unittest.suite(
+    small_unittest_suite(
         name,
         absolute_lock_path_decides_test,
         ancestor_link_is_refused_test,

@@ -25,6 +25,7 @@ load(
     "is_within_package",
     "relative_key",
 )
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 _FIXTURE = "//flutter/tests/asset_keys_fixture"
 
@@ -275,7 +276,7 @@ def asset_keys_test_suite(name):
     Args:
         name: Name of the resulting test_suite.
     """
-    unittest.suite(
+    small_unittest_suite(
         name + "_keys_pure",
         _t0_test,
         _t1_test,

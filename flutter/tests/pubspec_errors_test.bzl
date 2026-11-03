@@ -15,6 +15,7 @@ load(
     "parse_flutter_plugin_block",
     "parse_pubspec",
 )
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 # A block sequence at its key's own column, outside `flutter:` (`topics`)
 # and inside it (`assets`).
@@ -159,7 +160,7 @@ def pubspec_errors_test_suite(name):
     Args:
         name: Name of the resulting test_suite.
     """
-    unittest.suite(
+    small_unittest_suite(
         name + "_pure",
         _t_compact_top_test,
         _t_compact_fonts_test,

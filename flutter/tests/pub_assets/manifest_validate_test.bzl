@@ -12,6 +12,7 @@ still parse exactly as on main. All fixtures count lines from 1 at the
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//flutter/private:flutter_pub_assets.bzl", "asset_entry_problem_error")
 load("//flutter/private:flutter_pubspec.bzl", "parse_flutter_assets_block")
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 def _assert_refused(env, content, key, detail_fragment, line):
     """Assert `content` yields exactly one `key` refusal at `line`.
@@ -1457,7 +1458,7 @@ _m66_test = unittest.make(_font_noasset_fractional_weight_refused_test_impl)
 
 def manifest_validate_test_suite(name):
     """The `flutter:` section validation test suite."""
-    unittest.suite(
+    small_unittest_suite(
         name,
         _m0_test,
         _m1_test,

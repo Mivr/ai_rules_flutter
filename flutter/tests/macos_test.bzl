@@ -20,6 +20,7 @@ load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
 load("//flutter/private:flutter_macos_application.bzl", "flutter_macos_framework", "flutter_macos_native_libs")
 load("//flutter/private:flutter_xtool_bundle.bzl", "flutter_darwin_xcframework_import", "flutter_xtool_macos_bundle")
 load("//flutter/private:validation.bzl", "is_valid_bundle_id", "minimum_os_version_is_below")
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 load(
     ":apple_bundling.bzl",
     "apple_plugin_fixtures",
@@ -1454,8 +1455,8 @@ def _apple_surface_tests(name):
     ]
 
 def macos_test_suite(name):
-    unittest.suite(name + "_bundle_id", _t0_test, _t1_test, _t2_test)
-    unittest.suite(name + "_minimum_os_version", _t3_test)
+    small_unittest_suite(name + "_bundle_id", _t0_test, _t1_test, _t2_test)
+    small_unittest_suite(name + "_minimum_os_version", _t3_test)
     native.test_suite(
         name = name,
         tests = [

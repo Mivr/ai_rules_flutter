@@ -2,6 +2,7 @@
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//flutter/private:flutter_asset_bundle.bzl", "build_asset_manifest", "detect_dpr")
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 def _detect_dpr_no_variant_test_impl(ctx):
     env = unittest.begin(ctx)
@@ -170,4 +171,17 @@ _t9_test = unittest.make(_manifest_empty_segment_variant_dir_test_impl)
 _t10_test = unittest.make(_manifest_empty_segment_no_variants_test_impl)
 
 def asset_bundle_test_suite(name):
-    unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test, _t6_test, _t7_test, _t8_test, _t9_test, _t10_test)
+    small_unittest_suite(
+        name,
+        _t0_test,
+        _t1_test,
+        _t2_test,
+        _t3_test,
+        _t4_test,
+        _t5_test,
+        _t6_test,
+        _t7_test,
+        _t8_test,
+        _t9_test,
+        _t10_test,
+    )

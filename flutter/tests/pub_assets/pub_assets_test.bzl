@@ -19,6 +19,7 @@ load(
 )
 load("//flutter/private:flutter_pub_package.bzl", "check_spoke_file_names")
 load("//flutter/private:flutter_pubspec.bzl", "parse_flutter_assets_block")
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 # -- variant directory names ------------------------------------------------------
 
@@ -671,7 +672,7 @@ _t28_test = unittest.make(_shallow_lister_bound_fails_loudly_test_impl)
 _t29_test = unittest.make(_covering_entries_resolve_at_scale_test_impl)
 
 def pub_assets_test_suite(name):
-    unittest.suite(
+    small_unittest_suite(
         name,
         _t0_test,
         _t1_test,

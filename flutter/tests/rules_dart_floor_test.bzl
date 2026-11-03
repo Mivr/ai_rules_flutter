@@ -11,6 +11,7 @@ non-map `environment`.
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//flutter/private:rules_dart_floor.bzl", "RULES_DART_FLOOR", "check_rules_dart_floor", "rules_dart_floor_error")
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 def _old_reader(_content):
     """Stand-in for a pre-floor reader: accepts the non-map environment."""
@@ -65,4 +66,4 @@ def rules_dart_floor_test_suite(name):
     Args:
         name: Name of the test suite.
     """
-    unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test)
+    small_unittest_suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test)

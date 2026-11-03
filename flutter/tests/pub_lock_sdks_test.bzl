@@ -8,6 +8,7 @@ load(
     "parse_lock_sdk_constraints",
     "version_below_lower_bound",
 )
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 _LOCK = """packages:
   meta:
@@ -141,7 +142,7 @@ def pub_lock_sdks_test_suite(name):
         target_under_test = ":" + name + "_missing_sha256_probe",
     )
 
-    unittest.suite(
+    small_unittest_suite(
         name + "_unit",
         _parses_the_sdks_block_test,
         _lock_without_sdks_block_test,

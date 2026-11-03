@@ -49,6 +49,7 @@ flutter_asset_bundle(
 # `//:verify_pub_assets_test` does for pub assets.
 dart_test(
     name = "verify_font_manifest_unique_test",
+    size = "small",
     data = [":diamond_bundle"],
     main = "verify_font_manifest_unique_test.dart",
     target_compatible_with = _HOST_COMPATIBLE,

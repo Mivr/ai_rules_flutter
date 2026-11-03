@@ -83,18 +83,21 @@ flutter_linux_bundle(
 
 build_test(
     name = "linux_app_build_test",
+    size = "small",
     target_compatible_with = ["@platforms//os:linux"],
     targets = [":app"],
 )
 
 build_test(
     name = "linux_bazel_runner_build_test",
+    size = "small",
     target_compatible_with = ["@platforms//os:linux"],
     targets = [":app_bazel_runner"],
 )
 
 dart_test(
     name = "verify_linux_bundle_test",
+    size = "small",
     data = [":app"],
     main = "test/verify_linux_bundle_test.dart",
     target_compatible_with = ["@platforms//os:linux"],
@@ -102,6 +105,7 @@ dart_test(
 
 dart_test(
     name = "verify_window_title_test",
+    size = "small",
     data = [":app_bazel_runner"],
     main = "test/verify_window_title_test.dart",
     target_compatible_with = ["@platforms//os:linux"],

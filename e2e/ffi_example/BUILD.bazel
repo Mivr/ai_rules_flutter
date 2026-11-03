@@ -250,6 +250,7 @@ flutter_windows_app(
 
 dart_test(
     name = "verify_macos_bundle_test",
+    size = "medium",
     data = [":ffi_macos"],
     main = "test/verify_macos_bundle_test.dart",
     target_compatible_with = ["@platforms//os:macos"],
@@ -262,6 +263,7 @@ dart_test(
 #     --strategy=TestRunner=standalone
 dart_test(
     name = "verify_macos_runtime_test",
+    size = "medium",
     data = [":ffi_macos"],
     main = "test/verify_macos_runtime_test.dart",
     tags = [
@@ -275,12 +277,14 @@ dart_test(
 # checks it anyway.
 dart_analysis_test(
     name = "verify_macos_runtime_test_analysis",
+    size = "small",
     target_compatible_with = ["@platforms//os:macos"],
     targets = [":verify_macos_runtime_test"],
 )
 
 dart_test(
     name = "verify_linux_bundle_test",
+    size = "small",
     data = [":ffi_linux"],
     main = "test/verify_linux_bundle_test.dart",
     target_compatible_with = ["@platforms//os:linux"],
@@ -292,6 +296,7 @@ dart_test(
 # test's doc comment for the invocation).
 dart_test(
     name = "verify_linux_runtime_test",
+    size = "medium",
     data = [":ffi_linux"],
     main = "test/verify_linux_runtime_test.dart",
     tags = [
@@ -305,12 +310,14 @@ dart_test(
 # checks it anyway.
 dart_analysis_test(
     name = "verify_linux_runtime_test_analysis",
+    size = "small",
     target_compatible_with = ["@platforms//os:linux"],
     targets = [":verify_linux_runtime_test"],
 )
 
 dart_test(
     name = "verify_windows_bundle_test",
+    size = "small",
     data = [":ffi_windows"],
     main = "test/verify_windows_bundle_test.dart",
     target_compatible_with = ["@platforms//os:windows"],
@@ -322,6 +329,7 @@ dart_test(
 # "manual"/"exclusive" — needs a display adapter for the engine's D3D surface.
 dart_test(
     name = "verify_windows_runtime_test",
+    size = "medium",
     data = [":ffi_windows"],
     main = "test/verify_windows_runtime_test.dart",
     tags = [
@@ -336,6 +344,7 @@ dart_test(
 # checks it anyway.
 dart_analysis_test(
     name = "verify_windows_runtime_test_analysis",
+    size = "small",
     target_compatible_with = ["@platforms//os:windows"],
     targets = [":verify_windows_runtime_test"],
 )
@@ -369,18 +378,21 @@ dart_test(
 # checks it anyway.
 dart_analysis_test(
     name = "verify_ios_simulator_test_analysis",
+    size = "small",
     target_compatible_with = ["@platforms//os:macos"],
     targets = [":verify_ios_simulator_test"],
 )
 
 flutter_ios_simulator_build_test(
     name = "ios_bundle_build_test",
+    size = "small",
     target_compatible_with = ["@platforms//os:macos"],
     targets = [":ffi_ios"],
 )
 
 build_test(
     name = "ffi_build_test",
+    size = "small",
     targets = [
         ":ffi_app",
         ":add",
@@ -392,18 +404,21 @@ build_test(
 
 build_test(
     name = "macos_bundle_build_test",
+    size = "small",
     target_compatible_with = ["@platforms//os:macos"],
     targets = [":ffi_macos"],
 )
 
 build_test(
     name = "linux_bundle_build_test",
+    size = "small",
     target_compatible_with = ["@platforms//os:linux"],
     targets = [":ffi_linux"],
 )
 
 build_test(
     name = "windows_bundle_build_test",
+    size = "small",
     target_compatible_with = ["@platforms//os:windows"],
     targets = [":ffi_windows"],
 )

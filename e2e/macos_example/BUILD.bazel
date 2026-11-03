@@ -355,6 +355,7 @@ macos_application(
 
 build_test(
     name = "macos_app_build_test",
+    size = "small",
     target_compatible_with = ["@platforms//os:macos"],
     targets = [":app"],
 )
@@ -363,6 +364,7 @@ build_test(
 # analysis-time action conflict, so it fails here rather than at runtime.
 build_test(
     name = "macos_two_apps_one_package_build_test",
+    size = "small",
     target_compatible_with = ["@platforms//os:macos"],
     targets = [
         ":app",
@@ -372,18 +374,21 @@ build_test(
 
 build_test(
     name = "macos_bazel_runner_build_test",
+    size = "small",
     target_compatible_with = ["@platforms//os:macos"],
     targets = [":app_bazel_runner"],
 )
 
 build_test(
     name = "macos_custom_runner_build_test",
+    size = "small",
     target_compatible_with = ["@platforms//os:macos"],
     targets = [":app_custom_runner"],
 )
 
 dart_test(
     name = "verify_macos_bundle_test",
+    size = "medium",
     data = [":app"],
     main = "test/verify_macos_bundle_test.dart",
     target_compatible_with = ["@platforms//os:macos"],
@@ -395,6 +400,7 @@ dart_test(
 # survived into the arm where flutter create grants nothing.
 dart_test(
     name = "verify_macos_app_intents_test",
+    size = "medium",
     data = [":app_intents"],
     main = "test/verify_macos_app_intents_test.dart",
     target_compatible_with = ["@platforms//os:macos"],
@@ -405,6 +411,7 @@ dart_test(
 # verifies.
 dart_test(
     name = "verify_macos_extensions_test",
+    size = "medium",
     data = [":app_extensions"],
     main = "test/verify_macos_extensions_test.dart",
     target_compatible_with = ["@platforms//os:macos"],
@@ -417,6 +424,7 @@ dart_test(
 # `bazel test //...`. Running it applies the analysis aspect.
 dart_test(
     name = "verify_macos_team_signing_test",
+    size = "medium",
     data = [":app_extensions_team"],
     main = "test/verify_macos_team_signing_test.dart",
     tags = ["manual"],
@@ -425,6 +433,7 @@ dart_test(
 
 dart_test(
     name = "verify_macos_entitlements_test",
+    size = "medium",
     data = [":app"],
     main = "test/verify_macos_entitlements_test.dart",
     target_compatible_with = ["@platforms//os:macos"],
@@ -432,6 +441,7 @@ dart_test(
 
 dart_test(
     name = "verify_macos_app_test",
+    size = "medium",
     data = [":app"],
     main = "test/verify_macos_app_test.dart",
     tags = [
@@ -445,6 +455,7 @@ dart_test(
 # checks it anyway.
 dart_analysis_test(
     name = "verify_macos_app_test_analysis",
+    size = "small",
     target_compatible_with = ["@platforms//os:macos"],
     targets = [":verify_macos_app_test"],
 )
@@ -462,6 +473,7 @@ profile_build(
 # and whose timeline records frames. A release build serves no VM service.
 dart_test(
     name = "verify_macos_profile_app_test",
+    size = "medium",
     data = [":app_profile"],
     main = "test/verify_macos_profile_app_test.dart",
     tags = [
@@ -473,6 +485,7 @@ dart_test(
 
 dart_analysis_test(
     name = "verify_macos_profile_app_test_analysis",
+    size = "small",
     target_compatible_with = ["@platforms//os:macos"],
     targets = [":verify_macos_profile_app_test"],
 )

@@ -10,6 +10,7 @@ load(
     "make_ios_registrant_content",
     "make_registrant_content",
 )
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 def _no_plugins_returns_empty_test_impl(ctx):
     env = unittest.begin(ctx)
@@ -410,4 +411,29 @@ _t21_test = unittest.make(_ios_objc_two_plugin_impl_test_impl)
 _t22_test = unittest.make(_ios_objc_exclusion_test_impl)
 
 def plugin_registrant_test_suite(name):
-    unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test, _t6_test, _t7_test, _t8_test, _t9_test, _t10_test, _t11_test, _t12_test, _t13_test, _t14_test, _t15_test, _t16_test, _t17_test, _t18_test, _t19_test, _t20_test, _t21_test, _t22_test)
+    small_unittest_suite(
+        name,
+        _t0_test,
+        _t1_test,
+        _t2_test,
+        _t3_test,
+        _t4_test,
+        _t5_test,
+        _t6_test,
+        _t7_test,
+        _t8_test,
+        _t9_test,
+        _t10_test,
+        _t11_test,
+        _t12_test,
+        _t13_test,
+        _t14_test,
+        _t15_test,
+        _t16_test,
+        _t17_test,
+        _t18_test,
+        _t19_test,
+        _t20_test,
+        _t21_test,
+        _t22_test,
+    )

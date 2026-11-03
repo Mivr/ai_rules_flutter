@@ -1,6 +1,5 @@
 """Unit tests for CocoaPods resolution order, hub precomputation, and spoke resolution."""
 
-load("@bazel_skylib//lib:partial.bzl", "partial")
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//flutter/private:flutter_pub_apple.bzl", "detect_apple_swiftpm_deps", "with_apple_swiftpm_deps")
 load("//flutter/private:flutter_pub_apple_local.bzl", "apply_apple_native_deps")
@@ -18,6 +17,7 @@ load(
 load("//flutter/private:flutter_pub_apple_pods_hub.bzl", "read_ios_pod_native_deps")
 load("//flutter/private:podfile_lock.bzl", "read_podfile_lock")
 load("//flutter/private:swiftpm_resolved.bzl", "read_ios_native_deps")
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 _FIXTURE_LOCK = """PODS:
   - Flutter (1.0.0)
@@ -581,24 +581,22 @@ _golden_resolution_test = unittest.make(_golden_resolution_test_impl)
 
 def flutter_pub_apple_pods_test_suite(name):
     """Test suite for CocoaPods dependency resolution in rules_flutter."""
-    unittest.suite(
+    small_unittest_suite(
         name + "_unit",
-        *[partial.make(t, size = "small") for t in [
-            _step1_engine_pods_test,
-            _step2_ios_pod_deps_test,
-            _step3_sibling_plugin_pod_test,
-            _step3_subspec_self_edges_test,
-            _step4_ios_pod_ignore_test,
-            _step5_6_stubs_and_checkout_test,
-            _deduplication_and_rendering_test,
-            _exact_error_messages_wording_test,
-            _spoke_message_11_refusal_test,
-            _flutterfire_manifest_cocoapods_mode_test,
-            _mixed_mode_fallback_test,
-            _pod7_precedence_and_laziness_test,
-            _unreferenced_unresolved_pod_laziness_test,
-            _hub_precomputation_and_reader_test,
-            _golden_resolution_test,
-        ]]
+        _step1_engine_pods_test,
+        _step2_ios_pod_deps_test,
+        _step3_sibling_plugin_pod_test,
+        _step3_subspec_self_edges_test,
+        _step4_ios_pod_ignore_test,
+        _step5_6_stubs_and_checkout_test,
+        _deduplication_and_rendering_test,
+        _exact_error_messages_wording_test,
+        _spoke_message_11_refusal_test,
+        _flutterfire_manifest_cocoapods_mode_test,
+        _mixed_mode_fallback_test,
+        _pod7_precedence_and_laziness_test,
+        _unreferenced_unresolved_pod_laziness_test,
+        _hub_precomputation_and_reader_test,
+        _golden_resolution_test,
     )
     native.test_suite(name = name, tests = [":" + name + "_unit"])

@@ -192,26 +192,31 @@ flutter_web_bundle(
 
 build_test(
     name = "android_app_build_test",
+    size = "small",
     targets = [":app"],
 )
 
 build_test(
     name = "android_bazel_runner_build_test",
+    size = "small",
     targets = [":app_bazel_runner"],
 )
 
 build_test(
     name = "android_custom_runner_build_test",
+    size = "small",
     targets = [":app_custom_runner"],
 )
 
 build_test(
     name = "web_build_test",
+    size = "small",
     targets = [":app_web"],
 )
 
 dart_test(
     name = "verify_android_apk_test",
+    size = "medium",
     data = [":app"],
     main = "test/verify_android_apk_test.dart",
 )
@@ -223,12 +228,14 @@ dart_test(
 # debug variant overlay.
 dart_test(
     name = "verify_android_permissions_test",
+    size = "medium",
     data = [":app"],
     main = "test/verify_android_permissions_test.dart",
 )
 
 dart_test(
     name = "verify_android_app_test",
+    size = "large",
     data = [":app"],
     main = "test/verify_android_app_test.dart",
     tags = [
@@ -241,6 +248,7 @@ dart_test(
 # checks it anyway.
 dart_analysis_test(
     name = "verify_android_app_test_analysis",
+    size = "small",
     targets = [":verify_android_app_test"],
 )
 

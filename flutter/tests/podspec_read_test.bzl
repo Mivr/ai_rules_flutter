@@ -25,6 +25,7 @@ load(
     "resolve_podspec_privacy_path",
     "splice_apple_podspec_link_settings",
 )
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 _WEBRTC_PODSPEC = """\
 Pod::Spec.new do |s|
@@ -651,7 +652,7 @@ def podspec_read_test_suite(name):
     Args:
         name: Name prefix for the declared test targets.
     """
-    unittest.suite(
+    small_unittest_suite(
         name + "_unit",
         _webrtc_and_normalization_test,
         _all_value_forms_test,

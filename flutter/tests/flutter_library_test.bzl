@@ -3,6 +3,7 @@
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("@rules_dart//dart:utils.bzl", "derive_lib_root", "derive_package_name")
 load("//flutter/private:flutter_info.bzl", "dedup_plugins")
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 def _package_name_explicit_attr_wins_test_impl(ctx):
     env = unittest.begin(ctx)
@@ -77,4 +78,4 @@ _t5_test = unittest.make(_dedup_plugins_removes_duplicates_test_impl)
 _t6_test = unittest.make(_dedup_plugins_preserves_order_test_impl)
 
 def flutter_library_test_suite(name):
-    unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test, _t6_test)
+    small_unittest_suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test, _t6_test)

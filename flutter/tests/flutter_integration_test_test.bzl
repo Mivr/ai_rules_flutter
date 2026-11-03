@@ -33,6 +33,7 @@ load(
     "LINUX_HEADLESS_RUNTIME_DEB_PACKAGES",
     "validate_linux_headless_runtime_downloads",
 )
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 _TEST_IMPORT = "../../integration_test/app_test.dart"
 
@@ -191,7 +192,7 @@ _t7_test = unittest.make(_android_bootstrap_with_integration_test_pkg_test_impl)
 _t8_test = unittest.make(_android_bootstrap_without_integration_test_pkg_test_impl)
 
 def flutter_integration_test_test_suite(name):
-    unittest.suite(
+    small_unittest_suite(
         name,
         _t0_test,
         _t1_test,

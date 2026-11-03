@@ -3,6 +3,7 @@
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("//flutter/private:runner_module.bzl", "runner_module_name")
 load("//flutter/private:validation.bzl", "is_valid_dart_define", "is_valid_swift_module_name")
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 def _accepts_simple_define_test_impl(ctx):
     env = unittest.begin(ctx)
@@ -175,7 +176,7 @@ def validation_test_suite(name):
         name = name + "_reserved_flutter_extra_define_fails",
         target_under_test = "//flutter:extra_dart_defines",
     )
-    unittest.suite(
+    small_unittest_suite(
         name + "_unit",
         _t0_test,
         _t1_test,

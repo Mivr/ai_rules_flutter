@@ -9,6 +9,7 @@ compile — so asserting on the generated source is the only way to see it.
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//flutter/private:flutter_test.bzl", "make_bootstrap_content")
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 _TEST_IMPORT = "../../pkg/test/widget_test.dart"
 _COMPARATOR_IMPORT = "my_test.golden_comparator.dart"
@@ -76,4 +77,4 @@ _t1_test = unittest.make(_golden_block_absent_without_flutter_test_test_impl)
 _t2_test = unittest.make(_bootstrap_keeps_its_contract_either_way_test_impl)
 
 def flutter_test_bootstrap_test_suite(name):
-    unittest.suite(name, _t0_test, _t1_test, _t2_test)
+    small_unittest_suite(name, _t0_test, _t1_test, _t2_test)

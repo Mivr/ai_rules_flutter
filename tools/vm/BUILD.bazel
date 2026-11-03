@@ -63,6 +63,7 @@ dart_binary(
 # then the deadline throw) and hermetic (no project, no network, no VM).
 dart_test(
     name = "gcloud_test",
+    size = "medium",
     srcs = ["gcloud.dart"],
     main = "gcloud_test.dart",
     deps = ["@dev_tool_deps//:test"],
@@ -72,6 +73,7 @@ dart_test(
 # wrapper rendering. No VM, no network, no credentials.
 dart_test(
     name = "deploy_bundle_test",
+    size = "small",
     srcs = ["vm_deploy.dart"],
     main = "deploy_bundle_test.dart",
     deps = ["@dev_tool_deps//:test"],
@@ -81,6 +83,7 @@ dart_test(
 # No VM, no network.
 dart_test(
     name = "run_e2e_test",
+    size = "small",
     srcs = ["vm_e2e.dart"],
     main = "run_e2e_test.dart",
     deps = ["@dev_tool_deps//:test"],

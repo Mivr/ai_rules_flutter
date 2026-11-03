@@ -9,6 +9,7 @@ load("//flutter/private:common.bzl", "ANDROID_ABIS", "android_elf_machine_for_ab
 load("//flutter/private:flutter_android_application.bzl", "flutter_android_bundle")
 load("//flutter/private:flutter_android_registrant.bzl", "flutter_android_registrant")
 load("//flutter/private:flutter_linux_application.bzl", "flutter_linux_bundle_rule")
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 # -- compute_desktop_bundle_copies tests --
 
@@ -660,7 +661,7 @@ def platform_bundle_test_suite(name):
         target_compatible_with = ["@platforms//os:linux"],
     )
 
-    unittest.suite(
+    small_unittest_suite(
         name + "_unit",
         _t0_test,
         _t1_test,

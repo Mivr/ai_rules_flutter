@@ -407,6 +407,7 @@ plugin_ios_build(
 
 build_test(
     name = "plugin_objc_dep_headers_build_test",
+    size = "small",
     target_compatible_with = ["@platforms//os:macos"],
     targets = [":plugin_objc_dep_ios_build"],
 )
@@ -422,6 +423,7 @@ test_suite(
 
 flutter_ios_simulator_build_test(
     name = "ios_app_build_test",
+    size = "small",
     target_compatible_with = ["@platforms//os:macos"],
     targets = [":app"],
 )
@@ -430,6 +432,7 @@ flutter_ios_simulator_build_test(
 # analysis-time action conflict, so it fails here rather than at runtime.
 flutter_ios_simulator_build_test(
     name = "ios_two_apps_one_package_build_test",
+    size = "small",
     target_compatible_with = ["@platforms//os:macos"],
     targets = [
         ":app",
@@ -439,6 +442,7 @@ flutter_ios_simulator_build_test(
 
 simulator_fastbuild_refused_test(
     name = "simulator_fastbuild_refused_test",
+    size = "small",
     target_compatible_with = ["@platforms//os:macos"],
     target_under_test = ":app",
 )
@@ -456,6 +460,7 @@ flutter_ios_simulator_build(
 # Network Privacy keys.
 dart_test(
     name = "verify_ios_info_plist_test",
+    size = "medium",
     data = [":app_simulator"],
     main = "test/verify_ios_info_plist_test.dart",
     target_compatible_with = ["@platforms//os:macos"],
@@ -468,6 +473,7 @@ dart_test(
 # app root's `flutter_assets/` (a debug app keeps none in `App.framework`).
 dart_test(
     name = "verify_ios_bundle_assets_test",
+    size = "medium",
     data = [
         "assets/message.txt",
         ":app_simulator",
@@ -486,6 +492,7 @@ flutter_ios_simulator_build(
 # the runner links the library that declares it.
 dart_test(
     name = "verify_ios_app_intents_test",
+    size = "medium",
     data = [":app_intents_simulator"],
     main = "test/verify_ios_app_intents_test.dart",
     target_compatible_with = ["@platforms//os:macos"],
@@ -501,6 +508,7 @@ flutter_ios_simulator_build(
 # the app's App Group.
 dart_test(
     name = "verify_ios_extensions_test",
+    size = "medium",
     data = [":app_extensions_simulator"],
     main = "test/verify_ios_extensions_test.dart",
     target_compatible_with = ["@platforms//os:macos"],
@@ -511,6 +519,7 @@ dart_test(
 # actually carry it.
 dart_test(
     name = "verify_ios_app_icon_test",
+    size = "medium",
     data = [":app_simulator"],
     main = "test/verify_ios_app_icon_test.dart",
     target_compatible_with = ["@platforms//os:macos"],
@@ -523,6 +532,7 @@ dart_test(
 # like the checks above: it runs on the macOS leg of full.yaml.
 dart_test(
     name = "verify_ios_release_framework_test",
+    size = "medium",
     srcs = ["test/ios_bundle_reader.dart"],
     data = [
         ":app_release_device",
@@ -535,12 +545,14 @@ dart_test(
 
 flutter_ios_simulator_build_test(
     name = "ios_bazel_runner_build_test",
+    size = "small",
     target_compatible_with = ["@platforms//os:macos"],
     targets = [":app_bazel_runner"],
 )
 
 flutter_ios_simulator_build_test(
     name = "ios_custom_runner_build_test",
+    size = "small",
     target_compatible_with = ["@platforms//os:macos"],
     targets = [":app_custom_runner"],
 )

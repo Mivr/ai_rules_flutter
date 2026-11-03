@@ -14,6 +14,7 @@ exports_files(
 
 dart_test(
     name = "patch_test",
+    size = "small",
     srcs = ["patch.dart"],
     main = "patch_test.dart",
     target_compatible_with = HOST_COMPATIBLE,

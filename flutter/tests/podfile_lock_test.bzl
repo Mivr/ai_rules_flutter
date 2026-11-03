@@ -1,6 +1,5 @@
 """Unit tests for the CocoaPods Podfile.lock parser."""
 
-load("@bazel_skylib//lib:partial.bzl", "partial")
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//flutter/private:podfile_lock.bzl", "read_podfile_lock")
 load(
@@ -9,6 +8,7 @@ load(
     "pub_spoke_swiftpm_attrs",
     "pub_spoke_swiftpm_rule_attrs",
 )
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 _LOCK_LABEL = "//app/ios:Podfile.lock"
 
@@ -467,19 +467,17 @@ def podfile_lock_test_suite(name):
     Args:
         name: Name of the test suite.
     """
-    unittest.suite(
+    small_unittest_suite(
         name,
-        *[partial.make(t, size = "small") for t in [
-            _synthetic_lock_parses_test,
-            _quoted_subspec_test,
-            _plugin_pods_test,
-            _checkout_options_test,
-            _spec_repos_and_checksums_test,
-            _refusals_syntax_test,
-            _refusals_pods_entries_test,
-            _refusals_pods_deps_test,
-            _empty_and_ignored_sections_test,
-            _dependency_free_entry_test,
-            _pub_spoke_podfile_lock_attrs_test,
-        ]]
+        _synthetic_lock_parses_test,
+        _quoted_subspec_test,
+        _plugin_pods_test,
+        _checkout_options_test,
+        _spec_repos_and_checksums_test,
+        _refusals_syntax_test,
+        _refusals_pods_entries_test,
+        _refusals_pods_deps_test,
+        _empty_and_ignored_sections_test,
+        _dependency_free_entry_test,
+        _pub_spoke_podfile_lock_attrs_test,
     )

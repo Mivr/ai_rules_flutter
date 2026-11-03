@@ -3,6 +3,7 @@ load("@rules_flutter//flutter:defs.bzl", "flutter_integration_test")
 flutter_integration_test(
     name = "sub_test",
     package_name = "sub",
+    size = "large",
     srcs = ["integration_test/sub_test.dart"],
     app_srcs = ["lib/main.dart"],
     assets = ["assets/sub.txt"],

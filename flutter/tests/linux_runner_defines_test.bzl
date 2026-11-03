@@ -6,6 +6,7 @@ so a title with a quote or backslash must be escaped, not spliced in raw.
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//flutter/private:flutter_linux_application.bzl", "linux_runner_defines")
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 def _plain_title_test_impl(ctx):
     env = unittest.begin(ctx)
@@ -31,7 +32,7 @@ _plain_title_test = unittest.make(_plain_title_test_impl)
 _escapes_quotes_and_backslashes_test = unittest.make(_escapes_quotes_and_backslashes_test_impl)
 
 def linux_runner_defines_test_suite(name):
-    unittest.suite(
+    small_unittest_suite(
         name,
         _plain_title_test,
         _escapes_quotes_and_backslashes_test,

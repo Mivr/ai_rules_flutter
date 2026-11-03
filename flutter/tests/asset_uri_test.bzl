@@ -24,6 +24,7 @@ load(
     "merge_pub_asset_conditions",
 )
 load("//flutter/private:flutter_pubspec.bzl", "parse_flutter_assets_block")
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 # The oracle file name below is built in pieces: the spellchecker reads its
 # first three letters as a misspelling and rewrites the expected key, so the
@@ -1009,7 +1010,7 @@ def asset_uri_test_suite(name):
     Args:
         name: Name of the resulting test_suite.
     """
-    unittest.suite(
+    small_unittest_suite(
         name,
         _t0_test,
         _t1_test,

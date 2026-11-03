@@ -34,6 +34,7 @@ load(
     "VALID_ASSET_PLATFORMS",
     "asset_flavor_error",
 )
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 # -- pub_asset_matches_target ---------------------------------------------------
 
@@ -496,7 +497,7 @@ def asset_platforms_test_suite(name):
         ],
     )
 
-    unittest.suite(
+    small_unittest_suite(
         name + "_unit",
         _t0_test,
         _t1_test,

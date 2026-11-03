@@ -49,6 +49,7 @@ flutter_web_bundle(
 
 build_test(
     name = "custom_boot_build_test",
+    size = "small",
     targets = [
         ":custom_boot",
         ":inline_boot",
@@ -57,6 +58,7 @@ build_test(
 
 dart_test(
     name = "verify_templating_test",
+    size = "small",
     data = [
         ":custom_boot",
         ":inline_boot",

@@ -105,24 +105,28 @@ flutter_windows_bundle(
 
 build_test(
     name = "windows_app_build_test",
+    size = "small",
     target_compatible_with = ["@platforms//os:windows"],
     targets = [":app"],
 )
 
 build_test(
     name = "windows_bazel_runner_build_test",
+    size = "small",
     target_compatible_with = ["@platforms//os:windows"],
     targets = [":app_bazel_runner"],
 )
 
 build_test(
     name = "windows_custom_runner_build_test",
+    size = "small",
     target_compatible_with = ["@platforms//os:windows"],
     targets = [":app_custom_runner"],
 )
 
 dart_test(
     name = "verify_windows_bundle_test",
+    size = "small",
     data = [":app"],
     main = "test/verify_windows_bundle_test.dart",
     target_compatible_with = ["@platforms//os:windows"],

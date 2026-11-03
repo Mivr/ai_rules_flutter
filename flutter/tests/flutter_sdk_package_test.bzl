@@ -14,6 +14,7 @@ load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version")
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_deps", "parse_pubspec_sdk_constraint", "pubspec_sdk_constraint_error")
 load("//flutter/private:flutter_sdk_package.bzl", "make_flutter_sdk_build_content")
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 # Verbatim `packages/flutter/pubspec.yaml` from the pinned Flutter 3.47.7.
 # Kept whole rather than trimmed to a minimal case: the shapes that break a
@@ -239,7 +240,7 @@ _clean_sdk_constraints_read_as_before_test = unittest.make(
 )
 
 def flutter_sdk_package_test_suite(name):
-    unittest.suite(
+    small_unittest_suite(
         name,
         _derives_the_language_version_from_the_sdk_constraint_test,
         _reads_runtime_deps_without_dev_deps_test,

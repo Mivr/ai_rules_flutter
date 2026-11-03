@@ -26,6 +26,7 @@ load(
     "spoke_file_name_problem",
     "starlark_string_literal",
 )
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 def _literal_round_trip_test_impl(ctx):
     """Quotes, backslashes, newlines, `$` and non-ASCII survive the helper."""
@@ -274,7 +275,7 @@ decode_rejects_undecodable_test = unittest.make(
 )
 
 def starlark_literal_test_suite(name):
-    unittest.suite(
+    small_unittest_suite(
         name,
         literal_round_trip_test,
         odd_name_error_names_all_three_test,

@@ -65,6 +65,7 @@ flutter_web_bundle(
 
 build_test(
     name = "glass_build_test",
+    size = "small",
     targets = [
         # Compiling the registrant is what proves the workspace plugin's
         # Kotlin is on its classpath.
@@ -76,12 +77,14 @@ build_test(
 
 build_test(
     name = "glass_macos_build_test",
+    size = "small",
     target_compatible_with = ["@platforms//os:macos"],
     targets = [":glass_macos"],
 )
 
 flutter_ios_simulator_build_test(
     name = "glass_ios_build_test",
+    size = "small",
     target_compatible_with = ["@platforms//os:macos"],
     targets = [":glass_ios"],
 )
@@ -90,6 +93,7 @@ flutter_ios_simulator_build_test(
 # permission it asks for.
 dart_test(
     name = "verify_glass_apk_test",
+    size = "medium",
     data = [":glass_android"],
     main = "test/verify_glass_apk_test.dart",
     tags = ["android"],

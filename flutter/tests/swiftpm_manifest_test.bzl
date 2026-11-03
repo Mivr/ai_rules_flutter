@@ -2,6 +2,7 @@
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//flutter/private:swiftpm_manifest.bzl", "parse_swiftpm_package", "parse_swiftpm_plugin_package")
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 _BIGINT = """// swift-tools-version:6.0
 //
@@ -374,7 +375,7 @@ _statement_refusals_test = unittest.make(_statement_refusals_test_impl)
 
 def swiftpm_manifest_test_suite(name):
     """Registers the `Package.swift` parser unit tests."""
-    unittest.suite(
+    small_unittest_suite(
         name + "_unit",
         _parses_the_bigint_manifest_test,
         _parses_every_supported_shape_test,

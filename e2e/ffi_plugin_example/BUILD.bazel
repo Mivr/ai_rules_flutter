@@ -226,6 +226,7 @@ flutter_linux_app(
 
 dart_test(
     name = "verify_macos_bundle_test",
+    size = "medium",
     data = [":ffi_plugin_macos"],
     main = "test/verify_macos_bundle_test.dart",
     target_compatible_with = ["@platforms//os:macos"],
@@ -233,6 +234,7 @@ dart_test(
 
 dart_test(
     name = "verify_linux_bundle_test",
+    size = "small",
     data = [":ffi_plugin_linux"],
     main = "test/verify_linux_bundle_test.dart",
     target_compatible_with = ["@platforms//os:linux"],
@@ -240,6 +242,7 @@ dart_test(
 
 build_test(
     name = "ffi_plugin_build_test",
+    size = "small",
     targets = [
         ":ffi_plugin_app",
         ":multiply",
@@ -249,18 +252,21 @@ build_test(
 
 build_test(
     name = "macos_bundle_build_test",
+    size = "small",
     target_compatible_with = ["@platforms//os:macos"],
     targets = [":ffi_plugin_macos"],
 )
 
 flutter_ios_simulator_build_test(
     name = "ios_bundle_build_test",
+    size = "small",
     target_compatible_with = ["@platforms//os:macos"],
     targets = [":ffi_plugin_ios"],
 )
 
 build_test(
     name = "linux_bundle_build_test",
+    size = "small",
     target_compatible_with = ["@platforms//os:linux"],
     targets = [":ffi_plugin_linux"],
 )
