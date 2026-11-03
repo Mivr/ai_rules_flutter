@@ -42,6 +42,12 @@ class MyApp extends StatelessWidget {
                   key: const ValueKey('e2e_asset_label'),
                 ),
               ),
+              // The marker attach_e2e_test edits and hot reloads on a
+              // simulator app it launched outside the dev tool.
+              const Text(
+                'iOS attach marker v1',
+                key: ValueKey('e2e_attach_label'),
+              ),
             ],
           ),
         ),

@@ -1,11 +1,105 @@
 @Tags(['e2e'])
 library;
 
+import 'dart:io';
+
 import 'package:test/test.dart';
 import 'package:vm_service/vm_service.dart';
 import 'package:vm_service/vm_service_io.dart';
 
 import 'dev_tool_e2e_harness.dart';
+import 'editable_workspace.dart';
+
+/// What a paused-start check runs: the `workspace` to launch `:app` from on
+/// `device`, the keyed `labelKey` the app draws once it runs, and how long the
+/// build and then the install and launch may take (`buildTimeout`, before
+/// `app.start`; `launchTimeout`, before `app.debugPort`).
+typedef _PausedApp = ({
+  String workspace,
+  String device,
+  String labelKey,
+  Duration buildTimeout,
+  Duration launchTimeout,
+});
+
+/// Start [app] with `--start-paused` and prove the engine holds the main
+/// isolate, the control channel still answers, and a resume lets it draw.
+Future<void> _holdsUntilResumed(_PausedApp app) async {
+  final dt = await startDevTool(
+    workspace: app.workspace,
+    target: ':app',
+    device: app.device,
+    extraArgs: ['--start-paused'],
+  );
+
+  final start = await dt.waitForEvent('app.start', timeout: app.buildTimeout);
+  final appId = start['params']?['appId'] as String? ?? dt.appId!;
+  final debugPort = await dt.waitForEvent(
+    'app.debugPort',
+    timeout: app.launchTimeout,
+  );
+  final wsUri = debugPort['params']?['wsUri'] as String;
+
+  // The tool says it observed the pause rather than assuming the switch
+  // took — this is that observation, made independently.
+  await dt.waitForStderr(
+    'start_paused',
+    timeout: const Duration(seconds: 60),
+  );
+
+  final service = await vmServiceConnectUri(wsUri);
+  addTearDown(service.dispose);
+  final vm = await service.getVM();
+  final main = vm.isolates!.firstWhere((i) => i.name == 'main');
+  final isolate = await service.getIsolate(main.id!);
+  expect(
+    isolate.pauseEvent?.kind,
+    EventKind.kPauseStart,
+    reason: 'the engine must be holding the root isolate before main()',
+  );
+
+  // Nothing that needs the framework can work yet — the binding has not
+  // run, so the agent's extensions are not registered. It has to *answer*,
+  // though: the extension runs on the isolate that is paused, so
+  // dispatching it would block the control channel for the rest of the
+  // run.
+  await dt.waitForHttpControl(timeout: const Duration(seconds: 60));
+  final tooEarly = await dt
+      .httpCommand('app.getText', {
+        'appId': appId,
+        'key': app.labelKey,
+      })
+      .timeout(
+        const Duration(seconds: 20),
+        onTimeout: () => throw StateError(
+          'app.getText never answered on a paused app — the control '
+          'channel is wedged behind an isolate that cannot run',
+        ),
+      );
+  expect(
+    tooEarly['error'],
+    contains('--start-paused'),
+    reason:
+        'a paused app has no widget tree to read, and the reason '
+        'must name the pause rather than the widget',
+  );
+
+  // Resume, exactly as a debugger would, and the app comes up.
+  await service.resume(main.id!);
+
+  final ready = await dt.httpCommand('app.waitFor', {
+    'appId': appId,
+    'key': app.labelKey,
+    'timeoutMs': '30000',
+  });
+  expect(
+    ready['error'],
+    isNull,
+    reason:
+        'resuming must let the app run to a rendered frame: '
+        '${ready['error']}',
+  );
+}
 
 /// End-to-end: `--start-paused` really holds the app at `main()`.
 ///
@@ -21,86 +115,35 @@ void main() {
   group('start-paused e2e', () {
     test(
       'holds main() until a debugger resumes it',
+      () => _holdsUntilResumed((
+        workspace: e2eWorkspace('macos_example'),
+        device: 'macos',
+        labelKey: 'e2e_define_label',
+        buildTimeout: const Duration(seconds: 240),
+        launchTimeout: const Duration(seconds: 120),
+      )),
+      timeout: const Timeout(Duration(minutes: 5)),
+    );
+
+    // The switch reaches an iOS app as trailing argv after the bundle id, a
+    // path neither desktop nor Android shares. The build and launch of a cold
+    // simulator run are bounded apart from the pause checks, as in the other
+    // simulator cases.
+    test(
+      'iOS simulator: holds main() until a debugger resumes it',
       () async {
-        final dt = await startDevTool(
-          workspace: e2eWorkspace('macos_example'),
-          target: ':app',
-          device: 'macos',
-          extraArgs: ['--start-paused'],
-        );
-
-        final start = await dt.waitForEvent(
-          'app.start',
-          timeout: const Duration(seconds: 240),
-        );
-        final appId = start['params']?['appId'] as String? ?? dt.appId!;
-        final debugPort = await dt.waitForEvent(
-          'app.debugPort',
-          timeout: const Duration(seconds: 120),
-        );
-        final wsUri = debugPort['params']?['wsUri'] as String;
-
-        // The tool says it observed the pause rather than assuming the switch
-        // took — this is that observation, made independently.
-        await dt.waitForStderr(
-          'start_paused',
-          timeout: const Duration(seconds: 60),
-        );
-
-        final service = await vmServiceConnectUri(wsUri);
-        addTearDown(service.dispose);
-        final vm = await service.getVM();
-        final main = vm.isolates!.firstWhere((i) => i.name == 'main');
-        final isolate = await service.getIsolate(main.id!);
-        expect(
-          isolate.pauseEvent?.kind,
-          EventKind.kPauseStart,
-          reason: 'the engine must be holding the root isolate before main()',
-        );
-
-        // Nothing that needs the framework can work yet — the binding has not
-        // run, so the agent's extensions are not registered. It has to *answer*,
-        // though: the extension runs on the isolate that is paused, so
-        // dispatching it would block the control channel for the rest of the
-        // run.
-        await dt.waitForHttpControl(timeout: const Duration(seconds: 60));
-        final tooEarly = await dt
-            .httpCommand('app.getText', {
-              'appId': appId,
-              'key': 'e2e_define_label',
-            })
-            .timeout(
-              const Duration(seconds: 20),
-              onTimeout: () => throw StateError(
-                'app.getText never answered on a paused app — the control '
-                'channel is wedged behind an isolate that cannot run',
-              ),
-            );
-        expect(
-          tooEarly['error'],
-          contains('--start-paused'),
-          reason:
-              'a paused app has no widget tree to read, and the reason '
-              'must name the pause rather than the widget',
-        );
-
-        // Resume, exactly as a debugger would, and the app comes up.
-        await service.resume(main.id!);
-
-        final ready = await dt.httpCommand('app.waitFor', {
-          'appId': appId,
-          'key': 'e2e_define_label',
-          'timeoutMs': '30000',
-        });
-        expect(
-          ready['error'],
-          isNull,
-          reason:
-              'resuming must let the app run to a rendered frame: '
-              '${ready['error']}',
+        await _holdsUntilResumed(
+          (
+            workspace: (await editableWorkspace('ios_example')).root,
+            device: 'ios-simulator',
+            labelKey: 'e2e_asset_label',
+            buildTimeout: e2eColdBuildTimeout,
+            launchTimeout: const Duration(minutes: 10),
+          ),
         );
       },
-      timeout: const Timeout(Duration(minutes: 5)),
+      skip: !Platform.isMacOS ? 'macOS only (needs Xcode Simulator)' : null,
+      timeout: const Timeout(Duration(minutes: 35)),
     );
 
     test(

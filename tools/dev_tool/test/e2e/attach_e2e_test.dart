@@ -445,7 +445,221 @@ void main() {
       },
       timeout: const Timeout(Duration(minutes: 6)),
     );
+
+    // The whole attach path on the simulator: the app is installed and
+    // launched with `xcrun simctl`, never by the dev tool, so everything the
+    // tool knows about it comes from the VM service URI it is handed.
+    test(
+      'iOS simulator: attaches to an app launched outside the tool, then '
+      'hot reloads an edit',
+      () async {
+        final EditableWorkspace ws = await editableWorkspace('ios_example');
+        final File appMain = ws.file('lib/main.dart');
+        final String original = appMain.readAsStringSync();
+        expect(
+          original,
+          contains('attach marker v1'),
+          reason: 'fixture marker present in ios_example main.dart',
+        );
+
+        final String vmServiceUri = await _launchSimulatorAppDirectly(ws);
+        final DevToolProcess dt = await attachDevTool(
+          workspace: ws.root,
+          target: ':app',
+          debugUrl: vmServiceUri,
+        );
+
+        final Map<String, dynamic> debugPort = await dt.waitForEvent(
+          'app.debugPort',
+          timeout: const Duration(minutes: 4),
+        );
+        expect(_params(debugPort)['baseUri'], vmServiceUri);
+        final Map<String, dynamic> started = await dt.waitForEvent(
+          'app.started',
+          timeout: const Duration(minutes: 4),
+        );
+        final String appId = _params(started)['appId'] as String? ?? dt.appId!;
+        await dt.waitForHttpControl(timeout: const Duration(seconds: 90));
+
+        final Map<String, dynamic> before = await dt.httpCommand(
+          'app.getText',
+          {
+            'appId': appId,
+            'key': 'e2e_attach_label',
+          },
+        );
+        expect(_result(before)['text'], 'iOS attach marker v1');
+
+        appMain.writeAsStringSync(
+          original.replaceFirst('attach marker v1', 'attach marker v2'),
+        );
+        final Map<String, dynamic> reload = await dt.sendCommand(
+          1,
+          'app.hotReload',
+          params: {'appId': appId},
+          timeout: e2eColdBuildTimeout,
+        );
+        expect(
+          reload['error'],
+          isNull,
+          reason: 'app.hotReload: ${reload['error']}',
+        );
+        expect(
+          _result(reload)['message'],
+          contains('successful'),
+          reason: 'reload reported: ${reload['result']}',
+        );
+
+        final Map<String, dynamic> after = await dt.httpCommand('app.waitFor', {
+          'appId': appId,
+          'text': 'iOS attach marker v2',
+          'timeoutMs': '30000',
+        });
+        expect(
+          after['error'],
+          isNull,
+          reason: 'the edit must be live in the attached app: $after',
+        );
+
+        await dt.sendCommand(2, 'daemon.shutdown');
+      },
+      timeout: const Timeout(Duration(minutes: 45)),
+    );
   }, skip: !Platform.isMacOS ? 'macOS only' : null);
+}
+
+/// The bundle id of `ios_example`'s `:app`.
+const _iosBundleId = 'com.rulesflutter.ios.example';
+
+/// The `params` of an event, or an empty map.
+Map<String, dynamic> _params(Map<String, dynamic> event) =>
+    (event['params'] as Map<String, dynamic>?) ?? const {};
+
+/// The `result` of a response, or an empty map.
+Map<String, dynamic> _result(Map<String, dynamic> response) =>
+    (response['result'] as Map<String, dynamic>?) ?? const {};
+
+/// Kill [process] and wait for it to be gone.
+Future<void> _killAndWait(Process process) async {
+  process.kill();
+  await process.exitCode;
+}
+
+/// Run [command] to completion in [workingDirectory], failing the test when it
+/// exits non-zero or outlives [timeout]. Spawned bound to the test, so a
+/// timeout leaves nothing running.
+Future<String> _runChecked(
+  List<String> command, {
+  required Duration timeout,
+  String? workingDirectory,
+}) async {
+  final Process process = await spawnBoundToTest(
+    spawn: () => Process.start(
+      command.first,
+      command.sublist(1),
+      workingDirectory: workingDirectory,
+    ),
+    dispose: _killAndWait,
+  );
+  final Future<String> stdout = process.stdout.transform(utf8.decoder).join();
+  final Future<String> stderr = process.stderr.transform(utf8.decoder).join();
+  final int code = await process.exitCode.timeout(
+    timeout,
+    onTimeout: () => throw StateError('`${command.join(' ')}` timed out'),
+  );
+  expect(code, 0, reason: '`${command.join(' ')}` failed: ${await stderr}');
+  return await stdout;
+}
+
+/// Build the debug simulator `:app` of [ws], install it on the booted
+/// simulator and launch it with `xcrun simctl`, outside the dev tool, and
+/// return the app's Dart VM service URI.
+///
+/// The URI comes from the simulator's own log, which is where the engine
+/// announces it. The log stream starts before the launch so the announcement
+/// cannot be missed. The app is uninstalled when the test ends, and the log
+/// stream is bound to the test like every other process it starts.
+Future<String> _launchSimulatorAppDirectly(EditableWorkspace ws) async {
+  await _runChecked(
+    ['bazel', 'build', ':app', '-c', 'dbg', '--ios_multi_cpus=sim_arm64'],
+    timeout: e2eColdBuildTimeout,
+    workingDirectory: ws.root,
+  );
+  const short = Duration(minutes: 2);
+  final String booted = await _runChecked([
+    'xcrun',
+    'simctl',
+    'list',
+    'devices',
+    'booted',
+    '-j',
+  ], timeout: short);
+  final String? udid = RegExp(
+    r'"udid"\s*:\s*"([^"]+)"',
+  ).firstMatch(booted)?.group(1);
+  expect(udid, isNotNull, reason: 'no booted iOS simulator: $booted');
+  final String simulator = udid!;
+
+  final Directory tmpDir = await Directory.systemTemp.createTemp(
+    'attach_ios_e2e_',
+  );
+  addTearDown(() async {
+    if (tmpDir.existsSync()) await tmpDir.delete(recursive: true);
+  });
+  await extractZip(zipPath: '${ws.root}/bazel-bin/app.ipa', destDir: tmpDir);
+  final Iterable<FileSystemEntity> apps = Directory(
+    '${tmpDir.path}/Payload',
+  ).listSync().where((e) => e.path.endsWith('.app'));
+  expect(apps, isNotEmpty, reason: 'No .app found in app.ipa');
+
+  // Registered before the install, so a failure part-way still removes it.
+  addTearDown(() async {
+    for (final verb in ['terminate', 'uninstall']) {
+      await Process.run('xcrun', ['simctl', verb, simulator, _iosBundleId]);
+    }
+  });
+  await _runChecked([
+    'xcrun',
+    'simctl',
+    'install',
+    simulator,
+    apps.first.path,
+  ], timeout: short);
+
+  final Process log = await spawnBoundToTest(
+    spawn: () => Process.start('xcrun', [
+      'simctl',
+      'spawn',
+      simulator,
+      'log',
+      'stream',
+      '--style',
+      'compact',
+      '--predicate',
+      'eventMessage contains "Dart VM service"',
+    ]),
+    dispose: _killAndWait,
+  );
+  final announced = Completer<String>();
+  log.stdout.transform(utf8.decoder).transform(const LineSplitter()).listen((
+    line,
+  ) {
+    final RegExpMatch? match = RegExp(
+      r'Dart VM service is listening on (http\S+)',
+    ).firstMatch(line);
+    if (match != null && !announced.isCompleted) {
+      announced.complete(match.group(1)!);
+    }
+  });
+
+  await _runChecked([
+    'xcrun',
+    'simctl',
+    'launch',
+    simulator,
+    _iosBundleId,
+  ], timeout: short);
+  return await announced.future.timeout(const Duration(minutes: 3));
 }
 
 /// Whether [process] is still running, decided without waiting on it.
