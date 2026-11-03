@@ -10,6 +10,7 @@ load("@bazel_skylib//rules:write_file.bzl", "write_file")
 
 # buildifier: disable=bzl-visibility
 load("@rules_apple//apple/internal:providers.bzl", "AppleBundleInfo")
+load("@rules_cc//cc:objc_library.bzl", "objc_library")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_swift//swift:swift.bzl", "SwiftInfo")
 load("//flutter:macos.bzl", "flutter_apple_plugin_library")
@@ -507,6 +508,11 @@ def _mixed_plugin_objc_input_test_impl(ctx):
     directory is a quote include path (so the plain-basename `#import`
     resolves from a source `.m`), and the target registers an ObjC compile
     action for its `.m` source.
+
+    A dependency may export a header with the same basename from another
+    directory; only the Swift module's own header may contribute a quote
+    include path, so the test also pins that the dependency's directory is
+    not one. `excluded_quote_include_suffix` names it.
     """
     env = analysistest.begin(ctx)
     tut = analysistest.target_under_test(env)
@@ -515,20 +521,45 @@ def _mixed_plugin_objc_input_test_impl(ctx):
         for f in tut[CcInfo].compilation_context.headers.to_list()
         if f.basename == ctx.attr.expected_header_basename
     ]
+    quote_includes = tut[CcInfo].compilation_context.quote_includes.to_list()
+    generated = [f for f in header_files if f.dirname in quote_includes]
     asserts.equals(
         env,
         [ctx.attr.expected_header_basename],
-        [f.basename for f in header_files],
+        [f.basename for f in generated],
+        "exactly one same-basename header must be reachable through a quote include path",
     )
-    quote_includes = tut[CcInfo].compilation_context.quote_includes.to_list()
     asserts.true(
         env,
-        bool(header_files) and header_files[0].dirname in quote_includes,
+        bool(generated) and generated[0].dirname in quote_includes,
         "Expected %s in the ObjC target's quote include paths, got: %s" % (
-            header_files[0].dirname if header_files else ctx.attr.expected_header_basename,
+            generated[0].dirname if generated else ctx.attr.expected_header_basename,
             quote_includes,
         ),
     )
+
+    shadow_suffix = ctx.attr.excluded_quote_include_suffix
+    asserts.equals(
+        env,
+        2 if shadow_suffix else 1,
+        len(header_files),
+        "the fixture must put exactly one same-basename header in the transitive set per declared shadow",
+    )
+    if shadow_suffix:
+        shadow_dirs = [f.dirname for f in header_files if f.dirname.endswith(shadow_suffix)]
+        asserts.equals(
+            env,
+            1,
+            len(shadow_dirs),
+            "the shadow dependency must export its same-basename header from the declared directory",
+        )
+        shadowed = [path for path in quote_includes if path.endswith(shadow_suffix)]
+        asserts.equals(
+            env,
+            [],
+            shadowed,
+            "A transitive header with the same basename must not add a quote include path",
+        )
 
     compiled = []
     for action in analysistest.target_actions(env):
@@ -746,6 +777,48 @@ def apple_plugin_fixtures(name, platform):
     mixed_kinds = _created_rules(before, mixed_rules)
     mixed_swift = mixed_rules["_" + mixed + "__swift"]
 
+    shadow_mixed = prefix + "_shadow_mixed"
+    shadow_module = prefix + "_shadow_module"
+    shadow_header_dir = shadow_mixed + "_shadow"
+    write_file(
+        name = shadow_mixed + "_swift_src",
+        out = shadow_mixed + "_swift.swift",
+        content = [
+            "import Flutter",
+            "public class ShadowMixedPlugin: NSObject {}",
+        ],
+    )
+    write_file(
+        name = shadow_mixed + "_objc_src",
+        out = shadow_mixed + "_objc.m",
+        content = ['#import "%s-Swift.h"' % shadow_module],
+    )
+    write_file(
+        name = shadow_mixed + "_shadow_header",
+        out = "%s/%s-Swift.h" % (shadow_header_dir, shadow_module),
+        content = [
+            "#pragma once",
+            "// A dependency's header that merely shares the generated header's basename.",
+        ],
+    )
+    objc_library(
+        name = shadow_mixed + "_shadow_objc",
+        hdrs = [":" + shadow_mixed + "_shadow_header"],
+        tags = ["manual"],
+    )
+
+    flutter_apple_plugin_library(
+        name = shadow_mixed,
+        srcs = [
+            ":" + shadow_mixed + "_swift.swift",
+            ":" + shadow_mixed + "_objc.m",
+        ],
+        module_name = shadow_module,
+        platform = platform,
+        deps = [":" + shadow_mixed + "_shadow_objc"],
+        tags = ["manual"],
+    )
+
     bridging = prefix + "_bridging"
     bridging_module = bridging + "_module"
     write_file(
@@ -778,6 +851,9 @@ def apple_plugin_fixtures(name, platform):
         pure_objc = pure_objc,
         mixed = mixed,
         mixed_module = module,
+        shadow_mixed = shadow_mixed,
+        shadow_module = shadow_module,
+        shadow_header_dir = shadow_header_dir,
         mixed_swift_generates_header = mixed_swift["generates_header"],
         mixed_swift_generated_header_name = mixed_swift["generated_header_name"],
         mixed_swift_copts = mixed_swift["copts"],
@@ -807,7 +883,10 @@ _ios_mixed_plugin_swift_header_test = analysistest.make(
 )
 _ios_mixed_plugin_objc_input_test = analysistest.make(
     _mixed_plugin_objc_input_test_impl,
-    attrs = {"expected_header_basename": attr.string(mandatory = True)},
+    attrs = {
+        "excluded_quote_include_suffix": attr.string(),
+        "expected_header_basename": attr.string(mandatory = True),
+    },
     config_settings = _IOS_APPLE_PLUGIN_TEST_SETTINGS,
 )
 _ios_apple_plugin_public_test = analysistest.make(
@@ -829,7 +908,10 @@ _macos_mixed_plugin_swift_header_test = analysistest.make(
 )
 _macos_mixed_plugin_objc_input_test = analysistest.make(
     _mixed_plugin_objc_input_test_impl,
-    attrs = {"expected_header_basename": attr.string(mandatory = True)},
+    attrs = {
+        "excluded_quote_include_suffix": attr.string(),
+        "expected_header_basename": attr.string(mandatory = True),
+    },
     config_settings = _MACOS_APPLE_PLUGIN_TEST_SETTINGS,
 )
 _macos_apple_plugin_public_test = analysistest.make(
@@ -875,6 +957,7 @@ def _apple_plugin_analysis_tests(
         fail("apple_plugin_fixtures: platform must be 'ios' or 'macos', got '%s'" % platform)
     swift_header_name = name + "_mixed_swift_header"
     objc_input_name = name + "_mixed_objc_header_input"
+    shadow_objc_input_name = name + "_shadow_mixed_objc_header_input"
     public_name = name + "_mixed_public_providers"
     bridging_name = name + "_bridging_header_copts"
     swift_header_test(
@@ -886,6 +969,13 @@ def _apple_plugin_analysis_tests(
         name = objc_input_name,
         target_under_test = ":_" + fixtures.mixed + "__objc",
         expected_header_basename = header,
+    )
+    objc_input_test(
+        name = shadow_objc_input_name,
+        size = "small",
+        target_under_test = ":_" + fixtures.shadow_mixed + "__objc",
+        expected_header_basename = fixtures.shadow_module + "-Swift.h",
+        excluded_quote_include_suffix = fixtures.shadow_header_dir,
     )
     public_test(
         name = public_name,
@@ -952,6 +1042,7 @@ def _apple_plugin_analysis_tests(
     return [
         swift_header_name,
         objc_input_name,
+        shadow_objc_input_name,
         public_name,
         bridging_name,
         attrs_name,
