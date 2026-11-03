@@ -313,7 +313,6 @@ bzl_library(
         "//flutter/private:ios_app",
         "//flutter/private:ios_sim_debug",
         "@bazel_skylib//rules:build_test",
-        "@bazel_skylib//rules:expand_template",
         "@rules_apple//apple",
         "@rules_swift//swift",
     ],
