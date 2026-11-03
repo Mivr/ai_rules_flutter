@@ -1,5 +1,6 @@
 """Unit tests for `flutter.pub(ios_plugin_deps = ...)` mapping and validation."""
 
+load("@bazel_skylib//lib:partial.bzl", "partial")
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load(
     "//flutter/private:flutter_pub_apple.bzl",
@@ -254,13 +255,15 @@ def ios_plugin_deps_test_suite(name):
     """
     unittest.suite(
         name,
-        _mapped_no_label_test,
-        _mapped_with_label_test,
-        _with_apple_swiftpm_deps_renders_target_test,
-        _lock_error_test,
-        _apple_error_test,
-        _overlay_error_test,
-        _pub_spoke_swiftpm_attrs_test,
-        _detect_apple_swiftpm_deps_short_circuits_test,
-        _unmapped_missing_resolved_keeps_refusal_test,
+        *[partial.make(t, size = "small") for t in [
+            _mapped_no_label_test,
+            _mapped_with_label_test,
+            _with_apple_swiftpm_deps_renders_target_test,
+            _lock_error_test,
+            _apple_error_test,
+            _overlay_error_test,
+            _pub_spoke_swiftpm_attrs_test,
+            _detect_apple_swiftpm_deps_short_circuits_test,
+            _unmapped_missing_resolved_keeps_refusal_test,
+        ]]
     )

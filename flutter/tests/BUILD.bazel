@@ -195,11 +195,31 @@ dart_test(
 # mechanism as the guards above.
 dart_test(
     name = "min_versions_android_guard_test",
-    size = "small",
+    size = "medium",
     data = ["min_versions_android_guard_test.dart"],
     env = {"GUARD_ROOT_ANCHOR": "$(rlocationpath :min_versions_android_guard_test.dart)"},
     env_inherit = ["BUILD_WORKSPACE_DIRECTORY"],
     main = "min_versions_android_guard_test.dart",
+    tags = [
+        "external",
+        "no-sandbox",
+    ],
+    deps = [
+        "@dev_tool_deps//:test",
+    ],
+)
+
+# Test hygiene guard: the iOS lint fixtures stay out of `manual` and carry an
+# explicit `size`, the non-sandboxed guards above are `medium`, and the
+# Starlark unit-test suites size their members `small`. Same discovery
+# mechanism as the guards above.
+dart_test(
+    name = "test_hygiene_regressions_guard_test",
+    size = "medium",
+    data = ["test_hygiene_regressions_guard_test.dart"],
+    env = {"GUARD_ROOT_ANCHOR": "$(rlocationpath :test_hygiene_regressions_guard_test.dart)"},
+    env_inherit = ["BUILD_WORKSPACE_DIRECTORY"],
+    main = "test_hygiene_regressions_guard_test.dart",
     tags = [
         "external",
         "no-sandbox",

@@ -1,5 +1,6 @@
 """Unit tests for a plugin manifest's local (same-package) targets."""
 
+load("@bazel_skylib//lib:partial.bzl", "partial")
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
@@ -791,20 +792,22 @@ def swiftpm_plugin_local_test_suite(name):
     """Registers the plugin-local target unit tests."""
     unittest.suite(
         name + "_unit",
-        _image_picker_shape_test,
-        _firebase_core_shape_test,
-        _video_player_shape_test,
-        _missing_directory_test,
-        _binary_target_refusal_test,
-        _parser_keeps_target_settings_test,
-        _parser_skips_untranslated_args_test,
-        _primary_only_keeps_base_shape_test,
-        _transitive_default_dirs_test,
-        _product_targets_in_manifest_order_test,
-        _define_and_condition_select_test,
-        _primary_conditional_dep_test,
-        _binary_dependency_refusal_test,
-        _xtool_appends_local_files_test,
+        *[partial.make(t, size = "small") for t in [
+            _image_picker_shape_test,
+            _firebase_core_shape_test,
+            _video_player_shape_test,
+            _missing_directory_test,
+            _binary_target_refusal_test,
+            _parser_keeps_target_settings_test,
+            _parser_skips_untranslated_args_test,
+            _primary_only_keeps_base_shape_test,
+            _transitive_default_dirs_test,
+            _product_targets_in_manifest_order_test,
+            _define_and_condition_select_test,
+            _primary_conditional_dep_test,
+            _binary_dependency_refusal_test,
+            _xtool_appends_local_files_test,
+        ]]
     )
     analysis_tests = _register_spm_plugin_analysis_tests(name)
     native.test_suite(
