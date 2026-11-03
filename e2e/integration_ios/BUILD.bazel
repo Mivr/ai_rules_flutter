@@ -1,7 +1,13 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@rules_apple//apple:ios.bzl", "ios_application")
 load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test", "dart_test")
-load("@rules_flutter//flutter:defs.bzl", "flutter_gen_l10n", "flutter_integration_test", "flutter_test")
+load(
+    "@rules_flutter//flutter:defs.bzl",
+    "flutter_gen_l10n",
+    "flutter_integration_test",
+    "flutter_library",
+    "flutter_test",
+)
 load("@rules_flutter//flutter:ios.bzl", "flutter_ios_registrant_gen", "flutter_ios_simulator_build_test")
 load("@rules_swift//swift:swift.bzl", "swift_library", "swift_library_group")
 
@@ -339,6 +345,7 @@ flutter_test(
 flutter_test(
     name = "plugin_spm_graph_test_lint",
     package_name = "integration_ios",
+    size = "small",
     srcs = ["lib/main.dart"],
     main = "integration_test/plugin_spm_graph_test.dart",
     tags = ["manual"],
@@ -370,13 +377,15 @@ flutter_test(
 
 # Host-side lint twin of `:plugin_spm_objc_test`: same portable split so
 # the analysis test below lints the plugin-local target fixture's Dart on
-# every OS.
-flutter_test(
-    name = "plugin_spm_objc_test_lint",
+# every OS. A plain library rather than a `manual` test: it stages the test
+# file outside `lib/` the same way, and `bazel test //...` cannot skip it.
+flutter_library(
+    name = "plugin_spm_objc_lint",
     package_name = "integration_ios",
-    srcs = ["lib/main.dart"],
-    main = "integration_test/plugin_spm_objc_test.dart",
-    tags = ["manual"],
+    srcs = [
+        "integration_test/plugin_spm_objc_test.dart",
+        "lib/main.dart",
+    ],
     deps = [
         "//ios_greeting_plugin",
         "@deps//:flutter",
@@ -389,13 +398,14 @@ flutter_test(
 
 dart_analysis_test(
     name = "ios_dart_analysis_test",
+    size = "small",
     targets = [
         ":app_test_lint",
         ":app_test_red_lint",
         ":plugin_pod_test_lint",
         ":plugin_registrant_filter_test",
         ":plugin_spm_graph_test_lint",
-        ":plugin_spm_objc_test_lint",
+        ":plugin_spm_objc_lint",
         ":plugin_spm_test_lint",
         "//android_only_plugin",
         "//dart_registration_plugin",

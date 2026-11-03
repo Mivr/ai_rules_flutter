@@ -8,6 +8,7 @@ does not declare fails naming the package and the entry, and a key or value
 naming no lock package fails naming `cycle_breaks` and the entry.
 """
 
+load("@bazel_skylib//lib:partial.bzl", "partial")
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load(
     "//flutter/private:flutter_pub_cycle_breaks.bzl",
@@ -82,7 +83,9 @@ def flutter_pub_cycle_breaks_test_suite(name):
     """
     unittest.suite(
         name,
-        _drops_only_the_named_edge_test,
-        _break_on_an_undeclared_edge_fails_test,
-        _lock_membership_test,
+        *[partial.make(t, size = "small") for t in [
+            _drops_only_the_named_edge_test,
+            _break_on_an_undeclared_edge_fails_test,
+            _lock_membership_test,
+        ]]
     )

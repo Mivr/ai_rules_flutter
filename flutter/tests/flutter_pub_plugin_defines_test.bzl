@@ -6,6 +6,7 @@ with fake input. They pin the exact messages for a stale key, a malformed
 entry, a package with nothing to compile and a package an overlay replaces.
 """
 
+load("@bazel_skylib//lib:partial.bzl", "partial")
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load(
     "//flutter/private:flutter_pub_plugin_defines.bzl",
@@ -97,7 +98,9 @@ def flutter_pub_plugin_defines_test_suite(name):
     """
     unittest.suite(
         name,
-        _lock_error_test,
-        _apple_error_test,
-        _overlay_error_test,
+        *[partial.make(t, size = "small") for t in [
+            _lock_error_test,
+            _apple_error_test,
+            _overlay_error_test,
+        ]]
     )
