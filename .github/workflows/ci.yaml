@@ -1287,6 +1287,27 @@ jobs:
         run: bazel build --nobuild --lockfile_mode=error //...
       - name: git diff --exit-code MODULE.bazel MODULE.bazel.lock
         run: git diff --exit-code MODULE.bazel MODULE.bazel.lock
+  # Early warning, permanently non-blocking: runs the root tests on Bazel's
+  # last release candidate so a break in the next Bazel release shows up before
+  # it ships. An upstream release-candidate regression must never block a merge
+  # or a tag-push release, so the job is deliberately absent from
+  # `conclusion.needs` and carries `continue-on-error`. The lockfile is off
+  # because no committed lock can match an unreleased Bazel.
+  last_rc:
+    name: Bazel last_rc (early warning)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    continue-on-error: true
+    env:
+      USE_BAZEL_VERSION: last_rc
+    steps:
+      - uses: actions/checkout@v7
+      - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+        with:
+          repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
+          cache-save: false
+      - name: bazel test --lockfile_mode=off //... --test_output=errors
+        run: bazel test --lockfile_mode=off //... --test_output=errors
   conclusion:
     name: Conclusion
     needs: [e2e-macos-apple, e2e-macos-toolchain, unit-tests, e2e-linux-app, e2e-linux-small, e2e-linux-examples, e2e-linux-pub-scc, e2e-linux-integration, e2e-windows, e2e-coverage, dart-tool-tests, pre-commit, web-smoke, reproducibility, mod-tidy]
