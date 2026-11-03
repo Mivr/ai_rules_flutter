@@ -124,6 +124,30 @@ flutter_ios_app(
     bundle_id = "com.rulesflutter.ios.example.second",
 )
 
+# An app whose `main` sits outside the package's `lib/` -- the shape
+# `flutter run -t test_driver/app.dart` runs. It has no `package:` URI, so the
+# build and the dev loop both name it under the app scheme; hot reload and hot
+# restart of it, and of the sibling it imports by relative path, are what
+# main_outside_lib_e2e_test drives on the simulator. Its own `package_name`
+# keeps its outputs apart from `:app_flutter`'s, as `:app_flutter_second` does.
+flutter_application(
+    name = "driver_flutter",
+    package_name = "ios_example_driver",
+    srcs = ["test_driver/banner.dart"],
+    main = "test_driver/app.dart",
+    min_os_version = IOS_MINIMUM_OS_VERSION,
+    deps = [
+        "@deps//:flutter",
+        "@rules_flutter//flutter:material_icons",
+    ],
+)
+
+flutter_ios_app(
+    name = "driver_app",
+    application = ":driver_flutter",
+    bundle_id = "com.rulesflutter.ios.example.driver",
+)
+
 # The same app, signed for a physical device: `provisioning_profile` is the
 # only difference, so the device bundle is the identical construction rather
 # than a second one hand-assembled out of Tier-2 `_gen` rules.

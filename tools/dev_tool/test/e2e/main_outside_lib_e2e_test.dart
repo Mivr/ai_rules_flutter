@@ -29,6 +29,8 @@ void main() {
     required String workspace,
     required String target,
     required String device,
+    Duration buildTimeout = const Duration(seconds: 300),
+    Duration launchTimeout = const Duration(seconds: 120),
   }) async {
     final ws = await editableWorkspace(workspace);
     final app = ws.file('test_driver/app.dart');
@@ -51,12 +53,9 @@ void main() {
       target: target,
       device: device,
     );
-    final start = await dt.waitForEvent(
-      'app.start',
-      timeout: const Duration(seconds: 300),
-    );
+    final start = await dt.waitForEvent('app.start', timeout: buildTimeout);
     final appId = start['params']?['appId'] as String? ?? dt.appId!;
-    await dt.waitForHttpControl(timeout: const Duration(seconds: 120));
+    await dt.waitForHttpControl(timeout: launchTimeout);
 
     Future<void> shows(String text, {required String after}) async {
       final found = await dt.httpCommand('app.waitFor', {
@@ -122,6 +121,22 @@ void main() {
       ),
       skip: !Platform.isMacOS ? 'macOS only' : null,
       timeout: const Timeout(Duration(minutes: 25)),
+    );
+
+    // The simulator app reaches the same two files through the iOS runner's
+    // own build, which is where the sources outside every package are least
+    // obvious. A cold run builds the workspace copy before it can launch.
+    test(
+      'iOS simulator: edits to it and its sibling reload and restart',
+      () => reloadsAndRestarts(
+        workspace: 'ios_example',
+        target: ':driver_app',
+        device: 'ios-simulator',
+        buildTimeout: e2eColdBuildTimeout,
+        launchTimeout: const Duration(minutes: 10),
+      ),
+      skip: !Platform.isMacOS ? 'macOS only (needs Xcode Simulator)' : null,
+      timeout: const Timeout(Duration(minutes: 45)),
     );
 
     test(
