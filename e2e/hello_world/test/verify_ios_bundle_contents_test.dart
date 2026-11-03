@@ -43,6 +43,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'font_manifest_checks.dart';
+
 /// The simulator bundle, forwarded by `:hello_world_ios_simulator`.
 const _ipaName = 'hello_world_ios.ipa';
 
@@ -65,18 +67,6 @@ const _absentAssets = [
 /// Font families the bundle's `FontManifest.json` must name.
 const _cupertinoFamily = 'packages/cupertino_icons/CupertinoIcons';
 const _materialFamily = 'MaterialIcons';
-
-/// The app's own family, declared through `flutter_font_family` and bundled
-/// bare as the root pubspec's fonts are.
-const _helloFamily = 'HelloSans';
-const _regularFont = 'fonts/HelloSans-Regular.ttf';
-const _boldFont = 'fonts/HelloSans-Bold.ttf';
-
-/// The `HelloSans` entry `FontManifest.json` must carry, in order.
-const _helloFonts = [
-  {'asset': _regularFont},
-  {'asset': _boldFont, 'weight': 700},
-];
 
 /// Records one expectation: [description] names what the bundle should
 /// hold, [ok] whether it does, and [found] what is there instead.
@@ -125,11 +115,7 @@ void main() {
     exit(1);
   }
   final committedBytes = committed.readAsBytesSync();
-  final committedFonts = <String, Uint8List>{
-    _regularFont: File('$testSrcDir/$testWorkspace/$_regularFont')
-        .readAsBytesSync(),
-    _boldFont: File('$testSrcDir/$testWorkspace/$_boldFont').readAsBytesSync(),
-  };
+  final testRoot = '$testSrcDir/$testWorkspace';
   final assetsDir = '$appDir/flutter_assets';
   final manifestText = _manifestText(files, assetsDir);
 
@@ -153,7 +139,7 @@ void main() {
   }
   _checkAnyAsset(files, assetsDir, committedBytes, manifestText, check);
   _checkPlatformAssets(files, assetsDir, manifestText, check);
-  _checkFontManifest(files, assetsDir, committedFonts, check);
+  _checkFontManifest(files, assetsDir, testRoot, check);
   _checkKernel(files, assetsDir, check);
 
   if (failed) exit(1);
@@ -275,15 +261,6 @@ String? _manifestText(Map<String, Uint8List> files, String assetsDir) {
   return null;
 }
 
-/// Whether [a] and [b] hold the same bytes in the same order.
-bool _bytesEqual(List<int> a, List<int> b) {
-  if (a.length != b.length) return false;
-  for (var i = 0; i < a.length; i++) {
-    if (a[i] != b[i]) return false;
-  }
-  return true;
-}
-
 /// The app's `Info.plist` carries the version `:hello_world_ios` was given.
 void _checkVersions(
   Map<String, Uint8List> files,
@@ -384,7 +361,7 @@ void _checkAnyAsset(
     check(
       'bundled $_anyAsset byte-identical to the committed one '
           '(${committed.length} bytes)',
-      _bytesEqual(bundled, committed),
+      bytesEqual(bundled, committed),
       '${bundled.length} bytes instead of ${committed.length}',
     );
   }
@@ -440,127 +417,25 @@ void _checkPlatformAssets(
 void _checkFontManifest(
   Map<String, Uint8List> files,
   String assetsDir,
-  Map<String, Uint8List> committedFonts,
+  String testRoot,
   _Check check,
 ) {
-  final raw = files['$assetsDir/FontManifest.json'];
-  if (raw == null) {
-    check(
-      'a FontManifest.json in the bundle',
-      false,
-      'no file at $assetsDir/FontManifest.json',
-    );
-    return;
+  void report(String description, {required bool ok, required String found}) {
+    check(description, ok, found);
   }
-  final List<dynamic> families;
-  try {
-    final decoded = jsonDecode(utf8.decode(raw));
-    if (decoded is! List) {
-      check(
-        'a FontManifest.json shaped as a family list',
-        false,
-        'a ${decoded.runtimeType}: $decoded',
-      );
-      return;
-    }
-    families = decoded;
-  } on FormatException catch (e) {
-    check(
-      'a FontManifest.json that parses as JSON',
-      false,
-      'a decode failure: $e',
-    );
-    return;
-  }
-  _checkFontFamily(families, files, assetsDir, _cupertinoFamily, check);
-  _checkFontFamily(families, files, assetsDir, _materialFamily, check);
-  _checkHelloSans(families, files, assetsDir, committedFonts, check);
-}
 
-/// The app's `HelloSans` entry is exactly the declaration, and each asset
-/// carries the committed file's bytes.
-void _checkHelloSans(
-  List<dynamic> families,
-  Map<String, Uint8List> files,
-  String assetsDir,
-  Map<String, Uint8List> committedFonts,
-  _Check check,
-) {
-  Map<dynamic, dynamic>? entry;
-  for (final item in families) {
-    if (item is Map && item['family'] == _helloFamily) {
-      entry = item;
-      break;
-    }
-  }
-  if (entry == null) {
-    check(
-      'a FontManifest.json family $_helloFamily',
-      false,
-      'families ${[for (final e in families)
-        if (e is Map) e['family'] else e]}',
-    );
-    return;
-  }
-  final declared = entry['fonts'];
-  check(
-    'the $_helloFamily entry ${jsonEncode(_helloFonts)}',
-    jsonEncode(declared) == jsonEncode(_helloFonts),
-    'fonts ${jsonEncode(declared)}',
+  final bundle = FontBundleView(
+    bundleKind: 'bundle',
+    assetsPrefix: assetsDir,
+    testRoot: testRoot,
+    readAsset: (asset) => files['$assetsDir/$asset'],
+    hasAsset: (asset) => files.containsKey('$assetsDir/$asset'),
   );
-  for (final asset in [_regularFont, _boldFont]) {
-    final bundled = files['$assetsDir/$asset'];
-    final committed = committedFonts[asset]!;
-    check(
-      'bundled $asset byte-identical to the committed file '
-      '(${committed.length} bytes)',
-      bundled != null && _bytesEqual(bundled, committed),
-      bundled == null
-          ? 'no file at $assetsDir/$asset'
-          : '${bundled.length} bytes instead of ${committed.length}',
-    );
-  }
-}
-
-/// The [family] entry exists and every font asset it names is a bundle file.
-void _checkFontFamily(
-  List<dynamic> families,
-  Map<String, Uint8List> files,
-  String assetsDir,
-  String family,
-  _Check check,
-) {
-  Map<dynamic, dynamic>? entry;
-  for (final item in families) {
-    if (item is Map && item['family'] == family) {
-      entry = item;
-      break;
-    }
-  }
-  if (entry == null) {
-    check(
-      'a FontManifest.json family $family',
-      false,
-      'families ${[for (final e in families)
-        if (e is Map) e['family'] else e]}',
-    );
-    return;
-  }
-  final fonts = entry['fonts'];
-  if (fonts is! List || fonts.isEmpty) {
-    check('fonts listed under the $family family', false, 'fonts: $fonts');
-    return;
-  }
-  for (final font in fonts) {
-    final asset = font is Map ? font['asset'] : null;
-    check(
-      'the bundled $family font asset $asset',
-      asset is String && files.containsKey('$assetsDir/$asset'),
-      asset is String
-          ? 'no file at $assetsDir/$asset'
-          : 'a font entry with no asset path: $font',
-    );
-  }
+  final families = decodeFontManifest(bundle, report);
+  if (families == null) return;
+  checkBundledFontFamily(families, bundle, _cupertinoFamily, report);
+  checkBundledFontFamily(families, bundle, _materialFamily, report);
+  checkHelloSansFamily(families, bundle, report);
 }
 
 /// The simulator build is a debug build, so the Dart kernel ships beside

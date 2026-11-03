@@ -31,20 +31,11 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'font_manifest_checks.dart';
+
 /// Records one expectation: [description] names what the APK should hold,
 /// [ok] whether it does, and [found] what is there instead.
 typedef _Check = void Function(String description, bool ok, String found);
-
-/// The app's own family, declared through `flutter_font_family`.
-const _helloFamily = 'HelloSans';
-const _regularFont = 'fonts/HelloSans-Regular.ttf';
-const _boldFont = 'fonts/HelloSans-Bold.ttf';
-
-/// The `HelloSans` entry `FontManifest.json` must carry, in order.
-const _helloFonts = [
-  {'asset': _regularFont},
-  {'asset': _boldFont, 'weight': 700},
-];
 
 /// The pub icon family whose font ships with the app.
 const _cupertinoFamily = 'packages/cupertino_icons/CupertinoIcons';
@@ -254,144 +245,44 @@ void _checkFonts(
   String testRoot,
   _Check check,
 ) {
-  final manifestEntry = _entryNamed(
-    entries,
-    'assets/flutter_assets/FontManifest.json',
-  );
-  if (manifestEntry.method == -1) {
-    check(
-      'a FontManifest.json in the APK',
-      false,
-      'no assets/flutter_assets/FontManifest.json entry',
-    );
-    return;
+  void report(String description, {required bool ok, required String found}) {
+    check(description, ok, found);
   }
-  final List<dynamic> families;
-  try {
-    final decoded = jsonDecode(utf8.decode(_entryData(bytes, manifestEntry)));
-    if (decoded is! List) {
-      check(
-        'a FontManifest.json shaped as a family list',
-        false,
-        'a ${decoded.runtimeType}: $decoded',
-      );
-      return;
-    }
-    families = decoded;
-  } on FormatException catch (e) {
-    check(
-      'a FontManifest.json that parses as JSON',
-      false,
-      'a decode failure: $e',
-    );
-    return;
-  }
-  _checkHelloSans(families, bytes, entries, testRoot, check);
-  _checkCupertinoFamily(families, entries, check);
-}
 
-/// The app's `HelloSans` entry is exactly the declaration, and each asset
-/// carries the committed file's bytes.
-void _checkHelloSans(
-  List<dynamic> families,
-  Uint8List bytes,
-  List<_Entry> entries,
-  String testRoot,
-  _Check check,
-) {
-  final entry = _fontFamily(families, _helloFamily);
-  if (entry == null) {
-    check(
-      'a FontManifest.json family $_helloFamily',
-      false,
-      'families ${_familyNames(families)}',
-    );
-    return;
-  }
-  check(
-    'the $_helloFamily entry ${jsonEncode(_helloFonts)}',
-    jsonEncode(entry['fonts']) == jsonEncode(_helloFonts),
-    'fonts ${jsonEncode(entry['fonts'])}',
+  const assetsPrefix = 'assets/flutter_assets';
+  final bundle = FontBundleView(
+    bundleKind: 'APK',
+    assetsPrefix: assetsPrefix,
+    testRoot: testRoot,
+    readAsset: (asset) {
+      final entry = _entryNamed(entries, '$assetsPrefix/$asset');
+      return entry.method == -1 ? null : _entryData(bytes, entry);
+    },
+    hasAsset: (asset) =>
+        _entryNamed(entries, '$assetsPrefix/$asset').method != -1,
   );
-  for (final asset in [_regularFont, _boldFont]) {
-    final bundled = _entryNamed(entries, 'assets/flutter_assets/$asset');
-    final committed = File('$testRoot/$asset');
-    if (!committed.existsSync()) {
-      check(
-        'the committed $asset',
-        false,
-        'no file at ${committed.path} (staged through `data`)',
-      );
-      continue;
-    }
-    final committedBytes = committed.readAsBytesSync();
-    final bundledBytes = bundled.method == -1
-        ? null
-        : _entryData(bytes, bundled);
-    check(
-      'bundled $asset byte-identical to the committed file '
-      '(${committedBytes.length} bytes)',
-      bundledBytes != null && _bytesEqual(bundledBytes, committedBytes),
-      bundledBytes == null
-          ? 'no assets/flutter_assets/$asset entry'
-          : '${bundledBytes.length} bytes instead of '
-                '${committedBytes.length}',
-    );
-  }
-}
-
-/// The pub icon family is listed with its font file present in the APK.
-void _checkCupertinoFamily(
-  List<dynamic> families,
-  List<_Entry> entries,
-  _Check check,
-) {
-  final entry = _fontFamily(families, _cupertinoFamily);
+  final families = decodeFontManifest(bundle, report);
+  if (families == null) return;
+  checkHelloSansFamily(families, bundle, report);
+  checkBundledFontFamily(families, bundle, _cupertinoFamily, report);
+  final cupertinoEntry = findFontFamily(families, _cupertinoFamily);
+  final cupertinoFonts = cupertinoEntry?['fonts'];
+  final listsCupertinoFont =
+      cupertinoFonts is List &&
+      cupertinoFonts.any((f) => f is Map && f['asset'] == _cupertinoFont);
   check(
-    'a FontManifest.json family $_cupertinoFamily',
-    entry != null,
-    'families ${_familyNames(families)}',
+    'FontManifest $_cupertinoFamily listing $_cupertinoFont',
+    listsCupertinoFont,
+    'fonts ${jsonEncode(cupertinoFonts)}',
   );
-  if (entry == null) return;
-  final fonts = entry['fonts'];
-  check(
-    'fonts listed under the $_cupertinoFamily family',
-    fonts is List && fonts.isNotEmpty,
-    'fonts: $fonts',
-  );
-  if (fonts is! List) return;
-  for (final font in fonts) {
-    final asset = font is Map ? font['asset'] : null;
-    check(
-      'the bundled $_cupertinoFamily font asset $asset',
-      asset is String &&
-          _entryNamed(entries, 'assets/flutter_assets/$asset').method != -1,
-      asset is String
-          ? 'no assets/flutter_assets/$asset entry'
-          : 'a font entry with no asset path: $font',
-    );
-  }
+  final cupertinoBytes = bundle.readAsset(_cupertinoFont);
   check(
     'the bundled $_cupertinoFont',
-    _entryNamed(entries, 'assets/flutter_assets/$_cupertinoFont').method != -1,
-    'no assets/flutter_assets/$_cupertinoFont entry',
+    cupertinoBytes != null && cupertinoBytes.isNotEmpty,
+    cupertinoBytes == null
+        ? 'no $assetsPrefix/$_cupertinoFont entry'
+        : 'empty $assetsPrefix/$_cupertinoFont entry',
   );
-}
-
-/// The FontManifest entry for [family], or null.
-Map<dynamic, dynamic>? _fontFamily(List<dynamic> families, String family) {
-  for (final item in families) {
-    if (item is Map && item['family'] == family) return item;
-  }
-  return null;
-}
-
-/// The family names a FontManifest lists, for a failure detail.
-List<dynamic> _familyNames(List<dynamic> families) {
-  return [
-    for (final entry in families)
-      if (entry is Map) entry['family'] else entry,
-  ];
 }
 
 /// The entry named [name], or a sentinel with method -1.
@@ -400,13 +291,4 @@ _Entry _entryNamed(List<_Entry> entries, String name) {
     (e) => e.name == name,
     orElse: () => _Entry('', -1, 0, 0),
   );
-}
-
-/// Whether [a] and [b] hold the same bytes in the same order.
-bool _bytesEqual(List<int> a, List<int> b) {
-  if (a.length != b.length) return false;
-  for (var i = 0; i < a.length; i++) {
-    if (a[i] != b[i]) return false;
-  }
-  return true;
 }

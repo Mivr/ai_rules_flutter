@@ -2,7 +2,7 @@ load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@rules_android//android:rules.bzl", "android_binary")
 load("@rules_apple//apple:ios.bzl", "ios_application")
 load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
-load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_test")
+load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_binary", "dart_test")
 load(
     "@rules_flutter//flutter:android.bzl",
     "ANDROID_MIN_SDK_VERSION",
@@ -942,6 +942,7 @@ flutter_ios_simulator_build_test(
 # the JSON manifests in pure Dart; no host unzip, plutil or xcrun runs here.
 dart_test(
     name = "verify_ios_bundle_contents_test",
+    srcs = ["test/font_manifest_checks.dart"],
     data = [
         "fonts/HelloSans-Bold.ttf",
         "fonts/HelloSans-Regular.ttf",
@@ -950,6 +951,18 @@ dart_test(
     ],
     main = "test/verify_ios_bundle_contents_test.dart",
     target_compatible_with = ["@platforms//os:macos"],
+)
+
+# Portable compile + lint target for `:verify_ios_bundle_contents_test`: the
+# test itself skips off macOS (`:hello_world_ios_simulator` requires Xcode), so
+# this target lets the `.bazelrc` `dart_analyze` and `dart_format` aspects
+# check its Dart on Linux and Windows too.
+dart_binary(
+    name = "verify_ios_bundle_contents_lint",
+    testonly = True,
+    srcs = ["test/font_manifest_checks.dart"],
+    main = "test/verify_ios_bundle_contents_test.dart",
+    target_compatible_with = _HOST_COMPATIBLE,
 )
 
 build_test(
@@ -1014,6 +1027,7 @@ dart_test(
 # central directory and inflates the manifest by hand; no unzip runs here.
 dart_test(
     name = "verify_android_platform_assets_test",
+    srcs = ["test/font_manifest_checks.dart"],
     data = [
         "fonts/HelloSans-Bold.ttf",
         "fonts/HelloSans-Regular.ttf",
