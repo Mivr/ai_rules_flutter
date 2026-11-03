@@ -129,14 +129,10 @@ bazel --max_idle_secs=60 run @rules_flutter//flutter:pub -- get
 Never hand-edit `pubspec.lock`; the command above writes it with the pinned
 toolchain and the sha256 of every archive.
 
-## Why `MODULE.bazel` is a symlink
+## Release archive
 
-`MODULE.bazel` points at `MODULE.bazel.real` so the new workspace follows the
-same shape as the other e2e workspaces that were added under a fix whose allowed
-paths did not include the release-archive line in `.gitattributes`. The
-export-ignore guard (`//flutter/tests:e2e_export_ignore_guard_test`) only sees
-regular module files, so until `.gitattributes` gains
-`/e2e/ios_plugin_matrix/ export-ignore`, the workspace would ship in the release
-archive and fail that guard. Bazel, `check_e2e_coverage` and the acceptance
-query all follow the symlink. A later item that may edit `.gitattributes` should
-delete the symlink, move the content back to `MODULE.bazel`, and add the line.
+This workspace is export-ignored in `.gitattributes`
+(`/e2e/ios_plugin_matrix/ export-ignore`), so it does not ship in the release
+archive. The export-ignore guard
+(`//flutter/tests:e2e_export_ignore_guard_test`) finds it through its regular
+`MODULE.bazel` and checks that line.
