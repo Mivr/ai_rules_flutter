@@ -253,7 +253,7 @@ def _swift_generated_header_include_impl(ctx):
     """Publish the generated header's directory as a quote include path."""
     headers = [
         header
-        for header in ctx.attr.swift[CcInfo].compilation_context.headers.to_list()
+        for header in ctx.attr.swift[CcInfo].compilation_context.direct_public_headers
         if header.basename == ctx.attr.header_name
     ]
     if len(headers) != 1:
