@@ -2843,7 +2843,18 @@ void main() {
           )..extensionRPCs = ['ext.flutter.evict'],
         );
 
-        await client.requireServiceExtension('ext.flutter.evict');
+        await expectLater(
+          client.requireServiceExtension('ext.flutter.evict'),
+          completes,
+        );
+        expect(
+          await client.waitForServiceExtension(
+            'ext.flutter.evict',
+            timeout: const Duration(milliseconds: 200),
+          ),
+          isTrue,
+          reason: 'the extension it accepted is registered',
+        );
       });
 
       test(
@@ -2878,11 +2889,16 @@ void main() {
         final client = await connected(fake);
         client.serviceExtensionTimeout = const Duration(seconds: 5);
 
-        final waiting = client.requireServiceExtension('ext.flutter.evict');
+        var resolved = false;
+        final waiting = client
+            .requireServiceExtension('ext.flutter.evict')
+            .then((_) => resolved = true);
         await pumpEventQueue();
+        expect(resolved, isFalse, reason: 'nothing is registered yet');
+
         fake.emitServiceExtensionAdded('iso-1', 'ext.flutter.evict');
 
-        await waiting;
+        await expectLater(waiting, completion(isTrue));
       });
     });
   });

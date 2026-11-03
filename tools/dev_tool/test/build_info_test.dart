@@ -133,7 +133,7 @@ void main() {
       // --output=label` prints `//:app_flutter`. Comparing them raw would fail
       // on every app in the main repository, which is every app.
       expect(
-        () => resolveAssetsDir(
+        resolveAssetsDir(
           info: info(label: '@@//:app_flutter'),
           candidates: const [
             'bazel-out/ios_sim_arm64-dbg-ST-abc/bin/app_flutter_flutter_assets',
@@ -142,7 +142,8 @@ void main() {
           target: '//:app',
           appliedArgs: const [],
         ),
-        returnsNormally,
+        'bazel-out/ios_sim_arm64-dbg-ST-abc/bin/app_flutter_flutter_assets',
+        reason: 'the apparent and canonical forms name the same application',
       );
     });
 
@@ -151,7 +152,7 @@ void main() {
       // not evidence of a mismatch, and the membership check above has already
       // established the tree is reachable.
       expect(
-        () => resolveAssetsDir(
+        resolveAssetsDir(
           info: info(),
           candidates: const [
             'bazel-out/ios_sim_arm64-dbg-ST-abc/bin/app_flutter_flutter_assets',
@@ -160,7 +161,8 @@ void main() {
           target: '//:app',
           appliedArgs: const [],
         ),
-        returnsNormally,
+        'bazel-out/ios_sim_arm64-dbg-ST-abc/bin/app_flutter_flutter_assets',
+        reason: 'an unanswered query falls back to the membership check alone',
       );
     });
   });

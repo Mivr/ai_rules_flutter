@@ -725,7 +725,10 @@ void main() {
         );
 
         await keys.close();
-        await loop.timeout(const Duration(seconds: 5));
+        // Returning, rather than hanging until the timeout, is the whole
+        // behaviour: a loop that kept waiting would fail this with a
+        // TimeoutException.
+        await expectLater(loop.timeout(const Duration(seconds: 5)), completes);
       });
     });
 

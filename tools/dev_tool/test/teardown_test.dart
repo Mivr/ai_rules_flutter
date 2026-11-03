@@ -108,7 +108,19 @@ void main() {
     });
 
     test('an empty teardown runs cleanly', () async {
-      await Teardown().run();
+      final teardown = Teardown();
+      expect(teardown.hasRun, isFalse);
+
+      await teardown.run();
+
+      expect(teardown.hasRun, isTrue);
+      // Nothing was registered, so nothing is queued behind the run: a step
+      // added now runs at once, exactly once, and a second run does not
+      // replay it.
+      final disposed = <String>[];
+      await teardown.add(() async => disposed.add('late'));
+      await teardown.run();
+      expect(disposed, ['late']);
     });
   });
 }

@@ -2902,6 +2902,29 @@ void main() {
           ),
           returnsNormally,
         );
+        // `auditOutputRanges` returns void, so the accepted edge-sharing pair
+        // is paired with a control: the same two ranges, `b` shifted 16 bytes
+        // back so it overlaps `a`, must be refused as an overlap.
+        ByteData.sublistView(b).setUint32(8, 0x3130, Endian.little);
+        expect(
+          () => macho.auditOutputRanges(
+            [
+              macho.LoadCommand(macho.lcFunctionStarts, a),
+              macho.LoadCommand(macho.lcDataInCode, b),
+            ],
+            const macho.RewrittenLayout(
+              linkeditOff: 0x3000,
+              fileLength: 0x5000,
+            ),
+          ),
+          throwsA(
+            isA<FormatException>().having(
+              (e) => e.message,
+              'message',
+              contains('overlap'),
+            ),
+          ),
+        );
       });
 
       test('refuses ranges past the end of the file', () {
@@ -2972,6 +2995,29 @@ void main() {
             macho.RewrittenLayout(linkeditOff: 0x3000, fileLength: 0x5000),
           ),
           returnsNormally,
+        );
+        // Void callee, so the accepted geometry is paired with a control: the
+        // same commands with the function-starts range moved to the last 16
+        // bytes of the file run 48 bytes past it and must be refused.
+        ByteData.sublistView(a).setUint32(8, 0x4ff0, Endian.little);
+        expect(
+          () => macho.auditOutputRanges(
+            [
+              macho.LoadCommand(macho.lcFunctionStarts, a),
+              macho.LoadCommand(macho.lcSymtab, symtab),
+            ],
+            const macho.RewrittenLayout(
+              linkeditOff: 0x3000,
+              fileLength: 0x5000,
+            ),
+          ),
+          throwsA(
+            isA<FormatException>().having(
+              (e) => e.message,
+              'message',
+              contains('past the end'),
+            ),
+          ),
         );
       });
     });

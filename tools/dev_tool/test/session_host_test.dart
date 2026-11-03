@@ -489,8 +489,15 @@ void main() {
       // left one listening would still pass. Discovered rather than named for
       // the same reason the channel discovers them — a host with no IPv6
       // cannot assign ::1, and asking for it there reports on the machine.
-      for (final address in await assignableLoopbacks()) {
+      final loopbacks = await assignableLoopbacks();
+      expect(loopbacks, isNotEmpty, reason: 'there is a family to rebind on');
+      for (final address in loopbacks) {
         final rebound = await HttpServer.bind(address, uri.port);
+        expect(
+          rebound.port,
+          uri.port,
+          reason: 'the port was free on ${address.address}',
+        );
         await rebound.close();
       }
     });

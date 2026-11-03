@@ -391,6 +391,10 @@ void main() {
       final s = AppLogStream();
       await s.close();
       await s.close();
+      expect(s.read(0).lines, isEmpty);
+      // Still closed after the second close: a late line is dropped.
+      s.add('late');
+      expect(s.read(0).lines, isEmpty);
     });
   });
 

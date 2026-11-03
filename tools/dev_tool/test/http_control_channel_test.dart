@@ -584,8 +584,17 @@ void main() {
       });
 
       test('stop is idempotent', () async {
+        final int port = channel.uri.port;
         await channel.stop();
+        expect(() => channel.uri, throwsA(isA<StateError>()));
+        // The first stop closed the listener: nothing answers on its port.
+        await expectLater(
+          Socket.connect('localhost', port),
+          throwsA(isA<SocketException>()),
+        );
+
         await channel.stop(); // Should not throw.
+        expect(() => channel.uri, throwsA(isA<StateError>()));
       });
 
       test(

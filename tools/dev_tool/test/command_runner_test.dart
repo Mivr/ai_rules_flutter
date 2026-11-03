@@ -231,8 +231,8 @@ void main() {
         final f1 = runner.run('slow', {});
         final f2 = runner.run('fast', {});
 
-        await f1.timeout(const Duration(seconds: 2));
-        await f2.timeout(const Duration(seconds: 2));
+        expect(await f1.timeout(const Duration(seconds: 2)), {'ok': true});
+        expect(await f2.timeout(const Duration(seconds: 2)), {'ok': true});
       },
     );
   });

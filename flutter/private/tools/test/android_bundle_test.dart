@@ -75,6 +75,27 @@ void main() {
           ),
           returnsNormally,
         );
+        // `validateAndroidElf` returns void, so the accepted calls above prove
+        // nothing alone: the same headers against the other ABI's machine
+        // number must throw, naming the machine the file really has.
+        expect(
+          () => validateAndroidElf(
+            _syntheticElf(machine: 183),
+            path: 'libapp.so',
+            wantMachine: 62,
+            abi: 'x86_64',
+          ),
+          throwsA(
+            isA<FormatException>().having(
+              (e) => e.message,
+              'message',
+              allOf(
+                contains('libapp.so has ELF machine 183'),
+                contains('x86_64 requires 62'),
+              ),
+            ),
+          ),
+        );
       });
 
       test('rejects non-ELF files with the exact error message', () {
