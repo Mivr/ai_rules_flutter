@@ -209,7 +209,10 @@ fake_application = rule(
     attrs = {
         "apple_libs": attr.label_list(),
         "apple_plugin_libraries": attr.label_list(),
-        "apple_privacy_manifests": attr.label_list(allow_files = True),
+        "apple_privacy_manifests": attr.label_list(
+            allow_files = True,
+            doc = "Privacy manifest files exposed on `FlutterApplicationInfo.apple_privacy_manifests`.",
+        ),
         "code_assets": attr.string_list(),
         "debug": attr.bool(default = False),
         "fat_macho": attr.bool(default = False),

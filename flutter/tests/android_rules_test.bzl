@@ -1,7 +1,6 @@
 """Direct `rules_testing` analysis tests for Android rules."""
 
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
-load("@rules_android//providers:providers.bzl", "StarlarkAndroidResourcesInfo")
 load("@rules_java//java/common:java_info.bzl", "JavaInfo")
 load("@rules_testing//lib:analysis_test.bzl", "analysis_test", "test_suite")
 load(
