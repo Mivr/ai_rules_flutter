@@ -184,6 +184,10 @@ void main() {
       );
       expect(broken(bytes, returns: true), isEmpty);
     });
+    test('a filler Returns section fails', () {
+      final Uint8List bytes = withParam(param('p'), returns: 'A value.');
+      expect(broken(bytes, returns: true), {'doc-too-short'});
+    });
     test('a function that returns nothing needs no Returns', () {
       expect(broken(withParam(param('p'))), isEmpty);
     });

@@ -206,8 +206,11 @@ class DocChecker {
         name: p.name,
       );
     }
-    if (f.returnDoc.trim().isEmpty && returnsValue(file, f.name)) {
-      out.add(file, f.name, 'returns-missing');
+    if (f.returnDoc.trim().isEmpty) {
+      if (returnsValue(file, f.name)) out.add(file, f.name, 'returns-missing');
+    } else {
+      final symbol = '${f.name}.<returns>';
+      _text(out, file, symbol, f.returnDoc, 'returns-missing', name: f.name);
     }
   }
 
