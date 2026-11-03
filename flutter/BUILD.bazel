@@ -280,6 +280,7 @@ bzl_library(
         "//flutter/private:flutter_pub_path",
         "//flutter/private:flutter_pub_plugin_defines",
         "//flutter/private:flutter_pub_plugin_deps",
+        "//flutter/private:flutter_pub_scc_plan",
         "//flutter/private:flutter_pub_tag",
         "//flutter/private:flutter_pubspec",
         "//flutter/private:flutter_sdk_package",
