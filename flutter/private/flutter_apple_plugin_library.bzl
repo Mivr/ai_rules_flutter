@@ -27,6 +27,11 @@ load("@rules_cc//cc:objc_library.bzl", "objc_library")
 load("@rules_swift//swift:swift.bzl", "swift_library")
 load("//flutter:providers.bzl", _FlutterApplePluginInfo = "FlutterApplePluginInfo")
 load(
+    ":flutter_apple_plugin_defines.bzl",
+    "plugin_objc_copts",
+    "plugin_swift_copts",
+)
+load(
     ":flutter_apple_plugin_library_helpers.bzl",
     _emit_plugin_swift_header_include_target = "emit_plugin_swift_header_include_target",
     _flutter_xtool_apple_plugin_library = "flutter_xtool_apple_plugin_library",
@@ -112,14 +117,6 @@ def _emit_apple_framework_import(spec):
             visibility = ["//visibility:private"],
         )
 
-def _plugin_define_copts(defines):
-    """The C-family `-D` flags for a plugin's define entries, in order."""
-    return ["-D" + define for define in defines]
-
-def _plugin_swift_define_copts(defines):
-    """The Swift `-D` flags: only value-less entries, because a condition has no value."""
-    return ["-D" + define for define in defines if "=" not in define]
-
 def _emit_plugin_objc_target(spec, objc_files, headers):
     """Emit the inner `objc_library`; return `(objc_module_name, dep_label_or_None)`."""
     if not objc_files:
@@ -136,7 +133,7 @@ def _emit_plugin_objc_target(spec, objc_files, headers):
         sdk_dylibs = spec.sdk_dylibs,
         module_name = objc_module_name,
         enable_modules = True,
-        copts = list(spec.copts) + list(spec.objc_copts) + _plugin_define_copts(spec.plugin_defines),
+        copts = plugin_objc_copts(spec.copts, spec.objc_copts, spec.plugin_defines),
         deps = [":" + spec.framework_target] + list(spec.deps),
         tags = spec.internal_tags,
         target_compatible_with = spec.target_compatible_with,
@@ -185,7 +182,7 @@ def _emit_plugin_mixed_objc_target(spec, objc_files, headers, swift_deps):
         sdk_frameworks = spec.sdk_frameworks,
         weak_sdk_frameworks = spec.weak_sdk_frameworks,
         sdk_dylibs = spec.sdk_dylibs,
-        copts = list(spec.copts) + list(spec.objc_copts) + _plugin_define_copts(spec.plugin_defines),
+        copts = plugin_objc_copts(spec.copts, spec.objc_copts, spec.plugin_defines),
         deps = [":" + spec.framework_target] + swift_deps,
         tags = spec.internal_tags,
         target_compatible_with = spec.target_compatible_with,
@@ -202,7 +199,7 @@ def _plugin_bridging_copts(spec, headers):
     view class without importing the framework still parses. A plugin with no
     bridging header gets its own copts unchanged.
     """
-    extra_copts = list(spec.copts) + _plugin_swift_define_copts(spec.plugin_defines)
+    extra_copts = plugin_swift_copts(spec.copts, spec.plugin_defines)
     for h in headers:
         if h.endswith("%s-Bridging-Header.h" % spec.module_name):
             if spec.platform == "ios":
@@ -213,7 +210,7 @@ def _plugin_bridging_copts(spec, headers):
                 fail(
                     "flutter_apple_plugin_library: platform must be 'ios' or 'macos', got '%s'" % spec.platform,
                 )
-            extra_copts.extend([
+            extra_copts = extra_copts + [
                 "-Xcc",
                 "-include",
                 "-Xcc",
@@ -224,7 +221,7 @@ def _plugin_bridging_copts(spec, headers):
                 framework_header,
                 "-import-objc-header",
                 "$(execpath %s)" % h,
-            ])
+            ]
             return h, extra_copts
     return None, extra_copts
 
@@ -331,7 +328,7 @@ def _emit_mixed_plugin(spec, swift_files, objc_files, headers, kwargs):
 
 def flutter_apple_plugin_objc_settings(
         includes = [],
-        conlyopts = [],
+        copts = [],
         cxxopts = [],
         linkopts = [],
         private_includes = [],
@@ -345,7 +342,8 @@ def flutter_apple_plugin_objc_settings(
 
     Args:
         includes: Public header search directories.
-        conlyopts: C-only compile options (`conlyopts`).
+        copts: Target-local C-family compile options from `cSettings`; their
+            `.define` entries reach `.c`, `.m` and `.mm` compiles alike.
         cxxopts: C++ compile options (`cxxopts`).
         linkopts: Link options from `linkerSettings`.
         private_includes: Target-local `.headerSearchPath` directories.
@@ -358,7 +356,7 @@ def flutter_apple_plugin_objc_settings(
     """
     return struct(
         includes = includes,
-        conlyopts = conlyopts,
+        copts = copts,
         cxxopts = cxxopts,
         linkopts = linkopts,
         private_includes = private_includes,
@@ -375,14 +373,15 @@ def flutter_apple_plugin_objc_library(
         platform = "macos",
         deps = [],
         settings = None,
+        plugin_defines = [],
         visibility = None):
     """Build a plugin-local C-family target as an ObjC-only library.
 
     The inner `objc_library` carries `module_name`, the Flutter framework
     import, and the target's translated settings (public includes,
-    `conlyopts`/`cxxopts` from `.define`, `linkopts` from
-    `linkerSettings`, and target-local `.headerSearchPath` directories).
-    The named target forwards CcInfo/SwiftInfo and exposes
+    `copts` from `cSettings`, `cxxopts` from `cxxSettings`, `linkopts`
+    from `linkerSettings`, and target-local `.headerSearchPath`
+    directories). The named target forwards CcInfo/SwiftInfo and exposes
     `FlutterApplePluginInfo`, so the aggregator and
     `flutter_plugin(apple_libs = ...)` accept it exactly like a Swift
     local target.
@@ -394,9 +393,12 @@ def flutter_apple_plugin_objc_library(
         module_name: The target's `c99name`, used as the clang module.
         platform: `"macos"` or `"ios"`. Picks the Flutter framework dep.
         deps: Same-package local libraries this target depends on.
-        settings: `struct(includes, conlyopts, cxxopts, linkopts,
+        settings: `struct(includes, copts, cxxopts, linkopts,
             private_includes, sdk_frameworks, weak_sdk_frameworks,
             sdk_dylibs)` of translated target settings.
+        plugin_defines: Preprocessor defines for that plugin's Apple
+            libraries, each `NAME` or `NAME=VALUE`, appended to `copts`
+            after the target's own settings so they stay target-local.
         visibility: Target visibility.
     """
     if platform not in ("macos", "ios"):
@@ -433,7 +435,7 @@ def flutter_apple_plugin_objc_library(
         srcs = srcs,
         hdrs = hdrs,
         includes = settings.includes,
-        conlyopts = settings.conlyopts,
+        copts = plugin_objc_copts(getattr(settings, "copts", []), [], plugin_defines),
         cxxopts = settings.cxxopts,
         linkopts = settings.linkopts,
         sdk_frameworks = settings.sdk_frameworks,

@@ -11385,8 +11385,8 @@
     },
     "@@ai_rules_flutter+//flutter:extensions.bzl%flutter": {
       "general": {
-        "bzlTransitiveDigest": "V19TtZ2J/Vb67qYIcGy9RdVSSJcFCgvNn6+chuqT3lo=",
-        "usagesDigest": "PpSSeyEdhjquRuGEaQ4PY4ZCV7iLf5Xsx94k6n73QZ8=",
+        "bzlTransitiveDigest": "DuZvOCmY8AHyeyHeu75YI+uod6L/zq2Xp7H/NXIuaeg=",
+        "usagesDigest": "TzZ38EWX//s4JpfwBXoXqGXfwlT6rdI2N2tDuRChcnE=",
         "recordedInputs": [
           "REPO_MAPPING:,deps__swiftpm-bigint ai_rules_flutter++flutter+deps__swiftpm-bigint",
           "REPO_MAPPING:ai_rules_dart+,dart_pub_scanner ai_rules_dart++dart+dart_pub_scanner",
@@ -15201,7 +15201,9 @@
               "plan_covers_package": true,
               "scc_targets": {},
               "cycle_breaks": [],
-              "plugin_defines": [],
+              "plugin_defines": [
+                "SPM_PLUGIN_DEFINE=100"
+              ],
               "overlay_roots": [
                 "@@ai_rules_flutter+//ext:BUILD.bazel"
               ],
