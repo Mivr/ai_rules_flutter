@@ -191,6 +191,143 @@ void main() {
     );
   });
 
+  group('--test-randomize-ordering-seed', () {
+    Map<String, dynamic> tree() => {
+      'type': 'group',
+      'setUpAll': {'name': 'setUpAll'},
+      'tearDownAll': {'name': 'tearDownAll'},
+      'entries': [
+        for (var i = 0; i < 12; i++) {'type': 'test', 'name': 't$i'},
+        {
+          'type': 'group',
+          'setUpAll': {'name': 'inner setUpAll'},
+          'entries': [
+            for (var i = 0; i < 12; i++) {'type': 'test', 'name': 'n$i'},
+          ],
+        },
+      ],
+    };
+
+    List<String> names(Map<String, dynamic> group) => [
+      for (final e in (group['entries'] as List).cast<Map<String, dynamic>>())
+        if (e['type'] == 'group') ...names(e) else e['name'] as String,
+    ];
+
+    test('no flag leaves the argument list and the seed untouched', () {
+      final runner.SeedArgs r = runner.extractSeed(['--update-goldens']);
+      expect(r.seed, isNull);
+      expect(r.rest, ['--update-goldens']);
+    });
+
+    test('an integer seed is removed and combines with --update-goldens', () {
+      final runner.SeedArgs r = runner.extractSeed([
+        '--test-randomize-ordering-seed=42',
+        '--update-goldens',
+      ]);
+      expect(r.seed, 42);
+      expect(r.rest, ['--update-goldens']);
+      expect(
+        runner.extractSeed([
+          '--test-randomize-ordering-seed=0',
+        ]).seed,
+        0,
+      );
+    });
+
+    test('random resolves once to an integer', () {
+      var calls = 0;
+      final runner.SeedArgs r = runner.extractSeed([
+        '--test-randomize-ordering-seed=random',
+      ], randomSeed: () => ++calls + 6);
+      expect(r.seed, 7);
+      expect(calls, 1);
+      final runner.SeedArgs real = runner.extractSeed([
+        '--test-randomize-ordering-seed=random',
+      ]);
+      expect(real.seed, isNotNull);
+      expect(real.seed, greaterThanOrEqualTo(0));
+    });
+
+    test('a bad value names the argument', () {
+      for (final bad in [
+        '--test-randomize-ordering-seed=-1',
+        '--test-randomize-ordering-seed=',
+        '--test-randomize-ordering-seed=abc',
+        '--test-randomize-ordering-seed=1.5',
+        '--test-randomize-ordering-seed=99999999999999999999999',
+        '--test-randomize-ordering-seed',
+      ]) {
+        expect(
+          () => runner.extractSeed([bad]),
+          throwsA(
+            isA<FormatException>().having(
+              (e) => e.message,
+              'message',
+              allOf(contains(bad), contains('--test-randomize-ordering-seed')),
+            ),
+          ),
+          reason: bad,
+        );
+      }
+    });
+
+    test('an unknown argument still reaches the existing rejection', () {
+      final runner.SeedArgs r = runner.extractSeed(['--bogus']);
+      expect(
+        () => runner.parseUpdateGoldens(r.rest, '/ws'),
+        throwsA(isA<FormatException>()),
+      );
+    });
+
+    test('the same seed gives the same order, every case exactly once', () {
+      final List<String> base = names(tree());
+      final List<String> a = names(runner.shuffleSuite(tree(), 42));
+      final List<String> b = names(runner.shuffleSuite(tree(), 42));
+      expect(a, b);
+      expect(a.toList()..sort(), base.toList()..sort());
+      expect(a, isNot(base));
+      expect(
+        names(runner.shuffleSuite(tree(), 43)),
+        isNot(a),
+      );
+    });
+
+    test('groups keep their fixtures and nesting', () {
+      final Map<String, dynamic> s = runner.shuffleSuite(tree(), 7);
+      expect((s['setUpAll'] as Map<String, dynamic>)['name'], 'setUpAll');
+      expect(
+        (s['tearDownAll'] as Map<String, dynamic>)['name'],
+        'tearDownAll',
+      );
+      final List<Map<String, dynamic>> inner = (s['entries'] as List)
+          .cast<Map<String, dynamic>>()
+          .where((e) => e['type'] == 'group')
+          .toList();
+      expect(inner, hasLength(1));
+      expect(
+        (inner.single['setUpAll'] as Map<String, dynamic>)['name'],
+        'inner setUpAll',
+      );
+      expect(names(inner.single), hasLength(12));
+    });
+
+    test('a single case is unaffected', () {
+      final Map<String, dynamic> one = {
+        'type': 'group',
+        'entries': [
+          {'type': 'test', 'name': 'only'},
+        ],
+      };
+      expect(names(runner.shuffleSuite(one, 5)), ['only']);
+    });
+
+    test('the resolved seed is announced on one line a user can copy', () {
+      final String line = runner.seedAnnouncement(1234);
+      expect(line, isNot(contains('\n')));
+      expect(line, contains('--test-randomize-ordering-seed=1234'));
+    });
+  });
+
   group('parseUpdateGoldens', () {
     // The refusal is the reason this is a function rather than three lines in
     // `main`: `bazel test` cannot be made to pass and fail the same target, so
