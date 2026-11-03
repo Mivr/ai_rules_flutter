@@ -279,6 +279,7 @@ flutter_android_app(
 
 build_test(
     name = "plugin_build_test",
+    size = "small",
     targets = [
         ":plugin_app",
         "//greeting_plugin",
@@ -287,30 +288,35 @@ build_test(
 
 build_test(
     name = "macos_bundle_build_test",
+    size = "small",
     target_compatible_with = ["@platforms//os:macos"],
     targets = [":plugin_macos"],
 )
 
 flutter_ios_simulator_build_test(
     name = "ios_bundle_build_test",
+    size = "small",
     target_compatible_with = ["@platforms//os:macos"],
     targets = [":plugin_ios"],
 )
 
 build_test(
     name = "linux_bundle_build_test",
+    size = "small",
     target_compatible_with = ["@platforms//os:linux"],
     targets = [":plugin_linux"],
 )
 
 build_test(
     name = "windows_bundle_build_test",
+    size = "small",
     target_compatible_with = ["@platforms//os:windows"],
     targets = [":plugin_windows"],
 )
 
 build_test(
     name = "android_bundle_build_test",
+    size = "small",
     tags = ["android"],
     targets = [":plugin_android"],
 )
@@ -332,6 +338,7 @@ debug_apk(
 # x64 APK, asserting it carries no ABI but x86_64.
 dart_test(
     name = "verify_android_apk_test",
+    size = "medium",
     data = [
         ":plugin_android",
         ":plugin_android_dbg",
@@ -353,6 +360,7 @@ dart_test(
 # label — the same form the hub's own aggregator uses for them.
 dart_test(
     name = "verify_build_config_test",
+    size = "small",
     data = [
         "@@ai_rules_flutter++flutter+deps__audio_session//android:_build_config_src",
         "@@ai_rules_flutter++flutter+deps__jni//android:_build_config_src",
@@ -368,6 +376,7 @@ dart_test(
 # docs/TESTING.md § Plugin verification matrix.
 dart_test(
     name = "verify_android_app_test",
+    size = "large",
     data = [":plugin_android"],
     main = "test/verify_android_app_test.dart",
     tags = [
@@ -381,11 +390,13 @@ dart_test(
 # checks it anyway.
 dart_analysis_test(
     name = "verify_android_app_test_analysis",
+    size = "small",
     targets = [":verify_android_app_test"],
 )
 
 build_test(
     name = "web_build_test",
+    size = "small",
     targets = [":plugin_web"],
 )
 
@@ -395,6 +406,7 @@ build_test(
 # Dock; run explicitly per docs/TESTING.md § Plugin verification matrix.
 dart_test(
     name = "verify_macos_app_test",
+    size = "medium",
     data = [":plugin_macos"],
     main = "test/verify_macos_app_test.dart",
     tags = [
@@ -408,6 +420,7 @@ dart_test(
 # checks it anyway.
 dart_analysis_test(
     name = "verify_macos_app_test_analysis",
+    size = "small",
     target_compatible_with = ["@platforms//os:macos"],
     targets = [":verify_macos_app_test"],
 )

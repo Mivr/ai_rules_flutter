@@ -4,6 +4,7 @@ load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 
 # buildifier: disable=bzl-visibility
 load("//flutter/private:toolchain_selection.bzl", "select_toolchain_source", "select_toolchain_version")
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 def _req(version, is_root = False, module = ""):
     return struct(version = version, is_root = is_root, module = module)
@@ -310,7 +311,7 @@ def toolchain_selection_test_suite(name):
         target_under_test = ":" + name + "_root_tie_probe",
         expected_substrings = ["equally-ranked", "Keep exactly one"],
     )
-    unittest.suite(
+    small_unittest_suite(
         name + "_unit",
         _single_request_test,
         _latest_wins_numerically_test,

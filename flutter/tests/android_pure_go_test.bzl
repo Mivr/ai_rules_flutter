@@ -9,6 +9,7 @@ on e2e/hello_world.
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//flutter/private:flutter_android_binary_proxy.bzl", "testing")
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 def _enables_pure_by_default_test_impl(ctx):
     env = unittest.begin(ctx)
@@ -33,7 +34,7 @@ def _opt_out_leaves_config_untouched_test_impl(ctx):
 _opt_out_leaves_config_untouched_test = unittest.make(_opt_out_leaves_config_untouched_test_impl)
 
 def android_pure_go_test_suite(name):
-    unittest.suite(
+    small_unittest_suite(
         name,
         _enables_pure_by_default_test,
         _opt_out_leaves_config_untouched_test,

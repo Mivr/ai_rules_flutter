@@ -8,6 +8,7 @@ load(
     "cpp_client_wrapper_missing_error",
     "cpp_client_wrapper_sha_error",
 )
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 def _artifact_path_test_impl(ctx):
     env = unittest.begin(ctx)
@@ -94,4 +95,4 @@ _t3_test = unittest.make(_missing_error_test_impl)
 _t4_test = unittest.make(_wrapper_files_shape_test_impl)
 
 def cpp_client_wrapper_test_suite(name):
-    unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test)
+    small_unittest_suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test)

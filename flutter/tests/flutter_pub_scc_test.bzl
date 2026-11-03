@@ -63,6 +63,7 @@ load(
     "flutter_pub_scc_member_target",
 )
 load("//flutter/private:podfile_lock.bzl", "read_podfile_lock")
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 def _hub_build_content_empty_scc_test_impl(ctx):
     """Hub BUILD and android/BUILD are byte-identical when scc_targets is empty."""
@@ -644,7 +645,7 @@ _windows_path_pubspec_test = unittest.make(_windows_path_pubspec_test_impl)
 
 def flutter_pub_scc_test_suite(name):
     """Defines the flutter.pub SCC planner and spoke test suite."""
-    unittest.suite(
+    small_unittest_suite(
         name,
         _hub_build_content_empty_scc_test,
         _hub_build_content_with_sccs_test,

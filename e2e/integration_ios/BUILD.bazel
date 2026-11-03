@@ -53,6 +53,7 @@ flutter_gen_l10n(
 flutter_integration_test(
     name = "app_test",
     package_name = "integration_ios",
+    size = "large",
     srcs = [
         "integration_test/app_test.dart",
         ":app_l10n",
@@ -91,6 +92,7 @@ flutter_ios_registrant_gen(
 # filtering regression fails here before the macOS simulator leg.
 dart_test(
     name = "plugin_registrant_filter_test",
+    size = "small",
     args = ["$(rlocationpaths :app_test_registrant)"],
     data = [":app_test_registrant"],
     main = "test/plugin_registrant_filter_test.dart",
@@ -105,6 +107,7 @@ dart_test(
 flutter_integration_test(
     name = "plugin_spm_test",
     package_name = "integration_ios",
+    size = "large",
     srcs = ["integration_test/plugin_spm_test.dart"],
     app_srcs = ["lib/main.dart"],
     assets = ["assets/logo.png"],
@@ -126,6 +129,7 @@ flutter_integration_test(
 flutter_integration_test(
     name = "plugin_spm_mapped_test",
     package_name = "integration_ios",
+    size = "large",
     srcs = ["integration_test/plugin_spm_test.dart"],
     app_srcs = ["lib/main.dart"],
     assets = ["assets/logo.png"],
@@ -147,6 +151,7 @@ flutter_integration_test(
 flutter_integration_test(
     name = "plugin_spm_objc_test",
     package_name = "integration_ios",
+    size = "large",
     srcs = ["integration_test/plugin_spm_objc_test.dart"],
     app_srcs = ["lib/main.dart"],
     assets = ["assets/logo.png"],
@@ -171,6 +176,7 @@ flutter_integration_test(
 flutter_integration_test(
     name = "plugin_spm_graph_test",
     package_name = "integration_ios",
+    size = "large",
     srcs = ["integration_test/plugin_spm_graph_test.dart"],
     app_srcs = ["lib/main.dart"],
     assets = ["assets/logo.png"],
@@ -193,6 +199,7 @@ flutter_integration_test(
 flutter_integration_test(
     name = "plugin_pod_test",
     package_name = "integration_ios",
+    size = "large",
     srcs = ["integration_test/plugin_pod_test.dart"],
     platform = "ios",
     deps = [
@@ -210,6 +217,7 @@ flutter_integration_test(
 flutter_integration_test(
     name = "plugin_pod_wrong_test",
     package_name = "integration_ios",
+    size = "large",
     srcs = ["integration_test/plugin_pod_test.dart"],
     platform = "ios",
     tags = ["manual"],
@@ -229,6 +237,7 @@ flutter_integration_test(
 flutter_integration_test(
     name = "app_test_red",
     package_name = "integration_ios",
+    size = "large",
     srcs = ["integration_test/red_test.dart"],
     app_srcs = ["lib/main.dart"],
     assets = ["assets/logo.png"],
@@ -249,6 +258,7 @@ flutter_integration_test(
 # `target_compatible_with`. `bazel test //...` runs this on every OS.
 build_test(
     name = "ios_dart_side_build_test",
+    size = "small",
     targets = [
         ":__app_test_app",
         ":__app_test_bootstrap",
@@ -278,6 +288,7 @@ build_test(
 flutter_test(
     name = "app_test_lint",
     package_name = "integration_ios",
+    size = "medium",
     srcs = [
         "lib/main.dart",
         ":app_l10n",
@@ -302,6 +313,7 @@ flutter_test(
 flutter_test(
     name = "app_test_red_lint",
     package_name = "integration_ios",
+    size = "medium",
     srcs = ["lib/main.dart"],
     main = "integration_test/red_test.dart",
     tags = ["manual"],
@@ -320,6 +332,7 @@ flutter_test(
 flutter_test(
     name = "plugin_spm_test_lint",
     package_name = "integration_ios",
+    size = "medium",
     srcs = ["lib/main.dart"],
     main = "integration_test/plugin_spm_test.dart",
     tags = ["manual"],
@@ -364,6 +377,7 @@ flutter_test(
 flutter_test(
     name = "plugin_pod_test_lint",
     package_name = "integration_ios",
+    size = "medium",
     main = "integration_test/plugin_pod_test.dart",
     tags = ["manual"],
     deps = [
@@ -453,6 +467,7 @@ ios_application(
 # constraint; the app and library it builds carry none.
 flutter_ios_simulator_build_test(
     name = "swiftpm_consumer_build_test",
+    size = "small",
     target_compatible_with = ["@platforms//os:macos"],
     targets = [":swiftpm_consumer_app"],
 )

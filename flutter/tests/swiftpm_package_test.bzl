@@ -4,6 +4,7 @@ load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//flutter/private:swiftpm_clang.bzl", "swiftpm_clang_module_spec", "swiftpm_generated_modulemap_content")
 load("//flutter/private:swiftpm_manifest.bzl", "parse_swiftpm_package")
 load("//flutter/private:swiftpm_package.bzl", "swiftpm_is_code_file", "swiftpm_select_target_files")
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 _DOCS = """// swift-tools-version:5.9
 import PackageDescription
@@ -367,7 +368,7 @@ _refuses_implicit_resources_test = unittest.make(_refuses_implicit_resources_tes
 
 def swiftpm_package_test_suite(name):
     """Registers the target file selection unit tests."""
-    unittest.suite(
+    small_unittest_suite(
         name + "_unit",
         _is_code_file_test,
         _skips_non_code_files_test,

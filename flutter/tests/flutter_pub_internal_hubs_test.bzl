@@ -1,6 +1,5 @@
 """Unit tests for flutter.pub internal hub handling and lazy planning."""
 
-load("@bazel_skylib//lib:partial.bzl", "partial")
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load(
     "@rules_dart//dart/pub:pub_scc.bzl",
@@ -15,6 +14,7 @@ load(
     "//flutter/private:flutter_pub_scc_plan.bzl",
     "plan_hub_sccs",
 )
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 def _fail_called(method):
     """Fails immediately if an unexpected module_ctx method is invoked."""
@@ -217,8 +217,8 @@ _internal_and_consumer_hub_plan_test = unittest.make(_internal_and_consumer_hub_
 
 def flutter_pub_internal_hubs_test_suite(name):
     """Defines the flutter.pub internal hubs unit test suite."""
-    unittest.suite(
+    small_unittest_suite(
         name,
-        partial.make(_dev_tool_and_gen_l10n_internal_plan_test, size = "small"),
-        partial.make(_internal_and_consumer_hub_plan_test, size = "small"),
+        _dev_tool_and_gen_l10n_internal_plan_test,
+        _internal_and_consumer_hub_plan_test,
     )

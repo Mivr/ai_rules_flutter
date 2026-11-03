@@ -383,6 +383,7 @@ _HOST_COMPATIBLE = select({
 flutter_test(
     name = "widget_test",
     package_name = "hello_world",
+    size = "medium",
     srcs = [
         "lib/common_widgets.dart",
         "lib/main.dart",
@@ -408,6 +409,7 @@ flutter_test(
 flutter_test(
     name = "impeller_shader_test",
     package_name = "hello_world",
+    size = "medium",
     enable_impeller = True,
     main = "test/impeller_shader_test.dart",
     shaders = ["shaders/indexed.frag"],
@@ -421,6 +423,7 @@ flutter_test(
 flutter_test(
     name = "bazel_protocol_test",
     package_name = "hello_world",
+    size = "medium",
     main = "test/bazel_protocol_test.dart",
     target_compatible_with = _HOST_COMPATIBLE,
     deps = [
@@ -432,6 +435,7 @@ flutter_test(
 flutter_test(
     name = "bazel_protocol_sharded_test",
     package_name = "hello_world",
+    size = "medium",
     main = "test/bazel_protocol_test.dart",
     shard_count = 3,
     target_compatible_with = _HOST_COMPATIBLE,
@@ -450,6 +454,7 @@ flutter_test(
 flutter_test(
     name = "tags_test",
     package_name = "hello_world",
+    size = "medium",
     exclude_tags = ["golden"],
     main = "test/tags_test.dart",
     target_compatible_with = _HOST_COMPATIBLE,
@@ -468,6 +473,7 @@ flutter_test(
 flutter_test(
     name = "tags_library_test",
     package_name = "hello_world",
+    size = "medium",
     exclude_tags = ["golden"],
     main = "test/tags_library_test.dart",
     target_compatible_with = _HOST_COMPATIBLE,
@@ -484,6 +490,7 @@ flutter_test(
 flutter_test(
     name = "dart_defines_test",
     package_name = "hello_world",
+    size = "medium",
     defines = [
         "E2E_ATTR=from_attr",
         "E2E_WINNER=attr",
@@ -500,6 +507,7 @@ flutter_test(
 flutter_test(
     name = "hello_test",
     package_name = "hello_world",
+    size = "medium",
     main = "hello_test.dart",
     target_compatible_with = _HOST_COMPATIBLE,
     deps = [
@@ -558,6 +566,7 @@ filegroup(
 
 flutter_prebuilt_test(
     name = "widget_prebuilt_test",
+    size = "medium",
     assets = ":widget_test_assets",
     base_dill = [":widget_test_base_kernel"],
     dill = ":widget_test_kernel",
@@ -572,6 +581,7 @@ flutter_prebuilt_test(
 flutter_test(
     name = "prebuilt_failing_source_test",
     package_name = "hello_world",
+    size = "medium",
     main = "test/prebuilt_failing_test.dart",
     tags = ["manual"],
     target_compatible_with = _HOST_COMPATIBLE,
@@ -607,6 +617,7 @@ filegroup(
 
 flutter_prebuilt_test(
     name = "prebuilt_failing_test",
+    size = "medium",
     assets = ":prebuilt_failing_assets",
     base_dill = [":prebuilt_failing_base_kernel"],
     dill = ":prebuilt_failing_kernel",
@@ -650,6 +661,7 @@ filegroup(
 
 flutter_prebuilt_test(
     name = "tags_library_prebuilt_test",
+    size = "medium",
     assets = ":tags_library_test_assets",
     base_dill = [":tags_library_test_base_kernel"],
     dill = ":tags_library_test_kernel",
@@ -698,6 +710,7 @@ filegroup(
 
 flutter_prebuilt_test(
     name = "widget_custom_bootstrap_test",
+    size = "medium",
     assets = ":widget_test_assets",
     dill = ":widget_custom_kernel",
     library_tags = ":widget_custom_kernel_tags",
@@ -714,6 +727,7 @@ flutter_prebuilt_test(
 # caches downstream.
 dart_test(
     name = "verify_custom_kernel_reproducible_test",
+    size = "small",
     data = [":widget_custom_kernel"],
     main = "test/verify_custom_kernel_reproducible_test.dart",
     target_compatible_with = _HOST_COMPATIBLE,
@@ -745,6 +759,7 @@ filegroup(
 
 flutter_prebuilt_test(
     name = "tags_library_custom_bootstrap_test",
+    size = "medium",
     assets = ":tags_library_test_assets",
     dill = ":tags_library_custom_kernel",
     exclude_tags = ["golden"],
@@ -791,6 +806,7 @@ flutter_asset_bundle(
 
 flutter_prebuilt_test(
     name = "widget_modular_prebuilt_test",
+    size = "medium",
     assets = ":modular_suite_assets",
     dill = ":widget_modular_kernel_files",
     target_compatible_with = _HOST_COMPATIBLE,
@@ -825,6 +841,7 @@ filegroup(
 
 flutter_prebuilt_test(
     name = "widget_modular_based_prebuilt_test",
+    size = "medium",
     assets = ":modular_suite_assets",
     base_dill = [":widget_modular_based_base_kernel_files"],
     dill = ":widget_modular_based_kernel_files",
@@ -848,21 +865,25 @@ custom_modular_app_kernel(
 
 build_test(
     name = "kernel_build_test",
+    size = "small",
     targets = [":hello_world"],
 )
 
 build_test(
     name = "modular_app_build_test",
+    size = "small",
     targets = [":hello_world_modular_app"],
 )
 
 build_test(
     name = "aot_build_test",
+    size = "small",
     targets = [":hello_world_aot"],
 )
 
 build_test(
     name = "application_build_test",
+    size = "small",
     targets = [":hello_world_app"],
 )
 
@@ -871,11 +892,13 @@ build_test(
 # the same way. Building the spoke proves the fetch agrees with the lock.
 build_test(
     name = "unversioned_path_build_test",
+    size = "small",
     targets = ["@deps//:unversioned_path"],
 )
 
 build_test(
     name = "macos_bundle_build_test",
+    size = "small",
     target_compatible_with = ["@platforms//os:macos"],
     targets = [":hello_world_macos"],
 )
@@ -932,6 +955,7 @@ dart_test(
 
 flutter_ios_simulator_build_test(
     name = "ios_bundle_build_test",
+    size = "small",
     target_compatible_with = ["@platforms//os:macos"],
     targets = [":hello_world_ios"],
 )
@@ -942,6 +966,7 @@ flutter_ios_simulator_build_test(
 # the JSON manifests in pure Dart; no host unzip, plutil or xcrun runs here.
 dart_test(
     name = "verify_ios_bundle_contents_test",
+    size = "small",
     srcs = ["test/font_manifest_checks.dart"],
     data = [
         "fonts/HelloSans-Bold.ttf",
@@ -967,6 +992,7 @@ dart_binary(
 
 build_test(
     name = "android_build_test",
+    size = "small",
     # See hello_world_android: skipped on the Windows CI runner (pagefile OOM)
     # via --build_tag_filters/--test_tag_filters. Builds normally everywhere else.
     tags = ["no-windows-ci"],
@@ -986,6 +1012,7 @@ android_apk_overlay_test_suite(
 # old way. Runs apksigner verify and zipalign -c over the overlay APK first.
 dart_test(
     name = "verify_android_apk_parity_test",
+    size = "medium",
     data = [
         ":hello_world_android",
         ":hello_world_android_reference",
@@ -1011,6 +1038,7 @@ dart_test(
 # debug key. Parses the block by hand; no apksigner/keytool runs here.
 dart_test(
     name = "verify_android_release_signing_test",
+    size = "small",
     data = [
         ":hello_world_android",
         ":hello_world_android_release_signed",
@@ -1027,6 +1055,7 @@ dart_test(
 # central directory and inflates the manifest by hand; no unzip runs here.
 dart_test(
     name = "verify_android_platform_assets_test",
+    size = "small",
     srcs = ["test/font_manifest_checks.dart"],
     data = [
         "fonts/HelloSans-Bold.ttf",
@@ -1046,6 +1075,7 @@ dart_test(
 # device; run explicitly per docs/TESTING.md.
 dart_test(
     name = "verify_android_app_test",
+    size = "large",
     data = [":hello_world_android"],
     main = "test/verify_android_app_test.dart",
     tags = [
@@ -1058,6 +1088,7 @@ dart_test(
 
 build_test(
     name = "linux_bundle_build_test",
+    size = "small",
     # Linux bundles require a Linux engine. On non-Linux hosts, use:
     #   bazel build :hello_world_linux -c dbg --platforms=@rules_flutter//flutter/platforms:linux_x64
     target_compatible_with = ["@platforms//os:linux"],
@@ -1066,17 +1097,20 @@ build_test(
 
 build_test(
     name = "asset_bundle_build_test",
+    size = "small",
     targets = [":hello_world_assets"],
 )
 
 build_test(
     name = "windows_bundle_build_test",
+    size = "small",
     target_compatible_with = ["@platforms//os:windows"],
     targets = [":hello_world_windows"],
 )
 
 build_test(
     name = "web_build_test",
+    size = "small",
     targets = [":hello_world_web"],
 )
 
@@ -1088,6 +1122,7 @@ build_test(
 # sentinel), and AssetManifest.bin.json references the prefixed asset path.
 dart_test(
     name = "verify_pub_assets_test",
+    size = "small",
     data = [":hello_world_app"],
     main = "test/verify_pub_assets_test.dart",
     target_compatible_with = _HOST_COMPATIBLE,
@@ -1107,6 +1142,7 @@ dart_test(
 # pub assets.
 dart_test(
     name = "verify_sub_assets_test",
+    size = "small",
     data = ["//sub:sub_app"],
     main = "test/verify_sub_assets_test.dart",
     target_compatible_with = _HOST_COMPATIBLE,
@@ -1140,6 +1176,7 @@ genrule(
 # and AssetManifest.bin.json.
 dart_test(
     name = "verify_root_keys_test",
+    size = "small",
     data = [":root_keys_bundle"],
     main = "test/verify_root_keys_test.dart",
     target_compatible_with = _HOST_COMPATIBLE,
@@ -1197,6 +1234,7 @@ dart_test(
 # proves the bundle still analyzes with the auto-discovered file.
 dart_test(
     name = "verify_macos_entitlements_test",
+    size = "medium",
     data = [":hello_world_macos"],
     main = "test/verify_macos_entitlements_test.dart",
     target_compatible_with = ["@platforms//os:macos"],
@@ -1208,6 +1246,7 @@ dart_test(
 # is the load-bearing half.
 dart_test(
     name = "verify_macos_app_icon_test",
+    size = "medium",
     data = [":hello_world_macos"],
     main = "test/verify_macos_app_icon_test.dart",
     target_compatible_with = ["@platforms//os:macos"],

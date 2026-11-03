@@ -6,6 +6,7 @@ exports_files(["pubspec.lock"])
 flutter_integration_test(
     name = "app_test",
     package_name = "integration_web",
+    size = "large",
     srcs = ["integration_test/app_test.dart"],
     app_srcs = ["lib/main.dart"],
     assets = ["assets/logo.png"],

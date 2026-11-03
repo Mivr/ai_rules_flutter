@@ -13,6 +13,7 @@ load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("//flutter/private:asset_keys.bzl", "is_within_package", "relative_key")
 load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 load(":action_content.bzl", "written_json")
 
 _FIXTURE = "//flutter/tests/shader_keys_fixture"
@@ -89,7 +90,7 @@ def shader_keys_test_suite(name):
     Args:
         name: Name of the resulting test_suite.
     """
-    unittest.suite(
+    small_unittest_suite(
         name + "_keys_pure",
         _root_key_test,
         _subpackage_key_test,

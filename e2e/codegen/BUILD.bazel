@@ -206,6 +206,7 @@ macos_application(
 
 build_test(
     name = "per_file_codegen_test",
+    size = "small",
     targets = [
         ":model_generated",
         ":order_generated",
@@ -214,18 +215,21 @@ build_test(
 
 build_test(
     name = "aggregate_codegen_test",
+    size = "small",
     targets = [":model_registry"],
 )
 
 # Verify the macOS runner over the source-assembled (.pkgsrcs) app builds.
 build_test(
     name = "macos_app_build_test",
+    size = "small",
     target_compatible_with = ["@platforms//os:macos"],
     targets = [":app_macos"],
 )
 
 build_test(
     name = "flutter_codegen_test",
+    size = "small",
     targets = [":app"],
 )
 
@@ -244,6 +248,7 @@ _HOST_COMPATIBLE = select({
 flutter_test(
     name = "user_test",
     package_name = "codegen_e2e",
+    size = "medium",
     srcs = [
         "lib/user.dart",
         ":user_json",
@@ -265,6 +270,7 @@ flutter_test(
 flutter_test(
     name = "unused_inputs_test",
     package_name = "codegen_e2e",
+    size = "medium",
     main = "test/unused_inputs_test.dart",
     target_compatible_with = _HOST_COMPATIBLE,
     deps = [
@@ -282,6 +288,7 @@ flutter_test(
 flutter_test(
     name = "native_asset_test",
     package_name = "codegen_e2e",
+    size = "medium",
     main = "test/native_asset_test.dart",
     target_compatible_with = _HOST_COMPATIBLE,
     deps = [
@@ -331,6 +338,7 @@ flutter_web_bundle(
 
 build_test(
     name = "flutter_web_codegen_test",
+    size = "small",
     targets = [":web_app"],
 )
 
@@ -444,6 +452,7 @@ flutter_gen_l10n(
 flutter_test(
     name = "l10n_test",
     package_name = "codegen_e2e",
+    size = "medium",
     srcs = [":app_l10n"],
     data = [":undeclared_l10n_arb"],
     main = "test/l10n_test.dart",
@@ -462,6 +471,7 @@ flutter_test(
 flutter_test(
     name = "golden_test",
     package_name = "codegen_e2e",
+    size = "medium",
     data = glob(["test/goldens/**"]),
     main = "test/golden_test.dart",
     target_compatible_with = _HOST_COMPATIBLE,
@@ -476,6 +486,7 @@ flutter_test(
 flutter_test(
     name = "golden_undeclared_test",
     package_name = "codegen_e2e",
+    size = "medium",
     main = "test/golden_undeclared_test.dart",
     target_compatible_with = _HOST_COMPATIBLE,
     deps = [
@@ -491,6 +502,7 @@ flutter_test(
 flutter_test(
     name = "test_api_only_test",
     package_name = "codegen_e2e",
+    size = "medium",
     main = "test/test_api_only_test.dart",
     target_compatible_with = _HOST_COMPATIBLE,
     deps = ["@deps//:test_api"],

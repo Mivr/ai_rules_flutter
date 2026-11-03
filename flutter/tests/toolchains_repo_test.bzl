@@ -28,6 +28,7 @@ load(
     "validate_darwin_sdk_config",
 )
 load("//flutter/settings:apple_backend.bzl", "APPLE_BACKEND_VALUES")
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 def _desktop_cross_pairs_keys_are_host_platforms_test_impl(ctx):
     """Every key in DESKTOP_CROSS_PAIRS must be a valid HOST_PLATFORMS key."""
@@ -936,7 +937,7 @@ def toolchains_repo_test_suite(name):
         ],
     )
 
-    unittest.suite(
+    small_unittest_suite(
         name + "_unit",
         _t0_test,
         _t1_test,

@@ -17,6 +17,7 @@ load("//flutter:native_assets.bzl", "flutter_data_asset", "flutter_native_asset"
 load("//flutter:providers.bzl", "FlutterNativeAssetInfo")
 load("//flutter/private:common.bzl", "HOST_COMPATIBLE", "check_unreplaced_hooks")
 load("//flutter/private:flutter_native_assets.bzl", "bridge_dart_code_assets", "native_asset_framework_name", "native_assets_target_string", "write_native_assets_manifest")
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 # -- Pure-function tests for the manifest helpers ----------------------
 
@@ -369,7 +370,7 @@ def native_assets_test_suite(name):
         target_compatible_with = HOST_COMPATIBLE,
     )
 
-    unittest.suite(
+    small_unittest_suite(
         name + "_pure",
         _target_string_t0_test,
         _target_string_t1_test,

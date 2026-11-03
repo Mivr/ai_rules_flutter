@@ -11,6 +11,7 @@ load(
     "host_artifacts_path",
     "source_strip_prefix",
 )
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 def _engine_artifact_url_test_impl(ctx):
     env = unittest.begin(ctx)
@@ -142,4 +143,4 @@ _t6_test = unittest.make(_source_tarball_url_override_test_impl)
 _t7_test = unittest.make(_source_strip_prefix_test_impl)
 
 def artifact_urls_test_suite(name):
-    unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test, _t6_test, _t7_test)
+    small_unittest_suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test, _t6_test, _t7_test)

@@ -11,6 +11,7 @@ load(
     "ios_engine_artifact_path",
 )
 load("//flutter/private:versions.bzl", "ARTIFACT_CHECKSUMS", "FLUTTER_VERSIONS", "custom_engine_base_url", "custom_source_url", "flutter_artifact_sha256", "flutter_source_sha256", "merge_custom_versions")
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 def _latest_version_first_test_impl(ctx):
     env = unittest.begin(ctx)
@@ -474,7 +475,7 @@ def versions_test_suite(name):
         ],
     )
 
-    unittest.suite(
+    small_unittest_suite(
         name + "_unit",
         _t0_test,
         _t1_test,

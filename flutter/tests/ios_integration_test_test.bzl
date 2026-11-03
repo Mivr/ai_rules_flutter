@@ -40,6 +40,7 @@ load(
     "ios_integration_test_tags",
 )
 load("//flutter/private:ios_sim_debug.bzl", "ios_sim_debug_transition_impl")
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 _TEST_IMPORT = "../../integration_test/app_test.dart"
 
@@ -600,7 +601,7 @@ def ios_integration_test_test_suite(name):
         target_under_test = ":_ios_macro_test",
         target_compatible_with = IOS_MACOS_ONLY,
     )
-    unittest.suite(
+    small_unittest_suite(
         name + "_unit",
         _t0_test,
         _t1_test,

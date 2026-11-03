@@ -28,6 +28,7 @@ dart_binary(
 
 dart_test(
     name = "python_host_test",
+    size = "medium",
     srcs = glob(["lib/**/*.dart"]),
     # The `PYTHONHOME` tests drive the launchers from a child `dart` process
     # (ambient variables cannot be set for the test's own process), so both the

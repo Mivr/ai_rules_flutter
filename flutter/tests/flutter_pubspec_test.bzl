@@ -8,6 +8,7 @@ load(
     "parse_flutter_plugin_block",
     "parse_pubspec",
 )
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 # Federated umbrella — only default_package per platform, no plugin classes.
 _PATH_PROVIDER_PUBSPEC = """\
@@ -425,7 +426,7 @@ _t16_test = unittest.make(_umbrella_plugin_loads_test_impl)
 _t17_test = unittest.make(_monolithic_plugin_loads_test_impl)
 
 def flutter_pubspec_test_suite(name):
-    unittest.suite(
+    small_unittest_suite(
         name,
         _t0_test,
         _t1_test,

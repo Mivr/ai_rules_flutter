@@ -20,6 +20,7 @@ load(
     "get_shader_platform_flags",
 )
 load("//flutter/private:flutter_web_application.bzl", "flutter_web_bundle")
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 load(":action_content.bzl", "written_json")
 
 def _compiled_shaders_bundle_impl(ctx):
@@ -302,7 +303,7 @@ def shader_compile_test_suite(name):
     Args:
       name: The test_suite target name.
     """
-    unittest.suite(
+    small_unittest_suite(
         name + "_flags_pure",
         _t0_test,
         _t1_test,

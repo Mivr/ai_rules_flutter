@@ -33,6 +33,7 @@ load(
     "service_worker_load_args",
     "service_worker_version_for",
 )
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 load(":action_content.bzl", "written_json")
 
 def _html_title_escaping_test_impl(ctx):
@@ -2574,4 +2575,4 @@ def web_test_suite(name):
         targets = [":_web_guard_clean"],
     )
 
-    unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test, _t6_test, _t7_test, _t8_test)
+    small_unittest_suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test, _t6_test, _t7_test, _t8_test)

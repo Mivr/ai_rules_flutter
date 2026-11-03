@@ -12,6 +12,7 @@ must keep into one closure: `:a` adopts `:b`'s `part of` file, re-exports
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME")
 load("//flutter/private:flutter_kernel_module.bzl", "flutter_kernel_module_action")
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 def _kernel_actions(env):
     actions = analysistest.target_actions(env)
@@ -242,7 +243,7 @@ def unused_inputs_test_suite(name):
     Args:
         name: The test suite name.
     """
-    unittest.suite(
+    small_unittest_suite(
         name,
         _library_unused_inputs_test,
         _entry_extra_inputs_test,

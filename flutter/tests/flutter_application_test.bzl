@@ -3,6 +3,7 @@
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//flutter/private:common.bzl", "detect_target_platform", "launch_build_args")
 load("//flutter/private:plugin_registrant.bzl", "DEV_REGISTRANT_PLATFORMS")
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 def _ios_detection_test_impl(ctx):
     env = unittest.begin(ctx)
@@ -194,7 +195,7 @@ _t10_test = unittest.make(_desktop_build_args_test_impl)
 _t11_test = unittest.make(_dev_registrant_covers_every_platform_test_impl)
 
 def flutter_application_test_suite(name):
-    unittest.suite(
+    small_unittest_suite(
         name,
         _t0_test,
         _t1_test,

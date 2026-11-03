@@ -17,6 +17,7 @@ load(
     "swiftpm_spoke_name",
     "swiftpm_unpinned_errors",
 )
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 _BIGINT_REV = "63feef7820abb1a8fb08587d7da56bb0b7db8751"
 _BIGINT_SHA = "55fc8a63f655a09d9216f2c9bc062c508f98d4eca4b8ebefaf295a3ea4ac8f22"
@@ -356,7 +357,7 @@ _swiftpm_spoke_attrs_test = unittest.make(_swiftpm_spoke_attrs_test_impl)
 
 def swiftpm_resolved_test_suite(name):
     """Registers the `Package.resolved` reader unit tests."""
-    unittest.suite(
+    small_unittest_suite(
         name + "_unit",
         _validators_test,
         _location_parts_test,

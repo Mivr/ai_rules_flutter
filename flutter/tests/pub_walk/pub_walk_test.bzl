@@ -27,6 +27,7 @@ load(
     "heredoc_blocks_bound_error",
     "scoped_tree_bound_error",
 )
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 # -- shared bound ---------------------------------------------------------------------
 
@@ -255,7 +256,7 @@ _t8_test = unittest.make(_heredoc_rewrite_passes_at_the_bound_test_impl)
 _t9_test = unittest.make(_heredoc_rewrite_reports_leftover_past_the_bound_test_impl)
 
 def pub_walk_test_suite(name):
-    unittest.suite(
+    small_unittest_suite(
         name,
         _t0_test,
         _t1_test,

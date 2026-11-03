@@ -11,6 +11,7 @@ load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 # buildifier: disable=bzl-visibility
 load("//flutter/private:local_sdk.bzl", "copy_failed_message", "engine_cache_dir", "host_engine_cache_dir", "macos_framework_cache_path", "missing_local_file_message", "missing_local_source_message")
 load("//flutter/private:versions.bzl", "unknown_version_message")
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 def _engine_cache_dir_test_impl(ctx):
     env = unittest.begin(ctx)
@@ -152,4 +153,4 @@ _t5_test = unittest.make(_missing_local_file_message_test_impl)
 _t6_test = unittest.make(_copy_failed_message_test_impl)
 
 def local_sdk_test_suite(name):
-    unittest.suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test, _t6_test)
+    small_unittest_suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test, _t6_test)

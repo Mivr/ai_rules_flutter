@@ -45,6 +45,7 @@ flutter_application(
 
 dart_test(
     name = "bundle_test",
+    size = "small",
     args = ["$(rlocationpaths :app)"],
     data = [":app"],
     main = "bundle_test.dart",

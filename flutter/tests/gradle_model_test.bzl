@@ -14,6 +14,7 @@ load(
     "gradle_has_word",
     "gradle_segments",
 )
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 # Verbatim `android/build.gradle:65` from firebase_messaging 15.2.1: a
 # quoted literal inside a `${...}` body whose own arguments are quoted.
@@ -112,7 +113,7 @@ maven_labels_template_literal_test = unittest.make(
 
 def gradle_model_test_suite(name):
     """Register the statement-model template tests."""
-    unittest.suite(
+    small_unittest_suite(
         name,
         firebase_messaging_bom_test,
         template_literal_brace_test,

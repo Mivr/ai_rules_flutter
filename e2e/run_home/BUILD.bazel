@@ -21,6 +21,7 @@ _HOST_COMPATIBLE = select({
 flutter_test(
     name = "widget_test",
     package_name = "run_home",
+    size = "medium",
     srcs = ["lib/main.dart"],
     main = "test/widget_test.dart",
     target_compatible_with = _HOST_COMPATIBLE,
@@ -54,6 +55,7 @@ filegroup(
 
 flutter_prebuilt_test(
     name = "widget_prebuilt_test",
+    size = "medium",
     assets = ":widget_test_assets",
     base_dill = [":widget_test_base_kernel"],
     dill = ":widget_test_kernel",
@@ -63,6 +65,7 @@ flutter_prebuilt_test(
 flutter_integration_test(
     name = "app_test_linux",
     package_name = "run_home",
+    size = "large",
     srcs = ["integration_test/app_test.dart"],
     app_srcs = ["lib/main.dart"],
     platform = "linux",
@@ -77,6 +80,7 @@ flutter_integration_test(
 flutter_integration_test(
     name = "app_test_web",
     package_name = "run_home",
+    size = "large",
     srcs = ["integration_test/app_test.dart"],
     app_srcs = ["lib/main.dart"],
     platform = "web",

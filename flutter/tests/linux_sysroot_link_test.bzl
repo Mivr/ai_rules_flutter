@@ -10,6 +10,7 @@ search path lets it answer the cc toolchain's own `-lm`, and the link dies with
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//flutter/private:flutter_linux_application.bzl", "gtk3_sysroot_link_inputs")
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 _LIB_DIR = "external/sysroot/usr/lib/x86_64-linux-gnu"
 
@@ -87,7 +88,7 @@ _never_adds_a_library_search_path_test = unittest.make(_never_adds_a_library_sea
 _ignores_matching_names_outside_the_lib_dir_test = unittest.make(_ignores_matching_names_outside_the_lib_dir_test_impl)
 
 def linux_sysroot_link_test_suite(name):
-    unittest.suite(
+    small_unittest_suite(
         name,
         _selects_only_gtk3_libraries_test,
         _never_adds_a_library_search_path_test,

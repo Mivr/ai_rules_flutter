@@ -1,11 +1,11 @@
 """Unit tests for a plugin manifest's sibling SwiftPM path dependencies."""
 
-load("@bazel_skylib//lib:partial.bzl", "partial")
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load(
     "//flutter/private:flutter_pub_apple_deps.bzl",
     "select_apple_swiftpm_deps",
 )
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 _LOCK_LABEL = "//app:pubspec.lock"
 
@@ -418,22 +418,20 @@ _unpinned_url_product_still_refuses_test = unittest.make(_unpinned_url_product_s
 
 def flutter_pub_apple_deps_test_suite(name):
     """Registers the sibling plugin path dependency unit tests."""
-    unittest.suite(
+    small_unittest_suite(
         name + "_unit",
-        *[partial.make(t, size = "small") for t in [
-            _firebase_auth_sibling_path_ios_test,
-            _firebase_auth_sibling_path_macos_test,
-            _google_mobile_ads_sibling_path_test,
-            _every_product_of_a_path_declaration_dedupes_test,
-            _path_to_an_unlocked_package_refuses_test,
-            _escaping_and_absolute_paths_refuse_test,
-            _path_to_the_plugin_itself_refuses_test,
-            _locked_package_without_apple_sources_still_labels_test,
-            _conditioned_path_product_is_dropped_test,
-            _flutterframework_path_product_is_skipped_test,
-            _url_and_id_products_still_resolve_test,
-            _unpinned_url_product_still_refuses_test,
-        ]]
+        _firebase_auth_sibling_path_ios_test,
+        _firebase_auth_sibling_path_macos_test,
+        _google_mobile_ads_sibling_path_test,
+        _every_product_of_a_path_declaration_dedupes_test,
+        _path_to_an_unlocked_package_refuses_test,
+        _escaping_and_absolute_paths_refuse_test,
+        _path_to_the_plugin_itself_refuses_test,
+        _locked_package_without_apple_sources_still_labels_test,
+        _conditioned_path_product_is_dropped_test,
+        _flutterframework_path_product_is_skipped_test,
+        _url_and_id_products_still_resolve_test,
+        _unpinned_url_product_still_refuses_test,
     )
     native.test_suite(
         name = name,

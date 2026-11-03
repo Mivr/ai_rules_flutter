@@ -10,6 +10,7 @@ load(
     "swiftpm_url_identity",
     "translate_swiftpm_package",
 )
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 _BIGINT = """// swift-tools-version:6.0
 import PackageDescription
@@ -289,7 +290,7 @@ _executable_target_refusal_test = unittest.make(_executable_target_refusal_test_
 
 def swiftpm_translate_test_suite(name):
     """Registers the translator unit tests."""
-    unittest.suite(
+    small_unittest_suite(
         name + "_unit",
         _c99name_test,
         _language_mode_test,

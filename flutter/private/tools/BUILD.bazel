@@ -565,8 +565,26 @@ _TEST_ENV = {
     },
 }
 
+# The unit tests that spawn a process or an HTTP server, run an external tool,
+# or run for several seconds get a `medium` budget; every other tool test is a
+# pure, hermetic function check and stays `small`.
+_MEDIUM_TESTS = [
+    "android_bundle_test",
+    "compile_shader_test",
+    "flutter_integration_test_ios_test",
+    "flutter_integration_test_runner_test",
+    "flutter_test_runner_test",
+    "generate_asset_manifest_test",
+    "kernel_filter_test",
+    "macho_edit_test",
+    "macho_section_type_test",
+    "run_home_test",
+    "xtool_pack_test",
+]
+
 [dart_test(
     name = name,
+    size = "medium" if name in _MEDIUM_TESTS else "small",
     srcs = [tool] + _TOOL_SRCS.get(tool, []),
     data = _TEST_DATA.get(name, []),
     env = _TEST_ENV.get(name, {}),
@@ -581,6 +599,7 @@ _TEST_ENV = {
 # binary as data and a longer timeout for its process spawns.
 dart_test(
     name = "incr_fkc_scratch_test",
+    size = "medium",
     timeout = "moderate",
     srcs = ["incr_fkc_scratch.dart"],
     data = [":incr_fkc_worker"],

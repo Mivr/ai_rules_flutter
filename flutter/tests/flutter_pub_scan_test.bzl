@@ -14,6 +14,7 @@ fixture, which greps each hostile fetch's message.
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//flutter/private:flutter_pub_scan.bzl", "fetch_hosted_archive")
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 _SHA256 = "16801f5b6333b3140ba8905d1de811cc718eb6bd0f567fdcfbc4b0929efce2f3"
 
@@ -153,7 +154,7 @@ walk_runs_after_extraction_test = unittest.make(_walk_runs_after_extraction_test
 
 def flutter_pub_scan_test_suite(name):
     """Registers the hosted-archive guard tests."""
-    unittest.suite(
+    small_unittest_suite(
         name,
         scan_runs_before_extract_test,
         refusal_stops_before_extract_test,

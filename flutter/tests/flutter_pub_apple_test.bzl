@@ -9,6 +9,7 @@ load(
     "with_apple_swiftpm_deps",
 )
 load("//flutter/private:starlark_literal.bzl", "starlark_string_literal")
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 _BIGINT_SHA = "55fc8a63f655a09d9216f2c9bc062c508f98d4eca4b8ebefaf295a3ea4ac8f22"
 
@@ -668,7 +669,7 @@ _plugin_defines_render_on_both_backends_test = unittest.make(_plugin_defines_ren
 
 def flutter_pub_apple_test_suite(name):
     """Registers the Apple plugin spoke SwiftPM link unit tests."""
-    unittest.suite(
+    small_unittest_suite(
         name + "_unit",
         _products_resolve_to_pinned_labels_test,
         _mapped_product_resolves_without_pins_test,

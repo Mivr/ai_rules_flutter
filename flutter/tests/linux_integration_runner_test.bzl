@@ -23,6 +23,7 @@ load(
     "windows_registrant_inputs",
     "windows_runner_inputs",
 )
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 _LINUX_ONLY = ["@platforms//os:linux"]
 
@@ -101,7 +102,7 @@ def linux_integration_runner_test_suite(name):
         target_under_test = ":_linux_it_under_test",
         target_compatible_with = _LINUX_ONLY,
     )
-    unittest.suite(
+    small_unittest_suite(
         name + "_unit",
         _linux_runner_defaults_test,
         _windows_runner_defaults_test,
