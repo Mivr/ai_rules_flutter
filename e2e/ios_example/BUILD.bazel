@@ -18,7 +18,7 @@ load(
     "flutter_ios_simulator_build_test",
 )
 load("@rules_swift//swift:swift.bzl", "swift_library")
-load(":ios_device_opt.bzl", "ios_device_opt_bundle")
+load(":ios_device_opt.bzl", "ios_device_opt_bundle", "ios_device_profile_bundle")
 load(":simulator_mode_test.bzl", "simulator_fastbuild_refused_test")
 
 exports_files(["pubspec.lock"])
@@ -38,7 +38,6 @@ flutter_application(
     assets = glob(["assets/**"]),
     main = "lib/main.dart",
     min_os_version = IOS_MINIMUM_OS_VERSION,
-    track_widget_creation = True,
     deps = [
         "@deps//:flutter",
         "@rules_flutter//flutter:material_icons",
@@ -264,20 +263,20 @@ ios_device_opt_bundle(
 # Profile device framework (what a profile engineer runs on a phone)
 #
 # Profile mode is `-c opt` plus the `//flutter:profile` build setting. The
-# application needs its own `package_name` for the same reason the release
-# applications do, and carries `track_widget_creation = False` explicitly:
-# this target proves the engine and snapshot mode, not the tracking flag.
+# application carries `track_widget_creation = False` explicitly: this target
+# proves the engine and snapshot mode, not the tracking flag.
 #
-# `:app_profile_device` sets `profile = True` on the transition, so the
+# `:app_profile_device` uses `ios_device_profile_bundle`, whose transition sets
+# `-c opt`, `arm64`, the iOS device platform and `//flutter:profile`, so the
 # `flutter_ios_engine` select resolves the pinned profile engine and
 # gen_snapshot. The bundle forwards the App.framework and that engine's
 # Flutter.framework from the same configuration; the profile test hashes the
-# engine symlink against both pinned engines.
+# bundled engine binary against both pinned engines.
 # =============================================================================
 
 flutter_application(
     name = "app_flutter_profile",
-    package_name = "ios_example_profile",
+    package_name = "ios_example",
     assets = glob(["assets/**"]),
     main = "lib/main.dart",
     min_os_version = IOS_MINIMUM_OS_VERSION,
@@ -293,29 +292,55 @@ flutter_ios_framework_gen(
     application = ":app_flutter_profile",
 )
 
-ios_device_opt_bundle(
+ios_device_profile_bundle(
     name = "app_profile_device",
     testonly = True,
     application = ":app_flutter_profile",
     engine = ":app_engine",
     framework = ":app_profile_framework",
-    profile = True,
     target_compatible_with = ["@platforms//os:macos"],
 )
 
 # =============================================================================
 # Widget-creation tracking twins
 #
-# `:app_flutter` sets `track_widget_creation = True` explicitly; the twin
-# `:app_flutter_untracked` has the same main, assets and deps with the flag
-# off. `flutter_ios_simulator_build` builds each for the simulator in debug
-# mode; the tracking test reads both bundled kernels and asserts the pinned
-# SDK's creation-location marker is in the True twin only.
+# `:app_flutter_tracked` sets `track_widget_creation = True` and its twin
+# `:app_flutter_untracked` sets `track_widget_creation = False` on the exact
+# same package_name, main, assets and deps, leaving `:app_flutter` untouched.
+# `flutter_ios_simulator_build` builds each for the simulator in debug mode;
+# the tracking test reads both bundled kernels and asserts the pinned SDK's
+# creation-location marker is in the True twin only.
 # =============================================================================
 
 flutter_application(
+    name = "app_flutter_tracked",
+    package_name = "ios_example",
+    assets = glob(["assets/**"]),
+    main = "lib/main.dart",
+    min_os_version = IOS_MINIMUM_OS_VERSION,
+    track_widget_creation = True,
+    deps = [
+        "@deps//:flutter",
+        "@rules_flutter//flutter:material_icons",
+    ],
+)
+
+flutter_ios_app(
+    name = "app_tracked",
+    application = ":app_flutter_tracked",
+    bundle_id = "com.rulesflutter.ios.example.tracked",
+)
+
+flutter_ios_simulator_build(
+    name = "app_tracked_simulator",
+    testonly = True,
+    target_compatible_with = ["@platforms//os:macos"],
+    targets = [":app_tracked"],
+)
+
+flutter_application(
     name = "app_flutter_untracked",
-    package_name = "ios_example_untracked",
+    package_name = "ios_example",
     assets = glob(["assets/**"]),
     main = "lib/main.dart",
     min_os_version = IOS_MINIMUM_OS_VERSION,
@@ -570,7 +595,7 @@ dart_test(
     name = "verify_ios_widget_tracking_test",
     srcs = ["test/ios_test_support.dart"],
     data = [
-        ":app_simulator",
+        ":app_tracked_simulator",
         ":app_untracked_simulator",
     ],
     main = "test/verify_ios_widget_tracking_test.dart",

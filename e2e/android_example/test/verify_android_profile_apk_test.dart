@@ -2,8 +2,8 @@
 ///
 /// Reads `:app_profile_apk`, built behind `profile_build` (`-c opt`, the arm64
 /// Android platform and `//flutter:profile`), which forwards the APK and the
-/// pinned profile engine jar; `:app_release_check`, the same application
-/// under the default release configuration; and the pinned release engine
+/// pinned profile engine jar; `:app_release_apk`, the same application
+/// behind `release_build`; and the pinned release engine
 /// jar. It then checks:
 ///
 /// * `lib/arm64-v8a/libflutter.so` in the APK is byte-identical (sha256) to
@@ -216,27 +216,18 @@ void _checkPermissions(Report report, File profile, File release) {
 /// The VM embeds a space-separated word list naming the target, for example
 /// `product no-asan ... arm64 android` in a release build or
 /// `release no-asan ... arm64 android` in a profile build. It is stored glued
-/// to a hash with no separator, so this finds the printable run and returns it
-/// from the mode marker.
+/// to a hash with no separator, so this finds the feature token run naming an
+/// Android target architecture (`no-product` before `product` so `no-product`
+/// is never sliced at `product`).
 String _features(Uint8List bytes) {
-  final text = latin1.decode(bytes);
-  for (final run in RegExp('[ -~]{16,}').allMatches(text)) {
-    final raw = run.group(0)!;
-    if (!raw.contains('arm64') ||
-        !raw.contains('android') ||
-        !raw.contains('no-asan')) {
-      continue;
-    }
-    for (final marker in ['product ', 'no-product ', 'release ']) {
-      final at = raw.indexOf(marker);
-      if (at < 0) continue;
-      final features = raw.substring(at);
-      final words = features.split(' ');
-      if (words.contains('arm64') &&
-          words.contains('android') &&
-          words.contains('no-asan')) {
-        return features;
-      }
+  final pattern = RegExp(
+    '(?:no-product|product|release|debug) [a-z0-9_-]+(?: [a-z0-9_-]+)*',
+  );
+  for (final match in pattern.allMatches(latin1.decode(bytes))) {
+    final candidate = match.group(0)!;
+    final words = candidate.split(' ');
+    if (words.contains('android') || words.contains('arm64')) {
+      if (words.length >= 3) return candidate;
     }
   }
   return '';

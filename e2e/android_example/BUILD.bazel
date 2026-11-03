@@ -15,7 +15,7 @@ load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_library
 load("@rules_flutter//flutter:web.bzl", "flutter_web_bundle")
 load("@rules_java//java:java_import.bzl", "java_import")
 load("@rules_kotlin//kotlin:android.bzl", "kt_android_library")
-load(":apk_modes.bzl", "debug_build", "profile_build")
+load(":apk_modes.bzl", "debug_build", "profile_build", "release_build")
 
 exports_files(["pubspec.lock"])
 
@@ -42,7 +42,6 @@ flutter_application(
     srcs = glob(["lib/**/*.dart"]),
     main = "lib/main.dart",
     native_deps = [":add"],
-    track_widget_creation = True,
     deps = [
         "@deps//:flutter",
         "@rules_flutter//flutter:material_icons",
@@ -77,28 +76,43 @@ flutter_android_app(
 # Profile and widget-tracking proofs
 #
 # `:app_profile` is built behind `profile_build`, which sets `-c opt`, the
-# `//flutter:profile` build setting and the arm64 Android platform. It shares
-# `:app_flutter` and declares no `permissions`: the profile APK gets INTERNET
-# from android/app/src/profile/AndroidManifest.xml, and `:app_release_check`
-# built from the same main manifest does not. `:app_profile_apk` also forwards
-# the pinned profile engine jar so the test can hash the `libflutter.so` the
-# APK packages.
+# `//flutter:profile` build setting and the arm64 Android platform. Its
+# application carries `track_widget_creation = False`, and `:app_profile`
+# declares no `permissions`: the profile APK gets INTERNET from
+# android/app/src/profile/AndroidManifest.xml, and `:app_release_check` built
+# behind `release_build` from the same main manifest does not.
+# `:app_profile_apk` also forwards the pinned profile engine jar so the test
+# can hash the `libflutter.so` the APK packages.
 #
-# `:app_flutter` sets `track_widget_creation = True` explicitly; the twin
-# `:app_flutter_untracked` has the same sources and deps with the flag off.
-# The debug APK twins let the test read each compiled kernel.
+# `:app_flutter_tracked` sets `track_widget_creation = True` and its twin
+# `:app_flutter_untracked` sets `track_widget_creation = False` on the exact
+# same package_name, sources, native_deps and deps, leaving `:app_flutter`
+# untouched. The debug APK twins let the test read each compiled kernel.
 # =============================================================================
+
+flutter_application(
+    name = "app_flutter_profile",
+    package_name = "android_example",
+    srcs = glob(["lib/**/*.dart"]),
+    main = "lib/main.dart",
+    native_deps = [":add"],
+    track_widget_creation = False,
+    deps = [
+        "@deps//:flutter",
+        "@rules_flutter//flutter:material_icons",
+    ],
+)
 
 flutter_android_app(
     name = "app_profile",
     package_name = "com.example.flutterapp.profile",
-    application = ":app_flutter",
+    application = ":app_flutter_profile",
 )
 
 flutter_android_app(
     name = "app_release_check",
     package_name = "com.example.flutterapp.releasecheck",
-    application = ":app_flutter",
+    application = ":app_flutter_profile",
 )
 
 profile_build(
@@ -108,6 +122,31 @@ profile_build(
         ":app_profile",
         "@flutter_android_engine_arm64_profile//:stripped",
     ],
+)
+
+release_build(
+    name = "app_release_apk",
+    testonly = True,
+    targets = [":app_release_check"],
+)
+
+flutter_application(
+    name = "app_flutter_tracked",
+    package_name = "android_example",
+    srcs = glob(["lib/**/*.dart"]),
+    main = "lib/main.dart",
+    native_deps = [":add"],
+    track_widget_creation = True,
+    deps = [
+        "@deps//:flutter",
+        "@rules_flutter//flutter:material_icons",
+    ],
+)
+
+flutter_android_app(
+    name = "app_tracked",
+    package_name = "com.example.flutterapp.tracked",
+    application = ":app_flutter_tracked",
 )
 
 flutter_application(
@@ -130,9 +169,9 @@ flutter_android_app(
 )
 
 debug_build(
-    name = "app_debug_apk",
+    name = "app_tracked_debug_apk",
     testonly = True,
-    targets = [":app"],
+    targets = [":app_tracked"],
 )
 
 debug_build(
@@ -311,7 +350,7 @@ dart_test(
     ],
     data = [
         ":app_profile_apk",
-        ":app_release_check",
+        ":app_release_apk",
         "@flutter_android_engine_arm64//:stripped",
     ],
     main = "test/verify_android_profile_apk_test.dart",
@@ -323,7 +362,7 @@ dart_test(
     name = "verify_android_widget_tracking_test",
     srcs = ["test/android_test_support.dart"],
     data = [
-        ":app_debug_apk",
+        ":app_tracked_debug_apk",
         ":app_untracked_debug_apk",
     ],
     main = "test/verify_android_widget_tracking_test.dart",

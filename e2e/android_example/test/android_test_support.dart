@@ -119,6 +119,7 @@ String sha256(File file) {
     try {
       result = Process.runSync(attempt.first, attempt.sublist(1));
     } on ProcessException {
+      // Tool absent on this host OS; try the fallback tool.
       continue;
     }
     if (result.exitCode == 0) {

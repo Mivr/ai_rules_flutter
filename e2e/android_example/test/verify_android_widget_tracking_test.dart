@@ -1,8 +1,9 @@
 /// Verifies `track_widget_creation` reaches the Android kernel.
 ///
 /// Reads two debug APKs built from the same sources and deps:
-/// `:app` (`track_widget_creation = True` on `:app_flutter`) and
-/// `:app_untracked` (`false`), each through `debug_build`. Their
+/// `:app_tracked` (`track_widget_creation = True` on `:app_flutter_tracked`)
+/// and `:app_untracked` (`False` on `:app_flutter_untracked`), each through
+/// `debug_build`. Their
 /// `assets/flutter_assets/kernel_blob.bin` is the kernel compiled for that
 /// application. With tracking on, the pinned Flutter SDK's widget transformer
 /// adds its creation-location named parameter to widget constructor calls and
@@ -37,8 +38,8 @@ void main() {
   final files = filesUnder(Directory(srcDir));
   final onApk = oneFile(
     files,
-    (file) => file.path.endsWith('/app.apk'),
-    'one app.apk',
+    (file) => file.path.endsWith('/app_tracked.apk'),
+    'one app_tracked.apk',
   );
   final offApk = oneFile(
     files,

@@ -1,8 +1,8 @@
 /// Verifies `track_widget_creation` reaches the iOS simulator kernel.
 ///
 /// Reads two simulator `.ipa` bundles built from the same sources and deps:
-/// `:app` (`track_widget_creation = True` on `:app_flutter`) and
-/// `:app_untracked` (`false`). Each bundle's
+/// `:app_tracked` (`track_widget_creation = True` on `:app_flutter_tracked`)
+/// and `:app_untracked` (`False` on `:app_flutter_untracked`). Each bundle's
 /// `App.framework/flutter_assets/kernel_blob.bin` is the kernel compiled for
 /// that application. With tracking on, the pinned Flutter SDK's widget
 /// transformer adds its creation-location named parameter to widget
@@ -30,7 +30,7 @@ import 'ios_test_support.dart';
 const _creationLocationMarker = r'$creationLocationd_0dea112b090073317d4';
 
 /// Basename of the tracking-on simulator bundle in the test's `data`.
-const _onIpaName = 'app.ipa';
+const _onIpaName = 'app_tracked.ipa';
 
 /// Basename of the tracking-off simulator bundle in the test's `data`.
 const _offIpaName = 'app_untracked.ipa';

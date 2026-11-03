@@ -125,36 +125,50 @@ MachOInfo parseMachO(Uint8List bytes) {
   );
 }
 
+/// Known Dart VM target CPU words in a snapshot features string.
+const _featureArchs = {
+  'arm64',
+  'x64',
+  'arm',
+  'ia32',
+  'riscv64',
+  'simarm64',
+  'simx64',
+};
+
+/// Known Dart VM target OS words in a snapshot features string.
+const _featureOses = {
+  'ios',
+  'android',
+  'macos',
+  'linux',
+  'windows',
+  'fuchsia',
+};
+
+/// Matches a space-separated Dart VM snapshot features string.
+///
+/// `no-product` precedes `product` so a `no-product` feature is never sliced at
+/// its `product` suffix.
+final _featuresPattern = RegExp(
+  '(?:no-product|product|release|debug) [a-z0-9_-]+(?: [a-z0-9_-]+)*',
+);
+
 /// The VM features string in [bytes], or empty when the binary holds none.
 ///
 /// The VM embeds a space-separated word list that names the target, for
 /// example `product no-asan ... arm64 ios no-compressed-pointers` in a
 /// release build or `release no-asan ... arm64 ios ...` in a profile build.
-/// It is stored glued to a hash with no separator, so this finds the printable
-/// run that names an architecture and a target OS rather than assuming the
-/// list starts at the file offset where a particular mode puts it.
+/// It is stored glued to a hash with no separator, so this finds the feature
+/// token run that names a known Dart architecture and target OS rather than
+/// assuming the list starts at the file offset where a particular mode puts it.
 String snapshotFeatures(Uint8List bytes) {
   final text = latin1.decode(bytes);
-  for (final run in RegExp('[ -~]{16,}').allMatches(text)) {
-    final raw = run.group(0)!;
-    if (!raw.contains('arm64') || !raw.contains('no-asan')) continue;
-    final namesTarget =
-        raw.contains(' ios ') ||
-        raw.contains(' android ') ||
-        raw.contains(' macos ');
-    if (!namesTarget) continue;
-    for (final marker in ['product ', 'no-product ', 'release ']) {
-      final at = raw.indexOf(marker);
-      if (at < 0) continue;
-      final features = raw.substring(at);
-      final words = features.split(' ');
-      if (words.contains('arm64') &&
-          words.contains('no-asan') &&
-          words.any(
-            (word) => word == 'ios' || word == 'android' || word == 'macos',
-          )) {
-        return features;
-      }
+  for (final match in _featuresPattern.allMatches(text)) {
+    final candidate = match.group(0)!;
+    final words = candidate.split(' ');
+    if (words.any(_featureArchs.contains) && words.any(_featureOses.contains)) {
+      return candidate;
     }
   }
   return '';

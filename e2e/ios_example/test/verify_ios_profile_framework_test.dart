@@ -2,12 +2,12 @@
 /// release build that silently linked the release engine.
 ///
 /// Reads `:app_profile_device`, a `flutter_application` built through the
-/// `ios_device_opt` transition (`-c opt`, `arm64`, iOS device platform,
-/// `//flutter:profile`). The target forwards the App.framework built in that
-/// configuration and the Flutter.framework the configuration linked, plus a
-/// unique symlink to the engine binary (`app_profile_device.linked_engine`)
-/// so the test can hash exactly the engine that binary would load. Its `data`
-/// also carries the pinned profile and release engine xcframeworks.
+/// `ios_device_profile_bundle` transition (`-c opt`, `arm64`, iOS device
+/// platform, `//flutter:profile`). The target forwards the App.framework built
+/// in that configuration and stages the Flutter.framework slice that
+/// configuration selected under its own directory so the test can hash the
+/// exact engine binary linked. Its `data` also carries the pinned profile and
+/// release engine xcframeworks.
 ///
 /// Checks:
 ///
@@ -15,9 +15,9 @@
 ///   platform is iOS (2), so it is a device binary;
 /// * the snapshot features name arm64 and ios and do NOT contain `product`,
 ///   which a release snapshot carries;
-/// * the linked engine binary's sha256 equals the pinned profile engine's
-///   device binary and differs from the pinned release engine's, so a build
-///   that silently selected release fails.
+/// * the bundled Flutter.framework binary's sha256 equals the pinned profile
+///   engine's device binary and differs from the pinned release engine's, so a
+///   build that silently selected release fails.
 ///
 /// Every failed assertion prints what it expected and what it found. A
 /// missing input fails the test; nothing here is ever skipped.
@@ -34,10 +34,6 @@ import 'dart:typed_data';
 import 'ios_test_support.dart';
 import 'macho_snapshot.dart';
 
-/// Basename of the symlink the transitioned bundle writes for the engine it
-/// linked.
-const _linkedEngineName = 'app_profile_device.linked_engine';
-
 void main() {
   final srcDir = Platform.environment['TEST_SRCDIR'];
   if (srcDir == null) _abort('FAIL: missing TEST_SRCDIR env var');
@@ -48,10 +44,10 @@ void main() {
     _isAppBinary,
     'one profile App.framework/App',
   );
-  final linked = oneFile(
+  final bundled = oneFile(
     files,
-    (file) => file.uri.pathSegments.last == _linkedEngineName,
-    'the transitioned bundle engine symlink $_linkedEngineName',
+    _isBundledEngine,
+    'one bundled Flutter.framework/Flutter from the profile configuration',
   );
   final pinnedProfile = oneFile(
     files,
@@ -69,21 +65,21 @@ void main() {
   _checkMachO(report, app.path, appBytes);
   _checkFeatures(report, app.path, appBytes);
 
-  final linkedHash = _sha256(linked);
+  final bundledHash = _sha256(bundled);
   final profileHash = _sha256(pinnedProfile);
   final releaseHash = _sha256(pinnedRelease);
   report
     ..check(
-      'the linked engine binary to be the pinned profile engine '
-      '($profileHash)',
-      ok: linkedHash == profileHash,
-      found: '$linkedHash at ${linked.path}',
+      'the bundled Flutter.framework binary to match the pinned profile '
+      'engine ($profileHash)',
+      ok: bundledHash == profileHash,
+      found: '$bundledHash at ${bundled.path}',
     )
     ..check(
-      'the linked engine binary to differ from the pinned release engine '
-      '($releaseHash)',
-      ok: linkedHash != releaseHash,
-      found: '$linkedHash at ${linked.path}',
+      'the bundled Flutter.framework binary to differ from the pinned release '
+      'engine ($releaseHash)',
+      ok: bundledHash != releaseHash,
+      found: '$bundledHash at ${bundled.path}',
     )
     ..check(
       'the pinned profile and release engines to differ, so the comparison '
@@ -95,19 +91,27 @@ void main() {
   if (!report.passed) exit(1);
   print(
     'PASS: the device profile App.framework is an arm64 iOS AOT snapshot '
-    'without the product feature and links the pinned profile engine',
+    'without the product feature and bundles the pinned profile engine',
   );
 }
 
 /// Whether [file] is the App.framework binary the profile application built.
 bool _isAppBinary(File file) => file.path.endsWith('App.framework/App');
 
-/// Whether [file] is the device slice of a Flutter.xcframework.
+/// Whether [file] is the Flutter.framework binary staged by the profile bundle.
+bool _isBundledEngine(File file) {
+  final path = file.path;
+  return path.endsWith('/Flutter.framework/Flutter') &&
+      !path.contains('/Flutter.xcframework/');
+}
+
+/// Whether [file] is the device slice of a pinned Flutter.xcframework.
 bool _isDeviceEngine(File file) {
   final path = file.path;
   return path.endsWith(
-        'Flutter.xcframework/ios-arm64/Flutter.framework/Flutter',
+        '/Flutter.xcframework/ios-arm64/Flutter.framework/Flutter',
       ) &&
+      !path.contains('/debug/') &&
       !path.contains('extension_safe');
 }
 
@@ -179,6 +183,7 @@ String _sha256(File file) {
     try {
       result = Process.runSync(attempt.first, attempt.sublist(1));
     } on ProcessException {
+      // Tool absent on this host OS; try the fallback tool.
       continue;
     }
     if (result.exitCode == 0) {
