@@ -20,6 +20,22 @@ into bundle inputs, matching `flutter_tools` (`asset.dart`, `flutter_manifest.da
 - Asset walks are bounded; a walk that reaches its bound fails the fetch,
   naming the package and the directory, instead of bundling part of the tree.
 
+### Resolution-aware asset variants
+
+A resolution variant is a file in a directory whose name is a number followed
+by `x` — `2x`, `2.0x`, `1.5x`, `0.75x`, `2.x` and any other tail matching
+flutter_tools' `_assetVariantDirectoryRegExp` (`/?(\d+(\.\d*)?)x$`). The
+variant belongs to the file of the same name in that directory's own parent:
+`assets/2.5x/logo.png` is a `dpr: 2.5` variant of `assets/logo.png`, and
+`packages/brand/assets/2.0x/brand.png` is a `dpr: 2.0` variant of
+`packages/brand/assets/brand.png`. Only the file's immediate parent
+directory counts: `assets/2x/sub/logo.png` is its own asset (key
+`assets/2x/sub/logo.png`), not a variant of `assets/sub/logo.png`, because
+its parent `sub` is not a variant directory. An app's own `assets` and a pub
+package's `assets` group the same way, and a directory name outside the rule
+(`sub`, `icons`, `x`, `2xx`) is not a variant. The manifest keeps the main
+entry and its variants under the main key, with the main entry first.
+
 ## Entry spellings and bundle keys
 
 Every entry kind that names a file (assets in both forms, shaders, font

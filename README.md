@@ -35,6 +35,7 @@ If `flutter build` works for you, here is what Bazel adds:
 - [Getting started](#getting-started)
 - [Flutter SDK versions](docs/flutter-sdk-versions.md): pins, custom releases, offline SDKs, mirrors
 - [Dependencies](#dependencies): pub packages, build hooks, native code
+- [Pub package assets](docs/pub-assets.md): resolution-aware variants, entry spellings, and what the fetch refuses
 - [Building for each platform](#building-for-each-platform): macOS, iOS, Android, Linux, Windows, web, cross-compiling, release permissions
 - [Rules reference](#rules-reference): libraries, applications, tests, plugins, code generation, providers
 - [Incremental kernel compiles](docs/incremental-kernel.md): the opt-in warm `frontend_server` worker for JIT compiles

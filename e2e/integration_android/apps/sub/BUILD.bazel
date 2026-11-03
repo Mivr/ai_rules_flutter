@@ -5,7 +5,12 @@ flutter_integration_test(
     package_name = "sub",
     srcs = ["integration_test/sub_test.dart"],
     app_srcs = ["lib/main.dart"],
-    assets = ["assets/sub.txt"],
+    assets = [
+        "assets/2.0x/logo.png",
+        "assets/2.5x/logo.png",
+        "assets/logo.png",
+        "assets/sub.txt",
+    ],
     platform = "android",
     shaders = ["shaders/sub.frag"],
     deps = [

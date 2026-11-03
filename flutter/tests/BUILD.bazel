@@ -2,6 +2,7 @@ load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@rules_dart//dart:defs.bzl", "dart_test")
 load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
 load("//flutter/private:flutter_aot_target.bzl", "flutter_aot_target")
+load("//flutter/tests/asset_variants:asset_variants_test.bzl", "asset_variants_test_suite")
 load(":action_inputs_test.bzl", "action_inputs_test_suite")
 load(":android_pure_go_test.bzl", "android_pure_go_test_suite")
 load(":android_release_signing_test.bzl", "android_release_signing_test_suite")
@@ -169,6 +170,8 @@ cpp_client_wrapper_test_suite(name = "cpp_client_wrapper_test")
 custom_kernel_defines_test_suite(name = "custom_kernel_defines_test")
 
 asset_bundle_test_suite(name = "asset_bundle_test")
+
+asset_variants_test_suite(name = "asset_variants_test")
 
 asset_keys_test_suite(name = "asset_keys_test")
 
