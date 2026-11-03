@@ -61,17 +61,7 @@ starlark_doc_extract(
     name = "providers.doc_extract",
     src = "//flutter:providers.bzl",
     deps = [
-        "//flutter:dev_files",
-        "//flutter:ios",
-        "//flutter:macos",
-        "//flutter:native_assets",
-        "//flutter:native_hot_patch",
         "//flutter:providers",
-        "//flutter:providers.bzl",
-        "//flutter:repositories",
-        "//flutter:toolchain",
-        "//flutter:utils",
-        "//flutter:windows",
     ],
 )
 
