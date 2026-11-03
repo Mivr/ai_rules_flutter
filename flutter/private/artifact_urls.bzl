@@ -116,7 +116,7 @@ def require_sha256(sha256, url):
         url: The URL the digest is for, named in the failure message.
 
     Returns:
-        `sha256`.
+        The unchanged `sha256` digest, so callers can pass it straight to `download`.
     """
     if not sha256:
         fail((

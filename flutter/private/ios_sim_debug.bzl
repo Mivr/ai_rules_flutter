@@ -14,6 +14,15 @@ which rejects profile mode outside `-c opt`.
 _PROFILE_FLAG = str(Label("//flutter:profile"))
 
 def ios_sim_debug_transition_impl(_settings, _attr):
+    """Transition implementation that selects a debug simulator build.
+
+    Args:
+      _settings: The incoming build settings; unused because the outputs are fixed.
+      _attr: The attributes of the transitioned rule; unused.
+
+    Returns:
+      A dict setting `-c dbg`, `--ios_multi_cpus=sim_arm64` and clearing `//flutter:profile`.
+    """
     return {
         "//command_line_option:compilation_mode": "dbg",
         "//command_line_option:ios_multi_cpus": ["sim_arm64"],

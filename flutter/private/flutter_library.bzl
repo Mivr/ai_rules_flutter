@@ -490,7 +490,7 @@ def flutter_analyzable_info(ctx, package_name, lib_root):
       lib_root: The package root the rule's `DartInfo` uses.
 
     Returns:
-      A `DartAnalyzableInfo`.
+      A `DartAnalyzableInfo` whose package map adds `package:sky_engine` to the `DartInfo` one.
     """
     return dart_analyzable_info_with_package(
         label = ctx.label,

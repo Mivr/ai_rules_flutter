@@ -369,7 +369,7 @@ def flutter_font_family(name, family = "", fonts = [], **kwargs):
     ```
 
     Args:
-        name: Target name.
+        name: Name of the font-family target that other rules list in their font attributes.
         family: The family name the app asks for in `TextStyle(fontFamily:)`.
             Must be non-empty.
         fonts: A list of font maps, in `FontManifest.json` order. Each map

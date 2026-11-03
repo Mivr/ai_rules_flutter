@@ -394,7 +394,16 @@ _DESKTOP_HDR_EXTS = ("h", "hh", "hpp")
 _DESKTOP_C_EXTS = ("cc", "cpp", "c")
 
 def desktop_plugin_target(name, src_dir, platform):
-    """The `flutter_<platform>_plugin_library` target for one desktop platform."""
+    """The `flutter_<platform>_plugin_library` target for one desktop platform.
+
+    Args:
+        name: Classified lock package name used as the target name prefix.
+        src_dir: Plugin source directory globbed for C/C++ sources and headers.
+        platform: Desktop platform, either `"linux"` or `"windows"`.
+
+    Returns:
+        The BUILD snippet text declaring the plugin library target.
+    """
 
     # Same shape as above: `name` is a classified lock package name and
     # `platform` is `"linux"` or `"windows"` at every call site.

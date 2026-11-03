@@ -69,7 +69,7 @@ def flutter_application(name, package_name = "", **kwargs):
     deltas to match the running application's library URIs.
 
     Args:
-        name: Target name.
+        name: Name of the `flutter_application` target; also the default Dart package name.
         package_name: Dart package name (from pubspec.yaml). Defaults to name.
         **kwargs: All other arguments forwarded to the underlying rule.
     """

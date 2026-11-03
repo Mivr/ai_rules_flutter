@@ -295,7 +295,7 @@ def flutter_info(deps = [], plugins = [], asset_channels = None, plugin_librarie
         `pub_fonts`, `pub_assets` and `pub_shaders`.
 
     Returns:
-      A `FlutterInfo`.
+      A `FlutterInfo` carrying this target's channels merged with every dependency's.
     """
     if asset_channels == None:
         asset_channels = flutter_asset_channels()

@@ -184,15 +184,40 @@ def windows_runner_inputs(srcs, hdrs = []):
 
     The single place a missing field gets its default, so callers pass only
     what they have and a caller that forgets `hdrs` still analyses.
+
+    Args:
+        srcs: C++ source files of the runner.
+        hdrs: Header files of the runner. Defaults to an empty list.
+
+    Returns:
+        A struct with `srcs` and `hdrs` fields.
     """
     return struct(srcs = srcs, hdrs = hdrs)
 
 def windows_registrant_inputs(srcs, hdrs = []):
-    """Builds the `registrant` struct `_compile_windows_runner` reads."""
+    """Builds the `registrant` struct `_compile_windows_runner` reads.
+
+    Args:
+        srcs: C++ source files of the generated plugin registrant.
+        hdrs: Header files of the generated plugin registrant. Defaults to an empty list.
+
+    Returns:
+        A struct with `srcs` and `hdrs` fields.
+    """
     return struct(srcs = srcs, hdrs = hdrs)
 
 def windows_plugin_inputs(srcs, hdrs = [], include_dirs = []):
-    """Builds the `plugins` struct `_compile_windows_runner` reads."""
+    """Builds the `plugins` struct `_compile_windows_runner` reads.
+
+    Args:
+        srcs: C++ source files contributed by native plugins.
+        hdrs: Header files contributed by native plugins. Defaults to an empty list.
+        include_dirs: Include directories, relative to each plugin package root, added as `-I` flags.
+            Defaults to an empty list.
+
+    Returns:
+        A struct with `srcs`, `hdrs` and `include_dirs` fields.
+    """
     return struct(srcs = srcs, hdrs = hdrs, include_dirs = include_dirs)
 
 def _compile_windows_runner(ctx, engine_files, is_debug, runner = windows_runner_inputs([]), registrant = windows_registrant_inputs([]), plugins = windows_plugin_inputs([])):
@@ -206,7 +231,7 @@ def _compile_windows_runner(ctx, engine_files, is_debug, runner = windows_runner
     - The C++ client wrapper include directory (for flutter/plugin_registry.h)
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         engine_files: Engine library files from toolchain.
         is_debug: Whether this is a debug build.
         runner: Struct with the runner's own `srcs` and `hdrs`.

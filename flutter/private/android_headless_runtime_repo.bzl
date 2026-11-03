@@ -79,13 +79,27 @@ _EMULATOR_PRUNE_PATHS = (
 )
 
 def android_emulator_url(build_id):
-    """Returns the Google Android repository download URL for the Linux x64 emulator."""
+    """Returns the Google Android repository download URL for the Linux x64 emulator.
+
+    Args:
+        build_id: Android emulator build number substituted into the archive file name.
+
+    Returns:
+        The download URL string; fails when `build_id` is empty.
+    """
     if not build_id:
         fail("Android emulator build_id is required.")
     return _ANDROID_REPOSITORY_BASE_URL + "emulator-linux_x64-{}.zip".format(build_id)
 
 def android_platform_tools_url(version):
-    """Returns the Google Android repository download URL for Linux platform-tools."""
+    """Returns the Google Android repository download URL for Linux platform-tools.
+
+    Args:
+        version: Android platform-tools version substituted into the archive file name.
+
+    Returns:
+        The download URL string; fails when `version` is empty.
+    """
     if not version:
         fail("Android platform-tools version is required.")
     return _ANDROID_REPOSITORY_BASE_URL + "platform-tools_{}-linux.zip".format(version)
@@ -95,7 +109,17 @@ def android_system_image_url(
         abi = ANDROID_SYSTEM_IMAGE_ABI,
         api_level = ANDROID_SYSTEM_IMAGE_API_LEVEL,
         revision = ANDROID_SYSTEM_IMAGE_REVISION):
-    """Returns the Google Android repository download URL for a system image archive."""
+    """Returns the Google Android repository download URL for a system image archive.
+
+    Args:
+        tag: System image tag directory in the repository. Defaults to `ANDROID_SYSTEM_IMAGE_TAG`.
+        abi: System image CPU ABI. Defaults to `ANDROID_SYSTEM_IMAGE_ABI`.
+        api_level: Android API level of the image. Defaults to `ANDROID_SYSTEM_IMAGE_API_LEVEL`.
+        revision: Repository revision suffix of the image archive. Defaults to `ANDROID_SYSTEM_IMAGE_REVISION`.
+
+    Returns:
+        The download URL string; fails when any argument is empty.
+    """
     if not tag or not abi or not api_level or not revision:
         fail("Android system image tag, abi, api_level, and revision are all required.")
     return _ANDROID_REPOSITORY_BASE_URL + "sys-img/{tag}/{abi}-{api_level}_{revision}.zip".format(

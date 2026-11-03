@@ -36,7 +36,7 @@ def web_build_mode(ctx):
     needs no engine of its own: nothing outside this rule has to agree.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
 
     Returns:
         "debug", "profile" or "release".
@@ -432,7 +432,7 @@ def _write_web_guard_manifest(ctx, scope, compile_sources, stage):
     same files the compilers resolve through the staging root.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         scope: Action-unique prefix for the manifest file: mirror the stage
             tree's `<output-dir>.<output-base>` form, since a bare output
             basename (`main.dart.wasm`) repeats across every bundle in the
@@ -492,7 +492,7 @@ def _web_guarded_run(ctx, args, req, run):
     """Run a web compile behind the optional `web_guard` wrapper.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         args: The `ctx.actions.args()` the compile runs with.
         req: The `req` struct (carries `dart` and `web_guard_tool`).
         run: The invocation struct (guard scope, sources, stage, inputs,
@@ -570,7 +570,7 @@ def flutter_dart2wasm_action(ctx, req):
     so `make_dart2wasm_request` already refused a declaration anywhere else.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         req: The `req` struct `make_dart2wasm_request` built.
     """
     scope = req.output_wasm.dirname.split("/")[-1] + "." + req.output_wasm.basename
@@ -644,7 +644,7 @@ def flutter_dart2js_action(ctx, req):
     output.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         req: The `req` struct `make_dart2js_request` built.
     """
     scope = req.output_dir.basename + ".dart2js"
@@ -707,7 +707,7 @@ def flutter_dart2js_cfe_action(ctx, req):
     renderer's defines); const_finder unions the code points across them.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         req: The `req` struct `make_dart2js_cfe_request` built.
     """
     scope = req.output_dill.basename + ".dart2js_cfe"

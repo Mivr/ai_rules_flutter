@@ -73,18 +73,20 @@ flutter_patched_sdk_product_repo = repository_rule(
             default = "",
         ),
         "sha256": attr.string(
-            doc = "Expected SHA-256 of the archive. Empty means a local SDK (with `local_path`).",
+            doc = "Expected SHA-256 of the product patched SDK archive. " +
+                  "Empty means a local SDK (with `local_path`).",
             default = "",
         ),
         "local_path": attr.string(
             doc = "Optional path to a pre-extracted Flutter SDK " +
-                  "(bin/cache layout) to source every artifact from instead " +
+                  "(bin/cache layout) to source the product patched SDK from instead " +
                   "of the network. Mutually exclusive with downloading.",
             default = "",
         ),
         "engine_base_url": attr.string(
             doc = "Optional replacement origin for the engine revision " +
-                  "directory (an enterprise build). Empty means the default GCS base.",
+                  "directory used to download the product patched SDK (an enterprise build). " +
+                  "Empty means the default GCS base.",
             default = "",
         ),
     },
@@ -138,12 +140,13 @@ flutter_material_fonts_repo = repository_rule(
             default = "",
         ),
         "sha256": attr.string(
-            doc = "Expected SHA-256 of the archive. Empty means a local SDK (with `local_path`).",
+            doc = "Expected SHA-256 of the Material icon fonts archive. " +
+                  "Empty means a local SDK (with `local_path`).",
             default = "",
         ),
         "local_path": attr.string(
             doc = "Optional path to a pre-extracted Flutter SDK " +
-                  "(bin/cache layout) to source every artifact from instead " +
+                  "(bin/cache layout) to source the Material icon fonts from instead " +
                   "of the network. Mutually exclusive with downloading.",
             default = "",
         ),
@@ -207,17 +210,19 @@ flutter_font_subset_repo = repository_rule(
             mandatory = True,
         ),
         "sha256": attr.string(
-            doc = "Expected SHA-256 of the archive. Empty means a local SDK (with `local_path`).",
+            doc = "Expected SHA-256 of the font-subset tools archive. " +
+                  "Empty means a local SDK (with `local_path`).",
             default = "",
         ),
         "engine_base_url": attr.string(
             doc = "Optional replacement origin for the engine revision " +
-                  "directory (an enterprise build). Empty means the default GCS base.",
+                  "directory used to download the font-subset tools (an enterprise build). " +
+                  "Empty means the default GCS base.",
             default = "",
         ),
         "local_path": attr.string(
             doc = "Optional path to a pre-extracted Flutter SDK " +
-                  "(bin/cache layout) to source every artifact from instead " +
+                  "(bin/cache layout) to source the font-subset tools from instead " +
                   "of the network. Mutually exclusive with downloading.",
             default = "",
         ),
@@ -269,17 +274,19 @@ flutter_host_tools_release_repo = repository_rule(
             mandatory = True,
         ),
         "sha256": attr.string(
-            doc = "Expected SHA-256 of the archive. Empty means a local SDK (with `local_path`).",
+            doc = "Expected SHA-256 of the macOS release host tools archive. " +
+                  "Empty means a local SDK (with `local_path`).",
             default = "",
         ),
         "engine_base_url": attr.string(
             doc = "Optional replacement origin for the engine revision " +
-                  "directory (an enterprise build). Empty means the default GCS base.",
+                  "directory used to download the macOS release host tools (an enterprise build). " +
+                  "Empty means the default GCS base.",
             default = "",
         ),
         "local_path": attr.string(
             doc = "Optional path to a pre-extracted Flutter SDK " +
-                  "(bin/cache layout) to source every artifact from instead " +
+                  "(bin/cache layout) to source the macOS release host tools from instead " +
                   "of the network. Mutually exclusive with downloading.",
             default = "",
         ),
@@ -1177,12 +1184,13 @@ flutter_engine_artifacts = repository_rule(
         ),
         "engine_base_url": attr.string(
             doc = "Optional replacement origin for the engine revision " +
-                  "directory (an enterprise build). Empty means the default GCS base.",
+                  "directory used to download the core engine artifacts (an enterprise build). " +
+                  "Empty means the default GCS base.",
             default = "",
         ),
         "local_path": attr.string(
             doc = "Optional path to a pre-extracted Flutter SDK " +
-                  "(bin/cache layout) to source every artifact from instead " +
+                  "(bin/cache layout) to source the core engine artifacts from instead " +
                   "of the network. Mutually exclusive with downloading.",
             default = "",
         ),
@@ -1431,7 +1439,15 @@ def _register_download_host_repos(name, flutter_version, engine_revision, engine
             )
 
 def _register_download_cross_repos(name, flutter_version, engine_revision, engine_base_url, checksums):
-    """Cross-compilation repos."""
+    """Registers the cross-compilation repos for each host and target platform pair.
+
+    Args:
+        name: The base repository name shared by the registered repos.
+        flutter_version: The Flutter SDK version the engine artifacts belong to.
+        engine_revision: The engine revision whose artifacts are downloaded.
+        engine_base_url: The base URL the engine artifacts are fetched from.
+        checksums: Optional checksum table that overrides the recorded one, mainly for tests.
+    """
     for host_platform, targets in CROSS_COMPILATION_PAIRS.items():
         for target_platform in targets:
             gen_snapshot_sha256 = ""

@@ -55,7 +55,7 @@ def _swiftpm_consume_run(content, n, i):
 
     Args:
         content: The manifest text.
-        n: `len(content)`.
+        n: The length of `content`, passed in so the scan loop does not recompute it.
         i: The position the run starts at.
 
     Returns:

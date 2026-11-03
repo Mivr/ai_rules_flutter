@@ -35,7 +35,7 @@ def local_library_name(plugin, platform, target_name):
         target_name: The manifest target name.
 
     Returns:
-        `<pkg>_apple_<plat>__<c99name>`.
+        The target name, formatted as `<plugin>_apple_<platform>__<c99name>`.
     """
     return "%s_apple_%s__%s" % (plugin, platform, swiftpm_c99name(target_name))
 
@@ -208,7 +208,7 @@ def _render_src_list(name, paths):
     """Render one `name = [...]` source attribute.
 
     Args:
-        name: The attribute name.
+        name: The rule attribute the rendered list is assigned to, such as `srcs` or `hdrs`.
         paths: The repo-relative file paths.
 
     Returns:
@@ -245,7 +245,7 @@ def _render_swift_local(plugin, platform, target, selected, settings, plugin_def
         plugin_defines: The plugin's `ios_plugin_defines` entries.
 
     Returns:
-        The rule text.
+        The text of the `swift_library` rule that is emitted for the local target.
     """
     lines = [
         "flutter_apple_plugin_library(",

@@ -124,7 +124,15 @@ AOT_CROSS_COMPILATION_PAIRS = {
 }
 
 def supports_aot_cross_compilation(host_platform, target_platform):
-    """Returns True if (host_platform, target_platform) has a target-compatible AOT gen_snapshot."""
+    """Returns True if (host_platform, target_platform) has a target-compatible AOT gen_snapshot.
+
+    Args:
+      host_platform: The host platform key, such as `"linux-x64"`.
+      target_platform: The target platform key, such as `"android-arm64"`.
+
+    Returns:
+      True when `AOT_CROSS_COMPILATION_PAIRS` lists the target for that host, otherwise False.
+    """
     return target_platform in AOT_CROSS_COMPILATION_PAIRS.get(host_platform, [])
 
 def _native_toolchains_section(user_repository_name):

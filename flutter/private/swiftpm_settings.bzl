@@ -179,7 +179,7 @@ def _swiftpm_setting_string(args, index):
         index: The positional index to read.
 
     Returns:
-        `struct(ok, text)`.
+        `struct(ok, text)`, where `text` is the string literal value when `ok` is true.
     """
     positionals = [arg for arg in args if arg.key == ""]
     if index >= len(positionals) or len(positionals[index].value) != 1 or positionals[index].value[0].kind != "str":
@@ -313,7 +313,7 @@ def _swiftpm_setting_c(who, target_name, category, array_name, dotted, args, lin
     Args:
         who: The target prefix for messages.
         target_name: The bare target name for the condition parser.
-        category: `c` or `cxx`.
+        category: Which compile settings to select: `c` or `cxx`.
         array_name: The setting array, for messages.
         dotted: The dotted call name.
         args: The parsed argument structs.

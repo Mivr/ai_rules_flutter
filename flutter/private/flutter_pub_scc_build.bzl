@@ -33,7 +33,11 @@ load(
 load("//flutter/private:starlark_literal.bzl", "starlark_string_literal")
 
 def scc_flutter_test_package_bzl_content():
-    """Returns the `flutter_test_package.bzl` content for a `test` SCC member."""
+    """Returns the `flutter_test_package.bzl` content for a `test` SCC member.
+
+    Returns:
+        The `flutter_test_package.bzl` source text that forwards Flutter providers.
+    """
     return make_flutter_test_package_bzl_content(forward_flutter_providers = True)
 
 def _dedupe_labels(labels):
@@ -377,7 +381,15 @@ def adapt_scc_member_overlay_content(package_name, language_version, version, pl
     )
 
 def adapt_scc_member_android_overlay_content(package_name, overlay_android_content):
-    """Rewrites root-relative labels in an SCC member's `android/BUILD.bazel.tpl`."""
+    """Rewrites root-relative labels in an SCC member's `android/BUILD.bazel.tpl`.
+
+    Args:
+        package_name: Pub package name of the SCC member, used as the label prefix.
+        overlay_android_content: Text of the member's `android/BUILD.bazel.tpl` overlay.
+
+    Returns:
+        The overlay text with root-relative labels rewritten under `//<package_name>`.
+    """
     return overlay_android_content.replace(
         '"//android:__pkg__"',
         '"//' + package_name + '/android:__pkg__"',

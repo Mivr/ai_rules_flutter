@@ -75,7 +75,14 @@ CHROME_RUNTIME_DEB_PACKAGES = (
 )
 
 def chrome_headless_shell_url(version):
-    """Returns the Chrome for Testing download URL for linux64 chrome-headless-shell."""
+    """Returns the Chrome for Testing download URL for linux64 chrome-headless-shell.
+
+    Args:
+        version: The Chrome for Testing version string substituted into the download path.
+
+    Returns:
+        The download URL string; fails when `version` is empty.
+    """
     if not version:
         fail("chrome-headless-shell version is required.")
     return "https://storage.googleapis.com/chrome-for-testing-public/{version}/linux64/chrome-headless-shell-linux64.zip".format(

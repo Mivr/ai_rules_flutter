@@ -660,7 +660,7 @@ def detect_apple_privacy_manifests(ctx, source_dirs):
       `<source_dir>/Resources/PrivacyInfo.xcprivacy`.
 
     Args:
-        ctx: Repository context.
+        ctx: The repository context of the repository rule implementation that calls this helper.
         source_dirs: List of source directory relative paths.
 
     Returns:
@@ -723,7 +723,7 @@ def detect_apple_podspecs(
     """Detect and parse platform podspecs, merging existing `.xcprivacy` manifests.
 
     Args:
-        ctx: Repository context.
+        ctx: The repository context of the repository rule implementation that calls this helper.
         plugin: Pub plugin name string.
         macos_srcs: List of macOS source dirs.
         ios_srcs: List of iOS source dirs.

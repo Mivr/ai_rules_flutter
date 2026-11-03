@@ -457,7 +457,7 @@ def _swiftpm_apply_target_deps(identity, kind, kwarg, acc):
         acc: The accumulator dict (mutated in place).
 
     Returns:
-        `struct(ok, error)`.
+        `struct(ok, error)`; `ok` is false and `error` names the problem when the keyword is refused.
     """
     array = _swiftpm_array_parts(kwarg.value)
     if not array.ok:
@@ -487,7 +487,7 @@ def _swiftpm_apply_target_settings(identity, kind, kwarg, acc):
         acc: The accumulator dict (mutated in place).
 
     Returns:
-        `struct(ok, error)`.
+        `struct(ok, error)`; `ok` is false and `error` names the problem when the keyword is refused.
     """
     array = _swiftpm_array_parts(kwarg.value)
     if not array.ok:
@@ -517,7 +517,7 @@ def _swiftpm_apply_target_kwarg(identity, kind, kwarg, acc, lenient):
             settings never change its output.
 
     Returns:
-        `struct(ok, error)`.
+        `struct(ok, error)`; `ok` is false and `error` names the problem when the keyword is refused.
     """
     key = kwarg.key
     if key == "name" or key == "path":
@@ -756,7 +756,7 @@ def _swiftpm_apply_package_array(identity, kwarg, acc, key, lenient):
         lenient: When True, skip untranslatable target settings.
 
     Returns:
-        `struct(ok, error)`.
+        `struct(ok, error)`; `ok` is false and `error` names the problem when the keyword is refused.
     """
     array = _swiftpm_array_parts(kwarg.value)
     if not array.ok:
@@ -793,7 +793,7 @@ def _swiftpm_apply_package_kwarg(identity, kwarg, acc, lenient):
             ...).
 
     Returns:
-        `struct(ok, error)`.
+        `struct(ok, error)`; `ok` is false and `error` names the problem when the keyword is refused.
     """
     key = kwarg.key
     if key == "name" or key == "platforms" or key == "cLanguageStandard" or key == "cxxLanguageStandard":

@@ -55,7 +55,7 @@ def flutter_android_plugin_library(
             generated one that contributes nothing.
         deps: Extra Maven AAR / android_library deps. The Flutter
             Android engine is added automatically.
-        visibility: Target visibility.
+        visibility: Visibility of the generated target; defaults to the package default.
         tags: Bazel tags. Defaults to ["manual"].
         **kwargs: Forwarded to kt_android_library.
     """

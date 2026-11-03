@@ -252,8 +252,8 @@ def _reserve(reserved, copies, src, dst):
     Args:
         reserved: Destination-to-source dict, mutated.
         copies: The bundler's copy list, mutated.
-        src: Source path.
-        dst: Bundle-relative destination.
+        src: Path of the source file that is copied into the bundle.
+        dst: Destination path of the copy, relative to the bundle root.
     """
     reserved[dst] = src
     copies.append({"src": src, "dst": dst})
@@ -975,7 +975,7 @@ def _web_assemble_copies(ctx, program, files):
     entry (built where the outputs were declared), never a derived name.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         program: The `_web_compile_program` struct (reads `compile_copies`).
         files: The bundle content struct (`web_dir`, `index_html`,
             `bootstrap_js`, `manifest_json`, `version_json`,
@@ -1067,7 +1067,7 @@ def _web_run_bundler(ctx, flutter_sdk_info, program, bundle, flutter_assets):
     The whole directory contents are copied into the output root.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         flutter_sdk_info: The Flutter SDK info struct (for the exec `dart`).
         program: The `_web_compile_program` struct (`compile_outputs`,
             `dart2js_dirs`).
@@ -1263,7 +1263,7 @@ def _web_dev_config_content(ctx, flutter_sdk_info, debug, staged_agent, bundle):
     mismatch.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         flutter_sdk_info: The Flutter SDK info struct (engine revision,
             version and host tool paths).
         debug: The debug struct (`defines`, `lib_root`, `registrant`,
@@ -1379,7 +1379,7 @@ def _web_debug_result(ctx, flutter_sdk_info, debug, bundle, output_dir, output_g
     """Assembles the debug-mode providers: DDC files plus the dev config.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         flutter_sdk_info: The Flutter SDK info struct (engine revision,
             version and host tool paths).
         debug: The debug struct (`defines`, `lib_root`, `registrant`,

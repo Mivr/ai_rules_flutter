@@ -54,6 +54,15 @@ VERSION_JSON_TEMPLATE = """\
 """
 
 def build_config_js(engine_revision, builds):
+    """Render the `_flutter.buildConfig` bootstrap script for a web bundle.
+
+    Args:
+      engine_revision: The Flutter engine revision string recorded in the config.
+      builds: List of build entry dicts (such as `JS_BUILD` or `wasm_build(...)`) the loader may pick from.
+
+    Returns:
+      The JavaScript source text that assigns `_flutter.buildConfig`.
+    """
     config = {
         "engineRevision": engine_revision,
         "builds": builds,
@@ -66,6 +75,14 @@ _flutter.buildConfig = %s;
 """ % json.encode(config)
 
 def wasm_build(renderer):
+    """Build the `buildConfig` entry describing a dart2wasm web build.
+
+    Args:
+      renderer: The renderer name the loader selects for this build, such as `"skwasm"`.
+
+    Returns:
+      A dict with the dart2wasm compile target, the renderer and the wasm/mjs output paths.
+    """
     return {
         "compileTarget": "dart2wasm",
         "renderer": renderer,

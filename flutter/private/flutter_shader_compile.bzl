@@ -144,7 +144,7 @@ def _run_shader_compile(ctx, compile, tools):
     """Runs impellerc directly, or via the retry wrapper where SkSL can fail soft.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         compile: struct describing the shader compile: `shader` (the input
             file), `output` (the `.iplr` file), `spirv_output` (the
             intermediate file), `target_platform`, `platform_flags` (the
@@ -215,7 +215,7 @@ def flutter_shader_compile_action(
     """Compile a single shader file to .iplr format using impellerc.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         job: The shader job struct: `file` (the input .frag/.glsl shader
             File) and `includes` (Files the shader may `#include` — inputs
             the sandbox needs, staged into a per-action include tree so

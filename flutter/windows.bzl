@@ -113,7 +113,7 @@ def flutter_windows_bundle(name, application, runner, **kwargs):
     runner executable and FlutterApplicationInfo, produces the bundle directory.
 
     Args:
-        name: Target name.
+        name: Name of the target that produces the Windows application directory.
         application: A flutter_application target (FlutterApplicationInfo).
         runner: A pre-compiled runner executable (from flutter_windows_runner_lib_gen or cc_binary).
         **kwargs: Additional arguments (e.g. app_name, tags, visibility).

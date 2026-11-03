@@ -293,7 +293,7 @@ def _integration_test_common_setup(ctx):
     """The checks and build-mode inputs the dart:io test rules share.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
 
     Returns:
         A struct with `aot`, `extra_srcs`, `is_debug`, `lib_root`, `main_file`,
@@ -329,7 +329,7 @@ def _integration_test_dart_sources(ctx, setup, platform, content):
     """Generates the bootstrap and registrant, and computes the package config.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         setup: An `_integration_test_common_setup` struct.
         platform: The registrant's target platform (`linux` or `android`).
         content: The bootstrap `{placeholder: replacement}` dict.
@@ -399,7 +399,7 @@ def _integration_test_native_assets(ctx, flutter_sdk_info, target_os):
     """Collects the native assets and writes the compiler's manifest.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         flutter_sdk_info: The resolved Flutter SDK info.
         target_os: The target OS the manifest is keyed by.
 
@@ -496,7 +496,7 @@ def _integration_test_providers(ctx, sources, run):
     """The providers every platform test rule returns.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         sources: struct with `package_name`, `lib_root`, `main_file`, `extra_srcs`.
         run: struct with `executable`, `env` and `runtime_files`.
 
@@ -583,7 +583,7 @@ def _integration_test_kernel(ctx, flutter_sdk_info, sources, native_assets, aot,
     """Runs the kernel compile the dart:io test rules share.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         flutter_sdk_info: The resolved Flutter SDK info.
         sources: struct with `bootstrap`, `bootstrap_location`,
             `package_config` and `registrant_location`.
@@ -628,7 +628,7 @@ def _integration_test_aot(ctx, flutter_sdk_info, kernel_dill, is_debug, strip):
     """AOT-compiles the kernel in ELF form when the build is not debug.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         flutter_sdk_info: The resolved Flutter SDK info.
         kernel_dill: The compiled kernel File.
         is_debug: Whether the build is debug.
@@ -653,7 +653,7 @@ def _integration_test_assets(ctx, flutter_sdk_info, target_platform, kernel_dill
     """Compiles shaders and builds the `flutter_assets/` tree.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         flutter_sdk_info: The resolved Flutter SDK info.
         target_platform: The bundle's platform.
         kernel_dill: The compiled kernel File, or None for web.
@@ -705,7 +705,7 @@ def _web_integration_test_setup(ctx):
     """Validates a web target and resolves its compile inputs.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
 
     Returns:
         A struct with `main_file`, `extra_srcs`, `renderer`, `sdk`,
@@ -773,7 +773,7 @@ def _web_integration_test_bootstrap(ctx, setup):
     """Generates the bootstrap, its engine wrapper and the plugin registrant.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         setup: The `_web_integration_test_setup` struct.
 
     Returns:
@@ -822,7 +822,7 @@ def _web_integration_test_compile(ctx, setup, entrypoint):
     """Compiles the wrapped test for dart2wasm or dart2js.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         setup: The `_web_integration_test_setup` struct.
         entrypoint: The `_web_integration_test_bootstrap` struct.
 
@@ -904,7 +904,7 @@ def _web_integration_test_template_files(ctx, setup):
     """Writes the four web template inputs the substitution tool reads.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         setup: The `_web_integration_test_setup` struct.
 
     Returns:
@@ -934,7 +934,7 @@ def _web_integration_test_templates(ctx, setup, builds, inputs):
     """Runs the web template substitution tool over the written inputs.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         setup: The `_web_integration_test_setup` struct.
         builds: The compiler build records.
         inputs: The `_web_integration_test_template_files` struct.
@@ -1025,7 +1025,7 @@ def _web_integration_test_bundle(ctx, setup, compile, assets, templates):
     """Assembles the web bundle directory the runner serves.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         setup: The `_web_integration_test_setup` struct.
         compile: The `_web_integration_test_compile` struct.
         assets: The `flutter_assets` directory.
@@ -1105,7 +1105,7 @@ def _web_integration_test_run(ctx, setup, output_dir):
     """Wires the runner executable, environment and runfiles for the web bundle.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         setup: The `_web_integration_test_setup` struct.
         output_dir: The web bundle directory the runner serves.
 
@@ -1166,7 +1166,7 @@ def _linux_integration_test_setup(ctx):
     """Validates a Linux target and resolves its shared build inputs.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
 
     Returns:
         An `_integration_test_common_setup` struct.
@@ -1201,7 +1201,7 @@ def _linux_integration_test_sources(ctx, setup):
     """Generates the Linux bootstrap and registrant, and its package config.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         setup: The `_linux_integration_test_setup` struct.
 
     Returns:
@@ -1218,7 +1218,7 @@ def _linux_integration_test_runner(ctx, setup, sources):
     """Compiles the GTK runner and the native plugin registrant sources.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         setup: The `_linux_integration_test_setup` struct.
         sources: The `_linux_integration_test_sources` struct.
 
@@ -1256,7 +1256,7 @@ def _linux_integration_test_bundle(ctx, setup, kernel_dill, aot_output, assets, 
     """Assembles the Linux desktop bundle directory.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         setup: The `_linux_integration_test_setup` struct.
         kernel_dill: The compiled kernel File.
         aot_output: The AOT `.so` File, or None in debug mode.
@@ -1328,7 +1328,7 @@ def _linux_integration_test_run(ctx, setup, bundle):
     """Wires the runner executable, environment and runfiles for the Linux bundle.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         setup: The `_linux_integration_test_setup` struct.
         bundle: The `_linux_integration_test_bundle` struct.
 
@@ -1391,7 +1391,7 @@ def _android_integration_app_setup(ctx):
     """Validates an Android app target and resolves its shared build inputs.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
 
     Returns:
         An `_integration_test_common_setup` struct.
@@ -1408,7 +1408,7 @@ def _android_integration_app_sources(ctx, setup):
     """Generates the Android bootstrap and registrant, and its package config.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         setup: The `_android_integration_app_setup` struct.
 
     Returns:
@@ -1425,7 +1425,7 @@ def _android_integration_app_providers(ctx, setup, sources, native_assets, kerne
     """The providers a compiled Android integration-test app returns.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         setup: The `_android_integration_app_setup` struct.
         sources: The `_android_integration_app_sources` struct.
         native_assets: The `_integration_test_native_assets` struct.
@@ -1489,7 +1489,7 @@ def _android_integration_test_setup(ctx):
     """Validates an Android test target and resolves its run inputs.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
 
     Returns:
         A struct with `main_file`, `extra_srcs`, `package_name`, `lib_root`
@@ -1649,17 +1649,20 @@ _COMMON_INTEGRATION_TEST_ATTRS["exclude_tags"] = attr.string_list(
 _COMMON_INTEGRATION_TEST_ATTRS.update(PLATFORM_CONSTRAINT_ATTRS)
 _COMMON_INTEGRATION_TEST_ATTRS.update(MODULAR_KERNEL_ATTRS)
 _COMMON_INTEGRATION_TEST_ATTRS["_tool"] = attr.label(
+    doc = "Executable test-runner tool, built for the exec platform, that drives the integration test and reports results.",
     default = Label("//flutter/private/tools:flutter_integration_test_runner"),
     executable = True,
     cfg = "exec",
 )
 _COMMON_INTEGRATION_TEST_ATTRS["_library_tags_tool"] = LIBRARY_TAGS_TOOL_ATTR
 _COMMON_INTEGRATION_TEST_ATTRS["_bundle_tool"] = attr.label(
+    doc = "Executable tool, built for the exec platform, that assembles the application bundle the test runs against.",
     default = Label("//flutter/private/tools:bundle_app"),
     executable = True,
     cfg = "exec",
 )
 _COMMON_INTEGRATION_TEST_ATTRS["_sky_engine"] = attr.label(
+    doc = "The sky_engine Dart package target that supplies the dart:ui SDK libraries needed to compile the test.",
     default = Label("@flutter_sky_engine//:sky_engine"),
     providers = [DartInfo],
 )
@@ -1720,35 +1723,43 @@ _INTEGRATION_TEST_ATTRS["source_maps"] = attr.bool(
     default = False,
 )
 _INTEGRATION_TEST_ATTRS["_chrome_headless_shell"] = attr.label(
+    doc = "The hermetic chrome-headless-shell binary the web test launches to run the compiled app.",
     default = Label("@flutter_chrome_headless_shell//:browser/chrome-headless-shell"),
     allow_single_file = True,
 )
 _INTEGRATION_TEST_ATTRS["_chrome_fontconfig"] = attr.label(
+    doc = "The fontconfig file that points the headless Chrome at the bundled fonts.",
     default = Label("@flutter_chrome_headless_shell//:fonts/fonts.conf"),
     allow_single_file = True,
 )
 _INTEGRATION_TEST_ATTRS["_chrome_all_files"] = attr.label(
+    doc = "All files of the hermetic headless Chrome distribution, made available to the test runfiles.",
     default = Label("@flutter_chrome_headless_shell//:all_files"),
 )
 _INTEGRATION_TEST_ATTRS["_roboto_font"] = attr.label(
+    doc = "The Roboto Regular font file provided so text renders consistently in headless Chrome.",
     default = Label("@flutter_material_fonts//:material-fonts/Roboto-Regular.ttf"),
     allow_single_file = True,
 )
 _INTEGRATION_TEST_ATTRS["_dart2wasm_platform_dill"] = attr.label(
+    doc = "The dart2wasm platform kernel (dill) used when compiler is dart2wasm.",
     default = Label("@flutter_web_sdk//:web-sdk/kernel/dart2wasm_platform.dill"),
     allow_single_file = True,
     cfg = "exec",
 )
 _INTEGRATION_TEST_ATTRS["_dart2js_platform_dill"] = attr.label(
+    doc = "The dart2js platform kernel (dill) used when compiler is dart2js.",
     default = Label("@flutter_web_sdk//:web-sdk/kernel/dart2js_platform.dill"),
     allow_single_file = True,
     cfg = "exec",
 )
 _INTEGRATION_TEST_ATTRS["_web_sdk"] = attr.label(
+    doc = "The Flutter web SDK target supplying the web compilation artifacts and engine files.",
     default = Label("@flutter_web_sdk//:web_sdk"),
     cfg = "exec",
 )
 _INTEGRATION_TEST_ATTRS["_web_template_tool"] = attr.label(
+    doc = "Executable tool, built for the exec platform, that expands the web index template for the test page.",
     default = Label("//flutter/private/tools:web_template"),
     executable = True,
     cfg = "exec",
@@ -1778,25 +1789,31 @@ _LINUX_INTEGRATION_TEST_ATTRS["window_title"] = attr.string(
     default = "Flutter Integration Test",
 )
 _LINUX_INTEGRATION_TEST_ATTRS["_linux_runner_source"] = attr.label(
+    doc = "The C++ GTK runner source file that is compiled into the Linux test host executable.",
     default = Label("//flutter/private/runners:linux_runner.cc"),
     allow_single_file = True,
 )
 _LINUX_INTEGRATION_TEST_ATTRS["_cc_toolchain"] = attr.label(
+    doc = "The C++ toolchain used to compile and link the Linux runner.",
     default = "@bazel_tools//tools/cpp:current_cc_toolchain",
 )
 _LINUX_INTEGRATION_TEST_ATTRS["_linux_xvfb"] = attr.label(
+    doc = "The Xvfb virtual display server binary the Linux test starts to run headlessly.",
     default = Label("@flutter_linux_headless_runtime//:sysroot/usr/bin/Xvfb"),
     allow_single_file = True,
 )
 _LINUX_INTEGRATION_TEST_ATTRS["_linux_xkbcomp"] = attr.label(
+    doc = "The xkbcomp binary Xvfb needs to compile keyboard maps for the virtual display.",
     default = Label("@flutter_linux_headless_runtime//:sysroot/usr/bin/xkbcomp"),
     allow_single_file = True,
 )
 _LINUX_INTEGRATION_TEST_ATTRS["_linux_fontconfig"] = attr.label(
+    doc = "The fontconfig file that points the headless Linux test at the bundled fonts.",
     default = Label("@flutter_linux_headless_runtime//:fonts/fonts.conf"),
     allow_single_file = True,
 )
 _LINUX_INTEGRATION_TEST_ATTRS["_linux_runtime_all_files"] = attr.label(
+    doc = "All files of the hermetic headless Linux runtime (sysroot, Xvfb, fonts), added to the test runfiles.",
     default = Label("@flutter_linux_headless_runtime//:all_files"),
 )
 _LINUX_INTEGRATION_TEST_ATTRS["_bootstrap_template"] = attr.label(
@@ -1860,14 +1877,17 @@ _ANDROID_INTEGRATION_TEST_ATTRS = {
     "_library_tags_tool": _COMMON_INTEGRATION_TEST_ATTRS["_library_tags_tool"],
     "_sky_engine": _COMMON_INTEGRATION_TEST_ATTRS["_sky_engine"],
     "_android_emulator": attr.label(
+        doc = "The Android emulator binary the test boots to run the APK.",
         default = Label("@flutter_android_headless_runtime//:sdk/emulator/emulator"),
         allow_single_file = True,
     ),
     "_android_adb": attr.label(
+        doc = "The adb binary the test uses to install the APK and talk to the emulator.",
         default = Label("@flutter_android_headless_runtime//:sdk/platform-tools/adb"),
         allow_single_file = True,
     ),
     "_android_runtime_all_files": attr.label(
+        doc = "All files of the hermetic headless Android runtime (SDK, emulator), added to the test runfiles.",
         default = Label("@flutter_android_headless_runtime//:all_files"),
     ),
 }
@@ -2285,7 +2305,7 @@ def flutter_integration_test(
     package's `ios/Runner` sources).
 
     Args:
-        name: Target name.
+        name: Name of the integration test target that this macro defines.
         package_name: Dart package name (from `pubspec.yaml`). Defaults to `name`.
         deps: Dependencies (`dart_library` / `flutter_library`) for the test and app.
         app_deps: Optional additional dependencies for the app, merged with `deps`.

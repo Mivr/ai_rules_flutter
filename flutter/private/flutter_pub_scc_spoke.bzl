@@ -489,7 +489,7 @@ flutter_pub_scc_package = repository_rule(
         "pubspec_lock": attr.label(
             allow_single_file = True,
             default = None,
-            doc = "pubspec.lock label.",
+            doc = "Label of the `pubspec.lock` file that the strongly connected component was locked from.",
         ),
     },
     doc = "Merged spoke repository rule for multi-package strongly connected components.",

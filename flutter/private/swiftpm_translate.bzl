@@ -398,7 +398,7 @@ def _swiftpm_build_string(text):
     """Quote arbitrary text as a BUILD string literal.
 
     Args:
-        text: The raw text.
+        text: The raw manifest text that is being translated.
 
     Returns:
         The double-quoted literal with `\\` and `"` escaped.
@@ -580,7 +580,7 @@ def _swiftpm_emit_product_block(product):
         product: The parsed product struct (`name`, `targets`).
 
     Returns:
-        The rule text.
+        The text of the `alias` or `swift_library_group` rule for the product.
     """
     if len(product.targets) == 1:
         return "alias(\n    name = {name},\n    actual = {actual},\n    visibility = [\"//visibility:public\"],\n)".format(name = repr(product.name), actual = repr(":" + product.targets[0] + "_lib"))

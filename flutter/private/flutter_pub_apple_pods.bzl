@@ -39,7 +39,7 @@ def format_message_11(plugin = None, pod = "", version = "", lock_label = "", re
 
     Args:
         plugin: The Flutter plugin package name.
-        pod: The pod name.
+        pod: The name of the CocoaPods pod that has no Bazel target.
         version: The locked version string, or "".
         lock_label: The string label of Podfile.lock.
         reason: Optional refusal reason, or "".
@@ -67,12 +67,12 @@ def resolve_binary_pod_stub(_pod = "", _root = "", _version = ""):
     """Pure stub for binary pod resolution (filled in by POD-21).
 
     Args:
-        _pod: The pod name.
-        _root: The root pod name.
-        _version: The locked version string.
+        _pod: The name of the pod being resolved; unused by the stub.
+        _root: The name of the root pod of the resolved pod; unused by the stub.
+        _version: The version string locked in `Podfile.lock`; unused by the stub.
 
     Returns:
-        None.
+        Always `None`, because no resolver is wired in behind this stub yet.
     """
     return None
 
@@ -80,12 +80,12 @@ def resolve_swiftpm_pod_stub(_pod = "", _root = "", _version = ""):
     """Pure stub for pod-to-SwiftPM table resolution (filled in by POD-18).
 
     Args:
-        _pod: The pod name.
-        _root: The root pod name.
-        _version: The locked version string.
+        _pod: The name of the pod being resolved; unused by the stub.
+        _root: The name of the root pod of the resolved pod; unused by the stub.
+        _version: The version string locked in `Podfile.lock`; unused by the stub.
 
     Returns:
-        None.
+        Always `None`, because no resolver is wired in behind this stub yet.
     """
     return None
 
