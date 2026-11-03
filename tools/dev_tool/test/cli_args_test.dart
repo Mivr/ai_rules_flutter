@@ -45,7 +45,11 @@ void main() {
   });
 
   test('an argv with no positionals passes', () {
-    expect(() => requireNoPositionalArgs('run', const []), returnsNormally);
+    // Take the argv through the real parser so `rest` is what it produced, not
+    // a list this test wrote to match the validator.
+    final List<String> rest = RunCommand.parser.parse(['-t', '//:app']).rest;
+    expect(rest, isEmpty);
+    expect(() => requireNoPositionalArgs('run', rest), returnsNormally);
   });
 
   // `ArgParser` splits a multi-option on commas unless told not to, which cut

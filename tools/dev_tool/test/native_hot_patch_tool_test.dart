@@ -4,6 +4,13 @@ import 'package:flutter_bazel_dev_tool/dev_tool_exception.dart';
 import 'package:flutter_bazel_dev_tool/native_hot_patch_tool.dart';
 import 'package:test/test.dart';
 
+/// A [NativePatchTool] and the `(executable, args, workingDirectory)` of every
+/// command it ran, as the fake process runner recorded them.
+typedef _RecordedTool = ({
+  NativePatchTool tool,
+  List<(String, List<String>, String)> calls,
+});
+
 void main() {
   group('manifest', () {
     const valid = '''
@@ -143,7 +150,19 @@ void main() {
     });
 
     test('a snapshot answers ok', () async {
-      await toolAnswering(0, '{"status":"ok"}\n').tool.snapshot('/state');
+      final _RecordedTool t = toolAnswering(0, '{"status":"ok"}\n');
+      await expectLater(t.tool.snapshot('/state'), completes);
+      // The `ok` answer is only meaningful for the one command line it was
+      // given to, so the argv the fake tool received is the post-condition.
+      expect(
+        [
+          for (final (exe, args, cwd) in t.calls)
+            '$cwd: $exe ${args.join(' ')}',
+        ],
+        [
+          '/exec/root: bazel-out/host/bin/patcher --crate add snapshot --state /state',
+        ],
+      );
     });
 
     test('a snapshot that fails stops the launch with the builder\'s own '

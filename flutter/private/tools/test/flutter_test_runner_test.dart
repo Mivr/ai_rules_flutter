@@ -313,10 +313,25 @@ void main() {
 
   group('teardownQuietly', () {
     test('swallows a peer-gone I/O race and an already-closed race', () async {
-      await support.teardownQuietly(() async {
-        throw const FileSystemException('connection reset');
-      });
-      await support.teardownQuietly(() async => throw StateError('closed'));
+      final ran = <String>[];
+      await expectLater(
+        support.teardownQuietly(() async {
+          ran.add('io');
+          throw const FileSystemException('connection reset');
+        }),
+        completes,
+      );
+      await expectLater(
+        support.teardownQuietly(
+          () => Future<void>.sync(() {
+            ran.add('state');
+            throw StateError('closed');
+          }),
+        ),
+        completes,
+      );
+      // Each step really ran and threw; the race was swallowed, not skipped.
+      expect(ran, ['io', 'state']);
     });
 
     test('lets an unexpected teardown error propagate', () async {

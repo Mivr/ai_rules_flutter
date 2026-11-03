@@ -1857,15 +1857,17 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     });
 
     test('preflight passes when every tool is present', () async {
-      final device = _ToolsDevice([
-        HostTool(
-          name: 'dart',
-          purpose: 'prove the point',
-          remedy: 'unreachable',
-          candidates: [Platform.resolvedExecutable],
-        ),
-      ]);
-      await device.preflight();
+      final tool = HostTool(
+        name: 'dart',
+        purpose: 'prove the point',
+        remedy: 'unreachable',
+        candidates: [Platform.resolvedExecutable],
+      );
+      final device = _ToolsDevice([tool]);
+      await expectLater(device.preflight(), completes);
+      // What preflight accepted is the candidate it was given, not some other
+      // `dart` that happened to be on PATH.
+      expect(tool.find(), Platform.resolvedExecutable);
     });
   });
 
@@ -5618,7 +5620,24 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     test('returns once a listener accepts', () async {
       final server = await ServerSocket.bind('127.0.0.1', 0);
       addTearDown(server.close);
+      final accepted = <Socket>[];
+      final firstProbe = Completer<void>();
+      server.listen((socket) {
+        accepted.add(socket);
+        if (!firstProbe.isCompleted) firstProbe.complete();
+      });
+
       await waitForLocalTcpPort(server.port, what: 'test listener');
+
+      await firstProbe.future.timeout(const Duration(seconds: 2));
+      expect(
+        accepted,
+        hasLength(1),
+        reason: 'the first probe connected, so the wait never dialled again',
+      );
+      for (final socket in accepted) {
+        socket.destroy();
+      }
     });
 
     test('waits for a listener that binds late', () async {

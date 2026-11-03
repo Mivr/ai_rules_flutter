@@ -142,7 +142,14 @@ void main() {
 </dict>
 </plist>
 ''';
-      expect(() => merge(_release, [spaced]), returnsNormally);
+      final String merged = merge(_release, [spaced]);
+      // The spaced copy only re-declares `app-sandbox` with the same value, so
+      // nothing is added and nothing is dropped: the key set is the base's.
+      expect(keysOf(merged).toSet(), equals(keysOf(_release).toSet()));
+      expect(
+        keysOf(merged).where((k) => k == 'com.apple.security.app-sandbox'),
+        hasLength(1),
+      );
     });
 
     test('hard-fails on a key the base declares with a different value', () {

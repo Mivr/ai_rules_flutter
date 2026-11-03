@@ -256,28 +256,33 @@ void main() {
       });
     });
 
-    test('sub-second mtime precision is preserved on macOS APFS', () async {
-      // If FileStat.modified truncates to seconds, two writes within the
-      // same wall-second would produce identical Versions and AppliedVersions
-      // would silently miss the second edit. macOS APFS supports nanosecond
-      // mtime; Dart's FileStat.modified should carry it. This test pins that.
-      if (!Platform.isMacOS) return; // APFS-specific assertion.
-      writeFile('a.dart', 'v1');
-      final t1 = File(p.join(tmp.path, 'lib', 'a.dart')).statSync().modified;
-      // 'v1' and 'v2' are the same length on purpose: size is the other half
-      // of `Version`, and letting it move would let this pass without saying
-      // anything about mtime. The 5ms is the interval under test, not a wait
-      // for anything — it is what makes the two writes sub-second apart, which
-      // is the resolution being pinned.
-      await Future<void>.delayed(const Duration(milliseconds: 5));
-      writeFile('a.dart', 'v2');
-      final t2 = File(p.join(tmp.path, 'lib', 'a.dart')).statSync().modified;
-      expect(
-        t2.isAfter(t1),
-        isTrue,
-        reason: 'mtime should differ after a 5ms-apart rewrite on APFS',
-      );
-    });
+    test(
+      'sub-second mtime precision is preserved on macOS APFS',
+      () async {
+        // If FileStat.modified truncates to seconds, two writes within the
+        // same wall-second would produce identical Versions and AppliedVersions
+        // would silently miss the second edit. macOS APFS supports nanosecond
+        // mtime; Dart's FileStat.modified should carry it. This test pins that.
+        writeFile('a.dart', 'v1');
+        final t1 = File(p.join(tmp.path, 'lib', 'a.dart')).statSync().modified;
+        // 'v1' and 'v2' are the same length on purpose: size is the other half
+        // of `Version`, and letting it move would let this pass without saying
+        // anything about mtime. The 5ms is the interval under test, not a wait
+        // for anything — it is what makes the two writes sub-second apart, which
+        // is the resolution being pinned.
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+        writeFile('a.dart', 'v2');
+        final t2 = File(p.join(tmp.path, 'lib', 'a.dart')).statSync().modified;
+        expect(
+          t2.isAfter(t1),
+          isTrue,
+          reason: 'mtime should differ after a 5ms-apart rewrite on APFS',
+        );
+      },
+      skip: Platform.isMacOS
+          ? null
+          : 'APFS-specific: nanosecond mtime is a macOS filesystem guarantee',
+    );
   });
 
   group('Workspace.snapshot', () {
