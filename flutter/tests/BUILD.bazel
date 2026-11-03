@@ -105,7 +105,8 @@ filegroup(
 )
 
 # Parser shared by the root floor guard and e2e/min_versions, so both read
-# MODULE.bazel and the table the same way.
+# MODULE.bazel and the table the same way. The buildifier config guard in
+# ./buildifier_config reads the `buildifier_prebuilt` version through it too.
 dart_library(
     name = "dependency_floors_lib",
     package_name = "dependency_floors",
