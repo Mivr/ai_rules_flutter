@@ -669,7 +669,8 @@ def _local_insert_into_list(block, attr, labels):
         labels: The item strings to add.
 
     Returns:
-        `struct(found, block)`.
+        `struct(found, block)`: `found` says whether the attribute existed, and `block` is the
+        target text with the labels added.
     """
     marker = "    %s = " % attr
     start = block.find(marker)

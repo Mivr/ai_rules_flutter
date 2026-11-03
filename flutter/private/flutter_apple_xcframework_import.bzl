@@ -141,7 +141,7 @@ def _emit_error(name, message):
     purpose is the analysis failure an explicit test asks for.
 
     Args:
-        name: Target name.
+        name: Name of the target that fails analysis with `message`.
         message: The exact analysis error.
     """
     _flutter_apple_xcframework_import_invalid(
@@ -269,7 +269,7 @@ def flutter_apple_xcframework_import(
     The macro works for both iOS and macOS.
 
     Args:
-        name: Target name.
+        name: Name of the target that re-exports the imported framework.
         framework: Label whose files are the one `.xcframework` or `.framework`
             directory to import.
         linkage: `"static"` (default) or `"dynamic"`.

@@ -461,7 +461,7 @@ def assemble_ios_integration_test(
     `flutter_ios_integration_test` on macOS.
 
     Args:
-        name: Target name.
+        name: Name of the iOS integration test target that this macro defines.
         bootstrap: Label of the test bootstrap `.dart` source (a
             `flutter_ios_integration_bootstrap` target created by the caller).
         package_name: Dart package name (from `pubspec.yaml`). Defaults to `name`.

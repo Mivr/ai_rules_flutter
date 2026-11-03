@@ -63,7 +63,7 @@ def _web_ui_web_head_lines():
     ]
 
 def _web_shared_navigation_lines():
-    """`PlatformLocation`/`BrowserPlatformLocation`/`UrlStrategy` stubs.
+    """Declares the `PlatformLocation`, `BrowserPlatformLocation` and `UrlStrategy` stubs.
 
     Shared verbatim by the `dart:ui_web` and `flutter_web_plugins` stubs:
     both stand in for web-only navigation types when compiling against a
@@ -158,6 +158,9 @@ def make_web_ui_web_stub_content():
     re-exported by `src/navigation/url_strategy.dart`) for compiles against a
     platform without `dart:ui_web`, which select it through the wrapper's
     conditional import.
+
+    Returns:
+      The Dart source text of the stub library, as a single string.
     """
     return "\n".join(_web_ui_web_head_lines() + _web_shared_navigation_lines() + _web_ui_web_tail_lines())
 
@@ -1168,6 +1171,12 @@ def shader_sources(ctx):
     `#include`, where those are source files of this workspace. A shader from
     another repository maps to an empty list; it is still a shader, which is
     what the dev tool needs to know to make the app reload it.
+
+    Args:
+      ctx: The rule context of the target whose shader jobs are listed.
+
+    Returns:
+      A dict mapping each bundle path to the list of workspace-relative source paths behind it.
     """
     return {
         job.bundle_path: [
@@ -1408,7 +1417,7 @@ def declare_flutter_assets_dir(ctx):
     place rather than re-spelled at each call site.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
 
     Returns:
         The declared directory (tree artifact) File.
@@ -1454,7 +1463,7 @@ def _own_font_targets(ctx):
     """The rule's own `fonts` targets when its `attrs` declare `fonts`.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
 
     Returns:
         List of `flutter_font_family` targets, or `[]` for rules without `fonts`.
@@ -1472,7 +1481,7 @@ def _bundle_tree_shake(ctx, flutter_sdk_info, bundle, fonts):
     Args:
         ctx: Rule context (reads `label` and `tree_shake_icons`).
         flutter_sdk_info: `FlutterSdkInfo` from the toolchain, or `None`.
-        bundle: `make_bundle_inputs` struct.
+        bundle: The `make_bundle_inputs` struct that carries the compiled kernel dills.
         fonts: Aggregated `FontManifest` family entries.
 
     Returns:

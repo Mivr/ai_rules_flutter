@@ -108,7 +108,7 @@ def flutter_macos_framework_gen(name, minimum_os_version = MACOS_MINIMUM_OS_VERS
     """Generates App.framework. See `flutter_macos_framework`.
 
     Args:
-        name: Target name.
+        name: Name of the target that produces `App.framework`.
         minimum_os_version: Minimum macOS deployment target.
         **kwargs: Forwarded to the underlying rule. `tags` defaults to
             `["manual"]` — build via the consuming `macos_application`.
@@ -125,7 +125,7 @@ def flutter_macos_registrant_gen(name, **kwargs):
     """Generates the macOS GeneratedPluginRegistrant. See `flutter_macos_registrant`.
 
     Args:
-        name: Target name.
+        name: Name of the target that holds the generated macOS `GeneratedPluginRegistrant` sources.
         **kwargs: Forwarded to the underlying rule. `tags` defaults to
             `["manual"]` — build via the consuming `macos_application`.
     """
@@ -136,7 +136,7 @@ def flutter_macos_native_libs_gen(name, minimum_os_version = MACOS_MINIMUM_OS_VE
     """Exposes native dylibs for bundling. See `flutter_macos_native_libs`.
 
     Args:
-        name: Target name.
+        name: Name of the target that exposes the native dylibs for bundling.
         minimum_os_version: Minimum macOS deployment target.
         **kwargs: Forwarded to the underlying rule. `tags` defaults to
             `["manual"]` — build via the consuming `macos_application`.
@@ -154,7 +154,7 @@ def flutter_macos_privacy_manifests_gen(name, **kwargs):
     """Exposes plugin privacy manifests. See `flutter_macos_privacy_manifests`.
 
     Args:
-        name: Target name.
+        name: Name of the target that exposes the plugins' privacy manifests.
         **kwargs: Forwarded to the underlying rule. `tags` defaults to
             `["manual"]` — build via the consuming `macos_application`.
     """

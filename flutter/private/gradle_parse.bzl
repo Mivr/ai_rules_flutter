@@ -137,7 +137,11 @@ def gradle_match_paren(text, open_pos):
     return -1
 
 def gradle_bad_add():
-    """The shared "not a modellable `add()` call" parse result."""
+    """The shared "not a modellable `add()` call" parse result.
+
+    Returns:
+      A struct of `kind` `"bad"` with empty `config` and `notation` and `project` false.
+    """
     return struct(kind = "bad", config = "", notation = "", project = False)
 
 def gradle_parse_add_tail(stmt, pos, paren, config):
@@ -313,7 +317,7 @@ def parse_gradle_apply(stmt):
         stmt: The stripped statement text.
 
     Returns:
-        `struct(kind, path)`.
+        `struct(kind, path)`, where `path` is the literal script path when `kind` is `"path"`.
     """
     if gradle_leading_word(stmt) != "apply":
         return struct(kind = "none", path = "")

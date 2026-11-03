@@ -121,7 +121,7 @@ def flutter_ios_registrant_gen(name, language = "swift", exclude_plugins = [], *
     """Generates the iOS GeneratedPluginRegistrant. See `flutter_ios_registrant`.
 
     Args:
-        name: Target name.
+        name: Name of the target that holds the generated iOS `GeneratedPluginRegistrant` sources.
         language: Registrant language: `"swift"` (default) emits
             GeneratedPluginRegistrant.swift; `"objc"` emits
             GeneratedPluginRegistrant.h and GeneratedPluginRegistrant.m
@@ -150,7 +150,7 @@ def flutter_ios_native_frameworks_gen(name, minimum_os_version = IOS_MINIMUM_OS_
     """Wraps native dylibs in .frameworks for iOS bundling. See `flutter_ios_native_frameworks`.
 
     Args:
-        name: Target name.
+        name: Name of the target that exposes the `.framework` wrappers of the native dylibs.
         minimum_os_version: Minimum iOS deployment target.
         **kwargs: Forwarded to the underlying rule. `tags` defaults to
             `["manual"]` — build via the consuming `ios_application`.
@@ -167,7 +167,7 @@ def flutter_ios_privacy_manifests_gen(name, **kwargs):
     """Exposes plugin privacy manifests. See `flutter_ios_privacy_manifests`.
 
     Args:
-        name: Target name.
+        name: Name of the target that exposes the plugins' privacy manifests.
         **kwargs: Forwarded to the underlying rule. `tags` defaults to
             `["manual"]` — build via the consuming `ios_application`.
     """
@@ -382,7 +382,7 @@ def flutter_ios_simulator_build(name, targets, **kwargs):
     the bundle through `data`. The files keep their runfiles paths.
 
     Args:
-        name: Target name.
+        name: Name of the target that forwards the files of the debug-built simulator apps.
         targets: `flutter_ios_app` or `ios_application` targets.
         **kwargs: Common attributes (e.g. `tags`, `testonly`, `visibility`).
     """
@@ -401,7 +401,7 @@ def flutter_ios_simulator_build_test(name, targets, **kwargs):
     `flutter_ios_simulator_build`.
 
     Args:
-        name: Target name.
+        name: Name of the `build_test` target that builds the simulator apps.
         targets: `flutter_ios_app` or `ios_application` targets to build.
         **kwargs: Passed through to `build_test` (e.g. `tags`,
             `target_compatible_with`).

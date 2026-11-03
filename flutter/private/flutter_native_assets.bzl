@@ -141,6 +141,13 @@ def native_assets_target_string(target_os, target_arch):
     section. Returns "" when the pair isn't supported, in which case
     the caller emits an empty `native-assets` dict (which is still
     valid for the engine).
+
+    Args:
+      target_os: The target operating system name, such as `"ios"`; empty means unknown.
+      target_arch: The target CPU architecture name, such as `"arm64"`; empty means unknown.
+
+    Returns:
+      The Dart Target string for the pair, or `""` when it is unset or unsupported.
     """
     if not target_os or not target_arch:
         return ""

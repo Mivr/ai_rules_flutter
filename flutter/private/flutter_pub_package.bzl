@@ -109,6 +109,13 @@ def parse_gradle_android_namespace(content, language = "groovy"):
 
     Moved to `//flutter/private:gradle.bzl`; kept here with the same
     signature so existing loads keep working.
+
+    Args:
+        content: Gradle build script text to scan.
+        language: Gradle DSL of the script, `"groovy"` or `"kotlin"`. Defaults to `"groovy"`.
+
+    Returns:
+        The `android.namespace` string, as returned by the gradle helper.
     """
     return _gradle_parse_gradle_android_namespace(content, language)
 
@@ -117,6 +124,12 @@ def parse_android_manifest_package(content):
 
     Moved to `//flutter/private:gradle.bzl`; kept here with the same
     signature so existing loads keep working.
+
+    Args:
+        content: AndroidManifest.xml text to scan.
+
+    Returns:
+        The manifest `package` attribute, as returned by the gradle helper.
     """
     return _gradle_parse_android_manifest_package(content)
 
@@ -125,6 +138,16 @@ def maven_labels_for_gradle(content, mapping, ignore, read_script = None, langua
 
     Moved to `//flutter/private:gradle.bzl`; kept here with the same
     signature so existing loads keep working.
+
+    Args:
+        content: Gradle build script text whose runtime dependencies are translated.
+        mapping: Dict mapping Maven coordinates to Bazel labels.
+        ignore: Coordinates to skip when translating dependencies.
+        read_script: Optional callable used to read referenced scripts. Defaults to `None`.
+        language: Gradle DSL of the script, `"groovy"` or `"kotlin"`. Defaults to `"groovy"`.
+
+    Returns:
+        The Bazel label list produced by the gradle helper.
     """
     return _gradle_maven_labels_for_gradle(content, mapping, ignore, read_script, language)
 
@@ -133,6 +156,12 @@ def is_java_package_name(value):
 
     Moved to `//flutter/private:gradle.bzl`; kept here with the same
     signature so existing loads keep working.
+
+    Args:
+        value: Candidate string to validate as a Java package name.
+
+    Returns:
+        True when `value` is a well-formed Java package name, otherwise False.
     """
     return _gradle_is_java_package_name(value)
 
@@ -141,6 +170,12 @@ def is_maven_dep_label(value):
 
     Moved to `//flutter/private:gradle.bzl`; kept here with the same
     signature so existing loads keep working.
+
+    Args:
+        value: Candidate string to validate as a Maven dependency label.
+
+    Returns:
+        True when `value` is a plausible Maven dependency label, otherwise False.
     """
     return _gradle_is_maven_dep_label(value)
 
@@ -244,6 +279,12 @@ def build_pkg_assets_dict(expanded):
     label names the decoded file (`":" + path`); the value is the
     percent-encoded bundle key, as flutter_tools keys it
     (`asset.dart:1425-1428`).
+
+    Args:
+        expanded: List of expanded asset entries, each with `path` and `key` fields.
+
+    Returns:
+        Dict mapping `":" + path` labels to percent-encoded bundle keys.
     """
     return {":" + entry.path: entry.key for entry in expanded}
 
@@ -252,6 +293,12 @@ def build_pkg_shaders_dict(parsed_shaders):
 
     Same shape as pkg_assets, no directories: decoded labels naming the
     files, encoded bundle keys as values (`asset.dart:1425-1428`).
+
+    Args:
+        parsed_shaders: List of normalized shader entries, each with `path` and `key` fields.
+
+    Returns:
+        Dict mapping `":" + path` labels to percent-encoded bundle keys.
     """
     return {":" + entry.path: entry.key for entry in parsed_shaders}
 
@@ -1444,7 +1491,7 @@ def link_path_package(ctx):
             `package_name`, `version`, and `hub_name` from its attrs.
 
     Returns:
-        None.
+        Always `None`; the function works through the repository context.
     """
     root = path_package_root(ctx)
     src = root.src

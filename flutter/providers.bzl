@@ -204,7 +204,7 @@ def resolve_exec_dart(ctx, _flutter_sdk_info = None):
     back silently to `flutter_sdk_info.dart`.
 
     Args:
-      ctx: Rule context.
+      ctx: The rule context of the rule implementation that calls this helper.
       _flutter_sdk_info: Unused; retained for call-site compatibility.
 
     Returns:
@@ -232,7 +232,7 @@ def resolve_exec_dart_vm(ctx, _flutter_sdk_info = None):
     silently to `flutter_sdk_info`.
 
     Args:
-      ctx: Rule context.
+      ctx: The rule context of the rule implementation that calls this helper.
       _flutter_sdk_info: Unused; retained for call-site compatibility.
 
     Returns:

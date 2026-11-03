@@ -152,7 +152,7 @@ def _create_native_libs_jar(ctx, aot_output, native_libs, abi):
     otherwise silently drop one of them.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         aot_output: The AOT compile output, packaged as libapp.so (Android
             convention: the engine loads the Dart snapshot via
             System.loadLibrary("app")). None in debug/JIT mode.

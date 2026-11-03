@@ -56,7 +56,7 @@ def flutter_web_manifest_gen(name, app_name, **kwargs):
     """Generates a manifest.json from the default Bazel template.
 
     Args:
-        name: Target name.
+        name: Name of the target that holds the generated `manifest.json`.
         app_name: Application name substituted into the manifest fields.
         **kwargs: Additional arguments (e.g. tags, visibility).
     """
@@ -77,7 +77,7 @@ def flutter_web_bundle(name, web_sdk = None, **kwargs):
     flutter_web_app which auto-discovers runner files.
 
     Args:
-        name: Target name.
+        name: Name of the target that builds the web bundle with its deployment artifacts.
         web_sdk: Optional web SDK repo name (e.g. "@my_flutter_web_sdk").
             Defaults to "@flutter_web_sdk".
         **kwargs: All other arguments forwarded to the underlying rule.
@@ -147,7 +147,7 @@ def flutter_web_app(
         letting one quietly overwrite the other.
 
     Args:
-        name: Target name.
+        name: Name of the web application target.
         package_name: Dart package name (same value as `pubspec.yaml`'s `name:`).
             Required: keys the web bootstrap's `package:` URI for `main` and
             anchors codegen sibling co-location.

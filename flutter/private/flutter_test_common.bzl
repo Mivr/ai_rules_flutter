@@ -139,9 +139,25 @@ def _exposes_package(deps, names):
 # supported configuration) fail its kernel compile on an import it never asked
 # for. Upstream draws the same line with its `if (flutterTestDep)` guard.
 def can_bootstrap(deps):
+    """Tell whether the test bootstrap can be generated for these deps.
+
+    Args:
+      deps: The dependency targets of the test, searched for exposed Dart packages.
+
+    Returns:
+      True when `flutter_test` or `test_api` is among the exposed packages.
+    """
     return _exposes_package(deps, ["flutter_test", "test_api"])
 
 def has_flutter_test(deps):
+    """Tell whether the deps expose `flutter_test`, which the golden block needs.
+
+    Args:
+      deps: The dependency targets of the test, searched for exposed Dart packages.
+
+    Returns:
+      True when the `flutter_test` package is among the exposed packages.
+    """
     return _exposes_package(deps, ["flutter_test"])
 
 def flutter_test_bootstrap_action(ctx, test_main_uri, output):

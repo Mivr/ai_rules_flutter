@@ -595,7 +595,7 @@ def generate_native_plugin_registrant_header(ctx, target_platform):
     can #include "flutter/generated_plugin_registrant.h".
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         target_platform: Platform string ("linux" or "windows").
 
     Returns:
@@ -619,7 +619,7 @@ def generate_native_plugin_registrant(ctx, plugins, target_platform, exclude_plu
     unconditionally call the registration function.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         plugins: List of plugin structs.
         target_platform: Platform string ("linux", "windows", "macos",
             "ios", "android").
@@ -675,7 +675,7 @@ def generate_ios_objc_registrant(ctx, plugins, exclude_plugins = []):
     to its sibling header.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         plugins: List of plugin structs.
         exclude_plugins: Plugin module names to omit from the registrant.
             A name that is not a native iOS plugin is an error, listing
@@ -724,7 +724,7 @@ def generate_dev_plugin_registrants(ctx, plugins, agent_import = None, native_ag
     `-Dflutter.dart_plugin_registrant`.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         plugins: List of plugin structs.
         agent_import: Optional relative import for the staged agent-extensions
             library (the files are declared next to it, so a basename works).
@@ -756,7 +756,7 @@ def generate_dart_plugin_registrant(ctx, plugins, target_platform = None, agent_
     """Generate a Dart plugin registrant source file via ctx.actions.write.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         plugins: List of plugin structs.
         target_platform: Optional platform string to filter plugins by.
         agent_import: Optional relative import for the staged agent-extensions

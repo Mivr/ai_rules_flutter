@@ -66,7 +66,7 @@ def swiftpm_spoke_name(hub_name, identity):
         identity: The SwiftPM package identity.
 
     Returns:
-        `<hub>__swiftpm-<identity>`.
+        The spoke repository name, formatted as `<hub>__swiftpm-<identity>`.
     """
     return hub_name + "__swiftpm-" + identity
 
@@ -169,7 +169,7 @@ def _swiftpm_json_scan_one(text, i, line):
     """Scan the single token starting at one index.
 
     Args:
-        text: The full text.
+        text: The complete file text to scan, as read from disk.
         i: The index of the token's first character (never whitespace).
         line: The line the token starts on.
 
@@ -242,7 +242,7 @@ def _swiftpm_json_unicode(text, i, n):
     """Skip the four hex digits of a `\\u` escape.
 
     Args:
-        text: The full text.
+        text: The complete file text to scan, as read from disk.
         i: The index of the `u`.
         n: The text length.
 
@@ -260,7 +260,7 @@ def _swiftpm_json_escape(text, i, n):
     """Skip one backslash escape inside a JSON string.
 
     Args:
-        text: The full text.
+        text: The complete file text to scan, as read from disk.
         i: The index of the backslash.
         n: The text length.
 
@@ -280,7 +280,7 @@ def _swiftpm_json_string(text, start, line):
     """Skip one JSON string literal.
 
     Args:
-        text: The full text.
+        text: The complete file text to scan, as read from disk.
         start: The index of the opening quote.
         line: The line the string starts on.
 
@@ -311,7 +311,7 @@ def _swiftpm_json_digits(text, i, n):
     """Skip one run of ASCII digits.
 
     Args:
-        text: The full text.
+        text: The complete file text to scan, as read from disk.
         i: The index the run starts at.
         n: The text length.
 
@@ -330,7 +330,7 @@ def _swiftpm_json_number(text, start):
     """Skip one JSON number literal.
 
     Args:
-        text: The full text.
+        text: The complete file text to scan, as read from disk.
         start: The index the number starts at.
 
     Returns:
@@ -367,7 +367,7 @@ def _swiftpm_json_literal(text, start):
     """Skip one `true`, `false` or `null` literal.
 
     Args:
-        text: The full text.
+        text: The complete file text to scan, as read from disk.
         start: The index the literal starts at.
 
     Returns:
@@ -402,7 +402,7 @@ def _swiftpm_json_check_val(tok, stack, counts):
     """Consume one token where a value is expected.
 
     Args:
-        tok: The token.
+        tok: One lexer token from the scanned text, as produced by the tokenizer.
         stack: The open containers (`{`/`[`; mutated in place).
         counts: The per-frame completed values (mutated in place).
 
@@ -429,7 +429,7 @@ def _swiftpm_json_check_key(tok, stack, counts):
     """Consume one token where an object key is expected.
 
     Args:
-        tok: The token.
+        tok: One lexer token from the scanned text, as produced by the tokenizer.
         stack: The open containers (mutated in place).
         counts: The per-frame completed values (mutated in place).
 
@@ -448,7 +448,7 @@ def _swiftpm_json_check_sep(tok, stack, counts):
     """Consume one token where a separator or closing bracket is expected.
 
     Args:
-        tok: The token.
+        tok: One lexer token from the scanned text, as produced by the tokenizer.
         stack: The open containers (mutated in place).
         counts: The per-frame completed values (mutated in place).
 
@@ -479,7 +479,7 @@ def _swiftpm_json_check_tokens(tokens):
         tokens: The tokenized stream.
 
     Returns:
-        `struct(ok, detail)`.
+        `struct(ok, detail)`; `detail` says what the grammar check expected when `ok` is false.
     """
     stack = []
     counts = []
@@ -718,7 +718,7 @@ def read_ios_native_deps(content, label, hub_name):
     failure names the hub and the file.
 
     Args:
-        content: The file text.
+        content: The full text of the file that is being parsed.
         label: The file label, for messages.
         hub_name: The `flutter.pub` hub name, for messages.
 

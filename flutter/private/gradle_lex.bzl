@@ -20,7 +20,14 @@ unreadable downstream and never silently ignored.
 """
 
 def gradle_language_of(path):
-    """The Gradle dialect from a build-file path: `"kotlin"` or `"groovy"`."""
+    """The Gradle dialect from a build-file path: `"kotlin"` or `"groovy"`.
+
+    Args:
+      path: The build file path; a `.kts` suffix selects Kotlin.
+
+    Returns:
+      `"kotlin"` for `.kts` paths, otherwise `"groovy"`.
+    """
     if path.endswith(".kts"):
         return "kotlin"
     return "groovy"

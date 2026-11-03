@@ -216,7 +216,7 @@ def read_ios_pod_native_deps(content, label, hub_name):
     `ios_pod_ignore`, and `ios_pods` structures.
 
     Args:
-        content: The file text.
+        content: The full text of the file that is being parsed.
         label: The file label string, for error reporting.
         hub_name: The flutter.pub hub name, for error reporting.
 

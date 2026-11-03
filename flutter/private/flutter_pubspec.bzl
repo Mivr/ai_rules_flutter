@@ -72,7 +72,14 @@ def parse_pubspec(content):
     return parse_pubspec_document(content)
 
 def parse_flutter_block(content):
-    """Return the `flutter:` sub-dict, or empty dict when absent."""
+    """Return the `flutter:` sub-dict, or empty dict when absent.
+
+    Args:
+        content: Full pubspec.yaml content as a string.
+
+    Returns:
+        The `flutter:` mapping as a dict, or an empty dict when absent.
+    """
     pubspec = parse_pubspec(content)
     flutter = pubspec.get("flutter")
     return flutter if type(flutter) == "dict" else {}

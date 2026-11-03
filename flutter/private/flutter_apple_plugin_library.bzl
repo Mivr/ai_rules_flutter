@@ -403,7 +403,7 @@ def flutter_apple_plugin_objc_library(
     Args:
         name: Target name. Pass to the primary library's `deps`.
         srcs: Compilable C-family sources plus private headers.
-        hdrs: Public headers.
+        hdrs: Public headers exposed to dependents of the inner `objc_library`.
         module_name: The target's `c99name`, used as the clang module.
         platform: `"macos"` or `"ios"`. Picks the Flutter framework dep.
         deps: Same-package local libraries this target depends on.
@@ -413,7 +413,7 @@ def flutter_apple_plugin_objc_library(
         plugin_defines: Preprocessor defines for that plugin's Apple
             libraries, each `NAME` or `NAME=VALUE`, appended to `copts`
             after the target's own settings so they stay target-local.
-        visibility: Target visibility.
+        visibility: Visibility of the named target; the inner library stays private to the package.
     """
     if platform not in ("macos", "ios"):
         fail("flutter_apple_plugin_objc_library: platform must be 'macos' or 'ios', got '%s'" % platform)
@@ -592,7 +592,7 @@ def flutter_apple_plugin_library(
         engine: Optional override for the Flutter engine framework label.
         backend: Apple bundling backend: `"rules_apple"` (default) or
             `"xtool"` (explicit opt-in).
-        visibility: Target visibility.
+        visibility: Visibility of the generated target; defaults to the package default.
         tags: Bazel tags. Defaults to `["manual"]` so the spoke target
             is only built when something depends on it.
         **kwargs: Forwarded to the underlying swift_library.

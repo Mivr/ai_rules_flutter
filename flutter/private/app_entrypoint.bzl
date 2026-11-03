@@ -32,7 +32,7 @@ def app_scheme_rel_path(file):
     """The path of `file` under `APP_SCHEME` (without leading slash).
 
     Args:
-        file: A `File`.
+        file: The source or generated `File` whose path is mapped under `APP_SCHEME`.
 
     Returns:
         Workspace-relative path (`external/<repo>/...` for external repos).
@@ -54,7 +54,7 @@ def app_scheme_location(file):
     URI it can never compile again.
 
     Args:
-        file: A `File`.
+        file: The source or generated `File` whose path is mapped under `APP_SCHEME`.
 
     Returns:
         struct(uri, root): `org-dartlang-app:///<path>`, and the
@@ -221,7 +221,7 @@ def with_root(roots, root):
         root: One more, or None.
 
     Returns:
-        A new list.
+        A new list: `roots` followed by `root` when `root` is set and not already present.
     """
     if root == None or root in roots:
         return list(roots)

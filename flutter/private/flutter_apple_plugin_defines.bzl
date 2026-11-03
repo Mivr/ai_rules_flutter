@@ -69,17 +69,47 @@ def plugin_define_copts(defines):
     A value holding a quote, backslash, space, tab or `$` is Bourne-quoted so
     `objc_library`'s make-variable expansion and shell tokenization hand Clang
     the exact `-DNAME=VALUE` argument.
+
+    Args:
+        defines: List of `NAME` or `NAME=VALUE` define entries from `ios_plugin_defines`.
+
+    Returns:
+        A list of `-D<entry>` strings, one per distinct macro name.
     """
     return [_objc_define_flag(define) for define in dedupe_plugin_defines(defines)]
 
 def plugin_swift_define_copts(defines):
-    """The Swift `-D` flags: only value-less entries, because a condition has no value."""
+    """The Swift `-D` flags: only value-less entries, because a condition has no value.
+
+    Args:
+        defines: List of `NAME` or `NAME=VALUE` define entries from `ios_plugin_defines`.
+
+    Returns:
+        A list of `-D<NAME>` strings for the deduplicated entries that contain no `=`.
+    """
     return ["-D" + define for define in dedupe_plugin_defines(defines) if "=" not in define]
 
 def plugin_objc_copts(copts, objc_copts, plugin_defines):
-    """Compose ObjC compile options, keeping a `select()` in `copts` intact."""
+    """Compose ObjC compile options, keeping a `select()` in `copts` intact.
+
+    Args:
+        copts: Shared compile options for the plugin; may be a `select()`.
+        objc_copts: Extra compile options that apply only to Objective-C sources.
+        plugin_defines: List of `NAME` or `NAME=VALUE` define entries turned into `-D` flags.
+
+    Returns:
+        The concatenation of `copts`, `objc_copts` and the `-D` flags, built with `+`.
+    """
     return copts + objc_copts + plugin_define_copts(plugin_defines)
 
 def plugin_swift_copts(copts, plugin_defines):
-    """Compose Swift compile options, keeping a `select()` in `copts` intact."""
+    """Compose Swift compile options, keeping a `select()` in `copts` intact.
+
+    Args:
+        copts: Shared compile options for the plugin; may be a `select()`.
+        plugin_defines: List of `NAME` or `NAME=VALUE` define entries; only value-less ones are kept.
+
+    Returns:
+        The concatenation of `copts` and the Swift `-D` flags, built with `+`.
+    """
     return copts + plugin_swift_define_copts(plugin_defines)

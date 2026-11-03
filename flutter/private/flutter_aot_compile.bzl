@@ -10,7 +10,7 @@ def _flutter_aot_action(ctx, gen_snapshot, kernel_dill, output, spec):
     """Internal helper for all AOT compilation variants.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         gen_snapshot: gen_snapshot executable File.
         kernel_dill: Kernel .dill input.
         output: Output native library File.
@@ -370,7 +370,17 @@ def flutter_aot_gen_snapshot_flags(ctx, strip):
     return extra_flags, extra_outputs, debug_info_output, obfuscation_map_output, strip
 
 def flutter_aot_elf_action(ctx, gen_snapshot, kernel_dill, output, strip = True, extra_flags = [], extra_outputs = []):
-    """AOT compile to ELF shared library. Used for Android, Linux, Windows."""
+    """AOT compile to ELF shared library. Used for Android, Linux, Windows.
+
+    Args:
+        ctx: The rule context of the rule implementation that calls this helper.
+        gen_snapshot: gen_snapshot executable File that performs the compilation.
+        kernel_dill: Kernel .dill input File to compile.
+        output: Output ELF shared library File, passed to gen_snapshot as `--elf`.
+        strip: Whether to pass `--strip` to gen_snapshot. Defaults to True.
+        extra_flags: Additional gen_snapshot flags appended before the kernel input. Defaults to none.
+        extra_outputs: Additional output Files the action declares, such as debug info. Defaults to none.
+    """
     _flutter_aot_action(
         ctx = ctx,
         gen_snapshot = gen_snapshot,
@@ -418,7 +428,7 @@ def flutter_aot_macho_action(
     """AOT compile to Mach-O dylib. Used for macOS and iOS.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         gen_snapshot: gen_snapshot executable File.
         kernel_dill: Kernel .dill input.
         output: Output dylib File.

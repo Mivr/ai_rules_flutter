@@ -224,6 +224,13 @@ def missing_pubspec_refusal(hub_name, package_name):
 
     Returns the message instead of failing so unit tests can assert it; the
     caller `fail()`s with it. Names the hub and the lock key.
+
+    Args:
+        hub_name: Name of the pub hub being fetched, shown in the message.
+        package_name: Lock key of the path package lacking a readable pubspec.
+
+    Returns:
+        The refusal message string, which the caller passes to `fail()`.
     """
     return (
         "flutter.pub hub \"" + hub_name + "\": path dependency \"" +
@@ -238,6 +245,14 @@ def pubspec_name_refusal(hub_name, package_name, actual):
 
     Returns the message instead of failing so unit tests can assert it; the
     caller `fail()`s with it. Names the hub, the lock key, and both values.
+
+    Args:
+        hub_name: Name of the pub hub being fetched, shown in the message.
+        package_name: Lock key of the path package.
+        actual: Package name found in the pubspec.yaml.
+
+    Returns:
+        The refusal message string, which the caller passes to `fail()`.
     """
     return (
         "flutter.pub hub \"" + hub_name + "\": path dependency \"" +
@@ -255,6 +270,15 @@ def pubspec_version_refusal(hub_name, package_name, locked, actual):
     A pubspec with no `version:` field reads as `0.0.0` (the way `pub get`
     locks it), so an unversioned package shows `0.0.0` on the pubspec side
     here when the lock moved on.
+
+    Args:
+        hub_name: Name of the pub hub being fetched, shown in the message.
+        package_name: Lock key of the path package.
+        locked: Version recorded in the lock entry.
+        actual: Version found in the pubspec.yaml.
+
+    Returns:
+        The refusal message string, which the caller passes to `fail()`.
     """
     return (
         "flutter.pub hub \"" + hub_name + "\": path dependency \"" +
@@ -271,6 +295,14 @@ def malformed_pub_version_refusal(hub_name, package_name, bad_value):
     Either side can be bad: the lock entry or the package's own pubspec.
     Returns the message instead of failing so unit tests can assert it; the
     caller `fail()`s with it. Names the hub, the lock key, and the bad value.
+
+    Args:
+        hub_name: Name of the pub hub being fetched, shown in the message.
+        package_name: Lock key of the path package.
+        bad_value: The version string that failed to parse.
+
+    Returns:
+        The refusal message string, which the caller passes to `fail()`.
     """
     return (
         "flutter.pub hub \"" + hub_name + "\": path dependency \"" +

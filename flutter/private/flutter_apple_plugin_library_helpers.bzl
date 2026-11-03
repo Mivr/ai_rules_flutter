@@ -65,7 +65,7 @@ def write_plugin_modulemap(ctx, module_name, headers):
     """Write the plugin's modulemap covering its headers.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         module_name: Module name string.
         headers: List of header File objects.
 
@@ -88,7 +88,7 @@ def collect_plugin_dep_infos(ctx):
     """Collect CcInfo, SwiftInfo and framework files from the plugin's deps.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
 
     Returns:
         struct(cc_infos, swift_infos, framework_files).
@@ -107,7 +107,7 @@ def merge_plugin_sdk_lists(ctx, sdk_frameworks, sdk_dylibs):
     """Union the rule's SDK frameworks/dylibs with the ones plugin deps declare.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         sdk_frameworks: List of SDK frameworks.
         sdk_dylibs: List of SDK dylibs.
 
@@ -127,7 +127,14 @@ def merge_plugin_sdk_lists(ctx, sdk_frameworks, sdk_dylibs):
     return frameworks, dylibs
 
 def objc_copts_xtool_refusal(name):
-    """The message for `objc_copts` on the `xtool` backend, naming the plugin target."""
+    """The message for `objc_copts` on the `xtool` backend, naming the plugin target.
+
+    Args:
+        name: Label name of the plugin target, included in the message so users can find it.
+
+    Returns:
+        The refusal message string for the caller to pass to `fail()`.
+    """
     return (
         "flutter_apple_plugin_library: %s: objc_copts is not supported on the xtool backend; " % name +
         "the backend compiles every source in one swiftc invocation, so there is no " +
@@ -135,7 +142,14 @@ def objc_copts_xtool_refusal(name):
     )
 
 def plugin_defines_xtool_refusal(name):
-    """The message for `plugin_defines` on the `xtool` backend, naming the plugin target."""
+    """The message for `plugin_defines` on the `xtool` backend, naming the plugin target.
+
+    Args:
+        name: Label name of the plugin target, included in the message so users can find it.
+
+    Returns:
+        The refusal message string for the caller to pass to `fail()`.
+    """
     return (
         "flutter_apple_plugin_library: %s: plugin_defines is not supported on the xtool backend; " % name +
         "it compiles every source in one swiftc invocation with no define flags. " +
@@ -143,7 +157,14 @@ def plugin_defines_xtool_refusal(name):
     )
 
 def weak_sdk_frameworks_xtool_refusal(name):
-    """The message for `weak_sdk_frameworks` on the `xtool` backend, naming the plugin target."""
+    """The message for `weak_sdk_frameworks` on the `xtool` backend, naming the plugin target.
+
+    Args:
+        name: Label name of the plugin target, included in the message so users can find it.
+
+    Returns:
+        The refusal message string for the caller to pass to `fail()`.
+    """
     return (
         "flutter_apple_plugin_library: %s: weak_sdk_frameworks is not supported on the xtool backend; " % name +
         "the backend compiles every source in one swiftc invocation with no weak framework flags. " +

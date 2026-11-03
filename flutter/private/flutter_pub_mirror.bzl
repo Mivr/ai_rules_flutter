@@ -178,6 +178,14 @@ def ancestor_link_refusal(package_name, link_rel, link_real):
 
     Returns the message instead of failing so unit tests can assert it; the
     caller `fail()`s with it. Names the package and the link.
+
+    Args:
+        package_name: The path-dependency package whose tree is being mirrored.
+        link_rel: The package-relative path of the offending symlink.
+        link_real: The resolved real path the symlink points to.
+
+    Returns:
+        The refusal message string, which the caller passes to `fail()`.
     """
     return (
         "flutter.pub repo rule: path dependency \"" + package_name + "\" " +
@@ -221,6 +229,14 @@ def outside_workspace_refusal(package_name, link_rel, link_real):
     caller `fail()`s with it. Names the package, the offending path, and
     its real path, so the fix (move the package or the link target inside
     the workspace) is evident.
+
+    Args:
+        package_name: The path-dependency package whose tree is being mirrored.
+        link_rel: The package-relative path of the offending symlink.
+        link_real: The resolved real path the symlink points to.
+
+    Returns:
+        The refusal message string, which the caller passes to `fail()`.
     """
     return (
         "flutter.pub repo rule: path dependency \"" + package_name + "\" " +
@@ -253,6 +269,14 @@ def cycle_refusal(package_name, link_rel, link_real):
     Returns the message instead of failing so unit tests can assert it; the
     caller `fail()`s with it. Names the package and the link, and says it
     is a cycle.
+
+    Args:
+        package_name: The path-dependency package whose tree is being mirrored.
+        link_rel: The package-relative path of the offending symlink.
+        link_real: The resolved real path the symlink points to.
+
+    Returns:
+        The refusal message string, which the caller passes to `fail()`.
     """
     return (
         "flutter.pub repo rule: path dependency \"" + package_name + "\" " +

@@ -104,7 +104,7 @@ def unquote(scalar):
         scalar: The scalar string.
 
     Returns:
-        Unquoted string.
+        The scalar without its enclosing quotes, or unchanged when it is not quoted.
     """
     s = scalar.strip()
     if len(s) >= 2:
@@ -119,7 +119,7 @@ def _unquote_strict(scalar):
         scalar: Stripped scalar text.
 
     Returns:
-        `struct(ok, text)`.
+        `struct(ok, text)`, where `text` is the unquoted scalar when `ok` is true.
     """
     if not scalar:
         return struct(ok = False, text = "")

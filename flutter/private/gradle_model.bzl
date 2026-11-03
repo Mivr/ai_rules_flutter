@@ -230,7 +230,15 @@ def gradle_segments(text, language):
     return spans
 
 def gradle_code_text(text, language):
-    """The code spans of a statement joined with spaces (literals blanked)."""
+    """The code spans of a statement joined with spaces (literals blanked).
+
+    Args:
+      text: One statement from `gradle_lex`.
+      language: `"groovy"` or `"kotlin"`, from the file extension.
+
+    Returns:
+      The code-only spans of the statement, joined by single spaces.
+    """
     return " ".join([s.text for s in gradle_segments(text, language) if s.code])
 
 def gradle_has_word(text, language, word):
@@ -294,7 +302,7 @@ def gradle_collect_files(root_path, root_content, root_language, read_script):
 
     Args:
         root_path: Spoke-relative path of the root script, for messages.
-        root_content: Its text.
+        root_content: The text of the root script, already read by the caller.
         root_language: `"groovy"` or `"kotlin"`, from its extension.
         read_script: Optional callback taking a package-relative applied
             script path and returning its text, or None when missing.

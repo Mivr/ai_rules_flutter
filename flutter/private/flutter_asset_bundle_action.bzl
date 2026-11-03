@@ -310,7 +310,7 @@ def flutter_asset_bundle_action(ctx, content, shaking, output_dir):
     """Create an action that generates the flutter_assets/ tree artifact.
 
     Args:
-        ctx: Rule context.
+        ctx: The rule context of the rule implementation that calls this helper.
         content: What goes into the bundle, from `make_bundle_content`.
         shaking: The icon tree-shaking toolchain and kernels, from
             `make_tree_shake` (all empty when tree shaking is off).
