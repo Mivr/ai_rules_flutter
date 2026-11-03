@@ -1,3 +1,5 @@
+load("@rules_dart//dart:defs.bzl", "dart_test")
+
 # Five public `flutter/*.bzl` entries have no `starlark_doc_extract` target:
 # `starlark_doc_extract` refuses a load closure that reaches a Starlark module
 # with no `bzl_library` target.
@@ -59,7 +61,17 @@ starlark_doc_extract(
     name = "providers.doc_extract",
     src = "//flutter:providers.bzl",
     deps = [
+        "//flutter:dev_files",
+        "//flutter:ios",
+        "//flutter:macos",
+        "//flutter:native_assets",
+        "//flutter:native_hot_patch",
         "//flutter:providers",
+        "//flutter:providers.bzl",
+        "//flutter:repositories",
+        "//flutter:toolchain",
+        "//flutter:utils",
+        "//flutter:windows",
     ],
 )
 
@@ -122,4 +134,40 @@ filegroup(
         ":windows.doc_extract",
     ],
     visibility = ["//visibility:public"],
+)
+
+# Fails on any documentation gap in the extracts above: `//tools/doc_check`
+# reads the `ModuleInfo` binaryprotos and, for each function it finds, the
+# `.bzl` source that says whether the function returns a value.
+dart_test(
+    name = "doc_check_test",
+    size = "small",
+    srcs = ["//tools/doc_check:lib"],
+    data = [
+        ":all_doc_extracts",
+        "//flutter:dev_files",
+        "//flutter:ios",
+        "//flutter:macos",
+        "//flutter:native_assets",
+        "//flutter:native_hot_patch",
+        "//flutter:providers",
+        "//flutter:providers.bzl",
+        "//flutter:repositories",
+        "//flutter:toolchain",
+        "//flutter:utils",
+        "//flutter:windows",
+        "//tools/doc_check:allowlist.txt",
+        "//tools/doc_check:shared_phrasings.txt",
+    ],
+    env = {
+        "DOC_CHECK_ALLOWLIST_RLOCATION": "$(rlocationpath //tools/doc_check:allowlist.txt)",
+        "DOC_CHECK_ANCHOR_RLOCATION": "$(rlocationpath //flutter:providers.bzl)",
+        "DOC_CHECK_EXTRACTS_RLOCATIONS": "$(rlocationpaths :all_doc_extracts)",
+        "DOC_CHECK_SHARED_RLOCATION": "$(rlocationpath //tools/doc_check:shared_phrasings.txt)",
+    },
+    main = "//tools/doc_check:doc_check_docs_test.dart",
+    deps = [
+        "@dev_tool_deps//:test",
+        "@rules_dart//dart/runfiles",
+    ],
 )
