@@ -36,6 +36,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:runfiles/runfiles.dart';
@@ -78,19 +79,96 @@ bool parseUpdateGoldens(List<String> args, String? workspaceDir) {
   return update;
 }
 
+/// The launcher arguments left once the seed flag is taken out, and the seed.
+typedef SeedArgs = ({int? seed, List<String> rest});
+
+const _seedFlag = '--test-randomize-ordering-seed';
+
+/// Takes Bazel's `--test-randomize-ordering-seed=<value>` out of [args].
+///
+/// `<value>` is `random` or a non-negative decimal integer. `random` resolves
+/// here, once, through [randomSeed], so the run has one integer to print and
+/// to reproduce with. Throws [FormatException] naming the argument for an
+/// empty, negative or non-numeric value, a bare flag with no `=`, or a flag
+/// given twice; every other argument is left in `rest` for
+/// [parseUpdateGoldens].
+SeedArgs extractSeed(List<String> args, {int Function()? randomSeed}) {
+  int? seed;
+  final rest = <String>[];
+  for (final arg in args) {
+    if (arg != _seedFlag && !arg.startsWith('$_seedFlag=')) {
+      rest.add(arg);
+      continue;
+    }
+    final String? value = arg.length > _seedFlag.length
+        ? arg.substring(_seedFlag.length + 1)
+        : null;
+    final int? parsed = value == 'random'
+        ? (randomSeed ?? _newRandomSeed)()
+        : (value == null || !RegExp(r'^[0-9]+$').hasMatch(value)
+              ? null
+              : int.tryParse(value));
+    if (parsed == null || seed != null) {
+      throw FormatException(
+        'flutter_test runner: invalid argument "$arg". '
+        '$_seedFlag takes `random` or a non-negative decimal integer, '
+        'once.',
+      );
+    }
+    seed = parsed;
+  }
+  return (seed: seed, rest: rest);
+}
+
+int _newRandomSeed() => Random.secure().nextInt(1 << 32);
+
+/// The one line that records the seed a run used, so Bazel's test log carries
+/// what is needed to repeat a failing order.
+String seedAnnouncement(int seed) =>
+    'flutter_test: running cases in randomized order; reproduce with '
+    '$_seedFlag=$seed';
+
+/// Returns [group] with the entries of every group, nested ones included,
+/// put in an order derived from [seed].
+///
+/// The same seed on the same tree gives the same order. Cases are moved, never
+/// copied or dropped, and a group keeps its own `setUpAll` and `tearDownAll`,
+/// which [_Harness._runGroup] runs around its entries wherever they land.
+Map<String, dynamic> shuffleSuite(Map<String, dynamic> group, int seed) =>
+    _shuffleGroup(group, Random(seed));
+
+Map<String, dynamic> _shuffleGroup(Map<String, dynamic> group, Random random) {
+  final List<dynamic> entries = [...(group['entries'] as List? ?? const [])]
+    ..shuffle(random);
+  return {
+    ...group,
+    'entries': [
+      for (final entry in entries)
+        if ((entry as Map)['type'] == 'group')
+          _shuffleGroup(entry.cast<String, dynamic>(), random)
+        else
+          entry,
+    ],
+  };
+}
+
 void main(List<String> args) async {
   final r = Runfiles.create();
 
   final bool updateGoldens;
+  final int? seed;
   try {
+    final SeedArgs parsed = extractSeed(args);
+    seed = parsed.seed;
     updateGoldens = parseUpdateGoldens(
-      args,
+      parsed.rest,
       Platform.environment['BUILD_WORKSPACE_DIRECTORY'],
     );
   } on FormatException catch (e) {
     stderr.writeln(e.message);
     exit(64);
   }
+  if (seed != null) stdout.writeln(seedAnnouncement(seed));
 
   final TestRunfiles files;
   try {
@@ -138,6 +216,7 @@ void main(List<String> args) async {
       testPath: testPath,
       coverageOutput: coverageOutput,
       updateGoldens: updateGoldens,
+      seed: seed,
       selection: selection,
       libraryTags: libraryTags,
       xmlOutput: Platform.environment['XML_OUTPUT_FILE'],
@@ -156,6 +235,7 @@ class FlutterTestRun {
     required this.tester,
     required this.icu,
     required this.dill,
+    required this.seed,
     this.baseDill,
     required this.assetsDir,
     required this.testPath,
@@ -191,6 +271,9 @@ class FlutterTestRun {
 
   /// Whether to update golden files instead of comparing against them.
   final bool updateGoldens;
+
+  /// Seed for the case order; null keeps declaration order.
+  final int? seed;
 
   /// Name filter selecting which cases run.
   final TestSelection selection;
@@ -395,7 +478,7 @@ class _Harness {
     );
 
     final results = _Results();
-    await _driveSelectedTests(root, run.selection, results);
+    await _driveSelectedTests(root, run.selection, run.seed, results);
     await _writeXmlReport(run.xmlOutput, results, run.testPath);
 
     // Collect coverage before tearing the tester down — the isolate must still
@@ -631,6 +714,7 @@ class _Harness {
   Future<void> _driveSelectedTests(
     Map<String, dynamic>? root,
     TestSelection selection,
+    int? seed,
     _Results results,
   ) async {
     if (root == null) {
@@ -649,7 +733,10 @@ class _Harness {
       results.recordError(e.message);
     }
     if (selected != null) {
-      await _runGroup(selected, results);
+      await _runGroup(
+        seed == null ? selected : shuffleSuite(selected, seed),
+        results,
+      );
     } else if (!results.hasFailure && selection.narrows) {
       stdout.writeln(
         'flutter_test: no test case in this suite matches this run\'s '
