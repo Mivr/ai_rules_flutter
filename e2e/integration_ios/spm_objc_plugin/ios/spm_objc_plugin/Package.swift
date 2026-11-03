@@ -18,7 +18,8 @@ let package = Package(
         .target(
             name: "spm_objc_plugin_objc",
             path: "Sources/spm_objc_plugin_objc",
-            publicHeadersPath: "include"
+            publicHeadersPath: "include",
+            cSettings: [.define("SPM_LOCAL_C_DEFINE", to: "7")]
         ),
     ]
 )

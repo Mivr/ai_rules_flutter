@@ -177,7 +177,7 @@ def swiftpm_render_clang_library(lib):
             one, else the generated `<public>/module.modulemap` the repo
             rule writes — or None for link-only; whether `module_map` is
             an explicit map (informational: both forms reach the hint the
-            same way); `struct(text, platforms)` C-only, C++, link option,
+            same way); `struct(text, platforms)` C-family, C++, link option,
             public include, target-local include and dependency entries;
             the manual-tag list.
 
@@ -194,7 +194,7 @@ def swiftpm_render_clang_library(lib):
     for header in lib.public_headers:
         lines.append("        {item},".format(item = repr(header)))
     lines.append("    ],")
-    lists = swiftpm_render_list_attr("conlyopts", [], lib.c_only)
+    lists = swiftpm_render_list_attr("copts", [], lib.c_only)
     if lists:
         lines.append(lists)
     lists = swiftpm_render_list_attr("cxxopts", [], lib.cxx)

@@ -352,12 +352,62 @@ def _define_and_condition_select_test_impl(ctx):
     )
     rendered = render_local_target_blocks("conditional_plugin", "ios", locals.targets, {"conditional": selected})
     asserts.true(env, rendered.ok)
-    asserts.true(env, "conlyopts = select({" in rendered.text)
+    asserts.true(env, "copts = select({" in rendered.text)
+    asserts.true(env, "conlyopts = " not in rendered.text)
     asserts.true(env, "\"-DENABLED=1\"," in rendered.text)
     asserts.true(env, "\"@platforms//os:ios\": [" in rendered.text)
     asserts.true(env, "\"@platforms//os:macos\": [" in rendered.text)
     asserts.true(env, "ios/conditional_plugin/Sources/conditional/../conditional/include" not in rendered.text)
     asserts.true(env, "ios/conditional_plugin/Sources/conditional/include" in rendered.text)
+    return unittest.end(env)
+
+def _render_local_plugin_defines_test_impl(ctx):
+    env = unittest.begin(ctx)
+    objc = _target("plugin_objc", path = "Sources/plugin_objc")
+    swift = _target("plugin_swift", path = "Sources/plugin_swift")
+    primary = _target(
+        "plugin",
+        deps = [_same("plugin_objc"), _same("plugin_swift")],
+        path = "Sources/plugin",
+    )
+    model = _model([_product("plugin", ["plugin"])], [primary, objc, swift])
+    locals = plugin_local_targets("plugin", model, "ios/plugin", "ios/plugin/Sources/plugin", "ios")
+    asserts.true(env, locals.ok)
+    files = {
+        "plugin_objc": struct(
+            ok = True,
+            srcs = [],
+            c_srcs = ["ios/plugin/Sources/plugin_objc/value.m"],
+            public_hdrs = [],
+            private_hdrs = [],
+            explicit_map = None,
+            map_in_include = False,
+        ),
+        "plugin_swift": struct(
+            ok = True,
+            srcs = ["ios/plugin/Sources/plugin_swift/value.swift"],
+            c_srcs = [],
+            public_hdrs = [],
+            private_hdrs = [],
+            explicit_map = None,
+            map_in_include = False,
+        ),
+    }
+    defines = ["PERMISSION_CAMERA=1", "PLUGIN_FLAG"]
+    rendered = render_local_target_blocks(
+        "plugin",
+        "ios",
+        locals.targets,
+        files,
+        plugin_defines = defines,
+    )
+    asserts.true(env, rendered.ok)
+    asserts.true(env, "flutter_apple_plugin_objc_library(" in rendered.text)
+    asserts.true(env, "flutter_apple_plugin_library(" in rendered.text)
+    asserts.equals(env, 2, rendered.text.count('plugin_defines = ["PERMISSION_CAMERA=1", "PLUGIN_FLAG"],'))
+    plain = render_local_target_blocks("plugin", "ios", locals.targets, files)
+    asserts.true(env, plain.ok)
+    asserts.true(env, "plugin_defines" not in plain.text)
     return unittest.end(env)
 
 def _primary_conditional_dep_test_impl(ctx):
@@ -433,6 +483,7 @@ _primary_only_keeps_base_shape_test = unittest.make(_primary_only_keeps_base_sha
 _transitive_default_dirs_test = unittest.make(_transitive_default_dirs_test_impl)
 _product_targets_in_manifest_order_test = unittest.make(_product_targets_in_manifest_order_test_impl)
 _define_and_condition_select_test = unittest.make(_define_and_condition_select_test_impl)
+_render_local_plugin_defines_test = unittest.make(_render_local_plugin_defines_test_impl)
 _primary_conditional_dep_test = unittest.make(_primary_conditional_dep_test_impl)
 _binary_dependency_refusal_test = unittest.make(_binary_dependency_refusal_test_impl)
 _xtool_appends_local_files_test = unittest.make(_xtool_appends_local_files_test_impl)
@@ -804,6 +855,7 @@ def swiftpm_plugin_local_test_suite(name):
             _transitive_default_dirs_test,
             _product_targets_in_manifest_order_test,
             _define_and_condition_select_test,
+            _render_local_plugin_defines_test,
             _primary_conditional_dep_test,
             _binary_dependency_refusal_test,
             _xtool_appends_local_files_test,

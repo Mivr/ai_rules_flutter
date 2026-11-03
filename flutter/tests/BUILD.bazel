@@ -70,6 +70,7 @@ load(":rules_dart_floor_test.bzl", "rules_dart_floor_test_suite")
 load(":shader_compile_test.bzl", "shader_compile_test_suite")
 load(":shader_keys_test.bzl", "shader_keys_test_suite")
 load(":starlark_literal_test.bzl", "starlark_literal_test_suite")
+load(":swiftpm_local_defines_test.bzl", "swiftpm_local_defines_test_suite")
 load(":swiftpm_local_settings_test.bzl", "swiftpm_local_settings_fixture")
 load(":swiftpm_manifest_test.bzl", "swiftpm_manifest_test_suite")
 load(":swiftpm_package_test.bzl", "swiftpm_package_test_suite")
@@ -466,6 +467,8 @@ starlark_literal_test_suite(name = "starlark_literal_test")
 swiftpm_package_test_suite(name = "swiftpm_package_test")
 
 swiftpm_plugin_local_test_suite(name = "swiftpm_plugin_local_test")
+
+swiftpm_local_defines_test_suite(name = "swiftpm_local_defines_test")
 
 swiftpm_manifest_test_suite(name = "swiftpm_manifest_test")
 

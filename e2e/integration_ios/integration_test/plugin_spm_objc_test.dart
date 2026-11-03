@@ -15,6 +15,6 @@ void main() {
     // The Swift target imports the separate ObjC module and reads the
     // value only that module computes, so this assertion fails when the
     // manifest's second target is not compiled.
-    expect(await const SpmObjcPlugin().computedValue(), '42');
+    expect(await const SpmObjcPlugin().computedValue(), '149');
   });
 }

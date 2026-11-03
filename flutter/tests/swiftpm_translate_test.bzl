@@ -310,6 +310,7 @@ def swiftpm_translate_test_suite(name):
         _swift_settings_emit_test,
         _swift_define_is_target_local_test,
         _clang_target_emit_test,
+        _c_family_define_attrs_test,
         _header_search_path_is_target_local_test,
         _generated_map_emit_test,
         _generated_map_forms_emit_test,
@@ -477,6 +478,44 @@ def _clang_target_emit_test_impl(ctx):
     return unittest.end(env)
 
 _clang_target_emit_test = unittest.make(_clang_target_emit_test_impl)
+
+_DEFINE_SETTINGS_MANIFEST = """// swift-tools-version:5.9
+import PackageDescription
+let package = Package(
+    name: "Defs",
+    products: [.library(name: "Defs", targets: ["Defs"])],
+    targets: [.target(name: "Defs", cSettings: [.define("C_DEFINE", to: "7")], cxxSettings: [.define("CXX_DEFINE", to: "9")])],
+)
+"""
+
+def _c_family_define_attrs_test_impl(ctx):
+    env = unittest.begin(ctx)
+    parsed = parse_swiftpm_package("defs", _DEFINE_SETTINGS_MANIFEST)
+    asserts.true(env, parsed.ok)
+    files = {
+        "Defs": struct(
+            dir = "pkg/Sources/Defs",
+            srcs = [],
+            c_srcs = ["pkg/Sources/Defs/Defs.m"],
+            public_hdrs = [],
+            private_hdrs = [],
+            explicit_map = None,
+            map_in_include = False,
+        ),
+    }
+    translated = translate_swiftpm_package("defs", "deps", parsed.model, ["defs"], files)
+    asserts.true(env, translated.ok)
+    block = _rule_block(translated.text, "Defs_lib")
+    asserts.true(env, block != "")
+    asserts.true(env, "copts = [" in block)
+    asserts.true(env, "\"-DC_DEFINE=7\"" in block)
+    asserts.true(env, "conlyopts = " not in block)
+    asserts.true(env, "defines = " not in block)
+    asserts.true(env, "cxxopts = [" in block)
+    asserts.true(env, "\"-DCXX_DEFINE=9\"" in block)
+    return unittest.end(env)
+
+_c_family_define_attrs_test = unittest.make(_c_family_define_attrs_test_impl)
 
 _HEADER_LOCALITY_MANIFEST = """// swift-tools-version:5.9
 import PackageDescription

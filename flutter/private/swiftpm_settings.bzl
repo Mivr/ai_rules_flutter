@@ -14,7 +14,7 @@ The manifest parser (`swiftpm_manifest.bzl`) calls the parsers here while
 folding `.target(...)` keyword arguments; the BUILD emitter
 (`swiftpm_translate.bzl`, `swiftpm_clang.bzl`) calls
 `swiftpm_target_setting_entries` to map the parsed settings onto
-`conlyopts`/`cxxopts`/`defines`/`copts`/`linkopts`/`includes` entries and
+`copts`/`cxxopts`/`linkopts`/`includes` entries and
 `swiftpm_render_list_attr` to render any entry list (settings and
 conditional dependencies share the `struct(text, platforms)` shape) as a
 Bazel list attribute with `select()`s on the target platform's OS.
@@ -527,10 +527,12 @@ def _swiftpm_fold_linker_list(settings):
 def swiftpm_target_setting_entries(target, target_dir, target_kind):
     """Map one target's parsed settings onto Bazel flag entries.
 
-    `cSettings` entries become `conlyopts` (`.define` to `-Dname` /
-    `-Dname=value`) and `private_includes` (`.headerSearchPath`, rebased
-    onto the target directory so the entries stay hermetic inside the
-    spoke repository); `cxxSettings` likewise onto `cxxopts`;
+    `cSettings` entries become `copts` (`.define` to `-Dname` /
+    `-Dname=value`, target-local so they reach `.c`, `.m` and `.mm`
+    compiles without propagating to dependents) and `private_includes`
+    (`.headerSearchPath`, rebased onto the target directory so the entries
+    stay hermetic inside the spoke repository); `cxxSettings` likewise
+    onto `cxxopts`;
     `swiftSettings` `.define` onto `-Dname` in `copts` (target-local, the
     way SwiftPM applies it) and the feature settings onto `copts`
     (`-enable-upcoming-feature` / `-enable-experimental-feature`);
@@ -577,7 +579,7 @@ def _swiftpm_clang_entry(target, target_dir, setting):
     """Render one `cSettings`/`cxxSettings` entry as a flag or a search path.
 
     Both C-family option lists render the same entries; the caller sorts
-    them into `conlyopts` versus `cxxopts`.
+    them into `copts` versus `cxxopts`.
 
     Args:
         target: The parsed target struct, for messages.
