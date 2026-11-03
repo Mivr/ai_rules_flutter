@@ -12,7 +12,14 @@ load("@rules_dart//dart:providers.bzl", "DartInfo")
 load("@rules_dart//dart:utils.bzl", "collect_packages", "collect_transitive_srcs")
 load("@rules_flutter//flutter:utils.bzl", "FLUTTER_KERNEL_COMPILE_ATTRS", "FLUTTER_KERNEL_COMPILE_TOOLCHAINS", "compile_package_config", "flutter_kernel_compile_action", "flutter_kernel_compile_tools", "flutter_kernel_dills", "flutter_kernel_options", "flutter_kernel_outputs", "flutter_kernel_sources")
 
-_CONSUMER_RESOURCE_SET = {"memory": 8000, "cpu": 1}
+def _consumer_resource_set(_os, _inputs_size):
+    """Host resources for the smoke consumer compile action.
+
+    `ctx.actions.run` calls this with the execution OS and the inputs size;
+    it returns the pinned memory/cpu budget. The caller passes the function
+    itself, never a call, so Bazel 9 accepts it as `resource_set`.
+    """
+    return {"memory": 8000, "cpu": 1}
 
 def _consumer_caller_impl(ctx):
     tools = flutter_kernel_compile_tools(ctx)
@@ -38,7 +45,7 @@ def _consumer_caller_impl(ctx):
         flutter_kernel_dills(
             import_dill = ctx.file.import_dill if ctx.attr.import_dill else None,
         ),
-        resource_set = _CONSUMER_RESOURCE_SET if ctx.attr.use_resource_set else None,
+        resource_set = _consumer_resource_set if ctx.attr.use_resource_set else None,
     )
     return [DefaultInfo(files = depset([output]))]
 

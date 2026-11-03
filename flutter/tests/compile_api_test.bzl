@@ -56,7 +56,14 @@ _HOST_COMPATIBLE = select({
     "//conditions:default": ["@platforms//:incompatible"],
 })
 
-_TEST_RESOURCE_SET = {"memory": 8000, "cpu": 1}
+def _test_resource_set(_os, _inputs_size):
+    """Host resources for the compile-API test caller rule.
+
+    `ctx.actions.run` calls this with the execution OS and the inputs size;
+    it returns the pinned memory/cpu budget. The caller passes the function
+    itself, never a call, so Bazel 9 accepts it as `resource_set`.
+    """
+    return {"memory": 8000, "cpu": 1}
 
 def _compile_api_caller_impl(ctx):
     """A downstream-style compile over the public utils only."""
@@ -81,7 +88,7 @@ def _compile_api_caller_impl(ctx):
         flutter_kernel_dills(
             import_dill = ctx.file.import_dill if ctx.attr.import_dill else None,
         ),
-        resource_set = _TEST_RESOURCE_SET if ctx.attr.use_resource_set else None,
+        resource_set = _test_resource_set if ctx.attr.use_resource_set else None,
     )
     return [DefaultInfo(files = depset([output]))]
 
@@ -474,6 +481,16 @@ def _reproducible_default_test_impl(ctx):
             )
     return analysistest.end(env)
 
+def _resource_set_test_impl(ctx):
+    """The test `resource_set` callable returns the pinned host resources."""
+    env = analysistest.begin(ctx)
+    asserts.equals(
+        env,
+        {"memory": 8000, "cpu": 1},
+        _test_resource_set(None, 0),
+    )
+    return analysistest.end(env)
+
 _DBG = {
     "//command_line_option:compilation_mode": "dbg",
     str(Label("//flutter:profile")): False,
@@ -502,6 +519,7 @@ _undeclared_staged_out_test = analysistest.make(_undeclared_staged_out_test_impl
 _extra_roots_test = analysistest.make(_extra_roots_test_impl, config_settings = _DBG)
 _no_extra_roots_test = analysistest.make(_no_extra_roots_test_impl, config_settings = _DBG)
 _reproducible_default_test = analysistest.make(_reproducible_default_test_impl, config_settings = _DBG)
+_resource_set_test = analysistest.make(_resource_set_test_impl, config_settings = _DBG)
 
 def compile_api_test_suite(name):
     """Fixtures and tests for the public compile API.
@@ -873,6 +891,10 @@ def compile_api_test_suite(name):
         name = name + "_reproducible_default",
         target_under_test = ":_compile_api_extras",
     )
+    _resource_set_test(
+        name = name + "_resource_set",
+        target_under_test = ":_compile_api_default",
+    )
     _extra_roots_reject_test(
         name = name + "_extra_roots_abs",
         target_under_test = ":_compile_api_bad_roots_abs",
@@ -929,6 +951,7 @@ def compile_api_test_suite(name):
             ":" + name + "_extra_roots",
             ":" + name + "_no_extra_roots",
             ":" + name + "_reproducible_default",
+            ":" + name + "_resource_set",
             ":" + name + "_extra_roots_abs",
             ":" + name + "_extra_roots_win",
             ":" + name + "_extra_roots_escape",
