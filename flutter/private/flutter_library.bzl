@@ -5,7 +5,7 @@ load("@rules_dart//dart:utils.bzl", "dart_analyzable_info_with_package", "dart_i
 load("//flutter:providers.bzl", "FlutterInfo")
 load("//flutter/private:asset_keys.bzl", "library_asset_entries")
 load("//flutter/private:asset_uri.bzl", "normalize_asset_uri")
-load("//flutter/private:flutter_font_family.bzl", "FONTS_ATTR", "check_unclaimed_font_files", "font_family_contributions", "font_file_table", "font_json_contribution")
+load("//flutter/private:flutter_font_family.bzl", "FONTS_ATTR", "check_unclaimed_font_files", "font_family_contributions", "font_file_table", "font_json_contribution", _flutter_font_family = "flutter_font_family")
 load("//flutter/private:flutter_info.bzl", "LINK_HOOK_ATTR", "flutter_asset_channels", "flutter_info", "flutter_pub_channels")
 
 def pub_asset_matches_target(flavors, platforms, target_platform, flavor = None):
@@ -719,3 +719,5 @@ flutter_library = rule(
     },
     doc = "Collects Flutter sources and assets, propagates DartInfo and FlutterInfo. Does not compile.",
 )
+
+flutter_font_family = _flutter_font_family
