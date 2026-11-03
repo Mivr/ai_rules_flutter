@@ -32,9 +32,16 @@ class WarmTarget {
 }
 
 /// The default targets pre-warmed for iOS simulator e2e tests.
+///
+/// Each workspace's simulator bundle and its `flutter_application` dev inputs
+/// are both listed: the bundle compiles its dev inputs inside a split
+/// transition, so warming the bundle alone leaves the host-configured dev
+/// build that `run` and `attach` read cold for the timed e2e run.
 const defaultWarmTargets = <WarmTarget>[
   WarmTarget(workspace: 'e2e/ios_example', target: ':app'),
+  WarmTarget(workspace: 'e2e/ios_example', target: ':app_flutter'),
   WarmTarget(workspace: 'e2e/plugin_example', target: ':plugin_ios'),
+  WarmTarget(workspace: 'e2e/plugin_example', target: ':plugin_app'),
 ];
 
 /// Thrown when warming fails.
@@ -163,41 +170,70 @@ Duration parseWarmTimeout(List<String> args) {
 }
 
 /// Builds [targets] into the shared disk cache and shuts down Bazel per workspace.
+///
+/// Contiguous targets that share a workspace build one after another on the
+/// same Bazel server, and that server is shut down once when the group ends —
+/// whether every target built or one of them failed. A failure stops the run,
+/// so the groups after it are not started.
 Future<void> warmIosE2eBuilds(
   WarmOptions options, {
   List<WarmTarget> targets = defaultWarmTargets,
 }) async {
   final diskCache = resolveWarmDiskCache(options.environment);
-  for (final targetSpec in targets) {
-    final workspaceDir = p.join(options.repoRoot, targetSpec.workspace);
+  for (final List<WarmTarget> group in _groupByWorkspace(targets)) {
+    final workspaceDir = p.join(options.repoRoot, group.first.workspace);
     final moduleFile = File(p.join(workspaceDir, 'MODULE.bazel'));
     if (!moduleFile.existsSync()) {
       throw WarmFailure('missing ${moduleFile.path}');
     }
-
-    final argv = bazelBuildArgs(
-      targetSpec.target,
-      compilationMode: 'dbg',
-      extraArgs: [
-        ...IOSSimulatorDevice(udid: 'warm').buildArgs,
-        '--disk_cache=$diskCache',
-        '--experimental_disk_cache_gc_max_size=50G',
-        '--experimental_disk_cache_gc_max_age=30d',
-      ],
-    );
-
-    options.log('warming ${targetSpec.workspace} (${targetSpec.target}) ...');
     try {
-      await _runBuildAttempt(
-        options: options,
-        argv: argv,
-        workspaceDir: workspaceDir,
-        targetSpec: targetSpec,
-      );
+      for (final targetSpec in group) {
+        await _warmTarget(options, targetSpec, workspaceDir, diskCache);
+      }
     } finally {
       await _shutdownWorkspace(options, workspaceDir);
     }
   }
+}
+
+/// Splits [targets] into runs of contiguous entries that share a workspace,
+/// keeping their order.
+List<List<WarmTarget>> _groupByWorkspace(List<WarmTarget> targets) {
+  final groups = <List<WarmTarget>>[];
+  for (final target in targets) {
+    if (groups.isNotEmpty && groups.last.first.workspace == target.workspace) {
+      groups.last.add(target);
+    } else {
+      groups.add([target]);
+    }
+  }
+  return groups;
+}
+
+/// Builds one [targetSpec] into the disk cache at [diskCache].
+Future<void> _warmTarget(
+  WarmOptions options,
+  WarmTarget targetSpec,
+  String workspaceDir,
+  String diskCache,
+) async {
+  final argv = bazelBuildArgs(
+    targetSpec.target,
+    compilationMode: 'dbg',
+    extraArgs: [
+      ...IOSSimulatorDevice(udid: 'warm').buildArgs,
+      '--disk_cache=$diskCache',
+      '--experimental_disk_cache_gc_max_size=50G',
+      '--experimental_disk_cache_gc_max_age=30d',
+    ],
+  );
+  options.log('warming ${targetSpec.workspace} (${targetSpec.target}) ...');
+  await _runBuildAttempt(
+    options: options,
+    argv: argv,
+    workspaceDir: workspaceDir,
+    targetSpec: targetSpec,
+  );
 }
 
 String _formatElapsed(Duration elapsed) => elapsed.inSeconds >= 1

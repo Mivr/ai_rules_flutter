@@ -105,6 +105,7 @@ class _Harness {
   static Future<_Harness> create({
     bool withOrchestrator = true,
     List<FakeAppInstance>? apps,
+    Duration readyTimeout = const Duration(seconds: 90),
   }) async {
     final tmp = await Directory.systemTemp.createTemp('reload_pipeline_');
     Directory(p.join(tmp.path, 'lib')).createSync();
@@ -112,7 +113,7 @@ class _Harness {
       isMachine: false,
       logger: Logger('test.reload_pipeline'),
     );
-    final pipeline = ReloadPipeline(host: host);
+    final pipeline = ReloadPipeline(host: host, readyTimeout: readyTimeout);
     host.registerReloadCommands(pipeline);
 
     final resolver = SourceUriResolver(
@@ -486,6 +487,134 @@ void main() {
         );
       },
     );
+
+    // The clock below is the gate's own, shortened so these run in
+    // milliseconds. An unsettled gate with nothing in flight is the case the
+    // clock exists for: nothing is coming, so the answer is the old one.
+    test('an unsettled pipeline with nothing in flight answers still-starting '
+        'once readyTimeout elapses', () async {
+      final _Harness h = await _Harness.create(
+        readyTimeout: const Duration(milliseconds: 20),
+      );
+      addTearDown(h.dispose);
+
+      expect(await h.hotReload(), {
+        'succeeded': false,
+        'runningCode': 'unchanged',
+        'error': 'Hot reload is still starting up.',
+      });
+    });
+
+    // Startup is slower than the clock: a `bazel build` of the dev inputs runs
+    // for over a minute on a cold cache, and a reload that arrives in that
+    // window must queue on the startup, not be told it is still starting.
+    for (final (verb, send) in [
+      ('app.hotReload', (_Harness h) => h.hotReload()),
+      ('app.restart', (_Harness h) => h.restart()),
+    ]) {
+      test('$verb is held past readyTimeout while startup is in flight, and '
+          'runs once startup signals ready', () async {
+        final _Harness h = await _Harness.create(
+          readyTimeout: const Duration(milliseconds: 20),
+        );
+        addTearDown(h.dispose);
+        final startupDone = Completer<void>();
+        final Future<void> startup = h.pipeline.trackAssembly(
+          () => startupDone.future,
+        );
+        expect(h.pipeline.awaitingAssembly, isTrue);
+
+        var answered = 0;
+        final Future<Map<String, dynamic>> reply = send(h).then((r) {
+          answered++;
+          return r;
+        });
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+        expect(answered, 0, reason: 'answered while startup was still running');
+
+        h.pipeline.ready.signalReady();
+        startupDone.complete();
+        await startup;
+
+        expect(
+          await reply,
+          isNot(containsPair('error', 'Hot reload is still starting up.')),
+          reason: '$verb was answered by the clock, not by startup',
+        );
+        expect(h.pipeline.awaitingAssembly, isFalse);
+      });
+    }
+
+    test('an initial assembly that settles unavailable answers with its own '
+        'reason, not the still-starting one', () async {
+      final _Harness h = await _Harness.create(
+        readyTimeout: const Duration(milliseconds: 20),
+      );
+      addTearDown(h.dispose);
+      final Future<void> startup = h.pipeline.trackAssembly(() async {
+        await Future<void>.delayed(const Duration(milliseconds: 60));
+        h.pipeline.ready.signalUnavailable('Initial compile failed.');
+      });
+
+      expect(await h.hotReload(), {
+        'succeeded': false,
+        'runningCode': 'unchanged',
+        'error': 'Initial compile failed.',
+      });
+      await startup;
+    });
+
+    test('an initial assembly that settles retryable runs the retry, nested '
+        'assembly included, and then the queued command', () async {
+      final _Harness h = await _Harness.create(
+        readyTimeout: const Duration(milliseconds: 20),
+      );
+      addTearDown(h.dispose);
+      var retries = 0;
+      // The retry opens its own scope inside the one [ReloadPipeline] already
+      // holds for it — the shape `NativePipelineAssembler.assemble()` gives
+      // it. Nesting must not deadlock or close the barrier early.
+      h.pipeline.reassemble = () => h.pipeline.trackAssembly(() async {
+        retries++;
+        await Future<void>.delayed(const Duration(milliseconds: 40));
+        h.pipeline.reassemble = null;
+        h.pipeline.ready.signalReady();
+      });
+      final Future<void> startup = h.pipeline.trackAssembly(() async {
+        await Future<void>.delayed(const Duration(milliseconds: 60));
+        h.pipeline.ready.signalRetryable('the build failed');
+      });
+
+      expect(
+        await h.hotReload(),
+        containsPair('message', contains('Hot reload')),
+      );
+      await startup;
+      expect(retries, 1);
+      expect(h.pipeline.awaitingAssembly, isFalse);
+    });
+
+    test('a startup that throws without settling releases the barrier, and a '
+        'waiting command is answered instead of hanging', () async {
+      final _Harness h = await _Harness.create(
+        readyTimeout: const Duration(milliseconds: 20),
+      );
+      addTearDown(h.dispose);
+      final Future<void> startup = h.pipeline.trackAssembly(() async {
+        await Future<void>.delayed(const Duration(milliseconds: 40));
+        throw StateError('startup bug');
+      });
+
+      final Future<Map<String, dynamic>> reply = h.hotReload();
+      await expectLater(startup, throwsStateError);
+
+      expect(await reply, {
+        'succeeded': false,
+        'runningCode': 'unchanged',
+        'error': 'Hot reload is still starting up.',
+      });
+      expect(h.pipeline.awaitingAssembly, isFalse);
+    });
   });
 
   group('orchestrator branch', () {

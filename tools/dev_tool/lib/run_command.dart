@@ -352,12 +352,12 @@ class RunCommand {
     host.registerReloadCommands(pipeline);
     host.registerLifecycleCommands();
 
-    protocol.startListening();
-
     // Assigned part-way through the run and released in its `finally`, so
     // declared before it.
     SourceWatcher? sourceWatcher;
     WebPipelineAssembler? web;
+    // Set by the startup scope below, which the session loop needs afterwards.
+    late final RunPlan plan;
 
     // Everything from here to the end of the run is inside this `try`, so
     // however it ends — the session loop returning, a launch that throws
@@ -365,39 +365,47 @@ class RunCommand {
     // bazel is still resolving or building — what it owns is released by
     // the one `finally` below.
     try {
-      final plan = await _resolvePlan(host, logger);
+      // Everything from listening to the first session is one assembly scope:
+      // a reload or restart that arrives at any point in it queues on
+      // `pipeline.ready`, and does not give up after the unsettled-gate clock
+      // while the startup is still running.
+      await pipeline.trackAssembly(() async {
+        protocol.startListening();
 
-      final built = await _buildApp(plan);
-      final appFile = built.appFile;
+        plan = await _resolvePlan(host, logger);
 
-      sourceWatcher = await _startWatcher(plan, pipeline, logger);
+        final built = await _buildApp(plan);
+        final appFile = built.appFile;
 
-      web = await _assembleWeb(plan, host, pipeline, webSession, built);
+        sourceWatcher = await _startWatcher(plan, pipeline, logger);
 
-      await _launchDevices(plan, host, appFile, webSession);
+        web = await _assembleWeb(plan, host, pipeline, webSession, built);
 
-      _registerWebHandlers(plan, host, pipeline, logger);
+        await _launchDevices(plan, host, appFile, webSession);
 
-      // Started before the pipeline is assembled, because assembly can need the
-      // channel to finish: `--start-paused` holds the app before `main()`, and
-      // the first thing assembly does is ask the app what build it came from.
-      // Brought up afterwards, nothing could deliver the resume — the app waits
-      // for a debugger, the resume waits for the channel, and the channel waits
-      // for the app. Agent commands arriving in this window answer on their own
-      // (`agent_command.dart` knows a paused device has no widget tree), and
-      // reload commands wait on `pipeline.ready` rather than racing the seed.
-      if (plan.httpChannelEnabled) await host.startHttpChannel();
+        _registerWebHandlers(plan, host, pipeline, logger);
 
-      await _assembleNative(
-        plan,
-        host,
-        pipeline,
-        appFile,
-        built.builtBefore,
-        logger,
-      );
+        // Started before the pipeline is assembled, because assembly can need the
+        // channel to finish: `--start-paused` holds the app before `main()`, and
+        // the first thing assembly does is ask the app what build it came from.
+        // Brought up afterwards, nothing could deliver the resume — the app waits
+        // for a debugger, the resume waits for the channel, and the channel waits
+        // for the app. Agent commands arriving in this window answer on their own
+        // (`agent_command.dart` knows a paused device has no widget tree), and
+        // reload commands wait on `pipeline.ready` rather than racing the seed.
+        if (plan.httpChannelEnabled) await host.startHttpChannel();
 
-      _settlePipelineReady(plan, pipeline);
+        await _assembleNative(
+          plan,
+          host,
+          pipeline,
+          appFile,
+          built.builtBefore,
+          logger,
+        );
+
+        _settlePipelineReady(plan, pipeline);
+      });
 
       await _driveSession(plan, host, pipeline, sourceWatcher);
     } on BazelCancelled {

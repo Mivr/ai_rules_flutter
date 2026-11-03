@@ -161,7 +161,10 @@ class NativePipelineAssembler {
   /// Never throws: a run whose reload pipeline failed still has a running app,
   /// and the failure belongs in the gate — where the next `app.hotReload` reads
   /// it — rather than unwinding a session that is otherwise fine.
-  Future<void> assemble() async {
+  Future<void> assemble() => pipeline.trackAssembly(_assembleOnce);
+
+  /// One attempt, run inside the assembly scope [assemble] opens. See [assemble].
+  Future<void> _assembleOnce() async {
     // Cleared at the top of every attempt and re-armed only by the one failure
     // below that another attempt can get past, so `awaitingAssembly` never
     // outlives the state it describes — a pipeline that assembled would

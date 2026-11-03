@@ -46,6 +46,12 @@ class ReloadPipeline {
   /// The sessions this pipeline applies to, and the appId targeting rules.
   final SessionHost host;
 
+  /// How long a request waits on a gate that is still unsettled and has no
+  /// assembly in flight before it is answered `Hot reload is still starting
+  /// up.`. An assembly in flight is waited for past this, until it settles the
+  /// gate — see [trackAssembly].
+  final Duration readyTimeout;
+
   /// Bridges the gap between the `app.started` protocol event (emitted from the
   /// launch loop) and this pipeline being wired (assembled after it).
   /// [hotReload] and [restart] await it, so a client firing on `app.started`
@@ -218,7 +224,7 @@ class ReloadPipeline {
   /// save that fixes the code usually lands *inside* one. Without this the
   /// watcher would drop exactly that edit, the attempt would finish with the
   /// broken tree it read, and nothing would ever ask again.
-  bool get awaitingAssembly => reassemble != null || _attemptInFlight;
+  bool get awaitingAssembly => reassemble != null || _activeAssemblies > 0;
 
   /// Which command is running, counted up by [hotReload] and [restart].
   ///
@@ -232,9 +238,42 @@ class ReloadPipeline {
   /// Serializes assembly attempts, so two requests arriving together produce
   /// two builds one after another rather than two at once.
   Future<void> _attempts = Future<void>.value();
-  bool _attemptInFlight = false;
 
-  ReloadPipeline({required this.host});
+  /// How many [trackAssembly] scopes are open right now. Counted rather than
+  /// flagged, because a scope can open inside another one.
+  int _activeAssemblies = 0;
+
+  /// Open while [_activeAssemblies] is above zero, so a request can wait on the
+  /// whole of an assembly rather than on a clock.
+  Completer<void>? _assemblyBarrier;
+
+  ReloadPipeline({
+    required this.host,
+    this.readyTimeout = const Duration(seconds: 90),
+  });
+
+  /// Runs [action] as an assembly scope: until it finishes, a request on a gate
+  /// that has not settled waits for the gate rather than giving up after
+  /// [readyTimeout].
+  ///
+  /// Re-entrant. A scope opened inside another — a retry that runs
+  /// `NativePipelineAssembler.assemble()`, which opens its own — only counts up,
+  /// and the barrier opens and closes once, for the outermost scope. It is
+  /// closed in `finally`, so an assembly that throws releases the requests
+  /// waiting on it instead of holding them forever.
+  Future<T> trackAssembly<T>(Future<T> Function() action) async {
+    _activeAssemblies++;
+    _assemblyBarrier ??= Completer<void>();
+    try {
+      return await action();
+    } finally {
+      _activeAssemblies--;
+      if (_activeAssemblies == 0) {
+        _assemblyBarrier?.complete();
+        _assemblyBarrier = null;
+      }
+    }
+  }
 
   /// Whether this run can hot reload at all.
   ///
@@ -272,15 +311,13 @@ class ReloadPipeline {
   /// the report is well-formed rather than carrying a placeholder — if the
   /// refusal arm ever grows a composed sentence, the word it needs is there.
   Future<Map<String, dynamic>?> _awaitReady(String verb) async {
-    await ready.whenReady.timeout(
-      const Duration(seconds: 90),
-      onTimeout: () {},
-    );
-    // An attempt in flight holds the gate open, and waiting for *it* is a
+    await ready.whenReady.timeout(readyTimeout, onTimeout: () {});
+    // An assembly in flight holds the gate open, and waiting for *it* is a
     // different thing from waiting out the clock above: something is running,
     // it will settle, and a `bazel build` taking its time is not evidence that
     // anything is wrong. The bound above stays for the case it was written
     // for — a run mode that settles the gate never at all.
+    await _waitForAssembly();
     if (!ready.isSettled) await _attempts;
     // A gate settled retryable is a verdict on the last attempt, not on the
     // run. This request is the event that makes the next one.
@@ -295,6 +332,18 @@ class ReloadPipeline {
       );
     }
     return null;
+  }
+
+  /// Waits while an assembly scope is open and the gate is still unsettled.
+  ///
+  /// Returns as soon as the gate settles, or as soon as no scope is open — which
+  /// is what lets a scope that ends without settling release its waiters.
+  Future<void> _waitForAssembly() async {
+    while (!ready.isSettled) {
+      final Completer<void>? barrier = _assemblyBarrier;
+      if (barrier == null) return;
+      await Future.any<void>([ready.whenReady, barrier.future]);
+    }
   }
 
   /// Run one more assembly attempt for this request, behind whatever attempt is
@@ -323,12 +372,7 @@ class ReloadPipeline {
       final retry = reassemble;
       if (retry == null) return;
       ready.reopen();
-      _attemptInFlight = true;
-      try {
-        await retry();
-      } finally {
-        _attemptInFlight = false;
-      }
+      await trackAssembly(retry);
     } catch (e) {
       // Assembly is documented never to throw. If one ever does, the gate it
       // reopened would otherwise never settle, and every later request would

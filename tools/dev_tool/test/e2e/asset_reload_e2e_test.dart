@@ -89,6 +89,11 @@ void main() {
           reason: 'app.hotReload: ${reload['error']}',
         );
         expect(
+          reload,
+          containsPair('result', containsPair('succeeded', true)),
+          reason: 'app.hotReload: $reload',
+        );
+        expect(
           reload['result']?['assetsChanged'],
           1,
           reason:
@@ -195,6 +200,11 @@ void main() {
           reload['error'],
           isNull,
           reason: 'app.hotReload: ${reload['error']}',
+        );
+        expect(
+          reload,
+          containsPair('result', containsPair('succeeded', true)),
+          reason: 'app.hotReload: $reload',
         );
         expect(
           reload['result']?['assetsChanged'],
@@ -317,6 +327,11 @@ void main() {
           reload['error'],
           isNull,
           reason: 'app.hotReload: ${reload['error']}',
+        );
+        expect(
+          reload,
+          containsPair('result', containsPair('succeeded', true)),
+          reason: 'app.hotReload: $reload',
         );
         // Under a tree mismatch the rebuild still succeeds and the reload still
         // returns cleanly — it just reports nothing changed, because the
