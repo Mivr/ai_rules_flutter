@@ -52,17 +52,33 @@ Map<String, dynamic> buildInfoJson({String compilationMode = 'dbg'}) => {
   'targetPlatform': 'macos',
 };
 
+/// A started [NativePipelineAssembler.assemble]: the session it runs against,
+/// the pipeline it settles, and the assembly itself.
+typedef StartedAssembly = ({
+  /// The session the assembly runs against, with the reload commands wired.
+  SessionHost host,
+
+  /// The pipeline the assembly settles.
+  ReloadPipeline pipeline,
+
+  /// Completes when the assembly has settled the pipeline.
+  Future<void> assembly,
+});
+
 void main() {
-  /// Assemble against one session whose app answers [buildInfo] — or, when
-  /// [withVmService] is false, against a session with no VM service at all.
+  /// Start assembling against one session, and return with the assembly
+  /// running: its `assembly` field settles when it is done.
   ///
-  /// [shuttingDown] tears the session down first, standing in for a
-  /// `daemon.shutdown` that landed while the assembly was still running.
-  Future<ReloadPipeline> assembleAgainst({
+  /// [spawnDelay] holds every bazel spawn back by that long, which is what
+  /// makes an assembly slower than [readyTimeout] — the case a reload that
+  /// arrives mid-assembly has to be held through.
+  Future<StartedAssembly> startAssembly({
     Map<String, dynamic>? buildInfo,
     bool withVmService = true,
     bool shuttingDown = false,
     bool extensionRegistered = true,
+    Duration readyTimeout = const Duration(seconds: 90),
+    Duration spawnDelay = Duration.zero,
   }) async {
     final logger = Logger('test.native_pipeline_assembler');
     final host = SessionHost(
@@ -73,7 +89,15 @@ void main() {
       // spawn itself refusing the directory.
       bazel: Bazel.uninterruptible(
         spawn: (args, {required workingDirectory}) =>
-            Process.start('bazel', args, workingDirectory: workingDirectory),
+            Future<void>.delayed(
+              spawnDelay,
+            ).then(
+              (_) => Process.start(
+                'bazel',
+                args,
+                workingDirectory: workingDirectory,
+              ),
+            ),
         because: 'this test starts it straight from PATH',
       ),
     );
@@ -110,8 +134,9 @@ void main() {
     // the assembler reads.
     if (shuttingDown) await host.teardown.run();
 
-    final pipeline = ReloadPipeline(host: host);
-    await NativePipelineAssembler(
+    final pipeline = ReloadPipeline(host: host, readyTimeout: readyTimeout);
+    host.registerReloadCommands(pipeline);
+    final Future<void> assembly = NativePipelineAssembler(
       workspace: _noWorkspace,
       toolchain: _toolchain,
       target: '//:app',
@@ -121,10 +146,62 @@ void main() {
       logger: logger,
       builtBefore: DateTime.now(),
     ).assemble();
-    return pipeline;
+    return (host: host, pipeline: pipeline, assembly: assembly);
+  }
+
+  /// Assemble against one session whose app answers [buildInfo] — or, when
+  /// [withVmService] is false, against a session with no VM service at all —
+  /// and wait for the assembly to finish.
+  Future<ReloadPipeline> assembleAgainst({
+    Map<String, dynamic>? buildInfo,
+    bool withVmService = true,
+    bool shuttingDown = false,
+    bool extensionRegistered = true,
+  }) async {
+    final StartedAssembly started = await startAssembly(
+      buildInfo: buildInfo,
+      withVmService: withVmService,
+      shuttingDown: shuttingDown,
+      extensionRegistered: extensionRegistered,
+    );
+    await started.assembly;
+    return started.pipeline;
   }
 
   group('NativePipelineAssembler', () {
+    // The reload the user sent while the dev build was still running. The
+    // assembly is slower than the gate's clock, so the clock alone would answer
+    // "still starting up" while the build that settles the gate is in progress.
+    test(
+      'an assembly slower than readyTimeout holds an in-flight app.hotReload '
+      'until it settles the gate',
+      () async {
+        final StartedAssembly started = await startAssembly(
+          buildInfo: buildInfoJson(),
+          readyTimeout: const Duration(milliseconds: 20),
+          spawnDelay: const Duration(milliseconds: 150),
+        );
+
+        final Map<String, dynamic> reply = await started.host.commandRunner.run(
+          'app.hotReload',
+          {},
+        );
+
+        expect(
+          started.pipeline.ready.isSettled,
+          isTrue,
+          reason: 'the reply came before the assembly settled the gate',
+        );
+        expect(
+          reply,
+          containsPair('error', started.pipeline.ready.unavailableReason),
+          reason:
+              "the reply must be the assembly's own verdict, not the clock's",
+        );
+        await started.assembly;
+      },
+    );
+
     test('reads the app’s build record before it builds anything', () async {
       // A release app cannot be reloaded, and the app is the only thing that
       // knows it is one. Reported here means reported before the dev build —

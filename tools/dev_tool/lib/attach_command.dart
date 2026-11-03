@@ -163,37 +163,47 @@ class AttachCommand {
         );
       }
 
-      host.protocol.startListening();
+      final AttachServeInputs serve = (
+        target: target,
+        userBuildArgs: userBuildArgs,
+        workspace: workspace,
+        builtBefore: builtBefore,
+        sourceWatcher: sourceWatcher,
+        devToolsEnabled: devToolsEnabled,
+        httpChannelEnabled: httpChannelEnabled,
+        logger: logger,
+      );
+      // Startup is one assembly scope, from listening to the pipeline being
+      // settled. It ends before the interactive session, which reads
+      // `awaitingAssembly` for as long as it runs, so the scope must not
+      // outlive the startup it covers.
+      final ToolchainPaths toolchain = await pipeline.trackAssembly(() async {
+        host.protocol.startListening();
 
-      // Connect to each running app.
-      for (var i = 0; i < debugUrls.length; i++) {
-        await attachApp(
-          host,
-          pipeline,
-          debugUrls[i],
-          inputs: (
-            index: i,
-            multiApp: debugUrls.length > 1,
-            workspace: workspace,
-            logForwarders: logForwarders,
-            logger: logger,
-          ),
-        );
-      }
+        // Connect to each running app.
+        for (var i = 0; i < debugUrls.length; i++) {
+          await attachApp(
+            host,
+            pipeline,
+            debugUrls[i],
+            inputs: (
+              index: i,
+              multiApp: debugUrls.length > 1,
+              workspace: workspace,
+              logForwarders: logForwarders,
+              logger: logger,
+            ),
+          );
+        }
 
-      await assembleAndServeAttach(
+        return await assembleAttachedPipeline(host, pipeline, inputs: serve);
+      });
+
+      await serveAttachedSession(
         host,
         pipeline,
-        inputs: (
-          target: target,
-          userBuildArgs: userBuildArgs,
-          workspace: workspace,
-          builtBefore: builtBefore,
-          sourceWatcher: sourceWatcher,
-          devToolsEnabled: devToolsEnabled,
-          httpChannelEnabled: httpChannelEnabled,
-          logger: logger,
-        ),
+        toolchain: toolchain,
+        inputs: serve,
       );
     } on BazelCancelled {
       // Only a shutdown stops a bazel command (see [Bazel.close]), and here
@@ -278,7 +288,8 @@ typedef AttachAppInputs = ({
   Logger logger,
 });
 
-/// What [assembleAndServeAttach] resolves and serves with.
+/// What [assembleAttachedPipeline] and [serveAttachedSession] resolve and
+/// serve with.
 ///
 /// One object for the toolchain resolution and pipeline assembly the command
 /// does once after connecting: what to resolve, what was built when, and
@@ -462,9 +473,9 @@ Future<void> forwardAttachedLogs(
   }
 }
 
-/// Resolve the toolchain, assemble the reload pipeline and serve.
+/// Resolve the toolchain and assemble the reload pipeline.
 ///
-/// Resolved before assembly so the interactive session below can serve
+/// Resolved before assembly so the interactive session can serve
 /// DevTools from the toolchain's Dart, not whatever is on PATH.
 ///
 /// Assembled exactly as `run` does on native, with no launch context:
@@ -477,15 +488,11 @@ Future<void> forwardAttachedLogs(
 /// VmServiceReloadStrategy. Going through here is what gives attach the
 /// orchestrator's per-app RPC budget and commit/rollback,
 /// `refreshGenerated` for codegen apps, and asset tracking.
-Future<void> assembleAndServeAttach(
+Future<ToolchainPaths> assembleAttachedPipeline(
   SessionHost host,
   ReloadPipeline pipeline, {
   required AttachServeInputs inputs,
 }) async {
-  final sessions = host.sessions;
-  final protocol = host.protocol;
-  final teardown = host.teardown;
-
   final toolchain = await resolveToolchainPaths(
     inputs.target,
     workspace: inputs.workspace,
@@ -498,7 +505,7 @@ Future<void> assembleAndServeAttach(
     workspace: inputs.workspace,
     toolchain: toolchain,
     target: inputs.target,
-    configDevice: sessions.first.device,
+    configDevice: host.sessions.first.device,
     userBuildArgs: inputs.userBuildArgs,
     host: host,
     pipeline: pipeline,
@@ -518,6 +525,20 @@ Future<void> assembleAndServeAttach(
       'Hot reload is not available for this session.',
     );
   }
+  return toolchain;
+}
+
+/// Serve the attached session: the HTTP channel, then the interactive loop.
+///
+/// Outside the assembly scope on purpose — see the call in `execute`.
+Future<void> serveAttachedSession(
+  SessionHost host,
+  ReloadPipeline pipeline, {
+  required ToolchainPaths toolchain,
+  required AttachServeInputs inputs,
+}) async {
+  final protocol = host.protocol;
+  final teardown = host.teardown;
 
   // After assembly, for the reason `run` starts it there: a driver reads
   // this channel appearing as "the run is ready", and an edit that lands
@@ -545,7 +566,7 @@ Future<void> assembleAndServeAttach(
   // The same client the assembler reads (see [NativePipelineAssembler],
   // which settles the gate off exactly this): the death that explains an
   // interrupted assembly is the death of the app it was reading.
-  if (sessions.first.vmClient?.isGone ?? false) return;
+  if (host.sessions.first.vmClient?.isGone ?? false) return;
   if (!pipeline.hasReloadPath) {
     throw DevToolException(
       'Cannot start interactive session without a reload pipeline.',
@@ -553,7 +574,7 @@ Future<void> assembleAndServeAttach(
   }
   await runInteractiveSession(
     targets: (
-      sessions: sessions,
+      sessions: host.sessions,
       frontendServer: pipeline.frontendServer,
       protocol: protocol,
       commandRunner: host.commandRunner,

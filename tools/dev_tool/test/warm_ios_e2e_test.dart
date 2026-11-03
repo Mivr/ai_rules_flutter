@@ -15,6 +15,29 @@ class RecordedCall {
   const RecordedCall({required this.args, required this.workingDirectory});
 }
 
+WarmChild _child(int exitCode) => WarmChild(
+  exitCode: Future.value(exitCode),
+  stdoutText: Future.value(''),
+  stderrText: Future.value(''),
+  kill: () {},
+);
+
+/// Options whose spawner records every call in [calls] and fails the build of
+/// [failingTarget] with exit code 1.
+WarmOptions _warmOptionsFailingOn(
+  String repoRoot,
+  String failingTarget,
+  List<RecordedCall> calls,
+) => WarmOptions(
+  bazel: (args, {required workingDirectory}) async {
+    calls.add(RecordedCall(args: args, workingDirectory: workingDirectory));
+    return _child(args.contains(failingTarget) ? 1 : 0);
+  },
+  repoRoot: repoRoot,
+  environment: {'HOME': '/test/home'},
+  log: (_) {},
+);
+
 void main() {
   group('WarmTarget and WarmFailure', () {
     test('WarmTarget supports equality and hashCode', () {
@@ -36,8 +59,16 @@ void main() {
         equals([
           const WarmTarget(workspace: 'e2e/ios_example', target: ':app'),
           const WarmTarget(
+            workspace: 'e2e/ios_example',
+            target: ':app_flutter',
+          ),
+          const WarmTarget(
             workspace: 'e2e/plugin_example',
             target: ':plugin_ios',
+          ),
+          const WarmTarget(
+            workspace: 'e2e/plugin_example',
+            target: ':plugin_app',
           ),
         ]),
       );
@@ -215,7 +246,7 @@ void main() {
     }
 
     test(
-      'defaultWarmTargets warms e2e/ios_example then e2e/plugin_example with exact bazelBuildArgs and shutdowns',
+      'defaultWarmTargets builds each workspace bundle and its dev inputs in order, with one shutdown per workspace',
       () async {
         createWorkspace('e2e/ios_example');
         createWorkspace('e2e/plugin_example');
@@ -230,12 +261,7 @@ void main() {
           calls.add(
             RecordedCall(args: args, workingDirectory: workingDirectory),
           );
-          return WarmChild(
-            exitCode: Future.value(0),
-            stdoutText: Future.value(''),
-            stderrText: Future.value(''),
-            kill: () {},
-          );
+          return _child(0);
         }
 
         final options = WarmOptions(
@@ -247,21 +273,9 @@ void main() {
 
         await warmIosE2eBuilds(options);
 
-        expect(calls.length, 4);
-
         final expectedDiskCache = '/test/home/.cache/rules_flutter_e2e_disk';
-        final expectedIosArgs = bazelBuildArgs(
-          ':app',
-          compilationMode: 'dbg',
-          extraArgs: [
-            ...IOSSimulatorDevice(udid: 'warm').buildArgs,
-            '--disk_cache=$expectedDiskCache',
-            '--experimental_disk_cache_gc_max_size=50G',
-            '--experimental_disk_cache_gc_max_age=30d',
-          ],
-        );
-        final expectedPluginArgs = bazelBuildArgs(
-          ':plugin_ios',
+        List<String> expectedArgs(String target) => bazelBuildArgs(
+          target,
           compilationMode: 'dbg',
           extraArgs: [
             ...IOSSimulatorDevice(udid: 'warm').buildArgs,
@@ -271,20 +285,140 @@ void main() {
           ],
         );
 
-        final iosWs = p.join(tempDir.path, 'e2e/ios_example');
-        final pluginWs = p.join(tempDir.path, 'e2e/plugin_example');
+        final String iosWs = p.join(tempDir.path, 'e2e/ios_example');
+        final String pluginWs = p.join(tempDir.path, 'e2e/plugin_example');
+
+        expect(calls.length, 6);
 
         expect(calls[0].workingDirectory, iosWs);
-        expect(calls[0].args, expectedIosArgs);
+        expect(calls[0].args, expectedArgs(':app'));
 
         expect(calls[1].workingDirectory, iosWs);
-        expect(calls[1].args, ['shutdown']);
+        expect(calls[1].args, expectedArgs(':app_flutter'));
 
-        expect(calls[2].workingDirectory, pluginWs);
-        expect(calls[2].args, expectedPluginArgs);
+        expect(calls[2].workingDirectory, iosWs);
+        expect(calls[2].args, ['shutdown']);
 
         expect(calls[3].workingDirectory, pluginWs);
-        expect(calls[3].args, ['shutdown']);
+        expect(calls[3].args, expectedArgs(':plugin_ios'));
+
+        expect(calls[4].workingDirectory, pluginWs);
+        expect(calls[4].args, expectedArgs(':plugin_app'));
+
+        expect(calls[5].workingDirectory, pluginWs);
+        expect(calls[5].args, ['shutdown']);
+      },
+    );
+
+    test(
+      'contiguous targets in one workspace wait for each build before starting the next, and shut down once after the last',
+      () async {
+        createWorkspace('e2e/ios_example');
+
+        final calls = <RecordedCall>[];
+        final firstExit = Completer<int>();
+        Future<WarmChild> fakeSpawner(
+          List<String> args, {
+          required String workingDirectory,
+        }) async {
+          calls.add(
+            RecordedCall(args: args, workingDirectory: workingDirectory),
+          );
+          return WarmChild(
+            exitCode: args.contains(':app')
+                ? firstExit.future
+                : Future.value(0),
+            stdoutText: Future.value(''),
+            stderrText: Future.value(''),
+            kill: () {},
+          );
+        }
+
+        final options = WarmOptions(
+          bazel: fakeSpawner,
+          repoRoot: tempDir.path,
+          environment: {'HOME': '/test/home'},
+          log: (_) {},
+        );
+        final Future<void> run = warmIosE2eBuilds(
+          options,
+          targets: const [
+            WarmTarget(workspace: 'e2e/ios_example', target: ':app'),
+            WarmTarget(workspace: 'e2e/ios_example', target: ':app_flutter'),
+          ],
+        );
+
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        expect(
+          calls.map((c) => c.args.first),
+          ['build'],
+          reason: 'the second build started before the first one finished',
+        );
+
+        firstExit.complete(0);
+        await run;
+
+        expect(calls.map((c) => c.args.contains(':app_flutter')).toList(), [
+          false,
+          true,
+          false,
+        ]);
+        expect(calls.last.args, ['shutdown']);
+      },
+    );
+
+    test(
+      'a failed first target stops the group: one shutdown for that workspace, and nothing after it runs',
+      () async {
+        createWorkspace('e2e/ios_example');
+        createWorkspace('e2e/plugin_example');
+        final String iosWs = p.join(tempDir.path, 'e2e/ios_example');
+        final calls = <RecordedCall>[];
+
+        final WarmOptions options = _warmOptionsFailingOn(
+          tempDir.path,
+          ':app',
+          calls,
+        );
+
+        await expectLater(
+          warmIosE2eBuilds(options),
+          throwsA(isA<WarmFailure>()),
+        );
+
+        expect(calls.map((c) => c.workingDirectory), [iosWs, iosWs]);
+        expect(calls.map((c) => c.args.first), ['build', 'shutdown']);
+      },
+    );
+
+    test(
+      'a failed second target stops the group: its shutdown still runs once, and the next workspace is never started',
+      () async {
+        createWorkspace('e2e/ios_example');
+        createWorkspace('e2e/plugin_example');
+        final String iosWs = p.join(tempDir.path, 'e2e/ios_example');
+        final calls = <RecordedCall>[];
+
+        final WarmOptions options = _warmOptionsFailingOn(
+          tempDir.path,
+          ':app_flutter',
+          calls,
+        );
+
+        WarmFailure? caught;
+        try {
+          await warmIosE2eBuilds(options);
+        } on WarmFailure catch (f) {
+          caught = f;
+        }
+
+        expect(caught?.reason, contains(':app_flutter'));
+        expect(calls.map((c) => c.workingDirectory), [iosWs, iosWs, iosWs]);
+        expect(calls.map((c) => c.args.first), ['build', 'build', 'shutdown']);
+        expect(
+          calls.where((c) => c.workingDirectory.endsWith('plugin_example')),
+          isEmpty,
+        );
       },
     );
 

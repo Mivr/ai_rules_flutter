@@ -156,6 +156,11 @@ void main() {
             isNull,
             reason: 'app.restart: ${restart['error']}',
           );
+          expect(
+            restart,
+            containsPair('result', containsPair('succeeded', true)),
+            reason: 'app.restart: $restart',
+          );
 
           final after = _documentsPath(
             await _pluginResultsAfter(dt, printed, tag: 'after restart'),
@@ -529,6 +534,11 @@ void main() {
             restart['error'],
             isNull,
             reason: 'app.restart: ${restart['error']}',
+          );
+          expect(
+            restart,
+            containsPair('result', containsPair('succeeded', true)),
+            reason: 'app.restart: $restart',
           );
 
           expect(

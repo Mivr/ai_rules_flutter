@@ -115,7 +115,11 @@ class WebPipelineAssembler {
 
   /// Assemble, or — with `--allow-no-vm-service` — record why there is no dev
   /// loop and let the run serve the last build statically.
-  Future<void> assemble(List<String> outputFiles) async {
+  Future<void> assemble(List<String> outputFiles) =>
+      pipeline.trackAssembly(() => _assembleOnce(outputFiles));
+
+  /// One attempt, run inside the assembly scope [assemble] opens.
+  Future<void> _assembleOnce(List<String> outputFiles) async {
     try {
       final config = _loadDevConfig(outputFiles);
       _rejectShadowedSources(config.devConfig);
