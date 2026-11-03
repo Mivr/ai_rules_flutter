@@ -53,28 +53,38 @@ String? _workspaceRoot() {
   return null;
 }
 
-/// Relative paths of every directory under `e2e/` holding a `MODULE.bazel`.
+/// Last path segment of [path].
+String _baseName(String path) => path.split(Platform.pathSeparator).last;
+
+/// Lists [dir] without following links. Throws a [StateError] naming the
+/// path and the OS error when it cannot be listed, so no directory is
+/// silently dropped from the check.
+List<FileSystemEntity> _listOrFail(Directory dir) {
+  try {
+    return dir.listSync(followLinks: false);
+  } on FileSystemException catch (e) {
+    throw StateError(
+      'cannot list ${dir.path}: ${e.osError ?? e.message}',
+    );
+  }
+}
+
+/// Relative paths of every directory under `e2e/` holding a `MODULE.bazel`,
+/// whether that module file is a regular file or a symlink. Symlinked
+/// directories are not descended into. Throws when a directory cannot be
+/// listed.
 List<String> _findWorkspaces(String root) {
   final found = <String>[];
   final stack = <Directory>[Directory('$root/e2e')];
   while (stack.isNotEmpty) {
     final current = stack.removeLast();
-    List<FileSystemEntity> children;
-    try {
-      children = current.listSync(followLinks: false);
-    } on FileSystemException {
-      continue;
-    }
     var hasModule = false;
     final subdirs = <Directory>[];
-    for (final child in children) {
+    for (final FileSystemEntity child in _listOrFail(current)) {
+      final String name = _baseName(child.path);
       if (child is Directory) {
-        if (child.path.split(Platform.pathSeparator).last == 'node_modules') {
-          continue;
-        }
-        subdirs.add(child);
-      } else if (child is File &&
-          child.path.split(Platform.pathSeparator).last == 'MODULE.bazel') {
+        if (name != 'node_modules') subdirs.add(child);
+      } else if ((child is File || child is Link) && name == 'MODULE.bazel') {
         hasModule = true;
       }
     }
@@ -155,6 +165,55 @@ void main() {
       }
     }
     expect(problems, isEmpty, reason: problems.join('\n'));
+  });
+
+  group('fixtures', () {
+    late Directory tmp;
+
+    setUp(() {
+      tmp = Directory.systemTemp.createTempSync('export_ignore_guard_');
+      Directory('${tmp.path}/e2e').createSync();
+      File('${tmp.path}/.gitattributes').writeAsStringSync('');
+    });
+
+    tearDown(() => tmp.deleteSync(recursive: true));
+
+    test('a workspace whose MODULE.bazel is a symlink is reported', () {
+      final ws = Directory('${tmp.path}/e2e/linked');
+      ws.createSync();
+      File('${ws.path}/MODULE.bazel.real').writeAsStringSync('');
+      try {
+        Link('${ws.path}/MODULE.bazel').createSync('MODULE.bazel.real');
+      } on FileSystemException catch (e) {
+        fail('cannot create a symlink on ${Platform.operatingSystem}: $e');
+      }
+      final List<String> workspaces = _findWorkspaces(tmp.path);
+      expect(workspaces, ['e2e/linked']);
+      expect(_isIgnored(workspaces.single, _ignoredDirs(tmp.path)), isFalse);
+    });
+
+    test('a symlinked directory is not descended into', () {
+      final real = Directory('${tmp.path}/real');
+      real.createSync();
+      File('${real.path}/MODULE.bazel').writeAsStringSync('');
+      Link('${tmp.path}/e2e/loop').createSync(real.path);
+      expect(_findWorkspaces(tmp.path), isEmpty);
+    });
+
+    test('a directory the walk cannot list fails naming it', () {
+      Directory('${tmp.path}/e2e').deleteSync();
+      File('${tmp.path}/e2e').writeAsStringSync('not a directory');
+      expect(
+        () => _findWorkspaces(tmp.path),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            contains('cannot list ${tmp.path}/e2e'),
+          ),
+        ),
+      );
+    });
   });
 
   test('e2e/smoke still ships in the release archive', () {
