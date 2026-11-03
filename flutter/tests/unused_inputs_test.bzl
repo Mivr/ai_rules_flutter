@@ -61,12 +61,20 @@ def _fake_file(path):
         short_path = short_path,
     )
 
+def _record_add_all(added, *a, **kw):
+    """Records an `add_all` call; a `before_each` call also leaves a `struct` with its flag and values."""
+    added.append(a[0])
+    if "before_each" in kw:
+        values = a[0].to_list() if type(a[0]) == "depset" else list(a[0])
+        added.append(struct(before_each = kw["before_each"], values = values))
+
 def _fake_args(added):
     # Records single-argument adds as strings and `--flag value` adds as
     # pairs, so tests can assert both forwarded flags and multi-root values.
+    # `add_all(..., before_each = flag)` also records a `struct(before_each, values)`.
     return struct(
         add = lambda *a, **_kw: added.append(a[0] if len(a) == 1 else a),
-        add_all = lambda *a, **_kw: added.append(a[0]),
+        add_all = lambda *a, **kw: _record_add_all(added, *a, **kw),
         set_param_file_format = lambda *a, **_kw: None,
         use_param_file = lambda *a, **_kw: None,
     )
@@ -181,6 +189,32 @@ def _entry_extra_inputs_test_impl(ctx):
     )
     return unittest.end(env)
 
+def _extra_inputs_input_source_test_impl(ctx):
+    """`extra_inputs` are forwarded as `--input-source`, apart from the module's own sources."""
+    env = unittest.begin(ctx)
+    added = []
+    runs = []
+    extra = _fake_file("flutter/tests/unused_inputs_fixture/b/lib/other.dart")
+    _compile(added, runs, extra_inputs = depset([extra]))
+    asserts.equals(env, 1, len(runs), "registers one DartKernel action")
+    own = [a for a in added if type(a) == "tuple" and a[0] == "--input-source"]
+    asserts.equals(
+        env,
+        [("--input-source", "flutter/tests/unused_inputs_fixture/a/lib/adopt.dart")],
+        [(k, v.path) for (k, v) in own],
+        "the own source keeps its --input-source pair",
+    )
+    extras = [a for a in added if type(a) == "struct" and a.before_each == "--input-source"]
+    asserts.equals(env, 1, len(extras), "extra_inputs adds one before_each --input-source batch")
+    if len(extras) == 1:
+        asserts.equals(
+            env,
+            [extra.path],
+            [f.path for f in extras[0].values],
+            "extra_inputs are each preceded by --input-source",
+        )
+    return unittest.end(env)
+
 def _default_no_list_test_impl(ctx):
     env = unittest.begin(ctx)
     added = []
@@ -234,6 +268,7 @@ def _stage_all_test_impl(ctx):
 
 _library_unused_inputs_test = unittest.make(_library_unused_inputs_test_impl)
 _entry_extra_inputs_test = unittest.make(_entry_extra_inputs_test_impl)
+_extra_inputs_input_source_test = unittest.make(_extra_inputs_input_source_test_impl)
 _default_no_list_test = unittest.make(_default_no_list_test_impl)
 _stage_all_test = unittest.make(_stage_all_test_impl)
 
@@ -247,6 +282,7 @@ def unused_inputs_test_suite(name):
         name,
         _library_unused_inputs_test,
         _entry_extra_inputs_test,
+        _extra_inputs_input_source_test,
         _default_no_list_test,
         _stage_all_test,
     )
