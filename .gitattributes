@@ -19,6 +19,7 @@
 /.typos.toml export-ignore
 /ai-docs/ export-ignore
 /dev/ export-ignore
+/flutter/tests/rules_testing/ export-ignore
 /references/ export-ignore
 /renovate.json export-ignore
 /tools/BUILD.bazel export-ignore

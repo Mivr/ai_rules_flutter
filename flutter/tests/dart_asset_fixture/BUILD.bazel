@@ -26,7 +26,7 @@ cc_shared_library(
         "//conditions:default": "libasset_fixture.so",
     }),
     target_compatible_with = HOST_COMPATIBLE,
-    visibility = ["//flutter/tests:__pkg__"],
+    visibility = ["//flutter/tests:__subpackages__"],
     deps = [":empty"],
 )
 
