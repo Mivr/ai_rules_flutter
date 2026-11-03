@@ -226,10 +226,10 @@ class ModuleDoc {
       file: m.string(6),
       doc: m.string(5),
       callables: [
-        ..._rules(m.messages(1)),
-        ..._callables(m.messages(9), 'macro', 4, 3),
-        ..._callables(m.messages(4), 'aspect', 5, 4),
-        ..._callables(m.messages(8), 'repository_rule', 5, 3),
+        ..._callables(m.messages(1), _ruleKind, 4, 3),
+        ..._callables(m.messages(9), (_) => 'macro', 4, 3),
+        ..._callables(m.messages(4), (_) => 'aspect', 5, 4),
+        ..._callables(m.messages(8), (_) => 'repository_rule', 5, 3),
         ..._extensions(m.messages(7)),
       ],
       functions: m.messages(3).map(FuncDoc.fromWire).toList(),
@@ -253,36 +253,27 @@ class ModuleDoc {
   final List<ProviderDoc> providers;
 }
 
-/// Decodes `RuleInfo` messages; the kind says whether it is a test or an
-/// executable rule, which gate 04 consumes through `--emit-rule-kinds`.
-List<CallableDoc> _rules(List<WireMessage> messages) => [
-  for (final m in messages)
-    CallableDoc(
-      kind: m.flag(6)
-          ? 'test_rule'
-          : m.flag(7)
-          ? 'executable_rule'
-          : 'rule',
-      name: m.string(1),
-      doc: m.string(2),
-      attrs: m.messages(3).map(AttrDoc.fromWire).toList(),
-      file: m.message(4)?.string(2) ?? '',
-    ),
-];
+/// The kind of a `RuleInfo`: a test or executable rule, else a plain `rule`.
+String _ruleKind(WireMessage m) => m.flag(6)
+    ? 'test_rule'
+    : m.flag(7)
+    ? 'executable_rule'
+    : 'rule';
 
-/// Decodes `MacroInfo`/`AspectInfo`/`RepositoryRuleInfo` messages.
+/// Decodes `RuleInfo`/`MacroInfo`/`AspectInfo`/`RepositoryRuleInfo` messages.
 ///
-/// All three put the name in field 1, the docstring in field 2 and the
-/// attributes in [attrField]; the origin key sits in [originField].
+/// All four put the name in field 1, the docstring in field 2 and the
+/// attributes in [attrField]; the origin key sits in [originField]. [kindOf]
+/// names the kind of each message.
 List<CallableDoc> _callables(
   List<WireMessage> messages,
-  String kind,
+  String Function(WireMessage) kindOf,
   int originField,
   int attrField,
 ) => [
   for (final m in messages)
     CallableDoc(
-      kind: kind,
+      kind: kindOf(m),
       name: m.string(1),
       doc: m.string(2),
       attrs: m.messages(attrField).map(AttrDoc.fromWire).toList(),
