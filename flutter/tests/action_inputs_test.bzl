@@ -853,7 +853,6 @@ def _bare_pub_fonts_dep_impl(ctx):
         family = "CustomIcons",
         fonts = (struct(
             asset_path = "fonts/CustomIcons.otf",
-            file = font_file,
             weight = None,
             style = None,
         ),),

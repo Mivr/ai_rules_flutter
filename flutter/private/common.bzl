@@ -1449,6 +1449,58 @@ def make_bundle_inputs(target_platform, compiled_shaders = {}, kernel_dill = Non
         data_assets = data_assets,
     )
 
+def _own_font_targets(ctx):
+    """The rule's own `fonts` targets when its `attrs` declare `fonts`.
+
+    Args:
+        ctx: Rule context.
+
+    Returns:
+        List of `flutter_font_family` targets, or `[]` for rules without `fonts`.
+    """
+    return ctx.attr.fonts if hasattr(ctx.attr, "fonts") else []
+
+def _bundle_tree_shake(ctx, flutter_sdk_info, bundle, fonts):
+    """Resolve the `make_tree_shake` inputs for `flutter_build_assets`.
+
+    `const_finder.dart.snapshot` is a kernel snapshot built by the Flutter
+    engine's bundled Dart SDK and analyzes `kernel_dill` compiled by Flutter's
+    `frontend_server`, so it must run on `flutter_sdk_info.dart` paired with
+    `flutter_sdk_info.dart_vm_files` rather than `@rules_dart`'s exec-tools SDK.
+
+    Args:
+        ctx: Rule context (reads `label` and `tree_shake_icons`).
+        flutter_sdk_info: `FlutterSdkInfo` from the toolchain, or `None`.
+        bundle: `make_bundle_inputs` struct.
+        fonts: Aggregated `FontManifest` family entries.
+
+    Returns:
+        A `make_tree_shake` struct.
+    """
+    const_finder, font_subset = resolve_font_subset_tools(flutter_sdk_info) if fonts else (None, None)
+    all_kernel_dills = list(bundle.kernel_dills) if bundle.kernel_dills else ([bundle.kernel_dill] if bundle.kernel_dill != None else [])
+    needs_tree_shake = ctx.attr.tree_shake_icons and bool(fonts) and not bundle.is_debug and bool(all_kernel_dills)
+    if needs_tree_shake and (const_finder == None or font_subset == None):
+        fail(
+            "%s: icon tree shaking is enabled (`tree_shake_icons = True`) and the target bundles fonts, " % ctx.label +
+            "but `const_finder` or `font_subset` (`font-subset`) is not available in the Flutter toolchain " +
+            "(`@rules_flutter//flutter:font_subset_toolchain_type`) for the execution platform.",
+        )
+
+    # Icon tree shaking: enabled only in non-debug mode with tree_shake_icons=True
+    # when the dependency graph actually contributes at least one font family.
+    if not needs_tree_shake:
+        return make_tree_shake()
+    return make_tree_shake(
+        dart = flutter_sdk_info.dart,
+        flutter_sdk_files = flutter_sdk_info.dart_vm_files,
+        const_finder = const_finder,
+        font_subset = font_subset,
+        kernel_dill = all_kernel_dills[0],
+        kernel_dills = all_kernel_dills,
+        tree_shake_key = bundle.tree_shake_key,
+    )
+
 def flutter_build_assets(ctx, flutter_sdk_info, output_dir, bundle):
     """Run the shared asset bundling step.
 
@@ -1482,7 +1534,7 @@ def flutter_build_assets(ctx, flutter_sdk_info, output_dir, bundle):
         ctx.attr.deps,
         bundle.target_platform,
         extra_claims,
-        getattr(ctx.attr, "fonts", []),
+        _own_font_targets(ctx),
     )
     extra_asset_copies = dict(bundle.compiled_shaders.items() + pub_extra_asset_copies.items())
 
@@ -1499,50 +1551,15 @@ def flutter_build_assets(ctx, flutter_sdk_info, output_dir, bundle):
 
     check_bundle_claims(struct(label = ctx.label, deps = ctx.attr.deps), all_entries, extra_claims)
 
-    license_files = ctx.files.license_files
-
-    const_finder, font_subset = resolve_font_subset_tools(flutter_sdk_info) if fonts else (None, None)
-    all_kernel_dills = list(bundle.kernel_dills) if bundle.kernel_dills else ([bundle.kernel_dill] if bundle.kernel_dill != None else [])
-
-    if ctx.attr.tree_shake_icons and bool(fonts) and not bundle.is_debug and bool(all_kernel_dills) and (const_finder == None or font_subset == None):
-        fail(
-            "%s: icon tree shaking is enabled (`tree_shake_icons = True`) and the target bundles fonts, " % ctx.label +
-            "but `const_finder` or `font_subset` (`font-subset`) is not available in the Flutter toolchain " +
-            "(`@rules_flutter//flutter:font_subset_toolchain_type`) for the execution platform.",
-        )
-
-    # Icon tree shaking: enabled only in non-debug mode with tree_shake_icons=True
-    # when the dependency graph actually contributes at least one font family.
-    tree_shake_icons = (
-        ctx.attr.tree_shake_icons and
-        bool(fonts) and
-        not bundle.is_debug and
-        bool(all_kernel_dills) and
-        const_finder != None and
-        font_subset != None
-    )
-
-    # `const_finder.dart.snapshot` is a kernel snapshot built by the Flutter
-    # engine's bundled Dart SDK and analyzes `kernel_dill` compiled by Flutter's
-    # `frontend_server`, so it must run on `flutter_sdk_info.dart` paired with
-    # `flutter_sdk_info.dart_vm_files` rather than `@rules_dart`'s exec-tools SDK.
     return flutter_asset_bundle_action(
         ctx = ctx,
         content = make_bundle_content(
             assets = all_entries,
             fonts = fonts,
-            license_files = license_files,
+            license_files = ctx.files.license_files,
             extra_asset_copies = extra_asset_copies,
         ),
-        shaking = make_tree_shake(
-            dart = flutter_sdk_info.dart if tree_shake_icons else None,
-            flutter_sdk_files = flutter_sdk_info.dart_vm_files if tree_shake_icons else None,
-            const_finder = const_finder if tree_shake_icons else None,
-            font_subset = font_subset if tree_shake_icons else None,
-            kernel_dill = all_kernel_dills[0] if tree_shake_icons else None,
-            kernel_dills = all_kernel_dills if tree_shake_icons else [],
-            tree_shake_key = bundle.tree_shake_key if tree_shake_icons else "",
-        ),
+        shaking = _bundle_tree_shake(ctx, flutter_sdk_info, bundle, fonts),
         output_dir = output_dir,
     )
 
