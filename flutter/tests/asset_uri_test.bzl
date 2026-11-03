@@ -52,6 +52,18 @@ def _plain_entry_passes_through_test_impl(ctx):
     _check_ok(env, "img/2.0x/logo.png", "img/2.0x/logo.png", "img/2.0x/logo.png")
     return unittest.end(env)
 
+def _segment_percent_boundaries_test_impl(ctx):
+    """A valid escape decodes at the start, middle and end; a trailing `%` or cut-off escape stays literal."""
+    env = unittest.begin(ctx)
+    _check_ok(env, "%41bc.png", "Abc.png", "Abc.png")
+    _check_ok(env, "a%41c.png", "aAc.png", "aAc.png")
+    _check_ok(env, "ab%41", "abA", "abA")
+    _check_ok(env, "a%", "a%", "a%25")
+    _check_ok(env, "dir/a%", "dir/a%", "dir/a%25")
+    _check_ok(env, "a%2", "a%2", "a%252")
+    _check_ok(env, "%", "%", "%25")
+    return unittest.end(env)
+
 def _spaced_entry_encodes_test_impl(ctx):
     """A space encodes; the decoded path still names the file."""
     env = unittest.begin(ctx)
@@ -1003,6 +1015,7 @@ _t22_test = unittest.make(_empty_segment_forms_bundle_raw_test_impl)
 _t23_test = unittest.make(_overlap_plain_raw_refuses_test_impl)
 _t24_test = unittest.make(_overlap_variant_raw_refuses_test_impl)
 _t25_test = unittest.make(_mixed_without_overlap_bundles_test_impl)
+_t26_test = unittest.make(_segment_percent_boundaries_test_impl)
 
 def asset_uri_test_suite(name):
     """Defines the asset-URI normalization unit and through tests.
@@ -1038,4 +1051,5 @@ def asset_uri_test_suite(name):
         _t23_test,
         _t24_test,
         _t25_test,
+        _t26_test,
     )

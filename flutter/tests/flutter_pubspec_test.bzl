@@ -229,12 +229,24 @@ def _no_plugin_block_test_impl(ctx):
     asserts.equals(env, False, result.present)
     asserts.equals(env, 0, len(result.platforms))
     asserts.equals(env, "", result.implements)
+    asserts.equals(env, False, result.ffi_plugin)
+    return unittest.end(env)
+
+def _non_mapping_plugin_test_impl(ctx):
+    """A scalar `flutter.plugin` is no plugin block: not present, not an FFI plugin."""
+    env = unittest.begin(ctx)
+    result = parse_flutter_plugin_block("flutter:\n  plugin: true\n")
+    asserts.equals(env, False, result.present)
+    asserts.equals(env, False, result.ffi_plugin)
+    asserts.equals(env, 0, len(result.platforms))
+    asserts.equals(env, "", result.implements)
     return unittest.end(env)
 
 def _empty_pubspec_test_impl(ctx):
     env = unittest.begin(ctx)
     result = parse_flutter_plugin_block("")
     asserts.equals(env, False, result.present)
+    asserts.equals(env, False, result.ffi_plugin)
     asserts.equals(env, 0, len(result.platforms))
     return unittest.end(env)
 
@@ -424,6 +436,7 @@ _t14_test = unittest.make(_empty_plugin_map_refused_test_impl)
 _t15_test = unittest.make(_bad_android_pluginclass_refused_test_impl)
 _t16_test = unittest.make(_umbrella_plugin_loads_test_impl)
 _t17_test = unittest.make(_monolithic_plugin_loads_test_impl)
+_t18_test = unittest.make(_non_mapping_plugin_test_impl)
 
 def flutter_pubspec_test_suite(name):
     small_unittest_suite(
@@ -446,4 +459,5 @@ def flutter_pubspec_test_suite(name):
         _t15_test,
         _t16_test,
         _t17_test,
+        _t18_test,
     )

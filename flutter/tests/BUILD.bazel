@@ -6,6 +6,7 @@ load(":action_inputs_test.bzl", "action_inputs_test_suite")
 load(":android_pure_go_test.bzl", "android_pure_go_test_suite")
 load(":android_release_signing_test.bzl", "android_release_signing_test_suite")
 load(":aot_flags_test.bzl", "aot_flags_test_suite")
+load(":aot_guards_test.bzl", "aot_guards_test_suite")
 load(":app_entrypoint_test.bzl", "app_entrypoint_test_suite")
 load(":apple_objc_deps_test.bzl", "apple_objc_deps_test_suite")
 load(":artifact_urls_test.bzl", "artifact_urls_test_suite")
@@ -41,6 +42,7 @@ load(":flutter_sdk_package_test.bzl", "flutter_sdk_package_test_suite")
 load(":flutter_test_bootstrap_test.bzl", "flutter_test_bootstrap_test_suite")
 load(":gen_l10n_test.bzl", "gen_l10n_test_suite")
 load(":gradle_model_test.bzl", "gradle_model_test_suite")
+load(":header_only_kernel_info_test.bzl", "header_only_kernel_info_test_suite")
 load(":ios_integration_test_test.bzl", "ios_integration_test_test_suite")
 load(":ios_plugin_deps_test.bzl", "ios_plugin_deps_test_suite")
 load(":ios_split_debug_assets_test.bzl", "ios_split_debug_assets_test_suite")
@@ -471,6 +473,8 @@ native_sources_test_suite(name = "native_sources_test")
 
 modular_api_test_suite(name = "modular_api_test")
 
+header_only_kernel_info_test_suite(name = "header_only_kernel_info_test")
+
 bridge_probe(
     name = "dart_code_asset_bridge_probe",
     expected_asset_ids = ["package:asset_fixture/src/ffi/asset_fixture.g.dart"],
@@ -540,6 +544,8 @@ build_test(
 )
 
 aot_flags_test_suite(name = "aot_flags_test")
+
+aot_guards_test_suite(name = "aot_guards_test")
 
 flutter_pub_scc_test_suite(name = "flutter_pub_scc_test")
 
