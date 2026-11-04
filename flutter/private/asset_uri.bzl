@@ -418,7 +418,14 @@ def normalize_asset_uri(entry, is_map = False):
         return _refusal("it names no file")
     decoded = "/".join(collapsed)
     if is_dir:
-        return struct(ok = True, segments = collapsed, decoded = decoded + "/", key = key + "/", is_dir = True, reason = "")
+        return struct(
+            ok = True,
+            segments = collapsed,
+            decoded = decoded + "/",
+            key = key + "/",
+            is_dir = True,
+            reason = "",
+        )
     return struct(ok = True, segments = collapsed, decoded = decoded, key = key, is_dir = False, reason = "")
 
 def encode_asset_key(decoded):

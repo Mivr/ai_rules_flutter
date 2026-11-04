@@ -5,7 +5,7 @@ load("//flutter:providers.bzl", "FlutterSdkInfo", "resolve_exec_dart", "resolve_
 load("//flutter:toolchain.bzl", "flutter_toolchain")
 load("//flutter/private:common.bzl", "KERNEL_COMPILE_ATTRS", "flutter_compile_kernel", "make_kernel_inputs", "make_kernel_target")
 load("//flutter/private:engine_helpers.bzl", "dart_binary_name", "dartaotruntime_binary_name", "engine_arch_for_os", "platform_to_arch", "platform_to_os")
-load("//flutter/private:flutter_kernel_module.bzl", "find_flutter_kernel_module_tools", "is_same_sdk")
+load("//flutter/private:flutter_kernel_tools.bzl", "find_flutter_kernel_module_tools", "is_same_sdk")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 def _provider_exists_test_impl(ctx):

@@ -176,7 +176,12 @@ def engine_cache_dir(artifact_path):
         return "common"
     cache_dir = "/".join(parts[:-1])
     base = parts[-1]
-    if base != "artifacts.zip" and not base.endswith(".framework.zip") and not base.endswith("-flutter.zip") and not base.endswith("-flutter-gtk.zip") and base not in ("font-subset.zip", "flutter-cpp-client-wrapper.zip"):
+    is_host_archive = (
+        base == "artifacts.zip" or base.endswith(".framework.zip") or
+        base.endswith("-flutter.zip") or base.endswith("-flutter-gtk.zip") or
+        base in ("font-subset.zip", "flutter-cpp-client-wrapper.zip")
+    )
+    if not is_host_archive:
         # A cross-compile gen_snapshot archive: one binary that extracts one
         # level deeper than its directory (`android-arm64-release/linux-x64.zip`
         # into `engine/android-arm64-release/linux-x64/`).

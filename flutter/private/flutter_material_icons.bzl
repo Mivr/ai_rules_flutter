@@ -30,7 +30,9 @@ _MATERIAL_ICONS_BUNDLE_PATH = "fonts/MaterialIcons-Regular.otf"
 def _flutter_material_icons_impl(ctx):
     toolchain = ctx.toolchains["@rules_flutter//flutter:toolchain_type"]
     material_tc = ctx.toolchains["@rules_flutter//flutter/private:material_icons_toolchain_type"]
-    material_font = toolchain.flutter_sdk_info.material_icons_font or (material_tc.material_icons_font if material_tc else None)
+    material_font = toolchain.flutter_sdk_info.material_icons_font
+    if not material_font and material_tc:
+        material_font = material_tc.material_icons_font
     if not material_font:
         fail(
             "Unresolved @rules_flutter//flutter:material_icons_toolchain_type " +

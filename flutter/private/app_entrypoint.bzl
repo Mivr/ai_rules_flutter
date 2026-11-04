@@ -407,7 +407,8 @@ def resolve_wrapper_main_import(package_name, lib_root, main_short_path, main_pa
     Returns:
       A string suitable for the wrapper's `import '<value>' as entrypoint`.
     """
-    return app_main_package_uri(package_name, lib_root, main_short_path) or compute_wrapper_main_import(wrapper_depth, main_path)
+    package_uri = app_main_package_uri(package_name, lib_root, main_short_path)
+    return package_uri or compute_wrapper_main_import(wrapper_depth, main_path)
 
 def _is_absolute_root(root):
     """Whether an `extra_roots` value is an absolute path on any host OS."""
@@ -482,6 +483,10 @@ def _sourced_package_names(packages, all_srcs):
             sourced[name] = True
     return sourced
 
+def _takes_extra_root(pkg, extra_roots, sourced):
+    """Whether `pkg` is listed in `extra_roots` and has no sources of its own in the build."""
+    return pkg.package_name in extra_roots and pkg.package_name not in sourced
+
 def _extra_root_record(pkg, lib_root):
     """The `pkg` record re-rooted at `lib_root`, keeping every fact it carries.
 
@@ -537,7 +542,7 @@ def compile_package_config(ctx, packages, all_srcs, extra_roots = {}):
     validate_extra_roots(extra_roots)
     sourced = _sourced_package_names(packages, all_srcs)
     kept = [
-        _extra_root_record(pkg, extra_roots[pkg.package_name]) if pkg.package_name in extra_roots and pkg.package_name not in sourced else pkg
+        _extra_root_record(pkg, extra_roots[pkg.package_name]) if _takes_extra_root(pkg, extra_roots, sourced) else pkg
         for pkg in packages
     ]
     config_file = ctx.actions.declare_file(ctx.label.name + ".package_config.json")

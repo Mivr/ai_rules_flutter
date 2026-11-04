@@ -143,7 +143,8 @@ def _is_gen_snapshot_uint(value):
 
 def _gen_snapshot_allowed_spellings():
     """Every accepted `extra_gen_snapshot_options` flag, for error messages."""
-    return ["--" + f for f in sorted(_GEN_SNAPSHOT_UINT_OPTIONS.keys() + _GEN_SNAPSHOT_BARE_OPTIONS.keys())] + ["--strip", "--no-strip", "--deterministic"]
+    options = sorted(_GEN_SNAPSHOT_UINT_OPTIONS.keys() + _GEN_SNAPSHOT_BARE_OPTIONS.keys())
+    return ["--" + f for f in options] + ["--strip", "--no-strip", "--deterministic"]
 
 def _refuse_gen_snapshot_entry(label, entry):
     """Fails analysis for an `extra_gen_snapshot_options` entry on no allow-list.

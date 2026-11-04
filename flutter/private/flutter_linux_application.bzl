@@ -354,7 +354,15 @@ def linux_plugin_inputs(srcs, hdrs = [], include_dirs = []):
     """
     return struct(srcs = srcs, hdrs = hdrs, include_dirs = include_dirs)
 
-def compile_linux_runner(ctx, engine_files, defines, linux_sysroot, runner = linux_runner_inputs([]), registrant = linux_registrant_inputs([]), target_arch = "", plugins = linux_plugin_inputs([])):
+def compile_linux_runner(
+        ctx,
+        engine_files,
+        defines,
+        linux_sysroot,
+        runner = linux_runner_inputs([]),
+        registrant = linux_registrant_inputs([]),
+        target_arch = "",
+        plugins = linux_plugin_inputs([])):
     """Compile the C++ GTK Linux runner binary.
 
     Uses cc_common.compile() + cc_common.link() with Bazel's hermetic CC
@@ -395,7 +403,13 @@ def compile_linux_runner(ctx, engine_files, defines, linux_sysroot, runner = lin
     # #include directives resolve.  Also add their directories to the include
     # path so runner code can do #include "flutter/generated_plugin_registrant.h".
     all_header_files = header_files + registrant.hdrs + runner.hdrs + plugins.hdrs
-    extra_compile = _linux_runner_include_flags(runner.hdrs, registrant.hdrs, plugins.hdrs, plugins.srcs, plugins.include_dirs)
+    extra_compile = _linux_runner_include_flags(
+        runner.hdrs,
+        registrant.hdrs,
+        plugins.hdrs,
+        plugins.srcs,
+        plugins.include_dirs,
+    )
 
     return compile_and_link_runner(
         ctx = ctx,

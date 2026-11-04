@@ -110,7 +110,14 @@ def _write_application_manifest(ctx, native_assets_list, target_platform, target
     )
     return native_assets_manifest_file
 
-def _compile_application_kernel(ctx, flutter_sdk_info, target_platform, is_ios, native_assets_manifest_file, flutter_assets, recorded_uses):
+def _compile_application_kernel(
+        ctx,
+        flutter_sdk_info,
+        target_platform,
+        is_ios,
+        native_assets_manifest_file,
+        flutter_assets,
+        recorded_uses):
     """Runs Step 1: mode-aware kernel compilation."""
     return flutter_compile_kernel(
         ctx = ctx,
@@ -143,7 +150,10 @@ def _compile_application_aot(ctx, flutter_sdk_info, is_debug, is_ios, is_macos, 
     """
     if is_debug:
         return None, None, None, strip
-    extra_flags, extra_outputs, debug_info_output, obfuscation_map_output, strip = flutter_aot_gen_snapshot_flags(ctx, strip)
+    extra_flags, extra_outputs, debug_info_output, obfuscation_map_output, strip = flutter_aot_gen_snapshot_flags(
+        ctx,
+        strip,
+    )
     if is_ios or is_macos:
         aot_output = ctx.actions.declare_file(ctx.label.name + ".dylib")
         flutter_aot_macho_action(
@@ -151,7 +161,9 @@ def _compile_application_aot(ctx, flutter_sdk_info, is_debug, is_ios, is_macos, 
             gen_snapshot = flutter_sdk_info.gen_snapshot,
             kernel_dill = kernel_dill,
             output = aot_output,
-            macho = macho_snapshot_options(min_os_version = ctx.attr.min_os_version if ctx.attr.min_os_version else None),
+            macho = macho_snapshot_options(
+                min_os_version = ctx.attr.min_os_version if ctx.attr.min_os_version else None,
+            ),
             strip = strip,
             extra_flags = extra_flags,
             extra_outputs = extra_outputs,
@@ -251,7 +263,14 @@ def _application_dep_pairs(ctx, collect_native, field):
         for p in getattr(dep[FlutterInfo], field).to_list()
     ]
 
-def _write_dev_config(ctx, flutter_sdk_info, compilation, bundled_native_libs, binding_contracts, native_lib_sources, contract_files):
+def _write_dev_config(
+        ctx,
+        flutter_sdk_info,
+        compilation,
+        bundled_native_libs,
+        binding_contracts,
+        native_lib_sources,
+        contract_files):
     """Writes the hot-reload dev config (debug only) and returns extra default files.
 
     Mirrors flutter_web_application's `_dev_config.json`. Tells the dev tool
@@ -370,7 +389,14 @@ def _write_dev_config(ctx, flutter_sdk_info, compilation, bundled_native_libs, b
     extra_files.extend(contract_files)
     return extra_files
 
-def _application_default_files(flutter_assets, package_config, native_assets_manifest_file, bundled_native_libs, aot_output, is_debug, kernel_dill):
+def _application_default_files(
+        flutter_assets,
+        package_config,
+        native_assets_manifest_file,
+        bundled_native_libs,
+        aot_output,
+        is_debug,
+        kernel_dill):
     """Assembles the DefaultInfo file list, including the manifest-named code assets.
 
     The code-asset libraries join `default_files` with the manifest that names
@@ -430,11 +456,71 @@ def _application_providers(flutter_sdk_info, is_debug, outputs, plugins):
     providers.append(OutputGroupInfo(**output_groups))
     return providers
 
+def _application_default_files_with_dev_config(ctx, flutter_sdk_info, compilation, is_debug, built):
+    """The application's default files, plus the hot-reload dev config on a debug build.
+
+    Args:
+      ctx: The rule context.
+      flutter_sdk_info: The resolved `FlutterSdkInfo`.
+      compilation: The kernel compilation struct.
+      is_debug: Whether this is a debug build.
+      built: A struct of the files built so far: `flutter_assets`, `native_assets_manifest_file`, `native_libs`,
+        `bundled_code_assets` and `aot_output`.
+
+    Returns:
+      The list of default output Files.
+    """
+    bundled_native_libs = _index_bundled_libraries(built.native_libs, built.bundled_code_assets)
+
+    # What each of those libraries' bindings were generated from, when its build
+    # said so — see `flutter_native_library`. Keyed by the same paths, so a
+    # library with no contract is an empty list rather than a missing key: the dev
+    # tool has to tell "nothing describes this one" from "this one is not
+    # bundled", and they mean opposite things for a reload.
+    binding_contracts, contract_files = _index_library_pairs(
+        bundled_native_libs,
+        _application_dep_pairs(ctx, collect_binding_contracts, "binding_contracts"),
+        "contract",
+    )
+
+    # And what each is built from, on the same keys, so a reload can tell that a
+    # library went stale in an app that runs no build of its own.
+    native_lib_sources, _ = _index_library_pairs(
+        bundled_native_libs,
+        _application_dep_pairs(ctx, collect_native_source_pairs, "native_lib_sources"),
+        "sources",
+    )
+
+    default_files = _application_default_files(
+        built.flutter_assets,
+        compilation.package_config,
+        built.native_assets_manifest_file,
+        bundled_native_libs,
+        built.aot_output,
+        is_debug,
+        compilation.kernel_dill,
+    )
+
+    # Hot-reload dev config (debug only), mirroring flutter_web_application's
+    # `_dev_config.json`.
+    if is_debug and compilation.dev_package_config != None:
+        default_files.extend(
+            _write_dev_config(
+                ctx,
+                flutter_sdk_info,
+                compilation,
+                bundled_native_libs,
+                binding_contracts,
+                native_lib_sources,
+                contract_files,
+            ),
+        )
+    return default_files
+
 def _flutter_application_impl(ctx):
     flutter_sdk_info = resolve_flutter_sdk_info(ctx)
 
-    mode = flutter_build_mode(ctx)
-    is_debug = mode == "debug"
+    is_debug = flutter_build_mode(ctx) == "debug"
 
     # Profile strips like release, as `flutter build --profile` does: the
     # profiler names Dart code from the snapshot, not from native symbols.
@@ -471,30 +557,50 @@ def _flutter_application_impl(ctx):
     recorded_uses = ctx.actions.declare_file(ctx.label.name + ".recorded_uses.json") if run_link_hooks else None
 
     # Step 1: Kernel compilation (mode-aware: debug uses debug dill, no AOT).
-    compilation = _compile_application_kernel(ctx, flutter_sdk_info, target_platform, platform.is_ios, native_assets_manifest_file, flutter_assets, recorded_uses)
+    compilation = _compile_application_kernel(
+        ctx,
+        flutter_sdk_info,
+        target_platform,
+        platform.is_ios,
+        native_assets_manifest_file,
+        flutter_assets,
+        recorded_uses,
+    )
     kernel_dill = compilation.kernel_dill
     package_config = compilation.package_config
 
     # Step 2: AOT compile — choose format based on target platform.
-    aot_output, debug_info_output, obfuscation_map_output, strip = _compile_application_aot(ctx, flutter_sdk_info, is_debug, platform.is_ios, platform.is_macos, kernel_dill, strip)
+    aot_output, debug_info_output, obfuscation_map_output, strip = _compile_application_aot(
+        ctx,
+        flutter_sdk_info,
+        is_debug,
+        platform.is_ios,
+        platform.is_macos,
+        kernel_dill,
+        strip,
+    )
 
     native_libs = _collect_application_native_libs(ctx)
 
     # Step 2b: package link hooks over the recorded uses. Each emits the data
     # assets declared in `link_hook_assets`, bundled below beside the native
     # assets' data assets.
-    transitive_data_assets, link_hook_validation = _run_application_link_hooks(ctx, run_link_hooks, recorded_uses, transitive_data_assets)
+    transitive_data_assets, link_hook_validation = _run_application_link_hooks(
+        ctx,
+        run_link_hooks,
+        recorded_uses,
+        transitive_data_assets,
+    )
 
     # Step 3: Shader compilation + asset bundle. Pass data assets so the
     # bundler places them under flutter_assets/packages/<pkg>/<name>.
-    compiled_shaders = flutter_compile_shaders(ctx, flutter_sdk_info, target_platform)
     flutter_build_assets(
         ctx = ctx,
         flutter_sdk_info = flutter_sdk_info,
         output_dir = flutter_assets,
         bundle = make_bundle_inputs(
             target_platform = target_platform,
-            compiled_shaders = compiled_shaders,
+            compiled_shaders = flutter_compile_shaders(ctx, flutter_sdk_info, target_platform),
             kernel_dill = kernel_dill,
             is_debug = is_debug,
             data_assets = transitive_data_assets,
@@ -507,33 +613,14 @@ def _flutter_application_impl(ctx):
     # library graph and does not contribute to another one.
     plugins = _aggregate_application_plugins(ctx)
 
-    bundled_native_libs = _index_bundled_libraries(native_libs, bundled_code_assets)
-
-    # What each of those libraries' bindings were generated from, when its build
-    # said so — see `flutter_native_library`. Keyed by the same paths, so a
-    # library with no contract is an empty list rather than a missing key: the dev
-    # tool has to tell "nothing describes this one" from "this one is not
-    # bundled", and they mean opposite things for a reload.
-    binding_contracts, contract_files = _index_library_pairs(
-        bundled_native_libs,
-        _application_dep_pairs(ctx, collect_binding_contracts, "binding_contracts"),
-        "contract",
+    built = struct(
+        flutter_assets = flutter_assets,
+        native_assets_manifest_file = native_assets_manifest_file,
+        native_libs = native_libs,
+        bundled_code_assets = bundled_code_assets,
+        aot_output = aot_output,
     )
-
-    # And what each is built from, on the same keys, so a reload can tell that a
-    # library went stale in an app that runs no build of its own.
-    native_lib_sources, _ = _index_library_pairs(
-        bundled_native_libs,
-        _application_dep_pairs(ctx, collect_native_source_pairs, "native_lib_sources"),
-        "sources",
-    )
-
-    default_files = _application_default_files(flutter_assets, package_config, native_assets_manifest_file, bundled_native_libs, aot_output, is_debug, kernel_dill)
-
-    # Hot-reload dev config (debug only), mirroring flutter_web_application's
-    # `_dev_config.json`.
-    if is_debug and compilation.dev_package_config != None:
-        default_files.extend(_write_dev_config(ctx, flutter_sdk_info, compilation, bundled_native_libs, binding_contracts, native_lib_sources, contract_files))
+    default_files = _application_default_files_with_dev_config(ctx, flutter_sdk_info, compilation, is_debug, built)
 
     outputs = struct(
         kernel_dill = kernel_dill,

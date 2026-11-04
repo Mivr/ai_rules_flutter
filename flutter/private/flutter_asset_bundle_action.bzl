@@ -255,7 +255,27 @@ def make_bundle_content(assets = [], fonts = [], notices = "", license_files = [
         extra_asset_copies = extra_asset_copies,
     )
 
-def make_tree_shake(dart = None, flutter_sdk_files = None, const_finder = None, font_subset = None, kernel_dill = None, kernel_dills = [], tree_shake_key = ""):
+def kernel_dills_of(compiled):
+    """The kernel dills a bundle or tree-shake struct names: `kernel_dills`, else the single `kernel_dill`.
+
+    Args:
+      compiled: A struct with `kernel_dills` (a list, possibly empty) and `kernel_dill` (a File or None).
+
+    Returns:
+      A new list of the kernel dill Files, empty when there are none.
+    """
+    if compiled.kernel_dills:
+        return list(compiled.kernel_dills)
+    return [compiled.kernel_dill] if compiled.kernel_dill != None else []
+
+def make_tree_shake(
+        dart = None,
+        flutter_sdk_files = None,
+        const_finder = None,
+        font_subset = None,
+        kernel_dill = None,
+        kernel_dills = [],
+        tree_shake_key = ""):
     """The icon tree-shaking toolchain and kernels for a bundle action.
 
     Every field is None or empty when tree shaking is off; the action then
@@ -373,7 +393,7 @@ def flutter_asset_bundle_action(ctx, content, shaking, output_dir):
     }
 
     # Icon tree shaking config.
-    all_kernel_dills = list(shaking.kernel_dills) if shaking.kernel_dills else ([shaking.kernel_dill] if shaking.kernel_dill != None else [])
+    all_kernel_dills = kernel_dills_of(shaking)
     extra_inputs = []
     transitive_inputs = []
     if shaking.const_finder and shaking.font_subset and all_kernel_dills:
@@ -407,7 +427,8 @@ def flutter_asset_bundle_action(ctx, content, shaking, output_dir):
             output_dir.path,
         ],
         inputs = depset(
-            direct = [config_file] + [entry.file for entry in content.assets] + extra_files + content.license_files + extra_inputs,
+            direct = [config_file] + [entry.file for entry in content.assets] + extra_files + content.license_files +
+                     extra_inputs,
             transitive = transitive_inputs,
         ),
         outputs = [output_dir],

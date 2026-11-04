@@ -25,7 +25,6 @@ load(
     "kernel_link_action",
     "kernel_package_config",
     "kernel_packages_consistent",
-    "kernel_tools_for",
     "library_source_uri",
     "modular_kernel_conditions",
     "modular_kernel_eligible",
@@ -42,6 +41,14 @@ load(
     "package_lib_prefix",
     "stage_generated_inputs",
     "synthesize_app_package",
+)
+load(
+    "//flutter/private:flutter_kernel_tools.bzl",
+    "flutter_kernel_tools_for",
+    "has_comma_defines",
+    "is_same_sdk",
+    "kernel_worker_defines",
+    "reject_global_extra_defines",
 )
 load(
     "//flutter/private:flutter_test_common.bzl",
@@ -97,159 +104,6 @@ def _no_flutter_kernel_module():
             product_kernel_info = empty,
         ),
     ]
-
-def _global_extra_defines(ctx):
-    defines = []
-    if hasattr(ctx.attr, "_extra_dart_defines") and ctx.attr._extra_dart_defines != None:
-        defines.extend(ctx.attr._extra_dart_defines[BuildSettingInfo].value)
-    return defines
-
-def _reject_global_extra_defines(ctx, what):
-    """Fails a custom modular kernel analysed with a global `extra_dart_defines`.
-
-    A custom kernel has no whole-program fallback, so a flag-bearing global
-    cannot quietly split the closure: the `deps` edge resets it for the
-    dependency modules while the entry would keep it. Refuse it unless the
-    target knowingly opts out with `ignore_global_dart_defines`.
-
-    Args:
-      ctx: The custom rule context. Must merge `FLUTTER_MODULAR_KERNEL_ATTRS`
-        (which provides `ignore_global_dart_defines`).
-      what: The calling function name, for error messages.
-    """
-    global_defines = _global_extra_defines(ctx)
-    if global_defines and not getattr(ctx.attr, "ignore_global_dart_defines", False):
-        fail("%s: %s refuses global //flutter:extra_dart_defines %s: the dependency modules are keyed and built without it, so the entry compile takes none of it either; set `ignore_global_dart_defines = True` to build without the global defines, or compile whole-program with `flutter_kernel_compile_action` when the defines must reach the kernel" % (ctx.label, what, global_defines))
-
-def _has_comma_defines(ctx):
-    return any(["," in d for d in _global_extra_defines(ctx)])
-
-def _kernel_worker_defines(ctx):
-    """Returns global `extra_dart_defines` entries supported by `kernel_worker`.
-
-    `kernel_worker`'s `ArgParser` declares `-D` / `--define` with `package:args`'s
-    default `splitCommas: true`, so a define whose value contains `,` (such as
-    `e2e/hello_world/.bazelrc`'s `E2E_FLAG=from,flag`) would be split at the
-    comma and rejected with `FormatException: no value given to -D option`.
-    When any global define contains `,`, `_has_comma_defines(ctx)` disables
-    modular kernel compilation so targets fall back to whole-program
-    `frontend_server` compilation instead of silently dropping the define.
-    A custom modular kernel that set `ignore_global_dart_defines` builds its
-    whole closure without the flag (the `deps` edge resets it for the
-    dependency modules), so the entry compile takes none of it either.
-    """
-    if getattr(ctx.attr, "ignore_global_dart_defines", False):
-        return []
-    return [
-        d
-        for d in _global_extra_defines(ctx)
-        if "," not in d
-    ]
-
-def _sdk_root_from_dart(dart_file):
-    p = dart_file.path
-    for suffix in ("/bin/dart", "/bin/dart.exe"):
-        if p.endswith(suffix):
-            return p[:-len(suffix)]
-    return p
-
-def is_same_sdk(exec_tools, flutter_sdk_info):
-    """Returns True when `exec_tools` and `flutter_sdk_info` refer to the same Dart SDK.
-
-    Compares executable file identity (`dartaotruntime`, then `dart`), falling back
-    to SDK version string comparison when neither executable pair is present.
-
-    Args:
-      exec_tools: The kernel tools struct (e.g. from `kernel_tools_for(ctx)`).
-      flutter_sdk_info: `FlutterSdkInfo` from the active Flutter toolchain.
-
-    Returns:
-      `True` if both toolchains refer to the same Dart SDK, else `False`.
-    """
-    if exec_tools == None or flutter_sdk_info == None:
-        return False
-    exec_aot = getattr(exec_tools, "dartaotruntime", None)
-    flutter_aot = getattr(flutter_sdk_info, "dartaotruntime", None)
-    if exec_aot != None and flutter_aot != None:
-        return exec_aot == flutter_aot
-    exec_dart = getattr(exec_tools, "dart", None)
-    flutter_dart = getattr(flutter_sdk_info, "dart", None)
-    if exec_dart != None and flutter_dart != None:
-        return exec_dart == flutter_dart
-    exec_version = getattr(exec_tools, "version", None)
-    flutter_version = getattr(flutter_sdk_info, "version", None)
-    if exec_version != None and flutter_version != None:
-        return exec_version == flutter_version
-    return False
-
-def find_flutter_kernel_module_tools(flutter_sdk_info, exec_tools = None):
-    """Selects kernel module tools matching `flutter_sdk_info`'s bundled Dart SDK.
-
-    When `exec_tools` is already from the same SDK (`is_same_sdk(exec_tools, flutter_sdk_info)`),
-    returns `exec_tools` directly. When `@rules_dart`'s standalone toolchain resolved
-    ahead of `@flutter_toolchains`, locates `kernel_worker_aot.dart.snapshot` and
-    `libraries.json` in `flutter_sdk_info.tool_files` so modular `.flutter.kmod`
-    compilation runs the `kernel_worker` and `dartaotruntime` matching
-    `flutter_sdk_info.platform_kernel_dill` and `flutter_tester`, while keeping
-    `exec_tools`'s outer VM (`dart`, `dartvm`, `runtime_files`, `version`) that
-    launches the `@rules_dart//dart/private/tools:kernel_module` tool.
-
-    Args:
-      flutter_sdk_info: `FlutterSdkInfo` from the active Flutter toolchain.
-      exec_tools: Optional struct from `kernel_tools_for(ctx)`.
-
-    Returns:
-      A kernel tools struct whose `dartaotruntime`, `kernel_worker`, and
-      `libraries_json` match `flutter_sdk_info`, or `None` if `flutter_sdk_info`
-      lacks the required files.
-    """
-    if flutter_sdk_info == None or flutter_sdk_info.dart == None or flutter_sdk_info.dartaotruntime == None:
-        return None
-    if exec_tools != None and is_same_sdk(exec_tools, flutter_sdk_info):
-        return exec_tools
-
-    sdk_root = _sdk_root_from_dart(flutter_sdk_info.dart)
-    dartvm_paths = (sdk_root + "/bin/dartvm", sdk_root + "/bin/dartvm.exe")
-    wanted = {
-        "kernel_worker": sdk_root + "/bin/snapshots/kernel_worker_aot.dart.snapshot",
-        "libraries_json": sdk_root + "/lib/libraries.json",
-    }
-    dartvm = None
-    found = {}
-    for f in flutter_sdk_info.tool_files.to_list():
-        if f.path in dartvm_paths:
-            dartvm = f
-        for key, path in wanted.items():
-            if f.path == path:
-                found[key] = f
-    if len(found) != len(wanted):
-        return None
-
-    return struct(
-        dart = exec_tools.dart if exec_tools != None else flutter_sdk_info.dart,
-        dartvm = exec_tools.dartvm if exec_tools != None else dartvm,
-        runtime_files = exec_tools.runtime_files if exec_tools != None else flutter_sdk_info.dart_vm_files,
-        dartaotruntime = flutter_sdk_info.dartaotruntime,
-        kernel_worker = found["kernel_worker"],
-        platform_dill = flutter_sdk_info.platform_kernel_dill,
-        libraries_json = found["libraries_json"],
-        version = exec_tools.version if exec_tools != None else flutter_sdk_info.version,
-    )
-
-def flutter_kernel_tools_for(ctx, flutter_sdk_info):
-    """Returns kernel module tools whose compiler matches `flutter_sdk_info`, or `None`.
-
-    Args:
-      ctx: Rule or aspect context declaring `MODULAR_KERNEL_TOOLCHAINS`.
-      flutter_sdk_info: `FlutterSdkInfo` from the active Flutter toolchain.
-
-    Returns:
-      The kernel tools struct matching `flutter_sdk_info`, or `None`.
-    """
-    exec_tools = kernel_tools_for(ctx)
-    if exec_tools == None or flutter_sdk_info == None:
-        return None
-    return find_flutter_kernel_module_tools(flutter_sdk_info, exec_tools = exec_tools)
 
 def _own_package_record(info):
     """Returns the `DartPackageInfo` for the package a `DartInfo` itself owns."""
@@ -378,6 +232,11 @@ def _kernel_module_source_args(args, module, excluded, unused_inputs_list, optio
     if module.extra_inputs:
         args.add_all(module.extra_inputs, before_each = "--input-source")
 
+def _optional_kernel_outputs(module, unused_inputs_list):
+    """The unused-inputs list and the outline, for those the module declares."""
+    outputs = [unused_inputs_list] if unused_inputs_list != None else []
+    return outputs + ([module.koutline] if module.koutline != None else [])
+
 def _kernel_module_tool_inputs(ctx, tools, args, direct_inputs, action_tools):
     """Pick the kernel worker executable and register its tool inputs.
 
@@ -467,7 +326,14 @@ def flutter_kernel_module_action(ctx, tools, module, options):
     Returns:
       The declared VM exclusion report file.
     """
-    sources, package_config, stage = _kernel_module_staged_inputs(ctx, module.sources, module.output, module.extra_inputs, module.packages, options.scheme)
+    sources, package_config, stage = _kernel_module_staged_inputs(
+        ctx,
+        module.sources,
+        module.output,
+        module.extra_inputs,
+        module.packages,
+        options.scheme,
+    )
     sdk = _resolve_module_sdk(tools = tools, options = options)
     excluded = ctx.actions.declare_file(module.output.basename + ".vm_excluded.txt")
     if options.unused_inputs:
@@ -478,8 +344,20 @@ def flutter_kernel_module_action(ctx, tools, module, options):
     else:
         unused_inputs_list = None
 
-    args = _kernel_module_base_args(ctx = ctx, package_config = package_config, stage = stage, sdk = sdk, options = options)
-    _kernel_module_source_args(args = args, module = module, excluded = excluded, unused_inputs_list = unused_inputs_list, options = options)
+    args = _kernel_module_base_args(
+        ctx = ctx,
+        package_config = package_config,
+        stage = stage,
+        sdk = sdk,
+        options = options,
+    )
+    _kernel_module_source_args(
+        args = args,
+        module = module,
+        excluded = excluded,
+        unused_inputs_list = unused_inputs_list,
+        options = options,
+    )
 
     direct_inputs = [
         package_config,
@@ -511,7 +389,7 @@ def flutter_kernel_module_action(ctx, tools, module, options):
             direct = action_tools,
             transitive = [r for r in [getattr(tools, "runtime_files", None)] if r != None],
         ),
-        outputs = [module.output, excluded] + ([unused_inputs_list] if unused_inputs_list != None else []) + ([module.koutline] if module.koutline != None else []),
+        outputs = [module.output, excluded] + _optional_kernel_outputs(module, unused_inputs_list),
         unused_inputs_list = unused_inputs_list,
         mnemonic = "DartKernel",
         progress_message = "Compiling Dart kernel module %s" % module.output.short_path,
@@ -546,13 +424,16 @@ def _is_opaque_module(ctx, dart_info, package_name, lib_root, own_record, own_sr
     if not has_srcs_attr and dart_info.transitive_srcs.to_list() != [] and len(rule_deps) == 0:
         opaque = True
     prefix = package_lib_prefix(lib_root)
-    if own_srcs and (not package_name or own_record == None or any([not f.short_path.startswith(prefix) for f in own_srcs])):
+    outside_lib = any([not f.short_path.startswith(prefix) for f in own_srcs])
+    if own_srcs and (not package_name or own_record == None or outside_lib):
         opaque = True
     return opaque
 
 def _modular_gate_open(ctx, opaque, enabled, tools, same_sdk, flutter_sdk_info):
     """Whether every modular-kernel precondition holds for this evaluation."""
-    return not opaque and enabled and not _has_comma_defines(ctx) and tools != None and same_sdk and flutter_sdk_info != None and flutter_sdk_info.platform_kernel_dill != None
+    if opaque or not enabled or has_comma_defines(ctx) or tools == None or not same_sdk:
+        return False
+    return flutter_sdk_info != None and flutter_sdk_info.platform_kernel_dill != None
 
 def _collect_dep_mod_infos(rule_deps):
     """The dep `FlutterKernelModuleInfo` values, or None when a dep opted out."""
@@ -591,9 +472,9 @@ def _modular_dep_closures(target, dep_kernels, rule_deps, own_srcs):
     )
     upstream_excluded = depset(transitive = [k.closure_excluded for k in dep_kernels])
     has_cross_pkg_cycle = False
-    cross_pkg_srcs = (
-        depset(own_srcs, transitive = [collect_transitive_srcs(rule_deps)]) if has_cross_pkg_cycle else depset(transitive = [k.cross_pkg_srcs for k in dep_kernels])
-    )
+    cross_pkg_srcs = depset(transitive = [k.cross_pkg_srcs for k in dep_kernels])
+    if has_cross_pkg_cycle:
+        cross_pkg_srcs = depset(own_srcs, transitive = [collect_transitive_srcs(rule_deps)])
     owned = depset(
         [(str(target.label), f.short_path) for f in own_srcs],
         transitive = [k.owned for k in dep_kernels],
@@ -694,7 +575,7 @@ def _compile_main_kmod(ctx, tools, flutter_sdk_info, spec):
         for f in spec.own_srcs
     ]
     deduped_packages = first_per_package(spec.records)
-    worker_defines = _kernel_worker_defines(ctx)
+    worker_defines = kernel_worker_defines(ctx)
     excluded = flutter_kernel_module_action(
         ctx = ctx,
         tools = tools,
@@ -799,7 +680,11 @@ def _compile_product_kmod(ctx, tools, flutter_sdk_info, spec):
         kmod = product_kmod,
         koutline = product_koutline,
         transitive_kmods = depset(order = "postorder", direct = [product_kmod], transitive = [product_dep_closure]),
-        transitive_koutlines = depset(order = "postorder", direct = [product_koutline], transitive = [product_dep_outline_closure]),
+        transitive_koutlines = depset(
+            order = "postorder",
+            direct = [product_koutline],
+            transitive = [product_dep_outline_closure],
+        ),
         modular = True,
         closure_excluded = depset(direct = [product_excluded], transitive = [product_upstream_excluded]),
         cross_pkg_srcs = spec.cross_pkg_srcs,
@@ -876,7 +761,16 @@ def _compile_target_kernels(ctx, tools, flutter_sdk_info, target_name, package_n
             upstream_excluded = job.upstream_excluded,
         ),
     )
-    base_dill, base_keys, base_kmods = _link_flutter_test_base(ctx, target_name, package_name, kmod, job.dep_closure, job.base_dill, job.base_keys, job.base_kmods)
+    base_dill, base_keys, base_kmods = _link_flutter_test_base(
+        ctx,
+        target_name,
+        package_name,
+        kmod,
+        job.dep_closure,
+        job.base_dill,
+        job.base_keys,
+        job.base_kmods,
+    )
 
     if job.product_modular:
         product_kernel_info = _compile_product_kmod(
@@ -937,7 +831,12 @@ def _flutter_kernel_module_aspect_impl(target, ctx):
     if dep == None:
         return _no_flutter_kernel_module()
 
-    dep_closure, dep_outline_closure, upstream_excluded, cross_pkg_srcs, owned, edges = _modular_dep_closures(target, dep.dep_kernels, rule_deps, own_srcs)
+    dep_closure, dep_outline_closure, upstream_excluded, cross_pkg_srcs, owned, edges = _modular_dep_closures(
+        target,
+        dep.dep_kernels,
+        rule_deps,
+        own_srcs,
+    )
     base_dill, base_keys, base_kmods = _find_dep_base_dill(dep.dep_kernels)
 
     if not own_srcs:
@@ -1037,7 +936,7 @@ def _compile_flutter_entry_module(
             ),
         ),
         options = struct(
-            defines = _kernel_worker_defines(ctx),
+            defines = kernel_worker_defines(ctx),
             exclude_non_sources = True,
             droppable = False,
             target = "flutter",
@@ -1090,7 +989,14 @@ def _link_flutter_test_entry_module(ctx, dep_kernels, entry, output):
     )
     return base_dill
 
-def flutter_modular_test_tools(ctx, flutter_sdk_info, own_files, packages, native_assets_list, tools = None, product = False):
+def flutter_modular_test_tools(
+        ctx,
+        flutter_sdk_info,
+        own_files,
+        packages,
+        native_assets_list,
+        tools = None,
+        product = False):
     """Decides whether a target compiles modularly, and with which tools.
 
     Args:
@@ -1109,11 +1015,13 @@ def flutter_modular_test_tools(ctx, flutter_sdk_info, own_files, packages, nativ
       must fall back to whole-program `FlutterKernelCompile`.
     """
     enabled = ctx.attr._modular_kernel[BuildSettingInfo].value if hasattr(ctx.attr, "_modular_kernel") else False
-    platform_dill = (
-        flutter_sdk_info.platform_kernel_dill_product if product and flutter_sdk_info != None else (flutter_sdk_info.platform_kernel_dill if flutter_sdk_info != None else None)
-    )
+    platform_dill = None
+    if flutter_sdk_info != None:
+        platform_dill = flutter_sdk_info.platform_kernel_dill
+        if product:
+            platform_dill = flutter_sdk_info.platform_kernel_dill_product
     opted_out = getattr(ctx.attr, "ignore_global_dart_defines", False)
-    if not enabled or (_has_comma_defines(ctx) and not opted_out) or platform_dill == None:
+    if not enabled or (has_comma_defines(ctx) and not opted_out) or platform_dill == None:
         return None
     if tools == None:
         tools = flutter_kernel_tools_for(ctx, flutter_sdk_info)
@@ -1318,7 +1226,7 @@ def _flutter_modular_custom_tools(ctx, deps, own_files, packages, what):
     flutter_sdk_info = flutter_toolchain.flutter_sdk_info if flutter_toolchain else None
     if flutter_sdk_info == None or flutter_sdk_info.platform_kernel_dill == None:
         fail("%s: %s needs a Flutter SDK with a debug platform kernel dill" % (ctx.label, what))
-    _reject_global_extra_defines(ctx, what)
+    reject_global_extra_defines(ctx, what)
     if ctx.attr.defines:
         fail("%s: %s does not accept defines (%s); the built-in rules fall back to a whole-program compile for targets with defines, but a custom modular kernel has no fallback" % (ctx.label, what, ctx.attr.defines))
     native_assets = depset(transitive = [

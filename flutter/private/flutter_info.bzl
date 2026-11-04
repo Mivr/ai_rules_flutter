@@ -47,7 +47,11 @@ def flutter_asset_channels(asset_dirs = [], assets = [], shader_srcs = [], apple
         apple_privacy_manifests = apple_privacy_manifests,
     )
 
-def flutter_plugin_libraries(apple_plugin_libraries = [], android_plugin_libraries = [], linux_plugin_libraries = [], windows_plugin_libraries = []):
+def flutter_plugin_libraries(
+        apple_plugin_libraries = [],
+        android_plugin_libraries = [],
+        linux_plugin_libraries = [],
+        windows_plugin_libraries = []):
     """Groups what a target contributes to the per-platform plugin channels.
 
     One channel per platform rather than one tagged union, because the
@@ -76,7 +80,12 @@ def flutter_plugin_libraries(apple_plugin_libraries = [], android_plugin_librari
         windows_plugin_libraries = windows_plugin_libraries,
     )
 
-def flutter_native_channels(native_libs = [], native_lib_sources = [], binding_contracts = [], native_assets = [], data_assets = []):
+def flutter_native_channels(
+        native_libs = [],
+        native_lib_sources = [],
+        binding_contracts = [],
+        native_assets = [],
+        data_assets = []):
     """Groups what a target contributes to the native-code channels.
 
     Args:
@@ -259,7 +268,13 @@ def collect_flutter_plugin_deps(deps):
         windows_plugin_libraries = depset(transitive = windows_plugin_lib_depsets),
     )
 
-def flutter_info(deps = [], plugins = [], asset_channels = None, plugin_libraries = None, native_channels = None, pub_channels = None):
+def flutter_info(
+        deps = [],
+        plugins = [],
+        asset_channels = None,
+        plugin_libraries = None,
+        native_channels = None,
+        pub_channels = None):
     """Builds a `FlutterInfo`, merging its dependencies' contributions.
 
     The caller supplies only what this target contributes itself, grouped into

@@ -123,7 +123,15 @@ def _prepare_macos_framework_binary(ctx, dart_exe, dart_vm_files, app_info, is_d
     )
     return prepared_binary
 
-def _macos_framework_assemble_inputs(ctx, flutter_sdk_info, app_info, flutter_assets, prepared_binary, prepared_plist, stage_dir, framework_zip):
+def _macos_framework_assemble_inputs(
+        ctx,
+        flutter_sdk_info,
+        app_info,
+        flutter_assets,
+        prepared_binary,
+        prepared_plist,
+        stage_dir,
+        framework_zip):
     """Builds the assemble action's inputs and args, including debug kernel inputs.
 
     In debug mode, places the kernel dill and VM snapshots into
@@ -226,12 +234,29 @@ def _flutter_macos_framework_impl(ctx):
     # `[framework_zip]` and no stale stage content can enter the zip.
     framework_zip = ctx.actions.declare_file("%s/App.framework.zip" % ctx.label.name)
     stage_dir = framework_zip.path + ".stage"
-    prepared_binary = _prepare_macos_framework_binary(ctx, dart_exe, dart_vm_files, app_info, is_debug, stub_arch, minimum_os_version)
+    prepared_binary = _prepare_macos_framework_binary(
+        ctx,
+        dart_exe,
+        dart_vm_files,
+        app_info,
+        is_debug,
+        stub_arch,
+        minimum_os_version,
+    )
 
     prepared_plist = ctx.actions.declare_file("%s_macho/Info.plist" % ctx.label.name)
     ctx.actions.write(prepared_plist, _APP_FRAMEWORK_INFO_PLIST)
 
-    inputs, assemble_args = _macos_framework_assemble_inputs(ctx, flutter_sdk_info, app_info, flutter_assets, prepared_binary, prepared_plist, stage_dir, framework_zip)
+    inputs, assemble_args = _macos_framework_assemble_inputs(
+        ctx,
+        flutter_sdk_info,
+        app_info,
+        flutter_assets,
+        prepared_binary,
+        prepared_plist,
+        stage_dir,
+        framework_zip,
+    )
 
     ctx.actions.run(
         executable = dart_exe,

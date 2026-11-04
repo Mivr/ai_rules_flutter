@@ -241,7 +241,16 @@ def flutter_shader_compile_action(
     # symlink containing undeclared sibling files).
     staged_files, include_dirs = _stage_shader_includes(ctx, output, job.file, job.includes)
 
-    args = _shader_compile_args(ctx, output, spirv_output, job.file, platform_flags, is_web, include_dirs, shader_lib_dir)
+    args = _shader_compile_args(
+        ctx,
+        output,
+        spirv_output,
+        job.file,
+        platform_flags,
+        is_web,
+        include_dirs,
+        shader_lib_dir,
+    )
 
     inputs = [job.file] + tools.shader_lib + list(job.includes) + staged_files
     _run_shader_compile(

@@ -14,7 +14,12 @@ load("@rules_apple//apple:versioning.bzl", "apple_bundle_version")
 load("@rules_swift//swift:swift.bzl", "swift_library")
 load("//flutter/private:constants.bzl", _MACOS_MINIMUM_OS_VERSION = "MACOS_MINIMUM_OS_VERSION")
 load("//flutter/private:flutter_apple_plugins_aggregator.bzl", _flutter_apple_plugins_aggregator = "flutter_apple_plugins_aggregator")
-load("//flutter/private:flutter_macos_application.bzl", _flutter_macos_framework_rule = "flutter_macos_framework", _flutter_macos_native_libs_rule = "flutter_macos_native_libs", _flutter_macos_privacy_manifests_rule = "flutter_macos_privacy_manifests")
+load(
+    "//flutter/private:flutter_macos_application.bzl",
+    _flutter_macos_framework_rule = "flutter_macos_framework",
+    _flutter_macos_native_libs_rule = "flutter_macos_native_libs",
+    _flutter_macos_privacy_manifests_rule = "flutter_macos_privacy_manifests",
+)
 load("//flutter/private:flutter_macos_registrant.bzl", _flutter_macos_registrant_rule = "flutter_macos_registrant")
 load("//flutter/private:flutter_plist_merge.bzl", _flutter_entitlements_merge = "flutter_entitlements_merge", _flutter_plist_merge = "flutter_plist_merge")
 load("//flutter/private:flutter_xtool_bundle.bzl", _flutter_darwin_xcframework_import = "flutter_darwin_xcframework_import", _flutter_xtool_macos_bundle = "flutter_xtool_macos_bundle")
@@ -126,8 +131,16 @@ def _macos_resolve_entitlements(name, entitlements, additional_entitlements, int
         resolved = "__%s_entitlements" % name
     return resolved
 
-def _macos_build_frameworks(name, application, minimum_os_version, allow_non_macho, backend, engine, internal_tags):
+def _macos_build_frameworks(name, application, patching, backend, engine, internal_tags):
     """Emits the registrant, App.framework, native libs and engine targets.
+
+    Args:
+      name: The app name; internal targets derive from it.
+      application: The flutter_application target.
+      patching: Struct of `minimum_os_version` and `allow_non_macho`.
+      backend: Apple bundling backend.
+      engine: The caller's engine target, or None to generate one.
+      internal_tags: Tags for the generated targets.
 
     Returns:
       The engine target label to link the runner against.
@@ -144,8 +157,8 @@ def _macos_build_frameworks(name, application, minimum_os_version, allow_non_mac
     _flutter_macos_framework_rule(
         name = "__%s_app_framework" % name,
         application = application,
-        minimum_os_version = minimum_os_version,
-        allow_non_macho = allow_non_macho,
+        minimum_os_version = patching.minimum_os_version,
+        allow_non_macho = patching.allow_non_macho,
         tags = internal_tags,
     )
 
@@ -153,8 +166,8 @@ def _macos_build_frameworks(name, application, minimum_os_version, allow_non_mac
     _flutter_macos_native_libs_rule(
         name = "__%s_native_libs" % name,
         application = application,
-        minimum_os_version = minimum_os_version,
-        allow_non_macho = allow_non_macho,
+        minimum_os_version = patching.minimum_os_version,
+        allow_non_macho = patching.allow_non_macho,
         tags = internal_tags,
     )
 
@@ -319,8 +332,18 @@ def _macos_emit_rules_apple_bundle(name, bundle):
         **bundle.kwargs
     )
 
-def _macos_emit_xtool_bundle(name, bundle, invalid_version_error, additional_contents, menu_xib, runner_srcs, runner_deps, engine_target):
-    """Emits the final xtool macOS bundle target, forwarding only its kwargs."""
+def _macos_emit_xtool_bundle(name, bundle, invalid_version_error, additional_contents, menu_xib, runner, engine_target):
+    """Emits the final xtool macOS bundle target, forwarding only its kwargs.
+
+    Args:
+        name: The app name; internal targets derive from it.
+        bundle: The final bundle's settings struct.
+        invalid_version_error: The version error the rule reports, or None.
+        additional_contents: The caller's extra bundle contents.
+        menu_xib: The caller's main menu `.xib`, or None to discover one.
+        runner: Struct of the runner's `srcs` and `deps`.
+        engine_target: The engine target the bundle links.
+    """
     valid_xtool_kwargs = (
         "build_version",
         "certificate",
@@ -356,10 +379,10 @@ def _macos_emit_xtool_bundle(name, bundle, invalid_version_error, additional_con
         menu_xib = xtool_menu_xib,
         app_icons = bundle.app_icons if bundle.app_icons != None else [],
         infoplists = [bundle.actual_info_plist],
-        srcs = runner_srcs,
+        srcs = runner.srcs,
         registrant = ":__%s_registrant" % name,
         plugins = [":__%s_apple_plugins" % name],
-        deps = runner_deps,
+        deps = runner.deps,
         frameworks = [
             ":__%s_app_framework" % name,
             engine_target,
@@ -514,13 +537,7 @@ def flutter_macos_app(
     tags = kwargs.pop("tags", ["manual"])
     internal_tags = tags if "manual" in tags else tags + ["manual"]
     visibility = kwargs.pop("visibility", None)
-    validate_minimum_os_version(
-        "flutter_macos_app",
-        name,
-        minimum_os_version,
-        _MACOS_MINIMUM_OS_VERSION,
-        "macOS",
-    )
+    validate_minimum_os_version("flutter_macos_app", name, minimum_os_version, _MACOS_MINIMUM_OS_VERSION, "macOS")
 
     module_name = runner_module_name("flutter_macos_app", name)
 
@@ -535,7 +552,8 @@ def flutter_macos_app(
 
     # -- Internal targets (all __{name}_ prefixed) --
 
-    engine_target = _macos_build_frameworks(name, application, minimum_os_version, allow_non_macho, backend, engine, internal_tags)
+    patching = struct(minimum_os_version = minimum_os_version, allow_non_macho = allow_non_macho)
+    engine_target = _macos_build_frameworks(name, application, patching, backend, engine, internal_tags)
 
     # 5. Discover runner Swift sources and build swift_library.
     runner_srcs = _macos_discover_runner_srcs(srcs)
@@ -550,7 +568,8 @@ def flutter_macos_app(
         tags = internal_tags,
     )
 
-    _macos_build_runner(name, backend, menu_xib, display_name, module_name, struct(srcs = runner_srcs, deps = runner_deps), engine_target, internal_tags)
+    runner = struct(srcs = runner_srcs, deps = runner_deps)
+    _macos_build_runner(name, backend, menu_xib, display_name, module_name, runner, engine_target, internal_tags)
 
     # 6b. App icon — the conventional catalog `flutter create` writes, unless
     #     the caller named something else. Discovered for the same reason the
@@ -598,4 +617,12 @@ def flutter_macos_app(
     if backend == "rules_apple":
         _macos_emit_rules_apple_bundle(name, bundle)
     else:
-        _macos_emit_xtool_bundle(name, bundle, invalid_version_error, additional_contents, menu_xib, runner_srcs, runner_deps, engine_target)
+        _macos_emit_xtool_bundle(
+            name,
+            bundle,
+            invalid_version_error,
+            additional_contents,
+            menu_xib,
+            runner,
+            engine_target,
+        )
