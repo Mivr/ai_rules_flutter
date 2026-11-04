@@ -85,22 +85,29 @@ def write_plugin_modulemap(ctx, module_name, headers):
     return modulemap_file
 
 def collect_plugin_dep_infos(ctx):
-    """Collect CcInfo, SwiftInfo and framework files from the plugin's deps.
+    """Collect CcInfo, SwiftInfo and framework infos from the plugin's deps.
 
     Args:
         ctx: The rule context of the rule implementation that calls this helper.
 
     Returns:
-        struct(cc_infos, swift_infos, framework_files).
+        struct(cc_infos, swift_infos, framework_infos).
     """
     return struct(
         cc_infos = [dep[CcInfo] for dep in ctx.attr.deps if CcInfo in dep],
         swift_infos = [dep[SwiftInfo] for dep in ctx.attr.deps if SwiftInfo in dep],
-        framework_files = [
-            dep[FlutterDarwinFrameworkInfo].framework_files
-            for dep in ctx.attr.deps
-            if FlutterDarwinFrameworkInfo in dep and not dep.label.name.endswith("__flutter_framework")
-        ],
+        framework_infos = depset(
+            direct = [
+                dep[FlutterDarwinFrameworkInfo]
+                for dep in ctx.attr.deps
+                if FlutterDarwinFrameworkInfo in dep and not dep.label.name.endswith("__flutter_framework")
+            ],
+            transitive = [
+                dep[FlutterApplePluginInfo].framework_infos
+                for dep in ctx.attr.deps
+                if FlutterApplePluginInfo in dep and getattr(dep[FlutterApplePluginInfo], "framework_infos", None) != None
+            ],
+        ),
     )
 
 def merge_plugin_sdk_lists(ctx, sdk_frameworks, sdk_dylibs):
@@ -200,7 +207,7 @@ def _flutter_xtool_apple_plugin_library_impl(ctx):
     sdk_frameworks, sdk_dylibs = merge_plugin_sdk_lists(ctx, ctx.attr.sdk_frameworks, ctx.attr.sdk_dylibs)
 
     return [
-        DefaultInfo(files = depset(all_plugin_files, transitive = dep_infos.framework_files)),
+        DefaultInfo(files = depset(all_plugin_files)),
         merged_cc_info,
         SwiftInfo(swift_infos = dep_infos.swift_infos),
         FlutterApplePluginInfo(
@@ -213,6 +220,7 @@ def _flutter_xtool_apple_plugin_library_impl(ctx):
             sdk_frameworks = tuple(sdk_frameworks),
             weak_sdk_frameworks = (),
             sdk_dylibs = tuple(sdk_dylibs),
+            framework_infos = dep_infos.framework_infos,
         ),
     ]
 

@@ -22,6 +22,7 @@ def _collect_apple_plugin_inputs(entries, target_platform):
     files = []
     sdk_frameworks = []
     sdk_dylibs = []
+    framework_infos = []
     for entry in entries:
         if entry.platform != target_platform:
             continue
@@ -35,12 +36,15 @@ def _collect_apple_plugin_inputs(entries, target_platform):
             _append_unique(sdk_frameworks, entry.sdk_frameworks)
         if hasattr(entry, "sdk_dylibs") and entry.sdk_dylibs:
             _append_unique(sdk_dylibs, entry.sdk_dylibs)
+        if getattr(entry, "framework_infos", None) != None:
+            framework_infos.append(entry.framework_infos)
     return struct(
         cc_infos = cc_infos,
         swift_infos = swift_infos,
         files = files,
         sdk_frameworks = sdk_frameworks,
         sdk_dylibs = sdk_dylibs,
+        framework_infos = framework_infos,
     )
 
 def _flutter_apple_plugins_aggregator_impl(ctx):
@@ -62,6 +66,7 @@ def _flutter_apple_plugins_aggregator_impl(ctx):
             modulemap = None,
             sdk_frameworks = tuple(collected.sdk_frameworks),
             sdk_dylibs = tuple(collected.sdk_dylibs),
+            framework_infos = depset(transitive = collected.framework_infos),
         ),
     ]
 
@@ -98,7 +103,10 @@ def _flutter_apple_plugin_bundle_impl(ctx):
     objc_infos = []
     swift_infos = []
     dep_files = []
+    framework_infos = []
     for dep in ctx.attr.deps + ctx.attr.clang_module_deps:
+        if FlutterApplePluginInfo in dep and getattr(dep[FlutterApplePluginInfo], "framework_infos", None) != None:
+            framework_infos.append(dep[FlutterApplePluginInfo].framework_infos)
         if CcInfo in dep:
             cc_infos.append(dep[CcInfo])
         if ObjcInfo in dep:
@@ -121,6 +129,7 @@ def _flutter_apple_plugin_bundle_impl(ctx):
             modulemap = None,
             sdk_frameworks = tuple(ctx.attr.sdk_frameworks),
             sdk_dylibs = tuple(ctx.attr.sdk_dylibs),
+            framework_infos = depset(transitive = framework_infos),
         ),
     ]
 
