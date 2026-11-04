@@ -15,6 +15,7 @@ load("//flutter/private:asset_uri.bzl", "encode_asset_key")
 load("//flutter/private:flutter_asset_bundle_action.bzl", "flutter_asset_bundle_action", "make_bundle_content", "make_tree_shake")
 load(
     "//flutter/private:flutter_compile.bzl",
+    "INCREMENTAL_KERNEL_ATTRS",
     "flutter_kernel_compile_action",
     "flutter_kernel_dills",
     "flutter_kernel_options",
@@ -1976,9 +1977,6 @@ KERNEL_COMPILE_ATTRS = {
         executable = True,
         cfg = "exec",
     ),
-    # Opt-in incremental kernel worker flag, and its dev-only serialization flag (BuildSettingInfo).
-    "_incremental_kernel": attr.label(default = Label("//flutter:incremental_kernel")),
-    "_dev_incremental_serialization": attr.label(default = Label("//flutter:dev_incremental_serialization")),
     "_incr_worker_tool": attr.label(
         default = Label("//flutter/private/tools:incr_fkc_worker"),
         executable = True,
@@ -2045,7 +2043,7 @@ KERNEL_COMPILE_ATTRS = {
     "defines": attr.string_list(
         doc = "Dart environment defines (-D flags).",
     ),
-} | EXTRA_DART_DEFINES_ATTR | BUILD_MODE_ATTR
+} | EXTRA_DART_DEFINES_ATTR | BUILD_MODE_ATTR | INCREMENTAL_KERNEL_ATTRS
 
 def _aspect_target_platform(ctx, fixed_platform):
     """The platform string the shader aspect compiles for."""
