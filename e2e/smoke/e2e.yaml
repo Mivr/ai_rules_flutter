@@ -3,3 +3,10 @@ commands:
   - name: test all targets
     run: bazel test //... --test_output=errors
     min_tests_executed: 22
+    expect:
+      exit_code: 0
+  - name: undeclared-import compile fails on the guard refusal
+    run: bazel build //:consumer_negative
+    expect:
+      non_zero: true
+      output_contains: is not a declared input

@@ -3,12 +3,24 @@ commands:
   - name: test all targets
     run: bazel test //... --test_output=errors
     min_tests_executed: 18
+    expect:
+      exit_code: 0
+  - name: iOS simulator green test.xml
+    run: bazel test //:app_test --test_output=errors
+    expect:
+      exit_code: 0
+      test_xml_contains:
+        - <testsuite name="integration_test/app_test.dart"
+        - failures="0" errors="0"
   - name: iOS simulator red twin
     run: bazel test //:app_test_red --test_output=errors
     expect:
       non_zero: true
       output_contains: RED_TWIN_MUST_FAIL
       test_log_contains: RED_TWIN_MUST_FAIL
+      test_xml_contains:
+        - <testsuite name="integration_test/red_test.dart"
+        - <failure
   - name: SwiftPM unpinned red path
     run: bazel query @deps_unpinned__spm_bigint_plugin//:all
     expect:
@@ -21,6 +33,9 @@ commands:
     run: bazel test //:plugin_pod_wrong_test --test_output=errors
     expect:
       non_zero: true
+      test_xml_contains:
+        - <testsuite name="integration_test/plugin_pod_test.dart"
+        - <failure
   - name: CocoaPods unmapped pod red path
     run: bazel query @deps_pods_unmapped__pod_bigint_plugin//:all
     expect:
