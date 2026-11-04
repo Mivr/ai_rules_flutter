@@ -63,6 +63,7 @@ load(":plist_merge_test.bzl", "plist_merge_test_suite")
 load(":plugin_registrant_test.bzl", "plugin_registrant_test_suite")
 load(":podfile_lock_test.bzl", "podfile_lock_test_suite")
 load(":podspec_read_test.bzl", "podspec_read_test_suite")
+load(":podspec_xcconfig_defines_test.bzl", "podspec_xcconfig_defines_test_suite")
 load(":profile_mode_test.bzl", "profile_mode_test_suite")
 load(":pub_lock_sdks_test.bzl", "pub_lock_sdks_test_suite")
 load(":pubspec_errors_test.bzl", "pubspec_errors_test_suite")
@@ -478,6 +479,8 @@ swiftpm_resolved_test_suite(name = "swiftpm_resolved_test")
 podfile_lock_test_suite(name = "podfile_lock_test")
 
 podspec_read_test_suite(name = "podspec_read_test")
+
+podspec_xcconfig_defines_test_suite(name = "podspec_xcconfig_defines_test")
 
 swiftpm_translate_test_suite(name = "swiftpm_translate_test")
 

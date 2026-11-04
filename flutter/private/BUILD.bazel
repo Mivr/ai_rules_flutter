@@ -882,11 +882,23 @@ bzl_library(
 )
 
 bzl_library(
+    name = "podspec_read_xcconfig",
+    srcs = ["podspec_read_xcconfig.bzl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":flutter_apple_plugin_defines",
+        ":starlark_literal",
+    ],
+)
+
+bzl_library(
     name = "podspec_read",
     srcs = ["podspec_read.bzl"],
     visibility = ["//visibility:public"],
     deps = [
+        ":flutter_apple_plugin_defines",
         ":podspec_read_ruby",
+        ":podspec_read_xcconfig",
         ":starlark_literal",
     ],
 )
@@ -896,10 +908,12 @@ bzl_library(
     srcs = ["flutter_pub_apple_local.bzl"],
     visibility = ["//visibility:public"],
     deps = [
+        ":flutter_apple_plugin_defines",
         ":flutter_pub_apple",
         ":flutter_pub_apple_local_targets",
         ":flutter_pub_walk",
         ":podspec_read",
+        ":podspec_read_xcconfig",
         ":starlark_literal",
         ":swiftpm_manifest",
         ":swiftpm_manifest_lex",
