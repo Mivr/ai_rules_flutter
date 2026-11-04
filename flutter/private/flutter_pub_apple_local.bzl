@@ -16,6 +16,7 @@ single-module compile. The walk keeps the manifest's target settings so
 the generated libraries exactly as they do for a hub SwiftPM package.
 """
 
+load(":flutter_apple_plugin_defines.bzl", "dedupe_plugin_defines")
 load(
     ":flutter_pub_apple.bzl",
     "detect_apple_swiftpm_deps",
@@ -30,6 +31,7 @@ load(
 )
 load(":flutter_pub_walk.bzl", "PUB_WALK_BOUND", "has_files_bound_error")
 load(":podspec_read.bzl", "apply_apple_podspec_link_settings")
+load(":podspec_read_xcconfig.bzl", "active_podspec_defines")
 load(":starlark_literal.bzl", "starlark_string_literal")
 load(":swiftpm_manifest.bzl", "parse_swiftpm_package")
 load(":swiftpm_manifest_lex.bzl", "lex_swiftpm_manifest", "swiftpm_first_content_line")
@@ -534,7 +536,7 @@ def render_local_target_blocks(plugin, platform, targets, files_by_target, plugi
     """
     return _render_local_target_blocks(plugin, platform, targets, files_by_target, plugin_defines)
 
-def _detect_platform_local_targets(ctx, plugin, platform, srcs_dirs):
+def _detect_platform_local_targets(ctx, plugin, platform, srcs_dirs, podspec_defines):
     """Read and render one platform's plugin-local targets.
 
     Args:
@@ -542,6 +544,7 @@ def _detect_platform_local_targets(ctx, plugin, platform, srcs_dirs):
         plugin: The pub plugin name.
         platform: `"ios"` or `"macos"`.
         srcs_dirs: The platform's detected source directories.
+        podspec_defines: The platform podspec's static `GCC_PREPROCESSOR_DEFINITIONS`.
 
     Returns:
         `struct(ok, error, text, labels, xtool_files)`.
@@ -549,7 +552,8 @@ def _detect_platform_local_targets(ctx, plugin, platform, srcs_dirs):
     empty = struct(ok = True, error = "", text = "", labels = [], xtool_files = [])
     if not srcs_dirs:
         return empty
-    plugin_defines = ctx.attr.plugin_defines if hasattr(ctx.attr, "plugin_defines") else []
+    user_defines = ctx.attr.plugin_defines if hasattr(ctx.attr, "plugin_defines") else []
+    plugin_defines = dedupe_plugin_defines(podspec_defines + user_defines)
     for manifest_dir in [platform + "/" + plugin, "darwin/" + plugin]:
         manifest = manifest_dir + "/Package.swift"
         primary_dir = _local_primary_dir(manifest_dir, srcs_dirs)
@@ -590,8 +594,20 @@ def detect_apple_local_targets(ctx, plugin, apple):
         `struct(macos, ios)`: each platform's rendered local targets.
     """
     return struct(
-        macos = _detect_platform_local_targets(ctx, plugin, "macos", apple.macos_srcs),
-        ios = _detect_platform_local_targets(ctx, plugin, "ios", apple.ios_srcs),
+        macos = _detect_platform_local_targets(
+            ctx,
+            plugin,
+            "macos",
+            apple.macos_srcs,
+            active_podspec_defines(apple, "macos"),
+        ),
+        ios = _detect_platform_local_targets(
+            ctx,
+            plugin,
+            "ios",
+            apple.ios_srcs,
+            active_podspec_defines(apple, "ios"),
+        ),
     )
 
 def apply_apple_native_deps(ctx, plugin, apple, content):
