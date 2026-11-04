@@ -1980,6 +1980,10 @@ KERNEL_COMPILE_ATTRS = {
         default = Label("//flutter:incremental_kernel"),
         doc = "Opt-in incremental kernel worker flag (a BuildSettingInfo).",
     ),
+    "_dev_incremental_serialization": attr.label(
+        default = Label("//flutter:dev_incremental_serialization"),
+        doc = "Opt-in dev-only incremental serialization flag (a BuildSettingInfo).",
+    ),
     "_incr_worker_tool": attr.label(
         default = Label("//flutter/private/tools:incr_fkc_worker"),
         executable = True,

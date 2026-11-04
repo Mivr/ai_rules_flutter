@@ -468,6 +468,7 @@ _TEST_ATTRS = {
         "_shader_compile_tool",
         "_kernel_filter_tool",
         "_incremental_kernel",
+        "_dev_incremental_serialization",
         "_incr_worker_tool",
         "license_files",
         "tree_shake_icons",
