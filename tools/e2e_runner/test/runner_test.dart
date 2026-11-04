@@ -494,7 +494,7 @@ commands:
 void _registerCommandFilterTests() {
   const skip = 'POSIX /bin/sh fake bazel fixture';
   group('runE2e commandFilter', () {
-    Future<List<String>> run(List<String>? filter, {Object? matcher}) async {
+    ({Future<void> done, File calls}) start(List<String> filter) {
       final Directory root = Directory.systemTemp.createTempSync('runner_flt_');
       addTearDown(() => root.deleteSync(recursive: true));
       final callsLog = File(p.join(root.path, 'calls.log'));
@@ -503,23 +503,16 @@ void _registerCommandFilterTests() {
         root,
         'echo "\$*" >> "${callsLog.path}"\nexit 0',
       );
-      final Future<void> done = _runDemo(
-        root,
-        ws,
-        bazel,
-        commandFilter: filter,
+      return (
+        done: _runDemo(root, ws, bazel, commandFilter: filter),
+        calls: callsLog,
       );
-      if (matcher != null) {
-        await expectLater(done, throwsA(matcher));
-        expect(callsLog.readAsLinesSync().single, endsWith(' shutdown'));
-        return const [];
-      }
-      await done;
-      return callsLog.readAsLinesSync();
     }
 
     test('runs only the named commands in spec order', () async {
-      final List<String> calls = await run(['third', 'first']);
+      final run = start(['third', 'first']);
+      await run.done;
+      final List<String> calls = run.calls.readAsLinesSync();
       expect(calls, hasLength(3));
       expect(calls[0], contains('//:first'));
       expect(calls[1], contains('//:third'));
@@ -527,23 +520,31 @@ void _registerCommandFilterTests() {
     }, skip: Platform.isWindows ? skip : false);
 
     test('fails closed on an empty filter naming the spec path', () async {
-      await run(
-        const [],
-        matcher: isA<E2eRunnerException>()
-            .having((e) => e.specPath, 'specPath', endsWith('e2e.yaml'))
-            .having((e) => e.message, 'message', contains('empty')),
+      final run = start(const []);
+      await expectLater(
+        run.done,
+        throwsA(
+          isA<E2eRunnerException>()
+              .having((e) => e.specPath, 'specPath', endsWith('e2e.yaml'))
+              .having((e) => e.message, 'message', contains('empty')),
+        ),
       );
+      expect(run.calls.readAsLinesSync().single, endsWith(' shutdown'));
     }, skip: Platform.isWindows ? skip : false);
 
     test('fails closed on a name that matches no command', () async {
-      await run(
-        ['first', 'nope'],
-        matcher: isA<E2eRunnerException>().having(
-          (e) => e.message,
-          'message',
-          contains('"nope"'),
+      final run = start(['first', 'nope']);
+      await expectLater(
+        run.done,
+        throwsA(
+          isA<E2eRunnerException>().having(
+            (e) => e.message,
+            'message',
+            contains('"nope"'),
+          ),
         ),
       );
+      expect(run.calls.readAsLinesSync().single, endsWith(' shutdown'));
     }, skip: Platform.isWindows ? skip : false);
   });
 }
