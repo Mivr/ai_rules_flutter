@@ -52,4 +52,5 @@ extend-exclude = [
   "**/tls_fixture.dart",
   # Generated Android Maven lock files must stay byte-for-byte as written by pin.
   "**/rules_android_maven_install.json",
+  "**/android_ide_common_30_1_3_install.json",
 ]
