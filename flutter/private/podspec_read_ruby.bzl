@@ -6,6 +6,20 @@ backslash line continuations, multi-line strings, `%w[...]` word arrays, and
 `<<TAG` / `<<-TAG` / `<<~TAG` heredocs. No recursion and no unbounded loops.
 """
 
+load(
+    ":podspec_read_percent.bzl",
+    "decode_double_escape",
+    "split_percent_words",
+    "unescape_percent_q",
+)
+load(
+    ":podspec_read_regex.bzl",
+    "consume_regex_flags",
+    "regex_may_start",
+    "scan_slash_regex",
+    "skip_interpolation",
+)
+
 _PAIRED_CLOSERS = {
     "[": "]",
     "(": ")",
@@ -83,6 +97,11 @@ def _emit_spanned_token(ctx, kind, text, span, interp = False, words = None):
         words = words,
     ))
 
+def _mark_unterminated(ctx, what, line):
+    """Record the first lexical construct that ran to end of input without closing."""
+    if ctx["unterminated"] == None:
+        ctx["unterminated"] = struct(what = what, line = line)
+
 def _is_marker_line(content, n, pos, marker):
     """True when `content[pos:]` starts with `marker` followed by whitespace or EOF."""
     end = pos + len(marker)
@@ -155,7 +174,7 @@ def _try_lex_heredoc(ctx):
         tag = content[j:end_pos]
     else:
         return False
-    ctx["heredocs"].append(struct(tag = tag, strip = strip_mode))
+    ctx["heredocs"].append(struct(tag = tag, strip = strip_mode, line = ctx["line"]))
     _emit_token(ctx, "other", content[i:end_pos], i, end_pos)
     ctx["i"] = end_pos
     ctx["at_bol"] = False
@@ -188,6 +207,8 @@ def _scan_single_string(ctx):
             buf.append(c)
             j += 1
     kind = "str" if closed else "other"
+    if not closed:
+        _mark_unterminated(ctx, "an unterminated single-quoted string", start_line)
     _emit_spanned_token(ctx, kind, "".join(buf), struct(start = start, end = j, line = start_line))
     ctx["i"] = j
     ctx["at_bol"] = False
@@ -214,16 +235,6 @@ def _step_double_interp(ctx, content, n, j, state):
         ctx["line"] += 1
     return j + 1
 
-def _decode_double_escape(nxt):
-    """Decode one escaped character `\\<nxt>` in a Ruby double-quoted string."""
-    if nxt == "n":
-        return "\n"
-    if nxt == "t":
-        return "\t"
-    if nxt == "r":
-        return "\r"
-    return nxt
-
 def _scan_double_string(ctx):
     """Scan a double-quoted Ruby string `\"...\"` starting at `ctx["i"]`."""
     content = ctx["content"]
@@ -245,7 +256,7 @@ def _scan_double_string(ctx):
             if nxt == "\n":
                 ctx["line"] += 1
             else:
-                buf.append(_decode_double_escape(nxt))
+                buf.append(decode_double_escape(nxt))
             j += 2
         elif content[j:j + 2] == "#{":
             state["has_interp"] = True
@@ -261,67 +272,13 @@ def _scan_double_string(ctx):
             buf.append(c)
             j += 1
     kind = "str" if state["closed"] else "other"
+    if not state["closed"]:
+        _mark_unterminated(ctx, "an unterminated double-quoted string", start_line)
     span = struct(start = start, end = j, line = start_line)
     _emit_spanned_token(ctx, kind, "".join(buf), span, interp = state["has_interp"])
     ctx["i"] = j
     ctx["at_bol"] = False
     ctx["allow_heredoc"] = False
-
-def _split_percent_words(inner, open_ch, close_ch):
-    """Split a `%w[...]` body on ASCII whitespace, honoring backslash escapes."""
-    m = len(inner)
-    k = 0
-    words = []
-    cur = []
-    in_word = False
-    for _ in range(m + 1):
-        if k >= m:
-            break
-        c = inner[k:k + 1]
-        if c == "\\" and k + 1 < m:
-            nxt = inner[k + 1:k + 2]
-            if nxt in (" ", "\t", "\n", "\r", "\\", open_ch, close_ch):
-                cur.append(nxt)
-            else:
-                cur.append("\\" + nxt)
-            in_word = True
-            k += 2
-        elif c in (" ", "\t", "\n", "\r"):
-            if in_word:
-                words.append("".join(cur))
-                cur = []
-                in_word = False
-            k += 1
-        else:
-            cur.append(c)
-            in_word = True
-            k += 1
-    if in_word:
-        words.append("".join(cur))
-    return words
-
-def _unescape_percent_q(inner, open_ch, close_ch, is_double):
-    """Unescape the body of a `%q[...]` or `%Q[...]` string literal."""
-    m = len(inner)
-    k = 0
-    buf = []
-    for _ in range(m + 1):
-        if k >= m:
-            break
-        c = inner[k:k + 1]
-        if c == "\\" and k + 1 < m:
-            nxt = inner[k + 1:k + 2]
-            if is_double:
-                buf.append(_decode_double_escape(nxt))
-            elif nxt in ("\\", open_ch, close_ch):
-                buf.append(nxt)
-            else:
-                buf.append("\\" + nxt)
-            k += 2
-        else:
-            buf.append(c)
-            k += 1
-    return "".join(buf)
 
 def _scan_percent_body(ctx, mod, open_ch, close_ch):
     """Scan the delimited body of a `%` literal from `ctx["i"] + 3`."""
@@ -342,7 +299,10 @@ def _scan_percent_body(ctx, mod, open_ch, close_ch):
             j += 2
         elif interp_capable and content[j:j + 2] == "#{":
             has_interp = True
-            j += 2
+            body = skip_interpolation(ctx, j + 2)
+            j = body.end
+            if not body.closed:
+                return struct(end = j, closed = False, has_interp = True)
         elif paired and c == open_ch:
             depth += 1
             j += 1
@@ -370,14 +330,18 @@ def _try_lex_percent(ctx):
     start_line = ctx["line"]
     scanned = _scan_percent_body(ctx, mod, open_ch, close_ch)
     j = scanned.end
+    if not scanned.closed:
+        _mark_unterminated(ctx, "an unterminated percent literal", start_line)
+    elif mod == "r":
+        j = consume_regex_flags(content, n, j)
     span = struct(start = i, end = j, line = start_line)
     if not scanned.closed:
         _emit_spanned_token(ctx, "other", content[i:j], span)
     elif mod in ("w", "W"):
-        words = None if scanned.has_interp else _split_percent_words(content[i + 3:j - 1], open_ch, close_ch)
+        words = None if scanned.has_interp else split_percent_words(content[i + 3:j - 1], open_ch, close_ch)
         _emit_spanned_token(ctx, "pct_w", content[i:j], span, interp = scanned.has_interp, words = words)
     elif mod in ("q", "Q"):
-        val = _unescape_percent_q(content[i + 3:j - 1], open_ch, close_ch, mod == "Q")
+        val = unescape_percent_q(content[i + 3:j - 1], open_ch, close_ch, mod == "Q")
         _emit_spanned_token(ctx, "str", val, span, interp = scanned.has_interp)
     else:
         _emit_spanned_token(ctx, "other", content[i:j], span)
@@ -418,6 +382,30 @@ def _scan_word_or_punct(ctx):
     ctx["i"] = i + op_len
     ctx["allow_heredoc"] = tok_str not in (")", "]")
 
+def _lex_regex(ctx):
+    """Lex a `/.../flags` regex literal at `ctx["i"]` as one `other` token."""
+    start = ctx["i"]
+    start_line = ctx["line"]
+    scanned = scan_slash_regex(ctx)
+    if not scanned.closed:
+        _mark_unterminated(ctx, "an unterminated regex literal", start_line)
+    span = struct(start = start, end = scanned.end, line = start_line)
+    _emit_spanned_token(ctx, "other", ctx["content"][start:scanned.end], span)
+    ctx["i"] = scanned.end
+    ctx["at_bol"] = False
+    ctx["allow_heredoc"] = False
+
+def _eof_error(ctx):
+    """Return `struct(what, line)` for a construct still open at end of input, or `None`."""
+    if ctx["unterminated"] != None:
+        return ctx["unterminated"]
+    if ctx["in_block_comment"]:
+        return struct(what = "an unterminated `=begin` block comment", line = ctx["block_line"])
+    if ctx["heredocs"]:
+        hdoc = ctx["heredocs"][0]
+        return struct(what = "an unterminated heredoc `<<%s`" % hdoc.tag, line = hdoc.line)
+    return None
+
 def _step_code(ctx):
     """Advance one step in normal Ruby code state."""
     content = ctx["content"]
@@ -457,6 +445,9 @@ def _step_code(ctx):
         return
     if c == "%" and _try_lex_percent(ctx):
         return
+    if c == "/" and regex_may_start(ctx["tokens"], content, i):
+        _lex_regex(ctx)
+        return
     if content[i:i + 2] == "<<" and _try_lex_heredoc(ctx):
         return
     ctx["at_bol"] = False
@@ -472,10 +463,24 @@ def lex_podspec(content):
         List of token structs with `kind`, `text`, `raw`, `line`, `start`,
         `end`, `interp`, and `words`.
     """
+    return lex_podspec_checked(content).tokens
+
+def lex_podspec_checked(content):
+    """Tokenize a `.podspec` file and report any construct left open at end of input.
+
+    Args:
+        content: Full `.podspec` text string.
+
+    Returns:
+        `struct(tokens, error)`: the token list (see `lex_podspec`) and either
+        `None` or `struct(what, line)` naming the first unterminated string,
+        regex, percent literal, heredoc, or `=begin` block comment.
+    """
     n = len(content)
     ctx = {
         "allow_heredoc": True,
         "at_bol": True,
+        "block_line": 0,
         "content": content,
         "heredocs": [],
         "i": 0,
@@ -483,6 +488,7 @@ def lex_podspec(content):
         "line": 1,
         "n": n,
         "tokens": [],
+        "unterminated": None,
     }
     for _ in range(n + 1):
         if ctx["i"] >= n:
@@ -493,10 +499,11 @@ def lex_podspec(content):
             _consume_heredoc_line(ctx)
         elif ctx["at_bol"] and _is_marker_line(content, n, ctx["i"], "=begin"):
             ctx["in_block_comment"] = True
+            ctx["block_line"] = ctx["line"]
             _consume_block_comment_line(ctx)
         else:
             _step_code(ctx)
-    return ctx["tokens"]
+    return struct(tokens = ctx["tokens"], error = _eof_error(ctx))
 
 def _parse_single_literal_string(tok, allow_interpolation = False):
     """Extract a plain string literal from `tok`, or `None` if not literal."""
