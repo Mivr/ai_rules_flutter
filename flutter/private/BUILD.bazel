@@ -910,6 +910,7 @@ bzl_library(
     deps = [
         ":flutter_apple_plugin_defines",
         ":flutter_pub_apple",
+        ":flutter_pub_apple_local_refusal",
         ":flutter_pub_apple_local_targets",
         ":flutter_pub_walk",
         ":podspec_read",
@@ -919,6 +920,16 @@ bzl_library(
         ":swiftpm_manifest_lex",
         ":swiftpm_package",
         ":swiftpm_translate",
+    ],
+)
+
+bzl_library(
+    name = "flutter_pub_apple_local_refusal",
+    srcs = ["flutter_pub_apple_local_refusal.bzl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":swiftpm_manifest",
+        ":swiftpm_manifest_lex",
     ],
 )
 

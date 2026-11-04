@@ -29,6 +29,7 @@ load(
     "local_settings_bundle",
     _render_local_target_blocks = "render_local_target_blocks",
 )
+load(":flutter_pub_apple_local_refusal.bzl", "local_manifest_decision")
 load(":flutter_pub_walk.bzl", "PUB_WALK_BOUND", "has_files_bound_error")
 load(":podspec_read.bzl", "apply_apple_podspec_link_settings")
 load(":podspec_read_xcconfig.bzl", "active_podspec_defines")
@@ -536,6 +537,23 @@ def render_local_target_blocks(plugin, platform, targets, files_by_target, plugi
     """
     return _render_local_target_blocks(plugin, platform, targets, files_by_target, plugin_defines)
 
+def _local_other_source_dirs(ctx, manifest_dir, primary_dir):
+    """List the directories under a manifest's `Sources` besides the primary.
+
+    Args:
+        ctx: The spoke's repository context.
+        manifest_dir: The manifest's package-relative directory.
+        primary_dir: The primary source directory.
+
+    Returns:
+        The other directory paths, empty when `Sources` does not exist.
+    """
+    sources = ctx.path(manifest_dir + "/Sources")
+    if not sources.exists:
+        return []
+    primary = str(ctx.path(primary_dir))
+    return [str(e) for e in sources.readdir() if e.is_dir and str(e) != primary]
+
 def _detect_platform_local_targets(ctx, plugin, platform, srcs_dirs, podspec_defines):
     """Read and render one platform's plugin-local targets.
 
@@ -559,7 +577,16 @@ def _detect_platform_local_targets(ctx, plugin, platform, srcs_dirs, podspec_def
         primary_dir = _local_primary_dir(manifest_dir, srcs_dirs)
         if not primary_dir or not ctx.path(manifest).exists:
             continue
-        parsed = parse_plugin_local_package(plugin, ctx.read(manifest))
+        text = ctx.read(manifest)
+        res = local_manifest_decision(
+            plugin,
+            text,
+            parse_plugin_local_package(plugin, text),
+            _local_other_source_dirs(ctx, manifest_dir, primary_dir),
+        )
+        if not res.ok:
+            fail(res.error)
+        parsed = res.parsed
         if not parsed.ok:
             continue
         locals = plugin_local_targets(plugin, parsed.model, manifest_dir, primary_dir, platform)
@@ -593,6 +620,9 @@ def detect_apple_local_targets(ctx, plugin, apple):
     Returns:
         `struct(macos, ios)`: each platform's rendered local targets.
     """
+    if hasattr(ctx.attr, "plugin_native_deps") and ctx.attr.plugin_native_deps != None:
+        empty = struct(ok = True, error = "", text = "", labels = [], xtool_files = [])
+        return struct(macos = empty, ios = empty)
     return struct(
         macos = _detect_platform_local_targets(
             ctx,
