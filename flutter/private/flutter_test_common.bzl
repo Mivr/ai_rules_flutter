@@ -253,7 +253,7 @@ def make_test_artifacts(dill, base_dill = None, assets_dir = None, library_tags 
         library_tags = library_tags,
     )
 
-def make_test_selection(test_path = "", enable_impeller = False, include_tags = [], exclude_tags = []):
+def make_test_selection(test_path = "", enable_impeller = False, include_tags = [], exclude_tags = [], coverage_libraries = []):
     """How one `flutter_tester` run selects and displays its suite.
 
     Args:
@@ -265,16 +265,20 @@ def make_test_selection(test_path = "", enable_impeller = False, include_tags = 
         exclude_tags: Skip tests matching any of these tag selectors. Wins over
             `include_tags`; `--test_env=FLUTTER_TEST_EXCLUDE_TAGS=...`
             overrides this.
+        coverage_libraries: Library URI prefixes a coverage run is scoped to,
+            from `test_coverage_libraries`. Empty (the default) leaves the
+            coverage request unscoped.
 
     Returns:
-        A struct with `test_path`, `enable_impeller`, `include_tags` and
-        `exclude_tags`.
+        A struct with `test_path`, `enable_impeller`, `include_tags`,
+        `exclude_tags` and `coverage_libraries`.
     """
     return struct(
         test_path = test_path,
         enable_impeller = enable_impeller,
         include_tags = include_tags,
         exclude_tags = exclude_tags,
+        coverage_libraries = coverage_libraries,
     )
 
 def _base_runner_env(ctx, flutter_sdk_info, artifacts, selection):
@@ -303,6 +307,11 @@ def _base_runner_env(ctx, flutter_sdk_info, artifacts, selection):
         env["FLUTTER_TEST_TAGS_ATTR"] = ",".join(selection.include_tags)
     if selection.exclude_tags:
         env["FLUTTER_TEST_EXCLUDE_TAGS_ATTR"] = ",".join(selection.exclude_tags)
+
+    # The scope of a coverage run: one URI prefix per line. Set only for a
+    # test that knows its sources; absent means an unscoped request.
+    if selection.coverage_libraries:
+        env["FLUTTER_TEST_COVERAGE_LIBRARIES"] = "\n".join(selection.coverage_libraries)
 
     # The entrypoint's own `@Tags`, extracted at build time: the runner injects
     # them as the root group's metadata, so they inherit down to every test in

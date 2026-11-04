@@ -185,6 +185,9 @@ void main(List<String> args) async {
   }
   final String path = Platform.environment['FLUTTER_TEST_PATH'] ?? 'test.dart';
   final String? coverageOutput = Platform.environment['COVERAGE_OUTPUT_FILE'];
+  final List<String> coverageLibraries = _coverageLibraries(
+    Platform.environment,
+  );
 
   final TestSelection selection;
   try {
@@ -217,6 +220,7 @@ void main(List<String> args) async {
       assetsDir: files.assetsDir,
       testPath: path,
       coverageOutput: coverageOutput,
+      coverageLibraries: coverageLibraries,
       updateGoldens: updateGoldens,
       seed: seed,
       selection: selection,
@@ -226,6 +230,16 @@ void main(List<String> args) async {
     ),
   );
 }
+
+/// The coverage scope in `FLUTTER_TEST_COVERAGE_LIBRARIES`: one library URI
+/// prefix per line. An absent key, or blank lines, yield no entry, and an
+/// empty list leaves the coverage request unscoped.
+List<String> _coverageLibraries(Map<String, String> env) =>
+    (env['FLUTTER_TEST_COVERAGE_LIBRARIES'] ?? '')
+        .split('\n')
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty)
+        .toList();
 
 /// Everything `main` gathers for one `flutter_test` run.
 ///
@@ -238,6 +252,7 @@ class FlutterTestRun {
     required this.icu,
     required this.dill,
     required this.seed,
+    required this.coverageLibraries,
     this.baseDill,
     required this.assetsDir,
     required this.testPath,
@@ -270,6 +285,9 @@ class FlutterTestRun {
 
   /// LCOV output file; null disables coverage (and the VM service).
   final String? coverageOutput;
+
+  /// Library URI prefixes coverage is scoped to; empty collects everything.
+  final List<String> coverageLibraries;
 
   /// Whether to update golden files instead of comparing against them.
   final bool updateGoldens;
@@ -495,6 +513,7 @@ class _Harness {
       enableVmService: enableVmService,
       coverageVmServiceUri: coverageVmServiceUri,
       coverageOutput: run.coverageOutput,
+      coverageLibraries: run.coverageLibraries,
     );
     if (coverageError != null) {
       stderr.writeln('flutter_test (coverage): $coverageError');
@@ -779,6 +798,7 @@ class _Harness {
     required bool enableVmService,
     required Uri? coverageVmServiceUri,
     required String? coverageOutput,
+    required List<String> coverageLibraries,
   }) async {
     final coverageFile = coverageOutput;
     if (!enableVmService ||
@@ -788,9 +808,7 @@ class _Harness {
     }
     try {
       final String lcov = await coverage
-          .collectCoverage(
-            coverageVmServiceUri,
-          )
+          .collectCoverage(coverageVmServiceUri, coverageLibraries)
           .timeout(
             coverageBound(Platform.environment['TEST_TIMEOUT'], elapsed),
           );

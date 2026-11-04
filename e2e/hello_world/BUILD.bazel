@@ -546,6 +546,22 @@ flutter_test(
     ],
 )
 
+# Exercises: the coverage scope. Same suite as `:hello_coverage_test` without
+# the `COVERAGE_OUTPUT_FILE` env, so `bazel coverage` alone drives the run and
+# `check_coverage_scope_report.sh` reads the report it produces: the test's own
+# code is in it, the Flutter framework is not.
+flutter_test(
+    name = "hello_coverage_scope_test",
+    package_name = "hello_world",
+    size = "small",
+    timeout = "moderate",
+    main = "hello_test.dart",
+    target_compatible_with = _HOST_COMPATIBLE,
+    deps = [
+        "@deps//:flutter_test",
+    ],
+)
+
 # -- Prebuilt tests: run an already built kernel, compile nothing ---------------
 
 # `:widget_test`'s build products, one filegroup per `flutter_prebuilt_test`

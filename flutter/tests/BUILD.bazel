@@ -41,6 +41,7 @@ load(":flutter_pub_scc_test.bzl", "flutter_pub_scc_test_suite")
 load(":flutter_pubspec_test.bzl", "flutter_pubspec_test_suite")
 load(":flutter_sdk_package_test.bzl", "flutter_sdk_package_test_suite")
 load(":flutter_test_bootstrap_test.bzl", "flutter_test_bootstrap_test_suite")
+load(":flutter_test_coverage_test.bzl", "flutter_test_coverage_test_suite")
 load(":gen_l10n_test.bzl", "gen_l10n_test_suite")
 load(":gradle_model_test.bzl", "gradle_model_test_suite")
 load(":ios_integration_test_test.bzl", "ios_integration_test_test_suite")
@@ -449,6 +450,8 @@ rules_dart_floor_test_suite(name = "rules_dart_floor_test")
 flutter_sdk_package_test_suite(name = "flutter_sdk_package_test")
 
 flutter_test_bootstrap_test_suite(name = "flutter_test_bootstrap_test")
+
+flutter_test_coverage_test_suite(name = "flutter_test_coverage_test")
 
 plugin_registrant_test_suite(name = "plugin_registrant_test")
 
