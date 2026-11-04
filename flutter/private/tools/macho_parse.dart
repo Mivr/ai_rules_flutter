@@ -43,7 +43,7 @@ LoadCommand buildLcSegment64(Segment64Spec spec) {
   final bd = ByteData.sublistView(buf);
   bd.setUint32(0, lcSegment64, Endian.little);
   bd.setUint32(4, 72, Endian.little);
-  final nameBytes = ascii.encode(spec.segname);
+  final Uint8List nameBytes = ascii.encode(spec.segname);
   buf.setRange(8, 8 + math.min<int>(16, nameBytes.length), nameBytes);
   bd.setUint64(24, spec.vmaddr, Endian.little);
   bd.setUint64(32, spec.vmsize, Endian.little);
@@ -120,10 +120,10 @@ LoadCommand buildLcIdDylib(
   int currentVersion = 0x00010000,
   int compatibilityVersion = 0x00010000,
 }) {
-  final strBytes = utf8.encode(installName);
+  final Uint8List strBytes = utf8.encode(installName);
   // dylib_command is 24 bytes header + string + NUL + padding to 8-byte boundary.
-  final unalignedSize = 24 + strBytes.length + 1;
-  final cmdsize = (unalignedSize + 7) & ~7;
+  final int unalignedSize = 24 + strBytes.length + 1;
+  final int cmdsize = (unalignedSize + 7) & ~7;
   final buf = Uint8List(cmdsize);
   final bd = ByteData.sublistView(buf);
   bd.setUint32(0, lcIdDylib, Endian.little);
@@ -138,10 +138,10 @@ LoadCommand buildLcIdDylib(
 
 /// Builds an 8-byte-aligned `LC_RPATH` load command.
 LoadCommand buildLcRpath(String rpath) {
-  final strBytes = utf8.encode(rpath);
+  final Uint8List strBytes = utf8.encode(rpath);
   // rpath_command is 12 bytes header + string + NUL + padding to 8-byte boundary.
-  final unalignedSize = 12 + strBytes.length + 1;
-  final cmdsize = (unalignedSize + 7) & ~7;
+  final int unalignedSize = 12 + strBytes.length + 1;
+  final int cmdsize = (unalignedSize + 7) & ~7;
   final buf = Uint8List(cmdsize);
   final bd = ByteData.sublistView(buf);
   bd.setUint32(0, lcRpath, Endian.little);
@@ -346,7 +346,7 @@ void _considerCommandPayload(LoadCommand lc, _PayloadFloor floor) {
     case lcDyldInfoOnly:
       if (lc.bytes.length >= 48) {
         for (var i = 0; i < 5; i++) {
-          final field = 8 + i * 8;
+          final int field = 8 + i * 8;
           floor.consider(
             bd.getUint32(field, Endian.little),
             bd.getUint32(field + 4, Endian.little),
@@ -366,10 +366,10 @@ void _considerSegmentPayload(
   _PayloadFloor floor,
 ) {
   if (lc.bytes.length < 72) return;
-  final segname = segmentNameOf(lc);
-  final fileoff = bd.getUint64(40, Endian.little);
-  final filesize = bd.getUint64(48, Endian.little);
-  final nsects = bd.getUint32(64, Endian.little);
+  final String segname = segmentNameOf(lc);
+  final int fileoff = bd.getUint64(40, Endian.little);
+  final int filesize = bd.getUint64(48, Endian.little);
+  final int nsects = bd.getUint32(64, Endian.little);
   if (fileoff > 0 && filesize > 0) {
     floor.consider(
       fileoff,
@@ -381,14 +381,14 @@ void _considerSegmentPayload(
   }
   // Inspect each section_64 (80 bytes each starting at offset 72).
   for (var s = 0; s < nsects; s++) {
-    final sectOff = 72 + s * 80;
+    final int sectOff = 72 + s * 80;
     if (sectOff + 80 <= lc.bytes.length) {
       if (isZeroFillSectionType(sectionTypeOf(bd, sectOff))) {
         continue;
       }
-      final sSize = bd.getUint64(sectOff + 40, Endian.little);
-      final sOffset = bd.getUint32(sectOff + 48, Endian.little);
-      final name = ascii
+      final int sSize = bd.getUint64(sectOff + 40, Endian.little);
+      final int sOffset = bd.getUint32(sectOff + 48, Endian.little);
+      final String name = ascii
           .decode(lc.bytes.sublist(sectOff, sectOff + 16))
           .split('\x00')
           .first;
@@ -455,21 +455,21 @@ List<LoadCommand> parseLoadCommands(Uint8List bytes) {
     throw const FormatException('Not a 64-bit little-endian Mach-O binary.');
   }
   final bd = ByteData.sublistView(bytes);
-  final ncmds = bd.getUint32(16, Endian.little);
-  final sizeofcmds = bd.getUint32(20, Endian.little);
+  final int ncmds = bd.getUint32(16, Endian.little);
+  final int sizeofcmds = bd.getUint32(20, Endian.little);
   if (mhHeaderSize64 + sizeofcmds > bytes.length) {
     throw const FormatException('Truncated Mach-O load commands.');
   }
   final commands = <LoadCommand>[];
-  var offset = mhHeaderSize64;
+  int offset = mhHeaderSize64;
   for (var i = 0; i < ncmds; i++) {
     if (offset + 8 > mhHeaderSize64 + sizeofcmds) {
       throw const FormatException(
         'Load command header extends past sizeofcmds.',
       );
     }
-    final cmd = bd.getUint32(offset, Endian.little);
-    final cmdsize = bd.getUint32(offset + 4, Endian.little);
+    final int cmd = bd.getUint32(offset, Endian.little);
+    final int cmdsize = bd.getUint32(offset + 4, Endian.little);
     if (cmdsize < 8 || offset + cmdsize > mhHeaderSize64 + sizeofcmds) {
       throw FormatException('Invalid cmdsize $cmdsize at offset $offset.');
     }

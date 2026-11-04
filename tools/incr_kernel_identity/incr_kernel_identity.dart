@@ -21,7 +21,7 @@ import 'identity.dart';
 
 Future<void> main() async {
   // Locate the repo root. BUILD_WORKSPACE_DIRECTORY is set by `bazel run`.
-  final rootPath =
+  final String rootPath =
       Platform.environment['BUILD_WORKSPACE_DIRECTORY'] ??
       Directory.current.path;
   if (!File('$rootPath/MODULE.bazel').existsSync() ||

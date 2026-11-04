@@ -11,7 +11,7 @@ import '../flutter_integration_test_android.dart' as android;
 void main() {
   group('Android emulator, AVD & KVM helpers', () {
     test('builds hermetic Android runtime environment and emulator flags', () {
-      final env = android.buildAndroidRuntimeEnvironment(
+      final Map<String, String> env = android.buildAndroidRuntimeEnvironment(
         sdkRoot: '/runfiles/flutter_android_headless_runtime/sdk',
         sysrootDir: '/runfiles/flutter_android_headless_runtime/sysroot',
         scratchDir: '/tmp/android_scratch',
@@ -36,7 +36,7 @@ void main() {
       );
       expect(env['ANDROID_ADB_SERVER_PORT'], '15037');
 
-      final args = android.buildAndroidEmulatorArguments(
+      final List<String> args = android.buildAndroidEmulatorArguments(
         avdName: 'test',
         consolePort: 5554,
         adbPort: 5555,
@@ -50,7 +50,7 @@ void main() {
       expect(args, containsAllInOrder(['-accel', 'on']));
       expect(args, containsAllInOrder(['-ports', '5554,5555']));
 
-      final avdIni = android.buildAndroidAvdIniContent(
+      final String avdIni = android.buildAndroidAvdIniContent(
         avdDir: '/tmp/android_scratch/.android/avd/test.avd',
       );
       expect(
@@ -59,7 +59,7 @@ void main() {
       );
       expect(avdIni, contains('target=android-35'));
 
-      final avdConfig = android.buildAndroidAvdConfigContent();
+      final String avdConfig = android.buildAndroidAvdConfigContent();
       expect(avdConfig, contains('abi.type=x86_64'));
       expect(avdConfig, contains('hw.gpu.mode=swiftshader_indirect'));
       expect(
@@ -87,7 +87,9 @@ void main() {
     });
 
     test('verifyKvmAvailable succeeds on a readable and writable file', () {
-      final tmpDir = Directory.systemTemp.createTempSync('kvm_check_test_');
+      final Directory tmpDir = Directory.systemTemp.createTempSync(
+        'kvm_check_test_',
+      );
       try {
         final fakeKvm = File('${tmpDir.path}/kvm')..writeAsStringSync('');
         android.verifyKvmAvailable(fakeKvm.path);
@@ -101,7 +103,8 @@ void main() {
     test(
       'allocateAndroidEmulatorPorts returns valid even/odd port pair',
       () async {
-        final ports = await android.allocateAndroidEmulatorPorts();
+        final ({int adbPort, int adbServerPort, int consolePort}) ports =
+            await android.allocateAndroidEmulatorPorts();
         expect(ports.adbServerPort, greaterThan(0));
         expect(ports.consolePort, inInclusiveRange(5554, 5680));
         expect(ports.consolePort.isEven, isTrue);

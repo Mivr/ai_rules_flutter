@@ -17,6 +17,7 @@ library;
 
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:test/test.dart';
 
@@ -27,8 +28,8 @@ const _apiUrl = 'https://api.example.com';
 
 /// A port nothing is listening on right now, for `--web-browser-debug-port`.
 Future<int> freePort() async {
-  final socket = await ServerSocket.bind('localhost', 0);
-  final port = socket.port;
+  final ServerSocket socket = await ServerSocket.bind('localhost', 0);
+  final int port = socket.port;
   await socket.close();
   return port;
 }
@@ -36,7 +37,8 @@ Future<int> freePort() async {
 Future<dynamic> _getJson(Uri url) async {
   final client = HttpClient();
   try {
-    final response = await (await client.getUrl(url)).close();
+    final HttpClientResponse response = await (await client.getUrl(url))
+        .close();
     return json.decode(await response.transform(utf8.decoder).join());
   } finally {
     client.close();
@@ -49,13 +51,15 @@ Future<dynamic> _getJson(Uri url) async {
 /// URL is not continuously the app's — for a moment the listing carries a page
 /// with an empty URL.
 Future<String> _appPageSocket(int cdpPort, String origin) async {
-  final deadline = DateTime.now().add(const Duration(seconds: 60));
+  final DateTime deadline = DateTime.now().add(const Duration(seconds: 60));
   var delay = const Duration(milliseconds: 50);
   var seen = <String>[];
   while (true) {
     final targets =
         await _getJson(Uri.parse('http://127.0.0.1:$cdpPort/json')) as List;
-    final pages = targets.whereType<Map>().where((t) => t['type'] == 'page');
+    final Iterable<Map<dynamic, dynamic>> pages = targets
+        .whereType<Map>()
+        .where((t) => t['type'] == 'page');
     seen = [for (final p in pages) (p['url'] as String?) ?? ''];
     for (final page in pages) {
       if (((page['url'] as String?) ?? '').startsWith(origin)) {
@@ -77,11 +81,11 @@ Future<Map<String, dynamic>> _evaluate(
   String socketUrl,
   String expression,
 ) async {
-  final socket = await WebSocket.connect(
+  final WebSocket socket = await WebSocket.connect(
     socketUrl,
   ).timeout(const Duration(seconds: 30));
   try {
-    final replies = socket.asBroadcastStream();
+    final Stream<dynamic> replies = socket.asBroadcastStream();
     socket.add(
       json.encode({
         'id': 1,
@@ -109,10 +113,10 @@ void main() {
   test(
     'a web_define in the bootstrap template reaches the running page',
     () async {
-      final cdpPort = await freePort();
-      final webPort = await freePort();
+      final int cdpPort = await freePort();
+      final int webPort = await freePort();
 
-      final dt = await startDevTool(
+      final DevToolProcess dt = await startDevTool(
         workspace: e2eWorkspace('web_example'),
         // The one target whose bootstrap comes from a template of its own and
         // carries a define. Everything else in that workspace takes the
@@ -141,12 +145,15 @@ void main() {
       );
 
       final origin = 'http://localhost:$webPort';
-      final page = await _appPageSocket(cdpPort, origin);
+      final String page = await _appPageSocket(cdpPort, origin);
 
       // The define, read off the page's own global scope. Set by the bootstrap
       // the browser executed, so a value here means the dev loop served this
       // target's template rather than one of its own.
-      final defineResult = await _evaluate(page, 'window.rulesFlutterApiUrl');
+      final Map<String, dynamic> defineResult = await _evaluate(
+        page,
+        'window.rulesFlutterApiUrl',
+      );
       expect(defineResult['error'], isNull, reason: '$defineResult');
       expect(
         defineResult['result']?['result']?['value'],
@@ -160,13 +167,13 @@ void main() {
       // DDC — so pixels here mean the whole served bootstrap ran, against the
       // right compiler's output. `screenshot/native` because web has no engine
       // screenshot; `screenshot/flutter` answers 501 there by design.
-      final http = await dt.waitForHttpControl();
+      final HttpControlInfo http = await dt.waitForHttpControl();
       expect(http, isNotNull);
       final shot = '${Directory.systemTemp.path}/web_define_e2e.png';
       final file = File(shot);
       addTearDown(() => file.existsSync() ? file.deleteSync() : null);
       await dt.httpScreenshotToFile(dt.appId!, shot);
-      final bytes = file.readAsBytesSync();
+      final Uint8List bytes = file.readAsBytesSync();
       expect(bytes.sublist(0, 4), [
         0x89,
         0x50,
@@ -179,7 +186,7 @@ void main() {
       // template that asks flutter.js to register one registers nothing. One
       // installed against localhost would outlive this run and serve the next
       // one a stale bundle.
-      final workers = await _evaluate(
+      final Map<String, dynamic> workers = await _evaluate(
         page,
         'navigator.serviceWorker.getRegistrations().then(r => r.length)',
       );

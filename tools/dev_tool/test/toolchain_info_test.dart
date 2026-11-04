@@ -49,7 +49,7 @@ void main() {
       return (
         run: (args, {required String workingDirectory}) async {
           calls.add(args);
-          final reply = replies[args.first];
+          final ProcessResult? reply = replies[args.first];
           if (reply == null) {
             throw StateError('unexpected `bazel ${args.join(' ')}`');
           }
@@ -61,7 +61,9 @@ void main() {
 
     /// An output base directory holding [repoName] under `external/`.
     String outputBaseWith(String? repoName) {
-      final dir = Directory.systemTemp.createTempSync('toolchain_ob_');
+      final Directory dir = Directory.systemTemp.createTempSync(
+        'toolchain_ob_',
+      );
       addTearDown(() => dir.deleteSync(recursive: true));
       if (repoName != null) {
         Directory(
@@ -74,19 +76,21 @@ void main() {
     ProcessResult ok(String stdout) => ProcessResult(0, 0, stdout, '');
 
     test('resolves the five paths out of the repo that exists', () async {
-      final platform = detectHostPlatform();
-      final base = outputBaseWith(
+      final String platform = detectHostPlatform();
+      final String base = outputBaseWith(
         'ai_rules_flutter++flutter+flutter_$platform',
       );
-      final bazel = fakeBazel({'info': ok('$base\n')});
+      final ({List<List<String>> calls, BazelRunner run}) bazel = fakeBazel({
+        'info': ok('$base\n'),
+      });
 
-      final paths = await resolveToolchainPaths(
+      final ToolchainPaths paths = await resolveToolchainPaths(
         '//:app',
         workspace: '/ws',
         runBazel: bazel.run,
       );
 
-      final repo = p.join(
+      final String repo = p.join(
         base,
         'external',
         'ai_rules_flutter++flutter+flutter_$platform',
@@ -120,11 +124,13 @@ void main() {
       // The name `+flutter+flutter_<platform>`: without it, `flutter_bazel
       // run` inside ai_rules_flutter's own workspace cannot resolve a toolchain
       // however warm the output base is.
-      final platform = detectHostPlatform();
-      final base = outputBaseWith('+flutter+flutter_$platform');
-      final bazel = fakeBazel({'info': ok('$base\n')});
+      final String platform = detectHostPlatform();
+      final String base = outputBaseWith('+flutter+flutter_$platform');
+      final ({List<List<String>> calls, BazelRunner run}) bazel = fakeBazel({
+        'info': ok('$base\n'),
+      });
 
-      final paths = await resolveToolchainPaths(
+      final ToolchainPaths paths = await resolveToolchainPaths(
         '//:app',
         workspace: '/ws',
         runBazel: bazel.run,
@@ -137,8 +143,8 @@ void main() {
       // A cold output base — every `editableWorkspace` copy, and every first
       // run in a fresh clone — has no external repo to find. The fetch is the
       // step that creates it, not a retry.
-      final platform = detectHostPlatform();
-      final base = outputBaseWith(null);
+      final String platform = detectHostPlatform();
+      final String base = outputBaseWith(null);
       final repoName = 'ai_rules_flutter++flutter+flutter_$platform';
       final calls = <List<String>>[];
       Future<ProcessResult> run(
@@ -154,7 +160,7 @@ void main() {
         return ok('');
       }
 
-      final paths = await resolveToolchainPaths(
+      final ToolchainPaths paths = await resolveToolchainPaths(
         '//:app',
         workspace: '/ws',
         runBazel: run,
@@ -171,8 +177,8 @@ void main() {
       // build will: an iOS simulator app is refused at analysis outside
       // `-c dbg`, and a fetch without the run's `-c dbg` failed on exactly
       // that before anything was built.
-      final platform = detectHostPlatform();
-      final base = outputBaseWith(null);
+      final String platform = detectHostPlatform();
+      final String base = outputBaseWith(null);
       final repoName = 'ai_rules_flutter++flutter+flutter_$platform';
       final calls = <List<String>>[];
       Future<ProcessResult> run(
@@ -207,8 +213,8 @@ void main() {
           'ERROR: Analysis of target \'//:plugin_macos\' failed; build '
           'aborted: Either the ANDROID_NDK_HOME environment variable or the '
           'path attribute of android_ndk_repository must be set.';
-      final base = outputBaseWith(null);
-      final bazel = fakeBazel({
+      final String base = outputBaseWith(null);
+      final ({List<List<String>> calls, BazelRunner run}) bazel = fakeBazel({
         'info': ok('$base\n'),
         'fetch': ProcessResult(0, 2, '', ndk),
       });
@@ -237,8 +243,8 @@ void main() {
       // bazel is happy, so the target simply does not resolve an ai_rules_flutter
       // toolchain. Merging the two points the message at the toolchain for
       // failures that have nothing to do with it.
-      final base = outputBaseWith(null);
-      final bazel = fakeBazel({
+      final String base = outputBaseWith(null);
+      final ({List<List<String>> calls, BazelRunner run}) bazel = fakeBazel({
         'info': ok('$base\n'),
         'fetch': ok(''),
       });
@@ -266,7 +272,7 @@ void main() {
     });
 
     test('reports a failed `bazel info output_base`', () async {
-      final bazel = fakeBazel({
+      final ({List<List<String>> calls, BazelRunner run}) bazel = fakeBazel({
         'info': ProcessResult(0, 36, '', 'ERROR: not a workspace'),
       });
       expect(
@@ -290,7 +296,7 @@ void main() {
 
   group('detectHostPlatform', () {
     test('returns correct platform for current OS', () {
-      final platform = detectHostPlatform();
+      final String platform = detectHostPlatform();
       if (Platform.isMacOS) {
         expect(platform, startsWith('darwin-'));
       } else if (Platform.isLinux) {
@@ -307,14 +313,14 @@ void main() {
 
   group('detectArch', () {
     test('returns arm64 or x64', () {
-      final arch = detectArch();
+      final String arch = detectArch();
       expect(arch, anyOf('arm64', 'x64'));
     });
 
     test('is consistent with dart:ffi Abi', () {
-      final arch = detectArch();
+      final String arch = detectArch();
       // On arm64 hosts, Abi.current() returns an arm64 variant.
-      final isArm64Host =
+      final bool isArm64Host =
           Abi.current() == Abi.macosArm64 ||
           Abi.current() == Abi.linuxArm64 ||
           Abi.current() == Abi.windowsArm64;
@@ -553,7 +559,7 @@ void main() {
 
   group('findDevConfig', () {
     test('finds _dev_config.json in output files', () {
-      final result = findDevConfig([
+      final String? result = findDevConfig([
         '/bazel-out/k8-dbg/bin/hello_world_web',
         '/bazel-out/k8-dbg/bin/hello_world_dev_config.json',
         '/bazel-out/k8-dbg/bin/hello_world_ddc_dart_sdk.js',
@@ -562,7 +568,7 @@ void main() {
     });
 
     test('returns null when no _dev_config.json present', () {
-      final result = findDevConfig([
+      final String? result = findDevConfig([
         '/bazel-out/k8-opt/bin/hello_world_web',
       ]);
       expect(result, isNull);
@@ -594,7 +600,9 @@ void main() {
 
   group('parseDevConfig', () {
     test('reads and parses a JSON file with absolute paths', () {
-      final tmpDir = Directory.systemTemp.createTempSync('test_dev_config_');
+      final Directory tmpDir = Directory.systemTemp.createTempSync(
+        'test_dev_config_',
+      );
       final configFile = File('${tmpDir.path}/test_dev_config.json');
       configFile.writeAsStringSync(
         jsonEncode({
@@ -608,7 +616,7 @@ void main() {
         }),
       );
 
-      final config = parseDevConfig(configFile.path);
+      final DevConfig config = parseDevConfig(configFile.path);
       expect(config.engineRevision, 'rev123');
       expect(config.dartSdkRoot, '/sdk');
       // Absolute paths remain unchanged.
@@ -621,9 +629,11 @@ void main() {
 
     test('resolves relative paths using execution root from file location', () {
       // Simulate a Bazel output tree: .../execroot/_main/bazel-out/cfg/bin/
-      final tmpDir = Directory.systemTemp.createTempSync('test_exec_root_');
+      final Directory tmpDir = Directory.systemTemp.createTempSync(
+        'test_exec_root_',
+      );
       // Resolve tmpDir to handle /var → /private/var on macOS.
-      final resolvedTmpDir = tmpDir.resolveSymbolicLinksSync();
+      final String resolvedTmpDir = tmpDir.resolveSymbolicLinksSync();
       final execRoot = '$resolvedTmpDir/execroot/_main';
       final binDir = Directory('$execRoot/bazel-out/cfg/bin');
       binDir.createSync(recursive: true);
@@ -648,7 +658,7 @@ void main() {
         }),
       );
 
-      final config = parseDevConfig(configFile.path);
+      final DevConfig config = parseDevConfig(configFile.path);
       // The bootstrap the dev server serves is a path like any other, and the
       // server opens it directly — a relative one would be opened against
       // whatever the tool's cwd happened to be.
@@ -684,8 +694,10 @@ void main() {
       // looks a moved library's contract up by the key its sources came back
       // under. One map left relative found nothing there, and a hot reload
       // answered "Null check operator used on a null value".
-      final tmpDir = Directory.systemTemp.createTempSync('test_dev_cfg_src_');
-      final resolvedTmpDir = tmpDir.resolveSymbolicLinksSync();
+      final Directory tmpDir = Directory.systemTemp.createTempSync(
+        'test_dev_cfg_src_',
+      );
+      final String resolvedTmpDir = tmpDir.resolveSymbolicLinksSync();
       final execRoot = '$resolvedTmpDir/execroot/_main';
       final binDir = Directory('$execRoot/bazel-out/cfg/bin');
       binDir.createSync(recursive: true);
@@ -711,7 +723,7 @@ void main() {
         }),
       );
 
-      final config = parseDevConfig(configFile.path);
+      final DevConfig config = parseDevConfig(configFile.path);
       final library = '$execRoot/bazel-out/cfg/bin/libbridge.dylib';
       expect(config.nativeLibs.map(p.split), [p.split(library)]);
       expect(config.nativeLibContracts.keys.map(p.split), [p.split(library)]);
@@ -727,8 +739,10 @@ void main() {
       // the chosen one into a file:// URI for the frontend_server
       // --source/-D trio. Empty entries (a platform with no registrant)
       // stay empty rather than becoming a path to the exec root.
-      final tmpDir = Directory.systemTemp.createTempSync('test_dev_cfg_reg_');
-      final resolvedTmpDir = tmpDir.resolveSymbolicLinksSync();
+      final Directory tmpDir = Directory.systemTemp.createTempSync(
+        'test_dev_cfg_reg_',
+      );
+      final String resolvedTmpDir = tmpDir.resolveSymbolicLinksSync();
       final execRoot = '$resolvedTmpDir/execroot/_main';
       final binDir = Directory('$execRoot/bazel-out/cfg/bin');
       binDir.createSync(recursive: true);
@@ -751,7 +765,7 @@ void main() {
         }),
       );
 
-      final config = parseDevConfig(configFile.path);
+      final DevConfig config = parseDevConfig(configFile.path);
       expect(
         p.split(config.registrantFor('ios')),
         p.split(
@@ -762,8 +776,10 @@ void main() {
     });
 
     test('does not absolutize dartDefines, even path-like values', () {
-      final tmpDir = Directory.systemTemp.createTempSync('test_dev_cfg_dd_');
-      final resolvedTmpDir = tmpDir.resolveSymbolicLinksSync();
+      final Directory tmpDir = Directory.systemTemp.createTempSync(
+        'test_dev_cfg_dd_',
+      );
+      final String resolvedTmpDir = tmpDir.resolveSymbolicLinksSync();
       final execRoot = '$resolvedTmpDir/execroot/_main';
       final binDir = Directory('$execRoot/bazel-out/cfg/bin');
       binDir.createSync(recursive: true);
@@ -785,13 +801,15 @@ void main() {
         }),
       );
 
-      final config = parseDevConfig(configFile.path);
+      final DevConfig config = parseDevConfig(configFile.path);
       expect(config.dartDefines, ['ASSET_DIR=external/foo', 'MSG=hello']);
     });
 
     test('parses + absolutizes the codegen multi-root fields', () {
-      final tmpDir = Directory.systemTemp.createTempSync('test_dev_cfg_mr_');
-      final resolvedTmpDir = tmpDir.resolveSymbolicLinksSync();
+      final Directory tmpDir = Directory.systemTemp.createTempSync(
+        'test_dev_cfg_mr_',
+      );
+      final String resolvedTmpDir = tmpDir.resolveSymbolicLinksSync();
       final execRoot = '$resolvedTmpDir/execroot/_main';
       final binDir = Directory('$execRoot/bazel-out/cfg/bin');
       binDir.createSync(recursive: true);
@@ -822,7 +840,7 @@ void main() {
         }),
       );
 
-      final config = parseDevConfig(configFile.path);
+      final DevConfig config = parseDevConfig(configFile.path);
       expect(config.filesystemScheme, 'org-dartlang-app');
       // devPackageConfig + filesystemRoots + generatedSourcePaths are
       // exec-relative paths → absolutized (incl. "" → the exec root itself).
@@ -872,7 +890,9 @@ void main() {
 
   group('requireDeclaredFilesExist', () {
     test('names a native library the build declared and did not write', () {
-      final tmp = Directory.systemTemp.createTempSync('test_declared_libs_');
+      final Directory tmp = Directory.systemTemp.createTempSync(
+        'test_declared_libs_',
+      );
       addTearDown(() => tmp.deleteSync(recursive: true));
       final present = File('${tmp.path}/libthere.dylib')
         ..writeAsStringSync('x');
@@ -908,7 +928,9 @@ void main() {
   group('buildWebToolchainFromOutputs', () {
     test('constructs WebToolchainPaths from output file list', () {
       // Create temp files so resolveSymbolicLinksSync works.
-      final tmpDir = Directory.systemTemp.createTempSync('test_web_outputs_');
+      final Directory tmpDir = Directory.systemTemp.createTempSync(
+        'test_web_outputs_',
+      );
       final files = <String>[];
       for (final suffix in [
         'app_ddc_outline.dill',
@@ -932,7 +954,10 @@ void main() {
         appEntrypoint: 'package:test_app/main.dart',
       );
 
-      final result = buildWebToolchainFromOutputs(files, devConfig);
+      final WebToolchainPaths result = buildWebToolchainFromOutputs(
+        files,
+        devConfig,
+      );
       expect(result.ddcOutlineDill, contains('app_ddc_outline.dill'));
       expect(result.librariesSpec, contains('app_ddc_libraries.json'));
       expect(result.dartSdkJs, contains('app_ddc_dart_sdk.js'));
@@ -966,11 +991,13 @@ void main() {
 
   group('findWebOutputDir', () {
     test('finds directory ending with _web', () {
-      final tmpDir = Directory.systemTemp.createTempSync('test_web_dir_');
+      final Directory tmpDir = Directory.systemTemp.createTempSync(
+        'test_web_dir_',
+      );
       final webDir = Directory('${tmpDir.path}/app_web');
       webDir.createSync();
 
-      final result = findWebOutputDir([
+      final String result = findWebOutputDir([
         '${tmpDir.path}/app_dev_config.json',
         webDir.path,
       ]);

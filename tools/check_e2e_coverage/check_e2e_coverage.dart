@@ -22,7 +22,7 @@ import 'coverage.dart';
 
 void main() {
   // Locate the repo root. BUILD_WORKSPACE_DIRECTORY is set by `bazel run`.
-  final rootPath =
+  final String rootPath =
       Platform.environment['BUILD_WORKSPACE_DIRECTORY'] ??
       Directory.current.path;
   if (!File('$rootPath/MODULE.bazel').existsSync() ||
@@ -30,9 +30,14 @@ void main() {
     stderr.writeln('error: run //tools/check_e2e_coverage from the repo root');
     exit(2);
   }
-  final modules = findE2eModules(Directory('$rootPath/e2e'), rootPath);
-  final covered = findCoveredModules(Directory('$rootPath/.github/workflows'));
-  final errors = checkCoverage(
+  final Set<String> modules = findE2eModules(
+    Directory('$rootPath/e2e'),
+    rootPath,
+  );
+  final Set<String> covered = findCoveredModules(
+    Directory('$rootPath/.github/workflows'),
+  );
+  final List<String> errors = checkCoverage(
     modules: modules,
     covered: covered,
     reasons: uncoveredReasons,
@@ -43,7 +48,7 @@ void main() {
     }
     exit(1);
   }
-  final coveredCount = modules
+  final int coveredCount = modules
       .where((m) => covered.contains(leafName(m)))
       .length;
   print(

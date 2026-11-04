@@ -183,9 +183,9 @@ List<CommandRange> _segmentRanges(LoadCommand lc) {
       size: bd.getUint64(48, Endian.little),
     ),
   ];
-  final nsects = bd.getUint32(64, Endian.little);
+  final int nsects = bd.getUint32(64, Endian.little);
   for (var s = 0; s < nsects; s++) {
-    final at = 72 + s * 80;
+    final int at = 72 + s * 80;
     if (at + 80 > lc.bytes.length) {
       throw FormatException(
         'Cannot strip local symbols: truncated ${describeStripCommand(lc)} '
@@ -251,9 +251,9 @@ List<SectionLayout> sectionLayoutsOf(LoadCommand lc) {
   }
   final layouts = <SectionLayout>[];
   final bd = ByteData.sublistView(lc.bytes);
-  final nsects = bd.getUint32(64, Endian.little);
+  final int nsects = bd.getUint32(64, Endian.little);
   for (var s = 0; s < nsects; s++) {
-    final at = 72 + s * 80;
+    final int at = 72 + s * 80;
     if (at + 80 > lc.bytes.length) {
       throw FormatException(
         'Cannot strip local symbols: truncated ${describeStripCommand(lc)} '
@@ -330,8 +330,8 @@ void throwOnInPlaceSegmentOverlap(
       'Cannot strip local symbols: truncated ${describeStripCommand(lc)}.',
     );
   }
-  final segname = segmentNameOf(lc);
-  for (final section in sectionLayoutsOf(lc)) {
+  final String segname = segmentNameOf(lc);
+  for (final SectionLayout section in sectionLayoutsOf(lc)) {
     if (isZeroFillSectionType(section.type) || section.offset == 0) continue;
     _throwOnTouchedSpan(
       'section ${section.name} of segment $segname',
@@ -359,7 +359,7 @@ void _throwOnTouchedSpan(
   InPlaceTouchedSpans spans,
 ) {
   if (size == 0) return;
-  final hit = spans.meetingSpan(offset, size);
+  final (int, int)? hit = spans.meetingSpan(offset, size);
   if (hit == null) return;
   throw FormatException(
     'Cannot strip local symbols: $label [$offset, ${offset + size}) names '
@@ -412,7 +412,7 @@ List<CommandRange> _dysymtabRanges(LoadCommand lc) {
       'module, reference-symbol or relocation tables.',
     );
   }
-  final count = bd.getUint32(60, Endian.little);
+  final int count = bd.getUint32(60, Endian.little);
   if (count == 0) return const [];
   return [
     CommandRange(
@@ -496,7 +496,7 @@ LoadCommand relocatedNoteCommand(
   Map<int, int> movedOffsets,
   int fileLength,
 ) {
-  final range = notePayloadRange(lc);
+  final CommandRange range = notePayloadRange(lc);
   if (range.size == 0) return lc;
   if (!rangeWithinFile(range.offset, range.size, fileLength)) {
     throw FormatException(
@@ -504,7 +504,7 @@ LoadCommand relocatedNoteCommand(
       '0x${lc.cmd.toRadixString(16)} points past the end of the file.',
     );
   }
-  final fresh = movedOffsets[range.offset];
+  final int? fresh = movedOffsets[range.offset];
   if (fresh == null) return lc;
   final bytes = Uint8List.fromList(lc.bytes);
   ByteData.sublistView(bytes).setUint64(24, fresh, Endian.little);
@@ -555,7 +555,7 @@ void _auditCommandRanges(
   RewrittenLayout layout,
   List<CommandRange> managed,
 ) {
-  for (final range in accountedRangesOf(lc)) {
+  for (final CommandRange range in accountedRangesOf(lc)) {
     if (range.size == 0) continue;
     if (!rangeWithinFile(range.offset, range.size, layout.fileLength)) {
       throw FormatException(

@@ -14,12 +14,18 @@ import 'package:test/test.dart';
 
 import '../run_home.dart' as run_home;
 
+typedef _Row = ({
+  List<String> args,
+  run_home.RunHomePolicy policy,
+  List<String> want,
+});
+
 // The shell counterpart (`RUN_HOME_SH` / `RUN_HOME_SUPPRESS_ANALYTICS` in
 // `//flutter/private:run_home.bzl`) is handed to this test as a runfiles
 // path via the `RUN_HOME_BZL` env var, so the agreement checks below fail
 // the moment the two copies drift apart.
 String _runHomeBzl() {
-  final rel = Platform.environment['RUN_HOME_BZL'];
+  final String? rel = Platform.environment['RUN_HOME_BZL'];
   if (rel == null || rel.isEmpty) {
     fail('RUN_HOME_BZL is not set; run this through `bazel test`.');
   }
@@ -139,11 +145,11 @@ const _classificationTable =
 // The `RUN_HOME_SH` snippet, extracted from the `.bzl` source so the bash
 // test below executes the shipped text, not a copy.
 String _runHomeSnippet() {
-  final bzl = _runHomeBzl();
+  final String bzl = _runHomeBzl();
   const marker = 'RUN_HOME_SH = """\\\n';
-  final start = bzl.indexOf(marker);
+  final int start = bzl.indexOf(marker);
   if (start < 0) fail('RUN_HOME_SH block not found in run_home.bzl.');
-  final end = bzl.indexOf('"""', start + marker.length);
+  final int end = bzl.indexOf('"""', start + marker.length);
   if (end < 0) fail('RUN_HOME_SH block is unterminated in run_home.bzl.');
   return bzl.substring(start + marker.length, end);
 }
@@ -182,7 +188,7 @@ Future<({List<String> argv, String home})> _bashRun(
   final ran = File('${scratch.path}/ran.txt');
   final home = File('${scratch.path}/home.txt');
   expect((await Process.run('chmod', ['+x', stub.path])).exitCode, 0);
-  final result = await Process.run(
+  final ProcessResult result = await Process.run(
     'bash',
     [driver.path, ...args],
     environment: {
@@ -202,7 +208,7 @@ Future<({List<String> argv, String home})> _bashRun(
 void main() {
   group('privateHomeEnv', () {
     test('covers every home-locating key at the given dir', () {
-      final env = run_home.privateHomeEnv('/priv');
+      final Map<String, String> env = run_home.privateHomeEnv('/priv');
       expect(env.keys.toSet(), run_home.homeEnvKeys.toSet());
       expect(env.values.toSet(), {'/priv'});
     });
@@ -239,7 +245,7 @@ void main() {
 
   group('runHomePolicy', () {
     test('matches the shared table', () {
-      for (final row in _classificationTable) {
+      for (final _Row row in _classificationTable) {
         expect(
           run_home.runHomePolicy(row.args),
           row.policy,
@@ -273,7 +279,7 @@ void main() {
     });
 
     test('command form takes the flag, private-home form passes through', () {
-      for (final row in _classificationTable) {
+      for (final _Row row in _classificationTable) {
         expect(
           run_home.withSuppressedAnalytics(row.args),
           row.want,
@@ -288,14 +294,16 @@ void main() {
         if (!await _bashAvailable()) {
           markTestSkipped('bash is not on PATH; the .bat covers Windows.');
         }
-        final snippet = _runHomeSnippet();
-        final scratch = Directory.systemTemp.createTempSync('run-home-bash-');
+        final String snippet = _runHomeSnippet();
+        final Directory scratch = Directory.systemTemp.createTempSync(
+          'run-home-bash-',
+        );
         try {
           final caller = Directory('${scratch.path}/caller')..createSync();
           final marker = File('${caller.path}/marker')
             ..writeAsStringSync('caller home');
-          for (final row in _classificationTable) {
-            final got = await _bashRun(
+          for (final _Row row in _classificationTable) {
+            final ({List<String> argv, String home}) got = await _bashRun(
               scratch,
               snippet,
               row.args,
@@ -335,7 +343,9 @@ void main() {
 
   group('createPrivateHome', () {
     test('makes a fresh dir the caller removes', () {
-      final dir = run_home.createPrivateHome(Directory.systemTemp.path);
+      final Directory dir = run_home.createPrivateHome(
+        Directory.systemTemp.path,
+      );
       try {
         expect(dir.existsSync(), isTrue);
       } finally {
@@ -360,8 +370,8 @@ void main() {
     });
 
     test('the RUN_HOME_SH snippet passes the same flag', () {
-      final bzl = _runHomeBzl();
-      final snippet = bzl.substring(bzl.indexOf('run_home_exec()'));
+      final String bzl = _runHomeBzl();
+      final String snippet = bzl.substring(bzl.indexOf('run_home_exec()'));
       // Both the already-present check and the insertion site spell the
       // flag literally, so a const-only change fails here until the
       // snippet follows.
@@ -370,13 +380,13 @@ void main() {
     });
 
     test('the RUN_HOME_SH snippet classifies like the Dart table', () {
-      final snippet = _runHomeSnippet();
+      final String snippet = _runHomeSnippet();
       // The leading check covers both flags, leading dash-arguments are
       // skipped, and the program suffixes match the Dart table.
       expect(snippet, contains('"${run_home.noSuppressAnalyticsFlag}"'));
       expect(snippet, contains('== -*'));
       expect(snippet, contains('run_home_private_exec'));
-      for (final suffix in run_home.programFileSuffixes) {
+      for (final String suffix in run_home.programFileSuffixes) {
         expect(snippet, contains(suffix));
       }
     });

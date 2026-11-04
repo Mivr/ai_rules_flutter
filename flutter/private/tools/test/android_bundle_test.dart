@@ -6,7 +6,7 @@ import 'dart:convert';
 import 'package:test/test.dart';
 
 import '../android_bundle.dart';
-import '../zip_reader.dart' show readZipEntries, readZipRawEntries;
+import '../zip_reader.dart' show ZipRawEntry, readZipEntries, readZipRawEntries;
 import '../zip_writer.dart' show ZipEntry, crc32, encodeDeterministicZip;
 
 Uint8List _syntheticElf({required int machine, List<int> payload = const []}) {
@@ -46,7 +46,7 @@ void main() {
           final outJar = '${tempDir.path}/empty_native_libs.jar';
           await runAndroidBundle(['empty-jar', '--output', outJar]);
 
-          final bytes = File(outJar).readAsBytesSync();
+          final Uint8List bytes = File(outJar).readAsBytesSync();
           expect(bytes, equals(emptyJarBytes));
           expect(bytes.length, 22);
           expect(bytes.sublist(0, 4), [0x50, 0x4b, 0x05, 0x06]);
@@ -192,7 +192,9 @@ void main() {
 
           expect(File(outJar).existsSync(), isTrue);
           expect(File(outJar).lengthSync(), greaterThan(0));
-          final readEntries = readZipEntries(File(outJar).readAsBytesSync());
+          final List<ZipEntry> readEntries = readZipEntries(
+            File(outJar).readAsBytesSync(),
+          );
           expect(readEntries.map((e) => e.path).toList(), [
             'lib/arm64-v8a/libapp.so',
             'lib/arm64-v8a/libplugin.so',
@@ -206,7 +208,7 @@ void main() {
       // inflated, at any size below the ZIP32 limits. 65 MiB sits just past
       // the old 64 MiB streaming wall.
       String writeBigElf(String name, {required bool compressible}) {
-        const size = 65 * 1024 * 1024;
+        const int size = 65 * 1024 * 1024;
         final body = Uint8List(size);
         if (compressible) {
           body.fillRange(0, body.length, 7);
@@ -244,38 +246,52 @@ void main() {
       }
 
       test('stores a compressible native library larger than 64 MiB', () async {
-        final libPath = writeBigElf('big_compressible.so', compressible: true);
-        final original = File(libPath).readAsBytesSync();
+        final String libPath = writeBigElf(
+          'big_compressible.so',
+          compressible: true,
+        );
+        final Uint8List original = File(libPath).readAsBytesSync();
         expect(original.length, greaterThan(64 * 1024 * 1024));
 
-        final jarPath = await jarOf(libPath, 'lib/arm64-v8a/libbig.so');
-        final raw = readZipRawEntries(File(jarPath).readAsBytesSync());
+        final String jarPath = await jarOf(libPath, 'lib/arm64-v8a/libbig.so');
+        final List<ZipRawEntry> raw = readZipRawEntries(
+          File(jarPath).readAsBytesSync(),
+        );
         expect(raw.map((e) => e.path), ['lib/arm64-v8a/libbig.so']);
         expect(raw.single.method, 0);
         expect(raw.single.rawData.length, original.length);
         expect(raw.single.crc, crc32(original));
 
-        final inflated = readZipEntries(File(jarPath).readAsBytesSync());
+        final List<ZipEntry> inflated = readZipEntries(
+          File(jarPath).readAsBytesSync(),
+        );
         expect(inflated.single.data, original);
       });
 
       test(
         'stores an incompressible native library larger than 64 MiB',
         () async {
-          final libPath = writeBigElf(
+          final String libPath = writeBigElf(
             'big_incompressible.so',
             compressible: false,
           );
-          final original = File(libPath).readAsBytesSync();
+          final Uint8List original = File(libPath).readAsBytesSync();
           expect(original.length, greaterThan(64 * 1024 * 1024));
 
-          final jarPath = await jarOf(libPath, 'lib/arm64-v8a/libbig.so');
-          final raw = readZipRawEntries(File(jarPath).readAsBytesSync());
+          final String jarPath = await jarOf(
+            libPath,
+            'lib/arm64-v8a/libbig.so',
+          );
+          final List<ZipRawEntry> raw = readZipRawEntries(
+            File(jarPath).readAsBytesSync(),
+          );
           expect(raw.single.method, 0);
           expect(raw.single.rawData.length, original.length);
           expect(raw.single.crc, crc32(original));
 
-          final inflated = readZipEntries(File(jarPath).readAsBytesSync());
+          final List<ZipEntry> inflated = readZipEntries(
+            File(jarPath).readAsBytesSync(),
+          );
           expect(inflated.single.data, original);
         },
       );
@@ -357,23 +373,23 @@ void main() {
       ) {
         final bd = ByteData.sublistView(bytes);
         var eocd = -1;
-        for (var i = bytes.length - 22; i >= 0; i--) {
+        for (int i = bytes.length - 22; i >= 0; i--) {
           if (bd.getUint32(i, Endian.little) == 0x06054b50) {
             eocd = i;
             break;
           }
         }
         expect(eocd, isNot(equals(-1)));
-        final count = bd.getUint16(eocd + 8, Endian.little);
-        final cdOffset = bd.getUint32(eocd + 16, Endian.little);
+        final int count = bd.getUint16(eocd + 8, Endian.little);
+        final int cdOffset = bd.getUint32(eocd + 16, Endian.little);
         final methods = <String, int>{};
         var pos = cdOffset;
         for (var i = 0; i < count; i++) {
           expect(bd.getUint32(pos, Endian.little), 0x02014b50);
-          final method = bd.getUint16(pos + 10, Endian.little);
-          final nameLen = bd.getUint16(pos + 28, Endian.little);
-          final extraLen = bd.getUint16(pos + 30, Endian.little);
-          final commentLen = bd.getUint16(pos + 32, Endian.little);
+          final int method = bd.getUint16(pos + 10, Endian.little);
+          final int nameLen = bd.getUint16(pos + 28, Endian.little);
+          final int extraLen = bd.getUint16(pos + 30, Endian.little);
+          final int commentLen = bd.getUint16(pos + 32, Endian.little);
           methods[utf8.decode(bytes.sublist(pos + 46, pos + 46 + nameLen))] =
               method;
           pos += 46 + nameLen + extraLen + commentLen;
@@ -391,16 +407,19 @@ void main() {
       // descriptor) set and zeroed local size fields, the way singlejar
       // emits the merged classes.dex entries of a real unsigned APK.
       Uint8List zipWithDescriptorEntry(String path, Uint8List data) {
-        final name = utf8.encode(path);
-        final crc = crc32(data);
-        final u16 = (BytesBuilder b, int v) =>
-            b.add([v & 0xff, (v >> 8) & 0xff]);
-        final u32 = (BytesBuilder b, int v) => b.add([
-          v & 0xff,
-          (v >> 8) & 0xff,
-          (v >> 16) & 0xff,
-          (v >> 24) & 0xff,
-        ]);
+        final Uint8List name = utf8.encode(path);
+        final int crc = crc32(data);
+        final void Function(BytesBuilder b, int v) u16 = (
+          BytesBuilder b,
+          int v,
+        ) => b.add([v & 0xff, (v >> 8) & 0xff]);
+        final void Function(BytesBuilder b, int v) u32 =
+            (BytesBuilder b, int v) => b.add([
+              v & 0xff,
+              (v >> 8) & 0xff,
+              (v >> 16) & 0xff,
+              (v >> 24) & 0xff,
+            ]);
         final local = BytesBuilder(copy: false);
         u32(local, 0x04034b50);
         u16(local, 20);
@@ -418,7 +437,7 @@ void main() {
         u32(local, crc);
         u32(local, data.length);
         u32(local, data.length);
-        final localBytes = local.takeBytes();
+        final Uint8List localBytes = local.takeBytes();
         final central = BytesBuilder(copy: false);
         u32(central, 0x02014b50);
         u16(central, (3 << 8) | 20);
@@ -438,7 +457,7 @@ void main() {
         u32(central, 0x81A40000);
         u32(central, 0);
         central.add(name);
-        final centralBytes = central.takeBytes();
+        final Uint8List centralBytes = central.takeBytes();
         final eocd = BytesBuilder(copy: false);
         u32(eocd, 0x06054b50);
         u16(eocd, 0);
@@ -520,10 +539,10 @@ void main() {
               data: Uint8List.fromList([1, 2]),
             ),
           ];
-          final basePath = await writeBaseApk(baseEntries);
-          final baseBytes = File(basePath).readAsBytesSync();
-          final jarPath = await writeNativeLibsJar();
-          final assetsPath = writeFlutterAssets();
+          final String basePath = await writeBaseApk(baseEntries);
+          final Uint8List baseBytes = File(basePath).readAsBytesSync();
+          final String jarPath = await writeNativeLibsJar();
+          final String assetsPath = writeFlutterAssets();
           final outPath = '${tempDir.path}/overlay_unsigned.apk';
 
           await runAndroidBundle([
@@ -538,8 +557,8 @@ void main() {
             outPath,
           ]);
 
-          final outBytes = File(outPath).readAsBytesSync();
-          final outEntries = entriesByPath(outPath);
+          final Uint8List outBytes = File(outPath).readAsBytesSync();
+          final Map<String, List<int>> outEntries = entriesByPath(outPath);
 
           // Every base entry keeps its exact content.
           for (final entry in baseEntries) {
@@ -565,7 +584,7 @@ void main() {
 
           // Base local file sections are preserved byte-for-byte: the output
           // starts with the base bytes up to the base central directory.
-          final baseCentralOffset = readCentralForTest(baseBytes).cdOffset;
+          final int baseCentralOffset = readCentralForTest(baseBytes).cdOffset;
           expect(
             outBytes.sublist(0, baseCentralOffset),
             equals(baseBytes.sublist(0, baseCentralOffset)),
@@ -576,14 +595,14 @@ void main() {
       test(
         'stores .so and aapt2 no-compress extensions, deflates the rest',
         () async {
-          final basePath = await writeBaseApk([
+          final String basePath = await writeBaseApk([
             ZipEntry(
               path: 'AndroidManifest.xml',
               data: Uint8List.fromList([1]),
             ),
           ]);
-          final jarPath = await writeNativeLibsJar();
-          final assetsPath = writeFlutterAssets();
+          final String jarPath = await writeNativeLibsJar();
+          final String assetsPath = writeFlutterAssets();
           final outPath = '${tempDir.path}/overlay_methods.apk';
 
           await runAndroidBundle([
@@ -598,8 +617,9 @@ void main() {
             outPath,
           ]);
 
-          final methods = readCentralForTest(File(outPath).readAsBytesSync())
-              .methods;
+          final Map<String, int> methods = readCentralForTest(
+            File(outPath).readAsBytesSync(),
+          ).methods;
           expect(methods['lib/arm64-v8a/libapp.so'], 0);
           expect(methods['assets/flutter_assets/logo.png'], 0);
           expect(methods['assets/flutter_assets/AssetManifest.json'], 8);
@@ -616,13 +636,13 @@ void main() {
           File('${assetsDir.path}/data.custom').writeAsBytesSync(filler);
           File('${assetsDir.path}/PHOTO.PNG').writeAsBytesSync(filler);
           File('${assetsDir.path}/photo.webp').writeAsBytesSync(filler);
-          final basePath = await writeBaseApk([
+          final String basePath = await writeBaseApk([
             ZipEntry(
               path: 'AndroidManifest.xml',
               data: Uint8List.fromList([1]),
             ),
           ]);
-          final jarPath = await writeNativeLibsJar();
+          final String jarPath = await writeNativeLibsJar();
 
           Future<Map<String, int>> spliceMethods(List<String> extraArgs) async {
             final outPath =
@@ -649,7 +669,7 @@ void main() {
           );
           // With it — bare or leading-dot form — the entry is stored.
           for (final flag in ['custom', '.custom']) {
-            final methods = await spliceMethods([
+            final Map<String, int> methods = await spliceMethods([
               '--nocompress-extensions',
               flag,
             ]);
@@ -660,7 +680,7 @@ void main() {
             );
           }
           // Case-sensitive like aapt2: the uppercase PNG matches no rule.
-          final methods = await spliceMethods([
+          final Map<String, int> methods = await spliceMethods([
             '--nocompress-extensions',
             'custom',
           ]);
@@ -674,14 +694,14 @@ void main() {
         // The jar writer stores .so entries; the splice must reuse those raw
         // bytes and their CRC without inflating — the entry never fits a
         // 64 MiB streaming window, and below the ZIP32 limits it must work.
-        const size = 65 * 1024 * 1024;
+        const int size = 65 * 1024 * 1024;
         final body = Uint8List(size)..fillRange(0, size, 7);
         final staged = BytesBuilder(copy: false)
           ..add(_syntheticElf(machine: 183))
           ..add(body);
         final libPath = '${tempDir.path}/huge_libapp.so';
         File(libPath).writeAsBytesSync(staged.takeBytes(), flush: true);
-        final original = File(libPath).readAsBytesSync();
+        final Uint8List original = File(libPath).readAsBytesSync();
 
         final jarPath = '${tempDir.path}/huge_native_libs.jar';
         await runAndroidBundle([
@@ -695,7 +715,7 @@ void main() {
           'lib/arm64-v8a/libapp.so=$libPath',
         ]);
 
-        final basePath = await writeBaseApk([
+        final String basePath = await writeBaseApk([
           ZipEntry(
             path: 'AndroidManifest.xml',
             data: Uint8List.fromList([1]),
@@ -716,11 +736,11 @@ void main() {
           outPath,
         ]);
 
-        final outRaw = {
+        final Map<String, ZipRawEntry> outRaw = {
           for (final e in readZipRawEntries(File(outPath).readAsBytesSync()))
             e.path: e,
         };
-        final so = outRaw['lib/arm64-v8a/libapp.so']!;
+        final ZipRawEntry so = outRaw['lib/arm64-v8a/libapp.so']!;
         expect(so.method, 0);
         expect(so.rawData.length, original.length);
         expect(so.rawData, original);
@@ -732,11 +752,14 @@ void main() {
         // copies the local-file region (descriptor trailers included)
         // byte-for-byte, so these entries need no special handling.
         final dexData = Uint8List.fromList(List<int>.filled(1000, 5));
-        final baseBytes = zipWithDescriptorEntry('classes.dex', dexData);
+        final Uint8List baseBytes = zipWithDescriptorEntry(
+          'classes.dex',
+          dexData,
+        );
         final basePath = '${tempDir.path}/base_desc.apk';
         File(basePath).writeAsBytesSync(baseBytes);
-        final jarPath = await writeNativeLibsJar();
-        final assetsPath = writeFlutterAssets();
+        final String jarPath = await writeNativeLibsJar();
+        final String assetsPath = writeFlutterAssets();
         final outPath = '${tempDir.path}/overlay_desc.apk';
 
         await runAndroidBundle([
@@ -751,8 +774,8 @@ void main() {
           outPath,
         ]);
 
-        final outBytes = File(outPath).readAsBytesSync();
-        final baseCd = readCentralForTest(baseBytes).cdOffset;
+        final Uint8List outBytes = File(outPath).readAsBytesSync();
+        final int baseCd = readCentralForTest(baseBytes).cdOffset;
         expect(
           outBytes.sublist(0, baseCd),
           equals(baseBytes.sublist(0, baseCd)),
@@ -761,7 +784,7 @@ void main() {
       });
 
       test('empty payload reproduces the base APK byte-for-byte', () async {
-        final basePath = await writeBaseApk([
+        final String basePath = await writeBaseApk([
           ZipEntry(
             path: 'classes.dex',
             data: Uint8List.fromList(List<int>.filled(1000, 5)),
@@ -793,14 +816,14 @@ void main() {
       });
 
       test('refuses a payload entry that collides with the base APK', () async {
-        final basePath = await writeBaseApk([
+        final String basePath = await writeBaseApk([
           ZipEntry(
             path: 'assets/flutter_assets/AssetManifest.json',
             data: Uint8List.fromList([1]),
           ),
         ]);
-        final jarPath = await writeNativeLibsJar();
-        final assetsPath = writeFlutterAssets();
+        final String jarPath = await writeNativeLibsJar();
+        final String assetsPath = writeFlutterAssets();
 
         expect(
           runAndroidBundle([
@@ -819,14 +842,14 @@ void main() {
       });
 
       test('refuses a base APK that is already signed', () async {
-        final basePath = await writeBaseApk([
+        final String basePath = await writeBaseApk([
           ZipEntry(
             path: 'META-INF/CERT.SF',
             data: Uint8List.fromList([1, 2, 3]),
           ),
         ]);
-        final jarPath = await writeNativeLibsJar();
-        final assetsPath = writeFlutterAssets();
+        final String jarPath = await writeNativeLibsJar();
+        final String assetsPath = writeFlutterAssets();
 
         expect(
           runAndroidBundle([
@@ -847,10 +870,10 @@ void main() {
       test('refuses a base APK carrying an APK Signing Block', () async {
         // A v2-signed APK need not contain META-INF signature files; the
         // block sits between the local entries and the central directory.
-        final clean = encodeDeterministicZip([
+        final Uint8List clean = encodeDeterministicZip([
           ZipEntry(path: 'classes.dex', data: Uint8List.fromList([1])),
         ]);
-        final cdOffset = readCentralForTest(clean).cdOffset;
+        final int cdOffset = readCentralForTest(clean).cdOffset;
         final block = BytesBuilder(copy: false);
         void u64(BytesBuilder b, int v) => b.add([
           v & 0xff,
@@ -866,12 +889,12 @@ void main() {
         block.add(List<int>.filled(8, 0));
         u64(block, 24);
         block.add(utf8.encode('APK Sig Block 42'));
-        final blockBytes = block.takeBytes();
+        final Uint8List blockBytes = block.takeBytes();
         final forged = BytesBuilder(copy: false)
           ..add(Uint8List.sublistView(clean, 0, cdOffset))
           ..add(blockBytes)
           ..add(Uint8List.sublistView(clean, cdOffset));
-        final forgedBytes = forged.takeBytes();
+        final Uint8List forgedBytes = forged.takeBytes();
         final eocd = ByteData.sublistView(
           forgedBytes,
           forgedBytes.length - 22,
@@ -889,8 +912,8 @@ void main() {
         );
         final basePath = '${tempDir.path}/base_v2signed.apk';
         File(basePath).writeAsBytesSync(forgedBytes);
-        final jarPath = await writeNativeLibsJar();
-        final assetsPath = writeFlutterAssets();
+        final String jarPath = await writeNativeLibsJar();
+        final String assetsPath = writeFlutterAssets();
 
         expect(
           runAndroidBundle([

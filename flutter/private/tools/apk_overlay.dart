@@ -117,15 +117,15 @@ class _PayloadEntry {
   Uint8List bytes,
 ) {
   final bd = ByteData.sublistView(bytes);
-  final eocd = findEocdOffset(bytes);
-  final count = _getUint16LE(bd, eocd + 8);
+  final int eocd = findEocdOffset(bytes);
+  final int count = _getUint16LE(bd, eocd + 8);
   // entryCount == 0xFFFF would mean ZIP64; APKs never use it.
   if (count == 0xFFFF ||
       _getUint32LE(bd, eocd + 12) == 0xFFFFFFFF ||
       _getUint32LE(bd, eocd + 16) == 0xFFFFFFFF) {
     throw FormatException('apk-overlay: ZIP64 archives are not supported.');
   }
-  final cdOffset = _getUint32LE(bd, eocd + 16);
+  final int cdOffset = _getUint32LE(bd, eocd + 16);
   if (bytes.length < cdOffset + 4 || _getUint32LE(bd, cdOffset) != 0x02014b50) {
     throw FormatException(
       'apk-overlay: central directory not found at offset $cdOffset.',
@@ -140,7 +140,7 @@ class _PayloadEntry {
         'apk-overlay: invalid central directory header at $pos.',
       );
     }
-    final flags = _getUint16LE(bd, pos + 8);
+    final int flags = _getUint16LE(bd, pos + 8);
     // Entries with data descriptors (bit 3, e.g. the merged classes.dex
     // singlejar emits) need no special handling: the splice copies the whole
     // local-file region byte-for-byte, descriptors ride along untouched, and
@@ -151,10 +151,10 @@ class _PayloadEntry {
         'apk-overlay: encrypted entries are not supported.',
       );
     }
-    final nameLen = _getUint16LE(bd, pos + 28);
-    final extraLen = _getUint16LE(bd, pos + 30);
-    final commentLen = _getUint16LE(bd, pos + 32);
-    final recordLen = 46 + nameLen + extraLen + commentLen;
+    final int nameLen = _getUint16LE(bd, pos + 28);
+    final int extraLen = _getUint16LE(bd, pos + 30);
+    final int commentLen = _getUint16LE(bd, pos + 32);
+    final int recordLen = 46 + nameLen + extraLen + commentLen;
     names.add(
       decodeZipEntryName(
         bytes.sublist(pos + 46, pos + 46 + nameLen),
@@ -227,10 +227,12 @@ List<_PayloadEntry> _payloadFromFlutterAssets(Directory assetsDir) {
   final collected = <_PayloadEntry>[];
 
   void walk(Directory dir, String relPrefix) {
-    final children = dir.listSync(followLinks: false)
+    final List<FileSystemEntity> children = dir.listSync(followLinks: false)
       ..sort((a, b) => a.path.compareTo(b.path));
     for (final entity in children) {
-      final name = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
+      final String name = entity.uri.pathSegments
+          .where((s) => s.isNotEmpty)
+          .last;
       final relPath = relPrefix.isEmpty ? name : '$relPrefix/$name';
       if (entity is Directory) {
         walk(entity, relPath);
@@ -242,7 +244,7 @@ List<_PayloadEntry> _payloadFromFlutterAssets(Directory assetsDir) {
           ),
         );
       } else if (entity is Link) {
-        final resolved = entity.resolveSymbolicLinksSync();
+        final String resolved = entity.resolveSymbolicLinksSync();
         if (FileSystemEntity.isDirectorySync(resolved)) {
           throw ArgumentError(
             'apk-overlay: directory symlink not supported: ${entity.path}.',
@@ -272,7 +274,7 @@ List<_PayloadEntry> _payloadFromFlutterAssets(Directory assetsDir) {
 bool _storeUncompressedByName(String path, Set<String> extraNoCompress) {
   bool suffix(String ext) => ext.isNotEmpty && path.endsWith('.$ext');
   if (suffix('so')) return true;
-  for (final ext in _aaptNoCompressExtensions) {
+  for (final String ext in _aaptNoCompressExtensions) {
     if (suffix(ext)) return true;
   }
   for (var ext in extraNoCompress) {
@@ -377,7 +379,7 @@ const int _zip32Limit = 0xFFFFFFFF;
   int? crc,
   Set<String> extraNoCompress = const {},
 }) {
-  final nameBytes = utf8.encode(path);
+  final Uint8List nameBytes = utf8.encode(path);
   if (nameBytes.length >= 0xFFFF) {
     throw FormatException(
       'apk-overlay: entry name too long for ZIP32: $path.',
@@ -389,7 +391,7 @@ const int _zip32Limit = 0xFFFFFFFF;
       'ZIP32 limit; ZIP64 archives are not supported.',
     );
   }
-  final mustStore = _storeUncompressedByName(path, extraNoCompress);
+  final bool mustStore = _storeUncompressedByName(path, extraNoCompress);
   final Uint8List payload;
   final int method;
   if (mustStore) {
@@ -405,7 +407,7 @@ const int _zip32Limit = 0xFFFFFFFF;
     }
     // The payload size doubles as the fast estimator for the rule: only
     // entries inside the band pay for the exact level-9 measurement.
-    final decisionSize = aaptDecisionSize(data, deflated.length);
+    final int decisionSize = aaptDecisionSize(data, deflated.length);
     if (decisionSize >= _zip32Limit) {
       throw FormatException(
         'apk-overlay: compressed entry $path is $decisionSize bytes, '
@@ -420,7 +422,7 @@ const int _zip32Limit = 0xFFFFFFFF;
       method = 0;
     }
   }
-  final checksum = crc ?? crc32(data);
+  final int checksum = crc ?? crc32(data);
 
   final localBytes = BytesBuilder(copy: false)
     ..add(
@@ -520,8 +522,9 @@ void spliceApkOverlay({
   required String outputApkPath,
   Set<String> nocompressExtensions = const {},
 }) {
-  final base = File(baseApkPath).readAsBytesSync();
-  final central = _readCentral(base);
+  final Uint8List base = File(baseApkPath).readAsBytesSync();
+  final ({int cdOffset, int count, Set<String> names, Uint8List records})
+  central = _readCentral(base);
 
   final payload = <_PayloadEntry>[
     ..._payloadFromNativeLibsJar(File(nativeLibsJarPath).readAsBytesSync()),
@@ -540,7 +543,7 @@ void spliceApkOverlay({
   final out = BytesBuilder(copy: false)
     ..add(Uint8List.sublistView(base, 0, central.cdOffset));
   final newCentral = BytesBuilder(copy: false);
-  final offset = _appendPayloadEntries(
+  final int offset = _appendPayloadEntries(
     out: out,
     newCentral: newCentral,
     offset: central.cdOffset,
@@ -548,16 +551,16 @@ void spliceApkOverlay({
     nocompressExtensions: nocompressExtensions,
   );
 
-  final totalCount = central.count + payload.length;
+  final int totalCount = central.count + payload.length;
   if (totalCount >= 0xFFFF) {
     throw ArgumentError('apk-overlay: too many entries for a ZIP archive.');
   }
-  final newCentralBytes = newCentral.takeBytes();
+  final Uint8List newCentralBytes = newCentral.takeBytes();
   out.add(central.records);
   out.add(newCentralBytes);
 
   final cdOffset = offset;
-  final cdSize = central.records.length + newCentralBytes.length;
+  final int cdSize = central.records.length + newCentralBytes.length;
   if (cdOffset >= _zip32Limit) {
     throw FormatException(
       'apk-overlay: central directory offset $cdOffset exceeds the ZIP32 '
@@ -610,13 +613,13 @@ void _refuseSignedBase(
   // central directory begins.
   const signingBlockMagic = 'APK Sig Block 42';
   if (central.cdOffset >= 16) {
-    final magicBytes = base.sublist(
+    final Uint8List magicBytes = base.sublist(
       central.cdOffset - 16,
       central.cdOffset,
     );
     // Byte-wise: the preceding bytes are arbitrary zip content, usually not
     // valid UTF-8, so decode-then-compare would throw on innocent APKs.
-    final expected = utf8.encode(signingBlockMagic);
+    final Uint8List expected = utf8.encode(signingBlockMagic);
     var matches = magicBytes.length == expected.length;
     for (var i = 0; matches && i < expected.length; i++) {
       if (magicBytes[i] != expected[i]) matches = false;
@@ -648,7 +651,7 @@ int _appendPayloadEntries({
         'exceeds the ZIP32 limit; ZIP64 archives are not supported.',
       );
     }
-    final encoded = _encodeEntry(
+    final ({Uint8List central, Uint8List local}) encoded = _encodeEntry(
       entry.path,
       entry.data,
       crc: entry.crc,
@@ -691,7 +694,7 @@ void runApkOverlay(List<String> args) {
   final nocompressExtensions = <String>{};
 
   for (var i = 0; i < args.length; i++) {
-    final arg = args[i];
+    final String arg = args[i];
     switch (arg) {
       case '--base':
         if (i + 1 >= args.length) throw ArgumentError('Missing value for $arg');

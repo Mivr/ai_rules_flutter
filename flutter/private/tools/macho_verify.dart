@@ -7,7 +7,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'macho_cli.dart' show FlagCursor, usageError;
-import 'macho_fat.dart' show extractFatSlices, isFatMachO, isMachO64;
+import 'macho_fat.dart' show FatSlice, extractFatSlices, isFatMachO, isMachO64;
 import 'macho_framework.dart'
     show readRawFrameworkZipEntries, verifyMacosFramework;
 import 'macho_parse.dart' show parseLoadCommands;
@@ -15,7 +15,7 @@ import 'macho_parse.dart' show parseLoadCommands;
 Map<String, Uint8List> _readZipArchiveEntries(Uint8List zipBytes) {
   final bd = ByteData.sublistView(zipBytes);
   var eocdOffset = -1;
-  for (var i = zipBytes.length - 22; i >= 0; i--) {
+  for (int i = zipBytes.length - 22; i >= 0; i--) {
     if (bd.getUint32(i, Endian.little) == 0x06054b50) {
       eocdOffset = i;
       break;
@@ -26,8 +26,8 @@ Map<String, Uint8List> _readZipArchiveEntries(Uint8List zipBytes) {
       'Invalid ZIP archive: EOCD signature not found.',
     );
   }
-  final entryCount = bd.getUint16(eocdOffset + 10, Endian.little);
-  final cdOffset = bd.getUint32(eocdOffset + 16, Endian.little);
+  final int entryCount = bd.getUint16(eocdOffset + 10, Endian.little);
+  final int cdOffset = bd.getUint32(eocdOffset + 16, Endian.little);
   return {
     for (final entry in readRawFrameworkZipEntries(
       bd,
@@ -74,7 +74,7 @@ _VerifyArgs _parseVerifyArgs(List<String> args) {
   final forbiddenEntries = <String>[];
   final flags = FlagCursor(args);
   while (flags.moveNext()) {
-    final arg = flags.current;
+    final String arg = flags.current;
     switch (arg) {
       case '--input':
         inputPath = flags.take('--input');
@@ -110,16 +110,16 @@ _VerifyArgs _parseVerifyArgs(List<String> args) {
 
 /// Runs the `verify` subcommand: parses [args] and checks Mach-O and framework inputs.
 void runVerify(List<String> args) {
-  final parsed = _parseVerifyArgs(args);
-  final inputPath = parsed.inputPath;
-  final outputPath = parsed.outputPath;
+  final _VerifyArgs parsed = _parseVerifyArgs(args);
+  final String? inputPath = parsed.inputPath;
+  final String? outputPath = parsed.outputPath;
   if (inputPath == null || outputPath == null) {
     usageError('verify requires --input and --output');
   }
 
-  final binaryRelpath = parsed.binaryRelpath;
-  final frameworkZipPath = parsed.frameworkZipPath;
-  final isZipArchive =
+  final String? binaryRelpath = parsed.binaryRelpath;
+  final String? frameworkZipPath = parsed.frameworkZipPath;
+  final bool isZipArchive =
       FileSystemEntity.isFileSync(inputPath) &&
       (inputPath.endsWith('.ipa') || inputPath.endsWith('.zip'));
 
@@ -129,7 +129,7 @@ void runVerify(List<String> args) {
           (frameworkZipPath != null && frameworkZipPath.isNotEmpty))) {
     var fwName = 'App';
     if (binaryRelpath != null && binaryRelpath.contains('.framework/')) {
-      final seg = binaryRelpath
+      final String seg = binaryRelpath
           .split('/')
           .firstWhere((s) => s.endsWith('.framework'));
       fwName = seg.substring(0, seg.length - '.framework'.length);
@@ -146,12 +146,14 @@ void runVerify(List<String> args) {
     final String targetPath;
     final Uint8List bytes;
     if (isZipArchive) {
-      final loaded = _loadZipVerifyTarget(parsed, inputPath, outputPath);
+      final ({Uint8List bytes, String targetPath, String tempPath}) loaded =
+          _loadZipVerifyTarget(parsed, inputPath, outputPath);
       targetPath = loaded.targetPath;
       bytes = loaded.bytes;
       tempExtractedBinaryPath = loaded.tempPath;
     } else {
-      final loaded = _loadBundleVerifyTarget(parsed, inputPath);
+      final ({Uint8List bytes, String targetPath}) loaded =
+          _loadBundleVerifyTarget(parsed, inputPath);
       targetPath = loaded.targetPath;
       bytes = loaded.bytes;
     }
@@ -180,7 +182,7 @@ void runVerify(List<String> args) {
   String inputPath,
   String outputPath,
 ) {
-  final zipEntries = _readZipArchiveEntries(
+  final Map<String, Uint8List> zipEntries = _readZipArchiveEntries(
     File(inputPath).readAsBytesSync(),
   );
   _checkZipVerifyEntries(
@@ -189,13 +191,13 @@ void runVerify(List<String> args) {
     parsed.expectedEntries,
     parsed.forbiddenEntries,
   );
-  final binaryRelpath = parsed.binaryRelpath;
+  final String? binaryRelpath = parsed.binaryRelpath;
   if (binaryRelpath == null || binaryRelpath.isEmpty) {
     throw ArgumentError(
       '--binary-relpath is required when verifying a ZIP/IPA archive.',
     );
   }
-  final entryBytes = zipEntries[binaryRelpath];
+  final Uint8List? entryBytes = zipEntries[binaryRelpath];
   if (entryBytes == null) {
     throw StateError(
       'Binary "$binaryRelpath" not found in archive "$inputPath". '
@@ -219,7 +221,7 @@ void runVerify(List<String> args) {
     parsed.expectedEntries,
     parsed.forbiddenEntries,
   );
-  final binaryRelpath = parsed.binaryRelpath;
+  final String? binaryRelpath = parsed.binaryRelpath;
   final targetPath = binaryRelpath != null && binaryRelpath.isNotEmpty
       ? '$inputPath/$binaryRelpath'
       : inputPath;
@@ -246,7 +248,7 @@ void _checkZipVerifyEntries(
     }
   }
   for (final forbiddenEntry in forbiddenEntries) {
-    final matching = zipEntries.keys.where(
+    final Iterable<String> matching = zipEntries.keys.where(
       (k) =>
           k == forbiddenEntry ||
           k.startsWith('$forbiddenEntry/') ||
@@ -295,7 +297,7 @@ void _checkParsedMachO(String targetPath, Uint8List bytes) {
     );
   }
   if (isFatMachO(bytes)) {
-    for (final s in extractFatSlices(bytes)) {
+    for (final FatSlice s in extractFatSlices(bytes)) {
       parseLoadCommands(s.bytes);
     }
   } else {
@@ -310,7 +312,7 @@ void _checkObjdumpOutput(
   List<String> expectedSubstrings,
 ) {
   if (objdumpPath == null || objdumpPath.isEmpty) return;
-  final res = Process.runSync(objdumpPath, [
+  final ProcessResult res = Process.runSync(objdumpPath, [
     '--macho',
     '--private-headers',
     '--dylib-id',

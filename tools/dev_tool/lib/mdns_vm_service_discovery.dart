@@ -192,7 +192,7 @@ class MdnsVmServiceDiscovery {
   /// process open past shutdown. Every socket and timer the wait started is
   /// stopped on the way out.
   set abandoned(Future<void>? signal) {
-    final generation = ++_abandonGeneration;
+    final int generation = ++_abandonGeneration;
     _abandonSignal = signal;
     _abandoned = false;
     final pending = signal;
@@ -260,11 +260,11 @@ class MdnsVmServiceDiscovery {
     // it — the two things needed to tell "the app never started" apart from
     // "that was the copy running in a simulator on this Mac".
     final seen = <String, String>{};
-    var window = _initialQueryWindow;
+    Duration window = _initialQueryWindow;
     // The launch site may set [abandoned] per launch: read it once, so this
     // wait observes its own launch's signal even if a later launch replaces
     // the field while it is still running.
-    final abandonSignal = _abandonSignal;
+    final Future<void>? abandonSignal = _abandonSignal;
 
     var warned = false;
     while (elapsed.elapsed < timeout) {
@@ -273,10 +273,10 @@ class MdnsVmServiceDiscovery {
         warned = true;
         onSlow?.call(elapsed.elapsed);
       }
-      final attemptStart = elapsed.elapsed;
-      final remaining = timeout - attemptStart;
+      final Duration attemptStart = elapsed.elapsed;
+      final Duration remaining = timeout - attemptStart;
       final attemptWindow = window < remaining ? window : remaining;
-      final record = await _raceAbandon(
+      final MdnsVmServiceRecord? record = await _raceAbandon(
         _guarded(
           () => _queryOnce(
             bundleId: bundleId,
@@ -294,7 +294,7 @@ class MdnsVmServiceDiscovery {
       // listen. A lookup that comes back early — nothing on the link answered,
       // or the client short-circuited — must not become a tight loop of
       // queries, which would flood the link and defeat the backoff.
-      final spent = elapsed.elapsed - attemptStart;
+      final Duration spent = elapsed.elapsed - attemptStart;
       if (spent < attemptWindow) {
         await _waitGap(attemptWindow - spent, abandonSignal);
       }
@@ -342,7 +342,7 @@ class MdnsVmServiceDiscovery {
   /// skips its stop — each client is stopped exactly once.
   Future<T> _raceAbandon<T>(Future<T> work, Future<void>? abandonSignal) async {
     if (abandonSignal == null) return work;
-    final outcome = await Future.any([
+    final _AbandonResult<T> outcome = await Future.any([
       work.then((value) => _Worked<T>(value)),
       abandonSignal.then((_) => _Abandoned<T>()),
     ]);
@@ -383,7 +383,7 @@ class MdnsVmServiceDiscovery {
   ///
   /// The attempt's own `finally` then skips its stop — see [_activeClient].
   void _stopActiveClient() {
-    final client = _activeClient;
+    final MDnsClient? client = _activeClient;
     _activeClient = null;
     client?.stop();
   }
@@ -398,7 +398,7 @@ class MdnsVmServiceDiscovery {
     unawaited(
       runZonedGuarded(
         () async {
-          final result = await body();
+          final T result = await body();
           if (!completer.isCompleted) completer.complete(result);
         },
         (error, stack) {
@@ -434,16 +434,17 @@ class MdnsVmServiceDiscovery {
     required Duration window,
     required Map<String, String> seen,
   }) async {
-    final client = _clientFactory();
+    final MDnsClient client = _clientFactory();
     await client.start();
     // From here the attempt owns a live socket: abandonment stops it through
     // this field, and the `finally` below skips its own stop then.
     _activeClient = client;
     try {
-      final ptrStream = client.lookup<PtrResourceRecord>(
-        ResourceRecordQuery.serverPointer(dartVmServiceMdnsName),
-        timeout: window,
-      );
+      final Stream<PtrResourceRecord> ptrStream = client
+          .lookup<PtrResourceRecord>(
+            ResourceRecordQuery.serverPointer(dartVmServiceMdnsName),
+            timeout: window,
+          );
 
       final handled = <String>{};
       await for (final ptr in ptrStream) {
@@ -461,16 +462,17 @@ class MdnsVmServiceDiscovery {
         // `package:multicast_dns`: it splits the name on `.` and would ask
         // for a differently-labelled name that no responder matches. Hence
         // the short timeout — a miss here cannot be recovered by waiting.
-        final srvRecords = await _cachedLookup<SrvResourceRecord>(
-          client,
-          ResourceRecordQuery.service(ptr.domainName),
-        );
+        final List<SrvResourceRecord> srvRecords =
+            await _cachedLookup<SrvResourceRecord>(
+              client,
+              ResourceRecordQuery.service(ptr.domainName),
+            );
         if (srvRecords.isEmpty) continue;
 
         // The same advertisement arrives once per interface the device is
         // reachable on — four copies over USB is normal. Identical duplicates
         // are expected; a disagreement means these are not the same service.
-        final ports = srvRecords.map((r) => r.port).toSet();
+        final Set<int> ports = srvRecords.map((r) => r.port).toSet();
         if (ports.length > 1) {
           throw MdnsDiscoveryException(
             MdnsDiscoveryFailure.ambiguous,
@@ -479,15 +481,16 @@ class MdnsVmServiceDiscovery {
             '$bundleId and run again.',
           );
         }
-        final srv = srvRecords.first;
+        final SrvResourceRecord srv = srvRecords.first;
         seen[ptr.domainName] = srv.target;
         if (!mdnsTargetMatchesHostname(srv.target, hostnames)) continue;
 
-        final txtRecords = await _cachedLookup<TxtResourceRecord>(
-          client,
-          ResourceRecordQuery.text(ptr.domainName),
-        );
-        final authCodePath = parseMdnsAuthCodePath(
+        final List<TxtResourceRecord> txtRecords =
+            await _cachedLookup<TxtResourceRecord>(
+              client,
+              ResourceRecordQuery.text(ptr.domainName),
+            );
+        final String authCodePath = parseMdnsAuthCodePath(
           txtRecords.map((r) => r.text).join('\n'),
         );
 
@@ -535,13 +538,15 @@ class MdnsVmServiceDiscovery {
     // Unlike the SRV/TXT reads above, a host name has ordinary DNS labels, so
     // this one can go out on the wire if the PTR response did not carry an
     // address record for the advertising host.
-    final records = await client
+    final List<IPAddressResourceRecord> records = await client
         .lookup<IPAddressResourceRecord>(
           ResourceRecordQuery.addressIPv4(target),
           timeout: const Duration(seconds: 5),
         )
         .toList();
-    final address = selectMdnsAddress(records.map((r) => r.address).toList());
+    final InternetAddress? address = selectMdnsAddress(
+      records.map((r) => r.address).toList(),
+    );
     if (address == null) {
       throw MdnsDiscoveryException(
         MdnsDiscoveryFailure.addressUnresolved,
@@ -586,11 +591,11 @@ class MdnsVmServiceDiscovery {
     // device on the network answers over that network and has no business
     // needing a link-local interface here.
     if (!overPointToPointLink) return buffer.toString();
-    final interfaces = await _listInterfaces(
+    final List<NetworkInterface> interfaces = await _listInterfaces(
       includeLinkLocal: true,
       type: InternetAddressType.IPv4,
     );
-    final hasLinkLocal = interfaces.any(
+    final bool hasLinkLocal = interfaces.any(
       (i) => i.addresses.any((a) => a.isLinkLocal),
     );
     if (!hasLinkLocal) {
@@ -616,7 +621,10 @@ class MdnsVmServiceDiscovery {
 bool mdnsInstanceMatchesBundleId(String domainName, String bundleId) {
   const suffix = '.$dartVmServiceMdnsName';
   if (!domainName.endsWith(suffix)) return false;
-  final instance = domainName.substring(0, domainName.length - suffix.length);
+  final String instance = domainName.substring(
+    0,
+    domainName.length - suffix.length,
+  );
   if (instance == bundleId) return true;
   return RegExp(
     r'^' + RegExp.escape(bundleId) + r' \(\d+\)$',
@@ -633,15 +641,15 @@ bool mdnsInstanceMatchesBundleId(String domainName, String bundleId) {
 /// from the user-facing device name, which carries spaces and punctuation that
 /// the sanitiser rewrites.
 bool mdnsTargetMatchesHostname(String target, Iterable<String> hostnames) {
-  final targetLabel = mdnsFirstLabel(target);
+  final String targetLabel = mdnsFirstLabel(target);
   if (targetLabel.isEmpty) return false;
   return hostnames.any((h) => mdnsFirstLabel(h) == targetLabel);
 }
 
 /// The first DNS label of [name], lowercased, with trailing dots ignored.
 String mdnsFirstLabel(String name) {
-  final trimmed = name.trim();
-  final dot = trimmed.indexOf('.');
+  final String trimmed = name.trim();
+  final int dot = trimmed.indexOf('.');
   return (dot < 0 ? trimmed : trimmed.substring(0, dot)).toLowerCase();
 }
 
@@ -652,9 +660,9 @@ String mdnsFirstLabel(String name) {
 /// `--disable-service-auth-codes`, which is a legitimate configuration.
 String parseMdnsAuthCodePath(String txt) {
   const prefix = 'authCode=';
-  for (final line in const LineSplitter().convert(txt)) {
+  for (final String line in const LineSplitter().convert(txt)) {
     if (!line.startsWith(prefix)) continue;
-    final code = line.substring(prefix.length);
+    final String code = line.substring(prefix.length);
     return code.endsWith('/') ? code : '$code/';
   }
   return '';
@@ -666,6 +674,8 @@ String parseMdnsAuthCodePath(String txt) {
 /// link-local USB address, which is not reachable once the cable is out.
 InternetAddress? selectMdnsAddress(List<InternetAddress> addresses) {
   if (addresses.isEmpty) return null;
-  final routable = addresses.where((a) => !a.isLinkLocal).toList();
+  final List<InternetAddress> routable = addresses
+      .where((a) => !a.isLinkLocal)
+      .toList();
   return routable.isNotEmpty ? routable.first : addresses.first;
 }

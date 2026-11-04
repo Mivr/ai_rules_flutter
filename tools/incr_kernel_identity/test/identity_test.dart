@@ -58,7 +58,7 @@ void main() {
   group('splitTopLevelJsonValues', () {
     test('splits concatenated pretty objects, ignoring braces in strings', () {
       final text = '{"a": 1, "s": "}{"}\n{"b": {"c": 2}}';
-      final parts = splitTopLevelJsonValues(text);
+      final List<String> parts = splitTopLevelJsonValues(text);
       expect(parts, hasLength(2));
       expect(parts[0], contains('"a": 1'));
       expect(parts[1], contains('"c": 2'));
@@ -71,7 +71,7 @@ void main() {
 
   group('checkStrategy', () {
     test('a matching entry passes', () {
-      final verdict = checkStrategy(
+      final StrategyVerdict verdict = checkStrategy(
         logText: '${_logEntry(runner: 'worker', cacheHit: false)}\n',
         wantRunner: 'worker',
         step: 'worker-s0',
@@ -81,7 +81,7 @@ void main() {
     });
 
     test('the wrong runner fails', () {
-      final verdict = checkStrategy(
+      final StrategyVerdict verdict = checkStrategy(
         logText: _logEntry(runner: 'local', cacheHit: false),
         wantRunner: 'worker',
         step: 'worker-s0',
@@ -91,7 +91,7 @@ void main() {
     });
 
     test('a cache hit fails', () {
-      final verdict = checkStrategy(
+      final StrategyVerdict verdict = checkStrategy(
         logText: _logEntry(runner: 'worker', cacheHit: true),
         wantRunner: 'worker',
         step: 'worker-s0',
@@ -100,7 +100,7 @@ void main() {
     });
 
     test('no entry fails closed', () {
-      final verdict = checkStrategy(
+      final StrategyVerdict verdict = checkStrategy(
         logText: '{"mnemonic": "DartCompile", "runner": "worker"}\n',
         wantRunner: 'worker',
         step: 'worker-s0',
@@ -110,7 +110,7 @@ void main() {
     });
 
     test('an unparsable log fails closed', () {
-      final verdict = checkStrategy(
+      final StrategyVerdict verdict = checkStrategy(
         logText: '{not json',
         wantRunner: 'worker',
         step: 'worker-s0',
@@ -147,7 +147,7 @@ void main() {
     });
 
     test('PID stability compares both processes', () {
-      const base = (worker: 100, compiler: 101);
+      const ({int compiler, int worker}) base = (worker: 100, compiler: 101);
       expect(samePids((worker: 100, compiler: 101), base), isTrue);
       expect(samePids((worker: 999, compiler: 101), base), isFalse);
       expect(samePids((worker: 100, compiler: 999), base), isFalse);
@@ -349,7 +349,9 @@ void main() {
     });
 
     test('sha256OfFile matches sha256sum on known inputs', () async {
-      final dir = Directory.systemTemp.createTempSync('identity_sha_');
+      final Directory dir = Directory.systemTemp.createTempSync(
+        'identity_sha_',
+      );
       addTearDown(() => dir.deleteSync(recursive: true));
       final file = File('${dir.path}/in.txt')..writeAsStringSync('identity\n');
       expect(

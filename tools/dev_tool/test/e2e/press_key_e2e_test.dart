@@ -33,7 +33,7 @@ void main() {
     String key, {
     required String route,
   }) async {
-    final reply = await dt.httpCommand('app.pressKey', {
+    final Map<String, dynamic> reply = await dt.httpCommand('app.pressKey', {
       'appId': appId,
       'key': key,
     });
@@ -45,7 +45,7 @@ void main() {
   }
 
   Future<String?> textOf(DevToolProcess dt, String appId, String key) async {
-    final reply = await dt.httpCommand('app.getText', {
+    final Map<String, dynamic> reply = await dt.httpCommand('app.getText', {
       'appId': appId,
       'key': key,
     });
@@ -57,17 +57,17 @@ void main() {
     test(
       'types, deletes, moves the caret through Cocoa selectors, and submits',
       () async {
-        final dt = await startDevTool(
+        final DevToolProcess dt = await startDevTool(
           workspace: e2eWorkspace('hello_world'),
           target: ':hello_world_macos',
           device: 'macos',
         );
         await dt.waitForEvent('app.started');
         await dt.waitForHttpControl();
-        final appId = dt.appId!;
+        final String appId = dt.appId!;
         expect(dt.commands, contains('app.pressKey'));
 
-        final ready = await dt.httpCommand('app.waitFor', {
+        final Map<String, dynamic> ready = await dt.httpCommand('app.waitFor', {
           'appId': appId,
           'key': 'agent_test_field',
           'timeoutMs': '15000',
@@ -75,27 +75,32 @@ void main() {
         expect(ready['error'], isNull, reason: '$ready');
 
         // An unknown key is refused by name before anything is sent.
-        final ctrl = await dt.httpCommand('app.pressKey', {
+        final Map<String, dynamic> ctrl = await dt.httpCommand('app.pressKey', {
           'appId': appId,
           'key': 'Ctrl+K',
         });
         expect(ctrl['error'], contains('Unknown key "Ctrl"'));
         expect(ctrl['error'], contains('Did you mean "Control"?'));
 
-        final tap = await dt.httpCommand('app.tap', {
+        final Map<String, dynamic> tap = await dt.httpCommand('app.tap', {
           'appId': appId,
           'key': 'agent_test_field',
         });
         expect(tap['error'], isNull, reason: '$tap');
 
         for (final key in const ['a', 'b', 'c', 'd']) {
-          final typed = await press(dt, appId, key, route: 'framework');
+          final Map<String, dynamic> typed = await press(
+            dt,
+            appId,
+            key,
+            route: 'framework',
+          );
           expect(typed['textInput'], {'inserted': key});
         }
         // Backspace, ArrowLeft and ArrowDown are left unhandled by the
         // framework on macOS so the input method can have them; the reply
         // shows they went on as the selectors AppKit would send.
-        final backspace = await press(
+        final Map<String, dynamic> backspace = await press(
           dt,
           appId,
           'Backspace',
@@ -106,13 +111,23 @@ void main() {
           'selectors': ['deleteBackward:'],
         });
         for (var i = 0; i < 2; i++) {
-          final left = await press(dt, appId, 'ArrowLeft', route: 'framework');
+          final Map<String, dynamic> left = await press(
+            dt,
+            appId,
+            'ArrowLeft',
+            route: 'framework',
+          );
           expect(left['textInput'], {
             'selectors': ['moveLeft:'],
           });
         }
         await press(dt, appId, 'X', route: 'framework');
-        final down = await press(dt, appId, 'ArrowDown', route: 'framework');
+        final Map<String, dynamic> down = await press(
+          dt,
+          appId,
+          'ArrowDown',
+          route: 'framework',
+        );
         expect(down['textInput'], {
           'selectors': ['moveDown:'],
         });
@@ -123,7 +138,12 @@ void main() {
         // that did not move would give "abcXY".
         expect(await textOf(dt, appId, 'agent_test_echo'), 'echo: aXbcY');
 
-        final enter = await press(dt, appId, 'Enter', route: 'framework');
+        final Map<String, dynamic> enter = await press(
+          dt,
+          appId,
+          'Enter',
+          route: 'framework',
+        );
         expect(enter['textInput'], {'action': 'TextInputAction.done'});
         expect(
           await textOf(dt, appId, 'agent_test_echo'),
@@ -136,9 +156,19 @@ void main() {
           'appId': appId,
           'key': 'agent_test_field',
         });
-        final selectAll = await press(dt, appId, 'Meta+A', route: 'framework');
+        final Map<String, dynamic> selectAll = await press(
+          dt,
+          appId,
+          'Meta+A',
+          route: 'framework',
+        );
         expect(selectAll['handled'], isTrue);
-        final z = await press(dt, appId, 'z', route: 'framework');
+        final Map<String, dynamic> z = await press(
+          dt,
+          appId,
+          'z',
+          route: 'framework',
+        );
         expect(z['textInput'], {'inserted': 'z'}, reason: '$z');
         expect(
           await textOf(dt, appId, 'agent_test_echo'),
@@ -155,12 +185,20 @@ void main() {
         // a key would reach neither the field nor the shortcut above it. A key
         // press only ever reaches the focused window, so the key makes the app
         // active again and says so.
-        final away = await dt.httpCommand('app.setWindowActive', {
-          'appId': appId,
-          'active': 'false',
-        });
+        final Map<String, dynamic> away = await dt.httpCommand(
+          'app.setWindowActive',
+          {
+            'appId': appId,
+            'active': 'false',
+          },
+        );
         expect(away['error'], isNull, reason: '$away');
-        final quote = await press(dt, appId, 'Meta+Quote', route: 'framework');
+        final Map<String, dynamic> quote = await press(
+          dt,
+          appId,
+          'Meta+Quote',
+          route: 'framework',
+        );
         expect(quote['handled'], isTrue, reason: '$quote');
         expect(quote['activated'], contains('"inactive"'), reason: '$quote');
         expect(
@@ -172,7 +210,7 @@ void main() {
 
         // The echo line is a `Text.rich`. `getText` read it above; `waitFor`
         // by the same string has to find it too.
-        final found = await dt.httpCommand('app.waitFor', {
+        final Map<String, dynamic> found = await dt.httpCommand('app.waitFor', {
           'appId': appId,
           'text': "echo: z | submitted: aXbcY | shortcut: ⌘'",
           'timeoutMs': '5000',
@@ -189,7 +227,7 @@ void main() {
     test(
       'on the DDC dev loop: types, deletes, Control+K, Enter submits',
       () async {
-        final dt = await startDevTool(
+        final DevToolProcess dt = await startDevTool(
           workspace: e2eWorkspace('web_example'),
           target: ':app_wasm',
           device: 'chrome',
@@ -199,9 +237,9 @@ void main() {
           'app.start',
           timeout: const Duration(seconds: 240),
         );
-        final appId = dt.appId!;
+        final String appId = dt.appId!;
         await dt.waitForHttpControl(timeout: const Duration(seconds: 120));
-        final ready = await dt.httpCommand('app.waitFor', {
+        final Map<String, dynamic> ready = await dt.httpCommand('app.waitFor', {
           'appId': appId,
           'key': 'keys_field',
           'timeoutMs': '30000',
@@ -210,30 +248,45 @@ void main() {
 
         // Keys go to whatever has the browser's focus; with no field focused
         // the reply says the typed text reached nothing.
-        final stray = await press(dt, appId, 'q', route: 'browser');
+        final Map<String, dynamic> stray = await press(
+          dt,
+          appId,
+          'q',
+          route: 'browser',
+        );
         expect(stray['warning'], contains('not in a text field'));
         expect(await textOf(dt, appId, 'keys_field'), '');
 
         // A framework tap focuses the field, and Flutter's web engine then
         // gives its <input> the browser's focus.
-        final tap = await dt.httpCommand('app.tap', {
+        final Map<String, dynamic> tap = await dt.httpCommand('app.tap', {
           'appId': appId,
           'key': 'keys_field',
         });
         expect(tap['error'], isNull, reason: '$tap');
 
         for (final key in const ['a', 'b', 'c', 'd', 'e']) {
-          final typed = await press(dt, appId, key, route: 'browser');
+          final Map<String, dynamic> typed = await press(
+            dt,
+            appId,
+            key,
+            route: 'browser',
+          );
           expect(typed['focus'], endsWith('input'), reason: '$typed');
           expect(typed['settled'], 'yes', reason: '$typed');
         }
         await press(dt, appId, 'Backspace', route: 'browser');
         await press(dt, appId, 'ArrowLeft', route: 'browser');
         await press(dt, appId, 'ArrowLeft', route: 'browser');
-        final kill = await press(dt, appId, 'Control+K', route: 'browser');
+        final Map<String, dynamic> kill = await press(
+          dt,
+          appId,
+          'Control+K',
+          route: 'browser',
+        );
         if (Platform.isMacOS) {
           // Without the Cocoa command a Mac browser deletes nothing.
-          final keyDown = (kill['sent'] as List).firstWhere(
+          final dynamic keyDown = (kill['sent'] as List).firstWhere(
             (e) => (e as Map)['code'] == 'KeyK' && e['type'] != 'keyUp',
           );
           expect((keyDown as Map)['commands'], ['deleteToEndOfParagraph']);
@@ -254,7 +307,7 @@ void main() {
     test(
       'on --wasm, with no VM service: advertised, and read off a screenshot',
       () async {
-        final dt = await startDevTool(
+        final DevToolProcess dt = await startDevTool(
           workspace: e2eWorkspace('web_example'),
           target: ':app_wasm',
           device: 'chrome',
@@ -264,7 +317,7 @@ void main() {
           'app.started',
           timeout: const Duration(minutes: 4),
         );
-        final appId = dt.appId!;
+        final String appId = dt.appId!;
         await dt.waitForHttpControl();
 
         // The one app.* command such a run has: the rest need a VM service.
@@ -275,8 +328,10 @@ void main() {
         // a page still loading. Polled for pixels, not for an answer: the
         // browser captures a page that has not painted as readily as one that
         // has, and a first run of this test raced exactly that.
-        var before = await dt.nativeScreenshotWhenOnScreen(appId);
-        final painted = DateTime.now().add(const Duration(seconds: 60));
+        List<int> before = await dt.nativeScreenshotWhenOnScreen(appId);
+        final DateTime painted = DateTime.now().add(
+          const Duration(seconds: 60),
+        );
         while (decodePngForBlankness(before).isUniform &&
             DateTime.now().isBefore(painted)) {
           await Future<void>.delayed(const Duration(milliseconds: 250));
@@ -308,7 +363,12 @@ void main() {
           'Control+K',
           'Enter',
         ]) {
-          final result = await press(dt, appId, key, route: 'browser');
+          final Map<String, dynamic> result = await press(
+            dt,
+            appId,
+            key,
+            route: 'browser',
+          );
           expect(result['settled'], 'skipped', reason: '$result');
           expect(result['settleDetail'], contains('no VM service'));
         }
@@ -317,9 +377,11 @@ void main() {
         // Backspace submits "abc" (three); a Control+K or caret move that
         // did nothing submits "abcd" (four); no submit shows none.
         var squares = 0;
-        final deadline = DateTime.now().add(const Duration(seconds: 20));
+        final DateTime deadline = DateTime.now().add(
+          const Duration(seconds: 20),
+        );
         while (DateTime.now().isBefore(deadline)) {
-          final shot = await dt.httpNativeScreenshot(appId);
+          final List<int> shot = await dt.httpNativeScreenshot(appId);
           squares = countColourRuns(shot, _isMarker);
           if (squares == 2) break;
           await Future<void>.delayed(const Duration(milliseconds: 250));

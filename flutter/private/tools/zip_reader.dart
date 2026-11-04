@@ -39,7 +39,7 @@ typedef _CentralRecord = ({
 /// archive comment may hold.
 int findEocdOffset(Uint8List zipBytes) {
   final bd = ByteData.sublistView(zipBytes);
-  for (var i = zipBytes.length - 22; i >= 0; i--) {
+  for (int i = zipBytes.length - 22; i >= 0; i--) {
     if (bd.getUint32(i, Endian.little) == 0x06054b50 &&
         i + 22 + bd.getUint16(i + 20, Endian.little) == zipBytes.length) {
       return i;
@@ -189,9 +189,7 @@ const List<int> _cp437TailCodePoints = [
 String _decodeCp437Name(List<int> nameBytes) {
   final out = StringBuffer();
   for (final byte in nameBytes) {
-    out.writeCharCode(
-      byte < 0x80 ? byte : _cp437TailCodePoints[byte - 0x80],
-    );
+    out.writeCharCode(byte < 0x80 ? byte : _cp437TailCodePoints[byte - 0x80]);
   }
   return out.toString();
 }
@@ -228,7 +226,7 @@ String decodeZipEntryName(List<int> nameBytes, int flags, int recordOffset) {
   // preceding the standard EOCD record.
   if (eocdOffset >= 20 &&
       bd.getUint32(eocdOffset - 20, Endian.little) == 0x07064b50) {
-    final zip64EocdOffset = getUint64LE(bd, eocdOffset - 20 + 8);
+    final int zip64EocdOffset = getUint64LE(bd, eocdOffset - 20 + 8);
     if (zip64EocdOffset + 56 > zipBytes.length ||
         bd.getUint32(zip64EocdOffset, Endian.little) != 0x06064b50) {
       throw FormatException(
@@ -246,12 +244,7 @@ String decodeZipEntryName(List<int> nameBytes, int flags, int recordOffset) {
 /// Applies the ZIP64 extended information extra field (`0x0001`) to 32-bit
 /// size/offset markers, returning the resolved values and whether the field
 /// was present.
-({
-  int uncompressedSize,
-  int compressedSize,
-  int localOffset,
-  bool found,
-})
+({int uncompressedSize, int compressedSize, int localOffset, bool found})
 _applyZip64ExtraField(
   ByteData bd,
   int extraStart,
@@ -262,9 +255,9 @@ _applyZip64ExtraField(
 ) {
   var extraPos = extraStart;
   while (extraPos + 4 <= extraEnd) {
-    final headerId = bd.getUint16(extraPos, Endian.little);
-    final dataSize = bd.getUint16(extraPos + 2, Endian.little);
-    final fieldDataStart = extraPos + 4;
+    final int headerId = bd.getUint16(extraPos, Endian.little);
+    final int dataSize = bd.getUint16(extraPos + 2, Endian.little);
+    final int fieldDataStart = extraPos + 4;
     if (headerId == zip64HeaderId) {
       var fieldPos = fieldDataStart;
       if (uncompressedSize == zip64Limit32 &&
@@ -330,24 +323,24 @@ _CentralRecord _parseCentralRecord(
       bd.getUint32(pos, Endian.little) != 0x02014b50) {
     throw FormatException('Invalid central directory header at $pos.');
   }
-  final rawFlags = bd.getUint16(pos + 8, Endian.little);
-  final flags = options.flagsOverride ?? rawFlags;
-  final method = bd.getUint16(pos + 10, Endian.little);
-  final crc = bd.getUint32(pos + 16, Endian.little);
-  var compressedSize = bd.getUint32(pos + 20, Endian.little);
-  var uncompressedSize = bd.getUint32(pos + 24, Endian.little);
-  final nameLen = bd.getUint16(pos + 28, Endian.little);
-  final extraLen = bd.getUint16(pos + 30, Endian.little);
-  final commentLen = bd.getUint16(pos + 32, Endian.little);
-  final externalAttrs = bd.getUint32(pos + 38, Endian.little);
-  var localOffset = bd.getUint32(pos + 42, Endian.little);
+  final int rawFlags = bd.getUint16(pos + 8, Endian.little);
+  final int flags = options.flagsOverride ?? rawFlags;
+  final int method = bd.getUint16(pos + 10, Endian.little);
+  final int crc = bd.getUint32(pos + 16, Endian.little);
+  int compressedSize = bd.getUint32(pos + 20, Endian.little);
+  int uncompressedSize = bd.getUint32(pos + 24, Endian.little);
+  final int nameLen = bd.getUint16(pos + 28, Endian.little);
+  final int extraLen = bd.getUint16(pos + 30, Endian.little);
+  final int commentLen = bd.getUint16(pos + 32, Endian.little);
+  final int externalAttrs = bd.getUint32(pos + 38, Endian.little);
+  int localOffset = bd.getUint32(pos + 42, Endian.little);
 
   if (options.checkBounds && pos + 46 + nameLen > zipBytes.length) {
     throw FormatException('Invalid central directory header at $pos.');
   }
   // The name decodes by the flags actually on disk: the inflated reader's
   // flags override only silences bit 3 for payload handling, never the name.
-  final path = decodeZipEntryName(
+  final String path = decodeZipEntryName(
     zipBytes.sublist(pos + 46, pos + 46 + nameLen),
     rawFlags,
     pos,
@@ -356,8 +349,14 @@ _CentralRecord _parseCentralRecord(
   if (uncompressedSize == zip64Limit32 ||
       compressedSize == zip64Limit32 ||
       localOffset == zip64Limit32) {
-    final extraStart = pos + 46 + nameLen;
-    final resolved = _applyZip64ExtraField(
+    final int extraStart = pos + 46 + nameLen;
+    final ({
+      int compressedSize,
+      bool found,
+      int localOffset,
+      int uncompressedSize,
+    })
+    resolved = _applyZip64ExtraField(
       bd,
       extraStart,
       extraStart + extraLen,
@@ -410,11 +409,7 @@ _CentralRecord _parseInflatedCentralRecord(
 
 /// Inflates one entry's payload, verifying checksums for large streaming
 /// entries without holding them inflated in memory.
-({
-  Uint8List data,
-  int? uncompressedSizeOverride,
-  int? crc32Override,
-})
+({Uint8List data, int? uncompressedSizeOverride, int? crc32Override})
 _inflateZipPayload(
   ByteData bd,
   Uint8List zipBytes,
@@ -426,9 +421,15 @@ _inflateZipPayload(
       'Invalid local file header at ${central.localOffset}.',
     );
   }
-  final localNameLen = bd.getUint16(central.localOffset + 26, Endian.little);
-  final localExtraLen = bd.getUint16(central.localOffset + 28, Endian.little);
-  final dataStart = central.localOffset + 30 + localNameLen + localExtraLen;
+  final int localNameLen = bd.getUint16(
+    central.localOffset + 26,
+    Endian.little,
+  );
+  final int localExtraLen = bd.getUint16(
+    central.localOffset + 28,
+    Endian.little,
+  );
+  final int dataStart = central.localOffset + 30 + localNameLen + localExtraLen;
   final rawPayload = Uint8List.sublistView(
     zipBytes,
     dataStart,
@@ -463,19 +464,14 @@ _inflateZipPayload(
   );
 }
 
-({
-  Uint8List data,
-  int? uncompressedSizeOverride,
-  int? crc32Override,
-})
+({Uint8List data, int? uncompressedSizeOverride, int? crc32Override})
 _inflateStreamingZipPayload(_CentralRecord central, Uint8List rawPayload) {
   final crcSink = CrcAndSizeSink();
-  final inflateSink = ZLibDecoder(
-    raw: true,
-  ).startChunkedConversion(crcSink);
-  const step = 1024 * 1024;
+  final ByteConversionSink inflateSink = ZLibDecoder(raw: true)
+      .startChunkedConversion(crcSink);
+  const int step = 1024 * 1024;
   for (var off = 0; off < rawPayload.length; off += step) {
-    final end = (off + step < rawPayload.length)
+    final int end = (off + step < rawPayload.length)
         ? off + step
         : rawPayload.length;
     inflateSink.add(Uint8List.sublistView(rawPayload, off, end));
@@ -505,9 +501,9 @@ _inflateStreamingZipPayload(_CentralRecord central, Uint8List rawPayload) {
   int externalAttrs,
   String path,
 ) {
-  final unixMode = (externalAttrs >>> 16) & 0xFFFF;
-  final fileType = unixMode & 0xF000;
-  final isDir = path.endsWith('/') || fileType == 0x4000;
+  final int unixMode = (externalAttrs >>> 16) & 0xFFFF;
+  final int fileType = unixMode & 0xF000;
+  final bool isDir = path.endsWith('/') || fileType == 0x4000;
   final isSymlink = fileType == 0xA000;
   return (
     isDir: isDir,
@@ -521,8 +517,8 @@ _inflateStreamingZipPayload(_CentralRecord central, Uint8List rawPayload) {
 /// testing.
 List<ZipEntry> readZipEntries(Uint8List zipBytes) {
   final bd = ByteData.sublistView(zipBytes);
-  final eocdOffset = findEocdOffset(zipBytes);
-  final located = _applyZip64Locator(
+  final int eocdOffset = findEocdOffset(zipBytes);
+  final ({int cdOffset, int entryCount}) located = _applyZip64Locator(
     bd,
     zipBytes,
     eocdOffset,
@@ -532,12 +528,20 @@ List<ZipEntry> readZipEntries(Uint8List zipBytes) {
   final rawInflate = ZLibCodec(raw: true);
 
   final entries = <ZipEntry>[];
-  var pos = located.cdOffset;
+  int pos = located.cdOffset;
   for (var i = 0; i < located.entryCount; i++) {
-    final central = _parseInflatedCentralRecord(bd, zipBytes, pos);
+    final _CentralRecord central = _parseInflatedCentralRecord(
+      bd,
+      zipBytes,
+      pos,
+    );
     pos = central.nextPos;
-    final payload = _inflateZipPayload(bd, zipBytes, rawInflate, central);
-    final flags = _zipModeFlags(central.externalAttrs, central.path);
+    final ({int? crc32Override, Uint8List data, int? uncompressedSizeOverride})
+    payload = _inflateZipPayload(bd, zipBytes, rawInflate, central);
+    final ({bool isDir, bool isExec, bool isSymlink}) flags = _zipModeFlags(
+      central.externalAttrs,
+      central.path,
+    );
     entries.add(
       ZipEntry(
         path: central.path,
@@ -633,9 +637,15 @@ ZipRawEntry _materializeRawEntry(
       'Invalid local file header at ${central.localOffset}.',
     );
   }
-  final localNameLen = bd.getUint16(central.localOffset + 26, Endian.little);
-  final localExtraLen = bd.getUint16(central.localOffset + 28, Endian.little);
-  final dataStart = central.localOffset + 30 + localNameLen + localExtraLen;
+  final int localNameLen = bd.getUint16(
+    central.localOffset + 26,
+    Endian.little,
+  );
+  final int localExtraLen = bd.getUint16(
+    central.localOffset + 28,
+    Endian.little,
+  );
+  final int dataStart = central.localOffset + 30 + localNameLen + localExtraLen;
   if (dataStart + central.compressedSize > zipBytes.length) {
     throw FormatException(
       'ZIP entry "${central.path}" overruns the archive '
@@ -648,9 +658,9 @@ ZipRawEntry _materializeRawEntry(
     dataStart + central.compressedSize,
   );
 
-  final unixMode = (central.externalAttrs >>> 16) & 0xFFFF;
-  final fileType = unixMode & 0xF000;
-  final isDir = central.path.endsWith('/') || fileType == 0x4000;
+  final int unixMode = (central.externalAttrs >>> 16) & 0xFFFF;
+  final int fileType = unixMode & 0xF000;
+  final bool isDir = central.path.endsWith('/') || fileType == 0x4000;
   return ZipRawEntry(
     path: central.path,
     method: central.method,
@@ -672,8 +682,8 @@ ZipRawEntry _materializeRawEntry(
 /// ZIP32 limits reads, at any size.
 List<ZipRawEntry> readZipRawEntries(Uint8List zipBytes) {
   final bd = ByteData.sublistView(zipBytes);
-  final eocdOffset = findEocdOffset(zipBytes);
-  final located = _applyZip64Locator(
+  final int eocdOffset = findEocdOffset(zipBytes);
+  final ({int cdOffset, int entryCount}) located = _applyZip64Locator(
     bd,
     zipBytes,
     eocdOffset,
@@ -682,9 +692,9 @@ List<ZipRawEntry> readZipRawEntries(Uint8List zipBytes) {
   );
 
   final entries = <ZipRawEntry>[];
-  var pos = located.cdOffset;
+  int pos = located.cdOffset;
   for (var i = 0; i < located.entryCount; i++) {
-    final central = _parseRawCentralRecord(bd, zipBytes, pos);
+    final _CentralRecord central = _parseRawCentralRecord(bd, zipBytes, pos);
     pos = central.nextPos;
     entries.add(_materializeRawEntry(bd, zipBytes, central));
   }

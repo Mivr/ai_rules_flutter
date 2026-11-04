@@ -49,6 +49,8 @@
 library;
 
 import 'dart:async';
+import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:test/test.dart';
 
@@ -58,13 +60,13 @@ import 'editable_workspace.dart';
 void main() {
   group('native library rebuilt under a hot reload', () {
     test('delivered when the bindings hold, withheld when they move', () async {
-      final ws = await editableWorkspace('codegen');
-      final appMain = ws.file('lib/main.dart');
-      final nativeSource = ws.file('native_add/native/native_add.c');
-      final nativeHeader = ws.file('native_add/native/native_add.h');
-      final mainOriginal = appMain.readAsStringSync();
-      final sourceOriginal = nativeSource.readAsStringSync();
-      final headerOriginal = nativeHeader.readAsStringSync();
+      final EditableWorkspace ws = await editableWorkspace('codegen');
+      final File appMain = ws.file('lib/main.dart');
+      final File nativeSource = ws.file('native_add/native/native_add.c');
+      final File nativeHeader = ws.file('native_add/native/native_add.h');
+      final String mainOriginal = appMain.readAsStringSync();
+      final String sourceOriginal = nativeSource.readAsStringSync();
+      final String headerOriginal = nativeHeader.readAsStringSync();
       const dartAnchor = "'fields:";
       const bodyAnchor = '(int32_t)((uint32_t)a + (uint32_t)b)';
       const signature = 'int32_t native_add(int32_t a, int32_t b);';
@@ -84,7 +86,7 @@ void main() {
         reason: 'fixture marker present in native_add/native/native_add.h',
       );
 
-      final dt = await startDevTool(
+      final DevToolProcess dt = await startDevTool(
         workspace: ws.root,
         target: ':app_macos',
         device: 'macos',
@@ -100,7 +102,7 @@ void main() {
           'stdout (non-protocol):\n${dt.nonProtocolStdoutLines.join('\n')}',
         );
       }
-      final appId = dt.appId!;
+      final String appId = dt.appId!;
       await dt.waitForHttpControl(timeout: const Duration(seconds: 120));
       // Edit only once the pipeline has assembled, which is what a user doing this
       // does and what the check's baseline depends on. The assembler runs its own
@@ -125,7 +127,11 @@ void main() {
         sourceOriginal.replaceFirst(bodyAnchor, '$bodyAnchor + 1'),
       );
 
-      final delivered = await _command(dt, 'app.hotReload', appId);
+      final Map<String, dynamic> delivered = await _command(
+        dt,
+        'app.hotReload',
+        appId,
+      );
       expect(
         delivered['succeeded'],
         isTrue,
@@ -145,7 +151,11 @@ void main() {
 
       // The way out, which the reply names. The relauncher rebuilds the launch
       // bundle, finds the library moved, and replaces the process.
-      final relaunched = await _command(dt, 'app.restart', appId);
+      final Map<String, dynamic> relaunched = await _command(
+        dt,
+        'app.restart',
+        appId,
+      );
       expect(
         relaunched['relaunched'],
         isTrue,
@@ -161,7 +171,11 @@ void main() {
       appMain.writeAsStringSync(
         mainOriginal.replaceFirst(dartAnchor, "'RELOADED:"),
       );
-      final ordinary = await _command(dt, 'app.hotReload', appId);
+      final Map<String, dynamic> ordinary = await _command(
+        dt,
+        'app.hotReload',
+        appId,
+      );
       expect(
         ordinary['succeeded'],
         isTrue,
@@ -192,7 +206,11 @@ void main() {
             .replaceFirst(bodyAnchor, '$bodyAnchor + c'),
       );
 
-      final withheld = await _command(dt, 'app.hotReload', appId);
+      final Map<String, dynamic> withheld = await _command(
+        dt,
+        'app.hotReload',
+        appId,
+      );
       expect(
         withheld['succeeded'],
         isFalse,
@@ -211,13 +229,13 @@ void main() {
 
   group('native module rebuilt under a web hot reload', () {
     test('delivered when the contract holds, withheld when it moves', () async {
-      final ws = await editableWorkspace('codegen');
-      final appMain = ws.file('lib/main.dart');
-      final module = ws.file('web/demo_module.wasm');
-      final contract = ws.file('web/demo_module.api');
-      final mainOriginal = appMain.readAsStringSync();
-      final moduleOriginal = module.readAsBytesSync();
-      final contractOriginal = contract.readAsStringSync();
+      final EditableWorkspace ws = await editableWorkspace('codegen');
+      final File appMain = ws.file('lib/main.dart');
+      final File module = ws.file('web/demo_module.wasm');
+      final File contract = ws.file('web/demo_module.api');
+      final String mainOriginal = appMain.readAsStringSync();
+      final Uint8List moduleOriginal = module.readAsBytesSync();
+      final String contractOriginal = contract.readAsStringSync();
       const dartAnchor = "'fields:";
       expect(
         mainOriginal.contains(dartAnchor),
@@ -225,7 +243,7 @@ void main() {
         reason: 'fixture marker present in codegen lib/main.dart',
       );
 
-      final dt = await startDevTool(
+      final DevToolProcess dt = await startDevTool(
         workspace: ws.root,
         target: ':web_app',
         device: 'chrome',
@@ -242,7 +260,7 @@ void main() {
           'stdout (non-protocol):\n${dt.nonProtocolStdoutLines.join('\n')}',
         );
       }
-      final appId = dt.appId!;
+      final String appId = dt.appId!;
       await dt.waitForHttpControl(timeout: const Duration(seconds: 120));
       await _expectRendered(dt, appId, 'fields:name');
 
@@ -254,7 +272,11 @@ void main() {
       );
       module.writeAsBytesSync([...moduleOriginal, 0]);
 
-      final delivered = await _command(dt, 'app.hotReload', appId);
+      final Map<String, dynamic> delivered = await _command(
+        dt,
+        'app.hotReload',
+        appId,
+      );
       expect(
         delivered['succeeded'],
         isTrue,
@@ -273,7 +295,11 @@ void main() {
       );
       contract.writeAsStringSync('$contractOriginal\ndemo_sub(i32) -> i32\n');
 
-      final withheld = await _command(dt, 'app.hotReload', appId);
+      final Map<String, dynamic> withheld = await _command(
+        dt,
+        'app.hotReload',
+        appId,
+      );
       expect(withheld['succeeded'], isFalse);
       expect(
         withheld['nativeLibsStale'],
@@ -285,14 +311,22 @@ void main() {
       // And the restart that recovers it: the page re-runs `main()`, re-fetches
       // what the bundle now serves, and the watch is re-baselined — so the
       // reload after it is ordinary again, with nothing reported stale.
-      final restarted = await _command(dt, 'app.restart', appId);
+      final Map<String, dynamic> restarted = await _command(
+        dt,
+        'app.restart',
+        appId,
+      );
       expect(restarted['succeeded'], isTrue, reason: '${restarted['error']}');
       await _expectRendered(dt, appId, 'BLOCKED:name');
 
       appMain.writeAsStringSync(
         mainOriginal.replaceFirst(dartAnchor, "'RELOADED:"),
       );
-      final ordinary = await _command(dt, 'app.hotReload', appId);
+      final Map<String, dynamic> ordinary = await _command(
+        dt,
+        'app.hotReload',
+        appId,
+      );
       expect(
         ordinary['succeeded'],
         isTrue,
@@ -316,7 +350,9 @@ Future<Map<String, dynamic>> _command(
   String method,
   String appId,
 ) async {
-  final response = await dt.httpCommand(method, {'appId': appId});
+  final Map<String, dynamic> response = await dt.httpCommand(method, {
+    'appId': appId,
+  });
   final result = response['result'] as Map<String, dynamic>?;
   expect(result, isNotNull, reason: '$method: ${response['error']}');
   return result!;
@@ -332,7 +368,7 @@ Future<void> _expectRendered(
   String appId,
   String text,
 ) async {
-  final found = await dt.httpCommand('app.waitFor', {
+  final Map<String, dynamic> found = await dt.httpCommand('app.waitFor', {
     'appId': appId,
     'text': text,
     'timeoutMs': '20000',

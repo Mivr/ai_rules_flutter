@@ -1,6 +1,8 @@
 @Tags(['e2e'])
 library;
 
+import 'dart:io';
+
 import 'package:test/test.dart';
 
 import 'dev_tool_e2e_harness.dart';
@@ -33,9 +35,9 @@ void main() {
     test(
       'a browser session restarts again after a restart that failed',
       () async {
-        final ws = await editableWorkspace('web_example');
-        final appMain = ws.file('lib/main.dart');
-        final original = appMain.readAsStringSync();
+        final EditableWorkspace ws = await editableWorkspace('web_example');
+        final File appMain = ws.file('lib/main.dart');
+        final String original = appMain.readAsStringSync();
         const anchor =
             "const Text('You have pushed the button this many times:')";
         expect(
@@ -58,7 +60,7 @@ void main() {
         /// run that asserts about the fixture, not the tool. The check is here
         /// rather than at each call site so no edit can be added without it.
         void rewrite(String replacement) {
-          final edited = original.replaceFirst(anchor, replacement);
+          final String edited = original.replaceFirst(anchor, replacement);
           if (edited == original) {
             fail(
               'the edit anchor matched nothing in ${appMain.path}, so this '
@@ -68,16 +70,16 @@ void main() {
           appMain.writeAsStringSync(edited);
         }
 
-        final dt = await startDevTool(
+        final DevToolProcess dt = await startDevTool(
           workspace: ws.root,
           target: ':app_wasm',
           device: 'chrome',
         );
-        final start = await dt.waitForEvent(
+        final Map<String, dynamic> start = await dt.waitForEvent(
           'app.start',
           timeout: const Duration(seconds: 300),
         );
-        final appId = start['params']?['appId'] as String? ?? dt.appId!;
+        final String appId = start['params']?['appId'] as String? ?? dt.appId!;
         await dt.waitForHttpControl(timeout: const Duration(seconds: 120));
         // `app.started` fires when Chrome launches; the page reaches DWDS later,
         // and nothing below can be asked of the app before it does.
@@ -86,11 +88,14 @@ void main() {
           timeout: const Duration(seconds: 180),
         );
 
-        final baseline = await dt.httpCommand('app.waitFor', {
-          'appId': appId,
-          'text': 'You have pushed the button this many times:',
-          'timeoutMs': '30000',
-        });
+        final Map<String, dynamic> baseline = await dt.httpCommand(
+          'app.waitFor',
+          {
+            'appId': appId,
+            'text': 'You have pushed the button this many times:',
+            'timeoutMs': '30000',
+          },
+        );
         expect(
           baseline['error'],
           isNull,
@@ -101,7 +106,7 @@ void main() {
 
         // (1) A clean restart. Its own success is worth little; what it does is
         // put DWDS's expression probe in the queue behind the next compile.
-        final clean = await dt.sendCommand(
+        final Map<String, dynamic> clean = await dt.sendCommand(
           1,
           'app.restart',
           params: {'appId': appId},
@@ -118,7 +123,7 @@ void main() {
         // (2) A restart of a tree that does not compile: a failure that names
         // the cause.
         rewrite('const Text(WEB_RESTART_BROKEN)');
-        final broken = await dt.sendCommand(
+        final Map<String, dynamic> broken = await dt.sendCommand(
           2,
           'app.restart',
           params: {'appId': appId},
@@ -143,7 +148,7 @@ void main() {
         // text: restoring `original` byte-for-byte would leave a passing
         // assertion that a restart which never happened could also satisfy.
         rewrite("const Text('WEB_RESTART_RECOVERED')");
-        final fixed = await dt.sendCommand(
+        final Map<String, dynamic> fixed = await dt.sendCommand(
           3,
           'app.restart',
           params: {'appId': appId},
@@ -157,7 +162,7 @@ void main() {
               'failed: ${fixed['result']}',
         );
 
-        final shown = await dt.httpCommand('app.waitFor', {
+        final Map<String, dynamic> shown = await dt.httpCommand('app.waitFor', {
           'appId': appId,
           'text': 'WEB_RESTART_RECOVERED',
           'timeoutMs': '30000',

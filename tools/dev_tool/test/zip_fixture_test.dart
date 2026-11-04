@@ -15,7 +15,7 @@ void main() {
   /// directory and zips it the way the fixture tests do.
   String makeZip(Map<String, List<int>> files, {bool deflate = true}) {
     final root = Directory('${tmp.path}/tree')..createSync(recursive: true);
-    for (final entry in files.entries) {
+    for (final MapEntry<String, List<int>> entry in files.entries) {
       final file = File('${root.path}/${entry.key}')
         ..parent.createSync(recursive: true);
       file.writeAsBytesSync(entry.value);
@@ -48,7 +48,7 @@ void main() {
     'stored entries round-trip with names, contents and directories',
     () async {
       Directory('${tmp.path}/tree/empty').createSync(recursive: true);
-      final zip = makeZip({
+      final String zip = makeZip({
         'a.txt': 'hello'.codeUnits,
         'dir/b.bin': List.generate(256, (i) => i),
       }, deflate: false);
@@ -64,9 +64,9 @@ void main() {
   );
 
   test('a deflated entry round-trips', () async {
-    final content = List.filled(8192, 0xab);
-    final zip = makeZip({'big.bin': content});
-    final raw = File(zip).readAsBytesSync();
+    final List<int> content = List.filled(8192, 0xab);
+    final String zip = makeZip({'big.bin': content});
+    final Uint8List raw = File(zip).readAsBytesSync();
     final view = ByteData.sublistView(raw);
     final methods = <int>[];
     var at = 0;
@@ -91,11 +91,13 @@ void main() {
   test(
     'an entry whose CRC does not match is refused, writing nothing',
     () async {
-      final zip = makeZip({'a.txt': 'hello world'.codeUnits}, deflate: false);
+      final String zip = makeZip({
+        'a.txt': 'hello world'.codeUnits,
+      }, deflate: false);
       // First payload byte of the file entry: past the `tree/` directory
       // record (30 + 5 bytes), then its 30-byte local header and name.
       const entryName = 'tree/a.txt';
-      final bad = rezip(zip, 'bad.zip', (bytes) {
+      final String bad = rezip(zip, 'bad.zip', (bytes) {
         bytes[35 + 30 + entryName.length] ^= 0xFF;
       });
       final out = Directory('${tmp.path}/out');
@@ -114,10 +116,10 @@ void main() {
   );
 
   test('an unknown compression method is refused', () async {
-    final zip = makeZip({
+    final String zip = makeZip({
       'a.txt': [1, 2, 3],
     }, deflate: false);
-    final bad = rezip(zip, 'bad.zip', (bytes) {
+    final String bad = rezip(zip, 'bad.zip', (bytes) {
       final view = ByteData.sublistView(bytes);
       // File entry: past the `tree/` directory record (35 bytes).
       view.setUint16(35 + 8, 99, Endian.little);
@@ -139,18 +141,18 @@ void main() {
   });
 
   test('a data descriptor is refused', () async {
-    final zip = makeZip({
+    final String zip = makeZip({
       'a.txt': [1, 2, 3],
     }, deflate: false);
-    final bad = rezip(zip, 'bad.zip', (bytes) {
+    final String bad = rezip(zip, 'bad.zip', (bytes) {
       final view = ByteData.sublistView(bytes);
-      const localFlags = 35 + 6;
+      const int localFlags = 35 + 6;
       view.setUint16(
         localFlags,
         view.getUint16(localFlags, Endian.little) | 0x08,
         Endian.little,
       );
-      final central = fileCentral(bytes);
+      final int central = fileCentral(bytes);
       view.setUint16(
         central + 8,
         view.getUint16(central + 8, Endian.little) | 0x08,
@@ -173,8 +175,10 @@ void main() {
   });
 
   test('an archived executable mode is restored', () async {
-    final zip = makeZip({'run.sh': '#!/bin/sh\n'.codeUnits}, deflate: false);
-    final exec = rezip(zip, 'exec.zip', (bytes) {
+    final String zip = makeZip({
+      'run.sh': '#!/bin/sh\n'.codeUnits,
+    }, deflate: false);
+    final String exec = rezip(zip, 'exec.zip', (bytes) {
       ByteData.sublistView(
         bytes,
       ).setUint32(fileCentral(bytes) + 38, (0x81ED << 16), Endian.little);
@@ -189,8 +193,8 @@ void main() {
   });
 
   test('a symlink entry is restored as a link', () async {
-    final zip = makeZip({'link': 'real.txt'.codeUnits}, deflate: false);
-    final linked = rezip(zip, 'linked.zip', (bytes) {
+    final String zip = makeZip({'link': 'real.txt'.codeUnits}, deflate: false);
+    final String linked = rezip(zip, 'linked.zip', (bytes) {
       ByteData.sublistView(
         bytes,
       ).setUint32(fileCentral(bytes) + 38, (0xA1FF << 16), Endian.little);
@@ -212,12 +216,12 @@ void main() {
     // A same-length escape keeps every header aligned.
     const evil = '../../../../x.';
     assert(evil.length == name.length);
-    final zip = makeZip({
+    final String zip = makeZip({
       'dir/f.txt': [1],
     }, deflate: false);
-    final bad = rezip(zip, 'bad.zip', (bytes) {
+    final String bad = rezip(zip, 'bad.zip', (bytes) {
       bytes.setRange(35 + 30, 35 + 30 + name.length, evil.codeUnits);
-      final central = fileCentral(bytes);
+      final int central = fileCentral(bytes);
       bytes.setRange(
         central + 46,
         central + 46 + name.length,

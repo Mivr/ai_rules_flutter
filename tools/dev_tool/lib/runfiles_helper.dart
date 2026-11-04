@@ -114,12 +114,12 @@ ResolvedRunfile? resolveRunfileWithManifest(String path) {
       : [path];
 
   // Null when not running inside a Bazel runfiles tree (e.g. `dart run`).
-  final r = _runfiles;
+  final Runfiles? r = _runfiles;
   if (r == null) return null;
 
-  final manifestPath = _manifestPath;
+  final String? manifestPath = _manifestPath;
   for (final key in keys) {
-    final resolved = r.rlocation(key);
+    final String resolved = r.rlocation(key);
     if (File(resolved).existsSync()) {
       return ResolvedRunfile(resolved, manifestPath: manifestPath);
     }
@@ -138,10 +138,10 @@ ResolvedRunfile? resolveRunfileWithManifest(String path) {
 /// If rules_dart's candidates change, this copy has to change with them —
 /// there is nothing that would report the drift.
 String? _activeManifestPath() {
-  final env = Platform.environment['RUNFILES_MANIFEST_FILE'];
+  final String? env = Platform.environment['RUNFILES_MANIFEST_FILE'];
   if (env != null && env.isNotEmpty && File(env).existsSync()) return env;
 
-  final exe = Platform.executable;
+  final String exe = Platform.executable;
   for (final candidate in [
     '$exe.runfiles_manifest',
     '$exe.exe.runfiles_manifest',

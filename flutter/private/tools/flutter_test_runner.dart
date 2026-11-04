@@ -46,6 +46,8 @@ import 'flutter_test_coverage.dart' as coverage;
 import 'run_home.dart' as run_home;
 import 'test_support.dart';
 
+typedef _Shutdown = ({bool killedAfterTimeout, int testerExit});
+
 /// Whether this run should regenerate goldens instead of comparing them.
 ///
 /// Pure so it can be tested without a Bazel invocation to produce each case;
@@ -181,8 +183,8 @@ void main(List<String> args) async {
     stderr.writeln('flutter_test runner: ${e.message}');
     exit(64);
   }
-  final testPath = Platform.environment['FLUTTER_TEST_PATH'] ?? 'test.dart';
-  final coverageOutput = Platform.environment['COVERAGE_OUTPUT_FILE'];
+  final String path = Platform.environment['FLUTTER_TEST_PATH'] ?? 'test.dart';
+  final String? coverageOutput = Platform.environment['COVERAGE_OUTPUT_FILE'];
 
   final TestSelection selection;
   try {
@@ -203,7 +205,7 @@ void main(List<String> args) async {
   }
   // Touched before the run, as Bazel asks: it is how a runner says it supports
   // sharding at all, and Bazel 9 fails a sharded test whose runner never does.
-  final shardStatus = Platform.environment['TEST_SHARD_STATUS_FILE'];
+  final String? shardStatus = Platform.environment['TEST_SHARD_STATUS_FILE'];
   if (shardStatus != null) File(shardStatus).writeAsStringSync('');
 
   exitCode = await _runOnce(
@@ -213,7 +215,7 @@ void main(List<String> args) async {
       dill: files.dill,
       baseDill: files.baseDill,
       assetsDir: files.assetsDir,
-      testPath: testPath,
+      testPath: path,
       coverageOutput: coverageOutput,
       updateGoldens: updateGoldens,
       seed: seed,
@@ -298,9 +300,9 @@ bool _runfileExists(String path) =>
     File(path).existsSync() || Directory(path).existsSync();
 
 Future<int> _runOnce(FlutterTestRun run) async {
-  final baseDill = run.baseDill;
+  final String? baseDill = run.baseDill;
   File? combinedDill;
-  var effectiveDill = run.dill;
+  String effectiveDill = run.dill;
   // `baseDill` already passed the existence check in `main`: when the rule
   // shares one it is always combined, never silently dropped for a lone run
   // of the delta kernel. Null (or empty) means a whole-program kernel.
@@ -317,7 +319,7 @@ Future<int> _runOnce(FlutterTestRun run) async {
     combinedDill.writeAsBytesSync(builder.takeBytes(), flush: true);
     effectiveDill = combinedDill.path;
   }
-  final harness = await _Harness.bind();
+  final _Harness harness = await _Harness.bind();
   try {
     return await harness.run(run, effectiveDill);
   } finally {
@@ -360,8 +362,8 @@ class _Harness {
 
   /// Allocates a virtual channel pair for our side. Returns (outputId, inputId).
   ({int outputId, int inputId}) _allocChannel() {
-    final out = _nextId;
-    final inp = _nextId + 1;
+    final int out = _nextId;
+    final int inp = _nextId + 1;
     _nextId += 2;
     return (outputId: out, inputId: inp);
   }
@@ -400,7 +402,10 @@ class _Harness {
   /// never without the dial in `flutter/private/flutter_test.bzl`, which has
   /// to name the same family.
   static Future<_Harness> bind() async {
-    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final HttpServer server = await HttpServer.bind(
+      InternetAddress.loopbackIPv4,
+      0,
+    );
     return _Harness._(server);
   }
 
@@ -419,11 +424,11 @@ class _Harness {
   /// the process is already dead." The `try` around it was guarding a failure
   /// that cannot happen, while the value that does report it went unread.
   Future<void> dispose() async {
-    final ws = _ws;
+    final WebSocket? ws = _ws;
     if (ws != null) await teardownQuietly(ws.close);
     _process?.kill(ProcessSignal.sigkill);
     await teardownQuietly(() => _server.close(force: true));
-    final testerHome = _testerHome;
+    final Directory? testerHome = _testerHome;
     _testerHome = null;
     if (testerHome != null && testerHome.existsSync()) {
       cleanupQuietly(() => testerHome.deleteSync(recursive: true));
@@ -452,15 +457,13 @@ class _Harness {
     final vmServiceUriCompleter = Completer<Uri>();
     _watchTesterOutput(_process!, enableVmService, vmServiceUriCompleter);
 
-    final coverageService = await _readCoverageServiceUri(
-      enableVmService,
-      vmServiceUriCompleter,
-    );
+    final ({bool failed, Uri? uri}) coverageService =
+        await _readCoverageServiceUri(enableVmService, vmServiceUriCompleter);
     if (coverageService.failed) return 1;
-    final coverageVmServiceUri = coverageService.uri;
+    final Uri? coverageVmServiceUri = coverageService.uri;
 
     // Wait for the bootstrap to dial back.
-    final dialBackExit = await _settleDialBack();
+    final int? dialBackExit = await _settleDialBack();
     if (dialBackExit != null) return dialBackExit;
 
     // Default channel handler — receives the suite tree plus print/error
@@ -476,7 +479,7 @@ class _Harness {
 
     // Bounded inside Bazel's own budget, like each test below, so a suite that
     // never finishes loading is reported here rather than killed silently.
-    final root = await suiteReady.future.timeout(
+    final Map<String, dynamic>? root = await suiteReady.future.timeout(
       testCeiling(Platform.environment['TEST_TIMEOUT']),
       onTimeout: () => null,
     );
@@ -487,7 +490,7 @@ class _Harness {
 
     // Collect coverage before tearing the tester down — the isolate must still
     // be alive when we fetch source reports.
-    final coverageError = await _collectCoverage(
+    final String? coverageError = await _collectCoverage(
       elapsed: _clock.elapsed,
       enableVmService: enableVmService,
       coverageVmServiceUri: coverageVmServiceUri,
@@ -504,7 +507,7 @@ class _Harness {
     // close, the bootstrap's main isolate keeps the engine alive and
     // we'd block on the tester-exit timeout for every test run.
     _send(0, {'type': 'close'});
-    final shutdown = await _shutdownTester();
+    final _Shutdown shutdown = await _shutdownTester();
 
     stdout.writeln(results.summary());
 
@@ -576,7 +579,7 @@ class _Harness {
   /// overridden, at a fresh dir [dispose] removes; everything else is
   /// inherited unchanged.
   Future<Process> _spawnTester(List<String> command, bool updateGoldens) {
-    final testerHome = run_home.createPrivateHome(
+    final Directory testerHome = run_home.createPrivateHome(
       Platform.environment['TEST_TMPDIR'] ?? Directory.systemTemp.path,
     );
     _testerHome = testerHome;
@@ -608,7 +611,7 @@ class _Harness {
         .listen((line) {
           stderr.writeln('[flutter_tester] $line');
           if (enableVmService && !vmServiceUriCompleter.isCompleted) {
-            final m = vmServicePattern.firstMatch(line);
+            final RegExpMatch? m = vmServicePattern.firstMatch(line);
             if (m != null) {
               vmServiceUriCompleter.complete(Uri.parse(m.group(1)!));
             }
@@ -633,7 +636,7 @@ class _Harness {
   ) async {
     if (!enableVmService) return (uri: null, failed: false);
     try {
-      final uri = await vmServiceUriCompleter.future.timeout(
+      final Uri uri = await vmServiceUriCompleter.future.timeout(
         const Duration(seconds: 30),
       );
       return (uri: uri, failed: false);
@@ -651,7 +654,7 @@ class _Harness {
   /// tester exited or stayed silent, or null once the socket is adopted.
   Future<int?> _settleDialBack() async {
     switch (await _awaitDialBack()) {
-      case _TesterExited(:final exitCode):
+      case _TesterExited(:final int exitCode):
         stderr.writeln(
           'flutter_test: flutter_tester exited with code $exitCode before '
           'connecting to the harness.',
@@ -664,7 +667,7 @@ class _Harness {
           'it.',
         );
         return 1;
-      case _BootstrapConnected(:final request):
+      case _BootstrapConnected(:final HttpRequest request):
         _ws = await WebSocketTransformer.upgrade(request);
         return null;
     }
@@ -679,7 +682,7 @@ class _Harness {
       onDone: () {
         _socketClosed = true;
         if (!suiteReady.isCompleted) suiteReady.complete(null);
-        for (final c in _pendingTests.values) {
+        for (final Completer<void> c in _pendingTests.values) {
           if (!c.isCompleted) c.complete();
         }
         _pendingTests.clear();
@@ -694,7 +697,7 @@ class _Harness {
     Object? data,
     Completer<Map<String, dynamic>?> suiteReady,
   ) {
-    final msg = (data as Map).cast<String, dynamic>();
+    final Map<String, dynamic> msg = (data as Map).cast<String, dynamic>();
     switch (msg['type']) {
       case 'success':
         if (!suiteReady.isCompleted) {
@@ -704,7 +707,8 @@ class _Harness {
         stderr.writeln('flutter_test: load failure — ${msg['message']}');
         if (!suiteReady.isCompleted) suiteReady.complete(null);
       case 'error':
-        final err = (msg['error'] as Map).cast<String, dynamic>();
+        final Map<String, dynamic> err = (msg['error'] as Map)
+            .cast<String, dynamic>();
         stderr.writeln(
           'flutter_test: top-level error — ${err['message']}\n'
           '${err['stackChain']}',
@@ -757,9 +761,8 @@ class _Harness {
     String testPath,
   ) async {
     if (xmlOutput != null) {
-      await File(
-        xmlOutput,
-      ).writeAsString(junitXml(results.cases, suiteName: testPath));
+      await File(xmlOutput)
+          .writeAsString(junitXml(results.cases, suiteName: testPath));
     }
   }
 
@@ -784,7 +787,7 @@ class _Harness {
       return null;
     }
     try {
-      final lcov = await coverage
+      final String lcov = await coverage
           .collectCoverage(
             coverageVmServiceUri,
           )
@@ -795,9 +798,7 @@ class _Harness {
       // empty report means collection reached no source at all. Writing it
       // would produce exactly the green-test-with-empty-LCOV outcome the
       // exit below exists to prevent.
-      if (lcov.isEmpty) {
-        return 'collected no coverage records';
-      }
+      if (lcov.isEmpty) return 'collected no coverage records';
       await File(coverageFile).writeAsString(lcov);
       return null;
     } on IOException catch (e) {
@@ -825,11 +826,11 @@ class _Harness {
   /// `-1` can't double as a "we killed it" sentinel here: on POSIX a
   /// signal-killed process reports `-signum`, and SIGHUP is signal 1, so
   /// `-1` is a real exit value. Track the timeout kill explicitly instead.
-  Future<({bool killedAfterTimeout, int testerExit})> _shutdownTester() async {
-    final ws = _ws;
+  Future<_Shutdown> _shutdownTester() async {
+    final WebSocket? ws = _ws;
     if (ws != null) await teardownQuietly(ws.close);
     var killedAfterTimeout = false;
-    final testerExit = await _process!.exitCode.timeout(
+    final int testerExit = await _process!.exitCode.timeout(
       const Duration(seconds: 30),
       onTimeout: () {
         killedAfterTimeout = true;
@@ -859,7 +860,7 @@ class _Harness {
   /// a paused coverage run then reaches Bazel's outer test timeout with no
   /// diagnostic of its own.
   Future<_DialBack> _awaitDialBack() async {
-    final outcome = await Future.any([
+    final _DialBack? outcome = await Future.any([
       _server.first.then<_DialBack?>(_BootstrapConnected.new),
       _process!.exitCode.then<_DialBack?>(_TesterExited.new),
     ]).timeout(_dialBackBound, onTimeout: () => null);
@@ -868,16 +869,14 @@ class _Harness {
 
   void _onSocketMessage(dynamic raw) {
     final list = json.decode(raw as String) as List;
-    final id = (list[0] as num).toInt();
+    final int id = (list[0] as num).toInt();
     if (list.length == 1) {
       // Channel closed by remote — drop the handler so we stop dispatching.
       _inbound.remove(id);
       return;
     }
-    final handler = _inbound[id];
-    if (handler != null) {
-      handler(list[1]);
-    }
+    final void Function(Object?)? handler = _inbound[id];
+    if (handler != null) handler(list[1]);
   }
 
   Future<void> _runGroup(Map<String, dynamic> group, _Results results) async {
@@ -886,9 +885,9 @@ class _Harness {
       await _runTest(setUpAll.cast<String, dynamic>(), results, fixture: true);
     }
 
-    final entries = group['entries'] as List? ?? const [];
+    final List<dynamic> entries = group['entries'] as List? ?? const [];
     for (final entry in entries) {
-      final m = (entry as Map).cast<String, dynamic>();
+      final Map<String, dynamic> m = (entry as Map).cast<String, dynamic>();
       if (m['type'] == 'group') {
         await _runGroup(m, results);
       } else {
@@ -916,8 +915,8 @@ class _Harness {
     _Results results, {
     bool fixture = false,
   }) async {
-    final testChannelId = (test['channel'] as num).toInt();
-    final reportName = test['name'] as String? ?? '';
+    final int testChannelId = (test['channel'] as num).toInt();
+    final String reportName = test['name'] as String? ?? '';
 
     if (fileUnstartedTest(
       test: test,
@@ -932,7 +931,7 @@ class _Harness {
 
     TestFailureSummary? failure;
     void noteFailure(TestFailureSummary summary) => failure ??= summary;
-    final tracked = trackTestRun(
+    final RunningTest tracked = trackTestRun(
       channel: _allocChannel(),
       pending: _pendingTests,
       inbound: _inbound,
@@ -950,7 +949,7 @@ class _Harness {
     // Bazel's limit, so a wedged test is named as a failure here instead of the
     // whole target being killed with no word on which test hung. Kill the tester and treat
     // the socket as gone so the remaining tests bail out fast.
-    final ceiling = testCeiling(Platform.environment['TEST_TIMEOUT']);
+    final Duration ceiling = testCeiling(Platform.environment['TEST_TIMEOUT']);
     await _awaitTestCompletion(
       completer: tracked.completer,
       ceiling: ceiling,
@@ -1017,35 +1016,31 @@ class _Harness {
   Map<String, dynamic> _initialMessage(
     String testPath,
     Set<String> libraryTags,
-  ) {
-    return {
-      'type': 'initial',
-      'metadata': defaultSuiteMetadata(
-        suiteTimeout(Platform.environment['TEST_TIMEOUT']),
-        libraryTags,
-      ),
-      'platform': _suitePlatform(),
-      'platformVariables': const <String>[],
-      'collectTraces': true,
-      'noRetry': true,
-      'allowDuplicateTestNames': true,
-      'foldTraceExcept': const <String>[],
-      'foldTraceOnly': const <String>[],
-      'path': testPath,
-      'asciiGlyphs': !stdout.supportsAnsiEscapes,
-      'ignoreTimeouts': false,
-    };
-  }
+  ) => {
+    'type': 'initial',
+    'metadata': defaultSuiteMetadata(
+      suiteTimeout(Platform.environment['TEST_TIMEOUT']),
+      libraryTags,
+    ),
+    'platform': _suitePlatform(),
+    'platformVariables': const <String>[],
+    'collectTraces': true,
+    'noRetry': true,
+    'allowDuplicateTestNames': true,
+    'foldTraceExcept': const <String>[],
+    'foldTraceOnly': const <String>[],
+    'path': testPath,
+    'asciiGlyphs': !stdout.supportsAnsiEscapes,
+    'ignoreTimeouts': false,
+  };
 
   /// Built-in `Runtime.vm` and `Compiler.kernel` serialize as plain identifiers.
-  static Map<String, Object?> _suitePlatform() {
-    return {
-      'runtime': 'vm',
-      'compiler': 'kernel',
-      'os': _osIdentifier(),
-      'inGoogle': false,
-    };
-  }
+  static Map<String, Object?> _suitePlatform() => {
+    'runtime': 'vm',
+    'compiler': 'kernel',
+    'os': _osIdentifier(),
+    'inGoogle': false,
+  };
 
   static String _osIdentifier() {
     if (Platform.isMacOS) return 'mac-os';
@@ -1141,6 +1136,5 @@ class _Results implements TestResultSink {
   );
 }
 
-String _indent(String body, String prefix) {
-  return body.split('\n').map((l) => l.isEmpty ? l : '$prefix$l').join('\n');
-}
+String _indent(String body, String prefix) =>
+    body.split('\n').map((l) => l.isEmpty ? l : '$prefix$l').join('\n');

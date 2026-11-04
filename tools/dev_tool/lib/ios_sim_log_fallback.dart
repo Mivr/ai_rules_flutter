@@ -65,7 +65,7 @@ final Logger _fallbackLogger = Logger('dev_tool.ios_sim_log');
 /// What makes an entry count is still the absolute-time check
 /// [findSimLogVmServiceUri] runs on every returned entry.
 String _formatShowStart(DateTime instant) {
-  final start = instant.toLocal();
+  final DateTime start = instant.toLocal();
   String two(int n) => n.toString().padLeft(2, '0');
   return '${start.year}-${two(start.month)}-${two(start.day)} '
       '${two(start.hour)}:${two(start.minute)}:${two(start.second)}';
@@ -78,18 +78,20 @@ String _formatShowStart(DateTime instant) {
 /// same way on every machine. Null when the text is no instant at all, in
 /// which case the entry cannot prove it is this launch's and does not count.
 DateTime? _parseLogTimestamp(String raw) {
-  final text = raw.trim();
+  final String text = raw.trim();
   try {
     return DateTime.parse(text);
   } on FormatException {
     // Not ISO: fall through to the Apple shape below.
   }
-  final match = RegExp(
+  final RegExpMatch? match = RegExp(
     r'^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})'
     r'(?:\.(\d{1,9}))?\s*([+-]\d{2}:?\d{2}|Z)?$',
   ).firstMatch(text);
   if (match == null) return null;
-  final micros = (match.group(7) ?? '0').padRight(6, '0').substring(0, 6);
+  final String micros = (match.group(7) ?? '0')
+      .padRight(6, '0')
+      .substring(0, 6);
   var instant = DateTime.utc(
     int.parse(match.group(1)!),
     int.parse(match.group(2)!),
@@ -100,10 +102,10 @@ DateTime? _parseLogTimestamp(String raw) {
     0,
     int.parse(micros),
   );
-  final zone = match.group(8);
+  final String? zone = match.group(8);
   if (zone != null && zone != 'Z') {
     final sign = zone.startsWith('-') ? -1 : 1;
-    final digits = zone.substring(1).replaceAll(':', '');
+    final String digits = zone.substring(1).replaceAll(':', '');
     instant = instant.subtract(
       Duration(
         hours: sign * int.parse(digits.substring(0, 2)),
@@ -118,7 +120,7 @@ DateTime? _parseLogTimestamp(String raw) {
 /// [keys], or null.
 String? _firstString(Map<Object?, Object?> entry, List<String> keys) {
   for (final key in keys) {
-    final value = entry[key];
+    final Object? value = entry[key];
     if (value is String) return value;
   }
   return null;
@@ -138,7 +140,7 @@ int? simLogEntryPid(Map<Object?, Object?> entry) {
     'processId',
     'pid',
   ]) {
-    final value = entry[key];
+    final Object? value = entry[key];
     if (value is int) return value;
     if (value is String) return int.tryParse(value);
   }
@@ -158,7 +160,7 @@ String? simLogEntryMessage(Map<Object?, Object?> entry) =>
 /// pattern every log-based discovery wait reads — shared with the live
 /// discovery stream so both sources take the same announcement.
 Uri? simLogAnnouncementUri(String message) {
-  final match = vmServiceUriPattern.firstMatch(message);
+  final RegExpMatch? match = vmServiceUriPattern.firstMatch(message);
   if (match == null) return null;
   return Uri.parse(match.group(1)!);
 }
@@ -174,11 +176,11 @@ Uri? _judgeJsonEntry(
   required int pid,
   required DateTime since,
 }) {
-  final message = simLogEntryMessage(entry);
+  final String? message = simLogEntryMessage(entry);
   if (message == null) return null;
   if (simLogEntryPid(entry) != pid) return null;
-  final rawTimestamp = _firstString(entry, const ['timestamp', 'time']);
-  final timestamp = rawTimestamp == null
+  final String? rawTimestamp = _firstString(entry, const ['timestamp', 'time']);
+  final DateTime? timestamp = rawTimestamp == null
       ? null
       : _parseLogTimestamp(
           rawTimestamp,
@@ -195,7 +197,7 @@ Uri? _judgeJsonEntry(
 /// Output with no such line comes back whole, so the decode below reports it
 /// as before instead of mistaking it for quiet.
 String _jsonDocument(String text) {
-  final lines = text.split('\n');
+  final List<String> lines = text.split('\n');
   for (var i = 0; i < lines.length; i++) {
     if (lines[i].trimLeft().startsWith('[')) {
       return lines.sublist(i).join('\n');
@@ -220,11 +222,11 @@ Uri? findSimLogVmServiceUri(
   required int pid,
   required DateTime since,
 }) {
-  final text = output.trim();
+  final String text = output.trim();
   if (text.isEmpty) return null;
   late final List<Object?> entries;
   try {
-    final decoded = json.decode(_jsonDocument(text));
+    final dynamic decoded = json.decode(_jsonDocument(text));
     if (decoded is! List) {
       throw const FormatException('not a JSON array of log entries');
     }
@@ -238,7 +240,7 @@ Uri? findSimLogVmServiceUri(
   }
   for (final entry in entries) {
     if (entry is! Map<Object?, Object?>) continue;
-    final found = _judgeJsonEntry(entry, pid: pid, since: since);
+    final Uri? found = _judgeJsonEntry(entry, pid: pid, since: since);
     if (found != null) return found;
   }
   return null;
@@ -311,14 +313,14 @@ class SimLogFallback {
     Future<void>? stop,
   }) async {
     var stopped = false;
-    final onStop = stop?.then((_) => stopped = true);
+    final Future<bool>? onStop = stop?.then((_) => stopped = true);
     final seen = <String>{};
     final reported = <String>{};
     while (!stopped) {
       await _pollOnce(out, seen, reported);
       if (stopped) break;
       final gap = Completer<void>();
-      final timer = clock.startTimer(pollInterval, () {
+      final VmDiscoveryTimer timer = clock.startTimer(pollInterval, () {
         if (!gap.isCompleted) gap.complete();
       });
       try {

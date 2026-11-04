@@ -11,6 +11,6 @@ import 'dart:ui';
 import 'package:flutter_test_analyze_fixture/counter.dart';
 
 void main() {
-  final grown = grow(const Size(1, 2), 3);
+  final Size grown = grow(const Size(1, 2), 3);
   assert(grown.width == 4, 'grow() should add to width');
 }

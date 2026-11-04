@@ -90,7 +90,7 @@ void main() {
     });
 
     test('resolves each keyword to its device kind', () async {
-      final devices = await resolveDevices([
+      final List<Device> devices = await resolveDevices([
         'macos',
         'linux',
         'windows',
@@ -111,13 +111,14 @@ void main() {
     test(
       'resolves ios-simulator:UDID to IOSSimulatorDevice with udid',
       () async {
-        final device = (await resolveDevices(['ios-simulator:ABC-123'])).single;
+        final Device device = (await resolveDevices(['ios-simulator:ABC-123']))
+            .single;
         expect((device as IOSSimulatorDevice).udid, 'ABC-123');
       },
     );
 
     test('resolves ios:UDID to IOSDevice with udid', () async {
-      final device = (await resolveDevices(['ios:ABC-123'])).single;
+      final Device device = (await resolveDevices(['ios:ABC-123'])).single;
       expect((device as IOSDevice).udid, 'ABC-123');
     });
 
@@ -127,12 +128,13 @@ void main() {
       // service name and answers `unknown host service '<serial>:features'` —
       // an error naming neither the device id nor the flag that produced it,
       // for a device the same `adb` installs to by hand.
-      final device = (await resolveDevices(['android:58051JEBF01271'])).single;
+      final Device device = (await resolveDevices(['android:58051JEBF01271']))
+          .single;
       expect((device as AndroidDevice).deviceId, '58051JEBF01271');
     });
 
     test('resolving known forms asks no other tool', () async {
-      final host = _fakeHost();
+      final ({List<List<String>> calls, ProcessRunSync run}) host = _fakeHost();
       await resolveDevices(
         [
           'macos',
@@ -157,7 +159,7 @@ void main() {
 
   group('resolveDevices refuses an id that names no device kind', () {
     test('a bare simulator UDID, naming the simulator and its form', () async {
-      final host = _fakeHost();
+      final ({List<List<String>> calls, ProcessRunSync run}) host = _fakeHost();
       await expectLater(
         resolveDevices([_simUdid], runProbe: host.run, adbPath: '/fake/adb'),
         throwsA(

@@ -57,9 +57,9 @@ void main() {
     });
 
     test('prefers a candidate over PATH', () {
-      final sdk = dir('sdk');
-      final onPath = dir('bin');
-      final candidate = touch(sdk, exeName('widget'));
+      final String sdk = dir('sdk');
+      final String onPath = dir('bin');
+      final String candidate = touch(sdk, exeName('widget'));
       touch(onPath, exeName('widget'));
 
       expect(
@@ -74,9 +74,9 @@ void main() {
     });
 
     test('searches PATH entries in order', () {
-      final first = dir('first');
-      final second = dir('second');
-      final found = touch(second, exeName('widget'));
+      final String first = dir('first');
+      final String second = dir('second');
+      final String found = touch(second, exeName('widget'));
 
       expect(
         tool(
@@ -91,7 +91,7 @@ void main() {
     // A directory named like the binary is not the binary; returning it would
     // produce an exec-format failure far from here.
     test('ignores a directory with the tool name', () {
-      final onPath = dir('bin');
+      final String onPath = dir('bin');
       Directory(p.join(onPath, exeName('widget'))).createSync();
 
       expect(
@@ -105,7 +105,7 @@ void main() {
     });
 
     test('skips PATH entirely when the tool has no PATH names', () {
-      final onPath = dir('bin');
+      final String onPath = dir('bin');
       touch(onPath, exeName('widget'));
 
       expect(
@@ -122,8 +122,8 @@ void main() {
 
   group('HostTool.require', () {
     test('names the tool, what it is for, where it looked, and the fix', () {
-      final missing = p.join(tmp.path, 'sdk', exeName('widget'));
-      final onPath = dir('bin');
+      final String missing = p.join(tmp.path, 'sdk', exeName('widget'));
+      final String onPath = dir('bin');
 
       expect(
         () => tool(
@@ -164,29 +164,29 @@ void main() {
     });
 
     test('returns the path when the tool is there', () {
-      final found = touch(dir('bin'), exeName('widget'));
+      final String found = touch(dir('bin'), exeName('widget'));
       expect(tool(candidates: [found]).require(), found);
     });
   });
 
   group('adbTool', () {
     test('finds adb under ANDROID_HOME', () {
-      final sdk = dir('sdk');
-      final adb = touch(p.join(sdk, 'platform-tools'), exeName('adb'));
+      final String sdk = dir('sdk');
+      final String adb = touch(p.join(sdk, 'platform-tools'), exeName('adb'));
 
       expect(adbTool(environment: {'ANDROID_HOME': sdk}).find(), adb);
     });
 
     test('finds adb under ANDROID_SDK_ROOT', () {
-      final sdk = dir('sdk');
-      final adb = touch(p.join(sdk, 'platform-tools'), exeName('adb'));
+      final String sdk = dir('sdk');
+      final String adb = touch(p.join(sdk, 'platform-tools'), exeName('adb'));
 
       expect(adbTool(environment: {'ANDROID_SDK_ROOT': sdk}).find(), adb);
     });
 
     test('falls back to PATH for an SDK installed outside the conventions', () {
-      final onPath = dir('bin');
-      final adb = touch(onPath, exeName('adb'));
+      final String onPath = dir('bin');
+      final String adb = touch(onPath, exeName('adb'));
 
       expect(
         adbTool(
@@ -218,7 +218,7 @@ void main() {
     // Having pointed at an SDK, the user needs to know that SDK was searched —
     // otherwise the answer looks like "set the variable you already set".
     test('names the SDK it searched when the variable is set', () {
-      final sdk = dir('sdk');
+      final String sdk = dir('sdk');
       expect(
         () => adbTool(environment: {'ANDROID_HOME': sdk, 'PATH': ''}).require(),
         throwsA(
@@ -237,8 +237,8 @@ void main() {
 
   group('aapt2Tool', () {
     test('finds aapt2 in the SDK build-tools', () {
-      final sdk = dir('sdk');
-      final aapt2 = touch(
+      final String sdk = dir('sdk');
+      final String aapt2 = touch(
         p.join(sdk, 'build-tools', '35.0.0'),
         exeName('aapt2'),
       );
@@ -249,9 +249,9 @@ void main() {
     // Lexical ordering puts `9.0.0` last, which would pick a decade-old aapt2
     // over the current one on any SDK still carrying an old version.
     test('prefers the newest build-tools, ordered numerically', () {
-      final sdk = dir('sdk');
+      final String sdk = dir('sdk');
       touch(p.join(sdk, 'build-tools', '9.0.0'), exeName('aapt2'));
-      final newest = touch(
+      final String newest = touch(
         p.join(sdk, 'build-tools', '34.0.0'),
         exeName('aapt2'),
       );
@@ -260,11 +260,11 @@ void main() {
     });
 
     test('skips a build-tools version that has no aapt2', () {
-      final sdk = dir('sdk');
+      final String sdk = dir('sdk');
       Directory(
         p.join(sdk, 'build-tools', '35.0.0'),
       ).createSync(recursive: true);
-      final older = touch(
+      final String older = touch(
         p.join(sdk, 'build-tools', '34.0.0'),
         exeName('aapt2'),
       );
@@ -273,7 +273,7 @@ void main() {
     });
 
     test('points at build-tools, not platform-tools, when missing', () {
-      final sdk = dir('sdk');
+      final String sdk = dir('sdk');
       expect(
         () =>
             aapt2Tool(environment: {'ANDROID_HOME': sdk, 'PATH': ''}).require(),
@@ -298,7 +298,7 @@ void main() {
     });
 
     test('orders newest first', () {
-      final sdk = dir('sdk');
+      final String sdk = dir('sdk');
       for (final v in ['9.0.0', '34.0.0', '35.0.1', '35.0.0']) {
         Directory(p.join(sdk, 'build-tools', v)).createSync(recursive: true);
       }
@@ -308,7 +308,7 @@ void main() {
 
   group('chromeTool', () {
     test('CHROME_EXECUTABLE wins over the installed browser', () {
-      final chrome = touch(dir('bin'), exeName('chrome'));
+      final String chrome = touch(dir('bin'), exeName('chrome'));
       expect(
         chromeTool(environment: {'CHROME_EXECUTABLE': chrome}).find(),
         chrome,

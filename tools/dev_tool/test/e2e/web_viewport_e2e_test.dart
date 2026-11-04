@@ -23,7 +23,7 @@ import 'dev_tool_e2e_harness.dart';
 void main() {
   group('web viewport e2e', () {
     Future<DevToolProcess> launch(String viewport) async {
-      final dt = await startDevTool(
+      final DevToolProcess dt = await startDevTool(
         workspace: e2eWorkspace('web_example'),
         // The DDC dev loop: the shape a developer's own run takes.
         target: ':app_wasm',
@@ -52,14 +52,14 @@ void main() {
       'a viewport with a scale captures at that size, through a restart and '
       'a resize',
       () async {
-        final dt = await launch('390x844@3');
+        final DevToolProcess dt = await launch('390x844@3');
         expect(
           await capture(dt, 'scaled'),
           (width: 1170, height: 2532),
           reason: '390x844 at 3x',
         );
 
-        final restart = await dt.sendCommand(
+        final Map<String, dynamic> restart = await dt.sendCommand(
           7,
           'app.restart',
           params: {'appId': dt.appId},
@@ -74,7 +74,7 @@ void main() {
         );
 
         // Whole numbers, which the HTTP channel's string parameters are not.
-        final resized = await dt.sendCommand(
+        final Map<String, dynamic> resized = await dt.sendCommand(
           8,
           'app.setViewport',
           params: {'appId': dt.appId, 'width': 300, 'height': 500},
@@ -93,7 +93,7 @@ void main() {
     test(
       'a viewport without a scale captures at exactly that size',
       () async {
-        final dt = await launch('390x844');
+        final DevToolProcess dt = await launch('390x844');
         expect(await capture(dt, 'plain'), (width: 390, height: 844));
       },
       timeout: const Timeout(Duration(minutes: 12)),

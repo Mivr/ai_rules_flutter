@@ -47,7 +47,7 @@ void main() {
 
     Future<(int, String)> run(List<String> flags, {bool strict = false}) async {
       final err = StringBuffer();
-      final code = await compileShader([
+      final int code = await compileShader([
         '--impellerc',
         impellerc,
         '--shader',
@@ -60,14 +60,17 @@ void main() {
     }
 
     test('falls back to the Impeller stages with a warning', () async {
-      final (code, err) = await run(['--sksl', '--runtime-stage-metal']);
+      final (int code, String err) = await run([
+        '--sksl',
+        '--runtime-stage-metal',
+      ]);
       expect(code, 0);
       expect(err, contains('warning: Shader shaders/glass.frag'));
       expect(err, contains('index expression must be constant'));
     });
 
     test('fails when SkSL is required', () async {
-      final (code, err) = await run([
+      final (int code, String err) = await run([
         '--sksl',
         '--runtime-stage-metal',
       ], strict: true);
@@ -76,14 +79,14 @@ void main() {
     });
 
     test('fails when SkSL is the only stage', () async {
-      final (code, err) = await run(['--sksl', '--json']);
+      final (int code, String err) = await run(['--sksl', '--json']);
       expect(code, isNot(0));
       expect(err, contains('index expression must be constant'));
       expect(err, isNot(contains('warning')));
     });
 
     test('says nothing when the first compile succeeds', () async {
-      final (code, err) = await run(['--runtime-stage-metal']);
+      final (int code, String err) = await run(['--runtime-stage-metal']);
       expect(code, 0);
       expect(err, isEmpty);
     });

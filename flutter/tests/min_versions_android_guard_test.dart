@@ -23,14 +23,14 @@ bool _looksLikeRoot(String root) =>
 /// tree behind the test's own anchor in `data`. Null when neither resolves, so
 /// the test fails loudly instead of reading another tree.
 String? _workspaceRoot() {
-  final env = Platform.environment;
-  final fromEnv = env['BUILD_WORKSPACE_DIRECTORY'];
+  final Map<String, String> env = Platform.environment;
+  final String? fromEnv = env['BUILD_WORKSPACE_DIRECTORY'];
   if (fromEnv != null && _looksLikeRoot(fromEnv)) return fromEnv;
-  final anchor = env['GUARD_ROOT_ANCHOR'];
-  final srcdir = env['TEST_SRCDIR'];
+  final String? anchor = env['GUARD_ROOT_ANCHOR'];
+  final String? srcdir = env['TEST_SRCDIR'];
   if (anchor == null || srcdir == null) return null;
-  final source = File('$srcdir/$anchor').resolveSymbolicLinksSync();
-  var dir = File(source).parent;
+  final String source = File('$srcdir/$anchor').resolveSymbolicLinksSync();
+  Directory dir = File(source).parent;
   for (var i = 0; i < 8; i++) {
     if (_looksLikeRoot(dir.path)) return dir.path;
     dir = dir.parent;
@@ -44,7 +44,7 @@ String _withoutComments(String text) {
   final out = StringBuffer();
   String? quote;
   for (var i = 0; i < text.length; i++) {
-    final ch = text[i];
+    final String ch = text[i];
     if (quote != null) {
       out.write(ch);
       if (ch == r'\' && i + 1 < text.length) {
@@ -75,7 +75,7 @@ String? _callText(String text, int open) {
   String? quote;
   var depth = 0;
   for (var i = open; i < text.length; i++) {
-    final ch = text[i];
+    final String ch = text[i];
     if (quote != null) {
       if (ch == r'\') {
         i++;
@@ -109,10 +109,12 @@ String? _callText(String text, int open) {
 String? _targetBlock(String text, String target) {
   String? block;
   final names = RegExp(r'''\bname\s*=\s*(["'])(.*?)\1''');
-  for (final match in RegExp(r'\bbuild_test\s*\(').allMatches(text)) {
-    final call = _callText(text, match.end - 1);
+  for (final RegExpMatch match in RegExp(
+    r'\bbuild_test\s*\(',
+  ).allMatches(text)) {
+    final String? call = _callText(text, match.end - 1);
     if (call == null) continue;
-    final found = names.allMatches(call).toList();
+    final List<RegExpMatch> found = names.allMatches(call).toList();
     if (found.length != 1 || found.single.group(2) != target) continue;
     if (block != null) return null;
     block = call;
@@ -122,7 +124,7 @@ String? _targetBlock(String text, String target) {
 
 /// String elements of the list-valued attribute [attribute] in [block].
 List<String> _strings(String block, String attribute) {
-  final match = RegExp(
+  final RegExpMatch? match = RegExp(
     '\\b$attribute\\s*=\\s*\\[([^\\]]*)\\]',
   ).firstMatch(block);
   if (match == null) return <String>[];
@@ -134,7 +136,7 @@ List<String> _strings(String block, String attribute) {
 void main() {
   const path = 'e2e/min_versions/BUILD.bazel';
   const target = 'android_build_test';
-  final root = _workspaceRoot();
+  final String? root = _workspaceRoot();
   if (root == null) {
     test('the workspace root is discoverable', () {
       fail(
@@ -145,18 +147,20 @@ void main() {
     return;
   }
   test('$target builds :app_android on Linux only', () {
-    final text = _withoutComments(File('$root/$path').readAsStringSync());
-    final block = _targetBlock(text, target);
+    final String text = _withoutComments(
+      File('$root/$path').readAsStringSync(),
+    );
+    final String? block = _targetBlock(text, target);
     if (block == null) {
       fail('$path: no single build_test target named $target');
     }
-    final targets = _strings(block, 'targets');
+    final List<String> targets = _strings(block, 'targets');
     if (targets.length != 1 || targets.single != ':app_android') {
       fail(
         '$path: $target targets $targets, expected exactly [":app_android"]',
       );
     }
-    final compatible = _strings(block, 'target_compatible_with');
+    final List<String> compatible = _strings(block, 'target_compatible_with');
     if (compatible.length != 1 || compatible.single != '@platforms//os:linux') {
       fail(
         '$path: $target target_compatible_with is $compatible, expected '

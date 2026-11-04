@@ -98,7 +98,7 @@ class AndroidDevice extends Device {
 
   @override
   NativePatchDelivery? get nativePatchDelivery {
-    final packageName = _packageName;
+    final String? packageName = _packageName;
     if (packageName == null) return null;
     return AndroidPatchDelivery(
       packageName: packageName,
@@ -185,7 +185,7 @@ class AndroidDevice extends Device {
   /// The app on the device is force-stopped by the [_releaseApp] the override
   /// runs next: a launch abandoned after `am start` must not leave it running.
   Future<void> releaseLaunch() async {
-    final logcat = _launchingLogcat;
+    final Process? logcat = _launchingLogcat;
     _launchingLogcat = null;
     if (logcat != null) {
       await stopProcess('adb logcat', logcat, teardownBound);
@@ -193,10 +193,10 @@ class AndroidDevice extends Device {
   }
 
   Future<AppInstance> _launch(String appPath, {AppLogListener? onLog}) async {
-    final packageName = _packageName ?? await _readPackageName(appPath);
+    final String packageName = _packageName ?? await _readPackageName(appPath);
 
     // Step 1: Install the APK.
-    final installResult = await _runProcess(
+    final ProcessResult installResult = await _runProcess(
       adbPath,
       _adbArgs(['install', '-r', appPath]),
     );
@@ -228,14 +228,14 @@ class AndroidDevice extends Device {
     // exceptions (`AndroidRuntime`), VM messages (`DartVM`) and native crashes
     // — exactly the output you most need when an app misbehaves. Matches
     // flutter_tools' AdbLogReader, which filters host-side for the same reason.
-    final logcat = _launchingLogcat = await _startProcess(
+    final Process logcat = _launchingLogcat = await _startProcess(
       adbPath,
       _adbArgs(['logcat', '-v', 'time', '-T', '1']),
     );
     // logcat has no stdout/stderr split: severity lives in the line's tag, so
     // [androidLogFilter] decides, and the raw stderr channel (adb's own
     // diagnostics) is not treated as app error output.
-    final logs = startProcessLogs(
+    final AppLogStream logs = startProcessLogs(
       logcat,
       onLog,
       stderrIsError: false,
@@ -243,11 +243,11 @@ class AndroidDevice extends Device {
     );
 
     // Step 3: Launch the activity.
-    final activity = _activityName ?? '.MainActivity';
+    final String activity = _activityName ?? '.MainActivity';
     // Starting logcat took a while: refuse before `am start` puts an app on
     // the device that nobody will stop.
     throwIfLaunchAbandoned();
-    final startResult = await _runProcess(
+    final ProcessResult startResult = await _runProcess(
       adbPath,
       _adbArgs([
         'shell', 'am', 'start',
@@ -263,8 +263,8 @@ class AndroidDevice extends Device {
 
     // Step 4: Discover VM service URI from logcat (see
     // [_discoverAndroidVmService] for the wait's shape).
-    final discovery = await _discoverAndroidVmService(logs);
-    final deviceUri = discovery.uri;
+    final VmServiceDiscovery discovery = await _discoverAndroidVmService(logs);
+    final Uri? deviceUri = discovery.uri;
 
     // Port forwarding — the URI logcat announces is device-local, and a failed
     // forward has no usable second answer. `127.0.0.1:<devicePort>` on the host
@@ -275,8 +275,8 @@ class AndroidDevice extends Device {
     // blaming the app.
     Uri? vmServiceUri;
     if (deviceUri != null) {
-      final devicePort = deviceUri.port;
-      final forwardResult = await _runProcess(
+      final int devicePort = deviceUri.port;
+      final ProcessResult forwardResult = await _runProcess(
         adbPath,
         _adbArgs(['forward', 'tcp:0', 'tcp:$devicePort']),
       );
@@ -289,8 +289,8 @@ class AndroidDevice extends Device {
       }
       // `tcp:0` asks adb to allocate the host port and print it. Anything else
       // on stdout means the forward is not the one this code goes on to dial.
-      final printed = (forwardResult.stdout as String).trim();
-      final hostPort = int.tryParse(printed);
+      final String printed = (forwardResult.stdout as String).trim();
+      final int? hostPort = int.tryParse(printed);
       if (hostPort == null) {
         throw StateError(
           'adb forward tcp:0 tcp:$devicePort reported success on $name but '
@@ -327,11 +327,12 @@ class AndroidDevice extends Device {
         'manifest to read the package name from.',
       );
     }
-    final info = await extractPackageInfo(
-      appPath,
-      runProcess: _runProcess,
-      aapt2Path: aapt2Path,
-    );
+    final ({String? activityName, String packageName}) info =
+        await extractPackageInfo(
+          appPath,
+          runProcess: _runProcess,
+          aapt2Path: aapt2Path,
+        );
     _packageName = info.packageName;
     _activityName ??= info.activityName;
     return info.packageName;
@@ -360,9 +361,9 @@ class AndroidDevice extends Device {
     String packageName,
     String adbStderr,
   ) async {
-    final apkBytes = await File(apkPath).length();
-    final free = await _freeSpaceOnData();
-    final installed = await _isInstalled(packageName);
+    final int apkBytes = await File(apkPath).length();
+    final String free = await _freeSpaceOnData();
+    final bool installed = await _isInstalled(packageName);
     return 'adb install failed: the device is out of room for this APK.\n'
         '  APK:  ${_formatBytes(apkBytes)} ($apkPath)\n'
         '  Free: $free on /data\n'
@@ -392,21 +393,21 @@ class AndroidDevice extends Device {
   /// that lies about the device is worse than one that admits it does not
   /// know.
   Future<String> _freeSpaceOnData() async {
-    final result = await _runProcess(
+    final ProcessResult result = await _runProcess(
       adbPath,
       _adbArgs(['shell', 'df', '/data']),
     );
     if (result.exitCode != 0) {
       return 'unknown (`adb shell df /data` failed: ${result.stderr})';
     }
-    final lines = const LineSplitter()
+    final Iterable<String> lines = const LineSplitter()
         .convert('${result.stdout}')
         .where((l) => l.trim().isNotEmpty);
     if (lines.isEmpty) return 'unknown (`adb shell df /data` printed nothing)';
     // `Filesystem 1K-blocks Used Available Use% Mounted on` — the available
     // column, in 1K blocks, off the last row df printed.
-    final fields = lines.last.trim().split(RegExp(r'\s+'));
-    final availableKb = fields.length > 3 ? int.tryParse(fields[3]) : null;
+    final List<String> fields = lines.last.trim().split(RegExp(r'\s+'));
+    final int? availableKb = fields.length > 3 ? int.tryParse(fields[3]) : null;
     if (availableKb == null) return 'unknown (df said: ${lines.last.trim()})';
     return _formatBytes(availableKb * 1024);
   }
@@ -416,7 +417,7 @@ class AndroidDevice extends Device {
   /// `pm path` exits non-zero and prints nothing for a package that is not
   /// there, which is the answer rather than an error.
   Future<bool> _isInstalled(String packageName) async {
-    final result = await _runProcess(
+    final ProcessResult result = await _runProcess(
       adbPath,
       _adbArgs(['shell', 'pm', 'path', packageName]),
     );
@@ -430,7 +431,7 @@ class AndroidDevice extends Device {
   /// from those tools.
   static String _formatBytes(int bytes) {
     const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    var value = bytes.toDouble();
+    double value = bytes.toDouble();
     var unit = 0;
     while (value >= 1024 && unit < units.length - 1) {
       value /= 1024;
@@ -452,7 +453,7 @@ class AndroidDevice extends Device {
     String packageName,
     String apkPath,
   ) async {
-    final result = await _runProcess(
+    final ProcessResult result = await _runProcess(
       adbPath,
       _adbArgs(['shell', 'dumpsys', 'package', packageName]),
     );
@@ -493,16 +494,16 @@ class AndroidDevice extends Device {
   /// `android.permission.INTERNET` under `requested permissions:`.
   /// A package that requests no permissions has no such section at all.
   static bool _requestsInternetPermission(String dumpsysOutput) {
-    final lines = const LineSplitter().convert(dumpsysOutput);
+    final List<String> lines = const LineSplitter().convert(dumpsysOutput);
     for (var i = 0; i < lines.length; i++) {
       if (lines[i].trim() != 'requested permissions:') continue;
-      final headerIndent = lines[i].length - lines[i].trimLeft().length;
-      for (var j = i + 1; j < lines.length; j++) {
-        final line = lines[j];
+      final int headerIndent = lines[i].length - lines[i].trimLeft().length;
+      for (int j = i + 1; j < lines.length; j++) {
+        final String line = lines[j];
         if (line.trim().isEmpty) break;
-        final indent = line.length - line.trimLeft().length;
+        final int indent = line.length - line.trimLeft().length;
         if (indent <= headerIndent) break;
-        final permission = line.trim().split(RegExp(r'[:\s]')).first;
+        final String permission = line.trim().split(RegExp(r'[:\s]')).first;
         if (permission == 'android.permission.INTERNET') return true;
       }
     }
@@ -552,9 +553,9 @@ class AndroidDevice extends Device {
         _adbArgs(['shell', 'am', 'force-stop', _packageName!]),
       );
     }
-    final hostPort = _forwardedHostPort;
+    final int? hostPort = _forwardedHostPort;
     if (hostPort != null) {
-      final removal = await _runProcess(
+      final ProcessResult removal = await _runProcess(
         adbPath,
         _adbArgs(['forward', '--remove', 'tcp:$hostPort']),
       );
@@ -635,7 +636,7 @@ class AndroidDevice extends Device {
     }
     if (_isEmulator) return _consoleScreenshot(outputPath);
     const remotePath = '/sdcard/flutter_screenshot.png';
-    final deadline = DateTime.now().add(screenshotBound);
+    final DateTime deadline = DateTime.now().add(screenshotBound);
     Future<ProcessResult> step(List<String> args, String what) =>
         runProcessBounded(
           _startScreenshotProcess,
@@ -646,7 +647,7 @@ class AndroidDevice extends Device {
           what: what,
         );
 
-    final capResult = await step([
+    final ProcessResult capResult = await step([
       'shell',
       'screencap',
       '-p',
@@ -655,7 +656,11 @@ class AndroidDevice extends Device {
     if (capResult.exitCode != 0) {
       throw StateError(_adbFailure('screencap', capResult.stderr));
     }
-    final pullResult = await step(['pull', remotePath, outputPath], 'adb pull');
+    final ProcessResult pullResult = await step([
+      'pull',
+      remotePath,
+      outputPath,
+    ], 'adb pull');
     if (pullResult.exitCode != 0) {
       throw StateError(_adbFailure('pull', pullResult.stderr));
     }
@@ -678,7 +683,7 @@ class AndroidDevice extends Device {
   /// on the emulator's choice of filename.
   Future<void> _consoleScreenshot(String outputPath) =>
       withTempDir('flutter_emu_shot_', (dir) async {
-        final result = await runProcessBounded(
+        final ProcessResult result = await runProcessBounded(
           _startScreenshotProcess,
           adbPath,
           _adbArgs(['emu', 'screenrecord', 'screenshot', dir.path]),
@@ -686,7 +691,7 @@ class AndroidDevice extends Device {
           bound: screenshotBound,
           what: 'adb emu screenrecord screenshot',
         );
-        final pngs = dir
+        final List<File> pngs = dir
             .listSync()
             .whereType<File>()
             .where((f) => f.path.toLowerCase().endsWith('.png'))
@@ -738,9 +743,13 @@ Future<({String packageName, String? activityName})> extractPackageInfo(
   ProcessRunSync? runProcess,
   String? aapt2Path,
 }) async {
-  final run = runProcess ?? Process.run;
-  final aapt2 = aapt2Path ?? aapt2Tool().require();
-  final result = await run(aapt2, ['dump', 'badging', apkPath]);
+  final Future<ProcessResult> Function(
+    String executable,
+    List<String> arguments,
+  )
+  run = runProcess ?? Process.run;
+  final String aapt2 = aapt2Path ?? aapt2Tool().require();
+  final ProcessResult result = await run(aapt2, ['dump', 'badging', apkPath]);
   if (result.exitCode != 0) {
     throw StateError(
       '`$aapt2 dump badging $apkPath` failed '
@@ -748,11 +757,12 @@ Future<({String packageName, String? activityName})> extractPackageInfo(
     );
   }
   final output = result.stdout as String;
-  final pkgMatch = RegExp(r"package: name='([^']+)'").firstMatch(output);
+  final RegExpMatch? pkgMatch = RegExp(r"package: name='([^']+)'")
+      .firstMatch(output);
   if (pkgMatch == null) {
     throw StateError('Could not extract package name from APK');
   }
-  final actMatch = RegExp(
+  final RegExpMatch? actMatch = RegExp(
     r"launchable-activity: name='([^']+)'",
   ).firstMatch(output);
   return (
@@ -800,11 +810,11 @@ final _logcatTimeFormat = RegExp(
 /// verbatim would silently drop exactly the crash output this is here to
 /// surface.
 LogcatLine? parseLogcatLine(String rawLine) {
-  final match = _logcatTimeFormat.firstMatch(rawLine);
+  final RegExpMatch? match = _logcatTimeFormat.firstMatch(rawLine);
   if (match == null) return null;
-  final level = match.group(1)!;
-  final tag = match.group(2)!.trim();
-  final message = match.group(3)!;
+  final String level = match.group(1)!;
+  final String tag = match.group(2)!.trim();
+  final String message = match.group(3)!;
   return LogcatLine(
     level: level,
     tag: tag,
@@ -829,7 +839,7 @@ LogcatLine? parseLogcatLine(String rawLine) {
 /// Not ported: flutter's tombstone state machine and repeated-line collapsing.
 /// Those polish a crash report; the allowlist is what makes crashes *visible*.
 bool _isAndroidTagOfInterest(LogcatLine line) {
-  final tag = line.tag.toLowerCase();
+  final String tag = line.tag.toLowerCase();
   if (line.level == 'F') return true;
   if (tag.startsWith('flutter')) return true;
   if (tag.startsWith('dartvm') && (line.level == 'I' || line.level == 'E')) {
@@ -858,7 +868,7 @@ final _androidFilteredMessages = <RegExp>[
 ///
 /// Exposed for testing.
 String? androidLogFilter(String rawLine) {
-  final line = parseLogcatLine(rawLine);
+  final LogcatLine? line = parseLogcatLine(rawLine);
   // Banners ("--------- beginning of main") and anything else that isn't a
   // record.
   if (line == null) return null;

@@ -5,6 +5,7 @@
 
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'xtool_framework.dart'
     show extractFrameworkArchive, resolveFrameworkDirectories;
@@ -36,10 +37,10 @@ Directory? _findSdkInArtifactInfo(
   String sdkPrefix,
 ) {
   if (decoded is! Map<String, Object?>) return null;
-  final artifacts = decoded['artifacts'];
+  final Object? artifacts = decoded['artifacts'];
   if (artifacts is! Map<String, Object?>) return null;
-  for (final entry in artifacts.entries) {
-    final candidate = _matchSdkVariant(
+  for (final MapEntry<String, Object?> entry in artifacts.entries) {
+    final Directory? candidate = _matchSdkVariant(
       sdkRoot,
       entry.key,
       entry.value,
@@ -57,12 +58,12 @@ Directory? _matchSdkVariant(
   String sdkPrefix,
 ) {
   if (val is! Map<String, Object?>) return null;
-  final variants = val['variants'];
+  final Object? variants = val['variants'];
   if (variants is! List<Object?>) return null;
-  final keyLower = key.toLowerCase();
-  for (final v in variants) {
+  final String keyLower = key.toLowerCase();
+  for (final Object? v in variants) {
     if (v is! Map<String, Object?>) continue;
-    final path = v['path'];
+    final Object? path = v['path'];
     if (path is! String) continue;
     if (keyLower.startsWith(sdkPrefix) ||
         path.toLowerCase().contains(sdkPrefix)) {
@@ -84,12 +85,17 @@ Directory resolveDarwinSdkPathFromArtifactBundle(
   if (!sdkRoot.existsSync()) {
     throw ArgumentError('SDK root directory does not exist: ${sdkRoot.path}');
   }
-  final names = _sdkNamesForPlatform(platform);
+  final ({String defaultDirName, String sdkPrefix}) names =
+      _sdkNamesForPlatform(platform);
 
   final infoJsonFile = File('${sdkRoot.path}/info.json');
   if (infoJsonFile.existsSync()) {
-    final decoded = jsonDecode(infoJsonFile.readAsStringSync());
-    final fromInfo = _findSdkInArtifactInfo(sdkRoot, decoded, names.sdkPrefix);
+    final dynamic decoded = jsonDecode(infoJsonFile.readAsStringSync());
+    final Directory? fromInfo = _findSdkInArtifactInfo(
+      sdkRoot,
+      decoded,
+      names.sdkPrefix,
+    );
     if (fromInfo != null) return fromInfo;
   }
 
@@ -160,15 +166,13 @@ void _requireRunnerFilesExist(List<String> paths, String kind) {
 
 /// Resolves `--framework` inputs to framework directories and their link
 /// names, extracting `.framework.zip` archives beside the runner output.
-({
-  List<Directory> dirs,
-  List<String> names,
-})
-_resolveRunnerFrameworks(RunnerCompileConfig config) {
+({List<Directory> dirs, List<String> names}) _resolveRunnerFrameworks(
+  RunnerCompileConfig config,
+) {
   final resolvedFrameworkDirs = <Directory>[];
   final linkedFrameworkNames = <String>[];
   Directory? frameworksScratch;
-  for (final fwInput in config.frameworkPaths) {
+  for (final String fwInput in config.frameworkPaths) {
     final List<Directory> dirs;
     if (fwInput.endsWith('.framework.zip')) {
       // Same archive form as bundle embedding (see above): extract beside
@@ -181,8 +185,8 @@ _resolveRunnerFrameworks(RunnerCompileConfig config) {
     }
     for (final d in dirs) {
       resolvedFrameworkDirs.add(d);
-      final base = d.uri.pathSegments.where((s) => s.isNotEmpty).last;
-      final fwName = base.endsWith('.framework')
+      final String base = d.uri.pathSegments.where((s) => s.isNotEmpty).last;
+      final String fwName = base.endsWith('.framework')
           ? base.substring(0, base.length - '.framework'.length)
           : base;
       if (!linkedFrameworkNames.contains(fwName)) {
@@ -254,7 +258,7 @@ List<String> _buildSwiftcArgs(
 
   final seenFwParents = <String>{};
   for (final fwDir in resolvedFrameworkDirs) {
-    final parentPath = fwDir.parent.path;
+    final String parentPath = fwDir.parent.path;
     if (seenFwParents.add(parentPath)) {
       swiftcArgs.addAll(['-F', parentPath]);
     }
@@ -266,18 +270,18 @@ List<String> _buildSwiftcArgs(
     swiftcArgs.addAll(['-framework', sdkFw]);
   }
   for (final dylib in sdkDylibs) {
-    final libArg = dylib.startsWith('lib') ? dylib.substring(3) : dylib;
+    final String libArg = dylib.startsWith('lib') ? dylib.substring(3) : dylib;
     swiftcArgs.add('-l$libArg');
   }
 
   final seenHeaderDirs = <String>{};
-  for (final hdr in config.headerPaths) {
-    final dirPath = File(hdr).parent.path;
+  for (final String hdr in config.headerPaths) {
+    final String dirPath = File(hdr).parent.path;
     if (seenHeaderDirs.add(dirPath)) {
       swiftcArgs.addAll(['-I', dirPath]);
     }
   }
-  for (final mm in config.modulemapPaths) {
+  for (final String mm in config.modulemapPaths) {
     swiftcArgs.addAll(['-Xcc', '-fmodule-map-file=$mm']);
   }
 
@@ -292,7 +296,7 @@ List<String> _buildSwiftcArgs(
 
 void _runSwiftc(RunnerCompileConfig config, List<String> swiftcArgs) {
   File(config.outputPath).parent.createSync(recursive: true);
-  final result = Process.runSync(
+  final ProcessResult result = Process.runSync(
     config.swiftcPath!,
     swiftcArgs,
     environment: const {'PATH': '/usr/bin:/bin'},
@@ -333,7 +337,7 @@ void _synthesizeRunnerBinary(
     for (final dylib in sdkDylibs) 'sdk_dylib=$dylib',
   ];
 
-  final machoBytes = generateStubExecutableMachO(
+  final Uint8List machoBytes = generateStubExecutableMachO(
     StubRunnerSpec(
       platform: config.platform,
       arch: config.arch,
@@ -357,10 +361,11 @@ void compileRunner(RunnerCompileConfig config) {
   _requireRunnerFilesExist(config.headerPaths, 'header');
   _requireRunnerFilesExist(config.modulemapPaths, 'modulemap');
 
-  final resolved = _resolveRunnerFrameworks(config);
-  final sdkFrameworks = _dedupeNonEmpty(config.sdkFrameworks);
-  final sdkDylibs = _dedupeNonEmpty(config.sdkDylibs);
-  final resolvedSdkDir = _resolveRunnerSdkDir(config);
+  final ({List<Directory> dirs, List<String> names}) resolved =
+      _resolveRunnerFrameworks(config);
+  final List<String> sdkFrameworks = _dedupeNonEmpty(config.sdkFrameworks);
+  final List<String> sdkDylibs = _dedupeNonEmpty(config.sdkDylibs);
+  final Directory? resolvedSdkDir = _resolveRunnerSdkDir(config);
 
   if (config.sdkAvailable &&
       config.swiftcPath != null &&

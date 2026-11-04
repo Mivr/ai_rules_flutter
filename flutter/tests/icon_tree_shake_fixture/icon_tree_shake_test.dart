@@ -7,12 +7,12 @@ import 'package:test/test.dart';
 /// set of Unicode code points mapped to a non-zero glyph ID.
 Set<int> readCmapCodePoints(Uint8List fontBytes) {
   final data = ByteData.sublistView(fontBytes);
-  final numTables = data.getUint16(4, Endian.big);
+  final int numTables = data.getUint16(4, Endian.big);
 
   int? cmapOffset;
   int? cmapLength;
   for (var i = 0; i < numTables; i++) {
-    final recordOffset = 12 + i * 16;
+    final int recordOffset = 12 + i * 16;
     final tag = String.fromCharCodes(
       fontBytes.sublist(recordOffset, recordOffset + 4),
     );
@@ -27,27 +27,30 @@ Set<int> readCmapCodePoints(Uint8List fontBytes) {
   }
 
   final codePoints = <int>{};
-  final numSubtables = data.getUint16(cmapOffset + 2, Endian.big);
+  final int numSubtables = data.getUint16(cmapOffset + 2, Endian.big);
   for (var i = 0; i < numSubtables; i++) {
-    final recordOffset = cmapOffset + 4 + i * 8;
-    final subtableRelOffset = data.getUint32(recordOffset + 4, Endian.big);
-    final subtableOffset = cmapOffset + subtableRelOffset;
-    final format = data.getUint16(subtableOffset, Endian.big);
+    final int recordOffset = cmapOffset + 4 + i * 8;
+    final int subtableRelOffset = data.getUint32(recordOffset + 4, Endian.big);
+    final int subtableOffset = cmapOffset + subtableRelOffset;
+    final int format = data.getUint16(subtableOffset, Endian.big);
 
     if (format == 4) {
-      final segCountX2 = data.getUint16(subtableOffset + 6, Endian.big);
-      final segCount = segCountX2 ~/ 2;
-      final endCodeStart = subtableOffset + 14;
-      final startCodeStart = endCodeStart + segCountX2 + 2;
-      final idDeltaStart = startCodeStart + segCountX2;
-      final idRangeOffsetStart = idDeltaStart + segCountX2;
+      final int segCountX2 = data.getUint16(subtableOffset + 6, Endian.big);
+      final int segCount = segCountX2 ~/ 2;
+      final int endCodeStart = subtableOffset + 14;
+      final int startCodeStart = endCodeStart + segCountX2 + 2;
+      final int idDeltaStart = startCodeStart + segCountX2;
+      final int idRangeOffsetStart = idDeltaStart + segCountX2;
 
       for (var s = 0; s < segCount; s++) {
-        final endCode = data.getUint16(endCodeStart + s * 2, Endian.big);
-        final startCode = data.getUint16(startCodeStart + s * 2, Endian.big);
-        final idDelta = data.getInt16(idDeltaStart + s * 2, Endian.big);
-        final idRangeOffsetPos = idRangeOffsetStart + s * 2;
-        final idRangeOffset = data.getUint16(idRangeOffsetPos, Endian.big);
+        final int endCode = data.getUint16(endCodeStart + s * 2, Endian.big);
+        final int startCode = data.getUint16(
+          startCodeStart + s * 2,
+          Endian.big,
+        );
+        final int idDelta = data.getInt16(idDeltaStart + s * 2, Endian.big);
+        final int idRangeOffsetPos = idRangeOffsetStart + s * 2;
+        final int idRangeOffset = data.getUint16(idRangeOffsetPos, Endian.big);
 
         for (var c = startCode; c <= endCode; c++) {
           if (c == 0xFFFF) continue;
@@ -55,7 +58,7 @@ Set<int> readCmapCodePoints(Uint8List fontBytes) {
           if (idRangeOffset == 0) {
             glyphId = (c + idDelta) & 0xFFFF;
           } else {
-            final glyphIndexOffset =
+            final int glyphIndexOffset =
                 idRangeOffsetPos + idRangeOffset + 2 * (c - startCode);
             if (glyphIndexOffset + 2 > fontBytes.length) continue;
             glyphId = data.getUint16(glyphIndexOffset, Endian.big);
@@ -69,14 +72,14 @@ Set<int> readCmapCodePoints(Uint8List fontBytes) {
         }
       }
     } else if (format == 12) {
-      final numGroups = data.getUint32(subtableOffset + 12, Endian.big);
+      final int numGroups = data.getUint32(subtableOffset + 12, Endian.big);
       for (var g = 0; g < numGroups; g++) {
-        final groupOffset = subtableOffset + 16 + g * 12;
-        final startChar = data.getUint32(groupOffset, Endian.big);
-        final endChar = data.getUint32(groupOffset + 4, Endian.big);
-        final startGlyph = data.getUint32(groupOffset + 8, Endian.big);
+        final int groupOffset = subtableOffset + 16 + g * 12;
+        final int startChar = data.getUint32(groupOffset, Endian.big);
+        final int endChar = data.getUint32(groupOffset + 4, Endian.big);
+        final int startGlyph = data.getUint32(groupOffset + 8, Endian.big);
         for (var c = startChar; c <= endChar; c++) {
-          final glyphId = startGlyph + (c - startChar);
+          final int glyphId = startGlyph + (c - startChar);
           if (glyphId != 0) {
             codePoints.add(c);
           }
@@ -90,11 +93,11 @@ Set<int> readCmapCodePoints(Uint8List fontBytes) {
 List<File> _findAllRunfiles(String suffix) {
   final matchSuffix = suffix;
   final found = <File>[];
-  final runfilesPath =
+  final String? runfilesPath =
       Platform.environment['RUNFILES_DIR'] ??
       Platform.environment['TEST_SRCDIR'];
   if (runfilesPath != null && Directory(runfilesPath).existsSync()) {
-    for (final entity in Directory(
+    for (final FileSystemEntity entity in Directory(
       runfilesPath,
     ).listSync(recursive: true, followLinks: true)) {
       if (entity is File &&
@@ -103,18 +106,18 @@ List<File> _findAllRunfiles(String suffix) {
       }
     }
   }
-  final manifestPath = Platform.environment['RUNFILES_MANIFEST_FILE'];
+  final String? manifestPath = Platform.environment['RUNFILES_MANIFEST_FILE'];
   if (manifestPath != null && File(manifestPath).existsSync()) {
-    for (final line in File(manifestPath).readAsLinesSync()) {
-      final space = line.indexOf(' ');
+    for (final String line in File(manifestPath).readAsLinesSync()) {
+      final int space = line.indexOf(' ');
       if (space <= 0) continue;
-      final target = line.substring(space + 1).trim();
+      final String target = line.substring(space + 1).trim();
       if (target.replaceAll('\\', '/').endsWith(matchSuffix) &&
           File(target).existsSync()) {
         found.add(File(target));
       }
       if (Directory(target).existsSync()) {
-        for (final entity in Directory(
+        for (final FileSystemEntity entity in Directory(
           target,
         ).listSync(recursive: true, followLinks: true)) {
           if (entity is File &&
@@ -145,8 +148,8 @@ List<File> _findIconTreeShakeDills() {
   // Also catch renderer-suffixed dills (e.g. _icon_tree_shaking_skwasm.dill)
   // whose suffix above already matches, plus any dill under a forwarded
   // icon-tree-shake output that the exact suffix missed.
-  for (final d in _findAllRunfiles('.dill')) {
-    final norm = d.path.replaceAll('\\', '/');
+  for (final File d in _findAllRunfiles('.dill')) {
+    final String norm = d.path.replaceAll('\\', '/');
     if (norm.contains('icon_tree_shaking') && seen.add(d.path)) {
       unique.add(d);
     }
@@ -156,30 +159,33 @@ List<File> _findIconTreeShakeDills() {
 
 File _findRunfile(String suffix) {
   final matchSuffix = suffix.startsWith('/') ? suffix : '/$suffix';
-  final runfilesPath =
+  final String? runfilesPath =
       Platform.environment['RUNFILES_DIR'] ??
       Platform.environment['TEST_SRCDIR'];
   if (runfilesPath != null && Directory(runfilesPath).existsSync()) {
     final dir = Directory(runfilesPath);
-    for (final entity in dir.listSync(recursive: true, followLinks: true)) {
+    for (final FileSystemEntity entity in dir.listSync(
+      recursive: true,
+      followLinks: true,
+    )) {
       if (entity is File &&
           entity.path.replaceAll('\\', '/').endsWith(matchSuffix)) {
         return entity;
       }
     }
   }
-  final manifestPath = Platform.environment['RUNFILES_MANIFEST_FILE'];
+  final String? manifestPath = Platform.environment['RUNFILES_MANIFEST_FILE'];
   if (manifestPath != null && File(manifestPath).existsSync()) {
-    for (final line in File(manifestPath).readAsLinesSync()) {
-      final space = line.indexOf(' ');
+    for (final String line in File(manifestPath).readAsLinesSync()) {
+      final int space = line.indexOf(' ');
       if (space <= 0) continue;
-      final target = line.substring(space + 1).trim();
+      final String target = line.substring(space + 1).trim();
       if (target.replaceAll('\\', '/').endsWith(matchSuffix) &&
           File(target).existsSync()) {
         return File(target);
       }
       if (Directory(target).existsSync()) {
-        for (final entity in Directory(
+        for (final FileSystemEntity entity in Directory(
           target,
         ).listSync(recursive: true, followLinks: true)) {
           if (entity is File &&
@@ -190,8 +196,11 @@ File _findRunfile(String suffix) {
       }
     }
   }
-  final fallback = Directory.current.parent;
-  for (final entity in fallback.listSync(recursive: true, followLinks: true)) {
+  final Directory fallback = Directory.current.parent;
+  for (final FileSystemEntity entity in fallback.listSync(
+    recursive: true,
+    followLinks: true,
+  )) {
     if (entity is File &&
         entity.path.replaceAll('\\', '/').endsWith(matchSuffix)) {
       return entity;
@@ -216,11 +225,11 @@ void main() {
   test(
     'kDebugMode ? Icons.a : Icons.b keeps Icons.b and shakes out Icons.a',
     () {
-      final bundledMaterial = _findRunfile(
+      final Uint8List bundledMaterial = _findRunfile(
         '_web_font_fixture_web/assets/fonts/MaterialIcons-Regular.otf',
       ).readAsBytesSync();
 
-      final codePoints = readCmapCodePoints(bundledMaterial);
+      final Set<int> codePoints = readCmapCodePoints(bundledMaterial);
       // Icons.b (0xe567, selected in icon_choice_lib dep) and Icons.d (0xe88a,
       // selected in main.dart) must be retained.
       expect(codePoints, contains(0xe567));
@@ -235,23 +244,23 @@ void main() {
   test(
     'font families used only through TextStyle(fontFamily: ...) ship whole',
     () {
-      final bundledRoboto = _findRunfile(
+      final Uint8List bundledRoboto = _findRunfile(
         '_web_font_fixture_web/assets/fonts/Roboto-Regular.ttf',
       ).readAsBytesSync();
       expect(bundledRoboto, equals(originalRobotoBytes));
 
-      final bundledCupertino = _findRunfile(
+      final Uint8List bundledCupertino = _findRunfile(
         '_web_font_fixture_web/assets/packages/cupertino_icons/assets/CupertinoIcons.ttf',
       ).readAsBytesSync();
       expect(bundledCupertino, equals(originalMaterialBytes));
-      final cupertinoCodePoints = readCmapCodePoints(bundledCupertino);
+      final Set<int> cupertinoCodePoints = readCmapCodePoints(bundledCupertino);
       expect(cupertinoCodePoints, containsAll(<int>[0xe047, 0xe567, 0xe145]));
 
-      final bundledTextOnlyMaterial = _findRunfile(
+      final Uint8List bundledTextOnlyMaterial = _findRunfile(
         'text_only_material_fixture_web/assets/fonts/MaterialIcons-Regular.otf',
       ).readAsBytesSync();
       expect(bundledTextOnlyMaterial, equals(originalMaterialBytes));
-      final materialTextCodePoints = readCmapCodePoints(
+      final Set<int> materialTextCodePoints = readCmapCodePoints(
         bundledTextOnlyMaterial,
       );
       expect(
@@ -264,11 +273,11 @@ void main() {
   test(
     'unused glyphs in an icon font family are subsetted where upstream would subset it',
     () {
-      final bundledUnusedFamily = _findRunfile(
+      final Uint8List bundledUnusedFamily = _findRunfile(
         '_web_font_fixture_web/assets/packages/unused_icons/fonts/UnusedFamily.otf',
       ).readAsBytesSync();
 
-      final codePoints = readCmapCodePoints(bundledUnusedFamily);
+      final Set<int> codePoints = readCmapCodePoints(bundledUnusedFamily);
       expect(codePoints, contains(0xe5cd));
       expect(codePoints, isNot(contains(0xe047)));
       expect(codePoints, isNot(contains(0xe567)));
@@ -279,19 +288,19 @@ void main() {
   test(
     'families where one name or asset path is a suffix of another get distinct subsets',
     () {
-      final bundledMaterial = _findRunfile(
+      final Uint8List bundledMaterial = _findRunfile(
         '_web_font_fixture_web/assets/fonts/MaterialIcons-Regular.otf',
       ).readAsBytesSync();
-      final bundledBareIcons = _findRunfile(
+      final Uint8List bundledBareIcons = _findRunfile(
         '_web_font_fixture_web/assets/fonts/Icons.otf',
       ).readAsBytesSync();
-      final bundledPkgIcons = _findRunfile(
+      final Uint8List bundledPkgIcons = _findRunfile(
         '_web_font_fixture_web/assets/packages/custom_icons/fonts/Icons.otf',
       ).readAsBytesSync();
 
-      final materialCodePoints = readCmapCodePoints(bundledMaterial);
-      final bareIconsCodePoints = readCmapCodePoints(bundledBareIcons);
-      final pkgIconsCodePoints = readCmapCodePoints(bundledPkgIcons);
+      final Set<int> materialCodePoints = readCmapCodePoints(bundledMaterial);
+      final Set<int> bareIconsCodePoints = readCmapCodePoints(bundledBareIcons);
+      final Set<int> pkgIconsCodePoints = readCmapCodePoints(bundledPkgIcons);
 
       // MaterialIcons retains 0xe567 and 0xe88a, not 0xe047 or 0xe145.
       expect(materialCodePoints, containsAll(<int>[0xe567, 0xe88a]));
@@ -316,19 +325,21 @@ void main() {
   test(
     'bundled MaterialIcons covers plugin-registered, renderer-guarded, and user-define-guarded code points across all shipped programs',
     () {
-      final skwasmMaterial = _findRunfile(
+      final Uint8List skwasmMaterial = _findRunfile(
         'skwasm_plugin_icon_fixture_web/assets/fonts/MaterialIcons-Regular.otf',
       ).readAsBytesSync();
-      final canvaskitMaterial = _findRunfile(
+      final Uint8List canvaskitMaterial = _findRunfile(
         'canvaskit_plugin_icon_fixture_web/assets/fonts/MaterialIcons-Regular.otf',
       ).readAsBytesSync();
-      final dart2jsCanvaskitMaterial = _findRunfile(
+      final Uint8List dart2jsCanvaskitMaterial = _findRunfile(
         'dart2js_canvaskit_plugin_icon_fixture_web/assets/fonts/MaterialIcons-Regular.otf',
       ).readAsBytesSync();
 
-      final skwasmCodePoints = readCmapCodePoints(skwasmMaterial);
-      final canvaskitCodePoints = readCmapCodePoints(canvaskitMaterial);
-      final dart2jsCanvaskitCodePoints = readCmapCodePoints(
+      final Set<int> skwasmCodePoints = readCmapCodePoints(skwasmMaterial);
+      final Set<int> canvaskitCodePoints = readCmapCodePoints(
+        canvaskitMaterial,
+      );
+      final Set<int> dart2jsCanvaskitCodePoints = readCmapCodePoints(
         dart2jsCanvaskitMaterial,
       );
 
@@ -368,14 +379,14 @@ void main() {
   );
 
   test('icon tree-shake kernel dills record only stable URIs', () {
-    final dills = _findIconTreeShakeDills();
+    final List<File> dills = _findIconTreeShakeDills();
     expect(
       dills,
       isNotEmpty,
       reason: 'expected forwarded icon tree-shake dills',
     );
     for (final dill in dills) {
-      final bytes = dill.readAsBytesSync();
+      final Uint8List bytes = dill.readAsBytesSync();
       final text = String.fromCharCodes(bytes);
       // Absolute `file://` URIs would make the dill differ per checkout,
       // machine and sandbox run number. `file://` itself also appears in
@@ -424,8 +435,8 @@ void main() {
           'org-dartlang-app:///flutter/tests/icon_tree_shake_fixture/dart2js_canvaskit_plugin_icon_fixture.package_config.json',
         ),
       ]) {
-        final depsContent = _findRunfile(depsSuffix).readAsStringSync();
-        final lines = depsContent
+        final String depsContent = _findRunfile(depsSuffix).readAsStringSync();
+        final List<String> lines = depsContent
             .split('\n')
             .where((l) => l.isNotEmpty)
             .toList();

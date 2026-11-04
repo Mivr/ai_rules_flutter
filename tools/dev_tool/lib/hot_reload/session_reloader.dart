@@ -98,7 +98,7 @@ class SessionReloader {
     required String entrypoint,
     required ApplyMode mode,
   }) async {
-    final outcome = mode == ApplyMode.hotRestart
+    final CompileOutcome outcome = mode == ApplyMode.hotRestart
         ? await compiler.compileFull(
             entrypoint: entrypoint,
             invalidated: invalidated,
@@ -144,10 +144,10 @@ class SessionReloader {
     required SourceVersions snapshot,
     required Set<String> invalidated,
   }) async {
-    final outcome = await app.applyKernel(dillPath, mode: mode);
+    final ApplyOutcome outcome = await app.applyKernel(dillPath, mode: mode);
     // Switched rather than tested, so a new outcome cannot join the pipeline
     // without someone deciding here what the VM ended up holding.
-    final landed = switch (outcome) {
+    final bool landed = switch (outcome) {
       Applied() || AppliedThenThrew() => true,
       ApplyFailed() || ApplyTimedOut() => false,
     };

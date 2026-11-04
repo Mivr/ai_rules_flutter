@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter_bazel_dev_tool/hot_reload/flutter_error_report.dart';
 import 'package:flutter_bazel_dev_tool/vm_service_client.dart';
 import 'package:logging/logging.dart';
 import 'package:path/path.dart' as p;
@@ -9,6 +10,18 @@ import 'package:vm_service/vm_service.dart' hide LogRecord;
 import 'package:test/test.dart';
 
 import 'fakes.dart';
+
+typedef _Client = VmServiceClient;
+typedef _Verdict = ApplyVerdict;
+typedef _Services = List<FakeVmService>;
+
+typedef _Sub = StreamSubscription<LogRecord>;
+
+typedef _F = ({
+  VmServiceClient client,
+  void Function() killCurrent,
+  List<FakeVmService> services,
+});
 
 void main() {
   group('VmServiceClient', () {
@@ -197,7 +210,7 @@ void main() {
           IsolateRef(id: 'iso-main', name: 'main', number: '2'),
         ],
       );
-      final client = await connected(fakeService);
+      final _Client client = await connected(fakeService);
       // Verify main isolate is used for reload.
       await client.hotReload(dillPath);
       expect(fakeService.lastIsolateId, 'iso-main');
@@ -210,7 +223,7 @@ void main() {
           IsolateRef(id: 'iso-second', name: 'helper', number: '2'),
         ],
       );
-      final client = await connected(fakeService);
+      final _Client client = await connected(fakeService);
       await client.hotReload(dillPath);
       expect(fakeService.lastIsolateId, 'iso-first');
     });
@@ -219,8 +232,8 @@ void main() {
       final fakeService = FakeVmService(
         isolates: [IsolateRef(id: 'iso-1', name: 'main', number: '1')],
       );
-      final client = await connected(fakeService);
-      final verdict = await client.hotReload(dillPath);
+      final _Client client = await connected(fakeService);
+      final _Verdict verdict = await client.hotReload(dillPath);
 
       expect(verdict, isA<VerdictApplied>());
       expect(fakeService.reloadSourcesCalled, isTrue);
@@ -232,8 +245,8 @@ void main() {
         isolates: [IsolateRef(id: 'iso-1', name: 'main', number: '1')],
         throwOnReload: true,
       );
-      final client = await connected(fakeService);
-      final verdict = await client.hotReload(dillPath);
+      final _Client client = await connected(fakeService);
+      final _Verdict verdict = await client.hotReload(dillPath);
       expect(verdict, isA<VerdictRefused>());
       expect(
         (verdict as VerdictRefused).reason,
@@ -252,9 +265,9 @@ void main() {
       final fakeService = FakeVmService(
         isolates: [IsolateRef(id: 'iso-1', name: 'main', number: '1')],
       );
-      final client = await connected(fakeService);
+      final _Client client = await connected(fakeService);
 
-      final verdict = await client.hotReload(dillPath);
+      final _Verdict verdict = await client.hotReload(dillPath);
 
       expect(verdict, isA<VerdictRefused>());
       expect(
@@ -280,7 +293,7 @@ void main() {
       final client = VmServiceClient(connector: (_) async => fakeService);
       await client.connect(devFS.serviceUri);
 
-      final verdict = await client.hotReload(dillPath);
+      final _Verdict verdict = await client.hotReload(dillPath);
 
       expect(verdict, isA<VerdictRefused>());
       expect(fakeService.reloadSourcesCalled, isFalse);
@@ -296,9 +309,9 @@ void main() {
       final fakeService = FakeVmService(
         isolates: [IsolateRef(id: 'iso-1', name: 'main', number: '1')],
       );
-      final client = await connected(fakeService);
+      final _Client client = await connected(fakeService);
 
-      final verdict = await client.hotRestart(dillPath);
+      final _Verdict verdict = await client.hotRestart(dillPath);
 
       expect(verdict, isA<VerdictRefused>());
       expect(
@@ -335,15 +348,16 @@ void main() {
       final fakeService = FakeVmService(
         isolates: [IsolateRef(id: 'iso-1', name: 'main', number: '1')],
       );
-      final client = await connected(fakeService);
-      final verdict = await client.hotRestart(dillPath);
+      final _Client client = await connected(fakeService);
+      final _Verdict verdict = await client.hotRestart(dillPath);
 
       expect(verdict, isA<VerdictApplied>());
       expect(fakeService.runInViewCalled, isTrue);
       // And it runs the copy inside the VM's own devFS. The engine opens
       // `mainScript` on the machine the app is on, so the only path that works
       // everywhere is one the VM handed us.
-      final runInView = fakeService.methodCalls.firstWhere(
+      final ({Map<String, dynamic>? args, String? isolateId, String method})
+      runInView = fakeService.methodCalls.firstWhere(
         (c) => c.method == '_flutter.runInView',
       );
       expect(
@@ -386,12 +400,12 @@ void main() {
         test(
           'a $verb answers as soon as the app says so, and says why',
           () async {
-            final client = await connected(notDrawing());
+            final _Client client = await connected(notDrawing());
             // Long enough that waiting it out could not pass for an answer.
             client.frameTimeout = const Duration(seconds: 30);
 
             final took = Stopwatch()..start();
-            final verdict = verb == 'restart'
+            final _Verdict verdict = verb == 'restart'
                 ? await client.hotRestart(dillPath)
                 : await client.hotReload(dillPath);
 
@@ -406,8 +420,8 @@ void main() {
       }
 
       test('the question goes to the isolate the restart made', () async {
-        final fake = notDrawing();
-        final client = await connected(fake);
+        final FakeVmService fake = notDrawing();
+        final _Client client = await connected(fake);
         // What runInView leaves behind: the old isolate gone, a new one up.
         fake.isolates
           ..clear()
@@ -415,21 +429,22 @@ void main() {
 
         await client.hotRestart(dillPath);
 
-        final asked = fake.extensionCalls.where(
-          (c) => c.method == 'ext.rules_flutter.renderState',
-        );
+        final Iterable<({Map<String, dynamic>? args, String method})> asked =
+            fake.extensionCalls.where(
+              (c) => c.method == 'ext.rules_flutter.renderState',
+            );
         expect(asked, isNotEmpty);
         expect(fake.lastIsolateId, 'iso-2');
       });
 
       test('an app that draws is not reported as not showing it', () async {
-        final fake = notDrawing()..drawsFrames = true;
+        final FakeVmService fake = notDrawing()..drawsFrames = true;
         fake.extensionResponses['ext.rules_flutter.renderState'] = {
           'rendering': true,
         };
-        final client = await connected(fake);
+        final _Client client = await connected(fake);
 
-        final verdict = await client.hotRestart(dillPath);
+        final _Verdict verdict = await client.hotRestart(dillPath);
 
         expect((verdict as VerdictApplied).notShown, isNull);
       });
@@ -438,10 +453,10 @@ void main() {
           'that drew', () async {
         // Attached to an app built without the agent: nobody to ask, so the
         // bound decides, and the verdict says that is what happened.
-        final client = await connected(notDrawing(saysWhy: false));
+        final _Client client = await connected(notDrawing(saysWhy: false));
         client.frameTimeout = const Duration(milliseconds: 300);
 
-        final verdict = await client.hotRestart(dillPath);
+        final _Verdict verdict = await client.hotRestart(dillPath);
 
         expect(
           (verdict as VerdictApplied).notShown,
@@ -453,14 +468,14 @@ void main() {
         // `framesEnabled` is false until `runApp` attaches the root widget, so
         // an answer from before the first frame says nothing about being seen,
         // and the agent declines to give one.
-        final fake = notDrawing();
+        final FakeVmService fake = notDrawing();
         fake.extensionResponses['ext.rules_flutter.renderState'] = {
           'firstFrameBuilt': false,
         };
-        final client = await connected(fake);
+        final _Client client = await connected(fake);
         client.frameTimeout = const Duration(milliseconds: 300);
 
-        final verdict = await client.hotRestart(dillPath);
+        final _Verdict verdict = await client.hotRestart(dillPath);
 
         expect(
           (verdict as VerdictApplied).notShown,
@@ -469,8 +484,9 @@ void main() {
       });
 
       test('an error in the frame it did build still wins', () async {
-        final fake = notDrawing()..emitFlutterErrorOnReload = true;
-        final client = await connected(fake);
+        final FakeVmService fake = notDrawing()
+          ..emitFlutterErrorOnReload = true;
+        final _Client client = await connected(fake);
         client.frameTimeout = const Duration(seconds: 30);
 
         expect(await client.hotRestart(dillPath), isA<VerdictAppErrored>());
@@ -484,7 +500,7 @@ void main() {
       final fake = FakeVmService(
         isolates: [IsolateRef(id: 'iso-1', name: 'main', number: '1')],
       );
-      final client = await connected(fake);
+      final _Client client = await connected(fake);
 
       final scripts = <String>[];
       for (var i = 0; i < 3; i++) {
@@ -505,9 +521,7 @@ void main() {
     });
 
     test('methods throw StateError when not connected', () {
-      final client = VmServiceClient(
-        connector: (_) async => FakeVmService(),
-      );
+      final client = VmServiceClient(connector: (_) async => FakeVmService());
       expect(() => client.hotReload(dillPath), throwsStateError);
       expect(() => client.hotRestart(dillPath), throwsStateError);
     });
@@ -516,7 +530,7 @@ void main() {
       final fakeService = FakeVmService(
         isolates: [IsolateRef(id: 'iso-1', name: 'main', number: '1')],
       );
-      final client = await connected(fakeService);
+      final _Client client = await connected(fakeService);
       await client.callServiceExtension(
         'ext.flutter.pushRoute',
         args: {'route': '/settings'},
@@ -530,8 +544,8 @@ void main() {
       final fakeService = FakeVmService(
         isolates: [IsolateRef(id: 'iso-1', name: 'main', number: '1')],
       );
-      final client = await connected(fakeService);
-      final enabled = await client.togglePerformanceOverlay();
+      final _Client client = await connected(fakeService);
+      final bool enabled = await client.togglePerformanceOverlay();
 
       // First toggle: off (default) → on.
       expect(enabled, isTrue);
@@ -546,8 +560,8 @@ void main() {
       final fakeService = FakeVmService(
         isolates: [IsolateRef(id: 'iso-1', name: 'main', number: '1')],
       );
-      final client = await connected(fakeService);
-      final enabled = await client.toggleWidgetInspector();
+      final _Client client = await connected(fakeService);
+      final bool enabled = await client.toggleWidgetInspector();
 
       expect(enabled, isTrue);
       expect(fakeService.lastExtensionMethod, 'ext.flutter.inspector.show');
@@ -555,13 +569,8 @@ void main() {
     });
 
     test('callServiceExtension throws StateError when not connected', () {
-      final client = VmServiceClient(
-        connector: (_) async => FakeVmService(),
-      );
-      expect(
-        () => client.callServiceExtension('ext.foo'),
-        throwsStateError,
-      );
+      final client = VmServiceClient(connector: (_) async => FakeVmService());
+      expect(() => client.callServiceExtension('ext.foo'), throwsStateError);
     });
 
     test('screenshot writes PNG from _flutter.screenshot extension', () async {
@@ -577,13 +586,13 @@ void main() {
         0x00, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E,
         0x44, 0xAE, 0x42, 0x60, 0x82,
       ];
-      final b64 = base64.encode(pngBytes);
+      final String b64 = base64.encode(pngBytes);
 
       final fakeService = FakeVmService(
         isolates: [IsolateRef(id: 'iso-1', name: 'main', number: '1')],
         screenshotData: b64,
       );
-      final client = await connected(fakeService);
+      final _Client client = await connected(fakeService);
 
       final tmpFile = File(p.join(tmp.path, 'test_screenshot.png'));
       try {
@@ -601,14 +610,12 @@ void main() {
         isolates: [IsolateRef(id: 'iso-1', name: 'main', number: '1')],
         // screenshotData is null — extension will return normal toggle response
       );
-      final client = await connected(fakeService);
+      final _Client client = await connected(fakeService);
       expect(() => client.screenshot('/tmp/test.png'), throwsStateError);
     });
 
     test('screenshot throws StateError when not connected', () {
-      final client = VmServiceClient(
-        connector: (_) async => FakeVmService(),
-      );
+      final client = VmServiceClient(connector: (_) async => FakeVmService());
       expect(() => client.screenshot('/tmp/test.png'), throwsStateError);
     });
 
@@ -616,9 +623,7 @@ void main() {
       final fakeService = FakeVmService(
         isolates: [IsolateRef(id: 'iso-1', name: 'main', number: '1')],
       );
-      final client = VmServiceClient(
-        connector: (_) async => fakeService,
-      );
+      final client = VmServiceClient(connector: (_) async => fakeService);
 
       expect(client.isConnected, isFalse);
       await client.connect(Uri.parse('http://127.0.0.1:8181/'));
@@ -722,7 +727,7 @@ void main() {
         // WebSocket dies between connect and reload.
         services.first.simulateDisposed();
 
-        final verdict = await client.hotReload(dillPath);
+        final _Verdict verdict = await client.hotReload(dillPath);
         expect(
           verdict,
           isA<VerdictApplied>(),
@@ -759,7 +764,7 @@ void main() {
 
         services.first.simulateDisposed();
 
-        final verdict = await client.hotRestart(dillPath);
+        final _Verdict verdict = await client.hotRestart(dillPath);
         expect(
           verdict,
           isA<VerdictApplied>(),
@@ -792,9 +797,9 @@ void main() {
               'The following _CompileTimeError was thrown '
               'building MyApp(dirty): Lookup failed: result',
         );
-        final client = await connected(fake);
+        final _Client client = await connected(fake);
 
-        final verdict = await client.hotReload(dillPath);
+        final _Verdict verdict = await client.hotReload(dillPath);
         expect(
           verdict,
           isA<VerdictAppErrored>(),
@@ -804,7 +809,7 @@ void main() {
         );
         // Asserted on the structured record, not on a flattened string: the
         // rendered text and the description arrive together and both survive.
-        final error = (verdict as VerdictAppErrored).error;
+        final FlutterErrorReport error = (verdict as VerdictAppErrored).error;
         expect(error.renderedText, contains('_CompileTimeError'));
         expect(error.data, isNotEmpty);
       },
@@ -824,9 +829,9 @@ void main() {
           113,
           'Isolate must be runnable',
         );
-        final client = await connected(fake);
+        final _Client client = await connected(fake);
 
-        final verdict = await client.hotReload(dillPath);
+        final _Verdict verdict = await client.hotReload(dillPath);
 
         expect(
           fake.reloadSourcesCalled,
@@ -856,9 +861,9 @@ void main() {
         113,
         'Isolate must be runnable',
       );
-      final client = await connected(fake);
+      final _Client client = await connected(fake);
 
-      final verdict = await client.hotReload(dillPath);
+      final _Verdict verdict = await client.hotReload(dillPath);
 
       expect(verdict, isA<VerdictAppErrored>());
       expect(
@@ -876,7 +881,7 @@ void main() {
           isolates: [IsolateRef(id: 'iso-1', name: 'main', number: '1')],
           reloadSuccess: false,
         );
-        final client = await connected(fake);
+        final _Client client = await connected(fake);
 
         expect(await client.hotReload(dillPath), isA<VerdictRefused>());
       },
@@ -890,9 +895,9 @@ void main() {
           emitFlutterErrorOnReload: true,
           flutterErrorText: 'Lookup failed: result in @getters in MyApp',
         );
-        final client = await connected(fake);
+        final _Client client = await connected(fake);
 
-        final verdict = await client.hotRestart(dillPath);
+        final _Verdict verdict = await client.hotRestart(dillPath);
         expect(verdict, isA<VerdictAppErrored>());
         expect(
           (verdict as VerdictAppErrored).error.renderedText,
@@ -905,7 +910,7 @@ void main() {
       final fake = FakeVmService(
         isolates: [IsolateRef(id: 'iso-1', name: 'main', number: '1')],
       );
-      final client = await connected(fake);
+      final _Client client = await connected(fake);
 
       expect(await client.hotReload(dillPath), isA<VerdictApplied>());
     });
@@ -947,15 +952,17 @@ void main() {
       test(
         'a later view that fails leaves the first one running the new code',
         () async {
-          final fake = twoViews()
+          final FakeVmService fake = twoViews()
             ..runInViewErrors['view-2'] = RPCError(
               '_flutter.runInView',
               -32000,
               'Could not run configuration in engine.',
             );
-          final (client, services) = await connectedCounting(fake);
+          final (_Client client, _Services services) = await connectedCounting(
+            fake,
+          );
 
-          final verdict = await client.hotRestart(dillPath);
+          final _Verdict verdict = await client.hotRestart(dillPath);
 
           expect(
             verdict,
@@ -982,16 +989,18 @@ void main() {
       test(
         'the first view failing is a refusal — nothing was restarted',
         () async {
-          final fake = twoViews()
+          final FakeVmService fake = twoViews()
             ..runInViewErrors['view-1'] = RPCError(
               '_flutter.runInView',
               -32000,
               'Service protocol could not handle or find a handler for the '
                   'requested method.',
             );
-          final (client, services) = await connectedCounting(fake);
+          final (_Client client, _Services services) = await connectedCounting(
+            fake,
+          );
 
-          final verdict = await client.hotRestart(dillPath);
+          final _Verdict verdict = await client.hotRestart(dillPath);
 
           expect(verdict, isA<VerdictRefused>());
           expect(fake.runInViewCalls, isEmpty);
@@ -1000,8 +1009,8 @@ void main() {
       );
 
       test('every view is restarted when none of them fails', () async {
-        final fake = twoViews();
-        final (client, _) = await connectedCounting(fake);
+        final FakeVmService fake = twoViews();
+        final (_Client client, _) = await connectedCounting(fake);
 
         expect(await client.hotRestart(dillPath), isA<VerdictApplied>());
         expect(fake.runInViewCalls, ['view-1', 'view-2']);
@@ -1041,7 +1050,7 @@ void main() {
       test(
         'a reassemble that finds it disposed is replayed, not reported',
         () async {
-          final (client, services) = dialling((fake, dial) {
+          final (_Client client, _Services services) = dialling((fake, dial) {
             if (dial == 0) {
               fake.extensionErrors['ext.flutter.reassemble'] = disposed(
                 'ext.flutter.reassemble',
@@ -1067,7 +1076,7 @@ void main() {
       test(
         'a restart\'s later view finding it disposed is replayed too',
         () async {
-          final (client, services) = dialling((fake, dial) {
+          final (_Client client, _Services services) = dialling((fake, dial) {
             fake
               ..isolates.addAll([
                 IsolateRef(id: 'iso-2', name: 'main', number: '2'),
@@ -1081,23 +1090,22 @@ void main() {
 
           expect(await client.hotRestart(dillPath), isA<VerdictApplied>());
           expect(services, hasLength(2));
-          expect(
-            services.last.runInViewCalls,
-            ['view-1', 'view-2'],
-            reason: 'the replay restarts every view on the new connection',
-          );
+          expect(services.last.runInViewCalls, [
+            'view-1',
+            'view-2',
+          ], reason: 'the replay restarts every view on the new connection');
         },
       );
 
       test('a disposal the replay hits too is not a refusal', () async {
-        final (client, services) = dialling((fake, _) {
+        final (_Client client, _Services services) = dialling((fake, _) {
           fake.extensionErrors['ext.flutter.reassemble'] = disposed(
             'ext.flutter.reassemble',
           );
         });
         await client.connect(devFS.serviceUri);
 
-        final verdict = await client.hotReload(dillPath);
+        final _Verdict verdict = await client.hotReload(dillPath);
 
         expect(
           verdict,
@@ -1113,33 +1121,30 @@ void main() {
         expect(services, hasLength(2), reason: 'replayed exactly once');
       });
 
-      test(
-        'a replay that can no longer deliver is not a refusal either',
-        () async {
-          // The app dying mid-reload is exactly when the fresh devFS refuses the
-          // upload. The first attempt still landed the kernel, so the refusal
-          // the second one answers is not the run's verdict.
-          final (client, services) = dialling((fake, dial) {
-            if (dial == 0) {
-              fake.extensionErrors['ext.flutter.reassemble'] = disposed(
-                'ext.flutter.reassemble',
-              );
-            } else {
-              devFS.uploadStatus = HttpStatus.internalServerError;
-            }
-          });
-          await client.connect(devFS.serviceUri);
+      test('a replay that can no longer deliver is not a refusal either', () async {
+        // The app dying mid-reload is exactly when the fresh devFS refuses the
+        // upload. The first attempt still landed the kernel, so the refusal
+        // the second one answers is not the run's verdict.
+        final (_Client client, _Services services) = dialling((fake, dial) {
+          if (dial == 0) {
+            fake.extensionErrors['ext.flutter.reassemble'] = disposed(
+              'ext.flutter.reassemble',
+            );
+          } else {
+            devFS.uploadStatus = HttpStatus.internalServerError;
+          }
+        });
+        await client.connect(devFS.serviceUri);
 
-          expect(
-            await client.hotReload(dillPath),
-            isA<VerdictAppErrored>(),
-            reason:
-                'the first attempt delivered; a later upload failing does '
-                'not un-deliver it',
-          );
-          expect(services, hasLength(2));
-        },
-      );
+        expect(
+          await client.hotReload(dillPath),
+          isA<VerdictAppErrored>(),
+          reason:
+              'the first attempt delivered; a later upload failing does '
+              'not un-deliver it',
+        );
+        expect(services, hasLength(2));
+      });
     });
   });
 
@@ -1149,7 +1154,7 @@ void main() {
   /// `app.dumpWidgetTree` just as surely as a reload — all of them inside the
   /// single command permit.
   group('VmServiceClient.connect bound', () {
-    final serviceUri = Uri.parse('http://127.0.0.1:8181/');
+    final Uri serviceUri = Uri.parse('http://127.0.0.1:8181/');
 
     test(
       'a dial that never answers throws instead of blocking forever',
@@ -1167,33 +1172,30 @@ void main() {
       },
     );
 
-    test(
-      'a connection that arrives after the deadline is closed, not adopted',
-      () async {
-        // Otherwise the abandoned dial publishes itself into a client whose
-        // caller has already been told the connect failed, leaving a socket open
-        // behind a connection nobody asked for.
-        final dial = Completer<VmService>();
-        final fake = FakeVmService(
-          isolates: [IsolateRef(id: 'iso-1', name: 'main', number: '1')],
-        );
-        final client = VmServiceClient(
-          connector: (_) => dial.future,
-          connectTimeout: const Duration(milliseconds: 50),
-        );
+    test('a connection that arrives after the deadline is closed, not adopted', () async {
+      // Otherwise the abandoned dial publishes itself into a client whose
+      // caller has already been told the connect failed, leaving a socket open
+      // behind a connection nobody asked for.
+      final dial = Completer<VmService>();
+      final fake = FakeVmService(
+        isolates: [IsolateRef(id: 'iso-1', name: 'main', number: '1')],
+      );
+      final client = VmServiceClient(
+        connector: (_) => dial.future,
+        connectTimeout: const Duration(milliseconds: 50),
+      );
 
-        await expectLater(
-          client.connect(serviceUri),
-          throwsA(isA<TimeoutException>()),
-        );
+      await expectLater(
+        client.connect(serviceUri),
+        throwsA(isA<TimeoutException>()),
+      );
 
-        dial.complete(fake);
-        await pumpEventQueue();
+      dial.complete(fake);
+      await pumpEventQueue();
 
-        expect(client.isConnected, isFalse);
-        expect(fake.disposed, isTrue);
-      },
-    );
+      expect(client.isConnected, isFalse);
+      expect(fake.disposed, isTrue);
+    });
 
     test('a VM that dials but never answers getVM is disconnected', () async {
       // The hang can land anywhere in the sequence, and past the dial the
@@ -1230,7 +1232,7 @@ void main() {
   /// and reopens is a *reconnect*, which this client survives, and treating one
   /// as a death would make an attach kill itself over a DDS hiccup.
   group('VmServiceClient.gone', () {
-    final serviceUri = Uri.parse('http://127.0.0.1:8181/');
+    final Uri serviceUri = Uri.parse('http://127.0.0.1:8181/');
 
     FakeVmService newFake() => FakeVmService(
       isolates: [IsolateRef(id: 'iso-1', name: 'main', number: '1')],
@@ -1247,12 +1249,10 @@ void main() {
 
     test('a closed socket that will not re-dial is the app gone', () async {
       var dials = 0;
-      final fake = newFake();
+      final FakeVmService fake = newFake();
       final client = VmServiceClient(
         connector: (_) async {
-          if (dials++ > 0) {
-            throw const SocketException('Connection refused');
-          }
+          if (dials++ > 0) throw const SocketException('Connection refused');
           return fake;
         },
       );
@@ -1275,19 +1275,17 @@ void main() {
 
     test('a refused re-dial is logged, not only reported', () async {
       var dials = 0;
-      final fake = newFake();
+      final FakeVmService fake = newFake();
       final client = VmServiceClient(
         connector: (_) async {
-          if (dials++ > 0) {
-            throw const SocketException('Connection refused');
-          }
+          if (dials++ > 0) throw const SocketException('Connection refused');
           return fake;
         },
       );
       await client.connect(serviceUri);
 
       final records = <LogRecord>[];
-      final sub = Logger.root.onRecord.listen(records.add);
+      final _Sub sub = Logger.root.onRecord.listen(records.add);
       try {
         fake.simulateDisposed();
 
@@ -1310,7 +1308,7 @@ void main() {
       final services = <FakeVmService>[];
       final client = VmServiceClient(
         connector: (_) async {
-          final fake = newFake();
+          final FakeVmService fake = newFake();
           services.add(fake);
           return fake;
         },
@@ -1365,12 +1363,10 @@ void main() {
       'an RPC that outlives a failed re-dial fails with its reason',
       () async {
         var dials = 0;
-        final fake = newFake();
+        final FakeVmService fake = newFake();
         final client = VmServiceClient(
           connector: (_) async {
-            if (dials++ > 0) {
-              throw const SocketException('Connection refused');
-            }
+            if (dials++ > 0) throw const SocketException('Connection refused');
             return fake;
           },
         );
@@ -1380,7 +1376,8 @@ void main() {
         // gate held across it would park the connect itself.
         final gate = Completer<void>();
         fake.callServiceExtensionGate = gate;
-        final inFlight = client.callServiceExtension('ext.flutter.foo');
+        final Future<Map<String, dynamic>?> inFlight = client
+            .callServiceExtension('ext.flutter.foo');
         await pumpEventQueue();
 
         fake.simulateDisposed();
@@ -1415,9 +1412,9 @@ void main() {
     test(
       'a re-dial that lands after a teardown is closed, not published',
       () async {
-        final first = newFake();
+        final FakeVmService first = newFake();
         final late_ = Completer<VmService>();
-        final arriving = newFake();
+        final FakeVmService arriving = newFake();
         var dials = 0;
         final client = VmServiceClient(
           connector: (_) => dials++ == 0 ? Future.value(first) : late_.future,
@@ -1453,7 +1450,7 @@ void main() {
         final client = VmServiceClient(
           connector: (_) async {
             if (refuse) throw const SocketException('Connection refused');
-            final fake = newFake();
+            final FakeVmService fake = newFake();
             services.add(fake);
             return fake;
           },
@@ -1485,7 +1482,7 @@ void main() {
         final services = <FakeVmService>[];
         final client = VmServiceClient(
           connector: (_) async {
-            final fake = newFake();
+            final FakeVmService fake = newFake();
             services.add(fake);
             return fake;
           },
@@ -1533,7 +1530,7 @@ void main() {
   /// is the shape a flapping tunnel has, and an unbounded client answers it by
   /// re-dialling forever without ever reporting anything.
   group('VmServiceClient and a connection that will not stay up', () {
-    final serviceUri = Uri.parse('http://127.0.0.1:8181/');
+    final Uri serviceUri = Uri.parse('http://127.0.0.1:8181/');
 
     FakeVmService newFake() => FakeVmService(
       isolates: [IsolateRef(id: 'iso-1', name: 'main', number: '1')],
@@ -1567,7 +1564,7 @@ void main() {
       final services = <FakeVmService>[];
       final client = VmServiceClient(
         connector: (_) async {
-          final fake = newFake();
+          final FakeVmService fake = newFake();
           services.add(fake);
           return fake;
         },
@@ -1607,7 +1604,7 @@ void main() {
       () async {
         var clock = DateTime(2026);
         // Time never advances, so every close is inside any window.
-        final f = flapping(now: () => clock, flapLimit: 5);
+        final _F f = flapping(now: () => clock, flapLimit: 5);
         await f.client.connect(serviceUri);
         expect(f.services, hasLength(1));
 
@@ -1650,7 +1647,7 @@ void main() {
       'a client that gave up names why, not just that it is disconnected',
       () async {
         var clock = DateTime(2026);
-        final f = flapping(now: () => clock, flapLimit: 2);
+        final _F f = flapping(now: () => clock, flapLimit: 2);
         await f.client.connect(serviceUri);
         await flap(f, 5);
         await f.client.gone.timeout(
@@ -1683,7 +1680,7 @@ void main() {
     // over a day and kill an app that was never unwell.
     test('a connection that lasted resets the count', () async {
       var clock = DateTime(2026);
-      final f = flapping(
+      final _F f = flapping(
         now: () => clock,
         flapLimit: 3,
         flapWindow: const Duration(seconds: 5),
@@ -1726,18 +1723,20 @@ void main() {
     // client that only completes `gone` goes on dialling behind it.
     test('nothing dials once the app has been reported gone', () async {
       var clock = DateTime(2026);
-      final f = flapping(now: () => clock, flapLimit: 2);
+      final _F f = flapping(now: () => clock, flapLimit: 2);
       await f.client.connect(serviceUri);
       await flap(f, 5);
       await f.client.gone;
-      final dialsAtDeath = f.services.length;
+      final int dialsAtDeath = f.services.length;
 
       // Every door to a dial, tried after the report: the watcher's own (more
       // closes), and a caller arriving through `_withReconnect` — a reload
       // dispatched by a driver that had not heard yet, which is the realistic
       // way this is reached.
       await flap(f, 5);
-      final verdict = await f.client.hotReload('/does/not/matter.dill');
+      final _Verdict verdict = await f.client.hotReload(
+        '/does/not/matter.dill',
+      );
       expect(
         verdict,
         isA<VerdictRefused>().having(
@@ -1763,7 +1762,7 @@ void main() {
     // charge against a connection the caller had already replaced.
     test('a teardown this end chose forgets the strikes before it', () async {
       var clock = DateTime(2026);
-      final f = flapping(now: () => clock, flapLimit: 3);
+      final _F f = flapping(now: () => clock, flapLimit: 3);
       await f.client.connect(serviceUri);
       await flap(f, 2);
       expect(await reportedGone(f.client), isFalse);
@@ -1788,7 +1787,7 @@ void main() {
       final services = <FakeVmService>[];
       final client = VmServiceClient(
         connector: (_) async {
-          final fake = newFake();
+          final FakeVmService fake = newFake();
           services.add(fake);
           // Dead before it can answer `getVM`: the dial succeeded and the socket
           // went away underneath it.
@@ -1821,7 +1820,7 @@ void main() {
     }
 
     test('a running isolate has no reason', () async {
-      final (client, _) = await connected(EventKind.kResume);
+      final (_Client client, _) = await connected(EventKind.kResume);
 
       expect(await client.pausedReason(), isNull);
     });
@@ -1830,21 +1829,21 @@ void main() {
     // isolate never returns: an `app.getText` against a --start-paused run
     // would wedge the HTTP control channel for the rest of the session.
     test('a start-paused isolate names the flag that paused it', () async {
-      final (client, _) = await connected(EventKind.kPauseStart);
+      final (_Client client, _) = await connected(EventKind.kPauseStart);
 
       expect(await client.pausedReason(), contains('--start-paused'));
     });
 
     test('a breakpoint says so, and says who has to resume it', () async {
-      final (client, _) = await connected(EventKind.kPauseBreakpoint);
+      final (_Client client, _) = await connected(EventKind.kPauseBreakpoint);
 
-      final reason = await client.pausedReason();
+      final String? reason = await client.pausedReason();
       expect(reason, contains('breakpoint'));
       expect(reason, contains('resume'));
     });
 
     test('an exited isolate is reported, not treated as running', () async {
-      final (client, _) = await connected(EventKind.kPauseExit);
+      final (_Client client, _) = await connected(EventKind.kPauseExit);
 
       expect(await client.pausedReason(), contains('exited'));
     });
@@ -1857,9 +1856,9 @@ void main() {
       await client.connect(Uri.parse('http://127.0.0.1:8181/'));
 
       final records = <LogRecord>[];
-      final rootLevel = Logger.root.level;
+      final Level rootLevel = Logger.root.level;
       Logger.root.level = Level.ALL;
-      final sub = Logger.root.onRecord.listen(records.add);
+      final _Sub sub = Logger.root.onRecord.listen(records.add);
       try {
         expect(await client.pausedReason(), isNull);
       } finally {
@@ -1894,8 +1893,8 @@ void main() {
       serviceUri = Uri.parse('http://127.0.0.1:${devFSServer.port}/');
       unawaited(
         devFSServer.forEach((request) async {
-          final encoded = request.headers.value('dev_fs_uri_b64')!;
-          final relative = utf8.decode(base64.decode(encoded));
+          final String encoded = request.headers.value('dev_fs_uri_b64')!;
+          final String relative = utf8.decode(base64.decode(encoded));
           final bytes = <int>[];
           await for (final chunk in request) {
             bytes.addAll(chunk);
@@ -1936,7 +1935,7 @@ void main() {
     }
 
     test('uploads the changed bytes into the devFS', () async {
-      final (client, _) = await connected();
+      final (_Client client, _) = await connected();
 
       expect(
         await client.reloadAssets({'assets/logo.png'}),
@@ -1946,9 +1945,8 @@ void main() {
       // The app reads this copy, not the build tree. An APK, a phone, and a
       // sandboxed macOS app can all reach it.
       expect(
-        File(
-          p.join(devFSRoot, 'flutter_assets', 'assets', 'logo.png'),
-        ).readAsStringSync(),
+        File(p.join(devFSRoot, 'flutter_assets', 'assets', 'logo.png'))
+            .readAsStringSync(),
         'new bytes',
       );
     });
@@ -1958,13 +1956,14 @@ void main() {
     // cannot open it; naming it would drop every reloaded asset and serve what
     // the app shipped with.
     test('a restart reads assets from the devFS directory', () async {
-      final (client, fake) = await connected();
+      final (_Client client, FakeVmService fake) = await connected();
       final dill = File(p.join(root.path, 'app.dill'))..writeAsStringSync('k');
 
       await client.reloadAssets({'assets/logo.png'});
       await client.hotRestart(dill.path);
 
-      final run = fake.methodCalls.firstWhere(
+      final ({Map<String, dynamic>? args, String? isolateId, String method})
+      run = fake.methodCalls.firstWhere(
         (c) => c.method == '_flutter.runInView',
       );
       expect(
@@ -1976,11 +1975,12 @@ void main() {
     test(
       'points the engine at the devFS directory, evicts, and reassembles',
       () async {
-        final (client, fake) = await connected();
+        final (_Client client, FakeVmService fake) = await connected();
 
         await client.reloadAssets({'assets/logo.png'});
 
-        final setPath = fake.methodCalls.firstWhere(
+        final ({Map<String, dynamic>? args, String? isolateId, String method})
+        setPath = fake.methodCalls.firstWhere(
           (c) => c.method == '_flutter.setAssetBundlePath',
         );
         expect(setPath.args?['viewId'], 'view-1');
@@ -2006,7 +2006,7 @@ void main() {
     test('evicts every changed archive path, not just the last', () async {
       File(p.join(assetsDir, 'assets', 'b.png')).writeAsStringSync('b');
       File(p.join(assetsDir, 'AssetManifest.bin')).writeAsStringSync('m');
-      final (client, fake) = await connected();
+      final (_Client client, FakeVmService fake) = await connected();
 
       await client.reloadAssets({
         'assets/logo.png',
@@ -2029,7 +2029,7 @@ void main() {
     test('points the engine at the devFS only once per connection', () async {
       // The directory does not move, and every extra call rebuilds the
       // engine's asset manager.
-      final (client, fake) = await connected();
+      final (_Client client, FakeVmService fake) = await connected();
 
       await client.reloadAssets({'assets/logo.png'});
       await client.reloadAssets({'assets/logo.png'});
@@ -2045,14 +2045,14 @@ void main() {
     test('asks the engine to re-register fonts when a font changed', () async {
       // Evicting drops the framework's copy of the bytes; only the engine
       // holds the registered font families that text renders from.
-      File(
-        p.join(assetsDir, 'assets', 'Inter.ttf'),
-      ).writeAsStringSync('font bytes');
-      final (client, fake) = await connected();
+      File(p.join(assetsDir, 'assets', 'Inter.ttf'))
+          .writeAsStringSync('font bytes');
+      final (_Client client, FakeVmService fake) = await connected();
 
       await client.reloadAssets({'assets/Inter.ttf'});
 
-      final reload = fake.methodCalls.firstWhere(
+      final ({Map<String, dynamic>? args, String? isolateId, String method})
+      reload = fake.methodCalls.firstWhere(
         (c) => c.method == '_flutter.reloadAssetFonts',
       );
       expect(reload.args, {'viewId': 'view-1'});
@@ -2060,7 +2060,7 @@ void main() {
     });
 
     test('leaves the font collection alone when no font changed', () async {
-      final (client, fake) = await connected();
+      final (_Client client, FakeVmService fake) = await connected();
 
       await client.reloadAssets({'assets/logo.png'});
 
@@ -2073,7 +2073,7 @@ void main() {
     test('a deleted asset is evicted without an upload', () async {
       // devFS has no delete, so the app falls back to its shipped copy. What
       // must not happen is a failed upload of a file that is gone.
-      final (client, fake) = await connected();
+      final (_Client client, FakeVmService fake) = await connected();
 
       expect(
         await client.reloadAssets({'assets/gone.png'}),
@@ -2094,14 +2094,14 @@ void main() {
         // re-read them. Failing partway through the second half leaves an app
         // that may already be showing some of the new assets, so "it keeps
         // showing the assets it already had" is not something this can say.
-        final (client, fake) = await connected();
+        final (_Client client, FakeVmService fake) = await connected();
         fake.extensionErrors['ext.flutter.evict'] = RPCError(
           'ext.flutter.evict',
           113,
           'Isolate must be runnable',
         );
 
-        final verdict = await client.reloadAssets({'assets/logo.png'});
+        final _Verdict verdict = await client.reloadAssets({'assets/logo.png'});
 
         expect(verdict, isA<VerdictAppErrored>());
         expect(
@@ -2109,9 +2109,8 @@ void main() {
           contains('Isolate must be runnable'),
         );
         expect(
-          File(
-            p.join(devFSRoot, 'flutter_assets', 'assets', 'logo.png'),
-          ).existsSync(),
+          File(p.join(devFSRoot, 'flutter_assets', 'assets', 'logo.png'))
+              .existsSync(),
           isTrue,
           reason: 'the bytes reached the devFS before the eviction failed',
         );
@@ -2188,7 +2187,7 @@ void main() {
   /// subsequent RPC answers `Sentinel(Collected)` / `Unrecognized isolateId`,
   /// forever.
   group('VmServiceClient main-isolate rotation', () {
-    final serviceUri = Uri.parse('http://127.0.0.1:8181/');
+    final Uri serviceUri = Uri.parse('http://127.0.0.1:8181/');
 
     test(
       'follows the root isolate across a restart it did not initiate',
@@ -2283,7 +2282,7 @@ void main() {
   /// seconds after `app.started`. In that window every `ext.*` call, the
   /// framework's own included, answers `-32601 Unknown method`.
   group('VmServiceClient waitForServiceExtension', () {
-    final serviceUri = Uri.parse('http://127.0.0.1:8181/');
+    final Uri serviceUri = Uri.parse('http://127.0.0.1:8181/');
     const getText = 'ext.rules_flutter.getText';
 
     test('returns at once for one the isolate already reports', () async {
@@ -2303,7 +2302,7 @@ void main() {
       final client = VmServiceClient(connector: (_) async => fake);
       await client.connect(serviceUri);
 
-      final waiting = client.waitForServiceExtension(getText);
+      final Future<bool> waiting = client.waitForServiceExtension(getText);
       await pumpEventQueue();
       fake.emitServiceExtensionAdded('iso-1', getText);
 
@@ -2317,7 +2316,7 @@ void main() {
       final client = VmServiceClient(connector: (_) async => fake);
       await client.connect(serviceUri);
 
-      final waiting = client.waitForServiceExtension(
+      final Future<bool> waiting = client.waitForServiceExtension(
         getText,
         timeout: const Duration(milliseconds: 200),
       );
@@ -2396,7 +2395,7 @@ void main() {
       fake.emitIsolateStart('iso-2');
       await pumpEventQueue();
 
-      final waiting = client.waitForServiceExtension(getText);
+      final Future<bool> waiting = client.waitForServiceExtension(getText);
       var answered = false;
       unawaited(waiting.then((_) => answered = true));
       await pumpEventQueue();
@@ -2422,7 +2421,7 @@ void main() {
       fake.emitIsolateExit('iso-1');
       await pumpEventQueue();
 
-      final waiting = client.waitForServiceExtension(getText);
+      final Future<bool> waiting = client.waitForServiceExtension(getText);
       var answered = false;
       unawaited(waiting.then((_) => answered = true));
       await pumpEventQueue();
@@ -2443,7 +2442,7 @@ void main() {
         final client = VmServiceClient(connector: (_) async => fake);
         await client.connect(serviceUri);
 
-        final waiting = client.waitForServiceExtension(
+        final Future<bool> waiting = client.waitForServiceExtension(
           getText,
           timeout: const Duration(milliseconds: 200),
         );
@@ -2500,7 +2499,7 @@ void main() {
         fake
           ..getIsolateGate = Completer<void>()
           ..getIsolateError = RPCError('getIsolate', 104, 'isolate collected');
-        final waiting = client.waitForServiceExtension(
+        final Future<bool> waiting = client.waitForServiceExtension(
           getText,
           timeout: const Duration(seconds: 5),
         );
@@ -2523,7 +2522,7 @@ void main() {
   /// been read, and the poll that reads it swallows its errors by design,
   /// because an in-deadline failure is the connection still settling.
   group('VmServiceClient.waitUntilPausedAtStart', () {
-    final serviceUri = Uri.parse('http://127.0.0.1:8181/');
+    final Uri serviceUri = Uri.parse('http://127.0.0.1:8181/');
 
     test('reports paused when the isolate holds at PauseStart', () async {
       final fake = FakeVmService(
@@ -2596,9 +2595,9 @@ void main() {
       await client.connect(serviceUri);
 
       final records = <LogRecord>[];
-      final rootLevel = Logger.root.level;
+      final Level rootLevel = Logger.root.level;
       Logger.root.level = Level.ALL;
-      final sub = Logger.root.onRecord.listen(records.add);
+      final _Sub sub = Logger.root.onRecord.listen(records.add);
       try {
         expect(
           await client.waitUntilPausedAtStart(
@@ -2631,7 +2630,7 @@ void main() {
   /// answering no requests at all. Waiting on either alone leaves one of those
   /// cases hanging.
   group('VmServiceClient.waitForFirstFrame', () {
-    final serviceUri = Uri.parse('http://127.0.0.1:8181/');
+    final Uri serviceUri = Uri.parse('http://127.0.0.1:8181/');
 
     FakeVmService newFake() => FakeVmService(
       isolates: [IsolateRef(id: 'iso-1', name: 'main', number: '1')],
@@ -2644,23 +2643,23 @@ void main() {
     }
 
     test('true when the app painted before anyone asked', () async {
-      final fake = newFake();
+      final FakeVmService fake = newFake();
       fake.extensionResponses['ext.flutter.didSendFirstFrameEvent'] = {
         'enabled': 'true',
       };
-      final client = await connected(fake);
+      final _Client client = await connected(fake);
 
       expect(await client.waitForFirstFrame(), isTrue);
     });
 
     test('true on the event alone, with the query never answered', () async {
-      final fake = newFake();
-      final client = await connected(fake);
+      final FakeVmService fake = newFake();
+      final _Client client = await connected(fake);
       // Every extension call from here on hangs: the app is up but its VM is
       // answering nothing, which is exactly the window this has to see through.
       fake.callServiceExtensionGate = Completer<void>();
 
-      final waiting = client.waitForFirstFrame(
+      final Future<bool> waiting = client.waitForFirstFrame(
         timeout: const Duration(seconds: 30),
       );
       await pumpEventQueue();
@@ -2681,16 +2680,16 @@ void main() {
     test(
       'true from the query alone, first -32601 then false then true',
       () async {
-        final fake = newFake();
+        final FakeVmService fake = newFake();
         const method = 'ext.flutter.didSendFirstFrameEvent';
         fake.extensionErrors[method] = RPCError(
           method,
           -32601,
           'Unknown method',
         );
-        final client = await connected(fake);
+        final _Client client = await connected(fake);
 
-        final waiting = client.waitForFirstFrame(
+        final Future<bool> waiting = client.waitForFirstFrame(
           timeout: const Duration(seconds: 20),
         );
 
@@ -2718,14 +2717,14 @@ void main() {
     /// A `-32601` is the boot sequence; anything else is a fault, and reporting
     /// it as "the app never rendered" sends the reader after the wrong thing.
     test('a non -32601 query error surfaces instead of a bare false', () async {
-      final fake = newFake();
+      final FakeVmService fake = newFake();
       const method = 'ext.flutter.didSendFirstFrameEvent';
       fake.extensionErrors[method] = RPCError(
         method,
         -32000,
         'Service disposed',
       );
-      final client = await connected(fake);
+      final _Client client = await connected(fake);
 
       await expectLater(
         client.waitForFirstFrame(timeout: const Duration(milliseconds: 500)),
@@ -2736,12 +2735,12 @@ void main() {
     test(
       'false at the bound when the query hangs and nothing paints',
       () async {
-        final fake = newFake();
-        final client = await connected(fake);
+        final FakeVmService fake = newFake();
+        final _Client client = await connected(fake);
         fake.callServiceExtensionGate = Completer<void>();
 
         final elapsed = Stopwatch()..start();
-        final answer = await client.waitForFirstFrame(
+        final bool answer = await client.waitForFirstFrame(
           timeout: const Duration(milliseconds: 200),
         );
         elapsed.stop();
@@ -2773,7 +2772,7 @@ void main() {
         fake.extensionResponses['ext.flutter.didSendFirstFrameEvent'] = {
           'enabled': 'true',
         };
-        final client = await connected(fake);
+        final _Client client = await connected(fake);
 
         expect(fake.getVMCalls, 2);
         expect(await client.waitForFirstFrame(), isTrue);
@@ -2790,9 +2789,9 @@ void main() {
         fake.extensionResponses['ext.flutter.didSendFirstFrameEvent'] = {
           'enabled': 'true',
         };
-        final client = await connected(fake);
+        final _Client client = await connected(fake);
 
-        final waiting = client.waitForFirstFrame(
+        final Future<bool> waiting = client.waitForFirstFrame(
           timeout: const Duration(seconds: 10),
         );
         await pumpEventQueue();
@@ -2828,7 +2827,7 @@ void main() {
     /// `-32601` ambiguous: a framework still starting and a framework that will
     /// never register it give the same error, and call sites are left guessing.
     group('VmServiceClient.requireServiceExtension', () {
-      final serviceUri = Uri.parse('http://127.0.0.1:8181/');
+      final Uri serviceUri = Uri.parse('http://127.0.0.1:8181/');
 
       Future<VmServiceClient> connected(FakeVmService fake) async {
         final client = VmServiceClient(connector: (_) async => fake);
@@ -2837,7 +2836,7 @@ void main() {
       }
 
       test('returns once the app has the extension', () async {
-        final client = await connected(
+        final _Client client = await connected(
           FakeVmService(
             isolates: [IsolateRef(id: 'iso-1', name: 'main', number: '1')],
           )..extensionRPCs = ['ext.flutter.evict'],
@@ -2860,7 +2859,7 @@ void main() {
       test(
         'throws, naming the extension and the wait, when it never comes',
         () async {
-          final client = await connected(
+          final _Client client = await connected(
             FakeVmService(
               isolates: [IsolateRef(id: 'iso-1', name: 'main', number: '1')],
             )..extensionRPCs = const [],
@@ -2886,11 +2885,11 @@ void main() {
         final fake = FakeVmService(
           isolates: [IsolateRef(id: 'iso-1', name: 'main', number: '1')],
         )..extensionRPCs = const [];
-        final client = await connected(fake);
+        final _Client client = await connected(fake);
         client.serviceExtensionTimeout = const Duration(seconds: 5);
 
         var resolved = false;
-        final waiting = client
+        final Future<bool> waiting = client
             .requireServiceExtension('ext.flutter.evict')
             .then((_) => resolved = true);
         await pumpEventQueue();

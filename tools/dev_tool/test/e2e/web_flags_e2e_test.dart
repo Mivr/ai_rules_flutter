@@ -25,6 +25,8 @@ import 'package:test/test.dart';
 import '../tls_fixture.dart';
 import 'dev_tool_e2e_harness.dart';
 
+typedef _Target = ({String isolateId, String rootLibId});
+
 /// A port nothing is listening on right now.
 ///
 /// The same way the servers under test take theirs, so the address family
@@ -33,8 +35,8 @@ import 'dev_tool_e2e_harness.dart';
 /// fast enough to matter, and a collision fails loudly (which is the whole
 /// point of `--web-port`) rather than silently passing.
 Future<int> freePort() async {
-  final socket = await ServerSocket.bind('localhost', 0);
-  final port = socket.port;
+  final ServerSocket socket = await ServerSocket.bind('localhost', 0);
+  final int port = socket.port;
   await socket.close();
   return port;
 }
@@ -47,7 +49,8 @@ Future<int> freePort() async {
 Future<({HttpClientResponse response, String body})> get(Uri url) async {
   final client = HttpClient()..badCertificateCallback = (_, __, ___) => true;
   try {
-    final response = await (await client.getUrl(url)).close();
+    final HttpClientResponse response = await (await client.getUrl(url))
+        .close();
     return (
       response: response,
       body: await response.transform(utf8.decoder).join(),
@@ -67,7 +70,7 @@ Future<dynamic> getJson(Uri url) async => json.decode((await get(url)).body);
 /// browsing-context-group swap, and for a moment the listing carries a page
 /// with an empty URL. Sampling once catches that window about half the time.
 Future<List<String>> pageTargetsOn(int cdpPort, String origin) async {
-  final deadline = DateTime.now().add(const Duration(seconds: 30));
+  final DateTime deadline = DateTime.now().add(const Duration(seconds: 30));
   var delay = const Duration(milliseconds: 50);
   var seen = <String>[];
   while (true) {
@@ -90,7 +93,7 @@ Future<List<String>> pageTargetsOn(int cdpPort, String origin) async {
 /// The base URL the DDC module server reported, read off its structured log
 /// rather than parsed out of prose.
 Uri moduleServerUri(DevToolProcess dt) {
-  for (final line in dt.stderrLines) {
+  for (final String line in dt.stderrLines) {
     try {
       final record = json.decode(line) as Map<String, dynamic>;
       if (record['message'] == 'frontend_server_ready') {
@@ -112,7 +115,7 @@ class VmProbe {
   new(this.socket) : replies = socket.asBroadcastStream();
 
   static Future<VmProbe> connect(DevToolProcess dt) async {
-    final debugPort = await dt.waitForEvent(
+    final Map<String, dynamic> debugPort = await dt.waitForEvent(
       'app.debugPort',
       timeout: const Duration(minutes: 2),
     );
@@ -152,12 +155,14 @@ class VmProbe {
   /// The app's isolate and its root library — what an evaluation needs a
   /// target in.
   Future<({String isolateId, String rootLibId})> appIsolate() async {
-    final vm = await call('getVM');
+    final Map<String, dynamic> vm = await call('getVM');
     final isolates = vm['result']?['isolates'] as List<dynamic>?;
     expect(isolates, isNotNull, reason: 'getVM listed no isolates: $vm');
     expect(isolates, isNotEmpty, reason: 'the app has no isolate: $vm');
     final isolateId = (isolates!.first as Map<String, dynamic>)['id'] as String;
-    final isolate = await call('getIsolate', {'isolateId': isolateId});
+    final Map<String, dynamic> isolate = await call('getIsolate', {
+      'isolateId': isolateId,
+    });
     final rootLib = isolate['result']?['rootLib'] as Map<String, dynamic>?;
     expect(rootLib, isNotNull, reason: 'the isolate has no rootLib: $isolate');
     return (isolateId: isolateId, rootLibId: rootLib!['id'] as String);
@@ -178,16 +183,16 @@ class VmProbe {
 }
 
 void main() {
-  final workspace = e2eWorkspace('web_example');
+  final String workspace = e2eWorkspace('web_example');
 
   test(
     'every serving and browser flag reaches the wire',
     () async {
-      final port = await freePort();
-      final debugPort = await freePort();
+      final int port = await freePort();
+      final int debugPort = await freePort();
       final launchUrl = 'http://localhost:$port/#/flagprobe';
 
-      final dt = await startDevTool(
+      final DevToolProcess dt = await startDevTool(
         workspace: workspace,
         // Its default `--hot` run is the DDC dev loop — the shape with a module
         // server, DWDS, and a resident compiler.
@@ -215,7 +220,9 @@ void main() {
       expect(moduleServerUri(dt), Uri.parse('http://localhost:$port'));
 
       // --web-header and --cross-origin-isolation, on the wire.
-      final page = await get(Uri.parse('http://localhost:$port/index.html'));
+      final ({String body, HttpClientResponse response}) page = await get(
+        Uri.parse('http://localhost:$port/index.html'),
+      );
       expect(page.response.statusCode, 200);
       expect(page.response.headers.value('x-rules-flutter'), 'on');
       expect(page.response.headers.value('x-second-header'), 'two');
@@ -248,7 +255,10 @@ void main() {
 
       // --web-launch-url: the tab is on the URL that was named, fragment and
       // all, and the page lookup still resolves it.
-      final pages = await pageTargetsOn(debugPort, 'http://localhost:$port');
+      final List<String> pages = await pageTargetsOn(
+        debugPort,
+        'http://localhost:$port',
+      );
       expect(
         pages.any((u) => u.startsWith('http://localhost:$port')),
         isTrue,
@@ -266,7 +276,7 @@ void main() {
       // --web-run-headless and --web-browser-flag together: a headless
       // browser really rendered, at the size the user's own switch asked for
       // rather than the one this tool sets for headless runs.
-      final http = await dt.waitForHttpControl();
+      final HttpControlInfo http = await dt.waitForHttpControl();
       expect(http, isNotNull);
       // Polled rather than taken once. A browser page is not capturable the
       // moment the control channel binds, and CDP answers a capture attempt
@@ -280,7 +290,7 @@ void main() {
       await dt.httpScreenshotToFile(dt.appId!, shot);
       final file = File(shot);
       addTearDown(() => file.existsSync() ? file.deleteSync() : null);
-      final size = pngSize(file.readAsBytesSync());
+      final ({int height, int width}) size = pngSize(file.readAsBytesSync());
       // Width is the window's exactly; height comes back a little short of
       // the 600 asked for because the window includes browser chrome the
       // viewport does not. Both are far from the 2400x1800 this tool sets for
@@ -297,10 +307,10 @@ void main() {
 
       // --web-enable-expression-evaluation, on by default here: the debugger
       // compiles a fragment against the running program and gets a value.
-      final vm = await VmProbe.connect(dt);
+      final VmProbe vm = await VmProbe.connect(dt);
       try {
-        final target = await vm.appIsolate();
-        final result = await vm.call('evaluate', {
+        final _Target target = await vm.appIsolate();
+        final Map<String, dynamic> result = await vm.call('evaluate', {
           'isolateId': target.isolateId,
           'targetId': target.rootLibId,
           'expression': '1 + 1',
@@ -332,12 +342,14 @@ void main() {
       // its VM service ride the same origin. A handshake against the server
       // object proves the flags reached the bind; only a session proves the
       // dev loop still works on the other side of it.
-      final dir = Directory.systemTemp.createTempSync('web_flags_tls_');
+      final Directory dir = Directory.systemTemp.createTempSync(
+        'web_flags_tls_',
+      );
       addTearDown(() => dir.deleteSync(recursive: true));
-      final tls = writeTestCertificate(dir);
-      final port = await freePort();
+      final ({String certPath, String keyPath}) tls = writeTestCertificate(dir);
+      final int port = await freePort();
 
-      final dt = await startDevTool(
+      final DevToolProcess dt = await startDevTool(
         workspace: workspace,
         target: ':app_wasm',
         device: 'chrome',
@@ -356,20 +368,22 @@ void main() {
       await dt.waitForEvent('app.started', timeout: const Duration(minutes: 6));
 
       // The scheme follows the certificate, everywhere the URL is reported.
-      final base = moduleServerUri(dt);
+      final Uri base = moduleServerUri(dt);
       expect(base, Uri.parse('https://localhost:$port'));
 
-      final page = await get(base.replace(path: '/index.html'));
+      final ({String body, HttpClientResponse response}) page = await get(
+        base.replace(path: '/index.html'),
+      );
       expect(page.response.statusCode, 200);
       expect(page.body, isNotEmpty);
 
       // The dev loop itself, on the far side of TLS: DWDS connected, the VM
       // service answers, and the debugger can still compile against the
       // running program.
-      final vm = await VmProbe.connect(dt);
+      final VmProbe vm = await VmProbe.connect(dt);
       try {
-        final target = await vm.appIsolate();
-        final result = await vm.call('evaluate', {
+        final _Target target = await vm.appIsolate();
+        final Map<String, dynamic> result = await vm.call('evaluate', {
           'isolateId': target.isolateId,
           'targetId': target.rootLibId,
           'expression': '1 + 1',
@@ -388,7 +402,7 @@ void main() {
   test(
     'the defaults and the off-switches are what they say',
     () async {
-      final dt = await startDevTool(
+      final DevToolProcess dt = await startDevTool(
         workspace: workspace,
         target: ':app_wasm',
         device: 'chrome',
@@ -396,13 +410,15 @@ void main() {
       );
 
       await dt.waitForEvent('app.started', timeout: const Duration(minutes: 6));
-      final base = moduleServerUri(dt);
+      final Uri base = moduleServerUri(dt);
 
       // Cross-origin isolation is OFF by default for the DDC dev loop, as it
       // is upstream. On, it costs the page every cross-origin subresource
       // without a CORP header and buys nothing: this loop has no
       // SharedArrayBuffer to protect.
-      final page = await get(base.replace(path: '/index.html'));
+      final ({String body, HttpClientResponse response}) page = await get(
+        base.replace(path: '/index.html'),
+      );
       expect(page.response.statusCode, 200);
       expect(page.response.headers.value('cross-origin-opener-policy'), isNull);
       expect(
@@ -413,15 +429,15 @@ void main() {
 
       // --no-web-enable-expression-evaluation: DWDS has no compiler to ask,
       // so an evaluation is refused rather than answered.
-      final vm = await VmProbe.connect(dt);
+      final VmProbe vm = await VmProbe.connect(dt);
       try {
-        final target = await vm.appIsolate();
-        final result = await vm.call('evaluate', {
+        final _Target target = await vm.appIsolate();
+        final Map<String, dynamic> result = await vm.call('evaluate', {
           'isolateId': target.isolateId,
           'targetId': target.rootLibId,
           'expression': '1 + 1',
         });
-        final answered =
+        final bool answered =
             result['error'] == null &&
             result['result']?['valueAsString'] == '2';
         expect(

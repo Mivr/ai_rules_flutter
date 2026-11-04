@@ -43,37 +43,37 @@ void main() {
   }
 
   test('extracted bundle: loose dylibs only, content-sensitive', () async {
-    final app = makeBundle('a', dylibBytes: [1, 2, 3, 4]);
-    final fp = await nativeLibsFingerprint(app.path);
+    final Directory app = makeBundle('a', dylibBytes: [1, 2, 3, 4]);
+    final Map<String, String> fp = await nativeLibsFingerprint(app.path);
     expect(fp.keys, ['Contents/Frameworks/libdemo.dylib']);
 
-    final same = await nativeLibsFingerprint(app.path);
+    final Map<String, String> same = await nativeLibsFingerprint(app.path);
     expect(fingerprintsEqual(fp, same), isTrue);
 
     File(
       '${app.path}/Contents/Frameworks/libdemo.dylib',
     ).writeAsBytesSync([1, 2, 3, 5]);
-    final changedFp = await nativeLibsFingerprint(app.path);
+    final Map<String, String> changedFp = await nativeLibsFingerprint(app.path);
     expect(fingerprintsEqual(fp, changedFp), isFalse);
     expect(changedLibs(fp, changedFp), ['Contents/Frameworks/libdemo.dylib']);
   });
 
   test('framework edits do not change the fingerprint', () async {
-    final app = makeBundle('b', dylibBytes: [1, 2, 3, 4]);
-    final fp = await nativeLibsFingerprint(app.path);
+    final Directory app = makeBundle('b', dylibBytes: [1, 2, 3, 4]);
+    final Map<String, String> fp = await nativeLibsFingerprint(app.path);
     File(
       '${app.path}/Contents/Frameworks/App.framework/Versions/A/App',
     ).writeAsBytesSync([4, 5, 6, 7, 8]);
-    final after = await nativeLibsFingerprint(app.path);
+    final Map<String, String> after = await nativeLibsFingerprint(app.path);
     expect(fingerprintsEqual(fp, after), isTrue);
   });
 
   test(
     'zip artifact: TOC fingerprint, content-sensitive, frameworks excluded',
     () async {
-      final app = makeBundle('c', dylibBytes: List.filled(1000, 7));
-      final zip1 = zipBundle(app);
-      final fp1 = await nativeLibsFingerprint(zip1);
+      final Directory app = makeBundle('c', dylibBytes: List.filled(1000, 7));
+      final String zip1 = zipBundle(app);
+      final Map<String, String> fp1 = await nativeLibsFingerprint(zip1);
       expect(fp1.keys.single, endsWith('Contents/Frameworks/libdemo.dylib'));
 
       // Dart-edit analog: framework payload changes, dylib unchanged.
@@ -81,8 +81,8 @@ void main() {
         '${app.path}/Contents/Frameworks/App.framework/Versions/A/App',
       ).writeAsBytesSync(List.filled(500, 3));
       File(zip1).deleteSync();
-      final zip2 = zipBundle(app);
-      final fp2 = await nativeLibsFingerprint(zip2);
+      final String zip2 = zipBundle(app);
+      final Map<String, String> fp2 = await nativeLibsFingerprint(zip2);
       expect(
         fingerprintsEqual(fp1, fp2),
         isTrue,
@@ -94,8 +94,8 @@ void main() {
         '${app.path}/Contents/Frameworks/libdemo.dylib',
       ).writeAsBytesSync(List.filled(1000, 8));
       File(zip2).deleteSync();
-      final zip3 = zipBundle(app);
-      final fp3 = await nativeLibsFingerprint(zip3);
+      final String zip3 = zipBundle(app);
+      final Map<String, String> fp3 = await nativeLibsFingerprint(zip3);
       expect(fingerprintsEqual(fp1, fp3), isFalse);
     },
   );
@@ -135,24 +135,26 @@ void main() {
     }
 
     test('an iOS native-asset framework binary is a native library', () async {
-      final root = makeIosBundle('ios_a', addBytes: [1, 1, 1, 1]);
-      final fp = await nativeLibsFingerprint(zipIpa(root));
+      final Directory root = makeIosBundle('ios_a', addBytes: [1, 1, 1, 1]);
+      final Map<String, String> fp = await nativeLibsFingerprint(zipIpa(root));
       expect(fp.keys, ['Payload/app.app/Frameworks/add.framework/add']);
 
       File(
         '${root.path}/Payload/app.app/Frameworks/add.framework/add',
       ).writeAsBytesSync([1, 1, 1, 2]);
       File('${root.path}.ipa').deleteSync();
-      final after = await nativeLibsFingerprint(zipIpa(root));
+      final Map<String, String> after = await nativeLibsFingerprint(
+        zipIpa(root),
+      );
       expect(changedLibs(fp, after), [
         'Payload/app.app/Frameworks/add.framework/add',
       ]);
     });
 
     test('a Dart edit or engine change still does not count', () async {
-      final root = makeIosBundle('ios_b', addBytes: [1, 1, 1, 1]);
+      final Directory root = makeIosBundle('ios_b', addBytes: [1, 1, 1, 1]);
       final app = '${root.path}/Payload/app.app';
-      final fp = await nativeLibsFingerprint(app);
+      final Map<String, String> fp = await nativeLibsFingerprint(app);
       expect(fp.keys, ['Frameworks/add.framework/add']);
 
       File('$app/Frameworks/App.framework/App').writeAsBytesSync([9, 9, 9]);
@@ -189,7 +191,7 @@ void main() {
     });
 
     test('a versioned macOS plugin framework binary counts', () async {
-      final app = makeBundle('mac_plugin', dylibBytes: [1]);
+      final Directory app = makeBundle('mac_plugin', dylibBytes: [1]);
       final frameworks = '${app.path}/Contents/Frameworks';
       File('$frameworks/my_plugin.framework/Versions/A/my_plugin')
         ..createSync(recursive: true)
@@ -197,7 +199,7 @@ void main() {
       File('$frameworks/FlutterMacOS.framework/Versions/A/FlutterMacOS')
         ..createSync(recursive: true)
         ..writeAsBytesSync([4, 4]);
-      final fp = await nativeLibsFingerprint(app.path);
+      final Map<String, String> fp = await nativeLibsFingerprint(app.path);
       expect(
         fp.keys,
         unorderedEquals([
@@ -226,7 +228,10 @@ void main() {
         final a = File('${tmp.path}/libone.dylib')..writeAsBytesSync([1, 2, 3]);
         final b = File('${tmp.path}/libtwo.dylib')..writeAsBytesSync([4, 5]);
 
-        final fp = await nativeLibsFingerprintOfFiles([a.path, b.path]);
+        final Map<String, String> fp = await nativeLibsFingerprintOfFiles([
+          a.path,
+          b.path,
+        ]);
         expect(fp.keys, unorderedEquals([a.path, b.path]));
         expect(
           fingerprintsEqual(
@@ -240,7 +245,10 @@ void main() {
         // Same length, different bytes: a body-only native edit is exactly this
         // shape, and size alone would miss it.
         b.writeAsBytesSync([4, 6]);
-        final after = await nativeLibsFingerprintOfFiles([a.path, b.path]);
+        final Map<String, String> after = await nativeLibsFingerprintOfFiles([
+          a.path,
+          b.path,
+        ]);
         expect(fingerprintsEqual(fp, after), isFalse);
         expect(changedLibs(fp, after), [b.path]);
       },

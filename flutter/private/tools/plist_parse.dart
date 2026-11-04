@@ -28,11 +28,11 @@ class _PlistReader {
 
   void skipTrivia() {
     while (pos < xml.length) {
-      final c = xml[pos];
+      final String c = xml[pos];
       if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
         pos++;
       } else if (xml.startsWith('<!--', pos)) {
-        final end = xml.indexOf('-->', pos + 4);
+        final int end = xml.indexOf('-->', pos + 4);
         if (end == -1) {
           throw FormatException('Unterminated comment in $source.');
         }
@@ -53,12 +53,12 @@ class _PlistReader {
       isEnd = true;
       pos++;
     }
-    final name = _readTagName();
+    final String name = _readTagName();
     return _readTagClose(name, isEnd);
   }
 
   String _readTagName() {
-    final nameStart = pos;
+    final int nameStart = pos;
     while (pos < xml.length && RegExp(r'[A-Za-z0-9_.:-]').hasMatch(xml[pos])) {
       pos++;
     }
@@ -68,7 +68,7 @@ class _PlistReader {
   (String, bool, bool) _readTagClose(String name, bool isEnd) {
     var inQuote = '';
     while (pos < xml.length) {
-      final c = xml[pos];
+      final String c = xml[pos];
       if (inQuote.isNotEmpty) {
         if (c == inQuote) inQuote = '';
         pos++;
@@ -89,21 +89,21 @@ class _PlistReader {
   }
 
   String readElement() {
-    final start = pos;
-    final (name, selfClosing, isEnd) = readTag();
+    final int start = pos;
+    final (String name, bool selfClosing, bool isEnd) = readTag();
     if (isEnd) {
       throw FormatException('Unexpected closing tag </$name> in $source.');
     }
     if (selfClosing) return xml.substring(start, pos);
     var depth = 1;
     while (depth > 0) {
-      final next = xml.indexOf('<', pos);
+      final int next = xml.indexOf('<', pos);
       if (next == -1) {
         throw FormatException('Unterminated <$name> in $source.');
       }
       pos = next;
       if (!_skipCommentOrStep()) {
-        final (_, nestedSelfClosing, nestedEnd) = readTag();
+        final (_, bool nestedSelfClosing, bool nestedEnd) = readTag();
         if (nestedEnd) {
           depth--;
         } else if (!nestedSelfClosing) {
@@ -118,7 +118,7 @@ class _PlistReader {
   /// a real tag that the caller must read.
   bool _skipCommentOrStep() {
     if (!xml.startsWith('<!--', pos)) return false;
-    final end = xml.indexOf('-->', pos + 4);
+    final int end = xml.indexOf('-->', pos + 4);
     if (end == -1) {
       throw FormatException('Unterminated comment in $source.');
     }
@@ -129,12 +129,12 @@ class _PlistReader {
 
 /// Parses the top-level `<dict>` entries of an XML plist.
 List<PlistEntry> parsePlistEntries(String xml, {String source = '<memory>'}) {
-  final dictStart = xml.indexOf('<dict');
+  final int dictStart = xml.indexOf('<dict');
   if (dictStart == -1) {
     if (xml.contains('<dict/>')) return const [];
     throw FormatException('Plist $source does not contain a root <dict>.');
   }
-  final openEnd = xml.indexOf('>', dictStart);
+  final int openEnd = xml.indexOf('>', dictStart);
   if (openEnd == -1) {
     throw FormatException('Malformed <dict> tag in $source.');
   }
@@ -149,7 +149,7 @@ List<PlistEntry> parsePlistEntries(String xml, {String source = '<memory>'}) {
     if (reader.pos >= xml.length) {
       throw FormatException('Root <dict> not closed in $source.');
     }
-    final (tagName, selfClosing, isEnd) = reader.readTag();
+    final (String tagName, bool selfClosing, bool isEnd) = reader.readTag();
     if (isEnd) {
       if (tagName != 'dict') {
         throw FormatException('Unexpected </$tagName> in $source.');
@@ -164,14 +164,14 @@ List<PlistEntry> parsePlistEntries(String xml, {String source = '<memory>'}) {
 }
 
 PlistEntry _readPlistEntry(String xml, _PlistReader reader, String source) {
-  final keyClose = xml.indexOf('</key>', reader.pos);
+  final int keyClose = xml.indexOf('</key>', reader.pos);
   if (keyClose == -1) {
     throw FormatException('Unclosed <key> in $source.');
   }
-  final keyName = xml.substring(reader.pos, keyClose).trim();
+  final String keyName = xml.substring(reader.pos, keyClose).trim();
   reader.pos = keyClose + '</key>'.length;
   reader.skipTrivia();
-  final valueXml = reader.readElement();
+  final String valueXml = reader.readElement();
   return PlistEntry(keyName, valueXml);
 }
 
@@ -180,7 +180,7 @@ String substitutePlistVariables(String text, Map<String, String> variables) {
   return text.replaceAllMapped(
     RegExp(r'\$\(([A-Za-z0-9_]+)\)|\$\{([A-Za-z0-9_]+)\}'),
     (match) {
-      final name = match.group(1) ?? match.group(2)!;
+      final String name = match.group(1) ?? match.group(2)!;
       return variables[name] ?? '';
     },
   );

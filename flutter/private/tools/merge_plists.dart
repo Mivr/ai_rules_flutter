@@ -103,19 +103,19 @@ class _Scanner {
   /// Consumes whitespace, comments, the XML declaration and the DOCTYPE.
   void skipInsignificant() {
     while (!atEnd) {
-      final c = text[pos];
+      final String c = text[pos];
       if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
         pos++;
       } else if (text.startsWith('<!--', pos)) {
-        final end = text.indexOf('-->', pos + 4);
+        final int end = text.indexOf('-->', pos + 4);
         if (end == -1) _reject(path, 'unterminated comment.');
         pos = end + 3;
       } else if (text.startsWith('<?', pos)) {
-        final end = text.indexOf('?>', pos);
+        final int end = text.indexOf('?>', pos);
         if (end == -1) _reject(path, 'unterminated processing instruction.');
         pos = end + 2;
       } else if (text.startsWith('<!DOCTYPE', pos)) {
-        final end = text.indexOf('>', pos);
+        final int end = text.indexOf('>', pos);
         if (end == -1) _reject(path, 'unterminated DOCTYPE declaration.');
         pos = end + 1;
       } else {
@@ -136,18 +136,18 @@ class _Scanner {
       isEndTag = true;
       pos++;
     }
-    final start = pos;
+    final int start = pos;
     while (!atEnd && RegExp(r'[A-Za-z0-9_.:-]').hasMatch(text[pos])) {
       pos++;
     }
     if (pos == start) _reject(path, 'malformed tag at offset $start.');
-    final name = text.substring(start, pos);
+    final String name = text.substring(start, pos);
 
     // Skip attributes; plist elements carry at most `version`, and we never
     // need to read one.
     var inQuote = '';
     while (!atEnd) {
-      final c = text[pos];
+      final String c = text[pos];
       if (inQuote.isNotEmpty) {
         if (c == inQuote) inQuote = '';
         pos++;
@@ -171,23 +171,23 @@ class _Scanner {
   /// `<`) including everything nested inside it, and returns its verbatim
   /// XML.
   String readElement() {
-    final start = pos;
-    final (name, selfClosing, isEndTag) = readTag();
+    final int start = pos;
+    final (String name, bool selfClosing, bool isEndTag) = readTag();
     if (isEndTag) _reject(path, 'unexpected close tag </$name>.');
     if (selfClosing) return text.substring(start, pos);
 
     var depth = 1;
     while (depth > 0) {
-      final next = text.indexOf('<', pos);
+      final int next = text.indexOf('<', pos);
       if (next == -1) _reject(path, 'unterminated element <$name>.');
       pos = next;
       if (text.startsWith('<!--', pos)) {
-        final end = text.indexOf('-->', pos + 4);
+        final int end = text.indexOf('-->', pos + 4);
         if (end == -1) _reject(path, 'unterminated comment.');
         pos = end + 3;
         continue;
       }
-      final (_, nestedSelfClosing, nestedIsEnd) = readTag();
+      final (_, bool nestedSelfClosing, bool nestedIsEnd) = readTag();
       if (nestedIsEnd) {
         depth--;
       } else if (!nestedSelfClosing) {
@@ -199,9 +199,9 @@ class _Scanner {
 
   /// Reads the text content up to the next `<`.
   String readText() {
-    final next = text.indexOf('<', pos);
+    final int next = text.indexOf('<', pos);
     if (next == -1) _reject(path, 'unterminated text content.');
-    final content = text.substring(pos, next);
+    final String content = text.substring(pos, next);
     pos = next;
     return content;
   }
@@ -219,7 +219,7 @@ List<PlistEntry> parsePlist(String xml, String path) {
   final entries = <PlistEntry>[];
   final seen = <String>{};
   while (true) {
-    final entry = _readRootEntry(scanner, seen);
+    final PlistEntry? entry = _readRootEntry(scanner, seen);
     if (entry == null) return entries;
     entries.add(entry);
   }
@@ -228,7 +228,8 @@ List<PlistEntry> parsePlist(String xml, String path) {
 /// Consumes the `<plist>` root tag and its `<dict>` child tag. Returns true
 /// when a self-closing tag makes the merge trivially empty.
 bool _openRootDict(_Scanner scanner) {
-  final (rootName, rootSelfClosing, rootIsEnd) = scanner.readTag();
+  final (String rootName, bool rootSelfClosing, bool rootIsEnd) = scanner
+      .readTag();
   if (rootIsEnd || rootName != 'plist') {
     _reject(
       scanner.path,
@@ -238,7 +239,8 @@ bool _openRootDict(_Scanner scanner) {
   if (rootSelfClosing) return true;
 
   scanner.skipInsignificant();
-  final (dictName, dictSelfClosing, dictIsEnd) = scanner.readTag();
+  final (String dictName, bool dictSelfClosing, bool dictIsEnd) = scanner
+      .readTag();
   if (dictIsEnd || dictName != 'dict') {
     _reject(
       scanner.path,
@@ -255,8 +257,8 @@ PlistEntry? _readRootEntry(_Scanner scanner, Set<String> seen) {
   if (scanner.atEnd) {
     _reject(scanner.path, 'the root <dict> is never closed.');
   }
-  final save = scanner.pos;
-  final (name, selfClosing, isEnd) = scanner.readTag();
+  final int save = scanner.pos;
+  final (String name, bool selfClosing, bool isEnd) = scanner.readTag();
   if (isEnd) {
     if (name != 'dict') {
       _reject(scanner.path, 'unexpected close tag </$name>.');
@@ -273,8 +275,8 @@ PlistEntry? _readRootEntry(_Scanner scanner, Set<String> seen) {
   if (selfClosing) {
     _reject(scanner.path, 'found an empty <key/> with no name.');
   }
-  final key = scanner.readText().trim();
-  final (closeName, _, closeIsEnd) = scanner.readTag();
+  final String key = scanner.readText().trim();
+  final (String closeName, _, bool closeIsEnd) = scanner.readTag();
   if (!closeIsEnd || closeName != 'key') {
     _reject(
       scanner.path,
@@ -300,26 +302,26 @@ PlistEntry? _readRootEntry(_Scanner scanner, Set<String> seen) {
 /// The `<string>` items of an `<array>` element's verbatim XML, or null when
 /// [rawValue] is not an array of plain strings.
 List<String>? _stringArrayItems(String rawValue) {
-  final trimmed = rawValue.trim();
+  final String trimmed = rawValue.trim();
   if (!trimmed.startsWith('<array')) return null;
-  final open = trimmed.indexOf('>');
+  final int open = trimmed.indexOf('>');
   if (open == -1) return null;
-  final close = trimmed.lastIndexOf('</array>');
+  final int close = trimmed.lastIndexOf('</array>');
   if (close == -1) return null;
-  final body = trimmed.substring(open + 1, close);
+  final String body = trimmed.substring(open + 1, close);
   final items = <String>[];
   var cursor = 0;
   while (true) {
-    final start = body.indexOf('<string>', cursor);
+    final int start = body.indexOf('<string>', cursor);
     if (start == -1) break;
-    final end = body.indexOf('</string>', start);
+    final int end = body.indexOf('</string>', start);
     if (end == -1) return null;
     items.add(body.substring(start + '<string>'.length, end));
     cursor = end + '</string>'.length;
   }
   // Reject anything in the array that is not a <string>: an array we cannot
   // fully account for must never be silently rewritten.
-  final withoutStrings = body.replaceAll(
+  final String withoutStrings = body.replaceAll(
     RegExp(r'<string>.*?</string>', dotAll: true),
     '',
   );
@@ -342,7 +344,7 @@ String _renderStringArray(List<String> items) {
 /// round trip through `plutil` or Xcode can leave behind. Both mean the same
 /// nothing, and a key that is nothing is the one this tool will drop.
 bool _isEmptyString(String rawValue) {
-  final trimmed = rawValue.trim();
+  final String trimmed = rawValue.trim();
   return trimmed == '<string></string>' || trimmed == '<string/>';
 }
 
@@ -387,7 +389,7 @@ void _mergeAdditionEntry({
   required String additionPath,
   required MergeMode mode,
 }) {
-  final existing = merged[entry.key];
+  final PlistEntry? existing = merged[entry.key];
   if (existing == null) {
     merged[entry.key] = entry;
     order.add(entry.key);
@@ -408,7 +410,10 @@ void _mergeAdditionEntry({
         'wrong, or drop the key from the addition.',
       );
     case MergeMode.supplement:
-      final unioned = _unionStringArrays(existing.rawValue, entry.rawValue);
+      final String? unioned = _unionStringArrays(
+        existing.rawValue,
+        entry.rawValue,
+      );
       if (unioned != null) {
         merged[entry.key] = PlistEntry(entry.key, unioned);
       }
@@ -419,11 +424,11 @@ void _mergeAdditionEntry({
 /// Unions two `<array>` string values, base entries first, or null when
 /// either value is not an array of plain strings (then the base wins).
 String? _unionStringArrays(String baseValue, String additionValue) {
-  final baseItems = _stringArrayItems(baseValue);
-  final additionItems = _stringArrayItems(additionValue);
+  final List<String>? baseItems = _stringArrayItems(baseValue);
+  final List<String>? additionItems = _stringArrayItems(additionValue);
   if (baseItems == null || additionItems == null) return null;
   final union = <String>[...baseItems];
-  for (final item in additionItems) {
+  for (final String item in additionItems) {
     if (!union.contains(item)) union.add(item);
   }
   return _renderStringArray(union);
@@ -457,12 +462,12 @@ String mergePlists({
   required MergeMode mode,
   Set<String> dropEmptyKeys = const {},
 }) {
-  final parsedBase = base == null
+  final List<PlistEntry> parsedBase = base == null
       ? <PlistEntry>[]
       : parsePlist(base.xml, base.path);
   // Dropped before the merge, not after: an addition legitimately declares
   // the key this removes, and removing it afterwards would take that with it.
-  final baseEntries = [
+  final List<PlistEntry> baseEntries = [
     for (final entry in parsedBase)
       if (!(dropEmptyKeys.contains(entry.key) &&
           _isEmptyString(entry.rawValue)))
@@ -506,11 +511,11 @@ void main(List<String> args) {
     }
   }
 
-  const modes = {
+  const Map<String, MergeMode> modes = {
     'strict-add': MergeMode.strictAdd,
     'supplement': MergeMode.supplement,
   };
-  final mode = modes[modeName];
+  final MergeMode? mode = modes[modeName];
   // Additions are no longer required: `--drop-empty` alone is a real job, and
   // it is the one the macOS Info.plist needs. Asking for neither is not.
   if (mode == null ||

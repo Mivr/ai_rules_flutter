@@ -63,7 +63,7 @@ int _bracketDelta(String line) {
   var inString = false;
   var escaped = false;
   for (var i = 0; i < line.length; i++) {
-    final char = line[i];
+    final String char = line[i];
     if (inString) {
       if (escaped) {
         escaped = false;
@@ -138,14 +138,14 @@ class SimDiscoveryFeed {
   /// `]` shapes there close the nested value, so they must neither end nor
   /// split the entry around them.
   void addLine(String line) {
-    final trimmed = line.trim();
+    final String trimmed = line.trim();
     if (trimmed.isEmpty) return;
     if (_depth > 0) {
       _depth += _bracketDelta(trimmed);
       if (_depth < 0) _depth = 0;
       return;
     }
-    final field = _fieldPattern.firstMatch(trimmed);
+    final RegExpMatch? field = _fieldPattern.firstMatch(trimmed);
     if (field != null) {
       _addField(field.group(1)!, field.group(2)!);
       return;
@@ -163,7 +163,7 @@ class SimDiscoveryFeed {
   void setPid(int? pid) {
     _launchPid = pid;
     _pidKnown = true;
-    for (final announcement in _held) {
+    for (final SimStreamAnnouncement announcement in _held) {
       _judge(announcement);
     }
     _held.clear();
@@ -180,7 +180,7 @@ class SimDiscoveryFeed {
   /// never the entry. Every decoded top-level field may complete the entry,
   /// so it is judged at once — see [_maybeJudgeEarly].
   void _addField(String key, String rawValue) {
-    var value = rawValue.trim();
+    String value = rawValue.trim();
     if (value.endsWith(',')) value = value.substring(0, value.length - 1);
     if (value == '{' || value == '[') {
       _depth++;
@@ -206,13 +206,17 @@ class SimDiscoveryFeed {
   /// completed — a pid-less announcement, or lines cut off mid-entry.
   void _maybeJudgeEarly() {
     if (_judgedCurrent) return;
-    final message = simLogEntryMessage(_current);
+    final String? message = simLogEntryMessage(_current);
     if (message == null) return;
-    final pid = simLogEntryPid(_current);
+    final int? pid = simLogEntryPid(_current);
     if (pid == null) return;
-    final uri = simLogAnnouncementUri(message);
+    final Uri? uri = simLogAnnouncementUri(message);
     if (uri == null) return;
-    final announcement = (pid: pid, uri: uri, message: message);
+    final ({String message, int pid, Uri uri}) announcement = (
+      pid: pid,
+      uri: uri,
+      message: message,
+    );
     if (!_pidKnown) {
       _held.add(announcement);
     } else {
@@ -234,13 +238,13 @@ class SimDiscoveryFeed {
       return;
     }
     if (_current.isEmpty) return;
-    final entry = _current;
+    final Map<String, Object?> entry = _current;
     _current = {};
-    final message = simLogEntryMessage(entry);
+    final String? message = simLogEntryMessage(entry);
     if (message == null) return;
-    final uri = simLogAnnouncementUri(message);
+    final Uri? uri = simLogAnnouncementUri(message);
     if (uri == null) return;
-    final announcement = (
+    final ({String message, int? pid, Uri uri}) announcement = (
       pid: simLogEntryPid(entry),
       uri: uri,
       message: message,
@@ -259,7 +263,7 @@ class SimDiscoveryFeed {
   /// keeps the old behaviour — the first announcement wins — because there
   /// is nothing to check against.
   void _judge(SimStreamAnnouncement announcement) {
-    final pid = announcement.pid;
+    final int? pid = announcement.pid;
     if (_launchPid == null || pid == _launchPid) {
       out.add(announcement.message);
       return;

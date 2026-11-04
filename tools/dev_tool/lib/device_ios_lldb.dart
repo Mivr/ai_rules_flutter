@@ -52,7 +52,7 @@ String _stripDeviceLogPrefix(String line) =>
 /// Only unambiguous markers are filtered; anything unrecognised is treated as
 /// app output, since losing a real line is worse than showing a noisy one.
 bool _isLldbCommandEcho(String line) {
-  final t = line.trim();
+  final String t = line.trim();
   if (t.isEmpty) return true;
   if (t.startsWith('(lldb)') ||
       t.startsWith('Breakpoint ') ||
@@ -93,10 +93,10 @@ extension IOSDeviceLldb on IOSDevice {
     required AppLogStream logs,
     required Future<void> consoleDone,
   }) async {
-    final lldb = await startHelper('lldb', []);
+    final Process lldb = await startHelper('lldb', []);
     lldbProcess = lldb;
     // lldb is a log source, not just a control channel — see [_startLldbOutput].
-    final lldbDone = _startLldbOutput(lldb, appLogs: logs);
+    final Future<void> lldbDone = _startLldbOutput(lldb, appLogs: logs);
 
     // Both sources are now known, so the stream's life can be settled in one
     // place. They are not ordered — devicectl exits when the app terminates,
@@ -104,13 +104,13 @@ extension IOSDeviceLldb on IOSDevice {
     // whichever ends first.
     logs.closeWhen([consoleDone, lldbDone]);
     await _lldbCommand(lldb, 'device select ${info.udid}');
-    final bpOutput = await _lldbCommand(
+    final String? bpOutput = await _lldbCommand(
       lldb,
       r"breakpoint set --func-regex '^NOTIFY_DEBUGGER_ABOUT_RX_PAGES$'",
       waitFor: RegExp(r'Breakpoint (\d+):'),
       returnMatch: true,
     );
-    final bpId =
+    final String bpId =
         RegExp(r'Breakpoint (\d+):').firstMatch(bpOutput ?? '')?.group(1) ??
         '1';
     // The script-input lines take [_lldbCommand]'s no-`waitFor` path: lldb
@@ -171,7 +171,7 @@ extension IOSDeviceLldb on IOSDevice {
   Future<void> _startLldbOutput(Process lldb, {AppLogStream? appLogs}) {
     final out = AppLogStream();
     lldbOutput = out;
-    final pump = pumpProcessLines(lldb, out, stderrIsError: true);
+    final AppLogPump pump = pumpProcessLines(lldb, out, stderrIsError: true);
     out.closeWhen([pump.done]);
 
     if (appLogs == null) return pump.done;
@@ -181,7 +181,7 @@ extension IOSDeviceLldb on IOSDevice {
     final forwarded = Completer<void>();
     out.lines.listen(
       (line) {
-        final stops = lldbStops;
+        final LldbStops? stops = lldbStops;
         if (stops != null && stops.lldb == lldb && stops.consume(line)) return;
         if (_isLldbCommandEcho(line.text)) return;
         appLogs.add(_stripDeviceLogPrefix(line.text), isError: line.isError);
@@ -200,7 +200,7 @@ extension IOSDeviceLldb on IOSDevice {
     bool returnMatch = false,
   }) async {
     throwIfLaunchAbandoned();
-    final output = lldbOutput;
+    final AppLogStream? output = lldbOutput;
     if (output == null) {
       throw StateError(
         'lldb output is not being drained; '
@@ -222,9 +222,9 @@ extension IOSDeviceLldb on IOSDevice {
     // replays everything buffered, so only lines from here on can answer: a
     // stop or a breakpoint id lldb printed for an earlier command matches the
     // same pattern and would otherwise be taken for this one's reply.
-    final from = output.nextCursor;
+    final int from = output.nextCursor;
     final completer = Completer<String>();
-    final sub = output.lines.listen(
+    final StreamSubscription<AppLogLine> sub = output.lines.listen(
       (line) {
         if (line.index < from) return;
         if (!completer.isCompleted && waitFor.hasMatch(line.text)) {
@@ -248,7 +248,7 @@ extension IOSDeviceLldb on IOSDevice {
 
     try {
       lldb.stdin.writeln(command);
-      final matched = await completer.future.timeout(
+      final String matched = await completer.future.timeout(
         const Duration(seconds: 30),
         onTimeout: () => throw StateError(
           'lldb did not answer "$command" within 30s (waiting for '
@@ -270,9 +270,9 @@ extension IOSDeviceLldb on IOSDevice {
   /// it would be dead code that made a broken URL match look recoverable.
   Future<int> findAppProcessId(String installationUrl) {
     return withTempDir('flutter_proc_', (jsonDir) async {
-      final jsonPath = p.join(jsonDir.path, 'processes.json');
+      final String jsonPath = p.join(jsonDir.path, 'processes.json');
 
-      final result = await runProcess('xcrun', [
+      final ProcessResult result = await runProcess('xcrun', [
         'devicectl',
         'device',
         'info',
@@ -307,13 +307,13 @@ extension IOSDeviceLldb on IOSDevice {
           '($e), so the launched app cannot be attached to.',
         );
       }
-      final processes = decoded is Map<String, dynamic>
+      final List<dynamic> processes = decoded is Map<String, dynamic>
           ? (decoded['result']?['runningProcesses'] as List?) ?? const []
           : const [];
 
       for (final proc in processes) {
         if (proc is! Map) continue;
-        final executable = proc['executable'] as String? ?? '';
+        final String executable = proc['executable'] as String? ?? '';
         final pid = proc['processIdentifier'] as int?;
         if (pid == null) continue;
         if (!executable.contains(installationUrl)) continue;
@@ -381,7 +381,7 @@ class LldbStops {
   /// ordinary output.
   bool consume(AppLogLine line) {
     if (line.index < from) return false;
-    final text = line.text;
+    final String text = line.text;
     if (_reported) {
       // The backtrace and detach that follow a reported stop are the report.
       if (text.trim().isEmpty || text.startsWith('(lldb)')) return true;
@@ -418,7 +418,7 @@ class LldbStops {
     if (stopping) return true;
 
     _reported = true;
-    final reason = _stop
+    final String reason = _stop
         .firstWhere(
           (l) => l.contains('stop reason = '),
           orElse: () => _stop.first,
@@ -432,7 +432,7 @@ class LldbStops {
       'device': deviceName,
       'reason': reason,
     });
-    for (final l in _stop) {
+    for (final String l in _stop) {
       appLogs.add(l, isError: true);
     }
     lldb.stdin

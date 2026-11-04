@@ -17,7 +17,7 @@ Uint8List machO(int fill) {
   bytes.setUint32(16, 1, Endian.little);
   bytes.setUint32(32, 0x1b, Endian.little);
   bytes.setUint32(36, 24, Endian.little);
-  final out = bytes.buffer.asUint8List();
+  final Uint8List out = bytes.buffer.asUint8List();
   out.fillRange(40, 56, fill);
   return out;
 }
@@ -167,7 +167,7 @@ void main() {
   /// mtime tick and without sleeping for the clock.
   void editSource() {
     final file = File('$workspace/native/mul.c');
-    final grownBy = file.lengthSync() + 1;
+    final int grownBy = file.lengthSync() + 1;
     file.writeAsStringSync('int mul() { return 2; } // ${'x' * grownBy}');
   }
 
@@ -176,8 +176,8 @@ void main() {
   /// exactly as it was. Only a content read sees this edit.
   void rewriteSameSizeAndRestoreMtime() {
     final file = File('$workspace/native/mul.c');
-    final modified = file.statSync().modified;
-    final bytes = file.readAsBytesSync();
+    final DateTime modified = file.statSync().modified;
+    final Uint8List bytes = file.readAsBytesSync();
     bytes[bytes.length - 1] = bytes.last + 1;
     file.writeAsBytesSync(bytes);
     file.setLastModifiedSync(modified);
@@ -192,7 +192,7 @@ void main() {
       // The same library in two configurations, as a platform rule's own
       // transition produces; only the second carries the bundled identity.
       builtFiles = [declare('top', 0x11), declare('top-ST-abc', 0xaa)];
-      final patcher = await arm();
+      final NativeHotPatcher? patcher = await arm();
       expect(patcher!.libraries, ['libmul.dylib']);
       expect(toolCalls, hasLength(1));
       expect(toolCalls.single, startsWith('tool top-ST-abc snapshot --state '));
@@ -269,7 +269,7 @@ void main() {
 
     test('with a source moved builds, patches and loads it', () async {
       editSource();
-      final outcome = await patcher.patchIfMoved();
+      final NativePatchOutcome outcome = await patcher.patchIfMoved();
       expect(
         outcome,
         isA<NativePatched>().having((o) => o.functions, 'functions', {
@@ -282,7 +282,7 @@ void main() {
         toolCalls.single,
         contains('--symbol flutter_hot_patch_apply=0x1f00'),
       );
-      final app = apps.single;
+      final FakeApp app = apps.single;
       expect(app.fakeDelivery.delivered, [
         '/out/libmul_patch.dylib -> /app/tmp/patch1.libmul.dylib',
       ]);
@@ -303,7 +303,7 @@ void main() {
       // that trusts the stamp answers "nothing moved" over changed bytes and
       // the edit never reaches the app — no patch and no error.
       rewriteSameSizeAndRestoreMtime();
-      final outcome = await patcher.patchIfMoved();
+      final NativePatchOutcome outcome = await patcher.patchIfMoved();
       expect(
         outcome,
         isA<NativePatched>().having((o) => o.functions, 'functions', {
@@ -373,7 +373,7 @@ void main() {
     });
 
     test('a library the reload\'s own rebuild moved is patched too', () async {
-      final outcome = await patcher.patchIfMoved(
+      final NativePatchOutcome outcome = await patcher.patchIfMoved(
         movedLibraries: {'libmul.dylib'},
       );
       expect(outcome, isA<NativePatched>());

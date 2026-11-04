@@ -101,7 +101,7 @@ void main() {
       final selection = TestSelection.fromEnvironment(const {
         'TESTBRIDGE_TEST_ONLY': 'widget',
       });
-      final selected = selection.select(_suite())!;
+      final Map<String, dynamic> selected = selection.select(_suite())!;
       expect(selected['entries'], hasLength(1));
       expect(_names(selected), ['a widget test is a case like any other']);
     });
@@ -110,7 +110,8 @@ void main() {
       final selection = TestSelection.fromEnvironment(const {
         'TESTBRIDGE_TEST_ONLY': 'setUpAll once',
       });
-      final outer = (selection.select(_suite())!['entries'] as List).single;
+      final dynamic outer =
+          (selection.select(_suite())!['entries'] as List).single;
       expect((outer as Map)['setUpAll'], isNotNull);
       expect(outer['tearDownAll'], isNotNull);
     });
@@ -126,7 +127,7 @@ void main() {
     test(
       'shards split the tests into contiguous shares, each exactly once',
       () {
-        final shards = [
+        final List<List<String>> shards = [
           for (var i = 0; i < 3; i++)
             _names(
               TestSelection.fromEnvironment({
@@ -152,7 +153,7 @@ void main() {
     });
 
     test('the filter applies before the shards split what is left', () {
-      final shards = [
+      final List<List<String>> shards = [
         for (var i = 0; i < 2; i++)
           _names(
             TestSelection.fromEnvironment({
@@ -432,7 +433,7 @@ void main() {
       final selection = TestSelection.fromEnvironment(const {
         'FLUTTER_TEST_TAGS': 'slow',
       });
-      final selected = selection.select(_taggedSuite())!;
+      final Map<String, dynamic> selected = selection.select(_taggedSuite())!;
       expect(_names(selected), [
         'slow case',
         'mixed group slow case',
@@ -445,7 +446,7 @@ void main() {
     });
 
     test('tags apply before the filter and the shards split what is left', () {
-      final shards = [
+      final List<List<String>> shards = [
         for (var i = 0; i < 2; i++)
           _names(
             TestSelection.fromEnvironment({
@@ -511,7 +512,7 @@ void main() {
   });
 
   group('junitXml', () {
-    final xml = junitXml([
+    final String xml = junitXml([
       TestCaseResult.passed(
         'adds <two> & "two"',
         const Duration(milliseconds: 1500),
@@ -583,8 +584,8 @@ void main() {
     };
 
     test('resolves every runfile the rule hands the runner', () {
-      final present = allPresent();
-      final files = resolveTestRunfiles(
+      final Set<String> present = allPresent();
+      final TestRunfiles files = resolveTestRunfiles(
         env(),
         rlocation,
         (path) => exists(present, path),
@@ -597,7 +598,7 @@ void main() {
     });
 
     test('a missing file fails naming the variable, the key and the path', () {
-      final present = allPresent()..remove('/runfiles/dill-key');
+      final Set<String> present = allPresent()..remove('/runfiles/dill-key');
       expect(
         () => resolveTestRunfiles(
           env(),
@@ -629,9 +630,9 @@ void main() {
         // Set but absent on disk: the rule handed the runner a key whose
         // file never arrived. (Unset optionals pass; the next tests cover
         // that.)
-        final full = env();
-        final key = full[variable]!;
-        final present = allPresent()..remove('/runfiles/$key');
+        final Map<String, String> full = env();
+        final String key = full[variable]!;
+        final Set<String> present = allPresent()..remove('/runfiles/$key');
         expect(
           () => resolveTestRunfiles(
             full,
@@ -656,7 +657,7 @@ void main() {
         '/runfiles/icu-key',
         '/runfiles/dill-key',
       };
-      final files = resolveTestRunfiles(
+      final TestRunfiles files = resolveTestRunfiles(
         env(baseDill: null, assets: null),
         rlocation,
         (path) => exists(present, path),
@@ -672,7 +673,7 @@ void main() {
         '/runfiles/dill-key',
         '/runfiles/assets-key',
       };
-      final files = resolveTestRunfiles(
+      final TestRunfiles files = resolveTestRunfiles(
         env(baseDill: ''),
         rlocation,
         (path) => exists(present, path),
@@ -681,8 +682,8 @@ void main() {
     });
 
     test('an unset required variable fails naming it', () {
-      final missing = env()..remove('FLUTTER_TEST_TESTER');
-      final present = allPresent();
+      final Map<String, String> missing = env()..remove('FLUTTER_TEST_TESTER');
+      final Set<String> present = allPresent();
       expect(
         () => resolveTestRunfiles(
           missing,

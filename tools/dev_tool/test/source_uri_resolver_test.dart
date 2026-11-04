@@ -12,7 +12,7 @@ void main() {
     test(
       'maps an app lib file (root package, empty libRoot) to package: URI',
       () {
-        final r = make([(name: 'app', libRoot: '')]);
+        final SourceUriResolver r = make([(name: 'app', libRoot: '')]);
         expect(r.uriFor('$ws/lib/main.dart'), 'package:app/main.dart');
         expect(
           r.uriFor('$ws/lib/sub/widget.dart'),
@@ -22,7 +22,7 @@ void main() {
     );
 
     test('maps a dependency package source under its libRoot', () {
-      final r = make([
+      final SourceUriResolver r = make([
         (name: 'app', libRoot: ''),
         (name: 'dep', libRoot: 'packages/dep'),
       ]);
@@ -35,7 +35,7 @@ void main() {
     test('longest libDir prefix wins for nested packages', () {
       // A package nested under another: the inner package must claim its files,
       // not the outer one.
-      final r = make([
+      final SourceUriResolver r = make([
         (name: 'outer', libRoot: ''),
         (name: 'inner', libRoot: 'lib/vendored'),
       ]);
@@ -48,14 +48,14 @@ void main() {
     });
 
     test('returns null for a path outside every source package lib dir', () {
-      final r = make([(name: 'app', libRoot: '')]);
+      final SourceUriResolver r = make([(name: 'app', libRoot: '')]);
       // Not under any lib/ (e.g. a tool script, or a pub dep in external/).
       expect(r.uriFor('$ws/tools/gen.dart'), isNull);
       expect(r.uriFor('/elsewhere/lib/x.dart'), isNull);
     });
 
     test('sourceLibDirs lists each package lib directory', () {
-      final r = make([
+      final SourceUriResolver r = make([
         (name: 'app', libRoot: ''),
         (name: 'dep', libRoot: 'packages/dep'),
       ]);
@@ -85,7 +85,7 @@ void main() {
       );
 
       test('maps each declared file to the URI the build declared', () {
-        final r = withAppSources();
+        final SourceUriResolver r = withAppSources();
         expect(
           r.uriFor('$ws/test_driver/app.dart'),
           'org-dartlang-app:///test_driver/app.dart',
@@ -123,7 +123,7 @@ void main() {
     });
 
     test('normalizes input paths (handles .. and trailing separators)', () {
-      final r = make([(name: 'app', libRoot: '')]);
+      final SourceUriResolver r = make([(name: 'app', libRoot: '')]);
       expect(
         r.uriFor('$ws/lib/foo/../main.dart'),
         'package:app/main.dart',

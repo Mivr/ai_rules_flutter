@@ -8,7 +8,7 @@ import '../version_update.dart';
 /// Writes [body] as `flutter/private/versions.bzl` under a temp dir, which is
 /// what [readCurrentSysrootChecksums] reads.
 Directory _writeVersionsBzl(String body) {
-  final dir = Directory.systemTemp.createTempSync('versions_bzl_');
+  final Directory dir = Directory.systemTemp.createTempSync('versions_bzl_');
   addTearDown(() => dir.deleteSync(recursive: true));
   File('${dir.path}/flutter/private/versions.bzl')
     ..createSync(recursive: true)
@@ -19,7 +19,7 @@ Directory _writeVersionsBzl(String body) {
 void main() {
   group('resolveVersionRequest', () {
     test('resolves the version and the Flutter repo default', () {
-      final request = resolveVersionRequest(['3.42.0']);
+      final VersionRequest request = resolveVersionRequest(['3.42.0']);
       expect(request.version, '3.42.0');
       expect(request.flutterRepo, '${request.workspaceDir}/references/flutter');
     });
@@ -27,8 +27,8 @@ void main() {
 
   group('renderVersionSnippet', () {
     test('renders the versions entry and every artifact section', () {
-      final sha = 'a' * 64;
-      final rendered = renderVersionSnippet(
+      final String sha = 'a' * 64;
+      final String rendered = renderVersionSnippet(
         version: '3.42.0',
         engineRev: 'enginerev',
         materialFontsUrl: 'fonts/url',
@@ -68,8 +68,8 @@ void main() {
         ),
       );
       // Every known artifact path gets exactly one line, in print order.
-      final lines = rendered.split('\n');
-      for (final artifact in artifacts) {
+      final List<String> lines = rendered.split('\n');
+      for (final String artifact in artifacts) {
         expect(
           lines.where((l) => l.contains('"$artifact"')),
           hasLength(1),
@@ -79,7 +79,7 @@ void main() {
     });
 
     test('an unhashed source tarball reads FIXME', () {
-      final rendered = renderVersionSnippet(
+      final String rendered = renderVersionSnippet(
         version: '3.42.0',
         engineRev: 'enginerev',
         materialFontsUrl: 'fonts/url',
@@ -107,7 +107,7 @@ void main() {
 
   group('readCurrentSysrootChecksums', () {
     test('reads both architectures from the versions.bzl block', () {
-      final dir = _writeVersionsBzl(
+      final Directory dir = _writeVersionsBzl(
         'LINUX_SYSROOT_CHECKSUMS = {\n'
         '    "amd64": "${'a' * 64}",\n'
         '    "arm64": "${'b' * 64}",\n'
@@ -120,7 +120,7 @@ void main() {
     });
 
     test('a missing block throws', () {
-      final dir = _writeVersionsBzl('FLUTTER_VERSIONS = {}\n');
+      final Directory dir = _writeVersionsBzl('FLUTTER_VERSIONS = {}\n');
       expect(
         () => readCurrentSysrootChecksums(dir.path),
         throwsFormatException,

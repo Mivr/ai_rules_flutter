@@ -94,27 +94,27 @@ class Workspace {
   /// fresh snapshot, keyed by the URI the frontend_server compiles each under.
   SourceVersions snapshot() {
     final versions = <String, Version>{};
-    for (final libDir in resolver.sourceLibDirs) {
+    for (final String libDir in resolver.sourceLibDirs) {
       final dir = Directory(libDir);
       if (!dir.existsSync()) continue;
-      for (final entity in dir.listSync(recursive: true)) {
+      for (final FileSystemEntity entity in dir.listSync(recursive: true)) {
         if (entity is! File || !entity.path.endsWith('.dart')) continue;
-        final uri = resolver.uriFor(entity.path);
+        final String? uri = resolver.uriFor(entity.path);
         if (uri == null) continue;
-        final stat = entity.statSync();
+        final FileStat stat = entity.statSync();
         versions[uri] = Version(mtime: stat.modified, size: stat.size);
       }
     }
     // The app's sources outside every package, and the generated files: both
     // stat'd one by one rather than found by a scan. They are the files the
     // build declared, and the directories they sit in can hold anything.
-    for (final entry in [
+    for (final MapEntry<String, String> entry in [
       ...resolver.appSourceFiles.entries,
       ...generatedFiles.entries,
     ]) {
       final f = File(entry.value);
       if (!f.existsSync()) continue;
-      final stat = f.statSync();
+      final FileStat stat = f.statSync();
       versions[entry.key] = Version(mtime: stat.modified, size: stat.size);
     }
     return SourceVersions(versions);

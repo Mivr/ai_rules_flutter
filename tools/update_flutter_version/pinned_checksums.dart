@@ -10,12 +10,12 @@ Map<String, String> pinnedArtifactChecksums(
   String versionsBzl,
   String version,
 ) {
-  final start = RegExp(
+  final RegExpMatch? start = RegExp(
     r'^ARTIFACT_CHECKSUMS\s*=\s*\{',
     multiLine: true,
   ).firstMatch(versionsBzl);
   if (start == null) return {};
-  final block = RegExp(
+  final RegExpMatch? block = RegExp(
     '^    "${RegExp.escape(version)}": \\{\n(.*?)^    \\},',
     multiLine: true,
     dotAll: true,
@@ -32,7 +32,7 @@ Map<String, String> pinnedArtifactChecksums(
 
 /// The `source_sha256` pinned for [version] in `FLUTTER_VERSIONS`, or null.
 String? pinnedSourceSha256(String versionsBzl, String version) {
-  final block = RegExp(
+  final RegExpMatch? block = RegExp(
     '^    "${RegExp.escape(version)}": struct\\((.*?)^    \\),',
     multiLine: true,
     dotAll: true,

@@ -26,10 +26,10 @@ AndroidPlatformLauncher androidLauncherFromEnv(
   Map<String, String> env,
   Runfiles r,
 ) {
-  final apkKey = env['FLUTTER_INTEGRATION_TEST_ANDROID_APK'];
-  final packageName = env['FLUTTER_INTEGRATION_TEST_ANDROID_PACKAGE'];
-  final emulatorKey = env['FLUTTER_INTEGRATION_TEST_ANDROID_EMULATOR'];
-  final adbKey = env['FLUTTER_INTEGRATION_TEST_ANDROID_ADB'];
+  final String? apkKey = env['FLUTTER_INTEGRATION_TEST_ANDROID_APK'];
+  final String? packageName = env['FLUTTER_INTEGRATION_TEST_ANDROID_PACKAGE'];
+  final String? emulatorKey = env['FLUTTER_INTEGRATION_TEST_ANDROID_EMULATOR'];
+  final String? adbKey = env['FLUTTER_INTEGRATION_TEST_ANDROID_ADB'];
   if (apkKey == null || apkKey.isEmpty) {
     throw const FormatException(
       'FLUTTER_INTEGRATION_TEST_ANDROID_APK must be set for platform="android".',
@@ -50,10 +50,10 @@ AndroidPlatformLauncher androidLauncherFromEnv(
       'FLUTTER_INTEGRATION_TEST_ANDROID_ADB must be set for platform="android".',
     );
   }
-  final apkPath = r.rlocation(apkKey);
-  final emulatorBinary = r.rlocation(emulatorKey);
-  final adbBinary = r.rlocation(adbKey);
-  final kvmPath = env['FLUTTER_INTEGRATION_TEST_KVM_PATH'] ?? '/dev/kvm';
+  final String apkPath = r.rlocation(apkKey);
+  final String emulatorBinary = r.rlocation(emulatorKey);
+  final String adbBinary = r.rlocation(adbKey);
+  final String kvmPath = env['FLUTTER_INTEGRATION_TEST_KVM_PATH'] ?? '/dev/kvm';
   return AndroidPlatformLauncher(
     apkPath: apkPath,
     packageName: packageName,
@@ -77,7 +77,7 @@ void verifyKvmAvailable(String kvmPath) {
     reader = File(kvmPath).openSync(mode: FileMode.read);
     writer = File(kvmPath).openSync(mode: FileMode.writeOnlyAppend);
   } on FileSystemException catch (e) {
-    final osCode = e.osError?.errorCode;
+    final int? osCode = e.osError?.errorCode;
     if (osCode == 2) {
       throw StateError(
         'KVM device not found at "$kvmPath". Android integration tests '
@@ -120,7 +120,12 @@ Map<String, String> buildAndroidRuntimeEnvironment({
     '$sysrootDir/lib/x86_64-linux-gnu',
   ];
 
-  final resolved = resolveForwarding(forwarding);
+  final ({
+    Map<String, String> declared,
+    String? fontconfigFile,
+    String timeZone,
+  })
+  resolved = resolveForwarding(forwarding);
 
   final result = <String, String>{
     'PATH': '$sdkRoot/platform-tools:$sdkRoot/emulator',
@@ -152,105 +157,101 @@ String buildAndroidAvdIniContent({
   required String avdDir,
   String avdName = 'test',
   int apiLevel = 35,
-}) {
-  return 'avd.ini.encoding=UTF-8\n'
-      'path=$avdDir\n'
-      'path.rel=avd/$avdName.avd\n'
-      'target=android-$apiLevel\n';
-}
+}) =>
+    'avd.ini.encoding=UTF-8\n'
+    'path=$avdDir\n'
+    'path.rel=avd/$avdName.avd\n'
+    'target=android-$apiLevel\n';
 
 /// Generates the `config.ini` for a fresh, headless `aosp_atd` `x86_64` AVD.
 String buildAndroidAvdConfigContent({
   String avdName = 'test',
   int apiLevel = 35,
-}) {
-  return 'AvdId=$avdName\n'
-      'PlayStore.enabled=false\n'
-      'abi.type=x86_64\n'
-      'avd.ini.displayname=$avdName\n'
-      'avd.ini.encoding=UTF-8\n'
-      'disk.dataPartition.size=4096M\n'
-      'fastboot.chosenSnapshotFile=\n'
-      'fastboot.forceChosenSnapshotBoot=no\n'
-      'fastboot.forceColdBoot=yes\n'
-      'fastboot.forceFastBoot=no\n'
-      'hw.accelerometer=yes\n'
-      'hw.arc=false\n'
-      'hw.audioInput=no\n'
-      'hw.audioOutput=no\n'
-      'hw.battery=yes\n'
-      'hw.camera.back=none\n'
-      'hw.camera.front=none\n'
-      'hw.cpu.arch=x86_64\n'
-      'hw.cpu.ncore=4\n'
-      'hw.dPad=no\n'
-      'hw.gps=no\n'
-      'hw.gpu.enabled=yes\n'
-      'hw.gpu.mode=swiftshader_indirect\n'
-      'hw.initialOrientation=Portrait\n'
-      'hw.keyboard=yes\n'
-      'hw.lcd.density=160\n'
-      'hw.lcd.height=800\n'
-      'hw.lcd.width=480\n'
-      'hw.mainKeys=no\n'
-      'hw.ramSize=2048\n'
-      'hw.sdCard=no\n'
-      'hw.sensors.orientation=yes\n'
-      'hw.sensors.proximity=yes\n'
-      'hw.trackBall=no\n'
-      'image.sysdir.1=system-images/android-$apiLevel/aosp_atd/x86_64/\n'
-      'runtime.network.latency=none\n'
-      'runtime.network.speed=full\n'
-      'showDeviceFrame=no\n'
-      'tag.display=AOSP ATD\n'
-      'tag.id=aosp_atd\n'
-      'vm.heapSize=256\n';
-}
+}) =>
+    'AvdId=$avdName\n'
+    'PlayStore.enabled=false\n'
+    'abi.type=x86_64\n'
+    'avd.ini.displayname=$avdName\n'
+    'avd.ini.encoding=UTF-8\n'
+    'disk.dataPartition.size=4096M\n'
+    'fastboot.chosenSnapshotFile=\n'
+    'fastboot.forceChosenSnapshotBoot=no\n'
+    'fastboot.forceColdBoot=yes\n'
+    'fastboot.forceFastBoot=no\n'
+    'hw.accelerometer=yes\n'
+    'hw.arc=false\n'
+    'hw.audioInput=no\n'
+    'hw.audioOutput=no\n'
+    'hw.battery=yes\n'
+    'hw.camera.back=none\n'
+    'hw.camera.front=none\n'
+    'hw.cpu.arch=x86_64\n'
+    'hw.cpu.ncore=4\n'
+    'hw.dPad=no\n'
+    'hw.gps=no\n'
+    'hw.gpu.enabled=yes\n'
+    'hw.gpu.mode=swiftshader_indirect\n'
+    'hw.initialOrientation=Portrait\n'
+    'hw.keyboard=yes\n'
+    'hw.lcd.density=160\n'
+    'hw.lcd.height=800\n'
+    'hw.lcd.width=480\n'
+    'hw.mainKeys=no\n'
+    'hw.ramSize=2048\n'
+    'hw.sdCard=no\n'
+    'hw.sensors.orientation=yes\n'
+    'hw.sensors.proximity=yes\n'
+    'hw.trackBall=no\n'
+    'image.sysdir.1=system-images/android-$apiLevel/aosp_atd/x86_64/\n'
+    'runtime.network.latency=none\n'
+    'runtime.network.speed=full\n'
+    'showDeviceFrame=no\n'
+    'tag.display=AOSP ATD\n'
+    'tag.id=aosp_atd\n'
+    'vm.heapSize=256\n';
 
 /// Builds the command-line flags passed to the hermetic Android `emulator`.
 List<String> buildAndroidEmulatorArguments({
   required String avdName,
   required int consolePort,
   required int adbPort,
-}) {
-  return <String>[
-    '-avd',
-    avdName,
-    '-no-window',
-    '-no-audio',
-    '-no-boot-anim',
-    '-no-snapshot',
-    '-no-snapshot-save',
-    '-no-snapshot-load',
-    '-wipe-data',
-    '-gpu',
-    'swiftshader_indirect',
-    '-accel',
-    'on',
-    '-ports',
-    '$consolePort,$adbPort',
-    '-no-metrics',
-  ];
-}
+}) => <String>[
+  '-avd',
+  avdName,
+  '-no-window',
+  '-no-audio',
+  '-no-boot-anim',
+  '-no-snapshot',
+  '-no-snapshot-save',
+  '-no-snapshot-load',
+  '-wipe-data',
+  '-gpu',
+  'swiftshader_indirect',
+  '-accel',
+  'on',
+  '-ports',
+  '$consolePort,$adbPort',
+  '-no-metrics',
+];
 
 /// Allocates a free `(consolePort, adbPort)` pair in `adb`'s local transport
 /// discovery range (`5554..5680`) and an ephemeral `adbServerPort`.
 Future<({int adbServerPort, int consolePort, int adbPort})>
 allocateAndroidEmulatorPorts() async {
-  final adbServerSocket = await ServerSocket.bind(
+  final ServerSocket adbServerSocket = await ServerSocket.bind(
     InternetAddress.loopbackIPv4,
     0,
   );
-  final adbServerPort = adbServerSocket.port;
+  final int adbServerPort = adbServerSocket.port;
   await adbServerSocket.close();
 
   const minConsolePort = 5554;
   const maxPairs = 64;
-  final startOffset = pid % maxPairs;
+  final int startOffset = pid % maxPairs;
   for (var i = 0; i < maxPairs; i++) {
-    final idx = (startOffset + i) % maxPairs;
-    final candidateConsole = minConsolePort + idx * 2;
-    final candidateAdb = candidateConsole + 1;
+    final int idx = (startOffset + i) % maxPairs;
+    final int candidateConsole = minConsolePort + idx * 2;
+    final int candidateAdb = candidateConsole + 1;
     if (candidateConsole == adbServerPort || candidateAdb == adbServerPort) {
       continue;
     }
@@ -348,12 +349,10 @@ class AndroidPlatformLauncher implements PlatformLauncher {
     Directory('${scratch.path}/.cache').createSync(recursive: true);
     Directory('${scratch.path}/xdg-runtime').createSync(recursive: true);
 
-    File('${avdHomeDir.path}/test.ini').writeAsStringSync(
-      buildAndroidAvdIniContent(avdDir: avdDir.path),
-    );
-    File('${avdDir.path}/config.ini').writeAsStringSync(
-      buildAndroidAvdConfigContent(),
-    );
+    File('${avdHomeDir.path}/test.ini')
+        .writeAsStringSync(buildAndroidAvdIniContent(avdDir: avdDir.path));
+    File('${avdDir.path}/config.ini')
+        .writeAsStringSync(buildAndroidAvdConfigContent());
     return (scratch: scratch, avdHomeDir: avdHomeDir);
   }
 
@@ -362,7 +361,7 @@ class AndroidPlatformLauncher implements PlatformLauncher {
     Map<String, String> runtimeEnv,
     int adbServerPort,
   ) async {
-    final startServerResult = await Process.run(
+    final ProcessResult startServerResult = await Process.run(
       adbBinary,
       const <String>['start-server'],
       environment: runtimeEnv,
@@ -384,7 +383,7 @@ class AndroidPlatformLauncher implements PlatformLauncher {
     Map<String, String> runtimeEnv,
     List<String> emulatorLogs,
   ) async {
-    final emulator = await Process.start(
+    final Process emulator = await Process.start(
       emulatorBinary,
       emulatorArgs,
       workingDirectory: scratchPath,
@@ -434,10 +433,11 @@ class AndroidPlatformLauncher implements PlatformLauncher {
           'before completing boot:\n${emulatorLogs.join("\n")}',
         );
       }
-      final propResult = await _runAdb(
-        serial,
-        const <String>['shell', 'getprop', 'sys.boot_completed'],
-      );
+      final ProcessResult propResult = await _runAdb(serial, const <String>[
+        'shell',
+        'getprop',
+        'sys.boot_completed',
+      ]);
       if (propResult.exitCode == 0 && '${propResult.stdout}'.trim() == '1') {
         booted = true;
         break;
@@ -456,10 +456,11 @@ class AndroidPlatformLauncher implements PlatformLauncher {
   /// app can dial `ws://127.0.0.1:<harnessPort>/…` (and the fallback 38427).
   Future<void> _forwardHarnessPorts(String serial, int harnessPort) async {
     for (final remotePort in <int>{harnessPort, 38427}) {
-      final rev = await _runAdb(
-        serial,
-        <String>['reverse', 'tcp:$remotePort', 'tcp:$harnessPort'],
-      );
+      final ProcessResult rev = await _runAdb(serial, <String>[
+        'reverse',
+        'tcp:$remotePort',
+        'tcp:$harnessPort',
+      ]);
       if (rev.exitCode != 0) {
         throw StateError(
           'adb reverse tcp:$remotePort tcp:$harnessPort failed on $serial:\n'
@@ -471,11 +472,11 @@ class AndroidPlatformLauncher implements PlatformLauncher {
 
   /// Installs the built integration test APK on the booted emulator.
   Future<void> _installApk(String serial) async {
-    final installResult = await _runAdb(
-      serial,
-      <String>['install', '-r', apkPath],
-      timeout: const Duration(seconds: 90),
-    );
+    final ProcessResult installResult = await _runAdb(serial, <String>[
+      'install',
+      '-r',
+      apkPath,
+    ], timeout: const Duration(seconds: 90));
     if (installResult.exitCode != 0) {
       throw StateError(
         'adb install -r "$apkPath" failed on $serial '
@@ -487,7 +488,7 @@ class AndroidPlatformLauncher implements PlatformLauncher {
 
   /// Aligns the device timezone with the test's TZ so the app observes it.
   Future<void> _configureDeviceTimezone(String serial) async {
-    final deviceTz = Platform.environment['TZ'] ?? 'UTC';
+    final String deviceTz = Platform.environment['TZ'] ?? 'UTC';
     await _runAdb(serial, <String>[
       'shell',
       'settings',
@@ -506,25 +507,18 @@ class AndroidPlatformLauncher implements PlatformLauncher {
 
   /// Launches the app's `FlutterActivity` with the harness URL as its
   /// entrypoint args. Returns the harness URL the app dials.
-  Future<String> _startFlutterActivity(
-    String serial,
-    String harnessUrl,
-  ) async {
-    final startResult = await _runAdb(
-      serial,
-      <String>[
-        'shell',
-        'am',
-        'start',
-        '-W',
-        '-n',
-        '$packageName/io.flutter.embedding.android.FlutterActivity',
-        '--esal',
-        'dart_entrypoint_args',
-        harnessUrl,
-      ],
-      timeout: const Duration(seconds: 45),
-    );
+  Future<String> _startFlutterActivity(String serial, String harnessUrl) async {
+    final ProcessResult startResult = await _runAdb(serial, <String>[
+      'shell',
+      'am',
+      'start',
+      '-W',
+      '-n',
+      '$packageName/io.flutter.embedding.android.FlutterActivity',
+      '--esal',
+      'dart_entrypoint_args',
+      harnessUrl,
+    ], timeout: const Duration(seconds: 45));
     final startOutput = '${startResult.stdout}\n${startResult.stderr}';
     if (startResult.exitCode != 0 ||
         startOutput.contains('Error:') ||
@@ -543,7 +537,7 @@ class AndroidPlatformLauncher implements PlatformLauncher {
     String serial,
     Map<String, String> runtimeEnv,
   ) async {
-    final logcat = await Process.start(
+    final Process logcat = await Process.start(
       adbBinary,
       <String>[
         '-s',
@@ -585,19 +579,21 @@ class AndroidPlatformLauncher implements PlatformLauncher {
     }
 
     // emulatorBinary is at <repoRoot>/sdk/emulator/emulator.
-    final sdkRoot = File(emulatorBinary).parent.parent.path;
-    final repoRoot = Directory(sdkRoot).parent.path;
+    final String sdkRoot = File(emulatorBinary).parent.parent.path;
+    final String repoRoot = Directory(sdkRoot).parent.path;
     final sysrootDir = '$repoRoot/sysroot';
 
-    final prepared = _prepareAndroidScratch();
-    final scratch = prepared.scratch;
+    final ({Directory avdHomeDir, Directory scratch}) prepared =
+        _prepareAndroidScratch();
+    final Directory scratch = prepared.scratch;
 
-    final ports = await allocateAndroidEmulatorPorts();
-    final declaredEnv = decodeDeclaredEnv(
+    final ({int adbPort, int adbServerPort, int consolePort}) ports =
+        await allocateAndroidEmulatorPorts();
+    final Map<String, String> declaredEnv = decodeDeclaredEnv(
       Platform.environment['FLUTTER_INTEGRATION_TEST_DECLARED_ENV'],
     );
-    final tz = Platform.environment['TZ'];
-    final runtimeEnv = buildAndroidRuntimeEnvironment(
+    final String? tz = Platform.environment['TZ'];
+    final Map<String, String> runtimeEnv = buildAndroidRuntimeEnvironment(
       sdkRoot: sdkRoot,
       sysrootDir: sysrootDir,
       scratchDir: scratch.path,
@@ -609,7 +605,7 @@ class AndroidPlatformLauncher implements PlatformLauncher {
 
     await _startAdbServer(runtimeEnv, ports.adbServerPort);
 
-    final emulatorArgs = buildAndroidEmulatorArguments(
+    final List<String> emulatorArgs = buildAndroidEmulatorArguments(
       avdName: 'test',
       consolePort: ports.consolePort,
       adbPort: ports.adbPort,
@@ -623,7 +619,7 @@ class AndroidPlatformLauncher implements PlatformLauncher {
     );
 
     final serial = 'emulator-${ports.consolePort}';
-    final bootDeadline = DateTime.now().add(bootTimeout);
+    final DateTime bootDeadline = DateTime.now().add(bootTimeout);
     await _guardDiscovery(
       serial,
       () => _bootAndLaunch(serial, binding, emulatorLogs, bootDeadline),
@@ -686,12 +682,13 @@ class AndroidPlatformLauncher implements PlatformLauncher {
       if (_disposing || checkInFlight) return;
       checkInFlight = true;
       try {
-        final crashResult = await _runAdb(
-          serial,
-          const <String>['logcat', '-b', 'crash', '-d'],
-          timeout: const Duration(seconds: 5),
-        );
-        final crashOut = '${crashResult.stdout}'.trim();
+        final ProcessResult crashResult = await _runAdb(serial, const <String>[
+          'logcat',
+          '-b',
+          'crash',
+          '-d',
+        ], timeout: const Duration(seconds: 5));
+        final String crashOut = '${crashResult.stdout}'.trim();
         if (crashOut.isNotEmpty &&
             (crashOut.contains(packageName) ||
                 crashOut.contains('FATAL EXCEPTION') ||
@@ -704,12 +701,12 @@ class AndroidPlatformLauncher implements PlatformLauncher {
           return;
         }
 
-        final pidResult = await _runAdb(
-          serial,
-          <String>['shell', 'pidof', packageName],
-          timeout: const Duration(seconds: 5),
-        );
-        final pidOut = '${pidResult.stdout}'.trim();
+        final ProcessResult pidResult = await _runAdb(serial, <String>[
+          'shell',
+          'pidof',
+          packageName,
+        ], timeout: const Duration(seconds: 5));
+        final String pidOut = '${pidResult.stdout}'.trim();
         if (pidResult.exitCode == 0 && pidOut.isNotEmpty) {
           sawRunningPid = true;
         } else if (sawRunningPid ||
@@ -734,19 +731,23 @@ class AndroidPlatformLauncher implements PlatformLauncher {
     List<String> args, {
     Duration timeout = const Duration(seconds: 20),
   }) async {
-    final env = _runtimeEnv;
+    final Map<String, String>? env = _runtimeEnv;
     if (env == null) {
       throw StateError('Android runtime environment not initialized.');
     }
-    final proc = await Process.start(
+    final Process proc = await Process.start(
       adbBinary,
       <String>['-s', serial, ...args],
       environment: env,
       includeParentEnvironment: false,
     );
-    final stdoutFuture = proc.stdout.transform(utf8.decoder).join();
-    final stderrFuture = proc.stderr.transform(utf8.decoder).join();
-    final exitCode = await proc.exitCode.timeout(
+    final Future<String> stdoutFuture = proc.stdout
+        .transform(utf8.decoder)
+        .join();
+    final Future<String> stderrFuture = proc.stderr
+        .transform(utf8.decoder)
+        .join();
+    final int exitCode = await proc.exitCode.timeout(
       timeout,
       onTimeout: () {
         proc.kill(ProcessSignal.sigkill);
@@ -773,7 +774,7 @@ class AndroidPlatformLauncher implements PlatformLauncher {
     _watchdogTimer?.cancel();
     _watchdogTimer = null;
 
-    final logcat = _logcatProcess;
+    final Process? logcat = _logcatProcess;
     _logcatProcess = null;
     if (logcat != null) {
       logcat.kill(ProcessSignal.sigkill);
@@ -785,7 +786,7 @@ class AndroidPlatformLauncher implements PlatformLauncher {
       );
     }
 
-    final emulator = _emulatorProcess;
+    final Process? emulator = _emulatorProcess;
     _emulatorProcess = null;
     if (emulator != null) {
       emulator.kill(ProcessSignal.sigkill);
@@ -797,14 +798,14 @@ class AndroidPlatformLauncher implements PlatformLauncher {
       );
     }
 
-    final env = _runtimeEnv;
+    final Map<String, String>? env = _runtimeEnv;
     _runtimeEnv = null;
     if (env != null && File(adbBinary).existsSync()) {
       // Best-effort: a stuck daemon only costs the next run seconds of
       // `adb start-server`; a teardown failure here must never mask the
       // integration result the `finally` block is unwinding.
       await teardownQuietly(() async {
-        final killProc = await Process.start(
+        final Process killProc = await Process.start(
           adbBinary,
           const <String>['kill-server'],
           environment: env,
@@ -820,7 +821,7 @@ class AndroidPlatformLauncher implements PlatformLauncher {
       });
     }
 
-    final dir = _scratchDir;
+    final Directory? dir = _scratchDir;
     _scratchDir = null;
     if (dir != null && dir.existsSync()) {
       cleanupQuietly(() => dir.deleteSync(recursive: true));

@@ -1,6 +1,8 @@
 @Tags(['e2e'])
 library;
 
+import 'dart:io';
+
 import 'package:test/test.dart';
 
 import 'dev_tool_e2e_harness.dart';
@@ -34,23 +36,23 @@ void main() {
     test(
       'filesystem watcher reloads app + dependency source edits',
       () async {
-        final ws = await editableWorkspace('codegen');
-        final appMain = ws.file('lib/main.dart');
-        final depSource = ws.file('dep_lib/lib/catalog.dart');
-        final appMainOrig = appMain.readAsStringSync();
-        final depSourceOrig = depSource.readAsStringSync();
+        final EditableWorkspace ws = await editableWorkspace('codegen');
+        final File appMain = ws.file('lib/main.dart');
+        final File depSource = ws.file('dep_lib/lib/catalog.dart');
+        final String appMainOrig = appMain.readAsStringSync();
+        final String depSourceOrig = depSource.readAsStringSync();
 
-        final dt = await startDevTool(
+        final DevToolProcess dt = await startDevTool(
           workspace: ws.root,
           target: ':app_macos',
           device: 'macos',
           watch: true,
         );
-        final start = await dt.waitForEvent(
+        final Map<String, dynamic> start = await dt.waitForEvent(
           'app.start',
           timeout: const Duration(seconds: 240),
         );
-        final appId = start['params']?['appId'] as String? ?? dt.appId!;
+        final String appId = start['params']?['appId'] as String? ?? dt.appId!;
         await dt.waitForHttpControl(timeout: const Duration(seconds: 60));
 
         // No settle before the first edit. The watcher is started before the app
@@ -63,7 +65,7 @@ void main() {
           isTrue,
           reason: 'fixture marker present',
         );
-        final afterApp = dt.events.length;
+        final int afterApp = dt.events.length;
         appMain.writeAsStringSync(
           appMainOrig.replaceFirst("'fields:", "'WATCHED:"),
         );
@@ -78,7 +80,7 @@ void main() {
         // path the resolver cannot key is dropped before the pipeline sees it,
         // so no reload happens at all and `package:dep_lib/...` never appears
         // among what was recompiled.
-        final afterDep = dt.events.length;
+        final int afterDep = dt.events.length;
         depSource.writeAsStringSync(
           depSourceOrig.replaceFirst(
             "catalogFields.join(',')",
@@ -115,16 +117,16 @@ void main() {
     test(
       'an edit made the instant app.started arrives still reloads',
       () async {
-        final ws = await editableWorkspace('hello_world');
-        final appMain = ws.file('lib/main.dart');
-        final original = appMain.readAsStringSync();
+        final EditableWorkspace ws = await editableWorkspace('hello_world');
+        final File appMain = ws.file('lib/main.dart');
+        final String original = appMain.readAsStringSync();
         expect(
           original.contains("'count: \$_counter'"),
           isTrue,
           reason: 'fixture marker present',
         );
 
-        final dt = await startDevTool(
+        final DevToolProcess dt = await startDevTool(
           workspace: ws.root,
           target: ':hello_world_macos',
           device: 'macos',
@@ -135,7 +137,7 @@ void main() {
           timeout: const Duration(seconds: 240),
         );
         // No settle, deliberately.
-        final cursor = dt.events.length;
+        final int cursor = dt.events.length;
         appMain.writeAsStringSync(
           original.replaceFirst("'count: \$_counter'", "'watched: \$_counter'"),
         );
@@ -151,15 +153,15 @@ void main() {
         );
 
         await dt.waitForHttpControl(timeout: const Duration(seconds: 120));
-        final appId = dt.appId;
+        final String? appId = dt.appId;
         expect(appId, isNotNull);
-        final label = await dt.httpCommand('app.waitFor', {
+        final Map<String, dynamic> label = await dt.httpCommand('app.waitFor', {
           'appId': appId!,
           'key': 'agent_test_label',
           'timeoutMs': '10000',
         });
         expect(label['error'], isNull);
-        final text = await dt.httpCommand('app.getText', {
+        final Map<String, dynamic> text = await dt.httpCommand('app.getText', {
           'appId': appId,
           'key': 'agent_test_label',
         });
@@ -188,20 +190,22 @@ Future<void> _awaitReload(
   required int after,
   required String recompiled,
 }) async {
-  final event = await dt.waitForEventWhere(
+  final Map<String, dynamic> event = await dt.waitForEventWhere(
     'app.reloadResult',
     after: after,
     what: 'a watcher-driven reload that recompiled $recompiled',
     timeout: const Duration(seconds: 180),
     test: (params) {
-      final result = (params['result'] as Map?) ?? const {};
+      final Map<dynamic, dynamic> result =
+          (params['result'] as Map?) ?? const {};
       if (result['succeeded'] != true) return true;
-      final files = result['filesRecompiled'];
+      final dynamic files = result['filesRecompiled'];
       return files is List &&
           files.any((f) => f is String && f.startsWith(recompiled));
     },
   );
-  final result = (event['params']!['result'] as Map).cast<String, dynamic>();
+  final Map<String, dynamic> result = (event['params']!['result'] as Map)
+      .cast<String, dynamic>();
   expect(
     result['succeeded'],
     isTrue,
@@ -227,7 +231,7 @@ Future<void> _expectRendered(
   String appId,
   String text,
 ) async {
-  final found = await dt.httpCommand('app.waitFor', {
+  final Map<String, dynamic> found = await dt.httpCommand('app.waitFor', {
     'appId': appId,
     'text': text,
     'timeoutMs': '15000',

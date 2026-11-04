@@ -24,8 +24,8 @@ import 'package:test/test.dart';
 /// Read a file named by [variable] from the test environment, failing when the
 /// data dependency or its runfiles path is missing.
 String _readData(String variable) {
-  final path = Platform.environment[variable];
-  final runfiles = Platform.environment['TEST_SRCDIR'];
+  final String? path = Platform.environment[variable];
+  final String? runfiles = Platform.environment['TEST_SRCDIR'];
   if (path == null || path.isEmpty || runfiles == null) {
     throw StateError(
       '$variable or TEST_SRCDIR is unset; the test target needs that data file',
@@ -46,7 +46,7 @@ void main() {
   });
 
   test('every regular dependency has a checked-in floor', () {
-    final declared = {
+    final Set<String> declared = {
       for (final dep in deps)
         if (!dep.dev) dep.name,
     };
@@ -65,7 +65,7 @@ void main() {
   test('every declared version is its floor, not a current release', () {
     for (final dep in deps) {
       if (dep.dev) continue;
-      final floor = floors[dep.name]!.floor;
+      final String floor = floors[dep.name]!.floor;
       expect(
         dep.version,
         equals(floor),
@@ -79,7 +79,7 @@ void main() {
   test('every current release above a floor has a root-only override', () {
     for (final dep in deps) {
       if (dep.dev) continue;
-      final entry = floors[dep.name]!;
+      final Floor entry = floors[dep.name]!;
       expect(
         pinned[dep.name],
         entry.current == entry.floor ? isNull : equals(entry.current),
@@ -93,7 +93,7 @@ void main() {
   });
 
   test('the table resolves each floor or names the module that lifts it', () {
-    for (final entry in floors.entries) {
+    for (final MapEntry<String, Floor> entry in floors.entries) {
       if (entry.value.liftedBy.isEmpty) {
         expect(
           entry.value.resolved,
@@ -101,7 +101,7 @@ void main() {
           reason: '${entry.key} has no lift, so it must resolve at its floor',
         );
       } else {
-        for (final module in entry.value.liftedBy) {
+        for (final String module in entry.value.liftedBy) {
           expect(
             floors.containsKey(module),
             isTrue,

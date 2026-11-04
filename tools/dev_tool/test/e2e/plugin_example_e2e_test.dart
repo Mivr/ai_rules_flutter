@@ -17,6 +17,7 @@ library;
 
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:test/test.dart';
 import 'package:vm_service/vm_service.dart';
@@ -50,7 +51,7 @@ Future<void> _runScreenshotTest({
   Duration buildTimeout = const Duration(seconds: 120),
   Duration launchTimeout = const Duration(seconds: 120),
 }) async {
-  final dt = await startDevTool(
+  final DevToolProcess dt = await startDevTool(
     workspace: workspace,
     target: target,
     device: device,
@@ -58,7 +59,7 @@ Future<void> _runScreenshotTest({
 
   await dt.waitForEvent('app.start', timeout: buildTimeout);
   await dt.waitForEvent('app.started', timeout: launchTimeout);
-  final http = await dt.waitForHttpControl();
+  final HttpControlInfo http = await dt.waitForHttpControl();
   expect(http, isNotNull);
 
   // Wait for first frame.
@@ -74,7 +75,7 @@ Future<void> _runScreenshotTest({
     reason: 'screenshot file should exist at $outputPath',
   );
 
-  final bytes = file.readAsBytesSync();
+  final Uint8List bytes = file.readAsBytesSync();
   expect(
     bytes.sublist(0, 4),
     _pngHeader,
@@ -98,7 +99,7 @@ void main() {
     'macOS e2e',
     () {
       test('plugin_macos renders non-blank frame', () async {
-        final ws = await editableWorkspace('plugin_example');
+        final EditableWorkspace ws = await editableWorkspace('plugin_example');
         await _runScreenshotTest(
           workspace: ws.root,
           target: ':plugin_macos',
@@ -110,7 +111,9 @@ void main() {
       test(
         'Dart plugin registration survives hot restart',
         () async {
-          final ws = await editableWorkspace('plugin_example');
+          final EditableWorkspace ws = await editableWorkspace(
+            'plugin_example',
+          );
           // The Dart plugin registrant is invoked by the engine's pre-main hook
           // on every root-isolate launch, including the restarted (dev-tool-
           // compiled) dill. A build-generated wrapper main cannot do that — the
@@ -124,16 +127,16 @@ void main() {
           // spinner `runApp`'s first frame built. That failed this test once
           // in four runs of a suite someone was working alongside. The line
           // is printed by the same code with the same values, frames or not.
-          final dt = await startDevTool(
+          final DevToolProcess dt = await startDevTool(
             workspace: ws.root,
             target: ':plugin_macos',
             device: 'macos',
           );
           await dt.waitForEvent('app.started');
           await dt.waitForHttpControl();
-          final appId = dt.appId!;
+          final String appId = dt.appId!;
 
-          final before = _documentsPath(
+          final String before = _documentsPath(
             await _pluginResultsAfter(dt, 0, tag: 'at launch'),
           );
           expect(
@@ -142,8 +145,8 @@ void main() {
             reason: 'path_provider must resolve at launch',
           );
 
-          final printed = _pluginResultLines(dt).length;
-          final restart = await dt.sendCommand(
+          final int printed = _pluginResultLines(dt).length;
+          final Map<String, dynamic> restart = await dt.sendCommand(
             9,
             'app.restart',
             params: {
@@ -162,7 +165,7 @@ void main() {
             reason: 'app.restart: $restart',
           );
 
-          final after = _documentsPath(
+          final String after = _documentsPath(
             await _pluginResultsAfter(dt, printed, tag: 'after restart'),
           );
           expect(
@@ -180,16 +183,18 @@ void main() {
         'a restart into a hidden window says why nothing changed, and shows '
         'once the window is back',
         () async {
-          final ws = await editableWorkspace('plugin_example');
-          final dt = await startDevTool(
+          final EditableWorkspace ws = await editableWorkspace(
+            'plugin_example',
+          );
+          final DevToolProcess dt = await startDevTool(
             workspace: ws.root,
             target: ':plugin_macos',
             device: 'macos',
           );
           await dt.waitForEvent('app.started');
           await dt.waitForHttpControl();
-          final appId = dt.appId!;
-          final app = await _MacApp.launchedBy(dt);
+          final String appId = dt.appId!;
+          final _MacApp app = await _MacApp.launchedBy(dt);
           addTearDown(app.dispose);
 
           Future<Map<String, dynamic>> documentsPathRead() =>
@@ -204,13 +209,14 @@ void main() {
           await app.bringToFront();
           await app.hide();
 
-          final restart = await dt.sendCommand(
+          final Map<String, dynamic> restart = await dt.sendCommand(
             9,
             'app.restart',
             params: {'appId': appId},
             timeout: e2eColdBuildTimeout,
           );
-          final result = restart['result'] as Map<String, dynamic>? ?? {};
+          final Map<String, dynamic> result =
+              restart['result'] as Map<String, dynamic>? ?? {};
           expect(result['succeeded'], isTrue, reason: '$restart');
           // Present only when the app said it could not draw. An app that
           // said nothing would have waited out the ten seconds and been
@@ -234,7 +240,7 @@ void main() {
           Map<String, dynamic> read = const {};
           while (shown.elapsed < const Duration(seconds: 10)) {
             read = await documentsPathRead();
-            final text = read['result']?['text'] as String? ?? '';
+            final String text = read['result']?['text'] as String? ?? '';
             if (text.startsWith('/')) break;
             await Future<void>.delayed(const Duration(milliseconds: 200));
           }
@@ -263,21 +269,23 @@ void main() {
       test(
         'app output reaches the client after launch',
         () async {
-          final ws = await editableWorkspace('plugin_example');
+          final EditableWorkspace ws = await editableWorkspace(
+            'plugin_example',
+          );
           // Launched through the Bazel-built binary rather than `dart run`,
           // because this test asserts stdout carries nothing but protocol
           // envelopes. `dart run` prepends its own SDK chatter ("Running build
           // hooks...") to stdout before `main()` is ever reached, which would
           // fail the assertion for a reason that has nothing to do with the dev
           // tool. The compiled binary is also what users actually run.
-          final dt = await startDevTool(
+          final DevToolProcess dt = await startDevTool(
             workspace: ws.root,
             target: ':plugin_macos',
             device: 'macos',
           );
           await dt.waitForEvent('app.started');
 
-          final summary = await dt.waitForAppLog(
+          final String summary = await dt.waitForAppLog(
             'plugin_example_results',
             timeout: const Duration(seconds: 90),
           );
@@ -302,8 +310,10 @@ void main() {
       test(
         'app output is readable from the /logs control endpoint',
         () async {
-          final ws = await editableWorkspace('plugin_example');
-          final dt = await startDevTool(
+          final EditableWorkspace ws = await editableWorkspace(
+            'plugin_example',
+          );
+          final DevToolProcess dt = await startDevTool(
             workspace: ws.root,
             target: ':plugin_macos',
             device: 'macos',
@@ -314,12 +324,12 @@ void main() {
             'plugin_example_results',
             timeout: const Duration(seconds: 90),
           );
-          final appId = dt.appId!;
+          final String appId = dt.appId!;
 
           // Default (no cursor) tails, which is what a tool arriving mid-run
           // wants.
-          final tail = await dt.httpLogs(appId);
-          final tailTexts = [
+          final Map<String, dynamic> tail = await dt.httpLogs(appId);
+          final List<String> tailTexts = [
             for (final l in tail['lines'] as List) (l as Map)['text'] as String,
           ];
           expect(
@@ -331,15 +341,15 @@ void main() {
           );
 
           // Resuming from nextCursor must not re-serve what was just read.
-          final resumed = await dt.httpLogs(
+          final Map<String, dynamic> resumed = await dt.httpLogs(
             appId,
             since: tail['nextCursor'] as int,
           );
-          final resumedIndices = [
+          final List<int> resumedIndices = [
             for (final l in resumed['lines'] as List)
               (l as Map)['index'] as int,
           ];
-          final tailIndices = [
+          final List<int> tailIndices = [
             for (final l in tail['lines'] as List) (l as Map)['index'] as int,
           ];
           expect(
@@ -377,7 +387,7 @@ void main() {
         // The in-tree workspace, not an editable copy: this test reads the
         // app's output and changes nothing, and a copy would pay a cold
         // toolchain fetch into a fresh output base for no benefit.
-        final dt = await startDevTool(
+        final DevToolProcess dt = await startDevTool(
           workspace: e2eWorkspace('plugin_example'),
           target: ':plugin_web',
           device: 'chrome',
@@ -387,7 +397,7 @@ void main() {
           timeout: const Duration(minutes: 6),
         );
 
-        final summary = await dt.waitForAppLog(
+        final String summary = await dt.waitForAppLog(
           'plugin_example_results',
           timeout: const Duration(minutes: 2),
         );
@@ -432,7 +442,7 @@ void main() {
     'iOS Simulator e2e',
     () {
       test('plugin_ios renders non-blank frame', () async {
-        final ws = await editableWorkspace('plugin_example');
+        final EditableWorkspace ws = await editableWorkspace('plugin_example');
         await _runScreenshotTest(
           workspace: ws.root,
           target: ':plugin_ios',
@@ -446,7 +456,9 @@ void main() {
       test(
         'hot restart re-registers the iOS plugin set, not the host\'s',
         () async {
-          final ws = await editableWorkspace('plugin_example');
+          final EditableWorkspace ws = await editableWorkspace(
+            'plugin_example',
+          );
           // The dev tool reads its plugin registrant from a bare build of the
           // flutter_application, which resolves in the HOST configuration —
           // macOS here. The registrant is platform-filtered, so a resident
@@ -458,14 +470,14 @@ void main() {
           // discriminator because its Dart registrant class differs between
           // iOS and macOS, while e.g. path_provider shares one Foundation
           // class across both and stays green either way.
-          final appMain = ws.file('lib/main.dart');
-          final appMainOrig = appMain.readAsStringSync();
+          final File appMain = ws.file('lib/main.dart');
+          final String appMainOrig = appMain.readAsStringSync();
           expect(
             appMainOrig,
             contains("'v1 \${r.launchOk}'"),
             reason: 'fixture marker present in plugin_example main.dart',
           );
-          final dt = await startDevTool(
+          final DevToolProcess dt = await startDevTool(
             workspace: ws.root,
             target: ':plugin_ios',
             device: 'ios-simulator',
@@ -482,7 +494,7 @@ void main() {
             timeout: const Duration(minutes: 10),
           );
           await dt.waitForHttpControl();
-          final appId = dt.appId!;
+          final String appId = dt.appId!;
 
           Future<String> launchOk(String tag, {required String marker}) async {
             Map<String, dynamic> resp = const {};
@@ -494,7 +506,7 @@ void main() {
               // Retry until the async FutureBuilder resolves AND the text
               // carries the expected marker — right after a restart the old
               // isolate's rendering can still answer the first getText.
-              final text = resp['result']?['text'] as String? ?? '';
+              final String text = resp['result']?['text'] as String? ?? '';
               if (resp['error'] == null && text.startsWith(marker)) return text;
               await Future<void>.delayed(const Duration(milliseconds: 500));
             }
@@ -522,7 +534,7 @@ void main() {
               "'v2 \${r.launchOk}'",
             ),
           );
-          final restart = await dt.sendCommand(
+          final Map<String, dynamic> restart = await dt.sendCommand(
             9,
             'app.restart',
             params: {
@@ -556,11 +568,13 @@ void main() {
       test(
         'every plugin answers on the simulator',
         () async {
-          final ws = await editableWorkspace('plugin_example');
+          final EditableWorkspace ws = await editableWorkspace(
+            'plugin_example',
+          );
           // The app's single diagnostic line, read off the machine protocol
           // like the web group does: a screenshot would prove the app drew,
           // not that every plugin call behind the line resolved.
-          final dt = await startDevTool(
+          final DevToolProcess dt = await startDevTool(
             workspace: ws.root,
             target: ':plugin_ios',
             device: 'ios-simulator',
@@ -574,7 +588,7 @@ void main() {
             timeout: const Duration(minutes: 10),
           );
 
-          final line = await dt.waitForAppLog(
+          final String line = await dt.waitForAppLog(
             'plugin_example_results',
             timeout: const Duration(minutes: 4),
           );
@@ -660,8 +674,10 @@ void main() {
       test(
         'is served as executable JavaScript by the binary users run',
         () async {
-          final ws = await editableWorkspace('plugin_example');
-          final dt = await startDevTool(
+          final EditableWorkspace ws = await editableWorkspace(
+            'plugin_example',
+          );
+          final DevToolProcess dt = await startDevTool(
             workspace: ws.root,
             target: ':plugin_web',
             device: 'chrome',
@@ -673,7 +689,7 @@ void main() {
 
           // Base URL from the structured log rather than parsed out of prose.
           Uri? serverUri;
-          for (final line in dt.stderrLines) {
+          for (final String line in dt.stderrLines) {
             try {
               final obj = json.decode(line) as Map<String, dynamic>;
               if (obj['message'] == 'frontend_server_ready') {
@@ -693,10 +709,10 @@ void main() {
 
           final client = HttpClient();
           try {
-            final request = await client.getUrl(
+            final HttpClientRequest request = await client.getUrl(
               serverUri!.replace(path: '/dwds/src/injected/client.js'),
             );
-            final response = await request.close();
+            final HttpClientResponse response = await request.close();
             await response.drain<void>();
 
             expect(
@@ -729,7 +745,7 @@ void main() {
         EditableWorkspace ws,
         List<String> extraArgs,
       ) async {
-        final dt = await startDevTool(
+        final DevToolProcess dt = await startDevTool(
           workspace: ws.root,
           target: ':plugin_web',
           device: 'chrome',
@@ -764,7 +780,9 @@ void main() {
       test(
         'web plugins register in DDC dev mode',
         () async {
-          final ws = await editableWorkspace('plugin_example');
+          final EditableWorkspace ws = await editableWorkspace(
+            'plugin_example',
+          );
           expectPluginsRegistered(await pluginResults(ws, const []));
         },
         timeout: const Timeout(Duration(minutes: 6)),
@@ -776,7 +794,9 @@ void main() {
       test(
         'web plugins register in WASM dev mode',
         () async {
-          final ws = await editableWorkspace('plugin_example');
+          final EditableWorkspace ws = await editableWorkspace(
+            'plugin_example',
+          );
           expectPluginsRegistered(await pluginResults(ws, const ['--wasm']));
         },
         timeout: const Timeout(Duration(minutes: 6)),
@@ -795,7 +815,7 @@ void main() {
   // test body. Two calls could disagree — a phone unplugged between them —
   // and the one that decided whether to skip would not be the one that
   // decided what to run against.
-  final android = AndroidDeviceProbe.detect();
+  final AndroidDeviceProbe android = AndroidDeviceProbe.detect();
   group(
     'Android e2e',
     () {
@@ -808,7 +828,7 @@ void main() {
       // dev tool's preflight aborts the launch (that fail-fast diagnostic
       // is unit-tested in device_test.dart).
       test('plugin_android renders non-blank frame', () async {
-        final ws = await editableWorkspace('plugin_example');
+        final EditableWorkspace ws = await editableWorkspace('plugin_example');
         // dev_tool's -d flag takes an Android serial, not a generic
         // 'android' token. `$ANDROID_SERIAL` picks between an emulator and a
         // connected phone when both are attached; the probe honors it and
@@ -863,7 +883,7 @@ Future<String> _pluginResultsAfter(
 }) async {
   final waited = Stopwatch()..start();
   while (waited.elapsed < const Duration(seconds: 90)) {
-    final lines = _pluginResultLines(dt);
+    final List<String> lines = _pluginResultLines(dt);
     if (lines.length > seen) return lines[seen];
     await Future<void>.delayed(const Duration(milliseconds: 200));
   }
@@ -899,13 +919,13 @@ class _MacApp {
 
   /// The app [dt] started: the dev tool launches it as a direct child.
   static Future<_MacApp> launchedBy(DevToolProcess dt) async {
-    final found = await Process.run('pgrep', [
+    final ProcessResult found = await Process.run('pgrep', [
       '-P',
       '${dt.process.pid}',
       '-f',
       r'\.app/Contents/MacOS/',
     ]);
-    final pids = '${found.stdout}'.trim().split('\n')
+    final List<String> pids = '${found.stdout}'.trim().split('\n')
       ..removeWhere((l) => l.isEmpty);
     if (pids.length != 1) {
       fail(
@@ -913,17 +933,19 @@ class _MacApp {
         'child, found ${pids.isEmpty ? 'none' : pids}',
       );
     }
-    final pid = int.parse(pids.single);
-    final path = await _jxa(pid, 'app.bundleURL.path.js');
-    final debugPort = await dt.waitForEvent('app.debugPort');
-    final vm = await vmServiceConnectUri(
+    final int pid = int.parse(pids.single);
+    final String path = await _jxa(pid, 'app.bundleURL.path.js');
+    final Map<String, dynamic> debugPort = await dt.waitForEvent(
+      'app.debugPort',
+    );
+    final VmService vm = await vmServiceConnectUri(
       debugPort['params']?['wsUri'] as String,
     );
     return _MacApp._(pid, path, vm);
   }
 
   Future<void> bringToFront() async {
-    final opened = await Process.run('open', [bundlePath]);
+    final ProcessResult opened = await Process.run('open', [bundlePath]);
     if (opened.exitCode != 0) fail('open $bundlePath: ${opened.stderr}');
     await _untilLifecycle('resumed');
   }
@@ -939,9 +961,9 @@ class _MacApp {
     final waited = Stopwatch()..start();
     Object? last;
     while (waited.elapsed < const Duration(seconds: 10)) {
-      final vm = await _vm.getVM();
-      final main = vm.isolates!.firstWhere((i) => i.name == 'main');
-      final reply = await _vm.callServiceExtension(
+      final VM vm = await _vm.getVM();
+      final IsolateRef main = vm.isolates!.firstWhere((i) => i.name == 'main');
+      final Response reply = await _vm.callServiceExtension(
         'ext.rules_flutter.renderState',
         isolateId: main.id,
       );
@@ -953,7 +975,7 @@ class _MacApp {
   }
 
   static Future<String> _jxa(int pid, String expression) async {
-    final result = await runBounded('osascript', [
+    final BoundedRun result = await runBounded('osascript', [
       '-l',
       'JavaScript',
       '-e',

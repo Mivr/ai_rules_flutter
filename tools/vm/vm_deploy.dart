@@ -10,7 +10,7 @@ library;
 /// Returns null when no `Active` session for the auto-logon user is listed,
 /// which is the state the deploy step reports and exits on.
 String? parseWindowsSessionId(String queryOutput) {
-  final sessionMatch = RegExp(
+  final RegExpMatch? sessionMatch = RegExp(
     r'testuser\s+\S*\s+(\d+)\s+Active',
   ).firstMatch(queryOutput);
   return sessionMatch?.group(1);

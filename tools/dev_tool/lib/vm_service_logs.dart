@@ -30,7 +30,7 @@ import 'package:vm_service/vm_service.dart';
 /// gets by stripping in `processVmServiceMessage` and re-printing the message
 /// whole.
 String? decodeVmServiceLogEvent(Event event) {
-  final bytes = event.bytes;
+  final String? bytes = event.bytes;
   if (bytes == null) return null;
   return utf8.decode(base64.decode(bytes), allowMalformed: true);
 }
@@ -58,9 +58,9 @@ Future<VmServiceLogForwarder> forwardVmServiceLogs(
   AppLogStream logs,
 ) async {
   void emit(Event event, {required bool isError}) {
-    final text = decodeVmServiceLogEvent(event);
+    final String? text = decodeVmServiceLogEvent(event);
     if (text == null) return;
-    for (final line in const LineSplitter().convert(text)) {
+    for (final String line in const LineSplitter().convert(text)) {
       logs.add(line, isError: isError);
     }
   }
@@ -70,7 +70,7 @@ Future<VmServiceLogForwarder> forwardVmServiceLogs(
     service.onStderrEvent.listen((e) => emit(e, isError: true)),
   ];
 
-  for (final stream in [EventStreams.kStdout, EventStreams.kStderr]) {
+  for (final String stream in [EventStreams.kStdout, EventStreams.kStderr]) {
     try {
       await service.streamListen(stream);
     } on RPCError catch (e) {

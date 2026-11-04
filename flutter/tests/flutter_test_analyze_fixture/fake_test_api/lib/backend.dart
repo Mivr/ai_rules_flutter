@@ -46,10 +46,10 @@ class RemoteListener {
 
     incoming.stream.listen((dynamic raw) async {
       if (raw is! List || raw.length < 2) return;
-      final channelId = (raw[0] as num).toInt();
-      final payload = raw[1];
+      final int channelId = (raw[0] as num).toInt();
+      final dynamic payload = raw[1];
       if (payload is! Map) return;
-      final msg = payload.cast<String, dynamic>();
+      final Map<String, dynamic> msg = payload.cast<String, dynamic>();
 
       if (channelId == 0) {
         final type = msg['type'] as String?;
@@ -58,7 +58,7 @@ class RemoteListener {
           Object? mainError;
           StackTrace? mainStack;
           try {
-            final runMain = getMain();
+            final Future<void> Function() runMain = getMain();
             await runMain();
           } on Object catch (e, st) {
             mainError = e;
@@ -70,7 +70,7 @@ class RemoteListener {
             const testChannelId = 2;
             handlers[testChannelId + 1] = (Map<String, dynamic> cmd) async {
               if (cmd['command'] != 'run') return;
-              final replyId = (cmd['channel'] as num).toInt() + 1;
+              final int replyId = (cmd['channel'] as num).toInt() + 1;
               if (mainError != null) {
                 outgoing.add(<dynamic>[
                   replyId,
@@ -105,7 +105,7 @@ class RemoteListener {
               nextChannelId += 2;
               handlers[testChannelId + 1] = (Map<String, dynamic> cmd) async {
                 if (cmd['command'] != 'run') return;
-                final replyId = (cmd['channel'] as num).toInt() + 1;
+                final int replyId = (cmd['channel'] as num).toInt() + 1;
                 try {
                   await registered.body();
                 } on Object catch (e, st) {
@@ -153,10 +153,7 @@ class RemoteListener {
         return;
       }
 
-      final handler = handlers[channelId];
-      if (handler != null) {
-        await handler(msg);
-      }
+      await handlers[channelId]?.call(msg);
     });
 
     return FakeTestChannel(outgoing.stream, incoming.sink);

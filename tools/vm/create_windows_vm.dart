@@ -116,10 +116,10 @@ New-Item -Path C:\startup_complete.txt -Value "STARTUP_COMPLETE" -Force
 ''';
 
 Future<void> main(List<String> args) async {
-  final vmName = args.isNotEmpty ? args[0] : _defaultName;
-  final project = await getProject();
-  final zone = await getZone();
-  final dartVersion = await hermeticDartVersion();
+  final String vmName = args.isNotEmpty ? args[0] : _defaultName;
+  final String project = await getProject();
+  final String zone = await getZone();
+  final String dartVersion = await hermeticDartVersion();
 
   print('Creating Windows VM: $vmName');
   print('  Project: $project');
@@ -133,7 +133,7 @@ Future<void> main(List<String> args) async {
   print('');
 
   // Write scripts to temp files to avoid shell escaping issues.
-  final tmpDir = Directory.systemTemp.createTempSync('win_vm_');
+  final Directory tmpDir = Directory.systemTemp.createTempSync('win_vm_');
   final tmpSpecialize = File('${tmpDir.path}/specialize.ps1');
   final tmpStartup = File('${tmpDir.path}/startup.ps1');
   tmpSpecialize.writeAsStringSync(_specializeScript);

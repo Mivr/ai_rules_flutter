@@ -42,10 +42,10 @@ class _ZipCentralEntry {
 }
 
 Map<String, _ZipCentralEntry> _readZip(File zipFile) {
-  final bytes = zipFile.readAsBytesSync();
+  final Uint8List bytes = zipFile.readAsBytesSync();
   final bd = ByteData.sublistView(bytes);
   var eocdOffset = -1;
-  for (var i = bytes.length - 22; i >= 0; i--) {
+  for (int i = bytes.length - 22; i >= 0; i--) {
     if (bd.getUint32(i, Endian.little) == 0x06054b50) {
       eocdOffset = i;
       break;
@@ -54,26 +54,34 @@ Map<String, _ZipCentralEntry> _readZip(File zipFile) {
   if (eocdOffset < 0) {
     throw StateError('Missing EOCD record in ${zipFile.path}');
   }
-  final entryCount = bd.getUint16(eocdOffset + 10, Endian.little);
-  final cdOffset = bd.getUint32(eocdOffset + 16, Endian.little);
+  final int entryCount = bd.getUint16(eocdOffset + 10, Endian.little);
+  final int cdOffset = bd.getUint32(eocdOffset + 16, Endian.little);
   final entries = <String, _ZipCentralEntry>{};
   var pos = cdOffset;
   for (var i = 0; i < entryCount; i++) {
     expect(bd.getUint32(pos, Endian.little), equals(0x02014b50));
-    final compressionMethod = bd.getUint16(pos + 10, Endian.little);
-    final compressedSize = bd.getUint32(pos + 20, Endian.little);
-    final uncompressedSize = bd.getUint32(pos + 24, Endian.little);
-    final nameLen = bd.getUint16(pos + 28, Endian.little);
-    final extraLen = bd.getUint16(pos + 30, Endian.little);
-    final commentLen = bd.getUint16(pos + 32, Endian.little);
-    final externalAttr = bd.getUint32(pos + 38, Endian.little);
-    final localHeaderOffset = bd.getUint32(pos + 42, Endian.little);
-    final name = utf8.decode(bytes.sublist(pos + 46, pos + 46 + nameLen));
+    final int compressionMethod = bd.getUint16(pos + 10, Endian.little);
+    final int compressedSize = bd.getUint32(pos + 20, Endian.little);
+    final int uncompressedSize = bd.getUint32(pos + 24, Endian.little);
+    final int nameLen = bd.getUint16(pos + 28, Endian.little);
+    final int extraLen = bd.getUint16(pos + 30, Endian.little);
+    final int commentLen = bd.getUint16(pos + 32, Endian.little);
+    final int externalAttr = bd.getUint32(pos + 38, Endian.little);
+    final int localHeaderOffset = bd.getUint32(pos + 42, Endian.little);
+    final String name = utf8.decode(
+      bytes.sublist(pos + 46, pos + 46 + nameLen),
+    );
 
     expect(bd.getUint32(localHeaderOffset, Endian.little), equals(0x04034b50));
-    final localNameLen = bd.getUint16(localHeaderOffset + 26, Endian.little);
-    final localExtraLen = bd.getUint16(localHeaderOffset + 28, Endian.little);
-    final dataStart = localHeaderOffset + 30 + localNameLen + localExtraLen;
+    final int localNameLen = bd.getUint16(
+      localHeaderOffset + 26,
+      Endian.little,
+    );
+    final int localExtraLen = bd.getUint16(
+      localHeaderOffset + 28,
+      Endian.little,
+    );
+    final int dataStart = localHeaderOffset + 30 + localNameLen + localExtraLen;
     final rawData = Uint8List.sublistView(
       bytes,
       dataStart,
@@ -101,15 +109,15 @@ void _expectMachoDylib(
 }) {
   expect(bytes.length, greaterThanOrEqualTo(32));
   final bd = ByteData.sublistView(bytes);
-  final magicBE = bd.getUint32(0, Endian.big);
+  final int magicBE = bd.getUint32(0, Endian.big);
   final slices = <Uint8List>[];
   if (magicBE == 0xcafebabe) {
-    final nfat = bd.getUint32(4, Endian.big);
+    final int nfat = bd.getUint32(4, Endian.big);
     expect(nfat, greaterThanOrEqualTo(2));
     for (var i = 0; i < nfat; i++) {
-      final entryOff = 8 + i * 20;
-      final offset = bd.getUint32(entryOff + 8, Endian.big);
-      final size = bd.getUint32(entryOff + 12, Endian.big);
+      final int entryOff = 8 + i * 20;
+      final int offset = bd.getUint32(entryOff + 8, Endian.big);
+      final int size = bd.getUint32(entryOff + 12, Endian.big);
       slices.add(Uint8List.sublistView(bytes, offset, offset + size));
     }
   } else {
@@ -123,16 +131,16 @@ void _expectMachoDylib(
     expect(sbd.getUint32(0, Endian.little), equals(0xfeedfacf));
     // MH_DYLIB (6)
     expect(sbd.getUint32(12, Endian.little), equals(6));
-    final ncmds = sbd.getUint32(16, Endian.little);
+    final int ncmds = sbd.getUint32(16, Endian.little);
     var cmdOffset = 32;
     String? installName;
     for (var i = 0; i < ncmds; i++) {
-      final cmd = sbd.getUint32(cmdOffset, Endian.little);
-      final cmdsize = sbd.getUint32(cmdOffset + 4, Endian.little);
+      final int cmd = sbd.getUint32(cmdOffset, Endian.little);
+      final int cmdsize = sbd.getUint32(cmdOffset + 4, Endian.little);
       if (cmd == 0x0d) {
         // LC_ID_DYLIB
-        final strOffset = sbd.getUint32(cmdOffset + 8, Endian.little);
-        var end = cmdOffset + strOffset;
+        final int strOffset = sbd.getUint32(cmdOffset + 8, Endian.little);
+        int end = cmdOffset + strOffset;
         while (end < cmdOffset + cmdsize && slice[end] != 0) {
           end++;
         }
@@ -162,7 +170,7 @@ void _expectPlistPackageTypeFmwk(String plistContent, String binaryName) {
 }
 
 Directory _findRunfilesRoot() {
-  final testSrcDir = Platform.environment['TEST_SRCDIR'];
+  final String? testSrcDir = Platform.environment['TEST_SRCDIR'];
   if (testSrcDir != null && Directory(testSrcDir).existsSync()) {
     return Directory(testSrcDir);
   }
@@ -170,14 +178,14 @@ Directory _findRunfilesRoot() {
 }
 
 List<FileSystemEntity> _findRunfileEntities(bool Function(String path) match) {
-  final root = _findRunfilesRoot();
+  final Directory root = _findRunfilesRoot();
   final results = <String, FileSystemEntity>{};
   final visitedDirs = <String>{};
   void walk(Directory dir) {
-    final realDir = dir.resolveSymbolicLinksSync();
+    final String realDir = dir.resolveSymbolicLinksSync();
     if (!visitedDirs.add(realDir)) return;
-    for (final entity in dir.listSync(followLinks: false)) {
-      final path = entity.path.replaceAll('\\', '/');
+    for (final FileSystemEntity entity in dir.listSync(followLinks: false)) {
+      final String path = entity.path.replaceAll('\\', '/');
       if (match(path)) {
         results[path] = entity;
       }
@@ -198,8 +206,8 @@ void _assertFrameworkDirLayout(
   required String binaryName,
   bool expectFat = false,
 }) {
-  final path = fwDir.path;
-  final rootEntries = fwDir
+  final String path = fwDir.path;
+  final Set<String> rootEntries = fwDir
       .listSync(followLinks: false)
       .map((e) => e.uri.pathSegments.where((s) => s.isNotEmpty).last)
       .toSet();
@@ -242,7 +250,7 @@ void _assertFrameworkDirLayout(
     FileSystemEntity.typeSync(versionedBinaryPath, followLinks: false),
     equals(FileSystemEntityType.file),
   );
-  final binaryBytes = File(versionedBinaryPath).readAsBytesSync();
+  final Uint8List binaryBytes = File(versionedBinaryPath).readAsBytesSync();
   _expectMachoDylib(
     binaryBytes,
     expectedInstallName: '@rpath/$binaryName.framework/Versions/A/$binaryName',
@@ -256,7 +264,7 @@ void _assertFrameworkDirLayout(
     FileSystemEntity.typeSync(versionedPlistPath, followLinks: false),
     equals(FileSystemEntityType.file),
   );
-  final plistContent = File(versionedPlistPath).readAsStringSync();
+  final String plistContent = File(versionedPlistPath).readAsStringSync();
   _expectPlistPackageTypeFmwk(plistContent, binaryName);
   expect(
     File('$path/Resources/Info.plist').readAsStringSync(),
@@ -265,7 +273,7 @@ void _assertFrameworkDirLayout(
 }
 
 String _testTmpDir() {
-  final tmp = Platform.environment['TEST_TMPDIR'];
+  final String? tmp = Platform.environment['TEST_TMPDIR'];
   if (tmp != null && Directory(tmp).existsSync()) {
     return tmp;
   }
@@ -282,17 +290,17 @@ String _testTmpDir() {
 /// exactly as every other consumer (codesign input staging, the .app
 /// assembler, the xtool packager) does, then asserts real `test -L` links.
 void _extractZip(Map<String, _ZipCentralEntry> entries, Directory destDir) {
-  final names = entries.keys.toList()..sort();
+  final List<String> names = entries.keys.toList()..sort();
   for (final name in names) {
-    final entry = entries[name]!;
-    final segments = name.split('/');
+    final _ZipCentralEntry entry = entries[name]!;
+    final List<String> segments = name.split('/');
     if (segments.any((s) => s.isEmpty || s == '.' || s == '..')) {
       throw StateError('Refusing to extract unsafe zip entry: $name');
     }
     final destPath = '${destDir.path}/$name';
     if (entry.isSymlink) {
-      final target = utf8.decode(entry.decodeBytes());
-      final targetSegments = target.split('/');
+      final String target = utf8.decode(entry.decodeBytes());
+      final List<String> targetSegments = target.split('/');
       if (target.isEmpty ||
           target.startsWith('/') ||
           targetSegments.any((s) => s == '..')) {
@@ -322,7 +330,9 @@ void _assertFrameworkZipLayout(
   bool forbidDirectoryEntries = false,
 }) {
   if (forbidDirectoryEntries) {
-    final dirEntries = entries.keys.where((k) => k.endsWith('/')).toList();
+    final List<String> dirEntries = entries.keys
+        .where((k) => k.endsWith('/'))
+        .toList();
     expect(
       dirEntries,
       isEmpty,
@@ -330,12 +340,12 @@ void _assertFrameworkZipLayout(
     );
   }
 
-  final currentEntry = entries['${prefix}Versions/Current'];
+  final _ZipCentralEntry? currentEntry = entries['${prefix}Versions/Current'];
   expect(currentEntry, isNotNull, reason: 'Missing ${prefix}Versions/Current');
   expect(currentEntry!.isSymlink, isTrue);
   expect(utf8.decode(currentEntry.decodeBytes()), equals('A'));
 
-  final binaryLinkEntry = entries['$prefix$binaryName'];
+  final _ZipCentralEntry? binaryLinkEntry = entries['$prefix$binaryName'];
   expect(binaryLinkEntry, isNotNull, reason: 'Missing $prefix$binaryName');
   expect(binaryLinkEntry!.isSymlink, isTrue);
   expect(
@@ -343,7 +353,7 @@ void _assertFrameworkZipLayout(
     equals('Versions/Current/$binaryName'),
   );
 
-  final resourcesLinkEntry = entries['${prefix}Resources'];
+  final _ZipCentralEntry? resourcesLinkEntry = entries['${prefix}Resources'];
   expect(resourcesLinkEntry, isNotNull, reason: 'Missing ${prefix}Resources');
   expect(resourcesLinkEntry!.isSymlink, isTrue);
   expect(
@@ -351,7 +361,8 @@ void _assertFrameworkZipLayout(
     equals('Versions/Current/Resources'),
   );
 
-  final binaryEntry = entries['${prefix}Versions/A/$binaryName'];
+  final _ZipCentralEntry? binaryEntry =
+      entries['${prefix}Versions/A/$binaryName'];
   expect(
     binaryEntry,
     isNotNull,
@@ -365,7 +376,8 @@ void _assertFrameworkZipLayout(
     expectFat: expectFat,
   );
 
-  final plistEntry = entries['${prefix}Versions/A/Resources/Info.plist'];
+  final _ZipCentralEntry? plistEntry =
+      entries['${prefix}Versions/A/Resources/Info.plist'];
   expect(
     plistEntry,
     isNotNull,
@@ -389,14 +401,15 @@ void main() {
   };
 
   group('macOS App.framework directory and AppleBundleInfo archive layout', () {
-    for (final entry in expectedFrameworkTargets.entries) {
-      final targetName = entry.key;
-      final expectFat = entry.value;
+    for (final MapEntry<String, bool> entry
+        in expectedFrameworkTargets.entries) {
+      final String targetName = entry.key;
+      final bool expectFat = entry.value;
 
       test(
         '$targetName produces versioned App.framework directory and zip',
         () {
-          final fwZips = _findRunfileEntities(
+          final List<FileSystemEntity> fwZips = _findRunfileEntities(
             (p) => p.endsWith('/$targetName/App.framework.zip'),
           );
           expect(
@@ -404,7 +417,9 @@ void main() {
             isNotEmpty,
             reason: 'Expected $targetName/App.framework.zip in runfiles',
           );
-          final zipEntries = _readZip(File(fwZips.first.path));
+          final Map<String, _ZipCentralEntry> zipEntries = _readZip(
+            File(fwZips.first.path),
+          );
           _assertFrameworkZipLayout(
             zipEntries,
             prefix: 'App.framework/',
@@ -428,11 +443,13 @@ void main() {
 
   group('macOS .app.zip bundle framework layout', () {
     test('e2e_macos_app.app.zip embeds versioned App.framework and FlutterMacOS.framework', () {
-      final appZips = _findRunfileEntities(
+      final List<FileSystemEntity> appZips = _findRunfileEntities(
         (p) => p.endsWith('/macos_test_e2e_macos_app.app.zip'),
       );
       expect(appZips, isNotEmpty);
-      final entries = _readZip(File(appZips.first.path));
+      final Map<String, _ZipCentralEntry> entries = _readZip(
+        File(appZips.first.path),
+      );
 
       _assertFrameworkZipLayout(
         entries,
@@ -448,10 +465,10 @@ void main() {
     });
 
     test('xtool macOS bundles built under different staging roots with certificate_password_env=TMPDIR are byte-identical', () {
-      final zipAEntities = _findRunfileEntities(
+      final List<FileSystemEntity> zipAEntities = _findRunfileEntities(
         (p) => p.endsWith('/macos_test_fake_xtool_macos_bundle.app.zip'),
       );
-      final zipBEntities = _findRunfileEntities(
+      final List<FileSystemEntity> zipBEntities = _findRunfileEntities(
         (p) => p.endsWith('/macos_test_fake_xtool_macos_bundle_alt.app.zip'),
       );
       expect(zipAEntities, isNotEmpty);
@@ -459,12 +476,12 @@ void main() {
 
       final fileA = File(zipAEntities.first.path);
       final fileB = File(zipBEntities.first.path);
-      final bytesA = fileA.readAsBytesSync();
-      final bytesB = fileB.readAsBytesSync();
+      final Uint8List bytesA = fileA.readAsBytesSync();
+      final Uint8List bytesB = fileB.readAsBytesSync();
       expect(bytesA, equals(bytesB));
 
-      final entriesA = _readZip(fileA);
-      final codeRes =
+      final Map<String, _ZipCentralEntry> entriesA = _readZip(fileA);
+      final _ZipCentralEntry? codeRes =
           entriesA['Runner.app/Contents/_CodeSignature/CodeResources'];
       expect(codeRes, isNotNull);
       expect(

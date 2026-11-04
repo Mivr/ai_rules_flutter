@@ -27,26 +27,30 @@ void main() {
 
   group('every failure carries an error', () {
     test('a compile failure', () {
-      final report = reload(outcome: const ReloadCompileFailed('boom'));
+      final CommandReport report = reload(
+        outcome: const ReloadCompileFailed('boom'),
+      );
       expect(report.succeeded, isFalse);
       expect(toWire(report)['error'], 'boom');
     });
 
     test('a compile failure with no diagnostics still says so', () {
       // Nothing to quote is not nothing to report.
-      final report = reload(outcome: const ReloadCompileFailed(''));
+      final CommandReport report = reload(
+        outcome: const ReloadCompileFailed(''),
+      );
       expect(toWire(report)['error'], isNotNull);
     });
 
     test('a withheld increment names the library and the contract', () {
-      final report = reload(
+      final CommandReport report = reload(
         nativeLibs: const NativeBindingsMoved(
           libs: ['bazel-out/bin/libbridge.dylib'],
           contracts: ['bazel-out/bin/codegen.ir'],
         ),
       );
       expect(report.succeeded, isFalse);
-      final wire = toWire(report);
+      final Map<String, dynamic> wire = toWire(report);
       // The library, as a field: a driver must not have to parse English to find
       // out what went stale, any more than it does for a relaunch.
       expect(wire['nativeLibsStale'], ['bazel-out/bin/libbridge.dylib']);
@@ -85,10 +89,10 @@ void main() {
     });
 
     test('an undeclared library says how to make it knowable', () {
-      final report = reload(
+      final CommandReport report = reload(
         nativeLibs: const NativeLibsUnverifiable(['libsqlite3.dylib']),
       );
-      final wire = toWire(report);
+      final Map<String, dynamic> wire = toWire(report);
       expect(wire['succeeded'], isFalse);
       expect(wire['runningCode'], 'unchanged');
       expect(wire['nativeLibsStale'], ['libsqlite3.dylib']);
@@ -102,14 +106,14 @@ void main() {
       // An asset-only edit headlines "successful" and lets the asset clause
       // finish the sentence. A withheld increment must not: the refusal is the
       // news, and `assetsChanged` rewrites `message` last.
-      final report = reload(
+      final CommandReport report = reload(
         nativeLibs: const NativeBindingsMoved(
           libs: ['libbridge.dylib'],
           contracts: ['codegen.ir'],
         ),
         assets: const AssetOutcome(changed: {'assets/logo.png'}),
       );
-      final wire = toWire(report);
+      final Map<String, dynamic> wire = toWire(report);
       expect(wire['message'], contains('withheld'));
       expect(wire['message'], contains('libbridge.dylib'));
       expect(wire['succeeded'], isFalse);
@@ -119,7 +123,7 @@ void main() {
       // The case that is *not* a failure: the bindings held, so the edit is live
       // — and the machine code behind it is not. `succeeded` is what tells a
       // driver this apart from the refusals, which carry the same field.
-      final report = reload(
+      final CommandReport report = reload(
         outcome: const ReloadApplied(
           filesRecompiled: {'package:app/main.dart'},
           isEmpty: false,
@@ -127,7 +131,7 @@ void main() {
         ),
         nativeLibs: const NativeCodeStale(['libbridge.dylib']),
       );
-      final wire = toWire(report);
+      final Map<String, dynamic> wire = toWire(report);
       expect(wire['succeeded'], isTrue);
       expect(wire['runningCode'], 'updated');
       expect(wire['nativeLibsStale'], ['libbridge.dylib']);
@@ -159,7 +163,7 @@ void main() {
           notShown: {'app-a': 'the app is not drawing, because the OS says so'},
         ),
       );
-      final wire = toWire(report);
+      final Map<String, dynamic> wire = toWire(report);
       expect(wire['succeeded'], isTrue);
       expect(wire['runningCode'], 'updated');
       expect(wire['notShown'], {
@@ -191,7 +195,7 @@ void main() {
     });
 
     test('an apply failure names every failing app, not just the first', () {
-      final report = reload(
+      final CommandReport report = reload(
         outcome: const ReloadApplyFailed({
           'app-a': ApplyFailed('isolate is gone'),
           'app-b': ApplyTimedOut(),
@@ -209,7 +213,7 @@ void main() {
     test('an all-timeout failure carries an error', () {
       // No `ApplyFailed` here to take a reason from, so the error has to be
       // built from the timeout itself or the failure reads as a success.
-      final report = reload(
+      final CommandReport report = reload(
         outcome: const ReloadApplyFailed({'app-a': ApplyTimedOut()}),
       );
       expect(report.succeeded, isFalse);
@@ -218,7 +222,7 @@ void main() {
     });
 
     test('an asset rebuild failure', () {
-      final report = reload(
+      final CommandReport report = reload(
         assets: const AssetOutcome(rebuildFailed: 'bazel build failed'),
       );
       expect(report.succeeded, isFalse);
@@ -235,7 +239,7 @@ void main() {
         sourceRebuildFailed: 'Generated source rebuild (bazel) failed.',
       );
       expect(report.succeeded, isFalse);
-      final wire = toWire(report);
+      final Map<String, dynamic> wire = toWire(report);
       expect(wire['error'], 'Generated source rebuild (bazel) failed.');
       expect(
         wire['message'],
@@ -245,7 +249,7 @@ void main() {
     });
 
     test('an asset delivery failure', () {
-      final report = reload(
+      final CommandReport report = reload(
         outcome: const ReloadNoChange(),
         assets: AssetOutcome(
           changed: const {'assets/a.png'},
@@ -268,7 +272,7 @@ void main() {
           timedOut: const ['hung'],
         ),
       );
-      final wire = toWire(report);
+      final Map<String, dynamic> wire = toWire(report);
       expect(report.succeeded, isFalse);
       expect(wire['timedOut'], ['hung']);
       expect(wire['applied'], ['live']);
@@ -277,7 +281,9 @@ void main() {
     });
 
     test('a pipeline that could not run', () {
-      final report = reload(unavailable: 'Hot reload is still starting up.');
+      final CommandReport report = reload(
+        unavailable: 'Hot reload is still starting up.',
+      );
       expect(report.succeeded, isFalse);
       expect(toWire(report)['error'], contains('starting up'));
     });
@@ -311,7 +317,7 @@ void main() {
       test('a ${outcome.runtimeType} says why in its own words', () {
         final report = CommandReport(verb: 'Restart', strategy: outcome);
         expect(report.succeeded, isFalse);
-        final wire = toWire(report);
+        final Map<String, dynamic> wire = toWire(report);
         expect(wire['error'], outcome.message);
         expect(wire['message'], startsWith('Restart failed: '));
         expect(wire['message'], contains(outcome.message));
@@ -321,7 +327,7 @@ void main() {
 
   group('success', () {
     test('carries no error and lists what recompiled', () {
-      final report = reload(
+      final CommandReport report = reload(
         outcome: const ReloadApplied(
           filesRecompiled: {'package:app/b.dart', 'package:app/a.dart'},
           isEmpty: false,
@@ -329,7 +335,7 @@ void main() {
         ),
       );
       expect(report.succeeded, isTrue);
-      final wire = toWire(report);
+      final Map<String, dynamic> wire = toWire(report);
       expect(wire.containsKey('error'), isFalse);
       expect(
         wire['filesRecompiled'],
@@ -344,7 +350,7 @@ void main() {
     test('an asset-only edit does not say "no changes detected"', () {
       // Both halves are true and saying them together is a contradiction: the
       // Dart half found nothing, and the user did change something.
-      final report = reload(
+      final CommandReport report = reload(
         outcome: const ReloadNoChange(),
         assets: AssetOutcome(
           changed: const {'assets/logo.png'},
@@ -357,14 +363,14 @@ void main() {
     });
 
     test('keeps which assets changed, not only how many', () {
-      final report = reload(
+      final CommandReport report = reload(
         outcome: const ReloadNoChange(),
         assets: AssetOutcome(
           changed: const {'assets/b.png', 'assets/a.png'},
           delivery: const StrategyApplied(1),
         ),
       );
-      final wire = toWire(report);
+      final Map<String, dynamic> wire = toWire(report);
       expect(wire['assetsChanged'], 2);
       expect(
         wire['assetPaths'],
@@ -374,7 +380,7 @@ void main() {
     });
 
     test('a failing reload keeps its reason beside the asset clause', () {
-      final report = reload(
+      final CommandReport report = reload(
         outcome: const ReloadCompileFailed('lib/a.dart:3: undefined name'),
         assets: AssetOutcome(
           changed: const {'assets/logo.png'},
@@ -390,7 +396,7 @@ void main() {
       // build handed back the bundle the app already has. Legitimate on a
       // reverted edit, and also what a stale action cache looks like from
       // here — silence would leave a stale asset with two suspects.
-      final report = reload(
+      final CommandReport report = reload(
         outcome: const ReloadNoChange(),
         assets: const AssetOutcome(rebuiltIdentical: true),
       );
@@ -400,7 +406,7 @@ void main() {
         isTrue,
         reason: 'nothing failed; the build simply had nothing to publish',
       );
-      final wire = toWire(report);
+      final Map<String, dynamic> wire = toWire(report);
       expect(wire['assetsRebuiltIdentical'], isTrue);
       expect(wire['assetsChanged'], 0);
       expect(wire['message'], contains('identical'));
@@ -410,9 +416,9 @@ void main() {
       // The contrast the signature above depends on. If this also carried a
       // field, "the build found nothing" and "no build ran" would be back to
       // being one answer.
-      final report = reload(outcome: const ReloadNoChange());
+      final CommandReport report = reload(outcome: const ReloadNoChange());
 
-      final wire = toWire(report);
+      final Map<String, dynamic> wire = toWire(report);
       expect(wire['assetsRebuiltIdentical'], isNull);
       expect(wire.containsKey('assetsChanged'), isFalse);
     });
@@ -424,7 +430,7 @@ void main() {
       // The fields beside it — the framework's rendering, its error count —
       // exist only in a report an app sent about code it took, and an app that
       // took the code is an `AppliedThenThrew`.
-      final report = reload(
+      final CommandReport report = reload(
         outcome: const ReloadApplyFailed({
           'app-a': ApplyFailed(
             'the new kernel could not be uploaded to the app\'s '
@@ -460,11 +466,11 @@ void main() {
     );
 
     test('is a failure carrying the app\'s report', () {
-      final report = threw();
+      final CommandReport report = threw();
       expect(report.succeeded, isFalse);
       expect(report.failedApps.keys, ['app-a']);
 
-      final wire = toWire(report);
+      final Map<String, dynamic> wire = toWire(report);
       expect(wire['error'], contains('app-a'));
       expect(
         wire['error'],
@@ -488,7 +494,7 @@ void main() {
     test('falls back to the rendered text when there is no description', () {
       // The framework does not always send `description`; losing the only text
       // there is would leave "Hot reload failed: app-a" and nothing else.
-      final report = reload(
+      final CommandReport report = reload(
         outcome: ReloadApplyFailed({
           'app-a': AppliedThenThrew(
             const FlutterErrorReport({'renderedErrorText': 'RangeError'}),
@@ -517,11 +523,11 @@ void main() {
       // A relaunch replaces the process from a bundle that was just rebuilt,
       // so `updated` is not a guess — it is the one thing a new process cannot
       // be wrong about.
-      final report = relaunch();
+      final CommandReport report = relaunch();
 
       expect(report.succeeded, isTrue);
       expect(report.runningCode, RunningCode.updated);
-      final wire = toWire(report);
+      final Map<String, dynamic> wire = toWire(report);
       expect(wire['succeeded'], isTrue);
       expect(wire['runningCode'], 'updated');
       expect(wire['relaunched'], isTrue);
@@ -535,7 +541,7 @@ void main() {
       // which code is loaded. A process that came back without a first frame
       // still came back running the rebuilt bundle, and reporting `unchanged`
       // here would tell a driver to expect its old code.
-      final report = relaunch(ready: false);
+      final CommandReport report = relaunch(ready: false);
 
       expect(
         report.runningCode,
@@ -543,13 +549,13 @@ void main() {
         reason: 'the process was replaced whether or not it has drawn',
       );
       expect(report.succeeded, isTrue);
-      final wire = toWire(report);
+      final Map<String, dynamic> wire = toWire(report);
       expect(wire['ready'], isFalse);
       expect(wire['succeeded'], isTrue);
     });
 
     test('the message names the libraries that forced it', () {
-      final report = relaunch();
+      final CommandReport report = relaunch();
 
       expect(toWire(report)['message'], contains('libnative.dylib'));
     });
@@ -558,7 +564,7 @@ void main() {
       // The one thing a driver cannot work out from the fields alone without
       // already knowing to look: its cursor is against a buffer that no longer
       // exists. `launch` is the machine-readable half; this is the other.
-      final report = relaunch();
+      final CommandReport report = relaunch();
 
       expect(toWire(report)['message'], contains('re-tail'));
     });
@@ -569,14 +575,14 @@ void main() {
     // ordinary single-device restart: the asset refresh runs first and returns
     // a non-empty diff, and only then does the relaunch fire.
     test('a changed asset does not overwrite the relaunch sentence', () {
-      final report = relaunch(
+      final CommandReport report = relaunch(
         assets: const AssetOutcome(
           changed: {'assets/a.png'},
           delivery: StrategyApplied(1),
         ),
       );
 
-      final wire = toWire(report);
+      final Map<String, dynamic> wire = toWire(report);
       expect(
         wire['message'],
         contains('libnative.dylib'),
@@ -588,7 +594,7 @@ void main() {
 
     test('a rebuild identical to the running bundle keeps it too', () {
       // The other asset arm, which assigns `message` the same way.
-      final report = relaunch(
+      final CommandReport report = relaunch(
         assets: const AssetOutcome(rebuiltIdentical: true),
       );
 
@@ -598,7 +604,7 @@ void main() {
     test('a report with no relaunch says nothing about one', () {
       // The contrast the keys above depend on. Emitted unconditionally, a
       // driver could not tell a relaunch from an ordinary restart.
-      final wire = toWire(CommandReport(verb: 'Restart'));
+      final Map<String, dynamic> wire = toWire(CommandReport(verb: 'Restart'));
 
       expect(wire.containsKey('relaunched'), isFalse);
       expect(wire.containsKey('nativeLibsChanged'), isFalse);
@@ -687,7 +693,7 @@ void main() {
 
     cases.forEach((name, report) {
       test('$name is a failure in both or neither', () {
-        final wireSaysFailed = toWire(report).containsKey('error');
+        final bool wireSaysFailed = toWire(report).containsKey('error');
         expect(
           wireSaysFailed,
           !report.succeeded,
@@ -699,7 +705,7 @@ void main() {
       // from the absence of a key. Two ways of saying the same thing can
       // drift, so the property asserted is that they cannot.
       test('$name says whether it succeeded, and agrees with `error`', () {
-        final wire = toWire(report);
+        final Map<String, dynamic> wire = toWire(report);
         expect(wire['succeeded'], report.succeeded);
         expect(wire['succeeded'], !wire.containsKey('error'));
       });

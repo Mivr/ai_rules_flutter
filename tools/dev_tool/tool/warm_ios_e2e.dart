@@ -132,13 +132,13 @@ String resolveWarmDiskCache(
   Map<String, String> environment, {
   bool? isWindows,
 }) {
-  final windows = isWindows ?? Platform.isWindows;
+  final bool windows = isWindows ?? Platform.isWindows;
   final varName = windows ? 'USERPROFILE' : 'HOME';
-  final home = environment[varName];
+  final String? home = environment[varName];
   if (home == null || home.trim().isEmpty) {
     throw WarmFailure('$varName environment variable is unset or empty');
   }
-  final joined = windows
+  final String joined = windows
       ? p.windows.join(home, '.cache', 'rules_flutter_e2e_disk')
       : p.posix.join(home, '.cache', 'rules_flutter_e2e_disk');
   return joined.replaceAll(r'\', '/');
@@ -157,15 +157,15 @@ Duration parseWarmTimeout(List<String> args) {
   if (args.length != 1) {
     throw const WarmFailure(usage);
   }
-  final arg = args.single;
+  final String arg = args.single;
   if (!arg.startsWith('--timeout=')) {
     throw const WarmFailure(usage);
   }
-  final rawSeconds = arg.substring('--timeout='.length);
+  final String rawSeconds = arg.substring('--timeout='.length);
   if (!RegExp(r'^[1-9]\d*$').hasMatch(rawSeconds)) {
     throw const WarmFailure(usage);
   }
-  final seconds = int.parse(rawSeconds);
+  final int seconds = int.parse(rawSeconds);
   return Duration(seconds: seconds);
 }
 
@@ -179,9 +179,9 @@ Future<void> warmIosE2eBuilds(
   WarmOptions options, {
   List<WarmTarget> targets = defaultWarmTargets,
 }) async {
-  final diskCache = resolveWarmDiskCache(options.environment);
+  final String diskCache = resolveWarmDiskCache(options.environment);
   for (final List<WarmTarget> group in _groupByWorkspace(targets)) {
-    final workspaceDir = p.join(options.repoRoot, group.first.workspace);
+    final String workspaceDir = p.join(options.repoRoot, group.first.workspace);
     final moduleFile = File(p.join(workspaceDir, 'MODULE.bazel'));
     if (!moduleFile.existsSync()) {
       throw WarmFailure('missing ${moduleFile.path}');
@@ -217,7 +217,7 @@ Future<void> _warmTarget(
   String workspaceDir,
   String diskCache,
 ) async {
-  final argv = bazelBuildArgs(
+  final List<String> argv = bazelBuildArgs(
     targetSpec.target,
     compilationMode: 'dbg',
     extraArgs: [
@@ -261,16 +261,16 @@ Future<void> _runBuildAttempt({
     exitCode = await child.exitCode.timeout(options.buildTimeout);
   } on TimeoutException {
     child.kill();
-    final elapsed = stopwatch.elapsed >= options.buildTimeout
+    final Duration elapsed = stopwatch.elapsed >= options.buildTimeout
         ? stopwatch.elapsed
         : options.buildTimeout;
-    final elapsedText = _formatElapsed(elapsed);
+    final String elapsedText = _formatElapsed(elapsed);
     try {
-      final stdoutText = await child.stdoutText.timeout(
+      final String stdoutText = await child.stdoutText.timeout(
         const Duration(milliseconds: 500),
         onTimeout: () => '',
       );
-      final stderrText = await child.stderrText.timeout(
+      final String stderrText = await child.stderrText.timeout(
         const Duration(milliseconds: 500),
         onTimeout: () => '',
       );
@@ -289,8 +289,8 @@ Future<void> _runBuildAttempt({
   }
 
   if (exitCode != 0) {
-    final stdoutText = await child.stdoutText;
-    final stderrText = await child.stderrText;
+    final String stdoutText = await child.stdoutText;
+    final String stderrText = await child.stderrText;
     if (stdoutText.isNotEmpty) {
       options.log(stdoutText);
     }
@@ -308,7 +308,7 @@ Future<void> _shutdownWorkspace(
   String workspaceDir,
 ) async {
   try {
-    final shutdownChild = await options.bazel(
+    final WarmChild shutdownChild = await options.bazel(
       const ['shutdown'],
       workingDirectory: workspaceDir,
     );
@@ -330,7 +330,7 @@ String warmRepoRootFor(String scriptPath) =>
     p.dirname(p.dirname(p.dirname(p.dirname(scriptPath))));
 
 String _findRepoRoot() {
-  final repoRoot = warmRepoRootFor(Platform.script.toFilePath());
+  final String repoRoot = warmRepoRootFor(Platform.script.toFilePath());
   final marker = File(p.join(repoRoot, 'tools', 'dev_tool', 'pubspec.yaml'));
   if (!marker.existsSync()) {
     throw WarmFailure('missing pubspec.yaml at ${marker.path}');
@@ -342,7 +342,7 @@ Future<WarmChild> _streamingProcessSpawner(
   List<String> args, {
   required String workingDirectory,
 }) async {
-  final process = await Process.start(
+  final Process process = await Process.start(
     'bazel',
     args,
     workingDirectory: workingDirectory,
@@ -417,7 +417,7 @@ Future<void> main(List<String> args) async {
   }
 
   try {
-    final repoRoot = _findRepoRoot();
+    final String repoRoot = _findRepoRoot();
     final options = WarmOptions(
       bazel: _streamingProcessSpawner,
       repoRoot: repoRoot,

@@ -19,15 +19,15 @@ final _sri = RegExp(r'^sha256-[A-Za-z0-9+/]{43}=$');
 /// The install block: the first starlark fence under `### MODULE.bazel`.
 String installBlock(String readme) {
   const fence = '```starlark';
-  final heading = readme.indexOf('### MODULE.bazel');
+  final int heading = readme.indexOf('### MODULE.bazel');
   if (heading < 0) {
     throw StateError('README has no ### MODULE.bazel heading');
   }
-  final open = readme.indexOf(fence, heading);
+  final int open = readme.indexOf(fence, heading);
   if (open < 0) {
     throw StateError('install block: no starlark fence');
   }
-  final close = readme.indexOf('```', open + fence.length);
+  final int close = readme.indexOf('```', open + fence.length);
   if (close < 0) {
     throw StateError('install block: unterminated fence');
   }
@@ -36,7 +36,7 @@ String installBlock(String readme) {
 
 /// The value of `key = "..."` in a Bazel call, or null when absent.
 String? _attr(String call, String key) {
-  final found = RegExp('$key = "([^"]*)"').firstMatch(call);
+  final RegExpMatch? found = RegExp('$key = "([^"]*)"').firstMatch(call);
   return found?.group(1);
 }
 
@@ -44,10 +44,10 @@ String? _attr(String call, String key) {
 Iterable<String> _calls(String block, String callName) sync* {
   var rest = block;
   while (true) {
-    final open = rest.indexOf('$callName(');
+    final int open = rest.indexOf('$callName(');
     if (open < 0) return;
     var depth = 0;
-    var i = open + callName.length;
+    int i = open + callName.length;
     for (; i < rest.length; i++) {
       if (rest[i] == '(') depth++;
       if (rest[i] == ')') {
@@ -66,16 +66,16 @@ Iterable<String> _calls(String block, String callName) sync* {
 /// Issue strings for the install block; empty when it resolves as written.
 List<String> checkInstallBlock(String readme) {
   final issues = <String>[];
-  final block = installBlock(readme);
-  final deps = _calls(block, 'bazel_dep').toList();
-  final overrides = _calls(block, 'archive_override').toList();
+  final String block = installBlock(readme);
+  final List<String> deps = _calls(block, 'bazel_dep').toList();
+  final List<String> overrides = _calls(block, 'archive_override').toList();
   for (final dep in deps) {
-    final name = _attr(dep, 'name');
+    final String? name = _attr(dep, 'name');
     if (name == null || !_expectedRepos.containsKey(name)) {
       issues.add('install block: unexpected bazel_dep ${name ?? dep}');
     }
   }
-  for (final entry in _expectedRepos.entries) {
+  for (final MapEntry<String, String> entry in _expectedRepos.entries) {
     issues.addAll(_checkModule(deps, overrides, entry.key, entry.value));
   }
   return issues;
@@ -89,17 +89,19 @@ List<String> _checkModule(
   String repoName,
 ) {
   final issues = <String>[];
-  final dep = deps.where((d) => _attr(d, 'name') == name);
+  final Iterable<String> dep = deps.where((d) => _attr(d, 'name') == name);
   if (dep.isEmpty) return ['install block: no bazel_dep for $name'];
-  final version = _attr(dep.first, 'version') ?? '';
+  final String version = _attr(dep.first, 'version') ?? '';
   if (_attr(dep.first, 'repo_name') != repoName) {
     issues.add('install block: $name needs repo_name = "$repoName"');
   }
-  final override = overrides.where((o) => _attr(o, 'module_name') == name);
+  final Iterable<String> override = overrides.where(
+    (o) => _attr(o, 'module_name') == name,
+  );
   if (override.isEmpty) {
     return [...issues, 'install block: no archive_override for $name'];
   }
-  final urls = RegExp(r'"(https://[^"]*)"')
+  final Iterable<String> urls = RegExp(r'"(https://[^"]*)"')
       .allMatches(override.first)
       .map((m) => m.group(1)!);
   if (urls.isEmpty || !urls.every((u) => u.contains('/v$version/'))) {

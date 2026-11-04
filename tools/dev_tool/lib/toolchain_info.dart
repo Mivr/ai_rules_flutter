@@ -84,7 +84,7 @@ Future<ToolchainPaths> resolveToolchainPaths(
   required BazelRunner runBazel,
   List<String> buildFlags = const [],
 }) async {
-  final info = await runBazel([
+  final ProcessResult info = await runBazel([
     'info',
     'output_base',
   ], workingDirectory: workspace);
@@ -96,20 +96,20 @@ Future<ToolchainPaths> resolveToolchainPaths(
       '${_tail(info.stderr as String)}',
     );
   }
-  final outputBase = (info.stdout as String).trim();
+  final String outputBase = (info.stdout as String).trim();
 
-  final platform = detectHostPlatform();
-  final externalBase = p.join(outputBase, 'external');
-  final candidates = flutterToolchainRepoNames(platform);
+  final String platform = detectHostPlatform();
+  final String externalBase = p.join(outputBase, 'external');
+  final List<String> candidates = flutterToolchainRepoNames(platform);
 
-  var externalDir = _existingRepo(externalBase, candidates);
+  String? externalDir = _existingRepo(externalBase, candidates);
   if (externalDir == null) {
     // `bazel fetch` analyses the target, and analysis is what resolves the
     // Flutter toolchain and materializes its repo. Its result is checked: this
     // is the first bazel command a run makes, so every way the workspace is
     // unusable surfaces here, and discarding it would turn all of them into
     // "could not find Flutter toolchain".
-    final fetch = await runBazel([
+    final ProcessResult fetch = await runBazel([
       'fetch',
       target,
       ...buildFlags,
@@ -136,7 +136,7 @@ Future<ToolchainPaths> resolveToolchainPaths(
     );
   }
 
-  final isWindows = Platform.isWindows;
+  final bool isWindows = Platform.isWindows;
   final dartBin = isWindows ? 'dart.exe' : 'dart';
   final dartaotruntimeBin = isWindows ? 'dartaotruntime.exe' : 'dartaotruntime';
 
@@ -163,7 +163,7 @@ Future<ToolchainPaths> resolveToolchainPaths(
 /// At most one can: see [flutterToolchainRepoNames].
 String? _existingRepo(String externalBase, List<String> candidates) {
   for (final name in candidates) {
-    final dir = p.join(externalBase, name);
+    final String dir = p.join(externalBase, name);
     if (Directory(dir).existsSync()) return dir;
   }
   return null;
@@ -175,18 +175,18 @@ String? _existingRepo(String externalBase, List<String> candidates) {
 /// Bazel writes its diagnostics — `ERROR:` lines included — to stderr, which is
 /// what every caller here passes.
 String _tail(String output, {int lines = 40}) {
-  final trimmed = output.trimRight();
+  final String trimmed = output.trimRight();
   // Said rather than left blank: a message that trails off after "exit 2" reads
   // as truncated output, when what happened is that bazel explained nothing.
   if (trimmed.isEmpty) return '(bazel wrote nothing to stderr)';
-  final all = trimmed.split('\n');
+  final List<String> all = trimmed.split('\n');
   if (all.length <= lines) return trimmed;
   return all.sublist(all.length - lines).join('\n');
 }
 
 String detectHostPlatform() {
-  final os = Platform.operatingSystem;
-  final arch = detectArch();
+  final String os = Platform.operatingSystem;
+  final String arch = detectArch();
 
   switch (os) {
     case 'macos':
@@ -455,7 +455,7 @@ class DevConfig {
   /// registrant is exactly the silent wrong-plugin-set bug the map exists to
   /// prevent. An empty value is a real answer: no registrant on this platform.
   String registrantFor(String platform) {
-    final registrant = dartPluginRegistrants[platform];
+    final String? registrant = dartPluginRegistrants[platform];
     if (registrant == null) {
       throw DevToolException(
         'the dev config carries no plugin registrant for platform '
@@ -552,7 +552,7 @@ class DevConfig {
 /// libraries are paths the dev build never rewrites, so every hot reload
 /// compiled the codegen output the app launched with.
 String? findDevConfig(List<String> files) {
-  final candidates = [
+  final List<String> candidates = [
     for (final f in files)
       if (f.endsWith('_dev_config.json')) f,
   ];
@@ -572,11 +572,11 @@ String? findDevConfig(List<String> files) {
 /// location (`.../execroot/_main/bazel-out/.../dev_config.json` → strip
 /// from `/bazel-out/` onward) and prepend it to make all paths absolute.
 DevConfig parseDevConfig(String path) {
-  final resolved = File(path).resolveSymbolicLinksSync();
+  final String resolved = File(path).resolveSymbolicLinksSync();
   final json =
       jsonDecode(File(resolved).readAsStringSync()) as Map<String, dynamic>;
 
-  final execRoot = _execRootOf(resolved);
+  final String? execRoot = _execRootOf(resolved);
   if (execRoot != null) {
     _absolutizeDevConfigPaths(json, execRoot);
   }
@@ -592,8 +592,8 @@ DevConfig parseDevConfig(String path) {
 /// it works on Windows where File.resolveSymbolicLinksSync returns
 /// '\'-separated paths) and strip from the 'bazel-out' segment onward.
 String? _execRootOf(String resolved) {
-  final parts = p.split(resolved);
-  final bazelOutIdx = parts.indexOf('bazel-out');
+  final List<String> parts = p.split(resolved);
+  final int bazelOutIdx = parts.indexOf('bazel-out');
   if (bazelOutIdx <= 0) return null;
   return p.joinAll(parts.sublist(0, bazelOutIdx));
 }
@@ -626,7 +626,7 @@ void _absolutizeScalarPaths(
     'agentExtensions',
     'flutterBootstrapJs',
   ]) {
-    final value = json[key];
+    final dynamic value = json[key];
     if (value is String && value.isNotEmpty) json[key] = abs(value);
   }
 }
@@ -706,7 +706,7 @@ void _absolutizeLibraryMaps(
 void requireDeclaredFilesExist(DevConfig config) {
   final missing = <String>[];
 
-  for (final entry in {
+  for (final MapEntry<String, String> entry in {
     'devPackageConfig': config.devPackageConfig,
     'buildPackageConfig': config.buildPackageConfig,
   }.entries) {
@@ -715,19 +715,20 @@ void requireDeclaredFilesExist(DevConfig config) {
     }
   }
 
-  for (final path in config.generatedSourcePaths) {
+  for (final String path in config.generatedSourcePaths) {
     if (!File(path).existsSync()) missing.add('generatedSourcePaths: $path');
   }
 
-  for (final path in config.nativeLibs) {
+  for (final String path in config.nativeLibs) {
     if (!File(path).existsSync()) missing.add('nativeLibs: $path');
   }
 
   // Sources are not checked here: they are the app's own files, and one deleted
   // between the build and this read is the user's edit in flight, not a build
   // that lied about what it wrote. The watch reports it as a moved source.
-  for (final entry in config.nativeLibContracts.entries) {
-    for (final path in entry.value) {
+  for (final MapEntry<String, List<String>> entry
+      in config.nativeLibContracts.entries) {
+    for (final String path in entry.value) {
       if (!File(path).existsSync()) missing.add('nativeLibContracts: $path');
     }
   }

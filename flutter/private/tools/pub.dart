@@ -41,7 +41,7 @@ Never _fail(String message) {
 }
 
 String _requireEnv(String name) {
-  final value = Platform.environment[name];
+  final String? value = Platform.environment[name];
   if (value == null || value.isEmpty) {
     _fail('$name is not set; run this through `bazel run`.\n$_usage');
   }
@@ -55,7 +55,7 @@ Future<void> main(List<String> args) async {
 
   // `bazel run` sets this to the source tree. pub has to run there rather than
   // in the runfiles tree: `pubspec.lock` is a checked-in file.
-  final workspace = Platform.environment['BUILD_WORKSPACE_DIRECTORY'];
+  final String? workspace = Platform.environment['BUILD_WORKSPACE_DIRECTORY'];
   if (workspace == null || workspace.isEmpty) {
     _fail(
       'BUILD_WORKSPACE_DIRECTORY is not set. Use `bazel run`, not the '
@@ -64,16 +64,16 @@ Future<void> main(List<String> args) async {
   }
 
   final runfiles = Runfiles.create();
-  final dart = runfiles.rlocation(_requireEnv('FLUTTER_PUB_DART'));
-  final manifest = runfiles.rlocation(
+  final String dart = runfiles.rlocation(_requireEnv('FLUTTER_PUB_DART'));
+  final String manifest = runfiles.rlocation(
     _requireEnv('FLUTTER_PUB_VERSION_MANIFEST'),
   );
 
-  var flutterRoot = File(manifest).absolute.parent;
+  Directory flutterRoot = File(manifest).absolute.parent;
   for (var i = 1; i < _manifestDepth; i++) {
     flutterRoot = flutterRoot.parent;
   }
-  for (final entry in _requiredEntries) {
+  for (final String entry in _requiredEntries) {
     if (!File('${flutterRoot.path}/$entry').existsSync()) {
       _fail(
         'the FLUTTER_ROOT assembled at ${flutterRoot.path} has no $entry, '
@@ -89,7 +89,7 @@ Future<void> main(List<String> args) async {
     'toolchain (FLUTTER_ROOT=${flutterRoot.path})',
   );
 
-  final process = await Process.start(
+  final Process process = await Process.start(
     dart,
     // Caller-home policy: the parent env stays (PUB_CACHE and the caller's
     // credentials resolve), and the dart CLI takes the global analytics

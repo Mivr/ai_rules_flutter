@@ -50,21 +50,24 @@ Future<int> runGuarded(
   StringSink out,
   StringSink err,
 ) async {
-  final parsed = _parseGuardArgs(argv);
+  final ({String? error, String? manifestPath, int separator}) parsed =
+      _parseGuardArgs(argv);
   if (parsed.error != null) {
     err.writeln(parsed.error);
     return 2;
   }
-  final sources = _readGuardSources(parsed.manifestPath!);
+  final ({String? error, List<String> paths}) sources = _readGuardSources(
+    parsed.manifestPath!,
+  );
   if (sources.error != null) {
     err.writeln(sources.error);
     return 2;
   }
-  final refused = _refuseUndecodableSources(sources.paths, err);
+  final int? refused = _refuseUndecodableSources(sources.paths, err);
   if (refused != null) return refused;
-  final executable = argv[parsed.separator + 1];
-  final cmdArgs = argv.sublist(parsed.separator + 2);
-  final guardErrors = findDisallowedFlutterDirectives(
+  final String executable = argv[parsed.separator + 1];
+  final List<String> cmdArgs = argv.sublist(parsed.separator + 2);
+  final List<String> guardErrors = findDisallowedFlutterDirectives(
     sources.paths,
     _commandMultiRoots(cmdArgs),
     tool: 'flutter',
@@ -83,7 +86,7 @@ Future<int> runGuarded(
 ({int separator, String? manifestPath, String? error}) _parseGuardArgs(
   List<String> argv,
 ) {
-  final i = argv.indexOf('--');
+  final int i = argv.indexOf('--');
   if (i < 0 || i + 1 >= argv.length) {
     return (
       separator: -1,
@@ -130,8 +133,8 @@ Future<int> runGuarded(
   }
   final sources = <String>[];
   var staged = false;
-  for (final line in manifest.readAsLinesSync()) {
-    final path = line.trim().replaceAll(r'\', '/');
+  for (final String line in manifest.readAsLinesSync()) {
+    final String path = line.trim().replaceAll(r'\', '/');
     if (path.isEmpty) continue;
     if (path.startsWith('#')) {
       staged = true;
@@ -174,7 +177,7 @@ int? _refuseUndecodableSources(List<String> sources, StringSink err) {
 List<String> _commandMultiRoots(List<String> cmdArgs) {
   final fsRoots = <String>[];
   for (var j = 0; j < cmdArgs.length; j++) {
-    final arg = cmdArgs[j];
+    final String arg = cmdArgs[j];
     if (arg == '--multi-root' && j + 1 < cmdArgs.length) {
       fsRoots.add(cmdArgs[++j]);
     } else if (arg.startsWith('--multi-root=')) {
@@ -191,7 +194,7 @@ Future<int> _runGuardedCommand(
   StringSink out,
   StringSink err,
 ) async {
-  final result = await Process.run(executable, cmdArgs);
+  final ProcessResult result = await Process.run(executable, cmdArgs);
   out.write(result.stdout as String);
   err.write(result.stderr as String);
   return result.exitCode;

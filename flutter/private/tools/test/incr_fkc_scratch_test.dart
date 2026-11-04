@@ -8,6 +8,7 @@ library;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:test/test.dart';
 
@@ -203,11 +204,11 @@ class ScratchHarness {
 /// tools. Throws when it cannot be found: these tests drive the real
 /// binary, so a missing binary fails instead of passing vacuously.
 String _workerBinary() {
-  final rel = Platform.environment['INCR_FKC_WORKER_BIN'];
+  final String? rel = Platform.environment['INCR_FKC_WORKER_BIN'];
   if (rel != null && rel.isNotEmpty && File(rel).existsSync()) {
     return File(rel).absolute.path;
   }
-  final runfilesDir =
+  final String? runfilesDir =
       Platform.environment['RUNFILES_DIR'] ??
       Platform.environment['TEST_SRCDIR'];
   if (runfilesDir != null && rel != null) {
@@ -232,15 +233,15 @@ class LockHolder {
   /// Starts the holder for [lockPath] and waits until it confirms the lock
   /// is taken. Throws when the holder never confirms.
   static Future<LockHolder> start(String script, String lockPath) async {
-    final proc = await Process.start(Platform.resolvedExecutable, [
+    final Process proc = await Process.start(Platform.resolvedExecutable, [
       script,
       lockPath,
     ]);
-    final lines = StreamIterator(
+    final StreamIterator<String> lines = StreamIterator(
       proc.stdout.transform(utf8.decoder).transform(const LineSplitter()),
     );
     try {
-      final confirmed = await lines.moveNext().timeout(
+      final bool confirmed = await lines.moveNext().timeout(
         const Duration(seconds: 60),
       );
       if (!confirmed || lines.current != 'held') {
@@ -277,14 +278,15 @@ String _writeHolderScript(Directory parent) =>
 /// Runs the shared-lock probe helper against [lockPath] and returns its
 /// `held` or `free` verdict. Only ever touches the probe's own process.
 Future<String> _sharedVerdict(String script, String lockPath) async {
-  final proc = await Process.start(Platform.resolvedExecutable, [
+  final Process proc = await Process.start(Platform.resolvedExecutable, [
     script,
     lockPath,
   ]);
-  final lines = StreamIterator(
+  final StreamIterator<String> lines = StreamIterator(
     proc.stdout.transform(utf8.decoder).transform(const LineSplitter()),
   );
-  final verdict = await lines.moveNext().timeout(const Duration(seconds: 60))
+  final String verdict =
+      await lines.moveNext().timeout(const Duration(seconds: 60))
       ? lines.current
       : '';
   await lines.cancel();
@@ -297,7 +299,7 @@ Future<String> _sharedVerdict(String script, String lockPath) async {
 /// the sweep are already members, and the sweep must add none.
 Set<String> _childPids() {
   final out = <String>{};
-  for (final task in Directory('/proc/self/task').listSync()) {
+  for (final FileSystemEntity task in Directory('/proc/self/task').listSync()) {
     final listing = File('${task.path}/children');
     if (!listing.existsSync()) continue;
     out.addAll(
@@ -322,9 +324,9 @@ void _writeDeadLock(Directory dir) {
 /// The names of this worker's scratch entries under [tmp].
 List<String> _scratchNames(Directory tmp) {
   final names = <String>[];
-  for (final entry in tmp.listSync()) {
+  for (final FileSystemEntity entry in tmp.listSync()) {
     if (entry is! Directory) continue;
-    final name = entry.path.split(Platform.pathSeparator).last;
+    final String name = entry.path.split(Platform.pathSeparator).last;
     if (name.startsWith(incrFkcScratchPrefix)) names.add(name);
   }
   return names..sort();
@@ -332,7 +334,7 @@ List<String> _scratchNames(Directory tmp) {
 
 /// Whether any file under [dir] ends with [suffix].
 bool _hasFileBelow(Directory dir, String suffix) {
-  for (final entry in dir.listSync(recursive: true)) {
+  for (final FileSystemEntity entry in dir.listSync(recursive: true)) {
     if (entry is File && entry.path.endsWith(suffix)) return true;
   }
   return false;
@@ -341,7 +343,7 @@ bool _hasFileBelow(Directory dir, String suffix) {
 /// Waits up to [limit] for [path] to disappear (used for fake pid files:
 /// absence proves the process is gone). Polls; never throws.
 Future<bool> _waitGone(String path, Duration limit) async {
-  final end = DateTime.now().add(limit);
+  final DateTime end = DateTime.now().add(limit);
   while (DateTime.now().isBefore(end)) {
     if (!File(path).existsSync()) return true;
     await Future<void>.delayed(const Duration(milliseconds: 100));
@@ -363,7 +365,7 @@ class DrivenWorker {
     String cwd,
     String tmp,
   ) async {
-    final proc = await Process.start(
+    final Process proc = await Process.start(
       binary,
       ['--persistent_worker', ...argv],
       workingDirectory: cwd,
@@ -393,7 +395,7 @@ class DrivenWorker {
       }),
     );
     await process.stdin.flush();
-    final hasReply = await _lines.moveNext().timeout(
+    final bool hasReply = await _lines.moveNext().timeout(
       const Duration(seconds: 60),
     );
     if (!hasReply) {
@@ -443,7 +445,7 @@ void main() {
       final lockPath = '${live.path}/$incrFkcLockFileName';
       File(lockPath).writeAsStringSync('');
       File('${live.path}/keep.txt').writeAsStringSync('keep');
-      final holder = await LockHolder.start(
+      final LockHolder holder = await LockHolder.start(
         _writeHolderScript(parent),
         lockPath,
       );
@@ -461,7 +463,7 @@ void main() {
       final lockPath = '${dead.path}/$incrFkcLockFileName';
       File(lockPath).writeAsStringSync('');
       File('${dead.path}/full.dill').writeAsBytesSync([1]);
-      final holder = await LockHolder.start(
+      final LockHolder holder = await LockHolder.start(
         _writeHolderScript(parent),
         lockPath,
       );
@@ -479,7 +481,7 @@ void main() {
       File('${young.path}/keep.txt').writeAsStringSync('keep');
       // A newborn mid-claim: the claim file is locked, but `lock` is not
       // published yet, so the sweep must keep the directory.
-      final holder = await LockHolder.start(
+      final LockHolder holder = await LockHolder.start(
         _writeHolderScript(parent),
         claimPath,
       );
@@ -496,15 +498,15 @@ void main() {
       final live = Directory('${parent.path}/incr_fkc_kept0001')..createSync();
       final lockPath = '${live.path}/$incrFkcLockFileName';
       File(lockPath).writeAsStringSync('owner');
-      final holder = await LockHolder.start(
+      final LockHolder holder = await LockHolder.start(
         _writeHolderScript(parent),
         lockPath,
       );
       addTearDown(holder.kill);
-      final before = File(lockPath).statSync();
-      final bytes = File(lockPath).readAsBytesSync();
+      final FileStat before = File(lockPath).statSync();
+      final Uint8List bytes = File(lockPath).readAsBytesSync();
       await sweepWorkerScratch(parent, exemptName: 'incr_fkc_mine');
-      final after = File(lockPath).statSync();
+      final FileStat after = File(lockPath).statSync();
       // Read-only probing leaves bytes, size and mtime identical.
       expect(File(lockPath).readAsBytesSync(), bytes);
       expect(after.size, before.size);
@@ -518,7 +520,7 @@ void main() {
         for (final e in dir.listSync())
           e.path.split(Platform.pathSeparator).last,
       };
-      final before = names(bare);
+      final Set<String> before = names(bare);
       await sweepWorkerScratch(parent, exemptName: 'incr_fkc_mine');
       // A creating open would publish a lock file here; the read-only
       // probe must leave the directory exactly as it found it.
@@ -531,7 +533,7 @@ void main() {
 
     test('a claimed lock refuses a shared lock from another process', () async {
       final dir = Directory('${parent.path}/incr_fkc_owned')..createSync();
-      final lock = await lockWorkerScratch(dir);
+      final ScratchLock lock = await lockWorkerScratch(dir);
       final lockFile = File('${dir.path}/$incrFkcLockFileName');
       // The claim is published atomically: `lock` exists, locked, with no
       // temporary claim left behind.
@@ -540,7 +542,7 @@ void main() {
         File('${dir.path}/$incrFkcClaimFileName').existsSync(),
         isFalse,
       );
-      final probe = _writeScript(
+      final String probe = _writeScript(
         parent,
         'shared_probe.dart',
         _sharedProbeSource,
@@ -578,7 +580,7 @@ void main() {
         // The holders are children already; the in-process sweep must add
         // none, and lock attempts that fail at once stay far under a
         // process-spawn budget.
-        final before = _childPids();
+        final Set<String> before = _childPids();
         final watch = Stopwatch()..start();
         await sweepWorkerScratch(parent, exemptName: 'incr_fkc_mine');
         watch.stop();
@@ -642,7 +644,10 @@ void main() {
       var unopenable = false;
       if (!Platform.isWindows) {
         addTearDown(() => Process.run('chmod', ['u+rw', nopermLock.path]));
-        final chmod = await Process.run('chmod', ['000', nopermLock.path]);
+        final ProcessResult chmod = await Process.run('chmod', [
+          '000',
+          nopermLock.path,
+        ]);
         if (chmod.exitCode == 0) {
           try {
             File(nopermLock.path).openSync(mode: FileMode.read).closeSync();
@@ -670,7 +675,10 @@ void main() {
       _writeDeadLock(stuck);
       final inner = Directory('${stuck.path}/key')..createSync();
       File('${inner.path}/full.dill').writeAsBytesSync([1]);
-      final chmod = await Process.run('chmod', ['a-w', inner.path]);
+      final ProcessResult chmod = await Process.run('chmod', [
+        'a-w',
+        inner.path,
+      ]);
       if (chmod.exitCode != 0) {
         markTestSkipped('chmod is unavailable');
       }
@@ -695,7 +703,7 @@ void main() {
 
     test('a claimed then released lock reads as dead', () async {
       final dir = Directory('${parent.path}/incr_fkc_claimed')..createSync();
-      final lock = await lockWorkerScratch(dir);
+      final ScratchLock lock = await lockWorkerScratch(dir);
       expect(File('${dir.path}/$incrFkcLockFileName').existsSync(), isTrue);
       await lock.close();
       await sweepWorkerScratch(parent, exemptName: 'incr_fkc_mine');
@@ -750,10 +758,14 @@ void main() {
     test(
       "a SIGKILLed worker's scratch is reclaimed by the next worker",
       () async {
-        final w1 = await spawn('${h.cwd}/w1.pid');
-        var reply = await w1.serve(h.argv('${h.cwd}/w1.pid'), h.inputs, 1);
+        final DrivenWorker w1 = await spawn('${h.cwd}/w1.pid');
+        Map<String, dynamic> reply = await w1.serve(
+          h.argv('${h.cwd}/w1.pid'),
+          h.inputs,
+          1,
+        );
         expect(reply['exitCode'], 0, reason: reply['output']);
-        final before = _scratchNames(tmp);
+        final List<String> before = _scratchNames(tmp);
         expect(before, hasLength(1));
         expect(
           _hasFileBelow(Directory('${tmp.path}/${before.single}'), 'full.dill'),
@@ -764,10 +776,10 @@ void main() {
           await _waitGone('${h.cwd}/w1.pid', const Duration(seconds: 20)),
           isTrue,
         );
-        final w2 = await spawn('${h.cwd}/w2.pid');
+        final DrivenWorker w2 = await spawn('${h.cwd}/w2.pid');
         reply = await w2.serve(h.argv('${h.cwd}/w2.pid'), h.inputs, 2);
         expect(reply['exitCode'], 0, reason: reply['output']);
-        final after = _scratchNames(tmp);
+        final List<String> after = _scratchNames(tmp);
         expect(after, hasLength(1));
         expect(after.single, isNot(before.single));
       },
@@ -777,23 +789,27 @@ void main() {
     test(
       "a live worker's scratch survives while a dead one's is reclaimed",
       () async {
-        final w1 = await spawn('${h.cwd}/w1.pid');
-        var reply = await w1.serve(h.argv('${h.cwd}/w1.pid'), h.inputs, 1);
+        final DrivenWorker w1 = await spawn('${h.cwd}/w1.pid');
+        Map<String, dynamic> reply = await w1.serve(
+          h.argv('${h.cwd}/w1.pid'),
+          h.inputs,
+          1,
+        );
         expect(reply['exitCode'], 0, reason: reply['output']);
-        final w1dir = _scratchNames(tmp).single;
-        final w3 = await spawn('${h.cwd}/w3.pid');
+        final String w1dir = _scratchNames(tmp).single;
+        final DrivenWorker w3 = await spawn('${h.cwd}/w3.pid');
         reply = await w3.serve(h.argv('${h.cwd}/w3.pid'), h.inputs, 1);
         expect(reply['exitCode'], 0, reason: reply['output']);
-        final w3dir = _scratchNames(tmp).firstWhere((n) => n != w1dir);
+        final String w3dir = _scratchNames(tmp).firstWhere((n) => n != w1dir);
         await w3.sigkill();
         expect(
           await _waitGone('${h.cwd}/w3.pid', const Duration(seconds: 20)),
           isTrue,
         );
-        final w2 = await spawn('${h.cwd}/w2.pid');
+        final DrivenWorker w2 = await spawn('${h.cwd}/w2.pid');
         reply = await w2.serve(h.argv('${h.cwd}/w2.pid'), h.inputs, 2);
         expect(reply['exitCode'], 0, reason: reply['output']);
-        final after = _scratchNames(tmp);
+        final List<String> after = _scratchNames(tmp);
         expect(after, contains(w1dir));
         expect(after, isNot(contains(w3dir)));
         reply = await w1.serve(h.argv('${h.cwd}/w1.pid'), h.inputs, 9);
@@ -819,8 +835,12 @@ void main() {
         if (!Platform.isWindows) {
           await Process.run('chmod', ['a-w', inner.path]);
         }
-        final w = await spawn('${h.cwd}/w.pid');
-        final reply = await w.serve(h.argv('${h.cwd}/w.pid'), h.inputs, 1);
+        final DrivenWorker w = await spawn('${h.cwd}/w.pid');
+        final Map<String, dynamic> reply = await w.serve(
+          h.argv('${h.cwd}/w.pid'),
+          h.inputs,
+          1,
+        );
         expect(reply['exitCode'], 0, reason: reply['output']);
       },
       timeout: const Timeout(Duration(minutes: 3)),
@@ -834,8 +854,12 @@ void main() {
         final orphan = Directory('${tmp.path}/incr_fkc_orphan999')
           ..createSync();
         File('${orphan.path}/full.dill').writeAsBytesSync([1, 2, 3]);
-        final w = await spawn('${h.cwd}/w.pid');
-        final reply = await w.serve(h.argv('${h.cwd}/w.pid'), h.inputs, 1);
+        final DrivenWorker w = await spawn('${h.cwd}/w.pid');
+        final Map<String, dynamic> reply = await w.serve(
+          h.argv('${h.cwd}/w.pid'),
+          h.inputs,
+          1,
+        );
         expect(reply['exitCode'], 0, reason: reply['output']);
         expect(File('${orphan.path}/full.dill').existsSync(), isTrue);
       },
@@ -849,8 +873,12 @@ void main() {
         File('${foreign.path}/keep.txt').writeAsStringSync('keep');
         final loose = File('${tmp.path}/incr_fkc_loose')
           ..writeAsStringSync('x');
-        final w = await spawn('${h.cwd}/w.pid');
-        final reply = await w.serve(h.argv('${h.cwd}/w.pid'), h.inputs, 1);
+        final DrivenWorker w = await spawn('${h.cwd}/w.pid');
+        final Map<String, dynamic> reply = await w.serve(
+          h.argv('${h.cwd}/w.pid'),
+          h.inputs,
+          1,
+        );
         expect(reply['exitCode'], 0, reason: reply['output']);
         expect(File('${foreign.path}/keep.txt').readAsStringSync(), 'keep');
         expect(loose.readAsStringSync(), 'x');
@@ -861,11 +889,15 @@ void main() {
     test(
       'a served worker exits promptly on stdin EOF',
       () async {
-        final w = await spawn('${h.cwd}/w.pid');
-        final reply = await w.serve(h.argv('${h.cwd}/w.pid'), h.inputs, 1);
+        final DrivenWorker w = await spawn('${h.cwd}/w.pid');
+        final Map<String, dynamic> reply = await w.serve(
+          h.argv('${h.cwd}/w.pid'),
+          h.inputs,
+          1,
+        );
         expect(reply['exitCode'], 0, reason: reply['output']);
         final watch = Stopwatch()..start();
-        final code = await w.eofAndWait(const Duration(seconds: 20));
+        final int code = await w.eofAndWait(const Duration(seconds: 20));
         watch.stop();
         expect(code, 0);
         expect(

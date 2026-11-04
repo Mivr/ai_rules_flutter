@@ -31,15 +31,15 @@ import 'dart:io';
 /// isolate, collected without error, on the `hello_coverage_test` path that is
 /// the only coverage run in the repo.
 Future<String> collectCoverage(Uri httpUri) async {
-  final ws = await _connectVmServiceWebSocket(httpUri);
+  final WebSocket ws = await _connectVmServiceWebSocket(httpUri);
   try {
     final rpc = _VmServiceRpc(ws);
-    final vm = await rpc.call('getVM');
-    final isolates = (vm['isolates'] as List?) ?? const [];
+    final Map<String, dynamic> vm = await rpc.call('getVM');
+    final List<dynamic> isolates = (vm['isolates'] as List?) ?? const [];
     final lines = <String>[];
     for (final iso in isolates) {
       final id = (iso as Map)['id'] as String;
-      final report = await rpc.call('getSourceReport', {
+      final Map<String, dynamic> report = await rpc.call('getSourceReport', {
         'isolateId': id,
         'reports': const ['Coverage'],
         'forceCompile': true,
@@ -53,7 +53,7 @@ Future<String> collectCoverage(Uri httpUri) async {
 }
 
 Future<WebSocket> _connectVmServiceWebSocket(Uri httpUri) {
-  final wsUri = httpUri.replace(
+  final Uri wsUri = httpUri.replace(
     scheme: httpUri.scheme == 'https' ? 'wss' : 'ws',
     path: '${httpUri.path}ws',
   );
@@ -126,20 +126,21 @@ Future<void> _formatLcov(
   _VmServiceRpc rpc,
   String isolateId,
 ) async {
-  final scripts = (report['scripts'] as List?) ?? const [];
-  final ranges = (report['ranges'] as List?) ?? const [];
+  final List<dynamic> scripts = (report['scripts'] as List?) ?? const [];
+  final List<dynamic> ranges = (report['ranges'] as List?) ?? const [];
 
   final scriptInfo = <int, ({String id, String uri})>{};
   for (var i = 0; i < scripts.length; i++) {
-    final s = (scripts[i] as Map).cast<String, dynamic>();
+    final Map<String, dynamic> s = (scripts[i] as Map).cast<String, dynamic>();
     scriptInfo[i] = (id: s['id'] as String, uri: s['uri'] as String);
   }
 
   final perScript = <int, ({List<int> hits, List<int> misses})>{};
   _accumulateTokenCoverage(ranges, scriptInfo, perScript);
 
-  for (final entry in perScript.entries) {
-    final info = scriptInfo[entry.key]!;
+  for (final MapEntry<int, ({List<int> hits, List<int> misses})> entry
+      in perScript.entries) {
+    final ({String id, String uri}) info = scriptInfo[entry.key]!;
     await _renderScriptCoverage(info, entry.value, rpc, isolateId, lines);
   }
 }
@@ -154,12 +155,13 @@ void _accumulateTokenCoverage(
   for (final range in ranges) {
     final scriptIndex = (range as Map)['scriptIndex'] as int?;
     if (scriptIndex == null) continue;
-    final info = scriptInfo[scriptIndex];
+    final ({String id, String uri})? info = scriptInfo[scriptIndex];
     if (info == null) continue;
     if (info.uri.startsWith('dart:')) continue;
-    final coverage = (range['coverage'] as Map?)?.cast<String, dynamic>();
+    final Map<String, dynamic>? coverage = (range['coverage'] as Map?)
+        ?.cast<String, dynamic>();
     if (coverage == null) continue;
-    final entry = perScript.putIfAbsent(
+    final ({List<int> hits, List<int> misses}) entry = perScript.putIfAbsent(
       scriptIndex,
       () => (hits: <int>[], misses: <int>[]),
     );
@@ -183,31 +185,31 @@ Future<void> _renderScriptCoverage(
   String isolateId,
   List<String> lines,
 ) async {
-  final script = await rpc.call('getObject', {
+  final Map<String, dynamic> script = await rpc.call('getObject', {
     'isolateId': isolateId,
     'objectId': info.id,
   });
   final table = script['tokenPosTable'] as List?;
   if (table == null) return;
-  final tokenToLine = _buildTokenToLineMap(table);
+  final Map<int, int> tokenToLine = _buildTokenToLineMap(table);
 
   final lineHits = <int, int>{};
-  for (final t in tokens.hits) {
-    final line = tokenToLine[t];
+  for (final int t in tokens.hits) {
+    final int? line = tokenToLine[t];
     if (line != null) lineHits[line] = (lineHits[line] ?? 0) + 1;
   }
-  for (final t in tokens.misses) {
-    final line = tokenToLine[t];
+  for (final int t in tokens.misses) {
+    final int? line = tokenToLine[t];
     if (line != null) lineHits.putIfAbsent(line, () => 0);
   }
 
   if (lineHits.isEmpty) return;
 
-  var path = info.uri;
+  String path = info.uri;
   if (path.startsWith('file://')) path = Uri.parse(path).toFilePath();
 
   lines.add('SF:$path');
-  final sorted = lineHits.entries.toList()
+  final List<MapEntry<int, int>> sorted = lineHits.entries.toList()
     ..sort((a, b) => a.key.compareTo(b.key));
   for (final lh in sorted) {
     lines.add('DA:${lh.key},${lh.value}');

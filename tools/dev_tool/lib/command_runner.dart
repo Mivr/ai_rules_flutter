@@ -117,7 +117,7 @@ class CommandRunner {
     _announcementScheduled = true;
     scheduleMicrotask(() {
       _announcementScheduled = false;
-      final current = describe();
+      final List<Map<String, Object>> current = describe();
       if (_announced != null && _sameSurface(_announced!, current)) return;
       _announced = current;
       onCommandsChanged!();
@@ -165,7 +165,7 @@ class CommandRunner {
     String method,
     Map<String, dynamic> params,
   ) async {
-    final handler = _handlers[method];
+    final CommandHandler? handler = _handlers[method];
     if (handler == null) {
       // Names where the real list is, because absence here is often correct
       // rather than a typo: a command can be genuinely unavailable on this
@@ -181,10 +181,10 @@ class CommandRunner {
     // Announced before the pool is requested, not after it is granted: a
     // command queued behind one that never finishes has also not started, and
     // that is exactly the state worth being able to see.
-    final report = _slow.contains(method) ? onProgress : null;
+    final CommandProgress? report = _slow.contains(method) ? onProgress : null;
     final id = 'cmd_${_nextProgressId++}';
     report?.call(method, params, id, finished: false);
-    final resource = await _pool.request();
+    final PoolResource resource = await _pool.request();
     try {
       return await handler(params);
     } finally {

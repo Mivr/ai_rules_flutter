@@ -26,7 +26,7 @@ void main() {
   test(
     'a Chrome run comes up with a VM service that answers',
     () async {
-      final dt = await startDevTool(
+      final DevToolProcess dt = await startDevTool(
         workspace: e2eWorkspace('web_example'),
         // The WASM target's default `--hot` run is the DDC/DWDS dev loop, which
         // is what owns the VM service this asserts on.
@@ -41,7 +41,7 @@ void main() {
       // impossible to debug — `web_e2e_test.dart` has a whole group about that
       // failure. The event that says where the VM service *is* is the one
       // worth waiting for.
-      final debugPort = await dt.waitForEvent(
+      final Map<String, dynamic> debugPort = await dt.waitForEvent(
         'app.debugPort',
         timeout: const Duration(minutes: 2),
       );
@@ -51,7 +51,7 @@ void main() {
       // And then the socket has to actually answer the VM service protocol.
       // Connecting proves DWDS's DDS is listening; `getVersion` proves what is
       // listening is a VM service and not merely an open port.
-      final socket = await WebSocket.connect(
+      final WebSocket socket = await WebSocket.connect(
         wsUri!,
       ).timeout(const Duration(seconds: 30));
       try {
@@ -86,10 +86,10 @@ void main() {
       // web compile above is the expensive part and this adds two round trips
       // to it; a second web run to assert one string would roughly double the
       // only web coverage CI has, for nothing.
-      final appId = dt.appId;
+      final String? appId = dt.appId;
       expect(appId, isNotNull, reason: 'appId from app.start event');
 
-      final ready = await dt.httpCommand('app.waitFor', {
+      final Map<String, dynamic> ready = await dt.httpCommand('app.waitFor', {
         'appId': appId!,
         'key': 'e2e_asset_label',
         'timeoutMs': '30000',
@@ -100,7 +100,7 @@ void main() {
         reason: 'e2e_asset_label never appeared — the page did not render',
       );
 
-      final label = await dt.httpCommand('app.getText', {
+      final Map<String, dynamic> label = await dt.httpCommand('app.getText', {
         'appId': appId,
         'key': 'e2e_asset_label',
       });

@@ -8,7 +8,7 @@ import '../chmod.dart';
 void main() {
   group('chmodFile', () {
     test('sets the exact mode bits it is given', () {
-      final dir = Directory.systemTemp.createTempSync('chmod_test_');
+      final Directory dir = Directory.systemTemp.createTempSync('chmod_test_');
       try {
         final file = File('${dir.path}/run.sh')
           ..writeAsStringSync('#!/bin/sh\nexit 0\n');

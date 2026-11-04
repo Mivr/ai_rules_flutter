@@ -45,15 +45,15 @@ bool _looksLikeRoot(String root) =>
 /// resolves, so the test fails loudly instead of scanning the wrong tree
 /// or silently passing.
 String? _workspaceRoot() {
-  final fromEnv = Platform.environment['BUILD_WORKSPACE_DIRECTORY'];
+  final String? fromEnv = Platform.environment['BUILD_WORKSPACE_DIRECTORY'];
   if (fromEnv != null && fromEnv.isNotEmpty && _looksLikeRoot(fromEnv)) {
     return fromEnv;
   }
-  final anchor = Platform.environment['GUARD_ROOT_ANCHOR'];
-  final srcdir = Platform.environment['TEST_SRCDIR'];
+  final String? anchor = Platform.environment['GUARD_ROOT_ANCHOR'];
+  final String? srcdir = Platform.environment['TEST_SRCDIR'];
   if (anchor != null && anchor.isNotEmpty && srcdir != null) {
     try {
-      var dir = File(
+      Directory dir = File(
         File('$srcdir/$anchor').resolveSymbolicLinksSync(),
       ).parent;
       for (var i = 0; i < 8; i++) {
@@ -77,7 +77,7 @@ List<String> _findNamed(String root, String dir, String fileName) {
   final found = <String>[];
   final stack = <Directory>[base];
   while (stack.isNotEmpty) {
-    final current = stack.removeLast();
+    final Directory current = stack.removeLast();
     List<FileSystemEntity> children;
     try {
       children = current.listSync(followLinks: false);
@@ -85,14 +85,14 @@ List<String> _findNamed(String root, String dir, String fileName) {
       continue;
     }
     for (final child in children) {
-      final name = child.path.split(Platform.pathSeparator).last;
+      final String name = child.path.split(Platform.pathSeparator).last;
       if (child is Directory) {
         if (name == 'node_modules' || name.startsWith('.')) {
           continue;
         }
         stack.add(child);
       } else if (child is File && name == fileName) {
-        var rel = child.path;
+        String rel = child.path;
         if (rel.startsWith('$root/')) rel = rel.substring(root.length + 1);
         found.add(rel);
       }
@@ -108,7 +108,7 @@ List<String> _findBzl(String root) {
   final found = <String>[];
   final stack = <Directory>[base];
   while (stack.isNotEmpty) {
-    final current = stack.removeLast();
+    final Directory current = stack.removeLast();
     List<FileSystemEntity> children;
     try {
       children = current.listSync(followLinks: false);
@@ -134,16 +134,16 @@ String _blankNonCode(String text, {required bool blankStrings}) {
   final out = StringBuffer();
   var i = 0;
   while (i < text.length) {
-    final ch = text[i];
+    final String ch = text[i];
     if (ch == '#') {
       while (i < text.length && text[i] != '\n') {
         out.write(' ');
         i++;
       }
     } else if (ch == '"' || ch == "'") {
-      final triple =
+      final bool triple =
           i + 2 < text.length && text[i + 1] == ch && text[i + 2] == ch;
-      final quote = triple ? ch + ch + ch : ch;
+      final String quote = triple ? ch + ch + ch : ch;
       out.write(blankStrings ? ' ' * quote.length : quote);
       i += quote.length;
       while (i < text.length) {
@@ -231,16 +231,18 @@ final RegExp _literalChecksum = RegExp(
 List<String> _checkNoRawDownload(String rel, String text) {
   if (rel == 'flutter/private/download.bzl') return <String>[];
   final errors = <String>[];
-  final code = _blankNonCode(text, blankStrings: true);
-  for (final match in _rawDownloadUse.allMatches(code)) {
+  final String code = _blankNonCode(text, blankStrings: true);
+  for (final RegExpMatch match in _rawDownloadUse.allMatches(code)) {
     errors.add(
       '$rel:${_lineOf(text, match.start)}: raw ctx.${match.group(0)!.substring(1)} '
       'outside flutter/private/download.bzl; fetch through '
       'pinned_download / pinned_download_and_extract',
     );
   }
-  final codeWithStrings = _blankNonCode(text, blankStrings: false);
-  for (final match in _getattrDownload.allMatches(codeWithStrings)) {
+  final String codeWithStrings = _blankNonCode(text, blankStrings: false);
+  for (final RegExpMatch match in _getattrDownload.allMatches(
+    codeWithStrings,
+  )) {
     errors.add(
       '$rel:${_lineOf(text, match.start)}: getattr lookup of a ctx download '
       'method outside flutter/private/download.bzl; fetch through '
@@ -262,11 +264,11 @@ Map<String, ({String rule, String kind})> _httpProxies(
   String text,
 ) {
   final proxies = <String, ({String rule, String kind})>{};
-  for (final match in _useRepoRuleBinding.allMatches(code)) {
-    final openParen = code.indexOf('(', match.start);
-    final end = _callEnd(code, openParen);
+  for (final RegExpMatch match in _useRepoRuleBinding.allMatches(code)) {
+    final int openParen = code.indexOf('(', match.start);
+    final int? end = _callEnd(code, openParen);
     if (end == null) continue;
-    final literals = _stringLiteral
+    final List<String> literals = _stringLiteral
         .allMatches(text.substring(openParen, end))
         .map((m) => m.group(1) ?? m.group(2) ?? '')
         .toList();
@@ -274,15 +276,15 @@ Map<String, ({String rule, String kind})> _httpProxies(
       proxies[match.group(1)!] = (rule: literals[1], kind: 'use_repo_rule');
     }
   }
-  for (final match in _loadCall.allMatches(code)) {
-    final openParen = code.indexOf('(', match.start);
-    final end = _callEnd(code, openParen);
+  for (final RegExpMatch match in _loadCall.allMatches(code)) {
+    final int openParen = code.indexOf('(', match.start);
+    final int? end = _callEnd(code, openParen);
     if (end == null) continue;
     // Top-level comma-separated args; the first is the label.
     final args = <String>[];
     var depth = 0;
-    var argStart = openParen + 1;
-    for (var i = openParen + 1; i < end; i++) {
+    int argStart = openParen + 1;
+    for (int i = openParen + 1; i < end; i++) {
       if (code[i] == '(') {
         depth++;
       } else if (code[i] == ')') {
@@ -293,16 +295,16 @@ Map<String, ({String rule, String kind})> _httpProxies(
       }
     }
     args.add(text.substring(argStart, end));
-    for (final arg in args.skip(1)) {
-      final aliasMatch = _loadAliasArg.firstMatch(arg);
-      final literal = _stringLiteral.firstMatch(
+    for (final String arg in args.skip(1)) {
+      final RegExpMatch? aliasMatch = _loadAliasArg.firstMatch(arg);
+      final RegExpMatch? literal = _stringLiteral.firstMatch(
         aliasMatch == null ? arg : arg.substring(aliasMatch.end),
       );
-      final orig = literal == null
+      final String orig = literal == null
           ? ''
           : (literal.group(1) ?? literal.group(2) ?? '');
       if (!_httpRuleNames.contains(orig)) continue;
-      final alias = aliasMatch?.group(1) ?? orig;
+      final String alias = aliasMatch?.group(1) ?? orig;
       if (alias == orig) continue; // Canonical name; matched directly.
       proxies[alias] = (rule: orig, kind: 'load');
     }
@@ -310,7 +312,7 @@ Map<String, ({String rule, String kind})> _httpProxies(
   // Plain `name = http_archive` rebindings at statement level (never a
   // keyword argument: those sit inside a call, after `(` or `,`). Chains
   // through known proxies resolve to a fixpoint.
-  final rebindingArgs = _plainRebinding
+  final List<({String lhs, String rhs})> rebindingArgs = _plainRebinding
       .allMatches(code)
       .map((m) => (lhs: m.group(1)!, rhs: m.group(2)!))
       .toList();
@@ -338,31 +340,36 @@ Map<String, ({String rule, String kind})> _httpProxies(
 /// rebinding — whatever the binding is called.
 List<String> _checkHttpChecksums(String rel, String text) {
   final errors = <String>[];
-  final code = _blankNonCode(text, blankStrings: true);
-  final proxies = _httpProxies(code, text);
-  final names = <String>{..._httpRuleNames, ...proxies.keys}.toList()
-    ..sort((a, b) => b.length.compareTo(a.length));
+  final String code = _blankNonCode(text, blankStrings: true);
+  final Map<String, ({String kind, String rule})> proxies = _httpProxies(
+    code,
+    text,
+  );
+  final List<String> names = <String>{
+    ..._httpRuleNames,
+    ...proxies.keys,
+  }.toList()..sort((a, b) => b.length.compareTo(a.length));
   final callRule = RegExp('(^|[^A-Za-z0-9_.])(${names.join('|')})\\s*\\(');
-  for (final match in callRule.allMatches(code)) {
-    final name = match.group(2)!;
-    final nameStart = match.start + match.group(0)!.indexOf(name);
-    final openParen = code.indexOf('(', nameStart);
-    final end = _callEnd(code, openParen);
+  for (final RegExpMatch match in callRule.allMatches(code)) {
+    final String name = match.group(2)!;
+    final int nameStart = match.start + match.group(0)!.indexOf(name);
+    final int openParen = code.indexOf('(', nameStart);
+    final int? end = _callEnd(code, openParen);
     if (end == null) {
       errors.add('$rel:${_lineOf(text, nameStart)}: cannot parse $name call');
       continue;
     }
-    final body = text.substring(openParen, end);
+    final String body = text.substring(openParen, end);
     var pinned = false;
-    for (final checksum in _literalChecksum.allMatches(body)) {
-      final value = checksum.group(2) ?? checksum.group(3) ?? '';
+    for (final RegExpMatch checksum in _literalChecksum.allMatches(body)) {
+      final String value = checksum.group(2) ?? checksum.group(3) ?? '';
       if (value.isNotEmpty) {
         pinned = true;
         break;
       }
     }
     if (!pinned) {
-      final proxy = proxies[name];
+      final ({String kind, String rule})? proxy = proxies[name];
       final via = proxy == null ? '' : ' (${proxy.rule} via ${proxy.kind})';
       errors.add(
         '$rel:${_lineOf(text, nameStart)}: $name()$via without a '
@@ -384,7 +391,10 @@ _dl(
     urls = ["https://example.invalid/probe.zip"],
 )
 ''';
-      final errors = _checkHttpChecksums('e2e/hello_world/MODULE.bazel', probe);
+      final List<String> errors = _checkHttpChecksums(
+        'e2e/hello_world/MODULE.bazel',
+        probe,
+      );
       expect(errors, hasLength(1));
       expect(errors.single, startsWith('e2e/hello_world/MODULE.bazel:3:'));
       expect(errors.single, contains('http_archive via use_repo_rule'));
@@ -400,7 +410,10 @@ _f(
     integrity = "",
 )
 ''';
-      final errors = _checkHttpChecksums('e2e/hello_world/MODULE.bazel', probe);
+      final List<String> errors = _checkHttpChecksums(
+        'e2e/hello_world/MODULE.bazel',
+        probe,
+      );
       expect(errors, hasLength(1));
       expect(errors.single, startsWith('e2e/hello_world/MODULE.bazel:3:'));
       expect(errors.single, contains('integrity'));
@@ -447,7 +460,7 @@ http_archive(
     urls = ["https://example.invalid/probe.dat"],
 )
 ''';
-      final errors = _checkHttpChecksums('MODULE.bazel', probe);
+      final List<String> errors = _checkHttpChecksums('MODULE.bazel', probe);
       expect(errors, hasLength(1));
       expect(errors.single, startsWith('MODULE.bazel:3:'));
       expect(errors.single, contains('http_file via use_repo_rule'));
@@ -472,7 +485,10 @@ http_archive(
     urls = ["https://example.invalid/probe.zip"],
 )
 ''';
-      final errors = _checkHttpChecksums('flutter/guardprobe.bzl', probe);
+      final List<String> errors = _checkHttpChecksums(
+        'flutter/guardprobe.bzl',
+        probe,
+      );
       expect(errors, hasLength(1));
       expect(errors.single, startsWith('flutter/guardprobe.bzl:3:'));
     });
@@ -486,7 +502,7 @@ load("@bazel_tools//tools/build_defs/repo:http.bzl", _zz_http_archive = "http_ar
 def zz_unpinned():
     _zz_http_archive(name = "zz_unpinned", urls = ["https://example.invalid/x.tgz"])
 ''';
-        final errors = _checkHttpChecksums(
+        final List<String> errors = _checkHttpChecksums(
           'flutter/private/zz_unpinned_http.bzl',
           probe,
         );
@@ -507,7 +523,10 @@ x = http_archive
 
 x(name = "rebound", urls = ["https://example.invalid/x.tgz"])
 ''';
-      final errors = _checkHttpChecksums('flutter/guardprobe.bzl', probe);
+      final List<String> errors = _checkHttpChecksums(
+        'flutter/guardprobe.bzl',
+        probe,
+      );
       expect(errors, hasLength(1));
       expect(errors.single, startsWith('flutter/guardprobe.bzl:5:'));
       expect(errors.single, contains('http_archive via alias'));
@@ -531,7 +550,7 @@ def zz_pinned():
     });
   });
 
-  final root = _workspaceRoot();
+  final String? root = _workspaceRoot();
   if (root == null) {
     test('download guard discovers the workspace', () {
       fail(
@@ -542,9 +561,9 @@ def zz_pinned():
     });
     return;
   }
-  final bzlFiles = _findBzl(root);
+  final List<String> bzlFiles = _findBzl(root);
   // Every MODULE.bazel in the repo: root, e2e, anywhere else.
-  final moduleFiles = _findNamed(root, '', 'MODULE.bazel');
+  final List<String> moduleFiles = _findNamed(root, '', 'MODULE.bazel');
 
   test('download guard discovers its inputs (no file list)', () {
     expect(
@@ -566,8 +585,8 @@ def zz_pinned():
 
   for (final rel in bzlFiles) {
     test('$rel fetches only through the pinned helpers', () {
-      final text = File('$root/$rel').readAsStringSync();
-      final problems = [
+      final String text = File('$root/$rel').readAsStringSync();
+      final List<String> problems = [
         ..._checkNoRawDownload(rel, text),
         ..._checkHttpChecksums(rel, text),
       ];
@@ -577,8 +596,8 @@ def zz_pinned():
 
   for (final rel in moduleFiles) {
     test('$rel pins every http checksum', () {
-      final text = File('$root/$rel').readAsStringSync();
-      final problems = _checkHttpChecksums(rel, text);
+      final String text = File('$root/$rel').readAsStringSync();
+      final List<String> problems = _checkHttpChecksums(rel, text);
       expect(problems, isEmpty, reason: problems.join('\n'));
     });
   }

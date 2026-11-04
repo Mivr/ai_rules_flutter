@@ -97,7 +97,7 @@ List<String> _positionalArgs(List<String> args) =>
 
 /// Whether [arg] names a program file for the `dart` CLI.
 bool _isProgramFile(String arg) {
-  final first = arg.toLowerCase();
+  final String first = arg.toLowerCase();
   return programFileSuffixes.any(first.endsWith);
 }
 
@@ -114,7 +114,7 @@ bool _isProgramFile(String arg) {
 /// `//flutter/private:run_home.bzl` and the Windows `.bat` in
 /// `//dart:flutter_sdk_binary`).
 bool isFileForm(List<String> args) {
-  final rest = _positionalArgs(args);
+  final List<String> rest = _positionalArgs(args);
   if (rest.isEmpty) return false;
   return _isProgramFile(rest.first);
 }
@@ -125,7 +125,7 @@ bool isFileForm(List<String> args) {
 /// argument: the first non-flag argument is a command such as `pub`, `format`
 /// or `help`.
 bool _isCommandForm(List<String> args) {
-  final rest = _positionalArgs(args);
+  final List<String> rest = _positionalArgs(args);
   return rest.isNotEmpty && !_isProgramFile(rest.first);
 }
 

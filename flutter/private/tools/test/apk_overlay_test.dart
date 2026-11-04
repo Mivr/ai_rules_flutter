@@ -77,7 +77,7 @@ void main() {
       List<int>? baseComment,
     }) {
       final basePath = '${tempDir.path}/base.apk';
-      var baseBytes = encodeDeterministicZip([
+      Uint8List baseBytes = encodeDeterministicZip([
         ZipEntry(
           path: 'AndroidManifest.xml',
           data: Uint8List.fromList([1]),
@@ -95,7 +95,7 @@ void main() {
       File(jarPath).writeAsBytesSync(encodeDeterministicZip(jarEntries));
       final assetsDir = Directory('${tempDir.path}/flutter_assets')
         ..createSync();
-      for (final entry in assets.entries) {
+      for (final MapEntry<String, Uint8List> entry in assets.entries) {
         File('${assetsDir.path}/${entry.key}').writeAsBytesSync(entry.value);
       }
       final outPath = '${tempDir.path}/out.apk';
@@ -112,7 +112,7 @@ void main() {
     }
 
     test('stores marginally compressible assets the reference stores', () {
-      final methods = spliceMethods(
+      final Map<String, int> methods = spliceMethods(
         assets: {
           'marginal_small.txt': Uint8List.fromList(utf8.encode(_marginalSmall)),
           'plain.txt': Uint8List.fromList(List<int>.filled(1000, 7)),
@@ -137,7 +137,7 @@ void main() {
     });
 
     test('deflates the estimator-trap vector the reference deflates', () {
-      final methods = spliceMethods(
+      final Map<String, int> methods = spliceMethods(
         assets: {
           'trap.txt': Uint8List.fromList(utf8.encode(_estimatorTrap)),
         },
@@ -151,7 +151,7 @@ void main() {
     });
 
     test('splices a base APK whose comment holds a stray EOCD signature', () {
-      final methods = spliceMethods(
+      final Map<String, int> methods = spliceMethods(
         assets: {
           'plain.txt': Uint8List.fromList([1, 2, 3]),
         },
@@ -169,10 +169,10 @@ void main() {
 
   group('EOCD finder and entry names', () {
     test('ignores a stray EOCD signature inside the archive comment', () {
-      final zip = encodeDeterministicZip([
+      final Uint8List zip = encodeDeterministicZip([
         ZipEntry(path: 'a.txt', data: Uint8List.fromList([1, 2, 3])),
       ]);
-      final commented = _withDeclaredComment(zip, 14, [
+      final Uint8List commented = _withDeclaredComment(zip, 14, [
         ...utf8.encode('note '),
         0x50,
         0x4B,
@@ -195,10 +195,10 @@ void main() {
     });
 
     test('rejects an EOCD whose comment does not reach the end of file', () {
-      final zip = encodeDeterministicZip([
+      final Uint8List zip = encodeDeterministicZip([
         ZipEntry(path: 'a.txt', data: Uint8List.fromList([1])),
       ]);
-      final truncated = _withDeclaredComment(zip, 16, [1, 2, 3]);
+      final Uint8List truncated = _withDeclaredComment(zip, 16, [1, 2, 3]);
       expect(
         () => readZipRawEntries(truncated),
         throwsA(
@@ -213,7 +213,7 @@ void main() {
 
     test('decodes a CP437 name when bit 11 is clear', () {
       // 'cp437_' + 0x82 (U+00E9 in CP437, invalid alone in UTF-8) + '.txt'.
-      final zip = _storedZip(
+      final Uint8List zip = _storedZip(
         [0x63, 0x70, 0x34, 0x33, 0x37, 0x5F, 0x82, 0x2E, 0x74, 0x78, 0x74],
         0,
         Uint8List.fromList([9]),
@@ -222,13 +222,17 @@ void main() {
     });
 
     test('decodes a UTF-8 name when bit 11 is set', () {
-      final nameBytes = utf8.encode('café_☃.txt');
-      final zip = _storedZip(nameBytes, 0x0800, Uint8List.fromList([9]));
+      final Uint8List nameBytes = utf8.encode('café_☃.txt');
+      final Uint8List zip = _storedZip(
+        nameBytes,
+        0x0800,
+        Uint8List.fromList([9]),
+      );
       expect(readZipRawEntries(zip).single.path, 'café_☃.txt');
     });
 
     test('names the entry whose UTF-8 name is malformed', () {
-      final zip = _storedZip(
+      final Uint8List zip = _storedZip(
         [0x62, 0x61, 0x64, 0xFF],
         0x0800,
         Uint8List.fromList([9]),
@@ -249,13 +253,13 @@ void main() {
   group('aaptDecisionSize fast path', () {
     test('fast decisions match the exact port over the fuzz corpus', () {
       var checked = 0;
-      for (final data in _decisionCorpus()) {
-        final fastSize = ZLibEncoder(raw: true).convert(data).length;
-        final fast = aaptDeflates(
+      for (final Uint8List data in _decisionCorpus()) {
+        final int fastSize = ZLibEncoder(raw: true).convert(data).length;
+        final bool fast = aaptDeflates(
           compressedSize: aaptDecisionSize(data, fastSize),
           rawSize: data.length,
         );
-        final exact = aaptDeflates(
+        final bool exact = aaptDeflates(
           compressedSize: aaptDeflatedSize(data),
           rawSize: data.length,
         );
@@ -314,7 +318,7 @@ Uint8List _storedZip(List<int> nameBytes, int flags, Uint8List content) {
     ..setUint32(38, 0x81A4 << 16, Endian.little)
     ..setUint32(42, 0, Endian.little);
   central.buffer.asUint8List().setRange(46, 46 + nameBytes.length, nameBytes);
-  final cdOffset = 30 + nameBytes.length + content.length;
+  final int cdOffset = 30 + nameBytes.length + content.length;
   final eocd = ByteData(22)
     ..setUint32(0, 0x06054b50, Endian.little)
     ..setUint16(8, 1, Endian.little)
@@ -387,7 +391,9 @@ Iterable<Uint8List> _decisionCorpus() sync* {
     65536,
     100000,
   ];
-  final text = utf8.encode('boundary method compression entry engine ');
+  final Uint8List text = utf8.encode(
+    'boundary method compression entry engine ',
+  );
   for (final size in sizes) {
     final random = Random(0xA47A9 + size);
     final patterns = <Uint8List>[

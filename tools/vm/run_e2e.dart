@@ -29,23 +29,27 @@ const _folderTimeout = Duration(minutes: 30);
 const _winOutputRoot = 'C:/b';
 
 Future<void> main(List<String> args) async {
-  final options = parseE2eArgs(args);
-  final vmName = options.vmName;
-  final isWindows = options.isWindows;
+  final E2eRunOptions options = parseE2eArgs(args);
+  final String vmName = options.vmName;
+  final bool isWindows = options.isWindows;
 
-  final repoRoot = _repoRoot();
+  final String repoRoot = _repoRoot();
   _warnIfDirty(repoRoot);
 
-  final tgz = await _packageCommittedTree(repoRoot);
+  final String tgz = await _packageCommittedTree(repoRoot);
 
   await _waitForToolchain(vmName, isWindows: isWindows);
   await _transferTreeToVm(vmName, tgz, isWindows: isWindows);
 
   // Run each folder.
   final results = <E2eFolderResult>[];
-  for (final folder in options.folders) {
+  for (final String folder in options.folders) {
     stdout.writeln('\n=== $folder ===');
-    final result = await _runFolder(vmName, folder, isWindows: isWindows);
+    final E2eFolderResult result = await _runFolder(
+      vmName,
+      folder,
+      isWindows: isWindows,
+    );
     results.add(result);
     stdout.writeln(
       '${result.pass ? "PASS" : "FAIL"} $folder (exit ${result.exitCode})',
@@ -74,7 +78,7 @@ Future<String> _packageCommittedTree(String repoRoot) async {
   final listing = File('${Directory.systemTemp.path}/rules_flutter_files.txt');
   // NUL-separated so paths with spaces survive; read as bytes because the
   // separator is not representable in the system text encoding.
-  final lsFiles = Process.runSync(
+  final ProcessResult lsFiles = Process.runSync(
     'git',
     ['-C', repoRoot, 'ls-files', '-z'],
     stdoutEncoding: null,
@@ -168,8 +172,8 @@ Future<E2eFolderResult> _runFolder(
   }
 
   final combined = '${result.stdout}\n${result.stderr}';
-  final exitCode = _parseRfExit(result.stdout.toString());
-  final pass = exitCode == 0 || exitCode == 4;
+  final int exitCode = _parseRfExit(result.stdout.toString());
+  final bool pass = exitCode == 0 || exitCode == 4;
   return E2eFolderResult(folder, exitCode, pass, _tail(combined));
 }
 
@@ -178,7 +182,7 @@ Future<void> _waitForToolchain(String vmName, {required bool isWindows}) async {
   print('Verifying toolchain on $vmName ...');
   // Generous: a fresh Windows VM may need ~15 min before SSH, then ~15 min to
   // finish installing MSVC + bazelisk via the startup script.
-  final deadline = DateTime.now().add(const Duration(minutes: 40));
+  final DateTime deadline = DateTime.now().add(const Duration(minutes: 40));
   while (DateTime.now().isBefore(deadline)) {
     final ProcessResult r;
     if (isWindows) {
@@ -203,17 +207,20 @@ Future<void> _waitForToolchain(String vmName, {required bool isWindows}) async {
 }
 
 int _parseRfExit(String stdout) {
-  final m = RegExp(r'RF_EXIT=(-?\d+)').firstMatch(stdout);
+  final RegExpMatch? m = RegExp(r'RF_EXIT=(-?\d+)').firstMatch(stdout);
   return m == null ? -1 : int.parse(m.group(1)!);
 }
 
 String _tail(String s, {int lines = 60}) {
-  final all = s.split('\n');
+  final List<String> all = s.split('\n');
   return all.length <= lines ? s : all.sublist(all.length - lines).join('\n');
 }
 
 String _repoRoot() {
-  final r = Process.runSync('git', ['rev-parse', '--show-toplevel']);
+  final ProcessResult r = Process.runSync('git', [
+    'rev-parse',
+    '--show-toplevel',
+  ]);
   if (r.exitCode != 0) {
     throw Exception('Not in a git repo: ${r.stderr}');
   }
@@ -221,7 +228,7 @@ String _repoRoot() {
 }
 
 void _warnIfDirty(String repoRoot) {
-  final r = Process.runSync('git', [
+  final ProcessResult r = Process.runSync('git', [
     '-C',
     repoRoot,
     'status',
@@ -237,7 +244,7 @@ void _warnIfDirty(String repoRoot) {
 }
 
 void _run(String exe, List<String> args, {Map<String, String>? environment}) {
-  final r = Process.runSync(exe, args, environment: environment);
+  final ProcessResult r = Process.runSync(exe, args, environment: environment);
   if (r.exitCode != 0) {
     throw Exception('$exe ${args.join(' ')} failed:\n${r.stderr}');
   }

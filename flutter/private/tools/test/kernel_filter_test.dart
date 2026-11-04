@@ -14,6 +14,12 @@ import 'package:test/test.dart';
 import '../directive_guard.dart';
 import '../kernel_filter.dart';
 
+typedef _Errors = List<String>;
+
+typedef _Manifest = KernelInputsManifest;
+
+typedef _Run = ({int code, String err, String out});
+
 const _id = '53d4fd45-0cd8-4542-bca7-7ba7c9385b70';
 
 void main() {
@@ -42,7 +48,7 @@ void main() {
 
   group('splitDependencyLines', () {
     test('separates reads from the rest', () {
-      final split = splitDependencyLines(
+      final ({List<String> reads, String rest}) split = splitDependencyLines(
         'result $_id\n'
         '$_id\n'
         '+file:///work/lib/main.dart\n'
@@ -50,10 +56,10 @@ void main() {
         '+file:///work/lib/foo.dart\n'
         '$_id app_flutter.dill 1\n',
       );
-      expect(
-        split.reads,
-        ['+file:///work/lib/main.dart', '+file:///work/lib/foo.dart'],
-      );
+      expect(split.reads, [
+        '+file:///work/lib/main.dart',
+        '+file:///work/lib/foo.dart',
+      ]);
       expect(split.rest, contains('Error: boom.'));
       expect(split.rest, isNot(contains(_id)));
       expect(split.rest, isNot(contains('+file://')));
@@ -67,7 +73,9 @@ void main() {
     tearDown(() => Directory.current = savedCwd.path);
 
     test('maps a read under the working directory to its exec path', () {
-      final work = Directory.systemTemp.createTempSync('kernel_filter_cwd_');
+      final Directory work = Directory.systemTemp.createTempSync(
+        'kernel_filter_cwd_',
+      );
       addTearDown(() => work.deleteSync(recursive: true));
       Directory.current = work.path;
       File('${work.path}/lib/main.dart').createSync(recursive: true);
@@ -82,7 +90,9 @@ void main() {
     });
 
     test('decodes percent escapes the way the front end spells them', () {
-      final work = Directory.systemTemp.createTempSync('kernel_filter_pct_');
+      final Directory work = Directory.systemTemp.createTempSync(
+        'kernel_filter_pct_',
+      );
       addTearDown(() => work.deleteSync(recursive: true));
       Directory.current = work.path;
       expect(
@@ -96,7 +106,9 @@ void main() {
     });
 
     test('rejects reads outside the working directory', () {
-      final work = Directory.systemTemp.createTempSync('kernel_filter_out_');
+      final Directory work = Directory.systemTemp.createTempSync(
+        'kernel_filter_out_',
+      );
       addTearDown(() => work.deleteSync(recursive: true));
       Directory.current = work.path;
       expect(dependencyExecPath('+file:///etc/hostname'), isNull);
@@ -129,7 +141,7 @@ void main() {
       Map<String, String> files, [
       List<String> roots = const [],
     ]) {
-      for (final entry in files.entries) {
+      for (final MapEntry<String, String> entry in files.entries) {
         write(entry.key, entry.value);
       }
       return findDisallowedFlutterDirectives(files.keys.toList(), roots);
@@ -138,7 +150,7 @@ void main() {
     test('accepts package, dart, relative and app-scheme directives', () {
       const helper = 'int get answer => 42;\n';
       write('lib/helper.dart', helper);
-      final errors = check({
+      final _Errors errors = check({
         'lib/helper.dart': helper,
         'lib/main.dart': '''
 import 'package:foo/foo.dart';
@@ -215,19 +227,15 @@ void main() {}
         // The front end reads `src//../e.dart` as `src/e.dart`; skipping the
         // empty segment would name `lib/e.dart` instead.
         expect(
-          importsOf(
-            'demo/lib/m.dart',
-            "import 'src//../e.dart';",
-            {'demo/lib/e.dart': lib},
-          ),
+          importsOf('demo/lib/m.dart', "import 'src//../e.dart';", {
+            'demo/lib/e.dart': lib,
+          }),
           hasLength(1),
         );
         expect(
-          importsOf(
-            'demo/lib/m.dart',
-            "import 'src//../e.dart';",
-            {'demo/lib/src/e.dart': lib},
-          ),
+          importsOf('demo/lib/m.dart', "import 'src//../e.dart';", {
+            'demo/lib/src/e.dart': lib,
+          }),
           isEmpty,
         );
       });
@@ -263,7 +271,7 @@ void main() {}
 
     test('refuses a file: import of an undeclared workspace file', () {
       write('pkg/lib/secret.dart', 'const secret = 1;\n');
-      final errors = check({
+      final _Errors errors = check({
         'lib/main.dart': """
 import 'file:///proc/self/cwd/pkg/lib/secret.dart';
 void main() {}
@@ -278,7 +286,7 @@ void main() {}
     });
 
     test('refuses a file: import of a host path outside the workspace', () {
-      final errors = check({
+      final _Errors errors = check({
         'lib/main.dart': """
 import 'file:///etc/hostname';
 void main() {}
@@ -297,7 +305,7 @@ void main() {}
         "file:///etc/hostname?query",
         "file:///etc/hostname#fragment",
       ]) {
-        final errors = check({
+        final _Errors errors = check({
           'lib/main.dart': "import '$uri';\nvoid main() {}\n",
         });
         expect(errors, hasLength(1), reason: uri);
@@ -316,7 +324,7 @@ void main() {}
         "part '''   \n../secret.dart''';",
         "import '''../secret.dart\n''';",
       ]) {
-        final errors = check({
+        final _Errors errors = check({
           'lib/main.dart': '$spelling\nvoid main() {}\n',
         });
         expect(errors, hasLength(1), reason: spelling);
@@ -330,7 +338,7 @@ void main() {}
     });
 
     test('refuses percent-encoded escapes naming a host file', () {
-      final errors = check({
+      final _Errors errors = check({
         'lib/main.dart': """
 import 'file:///etc%2fhostname';
 void main() {}
@@ -343,7 +351,7 @@ void main() {}
       // On the host but declared by no target: readable under every strategy,
       // so only the guard can stop it.
       write('secret.dart', 'const secret = 1;\n');
-      final errors = check({
+      final _Errors errors = check({
         'lib/main.dart': """
 import '../secret.dart';
 void main() {}
@@ -355,7 +363,7 @@ void main() {}
     });
 
     test('refuses an absolute path import', () {
-      final errors = check({
+      final _Errors errors = check({
         'lib/main.dart': """
 import '/etc/hostname';
 void main() {}
@@ -365,7 +373,7 @@ void main() {}
     });
 
     test('refuses a package: URI climbing above its package', () {
-      final errors = check({
+      final _Errors errors = check({
         'lib/main.dart': """
 import 'package:foo/../../secret.dart';
 void main() {}
@@ -377,7 +385,7 @@ void main() {}
     test('refuses a file: URI in an untaken conditional branch', () {
       const helper = 'int get answer => 42;\n';
       write('lib/helper.dart', helper);
-      final errors = check({
+      final _Errors errors = check({
         'lib/helper.dart': helper,
         'lib/main.dart': """
 import 'helper.dart' if (dart.library.html) 'file:///etc/hostname';
@@ -389,14 +397,14 @@ void main() {}
     });
 
     test('refuses file: exports and parts', () {
-      final exportErrors = check({
+      final _Errors exportErrors = check({
         'lib/main.dart': """
 export 'file:///etc/hostname';
 void main() {}
 """,
       });
       expect(exportErrors, hasLength(1));
-      final partErrors = check({
+      final _Errors partErrors = check({
         'lib/main.dart': "part 'file:///etc/hostname';\nvoid main() {}\n",
       });
       expect(partErrors, hasLength(1));
@@ -405,7 +413,7 @@ void main() {}
     test('refuses an app-scheme URI naming no declared key', () {
       const helper = 'int get answer => 42;\n';
       write('lib/helper.dart', helper);
-      final errors = check({
+      final _Errors errors = check({
         'lib/helper.dart': helper,
         'lib/main.dart': """
 import 'org-dartlang-app:///other/unlisted.dart';
@@ -422,7 +430,7 @@ void main() {}
       // sibling's `part of` name the same multi-root key the front end looks
       // up, so both directions are declared inputs.
       const stage = 'bazel-out/k8-fastbuild/bin/app.dill.1a2b3c4d.stage';
-      final errors = check(
+      final _Errors errors = check(
         {
           'lib/user.dart': "part 'user.g.dart';\n",
           'bazel-out/k8-fastbuild/bin/lib/user.g.dart':
@@ -435,7 +443,7 @@ void main() {}
 
     test('accepts generated parts in a dependency package', () {
       const stage = 'bazel-out/k8-fastbuild/bin/app.dill.1a2b3c4d.stage';
-      final errors = check(
+      final _Errors errors = check(
         {
           'dep_part/lib/settings.dart': "part 'settings.g.dart';\n",
           'bazel-out/k8-fastbuild/bin/dep_part/lib/settings.g.dart':
@@ -447,9 +455,7 @@ void main() {}
     });
 
     test('still refuses a part whose generated sibling is undeclared', () {
-      final errors = check({
-        'lib/user.dart': "part 'user.g.dart';\n",
-      });
+      final _Errors errors = check({'lib/user.dart': "part 'user.g.dart';\n"});
       expect(errors, hasLength(1));
       expect(errors.single, contains("part 'user.g.dart'"));
     });
@@ -464,7 +470,7 @@ void main() {}
           0xff,
           ...'\nimport \'file:///etc/hostname\';\nvoid main() {}\n'.codeUnits,
         ]);
-      final errors = findDisallowedFlutterDirectives([
+      final _Errors errors = findDisallowedFlutterDirectives([
         'lib/main.dart',
       ], const []);
       expect(errors, hasLength(1));
@@ -482,7 +488,7 @@ void main() {}
           0xff,
           ...'\nvoid main() {}\n'.codeUnits,
         ]);
-      final errors = findDisallowedFlutterDirectives([
+      final _Errors errors = findDisallowedFlutterDirectives([
         'lib/main.dart',
       ], const []);
       expect(errors, isEmpty);
@@ -499,7 +505,7 @@ void main() {}
           ...'\nint get answer => 42;\n'.codeUnits,
         ]);
       write('lib/main.dart', "import 'sibling.dart';\nvoid main() {}\n");
-      final errors = findDisallowedFlutterDirectives([
+      final _Errors errors = findDisallowedFlutterDirectives([
         'lib/main.dart',
         'lib/sibling.dart',
       ], const []);
@@ -555,16 +561,13 @@ void main() {}
       return manifest.path;
     }
 
-    File fakeCompiler(String name, String body) {
-      return File('${dir.path}/$name.dart')..writeAsStringSync(body);
-    }
+    File fakeCompiler(String name, String body) =>
+        File('${dir.path}/$name.dart')..writeAsStringSync(body);
 
-    Future<({int code, String out, String err})> run(
-      List<String> argv,
-    ) async {
+    Future<({int code, String out, String err})> run(List<String> argv) async {
       final out = StringBuffer();
       final err = StringBuffer();
-      final code = await runFiltered(argv, out, err);
+      final int code = await runFiltered(argv, out, err);
       return (code: code, out: '$out', err: '$err');
     }
 
@@ -574,7 +577,7 @@ void main() {}
       List<String> sources = const [],
       List<String> extraArgs = const [],
     }) async {
-      final script = fakeCompiler(
+      final File script = fakeCompiler(
         'fake',
         'import "dart:io";\n'
             'void main() {\n'
@@ -595,7 +598,7 @@ void main() {}
 
     test('a successful compile prints nothing', () async {
       writeWork('lib/main.dart', 'void main() {}\n');
-      final r = await run([
+      final _Run r = await run([
         '--declared-inputs',
         writeManifest(['lib/main.dart']),
         '--',
@@ -617,7 +620,7 @@ void main() {}
 
     test('a compile error still shows, with its exit code', () async {
       const error = 'lib/main.dart:3:5: Error: Expected `;` after this.';
-      final r = await runSource(
+      final _Run r = await runSource(
         'result $_id\n$_id\n$error\n$_id app_flutter.dill 1\n',
         1,
       );
@@ -634,7 +637,7 @@ void main() {}
     });
 
     test('refuses a call with no declared-inputs manifest', () async {
-      final r = await run(['--', Platform.resolvedExecutable, 'x.dart']);
+      final _Run r = await run(['--', Platform.resolvedExecutable, 'x.dart']);
       expect(r.code, 2);
       expect(r.err, contains('--declared-inputs'));
     });
@@ -645,14 +648,14 @@ import 'file:///etc/hostname';
 void main() {}
 """);
       final invoked = File('${dir.path}/invoked');
-      final script = fakeCompiler(
+      final File script = fakeCompiler(
         'counting',
         'import "dart:io";\n'
             'void main() {\n'
             '  File(r"${invoked.path}").writeAsStringSync("ran");\n'
             '}\n',
       );
-      final r = await run([
+      final _Run r = await run([
         '--declared-inputs',
         writeManifest(['lib/main.dart']),
         '--',
@@ -666,35 +669,32 @@ void main() {}
       expect(invoked.existsSync(), isFalse);
     });
 
-    test(
-      'refuses a triple-quoted import with a whitespace first line before running the compiler',
-      () async {
-        writeWork('secret.dart', 'const secret = 1;\n');
-        writeWork(
-          'lib/main.dart',
-          "import '''   \n../secret.dart''';\nvoid main() {}\n",
-        );
-        final invoked = File('${dir.path}/invoked');
-        final script = fakeCompiler(
-          'counting',
-          'import "dart:io";\n'
-              'void main() {\n'
-              '  File(r"${invoked.path}").writeAsStringSync("ran");\n'
-              '}\n',
-        );
-        final r = await run([
-          '--declared-inputs',
-          writeManifest(['lib/main.dart']),
-          '--',
-          Platform.resolvedExecutable,
-          script.path,
-        ]);
-        expect(r.code, 1);
-        expect(r.err, contains('lib/main.dart'));
-        expect(r.err, contains('is not a declared input'));
-        expect(invoked.existsSync(), isFalse);
-      },
-    );
+    test('refuses a triple-quoted import with a whitespace first line before running the compiler', () async {
+      writeWork('secret.dart', 'const secret = 1;\n');
+      writeWork(
+        'lib/main.dart',
+        "import '''   \n../secret.dart''';\nvoid main() {}\n",
+      );
+      final invoked = File('${dir.path}/invoked');
+      final File script = fakeCompiler(
+        'counting',
+        'import "dart:io";\n'
+            'void main() {\n'
+            '  File(r"${invoked.path}").writeAsStringSync("ran");\n'
+            '}\n',
+      );
+      final _Run r = await run([
+        '--declared-inputs',
+        writeManifest(['lib/main.dart']),
+        '--',
+        Platform.resolvedExecutable,
+        script.path,
+      ]);
+      expect(r.code, 1);
+      expect(r.err, contains('lib/main.dart'));
+      expect(r.err, contains('is not a declared input'));
+      expect(invoked.existsSync(), isFalse);
+    });
 
     test(
       'fails a read outside the declared inputs and drops the dill',
@@ -702,7 +702,7 @@ void main() {}
         writeWork('lib/main.dart', 'void main() {}\n');
         final output = File('${work.path}/app.dill')
           ..writeAsStringSync('stale bytes');
-        final script = fakeCompiler(
+        final File script = fakeCompiler(
           'reader',
           'import "dart:io";\n'
               'void main() {\n'
@@ -713,7 +713,7 @@ void main() {}
               '  stdout.writeln("$_id app.dill 0");\n'
               '}\n',
         );
-        final r = await run([
+        final _Run r = await run([
           '--declared-inputs',
           writeManifest(['lib/main.dart'], [], [], [], 'app.dill'),
           '--',
@@ -733,7 +733,7 @@ void main() {}
       writeWork('lib/main.dart', 'void main() {}\n');
       final summary = File('${work.path}/app_summary.dill')
         ..writeAsStringSync('compiled bytes');
-      final script = fakeCompiler(
+      final File script = fakeCompiler(
         'import_reader',
         'import "dart:io";\n'
             'void main() {\n'
@@ -744,7 +744,7 @@ void main() {}
             '  stdout.writeln("$_id app.dill 0");\n'
             '}\n',
       );
-      final r = await run([
+      final _Run r = await run([
         '--declared-inputs',
         writeManifest(['lib/main.dart'], [], ['app_summary.dill']),
         '--',
@@ -764,7 +764,7 @@ void main() {}
       writeWork('lib/main.dart', 'void main() {}\n');
       final summary = File('${work.path}/app_summary.dill')
         ..writeAsStringSync('compiled bytes');
-      final script = fakeCompiler(
+      final File script = fakeCompiler(
         'manifest_only_reader',
         'import "dart:io";\n'
             'void main() {\n'
@@ -775,7 +775,7 @@ void main() {}
             '  stdout.writeln("$_id app.dill 0");\n'
             '}\n',
       );
-      final r = await run([
+      final _Run r = await run([
         '--declared-inputs',
         writeManifest(['lib/main.dart'], [], ['app_summary.dill']),
         '--',
@@ -796,7 +796,7 @@ void main() {}
       final sneak = File('${work.path}/sneak.dill')..writeAsStringSync('sneak');
       final output = File('${work.path}/app.dill')
         ..writeAsStringSync('stale bytes');
-      final script = fakeCompiler(
+      final File script = fakeCompiler(
         'argv_spoof',
         'import "dart:io";\n'
             'void main() {\n'
@@ -807,7 +807,7 @@ void main() {}
             '  stdout.writeln("$_id app.dill 0");\n'
             '}\n',
       );
-      final r = await run([
+      final _Run r = await run([
         '--declared-inputs',
         writeManifest(['lib/main.dart'], [], [], [], 'app.dill'),
         '--',
@@ -838,7 +838,7 @@ void main() {}
         ..createSync(recursive: true);
       final output = File('${work.path}/app.dill')
         ..writeAsStringSync('stale bytes');
-      final script = fakeCompiler(
+      final File script = fakeCompiler(
         'mirror_reader',
         'import "dart:io";\n'
             'void main() {\n'
@@ -849,7 +849,7 @@ void main() {}
             '  stdout.writeln("$_id app.dill 0");\n'
             '}\n',
       );
-      final r = await run([
+      final _Run r = await run([
         '--declared-inputs',
         writeManifest(['lib/main.dart'], [], [], [], 'app.dill'),
         '--',
@@ -874,7 +874,7 @@ void main() {}
           ..writeAsStringSync('decoy bytes');
         final output = File('${work.path}/app.dill')
           ..writeAsStringSync('stale bytes');
-        final script = fakeCompiler(
+        final File script = fakeCompiler(
           'spoofed_output',
           'import "dart:io";\n'
               'void main() {\n'
@@ -885,7 +885,7 @@ void main() {}
               '  stdout.writeln("$_id app.dill 0");\n'
               '}\n',
         );
-        final r = await run([
+        final _Run r = await run([
           '--declared-inputs',
           writeManifest(['lib/main.dart'], [], [], [], 'app.dill'),
           '--',
@@ -908,7 +908,7 @@ void main() {}
         writeWork('lib/main.dart', 'void main() {}\n');
         final summary = File('${work.path}/app_summary.dill')
           ..writeAsStringSync('compiled bytes');
-        final script = fakeCompiler(
+        final File script = fakeCompiler(
           'import_sneak_reader',
           'import "dart:io";\n'
               'void main() {\n'
@@ -920,7 +920,7 @@ void main() {}
               '  stdout.writeln("$_id app.dill 0");\n'
               '}\n',
         );
-        final r = await run([
+        final _Run r = await run([
           '--declared-inputs',
           writeManifest(['lib/main.dart'], [], ['app_summary.dill']),
           '--',
@@ -939,7 +939,7 @@ void main() {}
 
     test('accepts reads of declared sources and staged copies', () async {
       writeWork('lib/main.dart', 'void main() {}\n');
-      final script = fakeCompiler(
+      final File script = fakeCompiler(
         'clean_reader',
         'import "dart:io";\n'
             'void main() {\n'
@@ -949,7 +949,7 @@ void main() {}
             '  stdout.writeln("$_id app.dill 0");\n'
             '}\n',
       );
-      final r = await run([
+      final _Run r = await run([
         '--declared-inputs',
         writeManifest(['lib/main.dart'], ['out/stage/lib/main.dart']),
         '--',
@@ -962,93 +962,87 @@ void main() {}
       expect(r.out.trim(), isEmpty);
     });
 
-    test(
-      'an unavailable plugin fails loudly: no retry, no registrant rewrite',
-      () async {
-        writeWork('lib/main.dart', 'void main() {}\n');
-        final registrant = File('${work.path}/plugin_registrant.dart')
-          ..createSync(recursive: true)
-          ..writeAsStringSync(
-            "import 'package:webby/webby.dart';\n"
-            'void register() => WebbyPlugin.registerWith();\n',
-          );
-        const original = "import 'package:webby/webby.dart';\n";
-        final invocations = File('${dir.path}/invocations');
-        final script = fakeCompiler(
-          'unavailable',
-          'import "dart:io";\n'
-              'void main() {\n'
-              '  File(r"${invocations.path}").writeAsStringSync("x", mode: FileMode.append);\n'
-              '  stdout.writeln("result $_id");\n'
-              '  stdout.writeln("lib/main.dart: Error: package:webby is not available on this platform.");\n'
-              '  stdout.writeln("$_id app.dill 1");\n'
-              '  exit(1);\n'
-              '}\n',
+    test('an unavailable plugin fails loudly: no retry, no registrant rewrite', () async {
+      writeWork('lib/main.dart', 'void main() {}\n');
+      final registrant = File('${work.path}/plugin_registrant.dart')
+        ..createSync(recursive: true)
+        ..writeAsStringSync(
+          "import 'package:webby/webby.dart';\n"
+          'void register() => WebbyPlugin.registerWith();\n',
         );
-        final r = await run([
-          '--declared-inputs',
-          writeManifest(['lib/main.dart']),
-          '--',
-          Platform.resolvedExecutable,
-          script.path,
-        ]);
-        expect(r.code, 1);
-        // The frontend's error passes through, with a hint that the build
-        // fails instead of shipping without the plugin.
-        expect(r.out, contains('is not available on this platform.'));
-        expect(r.err, contains('not available on the compiled platform'));
-        // No retry: the compiler ran exactly once ...
-        expect(invocations.readAsStringSync(), 'x');
-        // ... and the registrant is untouched.
-        expect(registrant.readAsStringSync(), contains(original));
-        expect(
-          registrant.readAsStringSync(),
-          contains('WebbyPlugin.registerWith();'),
-        );
-      },
-    );
+      const original = "import 'package:webby/webby.dart';\n";
+      final invocations = File('${dir.path}/invocations');
+      final File script = fakeCompiler(
+        'unavailable',
+        'import "dart:io";\n'
+            'void main() {\n'
+            '  File(r"${invocations.path}").writeAsStringSync("x", mode: FileMode.append);\n'
+            '  stdout.writeln("result $_id");\n'
+            '  stdout.writeln("lib/main.dart: Error: package:webby is not available on this platform.");\n'
+            '  stdout.writeln("$_id app.dill 1");\n'
+            '  exit(1);\n'
+            '}\n',
+      );
+      final _Run r = await run([
+        '--declared-inputs',
+        writeManifest(['lib/main.dart']),
+        '--',
+        Platform.resolvedExecutable,
+        script.path,
+      ]);
+      expect(r.code, 1);
+      // The frontend's error passes through, with a hint that the build
+      // fails instead of shipping without the plugin.
+      expect(r.out, contains('is not available on this platform.'));
+      expect(r.err, contains('not available on the compiled platform'));
+      // No retry: the compiler ran exactly once ...
+      expect(invocations.readAsStringSync(), 'x');
+      // ... and the registrant is untouched.
+      expect(registrant.readAsStringSync(), contains(original));
+      expect(
+        registrant.readAsStringSync(),
+        contains('WebbyPlugin.registerWith();'),
+      );
+    });
 
-    test(
-      'leaves staged flutter_web_plugins sources untouched',
-      () async {
-        writeWork('lib/main.dart', 'void main() {}\n');
-        const originalRegistry =
-            "import 'dart:ui_web' as ui_web;\n"
-            'void register() => ui_web.setPluginHandler((a, b, c) {});\n';
-        final stagedDir = Directory(
-          '${work.path}/stage/external/x__flutter_web_plugins/lib',
-        )..createSync(recursive: true);
-        final stagedRegistry = File('${stagedDir.path}/plugin_registry.dart')
-          ..writeAsStringSync(originalRegistry);
-        final stub = File('${work.path}/stage/app/plugin_web_ui_web_stub.dart')
-          ..createSync(recursive: true)
-          ..writeAsStringSync('// stub\n');
-        final script = fakeCompiler(
-          'nop',
-          'import "dart:io";\n'
-              'void main() {\n'
-              '  stdout.writeln("result $_id");\n'
-              '  stdout.writeln("$_id");\n'
-              '  stdout.writeln("+file://${work.path}/lib/main.dart");\n'
-              '  stdout.writeln("$_id app.dill 0");\n'
-              '}\n',
-        );
-        final r = await run([
-          '--declared-inputs',
-          writeManifest(['lib/main.dart']),
-          '--',
-          Platform.resolvedExecutable,
-          script.path,
-          '--filesystem-root',
-          '${work.path}/stage',
-          '--filesystem-scheme',
-          'org-dartlang-app',
-        ]);
-        expect(r.code, 0, reason: r.err);
-        expect(stagedRegistry.readAsStringSync(), originalRegistry);
-        expect(stub.readAsStringSync(), '// stub\n');
-      },
-    );
+    test('leaves staged flutter_web_plugins sources untouched', () async {
+      writeWork('lib/main.dart', 'void main() {}\n');
+      const originalRegistry =
+          "import 'dart:ui_web' as ui_web;\n"
+          'void register() => ui_web.setPluginHandler((a, b, c) {});\n';
+      final stagedDir = Directory(
+        '${work.path}/stage/external/x__flutter_web_plugins/lib',
+      )..createSync(recursive: true);
+      final stagedRegistry = File('${stagedDir.path}/plugin_registry.dart')
+        ..writeAsStringSync(originalRegistry);
+      final stub = File('${work.path}/stage/app/plugin_web_ui_web_stub.dart')
+        ..createSync(recursive: true)
+        ..writeAsStringSync('// stub\n');
+      final File script = fakeCompiler(
+        'nop',
+        'import "dart:io";\n'
+            'void main() {\n'
+            '  stdout.writeln("result $_id");\n'
+            '  stdout.writeln("$_id");\n'
+            '  stdout.writeln("+file://${work.path}/lib/main.dart");\n'
+            '  stdout.writeln("$_id app.dill 0");\n'
+            '}\n',
+      );
+      final _Run r = await run([
+        '--declared-inputs',
+        writeManifest(['lib/main.dart']),
+        '--',
+        Platform.resolvedExecutable,
+        script.path,
+        '--filesystem-root',
+        '${work.path}/stage',
+        '--filesystem-scheme',
+        'org-dartlang-app',
+      ]);
+      expect(r.code, 0, reason: r.err);
+      expect(stagedRegistry.readAsStringSync(), originalRegistry);
+      expect(stub.readAsStringSync(), '// stub\n');
+    });
 
     test('fails closed when a successful compile reported no reads', () async {
       // A real compile reads at least its entrypoint: zero `+` lines means
@@ -1057,7 +1051,7 @@ void main() {}
       writeWork('lib/main.dart', 'void main() {}\n');
       final output = File('${work.path}/app.dill')
         ..writeAsStringSync('stale bytes');
-      final script = fakeCompiler(
+      final File script = fakeCompiler(
         'silent',
         'import "dart:io";\n'
             'void main() {\n'
@@ -1066,7 +1060,7 @@ void main() {}
             '  stdout.writeln("$_id app.dill 0");\n'
             '}\n',
       );
-      final r = await run([
+      final _Run r = await run([
         '--declared-inputs',
         writeManifest(['lib/main.dart'], [], [], [], 'app.dill'),
         '--',
@@ -1085,7 +1079,7 @@ void main() {}
       writeWork('lib/main.dart', 'void main() {}\n');
       final output = File('${work.path}/app.dill')
         ..writeAsStringSync('stale bytes');
-      final script = fakeCompiler(
+      final File script = fakeCompiler(
         'sourceless',
         'import "dart:io";\n'
             'void main() {\n'
@@ -1095,12 +1089,10 @@ void main() {}
             '  stdout.writeln("$_id app.dill 0");\n'
             '}\n',
       );
-      final r = await run([
+      final _Run r = await run([
         '--declared-inputs',
         writeManifest(
-          [
-            'lib/main.dart',
-          ],
+          ['lib/main.dart'],
           [],
           ['pkg_config.json'],
           [],
@@ -1122,7 +1114,7 @@ void main() {}
       writeWork('lib/a.dart', 'int get answer => 42;\n');
       final output = File('${work.path}/app.dill')
         ..writeAsStringSync('stale bytes');
-      final script = fakeCompiler(
+      final File script = fakeCompiler(
         'entryless',
         'import "dart:io";\n'
             'void main() {\n'
@@ -1132,7 +1124,7 @@ void main() {}
             '  stdout.writeln("$_id app.dill 0");\n'
             '}\n',
       );
-      final r = await run([
+      final _Run r = await run([
         '--declared-inputs',
         writeManifest(['lib/main.dart', 'lib/a.dart'], [], [], [], 'app.dill'),
         '--',
@@ -1152,7 +1144,7 @@ void main() {}
         writeWork('lib/main.dart', 'void main() {}\n');
         final output = File('${work.path}/app.dill')
           ..writeAsStringSync('stale bytes');
-        final script = fakeCompiler(
+        final File script = fakeCompiler(
           'badentry',
           'import "dart:io";\n'
               'void main() {\n'
@@ -1163,7 +1155,7 @@ void main() {}
               '  stdout.writeln("$_id app.dill 0");\n'
               '}\n',
         );
-        final r = await run([
+        final _Run r = await run([
           '--declared-inputs',
           writeManifest(['lib/main.dart'], [], [], [], 'app.dill'),
           '--',
@@ -1180,7 +1172,7 @@ void main() {}
 
     test('accepts the entrypoint under its staged twin spelling', () async {
       writeWork('lib/main.dart', 'void main() {}\n');
-      final script = fakeCompiler(
+      final File script = fakeCompiler(
         'stagedentry',
         'import "dart:io";\n'
             'void main() {\n'
@@ -1190,7 +1182,7 @@ void main() {}
             '  stdout.writeln("$_id app.dill 0");\n'
             '}\n',
       );
-      final r = await run([
+      final _Run r = await run([
         '--declared-inputs',
         writeManifest(
           ['lib/main.dart'],
@@ -1213,7 +1205,7 @@ void main() {}
       () async {
         writeWork('lib/main.dart', 'void main() {}\n');
         final seen = File('${dir.path}/seen_args.txt');
-        final script = fakeCompiler(
+        final File script = fakeCompiler(
           'recorder',
           'import "dart:io";\n'
               'void main(List<String> args) {\n'
@@ -1224,7 +1216,7 @@ void main() {}
               '  stdout.writeln("$_id app.dill 0");\n'
               '}\n',
         );
-        final r = await run([
+        final _Run r = await run([
           '--declared-inputs',
           writeManifest(['lib/main.dart']),
           '--',
@@ -1235,8 +1227,8 @@ void main() {}
           'entry.dart',
         ]);
         expect(r.code, 0, reason: r.err);
-        final args = seen.readAsStringSync().split('\n');
-        final forced = args.lastIndexOf('--print-incremental-dependencies');
+        final _Errors args = seen.readAsStringSync().split('\n');
+        final int forced = args.lastIndexOf('--print-incremental-dependencies');
         expect(forced, isNot(-1));
         expect(args.last, 'entry.dart');
         expect(forced, args.length - 2);
@@ -1270,7 +1262,7 @@ void main() {}
       // The e2e/smoke consumer passes `--incremental`: an undeclared read
       // beside it is still refused.
       writeWork('lib/main.dart', 'void main() {}\n');
-      final script = fakeCompiler(
+      final File script = fakeCompiler(
         'incremental_reader',
         'import "dart:io";\n'
             'void main() {\n'
@@ -1281,7 +1273,7 @@ void main() {}
             '  stdout.writeln("$_id app.dill 0");\n'
             '}\n',
       );
-      final r = await run([
+      final _Run r = await run([
         '--declared-inputs',
         writeManifest(['lib/main.dart']),
         '--',
@@ -1421,7 +1413,9 @@ void main() {}
     tearDown(() => Directory.current = savedCwd.path);
 
     test('strips the working directory', () {
-      final work = Directory.systemTemp.createTempSync('kernel_filter_key_');
+      final Directory work = Directory.systemTemp.createTempSync(
+        'kernel_filter_key_',
+      );
       addTearDown(() => work.deleteSync(recursive: true));
       Directory.current = work.path;
       expect(
@@ -1435,10 +1429,7 @@ void main() {}
         flutterSourceKey('out.stage/app/lib/main.dart', ['out.stage']),
         'app/lib/main.dart',
       );
-      expect(
-        flutterSourceKey('a/b/c.dart', ['a', 'a/b']),
-        'c.dart',
-      );
+      expect(flutterSourceKey('a/b/c.dart', ['a', 'a/b']), 'c.dart');
     });
 
     test('strips the bazel-out bin prefix', () {

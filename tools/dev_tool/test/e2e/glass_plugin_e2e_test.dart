@@ -30,7 +30,7 @@ Future<String> _glassResults({
 }) async {
   // The in-tree workspace: these runs read the app's output and change
   // nothing.
-  final dt = await startDevTool(
+  final DevToolProcess dt = await startDevTool(
     workspace: e2eWorkspace('plugin_example'),
     target: target,
     device: device,
@@ -38,11 +38,11 @@ Future<String> _glassResults({
   );
   try {
     await dt.waitForEvent('app.started', timeout: const Duration(minutes: 8));
-    final line = await dt.waitForAppLog(
+    final String line = await dt.waitForAppLog(
       tag,
       timeout: const Duration(minutes: 2),
     );
-    final results = line.substring(line.indexOf(tag));
+    final String results = line.substring(line.indexOf(tag));
     // What the app saw, in the run's log whether or not it matches.
     print('e2e: $target on $device: $results');
     return results;
@@ -72,7 +72,7 @@ Matcher _drewOnWeb(String renderer) => matches(
 const _timeout = Timeout(Duration(minutes: 12));
 
 void main() {
-  final notMac = !Platform.isMacOS ? 'macOS only' : null;
+  final String? notMac = !Platform.isMacOS ? 'macOS only' : null;
 
   test(
     'macOS: package shaders draw as paint and as a backdrop filter',
@@ -135,11 +135,11 @@ void main() {
     test(
       '$platform: an edited shader draws after a hot reload',
       () async {
-        final ws = await editableWorkspace('plugin_example');
-        final shader = ws.file('glass_plugin/shaders/tint.frag');
-        final source = shader.readAsStringSync();
+        final EditableWorkspace ws = await editableWorkspace('plugin_example');
+        final File shader = ws.file('glass_plugin/shaders/tint.frag');
+        final String source = shader.readAsStringSync();
         expect(source, contains('fragColor = uColor;'));
-        final dt = await startDevTool(
+        final DevToolProcess dt = await startDevTool(
           workspace: ws.root,
           target: target,
           device: device,
@@ -160,7 +160,7 @@ void main() {
               'fragColor = vec4(0.0, 1.0, 0.0, 1.0);',
             ),
           );
-          final reload = await dt.sendCommand(
+          final Map<String, dynamic> reload = await dt.sendCommand(
             1,
             'app.hotReload',
             params: {'appId': dt.appId},
@@ -188,7 +188,7 @@ void main() {
 
   // Probed once, and read by both the `skip:` and the body; see
   // plugin_example_e2e_test.dart's Android group for why.
-  final android = AndroidDeviceProbe.detect();
+  final AndroidDeviceProbe android = AndroidDeviceProbe.detect();
   test(
     'Android: a shader SkSL cannot compile still draws under Impeller',
     () async {

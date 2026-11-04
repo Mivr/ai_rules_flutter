@@ -47,13 +47,13 @@ Uint8List buildElf({
   int? extraCallAt,
   List<int> magic = const [0x7f, 0x45, 0x4c, 0x46],
 }) {
-  final funcOff = 64 + 56;
-  final symOff = funcOff + _funcSize;
-  final name = withSymbol ? kFindPubspecSymbol : 'other.symbol';
-  final nameBytes = name.codeUnits + [0];
-  final strOff = symOff + 24;
-  final sectionOff = strOff + nameBytes.length;
-  final total = sectionOff + 3 * 64;
+  final int funcOff = 64 + 56;
+  final int symOff = funcOff + _funcSize;
+  final String name = withSymbol ? kFindPubspecSymbol : 'other.symbol';
+  final List<int> nameBytes = name.codeUnits + [0];
+  final int strOff = symOff + 24;
+  final int sectionOff = strOff + nameBytes.length;
+  final int total = sectionOff + 3 * 64;
   final bytes = Uint8List(total);
 
   bytes.setRange(0, 4, magic);
@@ -117,9 +117,9 @@ void _plantReturnNull(Uint8List bytes, int at) {
 
 /// The exact bytes [patchElfBytes] must produce for the standard input.
 Uint8List expectedPatched(Uint8List input) {
-  final patchAt = 64 + 56 + _callAt + 5;
-  final retNullAt = 64 + 56 + _retAt;
-  final rel = retNullAt - (patchAt + 5);
+  final int patchAt = 64 + 56 + _callAt + 5;
+  final int retNullAt = 64 + 56 + _retAt;
+  final int rel = retNullAt - (patchAt + 5);
   final out = Uint8List.fromList(input);
   out[patchAt] = 0xe9;
   ByteData.sublistView(out).setInt32(patchAt + 1, rel, Endian.little);
@@ -141,11 +141,11 @@ bool _equal(Uint8List a, Uint8List b) {
 /// Runs [runPatch] over [input] in a scratch file, returning the exit code
 /// and the file's final bytes.
 ({int code, Uint8List bytes}) runOverFile(Uint8List input) {
-  final dir = Directory.systemTemp.createTempSync('dartdev_patch');
+  final Directory dir = Directory.systemTemp.createTempSync('dartdev_patch');
   try {
     final path = '${dir.path}/dartdev_aot.dart.snapshot';
     File(path).writeAsBytesSync(input);
-    final code = runPatch([path]);
+    final int code = runPatch([path]);
     return (code: code, bytes: File(path).readAsBytesSync());
   } finally {
     dir.deleteSync(recursive: true);
@@ -155,34 +155,34 @@ bool _equal(Uint8List a, Uint8List b) {
 void main() {
   group('patchElfBytes', () {
     test('patches exact bytes with symbol and pattern', () {
-      final input = buildElf(withSymbol: true, withPattern: true);
+      final Uint8List input = buildElf(withSymbol: true, withPattern: true);
       expect(_equal(patchElfBytes(input), expectedPatched(input)), isTrue);
       expect(patchElfBytes(input).length, input.length);
     });
 
     test('rewrites one call into a jump to the epilogue', () {
-      final input = buildElf(withSymbol: true, withPattern: true);
-      final out = patchElfBytes(input);
-      const patchAt = 64 + 56 + _callAt + 5;
+      final Uint8List input = buildElf(withSymbol: true, withPattern: true);
+      final Uint8List out = patchElfBytes(input);
+      const int patchAt = 64 + 56 + _callAt + 5;
       expect(out[patchAt], 0xe9);
-      final rel = ByteData.sublistView(
+      final int rel = ByteData.sublistView(
         out,
       ).getInt32(patchAt + 1, Endian.little);
       expect(rel, 64 + 56 + _retAt - (patchAt + 5));
     });
 
     test('missing symbol fails', () {
-      final input = buildElf(withSymbol: false, withPattern: true);
+      final Uint8List input = buildElf(withSymbol: false, withPattern: true);
       expect(() => patchElfBytes(input), throwsA(isA<PatchFailure>()));
     });
 
     test('missing pattern fails', () {
-      final input = buildElf(withSymbol: true, withPattern: false);
+      final Uint8List input = buildElf(withSymbol: true, withPattern: false);
       expect(() => patchElfBytes(input), throwsA(isA<PatchFailure>()));
     });
 
     test('ambiguous call site fails', () {
-      final input = buildElf(
+      final Uint8List input = buildElf(
         withSymbol: true,
         withPattern: true,
         extraCallAt: 40,
@@ -207,7 +207,7 @@ void main() {
     });
 
     test('aarch64 ELF stays untouched even with symbol and pattern', () {
-      final input = buildElf(
+      final Uint8List input = buildElf(
         withSymbol: true,
         withPattern: true,
         machine: _machineAarch64,
@@ -216,29 +216,29 @@ void main() {
     });
 
     test('x86-64 ELF is patchable', () {
-      final input = buildElf(withSymbol: true, withPattern: true);
+      final Uint8List input = buildElf(withSymbol: true, withPattern: true);
       expect(skipReason(input), isNull);
     });
   });
 
   group('runPatch files', () {
     test('patches a file and exits 0', () {
-      final input = buildElf(withSymbol: true, withPattern: true);
-      final result = runOverFile(input);
+      final Uint8List input = buildElf(withSymbol: true, withPattern: true);
+      final ({Uint8List bytes, int code}) result = runOverFile(input);
       expect(result.code, 0);
       expect(_equal(result.bytes, expectedPatched(input)), isTrue);
     });
 
     test('fails and keeps the file on a missing pattern', () {
-      final input = buildElf(withSymbol: true, withPattern: false);
-      final result = runOverFile(input);
+      final Uint8List input = buildElf(withSymbol: true, withPattern: false);
+      final ({Uint8List bytes, int code}) result = runOverFile(input);
       expect(result.code, 1);
       expect(_equal(result.bytes, input), isTrue);
     });
 
     test('fails and keeps the file on a missing symbol', () {
-      final input = buildElf(withSymbol: false, withPattern: true);
-      final result = runOverFile(input);
+      final Uint8List input = buildElf(withSymbol: false, withPattern: true);
+      final ({Uint8List bytes, int code}) result = runOverFile(input);
       expect(result.code, 1);
       expect(_equal(result.bytes, input), isTrue);
     });
@@ -246,13 +246,15 @@ void main() {
     test('leaves Mach-O alone with exit 0', () {
       final input = Uint8List(128);
       input.setRange(0, 4, [0xcf, 0xfa, 0xed, 0xfe]);
-      final result = runOverFile(input);
+      final ({Uint8List bytes, int code}) result = runOverFile(input);
       expect(result.code, 0);
       expect(_equal(result.bytes, input), isTrue);
     });
 
     test('missing file exits 0', () {
-      final dir = Directory.systemTemp.createTempSync('dartdev_patch');
+      final Directory dir = Directory.systemTemp.createTempSync(
+        'dartdev_patch',
+      );
       try {
         expect(runPatch(['${dir.path}/absent.snapshot']), 0);
       } finally {

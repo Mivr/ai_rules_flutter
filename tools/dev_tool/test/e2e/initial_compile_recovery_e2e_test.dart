@@ -1,6 +1,8 @@
 @Tags(['e2e'])
 library;
 
+import 'dart:io';
+
 import 'package:test/test.dart';
 
 import 'dev_tool_e2e_harness.dart';
@@ -46,9 +48,9 @@ void main() {
     test(
       'a session whose first compile failed reloads once the code is fixed',
       () async {
-        final ws = await editableWorkspace('hello_world');
-        final appMain = ws.file('lib/main.dart');
-        final original = appMain.readAsStringSync();
+        final EditableWorkspace ws = await editableWorkspace('hello_world');
+        final File appMain = ws.file('lib/main.dart');
+        final String original = appMain.readAsStringSync();
         expect(
           original.contains("'count: \$_counter'"),
           isTrue,
@@ -62,7 +64,7 @@ void main() {
               'earlier run; restore it before running this test',
         );
 
-        final dt = await startDevTool(
+        final DevToolProcess dt = await startDevTool(
           workspace: ws.root,
           target: ':hello_world_macos',
           device: 'macos',
@@ -74,7 +76,7 @@ void main() {
           'package_roots_stabilized',
           timeout: const Duration(minutes: 5),
         );
-        final broke = dt.events.length;
+        final int broke = dt.events.length;
         appMain.writeAsStringSync(
           original.replaceFirst(
             "'count: \$_counter'",
@@ -87,7 +89,7 @@ void main() {
         // keeping. This runs in `--machine` mode, where the JSON logger drops
         // the human `text` — so `recoverable` is the field an IDE or agent
         // actually has, and asserting the prose here would assert nothing.
-        final reported = await dt.waitForStderr(
+        final String reported = await dt.waitForStderr(
           'initial_compile_failed',
           timeout: const Duration(minutes: 5),
         );
@@ -110,15 +112,15 @@ void main() {
         // (2) The session answers in that state. The watcher owes a reload for
         // the breaking edit itself, and it must come back as a compile failure —
         // not the instant refusal a settled gate gives, and not silence.
-        final failed = await dt.waitForEventWhere(
+        final Map<String, dynamic> failed = await dt.waitForEventWhere(
           'app.reloadResult',
           after: broke,
           what: 'the watcher-driven reload of the breaking edit',
           timeout: const Duration(minutes: 4),
           test: (params) => params['result'] is Map,
         );
-        final failedResult = (failed['params']!['result'] as Map)
-            .cast<String, dynamic>();
+        final Map<String, dynamic> failedResult =
+            (failed['params']!['result'] as Map).cast<String, dynamic>();
         expect(
           failedResult['succeeded'],
           isFalse,
@@ -130,7 +132,7 @@ void main() {
         // (3) The fix, and the bar. A marker of its own rather than the original
         // text: restoring `original` byte-for-byte would leave a passing
         // assertion that a reload which never happened could also satisfy.
-        final fixed = dt.events.length;
+        final int fixed = dt.events.length;
         appMain.writeAsStringSync(
           original.replaceFirst(
             "'count: \$_counter'",
@@ -138,22 +140,23 @@ void main() {
           ),
         );
 
-        final reload = await dt.waitForEventWhere(
+        final Map<String, dynamic> reload = await dt.waitForEventWhere(
           'app.reloadResult',
           after: fixed,
           what: 'the watcher-driven reload of the fix',
           timeout: const Duration(minutes: 4),
           test: (params) {
-            final result = (params['result'] as Map?) ?? const {};
+            final Map<dynamic, dynamic> result =
+                (params['result'] as Map?) ?? const {};
             if (result['succeeded'] != true) return true;
-            final files = result['filesRecompiled'];
+            final dynamic files = result['filesRecompiled'];
             return files is List &&
                 files.any(
                   (f) => f is String && f.startsWith('package:hello_world/'),
                 );
           },
         );
-        final result = (reload['params']!['result'] as Map)
+        final Map<String, dynamic> result = (reload['params']!['result'] as Map)
             .cast<String, dynamic>();
         expect(
           result['succeeded'],
@@ -167,9 +170,9 @@ void main() {
         // restarted. `app.waitFor` compares the widget's whole string, so this
         // cannot pass by finding nothing.
         await dt.waitForHttpControl(timeout: const Duration(minutes: 2));
-        final appId = dt.appId;
+        final String? appId = dt.appId;
         expect(appId, isNotNull);
-        final shown = await dt.httpCommand('app.waitFor', {
+        final Map<String, dynamic> shown = await dt.httpCommand('app.waitFor', {
           'appId': appId!,
           'text': 'recovered: 0',
           'timeoutMs': '30000',

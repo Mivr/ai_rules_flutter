@@ -19,6 +19,21 @@ import '../macho_parse.dart' as macho;
 import '../macho_ranges.dart' as macho;
 import 'macho_test_support.dart' as support;
 
+typedef _Input = ({
+  Uint8List bytes,
+  int oldEnd,
+  int stroff,
+  int strsize,
+  int symoff,
+});
+typedef _Input2 = ({
+  Uint8List bytes,
+  int linkeditOff,
+  int stroff,
+  int strsize,
+  int symoff,
+});
+
 /// The shared fixture's table start: two locals plus one global at 0x400.
 const _symoff = 0x400;
 
@@ -50,7 +65,7 @@ void main() {
 
 /// The one surviving global after a successful strip.
 void _expectOneGlobal(Uint8List bytes) {
-  final symtab = macho
+  final macho.LoadCommand symtab = macho
       .parseLoadCommands(bytes)
       .singleWhere((c) => c.cmd == macho.lcSymtab);
   expect(ByteData.sublistView(symtab.bytes).getUint32(12, Endian.little), 1);
@@ -58,7 +73,7 @@ void _expectOneGlobal(Uint8List bytes) {
 
 void _inPlaceLiveSectionTests() {
   test('live section with reserved1=1 over the tables is refused', () {
-    final input = support.buildSectionDylib(
+    final _Input input = support.buildSectionDylib(
       textSegEnd: _symoff,
       textSection: (
         sectname: '__text',
@@ -81,7 +96,7 @@ void _inPlaceLiveSectionTests() {
   });
 
   test('live section with another nonzero reserved1 is refused', () {
-    final input = support.buildSectionDylib(
+    final _Input input = support.buildSectionDylib(
       textSegEnd: _symoff,
       textSection: (
         sectname: '__text',
@@ -104,7 +119,7 @@ void _inPlaceLiveSectionTests() {
   });
 
   test('live section with reserved1=7 and reserved2 set is refused', () {
-    final input = support.buildSectionDylib(
+    final _Input input = support.buildSectionDylib(
       textSegEnd: _symoff,
       textSection: (
         sectname: '__text',
@@ -127,7 +142,7 @@ void _inPlaceLiveSectionTests() {
   });
 
   test('live section with attribute bits in flags is still live', () {
-    final input = support.buildSectionDylib(
+    final _Input input = support.buildSectionDylib(
       textSegEnd: _symoff,
       textSection: (
         sectname: '__text',
@@ -160,7 +175,7 @@ void _inPlaceZerofillSectionTests() {
       'zero-fill 0x${type.toRadixString(16)} with a nonzero offset strips '
       'over the tables',
       () {
-        final input = support.buildSectionDylib(
+        final _Input input = support.buildSectionDylib(
           textSegEnd: _symoff,
           textSection: (
             sectname: '__bss',
@@ -172,7 +187,7 @@ void _inPlaceZerofillSectionTests() {
             reserved2: 0,
           ),
         );
-        final stripped = support.stripTestDylib(input.bytes);
+        final Uint8List stripped = support.stripTestDylib(input.bytes);
         expect(stripped.length, input.bytes.length);
         _expectOneGlobal(stripped);
       },
@@ -180,7 +195,7 @@ void _inPlaceZerofillSectionTests() {
   }
 
   test('zero-fill with attribute bits still names no bytes', () {
-    final input = support.buildSectionDylib(
+    final _Input input = support.buildSectionDylib(
       textSegEnd: _symoff,
       textSection: (
         sectname: '__bss',
@@ -192,7 +207,7 @@ void _inPlaceZerofillSectionTests() {
         reserved2: 0,
       ),
     );
-    final stripped = support.stripTestDylib(input.bytes);
+    final Uint8List stripped = support.stripTestDylib(input.bytes);
     expect(stripped.length, input.bytes.length);
     _expectOneGlobal(stripped);
   });
@@ -200,7 +215,7 @@ void _inPlaceZerofillSectionTests() {
 
 void _linkeditLiveSectionTests() {
   test('live section with reserved1=1 reaching into __LINKEDIT is refused', () {
-    final input = support.buildLinkeditSectionDylib(
+    final _Input2 input = support.buildLinkeditSectionDylib(
       textSegEnd: _symoff,
       textSection: (
         sectname: '__text',
@@ -220,7 +235,7 @@ void _linkeditLiveSectionTests() {
   });
 
   test('live section with another nonzero reserved1 is refused', () {
-    final input = support.buildLinkeditSectionDylib(
+    final _Input2 input = support.buildLinkeditSectionDylib(
       textSegEnd: _symoff,
       textSection: (
         sectname: '__text',
@@ -240,7 +255,7 @@ void _linkeditLiveSectionTests() {
   });
 
   test('live section with reserved1=7 and reserved2 set is refused', () {
-    final input = support.buildLinkeditSectionDylib(
+    final _Input2 input = support.buildLinkeditSectionDylib(
       textSegEnd: _symoff,
       textSection: (
         sectname: '__text',
@@ -260,7 +275,7 @@ void _linkeditLiveSectionTests() {
   });
 
   test('live section with attribute bits in flags is still live', () {
-    final input = support.buildLinkeditSectionDylib(
+    final _Input2 input = support.buildLinkeditSectionDylib(
       textSegEnd: _symoff,
       textSection: (
         sectname: '__text',
@@ -290,7 +305,7 @@ void _linkeditZerofillSectionTests() {
       'zero-fill 0x${type.toRadixString(16)} with a nonzero offset strips '
       'over __LINKEDIT',
       () {
-        final input = support.buildLinkeditSectionDylib(
+        final _Input2 input = support.buildLinkeditSectionDylib(
           textSegEnd: _symoff,
           textSection: (
             sectname: '__bss',
@@ -303,7 +318,7 @@ void _linkeditZerofillSectionTests() {
           ),
           linkeditOff: _symoff,
         );
-        final stripped = support.stripTestDylib(input.bytes);
+        final Uint8List stripped = support.stripTestDylib(input.bytes);
         expect(stripped.length, lessThan(input.bytes.length));
         _expectOneGlobal(stripped);
       },
@@ -311,7 +326,7 @@ void _linkeditZerofillSectionTests() {
   }
 
   test('zero-fill with attribute bits still names no bytes', () {
-    final input = support.buildLinkeditSectionDylib(
+    final _Input2 input = support.buildLinkeditSectionDylib(
       textSegEnd: _symoff,
       textSection: (
         sectname: '__bss',
@@ -324,7 +339,7 @@ void _linkeditZerofillSectionTests() {
       ),
       linkeditOff: _symoff,
     );
-    final stripped = support.stripTestDylib(input.bytes);
+    final Uint8List stripped = support.stripTestDylib(input.bytes);
     expect(stripped.length, lessThan(input.bytes.length));
     _expectOneGlobal(stripped);
   });
@@ -346,7 +361,7 @@ void _sectionLayoutTests() {
         )),
       ]),
     );
-    final sections = macho.sectionLayoutsOf(command);
+    final List<macho.SectionLayout> sections = macho.sectionLayoutsOf(command);
     expect(sections, hasLength(1));
     expect(sections.single.type, macho.sectionTypeGbZerofill);
   });
@@ -396,7 +411,7 @@ void _sectionLayoutTests() {
           )),
         ]),
       );
-      final ranges = macho.accountedRangesOf(command);
+      final List<macho.CommandRange> ranges = macho.accountedRangesOf(command);
       expect(
         ranges.map((r) => (r.offset, r.size)).toList(),
         equals([

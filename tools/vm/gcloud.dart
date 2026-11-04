@@ -16,7 +16,7 @@ Future<String> gcloud(List<String> args, {bool quiet = false}) async {
   if (!quiet) {
     stderr.writeln('+ gcloud ${args.join(' ')}');
   }
-  final result = await Process.run('gcloud', args);
+  final ProcessResult result = await Process.run('gcloud', args);
   if (result.exitCode != 0) {
     throw Exception(
       'gcloud ${args.join(' ')} failed (exit ${result.exitCode}):\n'
@@ -33,7 +33,7 @@ Future<String> getProject() async {
 
 /// Get the active gcloud zone.
 Future<String> getZone() async {
-  final zone = await gcloud([
+  final String zone = await gcloud([
     'config',
     'get-value',
     'compute/zone',
@@ -51,7 +51,7 @@ Future<void> waitForSsh(
   String vmName, {
   Duration timeout = const Duration(minutes: 5),
 }) async {
-  final deadline = DateTime.now().add(timeout);
+  final DateTime deadline = DateTime.now().add(timeout);
   stderr.writeln('Waiting for $vmName to accept SSH ...');
   while (DateTime.now().isBefore(deadline)) {
     try {

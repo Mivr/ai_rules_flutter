@@ -73,10 +73,10 @@ echo "STARTUP_COMPLETE" > /tmp/startup_complete
 ''';
 
 Future<void> main(List<String> args) async {
-  final vmName = args.isNotEmpty ? args[0] : _defaultName;
-  final project = await getProject();
-  final zone = await getZone();
-  final dartVersion = await hermeticDartVersion();
+  final String vmName = args.isNotEmpty ? args[0] : _defaultName;
+  final String project = await getProject();
+  final String zone = await getZone();
+  final String dartVersion = await hermeticDartVersion();
 
   print('Creating Linux VM: $vmName');
   print('  Project: $project');
@@ -89,7 +89,7 @@ Future<void> main(List<String> args) async {
 
   // From a file: `--metadata` splits its value on commas, and the script
   // has them.
-  final tmpDir = Directory.systemTemp.createTempSync('linux_vm_');
+  final Directory tmpDir = Directory.systemTemp.createTempSync('linux_vm_');
   final tmpStartup = File('${tmpDir.path}/startup.sh')
     ..writeAsStringSync(_startupScript(dartVersion));
   try {
@@ -116,9 +116,9 @@ Future<void> main(List<String> args) async {
 
   // Wait for startup script to complete.
   print('Waiting for startup script to complete ...');
-  final deadline = DateTime.now().add(const Duration(minutes: 5));
+  final DateTime deadline = DateTime.now().add(const Duration(minutes: 5));
   while (true) {
-    final result = await sshRun(
+    final String result = await sshRun(
       vmName,
       'cat /tmp/startup_complete 2>/dev/null || true',
     );

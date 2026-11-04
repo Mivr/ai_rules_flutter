@@ -27,7 +27,9 @@ void main() {
     test('stats the declared app sources outside every package', () async {
       // They sit beside a `main` outside `lib/`, where no package scan looks;
       // left out of the snapshot, an edit to one is never seen as a change.
-      final tmp = await Directory.systemTemp.createTemp('snapshot_test_');
+      final Directory tmp = await Directory.systemTemp.createTemp(
+        'snapshot_test_',
+      );
       addTearDown(() => tmp.delete(recursive: true));
       final main = File(p.join(tmp.path, 'test_driver', 'app.dart'))
         ..createSync(recursive: true)
@@ -46,7 +48,7 @@ void main() {
         ),
       );
 
-      final before = workspace.snapshot();
+      final SourceVersions before = workspace.snapshot();
       expect(before.fileUris, [uri]);
       final applied = AppliedVersions()..markApplied(before, files: {uri});
       main.writeAsStringSync('v2, longer');
@@ -80,7 +82,7 @@ void main() {
       'findChangedFrom returns files whose disk version differs from applied version',
       () async {
         writeFile('a.dart', 'v1');
-        final v1 = workspace.snapshot();
+        final SourceVersions v1 = workspace.snapshot();
         final applied = AppliedVersions()
           ..markApplied(v1, files: {uriFor('a.dart')});
 
@@ -88,7 +90,7 @@ void main() {
         // APFS, but write a different content to bump size as well so the
         // Version compares unequal even on coarse-resolution filesystems.
         writeFile('a.dart', 'v2 longer content');
-        final v2 = workspace.snapshot();
+        final SourceVersions v2 = workspace.snapshot();
 
         expect(applied.findChangedFrom(v2), {uriFor('a.dart')});
       },
@@ -98,7 +100,7 @@ void main() {
       'findChangedFrom returns files present on disk but not yet applied',
       () {
         writeFile('a.dart', 'v1');
-        final v1 = workspace.snapshot();
+        final SourceVersions v1 = workspace.snapshot();
         final applied = AppliedVersions();
 
         expect(applied.findChangedFrom(v1), {uriFor('a.dart')});
@@ -110,7 +112,7 @@ void main() {
       () async {
         writeFile('a.dart', 'a-v1');
         writeFile('b.dart', 'b-v1');
-        final v1 = workspace.snapshot();
+        final SourceVersions v1 = workspace.snapshot();
         final applied = AppliedVersions();
 
         applied.markApplied(v1, files: {uriFor('a.dart')});
@@ -121,7 +123,7 @@ void main() {
         // Now edit a.dart — it should appear changed even though b.dart is
         // also un-applied (per-file state, not a global timestamp).
         writeFile('a.dart', 'a-v2 longer');
-        final v2 = workspace.snapshot();
+        final SourceVersions v2 = workspace.snapshot();
         expect(
           applied.findChangedFrom(v2),
           {uriFor('a.dart'), uriFor('b.dart')},
@@ -134,7 +136,7 @@ void main() {
       () {
         writeFile('a.dart', 'a-v1');
         writeFile('b.dart', 'b-v1');
-        final v1 = workspace.snapshot();
+        final SourceVersions v1 = workspace.snapshot();
         final applied = AppliedVersions()
           ..markApplied(v1, files: {uriFor('a.dart'), uriFor('b.dart')});
 
@@ -156,7 +158,7 @@ void main() {
         // a file should not crash; the file simply doesn't get recorded
         // until it appears in a real snapshot.
         writeFile('a.dart', 'a-v1');
-        final v1 = workspace.snapshot();
+        final SourceVersions v1 = workspace.snapshot();
         final applied = AppliedVersions();
 
         applied.markApplied(
@@ -178,8 +180,8 @@ void main() {
 
       test('seeds a source file that predates the build', () {
         writeFile('a.dart', 'v1');
-        final snap = workspace.snapshot();
-        final cutoff = DateTime.now().add(const Duration(seconds: 1));
+        final SourceVersions snap = workspace.snapshot();
+        final DateTime cutoff = DateTime.now().add(const Duration(seconds: 1));
 
         final applied = AppliedVersions()
           ..seedFromBuild(snap, builtBefore: cutoff, generated: const {});
@@ -198,7 +200,7 @@ void main() {
         File(
           p.join(tmp.path, 'lib', 'a.dart'),
         ).setLastModifiedSync(cutoff.add(const Duration(seconds: 1)));
-        final snap = workspace.snapshot();
+        final SourceVersions snap = workspace.snapshot();
 
         final applied = AppliedVersions()
           ..seedFromBuild(snap, builtBefore: cutoff, generated: const {});
@@ -212,12 +214,12 @@ void main() {
 
       test('does not seed a source file stamped exactly at the cutoff', () {
         writeFile('a.dart', 'v1');
-        final snap = workspace.snapshot();
+        final SourceVersions snap = workspace.snapshot();
         // Taken from the snapshot rather than stamped on: `setLastModified`
         // round-trips through the filesystem's own mtime resolution, which is
         // coarser than DateTime, so stamping "exactly" the cutoff lands before
         // it and the boundary never gets tested.
-        final cutoff = snap.versionOf(uriFor('a.dart'))!.mtime;
+        final DateTime cutoff = snap.versionOf(uriFor('a.dart'))!.mtime;
 
         final applied = AppliedVersions()
           ..seedFromBuild(snap, builtBefore: cutoff, generated: const {});
@@ -238,8 +240,11 @@ void main() {
           DateTime.now().add(const Duration(seconds: 30)),
         );
         const genUri = 'package:app/g.dart';
-        final ws = appWorkspace(tmp.path, generatedFiles: {genUri: gen.path});
-        final snap = ws.snapshot();
+        final Workspace ws = appWorkspace(
+          tmp.path,
+          generatedFiles: {genUri: gen.path},
+        );
+        final SourceVersions snap = ws.snapshot();
 
         final applied = AppliedVersions()
           ..seedFromBuild(
@@ -264,7 +269,9 @@ void main() {
         // would silently miss the second edit. macOS APFS supports nanosecond
         // mtime; Dart's FileStat.modified should carry it. This test pins that.
         writeFile('a.dart', 'v1');
-        final t1 = File(p.join(tmp.path, 'lib', 'a.dart')).statSync().modified;
+        final DateTime t1 = File(p.join(tmp.path, 'lib', 'a.dart'))
+            .statSync()
+            .modified;
         // 'v1' and 'v2' are the same length on purpose: size is the other half
         // of `Version`, and letting it move would let this pass without saying
         // anything about mtime. The 5ms is the interval under test, not a wait
@@ -272,7 +279,9 @@ void main() {
         // is the resolution being pinned.
         await Future<void>.delayed(const Duration(milliseconds: 5));
         writeFile('a.dart', 'v2');
-        final t2 = File(p.join(tmp.path, 'lib', 'a.dart')).statSync().modified;
+        final DateTime t2 = File(p.join(tmp.path, 'lib', 'a.dart'))
+            .statSync()
+            .modified;
         expect(
           t2.isAfter(t1),
           isTrue,
@@ -308,7 +317,7 @@ void main() {
         p.join(tmp.path, 'lib', 'a', 'b', 'c.dart'),
       ).writeAsStringSync('// c');
 
-      final snap = workspace.snapshot();
+      final SourceVersions snap = workspace.snapshot();
       expect(snap.fileUris, contains('package:app/a/b/c.dart'));
     });
 
@@ -317,7 +326,7 @@ void main() {
       File(p.join(tmp.path, 'lib', 'README.md')).writeAsStringSync('# notes');
       File(p.join(tmp.path, 'lib', 'a.dart')).writeAsStringSync('// a');
 
-      final snap = workspace.snapshot();
+      final SourceVersions snap = workspace.snapshot();
       expect(snap.fileUris, ['package:app/a.dart']);
     });
 
@@ -335,14 +344,14 @@ void main() {
         p.join(tmp.path, 'packages', 'dep', 'lib', 'api.dart'),
       ).writeAsStringSync('// api');
 
-      final ws = appWorkspace(
+      final Workspace ws = appWorkspace(
         tmp.path,
         packages: const [
           (name: 'app', libRoot: ''),
           (name: 'dep', libRoot: 'packages/dep'),
         ],
       );
-      final snap = ws.snapshot();
+      final SourceVersions snap = ws.snapshot();
       expect(
         snap.fileUris,
         containsAll(<String>[

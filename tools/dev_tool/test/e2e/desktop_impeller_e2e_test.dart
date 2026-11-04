@@ -87,9 +87,9 @@ void _desktop({
     test(
       'native capture works, the engine one does not, and reload lands',
       () async {
-        final ws = await editableWorkspace(workspace);
-        final main = ws.file('lib/main.dart');
-        final original = main.readAsStringSync();
+        final EditableWorkspace ws = await editableWorkspace(workspace);
+        final File main = ws.file('lib/main.dart');
+        final String original = main.readAsStringSync();
         expect(
           original,
           contains("const Text('$title')"),
@@ -98,7 +98,7 @@ void _desktop({
               'start with — $workspace/lib/main.dart changed shape',
         );
 
-        final dt = await startDevTool(
+        final DevToolProcess dt = await startDevTool(
           workspace: ws.root,
           target: ':app',
           device: device,
@@ -113,11 +113,11 @@ void _desktop({
           'app.started',
           timeout: const Duration(minutes: 15),
         );
-        final appId = dt.appId!;
+        final String appId = dt.appId!;
         expect(await dt.waitForHttpControl(), isNotNull);
 
         // 1. The endpoint that has to keep working.
-        final native = await dt.nativeScreenshotWhenOnScreen(appId);
+        final List<int> native = await dt.nativeScreenshotWhenOnScreen(appId);
         expect(
           native.sublist(0, 4),
           [0x89, 0x50, 0x4E, 0x47],
@@ -125,7 +125,8 @@ void _desktop({
         );
 
         // 2. The endpoint that has to refuse, and say where to go instead.
-        final refusal = await dt.httpFlutterScreenshotReply(appId);
+        final ({String body, int statusCode}) refusal = await dt
+            .httpFlutterScreenshotReply(appId);
         expect(
           refusal.statusCode,
           HttpStatus.notImplemented,
@@ -137,9 +138,11 @@ void _desktop({
 
         // 3. The refusal has to be true, not merely declared. Straight to the
         //    VM service, so the dev tool is not in the path at all.
-        final debugPort = await dt.waitForEvent('app.debugPort');
+        final Map<String, dynamic> debugPort = await dt.waitForEvent(
+          'app.debugPort',
+        );
         final wsUri = (debugPort['params'] as Map)['wsUri'] as String;
-        final engineError = await _flutterScreenshotError(wsUri);
+        final String? engineError = await _flutterScreenshotError(wsUri);
         expect(
           engineError,
           isNotNull,
@@ -162,16 +165,19 @@ void _desktop({
         // frame has necessarily built the tree, and a `getText` that lands in
         // that window returns an error whose `result` is absent — surfacing as
         // a bare `null` against the expected string, naming nothing.
-        final ready = await dt.httpCommand('app.waitFor', {
+        final Map<String, dynamic> ready = await dt.httpCommand('app.waitFor', {
           'appId': appId,
           'type': 'AppBar',
         });
         expect(ready['error'], isNull, reason: 'app.waitFor(AppBar): $ready');
 
-        final before = await dt.httpCommand('app.getText', {
-          'appId': appId,
-          'type': 'AppBar',
-        });
+        final Map<String, dynamic> before = await dt.httpCommand(
+          'app.getText',
+          {
+            'appId': appId,
+            'type': 'AppBar',
+          },
+        );
         expect(
           before['result']?['text'],
           title,
@@ -184,7 +190,7 @@ void _desktop({
             "const Text('$title RELOADED')",
           ),
         );
-        final reload = await dt.sendCommand(
+        final Map<String, dynamic> reload = await dt.sendCommand(
           1,
           'app.hotReload',
           params: {'appId': appId},
@@ -198,10 +204,13 @@ void _desktop({
 
         // Waiting for the new text *is* the assertion that the reload landed
         // in the running app; the `getText` below only reports what it found.
-        final repainted = await dt.httpCommand('app.waitFor', {
-          'appId': appId,
-          'text': '$title RELOADED',
-        });
+        final Map<String, dynamic> repainted = await dt.httpCommand(
+          'app.waitFor',
+          {
+            'appId': appId,
+            'text': '$title RELOADED',
+          },
+        );
         expect(
           repainted['error'],
           isNull,
@@ -211,7 +220,7 @@ void _desktop({
               'misses: $repainted',
         );
 
-        final after = await dt.httpCommand('app.getText', {
+        final Map<String, dynamic> after = await dt.httpCommand('app.getText', {
           'appId': appId,
           'type': 'AppBar',
         });
@@ -229,17 +238,17 @@ void _desktop({
 /// Called directly on the VM service rather than through the control channel,
 /// which refuses before reaching the engine.
 Future<String?> _flutterScreenshotError(String wsUri) async {
-  final service = await vm_io.vmServiceConnectUri(wsUri);
+  final vm.VmService service = await vm_io.vmServiceConnectUri(wsUri);
   try {
-    final isolate = await _mainIsolate(service);
+    final vm.IsolateRef isolate = await _mainIsolate(service);
     // Retry past "no running service protocol handlers", which is the engine
     // saying its handler set is still empty (`service_protocol.cc`) — not a
     // verdict on whether it can capture. Taken as the answer, it reports a
     // platform as failing for a reason that is only its startup timing.
-    final deadline = DateTime.now().add(const Duration(seconds: 60));
+    final DateTime deadline = DateTime.now().add(const Duration(seconds: 60));
     while (true) {
       try {
-        final response = await service.callServiceExtension(
+        final vm.Response response = await service.callServiceExtension(
           '_flutter.screenshot',
           isolateId: isolate.id,
         );
@@ -270,10 +279,10 @@ Future<vm.IsolateRef> _mainIsolate(
   vm.VmService service, {
   Duration timeout = const Duration(seconds: 60),
 }) async {
-  final deadline = DateTime.now().add(timeout);
+  final DateTime deadline = DateTime.now().add(timeout);
   var delay = const Duration(milliseconds: 50);
   while (true) {
-    final isolates =
+    final List<vm.IsolateRef> isolates =
         (await service.getVM()).isolates ?? const <vm.IsolateRef>[];
     if (isolates.isNotEmpty) {
       return isolates.firstWhere(

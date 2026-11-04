@@ -7,6 +7,13 @@ import 'package:test/test.dart';
 
 import 'fakes.dart';
 
+typedef _FakeBazel = ({
+  Bazel bazel,
+  List<Process> interrupted,
+  List<FakeProcess> processes,
+  List<({List<String> args, String workingDirectory})> spawned,
+});
+
 /// A real `--build_event_json_file` stream, trimmed to the events the parser
 /// reads: `bazel build //:ffi_macos -c dbg` with the hot patch aspect over
 /// `e2e/ffi_example`, output base and workspace paths scrubbed.
@@ -25,7 +32,7 @@ void main() {
     test(
       'reads the files an aspect put in a group, and the execution root',
       () {
-        final outputs = aspectOutputsFromBuildEvents(
+        final BazelAspectOutputs outputs = aspectOutputsFromBuildEvents(
           _hotPatchBuildEvents.join('\n'),
           aspect: aspect,
           outputGroup: 'flutter_native_hot_patch',
@@ -48,7 +55,7 @@ void main() {
         '{"id":{"targetCompleted":{"label":"//:app","aspect":"@@ai_rules_flutter+//flutter:dev_files.bzl%flutter_dev_files"}},"completed":{"outputGroup":[{"name":"flutter_native_hot_patch","fileSets":[{"id":"2"}]}]}}',
         '{"id":{"targetCompleted":{"label":"//:app","aspect":"@@ai_rules_flutter+//flutter:native_hot_patch.bzl%flutter_native_hot_patch_aspect"}},"completed":{"outputGroup":[{"name":"flutter_native_hot_patch","fileSets":[{"id":"0"}]}]}}',
       ];
-      final outputs = aspectOutputsFromBuildEvents(
+      final BazelAspectOutputs outputs = aspectOutputsFromBuildEvents(
         events.join('\n'),
         aspect: aspect,
         outputGroup: 'flutter_native_hot_patch',
@@ -84,7 +91,7 @@ void main() {
     // nothing: the caller reads `.outputFiles`, gets an empty list, and reports
     // whichever output it wanted as missing.
     test('asFailure carries the command and what bazel said', () {
-      final failure = BazelBuildResult(
+      final BazelInvocationFailure failure = BazelBuildResult(
         exitCode: 1,
         outputFiles: [],
         stderr: "lib/main.dart:12:5: Error: Expected ';' after this.",
@@ -133,7 +140,10 @@ void main() {
   // write down everything it produces for every user and every build.
   group('bazelBuildArgs', () {
     test('asks bazel for the files the dev loop reads', () {
-      final args = bazelBuildArgs('//:app', compilationMode: 'dbg');
+      final List<String> args = bazelBuildArgs(
+        '//:app',
+        compilationMode: 'dbg',
+      );
       expect(args, containsAllInOrder(['build', '//:app', '-c', 'dbg']));
       expect(
         args,
@@ -157,7 +167,7 @@ void main() {
       // A user who sets one means it. The aspect asks for more outputs; it
       // does not change how anything is built, so there is nothing here that
       // needs to win over `--build-arg`.
-      final args = bazelBuildArgs(
+      final List<String> args = bazelBuildArgs(
         '//:app',
         extraArgs: ['--remote_download_outputs=minimal'],
       );
@@ -253,20 +263,20 @@ void main() {
     }
 
     test('runs a command in the workspace and returns what it said', () async {
-      final fake = fakeBazel();
+      final _FakeBazel fake = fakeBazel();
 
-      final result = fake.bazel.run([
+      final Future<ProcessResult> result = fake.bazel.run([
         'info',
         'output_base',
       ], workingDirectory: '/ws');
       await pumpEventQueue();
-      final process = fake.processes.single;
+      final FakeProcess process = fake.processes.single;
       await process.outputAttached;
       process.emitStdout('/out/base');
       process.emitStderr('a warning\n');
       process.complete(0);
 
-      final finished = await result;
+      final ProcessResult finished = await result;
       expect(fake.spawned.single.args, ['info', 'output_base']);
       expect(fake.spawned.single.workingDirectory, '/ws');
       expect(finished.exitCode, 0);
@@ -277,16 +287,18 @@ void main() {
     test(
       'close interrupts a running command and waits for it to end',
       () async {
-        final fake = fakeBazel();
-        final build = fake.bazel.run([
+        final _FakeBazel fake = fakeBazel();
+        final Future<ProcessResult> build = fake.bazel.run([
           'build',
           '//:app',
         ], workingDirectory: '/ws');
         await pumpEventQueue();
-        final process = fake.processes.single;
+        final FakeProcess process = fake.processes.single;
 
         var closed = false;
-        final closing = fake.bazel.close().then((_) => closed = true);
+        final Future<bool> closing = fake.bazel.close().then(
+          (_) => closed = true,
+        );
         await pumpEventQueue();
 
         expect(fake.interrupted, [same(process)]);
@@ -301,7 +313,10 @@ void main() {
 
         // Expected before the stop is awaited: the stop finishes only once
         // the command's caller has been told.
-        final cancelled = expectLater(build, throwsA(isA<BazelCancelled>()));
+        final Future<dynamic> cancelled = expectLater(
+          build,
+          throwsA(isA<BazelCancelled>()),
+        );
         process.complete(8);
         await closing;
         await cancelled;
@@ -313,16 +328,16 @@ void main() {
     // to a run that is ending, and reporting it as a result would have the
     // caller carry on launching.
     test('a command close stopped is cancelled, whatever its status', () async {
-      final fake = fakeBazel();
-      final build = fake.bazel.run([
+      final _FakeBazel fake = fakeBazel();
+      final Future<ProcessResult> build = fake.bazel.run([
         'build',
         '//:app',
       ], workingDirectory: '/ws');
       await pumpEventQueue();
 
-      final closing = fake.bazel.close();
+      final Future<void> closing = fake.bazel.close();
       await pumpEventQueue();
-      final cancelled = expectLater(
+      final Future<dynamic> cancelled = expectLater(
         build,
         throwsA(
           isA<BazelCancelled>().having(
@@ -338,8 +353,10 @@ void main() {
     });
 
     test('a command that already ended is not interrupted', () async {
-      final fake = fakeBazel();
-      final info = fake.bazel.run(['info'], workingDirectory: '/ws');
+      final _FakeBazel fake = fakeBazel();
+      final Future<ProcessResult> info = fake.bazel.run([
+        'info',
+      ], workingDirectory: '/ws');
       await pumpEventQueue();
       fake.processes.single.complete(0);
       await info;
@@ -350,7 +367,7 @@ void main() {
     });
 
     test('refuses to start a command once closed', () async {
-      final fake = fakeBazel();
+      final _FakeBazel fake = fakeBazel();
       await fake.bazel.close();
 
       await expectLater(
@@ -370,23 +387,26 @@ void main() {
     test('a command still starting when close is called is interrupted '
         'once it exists', () async {
       final gate = Completer<void>();
-      final fake = fakeBazel(spawnGate: gate.future);
-      final build = fake.bazel.run([
+      final _FakeBazel fake = fakeBazel(spawnGate: gate.future);
+      final Future<ProcessResult> build = fake.bazel.run([
         'build',
         '//:app',
       ], workingDirectory: '/ws');
       await pumpEventQueue();
 
-      final closing = fake.bazel.close();
+      final Future<void> closing = fake.bazel.close();
       await pumpEventQueue();
       expect(fake.interrupted, isEmpty);
 
       gate.complete();
       await pumpEventQueue();
-      final process = fake.processes.single;
+      final FakeProcess process = fake.processes.single;
       expect(fake.interrupted, [same(process)]);
 
-      final cancelled = expectLater(build, throwsA(isA<BazelCancelled>()));
+      final Future<dynamic> cancelled = expectLater(
+        build,
+        throwsA(isA<BazelCancelled>()),
+      );
       process.complete(8);
       await closing;
       await cancelled;
@@ -398,15 +418,20 @@ void main() {
     // only confirmation that the build really stopped.
     test('close waits for what a stopped build printed, not only for its '
         'exit', () async {
-      final fake = fakeBazel();
-      final build = fake.bazel.build('//:app', workspace: '/ws');
+      final _FakeBazel fake = fakeBazel();
+      final Future<BazelBuildResult> build = fake.bazel.build(
+        '//:app',
+        workspace: '/ws',
+      );
       unawaited(build.then<void>((_) {}, onError: (Object _) {}));
       await pumpEventQueue();
-      final process = fake.processes.single;
+      final FakeProcess process = fake.processes.single;
       await process.outputAttached;
 
       var closed = false;
-      final closing = fake.bazel.close().then((_) => closed = true);
+      final Future<bool> closing = fake.bazel.close().then(
+        (_) => closed = true,
+      );
       await pumpEventQueue();
       process.exitBeforeOutputEnds(8);
       await pumpEventQueue();
@@ -421,9 +446,13 @@ void main() {
     test(
       'close gives up on a command that will not end, and says so',
       () async {
-        final fake = fakeBazel(stopBound: const Duration(milliseconds: 20));
+        final _FakeBazel fake = fakeBazel(
+          stopBound: const Duration(milliseconds: 20),
+        );
         final records = <LogRecord>[];
-        final sub = Logger.root.onRecord.listen(records.add);
+        final StreamSubscription<LogRecord> sub = Logger.root.onRecord.listen(
+          records.add,
+        );
         addTearDown(sub.cancel);
         unawaited(
           fake.bazel
@@ -446,12 +475,14 @@ void main() {
     // cannot happen is asking it to stop.
     test('without a way to interrupt, close still waits for the command, and '
         'says it could not stop it', () async {
-      final fake = fakeBazel(
+      final _FakeBazel fake = fakeBazel(
         canInterrupt: false,
         stopBound: const Duration(milliseconds: 20),
       );
       final records = <LogRecord>[];
-      final sub = Logger.root.onRecord.listen(records.add);
+      final StreamSubscription<LogRecord> sub = Logger.root.onRecord.listen(
+        records.add,
+      );
       addTearDown(sub.cancel);
       unawaited(
         fake.bazel
@@ -462,7 +493,7 @@ void main() {
 
       await fake.bazel.close();
 
-      final timedOut = records.singleWhere(
+      final LogRecord timedOut = records.singleWhere(
         (r) => '${r.message}'.contains('bazel_stop_timed_out'),
       );
       expect(
@@ -474,7 +505,7 @@ void main() {
     });
 
     test('close with nothing running returns at once, and twice', () async {
-      final fake = fakeBazel();
+      final _FakeBazel fake = fakeBazel();
 
       await fake.bazel.close();
       await fake.bazel.close();
@@ -484,24 +515,24 @@ void main() {
 
     group('build', () {
       test('lists the outputs of a build that succeeded', () async {
-        final fake = fakeBazel();
-        final build = fake.bazel.build(
+        final _FakeBazel fake = fakeBazel();
+        final Future<BazelBuildResult> build = fake.bazel.build(
           '//:app',
           workspace: '/ws',
           compilationMode: 'dbg',
         );
         await pumpEventQueue();
-        final buildProcess = fake.processes.single;
+        final FakeProcess buildProcess = fake.processes.single;
         await buildProcess.outputAttached;
         buildProcess.emitStderr('INFO: Build completed successfully\n');
         buildProcess.complete(0);
         await pumpEventQueue();
-        final cquery = fake.processes.last;
+        final FakeProcess cquery = fake.processes.last;
         await cquery.outputAttached;
         cquery.emitStdout('bazel-out/darwin/bin/app.zip');
         cquery.complete(0);
 
-        final result = await build;
+        final BazelBuildResult result = await build;
         expect(fake.spawned.first.args.first, 'build');
         expect(fake.spawned.last.args, [
           'cquery',
@@ -516,28 +547,37 @@ void main() {
 
       test('a build that failed carries the tail of what bazel said, and '
           'lists nothing', () async {
-        final fake = fakeBazel();
-        final build = fake.bazel.build('//:app', workspace: '/ws');
+        final _FakeBazel fake = fakeBazel();
+        final Future<BazelBuildResult> build = fake.bazel.build(
+          '//:app',
+          workspace: '/ws',
+        );
         await pumpEventQueue();
-        final process = fake.processes.single;
+        final FakeProcess process = fake.processes.single;
         await process.outputAttached;
         process.emitStderr("ERROR: lib/main.dart: Expected ';'\n");
         process.complete(1);
 
-        final result = await build;
+        final BazelBuildResult result = await build;
         expect(result.exitCode, 1);
         expect(result.stderr, contains("Expected ';'"));
         expect(fake.spawned, hasLength(1), reason: 'no cquery after a failure');
       });
 
       test('a build close stopped is cancelled and queries nothing', () async {
-        final fake = fakeBazel();
-        final build = fake.bazel.build('//:app', workspace: '/ws');
+        final _FakeBazel fake = fakeBazel();
+        final Future<BazelBuildResult> build = fake.bazel.build(
+          '//:app',
+          workspace: '/ws',
+        );
         await pumpEventQueue();
 
-        final closing = fake.bazel.close();
+        final Future<void> closing = fake.bazel.close();
         await pumpEventQueue();
-        final cancelled = expectLater(build, throwsA(isA<BazelCancelled>()));
+        final Future<dynamic> cancelled = expectLater(
+          build,
+          throwsA(isA<BazelCancelled>()),
+        );
         fake.processes.single.complete(8);
         await closing;
         await cancelled;

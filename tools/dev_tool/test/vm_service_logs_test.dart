@@ -69,7 +69,7 @@ void main() {
       service.emitStdoutEvent('flutter: from the browser\n');
       await pumpEventQueue();
 
-      final line = logs.read(0).lines.single;
+      final AppLogLine line = logs.read(0).lines.single;
       expect(line.text, 'flutter: from the browser');
       expect(line.isError, isFalse);
     });
@@ -147,7 +147,10 @@ void main() {
     test('dispose stops forwarding', () async {
       final service = FakeVmService();
       final logs = AppLogStream();
-      final forwarder = await forwardVmServiceLogs(service, logs);
+      final VmServiceLogForwarder forwarder = await forwardVmServiceLogs(
+        service,
+        logs,
+      );
 
       service.emitStdoutEvent('before\n');
       await pumpEventQueue();

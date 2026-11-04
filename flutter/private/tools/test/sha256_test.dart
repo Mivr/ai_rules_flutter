@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:test/test.dart';
 
@@ -28,7 +29,7 @@ void main() {
       expect(_hex(sha256([])), _expectedHex['empty']);
     });
     test('"abc"', () {
-      final input = utf8.encode('abc');
+      final Uint8List input = utf8.encode('abc');
       expect(sha256Hex(input), _expectedHex['abc']);
       expect(_hex(sha256(input)), _expectedHex['abc']);
     });
@@ -42,7 +43,7 @@ void main() {
       expect(sha256Hex(List.filled(64, 0x61)), _expectedHex['a64']);
     });
     test('one million "a"s', () {
-      final digest = sha256(List.filled(1000000, 0x61));
+      final List<int> digest = sha256(List.filled(1000000, 0x61));
       expect(digest, hasLength(32));
       expect(_hex(digest), _expectedHex['a1M']);
     });

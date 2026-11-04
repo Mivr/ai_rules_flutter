@@ -21,7 +21,7 @@ import 'package:flutter_bazel_dev_tool/reload_strategy.dart';
 Map<String, dynamic> toWire(CommandReport report) {
   final map = <String, dynamic>{};
 
-  final refusal = _refusalWire(report);
+  final Map<String, dynamic>? refusal = _refusalWire(report);
   if (refusal != null) return refusal;
 
   _foldOutcome(report, map);
@@ -66,7 +66,7 @@ Map<String, dynamic>? _refusalWire(CommandReport report) {
   // fold in — and falling through would reach the `null` outcome arm and call a
   // withheld increment a success.
   if (_refusedForNativeLibs(report.nativeLibs)) {
-    final refusal = {
+    final Map<String, dynamic> refusal = {
       ..._verdict(report),
       'error': _nativeLibsReason(report)!,
       'message': _nativeLibsSentence(report)!,
@@ -107,7 +107,7 @@ Map<String, dynamic>? _refusalWire(CommandReport report) {
   // Also returning outright: the app is gone, and nothing below describes a
   // command that ended with no app to report on.
   if (report.relaunchFailed case final failed?) {
-    final reasons = failed.failures.entries
+    final String reasons = failed.failures.entries
         .map((e) => '${e.key}: ${e.value}')
         .join('; ');
     return {
@@ -158,7 +158,11 @@ void _foldOutcome(CommandReport report, Map<String, dynamic> map) {
       // here with something to say — a relaunch, which runs no compiler and so
       // leaves `outcome` null — is not overwritten with a bare "successful".
       map['message'] ??= _headline(report);
-    case ReloadApplied(:final filesRecompiled, :final isEmpty, :final notShown):
+    case ReloadApplied(
+      :final Set<String> filesRecompiled,
+      :final bool isEmpty,
+      :final Map<String, String> notShown,
+    ):
       map['message'] = '${report.verb} successful';
       map['filesRecompiled'] = filesRecompiled.toList()..sort();
       map['isEmpty'] = isEmpty;
@@ -168,12 +172,12 @@ void _foldOutcome(CommandReport report, Map<String, dynamic> map) {
       map['message'] = report.nativePatch is NativePatched
           ? '${report.verb} successful'
           : '${report.verb} successful (no changes detected)';
-    case ReloadCompileFailed(:final diagnostics):
+    case ReloadCompileFailed(:final String diagnostics):
       map['message'] = 'Compilation failed';
       map['error'] = diagnostics.isNotEmpty
           ? diagnostics
           : 'compilation failed';
-    case ReloadApplyFailed(:final perApp):
+    case ReloadApplyFailed(:final Map<String, ApplyOutcome> perApp):
       map['message'] = '${report.verb} failed on some devices';
       map['perApp'] = {
         for (final entry in perApp.entries)
@@ -188,7 +192,7 @@ void _foldOutcome(CommandReport report, Map<String, dynamic> map) {
 
 /// The asset diff, folded into [map].
 void _foldAssets(CommandReport report, Map<String, dynamic> map) {
-  final assets = report.assets;
+  final AssetOutcome assets = report.assets;
   if (assets.rebuildFailed case final reason?) {
     map['error'] = reason;
     map['message'] = 'Asset rebuild failed';
@@ -300,7 +304,7 @@ Map<String, dynamic> _verdict(CommandReport report) => {
 /// is: a relaunch runs no compiler, so its `outcome` is null, and the null
 /// arm's "successful" would be all the reader got.
 String? _relaunchSentence(CommandReport report) => switch (report.relaunch) {
-  final r? =>
+  final Relaunched r? =>
     '${report.verb} successful — the app was relaunched because '
         'its native libraries changed (${r.changedLibs.join(', ')})',
   _ => null,
@@ -326,7 +330,7 @@ String _withCursorCaveat(CommandReport report, String sentence) =>
 /// was compiled"). Each reason's own closing stop is dropped, the reasons are
 /// joined with `; `, and the whole ends with one.
 String _oneSentence(List<String> reasons) {
-  final parts = [
+  final List<String> parts = [
     for (final r in reasons)
       if (r.trim().replaceFirst(RegExp(r'[.;\s]+$'), '') case final part
           when part.isNotEmpty)
@@ -345,7 +349,7 @@ String _oneSentence(List<String> reasons) {
 Map<String, dynamic>? _nativePatchRefusal(
   CommandReport report,
 ) => switch (report.nativePatch) {
-  NativePatchNeedsRestart(:final reasons) => {
+  NativePatchNeedsRestart(:final Map<String, List<String>> reasons) => {
     'error':
         '${reasons.keys.join(', ')} changed in a way that cannot be '
         'patched into the running app: '
@@ -354,21 +358,25 @@ Map<String, dynamic>? _nativePatchRefusal(
         'on the new code.',
     'nativePatchRestart': reasons,
   },
-  NativePatchBuildFailed(:final message) => {
+  NativePatchBuildFailed(:final String message) => {
     'error':
         'the native patch could not be built, so nothing was compiled and '
         'nothing was sent.\n$message',
   },
-  NativePatchLoadFailed(:final failures, :final applied) => {
-    'error':
-        'the native patch did not load in '
-        '${failures.entries.map((e) => '${e.key} (${e.value})').join(', ')}'
-        '${applied.isEmpty ? '' : ', and did in ${applied.join(', ')}, which now run the new native code'}'
-        '. The Dart edit was not sent. A restart (R) relaunches the app on '
-        'the new code.',
-    'nativePatchFailed': failures,
-    'nativePatchApplied': applied,
-  },
+  NativePatchLoadFailed(
+    :final Map<String, String> failures,
+    :final List<String> applied,
+  ) =>
+    {
+      'error':
+          'the native patch did not load in '
+          '${failures.entries.map((e) => '${e.key} (${e.value})').join(', ')}'
+          '${applied.isEmpty ? '' : ', and did in ${applied.join(', ')}, which now run the new native code'}'
+          '. The Dart edit was not sent. A restart (R) relaunches the app on '
+          'the new code.',
+      'nativePatchFailed': failures,
+      'nativePatchApplied': applied,
+    },
   _ => null,
 };
 
@@ -409,14 +417,17 @@ List<String>? _staleLibs(NativeLibsVerdict? verdict) => switch (verdict) {
 /// about their edit; a missing contract is a fact about their build, and saying
 /// so is the only way anyone learns that declaring one buys a working reload.
 String? _nativeLibsReason(CommandReport report) => switch (report.nativeLibs) {
-  NativeBindingsMoved(:final libs, :final contracts) =>
+  NativeBindingsMoved(
+    :final List<String> libs,
+    :final List<String> contracts,
+  ) =>
     '${libs.join(', ')} changed, and so did what its bindings are generated '
         'from (${contracts.join(', ')}) — so the increment would be injected '
         'over a library that cannot serve it, and a process cannot replace a '
         'library it has already loaded. ${_stillRunning(report)} Only a new '
         'process picks both up, which a restart (R, or `app.restart`) '
         'relaunches when this run launched the app.',
-  NativeLibsUnverifiable(:final libs) =>
+  NativeLibsUnverifiable(:final List<String> libs) =>
     '${libs.join(', ')} changed, and nothing declares what its bindings are '
         'generated from — so whether the increment still matches it is not '
         'knowable here, and a process cannot replace a library it has already '
@@ -465,7 +476,8 @@ String _staleCodeClause(List<String> libs) =>
 /// [CommandReport.outcome] alone is null on the DDC path, so reading that would
 /// call a refused delivery a success.
 String? _strategyFailure(CommandReport report) => switch (report.strategy) {
-  final s? when !s.isSuccess => '${report.verb} failed: ${s.message}',
+  final StrategyOutcome s? when !s.isSuccess =>
+    '${report.verb} failed: ${s.message}',
   _ => null,
 };
 
@@ -483,13 +495,13 @@ bool _dartSaidNothing(CommandReport report) {
   if (report.relaunch != null) return false;
   return switch (report.outcome) {
     null || ReloadNoChange() => true,
-    ReloadApplied(:final isEmpty) => isEmpty,
+    ReloadApplied(:final bool isEmpty) => isEmpty,
     _ => false,
   };
 }
 
 String _assetClause(CommandReport report) {
-  final assets = report.assets;
+  final AssetOutcome assets = report.assets;
   return assets.problem == null
       ? '${assets.changed.length} asset(s) reloaded'
       : '${assets.changed.length} asset(s) changed but ${assets.problem}';

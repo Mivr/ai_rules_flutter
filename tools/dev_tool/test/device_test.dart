@@ -21,6 +21,44 @@ import 'package:test/test.dart';
 
 import 'fakes.dart';
 
+typedef _Proc = FakeProcess;
+typedef _Instance = AppInstance;
+typedef _Cdp = HttpServer;
+typedef _Received = List<Map<String, dynamic>>;
+typedef _Args = List<String>;
+typedef _Device = AndroidDevice;
+typedef _Calls = List<List<String>>;
+typedef _Texts = Iterable<String>;
+
+typedef _Iproxy = Iterable<List<String>>;
+
+typedef _Sub = StreamSubscription<LogRecord>;
+
+typedef _Call = (String, List<String>);
+
+typedef _IosRig2 = ({List<FakeProcess> started, String unpacked});
+
+typedef _XcrunCalls = List<(String, List<String>)>;
+typedef _ActivationRig = ({
+  FakeProcess app,
+  MacOSDevice device,
+  FakeProcess osascript,
+  List<String> osascriptArgs,
+});
+typedef _WindowsHarness = ({
+  WindowsDevice device,
+  List<String> launched,
+  List<FakeProcess> procs,
+});
+typedef _IosRig = ({
+  IOSDevice device,
+  FakeProcess devicectl,
+  AppInstance instance,
+  FakeProcess lldb,
+  List<List<String>> runs,
+  List<List<String>> starts,
+});
+
 /// The announcement every desktop launch waits for.
 const _vmServiceLine =
     'The Dart VM service is listening on http://127.0.0.1:12345/test=/';
@@ -44,7 +82,7 @@ String _simLogShowDoc(List<String> entries) =>
 
 /// The structured `message` of a log record, or null for plain-text records.
 String? _logMessageOf(LogRecord record) {
-  final object = record.object;
+  final Object? object = record.object;
   if (object is Map) return object['message'] as String?;
   return null;
 }
@@ -72,20 +110,20 @@ void main() {
     test('matches "Dart VM service is listening on http://..."', () {
       final line =
           'The Dart VM service is listening on http://127.0.0.1:9999/xyz/';
-      final match = vmServiceUriPattern.firstMatch(line);
+      final RegExpMatch? match = vmServiceUriPattern.firstMatch(line);
       expect(match, isNotNull);
       expect(match!.group(1), 'http://127.0.0.1:9999/xyz/');
     });
 
     test('does not match unrelated stdout', () {
       final line = 'Starting Flutter application...';
-      final match = vmServiceUriPattern.firstMatch(line);
+      final RegExpMatch? match = vmServiceUriPattern.firstMatch(line);
       expect(match, isNull);
     });
 
     test('does not match partial prefix', () {
       final line = 'Something listening on http://localhost:1234/';
-      final match = vmServiceUriPattern.firstMatch(line);
+      final RegExpMatch? match = vmServiceUriPattern.firstMatch(line);
       expect(match, isNull);
     });
   });
@@ -93,7 +131,7 @@ void main() {
   group('detectDevice', () {
     test('returns a device for current platform', () {
       if (Platform.isMacOS || Platform.isLinux) {
-        final device = detectDevice();
+        final Device device = detectDevice();
         expect(device, isNotNull);
       }
     });
@@ -236,19 +274,25 @@ void main() {
       await device.launch('/path/to/MyApp.app');
 
       // Should have: boot, install, log stream spawn, launch.
-      final xcrunCalls = calls.where((c) => c.$1 == 'xcrun').toList();
+      final _XcrunCalls xcrunCalls = calls
+          .where((c) => c.$1 == 'xcrun')
+          .toList();
       expect(xcrunCalls.length, greaterThanOrEqualTo(4));
 
-      final bootCall = xcrunCalls.firstWhere((c) => c.$2.contains('boot'));
+      final _Call bootCall = xcrunCalls.firstWhere(
+        (c) => c.$2.contains('boot'),
+      );
       expect(bootCall.$2, contains('TEST-UDID'));
 
-      final installCall = xcrunCalls.firstWhere(
+      final _Call installCall = xcrunCalls.firstWhere(
         (c) => c.$2.contains('install'),
       );
       expect(installCall.$2, contains('TEST-UDID'));
       expect(installCall.$2, contains('/path/to/MyApp.app'));
 
-      final launchCall = xcrunCalls.firstWhere((c) => c.$2.contains('launch'));
+      final _Call launchCall = xcrunCalls.firstWhere(
+        (c) => c.$2.contains('launch'),
+      );
       expect(launchCall.$2, contains('com.example.test'));
     });
 
@@ -285,9 +329,8 @@ void main() {
           runProcess: (exe, args) async {
             if (exe == 'unzip') {
               unpacked = args.last;
-              Directory(
-                '$unpacked/Payload/Runner.app',
-              ).createSync(recursive: true);
+              Directory('$unpacked/Payload/Runner.app')
+                  .createSync(recursive: true);
             }
             if (args.contains(failAt)) {
               return ProcessResult(0, 1, '', '$failAt failed');
@@ -308,17 +351,17 @@ void main() {
       }
 
       test('when the install fails', () async {
-        final r = await failLaunch('install');
+        final _IosRig2 r = await failLaunch('install');
         expect(Directory(r.unpacked).existsSync(), isFalse);
       });
 
       // Past the install the two `log stream` helpers are running too, and a
       // launch that gives up must not leave them tailing the simulator's log.
       test('when the bundle id cannot be read', () async {
-        final r = await failLaunch('read');
+        final _IosRig2 r = await failLaunch('read');
         expect(Directory(r.unpacked).existsSync(), isFalse);
         expect(r.started, hasLength(2));
-        for (final process in r.started) {
+        for (final _Proc process in r.started) {
           expect(process.killed, isTrue);
         }
       });
@@ -341,7 +384,9 @@ void main() {
       final instance = AppInstance(process: fakeLog);
       await device.stop(instance);
 
-      final terminateCall = calls.firstWhere((c) => c.$2.contains('terminate'));
+      final _Call terminateCall = calls.firstWhere(
+        (c) => c.$2.contains('terminate'),
+      );
       expect(terminateCall.$2, contains('com.example.test'));
     });
 
@@ -367,7 +412,7 @@ void main() {
         );
         unawaited(fakeLog.outputAttached.then((_) => fakeLog.complete(0)));
 
-        final instance = await device.launch('/path/to/MyApp.app');
+        final _Instance instance = await device.launch('/path/to/MyApp.app');
         await device.stop(instance);
 
         expect(
@@ -396,7 +441,7 @@ void main() {
           calls.add((exe, args));
           if (exe == 'unzip') {
             // Simulate unzip by creating Payload/app.app directory.
-            final dest = args.last;
+            final String dest = args.last;
             Directory('$dest/Payload/app.app').createSync(recursive: true);
             File('$dest/Payload/app.app/Info.plist').writeAsStringSync('');
           }
@@ -410,15 +455,15 @@ void main() {
 
       unawaited(fakeLog.outputAttached.then((_) => fakeLog.complete(0)));
 
-      final app = await device.launch('/path/to/app.ipa');
+      final _Instance app = await device.launch('/path/to/app.ipa');
       addTearDown(app.disposeScratchDirs);
 
       // Should have called unzip.
-      final unzipCall = calls.firstWhere((c) => c.$1 == 'unzip');
+      final _Call unzipCall = calls.firstWhere((c) => c.$1 == 'unzip');
       expect(unzipCall.$2, contains('/path/to/app.ipa'));
 
       // simctl install should receive the extracted .app, not the .ipa.
-      final installCall = calls.firstWhere(
+      final _Call installCall = calls.firstWhere(
         (c) => c.$1 == 'xcrun' && c.$2.contains('install'),
       );
       expect(installCall.$2.last, endsWith('.app'));
@@ -443,7 +488,7 @@ void main() {
           bundleId: 'com.example.test',
           runProcess: (exe, args) async {
             if (exe == 'unzip') {
-              final dest = args.last;
+              final String dest = args.last;
               extractedLib =
                   '$dest/Payload/app.app/Frameworks/add.framework/add';
               File(extractedLib)
@@ -460,8 +505,10 @@ void main() {
         );
 
         unawaited(fakeLog.outputAttached.then((_) => fakeLog.complete(0)));
-        final before = DateTime.now().subtract(const Duration(seconds: 5));
-        final app = await device.launch('/path/to/app.ipa');
+        final DateTime before = DateTime.now().subtract(
+          const Duration(seconds: 5),
+        );
+        final _Instance app = await device.launch('/path/to/app.ipa');
         addTearDown(app.disposeScratchDirs);
 
         expect(mtimeAtInstall, isNotNull);
@@ -487,7 +534,7 @@ void main() {
           if (args.any((a) => a.contains('Dart VM service'))) {
             unawaited(
               p.outputAttached.then((_) {
-                for (final line in simStreamAnnouncement(
+                for (final String line in simStreamAnnouncement(
                   pid: 4242,
                   uri: 'http://127.0.0.1:54321/abc=/',
                   first: true,
@@ -501,7 +548,7 @@ void main() {
         },
       );
 
-      final instance = await device.launch('/path/to/MyApp.app');
+      final _Instance instance = await device.launch('/path/to/MyApp.app');
       expect(instance.vmServiceUri, isNotNull);
       expect(instance.vmServiceUri.toString(), 'http://127.0.0.1:54321/abc=/');
     });
@@ -535,7 +582,7 @@ void main() {
   group('findChrome', () {
     test('returns a string or null', () {
       // Just verifies it doesn't throw.
-      final result = findChrome();
+      final String? result = findChrome();
       expect(result, anyOf(isNull, isA<String>()));
     });
   });
@@ -550,7 +597,7 @@ void main() {
       Map<String, Object> pageState,
     ) async {
       final received = <Map<String, dynamic>>[];
-      final server = await HttpServer.bind('127.0.0.1', 0);
+      final _Cdp server = await HttpServer.bind('127.0.0.1', 0);
       addTearDown(() => server.close(force: true));
       server.listen((request) async {
         if (request.uri.path == '/json') {
@@ -572,7 +619,7 @@ void main() {
           await request.response.close();
           return;
         }
-        final socket = await WebSocketTransformer.upgrade(request);
+        final WebSocket socket = await WebSocketTransformer.upgrade(request);
         socket.listen((data) {
           final message = json.decode(data as String) as Map<String, dynamic>;
           received.add(message);
@@ -593,13 +640,13 @@ void main() {
 
     test('reads the focus first, then sends the chord in order on the app '
         'page', () async {
-      final (server, received) = await fakeBrowser({
+      final (_Cdp server, _Received received) = await fakeBrowser({
         'focus': 'flutter-view > input',
         'editable': true,
         'visible': true,
       });
 
-      final press = await pressKeyOverCdp(
+      final BrowserKeyPress press = await pressKeyOverCdp(
         cdpPort: server.port,
         appUrl: appUrl,
         chord: KeyChord.parse('Control+K', controlOrMetaIsMeta: true),
@@ -607,20 +654,17 @@ void main() {
       );
 
       expect(received.first['method'], 'Runtime.evaluate');
-      final keys = received.skip(1).toList();
+      final _Received keys = received.skip(1).toList();
       expect(
         keys.map((m) => m['method']),
         everyElement('Input.dispatchKeyEvent'),
       );
-      expect(
-        keys.map((m) => '${m['params']['type']} ${m['params']['code']}'),
-        [
-          'rawKeyDown ControlLeft',
-          'rawKeyDown KeyK',
-          'keyUp KeyK',
-          'keyUp ControlLeft',
-        ],
-      );
+      expect(keys.map((m) => '${m['params']['type']} ${m['params']['code']}'), [
+        'rawKeyDown ControlLeft',
+        'rawKeyDown KeyK',
+        'keyUp KeyK',
+        'keyUp ControlLeft',
+      ]);
       expect(keys[1]['params']['commands'], ['deleteToEndOfParagraph']);
       expect(press.sent, [for (final m in keys) m['params']]);
       expect(press.focus, 'flutter-view > input');
@@ -629,13 +673,13 @@ void main() {
     });
 
     test('reports a page with no field focused, and a hidden page', () async {
-      final (server, _) = await fakeBrowser({
+      final (_Cdp server, _) = await fakeBrowser({
         'focus': 'flutter-view',
         'editable': false,
         'visible': false,
       });
 
-      final press = await pressKeyOverCdp(
+      final BrowserKeyPress press = await pressKeyOverCdp(
         cdpPort: server.port,
         appUrl: appUrl,
         chord: KeyChord.parse('a', controlOrMetaIsMeta: true),
@@ -656,7 +700,7 @@ void main() {
     Future<HttpServer> serveCdpJson(
       List<dynamic> Function(int call) listing,
     ) async {
-      final server = await HttpServer.bind('127.0.0.1', 0);
+      final _Cdp server = await HttpServer.bind('127.0.0.1', 0);
       addTearDown(() => server.close(force: true));
       var calls = 0;
       server.listen((request) async {
@@ -699,14 +743,14 @@ void main() {
     test(
       'launches with the debug flags, a fresh profile, and the app URL',
       () async {
-        late final HttpServer cdp;
+        late final _Cdp cdp;
         cdp = await serveCdpJson(
           (_) => [extensionPage, blankPage, appPage(cdp)],
         );
 
         final proc = FakeProcess();
-        late List<String> args;
-        final launch = ChromeSession.launch(
+        late _Args args;
+        final Future<ChromeSession> launch = ChromeSession.launch(
           url: appUrl,
           chromePath: '/fake/chrome',
           startProcess: (exe, a) async {
@@ -718,7 +762,7 @@ void main() {
         await proc.outputAttached;
         proc.emitStderr(devToolsLine(cdp));
 
-        final session = await launch;
+        final ChromeSession session = await launch;
         addTearDown(() async {
           session.process.kill();
           await profileDirOf(args).delete(recursive: true);
@@ -748,7 +792,7 @@ void main() {
     );
 
     test('polls until the tab has navigated to the app page', () async {
-      late final HttpServer cdp;
+      late final _Cdp cdp;
       var calls = 0;
       cdp = await serveCdpJson((call) {
         calls = call + 1;
@@ -760,8 +804,8 @@ void main() {
       });
 
       final proc = FakeProcess();
-      late List<String> args;
-      final launch = ChromeSession.launch(
+      late _Args args;
+      final Future<ChromeSession> launch = ChromeSession.launch(
         url: appUrl,
         chromePath: '/fake/chrome',
         waits: (
@@ -777,7 +821,7 @@ void main() {
       await proc.outputAttached;
       proc.emitStderr(devToolsLine(cdp));
 
-      final session = await launch;
+      final ChromeSession session = await launch;
       addTearDown(() async {
         session.process.kill();
         await profileDirOf(args).delete(recursive: true);
@@ -799,11 +843,11 @@ void main() {
         // A tab that never navigates: only the extension and about:blank ever
         // show up. Falling back to either is exactly the bug — drive them and
         // screenshots and the console silently watch the wrong page.
-        final cdp = await serveCdpJson((_) => [extensionPage, blankPage]);
+        final _Cdp cdp = await serveCdpJson((_) => [extensionPage, blankPage]);
 
         final proc = FakeProcess();
-        late List<String> args;
-        final launch = ChromeSession.launch(
+        late _Args args;
+        final Future<ChromeSession> launch = ChromeSession.launch(
           url: appUrl,
           chromePath: '/fake/chrome',
           waits: (
@@ -850,8 +894,8 @@ void main() {
     test('fails the launch when Chrome exits without announcing a port, '
         'quoting what it said, and cleans up', () async {
       final proc = FakeProcess();
-      late List<String> args;
-      final launch = ChromeSession.launch(
+      late _Args args;
+      final Future<ChromeSession> launch = ChromeSession.launch(
         url: appUrl,
         chromePath: '/fake/chrome',
         startProcess: (exe, a) async {
@@ -889,8 +933,8 @@ void main() {
       // that announces itself. Rendering an empty tail as nothing at all would
       // read as if the quoting had been forgotten.
       final proc = FakeProcess();
-      late List<String> args;
-      final launch = ChromeSession.launch(
+      late _Args args;
+      final Future<ChromeSession> launch = ChromeSession.launch(
         url: appUrl,
         chromePath: '/fake/chrome',
         startProcess: (exe, a) async {
@@ -918,8 +962,8 @@ void main() {
       'fails the launch when Chrome never announces a port, and cleans up',
       () async {
         final proc = FakeProcess();
-        late List<String> args;
-        final launch = ChromeSession.launch(
+        late _Args args;
+        final Future<ChromeSession> launch = ChromeSession.launch(
           url: appUrl,
           chromePath: '/fake/chrome',
           waits: (
@@ -958,8 +1002,8 @@ void main() {
         // that carries neither the wait nor the output leaves the next flake
         // as undebuggable as this one was.
         final proc = FakeProcess();
-        late List<String> args;
-        final launch = ChromeSession.launch(
+        late _Args args;
+        final Future<ChromeSession> launch = ChromeSession.launch(
           url: appUrl,
           chromePath: '/fake/chrome',
           waits: (
@@ -1009,8 +1053,8 @@ void main() {
       // Silence is a diagnosis too: it rules out every cause that announces
       // itself and says the search belongs outside the browser's output.
       final proc = FakeProcess();
-      late List<String> args;
-      final launch = ChromeSession.launch(
+      late _Args args;
+      final Future<ChromeSession> launch = ChromeSession.launch(
         url: appUrl,
         chromePath: '/fake/chrome',
         waits: (
@@ -1058,7 +1102,7 @@ void main() {
       // must not — those stay the CDP override's, since --window-size cannot
       // express them.
       test('a viewport scale becomes --force-device-scale-factor', () {
-        final args = argsFor(
+        final _Args args = argsFor(
           const BrowserLaunchOptions(
             viewport: WebViewport(
               width: 393,
@@ -1072,7 +1116,7 @@ void main() {
       });
 
       test('a viewport without a scale leaves the command line alone', () {
-        final args = argsFor(
+        final _Args args = argsFor(
           const BrowserLaunchOptions(
             viewport: WebViewport(width: 393, height: 660),
           ),
@@ -1084,7 +1128,7 @@ void main() {
       });
 
       test('--web-run-headless adds headless and a real window size', () {
-        final args = argsFor(const BrowserLaunchOptions(headless: true));
+        final _Args args = argsFor(const BrowserLaunchOptions(headless: true));
         expect(args, contains('--headless'));
         expect(args, contains('--window-size=2400,1800'));
       });
@@ -1108,7 +1152,7 @@ void main() {
         // Chrome resolves a repeated switch by position, so a user switch
         // that fights one of the tool's defaults has to come after it to
         // mean anything at all.
-        final args = argsFor(
+        final _Args args = argsFor(
           const BrowserLaunchOptions(
             browserFlags: ['--mute-audio', '--lang=fr'],
           ),
@@ -1116,7 +1160,7 @@ void main() {
         expect(args.last, appUrl);
         expect(args[args.length - 3], '--mute-audio');
         expect(args[args.length - 2], '--lang=fr');
-        for (final own in chromeDebugFlags) {
+        for (final String own in chromeDebugFlags) {
           expect(
             args.indexOf(own),
             lessThan(args.indexOf('--mute-audio')),
@@ -1143,14 +1187,14 @@ void main() {
           // The announcement is the readiness signal, not merely the number: a
           // launch that trusted the flag and skipped the wait would hand every
           // CDP consumer a port before anything was listening on it.
-          late final HttpServer cdp;
+          late final _Cdp cdp;
           cdp = await serveCdpJson(
             (_) => [extensionPage, blankPage, appPage(cdp)],
           );
 
           final proc = FakeProcess();
-          late List<String> args;
-          final launch = ChromeSession.launch(
+          late _Args args;
+          final Future<ChromeSession> launch = ChromeSession.launch(
             url: appUrl,
             chromePath: '/fake/chrome',
             options: BrowserLaunchOptions(debugPort: cdp.port),
@@ -1163,7 +1207,7 @@ void main() {
           expect(args.first, '--remote-debugging-port=${cdp.port}');
           proc.emitStderr(devToolsLine(cdp));
 
-          final session = await launch;
+          final ChromeSession session = await launch;
           addTearDown(() async {
             session.process.kill();
             await profileDirOf(args).delete(recursive: true);
@@ -1175,14 +1219,14 @@ void main() {
       test('a browser that takes a different port fails the launch', () async {
         // Nothing here could drive that browser: every CDP consumer dials the
         // port that was asked for.
-        late final HttpServer cdp;
+        late final _Cdp cdp;
         cdp = await serveCdpJson(
           (_) => [extensionPage, blankPage, appPage(cdp)],
         );
 
         final proc = FakeProcess();
-        late List<String> args;
-        final launch = ChromeSession.launch(
+        late _Args args;
+        final Future<ChromeSession> launch = ChromeSession.launch(
           url: appUrl,
           chromePath: '/fake/chrome',
           options: BrowserLaunchOptions(debugPort: cdp.port + 1),
@@ -1216,14 +1260,14 @@ void main() {
         // The tab's URL and the launch URL are not the same string once the
         // app routes, so the page is matched on origin. Here the launched URL
         // carries a fragment the listed target does not.
-        late final HttpServer cdp;
+        late final _Cdp cdp;
         cdp = await serveCdpJson(
           (_) => [extensionPage, blankPage, appPage(cdp)],
         );
 
         final proc = FakeProcess();
-        late List<String> args;
-        final launch = ChromeSession.launch(
+        late _Args args;
+        final Future<ChromeSession> launch = ChromeSession.launch(
           url: '$appUrl/#/settings',
           chromePath: '/fake/chrome',
           startProcess: (exe, a) async {
@@ -1234,7 +1278,7 @@ void main() {
         await proc.outputAttached;
         proc.emitStderr(devToolsLine(cdp));
 
-        final session = await launch;
+        final ChromeSession session = await launch;
         addTearDown(() async {
           session.process.kill();
           await profileDirOf(args).delete(recursive: true);
@@ -1268,10 +1312,12 @@ void main() {
 
       await device.launch('/path/to/app.apk');
 
-      final runCalls = calls.where((c) => c.$1 == 'adb').toList();
+      final _XcrunCalls runCalls = calls.where((c) => c.$1 == 'adb').toList();
       expect(runCalls.length, greaterThanOrEqualTo(3));
 
-      final installCall = runCalls.firstWhere((c) => c.$2.contains('install'));
+      final _Call installCall = runCalls.firstWhere(
+        (c) => c.$2.contains('install'),
+      );
       expect(installCall.$2, contains('-s'));
       expect(installCall.$2, contains('emulator-5554'));
       expect(installCall.$2, contains('-r'));
@@ -1301,7 +1347,7 @@ void main() {
 
         await device.launch('/path/to/app.apk');
 
-        final startCall = calls.firstWhere((c) => c.$2.contains('am'));
+        final _Call startCall = calls.firstWhere((c) => c.$2.contains('am'));
         expect(
           startCall.$2,
           containsAllInOrder(['--ez', 'start-paused', 'true']),
@@ -1325,7 +1371,7 @@ void main() {
 
       await device.launch('/path/to/app.apk');
 
-      final startCall = calls.firstWhere((c) => c.$2.contains('am'));
+      final _Call startCall = calls.firstWhere((c) => c.$2.contains('am'));
       expect(startCall.$2, isNot(contains('start-paused')));
     });
 
@@ -1348,7 +1394,7 @@ void main() {
 
       await device.launch('/path/to/app.apk');
 
-      final startCall = calls.firstWhere((c) => c.$2.contains('am'));
+      final _Call startCall = calls.firstWhere((c) => c.$2.contains('am'));
       expect(startCall.$2, contains('shell'));
       expect(startCall.$2, contains('am'));
       expect(startCall.$2, contains('start'));
@@ -1374,7 +1420,7 @@ void main() {
 
       await device.launch('/path/to/app.apk');
 
-      final startCall = calls.firstWhere((c) => c.$2.contains('am'));
+      final _Call startCall = calls.firstWhere((c) => c.$2.contains('am'));
       expect(startCall.$2, contains('com.example.app/.MainActivity'));
     });
 
@@ -1382,16 +1428,12 @@ void main() {
       final device = AndroidDevice(
         packageName: 'com.example.app',
         adbPath: 'adb',
-        runProcess: (exe, args) async {
-          return ProcessResult(0, 1, '', 'INSTALL_FAILED');
-        },
+        runProcess: (exe, args) async =>
+            ProcessResult(0, 1, '', 'INSTALL_FAILED'),
         startProcess: (exe, args) async => FakeProcess(),
       );
 
-      expect(
-        () => device.launch('/path/to/app.apk'),
-        throwsStateError,
-      );
+      expect(() => device.launch('/path/to/app.apk'), throwsStateError);
     });
 
     /// `INSTALL_FAILED_INSUFFICIENT_STORAGE` is the one install failure a
@@ -1450,10 +1492,7 @@ void main() {
           isA<StateError>().having(
             (e) => e.message,
             'message',
-            allOf(
-              contains('more than one device'),
-              isNot(contains('adb -s')),
-            ),
+            allOf(contains('more than one device'), isNot(contains('adb -s'))),
           ),
         ),
       );
@@ -1538,9 +1577,10 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
 
       test('offers uninstall only when a copy is already installed', () async {
         await expectLater(
-          outOfSpace(availableKb: 2673748, alreadyInstalled: true).launch(
-            apkPath,
-          ),
+          outOfSpace(
+            availableKb: 2673748,
+            alreadyInstalled: true,
+          ).launch(apkPath),
           throwsA(
             isA<StateError>().having(
               (e) => e.message,
@@ -1622,13 +1662,13 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
 
     test('dials the discovered VM service through the adb forward', () async {
       final fakeLogcat = FakeProcess();
-      final device = launchableDevice(
+      final _Device device = launchableDevice(
         fakeLogcat,
         () => ProcessResult(0, 0, '41234\n', ''),
       );
       announceVmService(fakeLogcat);
 
-      final instance = await device.launch('/path/to/app.apk');
+      final _Instance instance = await device.launch('/path/to/app.apk');
       // 41234, not the announced 12345: the announced port is device-local and
       // the host reaches it only through the port adb allocated.
       expect(instance.vmServiceUri.toString(), 'http://127.0.0.1:41234/abc=/');
@@ -1636,7 +1676,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
 
     test('throws naming adb when the forward fails', () async {
       final fakeLogcat = FakeProcess();
-      final device = launchableDevice(
+      final _Device device = launchableDevice(
         fakeLogcat,
         () => ProcessResult(0, 1, '', 'error: device offline'),
       );
@@ -1658,7 +1698,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       'throws when the forward reports success but allocates no port',
       () async {
         final fakeLogcat = FakeProcess();
-        final device = launchableDevice(
+        final _Device device = launchableDevice(
           fakeLogcat,
           () => ProcessResult(0, 0, '', ''),
         );
@@ -1697,7 +1737,9 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       final instance = AppInstance(process: fakeLogcat);
       await device.stop(instance);
 
-      final stopCall = calls.firstWhere((c) => c.$2.contains('force-stop'));
+      final _Call stopCall = calls.firstWhere(
+        (c) => c.$2.contains('force-stop'),
+      );
       expect(stopCall.$2, contains('com.example.app'));
     });
 
@@ -1730,10 +1772,10 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       'stop removes the forward this launch created, by its host port',
       () async {
         final fakeLogcat = FakeProcess();
-        final (device, calls) = recordingDevice(fakeLogcat);
+        final (_Device device, _Calls calls) = recordingDevice(fakeLogcat);
         announceVmService(fakeLogcat);
 
-        final instance = await device.launch('/path/to/app.apk');
+        final _Instance instance = await device.launch('/path/to/app.apk');
         await device.stop(instance);
 
         // `adb forward` writes a rule into the adb server, not into any process
@@ -1745,7 +1787,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
 
     test('stop never clears another session\'s forwards', () async {
       final fakeLogcat = FakeProcess();
-      final (device, calls) = recordingDevice(fakeLogcat);
+      final (_Device device, _Calls calls) = recordingDevice(fakeLogcat);
       announceVmService(fakeLogcat);
 
       await device.stop(await device.launch('/path/to/app.apk'));
@@ -1764,7 +1806,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       'abandoning a launch force-stops the app and removes its forward',
       () async {
         final fakeLogcat = FakeProcess();
-        final (device, calls) = recordingDevice(fakeLogcat);
+        final (_Device device, _Calls calls) = recordingDevice(fakeLogcat);
         announceVmService(fakeLogcat);
 
         await device.launch('/path/to/app.apk');
@@ -1780,7 +1822,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
 
     test('stop removes nothing when the launch forwarded nothing', () async {
       final fakeLogcat = FakeProcess();
-      final (device, calls) = recordingDevice(fakeLogcat);
+      final (_Device device, _Calls calls) = recordingDevice(fakeLogcat);
       // No announcement: a release or profile launch has no VM service, so
       // `launch` never reaches the forward. Discovery gives up on its own.
       unawaited(fakeLogcat.outputAttached.then((_) => fakeLogcat.complete(0)));
@@ -1878,7 +1920,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     IOSDevice deviceOn(String transportType) => IOSDevice(
       udid: 'TEST-UDID',
       runProcess: (exe, args) async {
-        final out = args[args.indexOf('--json-output') + 1];
+        final String out = args[args.indexOf('--json-output') + 1];
         File(out).writeAsStringSync(devicesJson(transportType));
         return ProcessResult(0, 0, '', '');
       },
@@ -1899,13 +1941,13 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
 
     // Only a JIT app needs the debugger; an AOT one is launched running.
     test('a profile build needs no debugger', () async {
-      final device = deviceOn('wired')..buildMode = BuildMode.profile;
+      final IOSDevice device = deviceOn('wired')..buildMode = BuildMode.profile;
       expect(await namesFor(device), ['iproxy']);
     });
 
     // A release app has no VM service to forward to.
     test('a release build needs neither', () async {
-      final device = deviceOn('wired')..buildMode = BuildMode.release;
+      final IOSDevice device = deviceOn('wired')..buildMode = BuildMode.release;
       expect(await namesFor(device), isEmpty);
     });
 
@@ -1915,7 +1957,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       final device = IOSDevice(
         udid: 'OTHER-UDID',
         runProcess: (exe, args) async {
-          final out = args[args.indexOf('--json-output') + 1];
+          final String out = args[args.indexOf('--json-output') + 1];
           File(out).writeAsStringSync(devicesJson('wired'));
           return ProcessResult(0, 0, '', '');
         },
@@ -2021,7 +2063,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         );
         await device.launch('/path/to/app.apk');
 
-        final start = calls.firstWhere((c) => c.$2.contains('am'));
+        final _Call start = calls.firstWhere((c) => c.$2.contains('am'));
         expect(start.$2, contains('com.example.myapp/com.example.myapp.Main'));
       },
     );
@@ -2079,7 +2121,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     test('proceeds when the installed package requests INTERNET', () async {
       final calls = <(String, List<String>)>[];
       final fakeLogcat = FakeProcess();
-      final device = makeDevice(
+      final _Device device = makeDevice(
         calls: calls,
         logcat: fakeLogcat,
         onDumpsys: (args) async => ProcessResult(
@@ -2087,9 +2129,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
           0,
           dumpsysOutput(
             package: 'com.example.app',
-            requestedPermissions: [
-              'android.permission.INTERNET',
-            ],
+            requestedPermissions: ['android.permission.INTERNET'],
           ),
           '',
         ),
@@ -2104,10 +2144,12 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         ),
       );
 
-      final instance = await device.launch('/path/to/app.apk');
+      final _Instance instance = await device.launch('/path/to/app.apk');
       expect(instance.vmServiceUri, isNotNull);
 
-      final dumpsysCall = calls.firstWhere((c) => c.$2.contains('dumpsys'));
+      final _Call dumpsysCall = calls.firstWhere(
+        (c) => c.$2.contains('dumpsys'),
+      );
       expect(
         dumpsysCall.$2,
         containsAllInOrder(['shell', 'dumpsys', 'package', 'com.example.app']),
@@ -2118,7 +2160,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
 
     test('fails fast with diagnostic when INTERNET is missing', () async {
       final calls = <(String, List<String>)>[];
-      final device = makeDevice(
+      final _Device device = makeDevice(
         calls: calls,
         logcat: FakeProcess(),
         onDumpsys: (args) async => ProcessResult(
@@ -2126,9 +2168,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
           0,
           dumpsysOutput(
             package: 'com.example.app',
-            requestedPermissions: [
-              'android.permission.VIBRATE',
-            ],
+            requestedPermissions: ['android.permission.VIBRATE'],
           ),
           '',
         ),
@@ -2155,7 +2195,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     });
 
     test('fails when the package requests no permissions at all', () async {
-      final device = makeDevice(
+      final _Device device = makeDevice(
         calls: [],
         logcat: FakeProcess(),
         onDumpsys: (args) async => ProcessResult(
@@ -2182,7 +2222,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     });
 
     test('surfaces dumpsys query failure instead of skipping', () async {
-      final device = makeDevice(
+      final _Device device = makeDevice(
         calls: [],
         logcat: FakeProcess(),
         onDumpsys: (args) async =>
@@ -2202,7 +2242,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     });
 
     test('surfaces missing package record as an error', () async {
-      final device = makeDevice(
+      final _Device device = makeDevice(
         calls: [],
         logcat: FakeProcess(),
         onDumpsys: (args) async =>
@@ -2254,10 +2294,9 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
           calls.add((exe, args));
           if (exe == 'unzip') {
             // Simulate unzip by creating an .app directory.
-            final dest = args.last;
-            Directory(
-              '$dest/MyApp.app/Contents/MacOS',
-            ).createSync(recursive: true);
+            final String dest = args.last;
+            Directory('$dest/MyApp.app/Contents/MacOS')
+                .createSync(recursive: true);
             File('$dest/MyApp.app/Contents/MacOS/MyApp').writeAsStringSync('');
           }
           return ProcessResult(0, 0, '', '');
@@ -2281,11 +2320,11 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       await device.launch('/path/to/app.zip');
 
       // Should have called unzip.
-      final unzipCall = calls.firstWhere((c) => c.$1 == 'unzip');
+      final _Call unzipCall = calls.firstWhere((c) => c.$1 == 'unzip');
       expect(unzipCall.$2, contains('/path/to/app.zip'));
 
       // Should have started the extracted executable.
-      final startCalls = calls
+      final _XcrunCalls startCalls = calls
           .where((c) => c.$1 != 'unzip' && c.$1 != 'xcrun' && c.$1 != 'open')
           .toList();
       expect(startCalls, isNotEmpty);
@@ -2302,9 +2341,8 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
           runProcess: (exe, args) async {
             if (exe == 'unzip') {
               extracted = args.last;
-              Directory(
-                '$extracted/MyApp.app/Contents/MacOS',
-              ).createSync(recursive: true);
+              Directory('$extracted/MyApp.app/Contents/MacOS')
+                  .createSync(recursive: true);
             }
             return ProcessResult(0, 0, '', '');
           },
@@ -2424,7 +2462,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     // -600 and the app stays where it started. System Events does not need it.
     test('falls back to System Events by pid when open cannot find the '
         'app', () async {
-      final rig = activationRig(
+      final _ActivationRig rig = activationRig(
         open: ProcessResult(
           0,
           1,
@@ -2442,7 +2480,9 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     });
 
     test('does not touch System Events when open worked', () async {
-      final rig = activationRig(open: ProcessResult(0, 0, '', ''));
+      final _ActivationRig rig = activationRig(
+        open: ProcessResult(0, 0, '', ''),
+      );
 
       await rig.device.launch('/path/to/MyApp.app');
 
@@ -2452,9 +2492,9 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     test('a failure of both does not fail the launch, and says why in '
         'fields a JSON log keeps', () async {
       final records = <LogRecord>[];
-      final sub = Logger.root.onRecord.listen(records.add);
+      final _Sub sub = Logger.root.onRecord.listen(records.add);
       addTearDown(sub.cancel);
-      final rig = activationRig(
+      final _ActivationRig rig = activationRig(
         open: ProcessResult(
           0,
           1,
@@ -2469,10 +2509,10 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         ),
       );
 
-      final instance = await rig.device.launch('/path/to/MyApp.app');
+      final _Instance instance = await rig.device.launch('/path/to/MyApp.app');
 
       expect(instance.vmServiceUri, isNotNull);
-      final warning = records
+      final Map<Object?, Object?> warning = records
           .map((r) => r.object)
           .whereType<Map<Object?, Object?>>()
           .singleWhere((o) => o['message'] == 'macos_app_not_activated');
@@ -2490,19 +2530,19 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     test('a System Events that never answers is killed after the bound, and '
         'the launch carries on', () async {
       final records = <LogRecord>[];
-      final sub = Logger.root.onRecord.listen(records.add);
+      final _Sub sub = Logger.root.onRecord.listen(records.add);
       addTearDown(sub.cancel);
-      final rig = activationRig(
+      final _ActivationRig rig = activationRig(
         open: ProcessResult(0, 1, '', 'error -600'),
         // Never completes.
       );
       rig.device.activationBound = const Duration(milliseconds: 100);
 
-      final instance = await rig.device.launch('/path/to/MyApp.app');
+      final _Instance instance = await rig.device.launch('/path/to/MyApp.app');
 
       expect(instance.vmServiceUri, isNotNull);
       expect(rig.osascript.killed, isTrue);
-      final warning = records
+      final Map<Object?, Object?> warning = records
           .map((r) => r.object)
           .whereType<Map<Object?, Object?>>()
           .singleWhere((o) => o['message'] == 'macos_app_not_activated');
@@ -2521,9 +2561,8 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     setUp(() {
       bundleRoot = Directory.systemTemp.createTempSync('desktop_launch_test');
       Directory(p.join(bundleRoot.path, 'MyApp.app')).createSync();
-      File(
-        p.join(bundleRoot.path, 'MyApp.app', 'MyApp.app.exe'),
-      ).writeAsStringSync('exe');
+      File(p.join(bundleRoot.path, 'MyApp.app', 'MyApp.app.exe'))
+          .writeAsStringSync('exe');
     });
     tearDown(() => bundleRoot.deleteSync(recursive: true));
 
@@ -2534,8 +2573,8 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       List<AppLogLine>? sink,
     }) async {
       final proc = FakeProcess();
-      final device = build((exe, args) async => proc);
-      final pending = device.launch(
+      final Device device = build((exe, args) async => proc);
+      final Future<AppInstance> pending = device.launch(
         p.join(bundleRoot.path, 'MyApp.app'),
         onLog: sink == null ? null : sink.add,
       );
@@ -2543,7 +2582,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       // FakeProcess streams are live, not replayed.
       await proc.outputAttached;
       proc.emitStdout(_vmServiceLine);
-      final instance = await pending;
+      final _Instance instance = await pending;
       return (instance, proc);
     }
 
@@ -2572,7 +2611,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         test(
           'keeps forwarding stdout after the VM service is discovered',
           () async {
-            final (instance, proc) = await launchWith(build);
+            final (_Instance instance, _Proc proc) = await launchWith(build);
             expect(
               instance.vmServiceUri,
               isNotNull,
@@ -2583,7 +2622,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
             proc.emitStdout('flutter: still going');
             await pumpEventQueue();
 
-            final texts = instance.logs.read(0).lines.map((l) => l.text);
+            final _Texts texts = instance.logs.read(0).lines.map((l) => l.text);
             expect(texts, contains('flutter: after discovery'));
             expect(texts, contains('flutter: still going'));
           },
@@ -2592,12 +2631,12 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         test(
           'keeps forwarding stderr after the VM service is discovered',
           () async {
-            final (instance, proc) = await launchWith(build);
+            final (_Instance instance, _Proc proc) = await launchWith(build);
 
             proc.emitStderr('NSLog-style native message\n');
             await pumpEventQueue();
 
-            final line = instance.logs
+            final AppLogLine line = instance.logs
                 .read(0)
                 .lines
                 .firstWhere((l) => l.text.contains('NSLog-style'));
@@ -2612,8 +2651,8 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         test('delivers output emitted before discovery completes', () async {
           final sink = <AppLogLine>[];
           final proc = FakeProcess();
-          final device = build((exe, args) async => proc);
-          final pending = device.launch(
+          final Device device = build((exe, args) async => proc);
+          final Future<AppInstance> pending = device.launch(
             p.join(bundleRoot.path, 'MyApp.app'),
             onLog: sink.add,
           );
@@ -2637,7 +2676,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
 
         test('onLog receives post-discovery lines exactly once', () async {
           final sink = <AppLogLine>[];
-          final (_, proc) = await launchWith(build, sink: sink);
+          final (_, _Proc proc) = await launchWith(build, sink: sink);
 
           proc.emitStdout('flutter: only once');
           await pumpEventQueue();
@@ -2648,24 +2687,21 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
           );
         });
 
-        test(
-          'buffers output so a late reader still sees startup lines',
-          () async {
-            final (instance, proc) = await launchWith(build);
-            proc.emitStdout('flutter: printed before anyone read');
-            await pumpEventQueue();
+        test('buffers output so a late reader still sees startup lines', () async {
+          final (_Instance instance, _Proc proc) = await launchWith(build);
+          proc.emitStdout('flutter: printed before anyone read');
+          await pumpEventQueue();
 
-            // A consumer attaching now (the HTTP /logs endpoint, say) still sees
-            // everything from the beginning of the run.
-            final texts = instance.logs.read(0).lines.map((l) => l.text);
-            expect(texts, contains(_vmServiceLine));
-            expect(texts, contains('flutter: printed before anyone read'));
-          },
-        );
+          // A consumer attaching now (the HTTP /logs endpoint, say) still sees
+          // everything from the beginning of the run.
+          final _Texts texts = instance.logs.read(0).lines.map((l) => l.text);
+          expect(texts, contains(_vmServiceLine));
+          expect(texts, contains('flutter: printed before anyone read'));
+        });
 
         test('stop() closes the log stream', () async {
-          final (instance, _) = await launchWith(build);
-          final device = build((exe, args) async => FakeProcess());
+          final (_Instance instance, _) = await launchWith(build);
+          final Device device = build((exe, args) async => FakeProcess());
 
           await device.stop(instance);
           expect(instance.logs.isClosed, isTrue);
@@ -2697,7 +2733,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     test('keeps the VM-service announcement, so discovery still works', () {
       const announcement =
           'The Dart VM service is listening on http://127.0.0.1:1234/abc=/';
-      final kept = filter(
+      final String? kept = filter(
         '01-02 03:04:05.678 I/flutter ( 1234): $announcement',
       );
       expect(kept, isNotNull);
@@ -2790,7 +2826,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
 
   group('parseLogcatLine', () {
     test('splits level, tag and message from a -v time record', () {
-      final line = parseLogcatLine(
+      final LogcatLine line = parseLogcatLine(
         '01-02 03:04:05.678 E/AndroidRuntime( 1234): boom',
       )!;
       expect(line.level, 'E');
@@ -2799,7 +2835,9 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     });
 
     test('handles a space-padded pid', () {
-      final line = parseLogcatLine('01-02 03:04:05.678 I/flutter (  987): hi')!;
+      final LogcatLine line = parseLogcatLine(
+        '01-02 03:04:05.678 I/flutter (  987): hi',
+      )!;
       expect(line.tag, 'flutter');
       expect(line.message, 'hi');
     });
@@ -2829,13 +2867,13 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
 
   group('iOS Simulator log capture', () {
     test('the output predicate scopes to the app process', () {
-      final predicate = iosSimulatorLogPredicate('MyApp');
+      final String predicate = iosSimulatorLogPredicate('MyApp');
       expect(predicate, contains('processImagePath ENDSWITH "MyApp"'));
       expect(predicate, contains('eventType = logEvent'));
     });
 
     test('the output predicate filters known noise', () {
-      final predicate = iosSimulatorLogPredicate('MyApp');
+      final String predicate = iosSimulatorLogPredicate('MyApp');
       expect(
         predicate,
         contains('NOT(eventMessage BEGINSWITH "assertion failed: ")'),
@@ -2893,7 +2931,9 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
 
       await device.launch('/path/to/MyApp.app');
 
-      final logStreams = started.where((c) => c.$2.contains('stream')).toList();
+      final _XcrunCalls logStreams = started
+          .where((c) => c.$2.contains('stream'))
+          .toList();
       expect(
         logStreams,
         hasLength(2),
@@ -2936,7 +2976,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
 
       await device.launch('/path/to/MyApp.app');
 
-      final launchCall = runs.firstWhere(
+      final _Call launchCall = runs.firstWhere(
         (c) => c.$2.contains('launch') && c.$2.contains('simctl'),
       );
       expect(launchCall.$2.last, '--start-paused');
@@ -2964,12 +3004,12 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         },
       );
 
-      final pending = device.launch('/path/to/MyApp.app');
+      final Future<AppInstance> pending = device.launch('/path/to/MyApp.app');
       await bothSpawned.future;
       await Future.wait([for (final p in spawned) p.outputAttached]);
       // Complete the discovery stream so launch returns.
       for (final p in spawned) {
-        for (final line in simStreamAnnouncement(
+        for (final String line in simStreamAnnouncement(
           pid: 4242,
           uri: 'http://127.0.0.1:12345/test=/',
           first: true,
@@ -2977,7 +3017,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
           p.emitStdout(line);
         }
       }
-      final instance = await pending;
+      final _Instance instance = await pending;
 
       expect(
         instance.auxiliaryProcesses,
@@ -2986,86 +3026,78 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       );
 
       await device.stop(instance);
-      for (final aux in instance.auxiliaryProcesses) {
+      for (final Process aux in instance.auxiliaryProcesses) {
         await expectLater(aux.exitCode, completes);
       }
     });
 
-    test(
-      'finds the announcement in the persisted log when the stream attaches '
-      'late',
-      () async {
-        final showCalls = <List<String>>[];
-        final device =
-            IOSSimulatorDevice(
-                udid: 'TEST-UDID',
-                bundleId: 'com.example.test',
-                runProcess: (exe, args) async {
-                  if (args.contains('show')) {
-                    showCalls.add(args);
-                    // Logged now, so at or after the launch instant the device
-                    // captured before `simctl launch` ran.
-                    return ProcessResult(
-                      0,
-                      0,
-                      _simLogShowDoc([
-                        _simLogShowEntry(
-                          pid: 4242,
-                          timestamp: DateTime.now(),
-                          message:
-                              'The Dart VM service is listening on '
-                              'http://127.0.0.1:9999/xyz=/',
-                        ),
-                      ]),
-                      '',
-                    );
-                  }
-                  if (args.contains('launch')) {
-                    return ProcessResult(0, 0, 'com.example.test: 4242', '');
-                  }
-                  return ProcessResult(0, 0, '', '');
-                },
-                startProcess: (exe, args) async {
-                  final p = FakeProcess();
-                  if (args.any((a) => a.contains('Dart VM service'))) {
-                    // The late stream: its header, which proves nothing, and never
-                    // the announcement the app already printed.
-                    unawaited(
-                      p.outputAttached.then(
-                        (_) => p.emitStdout(
-                          'Filtering the log data using "eventMessage CONTAINS ..."',
-                        ),
+    test('finds the announcement in the persisted log when the stream attaches '
+        'late', () async {
+      final showCalls = <List<String>>[];
+      final device =
+          IOSSimulatorDevice(
+              udid: 'TEST-UDID',
+              bundleId: 'com.example.test',
+              runProcess: (exe, args) async {
+                if (args.contains('show')) {
+                  showCalls.add(args);
+                  // Logged now, so at or after the launch instant the device
+                  // captured before `simctl launch` ran.
+                  return ProcessResult(
+                    0,
+                    0,
+                    _simLogShowDoc([
+                      _simLogShowEntry(
+                        pid: 4242,
+                        timestamp: DateTime.now(),
+                        message:
+                            'The Dart VM service is listening on '
+                            'http://127.0.0.1:9999/xyz=/',
                       ),
-                    );
-                  }
-                  return p;
-                },
-              )
-              ..vmServiceTimeout = const Duration(seconds: 30)
-              ..simLogFallbackPollInterval = const Duration(milliseconds: 10);
+                    ]),
+                    '',
+                  );
+                }
+                if (args.contains('launch')) {
+                  return ProcessResult(0, 0, 'com.example.test: 4242', '');
+                }
+                return ProcessResult(0, 0, '', '');
+              },
+              startProcess: (exe, args) async {
+                final p = FakeProcess();
+                if (args.any((a) => a.contains('Dart VM service'))) {
+                  // The late stream: its header, which proves nothing, and never
+                  // the announcement the app already printed.
+                  unawaited(
+                    p.outputAttached.then(
+                      (_) => p.emitStdout(
+                        'Filtering the log data using "eventMessage CONTAINS ..."',
+                      ),
+                    ),
+                  );
+                }
+                return p;
+              },
+            )
+            ..vmServiceTimeout = const Duration(seconds: 30)
+            ..simLogFallbackPollInterval = const Duration(milliseconds: 10);
 
-        final elapsed = Stopwatch()..start();
-        final instance = await device.launch('/path/to/MyApp.app');
-        elapsed.stop();
+      final elapsed = Stopwatch()..start();
+      final _Instance instance = await device.launch('/path/to/MyApp.app');
+      elapsed.stop();
 
-        expect(
-          instance.vmServiceUri.toString(),
-          'http://127.0.0.1:9999/xyz=/',
-        );
-        expect(
-          showCalls,
-          isNotEmpty,
-          reason:
-              'the persisted log had to be read: the stream never announced',
-        );
-        expect(
-          elapsed.elapsed,
-          lessThan(const Duration(seconds: 10)),
-          reason:
-              'the fallback answers on its first poll, well before the bound',
-        );
-      },
-    );
+      expect(instance.vmServiceUri.toString(), 'http://127.0.0.1:9999/xyz=/');
+      expect(
+        showCalls,
+        isNotEmpty,
+        reason: 'the persisted log had to be read: the stream never announced',
+      );
+      expect(
+        elapsed.elapsed,
+        lessThan(const Duration(seconds: 10)),
+        reason: 'the fallback answers on its first poll, well before the bound',
+      );
+    });
 
     test(
       'takes only this launch announcement from the persisted log',
@@ -3086,9 +3118,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
               ),
               _simLogShowEntry(
                 pid: 4242,
-                timestamp: DateTime.now().subtract(
-                  const Duration(hours: 1),
-                ),
+                timestamp: DateTime.now().subtract(const Duration(hours: 1)),
                 message:
                     'The Dart VM service is listening on '
                     'http://127.0.0.1:2222/stale-old=/',
@@ -3134,7 +3164,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
               ..vmServiceTimeout = const Duration(seconds: 30)
               ..simLogFallbackPollInterval = const Duration(milliseconds: 10);
 
-        final instance = await device.launch('/path/to/MyApp.app');
+        final _Instance instance = await device.launch('/path/to/MyApp.app');
 
         expect(polls, greaterThan(1));
         expect(
@@ -3150,7 +3180,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     test('no pid means no fallback, and says so', () async {
       final runs = <(String, List<String>)>[];
       final records = <LogRecord>[];
-      final sub = Logger.root.onRecord.listen(records.add);
+      final _Sub sub = Logger.root.onRecord.listen(records.add);
       try {
         final device = IOSSimulatorDevice(
           udid: 'TEST-UDID',
@@ -3165,7 +3195,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
             if (args.any((a) => a.contains('Dart VM service'))) {
               unawaited(
                 p.outputAttached.then((_) {
-                  for (final line in simStreamAnnouncement(
+                  for (final String line in simStreamAnnouncement(
                     pid: 4242,
                     uri: 'http://127.0.0.1:54321/abc=/',
                     first: true,
@@ -3179,7 +3209,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
           },
         )..vmServiceTimeout = const Duration(seconds: 30);
 
-        final instance = await device.launch('/path/to/MyApp.app');
+        final _Instance instance = await device.launch('/path/to/MyApp.app');
         expect(
           instance.vmServiceUri.toString(),
           'http://127.0.0.1:54321/abc=/',
@@ -3205,7 +3235,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       () async {
         var shows = 0;
         final records = <LogRecord>[];
-        final sub = Logger.root.onRecord.listen(records.add);
+        final _Sub sub = Logger.root.onRecord.listen(records.add);
         try {
           final device =
               IOSSimulatorDevice(
@@ -3235,7 +3265,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
                           await Future<void>.delayed(
                             const Duration(milliseconds: 100),
                           );
-                          for (final line in simStreamAnnouncement(
+                          for (final String line in simStreamAnnouncement(
                             pid: 4242,
                             uri: 'http://127.0.0.1:54321/abc=/',
                             first: true,
@@ -3251,7 +3281,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
                 ..vmServiceTimeout = const Duration(seconds: 30)
                 ..simLogFallbackPollInterval = const Duration(milliseconds: 10);
 
-          final instance = await device.launch('/path/to/MyApp.app');
+          final _Instance instance = await device.launch('/path/to/MyApp.app');
           expect(
             instance.vmServiceUri.toString(),
             'http://127.0.0.1:54321/abc=/',
@@ -3298,7 +3328,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     test('finds this launch in the exact log show document layout', () {
       // `[{` opens, `},{` joins, `}]` closes, fields read `"key" : value`.
       // The message leads, so field order is the entry's, not the reader's.
-      final output = doc([
+      final String output = doc([
         body(
           pid: 9999,
           message:
@@ -3324,13 +3354,10 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     });
 
     test('reads the Apple timestamp shape', () {
-      final output =
-          doc([
-            body(),
-          ]).replaceFirst(
-            (since).toIso8601String(),
-            '2026-10-25 12:00:01.123456+0000',
-          );
+      final String output = doc([body()]).replaceFirst(
+        (since).toIso8601String(),
+        '2026-10-25 12:00:01.123456+0000',
+      );
       expect(
         findSimLogVmServiceUri(output, pid: 4242, since: since),
         Uri.parse(uri),
@@ -3345,9 +3372,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       );
       expect(
         findSimLogVmServiceUri(
-          doc([
-            body(timestamp: since.subtract(const Duration(seconds: 1))),
-          ]),
+          doc([body(timestamp: since.subtract(const Duration(seconds: 1)))]),
           pid: 4242,
           since: since,
         ),
@@ -3384,11 +3409,8 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         throwsA(isA<FormatException>()),
       );
       expect(
-        () => findSimLogVmServiceUri(
-          '{\n${body()}\n}',
-          pid: 4242,
-          since: since,
-        ),
+        () =>
+            findSimLogVmServiceUri('{\n${body()}\n}', pid: 4242, since: since),
         throwsA(isA<FormatException>()),
         reason: 'a bare object is not the document `log show` prints',
       );
@@ -3408,15 +3430,8 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       // before the JSON. Stale entries still lose to this launch's own.
       final output =
           'getpwuid_r did not find a match for uid 501\n'
-          '${doc([
-            body(
-              pid: 9999,
-              message: 'The Dart VM service is listening on '
-                  'http://127.0.0.1:1111/stale-other=/',
-            ),
-            body(timestamp: since.subtract(const Duration(seconds: 1))),
-            body(),
-          ])}';
+          '${doc([body(pid: 9999, message: 'The Dart VM service is listening on '
+              'http://127.0.0.1:1111/stale-other=/'), body(timestamp: since.subtract(const Duration(seconds: 1))), body()])}';
       expect(
         findSimLogVmServiceUri(output, pid: 4242, since: since),
         Uri.parse(uri),
@@ -3447,13 +3462,13 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         ),
         runProcess: (exe, args) async => ProcessResult(0, 0, '', ''),
       );
-      final args = fallback.logShowArgs;
+      final _Args args = fallback.logShowArgs;
       expect(
         args,
         containsAllInOrder(['simctl', 'spawn', 'TEST-UDID', 'log', 'show']),
       );
       expect(args, contains('--style'));
-      final predicate = args[args.indexOf('--predicate') + 1];
+      final String predicate = args[args.indexOf('--predicate') + 1];
       expect(predicate, contains('processIdentifier == 4242'));
       expect(predicate, contains('Dart VM service'));
     });
@@ -3466,9 +3481,9 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         query: (udid: 'TEST-UDID', pid: 4242, since: since),
         runProcess: (exe, args) async => ProcessResult(0, 0, '', ''),
       );
-      final args = fallback.logShowArgs;
-      final start = args[args.indexOf('--start') + 1];
-      final local = since.toLocal();
+      final _Args args = fallback.logShowArgs;
+      final String start = args[args.indexOf('--start') + 1];
+      final DateTime local = since.toLocal();
       String two(int n) => n.toString().padLeft(2, '0');
       expect(
         start,
@@ -3485,28 +3500,22 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     const announced = 'http://127.0.0.1:7777/fresh=/';
 
     String noisyAnswer({required DateTime at}) =>
-        '$preamble\n${_simLogShowDoc([
-          _simLogShowEntry(
-            pid: 9999,
-            timestamp: at,
-            message: 'The Dart VM service is listening on '
-                'http://127.0.0.1:1111/stale-other=/',
-          ),
-          _simLogShowEntry(
-            pid: 4242,
-            timestamp: at,
-            message: 'The Dart VM service is listening on $announced',
-          ),
-        ])}';
+        '$preamble\n${_simLogShowDoc([_simLogShowEntry(pid: 9999, timestamp: at, message: 'The Dart VM service is listening on '
+            'http://127.0.0.1:1111/stale-other=/'), _simLogShowEntry(pid: 4242, timestamp: at, message: 'The Dart VM service is listening on $announced')])}';
 
     Future<List<AppLogLine>> feedUntilLine(
       SimLogFallback fallback,
       AppLogStream out,
     ) async {
       final stop = Completer<void>();
-      final feeding = fallback.feedAnnouncements(out, stop: stop.future);
+      final Future<void> feeding = fallback.feedAnnouncements(
+        out,
+        stop: stop.future,
+      );
       try {
-        final deadline = DateTime.now().add(const Duration(seconds: 30));
+        final DateTime deadline = DateTime.now().add(
+          const Duration(seconds: 30),
+        );
         while (out.read(0).lines.isEmpty) {
           if (DateTime.now().isAfter(deadline)) {
             fail('the fallback never fed the announcement');
@@ -3537,7 +3546,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         pollInterval: const Duration(milliseconds: 1),
       );
 
-      final lines = await feedUntilLine(fallback, out);
+      final List<AppLogLine> lines = await feedUntilLine(fallback, out);
 
       expect(lines, hasLength(1));
       expect(
@@ -3554,7 +3563,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       () async {
         var shows = 0;
         final records = <LogRecord>[];
-        final sub = Logger.root.onRecord.listen(records.add);
+        final _Sub sub = Logger.root.onRecord.listen(records.add);
         try {
           final out = AppLogStream();
           final fallback = SimLogFallback(
@@ -3565,15 +3574,13 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
             ),
             runProcess: (exe, args) async {
               shows++;
-              if (shows <= 2) {
-                return ProcessResult(0, 0, preamble, '');
-              }
+              if (shows <= 2) return ProcessResult(0, 0, preamble, '');
               return ProcessResult(0, 0, noisyAnswer(at: DateTime.now()), '');
             },
             pollInterval: const Duration(milliseconds: 1),
           );
 
-          final lines = await feedUntilLine(fallback, out);
+          final List<AppLogLine> lines = await feedUntilLine(fallback, out);
 
           expect(
             lines.single.text,
@@ -3639,7 +3646,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         final helper = FakeProcess();
         final started = <(String, List<String>, Map<String, String>)>[];
 
-        final pending = runProcessBounded(
+        final Future<ProcessResult> pending = runProcessBounded(
           (exe, args, env) async {
             started.add((exe, args, env));
             return helper;
@@ -3702,7 +3709,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     test('a helper that answers in time is reported whole', () async {
       final helper = FakeProcess();
 
-      final pending = runProcessBounded(
+      final Future<ProcessResult> pending = runProcessBounded(
         (exe, args, env) async => helper,
         '/bundled/screenshot',
         const [],
@@ -3716,7 +3723,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       helper.emitStderr('skipped one zero-sized window');
       helper.complete(0);
 
-      final result = await pending;
+      final ProcessResult result = await pending;
       expect(result.exitCode, 0);
       expect(result.stdout, contains('wrote /tmp/shot.png'));
       expect(result.stderr, contains('skipped one zero-sized window'));
@@ -3758,12 +3765,10 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       bundle = Directory(p.join(sandbox.path, 'bazel-out', 'app'))
         ..createSync(recursive: true);
       File(p.join(bundle.path, 'app.exe')).writeAsStringSync('exe');
-      Directory(
-        p.join(bundle.path, 'data', 'flutter_assets'),
-      ).createSync(recursive: true);
-      File(
-        p.join(bundle.path, 'data', 'flutter_assets', 'AssetManifest.json'),
-      ).writeAsStringSync('{}');
+      Directory(p.join(bundle.path, 'data', 'flutter_assets'))
+          .createSync(recursive: true);
+      File(p.join(bundle.path, 'data', 'flutter_assets', 'AssetManifest.json'))
+          .writeAsStringSync('{}');
     });
 
     tearDown(() => sandbox.deleteSync(recursive: true));
@@ -3790,7 +3795,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     }
 
     test('launches a copy, never the path bazel will rewrite', () async {
-      final h = makeDevice();
+      final _WindowsHarness h = makeDevice();
       await h.device.launch(bundle.path);
 
       expect(
@@ -3804,10 +3809,10 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     test('copies the whole bundle, not just the executable', () async {
       // The runner resolves `data/flutter_assets` relative to its own
       // executable, so a lone .exe copy renders nothing.
-      final h = makeDevice();
+      final _WindowsHarness h = makeDevice();
       await h.device.launch(bundle.path);
 
-      final asset = p.join(
+      final String asset = p.join(
         p.dirname(h.launched.single),
         'data',
         'flutter_assets',
@@ -3819,15 +3824,14 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     test('a relaunch stages afresh and drops the previous copy', () async {
       // `app.restart` relaunches when native libraries changed. Reusing the
       // old directory would run the previous build's assets.
-      final h = makeDevice();
+      final _WindowsHarness h = makeDevice();
       await h.device.launch(bundle.path);
-      final first = h.launched.single;
+      final String first = h.launched.single;
 
-      File(
-        p.join(bundle.path, 'data', 'flutter_assets', 'AssetManifest.json'),
-      ).writeAsStringSync('{"new":true}');
+      File(p.join(bundle.path, 'data', 'flutter_assets', 'AssetManifest.json'))
+          .writeAsStringSync('{"new":true}');
       await h.device.launch(bundle.path);
-      final second = h.launched.last;
+      final String second = h.launched.last;
 
       expect(second, isNot(first));
       expect(
@@ -3835,7 +3839,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         isFalse,
         reason: 'the superseded copy must not be left behind',
       );
-      final asset = p.join(
+      final String asset = p.join(
         p.dirname(second),
         'data',
         'flutter_assets',
@@ -3845,9 +3849,9 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     });
 
     test('stop removes the copy it made', () async {
-      final h = makeDevice();
+      final _WindowsHarness h = makeDevice();
       await h.device.launch(bundle.path);
-      final launched = h.launched.single;
+      final String launched = h.launched.single;
 
       h.procs.single.complete(0);
       await h.device.stop(AppInstance(process: h.procs.single));
@@ -3905,7 +3909,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       final instance = AppInstance(process: FakeProcess());
       await device.screenshot(instance, '/tmp/android.png');
 
-      final adbCalls = calls.where((c) => c.$1 == 'adb').toList();
+      final _XcrunCalls adbCalls = calls.where((c) => c.$1 == 'adb').toList();
       expect(adbCalls.length, 3); // screencap, pull, rm
     });
 
@@ -3962,7 +3966,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         deviceId: 'emulator-5554',
         adbPath: 'adb',
         startScreenshotProcess: (exe, args) async {
-          final dir = args.last;
+          final String dir = args.last;
           for (final f in files) {
             File(p.join(dir, f)).writeAsStringSync('png-bytes-$f');
           }
@@ -3975,11 +3979,9 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       );
 
       test('captures through the emulator console, not screencap', () async {
-        final out = p.join(captured.path, 'shot.png');
-        await emulator(['Screenshot_1788460401.png']).screenshot(
-          AppInstance(process: FakeProcess()),
-          out,
-        );
+        final String out = p.join(captured.path, 'shot.png');
+        await emulator(['Screenshot_1788460401.png'])
+            .screenshot(AppInstance(process: FakeProcess()), out);
         expect(File(out).readAsStringSync(), contains('png-bytes'));
       });
 
@@ -4238,23 +4240,23 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       BuildMode buildMode = BuildMode.debug,
       List<String>? bonjourServices,
     }) async {
-      final devicectl = devicectlProcess ?? FakeProcess();
-      final lldb = lldbProcess ?? FakeProcess();
-      final iproxy = iproxyProcess ?? FakeProcess();
+      final _Proc devicectl = devicectlProcess ?? FakeProcess();
+      final _Proc lldb = lldbProcess ?? FakeProcess();
+      final _Proc iproxy = iproxyProcess ?? FakeProcess();
       final starts = <List<String>>[];
-      final runs = runsLog ?? <List<String>>[];
+      final _Calls runs = runsLog ?? <List<String>>[];
 
       // A wired launch port-forwards the advertised VM-service port through
       // iproxy and waits for that forward to accept connections before
       // returning. Stand a real listener up on the port the advertisement
       // names, so the test exercises the whole launch rather than stopping at
       // a missing iproxy.
-      final forward = await ServerSocket.bind('127.0.0.1', 0);
+      final ServerSocket forward = await ServerSocket.bind('127.0.0.1', 0);
       // The probe connects to confirm the forward is live; drop each
       // connection rather than leaving it queued in the accept backlog, which
       // would stall `close()` in tearDown.
       forward.listen((socket) => socket.destroy());
-      final forwardPort = forward.port;
+      final int forwardPort = forward.port;
       if (forwardBinds) {
         sockets.add(forward);
       } else {
@@ -4286,7 +4288,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         runProcess: (exe, args) async {
           runs.add([exe, ...args.cast<String>()]);
           onRun?.call(exe, args.cast<String>());
-          final out = args.contains('--json-output')
+          final String? out = args.contains('--json-output')
               ? args[args.indexOf('--json-output') + 1]
               : null;
           // What the app's Info.plist declares under NSBonjourServices; a key
@@ -4343,7 +4345,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         }
       });
 
-      final pending = device.launch(appPath, onLog: null);
+      final Future<AppInstance> pending = device.launch(appPath, onLog: null);
       // A launch that fails at the install step never starts devicectl at all,
       // so waiting on its output alone would hang out the test timeout on
       // exactly the failures these tests assert. Whichever settles first wins,
@@ -4373,7 +4375,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     // so the URI has to come from the app's mDNS advertisement — including the
     // auth code, without which the VM service refuses the connection.
     test('takes the VM service from the mDNS advertisement', () async {
-      final r = await launchFaked();
+      final _IosRig r = await launchFaked();
       expect(r.instance.vmServiceUri, isNotNull);
       expect(r.instance.vmServiceUri!.host, '127.0.0.1');
       expect(r.instance.vmServiceUri!.path, '/test=/');
@@ -4388,9 +4390,11 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       () async {
         late String extractedApp;
         DateTime? mtimeAtInstall;
-        final before = DateTime.now().subtract(const Duration(seconds: 5));
+        final DateTime before = DateTime.now().subtract(
+          const Duration(seconds: 5),
+        );
 
-        final r = await launchFaked(
+        final _IosRig r = await launchFaked(
           appPath: '/path/to/app.ipa',
           onRun: (exe, args) {
             if (exe == 'unzip') {
@@ -4464,7 +4468,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     // extension leaves the app itself stopped forever, waiting for a debugger
     // that went somewhere else — flutter/flutter#183263.
     test('skips app extensions when matching the launched process', () async {
-      final r = await launchFaked(
+      final _IosRig r = await launchFaked(
         runningProcesses: [
           runningProcess(
             pid: 111,
@@ -4586,17 +4590,15 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       );
       expect(
         runs,
-        contains(
-          containsAllInOrder(['process', 'terminate', '--pid', '4242']),
-        ),
+        contains(containsAllInOrder(['process', 'terminate', '--pid', '4242'])),
       );
     });
 
     // Wired: the VM service binds to the device's loopback, so it is only
     // reachable through a forward.
     test('port-forwards the advertised port when wired', () async {
-      final r = await launchFaked(transportType: 'wired');
-      final iproxy = r.starts.where((a) => a.first == 'iproxy');
+      final _IosRig r = await launchFaked(transportType: 'wired');
+      final _Iproxy iproxy = r.starts.where((a) => a.first == 'iproxy');
       expect(iproxy, hasLength(1));
       expect(iproxy.single, contains('TEST-UDID'));
       expect(r.instance.vmServiceUri!.host, '127.0.0.1');
@@ -4608,7 +4610,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     // forward that binds locally and then resets every connection, so the run
     // looks like it worked right up until DDS fails.
     test('addresses iproxy and lldb with the hardware UDID', () async {
-      final r = await launchFaked(transportType: 'wired');
+      final _IosRig r = await launchFaked(transportType: 'wired');
       expect(
         r.starts.firstWhere((a) => a.first == 'iproxy'),
         contains('TEST-UDID'),
@@ -4620,8 +4622,8 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     });
 
     test('does not bind the VM service to all interfaces when wired', () async {
-      final r = await launchFaked(transportType: 'wired');
-      final launch = r.starts.firstWhere((a) => a.contains('launch'));
+      final _IosRig r = await launchFaked(transportType: 'wired');
+      final _Args launch = r.starts.firstWhere((a) => a.contains('launch'));
       expect(launch, isNot(contains('--vm-service-host=0.0.0.0')));
     });
 
@@ -4629,16 +4631,16 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     // listen on all interfaces and gets dialed at the device's own address.
     // The two halves must agree or the session silently has no VM service.
     test('binds the VM service to all interfaces when wireless', () async {
-      final r = await launchFaked(
+      final _IosRig r = await launchFaked(
         transportType: 'localNetwork',
         deviceAddresses: ['192.168.1.244'],
       );
-      final launch = r.starts.firstWhere((a) => a.contains('launch'));
+      final _Args launch = r.starts.firstWhere((a) => a.contains('launch'));
       expect(launch, contains('--vm-service-host=0.0.0.0'));
     });
 
     test('dials the device address directly when wireless', () async {
-      final r = await launchFaked(
+      final _IosRig r = await launchFaked(
         transportType: 'localNetwork',
         deviceAddresses: ['192.168.1.244'],
       );
@@ -4653,7 +4655,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     test(
       'keeps forwarding console output after VM-service discovery',
       () async {
-        final r = await launchFaked();
+        final _IosRig r = await launchFaked();
         expect(
           r.instance.vmServiceUri,
           isNotNull,
@@ -4671,14 +4673,14 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     );
 
     test('does not flag devicectl stderr as error output', () async {
-      final r = await launchFaked();
+      final _IosRig r = await launchFaked();
 
       // devicectl routes the app's ordinary console output to stderr, so
       // flagging that channel would mark every print() as an error.
       r.devicectl.emitStderr('flutter: an ordinary print\n');
       await pumpEventQueue();
 
-      final line = r.instance.logs
+      final AppLogLine line = r.instance.logs
           .read(0)
           .lines
           .firstWhere((l) => l.text.contains('an ordinary print'));
@@ -4690,7 +4692,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       // JIT alive. Stop reading its pipes and it blocks on write once its
       // stdout buffer fills; a blocked lldb never services the process it
       // controls, so the app hangs on device until the dev tool is killed.
-      final r = await launchFaked();
+      final _IosRig r = await launchFaked();
 
       // Far more than a pipe buffer would hold. If nothing is draining, a
       // real lldb would be blocked by now.
@@ -4717,7 +4719,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       // Upstream treats devicectl and lldb as one combined log source on a
       // CoreDevice under Xcode 26+, because the debugger carries output the
       // console stream may not.
-      final r = await launchFaked();
+      final _IosRig r = await launchFaked();
 
       r.lldb.emitStdout('flutter: hello from the app');
       await pumpEventQueue();
@@ -4732,7 +4734,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       // devicectl --console exits when the app terminates, which is precisely
       // when lldb produces the output that explains why, so the shared stream
       // must outlive the first source to finish.
-      final r = await launchFaked();
+      final _IosRig r = await launchFaked();
 
       r.devicectl.complete(0);
       await pumpEventQueue();
@@ -4747,39 +4749,36 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       );
     });
 
-    test(
-      'lldb output survives a console channel that ends before the attach',
-      () async {
-        // `devicectl --console` normally runs for the app's lifetime, but it can
-        // end during the launch — the app was already running, or devicectl
-        // detached — while the app itself stays up and `_findAppProcessId` still
-        // answers. lldb attaches after that point, so if the console channel
-        // being the only registered producer is enough to close the shared log
-        // stream, every line for the rest of the run goes nowhere: mDNS
-        // discovery does not read this stream, so nothing else fails and the run
-        // proceeds in silence.
-        final r = await launchFaked(consoleExitsAtLaunch: true);
+    test('lldb output survives a console channel that ends before the attach', () async {
+      // `devicectl --console` normally runs for the app's lifetime, but it can
+      // end during the launch — the app was already running, or devicectl
+      // detached — while the app itself stays up and `_findAppProcessId` still
+      // answers. lldb attaches after that point, so if the console channel
+      // being the only registered producer is enough to close the shared log
+      // stream, every line for the rest of the run goes nowhere: mDNS
+      // discovery does not read this stream, so nothing else fails and the run
+      // proceeds in silence.
+      final _IosRig r = await launchFaked(consoleExitsAtLaunch: true);
 
-        expect(
-          r.instance.logs.isClosed,
-          isFalse,
-          reason: 'lldb is attached and is still a live source of output',
-        );
+      expect(
+        r.instance.logs.isClosed,
+        isFalse,
+        reason: 'lldb is attached and is still a live source of output',
+      );
 
-        r.lldb.emitStdout('flutter: hello from the app');
-        await pumpEventQueue();
+      r.lldb.emitStdout('flutter: hello from the app');
+      await pumpEventQueue();
 
-        expect(
-          r.instance.logs.read(0).lines.map((l) => l.text),
-          contains('flutter: hello from the app'),
-        );
-      },
-    );
+      expect(
+        r.instance.logs.read(0).lines.map((l) => l.text),
+        contains('flutter: hello from the app'),
+      );
+    });
 
     test(
       'the log stream closes once devicectl and lldb have both ended',
       () async {
-        final r = await launchFaked();
+        final _IosRig r = await launchFaked();
         expect(r.instance.logs.isClosed, isFalse);
 
         r.devicectl.complete(0);
@@ -4810,7 +4809,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     // with the tool resuming each stop itself, 11 of 11 did not. The same
     // change is flutter_tools af06e99a29 (flutter/flutter#190307).
     test('runs lldb synchronously and leaves resuming to the tool', () async {
-      final r = await launchFaked();
+      final _IosRig r = await launchFaked();
       final sent = r.lldb.stdinBuffer.toString();
 
       expect(sent, contains('script lldb.debugger.SetAsync(False)'));
@@ -4823,8 +4822,8 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     });
 
     test('resumes the app after every breakpoint stop, silently', () async {
-      final r = await launchFaked();
-      final before = 'process continue'
+      final _IosRig r = await launchFaked();
+      final int before = 'process continue'
           .allMatches(r.lldb.stdinBuffer.toString())
           .length;
 
@@ -4847,7 +4846,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     test(
       'a stop that is not a breakpoint is reported, then detached',
       () async {
-        final r = await launchFaked();
+        final _IosRig r = await launchFaked();
 
         emitLldbStop(r.lldb, 'EXC_BAD_ACCESS (code=50, address=0x11c3800c4)');
         await pumpEventQueue();
@@ -4860,8 +4859,8 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
           contains('quit'),
           reason: 'the session ends with lldb, and the app is not coming back',
         );
-        final logged = r.instance.logs.read(0).lines;
-        final reason = logged.firstWhere(
+        final List<AppLogLine> logged = r.instance.logs.read(0).lines;
+        final AppLogLine reason = logged.firstWhere(
           (l) => l.text.contains('EXC_BAD_ACCESS (code=50'),
         );
         expect(reason.isError, isTrue);
@@ -4872,7 +4871,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     // the app it debugs exits. An app closed on the phone, or killed by the
     // system, would otherwise leave a run attached to nothing.
     test('an app that exits on its own ends the session', () async {
-      final r = await launchFaked();
+      final _IosRig r = await launchFaked();
 
       r.lldb.emitStdout('Process 4242 exited with status = 0 (0x00000000)');
       await pumpEventQueue();
@@ -4885,7 +4884,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     // command's, or an earlier line in the same buffer — must not answer it.
     test('does not take an earlier stop as the attach reply', () async {
       FakeProcess? held;
-      final pending = launchFaked(
+      final Future<_IosRig> pending = launchFaked(
         lldbResponder: (lldb, line) {
           if (line.startsWith('device select')) {
             // Printed before the attach, so it cannot be the attach's reply.
@@ -4908,7 +4907,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       );
 
       emitLldbStop(held!, 'signal SIGSTOP');
-      final r = await pending;
+      final _IosRig r = await pending;
       expect(r.lldb.stdinBuffer.toString(), contains('process continue'));
     });
 
@@ -4917,9 +4916,9 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     // whatever the next launch expected to replace. Measured on an iOS 27
     // iPhone, where every stopped or failed run left its app up.
     test('stop terminates the app on the device', () async {
-      final r = await launchFaked();
+      final _IosRig r = await launchFaked();
 
-      final stopping = r.device.stop(r.instance);
+      final Future<void> stopping = r.device.stop(r.instance);
       // lldb reports the terminated app as a stop; that is not a crash.
       emitLldbStop(r.lldb, 'signal SIGTERM');
       await stopping;
@@ -4982,7 +4981,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     });
 
     test('abandoning a launch that returned terminates its app', () async {
-      final r = await launchFaked();
+      final _IosRig r = await launchFaked();
 
       await r.device.abandonLaunch();
 
@@ -4990,9 +4989,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       expect(r.devicectl.killed, isTrue);
       expect(
         r.runs,
-        contains(
-          containsAllInOrder(['process', 'terminate', '--pid', '4242']),
-        ),
+        contains(containsAllInOrder(['process', 'terminate', '--pid', '4242'])),
       );
     });
 
@@ -5001,11 +4998,13 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     // N_OSO symbol" and never printed the resume line. flutter_tools attaches
     // lldb only in debug (`shouldAttachLLDBDebugger`).
     group('an AOT build', () {
-      for (final mode in [BuildMode.profile, BuildMode.release]) {
+      for (final BuildMode mode in [BuildMode.profile, BuildMode.release]) {
         test('in ${mode.name} launches running, with no debugger', () async {
-          final r = await launchFaked(buildMode: mode);
+          final _IosRig r = await launchFaked(buildMode: mode);
           expect(r.starts.map((a) => a.first), isNot(contains('lldb')));
-          final launch = r.starts.singleWhere((a) => a.contains('launch'));
+          final _Args launch = r.starts.singleWhere(
+            (a) => a.contains('launch'),
+          );
           expect(launch, isNot(contains('--start-stopped')));
           expect(launch, contains('--console'));
           expect(r.instance.process, same(r.devicectl));
@@ -5013,13 +5012,13 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       }
 
       test('in release passes no debugging flags', () async {
-        final r = await launchFaked(buildMode: BuildMode.release);
-        final launch = r.starts.singleWhere((a) => a.contains('launch'));
+        final _IosRig r = await launchFaked(buildMode: BuildMode.release);
+        final _Args launch = r.starts.singleWhere((a) => a.contains('launch'));
         expect(launch, isNot(contains('--enable-checked-mode')));
       });
 
       test('in profile attaches to a VM service the app declares', () async {
-        final r = await launchFaked(
+        final _IosRig r = await launchFaked(
           buildMode: BuildMode.profile,
           bonjourServices: ['_rulesflutterexample._tcp', '_dartVmService._tcp'],
         );
@@ -5034,7 +5033,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       // for: iOS will not let an app advertise a service it does not declare.
       test('in profile does not wait for a VM service the app does not '
           'declare', () async {
-        final r = await launchFaked(
+        final _IosRig r = await launchFaked(
           buildMode: BuildMode.profile,
           bonjourServices: ['_rulesflutterexample._tcp'],
         );
@@ -5044,13 +5043,13 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
 
       test('in profile reads an app with no Bonjour services as having no '
           'VM service', () async {
-        final r = await launchFaked(buildMode: BuildMode.profile);
+        final _IosRig r = await launchFaked(buildMode: BuildMode.profile);
         expect(r.instance.vmServiceUri, isNull);
       });
 
       // flutter_tools does not look for one in release at all.
       test('in release never looks for a VM service', () async {
-        final r = await launchFaked(
+        final _IosRig r = await launchFaked(
           buildMode: BuildMode.release,
           bonjourServices: ['_dartVmService._tcp'],
         );
@@ -5059,7 +5058,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       });
 
       test('stop terminates the app and its console launcher', () async {
-        final r = await launchFaked(buildMode: BuildMode.release);
+        final _IosRig r = await launchFaked(buildMode: BuildMode.release);
         await r.device.stop(r.instance);
         expect(r.devicectl.killed, isTrue);
         expect(
@@ -5136,7 +5135,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
 
       test('but a launch that returns keeps it until stop', () async {
         late String unpacked;
-        final r = await launchFaked(
+        final _IosRig r = await launchFaked(
           appPath: '/path/to/app.ipa',
           onRun: unpackInto((dir) => unpacked = dir),
         );
@@ -5151,9 +5150,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     // an unhandled exception and took the tool down with a stack trace.
     test('a discovery failure fails the launch as a StateError', () async {
       await expectLater(
-        launchFaked(
-          mdnsStartError: const SocketException('No route to host'),
-        ),
+        launchFaked(mdnsStartError: const SocketException('No route to host')),
         throwsA(
           isA<StateError>().having(
             (e) => e.message,
@@ -5173,7 +5170,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     });
 
     test('reads udid, name, transport and hostnames', () {
-      final devices = parseDevicectlDevices(
+      final List<IOSDeviceInfo> devices = parseDevicectlDevices(
         devicesJson([
           {
             'identifier': 'CORE-1',
@@ -5202,7 +5199,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     });
 
     test('maps localNetwork to wireless', () {
-      final devices = parseDevicectlDevices(
+      final List<IOSDeviceInfo> devices = parseDevicectlDevices(
         devicesJson([
           {
             'identifier': 'CORE-1',
@@ -5218,7 +5215,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     // transport and `tunnelState: unavailable`. Choosing it produces a launch
     // that installs nothing and then waits out every timeout.
     test('drops a paired but unattached device', () {
-      final devices = parseDevicectlDevices(
+      final List<IOSDeviceInfo> devices = parseDevicectlDevices(
         devicesJson([
           {
             'identifier': 'CORE-GONE',
@@ -5239,7 +5236,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     });
 
     test('falls back to potentialHostnames when there are no local ones', () {
-      final devices = parseDevicectlDevices(
+      final List<IOSDeviceInfo> devices = parseDevicectlDevices(
         devicesJson([
           {
             'identifier': 'CORE-1',
@@ -5281,7 +5278,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     test(
       'ignores a paired but unattached device when auto-detecting',
       () async {
-        final device = deviceListing([
+        final IOSDevice device = deviceListing([
           {
             'identifier': 'CORE-GONE',
             'hardwareProperties': {'udid': 'GONE'},
@@ -5305,7 +5302,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     // Picking one silently would look like a working run against the wrong
     // phone.
     test('refuses to guess between two attached devices', () async {
-      final device = deviceListing([
+      final IOSDevice device = deviceListing([
         {
           'identifier': 'CORE-ONE',
           'hardwareProperties': {'udid': 'ONE'},
@@ -5335,7 +5332,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       'accepts either the hardware UDID or the CoreDevice identifier',
       () async {
         for (final requested in ['UDID-1', 'CORE-1']) {
-          final device = deviceListing([
+          final IOSDevice device = deviceListing([
             {
               'identifier': 'CORE-1',
               'hardwareProperties': {'udid': 'UDID-1'},
@@ -5361,7 +5358,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     test(
       'says which devices are attached when the requested one is not',
       () async {
-        final device = deviceListing([
+        final IOSDevice device = deviceListing([
           {
             'identifier': 'CORE-OTHER',
             'hardwareProperties': {'udid': 'OTHER'},
@@ -5492,8 +5489,8 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     // cable (see `IOSDevice.applyTimeout`), so a budget that fits a wired
     // restart abandons a wireless one mid-flight.
     test('is longer again when the device is on the network', () async {
-      final wired = await launchedDevice('wired');
-      final wireless = await launchedDevice('localNetwork');
+      final IOSDevice wired = await launchedDevice('wired');
+      final IOSDevice wireless = await launchedDevice('localNetwork');
       expect(wireless.applyTimeout, greaterThan(wired.applyTimeout));
     });
 
@@ -5570,25 +5567,24 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
 
   group('resolveRunfile', () {
     test('returns null when not in Bazel runfiles', () {
-      final result = resolveRunfile('_main/some/nonexistent/path');
+      final String? result = resolveRunfile('_main/some/nonexistent/path');
       expect(result, isNull);
     });
   });
 
   group('extractPackageInfo', () {
     test('parses aapt2 dump badging output', () async {
-      final info = await extractPackageInfo(
+      final ({String? activityName, String packageName})
+      info = await extractPackageInfo(
         '/fake/app.apk',
         aapt2Path: '/fake/aapt2',
-        runProcess: (exe, args) async {
-          return ProcessResult(
-            0,
-            0,
-            "package: name='com.example.myapp' versionCode='1'\n"
-                "launchable-activity: name='com.example.myapp.MainActivity'\n",
-            '',
-          );
-        },
+        runProcess: (exe, args) async => ProcessResult(
+          0,
+          0,
+          "package: name='com.example.myapp' versionCode='1'\n"
+              "launchable-activity: name='com.example.myapp.MainActivity'\n",
+          '',
+        ),
       );
       expect(info.packageName, 'com.example.myapp');
       expect(info.activityName, 'com.example.myapp.MainActivity');
@@ -5618,7 +5614,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
 
   group('waitForLocalTcpPort', () {
     test('returns once a listener accepts', () async {
-      final server = await ServerSocket.bind('127.0.0.1', 0);
+      final ServerSocket server = await ServerSocket.bind('127.0.0.1', 0);
       addTearDown(server.close);
       final accepted = <Socket>[];
       final firstProbe = Completer<void>();
@@ -5643,8 +5639,8 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     test('waits for a listener that binds late', () async {
       // Grab a free port, then release it so nothing is listening when the
       // wait starts; bind for real shortly after.
-      final probe = await ServerSocket.bind('127.0.0.1', 0);
-      final port = probe.port;
+      final ServerSocket probe = await ServerSocket.bind('127.0.0.1', 0);
+      final int port = probe.port;
       await probe.close();
 
       ServerSocket? server;
@@ -5659,8 +5655,8 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     });
 
     test('throws a StateError naming the forward when nothing binds', () async {
-      final probe = await ServerSocket.bind('127.0.0.1', 0);
-      final port = probe.port;
+      final ServerSocket probe = await ServerSocket.bind('127.0.0.1', 0);
+      final int port = probe.port;
       await probe.close();
 
       await expectLater(
@@ -5694,7 +5690,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       // FLUTTER_ENGINE_SWITCHES is a count the embedder iterates. Setting it
       // to 0 and setting nothing at all are the same to the engine, but the
       // absent form is what an unmodified launch has always looked like.
-      final env = desktopLaunchEnvironment(base: const {});
+      final Map<String, String> env = desktopLaunchEnvironment(base: const {});
 
       expect(env.keys, isNot(contains('FLUTTER_ENGINE_SWITCHES')));
       expect(
@@ -5706,14 +5702,19 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     test('passes start-paused as a counted engine switch', () {
       // The desktop embedders read switches from the environment and nowhere
       // else — the runner's argv goes to the Dart entrypoint, not the engine.
-      final env = desktopLaunchEnvironment(startPaused: true, base: const {});
+      final Map<String, String> env = desktopLaunchEnvironment(
+        startPaused: true,
+        base: const {},
+      );
 
       expect(env['FLUTTER_ENGINE_SWITCHES'], '1');
       expect(env['FLUTTER_ENGINE_SWITCH_1'], 'start-paused=true');
     });
 
     test('inherits the environment the app is launched from', () {
-      final env = desktopLaunchEnvironment(base: const {'HOME': '/home/dev'});
+      final Map<String, String> env = desktopLaunchEnvironment(
+        base: const {'HOME': '/home/dev'},
+      );
 
       expect(env['HOME'], '/home/dev');
     });
@@ -5723,7 +5724,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     /// Every log record the code under test emits while [body] runs.
     Future<List<LogRecord>> recording(Future<void> Function() body) async {
       final records = <LogRecord>[];
-      final sub = Logger.root.onRecord.listen(records.add);
+      final _Sub sub = Logger.root.onRecord.listen(records.add);
       try {
         await body();
       } finally {
@@ -5741,7 +5742,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       // The bound is what makes this return at all: without it `stop` awaits
       // an `exitCode` that a SIGTERM-trapping process never completes, and
       // `flutter_bazel` never comes back.
-      final records = await recording(
+      final List<LogRecord> records = await recording(
         () => device
             .stop(AppInstance(process: process))
             .timeout(
@@ -5776,17 +5777,15 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
       // exited, not because a short bound expired.
       final device = MacOSDevice()..teardownBound = const Duration(seconds: 30);
 
-      final records = await recording(
+      final List<LogRecord> records = await recording(
         () => device
             .stop(AppInstance(process: process))
             .timeout(const Duration(seconds: 5)),
       );
 
-      expect(
-        process.signals,
-        [ProcessSignal.sigterm],
-        reason: 'a process that stops when asked must not also be SIGKILLed',
-      );
+      expect(process.signals, [
+        ProcessSignal.sigterm,
+      ], reason: 'a process that stops when asked must not also be SIGKILLed');
       expect(
         records.where((r) => r.message.contains('process_kill')),
         isEmpty,
@@ -5800,7 +5799,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         // The one place the escalation meets a real kernel rather than a fake,
         // which is what keeps FakeProcess honest if the platform ever stops
         // behaving this way.
-        final real = await Process.start('/bin/sh', [
+        final Process real = await Process.start('/bin/sh', [
           '-c',
           'trap "" TERM; echo ready; while true; do sleep 0.05; done',
         ]);
@@ -5852,7 +5851,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
     test(
       'an app that has already exited is stopped without a warning',
       () async {
-        final real = await Process.start('/bin/sh', ['-c', 'exit 0']);
+        final Process real = await Process.start('/bin/sh', ['-c', 'exit 0']);
         await real.exitCode;
         expect(
           real.kill(),
@@ -5862,7 +5861,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
               'fake that did not could never fail this test',
         );
 
-        final records = await recording(
+        final List<LogRecord> records = await recording(
           () => MacOSDevice().stop(AppInstance(process: real)),
         );
 
@@ -5891,7 +5890,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
         ..teardownBound = const Duration(milliseconds: 50)
         ..setModuleServer(_HangingModuleServer());
 
-      final records = await recording(
+      final List<LogRecord> records = await recording(
         () => device
             .stop(AppInstance(process: process))
             .timeout(
@@ -5960,7 +5959,7 @@ class _ToolsDevice extends Device {
   String get name => 'Tools';
 
   @override
-  Future<AppInstance> launch(String appPath, {AppLogListener? onLog}) =>
+  Future<_Instance> launch(String appPath, {AppLogListener? onLog}) =>
       throw UnimplementedError();
 
   @override
@@ -5972,7 +5971,7 @@ class _MinimalDevice extends Device {
   String get name => 'Minimal';
 
   @override
-  Future<AppInstance> launch(String appPath, {AppLogListener? onLog}) =>
+  Future<_Instance> launch(String appPath, {AppLogListener? onLog}) =>
       throw UnimplementedError();
 
   @override

@@ -42,7 +42,7 @@ List<Directory> resolveFrameworkDirectories(String inputPath, String platform) {
 
   // Wrapper directory: check immediate children for *.framework or *.xcframework.
   final results = <Directory>[];
-  final children = dir.listSync(followLinks: true)
+  final List<FileSystemEntity> children = dir.listSync(followLinks: true)
     ..sort((a, b) => a.path.compareTo(b.path));
   for (final child in children) {
     if (child is Directory) {
@@ -72,11 +72,14 @@ List<Directory> resolveFrameworkDirectories(String inputPath, String platform) {
 /// Any previous extraction at that path is removed first so a re-run over a
 /// reused scratch root can never see stale entries.
 Directory extractFrameworkArchive(String zipPath, Directory scratchRoot) {
-  final zipBase = zipPath.split('/').where((s) => s.isNotEmpty).last;
+  final String zipBase = zipPath.split('/').where((s) => s.isNotEmpty).last;
   if (!zipBase.endsWith('.framework.zip')) {
     throw ArgumentError('Not a framework archive: $zipPath');
   }
-  final fwFileName = zipBase.substring(0, zipBase.length - '.zip'.length);
+  final String fwFileName = zipBase.substring(
+    0,
+    zipBase.length - '.zip'.length,
+  );
   final scratch = Directory('${scratchRoot.path}/$fwFileName');
   if (scratch.existsSync()) {
     scratch.deleteSync(recursive: true);
@@ -96,12 +99,12 @@ List<Directory> _resolveXcframeworkSlice(
   Directory xcframeworkDir,
   String platform,
 ) {
-  final sliceDirs =
+  final List<Directory> sliceDirs =
       xcframeworkDir.listSync(followLinks: true).whereType<Directory>().toList()
         ..sort((a, b) => a.path.compareTo(b.path));
 
   bool matchesSlice(String sliceName) {
-    final lower = sliceName.toLowerCase();
+    final String lower = sliceName.toLowerCase();
     if (platform == 'ios') {
       return lower.startsWith('ios-') && !lower.contains('simulator');
     } else if (platform == 'ios_sim') {
@@ -113,9 +116,11 @@ List<Directory> _resolveXcframeworkSlice(
   }
 
   for (final slice in sliceDirs) {
-    final sliceName = slice.uri.pathSegments.where((s) => s.isNotEmpty).last;
+    final String sliceName = slice.uri.pathSegments
+        .where((s) => s.isNotEmpty)
+        .last;
     if (matchesSlice(sliceName)) {
-      final frameworks =
+      final List<Directory> frameworks =
           slice
               .listSync(followLinks: true)
               .whereType<Directory>()
@@ -141,19 +146,19 @@ void copyDirectorySync(
   bool dereferenceSymlinks = false,
 }) {
   dst.createSync(recursive: true);
-  final children = src.listSync(followLinks: false)
+  final List<FileSystemEntity> children = src.listSync(followLinks: false)
     ..sort((a, b) => a.path.compareTo(b.path));
   for (final entity in children) {
-    final name = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
+    final String name = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
     final destPath = '${dst.path}/$name';
     if (entity is Link) {
-      final target = entity.targetSync();
-      final shouldDereference =
+      final String target = entity.targetSync();
+      final bool shouldDereference =
           dereferenceSymlinks ||
           target.startsWith('/') ||
           target.contains('..');
       if (shouldDereference) {
-        final resolved = entity.resolveSymbolicLinksSync();
+        final String resolved = entity.resolveSymbolicLinksSync();
         if (FileSystemEntity.isDirectorySync(resolved)) {
           copyDirectorySync(
             Directory(resolved),
@@ -188,8 +193,8 @@ const List<String> _unsupportedActoolExtensions = [
 ];
 
 void _validateResourceNotRequiringXcodeTools(String pathOrSpec) {
-  final lower = pathOrSpec.toLowerCase();
-  for (final ext in _unsupportedIbtoolExtensions) {
+  final String lower = pathOrSpec.toLowerCase();
+  for (final String ext in _unsupportedIbtoolExtensions) {
     if (lower.endsWith(ext) ||
         lower.contains('$ext/') ||
         lower.contains('$ext=')) {
@@ -200,7 +205,7 @@ void _validateResourceNotRequiringXcodeTools(String pathOrSpec) {
       );
     }
   }
-  for (final ext in _unsupportedActoolExtensions) {
+  for (final String ext in _unsupportedActoolExtensions) {
     if (lower.endsWith(ext) ||
         lower.contains('$ext/') ||
         lower.contains('$ext=')) {
@@ -216,7 +221,7 @@ void _validateResourceNotRequiringXcodeTools(String pathOrSpec) {
 /// Copies a `src[=dest_rel]` resource [spec] into [destRoot], rejecting sources that need Xcode tools.
 void copyResourceSpec(String spec, Directory destRoot) {
   _validateResourceNotRequiringXcodeTools(spec);
-  final eqIndex = spec.indexOf('=');
+  final int eqIndex = spec.indexOf('=');
   final String srcPath;
   final String relDest;
   if (eqIndex != -1) {
@@ -251,14 +256,14 @@ void copyAdditionalContentSpec(
   required String contentsRelPrefix,
   required Set<String> executablePaths,
 }) {
-  final eqIndex = spec.indexOf('=');
+  final int eqIndex = spec.indexOf('=');
   if (eqIndex <= 0 || eqIndex == spec.length - 1) {
     throw ArgumentError(
       'Invalid --additional-content spec "$spec": expected <subdir>=<path>.',
     );
   }
-  final subdir = spec.substring(0, eqIndex).trim();
-  final srcPath = spec.substring(eqIndex + 1);
+  final String subdir = spec.substring(0, eqIndex).trim();
+  final String srcPath = spec.substring(eqIndex + 1);
   if (subdir.isEmpty ||
       subdir.startsWith('/') ||
       subdir.split('/').contains('..')) {
@@ -269,7 +274,7 @@ void copyAdditionalContentSpec(
   }
   _validateResourceNotRequiringXcodeTools(srcPath);
 
-  final srcName = Uri.file(srcPath).pathSegments
+  final String srcName = Uri.file(srcPath).pathSegments
       .where((s) => s.isNotEmpty)
       .last;
   final destPath = '${contentsDir.path}/$subdir/$srcName';
@@ -280,7 +285,7 @@ void copyAdditionalContentSpec(
     // a bundle extension like .framework/.bundle/.appex/.xpc) expand their
     // contents directly into the destination subdirectory, matching
     // rules_apple's additional_contents semantics.
-    final isBundleDir = srcName.contains('.');
+    final bool isBundleDir = srcName.contains('.');
     final targetDir = isBundleDir
         ? Directory('${contentsDir.path}/$subdir/$srcName')
         : Directory('${contentsDir.path}/$subdir');
@@ -320,9 +325,12 @@ void markDirectoryExecutables(
   required Set<String> executablePaths,
 }) {
   if (!dir.existsSync()) return;
-  final dirName = dir.uri.pathSegments.where((s) => s.isNotEmpty).last;
+  final String dirName = dir.uri.pathSegments.where((s) => s.isNotEmpty).last;
   if (dirName.endsWith('.framework')) {
-    final fwName = dirName.substring(0, dirName.length - '.framework'.length);
+    final String fwName = dirName.substring(
+      0,
+      dirName.length - '.framework'.length,
+    );
     if (File('${dir.path}/$fwName').existsSync()) {
       executablePaths.add('$relPrefix/$fwName');
     }
@@ -331,8 +339,8 @@ void markDirectoryExecutables(
     }
     return;
   }
-  for (final entity in dir.listSync(followLinks: false)) {
-    final name = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
+  for (final FileSystemEntity entity in dir.listSync(followLinks: false)) {
+    final String name = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
     if (entity is Directory && name.endsWith('.framework')) {
       markDirectoryExecutables(
         entity,

@@ -6,13 +6,13 @@ import 'package:test/test.dart';
 import 'dev_tool_e2e_harness.dart';
 
 void main() {
-  final workspace = e2eWorkspace('multi_window_example');
+  final String workspace = e2eWorkspace('multi_window_example');
 
   group('multi_window macOS e2e', () {
     test(
       'native screenshot composites both planner windows by default',
       () async {
-        final dt = await startDevTool(
+        final DevToolProcess dt = await startDevTool(
           workspace: workspace,
           target: ':app_macos',
           device: 'macos',
@@ -24,7 +24,9 @@ void main() {
         // Both NSWindows take a beat to be on screen after launch, and no event
         // reports when they are — so the endpoint itself is the condition,
         // polled rather than slept past.
-        final composite = await dt.nativeScreenshotWhenOnScreen(dt.appId!);
+        final List<int> composite = await dt.nativeScreenshotWhenOnScreen(
+          dt.appId!,
+        );
         expect(composite.length, greaterThan(0));
         expect(composite.sublist(0, 4), [0x89, 0x50, 0x4E, 0x47]);
 
@@ -33,7 +35,7 @@ void main() {
     );
 
     test('?window= selects a single planner window by exact title', () async {
-      final dt = await startDevTool(
+      final DevToolProcess dt = await startDevTool(
         workspace: workspace,
         target: ':app_macos',
         device: 'macos',
@@ -44,11 +46,11 @@ void main() {
       // Each window is its own barrier: polling per title waits out exactly
       // the window that answer needs, and the bytes the poll returns are the
       // ones asserted on.
-      final tasks = await dt.nativeScreenshotWhenOnScreen(
+      final List<int> tasks = await dt.nativeScreenshotWhenOnScreen(
         dt.appId!,
         window: 'Planner — Tasks',
       );
-      final calendar = await dt.nativeScreenshotWhenOnScreen(
+      final List<int> calendar = await dt.nativeScreenshotWhenOnScreen(
         dt.appId!,
         window: 'Planner — Calendar',
       );
@@ -70,7 +72,7 @@ void main() {
     test(
       '?window= with unknown title returns a 500 with available titles',
       () async {
-        final dt = await startDevTool(
+        final DevToolProcess dt = await startDevTool(
           workspace: workspace,
           target: ':app_macos',
           device: 'macos',

@@ -59,7 +59,7 @@ void main() {
     });
 
     Uri _uri(String path, {bool withToken = true}) {
-      final base = channel.uri;
+      final Uri base = channel.uri;
       final query = withToken ? 'token=test-token-abc' : '';
       return base.replace(path: path, query: query);
     }
@@ -68,7 +68,9 @@ void main() {
       String path, {
       bool withToken = true,
     }) async {
-      final request = await client.getUrl(_uri(path, withToken: withToken));
+      final HttpClientRequest request = await client.getUrl(
+        _uri(path, withToken: withToken),
+      );
       return request.close();
     }
 
@@ -77,11 +79,13 @@ void main() {
       Map<String, dynamic> body, {
       bool withToken = true,
     }) async {
-      final request = await client.postUrl(_uri(path, withToken: withToken));
+      final HttpClientRequest request = await client.postUrl(
+        _uri(path, withToken: withToken),
+      );
       request.headers.contentType = ContentType.json;
       request.write(json.encode(body));
-      final response = await request.close();
-      final responseBody = await utf8.decoder.bind(response).join();
+      final HttpClientResponse response = await request.close();
+      final String responseBody = await utf8.decoder.bind(response).join();
       return (response, responseBody);
     }
 
@@ -91,13 +95,15 @@ void main() {
         () async {
           // Mimic an HTTP/2 cleartext (h2c) upgrade attempt: Dart's HttpServer
           // would otherwise silently drop the request body and hang the POST.
-          final request = await client.postUrl(_uri('/command'));
+          final HttpClientRequest request = await client.postUrl(
+            _uri('/command'),
+          );
           request.headers.contentType = ContentType.json;
           request.headers.set(HttpHeaders.connectionHeader, 'Upgrade');
           request.headers.set(HttpHeaders.upgradeHeader, 'h2c');
           request.write(json.encode({'method': 'test.echo'}));
-          final response = await request.close();
-          final body = await utf8.decoder.bind(response).join();
+          final HttpClientResponse response = await request.close();
+          final String body = await utf8.decoder.bind(response).join();
           expect(response.statusCode, HttpStatus.upgradeRequired);
           expect(body, contains('HTTP/1.1 only'));
         },
@@ -106,16 +112,19 @@ void main() {
 
     group('auth', () {
       test('returns 401 without token', () async {
-        final response = await _get('/command', withToken: false);
+        final HttpClientResponse response = await _get(
+          '/command',
+          withToken: false,
+        );
         expect(response.statusCode, HttpStatus.unauthorized);
         await response.drain<void>();
       });
 
       test('returns 401 with wrong token', () async {
-        final request = await client.getUrl(
+        final HttpClientRequest request = await client.getUrl(
           channel.uri.replace(path: '/command', query: 'token=wrong'),
         );
-        final response = await request.close();
+        final HttpClientResponse response = await request.close();
         expect(response.statusCode, HttpStatus.unauthorized);
         await response.drain<void>();
       });
@@ -125,14 +134,14 @@ void main() {
       // say where the token is actually read from, or it looks like the value
       // is wrong rather than in the wrong place.
       test('a 401 names the query parameter it read', () async {
-        final request = await client.getUrl(
+        final HttpClientRequest request = await client.getUrl(
           channel.uri.replace(path: '/command'),
         );
         request.headers.set(
           HttpHeaders.authorizationHeader,
           'Bearer test-token-abc',
         );
-        final response = await request.close();
+        final HttpClientResponse response = await request.close();
         expect(response.statusCode, HttpStatus.unauthorized);
         final body = json.decode(
           await response.transform(utf8.decoder).join(),
@@ -143,10 +152,13 @@ void main() {
       });
 
       test('accepts correct token', () async {
-        final (response, body) = await _post('/command', {
-          'method': 'test.echo',
-          'params': {'msg': 'hi'},
-        });
+        final (HttpClientResponse response, String body) = await _post(
+          '/command',
+          {
+            'method': 'test.echo',
+            'params': {'msg': 'hi'},
+          },
+        );
         expect(response.statusCode, HttpStatus.ok);
         final parsed = json.decode(body) as Map<String, dynamic>;
         expect(parsed['result']['echo'], 'hi');
@@ -155,37 +167,48 @@ void main() {
 
     group('POST /command', () {
       test('executes valid command', () async {
-        final (response, body) = await _post('/command', {
-          'method': 'test.echo',
-          'params': {'msg': 'hello'},
-        });
+        final (HttpClientResponse response, String body) = await _post(
+          '/command',
+          {
+            'method': 'test.echo',
+            'params': {'msg': 'hello'},
+          },
+        );
         expect(response.statusCode, HttpStatus.ok);
         final parsed = json.decode(body) as Map<String, dynamic>;
         expect(parsed['result']['echo'], 'hello');
       });
 
       test('returns 404 for unknown method', () async {
-        final (response, body) = await _post('/command', {
-          'method': 'nonexistent',
-        });
+        final (HttpClientResponse response, String body) = await _post(
+          '/command',
+          {
+            'method': 'nonexistent',
+          },
+        );
         expect(response.statusCode, HttpStatus.notFound);
         final parsed = json.decode(body) as Map<String, dynamic>;
         expect(parsed['error'], contains('Unknown command'));
       });
 
       test('returns 400 for malformed JSON', () async {
-        final request = await client.postUrl(_uri('/command'));
+        final HttpClientRequest request = await client.postUrl(
+          _uri('/command'),
+        );
         request.headers.contentType = ContentType.json;
         request.write('not json {{{');
-        final response = await request.close();
+        final HttpClientResponse response = await request.close();
         expect(response.statusCode, HttpStatus.badRequest);
         await response.drain<void>();
       });
 
       test('returns 400 when method field is missing', () async {
-        final (response, body) = await _post('/command', {
-          'params': {'msg': 'hi'},
-        });
+        final (HttpClientResponse response, String body) = await _post(
+          '/command',
+          {
+            'params': {'msg': 'hi'},
+          },
+        );
         expect(response.statusCode, HttpStatus.badRequest);
         final parsed = json.decode(body) as Map<String, dynamic>;
         expect(parsed['error'], contains('Missing "method" field'));
@@ -194,9 +217,12 @@ void main() {
       // One shape for every no, so a client checking for failures has one
       // place to look rather than a status code and a nested `error` field.
       test('a refused command answers 422 with the reason', () async {
-        final (response, body) = await _post('/command', {
-          'method': 'test.refuse',
-        });
+        final (HttpClientResponse response, String body) = await _post(
+          '/command',
+          {
+            'method': 'test.refuse',
+          },
+        );
         // 422, not 500: the request was fine and the tool is fine — the app
         // said no. A 500 would tell a client to retry against a healthy run.
         expect(response.statusCode, HttpStatus.unprocessableEntity);
@@ -210,9 +236,12 @@ void main() {
       });
 
       test('bad parameters answer 400', () async {
-        final (response, body) = await _post('/command', {
-          'method': 'test.badParams',
-        });
+        final (HttpClientResponse response, String body) = await _post(
+          '/command',
+          {
+            'method': 'test.badParams',
+          },
+        );
         expect(response.statusCode, HttpStatus.badRequest);
         expect(
           (json.decode(body) as Map<String, dynamic>)['error'],
@@ -221,9 +250,12 @@ void main() {
       });
 
       test('a command this run cannot serve answers 501', () async {
-        final (response, body) = await _post('/command', {
-          'method': 'test.cannot',
-        });
+        final (HttpClientResponse response, String body) = await _post(
+          '/command',
+          {
+            'method': 'test.cannot',
+          },
+        );
         expect(response.statusCode, HttpStatus.notImplemented);
         expect(
           (json.decode(body) as Map<String, dynamic>)['error'],
@@ -234,9 +266,12 @@ void main() {
       // Still a 500, and deliberately: the tool broke, which is not the same
       // as the command being refused.
       test('returns 500 when handler throws', () async {
-        final (response, body) = await _post('/command', {
-          'method': 'test.fail',
-        });
+        final (HttpClientResponse response, String body) = await _post(
+          '/command',
+          {
+            'method': 'test.fail',
+          },
+        );
         expect(response.statusCode, HttpStatus.internalServerError);
         final parsed = json.decode(body) as Map<String, dynamic>;
         expect(parsed['error'], contains('handler error'));
@@ -244,9 +279,11 @@ void main() {
 
       test('a 500 is logged server-side, not only answered', () async {
         final records = <LogRecord>[];
-        final rootLevel = Logger.root.level;
+        final Level rootLevel = Logger.root.level;
         Logger.root.level = Level.ALL;
-        final sub = Logger.root.onRecord.listen(records.add);
+        final StreamSubscription<LogRecord> sub = Logger.root.onRecord.listen(
+          records.add,
+        );
         try {
           await _post('/command', {'method': 'test.fail'});
         } finally {
@@ -270,15 +307,19 @@ void main() {
         'an unreadable body is logged server-side, not only answered',
         () async {
           final records = <LogRecord>[];
-          final rootLevel = Logger.root.level;
+          final Level rootLevel = Logger.root.level;
           Logger.root.level = Level.ALL;
-          final sub = Logger.root.onRecord.listen(records.add);
+          final StreamSubscription<LogRecord> sub = Logger.root.onRecord.listen(
+            records.add,
+          );
           try {
-            final request = await client.postUrl(_uri('/command'));
+            final HttpClientRequest request = await client.postUrl(
+              _uri('/command'),
+            );
             request.headers.contentType = ContentType.json;
             request.write('this is not json{{{');
-            final response = await request.close();
-            final body = await utf8.decoder.bind(response).join();
+            final HttpClientResponse response = await request.close();
+            final String body = await utf8.decoder.bind(response).join();
             expect(response.statusCode, HttpStatus.badRequest);
             expect(
               (json.decode(body) as Map<String, dynamic>)['error'],
@@ -300,9 +341,12 @@ void main() {
       );
 
       test('defaults params to empty map', () async {
-        final (response, body) = await _post('/command', {
-          'method': 'test.echo',
-        });
+        final (HttpClientResponse response, String body) = await _post(
+          '/command',
+          {
+            'method': 'test.echo',
+          },
+        );
         expect(response.statusCode, HttpStatus.ok);
         final parsed = json.decode(body) as Map<String, dynamic>;
         expect(parsed['result']['echo'], isNull);
@@ -316,15 +360,18 @@ void main() {
     /// re-reading this is how it stays current.
     group('GET /commands', () {
       test('lists what is registered, with the slow ones marked', () async {
-        final response = await _get('/commands');
+        final HttpClientResponse response = await _get('/commands');
         expect(response.statusCode, 200);
         final body = json.decode(
           await response.transform(utf8.decoder).join(),
         ) as Map<String, dynamic>;
-        final commands = (body['commands'] as List).cast<Map>();
+        final List<Map<dynamic, dynamic>> commands = (body['commands'] as List)
+            .cast<Map>();
         expect(commands, isNotEmpty);
         // Sorted by name, so a client can diff two readings.
-        final names = commands.map((c) => c['name'] as String).toList();
+        final List<String> names = commands
+            .map((c) => c['name'] as String)
+            .toList();
         expect(names, orderedEquals([...names]..sort()));
         // Every entry carries the flag a client needs to pick a timeout.
         expect(
@@ -339,7 +386,9 @@ void main() {
 
     group('GET /sessions/{appId}/screenshot/flutter', () {
       test('returns 404 for unknown appId', () async {
-        final response = await _get('/sessions/unknown/screenshot/flutter');
+        final HttpClientResponse response = await _get(
+          '/sessions/unknown/screenshot/flutter',
+        );
         expect(response.statusCode, HttpStatus.notFound);
         await response.drain<void>();
       });
@@ -359,8 +408,10 @@ void main() {
             appId: 'app1',
           );
 
-          final response = await _get('/sessions/app1/screenshot/flutter');
-          final body = await utf8.decoder.bind(response).join();
+          final HttpClientResponse response = await _get(
+            '/sessions/app1/screenshot/flutter',
+          );
+          final String body = await utf8.decoder.bind(response).join();
 
           expect(
             response.statusCode,
@@ -375,7 +426,9 @@ void main() {
 
     group('GET /sessions/{appId}/screenshot/native', () {
       test('returns 404 for unknown appId', () async {
-        final response = await _get('/sessions/unknown/screenshot/native');
+        final HttpClientResponse response = await _get(
+          '/sessions/unknown/screenshot/native',
+        );
         expect(response.statusCode, HttpStatus.notFound);
         await response.drain<void>();
       });
@@ -397,19 +450,23 @@ void main() {
             vmClient: VmServiceClient(),
             appId: 'app1',
           );
-          final response = await _get('/sessions/app1/screenshot/native');
+          final HttpClientResponse response = await _get(
+            '/sessions/app1/screenshot/native',
+          );
           await response.drain<void>();
           return response;
         }
 
         test('yes is yes, with no detail', () async {
-          final response = await captureAfter({'settled': 'yes'});
+          final HttpClientResponse response = await captureAfter({
+            'settled': 'yes',
+          });
           expect(response.headers.value('x-settled'), 'yes');
           expect(response.headers.value('x-settle-detail'), isNull);
         });
 
         test('skipped keeps its reason', () async {
-          final response = await captureAfter({
+          final HttpClientResponse response = await captureAfter({
             'settled': 'skipped',
             'settleDetail': 'the app is backgrounded',
           });
@@ -421,7 +478,7 @@ void main() {
         });
 
         test('no keeps its reason', () async {
-          final response = await captureAfter({
+          final HttpClientResponse response = await captureAfter({
             'settled': 'no',
             'settleDetail': 'timed out',
           });
@@ -452,8 +509,10 @@ void main() {
             vmClient: VmServiceClient(),
             appId: 'app1',
           );
-          final response = await _get('/sessions/app1/screenshot/native');
-          final body = await response.fold<List<int>>(
+          final HttpClientResponse response = await _get(
+            '/sessions/app1/screenshot/native',
+          );
+          final List<int> body = await response.fold<List<int>>(
             [],
             (bytes, chunk) => bytes..addAll(chunk),
           );
@@ -473,7 +532,8 @@ void main() {
               'reported no pause, so the app was running and the handler never '
               'returned — a backgrounded app stops producing frames, and any '
               'unbounded wait for one never ends.';
-          final (response, body) = await captureRefusedWith(reason);
+          final (HttpClientResponse response, List<int> body) =
+              await captureRefusedWith(reason);
 
           expect(response.statusCode, HttpStatus.ok, reason: printable(body));
           expect(body, png);
@@ -489,7 +549,8 @@ void main() {
         // read as an escape a decoder then trips on.
         test('a reason with a line break or a percent round-trips', () async {
           const reason = 'paused at a breakpoint\nin 100% of isolates';
-          final (response, body) = await captureRefusedWith(reason);
+          final (HttpClientResponse response, List<int> body) =
+              await captureRefusedWith(reason);
 
           expect(response.statusCode, HttpStatus.ok, reason: printable(body));
           expect(
@@ -502,7 +563,7 @@ void main() {
 
     group('routing', () {
       test('returns 404 for unknown paths', () async {
-        final response = await _get('/unknown/path');
+        final HttpClientResponse response = await _get('/unknown/path');
         expect(response.statusCode, HttpStatus.notFound);
         await response.drain<void>();
       });
@@ -524,12 +585,12 @@ void main() {
       test(
         'every loopback family this host can assign reaches the channel',
         () async {
-          final loopbacks = await assignableLoopbacks();
+          final List<InternetAddress> loopbacks = await assignableLoopbacks();
           expect(loopbacks, isNotEmpty);
           for (final address in loopbacks) {
             // Dialled by address, not by name: the point is which sockets exist,
             // and a name would let the resolver pick the one family that works.
-            final request = await client.postUrl(
+            final HttpClientRequest request = await client.postUrl(
               channel.uri.replace(
                 host: address.address,
                 path: '/command',
@@ -543,8 +604,8 @@ void main() {
                 'params': {'msg': address.address},
               }),
             );
-            final response = await request.close();
-            final body = await utf8.decoder.bind(response).join();
+            final HttpClientResponse response = await request.close();
+            final String body = await utf8.decoder.bind(response).join();
 
             expect(
               response.statusCode,
@@ -612,13 +673,17 @@ void main() {
             return {'message': 'stopped'};
           });
 
-          final responseFuture = _post('/command', {'method': 'test.slowStop'});
+          final Future<(HttpClientResponse, String)> responseFuture = _post(
+            '/command',
+            {'method': 'test.slowStop'},
+          );
           await handlerEntered.future;
 
-          final stopFuture = channel.stop();
+          final Future<void> stopFuture = channel.stop();
           handlerResume.complete();
 
-          final (response, body) = await responseFuture;
+          final (HttpClientResponse response, String body) =
+              await responseFuture;
           expect(response.statusCode, HttpStatus.ok);
           final parsed = json.decode(body) as Map<String, dynamic>;
           expect(parsed['result']['message'], 'stopped');
@@ -636,11 +701,14 @@ void main() {
           return {'message': 'stopped'};
         });
 
-        final uri = channel.uri;
-        final responseFuture = _post('/command', {'method': 'test.slowStop'});
+        final Uri uri = channel.uri;
+        final Future<(HttpClientResponse, String)> responseFuture = _post(
+          '/command',
+          {'method': 'test.slowStop'},
+        );
         await handlerEntered.future;
 
-        final stopFuture = channel.stop();
+        final Future<void> stopFuture = channel.stop();
 
         // New connections must be refused once stop() has begun.
         final freshClient = HttpClient()
@@ -654,7 +722,7 @@ void main() {
         freshClient.close(force: true);
 
         handlerResume.complete();
-        final (response, _) = await responseFuture;
+        final (HttpClientResponse response, _) = await responseFuture;
         expect(response.statusCode, HttpStatus.ok);
         await stopFuture;
       });
@@ -678,14 +746,14 @@ void main() {
       }
 
       Future<Map<String, dynamic>> getLogs(String query) async {
-        final request = await client.getUrl(
+        final HttpClientRequest request = await client.getUrl(
           channel.uri.replace(
             path: '/sessions/app1/logs',
             query: 'token=test-token-abc${query.isEmpty ? '' : '&$query'}',
           ),
         );
-        final response = await request.close();
-        final body = await utf8.decoder.bind(response).join();
+        final HttpClientResponse response = await request.close();
+        final String body = await utf8.decoder.bind(response).join();
         expect(response.statusCode, HttpStatus.ok, reason: body);
         return json.decode(body) as Map<String, dynamic>;
       }
@@ -696,7 +764,7 @@ void main() {
 
       test('with no cursor, tails the most recent lines', () async {
         seedSession('app1', count: 500);
-        final page = await getLogs('');
+        final Map<String, dynamic> page = await getLogs('');
 
         // The default is a tail, so an agent arriving with no cursor sees what
         // just happened rather than the start of the run.
@@ -727,12 +795,14 @@ void main() {
 
       test('polling with nextCursor neither overlaps nor gaps', () async {
         seedSession('app1', count: 3);
-        final first = await getLogs('since=0');
+        final Map<String, dynamic> first = await getLogs('since=0');
         expect(textsOf(first), ['line0', 'line1', 'line2']);
 
         logs.add('line3');
         logs.add('line4');
-        final second = await getLogs('since=${first['nextCursor']}');
+        final Map<String, dynamic> second = await getLogs(
+          'since=${first['nextCursor']}',
+        );
 
         expect(textsOf(second), ['line3', 'line4']);
         expect(second['nextCursor'], 5);
@@ -742,7 +812,7 @@ void main() {
         'polling with nothing new returns an empty page, not an error',
         () async {
           seedSession('app1', count: 2);
-          final page = await getLogs('since=2');
+          final Map<String, dynamic> page = await getLogs('since=2');
           expect(page['lines'], isEmpty);
           expect(page['nextCursor'], 2);
         },
@@ -750,7 +820,7 @@ void main() {
 
       test('reports missed lines when the cursor has been evicted', () async {
         seedSession('app1', count: 10, capacity: 3);
-        final page = await getLogs('since=0');
+        final Map<String, dynamic> page = await getLogs('since=0');
 
         expect(textsOf(page), ['line7', 'line8', 'line9']);
         expect(
@@ -770,14 +840,14 @@ void main() {
 
       test('limit caps the page', () async {
         seedSession('app1', count: 20);
-        final page = await getLogs('since=0&limit=4');
+        final Map<String, dynamic> page = await getLogs('since=0&limit=4');
         expect(textsOf(page), ['line0', 'line1', 'line2', 'line3']);
         expect(page['nextCursor'], 4);
       });
 
       test('an oversized limit is clamped rather than honoured', () async {
         seedSession('app1', count: 900);
-        final page = await getLogs('since=0&limit=100000');
+        final Map<String, dynamic> page = await getLogs('since=0&limit=100000');
         expect((page['lines'] as List).length, lessThanOrEqualTo(500));
       });
 
@@ -793,21 +863,23 @@ void main() {
 
       test('reports which launch of the app the page came from', () async {
         seedSession('app1', count: 2);
-        final before = await getLogs('since=0');
+        final Map<String, dynamic> before = await getLogs('since=0');
         expect(before['launch'], 1);
 
         // A relaunch (restart with changed native libraries) starts a fresh
         // buffer numbered from zero, so the cursor a poller is holding now
         // points into a process that no longer exists. `launch` is how it
         // learns that instead of silently re-reading unrelated lines.
-        final session = sessions['app1']!;
+        final DeviceSession session = sessions['app1']!;
         final relaunchedLogs = AppLogStream()..add('after relaunch');
         await session.relaunch(
           () async =>
               AppInstance(process: _StubProcess(), logs: relaunchedLogs),
         );
 
-        final after = await getLogs('since=${before['nextCursor']}');
+        final Map<String, dynamic> after = await getLogs(
+          'since=${before['nextCursor']}',
+        );
         expect(after['launch'], 2);
         expect(textsOf(await getLogs('since=0')), ['after relaunch']);
       });
@@ -818,7 +890,7 @@ void main() {
 
         await logs.close();
 
-        final page = await getLogs('since=0');
+        final Map<String, dynamic> page = await getLogs('since=0');
         expect(
           page['closed'],
           isTrue,
@@ -833,14 +905,14 @@ void main() {
 
       test('rejects a non-numeric since with 400', () async {
         seedSession('app1', count: 3);
-        final request = await client.getUrl(
+        final HttpClientRequest request = await client.getUrl(
           channel.uri.replace(
             path: '/sessions/app1/logs',
             query: 'token=test-token-abc&since=abc',
           ),
         );
-        final response = await request.close();
-        final body = await utf8.decoder.bind(response).join();
+        final HttpClientResponse response = await request.close();
+        final String body = await utf8.decoder.bind(response).join();
 
         expect(response.statusCode, HttpStatus.badRequest);
         expect(
@@ -854,7 +926,7 @@ void main() {
 
       test('rejects a non-positive limit with 400', () async {
         seedSession('app1', count: 3);
-        final request = await client.getUrl(
+        final HttpClientRequest request = await client.getUrl(
           channel.uri.replace(
             path: '/sessions/app1/logs',
             query: 'token=test-token-abc&limit=0',
@@ -864,13 +936,16 @@ void main() {
       });
 
       test('404s an unknown appId', () async {
-        final response = await _get('/sessions/nope/logs');
+        final HttpClientResponse response = await _get('/sessions/nope/logs');
         expect(response.statusCode, HttpStatus.notFound);
       });
 
       test('401s without a valid token', () async {
         seedSession('app1', count: 1);
-        final response = await _get('/sessions/app1/logs', withToken: false);
+        final HttpClientResponse response = await _get(
+          '/sessions/app1/logs',
+          withToken: false,
+        );
         expect(response.statusCode, HttpStatus.unauthorized);
       });
     });

@@ -207,7 +207,7 @@ List<StreamSubscription<ProcessSignal>> watchWorkerSignals(
   // The conventional 128-plus-signum statuses: SIGTERM is 15, SIGINT is 2.
   // (`ProcessSignal` exposes no number getter on every SDK this builds with,
   // so the statuses travel with the watched signals.)
-  final watchedSignals =
+  final List<({ProcessSignal signal, int status})> watchedSignals =
       signals ??
       [
         (signal: ProcessSignal.sigterm, status: 143),
@@ -263,8 +263,8 @@ class IncrWorker {
   bool _swept = false;
 
   static int _maxServersFromEnv() {
-    final raw = Platform.environment['INCR_FKC_MAX_SERVERS'];
-    final parsed = raw == null ? 0 : int.tryParse(raw) ?? 0;
+    final String? raw = Platform.environment['INCR_FKC_MAX_SERVERS'];
+    final int parsed = raw == null ? 0 : int.tryParse(raw) ?? 0;
     return parsed > 0 ? parsed : 1;
   }
 
@@ -311,7 +311,7 @@ class IncrWorker {
   /// worker.
   Future<void> closeAll() async {
     try {
-      for (final state in _servers.values) {
+      for (final IncrServerState state in _servers.values) {
         await state.session.close();
       }
     } finally {
@@ -327,7 +327,7 @@ class IncrWorker {
   /// locks are per process and vanish when any descriptor for the file
   /// closes, so no other code may open this file while the worker lives.
   Future<void> _closeScratchLock() async {
-    final lock = _scratchLock;
+    final ScratchLock? lock = _scratchLock;
     _scratchLock = null;
     if (lock != null) await lock.close();
   }
@@ -348,7 +348,7 @@ class IncrWorker {
   }
 
   Future<void> _drop(String key) async {
-    final state = _servers.remove(key);
+    final IncrServerState? state = _servers.remove(key);
     _order.remove(key);
     if (state != null) await state.session.close();
   }
@@ -358,7 +358,7 @@ class IncrWorker {
     RequestParts parts,
     List<String> roots,
   ) async {
-    final old = _servers.remove(key);
+    final IncrServerState? old = _servers.remove(key);
     _order.remove(key);
     if (old != null) await old.session.close();
     while (_order.isNotEmpty && _servers.length >= maxServers) {
@@ -367,7 +367,7 @@ class IncrWorker {
     final wdir = Directory(
       '${_tmp.path}${Platform.pathSeparator}$key',
     )..createSync(recursive: true);
-    final sep = Platform.pathSeparator;
+    final String sep = Platform.pathSeparator;
     final full = '${wdir.path}${sep}full.dill';
     final inc = '${wdir.path}${sep}inc.dill';
     final session = await _sessions(
@@ -414,9 +414,11 @@ class IncrWorker {
   /// not is refused, exactly like batch. The report must also name a declared
   /// source and the entrypoint under a declared spelling, like batch.
   String? _checkReads(Set<String> current, KernelInputsManifest manifest) {
-    final lines = [for (final u in current.toList()..sort()) '+$u'];
+    final List<String> lines = [
+      for (final u in current.toList()..sort()) '+$u',
+    ];
     if (lines.isEmpty) return noDependencyReadsMessage();
-    final bad = findUndeclaredReads(
+    final List<String> bad = findUndeclaredReads(
       lines,
       manifest.declared,
       manifest.extraAllowed,
@@ -424,9 +426,12 @@ class IncrWorker {
     if (bad.isNotEmpty) {
       return bad.map(undeclaredReadMessage).join('\n');
     }
-    final noSource = checkNoDeclaredSourceReads(lines, manifest.declared);
+    final String? noSource = checkNoDeclaredSourceReads(
+      lines,
+      manifest.declared,
+    );
     if (noSource != null) return noSource;
-    final noEntry = checkMissingEntrypointRead(
+    final String? noEntry = checkMissingEntrypointRead(
       lines,
       entrypointSpellingCandidates(manifest),
     );
@@ -458,8 +463,8 @@ class IncrWorker {
     } on FormatException catch (e) {
       return (exitCode: 2, output: e.message);
     }
-    final key = configurationKey(parts.fs, sha256Hex);
-    var state = _servers[key];
+    final String key = configurationKey(parts.fs, sha256Hex);
+    IncrServerState? state = _servers[key];
     if (state != null) _touch(key);
     final hashes = _changeSet(inputPaths, state, digests);
     final plan = _planCompile(
@@ -471,9 +476,9 @@ class IncrWorker {
     // The guard and the read check take their allowances only from the
     // manifest: argv `--filesystem-root` values never widen what either
     // accepts, so a smuggled root buys no read.
-    final roots = parts.manifest.fsRoots;
-    final guard = plan.cold ? GuardCache() : state!.guard;
-    final guardError = _checkGuard(
+    final List<String> roots = parts.manifest.fsRoots;
+    final GuardCache guard = plan.cold ? GuardCache() : state!.guard;
+    final String? guardError = _checkGuard(
       parts.manifest,
       roots,
       guard,
@@ -483,11 +488,12 @@ class IncrWorker {
     }
     try {
       if (plan.cold) {
-        final cold = await _runCold(key, parts, roots, guard);
+        final ({IncrResult? failure, IncrServerState state}) cold =
+            await _runCold(key, parts, roots, guard);
         state = cold.state;
         if (cold.failure != null) return cold.failure!;
       } else {
-        final failure = await _runWarm(
+        final IncrResult? failure = await _runWarm(
           state!,
           key,
           parts,
@@ -495,7 +501,11 @@ class IncrWorker {
         );
         if (failure != null) return failure;
       }
-      final resetFailure = await _runResetPhase(state, key, parts.entry);
+      final IncrResult? resetFailure = await _runResetPhase(
+        state,
+        key,
+        parts.entry,
+      );
       if (resetFailure != null) return resetFailure;
       return await _publishOutput(state, key, parts, hashes.current);
     } catch (_) {
@@ -509,15 +519,19 @@ class IncrWorker {
   /// Validates one request's argv and manifest. Throws [FormatException] with
   /// the action-failing message when malformed.
   RequestParts _parseRequest(List<String> argv) {
-    final split = splitWorkerArgv(argv);
-    final fs = split.command;
+    final ({List<String> command, String manifestPath}) split = splitWorkerArgv(
+      argv,
+    );
+    final List<String> fs = split.command;
     if (fs.isEmpty) throw const FormatException('no compiler command.');
     if (!File(_abs(split.manifestPath)).existsSync()) {
       throw FormatException(
         'incr_fkc_worker: declared-inputs manifest ${split.manifestPath} does not exist.',
       );
     }
-    final manifest = readKernelInputsManifest(_abs(split.manifestPath));
+    final KernelInputsManifest manifest = readKernelInputsManifest(
+      _abs(split.manifestPath),
+    );
     if (manifest.outputDill == null) {
       throw FormatException(
         'incr_fkc_worker: manifest ${split.manifestPath} names no # output.',
@@ -528,7 +542,7 @@ class IncrWorker {
     // request a private output path while the manifest names the action's.
     // The configuration key already excludes the output, so requests that
     // differ only here share a warm server.
-    final outI = fs.indexOf('--output-dill');
+    final int outI = fs.indexOf('--output-dill');
     if (outI < 0 || outI + 1 >= fs.length) {
       throw const FormatException(
         'incr_fkc_worker: compiler argv has no --output-dill.',
@@ -560,7 +574,7 @@ class IncrWorker {
     for (final p in {...inputPaths, ...stored.keys}) {
       current[p] = _inputHash(p, listed.contains(p) ? digests : const {});
     }
-    final changed = [
+    final List<String> changed = [
       for (final p in current.keys)
         if (current[p] != stored[p]) p,
     ]..sort();
@@ -580,7 +594,11 @@ class IncrWorker {
         state.devIncremental != devIncremental) {
       return (cold: true, uris: const []);
     }
-    final classified = classifyChanged(changed, state.roots, sources);
+    final ChangedInputs classified = classifyChanged(
+      changed,
+      state.roots,
+      sources,
+    );
     if (classified.restartReason != null) {
       return (cold: true, uris: const []);
     }
@@ -596,7 +614,7 @@ class IncrWorker {
     List<String> roots,
     GuardCache guard,
   ) {
-    final dartSources = [
+    final List<String> dartSources = [
       for (final p in manifest.sources)
         if (p.endsWith('.dart')) p,
     ];
@@ -617,7 +635,7 @@ class IncrWorker {
   ) async {
     final state = await _startFresh(key, parts, roots);
     state.guard = guard;
-    final r = await state.session.compile(parts.entry);
+    final CompileResult r = await state.session.compile(parts.entry);
     foldDepLines(state.currentReads, r.depLines);
     if (r.errors != 0) {
       await _drop(key);
@@ -640,14 +658,14 @@ class IncrWorker {
     RequestParts parts,
     List<String> uris,
   ) async {
-    final r = await state.session.recompile(
+    final CompileResult r = await state.session.recompile(
       parts.entry,
       uris.toSet().toList()..sort(),
     );
     foldDepLines(state.currentReads, r.depLines);
     if (r.errors != 0) {
       await state.session.reject();
-      final refusal = _checkReads(state.currentReads, parts.manifest);
+      final String? refusal = _checkReads(state.currentReads, parts.manifest);
       if (refusal != null) {
         await _drop(key);
         _deleteOutput(parts.outputRel);
@@ -667,7 +685,11 @@ class IncrWorker {
     String key,
     String entry,
   ) async {
-    final fin = await state.session.recompile(entry, [], resetFirst: true);
+    final CompileResult fin = await state.session.recompile(
+      entry,
+      [],
+      resetFirst: true,
+    );
     foldDepLines(state.currentReads, fin.depLines);
     if (fin.errors != 0) {
       await _drop(key);
@@ -685,14 +707,14 @@ class IncrWorker {
     Map<String, String?> current,
   ) async {
     await state.session.accept();
-    final refusal = _checkReads(state.currentReads, parts.manifest);
+    final String? refusal = _checkReads(state.currentReads, parts.manifest);
     if (refusal != null) {
       await _drop(key);
       _deleteOutput(parts.outputRel);
       return (exitCode: 1, output: refusal);
     }
     state.contentHashes = current;
-    final dst = _abs(parts.outputRel);
+    final String dst = _abs(parts.outputRel);
     await Directory(File(dst).parent.path).create(recursive: true);
     try {
       File(dst).deleteSync();
@@ -712,13 +734,15 @@ Future<int> runOneShotWorker(
   List<String> argv, {
   FutureOr<IncrWorker> Function()? createWorker,
 }) async {
-  final worker = createWorker != null
+  final IncrWorker worker = createWorker != null
       ? await createWorker()
       : await IncrWorker.create();
   await worker.ensureScratchReclaimed();
-  final signals = watchWorkerSignals(worker);
+  final List<StreamSubscription<ProcessSignal>> signals = watchWorkerSignals(
+    worker,
+  );
   try {
-    final result = await worker.handleRequest(argv, const []);
+    final IncrResult result = await worker.handleRequest(argv, const []);
     if (result.output.isNotEmpty) stderr.writeln(result.output);
     return result.exitCode;
   } on FormatException catch (e) {
@@ -766,21 +790,23 @@ Future<void> runPersistentWorker({
   Stream<List<int>>? stdinBytes,
   StringSink? responseSink,
 }) async {
-  final worker = createWorker != null
+  final IncrWorker worker = createWorker != null
       ? await createWorker()
       : await IncrWorker.create();
   await worker.ensureScratchReclaimed();
-  final signals = watchWorkerSignals(worker);
+  final List<StreamSubscription<ProcessSignal>> signals = watchWorkerSignals(
+    worker,
+  );
   try {
-    final out = responseSink ?? stdout;
-    final lines = (stdinBytes ?? stdin)
+    final StringSink out = responseSink ?? stdout;
+    final Stream<String> lines = (stdinBytes ?? stdin)
         .transform(utf8.decoder)
         .transform(const LineSplitter());
     await for (final line in lines) {
       if (line.trim().isEmpty) continue;
       final req = jsonDecode(line) as Map<String, dynamic>;
-      final rid = req['requestId'] ?? 0;
-      final rawArgs = [
+      final dynamic rid = req['requestId'] ?? 0;
+      final List<String> rawArgs = [
         for (final a in (req['arguments'] as List<dynamic>? ?? [])) a as String,
       ];
       final List<Map<String, dynamic>> reqInputs = [

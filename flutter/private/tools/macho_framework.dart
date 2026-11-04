@@ -41,7 +41,7 @@ Uint8List createFrameworkZipBytes(
   required String archiveRootName,
   Set<String> executableRelPaths = const {},
 }) {
-  final entries = _collectFrameworkEntries(
+  final List<FrameworkZipEntry> entries = _collectFrameworkEntries(
     frameworkDir,
     archiveRootName,
     executableRelPaths,
@@ -54,16 +54,32 @@ Uint8List createFrameworkZipBytes(
 
   const dosTime = 0x0000;
   const dosDate = 0x0021;
-  const versionMadeBy = (3 << 8) | 20;
+  const int versionMadeBy = (3 << 8) | 20;
   const versionNeeded = 20;
 
   var offset = 0;
   for (final entry in entries) {
-    final nameBytes = utf8.encode(entry.path);
-    final crc = crc32lib.crc32(entry.data);
-    final (:payload, :method) = _zipEntryPayload(entry, rawDeflate);
-    final externalAttrs = _zipExternalAttrs(entry);
-    final header = (
+    final Uint8List nameBytes = utf8.encode(entry.path);
+    final int crc = crc32lib.crc32(entry.data);
+    final (:Uint8List payload, :int method) = _zipEntryPayload(
+      entry,
+      rawDeflate,
+    );
+    final int externalAttrs = _zipExternalAttrs(entry);
+    final ({
+      int crc,
+      int dosDate,
+      int dosTime,
+      int externalAttrs,
+      int method,
+      Uint8List nameBytes,
+      int offset,
+      Uint8List payload,
+      int uncompressedLength,
+      int versionMadeBy,
+      int versionNeeded,
+    })
+    header = (
       nameBytes: nameBytes,
       payload: payload,
       method: method,
@@ -107,13 +123,13 @@ void _walkFrameworkEntries(
   List<FrameworkZipEntry> into,
   Set<String> executableRelPaths,
 ) {
-  final children = dir.listSync(followLinks: false)
+  final List<FileSystemEntity> children = dir.listSync(followLinks: false)
     ..sort((a, b) => a.path.compareTo(b.path));
   for (final entity in children) {
-    final name = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
+    final String name = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
     final relPath = '$relPrefix/$name';
     if (entity is Link) {
-      final target = entity.targetSync();
+      final String target = entity.targetSync();
       into.add(
         FrameworkZipEntry(
           path: relPath,
@@ -124,8 +140,8 @@ void _walkFrameworkEntries(
     } else if (entity is Directory) {
       _walkFrameworkEntries(entity, relPath, into, executableRelPaths);
     } else if (entity is File) {
-      final stat = entity.statSync();
-      final isExec =
+      final FileStat stat = entity.statSync();
+      final bool isExec =
           executableRelPaths.contains(relPath) || ((stat.mode & 0x49) != 0);
       into.add(
         FrameworkZipEntry(
@@ -143,7 +159,7 @@ void _walkFrameworkEntries(
   FrameworkZipEntry entry,
   ZLibCodec rawDeflate,
 ) {
-  final uncompressed = entry.data;
+  final Uint8List uncompressed = entry.data;
   if (entry.isSymlink || uncompressed.isEmpty) {
     return (payload: uncompressed, method: 0);
   }
@@ -241,7 +257,7 @@ Uint8List _finishFrameworkZip(
   int entryCount,
   int offset,
 ) {
-  final centralBytes = centralParts.takeBytes();
+  final Uint8List centralBytes = centralParts.takeBytes();
   final eocd = ByteData(22);
   eocd.setUint32(0, 0x06054b50, Endian.little);
   eocd.setUint16(4, 0, Endian.little);
@@ -273,21 +289,26 @@ readRawFrameworkZipEntries(
     if (bd.getUint32(pos, Endian.little) != 0x02014b50) {
       throw FormatException('Invalid central directory header at $pos.');
     }
-    final method = bd.getUint16(pos + 10, Endian.little);
-    final compressedSize = bd.getUint32(pos + 20, Endian.little);
-    final nameLen = bd.getUint16(pos + 28, Endian.little);
-    final extraLen = bd.getUint16(pos + 30, Endian.little);
-    final commentLen = bd.getUint16(pos + 32, Endian.little);
-    final externalAttrs = bd.getUint32(pos + 38, Endian.little);
-    final localOffset = bd.getUint32(pos + 42, Endian.little);
+    final int method = bd.getUint16(pos + 10, Endian.little);
+    final int compressedSize = bd.getUint32(pos + 20, Endian.little);
+    final int nameLen = bd.getUint16(pos + 28, Endian.little);
+    final int extraLen = bd.getUint16(pos + 30, Endian.little);
+    final int commentLen = bd.getUint16(pos + 32, Endian.little);
+    final int externalAttrs = bd.getUint32(pos + 38, Endian.little);
+    final int localOffset = bd.getUint32(pos + 42, Endian.little);
 
-    final path = utf8.decode(zipBytes.sublist(pos + 46, pos + 46 + nameLen));
+    final String path = utf8.decode(
+      zipBytes.sublist(pos + 46, pos + 46 + nameLen),
+    );
     pos += 46 + nameLen + extraLen + commentLen;
 
-    final localNameLen = bd.getUint16(localOffset + 26, Endian.little);
-    final localExtraLen = bd.getUint16(localOffset + 28, Endian.little);
-    final dataStart = localOffset + 30 + localNameLen + localExtraLen;
-    final rawPayload = zipBytes.sublist(dataStart, dataStart + compressedSize);
+    final int localNameLen = bd.getUint16(localOffset + 26, Endian.little);
+    final int localExtraLen = bd.getUint16(localOffset + 28, Endian.little);
+    final int dataStart = localOffset + 30 + localNameLen + localExtraLen;
+    final Uint8List rawPayload = zipBytes.sublist(
+      dataStart,
+      dataStart + compressedSize,
+    );
 
     final Uint8List data;
     if (method == 0) {
@@ -306,7 +327,7 @@ readRawFrameworkZipEntries(
 List<FrameworkZipEntry> readFrameworkZipEntries(Uint8List zipBytes) {
   final bd = ByteData.sublistView(zipBytes);
   var eocdOffset = -1;
-  for (var i = zipBytes.length - 22; i >= 0; i--) {
+  for (int i = zipBytes.length - 22; i >= 0; i--) {
     if (bd.getUint32(i, Endian.little) == 0x06054b50) {
       eocdOffset = i;
       break;
@@ -315,18 +336,19 @@ List<FrameworkZipEntry> readFrameworkZipEntries(Uint8List zipBytes) {
   if (eocdOffset == -1) {
     throw const FormatException('Invalid ZIP archive: EOCD not found.');
   }
-  final entryCount = bd.getUint16(eocdOffset + 10, Endian.little);
-  final cdOffset = bd.getUint32(eocdOffset + 16, Endian.little);
+  final int entryCount = bd.getUint16(eocdOffset + 10, Endian.little);
+  final int cdOffset = bd.getUint32(eocdOffset + 16, Endian.little);
 
   final entries = <FrameworkZipEntry>[];
-  for (final raw in readRawFrameworkZipEntries(
-    bd,
-    zipBytes,
-    entryCount,
-    cdOffset,
-  )) {
-    final unixMode = (raw.externalAttrs >>> 16) & 0xFFFF;
-    final fileType = unixMode & 0xF000;
+  for (final ({Uint8List data, int externalAttrs, String path}) raw
+      in readRawFrameworkZipEntries(
+        bd,
+        zipBytes,
+        entryCount,
+        cdOffset,
+      )) {
+    final int unixMode = (raw.externalAttrs >>> 16) & 0xFFFF;
+    final int fileType = unixMode & 0xF000;
     final isSymlink = fileType == 0xA000;
     entries.add(
       FrameworkZipEntry(
@@ -354,13 +376,13 @@ List<FrameworkZipEntry> readFrameworkZipEntries(Uint8List zipBytes) {
 /// segments; anything else throws, since archives only ever come from the
 /// rules' own producer.
 void extractFrameworkZip(Uint8List zipBytes, Directory destDir) {
-  final entries = readFrameworkZipEntries(zipBytes)
+  final List<FrameworkZipEntry> entries = readFrameworkZipEntries(zipBytes)
     ..sort((a, b) => a.path.compareTo(b.path));
   if (entries.isEmpty) {
     throw const FormatException('Refusing to extract an empty ZIP archive.');
   }
   for (final entry in entries) {
-    final segments = entry.path.split('/');
+    final List<String> segments = entry.path.split('/');
     if (segments.any((s) => s.isEmpty || s == '.' || s == '..') ||
         entry.path.startsWith('/')) {
       throw FormatException(
@@ -369,8 +391,8 @@ void extractFrameworkZip(Uint8List zipBytes, Directory destDir) {
     }
     final destPath = '${destDir.path}/${entry.path}';
     if (entry.isSymlink) {
-      final target = utf8.decode(entry.data);
-      final targetSegments = target.split('/');
+      final String target = utf8.decode(entry.data);
+      final List<String> targetSegments = target.split('/');
       if (target.isEmpty ||
           target.startsWith('/') ||
           targetSegments.any((s) => s == '..')) {
@@ -394,12 +416,12 @@ void _verifyMachODylibBytes(Uint8List bytes, String description) {
       '$description is not a 64-bit or universal Mach-O binary.',
     );
   }
-  final slices = isFatMachO(bytes)
+  final List<Uint8List> slices = isFatMachO(bytes)
       ? extractFatSlices(bytes).map((s) => s.bytes).toList()
       : <Uint8List>[bytes];
   for (final slice in slices) {
     final bd = ByteData.sublistView(slice);
-    final filetype = bd.getUint32(12, Endian.little);
+    final int filetype = bd.getUint32(12, Endian.little);
     if (filetype != mhDylib) {
       throw FormatException(
         '$description has Mach-O filetype 0x${filetype.toRadixString(16)}, '
@@ -415,7 +437,7 @@ void _verifyFrameworkInfoPlistXml(
   String frameworkName,
   String sourceDesc,
 ) {
-  final pkgTypeMatch = RegExp(
+  final RegExpMatch? pkgTypeMatch = RegExp(
     r'<key>\s*CFBundlePackageType\s*</key>\s*<string>\s*([^<\s]+)\s*</string>',
   ).firstMatch(plistXml);
   if (pkgTypeMatch == null || pkgTypeMatch.group(1) != 'FMWK') {
@@ -424,7 +446,7 @@ void _verifyFrameworkInfoPlistXml(
       '${pkgTypeMatch?.group(1)}',
     );
   }
-  final execMatch = RegExp(
+  final RegExpMatch? execMatch = RegExp(
     r'<key>\s*CFBundleExecutable\s*</key>\s*<string>\s*([^<\s]+)\s*</string>',
   ).firstMatch(plistXml);
   if (execMatch == null || execMatch.group(1) != frameworkName) {
@@ -449,7 +471,10 @@ void verifyMacosFramework(
   String frameworkName = 'App',
   String? frameworkZipPath,
 }) {
-  final fwDir = _resolveFrameworkDir(frameworkOrWrapperPath, frameworkName);
+  final Directory fwDir = _resolveFrameworkDir(
+    frameworkOrWrapperPath,
+    frameworkName,
+  );
 
   final versionABinary = File('${fwDir.path}/Versions/A/$frameworkName');
   final versionAPlist = File('${fwDir.path}/Versions/A/Resources/Info.plist');
@@ -488,7 +513,7 @@ void verifyMacosFramework(
     );
   }
 
-  final binaryBytes = versionABinary.readAsBytesSync();
+  final Uint8List binaryBytes = versionABinary.readAsBytesSync();
   _verifyMachODylibBytes(binaryBytes, versionABinary.path);
   _verifyFrameworkInfoPlistXml(
     versionAPlist.readAsStringSync(),
@@ -520,7 +545,7 @@ Directory _resolveFrameworkDir(
   final probeBinary = '${fwDir.path}/Versions/A/$frameworkName';
   if (FileSystemEntity.typeSync(probeBinary, followLinks: false) ==
       FileSystemEntityType.link) {
-    final target = Link(probeBinary).targetSync().replaceAll('\\', '/');
+    final String target = Link(probeBinary).targetSync().replaceAll('\\', '/');
     final suffix = '/$frameworkName.framework/Versions/A/$frameworkName';
     if (target.startsWith('/') && target.endsWith(suffix)) {
       fwDir = Directory(
@@ -536,7 +561,10 @@ Directory _resolveFrameworkDir(
 
 /// Throws unless [path] is a regular file.
 void _expectFrameworkFile(String path) {
-  final type = FileSystemEntity.typeSync(path, followLinks: false);
+  final FileSystemEntityType type = FileSystemEntity.typeSync(
+    path,
+    followLinks: false,
+  );
   if (type != FileSystemEntityType.file) {
     throw StateError('Expected regular file at $path, found $type');
   }
@@ -556,7 +584,7 @@ void _expectFrameworkSymlink(
       '${FileSystemEntity.typeSync(linkPath, followLinks: false)}',
     );
   }
-  final target = Link(linkPath).targetSync();
+  final String target = Link(linkPath).targetSync();
   if (target != expectedTarget) {
     throw StateError('Expected $linkPath -> "$expectedTarget", got "$target"');
   }
@@ -572,8 +600,8 @@ void _checkFrameworkTopEntries(Directory fwDir, String frameworkName) {
     'Headers',
     'Modules',
   };
-  for (final entity in fwDir.listSync(followLinks: false)) {
-    final name = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
+  for (final FileSystemEntity entity in fwDir.listSync(followLinks: false)) {
+    final String name = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
     if (name == 'Versions') {
       if (entity is! Directory || entity is Link) {
         throw StateError('Expected Versions to be a real directory.');
@@ -589,10 +617,11 @@ void _checkFrameworkTopEntries(Directory fwDir, String frameworkName) {
     }
   }
 
-  for (final entity in Directory('${fwDir.path}/Versions').listSync(
-    followLinks: false,
-  )) {
-    final name = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
+  for (final FileSystemEntity entity
+      in Directory('${fwDir.path}/Versions').listSync(
+        followLinks: false,
+      )) {
+    final String name = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
     if (name != 'A' && name != 'Current') {
       throw StateError(
         'Unexpected entry "$name" inside ${fwDir.path}/Versions.',
@@ -610,12 +639,13 @@ void _verifyFrameworkZipEntries(
   if (!zipFile.existsSync()) {
     throw StateError('Framework zip archive not found: $frameworkZipPath');
   }
-  final entries = {
+  final Map<String, FrameworkZipEntry> entries = {
     for (final e in readFrameworkZipEntries(zipFile.readAsBytesSync()))
       e.path: e,
   };
   final prefix = '$frameworkName.framework';
-  final binEntry = entries['$prefix/Versions/A/$frameworkName'];
+  final FrameworkZipEntry? binEntry =
+      entries['$prefix/Versions/A/$frameworkName'];
   if (binEntry == null || binEntry.isSymlink || !binEntry.isExecutable) {
     throw StateError(
       'Expected executable Mach-O entry "$prefix/Versions/A/$frameworkName" '
@@ -627,7 +657,8 @@ void _verifyFrameworkZipEntries(
     '$frameworkZipPath:$prefix/Versions/A/$frameworkName',
   );
 
-  final plistEntry = entries['$prefix/Versions/A/Resources/Info.plist'];
+  final FrameworkZipEntry? plistEntry =
+      entries['$prefix/Versions/A/Resources/Info.plist'];
   if (plistEntry == null || plistEntry.isSymlink) {
     throw StateError(
       'Expected regular file entry "$prefix/Versions/A/Resources/Info.plist" '
@@ -655,15 +686,15 @@ void _checkFrameworkZipSymlinks(
     '$prefix/$frameworkName': 'Versions/Current/$frameworkName',
     '$prefix/Resources': 'Versions/Current/Resources',
   };
-  for (final expected in expectedLinks.entries) {
-    final entry = entries[expected.key];
+  for (final MapEntry<String, String> expected in expectedLinks.entries) {
+    final FrameworkZipEntry? entry = entries[expected.key];
     if (entry == null || !entry.isSymlink) {
       throw StateError(
         'Expected symlink entry "${expected.key}" in $frameworkZipPath, '
         'found: ${entry == null ? "missing" : "regular file"}',
       );
     }
-    final target = utf8.decode(entry.data);
+    final String target = utf8.decode(entry.data);
     if (target != expected.value) {
       throw StateError(
         'Expected symlink "${expected.key}" -> "${expected.value}" in '

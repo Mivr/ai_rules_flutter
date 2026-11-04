@@ -42,16 +42,16 @@ final RegExp _conditionalFalse = RegExp(
 /// target named literally. Comments are ignored, so a commented-out target is
 /// not mistaken for a declared one.
 Set<String> findHostileFixtures(String source) {
-  final text = _stripComments(source);
+  final String text = _stripComments(source);
   final fixtures = <String>{};
-  for (final loop in _spellingLoop.allMatches(text)) {
-    for (final spelling in _quoted.allMatches(loop.group(1)!)) {
-      final name = spelling.group(1)!;
+  for (final RegExpMatch loop in _spellingLoop.allMatches(text)) {
+    for (final RegExpMatch spelling in _quoted.allMatches(loop.group(1)!)) {
+      final String name = spelling.group(1)!;
       fixtures.add('_web_guard_hostile_$name');
       fixtures.add('_web_guard_hostile_${name}_js');
     }
   }
-  for (final match in _literalHostile.allMatches(text)) {
+  for (final RegExpMatch match in _literalHostile.allMatches(text)) {
     fixtures.add(match.group(0)!);
   }
   return fixtures;
@@ -65,8 +65,8 @@ List<String> checkWebGuardCoverage({
   required Map<String, String> workflows,
 }) {
   final covered = <String>{};
-  for (final workflow in workflows.values) {
-    for (final step in _workflowSteps(_stripComments(workflow))) {
+  for (final String workflow in workflows.values) {
+    for (final String step in _workflowSteps(_stripComments(workflow))) {
       if (!_isMustFailGuardStep(step)) {
         continue;
       }
@@ -78,7 +78,7 @@ List<String> checkWebGuardCoverage({
     }
   }
   final errors = <String>[];
-  for (final fixture in fixtures.toList()..sort()) {
+  for (final String fixture in fixtures.toList()..sort()) {
     if (!covered.contains(fixture)) {
       errors.add(
         "web-guard fixture '$fixture' is not named by a must-fail CI step "
@@ -98,10 +98,10 @@ bool _isMustFailGuardStep(String step) {
   if (_continueOnError.hasMatch(step) || _conditionalFalse.hasMatch(step)) {
     return false;
   }
-  final lines = step.split('\n');
-  final grepsGuard = lines.any(_grepGuard.hasMatch);
-  final failsOnSuccess = lines.any((line) {
-    final trimmed = line.trimLeft();
+  final List<String> lines = step.split('\n');
+  final bool grepsGuard = lines.any(_grepGuard.hasMatch);
+  final bool failsOnSuccess = lines.any((line) {
+    final String trimmed = line.trimLeft();
     return trimmed.startsWith('if ') &&
         !trimmed.startsWith('if !') &&
         _bazelBuild.hasMatch(line);
@@ -112,11 +112,11 @@ bool _isMustFailGuardStep(String step) {
 /// Whether [step] names [fixture] as a whole target, so
 /// `_web_guard_hostile_file_js` cannot cover `_web_guard_hostile_file`.
 bool _namesWholeTarget(String step, String fixture) {
-  var start = step.indexOf(fixture);
+  int start = step.indexOf(fixture);
   while (start >= 0) {
-    final before = start == 0 ? '' : step[start - 1];
-    final afterIndex = start + fixture.length;
-    final after = afterIndex == step.length ? '' : step[afterIndex];
+    final String before = start == 0 ? '' : step[start - 1];
+    final int afterIndex = start + fixture.length;
+    final String after = afterIndex == step.length ? '' : step[afterIndex];
     if (!_nameChar.hasMatch(before) && !_nameChar.hasMatch(after)) {
       return true;
     }
@@ -128,23 +128,23 @@ bool _namesWholeTarget(String step, String fixture) {
 /// The `- name:` blocks of [workflow], from each step's start to the next
 /// step at the same or a shallower indent (or the next job key).
 Iterable<String> _workflowSteps(String workflow) sync* {
-  final lines = workflow.split('\n');
+  final List<String> lines = workflow.split('\n');
   var index = 0;
   while (index < lines.length) {
-    final start = _stepStart.firstMatch(lines[index]);
+    final RegExpMatch? start = _stepStart.firstMatch(lines[index]);
     if (start == null) {
       index++;
       continue;
     }
-    final indent = start.group(1)!.length;
+    final int indent = start.group(1)!.length;
     final first = index;
     index++;
     while (index < lines.length) {
-      final next = _nextStep.firstMatch(lines[index]);
+      final RegExpMatch? next = _nextStep.firstMatch(lines[index]);
       if (next != null && next.group(1)!.length <= indent) {
         break;
       }
-      final key = _jobKey.firstMatch(lines[index]);
+      final RegExpMatch? key = _jobKey.firstMatch(lines[index]);
       if (key != null && key.group(1)!.length < indent) {
         break;
       }
@@ -162,7 +162,7 @@ String _stripComments(String text) => text
       if (line.trimLeft().startsWith('#')) {
         return '';
       }
-      final marker = line.indexOf(' #');
+      final int marker = line.indexOf(' #');
       return marker < 0 ? line : line.substring(0, marker);
     })
     .join('\n');

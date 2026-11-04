@@ -54,7 +54,9 @@ class _CannedDevice extends Device {
 /// Capture records on [loggerName] for the duration of the test.
 List<LogRecord> captureLog(String loggerName) {
   final records = <LogRecord>[];
-  final sub = Logger.root.onRecord.listen((record) {
+  final StreamSubscription<LogRecord> sub = Logger.root.onRecord.listen((
+    record,
+  ) {
     if (record.loggerName == loggerName) records.add(record);
   });
   addTearDown(sub.cancel);
@@ -66,7 +68,9 @@ void main() {
     test(
       'aborts with the discovery note, naming the bound and the option',
       () async {
-        final records = captureLog('test.device_launcher.abort');
+        final List<LogRecord> records = captureLog(
+          'test.device_launcher.abort',
+        );
         final device = _CannedDevice(
           AppInstance(
             process: FakeProcess(),
@@ -110,7 +114,7 @@ void main() {
         expect(device.stops, 1);
         // The log line keeps the original sentence naming the device, with
         // the note appended.
-        final notFounds = records
+        final List<Map<dynamic, dynamic>> notFounds = records
             .map((r) => r.object)
             .whereType<Map>()
             .where((o) => o['message'] == 'vm_service_uri_not_found')
@@ -127,7 +131,9 @@ void main() {
     test(
       'without a discovery note the log line is the original sentence',
       () async {
-        final records = captureLog('test.device_launcher.nonote');
+        final List<LogRecord> records = captureLog(
+          'test.device_launcher.nonote',
+        );
         final device = _CannedDevice(AppInstance(process: FakeProcess()));
         final plan = RunPlan.forTest(
           target: '//app:app',
@@ -156,7 +162,7 @@ void main() {
             ),
           ),
         );
-        final notFounds = records
+        final List<Map<dynamic, dynamic>> notFounds = records
             .map((r) => r.object)
             .whereType<Map>()
             .where((o) => o['message'] == 'vm_service_uri_not_found')
@@ -174,7 +180,9 @@ void main() {
       'continues with a warning carrying the note under '
       '--allow-no-vm-service',
       () async {
-        final records = captureLog('test.device_launcher.continue');
+        final List<LogRecord> records = captureLog(
+          'test.device_launcher.continue',
+        );
         final device = _CannedDevice(
           AppInstance(
             process: FakeProcess(),
@@ -198,10 +206,10 @@ void main() {
           appFile: 'app',
         );
 
-        final session = await launcher.launch(device);
+        final DeviceSession session = await launcher.launch(device);
 
         expect(session.vmClient, isNull);
-        final warnings = records
+        final List<Map<dynamic, dynamic>> warnings = records
             .map((r) => r.object)
             .whereType<Map>()
             .where((o) => o['message'] == 'no_vm_service_continuing')
@@ -227,14 +235,14 @@ void main() {
           startProcess: (exe, args) async => proc,
         );
 
-        final pending = device.launch('/path/to/app');
+        final Future<AppInstance> pending = device.launch('/path/to/app');
         // The pump is draining the process's pipes: the launch is inside
         // discovery, sitting out its bound.
         await proc.outputAttached;
         // Attached before the shutdown: the launch fails while abandonment
         // is awaited, and a handler attached only afterwards would miss it
         // and the failure would surface as an unhandled async error.
-        final outcome = expectLater(
+        final Future<dynamic> outcome = expectLater(
           pending,
           throwsA(
             isA<VmDiscoveryCancelled>().having(
@@ -276,16 +284,16 @@ void main() {
           appId: 'canned_APP',
         );
 
-        final relaunched = session.relaunch(() async {
+        final Future<void> relaunched = session.relaunch(() async {
           await device.stop(session.appInstance);
           return device.launch('/path/to/app');
         });
         // The replacement is past its start and inside discovery.
-        final replacement = await started.future;
+        final FakeProcess replacement = await started.future;
         await replacement.outputAttached;
         // Attached before the shutdown, as above: the relaunch fails while
         // the shutdown is awaited.
-        final outcome = expectLater(
+        final Future<dynamic> outcome = expectLater(
           relaunched,
           throwsA(isA<VmDiscoveryCancelled>()),
         );

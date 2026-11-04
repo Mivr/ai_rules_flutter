@@ -74,7 +74,10 @@ class FrontendServerCompiler implements Compiler {
     required Set<String> invalidated,
     required String entrypoint,
   }) async {
-    final result = await _server.recompile(entrypoint, invalidated.toList());
+    final CompileResult result = await _server.recompile(
+      entrypoint,
+      invalidated.toList(),
+    );
     return _toOutcome(result);
   }
 
@@ -90,7 +93,7 @@ class FrontendServerCompiler implements Compiler {
     required String entrypoint,
     required Set<String> invalidated,
   }) async {
-    final result = await _server.recompile(
+    final CompileResult result = await _server.recompile(
       entrypoint,
       invalidated.toList(),
       resetFirst: true,

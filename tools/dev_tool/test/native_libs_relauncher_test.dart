@@ -13,6 +13,7 @@ import 'dart:io';
 import 'package:flutter_bazel_dev_tool/command_runner.dart';
 import 'package:flutter_bazel_dev_tool/device.dart';
 import 'package:flutter_bazel_dev_tool/hot_reload/applied_versions.dart';
+import 'package:flutter_bazel_dev_tool/hot_reload/compiler.dart';
 import 'package:flutter_bazel_dev_tool/hot_reload/source_uri_resolver.dart';
 import 'package:flutter_bazel_dev_tool/hot_reload/reload_orchestrator.dart';
 import 'package:flutter_bazel_dev_tool/command_report.dart';
@@ -84,11 +85,11 @@ class _Harness {
   );
 
   static Future<_Harness> create() async {
-    final tmp = await Directory.systemTemp.createTemp('relauncher_');
+    final Directory tmp = await Directory.systemTemp.createTemp('relauncher_');
     Directory(p.join(tmp.path, 'lib')).createSync();
     // An extracted-bundle artifact: a directory holding a loose `.dylib`, which
     // is what makes the fingerprint non-empty at all.
-    final appDir = p.join(tmp.path, 'app.app');
+    final String appDir = p.join(tmp.path, 'app.app');
     Directory(appDir).createSync();
     File(
       p.join(appDir, 'libnative.dylib'),
@@ -165,10 +166,10 @@ class _Harness {
 
 void main() {
   test('an unchanged native library does not relaunch', () async {
-    final h = await _Harness.create();
+    final _Harness h = await _Harness.create();
     addTearDown(h.dispose);
     var rebuilds = 0;
-    final r = await h.relauncher(
+    final Relauncher r = await h.relauncher(
       rebuild: () async {
         rebuilds++;
         return true;
@@ -188,10 +189,10 @@ void main() {
     // — which is exactly an edit that was patched in and then undone.
     test('a live patch relaunches an unchanged bundle, naming the patched '
         'library', () async {
-      final h = await _Harness.create();
+      final _Harness h = await _Harness.create();
       addTearDown(h.dispose);
       var rebaselined = 0;
-      final r = await h.relauncher(
+      final Relauncher r = await h.relauncher(
         rebuild: () async => true,
         patchedLibs: () => ['libnative.dylib'],
         afterRelaunch: () async => rebaselined++,
@@ -210,10 +211,10 @@ void main() {
     test(
       'no live patch and an unchanged bundle is still the fast path',
       () async {
-        final h = await _Harness.create();
+        final _Harness h = await _Harness.create();
         addTearDown(h.dispose);
         var rebaselined = 0;
-        final r = await h.relauncher(
+        final Relauncher r = await h.relauncher(
           rebuild: () async => true,
           patchedLibs: () => const [],
           afterRelaunch: () async => rebaselined++,
@@ -225,11 +226,11 @@ void main() {
   });
 
   test('a failed rebuild reports it and relaunches nothing', () async {
-    final h = await _Harness.create();
+    final _Harness h = await _Harness.create();
     addTearDown(h.dispose);
-    final r = await h.relauncher(rebuild: () async => false);
+    final Relauncher r = await h.relauncher(rebuild: () async => false);
 
-    final outcome = await r.relaunchIfNeeded();
+    final RelaunchOutcome outcome = await r.relaunchIfNeeded();
     expect(
       outcome,
       isA<RelaunchBuildFailed>().having(
@@ -242,9 +243,9 @@ void main() {
   });
 
   test('a changed native library replaces the process', () async {
-    final h = await _Harness.create();
+    final _Harness h = await _Harness.create();
     addTearDown(h.dispose);
-    final r = await h.relauncher(
+    final Relauncher r = await h.relauncher(
       rebuild: () async {
         // What the rebuild would have produced.
         h.changeNativeLib('machine code v2 — longer');
@@ -252,7 +253,7 @@ void main() {
       },
     );
 
-    final outcome = await r.relaunchIfNeeded();
+    final RelaunchOutcome outcome = await r.relaunchIfNeeded();
 
     expect(outcome, isA<Relaunched>());
     final relaunched = outcome as Relaunched;
@@ -265,7 +266,9 @@ void main() {
 
     // Facts, not a reply: the wording is the renderer's. This arm owes the wire
     // a `succeeded` and a `runningCode` like every other restart reply.
-    final wire = toWire(CommandReport(verb: 'Restart', relaunch: relaunched));
+    final Map<String, dynamic> wire = toWire(
+      CommandReport(verb: 'Restart', relaunch: relaunched),
+    );
     expect(wire['succeeded'], isTrue);
     expect(wire['runningCode'], 'updated');
     expect(wire['message'], contains('libnative.dylib'));
@@ -274,11 +277,11 @@ void main() {
   test(
     'a relaunch whose VM service never answers logs every attempt',
     () async {
-      final h = await _Harness.create();
+      final _Harness h = await _Harness.create();
       addTearDown(h.dispose);
       // A URI nobody listens on: the reconnect loop runs all five attempts.
       h.device.replacementVmServiceUri = Uri.parse('http://127.0.0.1:1/');
-      final r = await h.relauncher(
+      final Relauncher r = await h.relauncher(
         rebuild: () async {
           h.changeNativeLib('machine code v2 — longer');
           return true;
@@ -286,12 +289,14 @@ void main() {
       );
 
       final records = <LogRecord>[];
-      final rootLevel = Logger.root.level;
+      final Level rootLevel = Logger.root.level;
       Logger.root.level = Level.ALL;
-      final sub = Logger.root.onRecord.listen(records.add);
+      final StreamSubscription<LogRecord> sub = Logger.root.onRecord.listen(
+        records.add,
+      );
       Relaunched relaunched;
       try {
-        final outcome = await r.relaunchIfNeeded();
+        final RelaunchOutcome outcome = await r.relaunchIfNeeded();
         relaunched = outcome as Relaunched;
       } finally {
         await sub.cancel();
@@ -314,19 +319,19 @@ void main() {
   // the rebuilt APK after the old app had been stopped. The run then ended
   // with no reply and no log line saying why.
   test('a relaunch that cannot launch says why and ends the session', () async {
-    final h = await _Harness.create();
+    final _Harness h = await _Harness.create();
     addTearDown(h.dispose);
     h.device.launchError = StateError(
       'adb install failed: the device is out of room for this APK.',
     );
-    final r = await h.relauncher(
+    final Relauncher r = await h.relauncher(
       rebuild: () async {
         h.changeNativeLib('machine code v2 — longer');
         return true;
       },
     );
 
-    final outcome = await r.relaunchIfNeeded();
+    final RelaunchOutcome outcome = await r.relaunchIfNeeded();
 
     expect(outcome, isA<RelaunchFailed>());
     final failed = outcome as RelaunchFailed;
@@ -337,7 +342,7 @@ void main() {
     expect(h.device.stops, 1);
     await h.session.terminated.timeout(const Duration(seconds: 5));
 
-    final wire = toWire(
+    final Map<String, dynamic> wire = toWire(
       CommandReport(verb: 'Restart', relaunchFailed: failed),
     );
     expect(wire['succeeded'], isFalse);
@@ -352,12 +357,12 @@ void main() {
   // unit would mean a fresh compiler — throwing away the incremental state and,
   // worse, a record that then has to be invented from somewhere.
   test('the orchestrator keeps its units across a relaunch', () async {
-    final h = await _Harness.create();
+    final _Harness h = await _Harness.create();
     addTearDown(h.dispose);
-    final unitsBefore = [...h.orchestrator.units];
-    final compilerBefore = h.orchestrator.units.single.compiler;
-    final appliedBefore = h.orchestrator.units.single.applied;
-    final r = await h.relauncher(
+    final List<SessionReloader> unitsBefore = [...h.orchestrator.units];
+    final Compiler compilerBefore = h.orchestrator.units.single.compiler;
+    final AppliedVersions appliedBefore = h.orchestrator.units.single.applied;
+    final Relauncher r = await h.relauncher(
       rebuild: () async {
         h.changeNativeLib('machine code v2 — longer');
         return true;
@@ -378,10 +383,10 @@ void main() {
   });
 
   test('the session is swapped, not ended', () async {
-    final h = await _Harness.create();
+    final _Harness h = await _Harness.create();
     addTearDown(h.dispose);
-    final before = h.session.appInstance;
-    final r = await h.relauncher(
+    final AppInstance before = h.session.appInstance;
+    final Relauncher r = await h.relauncher(
       rebuild: () async {
         h.changeNativeLib('machine code v2 — longer');
         return true;
@@ -403,9 +408,9 @@ void main() {
   });
 
   test('a second relaunch compares against what is now running', () async {
-    final h = await _Harness.create();
+    final _Harness h = await _Harness.create();
     addTearDown(h.dispose);
-    final r = await h.relauncher(
+    final Relauncher r = await h.relauncher(
       rebuild: () async {
         h.changeNativeLib('machine code v2 — longer');
         return true;

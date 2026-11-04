@@ -195,7 +195,7 @@ class VmDiscoveryConfig {
 /// the caller to report as a usage error.
 Duration parseVmServiceTimeoutOption(String? raw) {
   if (raw == null || raw.isEmpty) return defaultVmServiceDiscoveryBound;
-  final seconds = int.tryParse(raw);
+  final int? seconds = int.tryParse(raw);
   if (seconds == null || seconds <= 0) {
     throw FormatException(
       '$vmServiceTimeoutOption must be a positive number of seconds, '
@@ -212,7 +212,7 @@ Duration parseVmServiceTimeoutOption(String? raw) {
 /// (an Apple format change, a failure answered elsewhere): the caller then
 /// waits without liveness rather than refusing a launch over a parse.
 int? parseSimctlLaunchPid(String output) {
-  final match = RegExp(r':\s*(\d+)\s*$').firstMatch(output.trim());
+  final RegExpMatch? match = RegExp(r':\s*(\d+)\s*$').firstMatch(output.trim());
   if (match == null) return null;
   return int.parse(match.group(1)!);
 }
@@ -237,14 +237,17 @@ Future<int?> watchHostPid({
   Future<void>? stop,
 }) async {
   var stopped = false;
-  final watchStop = stop?.then((_) {
+  final Future<void>? watchStop = stop?.then((_) {
     stopped = true;
   });
   while (await isAlive(pid)) {
     final gap = Completer<void>();
-    final timer = config.clock.startTimer(config.livenessPollInterval, () {
-      gap.complete();
-    });
+    final VmDiscoveryTimer timer = config.clock.startTimer(
+      config.livenessPollInterval,
+      () {
+        gap.complete();
+      },
+    );
     try {
       if (watchStop != null) {
         await Future.any([gap.future, watchStop]);
@@ -441,10 +444,10 @@ class _VmServiceWait {
   Future<VmServiceDiscovery> run() async {
     final announced = Completer<Uri?>();
     _watchExit();
-    final sub = logs.lines.listen(
+    final StreamSubscription<AppLogLine> sub = logs.lines.listen(
       (line) {
         if (announced.isCompleted) return;
-        final match = vmServiceUriPattern.firstMatch(line.text);
+        final RegExpMatch? match = vmServiceUriPattern.firstMatch(line.text);
         if (match != null) announced.complete(Uri.parse(match.group(1)!));
       },
       onDone: () {
@@ -453,27 +456,27 @@ class _VmServiceWait {
     );
     try {
       while (true) {
-        final elapsed = config.clock.now().difference(start);
+        final Duration elapsed = config.clock.now().difference(start);
         if (elapsed >= config.bound) {
           return (uri: null, gaveUpNote: _boundNote());
         }
-        final untilProgress = _nextProgress - elapsed;
+        final Duration untilProgress = _nextProgress - elapsed;
         if (untilProgress <= Duration.zero) {
           _logProgress(elapsed);
           _nextProgress += config.progressInterval;
           continue;
         }
-        var wait = config.bound - elapsed;
+        Duration wait = config.bound - elapsed;
         var tickIsProgress = false;
         if (untilProgress < wait) {
           wait = untilProgress;
           tickIsProgress = true;
         }
         switch (await _waitForOutcome(announced.future, wait)) {
-          case _LogOutcome(:final uri):
+          case _LogOutcome(:final Uri? uri):
             if (uri != null) return (uri: uri, gaveUpNote: null);
             return await _onSourceEnded();
-          case _ExitOutcome(:final code):
+          case _ExitOutcome(:final int? code):
             throw _exitFailure(code);
           case _AbandonedOutcome():
             throw VmDiscoveryCancelled(deviceName);
@@ -502,13 +505,13 @@ class _VmServiceWait {
     Duration wait,
   ) async {
     final tick = Completer<_DiscoveryOutcome>();
-    final timer = config.clock.startTimer(wait, () {
+    final VmDiscoveryTimer timer = config.clock.startTimer(wait, () {
       if (!tick.isCompleted) tick.complete(const _TickOutcome());
     });
     try {
       // A local: the field is public, so it cannot be promoted.
-      final exitFuture = appExit;
-      final abandonFuture = abandoned;
+      final Future<int?>? exitFuture = appExit;
+      final Future<void>? abandonFuture = abandoned;
       return await Future.any<_DiscoveryOutcome>([
         announced.then<_DiscoveryOutcome>(_LogOutcome.new),
         if (exitFuture != null)
@@ -554,9 +557,9 @@ class _VmServiceWait {
   Future<VmServiceDiscovery> _onSourceEnded() async {
     // A local: `appExit` is a public field, which never promotes, so the
     // null check has to live on the copy the grace below awaits.
-    final exitFuture = appExit;
+    final Future<int?>? exitFuture = appExit;
     if (exitFuture == null) return (uri: null, gaveUpNote: null);
-    final error = _exitError;
+    final Object? error = _exitError;
     if (error != null) throw error;
     if (_exitSeen) throw _exitFailure(_exitCode);
     if (await _waitForGraceExit(exitFuture)) throw _exitFailure(_exitCode);
@@ -571,12 +574,15 @@ class _VmServiceWait {
   /// leaves no pending timer behind.
   Future<bool> _waitForGraceExit(Future<int?> exitFuture) async {
     final grace = Completer<bool>();
-    final timer = config.clock.startTimer(config.sourceEndGrace, () {
-      if (!grace.isCompleted) grace.complete(_exitSeen);
-    });
+    final VmDiscoveryTimer timer = config.clock.startTimer(
+      config.sourceEndGrace,
+      () {
+        if (!grace.isCompleted) grace.complete(_exitSeen);
+      },
+    );
     try {
       // A local: the field is public, so it cannot be promoted.
-      final abandonFuture = abandoned;
+      final Future<void>? abandonFuture = abandoned;
       // An exit failure propagates to the caller, reported, never swallowed.
       return await Future.any([
         exitFuture.then((_) => true),
@@ -604,8 +610,8 @@ class _VmServiceWait {
   /// The bound expired while the app was still alive: the bound, the option
   /// that raises it, and the last log lines.
   String _boundNote() {
-    final bound = config.bound;
-    final option = config.boundOption;
+    final Duration bound = config.bound;
+    final String option = config.boundOption;
     return 'Still no VM service on $deviceName after ${bound.inSeconds}s (the '
         '$option bound). To wait longer, pass $option=<seconds> with a larger '
         'value. ${_lastLinesText()}';
@@ -614,9 +620,9 @@ class _VmServiceWait {
   /// The log source ended on a living app: the bound the wait would have
   /// kept going to, the option that raises it, and the last log lines.
   String _sourceEndedNote() {
-    final bound = config.bound;
-    final option = config.boundOption;
-    final elapsed = config.clock.now().difference(start).inSeconds;
+    final Duration bound = config.bound;
+    final String option = config.boundOption;
+    final int elapsed = config.clock.now().difference(start).inSeconds;
     return 'The log source on $deviceName ended after ${elapsed}s while the '
         'app was still running, before it announced a VM service. The wait '
         'would have kept going to ${bound.inSeconds}s (the $option bound); '
@@ -639,7 +645,7 @@ class _VmServiceWait {
 
   /// The app's last log lines, up to 20, for a failure message.
   String _lastLinesText() {
-    final lines = logs.read(-20).lines;
+    final List<AppLogLine> lines = logs.read(-20).lines;
     if (lines.isEmpty) return 'No app output was captured.';
     return 'Last app output:\n${lines.map((l) => l.text).join('\n')}';
   }

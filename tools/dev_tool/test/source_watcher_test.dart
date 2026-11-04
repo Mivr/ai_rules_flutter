@@ -51,7 +51,9 @@ void main() {
         await watcher.start();
         final events = <SourceChange>[];
         final first = Completer<void>();
-        final sub = watcher.changes.listen((change) {
+        final StreamSubscription<SourceChange> sub = watcher.changes.listen((
+          change,
+        ) {
           events.add(change);
           if (!first.isCompleted) first.complete();
         });
@@ -98,7 +100,9 @@ void main() {
 
       // Only now does the pipeline exist and subscribe.
       final events = <SourceChange>[];
-      final sub = watcher.changes.listen(events.add);
+      final StreamSubscription<SourceChange> sub = watcher.changes.listen(
+        events.add,
+      );
       await Future<void>.delayed(const Duration(milliseconds: 20));
 
       expect(events, hasLength(1));
@@ -118,7 +122,9 @@ void main() {
       );
       await watcher.start();
       final events = <SourceChange>[];
-      final sub = watcher.changes.listen(events.add);
+      final StreamSubscription<SourceChange> sub = watcher.changes.listen(
+        events.add,
+      );
 
       fake.emit(WatchEvent(ChangeType.MODIFY, '/root/lib/a.dart'));
       await Future<void>.delayed(const Duration(milliseconds: 60));
@@ -143,7 +149,9 @@ void main() {
       );
       await watcher.start();
       final events = <SourceChange>[];
-      final sub = watcher.changes.listen(events.add);
+      final StreamSubscription<SourceChange> sub = watcher.changes.listen(
+        events.add,
+      );
 
       fake.emit(WatchEvent(ChangeType.MODIFY, '/root/lib/a.dart'));
       fake.emit(WatchEvent(ChangeType.MODIFY, '/root/lib/README.md'));
@@ -173,7 +181,9 @@ void main() {
       );
       await watcher.start();
       final events = <SourceChange>[];
-      final sub = watcher.changes.listen(events.add);
+      final StreamSubscription<SourceChange> sub = watcher.changes.listen(
+        events.add,
+      );
 
       fake.emit(WatchEvent(ChangeType.MODIFY, '/root/lib/a.dart'));
       fake.emit(WatchEvent(ChangeType.MODIFY, '/root/assets/logo.png'));
@@ -203,7 +213,9 @@ void main() {
       );
       await watcher.start();
       final events = <SourceChange>[];
-      final sub = watcher.changes.listen(events.add);
+      final StreamSubscription<SourceChange> sub = watcher.changes.listen(
+        events.add,
+      );
 
       fake.emit(
         WatchEvent(
@@ -231,7 +243,9 @@ void main() {
       );
       await watcher.start();
       final events = <SourceChange>[];
-      final sub = watcher.changes.listen(events.add);
+      final StreamSubscription<SourceChange> sub = watcher.changes.listen(
+        events.add,
+      );
 
       fake.emit(WatchEvent(ChangeType.MODIFY, '/root/bazel-out/x.dart'));
       fake.emit(WatchEvent(ChangeType.MODIFY, '/root/bazel-bin/y.dart'));
@@ -256,7 +270,9 @@ void main() {
       );
       await watcher.start();
       final events = <SourceChange>[];
-      final sub = watcher.changes.listen(events.add);
+      final StreamSubscription<SourceChange> sub = watcher.changes.listen(
+        events.add,
+      );
 
       fake.emit(WatchEvent(ChangeType.MODIFY, '/root/lib/a.dart'));
       // Stop before the debounce fires.
@@ -283,7 +299,7 @@ void main() {
           sourcePackages: const [(name: 'app', libRoot: '')],
         );
         final change = SourceChange({'/root/lib/foo/bar.dart'});
-        final uris = change.paths.map(resolver.uriFor).toSet();
+        final Set<String?> uris = change.paths.map(resolver.uriFor).toSet();
         expect(uris, {'package:app/foo/bar.dart'});
       },
     );
@@ -304,7 +320,9 @@ void main() {
 
       fake.emitError(StateError('FSEvents died'));
 
-      final failure = await watcher.failed.timeout(const Duration(seconds: 5));
+      final WatcherFailure failure = await watcher.failed.timeout(
+        const Duration(seconds: 5),
+      );
       expect(failure.error, isA<StateError>());
       expect(failure.reason, contains('error'));
     });
@@ -316,7 +334,9 @@ void main() {
 
       await fake.closeStream();
 
-      final failure = await watcher.failed.timeout(const Duration(seconds: 5));
+      final WatcherFailure failure = await watcher.failed.timeout(
+        const Duration(seconds: 5),
+      );
       expect(failure.error, isNull, reason: 'an end is not an error');
       expect(failure.reason, isNotEmpty);
     });

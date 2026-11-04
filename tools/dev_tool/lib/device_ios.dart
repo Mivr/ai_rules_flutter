@@ -22,6 +22,10 @@ import 'package:flutter_bazel_dev_tool/vm_service_client.dart';
 import 'package:flutter_bazel_dev_tool/vm_service_discovery.dart';
 import 'package:path/path.dart' as p;
 
+typedef _Instance = AppInstance;
+
+typedef _Match = Iterable<IOSDeviceInfo>;
+
 final _logger = Logger('dev_tool.device');
 
 /// Reads the bundle identifier out of an extracted .app's Info.plist.
@@ -29,14 +33,12 @@ Future<String> extractBundleId(
   String appPath,
   ProcessRunSync runProcess,
 ) async {
-  final result = await runProcess('defaults', [
+  final ProcessResult result = await runProcess('defaults', [
     'read',
     '$appPath/Info.plist',
     'CFBundleIdentifier',
   ]);
-  if (result.exitCode == 0) {
-    return (result.stdout as String).trim();
-  }
+  if (result.exitCode == 0) return (result.stdout as String).trim();
   throw StateError('Could not extract bundle ID from $appPath');
 }
 
@@ -49,9 +51,9 @@ Future<({String appPath, Directory dir})> extractAppFromIpa(
   String ipaPath,
   ProcessRunSync runProcess,
 ) async {
-  final tempDir = await createTempDir('flutter_ipa_');
+  final Directory tempDir = await createTempDir('flutter_ipa_');
   try {
-    final result = await runProcess('unzip', [
+    final ProcessResult result = await runProcess('unzip', [
       '-oq',
       ipaPath,
       '-d',
@@ -64,7 +66,7 @@ Future<({String appPath, Directory dir})> extractAppFromIpa(
     if (!payloadDir.existsSync()) {
       throw StateError('No Payload directory found in IPA');
     }
-    final apps = payloadDir
+    final List<FileSystemEntity> apps = payloadDir
         .listSync()
         .where((e) => e.path.endsWith('.app'))
         .toList();
@@ -77,7 +79,7 @@ Future<({String appPath, Directory dir})> extractAppFromIpa(
     // native library or AOT App.framework that kept its size would install as
     // the old machine code, so stamp everything now.
     final now = DateTime.now();
-    await for (final entity in tempDir.list(
+    await for (final FileSystemEntity entity in tempDir.list(
       recursive: true,
       followLinks: false,
     )) {
@@ -162,24 +164,24 @@ class IOSDeviceInfo {
 /// a "no device attached" error at the first step.
 List<IOSDeviceInfo> parseDevicectlDevices(String jsonText) {
   final data = json.decode(jsonText) as Map<String, dynamic>;
-  final devices = (data['result']?['devices'] as List?) ?? const [];
+  final List<dynamic> devices = data['result']?['devices'] as List? ?? const [];
   final result = <IOSDeviceInfo>[];
   for (final entry in devices) {
     final device = entry as Map<String, dynamic>;
-    final connection =
+    final Map<String, dynamic> connection =
         (device['connectionProperties'] as Map?)?.cast<String, dynamic>() ??
         const {};
-    final transport = switch ((connection['transportType'] as String?)
-        ?.toLowerCase()) {
-      'wired' => IOSDeviceTransport.wired,
-      'localnetwork' => IOSDeviceTransport.wireless,
-      _ => null,
-    };
+    final IOSDeviceTransport? transport =
+        switch ((connection['transportType'] as String?)?.toLowerCase()) {
+          'wired' => IOSDeviceTransport.wired,
+          'localnetwork' => IOSDeviceTransport.wireless,
+          _ => null,
+        };
     if (transport == null) continue;
     final coreDeviceId = device['identifier'] as String?;
     final udid = ((device['hardwareProperties'] as Map?)?['udid']) as String?;
     if (coreDeviceId == null || udid == null) continue;
-    final properties =
+    final Map<String, dynamic> properties =
         (device['deviceProperties'] as Map?)?.cast<String, dynamic>() ??
         const {};
     result.add(
@@ -258,7 +260,7 @@ class IOSDevice extends Device {
   /// Throws rather than guessing: every caller runs after [launch] has
   /// resolved a device, or was handed an explicit UDID.
   String get addressedUdid {
-    final resolved = udid;
+    final String? resolved = udid;
     if (resolved == null) {
       throw StateError(
         'No iOS device has been resolved yet. This device was '
@@ -275,9 +277,9 @@ class IOSDevice extends Device {
 
   @override
   NativePatchDelivery? get nativePatchDelivery {
-    final bundleId = _launchedBundleId;
-    final appPath = _launchedAppPath;
-    final resolved = udid;
+    final String? bundleId = _launchedBundleId;
+    final String? appPath = _launchedAppPath;
+    final String? resolved = udid;
     if (bundleId == null || appPath == null || resolved == null) return null;
     return IOSDevicePatchDelivery(
       udid: resolved,
@@ -298,7 +300,7 @@ class IOSDevice extends Device {
   /// here costs one `devicectl list` instead of a whole build.
   @override
   Future<List<HostTool>> requiredHostTools() async {
-    final info = await _resolveInfo();
+    final IOSDeviceInfo info = await _resolveInfo();
     return [
       // Only a debug app is run under the debugger.
       if (buildMode == BuildMode.debug) lldbTool(),
@@ -344,34 +346,37 @@ class IOSDevice extends Device {
   /// which one, and silently choosing would look like a working run against
   /// the wrong phone.
   Future<IOSDeviceInfo> _resolveInfo() async {
-    final cached = _info;
+    final IOSDeviceInfo? cached = _info;
     if (cached != null) return cached;
 
-    final available = await withTempDir('flutter_devicectl_', (dir) async {
-      final jsonPath = p.join(dir.path, 'devices.json');
-      final result = await runProcess('xcrun', [
-        'devicectl',
-        'list',
-        'devices',
-        '--json-output',
-        jsonPath,
-      ]);
-      if (result.exitCode != 0) {
-        throw StateError('devicectl list devices failed: ${result.stderr}');
-      }
-      final jsonFile = File(jsonPath);
-      if (!jsonFile.existsSync()) {
-        throw StateError(
-          'devicectl list devices reported success but wrote no '
-          'device list to $jsonPath.',
-        );
-      }
-      return parseDevicectlDevices(jsonFile.readAsStringSync());
-    });
+    final List<IOSDeviceInfo> available = await withTempDir(
+      'flutter_devicectl_',
+      (dir) async {
+        final String jsonPath = p.join(dir.path, 'devices.json');
+        final ProcessResult result = await runProcess('xcrun', [
+          'devicectl',
+          'list',
+          'devices',
+          '--json-output',
+          jsonPath,
+        ]);
+        if (result.exitCode != 0) {
+          throw StateError('devicectl list devices failed: ${result.stderr}');
+        }
+        final jsonFile = File(jsonPath);
+        if (!jsonFile.existsSync()) {
+          throw StateError(
+            'devicectl list devices reported success but wrote no '
+            'device list to $jsonPath.',
+          );
+        }
+        return parseDevicectlDevices(jsonFile.readAsStringSync());
+      },
+    );
 
-    final requested = requestedUdid;
+    final String? requested = requestedUdid;
     if (requested != null) {
-      final match = available.where((d) => d.matches(requested));
+      final _Match match = available.where((d) => d.matches(requested));
       if (match.isEmpty) {
         throw StateError(
           'No attached iOS device with UDID $requested.'
@@ -421,7 +426,7 @@ class IOSDevice extends Device {
   Future<AppInstance> launch(String appPath, {AppLogListener? onLog}) async {
     beginLaunch();
     try {
-      final instance = await _launchAndAttach(appPath, onLog: onLog);
+      final _Instance instance = await _launchAndAttach(appPath, onLog: onLog);
       endLaunch();
       return instance;
     } on MdnsDiscoveryException catch (e) {
@@ -453,7 +458,7 @@ class IOSDevice extends Device {
   /// just as it was abandoned is killed rather than left to outlive the run.
   Future<Process> startHelper(String executable, List<String> args) async {
     throwIfLaunchAbandoned();
-    final process = await _startProcess(executable, args);
+    final Process process = await _startProcess(executable, args);
     if (launchAbandoned) {
       process.kill(ProcessSignal.sigkill);
       throwIfLaunchAbandoned();
@@ -474,17 +479,18 @@ class IOSDevice extends Device {
 
   final _scratch = LaunchScratch();
 
-  Future<AppInstance> _launchAndAttach(
+  Future<_Instance> _launchAndAttach(
     String appPath, {
     AppLogListener? onLog,
   }) async {
-    final info = await _resolveInfo();
+    final IOSDeviceInfo info = await _resolveInfo();
 
-    final installed = await _installAppOnDevice(appPath, info);
-    final installPath = installed.path;
+    final ({String installationUrl, String path}) installed =
+        await _installAppOnDevice(appPath, info);
+    final String installPath = installed.path;
 
     // Extract bundle ID from .app/Info.plist if not provided.
-    final bundleId =
+    final String bundleId =
         _bundleId ?? await extractBundleId(installPath, runProcess);
     _launchedBundleId = bundleId;
     _launchedAppPath = installPath;
@@ -500,7 +506,7 @@ class IOSDevice extends Device {
     //   4. Discover the VM service by its mDNS advertisement, if there is one
     final debug = buildMode == BuildMode.debug;
 
-    final logs = newAppLogs(onLog);
+    final AppLogStream logs = newAppLogs(onLog);
 
     // Step 1: Launch with --console to capture the app's output.
     //
@@ -513,11 +519,11 @@ class IOSDevice extends Device {
       bundleId,
       debug: debug,
     );
-    final consolePump = await _awaitLaunchBanner(logs);
+    final AppLogPump consolePump = await _awaitLaunchBanner(logs);
 
     // Step 2: Get PID from running process list. [stop] terminates the app by
     // it, debugger or not.
-    final processId = await findAppProcessId(installed.installationUrl);
+    final int processId = await findAppProcessId(installed.installationUrl);
     _appPid = processId;
 
     // Step 3: In debug, attach lldb. Otherwise devicectl, which runs until the
@@ -536,7 +542,7 @@ class IOSDevice extends Device {
     }
 
     // Step 4: Find the VM service by its mDNS advertisement.
-    final vmServiceUri = await _findVmService(
+    final Uri? vmServiceUri = await _findVmService(
       info: info,
       bundleId: bundleId,
       installPath: installPath,
@@ -562,17 +568,21 @@ class IOSDevice extends Device {
     // Extract .app from .ipa if needed — devicectl install requires .app.
     String installPath = appPath;
     if (appPath.endsWith('.ipa')) {
-      final extracted = await extractAppFromIpa(appPath, runProcess);
+      final ({String appPath, Directory dir}) extracted =
+          await extractAppFromIpa(appPath, runProcess);
       installPath = extracted.appPath;
       _scratch.hold(extracted.dir);
     }
 
-    final installationUrl = await withTempDir('flutter_install_', (
+    final String installationUrl = await withTempDir('flutter_install_', (
       installJsonDir,
     ) async {
-      final installJsonPath = p.join(installJsonDir.path, 'install.json');
+      final String installJsonPath = p.join(
+        installJsonDir.path,
+        'install.json',
+      );
 
-      final installResult = await runProcess('xcrun', [
+      final ProcessResult installResult = await runProcess('xcrun', [
         'devicectl',
         'device',
         'install',
@@ -631,7 +641,7 @@ class IOSDevice extends Device {
   /// routes the app's ordinary console output there, so treating that channel
   /// as errors would mark every `print()` as one.
   Future<AppLogPump> _awaitLaunchBanner(AppLogStream logs) async {
-    final consolePump = pumpProcessLines(
+    final AppLogPump consolePump = pumpProcessLines(
       _consoleLauncherProcess!,
       logs,
       stderrIsError: false,
@@ -650,7 +660,7 @@ class IOSDevice extends Device {
         line.contains('Launched application with');
 
     // Another reader of the same stream, like discovery below.
-    final bannerSub = logs.lines.listen((line) {
+    final StreamSubscription<AppLogLine> bannerSub = logs.lines.listen((line) {
       if (!launchCompleter.isCompleted && isDevicectlBanner(line.text)) {
         launchCompleter.complete();
       }
@@ -719,12 +729,16 @@ class IOSDevice extends Device {
     // rather than a hang. flutter_tools splits the same two concerns, warning
     // at 60s/75s while its mDNS query runs for ten minutes
     // (`ios/devices.dart`).
-    final record = await _discoverAdvertisedRecord(info, bundleId, logs);
+    final MdnsVmServiceRecord record = await _discoverAdvertisedRecord(
+      info,
+      bundleId,
+      logs,
+    );
 
     switch (info.transport) {
       case IOSDeviceTransport.wired:
         // The advertised port is a device-side port on the device's loopback.
-        final iproxy = await startHelper('iproxy', [
+        final Process iproxy = await startHelper('iproxy', [
           '${record.port}:${record.port}',
           '-u',
           info.udid,
@@ -747,7 +761,7 @@ class IOSDevice extends Device {
             what: 'iproxy forward for the iOS VM service',
           );
         } on StateError catch (e) {
-          final said = iproxyOutput
+          final Iterable<String> said = iproxyOutput
               .read(0)
               .lines
               .map((l) => l.text)
@@ -761,10 +775,7 @@ class IOSDevice extends Device {
       case IOSDeviceTransport.wireless:
         // No cable to forward through. `discover(resolveAddress: true)` throws
         // rather than returning a record without an address, so this is set.
-        return record.uriFor(
-          host: record.address!.address,
-          port: record.port,
-        );
+        return record.uriFor(host: record.address!.address, port: record.port);
     }
   }
 
@@ -832,7 +843,7 @@ class IOSDevice extends Device {
   /// Whether the app at [appPath] declares [_vmServiceBonjourType] in its
   /// Info.plist's NSBonjourServices.
   Future<bool> _declaresVmService(String appPath) async {
-    final result = await runProcess('plutil', [
+    final ProcessResult result = await runProcess('plutil', [
       '-extract',
       'NSBonjourServices',
       'json',
@@ -891,7 +902,7 @@ class IOSDevice extends Device {
         'to find the launched process by.',
       );
     }
-    final contents = file.readAsStringSync();
+    final String contents = file.readAsStringSync();
     final Object? decoded;
     try {
       decoded = json.decode(contents);
@@ -905,7 +916,7 @@ class IOSDevice extends Device {
     String? url;
     if (decoded is Map<String, dynamic>) {
       final apps = decoded['result']?['installedApplications'] as List?;
-      final first = (apps == null || apps.isEmpty) ? null : apps.first;
+      final dynamic first = (apps == null || apps.isEmpty) ? null : apps.first;
       if (first is Map) url = first['installationURL'] as String?;
     }
     if (url == null || url.isEmpty) {
@@ -930,22 +941,18 @@ class IOSDevice extends Device {
   /// readily as its target, and would in any case take out a concurrent
   /// session's forward.
   Future<void> _reapLaunchHelpers() async {
-    final iproxy = _iproxyProcess;
+    final Process? iproxy = _iproxyProcess;
     if (iproxy != null) {
       await stopProcess('iproxy', iproxy, teardownBound);
       _iproxyProcess = null;
     }
-    final consoleLauncher = _consoleLauncherProcess;
+    final Process? consoleLauncher = _consoleLauncherProcess;
     if (consoleLauncher != null) {
-      await stopProcess(
-        'iOS console launcher',
-        consoleLauncher,
-        teardownBound,
-      );
+      await stopProcess('iOS console launcher', consoleLauncher, teardownBound);
       _consoleLauncherProcess = null;
     }
     // Killing lldb terminates the debugserver, which kills the app.
-    final lldb = lldbProcess;
+    final Process? lldb = lldbProcess;
     if (lldb != null) {
       await stopProcess('lldb', lldb, teardownBound);
       lldbProcess = null;
@@ -976,7 +983,7 @@ class IOSDevice extends Device {
   /// then resumes it with the signal swallowed. Measured on an iOS 27 iPhone:
   /// terminate-then-detach left the app running every time.
   Future<void> _terminateApp() async {
-    final pid = _appPid;
+    final int? pid = _appPid;
     if (pid == null) return;
     _appPid = null;
     final ProcessResult result;
@@ -1041,11 +1048,9 @@ class IOSDevice extends Device {
     VmServiceClient? vmClient,
     String? window,
   }) async {
-    if (vmClient != null) {
-      await vmClient.waitForFirstFrame();
-    }
+    if (vmClient != null) await vmClient.waitForFirstFrame();
 
-    final resolved = resolveRunfileWithManifest(
+    final ResolvedRunfile? resolved = resolveRunfileWithManifest(
       'rules_flutter/tools/ios_screenshot/screenshot',
     );
     if (resolved == null) {
@@ -1058,14 +1063,11 @@ class IOSDevice extends Device {
     // The driver reads no runfiles (its program is embedded, its Python is
     // the host's), so unlike the old py_binary it needs no
     // RUNFILES_MANIFEST_FILE forwarded.
-    final result = await Process.run(
-      resolved.path,
-      [
-        outputPath,
-        '--udid',
-        addressedUdid,
-      ],
-    );
+    final ProcessResult result = await Process.run(resolved.path, [
+      outputPath,
+      '--udid',
+      addressedUdid,
+    ]);
     if (result.exitCode != 0) {
       final err = result.stderr as String;
       if (err.contains('Unable to connect to Tunneld') ||

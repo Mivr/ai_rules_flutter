@@ -49,9 +49,9 @@ class FakeSimctlSpawner implements ios.CommandSpawner {
   final List<String> killed = [];
 
   CannedSimctl? _lookup(String key) {
-    final exact = answers[key];
+    final CannedSimctl? exact = answers[key];
     if (exact != null) return exact;
-    for (final prefix in prefixAnswers.keys) {
+    for (final String prefix in prefixAnswers.keys) {
       if (key.startsWith(prefix)) return prefixAnswers[prefix];
     }
     return null;
@@ -64,7 +64,7 @@ class FakeSimctlSpawner implements ios.CommandSpawner {
   ) async {
     final key = '$executable ${args.join(' ')}';
     started.add(key);
-    final canned = _lookup(key);
+    final CannedSimctl? canned = _lookup(key);
     if (canned == null) fail('unexpected child: $key');
     return ios.SpawnedCommand(
       exitCode: canned.hang
@@ -242,7 +242,7 @@ void main() {
     });
 
     test('resolves the app through runfiles', () {
-      final underTest = ios.iosLauncherFromEnv({
+      final ios.IosPlatformLauncher underTest = ios.iosLauncherFromEnv({
         'FLUTTER_INTEGRATION_TEST_IOS_APP': 'some/app.ipa',
         'FLUTTER_INTEGRATION_TEST_IOS_BUNDLE_ID': 'com.example.testapp',
       }, runfiles);
@@ -290,11 +290,11 @@ void main() {
         expect(spawner.started[0], 'xcrun simctl list -j');
         expect(spawner.started[1], 'xcrun simctl boot udid-happy');
         expect(spawner.started[2], 'xcrun simctl bootstatus udid-happy -b');
-        final install = spawner.startedCall(
+        final String install = spawner.startedCall(
           'xcrun simctl install udid-happy ',
         );
         expect(spawner.started.indexOf(install), 3);
-        final extractedApp = install.split(' ').last;
+        final String extractedApp = install.split(' ').last;
         expect(extractedApp, endsWith('TestApp.app'));
         expect(Directory(extractedApp).existsSync(), isTrue);
         expect(
@@ -329,10 +329,10 @@ void main() {
         });
 
         await underTest.dispose();
-        final terminate = spawner.startedCall(
+        final String terminate = spawner.startedCall(
           'xcrun simctl terminate udid-happy com.example.testapp',
         );
-        final uninstall = spawner.startedCall(
+        final String uninstall = spawner.startedCall(
           'xcrun simctl uninstall udid-happy com.example.testapp',
         );
         expect(
@@ -394,10 +394,10 @@ void main() {
               .readAsStringSync(),
           'ws://127.0.0.1:4242${launcher.integrationWebSocketPath}?token=$_testToken',
         );
-        final installIndex = spawner.started.indexWhere(
+        final int installIndex = spawner.started.indexWhere(
           (s) => s.startsWith('xcrun simctl install '),
         );
-        final containerIndex = spawner.started.indexOf(
+        final int containerIndex = spawner.started.indexOf(
           'xcrun simctl get_app_container udid-container com.example.testapp data',
         );
         expect(containerIndex, greaterThan(installIndex));
@@ -705,11 +705,11 @@ void main() {
 
     test('a launch that already exited non-zero fails naming iOS', () async {
       final appDir = Directory('${tmp.path}/TestApp.app')..createSync();
-      final dead = await Process.start(
+      final Process dead = await Process.start(
         Platform.resolvedExecutable,
         ['--no-such-option-xyz'],
       );
-      final code = await dead.exitCode;
+      final int code = await dead.exitCode;
       expect(code, isNot(0));
       final spawner = FakeSimctlSpawner(
         {
@@ -781,7 +781,7 @@ void main() {
   group('extractIpaApp', () {
     test('keeps the app binary executable and links intact', () {
       final dest = Directory('${tmp.path}/extracted')..createSync();
-      final appDir = ios.extractIpaApp(
+      final String appDir = ios.extractIpaApp(
         ipaBytes: fixtureIpaBytes(),
         destDir: dest,
       );
@@ -802,7 +802,7 @@ void main() {
     test('extracts rules_apple-style directory entries', () {
       const appPrefix = 'Payload/TestApp.app/';
       final dest = Directory('${tmp.path}/rules_apple')..createSync();
-      final ipa = encodeDeterministicZip([
+      final Uint8List ipa = encodeDeterministicZip([
         ZipEntry(
           path: 'Payload/',
           data: Uint8List(0),
@@ -828,7 +828,7 @@ void main() {
           isExecutable: true,
         ),
       ]);
-      final appDir = ios.extractIpaApp(ipaBytes: ipa, destDir: dest);
+      final String appDir = ios.extractIpaApp(ipaBytes: ipa, destDir: dest);
 
       expect(appDir, '${dest.path}/TestApp.app');
       expect(
@@ -914,7 +914,7 @@ void main() {
 
     test('refuses an archive with no app', () {
       final dest = Directory('${tmp.path}/empty')..createSync();
-      final ipa = encodeDeterministicZip([
+      final Uint8List ipa = encodeDeterministicZip([
         ZipEntry(
           path: 'Payload/Notes.txt',
           data: Uint8List.fromList(utf8.encode('hi')),
@@ -949,7 +949,8 @@ void main() {
         'xcrun simctl uninstall udid-flaky com.example.testapp':
             const CannedSimctl(),
       });
-      final (:launcher, :launch) = await bootAppDir(spawner, appDir);
+      final (:ios.IosPlatformLauncher launcher, :Map<String, Object?> launch) =
+          await bootAppDir(spawner, appDir);
 
       expect(launch['executable'], 'xcrun');
       await launcher.dispose();
@@ -978,10 +979,14 @@ void main() {
 
   group('runner', () {
     test('dispatches ios and lists it in the unsupported message', () {
-      final underTest = runner.createPlatformLauncher('ios', {
-        'FLUTTER_INTEGRATION_TEST_IOS_APP': 'some/app.ipa',
-        'FLUTTER_INTEGRATION_TEST_IOS_BUNDLE_ID': 'com.example.testapp',
-      }, runfiles);
+      final launcher.PlatformLauncher underTest = runner.createPlatformLauncher(
+        'ios',
+        {
+          'FLUTTER_INTEGRATION_TEST_IOS_APP': 'some/app.ipa',
+          'FLUTTER_INTEGRATION_TEST_IOS_BUNDLE_ID': 'com.example.testapp',
+        },
+        runfiles,
+      );
       expect(underTest.platformName, 'ios');
 
       expect(

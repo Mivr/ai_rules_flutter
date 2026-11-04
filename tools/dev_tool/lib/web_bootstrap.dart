@@ -127,7 +127,7 @@ String generateDDCBootstrapScript({
   String ddcModuleLoaderUrl = 'ddc_module_loader.js',
   String mapperUrl = 'stack_trace_mapper.js',
 }) {
-  final isWindows = Platform.isWindows;
+  final bool isWindows = Platform.isWindows;
 
   return '''
 const _currentDirectory = (function () {

@@ -59,7 +59,9 @@ SHADER_PLATFORM_FLAGS = {
 
 void main() {
   test('reads every platform, folding flutter_tools names into ours', () {
-    final flags = flutterToolsShaderFlags(_flutterTools);
+    final Map<String, List<String>> flags = flutterToolsShaderFlags(
+      _flutterTools,
+    );
     expect(flags.keys.toSet(), {
       'android',
       'linux',
@@ -84,7 +86,7 @@ void main() {
   });
 
   test('a stage flutter_tools added is reported', () {
-    final moved = _flutterTools.replaceFirst(
+    final String moved = _flutterTools.replaceFirst(
       "return <String>['--runtime-stage-metal'];",
       "return <String>['--runtime-stage-metal', '--runtime-stage-vulkan'];",
     );

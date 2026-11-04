@@ -1,15 +1,27 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_bazel_dev_tool/dev_tool_exception.dart';
-import 'package:flutter_bazel_dev_tool/logging.dart';
 import 'package:flutter_bazel_dev_tool/toolchain_info.dart';
 import 'package:flutter_bazel_dev_tool/web_module_server.dart';
 import 'package:flutter_bazel_dev_tool/web_options.dart';
+import 'package:logging/logging.dart';
+import 'package:shelf/shelf.dart';
 import 'package:test/test.dart';
 
 import 'loopbacks.dart';
 import 'tls_fixture.dart';
+
+typedef _Dir = Directory;
+
+typedef _Resp = HttpClientResponse;
+
+typedef _Tls = ({String certPath, String keyPath});
+
+typedef _Root = ({String body, int status});
+
+typedef _Response = ({String body, String? cacheControl, int status});
 
 WebModuleServer serverWith({
   String? packageConfigPath,
@@ -46,7 +58,7 @@ WebModuleServer serverWith({
 /// A scratch directory that outlives the test that made it by exactly one
 /// teardown. Top level so the helpers below can reach it.
 Directory tempDir() {
-  final dir = Directory.systemTemp.createTempSync('web_module_server_');
+  final _Dir dir = Directory.systemTemp.createTempSync('web_module_server_');
   addTearDown(() => dir.deleteSync(recursive: true));
   return dir;
 }
@@ -58,12 +70,12 @@ Directory tempDir() {
 /// gate distinguishes, and a test that does not say which one it means is
 /// asserting against whichever the default happens to be.
 Future<WebModuleServer> bootableServer({required bool withProgram}) async {
-  final dir = tempDir();
+  final _Dir dir = tempDir();
   writeBootFiles(dir.path);
   // The three files the server streams straight off the toolchain rather
   // than generating. Their content is irrelevant here; what matters is their
   // reachability under the name the bootstrap script uses.
-  final toolchain = tempDir();
+  final _Dir toolchain = tempDir();
   for (final name in [
     'dart_sdk.js',
     'ddc_module_loader.js',
@@ -71,7 +83,7 @@ Future<WebModuleServer> bootableServer({required bool withProgram}) async {
   ]) {
     File('${toolchain.path}/$name').writeAsStringSync('// $name');
   }
-  final server = serverWith(
+  final WebModuleServer server = serverWith(
     buildOutputDir: dir.path,
     toolchainDir: toolchain.path,
   );
@@ -102,11 +114,13 @@ Future<({int status, String body, String? cacheControl})> fetch(
 ) async {
   final client = HttpClient();
   try {
-    final request = await client.getUrl(server.uri!.replace(path: path));
-    final response = await request.close();
+    final HttpClientRequest request = await client.getUrl(
+      server.uri!.replace(path: path),
+    );
+    final _Resp response = await request.close();
     // Awaited before the `finally` closes the client, for the reason [get]
     // records: a returned future races the force-close.
-    final body = await response.transform(utf8.decoder).join();
+    final String body = await response.transform(utf8.decoder).join();
     return (
       status: response.statusCode,
       body: body,
@@ -173,7 +187,7 @@ String writeCompile(
   final metadata = <int>[];
 
   List<int> append(List<int> blob, String text) {
-    final start = blob.length;
+    final int start = blob.length;
     blob.addAll(utf8.encode(text));
     return [start, blob.length];
   }
@@ -191,9 +205,7 @@ String writeCompile(
 
   File('$dillPath.json').writeAsStringSync(json.encode(manifest));
   File('$dillPath.sources').writeAsBytesSync(sources);
-  if (writeMap && maps.isNotEmpty) {
-    File('$dillPath.map').writeAsBytesSync(maps);
-  }
+  if (writeMap && maps.isNotEmpty) File('$dillPath.map').writeAsBytesSync(maps);
   if (writeMetadata && metadata.isNotEmpty) {
     File('$dillPath.metadata').writeAsBytesSync(metadata);
   }
@@ -319,11 +331,12 @@ void main() {
   /// consumer can read them; these assertions read the same records it would.
   List<Map<String, dynamic>> captureLogs() {
     final records = <Map<String, dynamic>>[];
-    final subscription = Logger.root.onRecord.listen((record) {
-      if (record.level >= Level.WARNING && record.object is Map) {
-        records.add(Map<String, dynamic>.from(record.object as Map));
-      }
-    });
+    final StreamSubscription<LogRecord> subscription = Logger.root.onRecord
+        .listen((record) {
+          if (record.level >= Level.WARNING && record.object is Map) {
+            records.add(Map<String, dynamic>.from(record.object as Map));
+          }
+        });
     addTearDown(subscription.cancel);
     return records;
   }
@@ -345,9 +358,9 @@ void main() {
     test('names the file when the package config is missing', () {
       const missing = '/nonexistent/package_config.json';
       expect(
-        () => serverWith(
-          packageConfigPath: missing,
-        ).initDwds(chromeConnection: noChrome),
+        () =>
+            serverWith(packageConfigPath: missing)
+                .initDwds(chromeConnection: noChrome),
         throwsA(
           isA<DevToolException>().having(
             (e) => e.message,
@@ -359,15 +372,17 @@ void main() {
     });
 
     test('names the file when the package config is malformed', () async {
-      final dir = await Directory.systemTemp.createTemp('web_module_server_');
+      final _Dir dir = await Directory.systemTemp.createTemp(
+        'web_module_server_',
+      );
       addTearDown(() => dir.delete(recursive: true));
       final config = File('${dir.path}/package_config.json');
       await config.writeAsString('{ this is not json');
 
       await expectLater(
-        () => serverWith(
-          packageConfigPath: config.path,
-        ).initDwds(chromeConnection: noChrome),
+        () =>
+            serverWith(packageConfigPath: config.path)
+                .initDwds(chromeConnection: noChrome),
         throwsA(
           isA<DevToolException>().having(
             (e) => e.message,
@@ -390,7 +405,7 @@ void main() {
   // with the tool saying nothing either way.
   group('WebModuleServer.updateModules', () {
     test('ends the run when the compile wrote no manifest', () {
-      final dir = tempDir();
+      final _Dir dir = tempDir();
 
       expect(
         () => serverWith().updateModules('${dir.path}/out.dill', full: true),
@@ -399,7 +414,7 @@ void main() {
     });
 
     test('ends the run when the compile wrote no module bytes', () {
-      final dir = tempDir();
+      final _Dir dir = tempDir();
       File('${dir.path}/out.dill.json').writeAsStringSync('{}');
 
       expect(
@@ -409,7 +424,7 @@ void main() {
     });
 
     test('names the manifest when it does not parse', () {
-      final dir = tempDir();
+      final _Dir dir = tempDir();
       File('${dir.path}/out.dill.json').writeAsStringSync('{ not json');
       File('${dir.path}/out.dill.sources').writeAsStringSync('');
 
@@ -420,23 +435,22 @@ void main() {
     });
 
     test('ends the run when the first compile produced no modules', () {
-      final dir = tempDir();
-      final dill = writeCompile(dir, []);
+      final _Dir dir = tempDir();
+      final String dill = writeCompile(dir, []);
 
       expect(
         () => serverWith().updateModules(dill, full: true),
         throwsDevToolException(
-          allOf(
-            contains('no modules'),
-            contains('$dill.json'),
-          ),
+          allOf(contains('no modules'), contains('$dill.json')),
         ),
       );
     });
 
     test('reports a truncated sources file instead of dropping the module', () {
-      final dir = tempDir();
-      final dill = writeCompile(dir, [const Module('main.lib.js', 'code')]);
+      final _Dir dir = tempDir();
+      final String dill = writeCompile(dir, [
+        const Module('main.lib.js', 'code'),
+      ]);
       // The manifest still claims bytes that are no longer there.
       File('$dill.sources').writeAsStringSync('co');
 
@@ -453,7 +467,7 @@ void main() {
     });
 
     test('reports a manifest entry with no byte range', () {
-      final dir = tempDir();
+      final _Dir dir = tempDir();
       final dill = '${dir.path}/out.dill';
       File('$dill.json').writeAsStringSync(
         json.encode({
@@ -464,58 +478,41 @@ void main() {
 
       expect(
         () => serverWith().updateModules(dill, full: true),
-        throwsDevToolException(
-          allOf(
-            contains('main'),
-            contains('byte range'),
-          ),
-        ),
+        throwsDevToolException(allOf(contains('main'), contains('byte range'))),
       );
     });
 
     test(
       'reports a source map the manifest declares and the compile omitted',
       () {
-        final dir = tempDir();
-        final dill = writeCompile(
-          dir,
-          [const Module('main.lib.js', 'code', sourceMap: '{"version":3}')],
-          writeMap: false,
-        );
+        final _Dir dir = tempDir();
+        final String dill = writeCompile(dir, [
+          const Module('main.lib.js', 'code', sourceMap: '{"version":3}'),
+        ], writeMap: false);
 
         expect(
           () => serverWith().updateModules(dill, full: true),
           throwsDevToolException(
-            allOf(
-              contains('$dill.map'),
-              contains('main'),
-            ),
+            allOf(contains('$dill.map'), contains('main')),
           ),
         );
       },
     );
 
     test('reports metadata the manifest declares and the compile omitted', () {
-      final dir = tempDir();
-      final dill = writeCompile(
-        dir,
-        [
-          Module(
-            'main.lib.js',
-            'code',
-            metadata: moduleMetadata('main', ['package:app/main.dart']),
-          ),
-        ],
-        writeMetadata: false,
-      );
+      final _Dir dir = tempDir();
+      final String dill = writeCompile(dir, [
+        Module(
+          'main.lib.js',
+          'code',
+          metadata: moduleMetadata('main', ['package:app/main.dart']),
+        ),
+      ], writeMetadata: false);
 
       expect(
         () => serverWith().updateModules(dill, full: true),
         throwsDevToolException(
-          allOf(
-            contains('$dill.metadata'),
-            contains('main'),
-          ),
+          allOf(contains('$dill.metadata'), contains('main')),
         ),
       );
     });
@@ -525,18 +522,15 @@ void main() {
       // `$dartReloadModifiedModules` skips it — the edit reloads, the screen
       // does not change. DWDS then chokes on the same bytes with no module
       // named.
-      final dir = tempDir();
-      final dill = writeCompile(dir, [
+      final _Dir dir = tempDir();
+      final String dill = writeCompile(dir, [
         const Module('widgets.lib.js', 'code', metadata: 'not json'),
       ]);
 
       expect(
         () => serverWith().updateModules(dill, full: true),
         throwsDevToolException(
-          allOf(
-            contains('widgets'),
-            contains('$dill.metadata'),
-          ),
+          allOf(contains('widgets'), contains('$dill.metadata')),
         ),
       );
     });
@@ -544,8 +538,8 @@ void main() {
     test('names the module whose metadata is not the shape DDC emits', () {
       // Valid JSON, wrong shape. The `as` casts that read these fields would
       // report it as a TypeError naming neither the module nor the file.
-      final dir = tempDir();
-      final dill = writeCompile(dir, [
+      final _Dir dir = tempDir();
+      final String dill = writeCompile(dir, [
         Module(
           'widgets.lib.js',
           'code',
@@ -568,9 +562,9 @@ void main() {
     test(
       'warns once, naming them, for modules that came back with no metadata',
       () {
-        final logs = captureLogs();
-        final dir = tempDir();
-        final dill = writeCompile(dir, [
+        final List<Map<String, dynamic>> logs = captureLogs();
+        final _Dir dir = tempDir();
+        final String dill = writeCompile(dir, [
           Module(
             'main.lib.js',
             'main code',
@@ -593,14 +587,14 @@ void main() {
     test(
       'serves the modules a compile produced, and reloads name libraries',
       () async {
-        final logs = captureLogs();
-        final dir = tempDir();
+        final List<Map<String, dynamic>> logs = captureLogs();
+        final _Dir dir = tempDir();
         writeBootFiles(dir.path);
-        final server = serverWith(buildOutputDir: dir.path);
+        final WebModuleServer server = serverWith(buildOutputDir: dir.path);
         await server.start();
         addTearDown(server.stop);
 
-        final first = writeCompile(dir, [
+        final String first = writeCompile(dir, [
           Module(
             'main.lib.js',
             'first code',
@@ -619,7 +613,7 @@ void main() {
         // reload and reloads every module listed.
         expect(await get(server, '/reloaded_sources.json'), '[]');
 
-        final second = writeCompile(dir, [
+        final String second = writeCompile(dir, [
           Module(
             'main.lib.js',
             'second code',
@@ -649,9 +643,9 @@ void main() {
     // that 404s every untouched module — a working page turning blank on an
     // edit to one file.
     test('keeps modules an incremental compile left out', () async {
-      final dir = tempDir();
+      final _Dir dir = tempDir();
       writeBootFiles(dir.path);
-      final server = serverWith(buildOutputDir: dir.path);
+      final WebModuleServer server = serverWith(buildOutputDir: dir.path);
       await server.start();
       addTearDown(server.stop);
 
@@ -708,14 +702,12 @@ void main() {
     // `reloaded_sources.json` lists nothing, `$dartReloadModifiedModules`
     // reloads nothing, and the reload reports success over an unchanged page.
     test('ends a reload whose recompile produced no modules', () {
-      final dir = tempDir();
-      final server = serverWith();
+      final _Dir dir = tempDir();
+      final WebModuleServer server = serverWith();
       server.updateModules(
-        writeCompile(
-          dir,
-          [const Module('main.lib.js', 'code')],
-          dill: 'out.dill',
-        ),
+        writeCompile(dir, [
+          const Module('main.lib.js', 'code'),
+        ], dill: 'out.dill'),
         full: true,
       );
 
@@ -759,8 +751,10 @@ void main() {
     ).allMatches(script).map((m) => m.group(1)!).toSet();
 
     test('every file main.dart.js pulls in is served', () async {
-      final server = await bootableServer(withProgram: true);
-      final referenced = referencedFiles(await get(server, '/main.dart.js'));
+      final WebModuleServer server = await bootableServer(withProgram: true);
+      final Set<String> referenced = referencedFiles(
+        await get(server, '/main.dart.js'),
+      );
 
       // Guard the guard: a regex that matched nothing would make this test
       // pass against a server that serves none of them.
@@ -781,8 +775,8 @@ void main() {
     });
 
     test('the handoff from main_module.bootstrap.js is served too', () async {
-      final server = await bootableServer(withProgram: true);
-      final referenced = referencedFiles(
+      final WebModuleServer server = await bootableServer(withProgram: true);
+      final Set<String> referenced = referencedFiles(
         await get(server, '/main_module.bootstrap.js'),
       );
       expect(referenced, contains('on_load_end_bootstrap.js'));
@@ -792,8 +786,8 @@ void main() {
     });
 
     test('flutter_bootstrap.js names a main script that is served', () async {
-      final server = await bootableServer(withProgram: true);
-      final script = await get(server, '/flutter_bootstrap.js');
+      final WebModuleServer server = await bootableServer(withProgram: true);
+      final String script = await get(server, '/flutter_bootstrap.js');
       expect(script, contains('"mainJsPath":"main.dart.js"'));
       await get(server, '/main.dart.js');
     });
@@ -830,9 +824,9 @@ void main() {
         ], dill: dill);
 
     test('an incremental compile still describes the whole program', () async {
-      final dir = tempDir();
+      final _Dir dir = tempDir();
       writeBootFiles(dir.path);
-      final server = serverWith(buildOutputDir: dir.path);
+      final WebModuleServer server = serverWith(buildOutputDir: dir.path);
       await server.start();
       addTearDown(server.stop);
 
@@ -861,9 +855,9 @@ void main() {
       // own: a module deleted from the program must not linger in the list a
       // fresh boot loads, or the page fetches a script the server no longer
       // has.
-      final dir = tempDir();
+      final _Dir dir = tempDir();
       writeBootFiles(dir.path);
-      final server = serverWith(buildOutputDir: dir.path);
+      final WebModuleServer server = serverWith(buildOutputDir: dir.path);
       await server.start();
       addTearDown(server.stop);
 
@@ -898,7 +892,7 @@ void main() {
     ];
 
     test('refuses every boot script until a program is held', () async {
-      final server = await bootableServer(withProgram: false);
+      final WebModuleServer server = await bootableServer(withProgram: false);
       for (final path in bootChain) {
         expect(
           (await fetch(server, '/$path')).status,
@@ -909,17 +903,17 @@ void main() {
     });
 
     test('the refusal says which state the server is in', () async {
-      final server = await bootableServer(withProgram: false);
+      final WebModuleServer server = await bootableServer(withProgram: false);
       // Named rather than matched loosely: a bare 503 tells a developer their
       // page is blank, not why, and this is the one response they will see
       // while a first compile is failing.
-      final body = (await fetch(server, '/main.dart.js')).body;
+      final String body = (await fetch(server, '/main.dart.js')).body;
       expect(body, contains('no program'));
       expect(body, contains('compile'));
     });
 
     test('serves every boot script once a program is held', () async {
-      final server = await bootableServer(withProgram: true);
+      final WebModuleServer server = await bootableServer(withProgram: true);
       for (final path in bootChain) {
         expect(
           (await fetch(server, '/$path')).status,
@@ -933,7 +927,7 @@ void main() {
       // Without this the refusal outlives the state that justified it: a
       // pinned `--web-port` puts the next run on the same origin, and a
       // cached 503 would blank a page whose server is healthy.
-      final server = await bootableServer(withProgram: false);
+      final WebModuleServer server = await bootableServer(withProgram: false);
       for (final path in bootChain) {
         expect(
           (await fetch(server, '/$path')).cacheControl,
@@ -944,7 +938,7 @@ void main() {
     });
 
     test('a served boot script is never cached either', () async {
-      final server = await bootableServer(withProgram: true);
+      final WebModuleServer server = await bootableServer(withProgram: true);
       for (final path in bootChain) {
         expect(
           (await fetch(server, '/$path')).cacheControl,
@@ -961,14 +955,14 @@ void main() {
       // branch instead of answering would hand the browser a compiled page
       // that renders correctly and has no hot reload at all — the failure this
       // gate exists to make impossible.
-      final dir = tempDir();
+      final _Dir dir = tempDir();
       writeBootFiles(dir.path);
       File('${dir.path}/main.dart.js').writeAsStringSync('// release bundle');
-      final server = serverWith(buildOutputDir: dir.path);
+      final WebModuleServer server = serverWith(buildOutputDir: dir.path);
       await server.start();
       addTearDown(server.stop);
 
-      final response = await fetch(server, '/main.dart.js');
+      final _Response response = await fetch(server, '/main.dart.js');
       expect(response.status, HttpStatus.serviceUnavailable);
       expect(response.body, isNot(contains('release bundle')));
     });
@@ -976,7 +970,7 @@ void main() {
 
   group('WebModuleServer.start', () {
     test('refuses to start without flutter.js', () {
-      final dir = tempDir();
+      final _Dir dir = tempDir();
       // The other half of the boot path is there, so this is about flutter.js
       // and not about whichever check happens to run first.
       File(devBootstrapPath(dir.path)).writeAsStringSync('// bootstrap');
@@ -984,10 +978,7 @@ void main() {
       expect(
         () => serverWith(buildOutputDir: dir.path).start(),
         throwsDevToolException(
-          allOf(
-            contains('${dir.path}/flutter.js'),
-            contains('blank'),
-          ),
+          allOf(contains('${dir.path}/flutter.js'), contains('blank')),
         ),
       );
     });
@@ -997,16 +988,13 @@ void main() {
     // none leaves the page with nothing to boot, and the browser reports that
     // as a blank tab.
     test("refuses to start without the build's flutter_bootstrap.js", () {
-      final dir = tempDir();
+      final _Dir dir = tempDir();
       File('${dir.path}/flutter.js').writeAsStringSync('// flutter.js');
 
       expect(
         () => serverWith(buildOutputDir: dir.path).start(),
         throwsDevToolException(
-          allOf(
-            contains(devBootstrapPath(dir.path)),
-            contains('blank'),
-          ),
+          allOf(contains(devBootstrapPath(dir.path)), contains('blank')),
         ),
       );
     });
@@ -1014,10 +1002,10 @@ void main() {
 
   group('WebModuleServer asset requests', () {
     test('logs the failure behind a 500', () async {
-      final logs = captureLogs();
-      final dir = tempDir();
+      final List<Map<String, dynamic>> logs = captureLogs();
+      final _Dir dir = tempDir();
       writeBootFiles(dir.path);
-      final server = serverWith(buildOutputDir: dir.path);
+      final WebModuleServer server = serverWith(buildOutputDir: dir.path);
       await server.start();
       addTearDown(server.stop);
 
@@ -1029,10 +1017,10 @@ void main() {
       File(devBootstrapPath(dir.path)).deleteSync();
       final client = HttpClient();
       addTearDown(() => client.close(force: true));
-      final request = await client.getUrl(
+      final HttpClientRequest request = await client.getUrl(
         server.uri!.replace(path: '/flutter_bootstrap.js'),
       );
-      final response = await request.close();
+      final _Resp response = await request.close();
       await response.drain<void>();
 
       expect(response.statusCode, HttpStatus.internalServerError);
@@ -1043,19 +1031,19 @@ void main() {
     });
 
     test('a missing asset is still a 404, not a report', () async {
-      final logs = captureLogs();
-      final dir = tempDir();
+      final List<Map<String, dynamic>> logs = captureLogs();
+      final _Dir dir = tempDir();
       writeBootFiles(dir.path);
-      final server = serverWith(buildOutputDir: dir.path);
+      final WebModuleServer server = serverWith(buildOutputDir: dir.path);
       await server.start();
       addTearDown(server.stop);
 
       final client = HttpClient();
       addTearDown(() => client.close(force: true));
-      final request = await client.getUrl(
+      final HttpClientRequest request = await client.getUrl(
         server.uri!.replace(path: '/favicon.ico'),
       );
-      final response = await request.close();
+      final _Resp response = await request.close();
       await response.drain<void>();
 
       expect(response.statusCode, HttpStatus.notFound);
@@ -1073,9 +1061,9 @@ void main() {
         addTearDown(() => client.close(force: true));
 
         Future<String> mainModuleFrom(bool nativeNullAssertions) async {
-          final dir = tempDir();
+          final _Dir dir = tempDir();
           writeBootFiles(dir.path);
-          final server = serverWith(
+          final WebModuleServer server = serverWith(
             buildOutputDir: dir.path,
             nativeNullAssertions: nativeNullAssertions,
           );
@@ -1094,10 +1082,10 @@ void main() {
             ]),
             full: true,
           );
-          final request = await client.getUrl(
+          final HttpClientRequest request = await client.getUrl(
             server.uri!.replace(path: '/main_module.bootstrap.js'),
           );
-          final response = await request.close();
+          final _Resp response = await request.close();
           return response.transform(utf8.decoder).join();
         }
 
@@ -1150,8 +1138,10 @@ void main() {
     Future<HttpClientResponse> getPath(Uri base, String pathAndQuery) async {
       final client = HttpClient();
       addTearDown(() => client.close(force: true));
-      final request = await client.getUrl(Uri.parse('$base$pathAndQuery'));
-      final response = await request.close();
+      final HttpClientRequest request = await client.getUrl(
+        Uri.parse('$base$pathAndQuery'),
+      );
+      final _Resp response = await request.close();
       addTearDown(() => response.drain<void>().catchError((_) {}));
       return response;
     }
@@ -1169,17 +1159,17 @@ void main() {
     }
 
     test('serves index.html at the root', () async {
-      final dir = tempDir();
+      final _Dir dir = tempDir();
       File('${dir.path}/index.html').writeAsStringSync('<html></html>');
-      final server = await serveBundle(dir);
+      final StaticWebServer server = await serveBundle(dir);
 
-      final response = await getPath(server.uri!, '/');
+      final _Resp response = await getPath(server.uri!, '/');
       expect(response.statusCode, HttpStatus.ok);
       expect(response.headers.value('content-type'), 'text/html');
     });
 
     test('answers every file from the one MIME table', () async {
-      final dir = tempDir();
+      final _Dir dir = tempDir();
       final files = [
         'index.html',
         'main.dart.mjs',
@@ -1194,10 +1184,10 @@ void main() {
           ..createSync(recursive: true)
           ..writeAsStringSync('content of $path');
       }
-      final server = await serveBundle(dir);
+      final StaticWebServer server = await serveBundle(dir);
 
       for (final path in files) {
-        final response = await getPath(server.uri!, '/$path');
+        final _Resp response = await getPath(server.uri!, '/$path');
         expect(response.statusCode, HttpStatus.ok, reason: 'GET /$path');
         expect(
           response.headers.value('content-type'),
@@ -1208,10 +1198,13 @@ void main() {
     });
 
     test('a missing file is a 404', () async {
-      final dir = tempDir();
-      final server = await serveBundle(dir);
+      final _Dir dir = tempDir();
+      final StaticWebServer server = await serveBundle(dir);
 
-      final response = await getPath(server.uri!, '/no_such_file.js');
+      final _Resp response = await getPath(
+        server.uri!,
+        '/no_such_file.js',
+      );
       expect(response.statusCode, HttpStatus.notFound);
     });
 
@@ -1220,17 +1213,20 @@ void main() {
       // collapses `..` segments (even `%2e%2e`-encoded ones) before a
       // handler runs, so a wire-level request cannot exercise this check —
       // an HTTP assertion here would pass with the check deleted.
-      final dir = tempDir();
+      final _Dir dir = tempDir();
       Directory('${dir.path}/bundle').createSync();
       File('${dir.path}/secret.txt').writeAsStringSync('secret');
 
-      final response = serveFileWithin('${dir.path}/bundle', '../secret.txt');
+      final Response response = serveFileWithin(
+        '${dir.path}/bundle',
+        '../secret.txt',
+      );
       expect(response.statusCode, HttpStatus.notFound);
     });
 
     test('exposes its HttpServer so a launch can own its lifetime', () async {
-      final dir = tempDir();
-      final server = await serveBundle(dir);
+      final _Dir dir = tempDir();
+      final StaticWebServer server = await serveBundle(dir);
       expect(server.server, isNotNull);
       expect(server.uri!.port, server.server!.port);
     });
@@ -1238,7 +1234,7 @@ void main() {
 
   group('basePathOf', () {
     String basePathFor(String html) {
-      final dir = tempDir();
+      final _Dir dir = tempDir();
       File('${dir.path}/index.html').writeAsStringSync(html);
       return basePathOf(dir.path);
     }
@@ -1309,8 +1305,8 @@ void main() {
     Future<({int status, String body})> getUrl(Uri url) async {
       final client = HttpClient();
       try {
-        final response = await (await client.getUrl(url)).close();
-        final body = await response.transform(utf8.decoder).join();
+        final _Resp response = await (await client.getUrl(url)).close();
+        final String body = await response.transform(utf8.decoder).join();
         return (status: response.statusCode, body: body);
       } finally {
         client.close();
@@ -1320,7 +1316,7 @@ void main() {
     const index = '<html><head><base href="/app/"></head></html>';
 
     test('the static server answers under it and nowhere else', () async {
-      final dir = tempDir();
+      final _Dir dir = tempDir();
       File('${dir.path}/index.html').writeAsStringSync(index);
       File('${dir.path}/main.dart.mjs').writeAsStringSync('// main');
       final server = StaticWebServer(
@@ -1330,22 +1326,22 @@ void main() {
       await server.start();
       addTearDown(server.stop);
 
-      final base = server.uri!;
+      final Uri base = server.uri!;
       expect(base.path, '/app');
       expect((await getUrl(Uri.parse('$base/'))).body, index);
       expect((await getUrl(base)).body, index);
       expect((await getUrl(Uri.parse('$base/main.dart.mjs'))).body, '// main');
 
-      final root = await getUrl(base.replace(path: '/main.dart.mjs'));
+      final _Root root = await getUrl(base.replace(path: '/main.dart.mjs'));
       expect(root.status, HttpStatus.notFound);
       expect(root.body, contains('/app/'));
     });
 
     test('the module server answers under it and nowhere else', () async {
-      final dir = tempDir();
+      final _Dir dir = tempDir();
       writeBootFiles(dir.path);
       File('${dir.path}/index.html').writeAsStringSync(index);
-      final server = serverWith(buildOutputDir: dir.path);
+      final WebModuleServer server = serverWith(buildOutputDir: dir.path);
       await server.start();
       addTearDown(server.stop);
       server.updateModules(
@@ -1369,7 +1365,7 @@ void main() {
         expect((await fetch(server, path)).status, HttpStatus.ok, reason: path);
       }
       expect((await fetch(server, '/app/')).body, index);
-      final outside = await fetch(server, '/main.dart.js');
+      final _Response outside = await fetch(server, '/main.dart.js');
       expect(outside.status, HttpStatus.notFound);
       expect(outside.body, contains('/app/'));
     });
@@ -1380,10 +1376,10 @@ void main() {
         // DWDS adds [AssetReader.basePath] to every server path it derives and
         // hands those paths back here; the merged metadata is named after the
         // page's own bootstrap URL, base path included.
-        final dir = tempDir();
+        final _Dir dir = tempDir();
         writeBootFiles(dir.path);
         File('${dir.path}/index.html').writeAsStringSync(index);
-        final server = serverWith(buildOutputDir: dir.path);
+        final WebModuleServer server = serverWith(buildOutputDir: dir.path);
         await server.start();
         addTearDown(server.stop);
         server.updateModules(
@@ -1423,7 +1419,7 @@ void main() {
       Directory dir, {
       required WebServerOptions options,
     }) async {
-      final moduleServer = serverWith(
+      final WebModuleServer moduleServer = serverWith(
         buildOutputDir: dir.path,
         options: options,
       );
@@ -1439,7 +1435,7 @@ void main() {
     }
 
     Directory bundle() {
-      final dir = tempDir();
+      final _Dir dir = tempDir();
       writeBootFiles(dir.path);
       File('${dir.path}/styles.css').writeAsStringSync('body {}');
       return dir;
@@ -1452,11 +1448,9 @@ void main() {
       bool acceptAnyCert = false,
     }) async {
       final client = HttpClient();
-      if (acceptAnyCert) {
-        client.badCertificateCallback = (_, __, ___) => true;
-      }
+      if (acceptAnyCert) client.badCertificateCallback = (_, __, ___) => true;
       addTearDown(() => client.close(force: true));
-      final response = await (await client.getUrl(url)).close();
+      final _Resp response = await (await client.getUrl(url)).close();
       return (
         response: response,
         body: await response.transform(utf8.decoder).join(),
@@ -1466,14 +1460,16 @@ void main() {
     test(
       'isolation headers are on both servers when asked, off when not',
       () async {
-        final dir = bundle();
+        final _Dir dir = bundle();
         for (final isolated in [true, false]) {
-          final bases = await bothServers(
+          final List<Uri> bases = await bothServers(
             dir,
             options: WebServerOptions(crossOriginIsolation: isolated),
           );
           for (final base in bases) {
-            final r = await get(base.replace(path: '/styles.css'));
+            final ({String body, HttpClientResponse response}) r = await get(
+              base.replace(path: '/styles.css'),
+            );
             expect(r.response.statusCode, HttpStatus.ok, reason: '$base');
             expect(
               r.response.headers.value('content-type'),
@@ -1499,15 +1495,15 @@ void main() {
       // The module server answers `flutter_bootstrap.js` from memory rather
       // than from the bundle. A header mechanism that only covered file
       // responses would isolate the assets and not the document.
-      final dir = bundle();
-      final moduleServer = serverWith(
+      final _Dir dir = bundle();
+      final WebModuleServer moduleServer = serverWith(
         buildOutputDir: dir.path,
         options: const WebServerOptions(crossOriginIsolation: true),
       );
       await moduleServer.start();
       addTearDown(moduleServer.stop);
 
-      final r = await get(
+      final ({String body, HttpClientResponse response}) r = await get(
         moduleServer.uri!.replace(path: '/flutter_bootstrap.js'),
       );
       expect(r.response.statusCode, HttpStatus.ok);
@@ -1528,18 +1524,18 @@ void main() {
     test('a fixed port is the port both servers bind', () async {
       // Bound one at a time — two servers cannot hold one port. The proof the
       // flag took effect is the socket, not the options object.
-      final dir = bundle();
+      final _Dir dir = bundle();
       // A port that was free a moment ago, taken the same way the servers
       // take theirs so the address family cannot differ.
       final probe = StaticWebServer(
         rootPath: dir.path,
         options: const WebServerOptions(crossOriginIsolation: false),
       );
-      final port = (await probe.start()).port;
+      final int port = (await probe.start()).port;
       await probe.stop();
 
       final options = WebServerOptions(crossOriginIsolation: false, port: port);
-      final moduleServer = serverWith(
+      final WebModuleServer moduleServer = serverWith(
         buildOutputDir: dir.path,
         options: options,
       );
@@ -1560,12 +1556,12 @@ void main() {
         // Upstream retries four times onto whatever it can get. A fixed port
         // exists because something else expects the server there, so silently
         // moving would answer a question nobody asked.
-        final dir = bundle();
+        final _Dir dir = bundle();
         final holder = StaticWebServer(
           rootPath: dir.path,
           options: const WebServerOptions(crossOriginIsolation: false),
         );
-        final port = (await holder.start()).port;
+        final int port = (await holder.start()).port;
         addTearDown(holder.stop);
         final options = WebServerOptions(
           crossOriginIsolation: false,
@@ -1575,10 +1571,7 @@ void main() {
         await expectLater(
           serverWith(buildOutputDir: dir.path, options: options).start(),
           throwsDevToolException(
-            allOf(
-              contains('$port'),
-              contains('--web-port'),
-            ),
+            allOf(contains('$port'), contains('--web-port')),
           ),
         );
         await expectLater(
@@ -1599,17 +1592,19 @@ void main() {
     // numbers sends every `localhost` client that picks IPv4 to adb, which
     // accepts the connection and closes it without a byte.
     test('every address localhost resolves to answers this server', () async {
-      final dir = bundle();
-      final bases = await bothServers(
+      final _Dir dir = bundle();
+      final List<Uri> bases = await bothServers(
         dir,
         options: const WebServerOptions(crossOriginIsolation: false),
       );
-      final addresses = await InternetAddress.lookup(defaultHostname);
+      final List<InternetAddress> addresses = await InternetAddress.lookup(
+        defaultHostname,
+      );
       expect(addresses, isNotEmpty);
 
       for (final base in bases) {
         for (final address in addresses) {
-          final r = await get(
+          final ({String body, HttpClientResponse response}) r = await get(
             base.replace(host: address.address, path: '/styles.css'),
           );
           expect(
@@ -1628,65 +1623,62 @@ void main() {
     // dressed as a successful start — the run reports it is serving at
     // http://localhost:PORT while every client that resolves to the held
     // family reaches the other process.
-    test(
-      'a port held on either loopback family is refused, not half-bound',
-      () async {
-        final dir = bundle();
-        // Both families where the host has both, and only the one it has where
-        // it has one — the tool is right to serve `localhost` on a single family
-        // when that is all this machine can assign, and a decoy on an address
-        // that cannot be bound at all is a case about the machine.
-        final loopbacks = await assignableLoopbacks();
-        expect(loopbacks, isNotEmpty);
-        for (final held in loopbacks) {
-          // A port this server could really have served on — free on *both*
-          // loopback families, taken the way it takes its own. Letting the decoy
-          // pick the port instead only proves it is free on the decoy's family:
-          // the other one may be held by something already (adb holds dozens of
-          // 127.0.0.1 ports), and then the refusal below is about that process
-          // rather than about the decoy, and nothing here is under test.
-          final probe = StaticWebServer(
-            rootPath: dir.path,
-            options: const WebServerOptions(crossOriginIsolation: false),
-          );
-          final port = (await probe.start()).port;
-          await probe.stop();
+    test('a port held on either loopback family is refused, not half-bound', () async {
+      final _Dir dir = bundle();
+      // Both families where the host has both, and only the one it has where
+      // it has one — the tool is right to serve `localhost` on a single family
+      // when that is all this machine can assign, and a decoy on an address
+      // that cannot be bound at all is a case about the machine.
+      final List<InternetAddress> loopbacks = await assignableLoopbacks();
+      expect(loopbacks, isNotEmpty);
+      for (final held in loopbacks) {
+        // A port this server could really have served on — free on *both*
+        // loopback families, taken the way it takes its own. Letting the decoy
+        // pick the port instead only proves it is free on the decoy's family:
+        // the other one may be held by something already (adb holds dozens of
+        // 127.0.0.1 ports), and then the refusal below is about that process
+        // rather than about the decoy, and nothing here is under test.
+        final probe = StaticWebServer(
+          rootPath: dir.path,
+          options: const WebServerOptions(crossOriginIsolation: false),
+        );
+        final int port = (await probe.start()).port;
+        await probe.stop();
 
-          final decoy = await HttpServer.bind(held, port);
-          addTearDown(() => decoy.close(force: true));
-          final options = WebServerOptions(
-            crossOriginIsolation: false,
-            port: port,
-          );
+        final HttpServer decoy = await HttpServer.bind(held, port);
+        addTearDown(() => decoy.close(force: true));
+        final options = WebServerOptions(
+          crossOriginIsolation: false,
+          port: port,
+        );
 
-          await expectLater(
-            serverWith(buildOutputDir: dir.path, options: options).start(),
-            throwsDevToolException(contains('$port')),
-            reason: 'held on ${held.address}',
-          );
-          await expectLater(
-            StaticWebServer(rootPath: dir.path, options: options).start(),
-            throwsDevToolException(contains('$port')),
-            reason: 'held on ${held.address}',
-          );
+        await expectLater(
+          serverWith(buildOutputDir: dir.path, options: options).start(),
+          throwsDevToolException(contains('$port')),
+          reason: 'held on ${held.address}',
+        );
+        await expectLater(
+          StaticWebServer(rootPath: dir.path, options: options).start(),
+          throwsDevToolException(contains('$port')),
+          reason: 'held on ${held.address}',
+        );
 
-          // And the refused start gave back whatever it had taken. With the
-          // decoy on ::1 the bind had already taken 127.0.0.1 before it found
-          // out, and an attempt that gives up without letting that one go holds
-          // the very port the next attempt needs — the same leak the
-          // `--web-header` case below is about, reached by a different route.
-          //
-          // Asked by *being* that next attempt: with the decoy gone, the same
-          // named port has to start. Binding the other family instead would only
-          // ask about a family this host may not have, and would say nothing
-          // about the one it does.
-          await decoy.close(force: true);
-          final next = StaticWebServer(rootPath: dir.path, options: options);
-          await next.start();
-          await next.stop();
-        }
-      },
-    );
+        // And the refused start gave back whatever it had taken. With the
+        // decoy on ::1 the bind had already taken 127.0.0.1 before it found
+        // out, and an attempt that gives up without letting that one go holds
+        // the very port the next attempt needs — the same leak the
+        // `--web-header` case below is about, reached by a different route.
+        //
+        // Asked by *being* that next attempt: with the decoy gone, the same
+        // named port has to start. Binding the other family instead would only
+        // ask about a family this host may not have, and would say nothing
+        // about the one it does.
+        await decoy.close(force: true);
+        final next = StaticWebServer(rootPath: dir.path, options: options);
+        await next.start();
+        await next.stop();
+      }
+    });
 
     // `--web-hostname any` publishes `http://localhost:PORT` — [displayHost]
     // is `localhost`, because `any` is not a name a browser resolves. So the
@@ -1696,21 +1688,23 @@ void main() {
     test(
       'every address the "any" URL resolves to answers this server',
       () async {
-        final dir = bundle();
-        final bases = await bothServers(
+        final _Dir dir = bundle();
+        final List<Uri> bases = await bothServers(
           dir,
           options: const WebServerOptions(
             crossOriginIsolation: false,
             hostname: anyHostname,
           ),
         );
-        final addresses = await InternetAddress.lookup(defaultHostname);
+        final List<InternetAddress> addresses = await InternetAddress.lookup(
+          defaultHostname,
+        );
         expect(addresses, isNotEmpty);
 
         for (final base in bases) {
           expect(base.host, defaultHostname);
           for (final address in addresses) {
-            final r = await get(
+            final ({String body, HttpClientResponse response}) r = await get(
               base.replace(host: address.address, path: '/styles.css'),
             );
             expect(
@@ -1737,76 +1731,73 @@ void main() {
     // bind; on Linux the kernel refuses the wildcard bind outright
     // (EADDRINUSE) and it is caught by the bind. Either
     // way the run ends naming the port, which is what a caller can rely on.
-    test(
-      'a wildcard bind that does not own its port is refused, not silent',
-      () async {
-        final dir = bundle();
-        // A port this server could really have served on — free on both loopback
-        // families, taken the way it takes its own. Letting the decoy pick it
-        // would only prove it was free on the decoy's family.
-        final probe = StaticWebServer(
-          rootPath: dir.path,
-          options: const WebServerOptions(crossOriginIsolation: false),
-        );
-        final port = (await probe.start()).port;
-        await probe.stop();
+    test('a wildcard bind that does not own its port is refused, not silent', () async {
+      final _Dir dir = bundle();
+      // A port this server could really have served on — free on both loopback
+      // families, taken the way it takes its own. Letting the decoy pick it
+      // would only prove it was free on the decoy's family.
+      final probe = StaticWebServer(
+        rootPath: dir.path,
+        options: const WebServerOptions(crossOriginIsolation: false),
+      );
+      final int port = (await probe.start()).port;
+      await probe.stop();
 
-        // Answers, and answers wrongly — a well-behaved HTTP server on the port
-        // this run wanted. adb, the squatter this exists for, closes the
-        // connection without a byte, which any check would notice; a decoy
-        // that returns a clean 200 is the case that only a check reading what
-        // came back can tell from success.
-        final decoy = await HttpServer.bind(InternetAddress.loopbackIPv4, port);
-        addTearDown(() => decoy.close(force: true));
-        decoy.listen((r) {
-          r.response
-            ..statusCode = HttpStatus.ok
-            ..write('the decoy answered');
-          r.response.close();
-        });
+      // Answers, and answers wrongly — a well-behaved HTTP server on the port
+      // this run wanted. adb, the squatter this exists for, closes the
+      // connection without a byte, which any check would notice; a decoy
+      // that returns a clean 200 is the case that only a check reading what
+      // came back can tell from success.
+      final HttpServer decoy = await HttpServer.bind(
+        InternetAddress.loopbackIPv4,
+        port,
+      );
+      addTearDown(() => decoy.close(force: true));
+      decoy.listen((r) {
+        r.response
+          ..statusCode = HttpStatus.ok
+          ..write('the decoy answered');
+        r.response.close();
+      });
 
-        final options = WebServerOptions(
-          crossOriginIsolation: false,
-          hostname: anyHostname,
-          port: port,
-        );
-        // Both platform paths end the same way — `Free port $port`, the advice a
-        // single named draw ends with — and neither may end the way a *search*
-        // does, because a named port is one draw and describing five would be
-        // describing draws this run never made. Naming the port is not enough on
-        // its own to say that: every branch of both messages carries the port
-        // number, so a bare `contains('$port')` holds whichever one was taken.
-        final refusedNamingThePort = throwsDevToolException(
-          allOf(
-            contains('Free port $port'),
-            isNot(contains('All 5 ports')),
-          ),
-        );
-        await expectLater(
-          serverWith(buildOutputDir: dir.path, options: options).start(),
-          refusedNamingThePort,
-        );
-        await expectLater(
-          StaticWebServer(rootPath: dir.path, options: options).start(),
-          refusedNamingThePort,
-        );
+      final options = WebServerOptions(
+        crossOriginIsolation: false,
+        hostname: anyHostname,
+        port: port,
+      );
+      // Both platform paths end the same way — `Free port $port`, the advice a
+      // single named draw ends with — and neither may end the way a *search*
+      // does, because a named port is one draw and describing five would be
+      // describing draws this run never made. Naming the port is not enough on
+      // its own to say that: every branch of both messages carries the port
+      // number, so a bare `contains('$port')` holds whichever one was taken.
+      final Matcher refusedNamingThePort = throwsDevToolException(
+        allOf(contains('Free port $port'), isNot(contains('All 5 ports'))),
+      );
+      await expectLater(
+        serverWith(buildOutputDir: dir.path, options: options).start(),
+        refusedNamingThePort,
+      );
+      await expectLater(
+        StaticWebServer(rootPath: dir.path, options: options).start(),
+        refusedNamingThePort,
+      );
 
-        // And the refused start gave the socket back. A wildcard bind succeeds
-        // on this kernel even against the decoy, so a start that gives up
-        // without closing it holds the port for the rest of the process — the
-        // one port the next attempt was told to use.
-        //
-        // Asked by *being* that next attempt: with the decoy gone, the same
-        // named port has to start. Binding ::1 beside the wildcard would ask
-        // nothing, twice over: a host with no IPv6 cannot run it at all, and
-        // where it can, BSD permits a specific address beside a wildcard, so it
-        // succeeds whether or not the socket was given back.
-        await decoy.close(force: true);
-        final next = StaticWebServer(rootPath: dir.path, options: options);
-        await next.start();
-        await next.stop();
-      },
-    );
+      // And the refused start gave the socket back. A wildcard bind succeeds
+      // on this kernel even against the decoy, so a start that gives up
+      // without closing it holds the port for the rest of the process — the
+      // one port the next attempt was told to use.
+      //
+      // Asked by *being* that next attempt: with the decoy gone, the same
+      // named port has to start. Binding ::1 beside the wildcard would ask
+      // nothing, twice over: a host with no IPv6 cannot run it at all, and
+      // where it can, BSD permits a specific address beside a wildcard, so it
+      // succeeds whether or not the socket was given back.
+      await decoy.close(force: true);
+      final next = StaticWebServer(rootPath: dir.path, options: options);
+      await next.start();
+      await next.stop();
+    });
 
     /// A [Squatter] backed by a real server that answers, and answers wrongly.
     ///
@@ -1815,7 +1806,10 @@ void main() {
     /// closes the connection without a byte, which is easier to notice, not
     /// harder.
     Future<Squatter> squatterTaking({required bool everyPort}) async {
-      final decoy = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final HttpServer decoy = await HttpServer.bind(
+        InternetAddress.loopbackIPv4,
+        0,
+      );
       addTearDown(() => decoy.close(force: true));
       decoy.listen((request) {
         request.response
@@ -1839,10 +1833,10 @@ void main() {
     // kernel hands to somebody else is not free — so the answer is another
     // draw, not the end of the run.
     test('a wildcard draws again past a port it turns out not to own', () async {
-      final dir = bundle();
-      final squatter = await squatterTaking(everyPort: false);
+      final _Dir dir = bundle();
+      final Squatter squatter = await squatterTaking(everyPort: false);
       final server = StaticWebServer(rootPath: dir.path, options: wildcard);
-      final uri = await squatter.run(server.start);
+      final Uri uri = await squatter.run(server.start);
       addTearDown(server.stop);
 
       // The interception this is about really happened...
@@ -1857,7 +1851,9 @@ void main() {
       expect(uri.port, squatter.probed.last);
       // Observed health rather than a returned value: the URL this run prints
       // serves the bundle.
-      final r = await get(uri.replace(path: '/styles.css'));
+      final ({String body, HttpClientResponse response}) r = await get(
+        uri.replace(path: '/styles.css'),
+      );
       expect(r.response.statusCode, HttpStatus.ok);
       expect(r.body, 'body {}');
     });
@@ -1869,17 +1865,17 @@ void main() {
     test(
       'a named port that is intercepted fails naming it, and is not redrawn',
       () async {
-        final dir = bundle();
+        final _Dir dir = bundle();
         // A port that was free a moment ago, taken the way the servers take
         // theirs so the address family cannot differ.
         final free = StaticWebServer(
           rootPath: dir.path,
           options: const WebServerOptions(crossOriginIsolation: false),
         );
-        final port = (await free.start()).port;
+        final int port = (await free.start()).port;
         await free.stop();
 
-        final squatter = await squatterTaking(everyPort: true);
+        final Squatter squatter = await squatterTaking(everyPort: true);
         await expectLater(
           squatter.run(
             () => StaticWebServer(
@@ -1913,8 +1909,8 @@ void main() {
     test(
       'a wildcard search gives up after five draws rather than running on',
       () async {
-        final dir = bundle();
-        final squatter = await squatterTaking(everyPort: true);
+        final _Dir dir = bundle();
+        final Squatter squatter = await squatterTaking(everyPort: true);
         await expectLater(
           squatter.run(
             () =>
@@ -1936,8 +1932,8 @@ void main() {
     );
 
     test('custom headers reach the wire on both servers', () async {
-      final dir = bundle();
-      final bases = await bothServers(
+      final _Dir dir = bundle();
+      final List<Uri> bases = await bothServers(
         dir,
         options: const WebServerOptions(
           crossOriginIsolation: false,
@@ -1945,7 +1941,9 @@ void main() {
         ),
       );
       for (final base in bases) {
-        final r = await get(base.replace(path: '/styles.css'));
+        final ({String body, HttpClientResponse response}) r = await get(
+          base.replace(path: '/styles.css'),
+        );
         expect(
           r.response.headers.value('x-custom-header'),
           'a value',
@@ -1960,8 +1958,8 @@ void main() {
       // `--web-header Content-Type=…` is inert where the handler typed the
       // response — which is every asset. Middleware applied after the handler
       // would have broken every MIME type in the bundle instead.
-      final dir = bundle();
-      final bases = await bothServers(
+      final _Dir dir = bundle();
+      final List<Uri> bases = await bothServers(
         dir,
         options: const WebServerOptions(
           crossOriginIsolation: false,
@@ -1969,7 +1967,9 @@ void main() {
         ),
       );
       for (final base in bases) {
-        final r = await get(base.replace(path: '/styles.css'));
+        final ({String body, HttpClientResponse response}) r = await get(
+          base.replace(path: '/styles.css'),
+        );
         expect(
           r.response.headers.value('content-type'),
           'text/css',
@@ -1983,13 +1983,15 @@ void main() {
       // an app served by this tool could not be put in an iframe. Upstream
       // removes it; so does this. A run that wants it back says
       // `--web-header X-Frame-Options=SAMEORIGIN`.
-      final dir = bundle();
-      final bases = await bothServers(
+      final _Dir dir = bundle();
+      final List<Uri> bases = await bothServers(
         dir,
         options: const WebServerOptions(crossOriginIsolation: false),
       );
       for (final base in bases) {
-        final r = await get(base.replace(path: '/styles.css'));
+        final ({String body, HttpClientResponse response}) r = await get(
+          base.replace(path: '/styles.css'),
+        );
         expect(
           r.response.headers.value('x-frame-options'),
           isNull,
@@ -1997,7 +1999,7 @@ void main() {
         );
       }
 
-      final withHeader = await bothServers(
+      final List<Uri> withHeader = await bothServers(
         dir,
         options: const WebServerOptions(
           crossOriginIsolation: false,
@@ -2005,7 +2007,9 @@ void main() {
         ),
       );
       for (final base in withHeader) {
-        final r = await get(base.replace(path: '/styles.css'));
+        final ({String body, HttpClientResponse response}) r = await get(
+          base.replace(path: '/styles.css'),
+        );
         expect(
           r.response.headers.value('x-frame-options'),
           'SAMEORIGIN',
@@ -2017,17 +2021,17 @@ void main() {
     test('TLS serves the bundle over https on both servers', () async {
       // A real handshake against a real certificate: the proof is a body
       // fetched over TLS, not an `isSecure` getter.
-      final dir = bundle();
-      final tls = writeTestCertificate(dir);
+      final _Dir dir = bundle();
+      final _Tls tls = writeTestCertificate(dir);
       final options = WebServerOptions(
         crossOriginIsolation: false,
         tlsCertPath: tls.certPath,
         tlsCertKeyPath: tls.keyPath,
       );
-      final bases = await bothServers(dir, options: options);
+      final List<Uri> bases = await bothServers(dir, options: options);
       for (final base in bases) {
         expect(base.scheme, 'https', reason: '$base');
-        final r = await get(
+        final ({String body, HttpClientResponse response}) r = await get(
           base.replace(path: '/styles.css'),
           acceptAnyCert: true,
         );
@@ -2045,19 +2049,19 @@ void main() {
     test(
       'TLS on "any" serves the bundle rather than failing its own check',
       () async {
-        final dir = bundle();
-        final tls = writeTestCertificate(dir);
+        final _Dir dir = bundle();
+        final _Tls tls = writeTestCertificate(dir);
         final options = WebServerOptions(
           crossOriginIsolation: false,
           hostname: anyHostname,
           tlsCertPath: tls.certPath,
           tlsCertKeyPath: tls.keyPath,
         );
-        final bases = await bothServers(dir, options: options);
+        final List<Uri> bases = await bothServers(dir, options: options);
         for (final base in bases) {
           expect(base.scheme, 'https', reason: '$base');
           expect(base.host, defaultHostname, reason: '$base');
-          final r = await get(
+          final ({String body, HttpClientResponse response}) r = await get(
             base.replace(path: '/styles.css'),
             acceptAnyCert: true,
           );
@@ -2068,8 +2072,8 @@ void main() {
     );
 
     test('an unusable certificate fails naming the flag', () async {
-      final dir = bundle();
-      final tls = writeTestCertificate(dir);
+      final _Dir dir = bundle();
+      final _Tls tls = writeTestCertificate(dir);
       await expectLater(
         StaticWebServer(
           rootPath: dir.path,
@@ -2099,12 +2103,12 @@ void main() {
       // and it does so *after* the bind. A throw that walked out of here
       // would leave the socket held by a server nobody has a handle to — and
       // with `--web-port` that is the exact port the next attempt needs.
-      final dir = bundle();
+      final _Dir dir = bundle();
       final probe = StaticWebServer(
         rootPath: dir.path,
         options: const WebServerOptions(crossOriginIsolation: false),
       );
-      final port = (await probe.start()).port;
+      final int port = (await probe.start()).port;
       await probe.stop();
 
       // A value dart:io will not take: a header value cannot contain a
@@ -2132,7 +2136,7 @@ void main() {
     });
 
     test('a hostname that does not resolve fails naming the flag', () async {
-      final dir = bundle();
+      final _Dir dir = bundle();
       await expectLater(
         StaticWebServer(
           rootPath: dir.path,
@@ -2142,16 +2146,13 @@ void main() {
           ),
         ).start(),
         throwsDevToolException(
-          allOf(
-            contains('--web-hostname'),
-            contains('no-such-host.invalid'),
-          ),
+          allOf(contains('--web-hostname'), contains('no-such-host.invalid')),
         ),
       );
     });
 
     test('"any" binds every interface and still reports localhost', () async {
-      final dir = bundle();
+      final _Dir dir = bundle();
       final server = StaticWebServer(
         rootPath: dir.path,
         options: const WebServerOptions(
@@ -2159,7 +2160,7 @@ void main() {
           hostname: anyHostname,
         ),
       );
-      final uri = await server.start();
+      final Uri uri = await server.start();
       addTearDown(server.stop);
 
       expect(uri.host, 'localhost');
@@ -2171,18 +2172,20 @@ void main() {
         anyOf(InternetAddress.anyIPv6.address, InternetAddress.anyIPv4.address),
       );
       // And it really answers there.
-      final r = await get(uri.replace(path: '/styles.css'));
+      final ({String body, HttpClientResponse response}) r = await get(
+        uri.replace(path: '/styles.css'),
+      );
       expect(r.response.statusCode, HttpStatus.ok);
     });
   });
 
   group('WebModuleServer.dartSourceContents', () {
     test('says so once when a source lookup fails', () async {
-      final logs = captureLogs();
-      final dir = tempDir();
+      final List<Map<String, dynamic>> logs = captureLogs();
+      final _Dir dir = tempDir();
       final config = File('${dir.path}/package_config.json')
         ..writeAsStringSync('{ this is not json');
-      final server = serverWith(
+      final WebModuleServer server = serverWith(
         workspaceRoot: dir.path,
         packageConfigPath: config.path,
       );
@@ -2199,11 +2202,11 @@ void main() {
     });
 
     test('a source that simply is not there is not a failure', () async {
-      final logs = captureLogs();
-      final dir = tempDir();
+      final List<Map<String, dynamic>> logs = captureLogs();
+      final _Dir dir = tempDir();
       final config = File('${dir.path}/package_config.json')
         ..writeAsStringSync(json.encode({'configVersion': 2, 'packages': []}));
-      final server = serverWith(
+      final WebModuleServer server = serverWith(
         workspaceRoot: dir.path,
         packageConfigPath: config.path,
       );
@@ -2232,16 +2235,15 @@ void main() {
         );
 
     test('the build config resolves a package: URI to its source', () async {
-      final logs = captureLogs();
-      final dir = tempDir();
+      final List<Map<String, dynamic>> logs = captureLogs();
+      final _Dir dir = tempDir();
       // What the build config points at: the assembled `.pkgsrcs` copy, named
       // by an ordinary relative rootUri.
       Directory('${dir.path}/app.pkgsrcs/lib').createSync(recursive: true);
-      File(
-        '${dir.path}/app.pkgsrcs/lib/main.dart',
-      ).writeAsStringSync('void main() {}');
+      File('${dir.path}/app.pkgsrcs/lib/main.dart')
+          .writeAsStringSync('void main() {}');
 
-      final server = serverWith(
+      final WebModuleServer server = serverWith(
         workspaceRoot: dir.path,
         packageConfigPath: writeConfig(dir, 'app.pkgsrcs').path,
       );
@@ -2254,14 +2256,14 @@ void main() {
     });
 
     test('the dev config resolves it to no source at all', () async {
-      final logs = captureLogs();
-      final dir = tempDir();
+      final List<Map<String, dynamic>> logs = captureLogs();
+      final _Dir dir = tempDir();
       // The source really is there, and reachable — this is not a missing
       // file. It is unreachable *through this config*.
       Directory('${dir.path}/lib').createSync();
       File('${dir.path}/lib/main.dart').writeAsStringSync('void main() {}');
 
-      final server = serverWith(
+      final WebModuleServer server = serverWith(
         workspaceRoot: dir.path,
         // `generate_dev_package_config` writes exactly this for a
         // source-assembled package: `<filesystemScheme>:///<lib_root>`. The
@@ -2282,8 +2284,10 @@ void main() {
 Future<String> get(WebModuleServer server, String path) async {
   final client = HttpClient();
   try {
-    final request = await client.getUrl(server.uri!.replace(path: path));
-    final response = await request.close();
+    final HttpClientRequest request = await client.getUrl(
+      server.uri!.replace(path: path),
+    );
+    final _Resp response = await request.close();
     expect(response.statusCode, HttpStatus.ok, reason: 'GET $path');
     // Awaited here, not returned: `return <future>` lets the `finally` below
     // force-close the client while the body is still arriving, which fails as

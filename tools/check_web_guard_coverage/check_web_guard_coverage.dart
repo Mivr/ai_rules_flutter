@@ -16,7 +16,7 @@ import 'coverage.dart';
 
 void main() {
   // Locate the repo root. BUILD_WORKSPACE_DIRECTORY is set by `bazel run`.
-  final rootPath =
+  final String rootPath =
       Platform.environment['BUILD_WORKSPACE_DIRECTORY'] ??
       Directory.current.path;
   final source = File('$rootPath/flutter/tests/web_test.bzl');
@@ -29,7 +29,7 @@ void main() {
     );
     exit(2);
   }
-  final fixtures = findHostileFixtures(source.readAsStringSync());
+  final Set<String> fixtures = findHostileFixtures(source.readAsStringSync());
   if (fixtures.isEmpty) {
     stderr.writeln(
       'error: found no _web_guard_hostile_* fixtures in ${source.path}; '
@@ -38,14 +38,16 @@ void main() {
     exit(1);
   }
   final workflows = <String, String>{};
-  for (final entity in workflowsDir.listSync(followLinks: false)) {
+  for (final FileSystemEntity entity in workflowsDir.listSync(
+    followLinks: false,
+  )) {
     if (entity is! File ||
         (!entity.path.endsWith('.yaml') && !entity.path.endsWith('.yml'))) {
       continue;
     }
     workflows[entity.path] = entity.readAsStringSync();
   }
-  final errors = checkWebGuardCoverage(
+  final List<String> errors = checkWebGuardCoverage(
     fixtures: fixtures,
     workflows: workflows,
   );

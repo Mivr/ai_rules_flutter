@@ -48,15 +48,18 @@ class FakeDevFS {
   new _(this._server, this.root);
 
   static Future<FakeDevFS> start(Directory root) async {
-    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final HttpServer server = await HttpServer.bind(
+      InternetAddress.loopbackIPv4,
+      0,
+    );
     final devFS = FakeDevFS._(server, root);
     unawaited(server.forEach(devFS._handle));
     return devFS;
   }
 
   Future<void> _handle(HttpRequest request) async {
-    final encoded = request.headers.value('dev_fs_uri_b64')!;
-    final relative = utf8.decode(base64.decode(encoded));
+    final String encoded = request.headers.value('dev_fs_uri_b64')!;
+    final String relative = utf8.decode(base64.decode(encoded));
     final bytes = <int>[];
     await for (final chunk in request) {
       bytes.addAll(chunk);
@@ -132,7 +135,7 @@ class BufferSink implements IOSink {
   List<String> get lines {
     final s = buffer.toString();
     if (s.isEmpty) return [];
-    final l = s.split('\n');
+    final List<String> l = s.split('\n');
     if (l.last.isEmpty) l.removeLast();
     return l;
   }
@@ -144,7 +147,7 @@ class BufferSink implements IOSink {
 /// two steps; doing it here keeps the assertion in the test about the
 /// message rather than the envelope.
 Map<String, dynamic> decodeSingleEvent(BufferSink sink) {
-  final lines = sink.lines;
+  final List<String> lines = sink.lines;
   if (lines.length != 1) {
     throw StateError(
       'expected exactly one protocol line, got ${lines.length}: '
@@ -170,7 +173,7 @@ List<String> simStreamAnnouncement({
   required String uri,
   required bool first,
 }) {
-  final message = json
+  final String message = json
       .encode('flutter: The Dart VM service is listening on $uri')
       .replaceAll('/', r'\/');
   return [
@@ -215,7 +218,11 @@ void emitSimStreamAnnouncement(
   required String uri,
   required bool first,
 }) {
-  for (final line in simStreamAnnouncement(pid: pid, uri: uri, first: first)) {
+  for (final String line in simStreamAnnouncement(
+    pid: pid,
+    uri: uri,
+    first: first,
+  )) {
     process.emitStdout(line);
   }
 }
@@ -407,13 +414,13 @@ class _FakeStdin implements IOSink {
     // died under an *open* sink is the other case, and a broken pipe is an
     // IOException.
     if (_closed) throw StateError('StreamSink is closed');
-    final error = _throws();
+    final Object? error = _throws();
     if (error != null) throw error;
 
     _buffer.write(text);
     _partial.write(text);
     if (!text.contains('\n')) return;
-    final parts = _partial.toString().split('\n');
+    final List<String> parts = _partial.toString().split('\n');
     // Whatever follows the last newline is not a line yet.
     _partial
       ..clear()
@@ -770,8 +777,8 @@ class FakeVmService implements VmService {
   }
 
   Future<VM> _getVM() async {
-    final n = getVMCalls++;
-    final fault = getVMError;
+    final int n = getVMCalls++;
+    final RPCError? fault = getVMError;
     if (fault != null) throw fault;
     return VM(
       isolates: n < getVMIsolates.length ? getVMIsolates[n] : isolates,
@@ -927,7 +934,7 @@ class FakeVmService implements VmService {
     }
 
     // Return current state for toggle reads.
-    final enabled = _toggleState[method] ?? false;
+    final bool enabled = _toggleState[method] ?? false;
     final response = Response()..json = {'enabled': enabled.toString()};
     return response;
   }
@@ -1339,8 +1346,8 @@ class FakeSourceTree {
     final found = <String>{};
     final queue = <String>[uri];
     while (queue.isNotEmpty) {
-      final current = queue.removeLast();
-      for (final entry in inlines.entries) {
+      final String current = queue.removeLast();
+      for (final MapEntry<String, Set<String>> entry in inlines.entries) {
         if (entry.value.contains(current) && found.add(entry.key)) {
           queue.add(entry.key);
         }
@@ -1419,7 +1426,7 @@ class DependencyFakeCompiler implements Compiler {
       // Only a library that moved *relative to this compiler's baseline* drags
       // its dependents along, which is what this fake models.
       if (accepted[uri]?.own != tree.versions[uri]) {
-        for (final dependent in tree.dependentsOf(uri)) {
+        for (final String dependent in tree.dependentsOf(uri)) {
           emitted[dependent] = tree.imageOf(dependent);
         }
       }
@@ -1434,7 +1441,7 @@ class DependencyFakeCompiler implements Compiler {
     required Set<String> invalidated,
   }) async {
     fullCompileCalls.add(RecompileCall(entrypoint, invalidated));
-    final emitted = {
+    final Map<String, LibImage> emitted = {
       for (final uri in tree.versions.keys) uri: tree.imageOf(uri),
     };
     _pending = {...emitted};
@@ -1444,7 +1451,7 @@ class DependencyFakeCompiler implements Compiler {
   @override
   Future<void> commit() async {
     commitCount++;
-    final pending = _pending;
+    final Map<String, LibImage>? pending = _pending;
     if (pending != null) {
       accepted
         ..clear()
@@ -1476,9 +1483,10 @@ Map<String, LibImage> liveImageOf(
   required FakeSourceTree tree,
   required Map<String, LibImage> launchedWith,
 }) {
-  var image = {...launchedWith};
-  for (final call in app.calls) {
-    final delta = tree.deltaByDill[call.dillPath] ?? const <String, LibImage>{};
+  Map<String, LibImage> image = {...launchedWith};
+  for (final ApplyCall call in app.calls) {
+    final Map<String, LibImage> delta =
+        tree.deltaByDill[call.dillPath] ?? const <String, LibImage>{};
     image = call.mode == ApplyMode.hotRestart
         ? {...delta}
         : {...image, ...delta};
@@ -1558,7 +1566,7 @@ class FakeMDnsClient implements MDnsClient {
     ResourceRecordQuery query, {
     Duration timeout = const Duration(seconds: 5),
   }) {
-    final matches =
+    final List<ResourceRecord> matches =
         records[(query.resourceRecordType, query.fullyQualifiedName)] ??
         const <ResourceRecord>[];
     return Stream.fromIterable(matches.whereType<T>());
@@ -1582,7 +1590,7 @@ Map<(int, String), List<ResourceRecord>> dartVmServiceRecords({
   String? authCode,
   List<String> addresses = const [],
 }) {
-  const validUntil = 1 << 40;
+  const int validUntil = 1 << 40;
   final service = '$instance.$dartVmServiceMdnsName';
   return {
     (ResourceRecordType.serverPointer, dartVmServiceMdnsName): [

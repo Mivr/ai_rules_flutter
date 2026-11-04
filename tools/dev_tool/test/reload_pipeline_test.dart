@@ -31,6 +31,12 @@ import 'package:test/test.dart';
 
 import 'fakes.dart';
 
+typedef _PatchProbe = ({
+  List<Set<String>> asked,
+  List<Set<String>> marked,
+  List<int> reassembled,
+});
+
 /// Enough of a config to construct a [FrontendServer] that is never started.
 /// The web-legacy branch's null checks are about the *presence* of a compiler,
 /// not about anything it can do.
@@ -107,7 +113,9 @@ class _Harness {
     List<FakeAppInstance>? apps,
     Duration readyTimeout = const Duration(seconds: 90),
   }) async {
-    final tmp = await Directory.systemTemp.createTemp('reload_pipeline_');
+    final Directory tmp = await Directory.systemTemp.createTemp(
+      'reload_pipeline_',
+    );
     Directory(p.join(tmp.path, 'lib')).createSync();
     final host = SessionHost(
       isMachine: false,
@@ -190,7 +198,7 @@ class _Harness {
   }
 
   void seedApplied() {
-    final snap = pipeline.workspaceView!.snapshot();
+    final SourceVersions snap = pipeline.workspaceView!.snapshot();
     pipeline.appliedVersions.markApplied(snap, files: snap.fileUris.toSet());
     // The assembler seeds the shared baseline and THEN constructs the
     // orchestrator, whose constructor copies it per app. Mirror that order:
@@ -216,14 +224,10 @@ Future<AssetTracker> seedBundle(Directory tmp, String contents) async {
   Directory(p.join(tmp.path, 'assets')).createSync(recursive: true);
   Directory(p.join(tmp.path, 'bundle', 'assets')).createSync(recursive: true);
   File(p.join(tmp.path, 'assets', 'message.txt')).writeAsStringSync(contents);
-  File(
-    p.join(tmp.path, 'bundle', 'assets', 'message.txt'),
-  ).writeAsStringSync(contents);
+  File(p.join(tmp.path, 'bundle', 'assets', 'message.txt'))
+      .writeAsStringSync(contents);
   return AssetTracker(
-    AssetBundle(
-      directory: p.join(tmp.path, 'bundle'),
-      workspaceRoot: tmp.path,
-    ),
+    AssetBundle(directory: p.join(tmp.path, 'bundle'), workspaceRoot: tmp.path),
     builtBefore: DateTime.now().add(const Duration(hours: 1)),
   );
 }
@@ -272,7 +276,7 @@ void main() {
     // loop, and the pipeline is assembled after it. A client answering that
     // event must queue, not be told hot reload is broken.
     test('an unavailable pipeline answers with its reason', () async {
-      final h = await _Harness.create();
+      final _Harness h = await _Harness.create();
       addTearDown(h.dispose);
       h.pipeline.ready.signalUnavailable('Initial compile failed.');
 
@@ -280,7 +284,7 @@ void main() {
       // failure that can say for certain the app kept its old code, since the
       // command stopped before anything was delivered. That certainty is what
       // `reportReloadCommand` gates its reassurance on.
-      const refused = {
+      const Map<String, Object> refused = {
         'succeeded': false,
         'runningCode': 'unchanged',
         'error': 'Initial compile failed.',
@@ -290,7 +294,7 @@ void main() {
     });
 
     test('a ready pipeline runs the command', () async {
-      final h = await _Harness.create();
+      final _Harness h = await _Harness.create();
       addTearDown(h.dispose);
       h.pipeline.ready.signalReady();
 
@@ -306,11 +310,11 @@ void main() {
     // patch to a device, so it is the path whose cost varies and the path
     // people ask about.
     test('a reload reports how long it took', () async {
-      final h = await _Harness.create();
+      final _Harness h = await _Harness.create();
       addTearDown(h.dispose);
       h.pipeline.ready.signalReady();
 
-      final response = await h.hotReload();
+      final Map<String, dynamic> response = await h.hotReload();
 
       expect(response['elapsedMs'], isA<int>());
       expect(response['elapsedMs'], greaterThanOrEqualTo(0));
@@ -321,7 +325,7 @@ void main() {
     // a timer — the tests below drive it with requests, which is all production
     // does.
     test('a request on a retryable pipeline assembles and then runs', () async {
-      final h = await _Harness.create();
+      final _Harness h = await _Harness.create();
       addTearDown(h.dispose);
       h.pipeline.ready.signalRetryable('the build failed');
       var attempts = 0;
@@ -346,7 +350,7 @@ void main() {
     });
 
     test('an attempt that fails again answers with the new reason', () async {
-      final h = await _Harness.create();
+      final _Harness h = await _Harness.create();
       addTearDown(h.dispose);
       h.pipeline.ready.signalRetryable('the build failed');
       h.pipeline.reassemble = () async =>
@@ -364,7 +368,7 @@ void main() {
     });
 
     test('an attempt that throws is logged, not only gated', () async {
-      final h = await _Harness.create();
+      final _Harness h = await _Harness.create();
       addTearDown(h.dispose);
       h.pipeline.ready.signalRetryable('the build failed');
       h.pipeline.reassemble = () async {
@@ -372,9 +376,11 @@ void main() {
       };
 
       final records = <LogRecord>[];
-      final rootLevel = Logger.root.level;
+      final Level rootLevel = Logger.root.level;
       Logger.root.level = Level.ALL;
-      final sub = Logger.root.onRecord.listen(records.add);
+      final StreamSubscription<LogRecord> sub = Logger.root.onRecord.listen(
+        records.add,
+      );
       Map<String, Object?> result;
       try {
         result = await h.hotReload();
@@ -401,7 +407,7 @@ void main() {
     // the event that would have driven the next attempt was just spent on the
     // wrong answer.
     test('a request that queued behind an attempt gets its own', () async {
-      final h = await _Harness.create();
+      final _Harness h = await _Harness.create();
       addTearDown(h.dispose);
       h.pipeline.ready.signalRetryable('the build failed');
 
@@ -422,7 +428,7 @@ void main() {
         h.pipeline.ready.signalReady();
       };
 
-      final broken = h.hotReload();
+      final Future<Map<String, dynamic>> broken = h.hotReload();
       await firstAttemptStarted.future;
       // The watcher reads this to decide whether an edit it cannot map is
       // worth a request. An attempt clears `reassemble` as it starts, so if
@@ -430,7 +436,7 @@ void main() {
       // which usually lands inside the build it is fixing — would be dropped
       // before it reached the queue above, and nothing would ask again.
       expect(h.pipeline.awaitingAssembly, isTrue);
-      final fixed = h.hotReload();
+      final Future<Map<String, dynamic>> fixed = h.hotReload();
       releaseFirstAttempt.complete();
 
       expect(await broken, containsPair('error', 'the build failed'));
@@ -447,7 +453,7 @@ void main() {
     test(
       'two requests on one retryable pipeline do not build at once',
       () async {
-        final h = await _Harness.create();
+        final _Harness h = await _Harness.create();
         addTearDown(h.dispose);
         h.pipeline.ready.signalRetryable('the build failed');
 
@@ -466,27 +472,24 @@ void main() {
       },
     );
 
-    test(
-      'an attempt that throws settles the gate with what went wrong',
-      () async {
-        // Assembly is documented never to throw. If one ever does, the gate it
-        // reopened would never settle and every later request would wait out the
-        // full 90-second timeout before answering "still starting up".
-        final h = await _Harness.create();
-        addTearDown(h.dispose);
-        h.pipeline.ready.signalRetryable('the build failed');
-        h.pipeline.reassemble = () async => throw StateError('assembler bug');
+    test('an attempt that throws settles the gate with what went wrong', () async {
+      // Assembly is documented never to throw. If one ever does, the gate it
+      // reopened would never settle and every later request would wait out the
+      // full 90-second timeout before answering "still starting up".
+      final _Harness h = await _Harness.create();
+      addTearDown(h.dispose);
+      h.pipeline.ready.signalRetryable('the build failed');
+      h.pipeline.reassemble = () async => throw StateError('assembler bug');
 
-        final answer = await h.hotReload();
-        expect(answer['error'], contains('assembler bug'));
-        expect(h.pipeline.ready.isSettled, isTrue);
-        expect(
-          h.pipeline.ready.isRetryable,
-          isFalse,
-          reason: 'a bug in the assembler is not something a save can cure',
-        );
-      },
-    );
+      final Map<String, dynamic> answer = await h.hotReload();
+      expect(answer['error'], contains('assembler bug'));
+      expect(h.pipeline.ready.isSettled, isTrue);
+      expect(
+        h.pipeline.ready.isRetryable,
+        isFalse,
+        reason: 'a bug in the assembler is not something a save can cure',
+      );
+    });
 
     // The clock below is the gate's own, shortened so these run in
     // milliseconds. An unsettled gate with nothing in flight is the case the
@@ -619,14 +622,14 @@ void main() {
 
   group('orchestrator branch', () {
     test('a real edit reports what was recompiled', () async {
-      final h = await _Harness.create();
+      final _Harness h = await _Harness.create();
       addTearDown(h.dispose);
       h.writeSource('main.dart', 'void main() {}');
       h.seedApplied();
       h.pipeline.ready.signalReady();
       h.writeSource('main.dart', 'void main() { print("edited"); }');
 
-      final response = await h.hotReload();
+      final Map<String, dynamic> response = await h.hotReload();
 
       expect(response['message'], 'Hot reload successful');
       expect(response['filesRecompiled'], ['package:app/main.dart']);
@@ -634,7 +637,7 @@ void main() {
     });
 
     test('an untouched tree reports no changes', () async {
-      final h = await _Harness.create();
+      final _Harness h = await _Harness.create();
       addTearDown(h.dispose);
       h.writeSource('main.dart', 'void main() {}');
       h.seedApplied();
@@ -658,7 +661,7 @@ void main() {
     });
 
     test('a compile failure carries its diagnostics', () async {
-      final h = await _Harness.create();
+      final _Harness h = await _Harness.create();
       addTearDown(h.dispose);
       h.writeSource('main.dart', 'void main() {}');
       h.seedApplied();
@@ -666,14 +669,14 @@ void main() {
       h.writeSource('main.dart', 'this is not dart');
       h.compiler.nextOutcome = const CompileFailed("expected ';'");
 
-      final response = await h.hotReload();
+      final Map<String, dynamic> response = await h.hotReload();
 
       expect(response['message'], 'Compilation failed');
       expect(response['error'], "expected ';'");
     });
 
     test('an apply failure names the device that refused', () async {
-      final h = await _Harness.create();
+      final _Harness h = await _Harness.create();
       addTearDown(h.dispose);
       h.writeSource('main.dart', 'void main() {}');
       h.seedApplied();
@@ -681,7 +684,7 @@ void main() {
       h.writeSource('main.dart', 'void main() { print("x"); }');
       h.app.nextOutcome = const ApplyFailed('isolate is gone');
 
-      final response = await h.hotReload();
+      final Map<String, dynamic> response = await h.hotReload();
 
       expect(response['message'], 'Hot reload failed on some devices');
       // Structured per app, not a flattened string: which app, what status,
@@ -699,7 +702,7 @@ void main() {
     });
 
     test('restart goes through the orchestrator too', () async {
-      final h = await _Harness.create();
+      final _Harness h = await _Harness.create();
       addTearDown(h.dispose);
       h.writeSource('main.dart', 'void main() {}');
       h.seedApplied();
@@ -716,13 +719,15 @@ void main() {
     // through the restart command. Dispatching it to `restart` would do a full
     // recompile and re-run `main()` for what the client asked to be a reload.
     test('app.restart with fullRestart:false is a hot reload', () async {
-      final h = await _Harness.create();
+      final _Harness h = await _Harness.create();
       addTearDown(h.dispose);
       h.writeSource('main.dart', 'void main() {}');
       h.seedApplied();
       h.pipeline.ready.signalReady();
 
-      final response = await h.restart({'fullRestart': false});
+      final Map<String, dynamic> response = await h.restart({
+        'fullRestart': false,
+      });
 
       expect(response['message'], contains('Hot reload'));
       expect(h.compiler.fullCompileCalls, isEmpty);
@@ -732,7 +737,7 @@ void main() {
   group('targeting', () {
     /// Two running apps, each with a session the way a multi-device run has.
     Future<_Harness> createTwoApps() async {
-      final h = await _Harness.create(
+      final _Harness h = await _Harness.create(
         apps: [
           FakeAppInstance(id: 'app1'),
           FakeAppInstance(id: 'app2'),
@@ -744,14 +749,16 @@ void main() {
     }
 
     test('app.hotReload with an appId reaches only that app', () async {
-      final h = await createTwoApps();
+      final _Harness h = await createTwoApps();
       addTearDown(h.dispose);
       h.writeSource('main.dart', 'void main() {}');
       h.seedApplied();
       h.pipeline.ready.signalReady();
       h.writeSource('main.dart', 'void main() { print("edited"); }');
 
-      final response = await h.hotReload({'appId': 'app1'});
+      final Map<String, dynamic> response = await h.hotReload({
+        'appId': 'app1',
+      });
 
       expect(response['message'], 'Hot reload successful');
       expect(h.apps[0].calls, hasLength(1));
@@ -764,14 +771,14 @@ void main() {
 
     test('app.restart with an appId restarts only that app, and the other '
         'still picks up the edit afterwards', () async {
-      final h = await createTwoApps();
+      final _Harness h = await createTwoApps();
       addTearDown(h.dispose);
       h.writeSource('main.dart', 'void main() {}');
       h.seedApplied();
       h.pipeline.ready.signalReady();
       h.writeSource('main.dart', 'void main() { print("edited"); }');
 
-      final response = await h.restart({'appId': 'app1'});
+      final Map<String, dynamic> response = await h.restart({'appId': 'app1'});
 
       expect(response['message'], 'Restart successful');
       expect(h.apps[0].calls.last.mode, ApplyMode.hotRestart);
@@ -783,7 +790,7 @@ void main() {
 
       // The stranded-baseline case: app2 never received the edit, and its
       // reload must still deliver it rather than reporting no changes.
-      final reload = await h.hotReload({'appId': 'app2'});
+      final Map<String, dynamic> reload = await h.hotReload({'appId': 'app2'});
       expect(reload['message'], 'Hot reload successful');
       expect(reload['filesRecompiled'], ['package:app/main.dart']);
       expect(h.apps[1].calls, hasLength(1));
@@ -793,14 +800,14 @@ void main() {
     test(
       'app.restart with fullRestart:false and an appId reloads that app',
       () async {
-        final h = await createTwoApps();
+        final _Harness h = await createTwoApps();
         addTearDown(h.dispose);
         h.writeSource('main.dart', 'void main() {}');
         h.seedApplied();
         h.pipeline.ready.signalReady();
         h.writeSource('main.dart', 'void main() { print("edited"); }');
 
-        final response = await h.restart({
+        final Map<String, dynamic> response = await h.restart({
           'fullRestart': false,
           'appId': 'app2',
         });
@@ -813,7 +820,7 @@ void main() {
     );
 
     test('an unknown appId is refused on the orchestrator path', () async {
-      final h = await createTwoApps();
+      final _Harness h = await createTwoApps();
       addTearDown(h.dispose);
       h.writeSource('main.dart', 'void main() {}');
       h.seedApplied();
@@ -839,7 +846,7 @@ void main() {
     test(
       'an appId whose session has no reload connection is a loud error',
       () async {
-        final h = await createTwoApps();
+        final _Harness h = await createTwoApps();
         addTearDown(h.dispose);
         // A session exists but no orchestrator app does — a device whose VM
         // service never came up.
@@ -848,7 +855,9 @@ void main() {
         h.seedApplied();
         h.pipeline.ready.signalReady();
 
-        final response = await h.hotReload({'appId': 'app3'});
+        final Map<String, dynamic> response = await h.hotReload({
+          'appId': 'app3',
+        });
         expect(response['error'], contains('app3'));
         expect(response['error'], contains('no reload connection'));
         expect(response['succeeded'], isFalse);
@@ -862,62 +871,52 @@ void main() {
       },
     );
 
-    test(
-      'a targeted restart delivers changed assets to every app',
-      () async {
-        final h = await createTwoApps();
-        addTearDown(h.dispose);
-        h.writeSource('main.dart', 'void main() {}');
-        h.seedApplied();
-        Directory(p.join(h.tmp.path, 'assets')).createSync(recursive: true);
-        Directory(
-          p.join(h.tmp.path, 'bundle', 'assets'),
-        ).createSync(recursive: true);
-        File(
-          p.join(h.tmp.path, 'assets', 'message.txt'),
-        ).writeAsStringSync('v1');
-        File(
-          p.join(h.tmp.path, 'bundle', 'assets', 'message.txt'),
-        ).writeAsStringSync('v1');
-        final strategy = _RecordingStrategy();
-        h.pipeline
-          ..assetTracker = AssetTracker(
-            AssetBundle(
-              directory: p.join(h.tmp.path, 'bundle'),
-              workspaceRoot: h.tmp.path,
-            ),
-            // Later than anything the fixture wrote: these cases are about a
-            // tree the build consumed, not one edited during assembly.
-            builtBefore: DateTime.now().add(const Duration(hours: 1)),
-          )
-          ..strategy = strategy
-          ..rebuildAssets = () async {
-            File(
-              p.join(h.tmp.path, 'bundle', 'assets', 'message.txt'),
-            ).writeAsStringSync(
-              File(
-                p.join(h.tmp.path, 'assets', 'message.txt'),
-              ).readAsStringSync(),
-            );
-            return true;
-          };
-        h.pipeline.ready.signalReady();
+    test('a targeted restart delivers changed assets to every app', () async {
+      final _Harness h = await createTwoApps();
+      addTearDown(h.dispose);
+      h.writeSource('main.dart', 'void main() {}');
+      h.seedApplied();
+      Directory(p.join(h.tmp.path, 'assets')).createSync(recursive: true);
+      Directory(p.join(h.tmp.path, 'bundle', 'assets'))
+          .createSync(recursive: true);
+      File(p.join(h.tmp.path, 'assets', 'message.txt')).writeAsStringSync('v1');
+      File(p.join(h.tmp.path, 'bundle', 'assets', 'message.txt'))
+          .writeAsStringSync('v1');
+      final strategy = _RecordingStrategy();
+      h.pipeline
+        ..assetTracker = AssetTracker(
+          AssetBundle(
+            directory: p.join(h.tmp.path, 'bundle'),
+            workspaceRoot: h.tmp.path,
+          ),
+          // Later than anything the fixture wrote: these cases are about a
+          // tree the build consumed, not one edited during assembly.
+          builtBefore: DateTime.now().add(const Duration(hours: 1)),
+        )
+        ..strategy = strategy
+        ..rebuildAssets = () async {
+          File(p.join(h.tmp.path, 'bundle', 'assets', 'message.txt'))
+              .writeAsStringSync(
+                File(p.join(h.tmp.path, 'assets', 'message.txt'))
+                    .readAsStringSync(),
+              );
+          return true;
+        };
+      h.pipeline.ready.signalReady();
 
-        File(
-          p.join(h.tmp.path, 'assets', 'message.txt'),
-        ).writeAsStringSync('version two');
-        await h.restart({'appId': 'app1'});
+      File(p.join(h.tmp.path, 'assets', 'message.txt'))
+          .writeAsStringSync('version two');
+      await h.restart({'appId': 'app1'});
 
-        // app1 reads the delivered copy when it restarts; app2 does not
-        // restart, so it must be told its cached copy is stale.
-        expect(strategy.assetCalls, [
-          {'assets/message.txt'},
-        ]);
-        expect(strategy.assetRecipients, [
-          ['app1', 'app2'],
-        ]);
-      },
-    );
+      // app1 reads the delivered copy when it restarts; app2 does not
+      // restart, so it must be told its cached copy is stale.
+      expect(strategy.assetCalls, [
+        {'assets/message.txt'},
+      ]);
+      expect(strategy.assetRecipients, [
+        ['app1', 'app2'],
+      ]);
+    });
   });
 
   group('web-legacy branch', () {
@@ -925,11 +924,11 @@ void main() {
     // state a failed assembly leaves behind, and the message has to name the
     // right thing rather than blame the nearest missing piece.
     test('no frontend server says so', () async {
-      final h = await _Harness.create(withOrchestrator: false);
+      final _Harness h = await _Harness.create(withOrchestrator: false);
       addTearDown(h.dispose);
       h.pipeline.ready.signalReady();
 
-      const refused = {
+      const Map<String, Object> refused = {
         'succeeded': false,
         'runningCode': 'unchanged',
         'error': 'No frontend server available',
@@ -939,7 +938,7 @@ void main() {
     });
 
     test('a frontend server with no strategy says THAT', () async {
-      final h = await _Harness.create(withOrchestrator: false);
+      final _Harness h = await _Harness.create(withOrchestrator: false);
       addTearDown(h.dispose);
       h.pipeline.frontendServer = FrontendServer(
         dartaotruntimePath: '/nonexistent',
@@ -962,7 +961,7 @@ void main() {
     });
 
     test('an unknown appId is refused, not silently applied to all', () async {
-      final h = await _Harness.create(withOrchestrator: false);
+      final _Harness h = await _Harness.create(withOrchestrator: false);
       addTearDown(h.dispose);
       h.pipeline.frontendServer = FrontendServer(
         dartaotruntimePath: '/nonexistent',
@@ -973,7 +972,7 @@ void main() {
       h.pipeline.strategy = _RecordingStrategy();
       h.pipeline.ready.signalReady();
 
-      const refused = {
+      const Map<String, Object> refused = {
         'succeeded': false,
         'runningCode': 'unchanged',
         'error': 'Unknown appId: ghost',
@@ -1002,8 +1001,9 @@ void main() {
     /// A web pipeline that can actually complete a restart: a compiler that
     /// answers, and a strategy to apply what it produces.
     Future<_Harness> webPipeline(_RecordingStrategy strategy) async {
-      final h = await _Harness.create(withOrchestrator: false);
-      final (:server, :process) = startedServer();
+      final _Harness h = await _Harness.create(withOrchestrator: false);
+      final (:FrontendServer server, :_ScriptedProcess process) =
+          startedServer();
       await server.start();
       addTearDown(() async {
         process.complete(0);
@@ -1024,9 +1024,11 @@ void main() {
     test(
       'a web restart answers with the verdict, like every other command',
       () async {
-        final h = await webPipeline(_RecordingStrategy());
+        final _Harness h = await webPipeline(_RecordingStrategy());
 
-        final response = await h.restart().timeout(const Duration(seconds: 5));
+        final Map<String, dynamic> response = await h.restart().timeout(
+          const Duration(seconds: 5),
+        );
 
         expect(response['succeeded'], isTrue);
         expect(
@@ -1039,48 +1041,46 @@ void main() {
       },
     );
 
-    test(
-      'a web restart the browser refuses will not claim it kept its code',
-      () async {
-        final h = await webPipeline(
-          _RecordingStrategy()
-            ..next = const StrategyRejected(
-              'the browser refused the new sources',
-            ),
-        );
+    test('a web restart the browser refuses will not claim it kept its code', () async {
+      final _Harness h = await webPipeline(
+        _RecordingStrategy()
+          ..next = const StrategyRejected(
+            'the browser refused the new sources',
+          ),
+      );
 
-        final response = await h.restart().timeout(const Duration(seconds: 5));
+      final Map<String, dynamic> response = await h.restart().timeout(
+        const Duration(seconds: 5),
+      );
 
-        expect(response['succeeded'], isFalse);
-        // Not `unchanged`: a rejection is shared between a browser declining the
-        // sources and a `catch` that can fire mid-delivery, so nothing here may
-        // promise the old code survived.
-        expect(response['runningCode'], 'unknown');
-        expect(response['error'], contains('refused the new sources'));
-      },
-    );
+      expect(response['succeeded'], isFalse);
+      // Not `unchanged`: a rejection is shared between a browser declining the
+      // sources and a `catch` that can fire mid-delivery, so nothing here may
+      // promise the old code survived.
+      expect(response['runningCode'], 'unknown');
+      expect(response['error'], contains('refused the new sources'));
+    });
 
     // A restart re-reads the whole bundle, so the rebuild's result reaches the
     // app — and the response has to name the assets it changed.
     test('a web restart reports the assets its rebuild changed', () async {
-      final h = await webPipeline(_RecordingStrategy());
+      final _Harness h = await webPipeline(_RecordingStrategy());
       h.pipeline
         ..assetTracker = await seedBundle(h.tmp, 'v1')
         ..rebuildAssets = () async {
-          File(
-            p.join(h.tmp.path, 'bundle', 'assets', 'message.txt'),
-          ).writeAsStringSync(
-            File(
-              p.join(h.tmp.path, 'assets', 'message.txt'),
-            ).readAsStringSync(),
-          );
+          File(p.join(h.tmp.path, 'bundle', 'assets', 'message.txt'))
+              .writeAsStringSync(
+                File(p.join(h.tmp.path, 'assets', 'message.txt'))
+                    .readAsStringSync(),
+              );
           return true;
         };
 
-      File(
-        p.join(h.tmp.path, 'assets', 'message.txt'),
-      ).writeAsStringSync('version two');
-      final response = await h.restart().timeout(const Duration(seconds: 5));
+      File(p.join(h.tmp.path, 'assets', 'message.txt'))
+          .writeAsStringSync('version two');
+      final Map<String, dynamic> response = await h.restart().timeout(
+        const Duration(seconds: 5),
+      );
 
       expect(response['assetsChanged'], 1);
       expect(response['assetPaths'], ['assets/message.txt']);
@@ -1091,46 +1091,40 @@ void main() {
     // An asset-only edit has no Dart changes, so the orchestrator truthfully
     // says "no changes detected" — which the user who just repainted an icon
     // reads as "my edit did nothing".
-    test(
-      'an asset-only edit is reported as a reload, not as no changes',
-      () async {
-        final h = await _Harness.create();
-        addTearDown(h.dispose);
-        h.writeSource('main.dart', 'void main() {}');
-        h.seedApplied();
-        final tracker = await seedBundle(h.tmp, 'v1');
-        final strategy = _RecordingStrategy();
-        h.pipeline
-          ..assetTracker = tracker
-          ..strategy = strategy
-          ..rebuildAssets = () async {
-            // What `bazel build` would do: republish the source into the bundle.
-            File(
-              p.join(h.tmp.path, 'bundle', 'assets', 'message.txt'),
-            ).writeAsStringSync(
-              File(
-                p.join(h.tmp.path, 'assets', 'message.txt'),
-              ).readAsStringSync(),
-            );
-            return true;
-          };
-        h.pipeline.ready.signalReady();
+    test('an asset-only edit is reported as a reload, not as no changes', () async {
+      final _Harness h = await _Harness.create();
+      addTearDown(h.dispose);
+      h.writeSource('main.dart', 'void main() {}');
+      h.seedApplied();
+      final AssetTracker tracker = await seedBundle(h.tmp, 'v1');
+      final strategy = _RecordingStrategy();
+      h.pipeline
+        ..assetTracker = tracker
+        ..strategy = strategy
+        ..rebuildAssets = () async {
+          // What `bazel build` would do: republish the source into the bundle.
+          File(p.join(h.tmp.path, 'bundle', 'assets', 'message.txt'))
+              .writeAsStringSync(
+                File(p.join(h.tmp.path, 'assets', 'message.txt'))
+                    .readAsStringSync(),
+              );
+          return true;
+        };
+      h.pipeline.ready.signalReady();
 
-        File(
-          p.join(h.tmp.path, 'assets', 'message.txt'),
-        ).writeAsStringSync('version two');
-        final response = await h.hotReload();
+      File(p.join(h.tmp.path, 'assets', 'message.txt'))
+          .writeAsStringSync('version two');
+      final Map<String, dynamic> response = await h.hotReload();
 
-        expect(
-          response['message'],
-          'Hot reload successful — 1 asset(s) reloaded',
-        );
-        expect(response['assetsChanged'], 1);
-        expect(strategy.assetCalls, [
-          {'assets/message.txt'},
-        ]);
-      },
-    );
+      expect(
+        response['message'],
+        'Hot reload successful — 1 asset(s) reloaded',
+      );
+      expect(response['assetsChanged'], 1);
+      expect(strategy.assetCalls, [
+        {'assets/message.txt'},
+      ]);
+    });
 
     // Two very different failures are easy to confuse: the tracker seeing no
     // source change, and a rebuild that ran and handed back the bundle it
@@ -1140,7 +1134,7 @@ void main() {
     test(
       'a rebuild that changes nothing says the build is what found nothing',
       () async {
-        final h = await _Harness.create();
+        final _Harness h = await _Harness.create();
         addTearDown(h.dispose);
         h.writeSource('main.dart', 'void main() {}');
         h.seedApplied();
@@ -1152,10 +1146,9 @@ void main() {
           ..rebuildAssets = () async => true;
         h.pipeline.ready.signalReady();
 
-        File(
-          p.join(h.tmp.path, 'assets', 'message.txt'),
-        ).writeAsStringSync('version two');
-        final response = await h.hotReload();
+        File(p.join(h.tmp.path, 'assets', 'message.txt'))
+            .writeAsStringSync('version two');
+        final Map<String, dynamic> response = await h.hotReload();
 
         expect(response['assetsChanged'], 0);
         expect(
@@ -1170,32 +1163,29 @@ void main() {
       },
     );
 
-    test(
-      'an untouched asset tree reports nothing at all about assets',
-      () async {
-        // The other half of the same claim: no source moved, so no build ran and
-        // there is nothing to say. A field set here would make the signature
-        // above useless.
-        final h = await _Harness.create();
-        addTearDown(h.dispose);
-        h.writeSource('main.dart', 'void main() {}');
-        h.seedApplied();
-        var built = false;
-        h.pipeline
-          ..assetTracker = await seedBundle(h.tmp, 'v1')
-          ..strategy = _RecordingStrategy()
-          ..rebuildAssets = () async {
-            built = true;
-            return true;
-          };
-        h.pipeline.ready.signalReady();
+    test('an untouched asset tree reports nothing at all about assets', () async {
+      // The other half of the same claim: no source moved, so no build ran and
+      // there is nothing to say. A field set here would make the signature
+      // above useless.
+      final _Harness h = await _Harness.create();
+      addTearDown(h.dispose);
+      h.writeSource('main.dart', 'void main() {}');
+      h.seedApplied();
+      var built = false;
+      h.pipeline
+        ..assetTracker = await seedBundle(h.tmp, 'v1')
+        ..strategy = _RecordingStrategy()
+        ..rebuildAssets = () async {
+          built = true;
+          return true;
+        };
+      h.pipeline.ready.signalReady();
 
-        final response = await h.hotReload();
+      final Map<String, dynamic> response = await h.hotReload();
 
-        expect(built, isFalse);
-        expect(response['assetsRebuiltIdentical'], isNull);
-      },
-    );
+      expect(built, isFalse);
+      expect(response['assetsRebuiltIdentical'], isNull);
+    });
 
     // The window `builtBefore` closes at construction, reopened on every
     // re-commit: a save landing while bazel is running is not in the bundle
@@ -1204,20 +1194,19 @@ void main() {
     test(
       'an asset saved while the rebuild ran is still stale afterwards',
       () async {
-        final h = await _Harness.create();
+        final _Harness h = await _Harness.create();
         addTearDown(h.dispose);
         h.writeSource('main.dart', 'void main() {}');
         h.seedApplied();
-        final tracker = await seedBundle(h.tmp, 'v1');
+        final AssetTracker tracker = await seedBundle(h.tmp, 'v1');
         final source = File(p.join(h.tmp.path, 'assets', 'message.txt'));
         h.pipeline
           ..assetTracker = tracker
           ..strategy = _RecordingStrategy()
           ..rebuildAssets = () async {
             // The build publishes what it read…
-            File(
-              p.join(h.tmp.path, 'bundle', 'assets', 'message.txt'),
-            ).writeAsStringSync('version two');
+            File(p.join(h.tmp.path, 'bundle', 'assets', 'message.txt'))
+                .writeAsStringSync('version two');
             // …and the user saves again before it returns.
             source.writeAsStringSync('version three');
             return true;
@@ -1241,7 +1230,7 @@ void main() {
     test(
       'a failed asset rebuild aborts rather than reloading half of it',
       () async {
-        final h = await _Harness.create();
+        final _Harness h = await _Harness.create();
         addTearDown(h.dispose);
         h.writeSource('main.dart', 'void main() {}');
         h.seedApplied();
@@ -1251,11 +1240,10 @@ void main() {
           ..rebuildAssets = () async => false;
         h.pipeline.ready.signalReady();
 
-        File(
-          p.join(h.tmp.path, 'assets', 'message.txt'),
-        ).writeAsStringSync('version two');
+        File(p.join(h.tmp.path, 'assets', 'message.txt'))
+            .writeAsStringSync('version two');
 
-        final response = await h.hotReload();
+        final Map<String, dynamic> response = await h.hotReload();
         expect(
           response['error'],
           'Asset rebuild (bazel) failed; see build output above.',
@@ -1272,7 +1260,7 @@ void main() {
     // uploads them; without it the restart would show what the app shipped
     // with.
     test('a restart rebuilds the bundle and delivers what changed', () async {
-      final h = await _Harness.create();
+      final _Harness h = await _Harness.create();
       addTearDown(h.dispose);
       h.writeSource('main.dart', 'void main() {}');
       h.seedApplied();
@@ -1281,16 +1269,14 @@ void main() {
         ..assetTracker = await seedBundle(h.tmp, 'v1')
         ..strategy = strategy
         ..rebuildAssets = () async {
-          File(
-            p.join(h.tmp.path, 'bundle', 'assets', 'message.txt'),
-          ).writeAsStringSync('version two');
+          File(p.join(h.tmp.path, 'bundle', 'assets', 'message.txt'))
+              .writeAsStringSync('version two');
           return true;
         };
       h.pipeline.ready.signalReady();
 
-      File(
-        p.join(h.tmp.path, 'assets', 'message.txt'),
-      ).writeAsStringSync('version two');
+      File(p.join(h.tmp.path, 'assets', 'message.txt'))
+          .writeAsStringSync('version two');
       await h.restart();
 
       expect(strategy.assetCalls, [
@@ -1303,7 +1289,7 @@ void main() {
     // `.glsl` it includes. An edit to the include alone has to reach the app,
     // and has to arrive named as a shader so the engine reloads the program.
     test('an edited shader include is delivered as a shader', () async {
-      final h = await _Harness.create();
+      final _Harness h = await _Harness.create();
       addTearDown(h.dispose);
       h.writeSource('main.dart', 'void main() {}');
       h.seedApplied();
@@ -1314,9 +1300,8 @@ void main() {
       final include = File(p.join(h.tmp.path, 'pkg', 'shaders', 'common.glsl'))
         ..createSync(recursive: true)
         ..writeAsStringSync('v1');
-      File(
-        p.join(h.tmp.path, 'pkg', 'shaders', 'glow.frag'),
-      ).writeAsStringSync('#include "common.glsl"');
+      File(p.join(h.tmp.path, 'pkg', 'shaders', 'glow.frag'))
+          .writeAsStringSync('#include "common.glsl"');
       final strategy = _RecordingStrategy();
       h.pipeline
         ..assetTracker = AssetTracker(
@@ -1354,7 +1339,7 @@ void main() {
         // The native side has one compiler per app and so never sets
         // `frontendServer`; reading that field as "is reload wired" would
         // silently turn off the watcher and the keyboard for every native run.
-        final h = await _Harness.create();
+        final _Harness h = await _Harness.create();
         addTearDown(h.dispose);
         expect(h.pipeline.frontendServer, isNull);
         expect(h.pipeline.orchestrator, isNotNull);
@@ -1365,18 +1350,18 @@ void main() {
     test(
       'a pipeline with neither compiler nor orchestrator has no reload path',
       () async {
-        final h = await _Harness.create(withOrchestrator: false);
+        final _Harness h = await _Harness.create(withOrchestrator: false);
         addTearDown(h.dispose);
         expect(h.pipeline.hasReloadPath, isFalse);
       },
     );
 
     test('watchesAsset consults the tracker, and is false without one', () async {
-      final h = await _Harness.create(withOrchestrator: false);
+      final _Harness h = await _Harness.create(withOrchestrator: false);
       addTearDown(h.dispose);
-      final assetSource = p.join(h.tmp.path, 'assets', 'message.txt');
+      final String assetSource = p.join(h.tmp.path, 'assets', 'message.txt');
       // A directory that exists but feeds nothing in the bundle.
-      final notAnAsset = p.join(h.tmp.path, 'lib', 'main.dart');
+      final String notAnAsset = p.join(h.tmp.path, 'lib', 'main.dart');
 
       // One pipeline object, answering differently once a tracker is attached:
       // that difference is what "consults" means.
@@ -1393,7 +1378,7 @@ void main() {
 
   group('codegen', () {
     test('the rebuild runs once, before any compile', () async {
-      final h = await _Harness.create();
+      final _Harness h = await _Harness.create();
       addTearDown(h.dispose);
       h.writeSource('main.dart', 'void main() {}');
       h.seedApplied();
@@ -1408,7 +1393,7 @@ void main() {
       };
       h.pipeline.ready.signalReady();
 
-      final result = await h.hotReload();
+      final Map<String, dynamic> result = await h.hotReload();
 
       expect(
         refreshCalls,
@@ -1428,15 +1413,19 @@ void main() {
     });
 
     test('a failed rebuild aborts a native reload and restart', () async {
-      final h = await _Harness.create();
+      final _Harness h = await _Harness.create();
       addTearDown(h.dispose);
       h.writeSource('main.dart', 'void main() {}');
       h.seedApplied();
       h.pipeline.refreshGenerated = () async => false;
       h.pipeline.ready.signalReady();
 
-      for (final command in [h.hotReload, h.restart]) {
-        final result = await command();
+      for (final Future<Map<String, dynamic>> Function([
+            Map<String, dynamic>? params,
+          ])
+          command
+          in [h.hotReload, h.restart]) {
+        final Map<String, dynamic> result = await command();
         expect(result['succeeded'], isFalse);
         expect(result['error'], 'Generated source rebuild (bazel) failed.');
         // `unchanged`, and earned: the rebuild runs before the compiler and
@@ -1450,7 +1439,7 @@ void main() {
     });
 
     test('a failed generated-source rebuild aborts the reload', () async {
-      final h = await _Harness.create(withOrchestrator: false);
+      final _Harness h = await _Harness.create(withOrchestrator: false);
       addTearDown(h.dispose);
       h.pipeline
         ..frontendServer = FrontendServer(
@@ -1495,7 +1484,7 @@ void main() {
     // loaded, and the increment goes in over the old machine code. These pin
     // the reply the dev tool owes instead.
     test('a hot reload withholds the increment when a library moved', () async {
-      final h = await _Harness.create();
+      final _Harness h = await _Harness.create();
       addTearDown(h.dispose);
       h.writeSource('main.dart', 'void main() {}');
       h.seedApplied();
@@ -1508,7 +1497,7 @@ void main() {
       h.writeSource('main.dart', 'void main() { print(2); }');
       h.pipeline.ready.signalReady();
 
-      final result = await h.hotReload();
+      final Map<String, dynamic> result = await h.hotReload();
 
       expect(h.nativeLibsGateCalls, 1);
       expect(result['succeeded'], isFalse);
@@ -1528,7 +1517,7 @@ void main() {
     });
 
     test('a library-only change is not reported as "no changes"', () async {
-      final h = await _Harness.create();
+      final _Harness h = await _Harness.create();
       addTearDown(h.dispose);
       // The silent shape. A body-only edit to the native source leaves the
       // generated Dart byte-identical, so the diff finds nothing and the reply
@@ -1544,14 +1533,14 @@ void main() {
       h.seedApplied();
       h.pipeline.ready.signalReady();
 
-      final result = await h.hotReload();
+      final Map<String, dynamic> result = await h.hotReload();
       expect(result['message'], isNot(contains('no changes')));
       expect(result['succeeded'], isFalse);
       expect(result['nativeLibsStale'], ['libbridge.dylib']);
     });
 
     test('a reload whose bindings held is delivered, and says so', () async {
-      final h = await _Harness.create();
+      final _Harness h = await _Harness.create();
       addTearDown(h.dispose);
       h.writeSource('main.dart', 'void main() {}');
       h.nativeLibs = const NativeCodeStale(['libbridge.dylib']);
@@ -1559,7 +1548,7 @@ void main() {
       h.writeSource('main.dart', 'void main() { print(1); }');
       h.pipeline.ready.signalReady();
 
-      final result = await h.hotReload();
+      final Map<String, dynamic> result = await h.hotReload();
 
       // The case the whole contract mechanism exists for: a pending native edit
       // must not block the Dart loop. Refusing here would make the fix worse
@@ -1597,17 +1586,17 @@ void main() {
           // answered for runs the code on disk, contract and all, so the next
           // verdict does not name it.
           h.nativeLibs = switch (h.nativeLibs) {
-            NativeCodeStale(libs: final stale) => switch ([
+            NativeCodeStale(libs: final List<String> stale) => switch ([
               for (final lib in stale)
                 if (!libs.contains(lib.split('/').last)) lib,
             ]) {
               [] => const NativeLibsCurrent(),
-              final left => NativeCodeStale(left),
+              final List<String> left => NativeCodeStale(left),
             },
             // Only reached when every library it named was patchable: the
             // pipeline refuses before asking the builder otherwise.
             NativeBindingsMoved() => const NativeLibsCurrent(),
-            final other => other,
+            final NativeLibsVerdict? other => other,
           };
         };
         h.pipeline.reassembleNativePatched = () async => reassembled.add(1);
@@ -1616,11 +1605,11 @@ void main() {
 
       test('a native-only edit is delivered, and the widgets rebuild to show '
           'it', () async {
-        final h = await _Harness.create();
+        final _Harness h = await _Harness.create();
         addTearDown(h.dispose);
         h.writeSource('main.dart', 'void main() {}');
         h.seedApplied();
-        final patch = wirePatch(
+        final _PatchProbe patch = wirePatch(
           h,
           const NativePatched(
             functions: {
@@ -1630,7 +1619,7 @@ void main() {
         );
         h.pipeline.ready.signalReady();
 
-        final result = await h.hotReload();
+        final Map<String, dynamic> result = await h.hotReload();
         expect(result['succeeded'], isTrue, reason: '${result['error']}');
         expect(result['runningCode'], 'updated');
         expect(result['nativePatched'], {
@@ -1642,12 +1631,12 @@ void main() {
       });
 
       test('a reload with Dart too does not reassemble twice', () async {
-        final h = await _Harness.create();
+        final _Harness h = await _Harness.create();
         addTearDown(h.dispose);
         h.writeSource('main.dart', 'void main() {}');
         h.seedApplied();
         h.writeSource('main.dart', 'void main() { print(1); }');
-        final patch = wirePatch(
+        final _PatchProbe patch = wirePatch(
           h,
           const NativePatched(
             functions: {
@@ -1657,14 +1646,14 @@ void main() {
         );
         h.pipeline.ready.signalReady();
 
-        final result = await h.hotReload();
+        final Map<String, dynamic> result = await h.hotReload();
         expect(result['succeeded'], isTrue, reason: '${result['error']}');
         expect(h.compiler.recompileCalls, hasLength(1));
         expect(patch.reassembled, isEmpty);
       });
 
       test('a library the patch delivered is no longer called stale', () async {
-        final h = await _Harness.create();
+        final _Harness h = await _Harness.create();
         addTearDown(h.dispose);
         h.writeSource('main.dart', 'void main() {}');
         h.nativeLibs = const NativeCodeStale([
@@ -1672,7 +1661,7 @@ void main() {
           'bazel-out/bin/libplain.dylib',
         ]);
         h.seedApplied();
-        final patch = wirePatch(
+        final _PatchProbe patch = wirePatch(
           h,
           const NativePatched(
             functions: {
@@ -1682,7 +1671,7 @@ void main() {
         );
         h.pipeline.ready.signalReady();
 
-        final result = await h.hotReload();
+        final Map<String, dynamic> result = await h.hotReload();
         // The rebuild that moved the library is the patcher's other trigger.
         expect(patch.asked.single, {'libbridge.dylib', 'libplain.dylib'});
         expect(result['nativeLibsStale'], ['bazel-out/bin/libplain.dylib']);
@@ -1691,12 +1680,12 @@ void main() {
 
       test('an edit that needs a restart is withheld with the builder\'s '
           'reason', () async {
-        final h = await _Harness.create();
+        final _Harness h = await _Harness.create();
         addTearDown(h.dispose);
         h.writeSource('main.dart', 'void main() {}');
         h.seedApplied();
         h.writeSource('main.dart', 'void main() { print(1); }');
-        final patch = wirePatch(
+        final _PatchProbe patch = wirePatch(
           h,
           const NativePatchNeedsRestart({
             'libbridge.dylib': ['`bridge::Point` changed layout.'],
@@ -1704,7 +1693,7 @@ void main() {
         );
         h.pipeline.ready.signalReady();
 
-        final result = await h.hotReload();
+        final Map<String, dynamic> result = await h.hotReload();
         expect(result['succeeded'], isFalse);
         expect(result['runningCode'], 'unchanged');
         expect(result['message'], contains('Hot reload withheld'));
@@ -1720,7 +1709,7 @@ void main() {
       test(
         'a patch that loaded in one app and not another says both',
         () async {
-          final h = await _Harness.create();
+          final _Harness h = await _Harness.create();
           addTearDown(h.dispose);
           h.writeSource('main.dart', 'void main() {}');
           h.seedApplied();
@@ -1733,7 +1722,7 @@ void main() {
           );
           h.pipeline.ready.signalReady();
 
-          final result = await h.hotReload();
+          final Map<String, dynamic> result = await h.hotReload();
           expect(result['succeeded'], isFalse);
           // One app runs the new native code, so the run as a whole does.
           expect(result['runningCode'], 'updated');
@@ -1745,11 +1734,11 @@ void main() {
       );
 
       test('a restart never patches: it is the reset', () async {
-        final h = await _Harness.create();
+        final _Harness h = await _Harness.create();
         addTearDown(h.dispose);
         h.writeSource('main.dart', 'void main() {}');
         h.seedApplied();
-        final patch = wirePatch(h, const NativePatchNotNeeded());
+        final _PatchProbe patch = wirePatch(h, const NativePatchNotNeeded());
         h.pipeline.ready.signalReady();
 
         await h.restart();
@@ -1772,13 +1761,13 @@ void main() {
 
         test('the builder is asked instead of refused, and what it '
             'patched is delivered', () async {
-          final h = await _Harness.create();
+          final _Harness h = await _Harness.create();
           addTearDown(h.dispose);
           h.writeSource('main.dart', 'void main() {}');
           bindingsMoved(h);
           h.seedApplied();
           h.writeSource('main.dart', 'void main() { print(1); }');
-          final patch = wirePatch(
+          final _PatchProbe patch = wirePatch(
             h,
             const NativePatched(
               functions: {
@@ -1788,7 +1777,7 @@ void main() {
           );
           h.pipeline.ready.signalReady();
 
-          final result = await h.hotReload();
+          final Map<String, dynamic> result = await h.hotReload();
           expect(patch.asked.single, {'libbridge.dylib'});
           expect(result['succeeded'], isTrue, reason: '${result['error']}');
           expect(result['runningCode'], 'updated');
@@ -1807,7 +1796,7 @@ void main() {
 
         test('a builder that cannot serve the new surface withholds it, in '
             'the builder\'s words', () async {
-          final h = await _Harness.create();
+          final _Harness h = await _Harness.create();
           addTearDown(h.dispose);
           h.writeSource('main.dart', 'void main() {}');
           bindingsMoved(h);
@@ -1821,7 +1810,7 @@ void main() {
           );
           h.pipeline.ready.signalReady();
 
-          final result = await h.hotReload();
+          final Map<String, dynamic> result = await h.hotReload();
           expect(result['succeeded'], isFalse);
           expect(result['runningCode'], 'unchanged');
           // The builder's reason, not "the contract moved" — it was asked
@@ -1838,17 +1827,17 @@ void main() {
 
         test('a library no builder covers is still refused, and no patch is '
             'built', () async {
-          final h = await _Harness.create();
+          final _Harness h = await _Harness.create();
           addTearDown(h.dispose);
           h.writeSource('main.dart', 'void main() {}');
           // `wirePatch` arms a builder for libbridge.dylib only.
           bindingsMoved(h, lib: 'libplain.dylib');
           h.seedApplied();
           h.writeSource('main.dart', 'void main() { print(1); }');
-          final patch = wirePatch(h, const NativePatchNotNeeded());
+          final _PatchProbe patch = wirePatch(h, const NativePatchNotNeeded());
           h.pipeline.ready.signalReady();
 
-          final result = await h.hotReload();
+          final Map<String, dynamic> result = await h.hotReload();
           expect(result['succeeded'], isFalse);
           expect(result['runningCode'], 'unchanged');
           expect(result['message'], contains('withheld'));
@@ -1864,7 +1853,7 @@ void main() {
 
         test('a library nothing describes is refused even with a builder '
             'armed', () async {
-          final h = await _Harness.create();
+          final _Harness h = await _Harness.create();
           addTearDown(h.dispose);
           h.writeSource('main.dart', 'void main() {}');
           // Unreachable through the rules — a `hot_patch` wrapper must declare
@@ -1874,10 +1863,10 @@ void main() {
           h.nativeLibs = const NativeLibsUnverifiable(['libbridge.dylib']);
           h.seedApplied();
           h.writeSource('main.dart', 'void main() { print(1); }');
-          final patch = wirePatch(h, const NativePatchNotNeeded());
+          final _PatchProbe patch = wirePatch(h, const NativePatchNotNeeded());
           h.pipeline.ready.signalReady();
 
-          final result = await h.hotReload();
+          final Map<String, dynamic> result = await h.hotReload();
           expect(result['succeeded'], isFalse);
           expect(result['message'], contains('withheld'));
           expect(patch.asked, isEmpty);
@@ -1886,7 +1875,7 @@ void main() {
     });
 
     test('moved bindings with no builder at all are still refused', () async {
-      final h = await _Harness.create();
+      final _Harness h = await _Harness.create();
       addTearDown(h.dispose);
       h.writeSource('main.dart', 'void main() {}');
       h.nativeLibs = const NativeBindingsMoved(
@@ -1897,7 +1886,7 @@ void main() {
       h.writeSource('main.dart', 'void main() { print(1); }');
       h.pipeline.ready.signalReady();
 
-      final result = await h.hotReload();
+      final Map<String, dynamic> result = await h.hotReload();
       expect(result['succeeded'], isFalse);
       expect(result['runningCode'], 'unchanged');
       expect(result['message'], contains('withheld'));
@@ -1905,7 +1894,7 @@ void main() {
     });
 
     test('a restart whose bindings held restarts, and says so', () async {
-      final h = await _Harness.create();
+      final _Harness h = await _Harness.create();
       addTearDown(h.dispose);
       h.writeSource('main.dart', 'void main() {}');
       h.nativeLibs = const NativeCodeStale(['libbridge.dylib']);
@@ -1916,7 +1905,7 @@ void main() {
       // hot restart re-runs `main()` over the same mapped images. That is still
       // worth doing — the Dart half is delivered — so long as the reply does not
       // leave the reader thinking the new native code came with it.
-      final result = await h.restart();
+      final Map<String, dynamic> result = await h.restart();
       expect(result['succeeded'], isTrue);
       expect(result['nativeLibsStale'], ['libbridge.dylib']);
       expect(h.compiler.fullCompileCalls, hasLength(1));
@@ -1925,8 +1914,9 @@ void main() {
     /// A web pipeline that can complete a command: a compiler that answers, and
     /// a strategy to apply what it produces.
     Future<_Harness> webPipeline({NativeLibsVerdict? verdict}) async {
-      final h = await _Harness.create(withOrchestrator: false);
-      final (:server, :process) = startedServer();
+      final _Harness h = await _Harness.create(withOrchestrator: false);
+      final (:FrontendServer server, :_ScriptedProcess process) =
+          startedServer();
       await server.start();
       addTearDown(() async {
         process.complete(0);
@@ -1955,7 +1945,7 @@ void main() {
       // Web's own gap: the page instantiates a module once and a reload does not
       // re-run `main()`, so the physics are identical — but nothing wired the
       // check there, so a `-d chrome` run said nothing at all.
-      final h = await webPipeline(
+      final _Harness h = await webPipeline(
         verdict: const NativeBindingsMoved(
           libs: ['demo_module.wasm'],
           contracts: ['demo_module.api'],
@@ -1964,7 +1954,7 @@ void main() {
       h.pipeline.assetTracker = await seedBundle(h.tmp, 'v1');
       h.pipeline.rebuildAssets = () async => true;
 
-      final result = await h.hotReload();
+      final Map<String, dynamic> result = await h.hotReload();
       expect(h.nativeLibsGateCalls, 1);
       expect(result['succeeded'], isFalse);
       expect(result['nativeLibsStale'], ['demo_module.wasm']);
@@ -1974,12 +1964,12 @@ void main() {
     });
 
     test('a web reload whose bindings held is delivered', () async {
-      final h = await webPipeline(
+      final _Harness h = await webPipeline(
         verdict: const NativeCodeStale(['demo_module.wasm']),
       );
       h.writeSource('main.dart', 'void main() { print(1); }');
 
-      final result = await h.hotReload();
+      final Map<String, dynamic> result = await h.hotReload();
       expect(result['succeeded'], isTrue, reason: '${result['error']}');
       expect(result['nativeLibsStale'], ['demo_module.wasm']);
     });
@@ -1990,17 +1980,17 @@ void main() {
       // module does it again against what the bundle now serves. Nothing else in
       // a run settles it — and on native nothing but a new process can, which is
       // why only this arm calls it.
-      final h = await webPipeline();
+      final _Harness h = await webPipeline();
       var marked = 0;
       h.pipeline.markNativeLibsLive = () async => marked++;
 
-      final result = await h.restart();
+      final Map<String, dynamic> result = await h.restart();
       expect(result['succeeded'], isTrue, reason: '${result['error']}');
       expect(marked, 1);
     });
 
     test('an undeclared library withholds with the advice', () async {
-      final h = await _Harness.create();
+      final _Harness h = await _Harness.create();
       addTearDown(h.dispose);
       h.writeSource('main.dart', 'void main() {}');
       h.nativeLibs = const NativeLibsUnverifiable(['libsqlite3.dylib']);
@@ -2008,7 +1998,7 @@ void main() {
       h.writeSource('main.dart', 'void main() { print(1); }');
       h.pipeline.ready.signalReady();
 
-      final result = await h.hotReload();
+      final Map<String, dynamic> result = await h.hotReload();
       expect(result['succeeded'], isFalse);
       expect(result['nativeLibsStale'], ['libsqlite3.dylib']);
       expect(result['error'], contains('flutter_native_library'));
@@ -2022,7 +2012,7 @@ void main() {
     });
 
     test('an unmoved library keeps the reload on its fast path', () async {
-      final h = await _Harness.create();
+      final _Harness h = await _Harness.create();
       addTearDown(h.dispose);
       h.writeSource('main.dart', 'void main() {}');
       h.nativeLibs = const NativeLibsCurrent();
@@ -2030,7 +2020,7 @@ void main() {
       h.writeSource('main.dart', 'void main() { print(1); }');
       h.pipeline.ready.signalReady();
 
-      final result = await h.hotReload();
+      final Map<String, dynamic> result = await h.hotReload();
       // A Dart-only edit in an app that bundles native libraries: the gate is
       // asked — it costs a few file hashes, no bazel — and the reload applies
       // exactly as it does for an app with no native libraries at all. Nothing
@@ -2045,7 +2035,7 @@ void main() {
     // A hot restart cannot replace a dlopened image, so the relauncher's answer
     // — when it gives one — IS the restart result and must short-circuit.
     test('a relaunch answers instead of the isolate restart', () async {
-      final h = await _Harness.create();
+      final _Harness h = await _Harness.create();
       addTearDown(h.dispose);
       h.writeSource('main.dart', 'void main() {}');
       h.seedApplied();
@@ -2058,7 +2048,7 @@ void main() {
       );
       h.pipeline.ready.signalReady();
 
-      final result = await h.restart();
+      final Map<String, dynamic> result = await h.restart();
       expect(result['relaunched'], isTrue);
       expect(result['succeeded'], isTrue);
       expect(result['runningCode'], 'updated');
@@ -2073,7 +2063,7 @@ void main() {
     });
 
     test('a relaunch answers a restart before the gate can', () async {
-      final h = await _Harness.create();
+      final _Harness h = await _Harness.create();
       addTearDown(h.dispose);
       h.writeSource('main.dart', 'void main() {}');
       h.nativeLibs = const NativeBindingsMoved(
@@ -2088,7 +2078,7 @@ void main() {
       );
       h.pipeline.ready.signalReady();
 
-      final result = await h.restart();
+      final Map<String, dynamic> result = await h.restart();
       // The process was replaced, so the library is no longer stale and the
       // restart succeeded. A gate that ran first would have refused the one
       // command that can actually deliver the edit.
@@ -2098,7 +2088,7 @@ void main() {
     });
 
     test('a restart with nothing to relaunch is withheld too', () async {
-      final h = await _Harness.create();
+      final _Harness h = await _Harness.create();
       addTearDown(h.dispose);
       h.writeSource('main.dart', 'void main() {}');
       h.nativeLibs = const NativeBindingsMoved(
@@ -2111,7 +2101,7 @@ void main() {
       // images, so it cannot deliver the library either.
       h.pipeline.ready.signalReady();
 
-      final result = await h.restart();
+      final Map<String, dynamic> result = await h.restart();
       expect(result['succeeded'], isFalse);
       expect(result['nativeLibsStale'], ['libbridge.dylib']);
       expect(result['message'], startsWith('Restart withheld'));
@@ -2119,7 +2109,7 @@ void main() {
     });
 
     test('a failed relaunch rebuild reports a source rebuild failure', () async {
-      final h = await _Harness.create();
+      final _Harness h = await _Harness.create();
       addTearDown(h.dispose);
       h.writeSource('main.dart', 'void main() {}');
       h.seedApplied();
@@ -2127,7 +2117,7 @@ void main() {
           const RelaunchBuildFailed('bazel build failed.');
       h.pipeline.ready.signalReady();
 
-      final result = await h.restart();
+      final Map<String, dynamic> result = await h.restart();
       expect(result['succeeded'], isFalse);
       expect(result['error'], 'bazel build failed.');
       // `unchanged`, and provably: the rebuild runs before any process is
@@ -2141,7 +2131,7 @@ void main() {
     });
 
     test('no native-lib change falls through to the isolate restart', () async {
-      final h = await _Harness.create();
+      final _Harness h = await _Harness.create();
       addTearDown(h.dispose);
       h.writeSource('main.dart', 'void main() {}');
       h.seedApplied();
@@ -2149,7 +2139,7 @@ void main() {
           const RelaunchNotNeeded();
       h.pipeline.ready.signalReady();
 
-      final result = await h.restart();
+      final Map<String, dynamic> result = await h.restart();
       expect(result, containsPair('message', 'Restart successful'));
       expect(
         result.containsKey('relaunched'),

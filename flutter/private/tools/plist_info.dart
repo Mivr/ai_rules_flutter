@@ -5,10 +5,10 @@
 /// with the reader in `plist_parse.dart`.
 
 import 'plist_parse.dart'
-    show escapeXml, parsePlistEntries, substitutePlistVariables;
+    show PlistEntry, escapeXml, parsePlistEntries, substitutePlistVariables;
 
 bool _isEmptyPlistString(String rawValue) {
-  final trimmed = rawValue.trim();
+  final String trimmed = rawValue.trim();
   return trimmed == '<string></string>' || trimmed == '<string/>';
 }
 
@@ -22,7 +22,10 @@ class _PlistMerger {
   new(this.variables);
 
   void setEntry(String key, String rawValue, {bool overwriteNonEmpty = true}) {
-    final substituted = substitutePlistVariables(rawValue.trim(), variables);
+    final String substituted = substitutePlistVariables(
+      rawValue.trim(),
+      variables,
+    );
     if (!merged.containsKey(key)) {
       merged[key] = substituted;
       order.add(key);
@@ -67,7 +70,10 @@ Map<String, String> _basePlistVariables({
 
 void _mergePlistSources(_PlistMerger merger, List<String> plistXmls) {
   for (var i = 0; i < plistXmls.length; i++) {
-    final entries = parsePlistEntries(plistXmls[i], source: 'plist[$i]');
+    final List<PlistEntry> entries = parsePlistEntries(
+      plistXmls[i],
+      source: 'plist[$i]',
+    );
     for (final entry in entries) {
       merger.setEntry(entry.key, entry.rawValue, overwriteNonEmpty: true);
     }
@@ -81,7 +87,7 @@ void _applyBuildVersionOverrides(
   // If explicit build/short version variables were supplied, ensure they
   // populate CFBundleVersion / CFBundleShortVersionString even if the base
   // Info.plist had literal strings instead of $(FLUTTER_BUILD_*) placeholders.
-  final buildName = extraVariables['FLUTTER_BUILD_NAME'];
+  final String? buildName = extraVariables['FLUTTER_BUILD_NAME'];
   if (buildName != null && buildName.isNotEmpty) {
     merger.setEntry(
       'CFBundleShortVersionString',
@@ -89,7 +95,7 @@ void _applyBuildVersionOverrides(
       overwriteNonEmpty: true,
     );
   }
-  final buildNumber = extraVariables['FLUTTER_BUILD_NUMBER'];
+  final String? buildNumber = extraVariables['FLUTTER_BUILD_NUMBER'];
   if (buildNumber != null && buildNumber.isNotEmpty) {
     merger.setEntry(
       'CFBundleVersion',
@@ -157,7 +163,7 @@ void _addIosPlistDefaults(
       '<array>\n\t\t<string>$supportedPlatform</string>\n\t</array>';
   defaults['DTPlatformName'] = '<string>$dtPlatform</string>';
 
-  final familyXml = _iosDeviceFamilyXml(families);
+  final String familyXml = _iosDeviceFamilyXml(families);
   if (families.isNotEmpty) {
     merger.setEntry('UIDeviceFamily', familyXml, overwriteNonEmpty: true);
   } else {
@@ -215,11 +221,11 @@ class InfoPlistRequest {
 /// Merges zero or more XML `Info.plist` sources, substitutes Xcode build
 /// variables, and injects standard Apple bundle keys required by iOS/macOS.
 String buildInfoPlist(InfoPlistRequest request) {
-  final platform = request.platform;
-  final minimumOsVersion = request.minimumOsVersion;
-  final families = request.families;
-  final extraVariables = request.extraVariables;
-  final variables = _basePlistVariables(
+  final String platform = request.platform;
+  final String minimumOsVersion = request.minimumOsVersion;
+  final List<String> families = request.families;
+  final Map<String, String> extraVariables = request.extraVariables;
+  final Map<String, String> variables = _basePlistVariables(
     appName: request.appName,
     bundleId: request.bundleId,
     minimumOsVersion: minimumOsVersion,
@@ -234,7 +240,7 @@ String buildInfoPlist(InfoPlistRequest request) {
   _applyBuildVersionOverrides(merger, extraVariables);
 
   // Standard Apple bundle defaults (only injected when missing or empty).
-  final defaults = _standardPlistDefaults(
+  final Map<String, String> defaults = _standardPlistDefaults(
     variables,
     request.appName,
     request.bundleId,
@@ -250,7 +256,7 @@ String buildInfoPlist(InfoPlistRequest request) {
   } else if (platform == 'macos') {
     _addMacosPlistDefaults(defaults, minimumOsVersion);
   }
-  for (final entry in defaults.entries) {
+  for (final MapEntry<String, String> entry in defaults.entries) {
     merger.setEntry(entry.key, entry.value, overwriteNonEmpty: false);
   }
   return _renderPlistXml(merger.order, merger.merged);
@@ -266,7 +272,7 @@ String _renderPlistXml(List<String> order, Map<String, String> merged) {
     ..writeln('<plist version="1.0">')
     ..writeln('<dict>');
   for (final key in order) {
-    final value = merged[key];
+    final String? value = merged[key];
     if (value == null) continue;
     buffer
       ..writeln('\t<key>$key</key>')

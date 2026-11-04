@@ -13,6 +13,6 @@ import 'dart:ui';
 import 'package:flutter_web_analyze_fixture/greeting.dart';
 
 void main() {
-  final grown = grow(const Size(4, 5), 6);
+  final Size grown = grow(const Size(4, 5), 6);
   assert(grown.height == 11, 'grow() should add to height');
 }

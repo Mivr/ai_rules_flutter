@@ -1,4 +1,5 @@
 /// The `build` command — invokes bazel build for a Flutter target.
+import 'dart:async';
 import 'dart:io';
 
 import 'package:args/args.dart';
@@ -62,7 +63,7 @@ class BuildCommand {
       onShutdown: bazel.close,
       exitProcess: exit,
     );
-    final subscriptions = [
+    final List<StreamSubscription<ProcessSignal>> subscriptions = [
       for (final signal in shutdownSignalsFor(isWindows: Platform.isWindows))
         handler.listen(signal.watch()),
     ];
@@ -85,15 +86,15 @@ class BuildCommand {
   Future<void> _build(Bazel bazel) async {
     final target = _results['target'] as String;
     final config = _results['config'] as String?;
-    final extraArgs = [
+    final List<String> extraArgs = [
       ...(_results['build-arg'] as List<String>),
       ...dartDefineFlags(_results['dart-define'] as List<String>),
     ];
-    final workspace = await bazel.findWorkspaceRoot();
+    final String workspace = await bazel.findWorkspaceRoot();
 
     stdout.writeln('Building $target...');
 
-    final result = await bazel.build(
+    final BazelBuildResult result = await bazel.build(
       target,
       workspace: workspace,
       compilationMode: config,
@@ -110,7 +111,7 @@ class BuildCommand {
     stdout.writeln('Build succeeded.');
     if (result.outputFiles.isNotEmpty) {
       stdout.writeln('Output files:');
-      for (final f in result.outputFiles) {
+      for (final String f in result.outputFiles) {
         stdout.writeln('  $f');
       }
     }

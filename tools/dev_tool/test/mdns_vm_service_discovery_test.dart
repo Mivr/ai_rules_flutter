@@ -140,7 +140,7 @@ void main() {
 
   group('selectMdnsAddress', () {
     test('prefers a routable address over a link-local one', () {
-      final chosen = selectMdnsAddress([
+      final InternetAddress? chosen = selectMdnsAddress([
         InternetAddress('169.254.21.246'),
         InternetAddress('192.168.1.244'),
       ]);
@@ -148,7 +148,9 @@ void main() {
     });
 
     test('takes a link-local address when it is all there is', () {
-      final chosen = selectMdnsAddress([InternetAddress('169.254.21.246')]);
+      final InternetAddress? chosen = selectMdnsAddress([
+        InternetAddress('169.254.21.246'),
+      ]);
       expect(chosen?.address, '169.254.21.246');
     });
 
@@ -168,7 +170,7 @@ void main() {
         ),
       );
 
-      final record = await discoveryOver(factory).discover(
+      final MdnsVmServiceRecord record = await discoveryOver(factory).discover(
         bundleId: bundleId,
         hostnames: deviceHostnames,
       );
@@ -213,11 +215,12 @@ void main() {
           ),
         );
 
-        final record = await discoveryOver(factory).discover(
-          bundleId: bundleId,
-          hostnames: deviceHostnames,
-          timeout: const Duration(seconds: 20),
-        );
+        final MdnsVmServiceRecord record = await discoveryOver(factory)
+            .discover(
+              bundleId: bundleId,
+              hostnames: deviceHostnames,
+              timeout: const Duration(seconds: 20),
+            );
 
         expect(record.port, 50541);
         expect(factory.clients.length, 3);
@@ -335,7 +338,7 @@ void main() {
         ),
       );
 
-      final record = await discoveryOver(factory).discover(
+      final MdnsVmServiceRecord record = await discoveryOver(factory).discover(
         bundleId: bundleId,
         hostnames: deviceHostnames,
         resolveAddress: true,
@@ -533,9 +536,10 @@ void main() {
       () async {
         final factory = FakeMDnsClientFactory();
         final abandoned = Completer<void>();
-        final discovery = discoveryOver(factory)..abandoned = abandoned.future;
+        final MdnsVmServiceDiscovery discovery = discoveryOver(factory)
+          ..abandoned = abandoned.future;
 
-        final pending = discovery.discover(
+        final Future<MdnsVmServiceRecord> pending = discovery.discover(
           bundleId: bundleId,
           hostnames: deviceHostnames,
           timeout: const Duration(minutes: 5),
@@ -569,7 +573,7 @@ void main() {
           listNetworkInterfaces: noInterfaces,
         )..abandoned = abandoned.future;
 
-        final pending = discovery.discover(
+        final Future<MdnsVmServiceRecord> pending = discovery.discover(
           bundleId: bundleId,
           hostnames: deviceHostnames,
           timeout: const Duration(minutes: 5),

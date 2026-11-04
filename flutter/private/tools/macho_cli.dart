@@ -14,13 +14,15 @@ Never usageError(String message) {
 }
 
 String _basename(String path) {
-  final normalized = path.replaceAll(r'\', '/');
-  final parts = normalized.split('/').where((s) => s.isNotEmpty);
+  final String normalized = path.replaceAll(r'\', '/');
+  final Iterable<String> parts = normalized
+      .split('/')
+      .where((s) => s.isNotEmpty);
   return parts.isEmpty ? path : parts.last;
 }
 
 String _stripExtension(String name) {
-  final dot = name.lastIndexOf('.');
+  final int dot = name.lastIndexOf('.');
   return dot > 0 ? name.substring(0, dot) : name;
 }
 
@@ -38,14 +40,14 @@ bool isAllowedNonMacho(
   void addPathCandidates(String? p) {
     if (p == null || p.isEmpty) return;
     candidates.add(p);
-    final base = _basename(p);
+    final String base = _basename(p);
     candidates.add(base);
-    final stem = _stripExtension(base);
+    final String stem = _stripExtension(base);
     candidates.add(stem);
     if (stem.startsWith('lib') && stem.length > 3) {
       candidates.add(stem.substring(3));
     }
-    for (final seg in p.replaceAll(r'\', '/').split('/')) {
+    for (final String seg in p.replaceAll(r'\', '/').split('/')) {
       if (seg.endsWith('.framework')) {
         candidates.add(seg);
         candidates.add(seg.substring(0, seg.length - '.framework'.length));
@@ -88,7 +90,7 @@ class FlagCursor {
 
 /// Appends the comma-separated parts of [value] to [into], skipping empties.
 void addCommaParts(Set<String> into, String value) {
-  for (final part in value.split(',')) {
+  for (final String part in value.split(',')) {
     if (part.isNotEmpty) into.add(part);
   }
 }
@@ -108,8 +110,8 @@ void addCommaParts(Set<String> into, String value) {
   if (platformName == null || minOsStr == null) {
     usageError('--platform and --min-os must be provided together');
   }
-  final platform = parsePlatform(platformName);
-  final minOs = parsePackedVersion(minOsStr);
+  final int platform = parsePlatform(platformName);
+  final int minOs = parsePackedVersion(minOsStr);
   return (
     platform: platform,
     minOs: minOs,

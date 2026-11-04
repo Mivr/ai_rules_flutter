@@ -6,7 +6,7 @@ import 'package:test/test.dart';
 import 'dev_tool_e2e_harness.dart';
 
 void main() {
-  final workspace = e2eWorkspace('macos_example');
+  final String workspace = e2eWorkspace('macos_example');
 
   group('Machine protocol e2e', () {
     // A run can fail before it has launched anything — a misconfigured host, an
@@ -45,7 +45,7 @@ void main() {
       final how = viaDartRun ? 'dart run' : 'the shipped binary';
       test('a failure during device resolution still reaches a machine client '
           '($how)', () async {
-        final dt = await startDevTool(
+        final DevToolProcess dt = await startDevTool(
           workspace: workspace,
           target: ':app',
           device: 'macos',
@@ -59,7 +59,9 @@ void main() {
         // Proof the protocol was up before resolution ran at all.
         await dt.waitForEvent('daemon.connected');
 
-        final failure = await dt.waitForEvent('daemon.logMessage');
+        final Map<String, dynamic> failure = await dt.waitForEvent(
+          'daemon.logMessage',
+        );
         expect(failure['params']?['level'], 'error');
         expect(
           failure['params']?['message'],
@@ -79,27 +81,36 @@ void main() {
     test(
       'emits daemon.connected, app.start, app.debugPort, app.started',
       () async {
-        final dt = await startDevTool(
+        final DevToolProcess dt = await startDevTool(
           workspace: workspace,
           target: ':app',
           device: 'macos',
         );
 
-        final connected = await dt.waitForEvent('daemon.connected');
+        final Map<String, dynamic> connected = await dt.waitForEvent(
+          'daemon.connected',
+        );
         expect(connected['params'], containsPair('version', '0.1.0'));
 
-        final start = await dt.waitForEvent('app.start');
+        final Map<String, dynamic> start = await dt.waitForEvent('app.start');
         expect(start['params']?['deviceId'], 'macOS');
 
-        final debugPort = await dt.waitForEvent('app.debugPort');
+        final Map<String, dynamic> debugPort = await dt.waitForEvent(
+          'app.debugPort',
+        );
         expect(debugPort['params']?['wsUri'], isNotNull);
         expect(debugPort['params']?['baseUri'], isNotNull);
 
-        final started = await dt.waitForEvent('app.started');
+        final Map<String, dynamic> started = await dt.waitForEvent(
+          'app.started',
+        );
         expect(started['params']?['appId'], isNotNull);
 
         // End the run — which is daemon.shutdown's job, not app.stop's.
-        final stopResp = await dt.sendCommand(1, 'daemon.shutdown');
+        final Map<String, dynamic> stopResp = await dt.sendCommand(
+          1,
+          'daemon.shutdown',
+        );
         expect(stopResp['result']?['message'], 'shutdown');
       },
     );
@@ -108,34 +119,36 @@ void main() {
     // docs/TESTING.md "Hot reload / hot restart (manual)".
 
     test('HTTP app.stop returns a complete response before teardown', () async {
-      final dt = await startDevTool(
+      final DevToolProcess dt = await startDevTool(
         workspace: workspace,
         target: ':app',
         device: 'macos',
       );
 
-      final start = await dt.waitForEvent('app.started');
-      final appId = start['params']?['appId'] as String? ?? dt.appId!;
+      final Map<String, dynamic> start = await dt.waitForEvent('app.started');
+      final String appId = start['params']?['appId'] as String? ?? dt.appId!;
       await dt.waitForHttpControl();
 
       // It stops one app, so it needs to be told which: a bare app.stop that
       // tore the whole run down would answer 'stopped' for having stopped
       // whatever it liked.
-      final bare = await dt.httpCommand('app.stop', {});
+      final Map<String, dynamic> bare = await dt.httpCommand('app.stop', {});
       expect(bare['error'], contains('needs an appId'));
       expect(bare['error'], contains('daemon.shutdown'));
 
       // The command tears the session down; the channel must still flush this
       // response in full, rather than severing it mid-response by force-closing
       // inside the app.stop handler.
-      final resp = await dt.httpCommand('app.stop', {'appId': appId});
+      final Map<String, dynamic> resp = await dt.httpCommand('app.stop', {
+        'appId': appId,
+      });
       expect(resp['result']?['message'], 'stopped');
       expect(resp['result']?['appId'], appId);
 
       // And the tool exits cleanly afterwards: this run's only app is gone, so
       // the session loop ends, which closes the channel and lets the process
       // finish.
-      final code = await dt.exitCodeWithin(
+      final int code = await dt.exitCodeWithin(
         const Duration(seconds: 30),
         stillRunning:
             "the run's only app was stopped but the tool did not exit",
@@ -144,7 +157,7 @@ void main() {
     });
 
     test('unknown method returns error', () async {
-      final dt = await startDevTool(
+      final DevToolProcess dt = await startDevTool(
         workspace: workspace,
         target: ':app',
         device: 'macos',
@@ -152,7 +165,10 @@ void main() {
 
       await dt.waitForEvent('app.started');
 
-      final resp = await dt.sendCommand(1, 'nonexistent.method');
+      final Map<String, dynamic> resp = await dt.sendCommand(
+        1,
+        'nonexistent.method',
+      );
       // Upstream's shape: `error` is a string carrying the reason, not a
       // JSON-RPC {code, message} object. And the reason names the list, since
       // absence is often correct rather than a typo — a command can be

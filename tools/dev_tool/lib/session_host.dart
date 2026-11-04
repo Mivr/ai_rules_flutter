@@ -28,6 +28,8 @@ import 'package:flutter_bazel_dev_tool/session.dart';
 import 'package:flutter_bazel_dev_tool/shutdown_signals.dart';
 import 'package:flutter_bazel_dev_tool/teardown.dart';
 
+export 'bazel.dart' show BazelBuildResult;
+
 class SessionHost {
   /// Every app this command is driving, in launch (or connect) order.
   ///
@@ -121,7 +123,7 @@ class SessionHost {
   /// Look up a session by appId. Returns null if not found.
   DeviceSession? findSession(String? appId) {
     if (appId == null) return null;
-    for (final s in sessions) {
+    for (final DeviceSession s in sessions) {
       if (s.appId == appId) return s;
     }
     return null;
@@ -131,7 +133,7 @@ class SessionHost {
   List<DeviceSession> targetSessions(Map<String, dynamic> params) {
     final appId = params['appId'] as String?;
     if (appId == null) return sessions;
-    final session = findSession(appId);
+    final DeviceSession? session = findSession(appId);
     return session == null ? const [] : [session];
   }
 
@@ -142,7 +144,7 @@ class SessionHost {
   /// and a run that ended all settle that same future. No second wait, no
   /// polling, and no timer of its own.
   Future<void> settleFirstFrameWaits() async {
-    for (final wait in firstFrameWaits) {
+    for (final Future<void> wait in firstFrameWaits) {
       await wait;
     }
   }
@@ -216,7 +218,7 @@ class SessionHost {
       longRunning: true,
     );
     commandRunner.register('app.restart', (params) async {
-      final fullRestart = params['fullRestart'] as bool? ?? true;
+      final bool fullRestart = params['fullRestart'] as bool? ?? true;
       return fullRestart
           ? pipeline.restart(params)
           : pipeline.hotReload(params);
@@ -245,7 +247,7 @@ class SessionHost {
           'the compiler and this process — send daemon.shutdown.',
         );
       }
-      final session = findSession(appId);
+      final DeviceSession? session = findSession(appId);
       if (session == null) {
         throw CommandFailure.notFound('Unknown appId: $appId');
       }
@@ -292,13 +294,13 @@ class SessionHost {
 
   /// Bind the HTTP control channel and print how to reach it.
   Future<void> startHttpChannel() async {
-    final channel = httpChannel = HttpControlChannel(
+    final HttpControlChannel channel = httpChannel = HttpControlChannel(
       commandRunner: commandRunner,
       findSession: findSession,
     );
     await channel.start();
-    final base = channel.uri;
-    final t = channel.token;
+    final Uri base = channel.uri;
+    final String t = channel.token;
     // One list, two renderings: prose hand-written beside the structured
     // fields would mean adding an endpoint edits a string nothing checks.
     final endpoints = [
@@ -360,7 +362,7 @@ class SessionHost {
     // up, so by now there is a session and its id is the only thing standing
     // between a reader and the URLs just printed.
     if (!protocol.enabled) {
-      for (final session in sessions) {
+      for (final DeviceSession session in sessions) {
         _announceSession(session.appId);
       }
     }
@@ -388,7 +390,7 @@ class SessionHost {
   }
 
   void _announceSession(String appId) {
-    final channel = httpChannel!;
+    final HttpControlChannel channel = httpChannel!;
     _logger.info({
       'message': 'session_ready',
       'text':
@@ -415,7 +417,9 @@ class SessionHost {
 
   /// Stop listening for signals, releasing the last thing holding the VM open.
   Future<void> _cancelShutdownSignals() async {
-    final subscriptions = List.of(_signalSubscriptions);
+    final List<StreamSubscription<ProcessSignal>> subscriptions = List.of(
+      _signalSubscriptions,
+    );
     _signalSubscriptions.clear();
     for (final subscription in subscriptions) {
       await subscription.cancel();
@@ -459,7 +463,8 @@ class SessionHost {
       exitProcess: exitProcess ?? exit,
       logger: _logger,
     );
-    for (final stream in signals ?? _processShutdownSignals()) {
+    for (final Stream<ProcessSignal> stream
+        in signals ?? _processShutdownSignals()) {
       _signalSubscriptions.add(handler.listen(stream));
     }
   }

@@ -71,7 +71,7 @@ String get _diskCache =>
 /// missing value, which is not what this is.
 String get _homeDirectory {
   final name = Platform.isWindows ? 'USERPROFILE' : 'HOME';
-  final value = Platform.environment[name];
+  final String? value = Platform.environment[name];
   if (value == null || value.isEmpty) {
     throw StateError(
       '$name is unset, so there is nowhere to put the shared disk cache. '
@@ -135,13 +135,13 @@ class EditableWorkspace {
 /// server per output base, and a sweep makes many) and the tree is removed
 /// unless [_keepEnvVar] is set.
 Future<EditableWorkspace> editableWorkspace(String name) async {
-  final source = e2eWorkspace(name);
+  final String source = e2eWorkspace(name);
   if (!Directory(source).existsSync()) {
     throw StateError('no e2e workspace named "$name" at $source');
   }
 
-  final parent = await Directory.systemTemp.createTemp('e2e_ws_');
-  final root = p.join(parent.path, name);
+  final Directory parent = await Directory.systemTemp.createTemp('e2e_ws_');
+  final String root = p.join(parent.path, name);
   Directory(root).createSync(recursive: true);
 
   _copyTree(Directory(source), Directory(root));
@@ -154,7 +154,7 @@ Future<EditableWorkspace> editableWorkspace(String name) async {
     // the test's own builds, so answering is nearly free; and after a shutdown
     // `bazel info` has to start a fresh server to answer, which recreates the
     // very output base this teardown exists to remove.
-    final outputBase = await _outputBase(root);
+    final String? outputBase = await _outputBase(root);
 
     // One Bazel server per output base, and the output base is keyed by this
     // path — so without this a sweep leaves a server per mutating test, each
@@ -205,7 +205,7 @@ Future<String?> _outputBase(String root) async {
     return null;
   }
   if (result.exitCode != 0) return null;
-  final path = (result.stdout as String).trim();
+  final String path = (result.stdout as String).trim();
   return path.isEmpty ? null : path;
 }
 
@@ -247,12 +247,12 @@ Future<void> _removeOutputBase(String outputBase) async {
 /// Copy [from] to [to], leaving out what belongs to the source's build rather
 /// than to its sources.
 void _copyTree(Directory from, Directory to) {
-  for (final entity in from.listSync(followLinks: false)) {
-    final base = p.basename(entity.path);
+  for (final FileSystemEntity entity in from.listSync(followLinks: false)) {
+    final String base = p.basename(entity.path);
     // Invariant 1. `bazel-<name>`, `bazel-out`, `bazel-bin`, `bazel-testlogs`
     // are symlinks into an output base this copy does not share.
     if (base.startsWith('bazel-')) continue;
-    final target = p.join(to.path, base);
+    final String target = p.join(to.path, base);
     if (entity is Directory) {
       Directory(target).createSync();
       _copyTree(entity, Directory(target));
@@ -302,7 +302,7 @@ void _writeLocalConfig({required String source, required String root}) {
     '',
     '# Invariant 2: the source resolves these by a path relative to itself.',
   ];
-  final overrides = _localPathOverrides(source);
+  final Map<String, String> overrides = _localPathOverrides(source);
   if (overrides.isEmpty) {
     throw StateError(
       'no local_path_override in ${p.join(source, 'MODULE.bazel')}. Every e2e '
@@ -312,14 +312,14 @@ void _writeLocalConfig({required String source, required String root}) {
       'in a way that names none of this.',
     );
   }
-  for (final entry in overrides.entries) {
+  for (final MapEntry<String, String> entry in overrides.entries) {
     lines.add('common --override_module=${entry.key}=${_rcPath(entry.value)}');
   }
 
   final sourceConfig = File(p.join(source, '.bazelrc.user'));
   if (sourceConfig.existsSync()) {
-    final carried = sourceConfig.readAsStringSync();
-    for (final module in overrides.keys) {
+    final String carried = sourceConfig.readAsStringSync();
+    for (final String module in overrides.keys) {
       if (carried.contains('--override_module=$module=')) {
         throw StateError(
           '${sourceConfig.path} already overrides "$module", and this copy '
@@ -357,7 +357,9 @@ Map<String, String> _localPathOverrides(String workspace) {
     r'path\s*=\s*"([^"]+)"\s*,?\s*\)',
     multiLine: true,
   );
-  for (final match in pattern.allMatches(module.readAsStringSync())) {
+  for (final RegExpMatch match in pattern.allMatches(
+    module.readAsStringSync(),
+  )) {
     found[match.group(1)!] = p.normalize(
       p.join(workspace, match.group(2)!),
     );

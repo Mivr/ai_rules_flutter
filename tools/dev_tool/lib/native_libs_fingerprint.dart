@@ -72,7 +72,7 @@ Future<Map<String, String>> nativeLibsFingerprintOfFiles(
 
 bool fingerprintsEqual(Map<String, String> a, Map<String, String> b) {
   if (a.length != b.length) return false;
-  for (final e in a.entries) {
+  for (final MapEntry<String, String> e in a.entries) {
     if (b[e.key] != e.value) return false;
   }
   return true;
@@ -84,7 +84,7 @@ List<String> changedLibs(
   Map<String, String> before,
   Map<String, String> after,
 ) {
-  final names = {...before.keys, ...after.keys};
+  final Set<String> names = {...before.keys, ...after.keys};
   return [
     for (final n in names)
       if (before[n] != after[n]) n,
@@ -99,20 +99,20 @@ const _flutterFrameworks = {'App', 'Flutter', 'FlutterMacOS'};
 const _flutterLibraries = {'libapp.so', 'libflutter.so'};
 
 bool _isNativeLib(String path) {
-  final segments = path.split('/');
-  final fw = segments.lastIndexWhere((s) => s.endsWith('.framework'));
+  final List<String> segments = path.split('/');
+  final int fw = segments.lastIndexWhere((s) => s.endsWith('.framework'));
   if (fw < 0) {
     if (_flutterLibraries.contains(segments.last)) return false;
     return path.endsWith('.dylib') ||
         path.endsWith('.so') ||
         path.endsWith('.dll');
   }
-  final name = segments[fw].substring(
+  final String name = segments[fw].substring(
     0,
     segments[fw].length - '.framework'.length,
   );
   if (_flutterFrameworks.contains(name)) return false;
-  final rest = segments.sublist(fw + 1);
+  final List<String> rest = segments.sublist(fw + 1);
   // iOS frameworks are flat (`<name>.framework/<name>`); macOS frameworks are
   // versioned (`<name>.framework/Versions/A/<name>`), and `Versions/Current`
   // is a symlink to the real version.
@@ -132,25 +132,25 @@ const _centralDirSignature = 0x02014b50;
 /// directory — content-sensitive and cheap (no decompression).
 Future<Map<String, String>> _fromZipTableOfContents(String zipPath) async {
   final file = File(zipPath);
-  final raf = await file.open();
+  final RandomAccessFile raf = await file.open();
   try {
-    final length = await raf.length();
+    final int length = await raf.length();
     // The end-of-central-directory record is within the last 64 KiB + 22
     // bytes (max comment length).
     final tailLen = length < 65558 ? length : 65558;
     await raf.setPosition(length - tailLen);
-    final tail = await raf.read(tailLen);
-    final eocd = _findEocd(tail);
+    final Uint8List tail = await raf.read(tailLen);
+    final int eocd = _findEocd(tail);
     if (eocd < 0) {
       throw FormatException('No zip end-of-central-directory in $zipPath');
     }
     final bd = ByteData.sublistView(tail);
-    final entryCount = bd.getUint16(eocd + 10, Endian.little);
-    final cdSize = bd.getUint32(eocd + 12, Endian.little);
-    final cdOffset = bd.getUint32(eocd + 16, Endian.little);
+    final int entryCount = bd.getUint16(eocd + 10, Endian.little);
+    final int cdSize = bd.getUint32(eocd + 12, Endian.little);
+    final int cdOffset = bd.getUint32(eocd + 16, Endian.little);
 
     await raf.setPosition(cdOffset);
-    final cd = await raf.read(cdSize);
+    final Uint8List cd = await raf.read(cdSize);
     final cdData = ByteData.sublistView(cd);
 
     final out = <String, String>{};
@@ -159,11 +159,11 @@ Future<Map<String, String>> _fromZipTableOfContents(String zipPath) async {
       if (cdData.getUint32(pos, Endian.little) != _centralDirSignature) {
         throw FormatException('Corrupt zip central directory in $zipPath');
       }
-      final crc32 = cdData.getUint32(pos + 16, Endian.little);
-      final uncompressedSize = cdData.getUint32(pos + 24, Endian.little);
-      final nameLen = cdData.getUint16(pos + 28, Endian.little);
-      final extraLen = cdData.getUint16(pos + 30, Endian.little);
-      final commentLen = cdData.getUint16(pos + 32, Endian.little);
+      final int crc32 = cdData.getUint32(pos + 16, Endian.little);
+      final int uncompressedSize = cdData.getUint32(pos + 24, Endian.little);
+      final int nameLen = cdData.getUint16(pos + 28, Endian.little);
+      final int extraLen = cdData.getUint16(pos + 30, Endian.little);
+      final int commentLen = cdData.getUint16(pos + 32, Endian.little);
       final name = String.fromCharCodes(
         cd.sublist(pos + 46, pos + 46 + nameLen),
       );
@@ -180,7 +180,7 @@ Future<Map<String, String>> _fromZipTableOfContents(String zipPath) async {
 
 int _findEocd(Uint8List tail) {
   final bd = ByteData.sublistView(tail);
-  for (var i = tail.length - 22; i >= 0; i--) {
+  for (int i = tail.length - 22; i >= 0; i--) {
     if (bd.getUint32(i, Endian.little) == _eocdSignature) return i;
   }
   return -1;
@@ -190,9 +190,12 @@ int _findEocd(Uint8List tail) {
 
 Future<Map<String, String>> _fromExtractedBundle(Directory appDir) async {
   final out = <String, String>{};
-  await for (final entity in appDir.list(recursive: true, followLinks: false)) {
+  await for (final FileSystemEntity entity in appDir.list(
+    recursive: true,
+    followLinks: false,
+  )) {
     if (entity is! File) continue;
-    final rel = entity.path.substring(appDir.path.length + 1);
+    final String rel = entity.path.substring(appDir.path.length + 1);
     if (!_isNativeLib(rel)) continue;
     out[rel] = 'fnv:${await _fnv1a64(entity)}';
   }
@@ -201,7 +204,7 @@ Future<Map<String, String>> _fromExtractedBundle(Directory appDir) async {
 
 Future<int> _fnv1a64(File f) async {
   var hash = 0xcbf29ce484222325;
-  await for (final chunk in f.openRead()) {
+  await for (final List<int> chunk in f.openRead()) {
     for (final b in chunk) {
       hash ^= b;
       hash *= 0x100000001b3;

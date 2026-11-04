@@ -21,7 +21,7 @@ import 'dart:io';
 /// is no retry to make — no `--sksl`, or nothing but `--sksl` to keep.
 List<String>? withoutSksl(List<String> args) {
   if (!args.contains('--sksl')) return null;
-  final rest = [
+  final List<String> rest = [
     for (final a in args)
       if (a != '--sksl') a,
   ];
@@ -40,7 +40,7 @@ Future<int> compileShader(List<String> argv, StringSink err) async {
   var requireSksl = false;
   var i = 0;
   for (; i < argv.length; i++) {
-    final a = argv[i];
+    final String a = argv[i];
     if (a == '--') {
       i++;
       break;
@@ -52,7 +52,7 @@ Future<int> compileShader(List<String> argv, StringSink err) async {
       requireSksl = true;
     }
   }
-  final args = argv.sublist(i);
+  final List<String> args = argv.sublist(i);
   if (impellerc == null || shader == null || args.isEmpty) {
     err.writeln(
       'Usage: dart compile_shader.dart --impellerc <path> --shader <path> '
@@ -61,10 +61,10 @@ Future<int> compileShader(List<String> argv, StringSink err) async {
     return 2;
   }
 
-  final first = await Process.run(impellerc, args);
+  final ProcessResult first = await Process.run(impellerc, args);
   if (first.exitCode == 0) return 0;
 
-  final retry = requireSksl ? null : withoutSksl(args);
+  final List<String>? retry = requireSksl ? null : withoutSksl(args);
   if (retry == null) {
     err
       ..write(first.stdout)
@@ -78,7 +78,7 @@ Future<int> compileShader(List<String> argv, StringSink err) async {
     return first.exitCode;
   }
 
-  final second = await Process.run(impellerc, retry);
+  final ProcessResult second = await Process.run(impellerc, retry);
   if (second.exitCode != 0) {
     err
       ..write(first.stdout)

@@ -43,6 +43,16 @@ import 'package:flutter_bazel_dev_tool/web_pipeline_assembler.dart';
 
 export 'dev_tool_exception.dart' show DevToolException;
 
+typedef _Built = ({
+  DateTime builtBefore,
+  String appFile,
+  List<String> outputFiles,
+});
+
+typedef _Artifact = ({String appFile, List<String> outputFiles});
+
+typedef _Plan = RunPlan;
+
 class RunCommand {
   static final parser = ArgParser()
     ..addOption(
@@ -335,7 +345,7 @@ class RunCommand {
     // that a run killed during its build or its install releases what it has
     // already taken. See SessionHost.listenForShutdownSignals.
     host.listenForShutdownSignals();
-    final protocol = host.protocol;
+    final MachineProtocol protocol = host.protocol;
 
     // The browser's session, once the launch loop has built it. The DWDS
     // `connectedApps` listener is attached before Chrome launches (a broadcast
@@ -373,8 +383,8 @@ class RunCommand {
 
         plan = await _resolvePlan(host, logger);
 
-        final built = await _buildApp(plan);
-        final appFile = built.appFile;
+        final _Built built = await _buildApp(plan);
+        final String appFile = built.appFile;
 
         sourceWatcher = await _startWatcher(plan, pipeline, logger);
 
@@ -443,14 +453,14 @@ class RunCommand {
     // launch — `--start-paused` and Android's VM-service preflight are
     // launch-time engine arguments, so there is no later moment at which they
     // could be applied.
-    final plan = await RunPlan.resolve(_results, logger, bazel: host.bazel);
+    final _Plan p = await RunPlan.resolve(_results, logger, bazel: host.bazel);
     // The first things the plan settles that the command surface depends on.
     // Only a `-c dbg` native build carries the record `app.buildInfo` reads,
     // and only a run with a VM service can reach the `ext.rules_flutter.*`
     // extensions the `app.*` agent commands proxy to. See
     // RunPlan.carriesBuildInfo and RunPlan.hasAgentSurface.
-    if (plan.carriesBuildInfo) host.registerBuildInfo();
-    if (plan.hasAgentSurface) {
+    if (p.carriesBuildInfo) host.registerBuildInfo();
+    if (p.hasAgentSurface) {
       host.registerAgentCommands();
     } else {
       // Keys go to the browser over CDP, which needs no VM service, so a
@@ -461,7 +471,7 @@ class RunCommand {
       // here; what a client gets otherwise is `Unknown command: app.getText`,
       // which is true but does not say that no flag on this invocation would
       // have made it available.
-      final absent = _noAgentSurface(plan);
+      final ({String because, String reason}) absent = _noAgentSurface(p);
       logger.info({
         'message': 'agent_surface_unavailable',
         'text':
@@ -476,20 +486,19 @@ class RunCommand {
         'reason': absent.reason,
       });
     }
-    return plan;
+    return p;
   }
 
   /// Build the app, stamped before bazel reads the sources.
-  Future<({DateTime builtBefore, String appFile, List<String> outputFiles})>
-  _buildApp(RunPlan plan) async {
+  Future<_Built> _buildApp(RunPlan plan) async {
     // Stamped before the build, not after: a source edited while bazel is
     // reading it may or may not be in the result, and the two ways of being
     // wrong are not equal. Unseeding costs a recompile of content the app
     // already has; seeding drops the edit. See
     // [AppliedVersions.seedFromBuild]. Off the filesystem's clock, not the
     // wall clock's: see [fileClockNow].
-    final builtBefore = await fileClockNow();
-    final build = await plan.buildApp();
+    final DateTime builtBefore = await fileClockNow();
+    final _Artifact build = await plan.buildApp();
     return (
       builtBefore: builtBefore,
       appFile: build.appFile,
@@ -590,8 +599,8 @@ class RunCommand {
   ) async {
     // Step 3b: Launch on each device and create sessions.
     final launcher = DeviceLauncher(plan: plan, host: host, appFile: appFile);
-    for (final device in plan.devices) {
-      final deviceSession = await launcher.launch(device);
+    for (final Device device in plan.devices) {
+      final DeviceSession deviceSession = await launcher.launch(device);
       if (device is WebDevice && !webSession.isCompleted) {
         webSession.complete(deviceSession);
       }
@@ -657,7 +666,7 @@ class RunCommand {
     // launch context, which is what arms the native-libs relauncher and makes
     // an asset rebuild reproduce the transitioned configuration the running
     // bundle came from.
-    final hasVmClient = host.sessions.any((s) => s.vmClient != null);
+    final bool hasVmClient = host.sessions.any((s) => s.vmClient != null);
     // `plan.hotReloadOff` rather than `!plan.profileMode`: a derivation of
     // "can this run reload" that forgets `--no-hot` lets `--no-hot -c dbg`
     // build a full compiler and orchestrator that every transport can drive.
@@ -792,9 +801,7 @@ class RunCommand {
     } else {
       // No hot reload possible — wait for the first device's app to end
       // (`terminated`, so a relaunch is not read as the app exiting).
-      if (host.sessions.isNotEmpty) {
-        await host.sessions.first.terminated;
-      }
+      if (host.sessions.isNotEmpty) await host.sessions.first.terminated;
     }
   }
 }
@@ -834,7 +841,7 @@ class RunCommand {
 Map<String, List<String>> categorizeOutputFiles(List<String> files) {
   final result = <String, List<String>>{};
   for (final f in files) {
-    final category = _categorize(f);
+    final String category = _categorize(f);
     (result[category] ??= []).add(f);
   }
   return result;

@@ -4,6 +4,7 @@ library;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:test/test.dart';
 
@@ -45,7 +46,7 @@ class _FakePlatformLauncher implements runner.PlatformLauncher {
 void main() {
   group('buildChromeArguments & buildChromeEnvironment', () {
     test('includes sandbox-safe flags and clears PATH so no host browser can run', () {
-      final args = runner.buildChromeArguments(
+      final List<String> args = runner.buildChromeArguments(
         url: 'http://127.0.0.1:12345/',
         userDataDir: '/tmp/profile',
       );
@@ -54,7 +55,7 @@ void main() {
       expect(args, contains('--disable-dev-shm-usage'));
       expect(args.last, 'http://127.0.0.1:12345/');
 
-      final env = runner.buildChromeEnvironment(
+      final Map<String, String> env = runner.buildChromeEnvironment(
         browserBinary: '/runfiles/flutter_chrome_headless_shell/browser/chrome-headless-shell',
         scratchDir: '/tmp/scratch',
         forwarding: const support.EnvForwarding(
@@ -78,7 +79,7 @@ void main() {
 
   group('Linux Xvfb & app environment helpers', () {
     test('builds hermetic Xvfb and Linux app environments', () {
-      final xvfbArgs = runner.buildXvfbArguments(
+      final List<String> xvfbArgs = runner.buildXvfbArguments(
         xkbDir: '/runfiles/flutter_linux_headless_runtime/sysroot/usr/share/X11/xkb',
       );
       expect(xvfbArgs, containsAllInOrder(['-displayfd', '1']));
@@ -90,7 +91,7 @@ void main() {
         ),
       );
 
-      final xvfbEnv = runner.buildXvfbEnvironment(
+      final Map<String, String> xvfbEnv = runner.buildXvfbEnvironment(
         sysrootDir: '/runfiles/flutter_linux_headless_runtime/sysroot',
         scratchDir: '/tmp/scratch',
       );
@@ -104,7 +105,7 @@ void main() {
         '/runfiles/flutter_linux_headless_runtime/sysroot/lib/x86_64-linux-gnu',
       );
 
-      final appEnv = runner.buildLinuxAppEnvironment(
+      final Map<String, String> appEnv = runner.buildLinuxAppEnvironment(
         bundleDir: '/runfiles/ws/app_linux',
         sysrootDir: '/runfiles/flutter_linux_headless_runtime/sysroot',
         scratchDir: '/tmp/scratch',
@@ -138,7 +139,9 @@ void main() {
     test(
       'prepareHermeticXvfbBinary zeroes out XkbBinDirectory /usr/bin literal',
       () {
-        final tmpDir = Directory.systemTemp.createTempSync('xvfb_patch_test_');
+        final Directory tmpDir = Directory.systemTemp.createTempSync(
+          'xvfb_patch_test_',
+        );
         try {
           final fakeXvfb = File('${tmpDir.path}/Xvfb');
           final payload = <int>[
@@ -152,11 +155,11 @@ void main() {
             ...utf8.encode('TRAILER'),
           ];
           fakeXvfb.writeAsBytesSync(payload);
-          final patchedPath = runner.prepareHermeticXvfbBinary(
+          final String patchedPath = runner.prepareHermeticXvfbBinary(
             sourceXvfbBinary: fakeXvfb.path,
             scratchDir: tmpDir.path,
           );
-          final patchedBytes = File(patchedPath).readAsBytesSync();
+          final Uint8List patchedBytes = File(patchedPath).readAsBytesSync();
           expect(patchedBytes.length, payload.length);
           // "/usr/bin" (8 bytes after "HEADER") is replaced by 8 zero bytes.
           expect(patchedBytes.sublist(6, 14), List<int>.filled(8, 0));
@@ -208,20 +211,20 @@ void main() {
       () async {
         final client = HttpClient();
         try {
-          final indexReq = await client.getUrl(
+          final HttpClientRequest indexReq = await client.getUrl(
             Uri.parse('http://127.0.0.1:${server.port}/'),
           );
-          final indexRes = await indexReq.close();
+          final HttpClientResponse indexRes = await indexReq.close();
           expect(indexRes.statusCode, HttpStatus.ok);
           expect(
             await utf8.decoder.bind(indexRes).join(),
             '<html>ok</html>',
           );
 
-          final wasmReq = await client.getUrl(
+          final HttpClientRequest wasmReq = await client.getUrl(
             Uri.parse('http://127.0.0.1:${server.port}/main.dart.wasm'),
           );
-          final wasmRes = await wasmReq.close();
+          final HttpClientResponse wasmRes = await wasmReq.close();
           expect(wasmRes.statusCode, HttpStatus.ok);
           expect(
             wasmRes.headers.value(HttpHeaders.contentTypeHeader),
@@ -229,12 +232,13 @@ void main() {
           );
           await wasmRes.drain<void>();
 
-          final fontManifestReq = await client.getUrl(
+          final HttpClientRequest fontManifestReq = await client.getUrl(
             Uri.parse(
               'http://127.0.0.1:${server.port}/assets/FontManifest.json',
             ),
           );
-          final fontManifestRes = await fontManifestReq.close();
+          final HttpClientResponse fontManifestRes = await fontManifestReq
+              .close();
           final manifestJson = json.decode(
             await utf8.decoder.bind(fontManifestRes).join(),
           ) as List<dynamic>;
@@ -243,12 +247,12 @@ void main() {
             isTrue,
           );
 
-          final robotoReq = await client.getUrl(
+          final HttpClientRequest robotoReq = await client.getUrl(
             Uri.parse(
               'http://127.0.0.1:${server.port}/assets/fonts/Roboto-Regular.ttf',
             ),
           );
-          final robotoRes = await robotoReq.close();
+          final HttpClientResponse robotoRes = await robotoReq.close();
           expect(robotoRes.statusCode, HttpStatus.ok);
           expect(
             await robotoRes.fold<List<int>>(<int>[], (a, b) => a..addAll(b)),
@@ -266,12 +270,12 @@ void main() {
       ).writeAsStringSync('{not json');
       final client = HttpClient();
       try {
-        final req = await client.getUrl(
+        final HttpClientRequest req = await client.getUrl(
           Uri.parse(
             'http://127.0.0.1:${server.port}/assets/FontManifest.json',
           ),
         );
-        final res = await req.close();
+        final HttpClientResponse res = await req.close();
         expect(res.statusCode, HttpStatus.internalServerError);
         await res.drain<void>();
       } finally {
@@ -285,10 +289,10 @@ void main() {
       Process.runSync('chmod', ['000', secret.path]);
       final client = HttpClient();
       try {
-        final req = await client.getUrl(
+        final HttpClientRequest req = await client.getUrl(
           Uri.parse('http://127.0.0.1:${server.port}/secret.txt'),
         );
-        final res = await req.close();
+        final HttpClientResponse res = await req.close();
         expect(res.statusCode, HttpStatus.internalServerError);
         await res.drain<void>();
       } finally {
@@ -301,7 +305,9 @@ void main() {
     test(
       'reports pass and writes JUnit XML when in-app suite succeeds',
       () async {
-        final tmpDir = Directory.systemTemp.createTempSync('integration_xml_');
+        final Directory tmpDir = Directory.systemTemp.createTempSync(
+          'integration_xml_',
+        );
         final xmlFile = File('${tmpDir.path}/test.xml');
         WebSocket? clientWs;
         try {
@@ -310,7 +316,7 @@ void main() {
               clientWs = await WebSocket.connect(binding.url);
               clientWs!.listen((raw) {
                 final list = json.decode(raw as String) as List<dynamic>;
-                final id = (list[0] as num).toInt();
+                final int id = (list[0] as num).toInt();
                 final payload = list[1] as Map<String, dynamic>;
                 if (id == 0 && payload['type'] == 'initial') {
                   clientWs!.add(
@@ -334,7 +340,8 @@ void main() {
                     ]),
                   );
                 } else if (id == 3 && payload['command'] == 'run') {
-                  final replyChannel = (payload['channel'] as num).toInt() + 1;
+                  final int replyChannel =
+                      (payload['channel'] as num).toInt() + 1;
                   clientWs!.add(
                     json.encode([
                       replyChannel,
@@ -347,7 +354,7 @@ void main() {
             },
           );
 
-          final code = await runner.runIntegrationSuite(
+          final int code = await runner.runIntegrationSuite(
             runner.IntegrationSuiteRun(
               launcher: launcher,
               testPath: 'integration_test/app_test.dart',
@@ -374,7 +381,9 @@ void main() {
     test(
       'fails with non-zero exit and records expected/actual on test failure',
       () async {
-        final tmpDir = Directory.systemTemp.createTempSync('integration_fail_');
+        final Directory tmpDir = Directory.systemTemp.createTempSync(
+          'integration_fail_',
+        );
         final xmlFile = File('${tmpDir.path}/test.xml');
         WebSocket? clientWs;
         try {
@@ -383,7 +392,7 @@ void main() {
               clientWs = await WebSocket.connect(binding.url);
               clientWs!.listen((raw) {
                 final list = json.decode(raw as String) as List<dynamic>;
-                final id = (list[0] as num).toInt();
+                final int id = (list[0] as num).toInt();
                 final payload = list[1] as Map<String, dynamic>;
                 if (id == 0 && payload['type'] == 'initial') {
                   clientWs!.add(
@@ -407,7 +416,8 @@ void main() {
                     ]),
                   );
                 } else if (id == 3 && payload['command'] == 'run') {
-                  final replyChannel = (payload['channel'] as num).toInt() + 1;
+                  final int replyChannel =
+                      (payload['channel'] as num).toInt() + 1;
                   clientWs!.add(
                     json.encode([
                       replyChannel,
@@ -433,7 +443,7 @@ void main() {
             },
           );
 
-          final code = await runner.runIntegrationSuite(
+          final int code = await runner.runIntegrationSuite(
             runner.IntegrationSuiteRun(
               launcher: launcher,
               testPath: 'integration_test/app_test.dart',
@@ -443,7 +453,7 @@ void main() {
             ),
           );
           expect(code, 1);
-          final xml = xmlFile.readAsStringSync();
+          final String xml = xmlFile.readAsStringSync();
           expect(xml, contains('counter increments to 3'));
           expect(xml, contains("Expected: '3'"));
           expect(xml, contains("Actual: '2'"));
@@ -459,7 +469,9 @@ void main() {
     test(
       'fails with non-zero exit when the in-app suite executes zero cases',
       () async {
-        final tmpDir = Directory.systemTemp.createTempSync('integration_zero_');
+        final Directory tmpDir = Directory.systemTemp.createTempSync(
+          'integration_zero_',
+        );
         final xmlFile = File('${tmpDir.path}/test.xml');
         WebSocket? clientWs;
         try {
@@ -468,7 +480,7 @@ void main() {
               clientWs = await WebSocket.connect(binding.url);
               clientWs!.listen((raw) {
                 final list = json.decode(raw as String) as List<dynamic>;
-                final id = (list[0] as num).toInt();
+                final int id = (list[0] as num).toInt();
                 final payload = list[1] as Map<String, dynamic>;
                 if (id == 0 && payload['type'] == 'initial') {
                   clientWs!.add(
@@ -490,7 +502,7 @@ void main() {
             },
           );
 
-          final code = await runner.runIntegrationSuite(
+          final int code = await runner.runIntegrationSuite(
             runner.IntegrationSuiteRun(
               launcher: launcher,
               testPath: 'integration_test/app_test.dart',
@@ -513,7 +525,7 @@ void main() {
       'refuses a tokenless and a wrong-token dial-back, adopts the legitimate one',
       () async {
         const token = '0123456789abcdef0123456789abcdef';
-        final tmpDir = Directory.systemTemp.createTempSync(
+        final Directory tmpDir = Directory.systemTemp.createTempSync(
           'integration_token_',
         );
         final xmlFile = File('${tmpDir.path}/test.xml');
@@ -536,7 +548,7 @@ void main() {
               clientWs = await WebSocket.connect(binding.url);
               clientWs!.listen((raw) {
                 final list = json.decode(raw as String) as List<dynamic>;
-                final id = (list[0] as num).toInt();
+                final int id = (list[0] as num).toInt();
                 final payload = list[1] as Map<String, dynamic>;
                 if (id == 0 && payload['type'] == 'initial') {
                   clientWs!.add(
@@ -560,7 +572,8 @@ void main() {
                     ]),
                   );
                 } else if (id == 3 && payload['command'] == 'run') {
-                  final replyChannel = (payload['channel'] as num).toInt() + 1;
+                  final int replyChannel =
+                      (payload['channel'] as num).toInt() + 1;
                   clientWs!.add(
                     json.encode([
                       replyChannel,
@@ -573,7 +586,7 @@ void main() {
             },
           );
 
-          final code = await runner.runIntegrationSuite(
+          final int code = await runner.runIntegrationSuite(
             runner.IntegrationSuiteRun(
               launcher: launcher,
               testPath: 'integration_test/app_test.dart',
@@ -598,8 +611,8 @@ void main() {
     );
 
     test('mints a random 128-bit token per run by default', () {
-      final first = runner.generateHarnessToken();
-      final second = runner.generateHarnessToken();
+      final String first = runner.generateHarnessToken();
+      final String second = runner.generateHarnessToken();
       expect(first, hasLength(32));
       expect(RegExp('^[0-9a-f]{32}\$').hasMatch(first), isTrue);
       expect(second, isNot(first));
@@ -665,7 +678,7 @@ void main() {
     test(
       'forwards declared env and TZ in chrome, linux and android environments',
       () {
-        final chromeEnv = runner.buildChromeEnvironment(
+        final Map<String, String> chromeEnv = runner.buildChromeEnvironment(
           browserBinary: '/runfiles/flutter_chrome_headless_shell/browser/chrome-headless-shell',
           scratchDir: '/tmp/scratch',
           forwarding: const support.EnvForwarding(
@@ -675,7 +688,7 @@ void main() {
         expect(chromeEnv['MY_VAR'], 'declared');
         expect(chromeEnv['TZ'], 'UTC');
 
-        final appEnv = runner.buildLinuxAppEnvironment(
+        final Map<String, String> appEnv = runner.buildLinuxAppEnvironment(
           bundleDir: '/runfiles/ws/app_linux',
           sysrootDir: '/runfiles/flutter_linux_headless_runtime/sysroot',
           scratchDir: '/tmp/scratch',
@@ -689,17 +702,18 @@ void main() {
         expect(appEnv['MY_VAR'], 'declared');
         expect(appEnv['TZ'], 'UTC');
 
-        final androidEnv = runner.buildAndroidRuntimeEnvironment(
-          sdkRoot: '/runfiles/flutter_android_headless_runtime/sdk',
-          sysrootDir: '/runfiles/flutter_android_headless_runtime/sysroot',
-          scratchDir: '/tmp/android_scratch',
-          avdHomeDir: '/tmp/android_scratch/.android/avd',
-          adbServerPort: 15037,
-          forwarding: const support.EnvForwarding(
-            env: {'MY_VAR': 'declared'},
-            tz: 'UTC',
-          ),
-        );
+        final Map<String, String> androidEnv = runner
+            .buildAndroidRuntimeEnvironment(
+              sdkRoot: '/runfiles/flutter_android_headless_runtime/sdk',
+              sysrootDir: '/runfiles/flutter_android_headless_runtime/sysroot',
+              scratchDir: '/tmp/android_scratch',
+              avdHomeDir: '/tmp/android_scratch/.android/avd',
+              adbServerPort: 15037,
+              forwarding: const support.EnvForwarding(
+                env: {'MY_VAR': 'declared'},
+                tz: 'UTC',
+              ),
+            );
         expect(androidEnv['MY_VAR'], 'declared');
         expect(androidEnv['TZ'], 'UTC');
       },
@@ -740,7 +754,9 @@ void main() {
     });
 
     test('deletes a real temp file', () {
-      final tmpDir = Directory.systemTemp.createTempSync('cleanup_test_');
+      final Directory tmpDir = Directory.systemTemp.createTempSync(
+        'cleanup_test_',
+      );
       try {
         final file = File('${tmpDir.path}/scratch')..writeAsStringSync('x');
         support.cleanupQuietly(file.deleteSync);
@@ -786,10 +802,13 @@ void main() {
 
   group('serveInternalError', () {
     test('swallows answering an already-closed response', () async {
-      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final HttpServer server = await HttpServer.bind(
+        InternetAddress.loopbackIPv4,
+        0,
+      );
       final handled = Completer<Object?>();
       server.listen((req) async {
-        final response = req.response;
+        final HttpResponse response = req.response;
         response.statusCode = HttpStatus.ok;
         await response.close();
         try {
@@ -802,10 +821,10 @@ void main() {
       try {
         final client = HttpClient();
         try {
-          final req = await client.getUrl(
+          final HttpClientRequest req = await client.getUrl(
             Uri.parse('http://127.0.0.1:${server.port}/'),
           );
-          final res = await req.close();
+          final HttpClientResponse res = await req.close();
           expect(res.statusCode, HttpStatus.ok);
           await res.drain<void>();
         } finally {

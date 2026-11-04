@@ -26,6 +26,8 @@ import 'package:flutter_bazel_dev_tool/vm_service_discovery.dart';
 import 'package:flutter_bazel_dev_tool/web_mode.dart';
 import 'package:flutter_bazel_dev_tool/web_options.dart';
 
+export 'device.dart' show Device;
+
 /// Refuses a compilation mode no device in [devices] can actually run.
 ///
 /// Only one combination qualifies, and it is the one that fails quietly: an AOT
@@ -39,7 +41,8 @@ import 'package:flutter_bazel_dev_tool/web_options.dart';
 /// would break every release build. It is running it that cannot work.
 void assertModeCanRun(String? compilationMode, List<Device> devices) {
   if (compilationMode != 'opt') return;
-  for (final simulator in devices.whereType<IOSSimulatorDevice>()) {
+  for (final IOSSimulatorDevice simulator
+      in devices.whereType<IOSSimulatorDevice>()) {
     throw DevToolException(
       'Cannot run an AOT build on ${simulator.name}: the simulator\'s '
       'Flutter engine is JIT-only and needs '
@@ -78,14 +81,14 @@ Future<_RunBuildInputs> resolveRunBuildInputs(
   required bool profileMode,
   required String? compilationMode,
 }) async {
-  final workspace = await bazel.findWorkspaceRoot();
-  final extraArgs = [
+  final String workspace = await bazel.findWorkspaceRoot();
+  final List<String> extraArgs = [
     ...(results['build-arg'] as List<String>),
     ...defineFlags,
     ...devices.first.buildArgs,
     ...modeBuildFlags(profileMode: profileMode),
   ];
-  final toolchain = await resolveToolchainPaths(
+  final ToolchainPaths toolchain = await resolveToolchainPaths(
     results['target'] as String,
     workspace: workspace,
     runBazel: bazel.run,
@@ -102,9 +105,11 @@ Future<_RunBuildInputs> resolveRunBuildInputs(
 /// All devices must agree on platform build args: one invocation is one
 /// build, and a build cannot be for two platforms at once.
 void requireSharedBuild(List<Device> devices) {
-  final distinctBuildArgs = devices.map((d) => d.buildArgs.join(' ')).toSet();
+  final Set<String> distinctBuildArgs = devices
+      .map((d) => d.buildArgs.join(' '))
+      .toSet();
   if (distinctBuildArgs.length <= 1) return;
-  final details = devices
+  final String details = devices
       .where((d) => d.buildArgs.isNotEmpty)
       .map((d) => '  ${d.name}: ${d.buildArgs.join(' ')}')
       .join('\n');
@@ -156,7 +161,7 @@ void prepareDevicesForLaunch(
   // --allow-no-vm-service opts out of requiring a VM service, so it also skips
   // the preflight (mirroring the post-launch no-VM-service abort).
   if (preparation.buildMode.servesVmService && !preparation.allowNoVmService) {
-    for (final device in devices.whereType<AndroidDevice>()) {
+    for (final AndroidDevice device in devices.whereType<AndroidDevice>()) {
       device.expectsVmService = true;
     }
   }
@@ -178,7 +183,7 @@ void prepareDevicesForLaunch(
   // to serve. The DDC path's server is built by the assembler from the same
   // options, so the two cannot disagree.
   if (preparation.webOptions != null) {
-    for (final device in devices.whereType<WebDevice>()) {
+    for (final WebDevice device in devices.whereType<WebDevice>()) {
       device.webOptions = preparation.webOptions;
     }
   }
@@ -423,7 +428,7 @@ class RunPlan {
   /// The web serving options, for a run that has them. Asking a native run is
   /// a caller bug, not a state to paper over with a default.
   WebServerOptions get webServer {
-    final options = webOptions;
+    final WebOptions? options = webOptions;
     if (options == null) {
       throw StateError(
         'This run has no web server options: it is not a web run.',
@@ -588,7 +593,7 @@ class RunPlan {
     required bool profileMode,
     required String? compilationMode,
   }) {
-    final buildMode = buildModeFor(
+    final BuildMode buildMode = buildModeFor(
       profileMode: profileMode,
       compilationMode: compilationMode,
     );
@@ -638,20 +643,20 @@ class RunPlan {
     Logger logger, {
     required Bazel bazel,
   }) async {
-    final flags = resolveRunFlags(results);
+    final ResolvedRunFlags flags = resolveRunFlags(results);
 
     // Reads nothing but the flags, so it comes before any I/O: a `-c` that
     // contradicts the run is a typo to report at once, not after two `bazel
     // info` spawns and a toolchain resolution have been spent on it.
-    final compilationMode = compilationModeFor(results);
+    final String? compilationMode = compilationModeFor(results);
 
     // Devices FIRST — they dictate the platform build flags — and before any
     // `bazel` spawn, so an id that names no device is refused at once.
-    final devices = await resolveDevices(
+    final List<Device> devices = await resolveDevices(
       results['device'] as List<String>,
     );
 
-    final resolved = await resolveRunBuildInputs(
+    final _RunBuildInputs resolved = await resolveRunBuildInputs(
       results,
       bazel,
       devices,
@@ -665,14 +670,14 @@ class RunPlan {
     // number is a typo to report at once rather than after a preflight.
     // `resolveWebMode` refuses `--wasm` and `--hot` combinations that cannot
     // hold; `WebOptions.resolve` refuses every web flag on a native run.
-    final webMode = resolveWebMode(
+    final WebMode? webMode = resolveWebMode(
       isWebDevice: devices.first is WebDevice,
       wasmMode: results['wasm'] as bool,
       profileMode: flags.profileMode,
       hotReloadEnabled: flags.hotReloadEnabled,
       hotExplicit: results.wasParsed('hot'),
     );
-    final webOptions = WebOptions.resolve(results, webMode);
+    final WebOptions? webOptions = WebOptions.resolve(results, webMode);
 
     logger.fine({
       'message': 'resolved_devices',
@@ -682,7 +687,7 @@ class RunPlan {
 
     requireSharedBuild(devices);
 
-    final buildMode = applyBuildMode(
+    final BuildMode buildMode = applyBuildMode(
       devices,
       profileMode: flags.profileMode,
       compilationMode: compilationMode,
@@ -742,7 +747,7 @@ class RunPlan {
       'mode': modeName,
     });
 
-    final result = await bazel.build(
+    final BazelBuildResult result = await bazel.build(
       target,
       workspace: workspace,
       compilationMode: compilationMode,
@@ -759,7 +764,7 @@ class RunPlan {
         'Build succeeded but cquery returned no output files for $target.',
       );
     }
-    final appFile = devices.first.pickArtifact(result.outputFiles);
+    final String appFile = devices.first.pickArtifact(result.outputFiles);
     logger.fine({
       'message': 'build_outputs',
       'text': 'Launch artifact: $appFile',

@@ -152,7 +152,7 @@ void main() {
     });
 
     test('the same header is allowed once isolation is off', () {
-      final options = resolveFor([
+      final WebOptions options = resolveFor([
         '--no-cross-origin-isolation',
         '--web-header=Cross-Origin-Opener-Policy=unsafe-none',
       ], const WasmWebMode())!;
@@ -192,7 +192,10 @@ void main() {
     test('defaults to the loopback, not to every interface', () {
       // A deliberate divergence from upstream, which defaults to `any`. A dev
       // loop has no reason to publish the app's sources to the LAN unasked.
-      final server = resolveFor([], const DdcWebMode())!.server;
+      final WebServerOptions server = resolveFor(
+        [],
+        const DdcWebMode(),
+      )!.server;
       expect(server.hostname, 'localhost');
       expect(server.displayHost, 'localhost');
     });
@@ -200,7 +203,7 @@ void main() {
     test('"any" binds everything but still shows as localhost in URLs', () {
       // `any` is not a name a browser resolves, and a server on every
       // interface is reachable on the loopback.
-      final server = resolveFor([
+      final WebServerOptions server = resolveFor([
         '--web-hostname=any',
       ], const DdcWebMode())!.server;
       expect(server.hostname, 'any');
@@ -208,7 +211,7 @@ void main() {
     });
 
     test('any other name is used as given', () {
-      final server = resolveFor([
+      final WebServerOptions server = resolveFor([
         '--web-hostname=127.0.0.1',
       ], const DdcWebMode())!.server;
       expect(server.displayHost, '127.0.0.1');
@@ -218,7 +221,7 @@ void main() {
 
   group('--web-header', () {
     test('parses NAME=VALUE, keeping "=" in the value', () {
-      final headers = resolveFor([
+      final Map<String, String> headers = resolveFor([
         '--web-header=X-A=one',
         '--web-header=X-B=a=b=c',
       ], const DdcWebMode())!.server.headers;
@@ -228,7 +231,7 @@ void main() {
     test('a repeated name collapses to the last value', () {
       // One header cannot have two values here; collapsing at parse time is
       // what keeps the wire from carrying both.
-      final headers = resolveFor([
+      final Map<String, String> headers = resolveFor([
         '--web-header=X-A=first',
         '--web-header=X-A=second',
       ], const DdcWebMode())!.server.headers;
@@ -290,7 +293,7 @@ void main() {
 
   group('TLS', () {
     test('both paths make a secure server', () {
-      final server = resolveFor([
+      final WebServerOptions server = resolveFor([
         '--web-tls-cert-path=/certs/c.pem',
         '--web-tls-cert-key-path=/certs/k.pem',
       ], const DdcWebMode())!.server;
@@ -300,7 +303,10 @@ void main() {
     });
 
     test('neither path leaves it plain', () {
-      final server = resolveFor([], const DdcWebMode())!.server;
+      final WebServerOptions server = resolveFor(
+        [],
+        const DdcWebMode(),
+      )!.server;
       expect(server.isSecure, isFalse);
       expect(server.scheme, 'http');
       expect(server.baseUri(8080).toString(), 'http://localhost:8080');
@@ -333,7 +339,7 @@ void main() {
 
   group('--web-browser-flag', () {
     test('carries the user\'s switches through in order', () {
-      final browser = resolveFor([
+      final BrowserLaunchOptions browser = resolveFor([
         '--web-browser-flag=--no-sandbox',
         '--web-browser-flag=--proxy-server=http://p:1',
       ], const DdcWebMode())!.browser;
@@ -398,14 +404,14 @@ void main() {
     });
 
     test('reads a size, and a scale when one is given', () {
-      final plain = resolveFor([
+      final WebViewport plain = resolveFor([
         '--web-viewport=393x660',
       ], const DdcWebMode())!.browser.viewport!;
       expect((plain.width, plain.height), (393, 660));
       // No `@scale` means the browser's own ratio, not a made-up 1.
       expect(plain.deviceScaleFactor, isNull);
 
-      final scaled = resolveFor([
+      final WebViewport scaled = resolveFor([
         '--web-viewport=393x660@3',
       ], const DdcWebMode())!.browser.viewport!;
       expect((scaled.width, scaled.height), (393, 660));
@@ -450,7 +456,10 @@ void main() {
   /// channel, so a form-factor sweep is one run rather than one run per size.
   group('app.setViewport params', () {
     test('reads a width and a height', () {
-      final v = parseSetViewportCommand({'width': 393, 'height': 660});
+      final WebViewport v = parseSetViewportCommand({
+        'width': 393,
+        'height': 660,
+      });
       expect((v.width, v.height), (393, 660));
       // Never a scale: the command cannot set one, so it must not look like
       // it defaulted one either.
@@ -555,14 +564,14 @@ void main() {
   });
 
   group('--web-launch-url', () {
-    final base = Uri.parse('http://localhost:8080');
+    final Uri base = Uri.parse('http://localhost:8080');
 
     test('unset opens the server\'s own URL', () {
       expect(resolveFor([], const DdcWebMode())!.launchUrlFor(base), base);
     });
 
     test('a URL on the dev server is used as given', () {
-      final options = resolveFor([
+      final WebOptions options = resolveFor([
         '--web-launch-url=http://localhost:8080/#/settings',
       ], const DdcWebMode())!;
       expect(
@@ -598,7 +607,7 @@ void main() {
     test('a server on every interface accepts any host at its port', () {
       // `--web-hostname any` really does answer on every address this host
       // has, so naming one of them is not pointing somewhere else.
-      final options = resolveFor([
+      final WebOptions options = resolveFor([
         '--web-hostname=any',
         '--web-launch-url=http://192.168.1.5:8080/',
       ], const DdcWebMode())!;
@@ -617,7 +626,7 @@ void main() {
       // The URL the page's `<base href>` names. Without the slash a
       // path-based router is handed `/app` and has to reconcile it with a
       // base of `/app/`.
-      final underBase = Uri.parse('http://localhost:8080/app');
+      final Uri underBase = Uri.parse('http://localhost:8080/app');
       expect(
         resolveFor([], const DdcWebMode())!.launchUrlFor(underBase).toString(),
         'http://localhost:8080/app/',
@@ -637,7 +646,7 @@ void main() {
 
     test('refuses a URL outside the base path the page is served under', () {
       // The server answers nothing there but a 404.
-      final underBase = Uri.parse('http://localhost:8080/app');
+      final Uri underBase = Uri.parse('http://localhost:8080/app');
       for (final url in [
         'http://localhost:8080/',
         'http://localhost:8080/ap',
@@ -687,7 +696,7 @@ void main() {
       // The default stepping aside is silent — the user did not ask. WASM
       // compiles with dart2wasm and a static run serves a built bundle;
       // neither has a resident compiler or a debugger.
-      for (final mode in [const WasmWebMode(), const StaticWebMode()]) {
+      for (final WebMode mode in [const WasmWebMode(), const StaticWebMode()]) {
         expect(
           resolveFor([], mode)!.enableExpressionEvaluation,
           isFalse,
@@ -705,7 +714,7 @@ void main() {
 
     test('an explicit request where it cannot work is refused, by name', () {
       // Accepting it and quietly doing nothing is the failure to avoid.
-      for (final mode in [const WasmWebMode(), const StaticWebMode()]) {
+      for (final WebMode mode in [const WasmWebMode(), const StaticWebMode()]) {
         expect(
           () => resolveFor(['--web-enable-expression-evaluation'], mode),
           throwsDevToolException(

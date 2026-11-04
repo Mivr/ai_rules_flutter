@@ -91,7 +91,7 @@ class Teardown {
   /// place they can be.
   Future<void> run() async {
     _hasRun = true;
-    final pending = _disposers.reversed.toList();
+    final List<Future<void> Function()> pending = _disposers.reversed.toList();
     _disposers.clear();
     Object? firstError;
     StackTrace? firstStack;

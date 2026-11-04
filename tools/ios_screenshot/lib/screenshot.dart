@@ -88,12 +88,12 @@ if __name__ == '__main__':
 ''';
 
 Future<void> main(List<String> args) async {
-  final python = findHostPython();
+  final String? python = findHostPython();
   if (python == null) {
     stderr.writeln(missingPythonMessage(purpose: 'iOS device screenshots'));
     exit(2);
   }
-  final exitCode = await runPythonProgram(
+  final int exitCode = await runPythonProgram(
     python,
     _screenshotProgram,
     args,

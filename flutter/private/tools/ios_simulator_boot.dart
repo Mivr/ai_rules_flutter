@@ -193,13 +193,14 @@ int compareVersions(List<int> a, List<int> b) {
 /// `com.apple.CoreSimulator.SimRuntime.iOS-26-5`, with `-` (not `.`) between
 /// the components; anything naming another platform never matches.
 List<int>? parseRuntimeVersion(String key) {
-  final match = RegExp(r'\.([A-Za-z]+OS)[- ]([\d._-]+)').firstMatch(key);
+  final RegExpMatch? match = RegExp(r'\.([A-Za-z]+OS)[- ]([\d._-]+)')
+      .firstMatch(key);
   if (match == null || match.group(1) != 'iOS') return null;
-  final parts = match.group(2)!.split(RegExp(r'[._-]+'));
+  final List<String> parts = match.group(2)!.split(RegExp(r'[._-]+'));
   final version = <int>[];
   for (final part in parts) {
     if (part.isEmpty) continue;
-    final number = int.tryParse(part);
+    final int? number = int.tryParse(part);
     if (number == null) return null;
     version.add(number);
   }
@@ -209,7 +210,7 @@ List<int>? parseRuntimeVersion(String key) {
 /// Whether a device entry counts as available. `simctl` writes a JSON boolean;
 /// anything else-shaped (including absent) does not qualify.
 bool _deviceAvailable(Map<String, dynamic> entry) {
-  final flag = entry['isAvailable'];
+  final dynamic flag = entry['isAvailable'];
   return flag == true || (flag is String && flag.toUpperCase() == 'YES');
 }
 
@@ -217,7 +218,7 @@ bool _deviceAvailable(Map<String, dynamic> entry) {
 /// the devices map (which carries no runtime-level flag) can honor them. When
 /// the array is absent every key counts as available.
 Set<String> _unavailableRuntimes(Map<String, dynamic> listing) {
-  final runtimes = listing['runtimes'];
+  final dynamic runtimes = listing['runtimes'];
   if (runtimes is! List) return const {};
   return {
     for (final entry in runtimes)
@@ -230,13 +231,13 @@ Set<String> _unavailableRuntimes(Map<String, dynamic> listing) {
 
 /// Every available iOS runtime in the listing, oldest first in listing order.
 List<SimulatorRuntime> _availableRuntimes(Map<String, dynamic> listing) {
-  final devices = listing['devices'];
+  final dynamic devices = listing['devices'];
   if (devices is! Map) return const [];
-  final unavailable = _unavailableRuntimes(listing);
+  final Set<String> unavailable = _unavailableRuntimes(listing);
   final found = <SimulatorRuntime>[];
-  for (final key in devices.keys) {
+  for (final Object? key in devices.keys) {
     if (key is! String || unavailable.contains(key)) continue;
-    final version = parseRuntimeVersion(key);
+    final List<int>? version = parseRuntimeVersion(key);
     if (version != null)
       found.add(SimulatorRuntime(key: key, version: version));
   }
@@ -248,12 +249,12 @@ List<SimulatorDevice> _availableIPhones(List<dynamic> entries) {
   final found = <SimulatorDevice>[];
   for (final entry in entries) {
     if (entry is! Map<String, dynamic>) continue;
-    final name = entry['name'];
-    final udid = entry['udid'];
+    final dynamic name = entry['name'];
+    final dynamic udid = entry['udid'];
     if (name is! String || !name.startsWith('iPhone')) continue;
     if (udid is! String || udid.isEmpty) continue;
     if (!_deviceAvailable(entry)) continue;
-    final state = entry['state'];
+    final dynamic state = entry['state'];
     found.add(
       SimulatorDevice(
         name: name,
@@ -269,15 +270,17 @@ List<SimulatorDevice> _availableIPhones(List<dynamic> entries) {
 /// Picks the simulator to boot: the newest available iOS runtime, and on it
 /// an already-booted iPhone when there is one, else the first shutdown one.
 SimulatorChoice selectSimulator(Map<String, dynamic> listing) {
-  final runtimes = _availableRuntimes(listing);
+  final List<SimulatorRuntime> runtimes = _availableRuntimes(listing);
   if (runtimes.isEmpty) {
     throw const BootFailure('no available iOS runtime in the simctl listing');
   }
   runtimes.sort((a, b) => compareVersions(a.version, b.version));
-  final newest = runtimes.last;
+  final SimulatorRuntime newest = runtimes.last;
   final devices = listing['devices'] as Map;
-  final entries = devices[newest.key];
-  final candidates = entries is List ? _availableIPhones(entries) : const [];
+  final dynamic entries = devices[newest.key];
+  final List<dynamic> candidates = entries is List
+      ? _availableIPhones(entries)
+      : const [];
   SimulatorDevice? booted;
   SimulatorDevice? shutdown;
   for (final device in candidates) {
@@ -288,7 +291,7 @@ SimulatorChoice selectSimulator(Map<String, dynamic> listing) {
     }
     if (booted != null && shutdown != null) break;
   }
-  final chosen = booted ?? shutdown;
+  final SimulatorDevice? chosen = booted ?? shutdown;
   if (chosen == null) {
     throw BootFailure(
       'no available iPhone on ${newest.label} (not creating devices)',
@@ -300,7 +303,7 @@ SimulatorChoice selectSimulator(Map<String, dynamic> listing) {
 /// Decodes the `simctl list` stdout into the map [selectSimulator] reads.
 Map<String, dynamic> decodeListing(String stdoutText) {
   try {
-    final decoded = json.decode(stdoutText);
+    final dynamic decoded = json.decode(stdoutText);
     if (decoded is Map<String, dynamic>) return decoded;
   } on FormatException {
     // Falls through to the failure below.
@@ -360,9 +363,13 @@ abstract class CommandSpawner {
 class ProcessCommandSpawner implements CommandSpawner {
   @override
   Future<SpawnedCommand> start(String executable, List<String> args) async {
-    final process = await Process.start(executable, args);
-    final stdoutFuture = process.stdout.transform(utf8.decoder).join();
-    final stderrFuture = process.stderr.transform(utf8.decoder).join();
+    final Process process = await Process.start(executable, args);
+    final Future<String> stdoutFuture = process.stdout
+        .transform(utf8.decoder)
+        .join();
+    final Future<String> stderrFuture = process.stderr
+        .transform(utf8.decoder)
+        .join();
     return SpawnedCommand(
       exitCode: process.exitCode,
       stdoutText: stdoutFuture,
@@ -381,7 +388,7 @@ Future<CommandResult> runSimctl(
 }) async {
   final label = 'xcrun ${args.join(' ')}';
   final waited = Stopwatch()..start();
-  final result = await _runSimctlAttempt(spawner, args, timeout);
+  final CommandResult? result = await _runSimctlAttempt(spawner, args, timeout);
   if (result == null) {
     throw BootFailure('`$label` timed out after ${waited.elapsed.inSeconds}s');
   }
@@ -411,16 +418,16 @@ Future<CommandResult> runSimctlWithRetries(
   bool retryAcceptBooting = false,
 }) async {
   final label = 'xcrun ${args.join(' ')}';
-  final started = now();
-  var elapsed = Duration.zero;
+  final DateTime started = now();
+  Duration elapsed = Duration.zero;
   var attempt = 0;
-  var attemptBound = bounds.first;
+  Duration attemptBound = bounds.first;
   while (true) {
-    final left = bounds.overall - elapsed;
+    final Duration left = bounds.overall - elapsed;
     if (left <= Duration.zero) break;
     attempt++;
     final bound = attemptBound < left ? attemptBound : left;
-    final result = await _runSimctlAttempt(spawner, args, bound);
+    final CommandResult? result = await _runSimctlAttempt(spawner, args, bound);
     if (result != null) {
       if (retryAcceptBooting &&
           attempt > 1 &&
@@ -501,7 +508,7 @@ Future<CommandResult?> _runSimctlAttempt(
 /// The first non-blank stderr line, or null when there is none — the most that
 /// fits on the failure's one stderr line.
 String? _firstStderrLine(String stderrText) {
-  for (final line in const LineSplitter().convert(stderrText)) {
+  for (final String line in const LineSplitter().convert(stderrText)) {
     if (line.trim().isNotEmpty) return line.trim();
   }
   return null;
@@ -510,7 +517,7 @@ String? _firstStderrLine(String stderrText) {
 /// Fails when [result] is not a 0 exit, quoting the call and its stderr.
 void _requireSimctlSuccess(CommandResult result, String label) {
   if (result.exitCode == 0) return;
-  final detail = _firstStderrLine(result.stderrText);
+  final String? detail = _firstStderrLine(result.stderrText);
   throw BootFailure(
     detail == null
         ? '`$label` exited ${result.exitCode}'
@@ -520,7 +527,7 @@ void _requireSimctlSuccess(CommandResult result, String label) {
 
 /// Boots the selected simulator and waits for it, logging the choice.
 Future<SimulatorChoice> bootSimulator(BootOptions options) async {
-  final list = await runSimctlWithRetries(
+  final CommandResult list = await runSimctlWithRetries(
     options.spawner,
     const ['simctl', 'list', '-j'],
     bounds: options.listBounds,
@@ -528,8 +535,10 @@ Future<SimulatorChoice> bootSimulator(BootOptions options) async {
     now: options.now,
   );
   _requireSimctlSuccess(list, 'xcrun simctl list -j');
-  final choice = selectSimulator(decodeListing(list.stdoutText));
-  final device = choice.device;
+  final SimulatorChoice choice = selectSimulator(
+    decodeListing(list.stdoutText),
+  );
+  final SimulatorDevice device = choice.device;
   if (choice.wasBooted) {
     options.log(
       'chose ${device.name} (${device.udid}) on ${choice.runtime.label} '
@@ -539,7 +548,7 @@ Future<SimulatorChoice> bootSimulator(BootOptions options) async {
     options.log(
       'booting ${device.name} (${device.udid}) on ${choice.runtime.label}...',
     );
-    final boot = await runSimctlWithRetries(
+    final CommandResult boot = await runSimctlWithRetries(
       options.spawner,
       ['simctl', 'boot', device.udid],
       bounds: options.bootBounds,
@@ -549,7 +558,7 @@ Future<SimulatorChoice> bootSimulator(BootOptions options) async {
     );
     _requireSimctlSuccess(boot, 'xcrun simctl boot ${device.udid}');
   }
-  final status = await runSimctl(
+  final CommandResult status = await runSimctl(
     options.spawner,
     ['simctl', 'bootstatus', device.udid, '-b'],
     timeout: options.bootstatusTimeout,
@@ -567,7 +576,7 @@ Future<String> bootAndReport(
   BootOptions options,
   void Function(String line) out,
 ) async {
-  final choice = await bootSimulator(options);
+  final SimulatorChoice choice = await bootSimulator(options);
   out('booted ${choice.device.udid}');
   return choice.device.udid;
 }
@@ -575,7 +584,7 @@ Future<String> bootAndReport(
 /// Reads `--timeout=<seconds>` (the `=` form only); anything else is a usage
 /// error carrying the one-line usage text.
 Duration parseBootTimeout(List<String> args) {
-  var timeout = _defaultBootstatusTimeout;
+  Duration timeout = _defaultBootstatusTimeout;
   for (final arg in args) {
     const prefix = '--timeout=';
     if (!arg.startsWith(prefix)) {
@@ -583,7 +592,7 @@ Duration parseBootTimeout(List<String> args) {
         'usage: boot_ios_simulator.dart [--timeout=<seconds>]',
       );
     }
-    final seconds = int.tryParse(arg.substring(prefix.length));
+    final int? seconds = int.tryParse(arg.substring(prefix.length));
     if (seconds == null || seconds <= 0) {
       throw const BootFailure(
         'usage: boot_ios_simulator.dart [--timeout=<seconds>]',

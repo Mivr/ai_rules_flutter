@@ -78,7 +78,7 @@ const _k = [
 int _rotr(int x, int n) => ((x >> n) | (x << (32 - n))) & 0xffffffff;
 
 List<int> _pad(List<int> bytes) {
-  final bitLength = bytes.length * 8;
+  final int bitLength = bytes.length * 8;
   final padded = [...bytes, 0x80];
   while (padded.length % 64 != 56) {
     padded.add(0);
@@ -99,7 +99,7 @@ List<int> sha256(List<int> bytes) {
   var h5 = 0x9b05688c;
   var h6 = 0x1f83d9ab;
   var h7 = 0x5be0cd19;
-  final padded = _pad(bytes);
+  final List<int> padded = _pad(bytes);
   final w = List<int>.filled(64, 0);
   for (var off = 0; off < padded.length; off += 64) {
     for (var i = 0; i < 16; i++) {
@@ -110,8 +110,10 @@ List<int> sha256(List<int> bytes) {
           padded[off + i * 4 + 3];
     }
     for (var i = 16; i < 64; i++) {
-      final s0 = _rotr(w[i - 15], 7) ^ _rotr(w[i - 15], 18) ^ (w[i - 15] >> 3);
-      final s1 = _rotr(w[i - 2], 17) ^ _rotr(w[i - 2], 19) ^ (w[i - 2] >> 10);
+      final int s0 =
+          _rotr(w[i - 15], 7) ^ _rotr(w[i - 15], 18) ^ (w[i - 15] >> 3);
+      final int s1 =
+          _rotr(w[i - 2], 17) ^ _rotr(w[i - 2], 19) ^ (w[i - 2] >> 10);
       w[i] = (w[i - 16] + s0 + w[i - 7] + s1) & 0xffffffff;
     }
     var a = h0;
@@ -123,12 +125,12 @@ List<int> sha256(List<int> bytes) {
     var g = h6;
     var h = h7;
     for (var i = 0; i < 64; i++) {
-      final s1 = _rotr(e, 6) ^ _rotr(e, 11) ^ _rotr(e, 25);
-      final ch = (e & f) ^ ((~e) & g);
-      final t1 = (h + s1 + ch + _k[i] + w[i]) & 0xffffffff;
-      final s0 = _rotr(a, 2) ^ _rotr(a, 13) ^ _rotr(a, 22);
-      final maj = (a & b) ^ (a & c) ^ (b & c);
-      final t2 = (s0 + maj) & 0xffffffff;
+      final int s1 = _rotr(e, 6) ^ _rotr(e, 11) ^ _rotr(e, 25);
+      final int ch = (e & f) ^ ((~e) & g);
+      final int t1 = (h + s1 + ch + _k[i] + w[i]) & 0xffffffff;
+      final int s0 = _rotr(a, 2) ^ _rotr(a, 13) ^ _rotr(a, 22);
+      final int maj = (a & b) ^ (a & c) ^ (b & c);
+      final int t2 = (s0 + maj) & 0xffffffff;
       h = g;
       g = f;
       f = e;
@@ -159,7 +161,7 @@ const _hex = '0123456789abcdef';
 /// The SHA-256 digest of [bytes] as 64 lowercase hex characters.
 String sha256Hex(List<int> bytes) {
   final out = StringBuffer();
-  for (final b in sha256(bytes)) {
+  for (final int b in sha256(bytes)) {
     out.write(_hex[(b >> 4) & 0xf]);
     out.write(_hex[b & 0xf]);
   }

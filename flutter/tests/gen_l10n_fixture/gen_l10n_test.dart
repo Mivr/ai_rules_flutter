@@ -3,32 +3,38 @@ import 'dart:io';
 import 'package:test/test.dart';
 
 File _findRunfile(String suffix) {
-  final runfilesPath =
+  final String? runfilesPath =
       Platform.environment['RUNFILES_DIR'] ??
       Platform.environment['TEST_SRCDIR'];
   if (runfilesPath != null && Directory(runfilesPath).existsSync()) {
     final dir = Directory(runfilesPath);
-    for (final entity in dir.listSync(recursive: true, followLinks: true)) {
+    for (final FileSystemEntity entity in dir.listSync(
+      recursive: true,
+      followLinks: true,
+    )) {
       if (entity is File &&
           entity.path.replaceAll(r'\', '/').endsWith(suffix)) {
         return entity;
       }
     }
   }
-  final manifestPath = Platform.environment['RUNFILES_MANIFEST_FILE'];
+  final String? manifestPath = Platform.environment['RUNFILES_MANIFEST_FILE'];
   if (manifestPath != null && File(manifestPath).existsSync()) {
-    for (final line in File(manifestPath).readAsLinesSync()) {
-      final space = line.indexOf(' ');
+    for (final String line in File(manifestPath).readAsLinesSync()) {
+      final int space = line.indexOf(' ');
       if (space <= 0) continue;
-      final target = line.substring(space + 1).trim();
+      final String target = line.substring(space + 1).trim();
       if (target.replaceAll(r'\', '/').endsWith(suffix) &&
           File(target).existsSync()) {
         return File(target);
       }
     }
   }
-  final fallback = Directory.current.parent;
-  for (final entity in fallback.listSync(recursive: true, followLinks: true)) {
+  final Directory fallback = Directory.current.parent;
+  for (final FileSystemEntity entity in fallback.listSync(
+    recursive: true,
+    followLinks: true,
+  )) {
     if (entity is File && entity.path.replaceAll(r'\', '/').endsWith(suffix)) {
       return entity;
     }
@@ -37,7 +43,7 @@ File _findRunfile(String suffix) {
 }
 
 Map<String, String> _readDirectoryFiles(Directory dir) {
-  final files = dir.listSync().whereType<File>().toList()
+  final List<File> files = dir.listSync().whereType<File>().toList()
     ..sort((a, b) => a.path.compareTo(b.path));
   return <String, String>{
     for (final f in files)
@@ -70,13 +76,13 @@ void main() {
 
   group('flutter_gen_l10n rule outputs ignore undeclared .arb files', () {
     test(':l10n includes en, es, es_419 and excludes undeclared en_US/de', () {
-      final base = _findRunfile(
+      final String base = _findRunfile(
         'gen_l10n_fixture/lib/l10n/app_localizations.dart',
       ).readAsStringSync();
-      final en = _findRunfile(
+      final String en = _findRunfile(
         'gen_l10n_fixture/lib/l10n/app_localizations_en.dart',
       ).readAsStringSync();
-      final es = _findRunfile(
+      final String es = _findRunfile(
         'gen_l10n_fixture/lib/l10n/app_localizations_es.dart',
       ).readAsStringSync();
 
@@ -99,13 +105,13 @@ void main() {
     test(
       ':l10n_subset excludes sibling app_es_419.arb and app_en_US.arb in the same directory',
       () {
-        final base = _findRunfile(
+        final String base = _findRunfile(
           'gen_l10n_fixture/lib/l10n/subset_localizations.dart',
         ).readAsStringSync();
-        final en = _findRunfile(
+        final String en = _findRunfile(
           'gen_l10n_fixture/lib/l10n/subset_localizations_en.dart',
         ).readAsStringSync();
-        final es = _findRunfile(
+        final String es = _findRunfile(
           'gen_l10n_fixture/lib/l10n/subset_localizations_es.dart',
         ).readAsStringSync();
 
@@ -126,10 +132,10 @@ void main() {
     test(
       ':l10n_en_us includes declared app_en_US.arb and excludes sibling es/es_419',
       () {
-        final base = _findRunfile(
+        final String base = _findRunfile(
           'gen_l10n_fixture/lib/l10n/en_us_localizations.dart',
         ).readAsStringSync();
-        final en = _findRunfile(
+        final String en = _findRunfile(
           'gen_l10n_fixture/lib/l10n/en_us_localizations_en.dart',
         ).readAsStringSync();
 
@@ -147,13 +153,13 @@ void main() {
     test(
       ':l10n_mixed_generated combines source and generated arbs and ignores undeclared generated arbs in bazel-out',
       () {
-        final base = _findRunfile(
+        final String base = _findRunfile(
           'gen_l10n_fixture/lib/l10n/mixed_localizations.dart',
         ).readAsStringSync();
-        final en = _findRunfile(
+        final String en = _findRunfile(
           'gen_l10n_fixture/lib/l10n/mixed_localizations_en.dart',
         ).readAsStringSync();
-        final fr = _findRunfile(
+        final String fr = _findRunfile(
           'gen_l10n_fixture/lib/l10n/mixed_localizations_fr.dart',
         ).readAsStringSync();
 
@@ -208,7 +214,7 @@ void main() {
         File('${cleanArbDir.path}/app_en.arb').writeAsStringSync(enArbContent);
         File('${cleanArbDir.path}/app_es.arb').writeAsStringSync(esArbContent);
 
-        final cleanResult = runGenL10n([
+        final ProcessResult cleanResult = runGenL10n([
           '--project-dir=${tmp.path}/clean',
           '--arb-dir=lib/l10n',
           '--output-dir=out/l10n',
@@ -240,7 +246,7 @@ void main() {
         ).writeAsStringSync(enUsArbContent);
         File('${dirtyArbDir.path}/app_de.arb').writeAsStringSync('{corrupt');
 
-        final dirtyResult = runGenL10n([
+        final ProcessResult dirtyResult = runGenL10n([
           '--project-dir=${tmp.path}/dirty',
           '--arb-dir=lib/l10n',
           '--output-dir=out/l10n',
@@ -256,8 +262,8 @@ void main() {
           reason: 'dirty run failed: ${dirtyResult.stderr}',
         );
 
-        final cleanFiles = _readDirectoryFiles(cleanOutDir);
-        final dirtyFiles = _readDirectoryFiles(dirtyOutDir);
+        final Map<String, String> cleanFiles = _readDirectoryFiles(cleanOutDir);
+        final Map<String, String> dirtyFiles = _readDirectoryFiles(dirtyOutDir);
         expect(
           dirtyFiles.keys,
           unorderedEquals(<String>[
@@ -276,7 +282,7 @@ void main() {
   "greeting": "Mutated undeclared greeting, {name}!"
 }
 ''');
-        final rerunResult = runGenL10n([
+        final ProcessResult rerunResult = runGenL10n([
           '--project-dir=${tmp.path}/dirty',
           '--arb-dir=lib/l10n',
           '--output-dir=out/l10n',
@@ -317,7 +323,7 @@ void main() {
           );
         }
 
-        final result = runGenL10n([
+        final ProcessResult result = runGenL10n([
           '--project-dir=${tmp.path}/ro',
           '--arb-dir=lib/l10n',
           '--output-dir=out/l10n',
@@ -333,7 +339,7 @@ void main() {
           reason: 'read-only input directory should succeed: ${result.stderr}',
         );
 
-        final generated = _readDirectoryFiles(roOutDir);
+        final Map<String, String> generated = _readDirectoryFiles(roOutDir);
         expect(
           generated.keys,
           unorderedEquals(<String>[
@@ -362,7 +368,7 @@ void main() {
           '${genDir.path}/app_es_419.arb',
         ).writeAsStringSync(es419ArbContent);
 
-        final result = runGenL10n(
+        final ProcessResult result = runGenL10n(
           [
             '--project-dir=.',
             '--arb-dir=pkg/lib/l10n',
@@ -381,7 +387,7 @@ void main() {
           reason: 'split-root run failed: ${result.stderr}',
         );
 
-        final baseDart = File(
+        final String baseDart = File(
           '${genDir.path}/app_localizations.dart',
         ).readAsStringSync();
         expect(baseDart, contains("Locale('en')"));

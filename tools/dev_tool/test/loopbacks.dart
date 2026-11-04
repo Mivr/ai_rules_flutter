@@ -22,7 +22,7 @@ import 'dart:io';
 /// Matching it exactly keeps this the set the server under test serves on.
 Future<List<InternetAddress>> assignableLoopbacks() async {
   final assignable = <InternetAddress>[];
-  for (final address in [
+  for (final InternetAddress address in [
     InternetAddress.loopbackIPv4,
     InternetAddress.loopbackIPv6,
   ]) {

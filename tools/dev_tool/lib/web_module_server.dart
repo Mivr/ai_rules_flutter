@@ -26,6 +26,8 @@ import 'package:shelf/shelf_io.dart' as shelf_io;
 
 export 'web_options.dart' show crossOriginIsolationHeaders;
 
+typedef _Manifest = Map<String, dynamic>;
+
 /// Where this file's warnings and errors go.
 ///
 /// Through the logger rather than straight to stderr so a `LOG_FORMAT=json`
@@ -50,7 +52,7 @@ final _logger = Logger('dev_tool.web_module_server');
 /// engine, which never inspects the type. The types the browser *does*
 /// enforce — scripts, wasm, html, css, fonts — are all named.
 String contentTypeFor(String path) {
-  final ext = p.extension(path).replaceFirst('.', '');
+  final String ext = p.extension(path).replaceFirst('.', '');
   return switch (ext) {
     'html' => 'text/html',
     'js' || 'mjs' => 'application/javascript',
@@ -107,7 +109,7 @@ Future<HttpServer> bindWebServer(
   // free. `HttpMultiServer._loopback` searches the same way for the same
   // reason, one family over; the only difference here is where the collision
   // becomes visible, since a wildcard bind cannot be refused.
-  final draws = options.port == 0 ? _maxPortDraws : 1;
+  final int draws = options.port == 0 ? _maxPortDraws : 1;
   for (var draw = 1; ; draw++) {
     try {
       return await _bindOneServer(options, handler);
@@ -261,12 +263,14 @@ class _ReachabilityProbe {
     WebServerOptions options,
     HttpServer server,
   ) async {
-    final port = server.port;
-    final published = options.baseUri(port);
+    final int port = server.port;
+    final Uri published = options.baseUri(port);
     // `displayHost` and not `hostname`: `any` is not a name anything resolves,
     // and the URL this run prints and opens a browser on says `localhost`.
     // That name is the promise being checked.
-    final resolved = await InternetAddress.lookup(options.displayHost);
+    final List<InternetAddress> resolved = await InternetAddress.lookup(
+      options.displayHost,
+    );
     for (final address in resolved) {
       final String answer;
       try {
@@ -291,11 +295,10 @@ class _ReachabilityProbe {
   /// server, not the certificate.
   Future<String> _fetch(Uri url, WebServerOptions options) async {
     final client = HttpClient();
-    if (options.isSecure) {
-      client.badCertificateCallback = (_, __, ___) => true;
-    }
+    if (options.isSecure) client.badCertificateCallback = (_, __, ___) => true;
     try {
-      final response = await (await client.getUrl(url)).close();
+      final HttpClientResponse response = await (await client.getUrl(url))
+          .close();
       return await response.transform(utf8.decoder).join();
     } finally {
       client.close(force: true);
@@ -384,7 +387,9 @@ class _InterceptedPort implements Exception {
 /// it is written as an address, and carrying the same exposure when it is a
 /// name with more than one behind it.
 Future<HttpServer> _bindEveryAddressOfTheHost(WebServerOptions options) async {
-  final context = options.isSecure ? _securityContext(options) : null;
+  final SecurityContext? context = options.isSecure
+      ? _securityContext(options)
+      : null;
 
   if (options.hostname == defaultHostname || options.hostname == anyHostname) {
     // `HttpMultiServer` reads both names itself: `localhost` is the pair of
@@ -460,12 +465,12 @@ String basePathOf(String bundleDir) {
   final index = File(p.join(bundleDir, 'index.html'));
   if (!index.existsSync()) return '';
   // Comments first: a commented-out `<base>` is not the page's base.
-  final html = index.readAsStringSync().replaceAll(_htmlComment, '');
-  for (final tag in _baseTag.allMatches(html)) {
-    final href = _hrefAttribute.firstMatch(tag[0]!);
+  final String html = index.readAsStringSync().replaceAll(_htmlComment, '');
+  for (final RegExpMatch tag in _baseTag.allMatches(html)) {
+    final RegExpMatch? href = _hrefAttribute.firstMatch(tag[0]!);
     // The first `<base>` carrying an href is the one a browser honours.
     if (href == null) continue;
-    final value = href[1] ?? href[2] ?? href[3]!;
+    final String value = href[1] ?? href[2] ?? href[3]!;
     if (value == r'$FLUTTER_BASE_HREF' || value == '/') return '';
     // `//host/` is not a path at all but a scheme-relative URL.
     if (!value.startsWith('/') ||
@@ -524,7 +529,7 @@ shelf.Response _outsideBasePath(String requestPath, String basePath) =>
 /// runs, so today no wire request can reach the check; it states the
 /// contract explicitly rather than inheriting it from transport behavior.
 shelf.Response serveFileWithin(String root, String requestPath) {
-  final filePath = p.normalize(p.join(root, requestPath));
+  final String filePath = p.normalize(p.join(root, requestPath));
   if (!p.isWithin(root, filePath)) {
     return shelf.Response.notFound('File not found: $requestPath');
   }
@@ -588,7 +593,7 @@ class StaticWebServer {
   }
 
   shelf.Response _handle(shelf.Request request) {
-    final path = pathUnderBase(request.url.path, _basePath);
+    final String? path = pathUnderBase(request.url.path, _basePath);
     if (path == null) return _outsideBasePath(request.url.path, _basePath);
     return serveFileWithin(rootPath, path.isEmpty ? 'index.html' : path);
   }
@@ -761,10 +766,10 @@ class WebModuleServer implements AssetReader {
 
   @override
   Future<String?> dartSourceContents(String requestedPath) async {
-    final serverPath = _underBase(requestedPath);
+    final String? serverPath = _underBase(requestedPath);
     if (serverPath == null) return null;
     // Check in-memory files first.
-    final bytes = _files[serverPath];
+    final Uint8List? bytes = _files[serverPath];
     if (bytes != null) return utf8.decode(bytes);
     // Read from workspace filesystem.
     if (workspaceRoot != null && serverPath.endsWith('.dart')) {
@@ -776,8 +781,11 @@ class WebModuleServer implements AssetReader {
           _packageConfig ??= await pkg.loadPackageConfig(
             File(packageConfigPath!),
           );
-          final packagePath = serverPath.replaceFirst('packages/', 'package:');
-          final resolved = _packageConfig!.resolve(Uri.parse(packagePath));
+          final String packagePath = serverPath.replaceFirst(
+            'packages/',
+            'package:',
+          );
+          final Uri? resolved = _packageConfig!.resolve(Uri.parse(packagePath));
           if (resolved != null) {
             final source = File(resolved.toFilePath());
             if (source.existsSync()) return source.readAsStringSync();
@@ -806,11 +814,11 @@ class WebModuleServer implements AssetReader {
 
   @override
   Future<String?> sourceMapContents(String serverPath) async {
-    final path = _underBase(serverPath);
+    final String? path = _underBase(serverPath);
     if (path == null) return null;
     // Source maps are looked up by their .js path (strip .map).
     if (path.endsWith('.map')) {
-      final bytes = _sourcemaps[path];
+      final Uint8List? bytes = _sourcemaps[path];
       if (bytes != null) return utf8.decode(bytes);
     }
     return null;
@@ -818,7 +826,7 @@ class WebModuleServer implements AssetReader {
 
   @override
   Future<String?> metadataContents(String serverPath) async {
-    final path = _underBase(serverPath);
+    final String? path = _underBase(serverPath);
     if (path == null) return null;
     // DWDS MetadataProvider asks for `main_module.ddc_merged_metadata`.
     if (path == 'main_module.ddc_merged_metadata' &&
@@ -826,7 +834,7 @@ class WebModuleServer implements AssetReader {
       return _metadataByModule.values.join('\n');
     }
     // Try exact path match in metadata store.
-    final bytes = _metadata[path];
+    final Uint8List? bytes = _metadata[path];
     if (bytes != null) return utf8.decode(bytes);
     return null;
   }
@@ -870,13 +878,11 @@ class WebModuleServer implements AssetReader {
     // does not name, so bytes left behind by a superseded compile are
     // unreachable rather than wrong, and clearing them would stake the page's
     // boot on a full compile never omitting anything.
-    if (full) {
-      _metadataByModule.clear();
-    }
+    if (full) _metadataByModule.clear();
 
     // Merge into existing state — incremental compiles only contain changed
     // modules, and unchanged modules must remain available.
-    for (final entry in batch.manifest.entries) {
+    for (final MapEntry<String, dynamic> entry in batch.manifest.entries) {
       batch.ingest(entry);
     }
     batch.commit();
@@ -914,7 +920,7 @@ class WebModuleServer implements AssetReader {
     required String module,
     required String artifact,
   }) {
-    final range = offsets[section];
+    final dynamic range = offsets[section];
     if (range is! List ||
         range.length != 2 ||
         range[0] is! int ||
@@ -962,7 +968,7 @@ class WebModuleServer implements AssetReader {
     ExpressionCompiler? expressionCompiler,
   }) async {
     // Build the package URI mapper for DWDS module resolution.
-    final configPath = packageConfigPath;
+    final String? configPath = packageConfigPath;
     if (configPath == null) {
       throw DevToolException(
         'Cannot start the web debugger: this run resolved no '
@@ -1053,7 +1059,7 @@ class WebModuleServer implements AssetReader {
     // Match Flutter's web_asset_server.dart:387-393 composition:
     // DWDS middleware wraps only our asset handler (not DWDS's own handler).
     // Cascade tries DWDS handler first, then our wrapped asset handler.
-    final wrappedAssetHandler = const shelf.Pipeline()
+    final shelf.Handler wrappedAssetHandler = const shelf.Pipeline()
         .addMiddleware(_dwds!.middleware)
         .addHandler(_shelfHandler);
     _activeHandler = shelf.Cascade()
@@ -1170,9 +1176,7 @@ class WebModuleServer implements AssetReader {
   /// runs: either a stale refusal or a stale program could otherwise outlive
   /// the state that produced it.
   shelf.Response? _serveBootChain(String path) {
-    if (!_bootChain.contains(path)) {
-      return null;
-    }
+    if (!_bootChain.contains(path)) return null;
     const noStore = 'no-store';
     if (!holdsProgram) {
       return shelf.Response(
@@ -1187,7 +1191,7 @@ class WebModuleServer implements AssetReader {
         headers: {'content-type': 'text/plain', 'cache-control': noStore},
       );
     }
-    final headers = {
+    final Map<String, String> headers = {
       'content-type': contentTypeFor(path),
       'cache-control': noStore,
     };
@@ -1211,18 +1215,14 @@ class WebModuleServer implements AssetReader {
 
   /// Shelf handler for all asset requests.
   Future<shelf.Response> _shelfHandler(shelf.Request request) async {
-    final underBase = pathUnderBase(request.url.path, _basePath);
-    if (underBase == null) {
-      return _outsideBasePath(request.url.path, _basePath);
-    }
-    final path = underBase.isEmpty ? 'index.html' : underBase;
+    final String? underBase = pathUnderBase(request.url.path, _basePath);
+    if (underBase == null) return _outsideBasePath(request.url.path, _basePath);
+    final String path = underBase.isEmpty ? 'index.html' : underBase;
 
     try {
       // 0. The boot chain, before anything else can answer for it.
-      final bootChain = _serveBootChain(path);
-      if (bootChain != null) {
-        return bootChain;
-      }
+      final shelf.Response? bootChain = _serveBootChain(path);
+      if (bootChain != null) return bootChain;
 
       // 1. In-memory files (first-upload bootstrap files override everything).
       if (_files.containsKey(path)) {
@@ -1265,14 +1265,10 @@ class WebModuleServer implements AssetReader {
       }
 
       // 6. dart_sdk.js from DDC build outputs.
-      if (path == 'dart_sdk.js') {
-        return _serveFile(webToolchain.dartSdkJs);
-      }
+      if (path == 'dart_sdk.js') return _serveFile(webToolchain.dartSdkJs);
       if (path == 'dart_sdk.js.map') {
         final mapPath = '${webToolchain.dartSdkJs}.map';
-        if (File(mapPath).existsSync()) {
-          return _serveFile(mapPath);
-        }
+        if (File(mapPath).existsSync()) return _serveFile(mapPath);
       }
 
       // 7. DDC module loader + stack trace mapper from DDC build outputs.
@@ -1393,7 +1389,7 @@ class _ModuleBatch {
       );
     }
 
-    final Map<String, dynamic> manifest;
+    final _Manifest manifest;
     try {
       manifest =
           json.decode(manifestFile.readAsStringSync()) as Map<String, dynamic>;
@@ -1404,9 +1400,11 @@ class _ModuleBatch {
         'Nothing from this compile can be served.',
       );
     }
-    final sourcesBytes = sourcesFile.readAsBytesSync();
-    final mapBytes = mapFile.existsSync() ? mapFile.readAsBytesSync() : null;
-    final metadataBytes = metadataFile.existsSync()
+    final Uint8List sourcesBytes = sourcesFile.readAsBytesSync();
+    final Uint8List? mapBytes = mapFile.existsSync()
+        ? mapFile.readAsBytesSync()
+        : null;
+    final Uint8List? metadataBytes = metadataFile.existsSync()
         ? metadataFile.readAsBytesSync()
         : null;
     return _ModuleBatch._(
@@ -1426,11 +1424,9 @@ class _ModuleBatch {
 
   /// Merge one manifest entry's code, source map and metadata into the server.
   void ingest(MapEntry<String, dynamic> entry) {
-    var modulePath = entry.key;
-    if (modulePath.startsWith('/')) {
-      modulePath = modulePath.substring(1);
-    }
-    final rawOffsets = entry.value;
+    String modulePath = entry.key;
+    if (modulePath.startsWith('/')) modulePath = modulePath.substring(1);
+    final dynamic rawOffsets = entry.value;
     if (rawOffsets is! Map<String, dynamic>) {
       throw DevToolException(
         'The DDC module manifest $manifestPath describes module '
@@ -1438,16 +1434,16 @@ class _ModuleBatch {
         'section offsets.',
       );
     }
-    final offsets = rawOffsets;
-    final moduleName = modulePath.replaceAll('.lib.js', '');
+    final _Manifest offsets = rawOffsets;
+    final String moduleName = modulePath.replaceAll('.lib.js', '');
 
-    final reloadEntry = _storeCode(modulePath, moduleName, offsets);
+    final _Manifest reloadEntry = _storeCode(modulePath, moduleName, offsets);
     _storeSourcemap(modulePath, moduleName, offsets);
     _storeMetadata(modulePath, moduleName, offsets, reloadEntry);
   }
 
   /// The entry's JavaScript, plus its `reloaded_sources.json` descriptor.
-  Map<String, dynamic> _storeCode(
+  _Manifest _storeCode(
     String modulePath,
     String moduleName,
     Map<String, dynamic> offsets,
@@ -1480,7 +1476,7 @@ class _ModuleBatch {
     // Source maps. The manifest is the contract: a declared section whose
     // file is absent is inconsistent output, not an optional extra.
     if (offsets.containsKey('sourcemap')) {
-      final map = mapBytes;
+      final Uint8List? map = mapBytes;
       if (map == null) {
         throw DevToolException(
           WebModuleServer._missingArtifact(
@@ -1514,7 +1510,7 @@ class _ModuleBatch {
       withoutMetadata.add(moduleName);
       return;
     }
-    final metadata = metadataBytes;
+    final Uint8List? metadata = metadataBytes;
     if (metadata == null) {
       throw DevToolException(
         WebModuleServer._missingArtifact(
@@ -1525,7 +1521,7 @@ class _ModuleBatch {
         ),
       );
     }
-    final metaSlice = WebModuleServer._slice(
+    final Uint8List metaSlice = WebModuleServer._slice(
       metadata,
       offsets: offsets,
       section: 'metadata',
@@ -1533,7 +1529,7 @@ class _ModuleBatch {
       artifact: metadataPath,
     );
     server._metadata['$modulePath.metadata'] = metaSlice;
-    final metaStr = utf8.decode(metaSlice);
+    final String metaStr = utf8.decode(metaSlice);
     if (metaStr.isEmpty) {
       withoutMetadata.add(moduleName);
       return;
@@ -1541,7 +1537,7 @@ class _ModuleBatch {
     server._metadataByModule[modulePath] = metaStr;
 
     // Extract libraries from metadata for reloaded_sources.
-    final Map<String, dynamic> metaJson;
+    final _Manifest metaJson;
     try {
       metaJson = json.decode(metaStr) as Map<String, dynamic>;
     } catch (e) {
@@ -1558,7 +1554,7 @@ class _ModuleBatch {
       );
     }
     // Use metadata name for module field when available.
-    final metaName = metaJson['name'];
+    final dynamic metaName = metaJson['name'];
     if (metaName != null) {
       if (metaName is! String) {
         throw DevToolException(
@@ -1580,7 +1576,7 @@ class _ModuleBatch {
     String moduleName,
     Map<String, dynamic> reloadEntry,
   ) {
-    final libs = metaJson['libraries'];
+    final dynamic libs = metaJson['libraries'];
     if (libs != null) {
       if (libs is! List) {
         throw DevToolException(
@@ -1592,7 +1588,7 @@ class _ModuleBatch {
         );
       }
       final libraryUris = <String>[];
-      for (final lib in libs) {
+      for (final Object? lib in libs) {
         if (lib is! Map) {
           throw DevToolException(
             WebModuleServer._badMetadata(
@@ -1602,7 +1598,7 @@ class _ModuleBatch {
             ),
           );
         }
-        final importUri = lib['importUri'];
+        final dynamic importUri = lib['importUri'];
         if (importUri != null && importUri is! String) {
           throw DevToolException(
             WebModuleServer._badMetadata(

@@ -307,7 +307,7 @@ bool zlibSmaller(ZlibRawTree tree, List<int> depth, int n, int m) =>
 /// Restores the heap property below node [k] (`pqdownheap`).
 void zlibPqdownheap(ZlibRawState s, ZlibRawTree tree, int k) {
   final int v = s.heap[k];
-  var j = k << 1;
+  int j = k << 1;
   while (j <= s.heapLen) {
     if (j < s.heapLen && zlibSmaller(tree, s.depth, s.heap[j + 1], s.heap[j])) {
       j++;
@@ -338,9 +338,9 @@ void zlibGenBitlen(
   }
   tree.len[s.heap[s.heapMax]] = 0;
   var overflow = 0;
-  for (var h = s.heapMax + 1; h < zlibHeapSize; h++) {
+  for (int h = s.heapMax + 1; h < zlibHeapSize; h++) {
     final int n = s.heap[h];
-    var bits = tree.len[tree.dad[n]] + 1;
+    int bits = tree.len[tree.dad[n]] + 1;
     if (bits > maxLength) {
       bits = maxLength;
       overflow++;
@@ -368,9 +368,9 @@ void zlibGenBitlen(
     s.blCount[maxLength]--;
     overflow -= 2;
   } while (overflow > 0);
-  var h = zlibHeapSize;
+  int h = zlibHeapSize;
   for (bits = maxLength; bits != 0; bits--) {
-    var n = s.blCount[bits];
+    int n = s.blCount[bits];
     while (n != 0) {
       final int m = s.heap[--h];
       if (m > maxCode) continue;
@@ -419,7 +419,7 @@ void zlibBuildTree(
     if (staticLens != null) s.staticLen -= staticLens[node];
   }
   tree.maxCode = maxCode;
-  for (var n = s.heapLen ~/ 2; n >= 1; n--) {
+  for (int n = s.heapLen ~/ 2; n >= 1; n--) {
     zlibPqdownheap(s, tree, n);
   }
   var node = elems;
@@ -447,7 +447,7 @@ void zlibBuildTree(
 void zlibScanTree(ZlibRawState s, ZlibRawTree tree, int maxCode) {
   var prevlen = -1;
   var curlen = 0;
-  var nextlen = tree.len[0];
+  int nextlen = tree.len[0];
   var count = 0;
   var maxCount = 7;
   var minCount = 4;
@@ -490,7 +490,7 @@ void zlibScanTree(ZlibRawState s, ZlibRawTree tree, int maxCode) {
 void zlibSendTree(ZlibRawState s, ZlibRawTree tree, int maxCode) {
   var prevlen = -1;
   var curlen = 0;
-  var nextlen = tree.len[0];
+  int nextlen = tree.len[0];
   var count = 0;
   var maxCount = 7;
   var minCount = 4;
@@ -541,7 +541,7 @@ int zlibBuildBlTree(ZlibRawState s) {
   zlibScanTree(s, s.dynLtree, s.dynLtree.maxCode);
   zlibScanTree(s, s.dynDtree, s.dynDtree.maxCode);
   zlibBuildTree(s, s.blTree, zlibStaticBlDesc);
-  var maxBlindex = zlibBlCodes - 1;
+  int maxBlindex = zlibBlCodes - 1;
   while (maxBlindex >= 3) {
     if (s.blTree.len[zlibBlOrder[maxBlindex]] != 0) break;
     maxBlindex--;
@@ -573,13 +573,13 @@ void zlibCompressBlock(
   var sx = 0;
   if (s.symNext != 0) {
     do {
-      var dist = s.symBuf[sx++] & 0xff;
+      int dist = s.symBuf[sx++] & 0xff;
       dist += (s.symBuf[sx++] & 0xff) << 8;
       final int lc = s.symBuf[sx++] & 0xff;
       if (dist == 0) {
         zlibSendCode(s, lc, lCodes, lLens);
       } else {
-        var code = zlibLengthCode[lc];
+        int code = zlibLengthCode[lc];
         zlibSendCode(s, code + 257, lCodes, lLens);
         final int extra = zlibExtraLbits[code];
         if (extra != 0) {
@@ -619,7 +619,7 @@ void zlibTrFlushBlock(ZlibRawState s, int bufStart, int storedLen, int last) {
   zlibBuildTree(s, s.dynDtree, zlibStaticDDesc);
   final int maxBlindex = zlibBuildBlTree(s);
   final int staticLenb = (s.staticLen + 3 + 7) >> 3;
-  var optLenb = (s.optLen + 3 + 7) >> 3;
+  int optLenb = (s.optLen + 3 + 7) >> 3;
   if (staticLenb <= optLenb) optLenb = staticLenb;
   if (storedLen + 4 <= optLenb && bufStart >= 0) {
     zlibTrStoredBlock(s, bufStart, storedLen, last);

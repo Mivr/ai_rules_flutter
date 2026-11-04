@@ -29,26 +29,28 @@ const _platformNames = {
 /// text of `flutter_tools/lib/src/build_system/tools/shader_compiler.dart`,
 /// keyed by rules_flutter platform name.
 Map<String, List<String>> flutterToolsShaderFlags(String source) {
-  final start = source.indexOf('_shaderTargetsFromTargetPlatform(');
+  final int start = source.indexOf('_shaderTargetsFromTargetPlatform(');
   if (start < 0) {
     throw const FormatException(
       'no _shaderTargetsFromTargetPlatform in shader_compiler.dart',
     );
   }
-  final body = source.substring(start);
+  final String body = source.substring(start);
   final out = <String, List<String>>{};
   var pending = <String>[];
   final caseOrReturn = RegExp(
     r'case TargetPlatform\.(\w+):|return <String>\[([^\]]*)\]',
   );
-  for (final m in caseOrReturn.allMatches(body)) {
+  for (final RegExpMatch m in caseOrReturn.allMatches(body)) {
     if (m[1] != null) {
       pending.add(m[1]!);
       continue;
     }
-    final flags = RegExp(r"'([^']+)'").allMatches(m[2]!).map((f) => f[1]!);
+    final Iterable<String> flags = RegExp(r"'([^']+)'")
+        .allMatches(m[2]!)
+        .map((f) => f[1]!);
     for (final platform in pending) {
-      final name = _platformNames[platform];
+      final String? name = _platformNames[platform];
       if (name != null) out[name] = flags.toList();
     }
     pending = [];
@@ -60,11 +62,11 @@ Map<String, List<String>> flutterToolsShaderFlags(String source) {
 
 /// `SHADER_PLATFORM_FLAGS` in [bzl], the text of `flutter_shader_compile.bzl`.
 Map<String, List<String>> rulesShaderFlags(String bzl) {
-  final start = bzl.indexOf('SHADER_PLATFORM_FLAGS = {');
+  final int start = bzl.indexOf('SHADER_PLATFORM_FLAGS = {');
   if (start < 0) {
     throw const FormatException('no SHADER_PLATFORM_FLAGS in the .bzl file');
   }
-  final end = bzl.indexOf('\n}', start);
+  final int end = bzl.indexOf('\n}', start);
   final entry = RegExp(r'"(\w+)":\s*\[([^\]]*)\]');
   return {
     for (final m in entry.allMatches(bzl.substring(start, end)))

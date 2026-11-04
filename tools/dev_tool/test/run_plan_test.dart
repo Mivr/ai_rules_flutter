@@ -71,7 +71,7 @@ void main() {
     });
 
     test('--no-hot names itself, and how to undo it', () {
-      final reason = RunPlan.hotReloadOffReason(
+      final String? reason = RunPlan.hotReloadOffReason(
         profileMode: false,
         hotFlag: false,
       );
@@ -82,7 +82,7 @@ void main() {
     test(
       'profile mode names the build, not the flag it shares with --no-hot',
       () {
-        final reason = RunPlan.hotReloadOffReason(
+        final String? reason = RunPlan.hotReloadOffReason(
           profileMode: true,
           hotFlag: true,
         );
@@ -223,7 +223,7 @@ void main() {
     });
 
     test('the flag reaches the build argv next to -c opt', () {
-      final args = bazelBuildArgs(
+      final List<String> args = bazelBuildArgs(
         '//app',
         compilationMode: 'opt',
         extraArgs: modeBuildFlags(profileMode: true),
@@ -235,7 +235,7 @@ void main() {
     });
 
     test('a non-profile build argv does not mention it', () {
-      final args = bazelBuildArgs(
+      final List<String> args = bazelBuildArgs(
         '//app',
         compilationMode: 'opt',
         extraArgs: modeBuildFlags(profileMode: false),
@@ -285,7 +285,7 @@ void main() {
     });
 
     test('opt, fastbuild and no -c are release', () {
-      for (final mode in ['opt', 'fastbuild', null]) {
+      for (final String? mode in ['opt', 'fastbuild', null]) {
         expect(
           buildModeFor(profileMode: false, compilationMode: mode),
           BuildMode.release,

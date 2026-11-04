@@ -19,8 +19,8 @@ void main(List<String> args) {
       '"assemble-macos-framework", or "copy-files".',
     );
   }
-  final subcommand = args.first;
-  final rest = args.sublist(1);
+  final String subcommand = args.first;
+  final List<String> rest = args.sublist(1);
   switch (subcommand) {
     case 'patch':
       runPatch(rest);

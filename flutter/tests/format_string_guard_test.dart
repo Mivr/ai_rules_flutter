@@ -34,15 +34,15 @@ bool _looksLikeRoot(String root) =>
 /// resolves, so the test fails loudly instead of scanning the wrong tree
 /// or silently passing.
 String? _workspaceRoot() {
-  final fromEnv = Platform.environment['BUILD_WORKSPACE_DIRECTORY'];
+  final String? fromEnv = Platform.environment['BUILD_WORKSPACE_DIRECTORY'];
   if (fromEnv != null && fromEnv.isNotEmpty && _looksLikeRoot(fromEnv)) {
     return fromEnv;
   }
-  final anchor = Platform.environment['GUARD_ROOT_ANCHOR'];
-  final srcdir = Platform.environment['TEST_SRCDIR'];
+  final String? anchor = Platform.environment['GUARD_ROOT_ANCHOR'];
+  final String? srcdir = Platform.environment['TEST_SRCDIR'];
   if (anchor != null && anchor.isNotEmpty && srcdir != null) {
     try {
-      var dir = File(
+      Directory dir = File(
         File('$srcdir/$anchor').resolveSymbolicLinksSync(),
       ).parent;
       for (var i = 0; i < 8; i++) {
@@ -62,7 +62,7 @@ List<String> _findBzl(String root) {
   final found = <String>[];
   final stack = <Directory>[base];
   while (stack.isNotEmpty) {
-    final current = stack.removeLast();
+    final Directory current = stack.removeLast();
     List<FileSystemEntity> children;
     try {
       children = current.listSync(followLinks: false);
@@ -91,7 +91,7 @@ String _stripComment(String line) {
   var triple = false;
   var i = 0;
   while (i < line.length) {
-    final ch = line[i];
+    final String ch = line[i];
     if (quote == null) {
       if (ch == '#') break;
       if (ch == '"' || ch == "'") {
@@ -144,7 +144,7 @@ int _skipWsBack(String w, int i) {
 /// Whether the character at [i] is escaped by an odd run of backslashes.
 bool _isEscaped(String w, int i) {
   var bs = 0;
-  var k = i - 1;
+  int k = i - 1;
   while (k >= 0 && w[k] == r'\') {
     bs++;
     k--;
@@ -157,14 +157,14 @@ bool _isEscaped(String w, int i) {
 /// [close] must be a quote. Triple-quoted literals are handled; a raw
 /// newline ends the search, since a single-quoted literal cannot span lines.
 int _literalOpener(String w, int close) {
-  final q = w[close];
+  final String q = w[close];
   if (q != '"' && q != "'") return -1;
-  final triple =
+  final bool triple =
       close >= 2 &&
       w[close - 1] == q &&
       w[close - 2] == q &&
       !_isEscaped(w, close - 1);
-  var i = close - (triple ? 3 : 1);
+  int i = close - (triple ? 3 : 1);
   while (i >= 0) {
     if (triple) {
       if (w[i] == q &&
@@ -192,14 +192,14 @@ List<String> _literalChain(String w, int close) {
   final chain = <String>[];
   var end = close;
   while (true) {
-    final open = _literalOpener(w, end);
+    final int open = _literalOpener(w, end);
     if (open < 0) break;
     chain.add(w.substring(open, end + 1));
-    var i = _skipWsBack(w, open - 1);
+    int i = _skipWsBack(w, open - 1);
     if (i < 0 || w[i] != '+') break;
     i = _skipWsBack(w, i - 1);
     if (i < 0) break;
-    final q = w[i];
+    final String q = w[i];
     if (q != '"' && q != "'") break;
     end = i;
   }
@@ -211,11 +211,11 @@ List<String> _literalChain(String w, int close) {
 /// argument; bails (not a literal message) on a nested call, a non-literal
 /// tail, or anything unmatched.
 List<String> _lastArgChain(String w, int close, int open) {
-  var end = _skipWsBack(w, close - 1);
+  int end = _skipWsBack(w, close - 1);
   while (end >= 0 && w[end] == ')') {
-    final inner = _matchOpen(w, end);
+    final int inner = _matchOpen(w, end);
     if (inner < 0 || inner <= open) return const [];
-    final k = _skipWsBack(w, inner - 1);
+    final int k = _skipWsBack(w, inner - 1);
     if (k < 0 || _isIdentChar(w[k])) return const [];
     end = _skipWsBack(w, end - 1);
   }
@@ -281,11 +281,11 @@ int _matchOpen(String code, int close) {
   String? quote;
   var i = close;
   while (i >= 0) {
-    final ch = code[i];
+    final String ch = code[i];
     if (quote != null) {
       if (ch == quote) {
         var bs = 0;
-        var k = i - 1;
+        int k = i - 1;
         while (k >= 0 && code[k] == r'\') {
           bs++;
           k--;
@@ -321,7 +321,7 @@ String _maskProse(String text) {
   final out = StringBuffer();
   var i = 0;
   while (i < text.length) {
-    final ch = text[i];
+    final String ch = text[i];
     if (ch == '#') {
       while (i < text.length && text[i] != '\n') {
         out.write(' ');
@@ -398,40 +398,40 @@ List<String> _checkMisboundFormat(String rel, String text) {
   final errors = <String>[];
   // Prose first: docstring/comment `.format(` text is never a call.
   // Masking preserves length and newlines, so offsets still line up.
-  final lines = _maskProse(text).split('\n');
+  final List<String> lines = _maskProse(text).split('\n');
   // Character offset of each line start, for file:line reporting.
   final offsets = <int>[0];
   for (final line in lines) {
     offsets.add(offsets.last + line.length + 1);
   }
   for (var i = 0; i < lines.length; i++) {
-    final code = _stripComment(lines[i]);
+    final String code = _stripComment(lines[i]);
     var searchFrom = 0;
     while (true) {
-      final idx = code.indexOf('.format(', searchFrom);
+      final int idx = code.indexOf('.format(', searchFrom);
       if (idx < 0) break;
       searchFrom = idx + 1;
       // The statement so far: context lines plus this line up to the
       // `.format(` call. Eight lines cover a `fail(` opener above a long
       // join; the chain walk below only follows `literal + literal`
       // anyway, so wider context cannot pull in other statements.
-      final window = [
+      final String window = [
         for (var k = i - 8 < 0 ? 0 : i - 8; k < i; k++) _stripComment(lines[k]),
         code.substring(0, idx),
       ].join('\n');
-      var j = _skipWsBack(window, window.length - 1);
+      int j = _skipWsBack(window, window.length - 1);
       if (j < 0) continue;
       // The suspect literals: a literal receiver fills its own
       // placeholders, so only earlier join members count; a call receiver
       // never formats anything, so the whole last-argument chain counts.
       List<String> suspects = const [];
       if (window[j] == '"' || window[j] == "'") {
-        final chain = _literalChain(window, j);
+        final List<String> chain = _literalChain(window, j);
         suspects = chain.length > 1 ? chain.sublist(1) : const [];
       } else if (window[j] == ')') {
-        final open = _matchOpen(window, j);
+        final int open = _matchOpen(window, j);
         if (open < 0) continue;
-        final k = _skipWsBack(window, open - 1);
+        final int k = _skipWsBack(window, open - 1);
         if (k < 0 || !_isIdentChar(window[k])) continue;
         // `return (...)` and friends group the join itself: `.format`
         // applies to it, so the placeholders fill — unlike `fail(...)`.
@@ -462,7 +462,10 @@ void main() {
             "refusing to ship an empty package".format(what = what, src = src),
         )
 ''';
-      final errors = _checkMisboundFormat('flutter/probe.bzl', probe);
+      final List<String> errors = _checkMisboundFormat(
+        'flutter/probe.bzl',
+        probe,
+      );
       expect(errors, hasLength(1));
       expect(errors.single, startsWith('flutter/probe.bzl:3:'));
     });
@@ -513,7 +516,10 @@ void main() {
                 "escaping with \\"..\\"",
             ).format(package = repr(package), root = repr(root))
 ''';
-      final errors = _checkMisboundFormat('flutter/probe.bzl', probe);
+      final List<String> errors = _checkMisboundFormat(
+        'flutter/probe.bzl',
+        probe,
+      );
       expect(errors, hasLength(1));
       expect(errors.single, startsWith('flutter/probe.bzl:7:'));
     });
@@ -585,12 +591,15 @@ def missing_local_file_message(src, what):
 
     test('a hash inside a string is not a comment', () {
       const probe = 'fail("oops {x} # not a comment").format(x = x)\n';
-      final errors = _checkMisboundFormat('flutter/probe.bzl', probe);
+      final List<String> errors = _checkMisboundFormat(
+        'flutter/probe.bzl',
+        probe,
+      );
       expect(errors, hasLength(1));
     });
   });
 
-  final root = _workspaceRoot();
+  final String? root = _workspaceRoot();
   if (root == null) {
     test('format guard discovers the workspace', () {
       fail(
@@ -601,7 +610,7 @@ def missing_local_file_message(src, what):
     });
     return;
   }
-  final bzlFiles = _findBzl(root);
+  final List<String> bzlFiles = _findBzl(root);
 
   test('format guard discovers its inputs (no file list)', () {
     expect(
@@ -613,8 +622,8 @@ def missing_local_file_message(src, what):
 
   for (final rel in bzlFiles) {
     test('$rel binds every .format() to the whole message', () {
-      final text = File('$root/$rel').readAsStringSync();
-      final problems = _checkMisboundFormat(rel, text);
+      final String text = File('$root/$rel').readAsStringSync();
+      final List<String> problems = _checkMisboundFormat(rel, text);
       expect(problems, isEmpty, reason: problems.join('\n'));
     });
   }

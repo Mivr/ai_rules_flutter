@@ -70,8 +70,8 @@ Set<String> findE2eModules(Directory e2eDir, String rootPath) {
       .where(
         (d) => !d.path.split(Platform.pathSeparator).last.startsWith('bazel-'),
       );
-  final top = childDirs(e2eDir).toList();
-  final nested = top.expand(childDirs);
+  final List<Directory> top = childDirs(e2eDir).toList();
+  final Iterable<Directory> nested = top.expand(childDirs);
   for (final dir in [...top, ...nested]) {
     if (File('${dir.path}/MODULE.bazel').existsSync()) {
       modules.add(_relativeTo(dir.path, rootPath));
@@ -83,23 +83,23 @@ Set<String> findE2eModules(Directory e2eDir, String rootPath) {
 /// Leaf module names referenced by any workflow outside of comments.
 Set<String> findCoveredModules(Directory workflowsDir) {
   final covered = <String>{};
-  final entries = workflowsDir
+  final Iterable<File> entries = workflowsDir
       .listSync(followLinks: false)
       .whereType<File>()
       .where(
         (f) => f.path.endsWith('.yaml') || f.path.endsWith('.yml'),
       );
   for (final file in entries) {
-    final text = stripComments(file.readAsStringSync());
-    for (final match in _workspaceRef.allMatches(text)) {
+    final String text = stripComments(file.readAsStringSync());
+    for (final RegExpMatch match in _workspaceRef.allMatches(text)) {
       covered.add(match.group(1)!.split('/').last);
     }
-    for (final match in _matrixRef.allMatches(text)) {
+    for (final RegExpMatch match in _matrixRef.allMatches(text)) {
       covered.add(match.group(1)!);
     }
-    for (final match in _workspacesRef.allMatches(text)) {
-      for (final token in match.group(1)!.trim().split(RegExp(r'\s+'))) {
-        final bare = token.replaceAll(RegExp('^["\']+|["\']+\$'), '');
+    for (final RegExpMatch match in _workspacesRef.allMatches(text)) {
+      for (final String token in match.group(1)!.trim().split(RegExp(r'\s+'))) {
+        final String bare = token.replaceAll(RegExp('^["\']+|["\']+\$'), '');
         if (bare.isNotEmpty && bare != r'$WORKSPACES') covered.add(bare);
       }
     }
@@ -132,11 +132,11 @@ List<String> checkCoverage({
   required Set<String> covered,
   required Map<String, String> reasons,
 }) {
-  final leafNames = modules.map(leafName).toSet();
+  final Set<String> leafNames = modules.map(leafName).toSet();
   final errors = <String>[];
-  for (final module in modules.toList()..sort()) {
-    final inWorkflow = covered.contains(leafName(module));
-    final hasReason = reasons.containsKey(module);
+  for (final String module in modules.toList()..sort()) {
+    final bool inWorkflow = covered.contains(leafName(module));
+    final bool hasReason = reasons.containsKey(module);
     if (inWorkflow && hasReason) {
       errors.add(
         "e2e module '$module' is covered by a workflow but still has an "
@@ -150,14 +150,14 @@ List<String> checkCoverage({
       );
     }
   }
-  for (final name in reasons.keys.toList()..sort()) {
+  for (final String name in reasons.keys.toList()..sort()) {
     if (!modules.contains(name)) {
       errors.add(
         "uncovered-reasons names '$name', which is no e2e module; remove it",
       );
     }
   }
-  for (final name in covered.toList()..sort()) {
+  for (final String name in covered.toList()..sort()) {
     if (!leafNames.contains(name)) {
       errors.add(
         "workflow references e2e module '$name', which does not exist; "

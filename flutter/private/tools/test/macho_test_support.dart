@@ -52,9 +52,9 @@ SectionSpec regularSection(
 Uint8List sectionRecord(SectionSpec spec) {
   final buf = Uint8List(80);
   final bd = ByteData.sublistView(buf);
-  final sectBytes = ascii.encode(spec.sectname);
+  final Uint8List sectBytes = ascii.encode(spec.sectname);
   buf.setRange(0, sectBytes.length, sectBytes);
-  final segBytes = ascii.encode(spec.segname);
+  final Uint8List segBytes = ascii.encode(spec.segname);
   buf.setRange(16, 16 + segBytes.length, segBytes);
   bd.setUint64(32, 0x1000, Endian.little);
   bd.setUint64(40, spec.size, Endian.little);
@@ -74,7 +74,7 @@ Uint8List segmentWithSections(
   int filesize,
   List<Uint8List> sections,
 ) {
-  final header = parse.buildLcSegment64((
+  final Uint8List header = parse.buildLcSegment64((
     segname: segname,
     vmaddr: 0,
     vmsize: filesize,
@@ -89,7 +89,7 @@ Uint8List segmentWithSections(
   for (final section in sections) {
     out.add(section);
   }
-  final bytes = out.toBytes();
+  final Uint8List bytes = out.toBytes();
   ByteData.sublistView(bytes).setUint32(4, bytes.length, Endian.little);
   return bytes;
 }
@@ -106,7 +106,7 @@ Uint8List segmentWithSections(
     strings.add(utf8.encode(name));
     strings.addByte(0);
   }
-  final strBytes = strings.toBytes();
+  final Uint8List strBytes = strings.toBytes();
   final symBytes = BytesBuilder(copy: false);
   for (var i = 0; i < names.length; i++) {
     final entry = ByteData(16)
@@ -117,7 +117,7 @@ Uint8List segmentWithSections(
       ..setUint64(8, 0x1000 + i * 8, Endian.little);
     symBytes.add(entry.buffer.asUint8List());
   }
-  final symTab = symBytes.toBytes();
+  final Uint8List symTab = symBytes.toBytes();
   expect(symTab.length, 3 * 16);
   expect(strBytes.length, 1 + 9 + 9 + 13);
   return (symtab: symTab, strings: strBytes);
@@ -139,7 +139,7 @@ Uint8List assembleTestMachO(List<Uint8List> commands, int fileSize) {
   bd.setUint32(16, commands.length, Endian.little);
   bd.setUint32(20, sizeofcmds, Endian.little);
   bd.setUint32(24, constants.mhNoReexportedDylibs, Endian.little);
-  var off = constants.mhHeaderSize64;
+  int off = constants.mhHeaderSize64;
   for (final c in commands) {
     buf.setRange(off, off + c.length, c);
     off += c.length;
@@ -163,11 +163,11 @@ buildSectionDylib({
   SectionSpec? dataSection,
 }) {
   const symoff = 0x400;
-  final fixture = buildSectionSymtab();
-  final symTab = fixture.symtab;
-  final strBytes = fixture.strings;
-  final stroff = symoff + symTab.length;
-  final oldEnd = stroff + strBytes.length;
+  final ({Uint8List strings, Uint8List symtab}) fixture = buildSectionSymtab();
+  final Uint8List symTab = fixture.symtab;
+  final Uint8List strBytes = fixture.strings;
+  final int stroff = symoff + symTab.length;
+  final int oldEnd = stroff + strBytes.length;
 
   final commands = <Uint8List>[
     segmentWithSections('__TEXT', 0, textSegEnd, [
@@ -199,7 +199,7 @@ buildSectionDylib({
   for (final end in [textSegEnd, dataSegEnd]) {
     if (end > fileSize) fileSize = end;
   }
-  final buf = assembleTestMachO(commands, fileSize);
+  final Uint8List buf = assembleTestMachO(commands, fileSize);
   buf.setRange(symoff, symoff + symTab.length, symTab);
   buf.setRange(stroff, stroff + strBytes.length, strBytes);
   return (
@@ -222,17 +222,17 @@ buildLinkeditSectionDylib({
   required SectionSpec textSection,
   required int linkeditOff,
 }) {
-  final fixture = buildSectionSymtab();
-  final symTab = fixture.symtab;
-  final strBytes = fixture.strings;
+  final ({Uint8List strings, Uint8List symtab}) fixture = buildSectionSymtab();
+  final Uint8List symTab = fixture.symtab;
+  final Uint8List strBytes = fixture.strings;
   final symoff = linkeditOff;
-  final stroff = symoff + symTab.length;
-  final tablesEnd = stroff + strBytes.length;
+  final int stroff = symoff + symTab.length;
+  final int tablesEnd = stroff + strBytes.length;
   var fileSize = tablesEnd;
-  for (final end in [textSegEnd, textSection.offset + textSection.size]) {
+  for (final int end in [textSegEnd, textSection.offset + textSection.size]) {
     if (end > fileSize) fileSize = end;
   }
-  final linkeditSize = fileSize - linkeditOff;
+  final int linkeditSize = fileSize - linkeditOff;
 
   final commands = <Uint8List>[
     segmentWithSections('__TEXT', 0, textSegEnd, [
@@ -267,7 +267,7 @@ buildLinkeditSectionDylib({
         )
         .bytes,
   ];
-  final buf = assembleTestMachO(commands, fileSize);
+  final Uint8List buf = assembleTestMachO(commands, fileSize);
   buf.setRange(symoff, symoff + symTab.length, symTab);
   buf.setRange(stroff, stroff + strBytes.length, strBytes);
   return (

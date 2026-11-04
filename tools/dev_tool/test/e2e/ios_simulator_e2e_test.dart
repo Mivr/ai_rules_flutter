@@ -55,7 +55,7 @@ void main() {
       test(
         'HTTP control channel screenshot captures Flutter UI',
         () async {
-          final dt = await _runOnSimulator();
+          final DevToolProcess dt = await _runOnSimulator();
           await Future<void>.delayed(const Duration(seconds: 3));
 
           final outputPath =
@@ -79,7 +79,7 @@ void main() {
       test(
         'app.debugPort endpoint answers getVersion for a rendered app',
         () async {
-          final dt = await _runOnSimulator();
+          final DevToolProcess dt = await _runOnSimulator();
           final Map<String, dynamic> debugPort = await dt.waitForEvent(
             'app.debugPort',
             timeout: const Duration(seconds: 60),

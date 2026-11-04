@@ -72,13 +72,13 @@ StabilizedPackageConfig stabilizePackageRoots(
       'The build-emitted dev package config is missing: $packageConfigPath',
     );
   }
-  final decoded = json.decode(source.readAsStringSync());
+  final dynamic decoded = json.decode(source.readAsStringSync());
   if (decoded is! Map<String, dynamic>) {
     throw DevToolException(
       'Expected a JSON object in $packageConfigPath, got ${decoded.runtimeType}.',
     );
   }
-  final packages = decoded['packages'];
+  final dynamic packages = decoded['packages'];
   if (packages is! List) {
     throw DevToolException('Expected a "packages" list in $packageConfigPath.');
   }
@@ -87,16 +87,16 @@ StabilizedPackageConfig stabilizePackageRoots(
   // already followed. This is `bazel-out/<config>/bin`, which is an ordinary
   // directory inside the output base — resolving it does not touch the forest,
   // and doing it once here is what makes the per-package work pure arithmetic.
-  final base = Directory(
+  final String base = Directory(
     p.dirname(packageConfigPath),
   ).resolveSymbolicLinksSync();
 
   final repointed = <String>[];
-  for (final entry in packages) {
+  for (final Object? entry in packages) {
     if (entry is! Map<String, dynamic>) continue;
-    final rootUri = entry['rootUri'];
+    final dynamic rootUri = entry['rootUri'];
     if (rootUri is! String) continue;
-    final moved = _repointRoot(rootUri, base: base);
+    final String? moved = _repointRoot(rootUri, base: base);
     if (moved == null) continue;
     entry['rootUri'] = moved;
     repointed.add(entry['name'] as String? ?? '<unnamed>');
@@ -118,17 +118,17 @@ StabilizedPackageConfig stabilizePackageRoots(
 /// different directory from the build-emitted one, so a relative root carried
 /// over unchanged would silently re-anchor to the new directory.
 String? _repointRoot(String rootUri, {required String base}) {
-  final parsed = Uri.parse(rootUri);
+  final Uri parsed = Uri.parse(rootUri);
   if (parsed.hasScheme && parsed.scheme != 'file') return null;
 
-  final asPath = parsed.scheme == 'file' ? parsed.toFilePath() : rootUri;
+  final String asPath = parsed.scheme == 'file' ? parsed.toFilePath() : rootUri;
   // `..` in a package root is resolved by the OS against real directories, so
   // normalizing against the already-resolved [base] gives the same answer the
   // compiler would have reached — without following the symlink at the end.
-  final resolved = p.normalize(
+  final String resolved = p.normalize(
     p.isAbsolute(asPath) ? asPath : p.join(base, asPath),
   );
-  final stable = _dropExecroot(resolved) ?? resolved;
+  final String stable = _dropExecroot(resolved) ?? resolved;
 
   if (!Directory(stable).existsSync()) {
     throw DevToolException(
@@ -147,7 +147,7 @@ String? _repointRoot(String rootUri, {required String base}) {
 /// required together: `external/` alone is not evidence of the forest, and it
 /// is the pairing that makes the repository tree the thing being named.
 String? _dropExecroot(String path) {
-  final parts = p.split(path);
+  final List<String> parts = p.split(path);
   for (var i = 0; i + 2 < parts.length; i++) {
     if (parts[i] == 'execroot' && parts[i + 2] == 'external') {
       return p.joinAll([...parts.sublist(0, i), ...parts.sublist(i + 2)]);

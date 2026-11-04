@@ -5,7 +5,7 @@ import 'vm_e2e.dart';
 void main() {
   group('parseE2eArgs', () {
     test('defaults to the CI matrix on Linux, stopping at first failure', () {
-      final options = parseE2eArgs(['my-vm']);
+      final E2eRunOptions options = parseE2eArgs(['my-vm']);
       expect(options.vmName, 'my-vm');
       expect(options.isWindows, isFalse);
       expect(options.keepGoing, isFalse);
@@ -13,7 +13,7 @@ void main() {
     });
 
     test('parses Windows, keep-going and an explicit folder list', () {
-      final options = parseE2eArgs([
+      final E2eRunOptions options = parseE2eArgs([
         'my-vm',
         '--windows',
         '--keep-going',

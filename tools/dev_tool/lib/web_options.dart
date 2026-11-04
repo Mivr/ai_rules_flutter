@@ -198,7 +198,7 @@ class BrowserLaunchOptions {
   /// returns a 1x PNG. Under `--force-device-scale-factor=3` the same override
   /// holds. So a scale has to be on the command line, and only a scale does.
   List<String> get scaleFlags {
-    final scale = viewport?.deviceScaleFactor;
+    final double? scale = viewport?.deviceScaleFactor;
     return scale == null ? const [] : ['--force-device-scale-factor=$scale'];
   }
 
@@ -298,10 +298,10 @@ class WebOptions {
   /// refused for the same reason as one on another port: the server answers
   /// nothing there but a 404.
   Uri launchUrlFor(Uri serverBase) {
-    final page = serverBase.path.isEmpty
+    final Uri page = serverBase.path.isEmpty
         ? serverBase
         : serverBase.replace(path: '${serverBase.path}/');
-    final url = browser.launchUrl;
+    final Uri? url = browser.launchUrl;
     if (url == null) return page;
     final hostMatters = server.hostname != anyHostname;
     if (url.scheme != serverBase.scheme ||
@@ -325,7 +325,7 @@ class WebOptions {
   /// `wasParsed` is what makes this possible without also refusing the
   /// defaults: a flag the user never typed is not a request.
   static void refuseOnNonWebRun(ArgResults results, Iterable<String> names) {
-    final passed = names
+    final Iterable<String> passed = names
         .where(results.options.contains)
         .where(results.wasParsed);
     if (passed.isEmpty) return;
@@ -353,10 +353,12 @@ class WebOptions {
     // The flag declares no default, so `null` *is* "not asked for" — no
     // `wasParsed` needed, and `--help` cannot print a default the code does
     // not use.
-    final crossOriginIsolation =
+    final bool crossOriginIsolation =
         (results['cross-origin-isolation'] as bool?) ?? mode is WasmWebMode;
 
-    final headers = parseWebHeaders(results['web-header'] as List<String>);
+    final Map<String, String> headers = parseWebHeaders(
+      results['web-header'] as List<String>,
+    );
     checkIsolationHeaders(headers, crossOriginIsolation);
 
     final certPath = results['web-tls-cert-path'] as String?;
@@ -366,7 +368,9 @@ class WebOptions {
     final browserFlags = results['web-browser-flag'] as List<String>;
     checkBrowserFlags(browserFlags);
 
-    final viewport = parseWebViewport(results['web-viewport'] as String?);
+    final WebViewport? viewport = parseWebViewport(
+      results['web-viewport'] as String?,
+    );
     checkViewportScaleFlag(viewport, browserFlags);
 
     // Only the DDC dev loop has a resident compiler and a debugger to
@@ -407,7 +411,7 @@ void checkIsolationHeaders(
   bool crossOriginIsolation,
 ) {
   if (!crossOriginIsolation) return;
-  final clashing = headers.keys.where(
+  final Iterable<String> clashing = headers.keys.where(
     (k) => crossOriginIsolationHeaders.keys.any(
       (h) => h.toLowerCase() == k.toLowerCase(),
     ),
@@ -447,7 +451,8 @@ void checkTlsPair(String? certPath, String? certKeyPath) {
 /// quietly stops holding.
 void checkBrowserFlags(List<String> browserFlags) {
   for (final flag in browserFlags) {
-    final instead = WebOptions.ownedBrowserSwitches[flag.split('=').first];
+    final String? instead =
+        WebOptions.ownedBrowserSwitches[flag.split('=').first];
     if (instead == null) continue;
     throw DevToolException(
       '--web-browser-flag cannot pass ${flag.split('=').first}: this tool '
@@ -468,7 +473,7 @@ void checkViewportScaleFlag(
   List<String> browserFlags,
 ) {
   if (viewport?.deviceScaleFactor == null) return;
-  final clashing = browserFlags.where(
+  final Iterable<String> clashing = browserFlags.where(
     (f) => f.split('=').first == '--force-device-scale-factor',
   );
   if (clashing.isEmpty) return;
@@ -514,7 +519,7 @@ void checkExpressionEvaluation(
 /// by [WebOptions.launchUrlFor] once the server has bound.
 Uri? parseWebLaunchUrl(String? raw) {
   if (raw == null) return null;
-  final uri = Uri.tryParse(raw);
+  final Uri? uri = Uri.tryParse(raw);
   if (uri == null ||
       (uri.scheme != 'http' && uri.scheme != 'https') ||
       uri.host.isEmpty) {
@@ -550,7 +555,7 @@ const _framingHeaders = {
 Map<String, String> parseWebHeaders(List<String> raw) {
   final headers = <String, String>{};
   for (final entry in raw) {
-    final split = entry.indexOf('=');
+    final int split = entry.indexOf('=');
     if (split <= 0) {
       throw DevToolException(
         '--web-header "$entry" is not a NAME=VALUE pair. A header needs a '
@@ -558,8 +563,8 @@ Map<String, String> parseWebHeaders(List<String> raw) {
         '--web-header X-Custom-Header=value.',
       );
     }
-    final name = entry.substring(0, split);
-    final why = _framingHeaders[name.toLowerCase()];
+    final String name = entry.substring(0, split);
+    final String? why = _framingHeaders[name.toLowerCase()];
     if (why != null) {
       throw DevToolException(
         '--web-header cannot set $name: it is not a header the server puts '
@@ -579,7 +584,7 @@ int parseWebPort(String? raw) => parsePortFlag(raw, '--web-port') ?? 0;
 /// A port-valued flag, or null when unset.
 int? parsePortFlag(String? raw, String flag) {
   if (raw == null) return null;
-  final port = int.tryParse(raw);
+  final int? port = int.tryParse(raw);
   if (port == null || port < 0 || port > 65535) {
     throw DevToolException(
       '$flag "$raw" is not a port number. Ports are 0-65535, and 0 asks for '
@@ -601,13 +606,13 @@ int? parsePortFlag(String? raw, String flag) {
 /// a size nobody asked for and report it as the one they did.
 WebViewport? parseWebViewport(String? raw) {
   if (raw == null) return null;
-  final match = RegExp(
+  final RegExpMatch? match = RegExp(
     r'^(\d+)x(\d+)(?:@(\d+(?:\.\d+)?))?$',
   ).firstMatch(raw.trim());
-  final width = match == null ? null : int.parse(match.group(1)!);
-  final height = match == null ? null : int.parse(match.group(2)!);
-  final scaleText = match?.group(3);
-  final scale = scaleText == null ? null : double.parse(scaleText);
+  final int? width = match == null ? null : int.parse(match.group(1)!);
+  final int? height = match == null ? null : int.parse(match.group(2)!);
+  final String? scaleText = match?.group(3);
+  final double? scale = scaleText == null ? null : double.parse(scaleText);
   if (width == null ||
       height == null ||
       width <= 0 ||
@@ -650,7 +655,7 @@ WebViewport parseSetViewportCommand(Map<String, dynamic> params) {
     );
   }
   int require(String name) {
-    final value = params[name];
+    final dynamic value = params[name];
     if (value is int && value > 0) return value;
     throw CommandFailure.badRequest(
       'app.setViewport needs $name as a whole number of CSS pixels greater '

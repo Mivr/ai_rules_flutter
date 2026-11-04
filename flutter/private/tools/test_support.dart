@@ -25,7 +25,7 @@ import 'dart:io';
 Duration testCeiling(String? bazelTestTimeout) {
   final int? seconds = int.tryParse(bazelTestTimeout ?? '');
   if (seconds == null || seconds <= 0) return const Duration(minutes: 5);
-  final margin = seconds ~/ 20;
+  final int margin = seconds ~/ 20;
   return Duration(seconds: seconds - (margin < 10 ? 10 : margin));
 }
 
@@ -168,7 +168,7 @@ bool fileUnstartedTest({
   required String disconnectMessage,
   required TestResultSink results,
 }) {
-  final readiness = testReadiness(
+  final TestReadiness readiness = testReadiness(
     test: test,
     fixture: fixture,
     socketClosed: socketClosed,
@@ -283,12 +283,13 @@ void Function(Object?) testMessageHandler({
   required void Function(TestFailureSummary) noteFailure,
 }) {
   return (data) {
-    final msg = (data as Map).cast<String, dynamic>();
+    final Map<String, dynamic> msg = (data as Map).cast<String, dynamic>();
     switch (msg['type']) {
       case 'state-change':
         break;
       case 'error':
-        final err = (msg['error'] as Map).cast<String, dynamic>();
+        final Map<String, dynamic> err = (msg['error'] as Map)
+            .cast<String, dynamic>();
         noteFailure(
           TestFailureSummary(
             message:
@@ -298,8 +299,8 @@ void Function(Object?) testMessageHandler({
           ),
         );
       case 'message':
-        final mtype = msg['message-type'] as String? ?? 'print';
-        final text = msg['text'] as String? ?? '';
+        final String mtype = msg['message-type'] as String? ?? 'print';
+        final String text = msg['text'] as String? ?? '';
         final line = mtype == 'print' ? text : '[$mtype] $text';
         stdout.writeln(line);
         output.writeln(line);
@@ -343,7 +344,7 @@ String summarizeTestResults({
     if (failed > 0) '$failed failed',
     if (skipped > 0) '$skipped skipped',
   ];
-  final body = pieces.isEmpty ? 'no tests' : pieces.join(', ');
+  final String body = pieces.isEmpty ? 'no tests' : pieces.join(', ');
   return '\n$body${suiteError ? ' (suite error)' : ''}';
 }
 
@@ -389,7 +390,7 @@ TestReadiness testReadiness({
   required String disconnectMessage,
 }) {
   final metadata = test['metadata'] as Map?;
-  final skipFlag = metadata == null
+  final bool skipFlag = metadata == null
       ? false
       : (metadata['skip'] as bool? ?? false);
   if (!fixture && skipFlag) {

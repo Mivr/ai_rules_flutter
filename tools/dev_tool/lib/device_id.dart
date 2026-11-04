@@ -68,7 +68,7 @@ Future<List<Device>> resolveDevices(
   final devices = <Device>[];
   final refused = <String>[];
   for (final id in ids) {
-    final device = _resolveDevice(id);
+    final Device? device = _resolveDevice(id);
     if (device == null) {
       refused.add(id);
     } else {
@@ -76,7 +76,7 @@ Future<List<Device>> resolveDevices(
     }
   }
   if (refused.isEmpty) return devices;
-  final known = await _lookUpDevices(
+  final _Lookup known = await _lookUpDevices(
     runProbe ?? _boundedRun,
     adbPath: adbPath,
   );
@@ -105,11 +105,11 @@ Device? _resolveDevice(String id) {
     case 'android':
       return AndroidDevice();
   }
-  final colon = id.indexOf(':');
+  final int colon = id.indexOf(':');
   if (colon < 0) return null;
-  final kind = id.substring(0, colon);
-  final rest = id.substring(colon + 1);
-  final make = switch (kind) {
+  final String kind = id.substring(0, colon);
+  final String rest = id.substring(colon + 1);
+  final Device Function(String udid)? make = switch (kind) {
     'ios-simulator' => (String udid) => IOSSimulatorDevice(udid: udid),
     'ios' => (String udid) => IOSDevice(udid: udid),
     // The prefix is stripped, never passed on: a colon in `adb -s` means a
@@ -186,20 +186,17 @@ Future<_Lookup> _lookUpDevices(ProcessRunSync run, {String? adbPath}) async {
     }
   }
 
-  final found = await Future.wait([
+  final List<(String, List<KnownDevice>?)> found = await Future.wait([
     probe('simctl', () async {
-      final result = await run('xcrun', ['simctl', 'list', 'devices', '-j']);
+      final ProcessResult result = await run('xcrun', _simctlList);
       _requireSuccess(result, 'xcrun simctl list devices -j');
       return parseSimctlDevices(result.stdout as String);
     }),
     probe('devicectl', () async {
       return withTempDir('flutter_devid_', (dir) async {
-        final jsonPath = p.join(dir.path, 'devices.json');
-        final result = await run('xcrun', [
-          'devicectl',
-          'list',
-          'devices',
-          '--json-output',
+        final String jsonPath = p.join(dir.path, 'devices.json');
+        final ProcessResult result = await run('xcrun', [
+          ..._devicectlList,
           jsonPath,
         ]);
         _requireSuccess(result, 'xcrun devicectl list devices');
@@ -216,9 +213,9 @@ Future<_Lookup> _lookUpDevices(ProcessRunSync run, {String? adbPath}) async {
       });
     }),
     probe('adb', () async {
-      final adb = adbPath ?? adbTool().find();
+      final String? adb = adbPath ?? adbTool().find();
       if (adb == null) throw StateError('adb was not found');
-      final result = await run(adb, ['devices', '-l']);
+      final ProcessResult result = await run(adb, ['devices', '-l']);
       _requireSuccess(result, '$adb devices -l');
       return parseAdbDevices(result.stdout as String);
     }),
@@ -236,6 +233,10 @@ Future<_Lookup> _lookUpDevices(ProcessRunSync run, {String? adbPath}) async {
   );
 }
 
+const _simctlList = ['simctl', 'list', 'devices', '-j'];
+
+const _devicectlList = ['devicectl', 'list', 'devices', '--json-output'];
+
 void _requireSuccess(ProcessResult result, String command) {
   if (result.exitCode != 0) {
     throw StateError(
@@ -247,7 +248,7 @@ void _requireSuccess(ProcessResult result, String command) {
 /// The simulators `xcrun simctl list devices -j` lists, booted or not.
 List<KnownDevice> parseSimctlDevices(String jsonText) {
   final data = json.decode(jsonText) as Map<String, dynamic>;
-  final runtimes = (data['devices'] as Map?) ?? const {};
+  final Map<dynamic, dynamic> runtimes = (data['devices'] as Map?) ?? const {};
   return [
     for (final list in runtimes.values)
       for (final entry in (list as List).cast<Map<String, dynamic>>())
@@ -264,13 +265,13 @@ List<KnownDevice> parseSimctlDevices(String jsonText) {
 /// The devices `adb devices -l` lists, in any state.
 List<KnownDevice> parseAdbDevices(String output) {
   final devices = <KnownDevice>[];
-  for (final line in const LineSplitter().convert(output)) {
-    final fields = line.trim().split(RegExp(r'\s+'));
+  for (final String line in const LineSplitter().convert(output)) {
+    final List<String> fields = line.trim().split(RegExp(r'\s+'));
     if (fields.length < 2 || line.startsWith('List of devices')) continue;
     if (line.startsWith('*')) continue; // "* daemon started successfully"
-    final serial = fields[0];
-    final state = fields[1];
-    final model = fields
+    final String serial = fields[0];
+    final String state = fields[1];
+    final String model = fields
         .firstWhere((f) => f.startsWith('model:'), orElse: () => '')
         .replaceFirst('model:', '');
     devices.add(
@@ -286,9 +287,9 @@ List<KnownDevice> parseAdbDevices(String output) {
 
 String _explainRefusal(String id, _Lookup lookup) {
   // A prefix with a typo in it is still worth looking up by what follows it.
-  final colon = id.indexOf(':');
-  final keys = {id, if (colon >= 0) id.substring(colon + 1)};
-  final matches = [
+  final int colon = id.indexOf(':');
+  final Set<String> keys = {id, if (colon >= 0) id.substring(colon + 1)};
+  final List<({KnownDevice device, String key})> matches = [
     for (final device in lookup.devices)
       for (final key in keys)
         if (device.ids.contains(key)) (key: key, device: device),
@@ -303,7 +304,7 @@ String _explainRefusal(String id, _Lookup lookup) {
         '${m.key} is ${m.device.description}; pass -d ${m.device.kind}:${m.key}',
     ].join('\n');
   }
-  final bare = keys.last;
+  final String bare = keys.last;
   return [
     head,
     if (lookup.answered.isNotEmpty)

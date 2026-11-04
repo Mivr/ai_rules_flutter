@@ -69,7 +69,7 @@ Future<T> spawnBoundToTest<T extends Object>({
     if (resource != null) await dispose(resource);
   });
 
-  final resource = await spawn();
+  final T resource = await spawn();
   spawned = resource;
 
   if (testEnded) {

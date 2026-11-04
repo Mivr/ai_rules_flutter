@@ -105,7 +105,7 @@ String valueOf(String plist, String key) =>
 void main() {
   group('strict-add', () {
     test('adds a key the base does not declare', () {
-      final merged = merge(_release, [_networkAddition]);
+      final String merged = merge(_release, [_networkAddition]);
       expect(
         keysOf(merged),
         containsAll([
@@ -117,14 +117,14 @@ void main() {
     });
 
     test('preserves base keys and their order', () {
-      final merged = merge(_release, [_networkAddition]);
+      final String merged = merge(_release, [_networkAddition]);
       expect(keysOf(merged).first, 'com.apple.security.app-sandbox');
     });
 
     test('dedupes a key the base already declares with the same value', () {
       // The load-bearing case: DebugProfile.entitlements already grants
       // network.server, and the same addition is merged into both configs.
-      final merged = merge(_debugProfile, [_networkAddition]);
+      final String merged = merge(_debugProfile, [_networkAddition]);
       expect(
         keysOf(merged).where((k) => k == 'com.apple.security.network.server'),
         hasLength(1),
@@ -188,7 +188,7 @@ void main() {
 </dict>
 </plist>
 ''';
-      final merged = merge(_release, [_networkAddition, extra]);
+      final String merged = merge(_release, [_networkAddition, extra]);
       expect(
         keysOf(merged),
         containsAll([
@@ -199,7 +199,7 @@ void main() {
     });
 
     test('merges into an absent base (iOS ships no Runner.entitlements)', () {
-      final merged = merge(null, [_networkAddition]);
+      final String merged = merge(null, [_networkAddition]);
       expect(keysOf(merged), [
         'com.apple.security.network.client',
         'com.apple.security.network.server',
@@ -218,7 +218,7 @@ void main() {
 </dict>
 </plist>
 ''';
-      final merged = merge(_release, [nested]);
+      final String merged = merge(_release, [nested]);
       expect(
         valueOf(merged, 'com.apple.security.application-groups'),
         contains('group.com.example.app'),
@@ -237,7 +237,7 @@ void main() {
 </dict>
 </plist>
 ''';
-      final merged = merge(appPlist, [
+      final String merged = merge(appPlist, [
         _vmServiceSupplement,
       ], mode: MergeMode.supplement);
       expect(keysOf(merged), [
@@ -257,7 +257,7 @@ void main() {
 </dict>
 </plist>
 ''';
-      final merged = merge(appPlist, [
+      final String merged = merge(appPlist, [
         _vmServiceSupplement,
       ], mode: MergeMode.supplement);
       expect(
@@ -278,10 +278,10 @@ void main() {
 </dict>
 </plist>
 ''';
-      final merged = merge(appPlist, [
+      final String merged = merge(appPlist, [
         _vmServiceSupplement,
       ], mode: MergeMode.supplement);
-      final services = valueOf(merged, 'NSBonjourServices');
+      final String services = valueOf(merged, 'NSBonjourServices');
       expect(services, contains('_tincan._udp'));
       expect(services, contains('_dartVmService._tcp'));
     });
@@ -298,10 +298,10 @@ void main() {
 </dict>
 </plist>
 ''';
-      final merged = merge(appPlist, [
+      final String merged = merge(appPlist, [
         _vmServiceSupplement,
       ], mode: MergeMode.supplement);
-      final services = valueOf(merged, 'NSBonjourServices');
+      final String services = valueOf(merged, 'NSBonjourServices');
       expect('_dartVmService._tcp'.allMatches(services), hasLength(1));
     });
 
@@ -315,7 +315,7 @@ void main() {
 </dict>
 </plist>
 ''';
-      final merged = merge(appPlist, [
+      final String merged = merge(appPlist, [
         _vmServiceSupplement,
       ], mode: MergeMode.supplement);
       expect(valueOf(merged, 'NSBonjourServices'), contains('not-an-array'));
@@ -330,7 +330,7 @@ void main() {
   // an icon.
   group('drop-empty', () {
     test('removes a key whose value is an empty string', () {
-      final merged = merge(
+      final String merged = merge(
         _macosInfoPlist,
         const [],
         mode: MergeMode.supplement,
@@ -345,11 +345,11 @@ void main() {
     });
 
     test('leaves a key that names a real value', () {
-      final named = _macosInfoPlist.replaceFirst(
+      final String named = _macosInfoPlist.replaceFirst(
         '<string></string>',
         '<string>MyIcon</string>',
       );
-      final merged = merge(
+      final String merged = merge(
         named,
         const [],
         mode: MergeMode.supplement,
@@ -359,11 +359,11 @@ void main() {
     });
 
     test('recognises the self-closing spelling too', () {
-      final selfClosing = _macosInfoPlist.replaceFirst(
+      final String selfClosing = _macosInfoPlist.replaceFirst(
         '<string></string>',
         '<string/>',
       );
-      final merged = merge(
+      final String merged = merge(
         selfClosing,
         const [],
         mode: MergeMode.supplement,
@@ -373,7 +373,7 @@ void main() {
     });
 
     test('leaves a key it was not asked about', () {
-      final merged = merge(
+      final String merged = merge(
         _macosInfoPlist,
         const [],
         mode: MergeMode.supplement,
@@ -518,7 +518,7 @@ void main() {
 </dict>
 </plist>
 ''';
-      final merged = merge(
+      final String merged = merge(
         appPlist,
         [_vmServiceSupplement],
         mode: MergeMode.supplement,

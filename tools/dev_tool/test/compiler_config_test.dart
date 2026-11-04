@@ -19,7 +19,7 @@ void main() {
     // — an experiment is a property of the process, not of a request.
 
     test('native config spells each experiment as a flag', () {
-      final flags = NativeCompilerConfig(
+      final List<String> flags = NativeCompilerConfig(
         patchedSdkRoot: '/patched',
         enableExperiments: const ['records', 'macros'],
       ).extraFlags;
@@ -28,7 +28,7 @@ void main() {
     });
 
     test('web config spells each experiment as a flag', () {
-      final flags = WebCompilerConfig(
+      final List<String> flags = WebCompilerConfig(
         webToolchain: webToolchain(),
         enableExperiments: const ['records'],
       ).extraFlags;
@@ -51,7 +51,7 @@ void main() {
     test('experiments do not disturb the flags around them', () {
       // The list is spliced into an ordered argv. A splice that ate its
       // neighbour would still satisfy the `contains` checks above.
-      final flags = WebCompilerConfig(
+      final List<String> flags = WebCompilerConfig(
         webToolchain: webToolchain(),
         enableExperiments: const ['records'],
         dartDefines: const ['A=1'],
@@ -60,7 +60,7 @@ void main() {
       expect(flags, contains('--experimental-emit-debug-metadata'));
       expect(flags, contains('-DA=1'));
 
-      final native = NativeCompilerConfig(
+      final List<String> native = NativeCompilerConfig(
         patchedSdkRoot: '/patched',
         enableExperiments: const ['records'],
         dartDefines: const ['A=1'],

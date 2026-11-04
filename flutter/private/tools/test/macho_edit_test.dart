@@ -15,6 +15,44 @@ import '../macho_strip.dart' as macho;
 import '../macho_stub.dart' as macho;
 import 'macho_test_support.dart' as support;
 
+typedef _Lc = macho.LoadCommand;
+typedef _ObjdumpRes = ProcessResult;
+
+typedef _Input5 = ({Uint8List bytes, int fileLength});
+
+typedef _Table = ({List<String> names, List<int> types});
+
+typedef _Cmds = List<macho.LoadCommand>;
+
+typedef _Input = ({
+  Uint8List bytes,
+  int indirectoff,
+  int stroff,
+  int strsize,
+  int symoff,
+  int trieoff,
+  int triesize,
+});
+typedef _Input2 = ({
+  Uint8List bytes,
+  Uint8List chainedFixups,
+  Uint8List dataInCode,
+  List<Uint8List> dyldRanges,
+  Uint8List exportsTrie,
+  Uint8List functionStarts,
+  int linkeditOff,
+  Uint8List requirements,
+  Uint8List specialSlot,
+});
+typedef _Input3 = ({Uint8List bytes, int stroff, int strsize, int symoff});
+typedef _Input4 = ({
+  Uint8List bytes,
+  int oldEnd,
+  int stroff,
+  int strsize,
+  int symoff,
+});
+
 String _hex(Uint8List bytes) =>
     bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
 
@@ -36,12 +74,14 @@ Uint8List _storedZip(
 }) {
   final local = BytesBuilder(copy: false);
   final central = BytesBuilder(copy: false);
-  final names = [...files.keys, ...symlinks.keys]..sort();
+  final List<String> names = [...files.keys, ...symlinks.keys]..sort();
   var offset = 0;
   for (final name in names) {
-    final isLink = symlinks.containsKey(name);
-    final payload = isLink ? utf8.encode(symlinks[name]!) : files[name]!;
-    final nameBytes = utf8.encode(name);
+    final bool isLink = symlinks.containsKey(name);
+    final List<int> payload = isLink
+        ? utf8.encode(symlinks[name]!)
+        : files[name]!;
+    final Uint8List nameBytes = utf8.encode(name);
     final lh = ByteData(30)
       ..setUint32(0, 0x04034b50, Endian.little)
       ..setUint16(4, 20, Endian.little)
@@ -80,7 +120,7 @@ Uint8List _storedZip(
     central.add(nameBytes);
     offset += 30 + nameBytes.length + payload.length;
   }
-  final centralBytes = central.toBytes();
+  final Uint8List centralBytes = central.toBytes();
   final eocd = ByteData(22)
     ..setUint32(0, 0x06054b50, Endian.little)
     ..setUint16(8, names.length, Endian.little)
@@ -105,16 +145,16 @@ Uint8List _buildSignedMachO({
   const codeLimit = 0x2000; // 2 pages
 
   // Build CS_CodeDirectory (44-byte header + identifier "test\0" + 2 * 32-byte hashes)
-  final ident = ascii.encode('test\x00');
+  final Uint8List ident = ascii.encode('test\x00');
   const cdHeaderSize = 44;
-  final hashOffset = cdHeaderSize + ident.length;
+  final int hashOffset = cdHeaderSize + ident.length;
   const nCodeSlots = 2;
-  final cdLength = hashOffset + nCodeSlots * 32;
+  final int cdLength = hashOffset + nCodeSlots * 32;
 
   // CS_SuperBlob: 12-byte header + 1 * 8-byte BlobIndex + CS_CodeDirectory
-  final superLength = 12 + 8 + cdLength;
-  final alignedSigSize = (superLength + 15) & ~15;
-  final totalSize = codeLimit + alignedSigSize;
+  final int superLength = 12 + 8 + cdLength;
+  final int alignedSigSize = (superLength + 15) & ~15;
+  final int totalSize = codeLimit + alignedSigSize;
 
   final buf = Uint8List(totalSize);
   final bd = ByteData.sublistView(buf);
@@ -189,7 +229,7 @@ Uint8List _buildSignedMachO({
   bd.setUint32(24, macho.mhNoReexportedDylibs, Endian.little);
   bd.setUint32(28, 0, Endian.little);
 
-  var off = macho.mhHeaderSize64;
+  int off = macho.mhHeaderSize64;
   for (final lc in commands) {
     buf.setRange(off, off + lc.cmdsize, lc.bytes);
     off += lc.cmdsize;
@@ -202,7 +242,7 @@ Uint8List _buildSignedMachO({
   bd.setUint32(codeLimit + 12, 0, Endian.big); // type = CSSLOT_CODEDIRECTORY
   bd.setUint32(codeLimit + 16, 20, Endian.big); // offset = 20
 
-  final cdOff = codeLimit + 20;
+  final int cdOff = codeLimit + 20;
   bd.setUint32(cdOff, macho.csMagicCodeDirectory, Endian.big);
   bd.setUint32(cdOff + 4, cdLength, Endian.big);
   bd.setUint32(cdOff + 8, 0x20400, Endian.big); // version
@@ -233,17 +273,14 @@ Uint8List _buildSignedMachO({
 }
 
 String? _resolveHermeticTool(String envVar) {
-  final rel = Platform.environment[envVar];
+  final String? rel = Platform.environment[envVar];
   if (rel == null || rel.isEmpty) return null;
   if (File(rel).existsSync()) return File(rel).absolute.path;
-  final runfilesDir =
+  final String? runfilesDir =
       Platform.environment['RUNFILES_DIR'] ??
       Platform.environment['TEST_SRCDIR'];
   if (runfilesDir != null) {
-    for (final candidate in [
-      '$runfilesDir/$rel',
-      '$runfilesDir/_main/$rel',
-    ]) {
+    for (final candidate in ['$runfilesDir/$rel', '$runfilesDir/_main/$rel']) {
       if (File(candidate).existsSync()) return File(candidate).absolute.path;
     }
   }
@@ -310,11 +347,7 @@ Uint8List _buildFullCoverageMachO() {
   textBd.setUint32(60, 5, Endian.little);
   textBd.setUint32(64, 1, Endian.little);
   textSeg.setRange(72, 72 + '__text'.length, ascii.encode('__text'));
-  textSeg.setRange(
-    72 + 16,
-    72 + 16 + '__TEXT'.length,
-    ascii.encode('__TEXT'),
-  );
+  textSeg.setRange(72 + 16, 72 + 16 + '__TEXT'.length, ascii.encode('__TEXT'));
   textBd.setUint64(72 + 32, 0x100, Endian.little);
   textBd.setUint64(72 + 40, 0x200, Endian.little);
   textBd.setUint32(72 + 48, 0x1000, Endian.little);
@@ -366,7 +399,7 @@ Uint8List _buildFullCoverageMachO() {
   bd.setUint32(20, sizeofcmds, Endian.little);
   bd.setUint32(24, macho.mhNoReexportedDylibs, Endian.little);
   bd.setUint32(28, 0, Endian.little);
-  var off = macho.mhHeaderSize64;
+  int off = macho.mhHeaderSize64;
   for (final c in commands) {
     buf.setRange(off, off + c.length, c);
     off += c.length;
@@ -394,19 +427,19 @@ Uint8List _buildSnapshotExportsTrie() {
     final out = BytesBuilder(copy: false)..addByte(0);
     _writeUleb(out, 0); // flags
     _writeUleb(out, address);
-    final bytes = out.toBytes();
+    final Uint8List bytes = out.toBytes();
     return [bytes.length - 1, ...bytes.sublist(1), 0];
   }
 
-  final nodeA = terminal(0x5000);
-  final nodeB = terminal(0x4000);
-  final edge0 = utf8.encode('_kDartSnapshot\x00');
-  final edgeA = utf8.encode('Data\x00');
-  final edgeB = utf8.encode('Text\x00');
+  final List<int> nodeA = terminal(0x5000);
+  final List<int> nodeB = terminal(0x4000);
+  final Uint8List edge0 = utf8.encode('_kDartSnapshot\x00');
+  final Uint8List edgeA = utf8.encode('Data\x00');
+  final Uint8List edgeB = utf8.encode('Text\x00');
   // Child offsets are absolute from the trie start.
-  final offNode1 = 2 + edge0.length + 1;
-  final offA = offNode1 + 2 + edgeA.length + 1 + edgeB.length + 1;
-  final offB = offA + nodeA.length;
+  final int offNode1 = 2 + edge0.length + 1;
+  final int offA = offNode1 + 2 + edgeA.length + 1 + edgeB.length + 1;
+  final int offB = offA + nodeA.length;
   assert(offB < 128, 'child offsets must stay single ULEB bytes');
   final node1 = BytesBuilder(copy: false)
     ..addByte(0) // terminalSize = 0
@@ -467,7 +500,7 @@ _buildUnstrippedDylib() {
     strings.add(utf8.encode(name));
     strings.addByte(0);
   }
-  final strBytes = strings.toBytes();
+  final Uint8List strBytes = strings.toBytes();
   final symBytes = BytesBuilder(copy: false);
   for (var i = 0; i < names.length; i++) {
     final entry = ByteData(16)
@@ -479,7 +512,7 @@ _buildUnstrippedDylib() {
     symBytes.add(entry.buffer.asUint8List());
   }
 
-  final trie = _buildSnapshotExportsTrie();
+  final Uint8List trie = _buildSnapshotExportsTrie();
   // Indirect entries: the kept `_kDartSnapshotText` (old index 4), the
   // dropped `_myLocal` (old index 0), and a LOCAL entry naming no index.
   final indirect = ByteData(12)
@@ -501,23 +534,19 @@ _buildUnstrippedDylib() {
   textBd.setUint32(60, 5, Endian.little);
   textBd.setUint32(64, 1, Endian.little);
   textSeg.setRange(72, 72 + '__text'.length, ascii.encode('__text'));
-  textSeg.setRange(
-    72 + 16,
-    72 + 16 + '__TEXT'.length,
-    ascii.encode('__TEXT'),
-  );
+  textSeg.setRange(72 + 16, 72 + 16 + '__TEXT'.length, ascii.encode('__TEXT'));
   textBd.setUint64(72 + 32, 0x1000, Endian.little);
   textBd.setUint64(72 + 40, 0x200, Endian.little);
   textBd.setUint32(72 + 48, 0x200, Endian.little);
   textBd.setUint32(72 + 52, 2, Endian.little);
 
   const symoff = 0x400;
-  final symLen = symBytes.length;
-  final stroff = symoff + symLen;
-  final indirectoff = (stroff + strBytes.length + 3) & ~3;
-  final trieoff = indirectoff + indirect.lengthInBytes;
-  final fileSize = trieoff + trie.length;
-  final linkSize = fileSize - symoff;
+  final int symLen = symBytes.length;
+  final int stroff = symoff + symLen;
+  final int indirectoff = (stroff + strBytes.length + 3) & ~3;
+  final int trieoff = indirectoff + indirect.lengthInBytes;
+  final int fileSize = trieoff + trie.length;
+  final int linkSize = fileSize - symoff;
 
   final dysymtab = ByteData(80)
     ..setUint32(0, macho.lcDysymtab, Endian.little)
@@ -576,7 +605,7 @@ _buildUnstrippedDylib() {
   bd.setUint32(20, sizeofcmds, Endian.little);
   bd.setUint32(24, macho.mhNoReexportedDylibs, Endian.little);
   bd.setUint32(28, 0, Endian.little);
-  var off = macho.mhHeaderSize64;
+  int off = macho.mhHeaderSize64;
   for (final c in commands) {
     buf.setRange(off, off + c.length, c);
     off += c.length;
@@ -601,14 +630,14 @@ _buildUnstrippedDylib() {
 }
 
 /// Reads the symbol names and `n_type` bytes of the `LC_SYMTAB` in [bytes].
-({List<String> names, List<int> types}) _readTestSymtab(Uint8List bytes) {
-  final lc = macho
+_Table _readTestSymtab(Uint8List bytes) {
+  final _Lc lc = macho
       .parseLoadCommands(bytes)
       .singleWhere((c) => c.cmd == macho.lcSymtab);
   final bd = ByteData.sublistView(lc.bytes);
-  final symoff = bd.getUint32(8, Endian.little);
-  final nsyms = bd.getUint32(12, Endian.little);
-  final stroff = bd.getUint32(16, Endian.little);
+  final int symoff = bd.getUint32(8, Endian.little);
+  final int nsyms = bd.getUint32(12, Endian.little);
+  final int stroff = bd.getUint32(16, Endian.little);
   final names = <String>[];
   final types = <int>[];
   for (var i = 0; i < nsyms; i++) {
@@ -625,7 +654,7 @@ _buildUnstrippedDylib() {
 
 /// Reads the six `LC_DYSYMTAB` index groups of [bytes] in command order.
 List<int> _readTestDysymtabGroups(Uint8List bytes) {
-  final lc = macho
+  final _Lc lc = macho
       .parseLoadCommands(bytes)
       .singleWhere((c) => c.cmd == macho.lcDysymtab);
   final bd = ByteData.sublistView(lc.bytes);
@@ -634,12 +663,12 @@ List<int> _readTestDysymtabGroups(Uint8List bytes) {
 
 /// Reads the indirect symbol entries of [bytes].
 List<int> _readTestIndirect(Uint8List bytes) {
-  final lc = macho
+  final _Lc lc = macho
       .parseLoadCommands(bytes)
       .singleWhere((c) => c.cmd == macho.lcDysymtab);
   final bd = ByteData.sublistView(lc.bytes);
-  final off = bd.getUint32(56, Endian.little);
-  final count = bd.getUint32(60, Endian.little);
+  final int off = bd.getUint32(56, Endian.little);
+  final int count = bd.getUint32(60, Endian.little);
   final table = ByteData.sublistView(bytes, off, off + count * 4);
   return [
     for (var i = 0; i < count; i++) table.getUint32(i * 4, Endian.little),
@@ -650,8 +679,8 @@ List<int> _readTestIndirect(Uint8List bytes) {
 /// local-symbol strip refuses it like a real dylib carrying relocations.
 Uint8List _withLocalRelocations(Uint8List bytes) {
   final out = Uint8List.fromList(bytes);
-  var off = macho.mhHeaderSize64;
-  for (final lc in macho.parseLoadCommands(bytes)) {
+  int off = macho.mhHeaderSize64;
+  for (final _Lc lc in macho.parseLoadCommands(bytes)) {
     if (lc.cmd == macho.lcDysymtab) {
       ByteData.sublistView(
         out,
@@ -701,7 +730,7 @@ void main() {
 
   group('generateStubMachO', () {
     test('synthesizes well-formed arm64 iOS stub dylib with segments, symtab, UUID, and flags', () {
-      final bytes = macho.generateStubMachO(
+      final Uint8List bytes = macho.generateStubMachO(
         arch: 'arm64',
         platform: macho.platformIos,
         minOs: macho.parsePackedVersion('13.0'),
@@ -712,7 +741,7 @@ void main() {
       final bd = ByteData.sublistView(bytes);
       expect(bd.getUint32(4, Endian.little), macho.cpuTypeArm64);
       expect(bd.getUint32(12, Endian.little), macho.mhDylib);
-      final flags = bd.getUint32(24, Endian.little);
+      final int flags = bd.getUint32(24, Endian.little);
       expect(
         flags,
         macho.mhNoundefs |
@@ -721,7 +750,7 @@ void main() {
             macho.mhNoReexportedDylibs,
       );
 
-      final cmds = macho.parseLoadCommands(bytes);
+      final _Cmds cmds = macho.parseLoadCommands(bytes);
       expect(cmds.map((c) => c.cmd), [
         macho.lcSegment64, // __TEXT
         macho.lcSegment64, // __LINKEDIT
@@ -753,11 +782,11 @@ void main() {
       expect(linkeditBd.getUint32(60, Endian.little), 1); // initprot = r--
 
       // Verify LC_ID_DYLIB.
-      final idLc = cmds.singleWhere((c) => c.cmd == macho.lcIdDylib);
+      final _Lc idLc = cmds.singleWhere((c) => c.cmd == macho.lcIdDylib);
       expect(_readCString(idLc.bytes, 24), '@rpath/App.framework/App');
 
       // Verify LC_SYMTAB points into __LINKEDIT.
-      final symtabLc = cmds.singleWhere((c) => c.cmd == macho.lcSymtab);
+      final _Lc symtabLc = cmds.singleWhere((c) => c.cmd == macho.lcSymtab);
       final symtabBd = ByteData.sublistView(symtabLc.bytes);
       expect(symtabBd.getUint32(8, Endian.little), 0x4000); // symoff
       expect(symtabBd.getUint32(12, Endian.little), 0); // nsyms
@@ -765,15 +794,15 @@ void main() {
       expect(symtabBd.getUint32(20, Endian.little), 8); // strsize
 
       // Verify LC_DYSYMTAB is 80 bytes.
-      final dysymtabLc = cmds.singleWhere((c) => c.cmd == macho.lcDysymtab);
+      final _Lc dysymtabLc = cmds.singleWhere((c) => c.cmd == macho.lcDysymtab);
       expect(dysymtabLc.cmdsize, 80);
 
       // Verify LC_UUID is non-zero, deterministic, and content-derived.
-      final uuidLc = cmds.singleWhere((c) => c.cmd == macho.lcUuid);
-      final uuidBytes = uuidLc.bytes.sublist(8, 24);
+      final _Lc uuidLc = cmds.singleWhere((c) => c.cmd == macho.lcUuid);
+      final Uint8List uuidBytes = uuidLc.bytes.sublist(8, 24);
       expect(uuidBytes.any((b) => b != 0), isTrue);
 
-      final bytesSame = macho.generateStubMachO(
+      final Uint8List bytesSame = macho.generateStubMachO(
         arch: 'arm64',
         platform: macho.platformIos,
         minOs: macho.parsePackedVersion('13.0'),
@@ -782,14 +811,14 @@ void main() {
       );
       expect(_hex(bytes), _hex(bytesSame));
 
-      final bytesDiffContent = macho.generateStubMachO(
+      final Uint8List bytesDiffContent = macho.generateStubMachO(
         arch: 'arm64',
         platform: macho.platformIos,
         minOs: macho.parsePackedVersion('14.0'),
         sdkVersion: macho.parsePackedVersion('16.2'),
         installName: '@rpath/App.framework/App',
       );
-      final uuidDiff = macho
+      final Uint8List uuidDiff = macho
           .parseLoadCommands(bytesDiffContent)
           .singleWhere((c) => c.cmd == macho.lcUuid)
           .bytes
@@ -797,7 +826,7 @@ void main() {
       expect(_hex(uuidBytes), isNot(_hex(uuidDiff)));
 
       // Verify LC_BUILD_VERSION.
-      final bvLc = cmds.singleWhere((c) => c.cmd == macho.lcBuildVersion);
+      final _Lc bvLc = cmds.singleWhere((c) => c.cmd == macho.lcBuildVersion);
       final bvBd = ByteData.sublistView(bvLc.bytes);
       expect(bvBd.getUint32(8, Endian.little), macho.platformIos);
       expect(bvBd.getUint32(12, Endian.little), 0x000d0000);
@@ -805,7 +834,7 @@ void main() {
     });
 
     test('synthesizes valid x86_64 iOS simulator stub dylib', () {
-      final bytes = macho.generateStubMachO(
+      final Uint8List bytes = macho.generateStubMachO(
         arch: 'x86_64',
         platform: macho.platformIosSimulator,
         minOs: macho.parsePackedVersion('14.0'),
@@ -815,8 +844,8 @@ void main() {
       final bd = ByteData.sublistView(bytes);
       expect(bd.getUint32(4, Endian.little), macho.cpuTypeX86_64);
       expect(bd.getUint32(8, Endian.little), macho.cpuSubtypeX86_64All);
-      final cmds = macho.parseLoadCommands(bytes);
-      final bvLc = cmds.singleWhere((c) => c.cmd == macho.lcBuildVersion);
+      final _Cmds cmds = macho.parseLoadCommands(bytes);
+      final _Lc bvLc = cmds.singleWhere((c) => c.cmd == macho.lcBuildVersion);
       final bvBd = ByteData.sublistView(bvLc.bytes);
       expect(bvBd.getUint32(8, Endian.little), macho.platformIosSimulator);
       expect(bvBd.getUint32(12, Endian.little), 0x000e0000);
@@ -824,8 +853,8 @@ void main() {
     });
 
     test('hermetic llvm-objdump and llvm-otool accept generated stubs', () {
-      final objdump = _resolveHermeticTool('LLVM_OBJDUMP');
-      final otool = _resolveHermeticTool('LLVM_OTOOL');
+      final String? objdump = _resolveHermeticTool('LLVM_OBJDUMP');
+      final String? otool = _resolveHermeticTool('LLVM_OTOOL');
       if (Platform.environment.containsKey('TEST_SRCDIR')) {
         expect(
           objdump,
@@ -840,7 +869,9 @@ void main() {
       }
       if (objdump == null || otool == null) return;
 
-      final tempDir = Directory.systemTemp.createTempSync('macho_llvm_stub_');
+      final Directory tempDir = Directory.systemTemp.createTempSync(
+        'macho_llvm_stub_',
+      );
       addTearDown(() => tempDir.deleteSync(recursive: true));
 
       for (final arch in ['arm64', 'x86_64']) {
@@ -855,7 +886,7 @@ void main() {
           ),
         );
 
-        final objdumpRes = Process.runSync(objdump, [
+        final _ObjdumpRes objdumpRes = Process.runSync(objdump, [
           '--macho',
           '--private-headers',
           '--dylib-id',
@@ -879,7 +910,12 @@ void main() {
         expect(out, contains('minos 12.3'));
         expect(out, contains('sdk 14.1'));
 
-        final otoolRes = Process.runSync(otool, ['-hv', '-l', '-L', dylibPath]);
+        final _ObjdumpRes otoolRes = Process.runSync(otool, [
+          '-hv',
+          '-l',
+          '-L',
+          dylibPath,
+        ]);
         expect(otoolRes.exitCode, 0, reason: '${otoolRes.stderr}');
         expect(
           otoolRes.stdout as String,
@@ -891,8 +927,8 @@ void main() {
 
   group('patchMachO', () {
     test('patches LC_BUILD_VERSION, LC_ID_DYLIB, LC_RPATH and re-signs LC_CODE_SIGNATURE', () {
-      final input = _buildSignedMachO(includeLegacyVersionMin: true);
-      final patched = macho.patchMachO(
+      final Uint8List input = _buildSignedMachO(includeLegacyVersionMin: true);
+      final Uint8List patched = macho.patchMachO(
         input,
         macho.PatchOptions(
           platform: macho.platformIos,
@@ -903,17 +939,14 @@ void main() {
         ),
       );
 
-      final cmds = macho.parseLoadCommands(patched);
+      final _Cmds cmds = macho.parseLoadCommands(patched);
       // Legacy LC_VERSION_MIN_IPHONEOS must be stripped.
-      expect(
-        cmds.where((c) => c.cmd == macho.lcVersionMinIphoneos),
-        isEmpty,
-      );
+      expect(cmds.where((c) => c.cmd == macho.lcVersionMinIphoneos), isEmpty);
       // LC_CODE_SIGNATURE must remain the final load command.
       expect(cmds.last.cmd, macho.lcCodeSignature);
 
       // Verify LC_ID_DYLIB was updated and 8-byte aligned.
-      final idCmd = cmds.singleWhere((c) => c.cmd == macho.lcIdDylib);
+      final _Lc idCmd = cmds.singleWhere((c) => c.cmd == macho.lcIdDylib);
       expect(idCmd.cmdsize % 8, 0);
       expect(
         _readCString(idCmd.bytes, 24),
@@ -921,14 +954,16 @@ void main() {
       );
 
       // Verify LC_BUILD_VERSION was added.
-      final bvCmd = cmds.singleWhere((c) => c.cmd == macho.lcBuildVersion);
+      final _Lc bvCmd = cmds.singleWhere((c) => c.cmd == macho.lcBuildVersion);
       final bvBd = ByteData.sublistView(bvCmd.bytes);
       expect(bvBd.getUint32(8, Endian.little), macho.platformIos);
       expect(bvBd.getUint32(12, Endian.little), 0x000d0000);
       expect(bvBd.getUint32(16, Endian.little), 0x00100000);
 
       // Verify LC_RPATH commands were added and deduplicated on second patch.
-      final rpathCmds = cmds.where((c) => c.cmd == macho.lcRpath).toList();
+      final _Cmds rpathCmds = cmds
+          .where((c) => c.cmd == macho.lcRpath)
+          .toList();
       expect(rpathCmds.length, 2);
       expect(
         _readCString(rpathCmds[0].bytes, 12),
@@ -937,11 +972,17 @@ void main() {
       expect(_readCString(rpathCmds[1].bytes, 12), '@loader_path/Frameworks');
 
       // Verify embedded CS_CodeDirectory page hashes match actual SHA-256 of pages 0 and 1.
-      const cdOff = 0x2000 + 20;
-      const hashOffset = 44 + 5; // "test\0"
-      final hashesStart = cdOff + hashOffset;
-      final page0Hash = patched.sublist(hashesStart, hashesStart + 32);
-      final page1Hash = patched.sublist(hashesStart + 32, hashesStart + 64);
+      const int cdOff = 0x2000 + 20;
+      const int hashOffset = 44 + 5; // "test\0"
+      final int hashesStart = cdOff + hashOffset;
+      final Uint8List page0Hash = patched.sublist(
+        hashesStart,
+        hashesStart + 32,
+      );
+      final Uint8List page1Hash = patched.sublist(
+        hashesStart + 32,
+        hashesStart + 64,
+      );
 
       expect(
         _hex(page0Hash),
@@ -954,7 +995,7 @@ void main() {
 
       // Re-patching with an existing LC_BUILD_VERSION and duplicate rpath replaces
       // LC_BUILD_VERSION in place without duplicating rpaths.
-      final repatched = macho.patchMachO(
+      final Uint8List repatched = macho.patchMachO(
         patched,
         macho.PatchOptions(
           platform: macho.platformMacos,
@@ -963,7 +1004,7 @@ void main() {
           rpaths: ['@executable_path/Frameworks'],
         ),
       );
-      final cmds2 = macho.parseLoadCommands(repatched);
+      final _Cmds cmds2 = macho.parseLoadCommands(repatched);
       expect(cmds2.where((c) => c.cmd == macho.lcBuildVersion).length, 1);
       expect(cmds2.where((c) => c.cmd == macho.lcRpath).length, 2);
       final bv2Bd = ByteData.sublistView(
@@ -975,14 +1016,14 @@ void main() {
     });
 
     test('patches all slices in a fat (0xcafebabe) Mach-O binary and thins when arch is set', () {
-      final arm64Slice = macho.generateStubMachO(
+      final Uint8List arm64Slice = macho.generateStubMachO(
         arch: 'arm64',
         platform: macho.platformMacos,
         minOs: macho.parsePackedVersion('11.0'),
         sdkVersion: macho.parsePackedVersion('11.0'),
         installName: '@rpath/Old.dylib',
       );
-      final x86Slice = macho.generateStubMachO(
+      final Uint8List x86Slice = macho.generateStubMachO(
         arch: 'x86_64',
         platform: macho.platformMacos,
         minOs: macho.parsePackedVersion('11.0'),
@@ -990,7 +1031,7 @@ void main() {
         installName: '@rpath/Old.dylib',
       );
 
-      final fatInput = macho.buildFatMachO([
+      final Uint8List fatInput = macho.buildFatMachO([
         macho.FatSlice(
           cputype: macho.cpuTypeX86_64,
           cpusubtype: macho.cpuSubtypeX86_64All,
@@ -1005,7 +1046,7 @@ void main() {
       expect(macho.isFatMachO(fatInput), isTrue);
 
       // Patch all slices in fat binary.
-      final patchedFat = macho.patchMachO(
+      final Uint8List patchedFat = macho.patchMachO(
         fatInput,
         macho.PatchOptions(
           platform: macho.platformIosSimulator,
@@ -1015,13 +1056,15 @@ void main() {
         ),
       );
       expect(macho.isFatMachO(patchedFat), isTrue);
-      final slices = macho.extractFatSlices(patchedFat);
+      final List<macho.FatSlice> slices = macho.extractFatSlices(patchedFat);
       expect(slices.length, 2);
       for (final s in slices) {
-        final cmds = macho.parseLoadCommands(s.bytes);
-        final idCmd = cmds.singleWhere((c) => c.cmd == macho.lcIdDylib);
+        final _Cmds cmds = macho.parseLoadCommands(s.bytes);
+        final _Lc idCmd = cmds.singleWhere((c) => c.cmd == macho.lcIdDylib);
         expect(_readCString(idCmd.bytes, 24), '@rpath/MyFat.framework/MyFat');
-        final bvCmd = cmds.singleWhere((c) => c.cmd == macho.lcBuildVersion);
+        final _Lc bvCmd = cmds.singleWhere(
+          (c) => c.cmd == macho.lcBuildVersion,
+        );
         final bvBd = ByteData.sublistView(bvCmd.bytes);
         expect(bvBd.getUint32(8, Endian.little), macho.platformIosSimulator);
         expect(bvBd.getUint32(12, Endian.little), 0x000f0400);
@@ -1029,7 +1072,7 @@ void main() {
       }
 
       // Thin fat binary to arm64 slice while patching.
-      final thinnedArm64 = macho.patchMachO(
+      final Uint8List thinnedArm64 = macho.patchMachO(
         fatInput,
         macho.PatchOptions(
           platform: macho.platformIos,
@@ -1045,7 +1088,7 @@ void main() {
         ByteData.sublistView(thinnedArm64).getUint32(4, Endian.little),
         macho.cpuTypeArm64,
       );
-      final thinCmds = macho.parseLoadCommands(thinnedArm64);
+      final _Cmds thinCmds = macho.parseLoadCommands(thinnedArm64);
       expect(
         _readCString(
           thinCmds.singleWhere((c) => c.cmd == macho.lcIdDylib).bytes,
@@ -1055,19 +1098,21 @@ void main() {
       );
 
       // Verify with hermetic llvm-lipo and llvm-objdump if available.
-      final lipo = _resolveHermeticTool('LLVM_LIPO');
-      final objdump = _resolveHermeticTool('LLVM_OBJDUMP');
+      final String? lipo = _resolveHermeticTool('LLVM_LIPO');
+      final String? objdump = _resolveHermeticTool('LLVM_OBJDUMP');
       if (lipo != null && objdump != null) {
-        final tempDir = Directory.systemTemp.createTempSync('macho_fat_test_');
+        final Directory tempDir = Directory.systemTemp.createTempSync(
+          'macho_fat_test_',
+        );
         addTearDown(() => tempDir.deleteSync(recursive: true));
         final fatPath = '${tempDir.path}/patched_fat.dylib';
         File(fatPath).writeAsBytesSync(patchedFat);
 
-        final lipoRes = Process.runSync(lipo, ['-archs', fatPath]);
+        final _ObjdumpRes lipoRes = Process.runSync(lipo, ['-archs', fatPath]);
         expect(lipoRes.exitCode, 0, reason: '${lipoRes.stderr}');
         expect((lipoRes.stdout as String).trim(), 'x86_64 arm64');
 
-        final objdumpRes = Process.runSync(objdump, [
+        final _ObjdumpRes objdumpRes = Process.runSync(objdump, [
           '--macho',
           '--private-headers',
           '--arch=all',
@@ -1083,7 +1128,7 @@ void main() {
     test(
       'rejects 32-bit Mach-O and non-Mach-O inputs with FormatException',
       () {
-        final macho32 = _buildMachO32();
+        final Uint8List macho32 = _buildMachO32();
         expect(macho.isMachO32(macho32), isTrue);
         expect(
           () => macho.patchMachO(
@@ -1103,7 +1148,7 @@ void main() {
         );
 
         // Fat binary containing a 32-bit slice must also fail loudly.
-        final fatWith32 = macho.buildFatMachO([
+        final Uint8List fatWith32 = macho.buildFatMachO([
           macho.FatSlice(
             cputype: macho.cpuTypeArm,
             cpusubtype: 9,
@@ -1151,60 +1196,57 @@ void main() {
       },
     );
 
-    test(
-      'patches every load-command kind and pins the patched bytes',
-      () {
-        final input = _buildFullCoverageMachO();
-        final patched = macho.patchMachO(
-          input,
-          macho.PatchOptions(
-            platform: macho.platformIos,
-            minOs: macho.parsePackedVersion('13.0'),
-            sdkVersion: macho.parsePackedVersion('16.0'),
-            installName: '@rpath/New.framework/New',
-            rpaths: ['@executable_path/Frameworks'],
-          ),
-        );
-        expect(patched.length, input.length);
+    test('patches every load-command kind and pins the patched bytes', () {
+      final Uint8List input = _buildFullCoverageMachO();
+      final Uint8List patched = macho.patchMachO(
+        input,
+        macho.PatchOptions(
+          platform: macho.platformIos,
+          minOs: macho.parsePackedVersion('13.0'),
+          sdkVersion: macho.parsePackedVersion('16.0'),
+          installName: '@rpath/New.framework/New',
+          rpaths: ['@executable_path/Frameworks'],
+        ),
+      );
+      expect(patched.length, input.length);
 
-        // All four legacy version-min commands are stripped; the linkedit
-        // table commands keep their offsets; build-version and rpath append.
-        expect(macho.parseLoadCommands(patched).map((c) => c.cmd), [
-          macho.lcSegment64,
-          macho.lcSegment64,
-          macho.lcSymtab,
-          macho.lcDysymtab,
-          macho.lcFunctionStarts,
-          macho.lcDataInCode,
-          macho.lcDyldExportsTrie,
-          macho.lcDyldChainedFixups,
-          macho.lcIdDylib,
-          macho.lcBuildVersion,
-          macho.lcRpath,
-        ]);
+      // All four legacy version-min commands are stripped; the linkedit
+      // table commands keep their offsets; build-version and rpath append.
+      expect(macho.parseLoadCommands(patched).map((c) => c.cmd), [
+        macho.lcSegment64,
+        macho.lcSegment64,
+        macho.lcSymtab,
+        macho.lcDysymtab,
+        macho.lcFunctionStarts,
+        macho.lcDataInCode,
+        macho.lcDyldExportsTrie,
+        macho.lcDyldChainedFixups,
+        macho.lcIdDylib,
+        macho.lcBuildVersion,
+        macho.lcRpath,
+      ]);
 
-        final idCmd = macho
-            .parseLoadCommands(patched)
-            .singleWhere((c) => c.cmd == macho.lcIdDylib);
-        expect(_readCString(idCmd.bytes, 24), '@rpath/New.framework/New');
+      final _Lc idCmd = macho
+          .parseLoadCommands(patched)
+          .singleWhere((c) => c.cmd == macho.lcIdDylib);
+      expect(_readCString(idCmd.bytes, 24), '@rpath/New.framework/New');
 
-        // Section and linkedit payload bytes survive the rewrite untouched.
-        expect(patched.sublist(0x1000, 0x1200), input.sublist(0x1000, 0x1200));
-        expect(patched.sublist(0x4000, 0x5000), input.sublist(0x4000, 0x5000));
+      // Section and linkedit payload bytes survive the rewrite untouched.
+      expect(patched.sublist(0x1000, 0x1200), input.sublist(0x1000, 0x1200));
+      expect(patched.sublist(0x4000, 0x5000), input.sublist(0x4000, 0x5000));
 
-        // Pins the patched bytes: any moved byte fails this digest.
-        expect(
-          _hex(macho.sha256(patched)),
-          'b6730c0ff3cdd07b52f2e122679a38b27865479eaee0db94ae49af27b5364fcc',
-        );
-      },
-    );
+      // Pins the patched bytes: any moved byte fails this digest.
+      expect(
+        _hex(macho.sha256(patched)),
+        'b6730c0ff3cdd07b52f2e122679a38b27865479eaee0db94ae49af27b5364fcc',
+      );
+    });
 
     test(
       'stripSymbols drops locals and stabs, keeping exports and imports',
       () {
-        final input = _buildUnstrippedDylib();
-        final stripped = macho.patchMachO(
+        final _Input input = _buildUnstrippedDylib();
+        final Uint8List stripped = macho.patchMachO(
           input.bytes,
           macho.PatchOptions(stripSymbols: true),
         );
@@ -1212,14 +1254,14 @@ void main() {
 
         // Only the two exports and the undefined import survive, defined
         // first, with no stab entry left.
-        final table = _readTestSymtab(stripped);
+        final _Table table = _readTestSymtab(stripped);
         expect(table.names, [
           '_kDartSnapshotText',
           '_kDartSnapshotData',
           '_printf',
         ]);
         expect(table.types, [0x0f, 0x0f, 0x01]);
-        for (final type in table.types) {
+        for (final int type in table.types) {
           expect(type & 0xe0, 0);
         }
 
@@ -1237,17 +1279,17 @@ void main() {
 
         // No dropped name survives anywhere, and the export trie moves
         // down byte-identical.
-        final text = latin1.decode(stripped);
+        final String text = latin1.decode(stripped);
         for (final gone in ['_myLocal', '_otherLocal', 'MyApp']) {
           expect(text, isNot(contains(gone)));
         }
         Uint8List trieOf(Uint8List bytes) {
-          final lc = macho
+          final _Lc lc = macho
               .parseLoadCommands(bytes)
               .singleWhere((c) => c.cmd == macho.lcDyldExportsTrie);
           final bd = ByteData.sublistView(lc.bytes);
-          final off = bd.getUint32(8, Endian.little);
-          final size = bd.getUint32(12, Endian.little);
+          final int off = bd.getUint32(8, Endian.little);
+          final int size = bd.getUint32(12, Endian.little);
           return bytes.sublist(off, off + size);
         }
 
@@ -1255,8 +1297,8 @@ void main() {
 
         // The hermetic llvm tools agree: only the two exports and the
         // import remain, with no debugger entries.
-        final nm = _resolveHermeticTool('LLVM_NM');
-        final objdump = _resolveHermeticTool('LLVM_OBJDUMP');
+        final String? nm = _resolveHermeticTool('LLVM_NM');
+        final String? objdump = _resolveHermeticTool('LLVM_OBJDUMP');
         if (Platform.environment.containsKey('TEST_SRCDIR')) {
           expect(nm, isNotNull, reason: 'LLVM_NM must resolve in Bazel');
           expect(
@@ -1267,14 +1309,14 @@ void main() {
         }
         if (nm == null || objdump == null) return;
 
-        final stripDir = Directory.systemTemp.createTempSync(
+        final Directory stripDir = Directory.systemTemp.createTempSync(
           'macho_strip_test_',
         );
         addTearDown(() => stripDir.deleteSync(recursive: true));
         final strippedPath = '${stripDir.path}/stripped.dylib';
         File(strippedPath).writeAsBytesSync(stripped);
 
-        final nmRes = Process.runSync(nm, [strippedPath]);
+        final _ObjdumpRes nmRes = Process.runSync(nm, [strippedPath]);
         expect(nmRes.exitCode, 0, reason: '${nmRes.stderr}');
         final nmOut = nmRes.stdout as String;
         expect(nmOut, contains('T _kDartSnapshotText'));
@@ -1284,7 +1326,7 @@ void main() {
           expect(nmOut, isNot(contains(gone)));
         }
 
-        final nmDebugRes = Process.runSync(nm, [
+        final _ObjdumpRes nmDebugRes = Process.runSync(nm, [
           '--debug-syms',
           strippedPath,
         ]);
@@ -1293,13 +1335,13 @@ void main() {
         expect(nmDebugOut, isNot(contains('FUN')));
         expect(nmDebugOut, isNot(contains('MyApp')));
 
-        final symsRes = Process.runSync(objdump, [
+        final _ObjdumpRes symsRes = Process.runSync(objdump, [
           '--macho',
           '--syms',
           strippedPath,
         ]);
         expect(symsRes.exitCode, 0, reason: '${symsRes.stderr}');
-        final symLines = [
+        final List<String> symLines = [
           for (final line in (symsRes.stdout as String).split('\n'))
             if (RegExp(r'^[0-9a-f]{16} ').hasMatch(line)) line,
         ];
@@ -1307,7 +1349,7 @@ void main() {
         expect(symsRes.stdout as String, contains('_kDartSnapshotText'));
         expect(symsRes.stdout as String, contains('_kDartSnapshotData'));
 
-        final trieRes = Process.runSync(objdump, [
+        final _ObjdumpRes trieRes = Process.runSync(objdump, [
           '--macho',
           '--exports-trie',
           strippedPath,
@@ -1320,8 +1362,8 @@ void main() {
     );
 
     test('a patch without stripping leaves the symbol table as it was', () {
-      final input = _buildUnstrippedDylib();
-      final patched = macho.patchMachO(
+      final _Input input = _buildUnstrippedDylib();
+      final Uint8List patched = macho.patchMachO(
         input.bytes,
         macho.PatchOptions(
           platform: macho.platformIos,
@@ -1330,8 +1372,8 @@ void main() {
       );
 
       // Same entries, same groups, same indirect entries.
-      final before = _readTestSymtab(input.bytes);
-      final after = _readTestSymtab(patched);
+      final _Table before = _readTestSymtab(input.bytes);
+      final _Table after = _readTestSymtab(patched);
       expect(after.names, before.names);
       expect(after.types, before.types);
       expect(
@@ -1341,7 +1383,7 @@ void main() {
       expect(_readTestIndirect(patched), _readTestIndirect(input.bytes));
 
       // The table payload bytes survive untouched.
-      final end = input.stroff + input.strsize;
+      final int end = input.stroff + input.strsize;
       expect(
         patched.sublist(input.symoff, end),
         input.bytes.sublist(input.symoff, end),
@@ -1349,14 +1391,14 @@ void main() {
     });
 
     test('patches a fat64 binary and keeps the fat64 header', () {
-      final arm = macho.generateStubMachO(
+      final Uint8List arm = macho.generateStubMachO(
         arch: 'arm64',
         platform: macho.platformMacos,
         minOs: macho.parsePackedVersion('11.0'),
         sdkVersion: macho.parsePackedVersion('11.0'),
         installName: '@rpath/Old.dylib',
       );
-      final fat64 = macho.buildFatMachO([
+      final Uint8List fat64 = macho.buildFatMachO([
         macho.FatSlice(
           cputype: macho.cpuTypeArm64,
           cpusubtype: macho.cpuSubtypeArm64All,
@@ -1365,7 +1407,7 @@ void main() {
       ], fat64: true);
       expect(macho.isFatMachO(fat64), isTrue);
 
-      final patched = macho.patchMachO(
+      final Uint8List patched = macho.patchMachO(
         fat64,
         macho.PatchOptions(
           platform: macho.platformIos,
@@ -1377,9 +1419,9 @@ void main() {
         ByteData.sublistView(patched).getUint32(0, Endian.big),
         macho.fatMagic64,
       );
-      final slices = macho.extractFatSlices(patched);
+      final List<macho.FatSlice> slices = macho.extractFatSlices(patched);
       expect(slices.length, 1);
-      final cmds = macho.parseLoadCommands(slices.single.bytes);
+      final _Cmds cmds = macho.parseLoadCommands(slices.single.bytes);
       expect(
         _readCString(
           cmds.singleWhere((c) => c.cmd == macho.lcIdDylib).bytes,
@@ -1394,14 +1436,14 @@ void main() {
     });
 
     test('checks the requested arch against a thin binary', () {
-      final stub = macho.generateStubMachO(
+      final Uint8List stub = macho.generateStubMachO(
         arch: 'arm64',
         platform: macho.platformMacos,
         minOs: macho.parsePackedVersion('11.0'),
         sdkVersion: macho.parsePackedVersion('11.0'),
         installName: '@rpath/Arch.dylib',
       );
-      final matched = macho.patchMachO(
+      final Uint8List matched = macho.patchMachO(
         stub,
         macho.PatchOptions(
           platform: macho.platformMacos,
@@ -1430,7 +1472,7 @@ void main() {
     });
 
     test('adds LC_ID_DYLIB to an execute stub that has none', () {
-      final stub = macho.generateStubMachO(
+      final Uint8List stub = macho.generateStubMachO(
         arch: 'arm64',
         platform: macho.platformIos,
         minOs: macho.parsePackedVersion('14.0'),
@@ -1442,7 +1484,7 @@ void main() {
         macho.parseLoadCommands(stub).where((c) => c.cmd == macho.lcIdDylib),
         isEmpty,
       );
-      final patched = macho.patchMachO(
+      final Uint8List patched = macho.patchMachO(
         stub,
         macho.PatchOptions(
           platform: macho.platformIos,
@@ -1450,7 +1492,7 @@ void main() {
           installName: '@rpath/Runner',
         ),
       );
-      final cmds = macho.parseLoadCommands(patched);
+      final _Cmds cmds = macho.parseLoadCommands(patched);
       expect(
         _readCString(
           cmds.singleWhere((c) => c.cmd == macho.lcIdDylib).bytes,
@@ -1508,7 +1550,7 @@ void main() {
   }) {
     const linkeditOff = 0x3000;
     const nLocals = 220;
-    final names = [
+    final List<String> names = [
       for (var i = 0; i < nLocals; i++)
         '_local_${i}_with_long_padding_0123456789abcdef',
       '_MyApp.build',
@@ -1517,7 +1559,7 @@ void main() {
       '_kDartSnapshotData',
       '_printf',
     ];
-    final types = [
+    final List<int> types = [
       for (var i = 0; i < nLocals; i++) 0x0e,
       0x24,
       0x64,
@@ -1525,7 +1567,7 @@ void main() {
       0x0f,
       0x01,
     ];
-    final sects = [
+    final List<int> sects = [
       for (var i = 0; i < nLocals; i++) 1,
       1,
       0,
@@ -1541,7 +1583,7 @@ void main() {
       strings.add(utf8.encode(name));
       strings.addByte(0);
     }
-    final strBytes = strings.toBytes();
+    final Uint8List strBytes = strings.toBytes();
     final symBytes = BytesBuilder(copy: false);
     for (var i = 0; i < names.length; i++) {
       final entry = ByteData(16)
@@ -1552,20 +1594,20 @@ void main() {
         ..setUint64(8, 0x1000 + i * 8, Endian.little);
       symBytes.add(entry.buffer.asUint8List());
     }
-    final symTab = symBytes.toBytes();
+    final Uint8List symTab = symBytes.toBytes();
 
     // Linkedit payloads with distinct contents, in scrambled file order.
-    final chained = _patternBytes(23, 48);
-    final rebase = _patternBytes(11, 256);
-    final bind = _patternBytes(12, 320);
-    final weak = _patternBytes(13, 192);
-    final lazy = _patternBytes(14, 224);
-    final export = _patternBytes(15, 160);
-    final funcStarts = _patternBytes(21, 64);
-    final dataInCode = _patternBytes(22, 80);
-    final trie = _buildSnapshotExportsTrie();
-    final specialSlot = _patternBytes(8, 32);
-    final requirements = _patternBytes(9, 32);
+    final Uint8List chained = _patternBytes(23, 48);
+    final Uint8List rebase = _patternBytes(11, 256);
+    final Uint8List bind = _patternBytes(12, 320);
+    final Uint8List weak = _patternBytes(13, 192);
+    final Uint8List lazy = _patternBytes(14, 224);
+    final Uint8List export = _patternBytes(15, 160);
+    final Uint8List funcStarts = _patternBytes(21, 64);
+    final Uint8List dataInCode = _patternBytes(22, 80);
+    final Uint8List trie = _buildSnapshotExportsTrie();
+    final Uint8List specialSlot = _patternBytes(8, 32);
+    final Uint8List requirements = _patternBytes(9, 32);
     // Every SuperBlob entry points at a `CS_Blob` (magic + length + body),
     // so the requirements payload carries its header; the verifier compares
     // the body bytes.
@@ -1587,14 +1629,14 @@ void main() {
         : cmsWrapper == 'empty'
         ? 8
         : 32;
-    final nBlobs =
+    final int nBlobs =
         (cmsTrailer ? 3 : 2) +
         (cmsWrapper == null ? 0 : 1) +
         (alternateCd ? 1 : 0);
     var nSlots = 8;
     var sigLength = 0;
     for (var i = 0; i < 3; i++) {
-      final cdLength = 128 + nSlots * 32 + 5;
+      final int cdLength = 128 + nSlots * 32 + 5;
       sigLength =
           12 +
           nBlobs * 8 +
@@ -1602,7 +1644,7 @@ void main() {
           wrapperLength +
           (alternateCd ? cdLength : 0) +
           cdLength;
-      final base =
+      final int base =
           linkeditOff +
           chained.length +
           symTab.length +
@@ -1618,15 +1660,15 @@ void main() {
           dataInCode.length;
       nSlots = (base + sigLength + 0xfff) ~/ 0x1000;
     }
-    final cdLength = 128 + nSlots * 32 + 5;
-    final superLength =
+    final int cdLength = 128 + nSlots * 32 + 5;
+    final int superLength =
         12 +
         nBlobs * 8 +
         requirementsBlob.length +
         wrapperLength +
         (alternateCd ? cdLength : 0) +
         cdLength;
-    final sigDatasize = superLength + (cmsTrailer ? 24 : 0);
+    final int sigDatasize = superLength + (cmsTrailer ? 24 : 0);
 
     // Assign file offsets in scrambled order.
     var cursor = linkeditOff;
@@ -1636,22 +1678,22 @@ void main() {
       return off;
     }
 
-    final chainedOff = take(chained);
-    final symoff = take(symTab);
-    final bindOff = take(bind);
-    final stroff = take(strBytes);
-    final rebaseOff = take(rebase);
-    final funcOff = take(funcStarts);
-    final weakOff = take(weak);
+    final int chainedOff = take(chained);
+    final int symoff = take(symTab);
+    final int bindOff = take(bind);
+    final int stroff = take(strBytes);
+    final int rebaseOff = take(rebase);
+    final int funcOff = take(funcStarts);
+    final int weakOff = take(weak);
     cursor = (cursor + 3) & ~3;
     final indirectOff = cursor;
     cursor += 12;
-    final lazyOff = take(lazy);
-    final trieOff = take(trie);
-    final exportOff = take(export);
-    final dicOff = take(dataInCode);
+    final int lazyOff = take(lazy);
+    final int trieOff = take(trie);
+    final int exportOff = take(export);
+    final int dicOff = take(dataInCode);
     final sigOff = cursor;
-    final fileSize = sigOff + sigDatasize;
+    final int fileSize = sigOff + sigDatasize;
 
     Uint8List tableCommand(int cmd, int dataoff, int datasize) {
       final buf = Uint8List(16);
@@ -1671,7 +1713,7 @@ void main() {
       Endian.little,
     );
     dyldBd.setUint32(4, 48, Endian.little);
-    final pairs = [
+    final List<(int, int)> pairs = [
       (rebaseOff, rebase.length),
       (bindOff, bind.length),
       (weakOff, weak.length),
@@ -1769,18 +1811,14 @@ void main() {
     bd.setUint32(20, sizeofcmds, Endian.little);
     bd.setUint32(24, macho.mhNoReexportedDylibs, Endian.little);
     bd.setUint32(28, 0, Endian.little);
-    var off = macho.mhHeaderSize64;
+    int off = macho.mhHeaderSize64;
     for (final c in commands) {
       buf.setRange(off, off + c.length, c);
       off += c.length;
     }
     buf.setRange(symoff, symoff + symTab.length, symTab);
     buf.setRange(stroff, stroff + strBytes.length, strBytes);
-    buf.setRange(
-      indirectOff,
-      indirectOff + 12,
-      indirect.buffer.asUint8List(),
-    );
+    buf.setRange(indirectOff, indirectOff + 12, indirect.buffer.asUint8List());
     final blobs = [
       rebase,
       bind,
@@ -1830,20 +1868,12 @@ void main() {
       cd[38] = 0;
       cd[39] = 12; // 4096-byte pages
       cbd.setUint32(40, 0, Endian.big);
-      cbd.setUint64(
-        56,
-        0xdeadbeefdeadbeef,
-        Endian.big,
-      ); // stale codeLimit64
+      cbd.setUint64(56, 0xdeadbeefdeadbeef, Endian.big); // stale codeLimit64
       cbd.setUint64(64, 0x1000, Endian.big); // execSegBase
       cbd.setUint64(72, 0x2000, Endian.big); // execSegLimit
       cbd.setUint64(80, 3, Endian.big); // execSegFlags
-      final identBytes = ascii.encode('$ident\x00');
-      cd.setRange(
-        identOffset,
-        identOffset + identBytes.length,
-        identBytes,
-      );
+      final Uint8List identBytes = ascii.encode('$ident\x00');
+      cd.setRange(identOffset, identOffset + identBytes.length, identBytes);
       cd.setRange(96, 128, specialSlot);
       return cd;
     }
@@ -1882,7 +1912,7 @@ void main() {
       if (alternateCd)
         (0x1000, buildCd(version: 0x20400, ident: 'alt', identOffset: 88)),
     ];
-    var sigCursor = sigOff + 12 + nBlobs * 8;
+    int sigCursor = sigOff + 12 + nBlobs * 8;
     bd.setUint32(sigOff, macho.csMagicEmbeddedSignature, Endian.big);
     bd.setUint32(sigOff + 4, superLength, Endian.big);
     bd.setUint32(sigOff + 8, nBlobs, Endian.big);
@@ -1933,7 +1963,7 @@ void main() {
   /// Every relocatable `(offset, size)` range the load commands of [bytes] name.
   List<(int, int)> _allLinkeditRanges(Uint8List bytes) {
     final ranges = <(int, int)>[];
-    for (final lc in macho.parseLoadCommands(bytes)) {
+    for (final _Lc lc in macho.parseLoadCommands(bytes)) {
       if (lc.cmd == macho.lcSymtab) {
         final bd = ByteData.sublistView(lc.bytes);
         ranges.add((
@@ -1967,7 +1997,7 @@ void main() {
   /// overlaps another range: the strip must never point a command at reused
   /// bytes.
   void _expectLinkeditSound(Uint8List bytes, int linkeditOff) {
-    final ranges = [
+    final List<(int, int)> ranges = [
       for (final r in _allLinkeditRanges(bytes))
         if (r.$2 != 0) r,
     ];
@@ -2003,23 +2033,23 @@ void main() {
     bool checkCodeLimit64Zero = true,
     int expectedCount = 2,
   }) {
-    final cmds = macho.parseLoadCommands(bytes);
-    final sigLc = cmds.singleWhere((c) => c.cmd == macho.lcCodeSignature);
+    final _Cmds cmds = macho.parseLoadCommands(bytes);
+    final _Lc sigLc = cmds.singleWhere((c) => c.cmd == macho.lcCodeSignature);
     final sigBd = ByteData.sublistView(sigLc.bytes);
-    final dataoff = sigBd.getUint32(8, Endian.little);
-    final datasize = sigBd.getUint32(12, Endian.little);
+    final int dataoff = sigBd.getUint32(8, Endian.little);
+    final int datasize = sigBd.getUint32(12, Endian.little);
     expect(dataoff % 16, 0, reason: 'LC_CODE_SIGNATURE must stay 16-aligned');
-    final blob = bytes.sublist(dataoff, dataoff + datasize);
+    final Uint8List blob = bytes.sublist(dataoff, dataoff + datasize);
     final bbd = ByteData.sublistView(blob);
     expect(bbd.getUint32(0, Endian.big), macho.csMagicEmbeddedSignature);
-    final count = bbd.getUint32(8, Endian.big);
+    final int count = bbd.getUint32(8, Endian.big);
     var cdOff = -1;
     var reqOff = -1;
     var reqLength = 0;
     expect(count, expectedCount);
     for (var i = 0; i < count; i++) {
-      final type = bbd.getUint32(12 + i * 8, Endian.big);
-      final at = bbd.getUint32(12 + i * 8 + 4, Endian.big);
+      final int type = bbd.getUint32(12 + i * 8, Endian.big);
+      final int at = bbd.getUint32(12 + i * 8 + 4, Endian.big);
       if (type == 2) {
         reqOff = at;
         reqLength = bbd.getUint32(at + 4, Endian.big);
@@ -2037,7 +2067,7 @@ void main() {
     expect(cdBd.getUint32(8, Endian.big), expectedVersion);
     expect(cdBd.getUint32(12, Endian.big), 0x20002);
     expect(cdBd.getUint32(24, Endian.big), 1); // one special slot
-    final slots = cdBd.getUint32(28, Endian.big);
+    final int slots = cdBd.getUint32(28, Endian.big);
     expect(slots, (dataoff + 0xfff) ~/ 0x1000);
     expect(cdBd.getUint32(32, Endian.big), dataoff); // codeLimit
     expect(cdBd.getUint8(36), 32);
@@ -2053,17 +2083,19 @@ void main() {
     expect(execBd.getUint64(8, Endian.big), 0x2000);
     expect(execBd.getUint64(16, Endian.big), 3);
 
-    final hashOffset = cdBd.getUint32(16, Endian.big);
-    final identOffset = cdBd.getUint32(20, Endian.big);
+    final int hashOffset = cdBd.getUint32(16, Endian.big);
+    final int identOffset = cdBd.getUint32(20, Endian.big);
     expect(_readCString(blob, cdOff + identOffset), expectedIdent);
-    final hashesStart = cdOff + hashOffset - 32;
+    final int hashesStart = cdOff + hashOffset - 32;
     expect(blob.sublist(hashesStart, hashesStart + 32), equals(specialSlot));
     for (var slot = 0; slot < slots; slot++) {
-      final start = slot * 0x1000;
-      var end = start + 0x1000;
+      final int start = slot * 0x1000;
+      int end = start + 0x1000;
       if (end > dataoff) end = dataoff;
-      final want = macho.sha256(Uint8List.sublistView(bytes, start, end));
-      final got = blob.sublist(
+      final Uint8List want = macho.sha256(
+        Uint8List.sublistView(bytes, start, end),
+      );
+      final Uint8List got = blob.sublist(
         hashesStart + 32 + slot * 32,
         hashesStart + 64 + slot * 32,
       );
@@ -2073,29 +2105,32 @@ void main() {
     // The `__LINKEDIT` segment tracks the new file size.
     for (final lc in cmds) {
       if (lc.cmd != macho.lcSegment64) continue;
-      final name = ascii.decode(lc.bytes.sublist(8, 24)).split('\x00').first;
+      final String name = ascii
+          .decode(lc.bytes.sublist(8, 24))
+          .split('\x00')
+          .first;
       if (name != '__LINKEDIT') continue;
       final segBd = ByteData.sublistView(lc.bytes);
-      final fileoff = segBd.getUint64(40, Endian.little);
+      final int fileoff = segBd.getUint64(40, Endian.little);
       expect(segBd.getUint64(48, Endian.little), bytes.length - fileoff);
     }
   }
 
   /// Returns the SuperBlob entry of [bytes] with index [type].
   Uint8List _superBlobEntry(Uint8List bytes, int type) {
-    final sigLc = macho
+    final _Lc sigLc = macho
         .parseLoadCommands(bytes)
         .singleWhere((c) => c.cmd == macho.lcCodeSignature);
     final sigBd = ByteData.sublistView(sigLc.bytes);
-    final dataoff = sigBd.getUint32(8, Endian.little);
-    final datasize = sigBd.getUint32(12, Endian.little);
-    final blob = bytes.sublist(dataoff, dataoff + datasize);
+    final int dataoff = sigBd.getUint32(8, Endian.little);
+    final int datasize = sigBd.getUint32(12, Endian.little);
+    final Uint8List blob = bytes.sublist(dataoff, dataoff + datasize);
     final bbd = ByteData.sublistView(blob);
-    final count = bbd.getUint32(8, Endian.big);
+    final int count = bbd.getUint32(8, Endian.big);
     for (var i = 0; i < count; i++) {
       if (bbd.getUint32(12 + i * 8, Endian.big) != type) continue;
-      final at = bbd.getUint32(12 + i * 8 + 4, Endian.big);
-      final length = ByteData.sublistView(
+      final int at = bbd.getUint32(12 + i * 8 + 4, Endian.big);
+      final int length = ByteData.sublistView(
         blob,
         at,
         at + 8,
@@ -2111,7 +2146,7 @@ void main() {
 
   /// Returns [bytes] with [cmd] appended to its load commands.
   Uint8List _withAppendedCommand(Uint8List bytes, Uint8List cmd) {
-    final cmds = macho.parseLoadCommands(bytes);
+    final _Cmds cmds = macho.parseLoadCommands(bytes);
     var sizeofcmds = 0;
     for (final c in cmds) {
       sizeofcmds += c.cmdsize;
@@ -2130,7 +2165,7 @@ void main() {
 
   /// Builds a header-only 64-bit Mach-O with no `LC_SYMTAB`.
   Uint8List _buildHeaderOnlyMachO() {
-    final commands = [
+    final List<Uint8List> commands = [
       macho.buildLcUuid(_patternBytes(7, 16)).bytes,
       macho.buildLcIdDylib('@rpath/Bare.dylib').bytes,
     ];
@@ -2147,7 +2182,7 @@ void main() {
     bd.setUint32(16, commands.length, Endian.little);
     bd.setUint32(20, sizeofcmds, Endian.little);
     bd.setUint32(24, macho.mhNoReexportedDylibs, Endian.little);
-    var off = macho.mhHeaderSize64;
+    int off = macho.mhHeaderSize64;
     for (final c in commands) {
       buf.setRange(off, off + c.length, c);
       off += c.length;
@@ -2160,8 +2195,8 @@ void main() {
   /// never overlap, the signature is rebuilt over the shrunk layout, and a
   /// retag of the stripped binary re-signs cleanly.
   void _checkStripIntegrity({required bool dyldInfoOnly}) {
-    final input = _buildStripIntegrityDylib(dyldInfoOnly: dyldInfoOnly);
-    final stripped = macho.patchMachO(
+    final _Input2 input = _buildStripIntegrityDylib(dyldInfoOnly: dyldInfoOnly);
+    final Uint8List stripped = macho.patchMachO(
       input.bytes,
       macho.PatchOptions(stripSymbols: true),
     );
@@ -2172,11 +2207,11 @@ void main() {
       greaterThanOrEqualTo(2 * 0x1000),
     );
 
-    final cmds = macho.parseLoadCommands(stripped);
-    final dyldLc = cmds.singleWhere(
+    final _Cmds cmds = macho.parseLoadCommands(stripped);
+    final _Lc dyldLc = cmds.singleWhere(
       (c) => c.cmd == (dyldInfoOnly ? macho.lcDyldInfoOnly : macho.lcDyldInfo),
     );
-    final pairs = _dyldPairs(dyldLc.bytes);
+    final List<(int, int)> pairs = _dyldPairs(dyldLc.bytes);
     expect(pairs.length, 5);
     for (var i = 0; i < 5; i++) {
       expect(
@@ -2187,8 +2222,8 @@ void main() {
 
     // The other table payloads move down byte-identical too.
     Uint8List moved(int cmd) {
-      final lc = cmds.singleWhere((c) => c.cmd == cmd);
-      final range = _singleRange(lc.bytes);
+      final _Lc lc = cmds.singleWhere((c) => c.cmd == cmd);
+      final (int, int) range = _singleRange(lc.bytes);
       return stripped.sublist(range.$1, range.$1 + range.$2);
     }
 
@@ -2228,19 +2263,16 @@ void main() {
       ),
     );
     expect(
-      _readCString(
-        cmds.singleWhere((c) => c.cmd == macho.lcIdDylib).bytes,
-        24,
-      ),
+      _readCString(cmds.singleWhere((c) => c.cmd == macho.lcIdDylib).bytes, 24),
       '@rpath/Strip.dylib',
     );
 
     // A retag of the stripped binary re-signs over the edited layout.
-    final retagged = macho.patchMachO(
+    final Uint8List retagged = macho.patchMachO(
       stripped,
       macho.PatchOptions(installName: '@rpath/Retagged.dylib'),
     );
-    final retaggedCmds = macho.parseLoadCommands(retagged);
+    final _Cmds retaggedCmds = macho.parseLoadCommands(retagged);
     expect(
       _readCString(
         retaggedCmds.singleWhere((c) => c.cmd == macho.lcIdDylib).bytes,
@@ -2266,14 +2298,14 @@ void main() {
     });
 
     test('strip refuses a load command pointing into __LINKEDIT', () {
-      final input = _buildStripIntegrityDylib(dyldInfoOnly: false);
+      final _Input2 input = _buildStripIntegrityDylib(dyldInfoOnly: false);
       // LC_TWOLEVEL_HINTS (0x16) carries an (offset, nhints) pair at +8/+12.
       final hints = ByteData(16)
         ..setUint32(0, 0x16, Endian.little)
         ..setUint32(4, 16, Endian.little)
         ..setUint32(8, input.linkeditOff + 64, Endian.little)
         ..setUint32(12, 8, Endian.little);
-      final boobyTrapped = _withAppendedCommand(
+      final Uint8List boobyTrapped = _withAppendedCommand(
         input.bytes,
         hints.buffer.asUint8List(),
       );
@@ -2293,13 +2325,13 @@ void main() {
     });
 
     test('patch refuses a non-SHA-256 CodeDirectory', () {
-      final input = _buildStripIntegrityDylib(dyldInfoOnly: false);
-      final cmds = macho.parseLoadCommands(input.bytes);
-      final sigLc = cmds.singleWhere((c) => c.cmd == macho.lcCodeSignature);
+      final _Input2 input = _buildStripIntegrityDylib(dyldInfoOnly: false);
+      final _Cmds cmds = macho.parseLoadCommands(input.bytes);
+      final _Lc sigLc = cmds.singleWhere((c) => c.cmd == macho.lcCodeSignature);
       final sigBd = ByteData.sublistView(sigLc.bytes);
-      final dataoff = sigBd.getUint32(8, Endian.little);
+      final int dataoff = sigBd.getUint32(8, Endian.little);
       final blob = ByteData.sublistView(input.bytes, dataoff);
-      final count = blob.getUint32(8, Endian.big);
+      final int count = blob.getUint32(8, Endian.big);
       var cdOff = -1;
       for (var i = 0; i < count; i++) {
         if (blob.getUint32(12 + i * 8, Endian.big) == 0 &&
@@ -2327,7 +2359,7 @@ void main() {
     });
 
     test('patch refuses a CMS signature blob', () {
-      final input = _buildStripIntegrityDylib(
+      final _Input2 input = _buildStripIntegrityDylib(
         dyldInfoOnly: false,
         cmsTrailer: true,
       );
@@ -2344,7 +2376,7 @@ void main() {
     });
 
     test('patch refuses a payload-carrying CMS signature wrapper', () {
-      final input = _buildStripIntegrityDylib(
+      final _Input2 input = _buildStripIntegrityDylib(
         dyldInfoOnly: false,
         cmsWrapper: 'payload',
       );
@@ -2363,12 +2395,12 @@ void main() {
     test(
       'strip keeps an empty CMS wrapper and rebuilds alternate CodeDirectories',
       () {
-        final input = _buildStripIntegrityDylib(
+        final _Input2 input = _buildStripIntegrityDylib(
           dyldInfoOnly: false,
           cmsWrapper: 'empty',
           alternateCd: true,
         );
-        final stripped = macho.patchMachO(
+        final Uint8List stripped = macho.patchMachO(
           input.bytes,
           macho.PatchOptions(stripSymbols: true),
         );
@@ -2381,7 +2413,7 @@ void main() {
         );
 
         // The empty signature wrapper survives byte-identical.
-        final wrapper = _superBlobEntry(stripped, 0x10000);
+        final Uint8List wrapper = _superBlobEntry(stripped, 0x10000);
         expect(wrapper.length, 8);
         final wbd = ByteData.sublistView(wrapper);
         expect(wbd.getUint32(0, Endian.big), macho.csMagicBlobWrapper);
@@ -2390,29 +2422,26 @@ void main() {
         // The alternate CodeDirectory is re-signed like the primary: the new
         // codeLimit, a covering slot count, the kept identifier and fresh
         // page hashes.
-        final sigLc = macho
+        final _Lc sigLc = macho
             .parseLoadCommands(stripped)
             .singleWhere((c) => c.cmd == macho.lcCodeSignature);
         final sigBd = ByteData.sublistView(sigLc.bytes);
-        final dataoff = sigBd.getUint32(8, Endian.little);
-        final alt = _superBlobEntry(stripped, 0x1000);
+        final int dataoff = sigBd.getUint32(8, Endian.little);
+        final Uint8List alt = _superBlobEntry(stripped, 0x1000);
         final altBd = ByteData.sublistView(alt);
         expect(altBd.getUint32(0, Endian.big), macho.csMagicCodeDirectory);
-        final altSlots = altBd.getUint32(28, Endian.big);
+        final int altSlots = altBd.getUint32(28, Endian.big);
         expect(altSlots, (dataoff + 0xfff) ~/ 0x1000);
         expect(altBd.getUint32(32, Endian.big), dataoff);
-        final altIdent = altBd.getUint32(20, Endian.big);
+        final int altIdent = altBd.getUint32(20, Endian.big);
         expect(_readCString(alt, altIdent), 'alt');
-        final altHashOff = altBd.getUint32(16, Endian.big);
+        final int altHashOff = altBd.getUint32(16, Endian.big);
         for (var slot = 0; slot < altSlots; slot++) {
-          final start = slot * 0x1000;
-          var end = start + 0x1000;
+          final int start = slot * 0x1000;
+          int end = start + 0x1000;
           if (end > dataoff) end = dataoff;
           expect(
-            alt.sublist(
-              altHashOff + slot * 32,
-              altHashOff + (slot + 1) * 32,
-            ),
+            alt.sublist(altHashOff + slot * 32, altHashOff + (slot + 1) * 32),
             equals(macho.sha256(Uint8List.sublistView(stripped, start, end))),
             reason: 'alternate page $slot hash',
           );
@@ -2423,11 +2452,11 @@ void main() {
     test(
       'strip keeps a version-0x20100 identifier at offset 44 byte-identical',
       () {
-        final input = _buildStripIntegrityDylib(
+        final _Input2 input = _buildStripIntegrityDylib(
           dyldInfoOnly: false,
           legacyIdent44: true,
         );
-        final stripped = macho.patchMachO(
+        final Uint8List stripped = macho.patchMachO(
           input.bytes,
           macho.PatchOptions(stripSymbols: true),
         );
@@ -2455,8 +2484,8 @@ void main() {
     );
 
     test('strip leaves a binary without LC_SYMTAB unchanged', () {
-      final input = _buildHeaderOnlyMachO();
-      final stripped = macho.patchMachO(
+      final Uint8List input = _buildHeaderOnlyMachO();
+      final Uint8List stripped = macho.patchMachO(
         input,
         macho.PatchOptions(stripSymbols: true),
       );
@@ -2481,7 +2510,7 @@ void main() {
         strings.add(utf8.encode(name));
         strings.addByte(0);
       }
-      final strBytes = strings.toBytes();
+      final Uint8List strBytes = strings.toBytes();
       final symBytes = BytesBuilder(copy: false);
       for (var i = 0; i < names.length; i++) {
         final entry = ByteData(16)
@@ -2492,15 +2521,15 @@ void main() {
           ..setUint64(8, 0x1000 + i * 8, Endian.little);
         symBytes.add(entry.buffer.asUint8List());
       }
-      final symTab = symBytes.toBytes();
+      final Uint8List symTab = symBytes.toBytes();
 
       // Headers first, then the symbol entries at 0x400 (room for appended
       // commands below), the bind-table gap when asked, then the strings.
       const symoff = 0x400;
-      final bind = _patternBytes(77, 320);
-      final bindOff = symoff + symTab.length;
-      final stroff = bindOff + (bindInGap ? bind.length : 0);
-      final fileSize = stroff + strBytes.length;
+      final Uint8List bind = _patternBytes(77, 320);
+      final int bindOff = symoff + symTab.length;
+      final int stroff = bindOff + (bindInGap ? bind.length : 0);
+      final int fileSize = stroff + strBytes.length;
 
       final dyldCmd = Uint8List(48);
       final dyldBd = ByteData.sublistView(dyldCmd);
@@ -2557,7 +2586,7 @@ void main() {
       bd.setUint32(16, commands.length, Endian.little);
       bd.setUint32(20, sizeofcmds, Endian.little);
       bd.setUint32(24, macho.mhNoReexportedDylibs, Endian.little);
-      var off = macho.mhHeaderSize64;
+      int off = macho.mhHeaderSize64;
       for (final c in commands) {
         buf.setRange(off, off + c.length, c);
         off += c.length;
@@ -2576,7 +2605,7 @@ void main() {
     test(
       'strip refuses an in-place rewrite over a resident bind table (RT29 01)',
       () {
-        final input = _buildNoLinkeditDylib(bindInGap: true);
+        final _Input3 input = _buildNoLinkeditDylib(bindInGap: true);
         expect(
           () => macho.patchMachO(
             input.bytes,
@@ -2596,29 +2625,29 @@ void main() {
     test(
       'strip rewrites small tables in place when nothing else lives there',
       () {
-        final input = _buildNoLinkeditDylib(bindInGap: false);
-        final stripped = macho.patchMachO(
+        final _Input3 input = _buildNoLinkeditDylib(bindInGap: false);
+        final Uint8List stripped = macho.patchMachO(
           input.bytes,
           macho.PatchOptions(stripSymbols: true),
         );
         // The file keeps its length: only the locals are gone.
         expect(stripped.length, input.bytes.length);
-        final symtab = macho
+        final _Lc symtab = macho
             .parseLoadCommands(stripped)
             .singleWhere((c) => c.cmd == macho.lcSymtab);
         final sbd = ByteData.sublistView(symtab.bytes);
         expect(sbd.getUint32(8, Endian.little), input.symoff);
         expect(sbd.getUint32(12, Endian.little), 1);
-        final newStroff = sbd.getUint32(16, Endian.little);
+        final int newStroff = sbd.getUint32(16, Endian.little);
         expect(newStroff, input.symoff + 16);
-        final newStrsize = sbd.getUint32(20, Endian.little);
+        final int newStrsize = sbd.getUint32(20, Endian.little);
         expect(newStrsize, '_kept_global'.length + 2);
         expect(
           stripped.sublist(newStroff, newStroff + newStrsize),
           equals([0, ...ascii.encode('_kept_global'), 0]),
         );
         // The freed tail is zeroed, and only the tail changed past the tables.
-        final oldEnd = input.stroff + input.strsize;
+        final int oldEnd = input.stroff + input.strsize;
         expect(
           stripped.sublist(newStroff + newStrsize, oldEnd),
           everyElement(0),
@@ -2628,9 +2657,9 @@ void main() {
           isNot(equals(input.bytes.sublist(input.symoff, oldEnd))),
         );
         // The range-free commands ride along byte-identical.
-        final before = macho.parseLoadCommands(input.bytes);
-        final after = macho.parseLoadCommands(stripped);
-        for (final cmd in [macho.lcBuildVersion, macho.lcIdDylib]) {
+        final _Cmds before = macho.parseLoadCommands(input.bytes);
+        final _Cmds after = macho.parseLoadCommands(stripped);
+        for (final int cmd in [macho.lcBuildVersion, macho.lcIdDylib]) {
           expect(
             after.singleWhere((c) => c.cmd == cmd).bytes,
             equals(before.singleWhere((c) => c.cmd == cmd).bytes),
@@ -2640,7 +2669,7 @@ void main() {
     );
 
     test('strip refuses a short LC_NOTE command (RT29 02 demo A)', () {
-      final input = _buildStripIntegrityDylib(dyldInfoOnly: false);
+      final _Input2 input = _buildStripIntegrityDylib(dyldInfoOnly: false);
       // A 32-byte 0x31 command: owner plus a u32 (offset, size) pair where the
       // u64 pair belongs. Too short to be a note, so it must be refused.
       final note = Uint8List(32);
@@ -2650,7 +2679,7 @@ void main() {
       note.setRange(8, 24, ascii.encode('0123456789abcdef'));
       nbd.setUint32(24, 15936, Endian.little);
       nbd.setUint32(28, 32, Endian.little);
-      final boobyTrapped = _withAppendedCommand(input.bytes, note);
+      final Uint8List boobyTrapped = _withAppendedCommand(input.bytes, note);
       expect(
         () => macho.patchMachO(
           boobyTrapped,
@@ -2667,8 +2696,8 @@ void main() {
     });
 
     test('strip refuses a second __LINKEDIT segment (RT29 02 demo B)', () {
-      final input = _buildStripIntegrityDylib(dyldInfoOnly: false);
-      final linkedit2 = macho.buildLcSegment64((
+      final _Input2 input = _buildStripIntegrityDylib(dyldInfoOnly: false);
+      final Uint8List linkedit2 = macho.buildLcSegment64((
         segname: '__LINKEDIT',
         vmaddr: 0x4000,
         vmsize: 320,
@@ -2679,7 +2708,10 @@ void main() {
         nsects: 0,
         flags: 0,
       )).bytes;
-      final boobyTrapped = _withAppendedCommand(input.bytes, linkedit2);
+      final Uint8List boobyTrapped = _withAppendedCommand(
+        input.bytes,
+        linkedit2,
+      );
       expect(
         () => macho.patchMachO(
           boobyTrapped,
@@ -2696,8 +2728,8 @@ void main() {
     });
 
     test('strip refuses a segment reaching into __LINKEDIT', () {
-      final input = _buildStripIntegrityDylib(dyldInfoOnly: false);
-      final data = macho.buildLcSegment64((
+      final _Input2 input = _buildStripIntegrityDylib(dyldInfoOnly: false);
+      final Uint8List data = macho.buildLcSegment64((
         segname: '__DATA',
         vmaddr: 0x10000,
         vmsize: 0x200,
@@ -2708,7 +2740,7 @@ void main() {
         nsects: 0,
         flags: 0,
       )).bytes;
-      final boobyTrapped = _withAppendedCommand(input.bytes, data);
+      final Uint8List boobyTrapped = _withAppendedCommand(input.bytes, data);
       expect(
         () => macho.patchMachO(
           boobyTrapped,
@@ -2725,10 +2757,10 @@ void main() {
     });
 
     test('strip moves a well-formed LC_NOTE down with __LINKEDIT', () {
-      final input = _buildStripIntegrityDylib(dyldInfoOnly: false);
+      final _Input2 input = _buildStripIntegrityDylib(dyldInfoOnly: false);
       // A note payload past the end of the file, inside a grown __LINKEDIT.
-      final payload = _patternBytes(99, 64);
-      final noteOff = input.bytes.length;
+      final Uint8List payload = _patternBytes(99, 64);
+      final int noteOff = input.bytes.length;
       final grown = Uint8List.fromList([...input.bytes, ...payload]);
       final segBd = ByteData.sublistView(
         grown,
@@ -2752,16 +2784,16 @@ void main() {
       note.setRange(8, 24, ascii.encode('com.apple.test\x00\x00'));
       nbd.setUint64(24, noteOff, Endian.little);
       nbd.setUint64(32, payload.length, Endian.little);
-      final noted = _withAppendedCommand(grown, note);
-      final stripped = macho.patchMachO(
+      final Uint8List noted = _withAppendedCommand(grown, note);
+      final Uint8List stripped = macho.patchMachO(
         noted,
         macho.PatchOptions(stripSymbols: true),
       );
-      final noteLc = macho
+      final _Lc noteLc = macho
           .parseLoadCommands(stripped)
           .singleWhere((c) => c.cmd == macho.lcNote);
       final movedBd = ByteData.sublistView(noteLc.bytes);
-      final newOff = movedBd.getUint64(24, Endian.little).toInt();
+      final int newOff = movedBd.getUint64(24, Endian.little).toInt();
       expect(newOff, lessThan(noteOff));
       expect(newOff, greaterThanOrEqualTo(input.linkeditOff));
       expect(movedBd.getUint64(32, Endian.little), payload.length);
@@ -2778,7 +2810,7 @@ void main() {
     });
 
     test('strip refuses an unknown load command type', () {
-      final input = _buildStripIntegrityDylib(dyldInfoOnly: false);
+      final _Input2 input = _buildStripIntegrityDylib(dyldInfoOnly: false);
       // Unknown type 0x99 carrying a u32 (offset, size) pair into __LINKEDIT:
       // the tool cannot know where its range really is, so it refuses by name.
       final unknown = Uint8List(24);
@@ -2787,7 +2819,7 @@ void main() {
         ..setUint32(4, 24, Endian.little)
         ..setUint32(8, input.linkeditOff + 64, Endian.little)
         ..setUint32(12, 32, Endian.little);
-      final boobyTrapped = _withAppendedCommand(input.bytes, unknown);
+      final Uint8List boobyTrapped = _withAppendedCommand(input.bytes, unknown);
       expect(
         () => macho.patchMachO(
           boobyTrapped,
@@ -2804,7 +2836,7 @@ void main() {
     });
 
     test('strip carries known range-free commands untouched', () {
-      final input = _buildStripIntegrityDylib(dyldInfoOnly: false);
+      final _Input2 input = _buildStripIntegrityDylib(dyldInfoOnly: false);
       // LC_MAIN must be range-free for real producer binaries to keep
       // stripping: it carries only an entry offset, no file range.
       final main = Uint8List(24);
@@ -2813,8 +2845,8 @@ void main() {
         ..setUint32(4, 24, Endian.little)
         ..setUint64(8, 0x1000, Endian.little)
         ..setUint64(16, 0, Endian.little);
-      final withMain = _withAppendedCommand(input.bytes, main);
-      final withVersion = _withAppendedCommand(
+      final Uint8List withMain = _withAppendedCommand(input.bytes, main);
+      final Uint8List withVersion = _withAppendedCommand(
         withMain,
         macho
             .buildLcBuildVersion(
@@ -2824,11 +2856,11 @@ void main() {
             )
             .bytes,
       );
-      final stripped = macho.patchMachO(
+      final Uint8List stripped = macho.patchMachO(
         withVersion,
         macho.PatchOptions(stripSymbols: true),
       );
-      final cmds = macho.parseLoadCommands(stripped);
+      final _Cmds cmds = macho.parseLoadCommands(stripped);
       expect(
         cmds.singleWhere((c) => c.cmd == macho.lcMain).bytes,
         equals(main),
@@ -2864,13 +2896,10 @@ void main() {
           ..setUint32(8, 0x3130, Endian.little)
           ..setUint32(12, 64, Endian.little);
         expect(
-          () => macho.auditOutputRanges(
-            [
-              macho.LoadCommand(macho.lcFunctionStarts, a),
-              macho.LoadCommand(macho.lcDataInCode, b),
-            ],
-            macho.RewrittenLayout(linkeditOff: 0x3000, fileLength: 0x5000),
-          ),
+          () => macho.auditOutputRanges([
+            macho.LoadCommand(macho.lcFunctionStarts, a),
+            macho.LoadCommand(macho.lcDataInCode, b),
+          ], macho.RewrittenLayout(linkeditOff: 0x3000, fileLength: 0x5000)),
           throwsA(
             isA<FormatException>().having(
               (e) => e.message,
@@ -2893,13 +2922,10 @@ void main() {
           ..setUint32(8, 0x3140, Endian.little)
           ..setUint32(12, 64, Endian.little);
         expect(
-          () => macho.auditOutputRanges(
-            [
-              macho.LoadCommand(macho.lcFunctionStarts, a),
-              macho.LoadCommand(macho.lcDataInCode, b),
-            ],
-            macho.RewrittenLayout(linkeditOff: 0x3000, fileLength: 0x5000),
-          ),
+          () => macho.auditOutputRanges([
+            macho.LoadCommand(macho.lcFunctionStarts, a),
+            macho.LoadCommand(macho.lcDataInCode, b),
+          ], macho.RewrittenLayout(linkeditOff: 0x3000, fileLength: 0x5000)),
           returnsNormally,
         );
         // `auditOutputRanges` returns void, so the accepted edge-sharing pair
@@ -2934,10 +2960,9 @@ void main() {
           ..setUint32(8, 0x4ff0, Endian.little)
           ..setUint32(12, 64, Endian.little);
         expect(
-          () => macho.auditOutputRanges(
-            [macho.LoadCommand(macho.lcFunctionStarts, a)],
-            macho.RewrittenLayout(linkeditOff: 0x3000, fileLength: 0x5000),
-          ),
+          () => macho.auditOutputRanges([
+            macho.LoadCommand(macho.lcFunctionStarts, a),
+          ], macho.RewrittenLayout(linkeditOff: 0x3000, fileLength: 0x5000)),
           throwsA(
             isA<FormatException>().having(
               (e) => e.message,
@@ -2949,7 +2974,7 @@ void main() {
       });
 
       test('refuses managed ranges escaping __LINKEDIT', () {
-        final symtab = macho
+        final Uint8List symtab = macho
             .buildLcSymtab(
               symoff: 0x1000,
               nsyms: 1,
@@ -2958,10 +2983,9 @@ void main() {
             )
             .bytes;
         expect(
-          () => macho.auditOutputRanges(
-            [macho.LoadCommand(macho.lcSymtab, symtab)],
-            macho.RewrittenLayout(linkeditOff: 0x3000, fileLength: 0x5000),
-          ),
+          () => macho.auditOutputRanges([
+            macho.LoadCommand(macho.lcSymtab, symtab),
+          ], macho.RewrittenLayout(linkeditOff: 0x3000, fileLength: 0x5000)),
           throwsA(
             isA<FormatException>().having(
               (e) => e.message,
@@ -2978,7 +3002,7 @@ void main() {
           ..setUint32(0, macho.lcFunctionStarts, Endian.little)
           ..setUint32(8, 0x3100, Endian.little)
           ..setUint32(12, 64, Endian.little);
-        final symtab = macho
+        final Uint8List symtab = macho
             .buildLcSymtab(
               symoff: 0x3200,
               nsyms: 1,
@@ -2987,13 +3011,10 @@ void main() {
             )
             .bytes;
         expect(
-          () => macho.auditOutputRanges(
-            [
-              macho.LoadCommand(macho.lcFunctionStarts, a),
-              macho.LoadCommand(macho.lcSymtab, symtab),
-            ],
-            macho.RewrittenLayout(linkeditOff: 0x3000, fileLength: 0x5000),
-          ),
+          () => macho.auditOutputRanges([
+            macho.LoadCommand(macho.lcFunctionStarts, a),
+            macho.LoadCommand(macho.lcSymtab, symtab),
+          ], macho.RewrittenLayout(linkeditOff: 0x3000, fileLength: 0x5000)),
           returnsNormally,
         );
         // Void callee, so the accepted geometry is paired with a control: the
@@ -3039,8 +3060,8 @@ void main() {
       test(
         'strip refuses a range ending past the input on the compacting path',
         () {
-          final input = _buildStripIntegrityDylib(dyldInfoOnly: false);
-          final boobyTrapped = _withAppendedCommand(
+          final _Input2 input = _buildStripIntegrityDylib(dyldInfoOnly: false);
+          final Uint8List boobyTrapped = _withAppendedCommand(
             input.bytes,
             hintsCommand(input.bytes.length - 2, 4),
           );
@@ -3062,8 +3083,8 @@ void main() {
 
       test('strip refuses a range starting past the input on the compacting '
           'path', () {
-        final input = _buildStripIntegrityDylib(dyldInfoOnly: false);
-        final boobyTrapped = _withAppendedCommand(
+        final _Input2 input = _buildStripIntegrityDylib(dyldInfoOnly: false);
+        final Uint8List boobyTrapped = _withAppendedCommand(
           input.bytes,
           hintsCommand(input.bytes.length + 8, 8),
         );
@@ -3083,8 +3104,8 @@ void main() {
       });
 
       test('strip refuses a range past the input on the in-place path', () {
-        final input = _buildNoLinkeditDylib(bindInGap: false);
-        final boobyTrapped = _withAppendedCommand(
+        final _Input3 input = _buildNoLinkeditDylib(bindInGap: false);
+        final Uint8List boobyTrapped = _withAppendedCommand(
           input.bytes,
           hintsCommand(input.bytes.length + 8, 8),
         );
@@ -3115,7 +3136,7 @@ void main() {
         const linkeditOff = 0x3000;
         const name = '_global12345';
         final strBytes = Uint8List.fromList([0, ...ascii.encode(name), 0]);
-        final symTab =
+        final Uint8List symTab =
             (ByteData(16)
                   ..setUint32(0, 1, Endian.little)
                   ..setUint8(4, 0x0f)
@@ -3126,9 +3147,9 @@ void main() {
                 .asUint8List();
         // Payloads packed with no gaps: the only size change at strip time
         // is the signature padding below.
-        final sigOff = linkeditOff + symTab.length + strBytes.length;
-        final sigBlob = _patternBytes(55, 40);
-        final fileLength = sigOff + sigBlob.length;
+        final int sigOff = linkeditOff + symTab.length + strBytes.length;
+        final Uint8List sigBlob = _patternBytes(55, 40);
+        final int fileLength = sigOff + sigBlob.length;
         final sigCmd = Uint8List(16);
         ByteData.sublistView(sigCmd)
           ..setUint32(0, macho.lcCodeSignature, Endian.little)
@@ -3184,7 +3205,7 @@ void main() {
         bd.setUint32(16, commands.length, Endian.little);
         bd.setUint32(20, sizeofcmds, Endian.little);
         bd.setUint32(24, macho.mhNoReexportedDylibs, Endian.little);
-        var off = macho.mhHeaderSize64;
+        int off = macho.mhHeaderSize64;
         for (final c in commands) {
           buf.setRange(off, off + c.length, c);
           off += c.length;
@@ -3200,8 +3221,8 @@ void main() {
       }
 
       test('a clean strip can emit an output longer than its input', () {
-        final input = _buildGrowingDylib(badHints: false);
-        final stripped = macho.stripLocalSymbols(
+        final _Input5 input = _buildGrowingDylib(badHints: false);
+        final macho.StrippedSymbols stripped = macho.stripLocalSymbols(
           input.bytes,
           macho.parseLoadCommands(input.bytes),
         );
@@ -3211,7 +3232,7 @@ void main() {
       });
 
       test('strip refuses a range the longer output would launder', () {
-        final input = _buildGrowingDylib(badHints: true);
+        final _Input5 input = _buildGrowingDylib(badHints: true);
         expect(
           () => macho.stripLocalSymbols(
             input.bytes,
@@ -3251,7 +3272,7 @@ void main() {
       /// A `__DATA` segment at [fileoff] with a hostile [filesize] authored
       /// the same way.
       Uint8List hostileDataSegment(int fileoff, int filesize) {
-        final seg = macho.buildLcSegment64((
+        final Uint8List seg = macho.buildLcSegment64((
           segname: '__DATA',
           vmaddr: 0x10000,
           vmsize: 0x1000,
@@ -3272,10 +3293,7 @@ void main() {
 
       void expectPastEnd(Uint8List bytes, Matcher name) {
         expect(
-          () => macho.patchMachO(
-            bytes,
-            macho.PatchOptions(stripSymbols: true),
-          ),
+          () => macho.patchMachO(bytes, macho.PatchOptions(stripSymbols: true)),
           throwsA(
             isA<FormatException>().having(
               (e) => e.message,
@@ -3295,10 +3313,7 @@ void main() {
           isFalse,
         );
         // A top-bit offset reads back negative: outside every file.
-        expect(
-          macho.rangeWithinFile(-0x8000000000000000, 64, 0x2000),
-          isFalse,
-        );
+        expect(macho.rangeWithinFile(-0x8000000000000000, 64, 0x2000), isFalse);
         // Each part fits below 2^63, but the sum wraps negative: a naive
         // `offset + size <= length` sum would call this inside the file.
         expect(
@@ -3317,8 +3332,8 @@ void main() {
       test(
         'strip refuses a note with a top-bit size on the compacting path',
         () {
-          final input = _buildStripIntegrityDylib(dyldInfoOnly: false);
-          final boobyTrapped = _withAppendedCommand(
+          final _Input2 input = _buildStripIntegrityDylib(dyldInfoOnly: false);
+          final Uint8List boobyTrapped = _withAppendedCommand(
             input.bytes,
             noteCommand(0x100, -0x8000000000000000),
           );
@@ -3327,8 +3342,8 @@ void main() {
       );
 
       test('strip refuses a note with a top-bit size on the in-place path', () {
-        final input = _buildNoLinkeditDylib(bindInGap: false);
-        final boobyTrapped = _withAppendedCommand(
+        final _Input3 input = _buildNoLinkeditDylib(bindInGap: false);
+        final Uint8List boobyTrapped = _withAppendedCommand(
           input.bytes,
           noteCommand(0x100, -0x8000000000000000),
         );
@@ -3337,8 +3352,8 @@ void main() {
 
       test('strip refuses a note whose offset and size sum past 2^63 on the '
           'compacting path', () {
-        final input = _buildStripIntegrityDylib(dyldInfoOnly: false);
-        final boobyTrapped = _withAppendedCommand(
+        final _Input2 input = _buildStripIntegrityDylib(dyldInfoOnly: false);
+        final Uint8List boobyTrapped = _withAppendedCommand(
           input.bytes,
           noteCommand(0x100, 0x7FFFFFFFFFFFFFFF),
         );
@@ -3347,8 +3362,8 @@ void main() {
 
       test('strip refuses a note whose offset and size sum past 2^63 on the '
           'in-place path', () {
-        final input = _buildNoLinkeditDylib(bindInGap: false);
-        final boobyTrapped = _withAppendedCommand(
+        final _Input3 input = _buildNoLinkeditDylib(bindInGap: false);
+        final Uint8List boobyTrapped = _withAppendedCommand(
           input.bytes,
           noteCommand(0x100, 0x7FFFFFFFFFFFFFFF),
         );
@@ -3357,8 +3372,8 @@ void main() {
 
       test('strip refuses a segment with a top-bit filesize on the compacting '
           'path', () {
-        final input = _buildStripIntegrityDylib(dyldInfoOnly: false);
-        final boobyTrapped = _withAppendedCommand(
+        final _Input2 input = _buildStripIntegrityDylib(dyldInfoOnly: false);
+        final Uint8List boobyTrapped = _withAppendedCommand(
           input.bytes,
           hostileDataSegment(0x1000, -0x8000000000000000),
         );
@@ -3367,8 +3382,8 @@ void main() {
 
       test('strip refuses a segment with a top-bit filesize on the in-place '
           'path', () {
-        final input = _buildNoLinkeditDylib(bindInGap: false);
-        final boobyTrapped = _withAppendedCommand(
+        final _Input3 input = _buildNoLinkeditDylib(bindInGap: false);
+        final Uint8List boobyTrapped = _withAppendedCommand(
           input.bytes,
           hostileDataSegment(0x1000, -0x8000000000000000),
         );
@@ -3382,17 +3397,17 @@ void main() {
     // locals plus one global at 0x400, three 16-byte entries, and strings of
     // NUL + '_local_a\0' + '_local_b\0' + '_kept_global\0'.
     const symoff = 0x400;
-    const oldEnd = symoff + 3 * 16 + (1 + 9 + 9 + 13);
+    const int oldEnd = symoff + 3 * 16 + (1 + 9 + 9 + 13);
     // The strip keeps one 16-byte entry and a 14-byte string table
     // (NUL + '_kept_global\0'), so the first zeroed byte is here.
-    const newTailStart = symoff + 16 + (1 + 12 + 1);
+    const int newTailStart = symoff + 16 + (1 + 12 + 1);
 
     test(
       'strip refuses an in-place rewrite over a live __text section (RT30 03)',
       () {
         // The red-team layout: no `__LINKEDIT`, and the symbol and string
         // tables [symoff, oldEnd) sit inside `__text` of `__TEXT`.
-        final input = support.buildSectionDylib(
+        final _Input4 input = support.buildSectionDylib(
           textSegEnd: 0x1000,
           textSection: support.regularSection(
             '__text',
@@ -3420,7 +3435,7 @@ void main() {
         // `__text` ends where the tables start, but a `__data` section of
         // another segment covers only [newTailStart, oldEnd), bytes the
         // rewrite zero-fills.
-        final input = support.buildSectionDylib(
+        final _Input4 input = support.buildSectionDylib(
           textSegEnd: symoff,
           textSection: support.regularSection(
             '__text',
@@ -3449,65 +3464,59 @@ void main() {
       },
     );
 
-    test(
-      'strip refuses a section-less segment covering the symbol table',
-      () {
-        // `__DATA` has no sections and its file range covers part of the
-        // symbol table; every section stays clear of the tables.
-        final input = support.buildSectionDylib(
-          textSegEnd: symoff,
-          textSection: support.regularSection(
-            '__text',
-            '__TEXT',
-            symoff - 200,
-            200,
-          ),
-          dataSegOff: symoff + 8,
-          dataSegEnd: symoff + 40,
-        );
-        support.expectStripRefusal(
-          input.bytes,
-          allOf(
-            contains('__DATA'),
-            contains('0x19'),
-            contains('$symoff'),
-            contains('__LINKEDIT'),
-          ),
-        );
-      },
-    );
+    test('strip refuses a section-less segment covering the symbol table', () {
+      // `__DATA` has no sections and its file range covers part of the
+      // symbol table; every section stays clear of the tables.
+      final _Input4 input = support.buildSectionDylib(
+        textSegEnd: symoff,
+        textSection: support.regularSection(
+          '__text',
+          '__TEXT',
+          symoff - 200,
+          200,
+        ),
+        dataSegOff: symoff + 8,
+        dataSegEnd: symoff + 40,
+      );
+      support.expectStripRefusal(
+        input.bytes,
+        allOf(
+          contains('__DATA'),
+          contains('0x19'),
+          contains('$symoff'),
+          contains('__LINKEDIT'),
+        ),
+      );
+    });
 
-    test(
-      'strip keeps a __text section ending where the tables start',
-      () {
-        // Adjacent is not overlapping: `__text` ends exactly where the
-        // symbol table starts, so the strip still succeeds and leaves the
-        // section bytes unchanged.
-        final input = support.buildSectionDylib(
-          textSegEnd: symoff,
-          textSection: support.regularSection(
-            '__text',
-            '__TEXT',
-            symoff - 200,
-            200,
-          ),
-        );
-        final sectionBefore = input.bytes.sublist(symoff - 200, symoff);
-        final stripped = macho.patchMachO(
-          input.bytes,
-          macho.PatchOptions(stripSymbols: true),
-        );
-        expect(stripped.length, input.bytes.length);
-        expect(stripped.sublist(symoff - 200, symoff), equals(sectionBefore));
-        final symtab = macho
-            .parseLoadCommands(stripped)
-            .singleWhere((c) => c.cmd == macho.lcSymtab);
-        expect(
-          ByteData.sublistView(symtab.bytes).getUint32(12, Endian.little),
-          1,
-        );
-      },
-    );
+    test('strip keeps a __text section ending where the tables start', () {
+      // Adjacent is not overlapping: `__text` ends exactly where the
+      // symbol table starts, so the strip still succeeds and leaves the
+      // section bytes unchanged.
+      final _Input4 input = support.buildSectionDylib(
+        textSegEnd: symoff,
+        textSection: support.regularSection(
+          '__text',
+          '__TEXT',
+          symoff - 200,
+          200,
+        ),
+      );
+      final Uint8List sectionBefore = input.bytes.sublist(symoff - 200, symoff);
+      final Uint8List stripped = macho.patchMachO(
+        input.bytes,
+        macho.PatchOptions(stripSymbols: true),
+      );
+      expect(stripped.length, input.bytes.length);
+      expect(stripped.sublist(symoff - 200, symoff), equals(sectionBefore));
+      final _Lc symtab = macho
+          .parseLoadCommands(stripped)
+          .singleWhere((c) => c.cmd == macho.lcSymtab);
+      expect(
+        ByteData.sublistView(symtab.bytes).getUint32(12, Endian.little),
+        1,
+      );
+    });
   });
 
   group('CLI', () {
@@ -3557,11 +3566,11 @@ void main() {
         '@executable_path/Frameworks,@loader_path/Frameworks',
       ]);
 
-      final patchedBytes = File(patchedPath).readAsBytesSync();
-      final cmds = macho.parseLoadCommands(patchedBytes);
-      final idCmd = cmds.singleWhere((c) => c.cmd == macho.lcIdDylib);
+      final Uint8List patchedBytes = File(patchedPath).readAsBytesSync();
+      final _Cmds cmds = macho.parseLoadCommands(patchedBytes);
+      final _Lc idCmd = cmds.singleWhere((c) => c.cmd == macho.lcIdDylib);
       expect(_readCString(idCmd.bytes, 24), '@rpath/Updated.framework/Updated');
-      final bvCmd = cmds.singleWhere((c) => c.cmd == macho.lcBuildVersion);
+      final _Lc bvCmd = cmds.singleWhere((c) => c.cmd == macho.lcBuildVersion);
       final bvBd = ByteData.sublistView(bvCmd.bytes);
       expect(bvBd.getUint32(12, Endian.little), 0x000f0000);
       expect(bvBd.getUint32(16, Endian.little), 0x00100200);
@@ -3581,8 +3590,8 @@ void main() {
         '--strip-symbols',
       ]);
 
-      final stripped = File(outPath).readAsBytesSync();
-      final table = _readTestSymtab(stripped);
+      final Uint8List stripped = File(outPath).readAsBytesSync();
+      final _Table table = _readTestSymtab(stripped);
       expect(table.names, [
         '_kDartSnapshotText',
         '_kDartSnapshotData',
@@ -3796,7 +3805,7 @@ void main() {
         'allowed.dylib',
       ]);
 
-      final bvCmd = macho
+      final _Lc bvCmd = macho
           .parseLoadCommands(stubOut.readAsBytesSync())
           .singleWhere((c) => c.cmd == macho.lcBuildVersion);
       expect(
@@ -3821,7 +3830,7 @@ void main() {
         '14.0',
       ]);
 
-      final bytes = File(execPath).readAsBytesSync();
+      final Uint8List bytes = File(execPath).readAsBytesSync();
       expect(macho.isMachO64(bytes), isTrue);
       final bd = ByteData.sublistView(bytes);
       expect(bd.getUint32(12, Endian.little), macho.mhExecute);
@@ -3829,7 +3838,7 @@ void main() {
         bd.getUint32(24, Endian.little),
         macho.mhNoundefs | macho.mhDyldlink | macho.mhTwolevel | macho.mhPie,
       );
-      final cmds = macho.parseLoadCommands(bytes);
+      final _Cmds cmds = macho.parseLoadCommands(bytes);
       expect(cmds.where((c) => c.cmd == macho.lcIdDylib), isEmpty);
       expect(cmds.where((c) => c.cmd == macho.lcBuildVersion).length, 1);
       expect(cmds.where((c) => c.cmd == macho.lcUuid).length, 1);
@@ -3851,10 +3860,10 @@ void main() {
         '--min-os',
         '11.0',
       ]);
-      final macCmds = macho.parseLoadCommands(
+      final _Cmds macCmds = macho.parseLoadCommands(
         File(macExecPath).readAsBytesSync(),
       );
-      final macRpaths = macCmds
+      final List<String> macRpaths = macCmds
           .where((c) => c.cmd == macho.lcRpath)
           .map((c) => _readCString(c.bytes, 12))
           .toList();
@@ -3899,195 +3908,180 @@ void main() {
       );
     });
 
-    test(
-      'assemble-macos-framework builds versioned macOS App.framework layout and zip',
-      () {
-        final dylibBytes = macho.generateStubMachO(
-          arch: 'arm64',
-          platform: macho.platformMacos,
-          minOs: macho.parsePackedVersion('15.0'),
-          sdkVersion: macho.parsePackedVersion('15.0'),
-          installName: '@rpath/App.framework/Versions/A/App',
-        );
-        final binFile = File('${tempDir.path}/App_bin')
-          ..writeAsBytesSync(dylibBytes);
-        const plistXml =
-            '<?xml version="1.0" encoding="UTF-8"?>\n'
-            '<plist version="1.0"><dict>\n'
-            '  <key>CFBundleExecutable</key><string>App</string>\n'
-            '  <key>CFBundleIdentifier</key><string>io.flutter.flutter.app</string>\n'
-            '  <key>CFBundlePackageType</key><string>FMWK</string>\n'
-            '</dict></plist>\n';
-        final plistFile = File('${tempDir.path}/Info.plist')
-          ..writeAsStringSync(plistXml);
-        final assetsDir = Directory('${tempDir.path}/flutter_assets')
-          ..createSync(recursive: true);
-        File('${assetsDir.path}/AssetManifest.bin').writeAsBytesSync([9, 9]);
-        final wrapperDir = '${tempDir.path}/wrapper';
-        final outputZip = '${tempDir.path}/App.framework.zip';
+    test('assemble-macos-framework builds versioned macOS App.framework layout and zip', () {
+      final Uint8List dylibBytes = macho.generateStubMachO(
+        arch: 'arm64',
+        platform: macho.platformMacos,
+        minOs: macho.parsePackedVersion('15.0'),
+        sdkVersion: macho.parsePackedVersion('15.0'),
+        installName: '@rpath/App.framework/Versions/A/App',
+      );
+      final binFile = File('${tempDir.path}/App_bin')
+        ..writeAsBytesSync(dylibBytes);
+      const plistXml =
+          '<?xml version="1.0" encoding="UTF-8"?>\n'
+          '<plist version="1.0"><dict>\n'
+          '  <key>CFBundleExecutable</key><string>App</string>\n'
+          '  <key>CFBundleIdentifier</key><string>io.flutter.flutter.app</string>\n'
+          '  <key>CFBundlePackageType</key><string>FMWK</string>\n'
+          '</dict></plist>\n';
+      final plistFile = File('${tempDir.path}/Info.plist')
+        ..writeAsStringSync(plistXml);
+      final assetsDir = Directory('${tempDir.path}/flutter_assets')
+        ..createSync(recursive: true);
+      File('${assetsDir.path}/AssetManifest.bin').writeAsBytesSync([9, 9]);
+      final wrapperDir = '${tempDir.path}/wrapper';
+      final outputZip = '${tempDir.path}/App.framework.zip';
 
-        macho.main([
-          'assemble-macos-framework',
-          '--binary',
-          binFile.path,
-          '--info-plist',
-          plistFile.path,
-          '--assets',
-          assetsDir.path,
-          '--output-dir',
-          wrapperDir,
-          '--output-zip',
-          outputZip,
-        ]);
+      macho.main([
+        'assemble-macos-framework',
+        '--binary',
+        binFile.path,
+        '--info-plist',
+        plistFile.path,
+        '--assets',
+        assetsDir.path,
+        '--output-dir',
+        wrapperDir,
+        '--output-zip',
+        outputZip,
+      ]);
 
-        final fwPath = '$wrapperDir/App.framework';
-        expect(
-          File('$fwPath/Versions/A/App').readAsBytesSync(),
-          equals(dylibBytes),
-        );
-        expect(
-          File('$fwPath/Versions/A/Resources/Info.plist').readAsStringSync(),
-          plistXml,
-        );
-        expect(
-          File(
-            '$fwPath/Versions/A/Resources/flutter_assets/AssetManifest.bin',
-          ).readAsBytesSync(),
-          [9, 9],
-        );
-        expect(Link('$fwPath/Versions/Current').targetSync(), 'A');
-        expect(Link('$fwPath/App').targetSync(), 'Versions/Current/App');
-        expect(
-          Link('$fwPath/Resources').targetSync(),
-          'Versions/Current/Resources',
-        );
+      final fwPath = '$wrapperDir/App.framework';
+      expect(
+        File('$fwPath/Versions/A/App').readAsBytesSync(),
+        equals(dylibBytes),
+      );
+      expect(
+        File('$fwPath/Versions/A/Resources/Info.plist').readAsStringSync(),
+        plistXml,
+      );
+      expect(
+        File('$fwPath/Versions/A/Resources/flutter_assets/AssetManifest.bin')
+            .readAsBytesSync(),
+        [9, 9],
+      );
+      expect(Link('$fwPath/Versions/Current').targetSync(), 'A');
+      expect(Link('$fwPath/App').targetSync(), 'Versions/Current/App');
+      expect(
+        Link('$fwPath/Resources').targetSync(),
+        'Versions/Current/Resources',
+      );
 
-        // Verify the framework directory and zip pass verifyMacosFramework.
-        macho.verifyMacosFramework(
-          fwPath,
-          frameworkName: 'App',
-          frameworkZipPath: outputZip,
-        );
+      // Verify the framework directory and zip pass verifyMacosFramework.
+      macho.verifyMacosFramework(
+        fwPath,
+        frameworkName: 'App',
+        frameworkZipPath: outputZip,
+      );
 
-        // Corrupting a symlink into a regular file (as rules_apple's _add_files does
-        // when AppleBundleInfo is absent) must fail verifyMacosFramework.
-        Link('$fwPath/App').deleteSync();
-        File('$fwPath/App').writeAsBytesSync(dylibBytes);
-        expect(
-          () => macho.verifyMacosFramework(fwPath, frameworkName: 'App'),
-          throwsA(
-            isA<StateError>().having(
-              (e) => e.message,
-              'message',
-              contains('Expected top-level symlink at'),
-            ),
+      // Corrupting a symlink into a regular file (as rules_apple's _add_files does
+      // when AppleBundleInfo is absent) must fail verifyMacosFramework.
+      Link('$fwPath/App').deleteSync();
+      File('$fwPath/App').writeAsBytesSync(dylibBytes);
+      expect(
+        () => macho.verifyMacosFramework(fwPath, frameworkName: 'App'),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            contains('Expected top-level symlink at'),
           ),
-        );
-      },
-    );
+        ),
+      );
+    });
 
-    test(
-      'assemble-macos-framework clears stale staging entries before it assembles',
-      () {
-        final dylibBytes = macho.generateStubMachO(
-          arch: 'arm64',
-          platform: macho.platformMacos,
-          minOs: macho.parsePackedVersion('15.0'),
-          sdkVersion: macho.parsePackedVersion('15.0'),
-          installName: '@rpath/App.framework/Versions/A/App',
-        );
-        final binFile = File('${tempDir.path}/stale_App_bin')
-          ..writeAsBytesSync(dylibBytes);
-        final plistFile = File('${tempDir.path}/stale_Info.plist')
-          ..writeAsStringSync('<plist version="1.0"><dict/></plist>');
-        final assetsDir = Directory('${tempDir.path}/stale_assets')
-          ..createSync(recursive: true);
-        File('${assetsDir.path}/fresh.txt').writeAsStringSync('fresh');
+    test('assemble-macos-framework clears stale staging entries before it assembles', () {
+      final Uint8List dylibBytes = macho.generateStubMachO(
+        arch: 'arm64',
+        platform: macho.platformMacos,
+        minOs: macho.parsePackedVersion('15.0'),
+        sdkVersion: macho.parsePackedVersion('15.0'),
+        installName: '@rpath/App.framework/Versions/A/App',
+      );
+      final binFile = File('${tempDir.path}/stale_App_bin')
+        ..writeAsBytesSync(dylibBytes);
+      final plistFile = File('${tempDir.path}/stale_Info.plist')
+        ..writeAsStringSync('<plist version="1.0"><dict/></plist>');
+      final assetsDir = Directory('${tempDir.path}/stale_assets')
+        ..createSync(recursive: true);
+      File('${assetsDir.path}/fresh.txt').writeAsStringSync('fresh');
 
-        final wrapperDir = '${tempDir.path}/stale_wrapper';
-        final outside = Directory('${tempDir.path}/stale_outside')
-          ..createSync(recursive: true);
-        File('${outside.path}/keep.txt').writeAsStringSync('keep');
-        final staleDir = Directory(
-          '$wrapperDir/App.framework/Versions/A/Resources/flutter_assets/'
-          'stale_dir',
-        )..createSync(recursive: true);
-        final staleAssets =
-            '$wrapperDir/App.framework/Versions/A/Resources/flutter_assets';
-        File('$staleAssets/stale.txt').writeAsStringSync('stale');
-        File('${staleDir.path}/nested.txt').writeAsStringSync('nested');
-        Link('$staleAssets/stale_link').createSync('stale.txt');
-        Link('$staleAssets/stale_dir_link').createSync(outside.path);
-        File(
-          '$wrapperDir/App.framework/Versions/A/Resources/stale_plist',
-        ).writeAsStringSync('stale');
-        final outputZip = '${tempDir.path}/stale_App.framework.zip';
+      final wrapperDir = '${tempDir.path}/stale_wrapper';
+      final outside = Directory('${tempDir.path}/stale_outside')
+        ..createSync(recursive: true);
+      File('${outside.path}/keep.txt').writeAsStringSync('keep');
+      final staleDir = Directory(
+        '$wrapperDir/App.framework/Versions/A/Resources/flutter_assets/'
+        'stale_dir',
+      )..createSync(recursive: true);
+      final staleAssets =
+          '$wrapperDir/App.framework/Versions/A/Resources/flutter_assets';
+      File('$staleAssets/stale.txt').writeAsStringSync('stale');
+      File('${staleDir.path}/nested.txt').writeAsStringSync('nested');
+      Link('$staleAssets/stale_link').createSync('stale.txt');
+      Link('$staleAssets/stale_dir_link').createSync(outside.path);
+      File('$wrapperDir/App.framework/Versions/A/Resources/stale_plist')
+          .writeAsStringSync('stale');
+      final outputZip = '${tempDir.path}/stale_App.framework.zip';
 
-        macho.main([
-          'assemble-macos-framework',
-          '--binary',
-          binFile.path,
-          '--info-plist',
-          plistFile.path,
-          '--assets',
-          assetsDir.path,
-          '--output-dir',
-          wrapperDir,
-          '--output-zip',
-          outputZip,
-        ]);
+      macho.main([
+        'assemble-macos-framework',
+        '--binary',
+        binFile.path,
+        '--info-plist',
+        plistFile.path,
+        '--assets',
+        assetsDir.path,
+        '--output-dir',
+        wrapperDir,
+        '--output-zip',
+        outputZip,
+      ]);
 
-        bool exists(String path) =>
-            FileSystemEntity.typeSync(path, followLinks: false) !=
-            FileSystemEntityType.notFound;
-        final fwPath = '$wrapperDir/App.framework';
-        expect(exists('$staleAssets/stale.txt'), isFalse);
-        expect(exists(staleDir.path), isFalse);
-        expect(exists('$staleAssets/stale_link'), isFalse);
-        expect(exists('$staleAssets/stale_dir_link'), isFalse);
-        expect(
-          File('${outside.path}/keep.txt').readAsStringSync(),
-          'keep',
-          reason: 'clearing the stage followed a stale link outside it',
-        );
-        expect(
-          exists('$fwPath/Versions/A/Resources/stale_plist'),
-          isFalse,
-        );
-        expect(File('$staleAssets/fresh.txt').readAsStringSync(), 'fresh');
+      bool exists(String path) =>
+          FileSystemEntity.typeSync(path, followLinks: false) !=
+          FileSystemEntityType.notFound;
+      final fwPath = '$wrapperDir/App.framework';
+      expect(exists('$staleAssets/stale.txt'), isFalse);
+      expect(exists(staleDir.path), isFalse);
+      expect(exists('$staleAssets/stale_link'), isFalse);
+      expect(exists('$staleAssets/stale_dir_link'), isFalse);
+      expect(
+        File('${outside.path}/keep.txt').readAsStringSync(),
+        'keep',
+        reason: 'clearing the stage followed a stale link outside it',
+      );
+      expect(exists('$fwPath/Versions/A/Resources/stale_plist'), isFalse);
+      expect(File('$staleAssets/fresh.txt').readAsStringSync(), 'fresh');
 
-        final zipEntries = macho.readFrameworkZipEntries(
-          File(outputZip).readAsBytesSync(),
-        );
-        expect(
-          zipEntries.where((e) => e.path.contains('stale')),
-          isEmpty,
-          reason: 'the zip kept an entry from the pre-populated staging tree',
-        );
+      final List<macho.FrameworkZipEntry> zipEntries = macho
+          .readFrameworkZipEntries(File(outputZip).readAsBytesSync());
+      expect(
+        zipEntries.where((e) => e.path.contains('stale')),
+        isEmpty,
+        reason: 'the zip kept an entry from the pre-populated staging tree',
+      );
 
-        final extractedRoot = Directory('${tempDir.path}/stale_extracted')
-          ..createSync(recursive: true);
-        macho.extractFrameworkZip(
-          File(outputZip).readAsBytesSync(),
-          extractedRoot,
-        );
-        final extractedAssets =
-            '${extractedRoot.path}/App.framework/Versions/A/Resources/'
-            'flutter_assets';
-        expect(exists('$extractedAssets/stale.txt'), isFalse);
-        expect(exists('$extractedAssets/stale_dir'), isFalse);
-        expect(exists('$extractedAssets/stale_link'), isFalse);
-        expect(
-          File('$extractedAssets/fresh.txt').readAsStringSync(),
-          'fresh',
-        );
-      },
-    );
+      final extractedRoot = Directory('${tempDir.path}/stale_extracted')
+        ..createSync(recursive: true);
+      macho.extractFrameworkZip(
+        File(outputZip).readAsBytesSync(),
+        extractedRoot,
+      );
+      final extractedAssets =
+          '${extractedRoot.path}/App.framework/Versions/A/Resources/'
+          'flutter_assets';
+      expect(exists('$extractedAssets/stale.txt'), isFalse);
+      expect(exists('$extractedAssets/stale_dir'), isFalse);
+      expect(exists('$extractedAssets/stale_link'), isFalse);
+      expect(File('$extractedAssets/fresh.txt').readAsStringSync(), 'fresh');
+    });
 
     test(
       'extractFrameworkZip recreates the versioned layout with real symlinks',
       () {
-        final dylibBytes = macho.generateStubMachO(
+        final Uint8List dylibBytes = macho.generateStubMachO(
           arch: 'arm64',
           platform: macho.platformMacos,
           minOs: macho.parsePackedVersion('15.0'),
@@ -4169,16 +4163,13 @@ void main() {
           Directory('${tempDir.path}/$name')..createSync(recursive: true);
 
       // Well-formed entries extract with contents and link targets intact.
-      final goodDir = fresh('good');
+      final Directory goodDir = fresh('good');
       macho.extractFrameworkZip(
         _storedZip(
           {
             'F/Versions/A/f': [1, 2, 3],
           },
-          symlinks: {
-            'F/Versions/Current': 'A',
-            'F/top': 'Versions/Current/f',
-          },
+          symlinks: {'F/Versions/Current': 'A', 'F/top': 'Versions/Current/f'},
         ),
         goodDir,
       );
@@ -4246,61 +4237,43 @@ void main() {
       );
     });
 
-    test(
-      'copy-files copies source files under basenames or explicit names and patches when --platform/--min-os are given',
-      () {
-        final f1 = File('${tempDir.path}/one/libadd.dylib')
-          ..parent.createSync(recursive: true)
-          ..writeAsStringSync('add');
-        final f2 = File('${tempDir.path}/two/libsub.dylib')
-          ..parent.createSync(recursive: true)
-          ..writeAsStringSync('sub');
-        final outDir = '${tempDir.path}/staged';
+    test('copy-files copies source files under basenames or explicit names and patches when --platform/--min-os are given', () {
+      final f1 = File('${tempDir.path}/one/libadd.dylib')
+        ..parent.createSync(recursive: true)
+        ..writeAsStringSync('add');
+      final f2 = File('${tempDir.path}/two/libsub.dylib')
+        ..parent.createSync(recursive: true)
+        ..writeAsStringSync('sub');
+      final outDir = '${tempDir.path}/staged';
 
-        macho.main([
-          'copy-files',
-          '--output-dir',
-          outDir,
-          f1.path,
-          'libadd.dylib',
-          f2.path,
-        ]);
+      macho.main([
+        'copy-files',
+        '--output-dir',
+        outDir,
+        f1.path,
+        'libadd.dylib',
+        f2.path,
+      ]);
 
-        expect(File('$outDir/libadd.dylib').readAsStringSync(), 'add');
-        expect(File('$outDir/libsub.dylib').readAsStringSync(), 'sub');
+      expect(File('$outDir/libadd.dylib').readAsStringSync(), 'add');
+      expect(File('$outDir/libsub.dylib').readAsStringSync(), 'sub');
 
-        // With --platform and --min-os, copy-files rewrites LC_BUILD_VERSION on Mach-O dylibs
-        // and rejects non-Mach-O files unless named in --allow-non-macho.
-        final machoLib = File('${tempDir.path}/three/libreal.dylib')
-          ..parent.createSync(recursive: true)
-          ..writeAsBytesSync(
-            macho.generateStubMachO(
-              arch: 'arm64',
-              platform: macho.platformMacos,
-              minOs: macho.parsePackedVersion('10.15'),
-              sdkVersion: macho.parsePackedVersion('10.15'),
-              installName: '@rpath/libreal.dylib',
-            ),
-          );
-        final patchedStaged = '${tempDir.path}/staged_patched';
-        expect(
-          () => macho.main([
-            'copy-files',
-            '--platform',
-            'macos',
-            '--min-os',
-            '13.2',
-            '--sdk-version',
-            '13.2',
-            '--output-dir',
-            patchedStaged,
-            f1.path,
-            'libadd.dylib',
-          ]),
-          throwsA(isA<FormatException>()),
+      // With --platform and --min-os, copy-files rewrites LC_BUILD_VERSION on Mach-O dylibs
+      // and rejects non-Mach-O files unless named in --allow-non-macho.
+      final machoLib = File('${tempDir.path}/three/libreal.dylib')
+        ..parent.createSync(recursive: true)
+        ..writeAsBytesSync(
+          macho.generateStubMachO(
+            arch: 'arm64',
+            platform: macho.platformMacos,
+            minOs: macho.parsePackedVersion('10.15'),
+            sdkVersion: macho.parsePackedVersion('10.15'),
+            installName: '@rpath/libreal.dylib',
+          ),
         );
-
-        macho.main([
+      final patchedStaged = '${tempDir.path}/staged_patched';
+      expect(
+        () => macho.main([
           'copy-files',
           '--platform',
           'macos',
@@ -4308,26 +4281,41 @@ void main() {
           '13.2',
           '--sdk-version',
           '13.2',
-          '--allow-non-macho',
-          'libadd.dylib',
           '--output-dir',
           patchedStaged,
-          machoLib.path,
-          'libreal.dylib',
           f1.path,
           'libadd.dylib',
-        ]);
+        ]),
+        throwsA(isA<FormatException>()),
+      );
 
-        final realCmds = macho.parseLoadCommands(
-          File('$patchedStaged/libreal.dylib').readAsBytesSync(),
-        );
-        final bvBd = ByteData.sublistView(
-          realCmds.singleWhere((c) => c.cmd == macho.lcBuildVersion).bytes,
-        );
-        expect(bvBd.getUint32(12, Endian.little), 0x000d0200);
-        expect(File('$patchedStaged/libadd.dylib').readAsStringSync(), 'add');
-      },
-    );
+      macho.main([
+        'copy-files',
+        '--platform',
+        'macos',
+        '--min-os',
+        '13.2',
+        '--sdk-version',
+        '13.2',
+        '--allow-non-macho',
+        'libadd.dylib',
+        '--output-dir',
+        patchedStaged,
+        machoLib.path,
+        'libreal.dylib',
+        f1.path,
+        'libadd.dylib',
+      ]);
+
+      final _Cmds realCmds = macho.parseLoadCommands(
+        File('$patchedStaged/libreal.dylib').readAsBytesSync(),
+      );
+      final bvBd = ByteData.sublistView(
+        realCmds.singleWhere((c) => c.cmd == macho.lcBuildVersion).bytes,
+      );
+      expect(bvBd.getUint32(12, Endian.little), 0x000d0200);
+      expect(File('$patchedStaged/libadd.dylib').readAsStringSync(), 'add');
+    });
 
     test('fat combines thin slices into a universal binary', () {
       final armPath = '${tempDir.path}/arm.dylib';
@@ -4354,7 +4342,7 @@ void main() {
 
       macho.main(['fat', '--output', fatPath, armPath, x86Path]);
 
-      final fat = File(fatPath).readAsBytesSync();
+      final Uint8List fat = File(fatPath).readAsBytesSync();
       expect(macho.isFatMachO(fat), isTrue);
       expect(macho.extractFatSlices(fat).length, 2);
     });
@@ -4424,14 +4412,14 @@ void main() {
 
   group('thinFatMachO', () {
     test('reports a missing arch and 32-bit-only binaries', () {
-      final arm = macho.generateStubMachO(
+      final Uint8List arm = macho.generateStubMachO(
         arch: 'arm64',
         platform: macho.platformMacos,
         minOs: macho.parsePackedVersion('11.0'),
         sdkVersion: macho.parsePackedVersion('11.0'),
         installName: '@rpath/Thin.dylib',
       );
-      final fat = macho.buildFatMachO([
+      final Uint8List fat = macho.buildFatMachO([
         macho.FatSlice(
           cputype: macho.cpuTypeArm64,
           cpusubtype: macho.cpuSubtypeArm64All,
@@ -4449,7 +4437,7 @@ void main() {
         ),
       );
 
-      final fat32 = macho.buildFatMachO([
+      final Uint8List fat32 = macho.buildFatMachO([
         macho.FatSlice(
           cputype: macho.cpuTypeArm,
           cpusubtype: 9,
@@ -4471,7 +4459,7 @@ void main() {
 
   group('frameworkZipDeflate', () {
     test('compresses large payloads and pins the archive bytes', () {
-      final dir = Directory.systemTemp.createTempSync('macho_zip_');
+      final Directory dir = Directory.systemTemp.createTempSync('macho_zip_');
       addTearDown(() => dir.deleteSync(recursive: true));
       final sliceDir = Directory('${dir.path}/App.framework/Versions/A')
         ..createSync(recursive: true);
@@ -4482,7 +4470,7 @@ void main() {
       File('${sliceDir.path}/App').writeAsBytesSync(big);
       File('${sliceDir.path}/small.txt').writeAsStringSync('x');
 
-      final zip = macho.createFrameworkZipBytes(
+      final Uint8List zip = macho.createFrameworkZipBytes(
         Directory('${dir.path}/App.framework'),
         archiveRootName: 'App.framework',
         executableRelPaths: {'App.framework/Versions/A/App'},
@@ -4490,7 +4478,8 @@ void main() {
 
       // 8 KiB of repetitive payload must deflate well below its raw size.
       expect(zip.length, lessThan(1024));
-      final entries = macho.readFrameworkZipEntries(zip);
+      final List<macho.FrameworkZipEntry> entries = macho
+          .readFrameworkZipEntries(zip);
       expect(entries.length, 2);
       expect(entries.singleWhere((e) => e.path.endsWith('/App')).data, big);
       expect(

@@ -39,10 +39,11 @@ bool _isJsonMode = false;
 /// Call once at startup before any Logger usage. Reads `LOG_FORMAT` and
 /// `LOG_LEVEL` from the process environment.
 void initLogging() {
-  final format = Platform.environment['LOG_FORMAT']?.toLowerCase() ?? 'text';
+  final String format =
+      Platform.environment['LOG_FORMAT']?.toLowerCase() ?? 'text';
   _isJsonMode = format == 'json';
 
-  final levelStr = Platform.environment['LOG_LEVEL']?.toUpperCase();
+  final String? levelStr = Platform.environment['LOG_LEVEL']?.toUpperCase();
   Logger.root.level = levelStr != null ? parseLogLevel(levelStr) : Level.INFO;
 
   Logger.root.onRecord.listen((record) {
@@ -120,8 +121,8 @@ class SubprocessOutput {
 
   /// Forward [chunk], emitting every complete line in it.
   void write(String chunk) {
-    final combined = _partial + chunk;
-    final lines = combined.split('\n');
+    final String combined = _partial + chunk;
+    final List<String> lines = combined.split('\n');
     _partial = lines.removeLast();
     for (final line in lines) {
       emitLine(line);
@@ -131,7 +132,7 @@ class SubprocessOutput {
   /// Forward a trailing line that never got its newline.
   void close() {
     if (_partial.isEmpty) return;
-    final last = _partial;
+    final String last = _partial;
     _partial = '';
     emitLine(last);
   }
@@ -159,7 +160,7 @@ class SubprocessOutput {
 /// is not one of `package:logging`'s names, and silently asking for nothing
 /// looks like a tool that ignores the variable.
 Level parseLogLevel(String name) {
-  for (final level in Level.LEVELS) {
+  for (final Level level in Level.LEVELS) {
     if (level.name == name) return level;
   }
   throw DevToolException(

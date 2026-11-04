@@ -15,6 +15,13 @@ import 'package:test/test.dart';
 
 import '../lib/python_host.dart';
 
+typedef _Planted = ({Directory plantedDir, String userBase});
+typedef _Stdin = ({
+  List<String> arguments,
+  Map<String, String> environment,
+  String program,
+});
+
 /// Probe run through both launchers: reports whether the standard library
 /// came from a hostile `PYTHONHOME` tree, whether a module from the
 /// launcher's working directory imports, and whether a module from the user
@@ -95,11 +102,11 @@ void main() {
     test(
       'stdin program ignores the working directory, keeps user site',
       () async {
-        final interpreter = _skipWhenNoPython(python);
+        final String? interpreter = _skipWhenNoPython(python);
         if (interpreter == null) return;
-        final planted = await _plantModules(interpreter, workDir);
+        final _Planted planted = await _plantModules(interpreter, workDir);
         final out = '${workDir.path}/report.txt';
-        final exitCode = await runPythonProgram(
+        final int exitCode = await runPythonProgram(
           interpreter,
           _probeProgram,
           [out],
@@ -114,11 +121,11 @@ void main() {
     test(
       '`-c` program ignores the working directory, keeps user site',
       () async {
-        final interpreter = _skipWhenNoPython(python);
+        final String? interpreter = _skipWhenNoPython(python);
         if (interpreter == null) return;
-        final planted = await _plantModules(interpreter, workDir);
+        final _Planted planted = await _plantModules(interpreter, workDir);
         final out = '${workDir.path}/report_c.txt';
-        final exitCode = await runPythonProgramInteractive(
+        final int exitCode = await runPythonProgramInteractive(
           interpreter,
           _probeProgram,
           [out],
@@ -133,18 +140,19 @@ void main() {
     test(
       'stdin program ignores an ambient PYTHONHOME, keeps user site',
       () async {
-        final interpreter = _skipWhenNoPython(python);
+        final String? interpreter = _skipWhenNoPython(python);
         if (interpreter == null) return;
-        final planted = await _plantModules(interpreter, workDir);
-        final home = await _fakePythonHome(interpreter, workDir);
+        final _Planted planted = await _plantModules(interpreter, workDir);
+        final Directory home = await _fakePythonHome(interpreter, workDir);
         final out = '${workDir.path}/report_home.txt';
-        final run = await _runWithAmbientHome(
-          mode: 'stdin',
-          python: interpreter,
-          out: out,
-          userBase: planted.userBase,
-          home: home,
-        );
+        final ({int exitCode, String logs, String report}) run =
+            await _runWithAmbientHome(
+              mode: 'stdin',
+              python: interpreter,
+              out: out,
+              userBase: planted.userBase,
+              home: home,
+            );
         expect(run.exitCode, equals(0), reason: run.logs);
         expect(run.report, equals(_cleanReport));
       },
@@ -153,18 +161,19 @@ void main() {
     test(
       '`-c` program ignores an ambient PYTHONHOME, keeps user site',
       () async {
-        final interpreter = _skipWhenNoPython(python);
+        final String? interpreter = _skipWhenNoPython(python);
         if (interpreter == null) return;
-        final planted = await _plantModules(interpreter, workDir);
-        final home = await _fakePythonHome(interpreter, workDir);
+        final _Planted planted = await _plantModules(interpreter, workDir);
+        final Directory home = await _fakePythonHome(interpreter, workDir);
         final out = '${workDir.path}/report_home_c.txt';
-        final run = await _runWithAmbientHome(
-          mode: 'argv',
-          python: interpreter,
-          out: out,
-          userBase: planted.userBase,
-          home: home,
-        );
+        final ({int exitCode, String logs, String report}) run =
+            await _runWithAmbientHome(
+              mode: 'argv',
+              python: interpreter,
+              out: out,
+              userBase: planted.userBase,
+              home: home,
+            );
         expect(run.exitCode, equals(0), reason: run.logs);
         expect(run.report, equals(_cleanReport));
       },
@@ -173,12 +182,12 @@ void main() {
     test(
       'stdin program ignores a caller-passed PYTHONHOME, keeps user site',
       () async {
-        final interpreter = _skipWhenNoPython(python);
+        final String? interpreter = _skipWhenNoPython(python);
         if (interpreter == null) return;
-        final planted = await _plantModules(interpreter, workDir);
-        final home = await _fakePythonHome(interpreter, workDir);
+        final _Planted planted = await _plantModules(interpreter, workDir);
+        final Directory home = await _fakePythonHome(interpreter, workDir);
         final out = '${workDir.path}/report_env_home.txt';
-        final exitCode = await runPythonProgram(
+        final int exitCode = await runPythonProgram(
           interpreter,
           _probeProgram,
           [out],
@@ -195,12 +204,12 @@ void main() {
     test(
       '`-c` program ignores a caller-passed PYTHONHOME, keeps user site',
       () async {
-        final interpreter = _skipWhenNoPython(python);
+        final String? interpreter = _skipWhenNoPython(python);
         if (interpreter == null) return;
-        final planted = await _plantModules(interpreter, workDir);
-        final home = await _fakePythonHome(interpreter, workDir);
+        final _Planted planted = await _plantModules(interpreter, workDir);
+        final Directory home = await _fakePythonHome(interpreter, workDir);
         final out = '${workDir.path}/report_env_home_c.txt';
-        final exitCode = await runPythonProgramInteractive(
+        final int exitCode = await runPythonProgramInteractive(
           interpreter,
           _probeProgram,
           [out],
@@ -217,9 +226,9 @@ void main() {
     test(
       'relative output path still resolves under the working directory',
       () async {
-        final interpreter = _skipWhenNoPython(python);
+        final String? interpreter = _skipWhenNoPython(python);
         if (interpreter == null) return;
-        final exitCode = await runPythonProgram(
+        final int exitCode = await runPythonProgram(
           interpreter,
           'with open(\'rel_report_xyz.txt\', \'w\') as handle:\n'
           '    handle.write(\'here\')\n',
@@ -235,7 +244,7 @@ void main() {
     );
 
     test('guard helpers strip what the tool did not choose', () {
-      final env = guardedPythonEnvironment({
+      final Map<String, String> env = guardedPythonEnvironment({
         'PYTHONPATH': '/attacker',
         'PYTHONHOME': '/attacker/home',
         'PYTHONPLATLIBDIR': '/attacker/plat',
@@ -258,7 +267,7 @@ void main() {
     });
 
     test('guard forwards a user-disabled user site', () {
-      final env = guardedPythonEnvironment({
+      final Map<String, String> env = guardedPythonEnvironment({
         'PYTHONNOUSERSITE': '1',
         'PYTHONUSERBASE': '/user/base',
       });
@@ -267,7 +276,7 @@ void main() {
     });
 
     test('one launch helper serves both carriers', () {
-      final stdin = guardedPythonLaunch(
+      final _Stdin stdin = guardedPythonLaunch(
         'print(1)',
         ['a'],
         interactive: false,
@@ -277,7 +286,9 @@ void main() {
       expect(stdin.environment['PYTHONHOME'], isNull);
       expect(stdin.environment['PYTHONSAFEPATH'], equals('1'));
       expect(stdin.program, contains('_flutter_bazel_guard_sys_path'));
-      final argv = guardedPythonLaunch('print(1)', ['a'], interactive: true);
+      final _Stdin argv = guardedPythonLaunch('print(1)', [
+        'a',
+      ], interactive: true);
       expect(argv.arguments.first, equals('-c'));
       expect(argv.arguments.last, equals('a'));
       expect(argv.arguments[1], equals(argv.program));
@@ -298,7 +309,7 @@ String? _skipWhenNoPython(String? python) {
 
 /// A working directory holding a planted module, and a user base whose site
 /// packages hold a shim module the launchers must still import.
-Future<({Directory plantedDir, String userBase})> _plantModules(
+Future<_Planted> _plantModules(
   String python,
   Directory workDir,
 ) async {
@@ -306,7 +317,7 @@ Future<({Directory plantedDir, String userBase})> _plantModules(
   File('${plantedDir.path}/ios_screenshot_planted_xyz.py')
       .writeAsStringSync("MARKER = 'planted-xyz'\n");
   final userBase = '${workDir.path}/userbase';
-  final usersite = await _pythonPrint(
+  final String usersite = await _pythonPrint(
     python,
     'import site; print(site.getusersitepackages())',
     'the user site',
@@ -334,7 +345,7 @@ Future<Directory> _fakePythonHome(
     ),
   );
   final home = Directory('${workDir.path}/fakehome')..createSync();
-  final base = stdlib.path.split(Platform.pathSeparator).last;
+  final String base = stdlib.path.split(Platform.pathSeparator).last;
   final target = Directory(
     Platform.isWindows ? '${home.path}/Lib' : '${home.path}/lib/$base',
   )..createSync(recursive: true);
@@ -349,8 +360,11 @@ Future<Directory> _fakePythonHome(
 /// Copies [from] to [to], leaving out bytecode caches so the copy never
 /// serves stale bytecode for a source file the test plants afterwards.
 void _copyTree(Directory from, Directory to) {
-  for (final entity in from.listSync(recursive: false, followLinks: false)) {
-    final name = entity.uri.pathSegments.lastWhere(
+  for (final FileSystemEntity entity in from.listSync(
+    recursive: false,
+    followLinks: false,
+  )) {
+    final String name = entity.uri.pathSegments.lastWhere(
       (segment) => segment.isNotEmpty,
     );
     if (entity is Directory) {
@@ -376,7 +390,7 @@ Future<({int exitCode, String report, String logs})> _runWithAmbientHome({
   required String userBase,
   required Directory home,
 }) async {
-  final dir = File(out).parent;
+  final Directory dir = File(out).parent;
   File('${dir.path}/driver_xyz.dart').writeAsStringSync(
     _driverProgram.replaceFirst(
       'LIB_URI',
@@ -384,7 +398,7 @@ Future<({int exitCode, String report, String logs})> _runWithAmbientHome({
     ),
   );
   File('${dir.path}/probe_xyz.py').writeAsStringSync(_probeProgram);
-  final result = await Process.run(
+  final ProcessResult result = await Process.run(
     _dartBinary(),
     [
       '${dir.path}/driver_xyz.dart',
@@ -397,7 +411,9 @@ Future<({int exitCode, String report, String logs})> _runWithAmbientHome({
     environment: {'PYTHONHOME': home.path},
   );
   final logs = '${result.stdout}${result.stderr}';
-  final report = File(out).existsSync() ? File(out).readAsStringSync() : '';
+  final String report = File(out).existsSync()
+      ? File(out).readAsStringSync()
+      : '';
   return (exitCode: result.exitCode, report: report, logs: logs);
 }
 
@@ -408,7 +424,7 @@ Future<String> _pythonPrint(
   String what,
   Map<String, String>? environment,
 ) async {
-  final result = await Process.run(
+  final ProcessResult result = await Process.run(
     python,
     ['-c', snippet],
     environment: environment,
@@ -421,8 +437,8 @@ Future<String> _pythonPrint(
 
 /// The SDK `dart` that runs test kernels, for driving a nested launcher.
 String _dartBinary([Map<String, String>? environment]) {
-  final env = environment ?? Platform.environment;
-  final key = env['IOS_SCREENSHOT_DART_RLOCATION'];
+  final Map<String, String> env = environment ?? Platform.environment;
+  final String? key = env['IOS_SCREENSHOT_DART_RLOCATION'];
   if (key == null || key.isEmpty) {
     throw StateError(
       'IOS_SCREENSHOT_DART_RLOCATION is not set; '
@@ -434,7 +450,8 @@ String _dartBinary([Map<String, String>? environment]) {
 
 /// The `python_host.dart` source the nested driver imports.
 String _libSource() {
-  final key = Platform.environment['IOS_SCREENSHOT_PYTHON_HOST_RLOCATION'];
+  final String? key =
+      Platform.environment['IOS_SCREENSHOT_PYTHON_HOST_RLOCATION'];
   if (key == null || key.isEmpty) {
     throw StateError(
       'IOS_SCREENSHOT_PYTHON_HOST_RLOCATION is not set; '
@@ -448,12 +465,13 @@ String _libSource() {
 void _dartBinaryTests() {
   group('_dartBinary', () {
     test('resolves Dart SDK executable from runfiles without PATH', () async {
-      final rlocation = Platform.environment['IOS_SCREENSHOT_DART_RLOCATION'];
+      final String? rlocation =
+          Platform.environment['IOS_SCREENSHOT_DART_RLOCATION'];
       expect(rlocation, isNotNull);
       expect(rlocation, isNotEmpty);
-      final dartPath = _dartBinary();
+      final String dartPath = _dartBinary();
       expect(File(dartPath).existsSync(), isTrue);
-      final result = await Process.run(
+      final ProcessResult result = await Process.run(
         dartPath,
         ['--version'],
         environment: {'PATH': ''},
@@ -464,13 +482,13 @@ void _dartBinaryTests() {
     });
 
     test('throws StateError when rlocation variable is absent', () {
-      final tempDir = _createDummyDartDir();
+      final Directory tempDir = _createDummyDartDir();
       addTearDown(() => tempDir.deleteSync(recursive: true));
-      final legacyDartKey = ['RULES', 'DART', 'DART'].join('_');
+      final String legacyDartKey = ['RULES', 'DART', 'DART'].join('_');
       final dummyDart = Platform.isWindows
           ? '${tempDir.path}/dart.exe'
           : '${tempDir.path}/dart';
-      final env = {
+      final Map<String, String> env = {
         legacyDartKey: dummyDart,
         'PATH': tempDir.path,
       };
@@ -490,13 +508,13 @@ void _dartBinaryTests() {
     });
 
     test('throws StateError when rlocation variable is empty', () {
-      final tempDir = _createDummyDartDir();
+      final Directory tempDir = _createDummyDartDir();
       addTearDown(() => tempDir.deleteSync(recursive: true));
-      final legacyDartKey = ['RULES', 'DART', 'DART'].join('_');
+      final String legacyDartKey = ['RULES', 'DART', 'DART'].join('_');
       final dummyDart = Platform.isWindows
           ? '${tempDir.path}/dart.exe'
           : '${tempDir.path}/dart';
-      final env = {
+      final Map<String, String> env = {
         'IOS_SCREENSHOT_DART_RLOCATION': '',
         legacyDartKey: dummyDart,
         'PATH': tempDir.path,
@@ -520,7 +538,7 @@ void _dartBinaryTests() {
 
 /// Creates a temporary directory containing dummy `dart` executables.
 Directory _createDummyDartDir() {
-  final tempDir = Directory.systemTemp.createTempSync('dart_dummy_');
+  final Directory tempDir = Directory.systemTemp.createTempSync('dart_dummy_');
   File('${tempDir.path}/dart').writeAsStringSync('');
   File('${tempDir.path}/dart.exe').writeAsStringSync('');
   if (!Platform.isWindows) {

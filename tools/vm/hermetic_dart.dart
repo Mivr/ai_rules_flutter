@@ -15,8 +15,8 @@ import 'dart:io';
 
 /// The version string of the SDK `@rules_dart//dart` resolves to, e.g. `3.13.2`.
 Future<String> hermeticDartVersion() async {
-  final workspace = await _workspace();
-  final result = await Process.run('bazel', [
+  final String workspace = await _workspace();
+  final ProcessResult result = await Process.run('bazel', [
     'run',
     '--ui_event_filters=-info,-stdout',
     '--noshow_progress',
@@ -35,7 +35,7 @@ Future<String> hermeticDartVersion() async {
   // `dart --version` has written to stdout on some SDKs and stderr on others,
   // and which one is not worth depending on.
   final output = '${result.stdout}\n${result.stderr}';
-  final match = RegExp(
+  final RegExpMatch? match = RegExp(
     r'Dart SDK version:\s*(\d+\.\d+\.\d+)',
   ).firstMatch(output);
   if (match == null) {
@@ -53,9 +53,12 @@ Future<String> hermeticDartVersion() async {
 /// from `Directory.current`, which finds the wrong root inside a nested
 /// workspace and silently uses it.
 Future<String> _workspace() async {
-  final fromBazel = Platform.environment['BUILD_WORKSPACE_DIRECTORY'];
+  final String? fromBazel = Platform.environment['BUILD_WORKSPACE_DIRECTORY'];
   if (fromBazel != null && fromBazel.isNotEmpty) return fromBazel;
-  final result = await Process.run('bazel', ['info', 'workspace']);
+  final ProcessResult result = await Process.run('bazel', [
+    'info',
+    'workspace',
+  ]);
   if (result.exitCode != 0) {
     throw Exception(
       'not inside a Bazel workspace: `bazel info workspace` exited '

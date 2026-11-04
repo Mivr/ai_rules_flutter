@@ -43,10 +43,13 @@ void _collect(List<_Entry> entries, Directory root, String rel) {
   switch (FileSystemEntity.typeSync(path, followLinks: false)) {
     case FileSystemEntityType.directory:
       entries.add(_Entry('$rel/', Uint8List(0), true));
-      final children = Directory(path).listSync(followLinks: false)
-        ..sort((a, b) => a.path.compareTo(b.path));
+      final List<FileSystemEntity> children = Directory(
+        path,
+      ).listSync(followLinks: false)..sort((a, b) => a.path.compareTo(b.path));
       for (final child in children) {
-        final name = child.uri.pathSegments.lastWhere((s) => s.isNotEmpty);
+        final String name = child.uri.pathSegments.lastWhere(
+          (s) => s.isNotEmpty,
+        );
         _collect(entries, root, '$rel/$name');
       }
     case FileSystemEntityType.file:
@@ -81,9 +84,9 @@ Uint8List _encodeZip(List<_Entry> entries, {required bool deflate}) {
   var offset = 0;
   for (final entry in entries) {
     final name = Uint8List.fromList(entry.name.codeUnits);
-    final crc = entry.isDirectory ? 0 : _crc32(entry.data);
+    final int crc = entry.isDirectory ? 0 : _crc32(entry.data);
     var method = 0;
-    var payload = entry.data;
+    Uint8List payload = entry.data;
     if (deflate && !entry.isDirectory && entry.data.isNotEmpty) {
       final compressed = Uint8List.fromList(
         ZLibEncoder(raw: true).convert(entry.data),
@@ -106,7 +109,7 @@ Uint8List _encodeZip(List<_Entry> entries, {required bool deflate}) {
       offsets.last,
     );
   }
-  final centralBytes = central.takeBytes();
+  final Uint8List centralBytes = central.takeBytes();
   final end = ByteData(22)
     ..setUint32(0, 0x06054b50, Endian.little)
     ..setUint16(8, entries.length, Endian.little)
@@ -156,7 +159,9 @@ void _writeCentral(
   bool isDirectory,
   int localOffset,
 ) {
-  final externalAttrs = isDirectory ? (0x41ED << 16) | 0x10 : (0x81A4 << 16);
+  final int externalAttrs = isDirectory
+      ? (0x41ED << 16) | 0x10
+      : (0x81A4 << 16);
   final header = ByteData(46 + name.length)
     ..setUint32(0, 0x02014b50, Endian.little)
     ..setUint16(4, (3 << 8) | 20, Endian.little)
@@ -209,8 +214,8 @@ Future<void> extractZip({
   required String zipPath,
   required Directory destDir,
 }) async {
-  final bytes = await File(zipPath).readAsBytes();
-  final entries = _readAllEntries(bytes, zipPath);
+  final Uint8List bytes = await File(zipPath).readAsBytes();
+  final List<_ReadEntry> entries = _readAllEntries(bytes, zipPath);
   for (final entry in entries) {
     final path = '${destDir.path}/${entry.name}';
     if (entry.isDirectory) {
@@ -235,9 +240,12 @@ Future<void> extractZip({
 Future<void> _restoreMode(Directory destDir, _ReadEntry entry) async {
   if (entry.isSymlink || (entry.unixMode & 0xF000) == 0) return;
   final path = '${destDir.path}/${entry.name}';
-  final wanted = entry.unixMode & 0xFFF;
+  final int wanted = entry.unixMode & 0xFFF;
   if ((FileStat.statSync(path).mode & 0xFFF) == wanted) return;
-  final r = await Process.run('chmod', [wanted.toRadixString(8), path]);
+  final ProcessResult r = await Process.run('chmod', [
+    wanted.toRadixString(8),
+    path,
+  ]);
   if (r.exitCode != 0) {
     throw StateError('chmod $path failed: ${r.stderr}');
   }
@@ -245,10 +253,10 @@ Future<void> _restoreMode(Directory destDir, _ReadEntry entry) async {
 
 List<_ReadEntry> _readAllEntries(Uint8List bytes, String zipPath) {
   final data = ByteData.sublistView(bytes);
-  final tailStart =
+  final int tailStart =
       bytes.length - (bytes.length < 65558 ? bytes.length : 65558);
   var eocd = -1;
-  for (var i = bytes.length - 22; i >= tailStart; i--) {
+  for (int i = bytes.length - 22; i >= tailStart; i--) {
     if (data.getUint32(i, Endian.little) == 0x06054b50) {
       eocd = i;
       break;
@@ -263,10 +271,10 @@ List<_ReadEntry> _readAllEntries(Uint8List bytes, String zipPath) {
       'Multi-disk zip archives are not supported: $zipPath',
     );
   }
-  final thisDisk = data.getUint16(eocd + 8, Endian.little);
-  final total = data.getUint16(eocd + 10, Endian.little);
-  final cdSize = data.getUint32(eocd + 12, Endian.little);
-  final cdOffset = data.getUint32(eocd + 16, Endian.little);
+  final int thisDisk = data.getUint16(eocd + 8, Endian.little);
+  final int total = data.getUint16(eocd + 10, Endian.little);
+  final int cdSize = data.getUint32(eocd + 12, Endian.little);
+  final int cdOffset = data.getUint32(eocd + 16, Endian.little);
   if (thisDisk == 0xFFFF ||
       total == 0xFFFF ||
       cdSize == 0xFFFFFFFF ||
@@ -294,17 +302,17 @@ int _readCentralEntry(
   if (data.getUint32(at, Endian.little) != 0x02014b50) {
     throw FormatException('Corrupt zip central directory in $zipPath');
   }
-  final flags = data.getUint16(at + 8, Endian.little);
-  final method = data.getUint16(at + 10, Endian.little);
-  final crc = data.getUint32(at + 16, Endian.little);
-  final compSize = data.getUint32(at + 20, Endian.little);
-  final uncompSize = data.getUint32(at + 24, Endian.little);
-  final nameLen = data.getUint16(at + 28, Endian.little);
-  final extraLen = data.getUint16(at + 30, Endian.little);
-  final commentLen = data.getUint16(at + 32, Endian.little);
-  final externalAttrs = data.getUint32(at + 38, Endian.little);
-  final localOffset = data.getUint32(at + 42, Endian.little);
-  final name = utf8.decode(bytes.sublist(at + 46, at + 46 + nameLen));
+  final int flags = data.getUint16(at + 8, Endian.little);
+  final int method = data.getUint16(at + 10, Endian.little);
+  final int crc = data.getUint32(at + 16, Endian.little);
+  final int compSize = data.getUint32(at + 20, Endian.little);
+  final int uncompSize = data.getUint32(at + 24, Endian.little);
+  final int nameLen = data.getUint16(at + 28, Endian.little);
+  final int extraLen = data.getUint16(at + 30, Endian.little);
+  final int commentLen = data.getUint16(at + 32, Endian.little);
+  final int externalAttrs = data.getUint32(at + 38, Endian.little);
+  final int localOffset = data.getUint32(at + 42, Endian.little);
+  final String name = utf8.decode(bytes.sublist(at + 46, at + 46 + nameLen));
   if (flags & 0x1 != 0) {
     throw FormatException(
       'Encrypted zip entries are not supported: $name in $zipPath',
@@ -331,9 +339,9 @@ int _readCentralEntry(
       'Refusing to extract absolute or parent path: $name in $zipPath',
     );
   }
-  final unixMode = (externalAttrs >> 16) & 0xFFFF;
-  final kind = unixMode & 0xF000;
-  final isDirectory = name.endsWith('/') || kind == 0x4000;
+  final int unixMode = (externalAttrs >> 16) & 0xFFFF;
+  final int kind = unixMode & 0xF000;
+  final bool isDirectory = name.endsWith('/') || kind == 0x4000;
   final isSymlink = kind == 0xA000;
   if (!isDirectory && !isSymlink && kind != 0x8000 && kind != 0) {
     throw FormatException('Unsupported file type for $name in $zipPath');
@@ -377,11 +385,11 @@ Uint8List _readEntryPayload(
   if (data.getUint16(localOffset + 8, Endian.little) != method) {
     throw FormatException('Corrupt zip local header for $name in $zipPath');
   }
-  final skip =
+  final int skip =
       data.getUint16(localOffset + 26, Endian.little) +
       data.getUint16(localOffset + 28, Endian.little);
-  final start = localOffset + 30 + skip;
-  final stored = bytes.sublist(start, start + compSize);
+  final int start = localOffset + 30 + skip;
+  final Uint8List stored = bytes.sublist(start, start + compSize);
   final Uint8List out = switch (method) {
     0 => stored,
     _ => Uint8List.fromList(ZLibDecoder(raw: true).convert(stored)),

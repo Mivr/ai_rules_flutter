@@ -6,9 +6,9 @@ import 'package:flutter_bazel_dev_tool/command_failure.dart';
 import 'package:flutter_bazel_dev_tool/dev_tool_exception.dart';
 import 'package:flutter_bazel_dev_tool/device.dart';
 import 'package:flutter_bazel_dev_tool/device_desktop.dart';
-import 'package:flutter_bazel_dev_tool/logging.dart';
 import 'package:flutter_bazel_dev_tool/session.dart';
 import 'package:flutter_bazel_dev_tool/session_host.dart';
+import 'package:logging/logging.dart';
 import 'package:test/test.dart';
 
 import 'fakes.dart';
@@ -27,15 +27,15 @@ DeviceSession newSession(String appId) => DeviceSession(
 void main() {
   group('SessionHost.findSession', () {
     test('finds a session by appId', () {
-      final host = newHost();
-      final a = newSession('a');
+      final SessionHost host = newHost();
+      final DeviceSession a = newSession('a');
       host.sessions.addAll([a, newSession('b')]);
 
       expect(host.findSession('a'), same(a));
     });
 
     test('is null for an unknown appId', () {
-      final host = newHost();
+      final SessionHost host = newHost();
       host.sessions.add(newSession('a'));
 
       expect(host.findSession('nope'), isNull);
@@ -46,7 +46,7 @@ void main() {
     // of them" — this returning the first session instead would silently make
     // every unaddressed command act on one device in a multi-device run.
     test('is null when no appId was given', () {
-      final host = newHost();
+      final SessionHost host = newHost();
       host.sessions.add(newSession('a'));
 
       expect(host.findSession(null), isNull);
@@ -55,15 +55,15 @@ void main() {
 
   group('SessionHost.targetSessions', () {
     test('a named appId targets just that session', () {
-      final host = newHost();
-      final b = newSession('b');
+      final SessionHost host = newHost();
+      final DeviceSession b = newSession('b');
       host.sessions.addAll([newSession('a'), b]);
 
       expect(host.targetSessions({'appId': 'b'}), [same(b)]);
     });
 
     test('no appId targets every session', () {
-      final host = newHost();
+      final SessionHost host = newHost();
       host.sessions.addAll([newSession('a'), newSession('b')]);
 
       expect(host.targetSessions({}), hasLength(2));
@@ -72,7 +72,7 @@ void main() {
     // Empty, not "all" — the caller distinguishes the two to answer `Unknown
     // appId` rather than quietly reloading every device the user did not name.
     test('an unknown appId targets nothing', () {
-      final host = newHost();
+      final SessionHost host = newHost();
       host.sessions.add(newSession('a'));
 
       expect(host.targetSessions({'appId': 'ghost'}), isEmpty);
@@ -81,7 +81,7 @@ void main() {
 
   group('SessionHost.performCleanup', () {
     test('runs the registered disposers and signals shutdown', () async {
-      final host = newHost();
+      final SessionHost host = newHost();
       final disposed = <String>[];
       await host.teardown.add(() async => disposed.add('first'));
       await host.teardown.add(() async => disposed.add('second'));
@@ -94,7 +94,7 @@ void main() {
     });
 
     test('is safe to run twice', () async {
-      final host = newHost();
+      final SessionHost host = newHost();
       var disposals = 0;
       await host.teardown.add(() async => disposals++);
 
@@ -109,7 +109,7 @@ void main() {
     // answering `app.started` reaches cleanup while setup is still building
     // things. A resource registered after that must not outlive the run.
     test('a disposer registered after cleanup runs immediately', () async {
-      final host = newHost();
+      final SessionHost host = newHost();
       await host.performCleanup();
 
       var disposed = false;
@@ -122,7 +122,7 @@ void main() {
     // disposer leaves a run nothing can stop — including the `daemon.shutdown`
     // that just answered with a 500.
     test('signals the session loop even when a disposer throws', () async {
-      final host = newHost();
+      final SessionHost host = newHost();
       await host.teardown.add(() async => throw StateError('adb went away'));
 
       await expectLater(host.performCleanup(), throwsStateError);
@@ -151,12 +151,15 @@ void main() {
         ),
       );
       await host.teardown.add(() async => order.add('app stopped'));
-      final running = host.bazel.run([
+      final Future<ProcessResult> running = host.bazel.run([
         'build',
         '//:app',
       ], workingDirectory: '/ws');
       await pumpEventQueue();
-      final cancelled = expectLater(running, throwsA(isA<BazelCancelled>()));
+      final Future<dynamic> cancelled = expectLater(
+        running,
+        throwsA(isA<BazelCancelled>()),
+      );
 
       await host.performCleanup();
 
@@ -172,7 +175,7 @@ void main() {
 
   group('SessionHost.fail', () {
     test('records the failure and tears the session down', () async {
-      final host = newHost();
+      final SessionHost host = newHost();
       var disposed = false;
       await host.teardown.add(() async => disposed = true);
 
@@ -187,7 +190,7 @@ void main() {
     // service dropping because the run is already coming down, say. Reporting
     // the last one would name the symptom and lose the cause.
     test('keeps the first failure, not the last', () async {
-      final host = newHost();
+      final SessionHost host = newHost();
 
       host.fail(DevToolException('cause'));
       host.fail(DevToolException('consequence'));
@@ -201,7 +204,7 @@ void main() {
     // Upstream's contract: it stops the app it names, so a client that names
     // one app of two must not lose both.
     test('app.stop needs to be told which app', () async {
-      final host = newHost();
+      final SessionHost host = newHost();
       host.registerLifecycleCommands();
 
       await expectLater(
@@ -219,7 +222,7 @@ void main() {
     });
 
     test('app.stop refuses an app this run has never heard of', () async {
-      final host = newHost();
+      final SessionHost host = newHost();
       host.registerLifecycleCommands();
       host.sessions.add(newSession('a'));
 
@@ -238,15 +241,18 @@ void main() {
     // Stopping an app is not ending the run: the run ends when its last app
     // does, which the session loop decides — not this handler.
     test('app.stop stops the named app and answers for it', () async {
-      final host = newHost();
+      final SessionHost host = newHost();
       host.registerLifecycleCommands();
       host.sessions.add(newSession('a'));
       var toreDown = false;
       await host.teardown.add(() async => toreDown = true);
 
-      final response = await host.commandRunner.run('app.stop', {
-        'appId': 'a',
-      });
+      final Map<String, dynamic> response = await host.commandRunner.run(
+        'app.stop',
+        {
+          'appId': 'a',
+        },
+      );
 
       expect(response, {'message': 'stopped', 'appId': 'a'});
       expect(
@@ -257,10 +263,13 @@ void main() {
     });
 
     test('daemon.shutdown tears down and answers', () async {
-      final host = newHost();
+      final SessionHost host = newHost();
       host.registerLifecycleCommands();
 
-      final response = await host.commandRunner.run('daemon.shutdown', {});
+      final Map<String, dynamic> response = await host.commandRunner.run(
+        'daemon.shutdown',
+        {},
+      );
 
       expect(response, {'message': 'shutdown'});
       expect(host.shutdownRequested.isCompleted, isTrue);
@@ -273,7 +282,7 @@ void main() {
     test(
       'the app.* agent surface is not part of the unconditional surface',
       () {
-        final host = newHost();
+        final SessionHost host = newHost();
         host.registerLifecycleCommands();
 
         expect(host.commandRunner.hasCommand('app.getText'), isFalse);
@@ -292,7 +301,7 @@ void main() {
     // commands are registered — so it is not here, and a run that cannot
     // answer it never offers it.
     test('app.buildInfo is not part of the unconditional surface', () {
-      final host = newHost();
+      final SessionHost host = newHost();
       host.registerLifecycleCommands();
 
       expect(host.commandRunner.hasCommand('app.buildInfo'), isFalse);
@@ -306,7 +315,7 @@ void main() {
     // host knows nothing about, and registering a stub would answer a client
     // that should have been told to wait.
     test('reload and restart are left to the pipeline', () {
-      final host = newHost();
+      final SessionHost host = newHost();
       host.registerLifecycleCommands();
 
       expect(host.commandRunner.hasCommand('app.hotReload'), isFalse);
@@ -321,26 +330,28 @@ void main() {
     // header; the channel wants a query parameter and answers a header with
     // `Invalid or missing token`, saying nothing about where it looked.
     test('every endpoint carries a URL that works, token included', () async {
-      final host = newHost();
+      final SessionHost host = newHost();
       final logger = Logger('test.session_host');
       final records = <Map<String, Object?>>[];
-      final subscription = logger.onRecord.listen((r) {
-        if (r.object case final Map<String, Object?> fields) {
-          records.add(fields);
-        }
-      });
+      final StreamSubscription<LogRecord> subscription = logger.onRecord.listen(
+        (r) {
+          if (r.object case final Map<String, Object?> fields) {
+            records.add(fields);
+          }
+        },
+      );
       addTearDown(subscription.cancel);
       Logger.root.level = Level.ALL;
 
       await host.startHttpChannel();
       addTearDown(host.closeTransports);
 
-      final record = records.singleWhere(
+      final Map<String, Object?> record = records.singleWhere(
         (r) => r['message'] == 'http_control_channel',
       );
       final token = record['token']! as String;
       expect(record['tokenParam'], 'token');
-      final endpoints = (record['endpoints']! as List)
+      final List<Map<String, String>> endpoints = (record['endpoints']! as List)
           .cast<Map<String, String>>();
       expect(endpoints, isNotEmpty);
       final base = host.httpChannel!.uri.toString();
@@ -372,11 +383,12 @@ void main() {
         logger: Logger('test.session_host'),
       );
       final records = <Map<String, Object?>>[];
-      final subscription = Logger('test.session_host').onRecord.listen((r) {
-        if (r.object case final Map<String, Object?> fields) {
-          records.add(fields);
-        }
-      });
+      final StreamSubscription<LogRecord> subscription =
+          Logger('test.session_host').onRecord.listen((r) {
+            if (r.object case final Map<String, Object?> fields) {
+              records.add(fields);
+            }
+          });
       addTearDown(subscription.cancel);
       Logger.root.level = Level.ALL;
 
@@ -389,20 +401,20 @@ void main() {
     }
 
     test('completes the banner\'s {appId} with a URL that works', () async {
-      final records = await recordsOf(
+      final List<Map<String, Object?>> records = await recordsOf(
         (host) async => host.announceSession('___app_ios_device_iOS__1234_'),
         isMachine: false,
         withChannel: true,
       );
 
-      final banner = records.singleWhere(
+      final Map<String, Object?> banner = records.singleWhere(
         (r) => r['message'] == 'http_control_channel',
       );
-      final announced = records.singleWhere(
+      final Map<String, Object?> announced = records.singleWhere(
         (r) => r['message'] == 'session_ready',
       );
       expect(announced['appId'], '___app_ios_device_iOS__1234_');
-      final logs = (banner['endpoints']! as List)
+      final Map<String, String> logs = (banner['endpoints']! as List)
           .cast<Map<String, String>>()
           .singleWhere((e) => e['path']!.endsWith('/logs'));
       expect(
@@ -422,11 +434,12 @@ void main() {
         logger: Logger('test.session_host'),
       );
       final records = <Map<String, Object?>>[];
-      final subscription = Logger('test.session_host').onRecord.listen((r) {
-        if (r.object case final Map<String, Object?> fields) {
-          records.add(fields);
-        }
-      });
+      final StreamSubscription<LogRecord> subscription =
+          Logger('test.session_host').onRecord.listen((r) {
+            if (r.object case final Map<String, Object?> fields) {
+              records.add(fields);
+            }
+          });
       addTearDown(subscription.cancel);
       Logger.root.level = Level.ALL;
 
@@ -441,7 +454,7 @@ void main() {
       await host.startHttpChannel();
       addTearDown(host.closeTransports);
 
-      final announced = records.singleWhere(
+      final Map<String, Object?> announced = records.singleWhere(
         (r) => r['message'] == 'session_ready',
       );
       expect(announced['appId'], 'launched-first');
@@ -450,7 +463,7 @@ void main() {
     // `app.started` already carries it there, and this channel's whole
     // audience is a program that read the event.
     test('says nothing under --machine', () async {
-      final records = await recordsOf(
+      final List<Map<String, Object?>> records = await recordsOf(
         (host) async => host.announceSession('a'),
         isMachine: true,
         withChannel: true,
@@ -462,7 +475,7 @@ void main() {
     // Without the channel the id addresses nothing: there are no per-session
     // endpoints to complete.
     test('says nothing without an HTTP channel', () async {
-      final records = await recordsOf(
+      final List<Map<String, Object?>> records = await recordsOf(
         (host) async => host.announceSession('a'),
         isMachine: false,
         withChannel: false,
@@ -474,9 +487,9 @@ void main() {
 
   group('SessionHost.closeTransports', () {
     test('stops the HTTP channel it started', () async {
-      final host = newHost();
+      final SessionHost host = newHost();
       await host.startHttpChannel();
-      final uri = host.httpChannel!.uri;
+      final Uri uri = host.httpChannel!.uri;
 
       await host.closeTransports();
 
@@ -489,10 +502,10 @@ void main() {
       // left one listening would still pass. Discovered rather than named for
       // the same reason the channel discovers them — a host with no IPv6
       // cannot assign ::1, and asking for it there reports on the machine.
-      final loopbacks = await assignableLoopbacks();
+      final List<InternetAddress> loopbacks = await assignableLoopbacks();
       expect(loopbacks, isNotEmpty, reason: 'there is a family to rebind on');
       for (final address in loopbacks) {
-        final rebound = await HttpServer.bind(address, uri.port);
+        final HttpServer rebound = await HttpServer.bind(address, uri.port);
         expect(
           rebound.port,
           uri.port,
@@ -503,7 +516,7 @@ void main() {
     });
 
     test('is safe with no HTTP channel started', () async {
-      final host = newHost();
+      final SessionHost host = newHost();
 
       await expectLater(host.closeTransports(), completes);
     });
@@ -516,7 +529,7 @@ void main() {
   // and every socket it held will still sit there until it is killed.
   group('SessionHost shutdown signals', () {
     test('closeTransports stops listening for them', () async {
-      final host = newHost();
+      final SessionHost host = newHost();
       final signals = StreamController<ProcessSignal>();
       host.listenForShutdownSignals(
         signals: [signals.stream],
@@ -533,7 +546,7 @@ void main() {
     // handler, so it cancels the very subscription it is running on. The exit
     // is what comes after that cancellation, and it still has to happen.
     test('a signalled shutdown still exits after cancelling itself', () async {
-      final host = newHost();
+      final SessionHost host = newHost();
       final signals = StreamController<ProcessSignal>();
       final exited = Completer<int>();
       host.listenForShutdownSignals(
@@ -554,7 +567,7 @@ void main() {
     // itself. Two streams because that is how the signals actually arrive —
     // `sigint.watch()` and `sigterm.watch()` are separate streams.
     test('a second signal on another stream does not re-run cleanup', () async {
-      final host = newHost();
+      final SessionHost host = newHost();
       final sigint = StreamController<ProcessSignal>();
       final sigterm = StreamController<ProcessSignal>();
       final exitCodes = <int>[];
@@ -574,7 +587,7 @@ void main() {
     });
 
     test('is safe to close with no signals installed', () async {
-      final host = newHost();
+      final SessionHost host = newHost();
 
       await expectLater(host.closeTransports(), completes);
     });

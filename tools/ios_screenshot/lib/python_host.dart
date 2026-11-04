@@ -6,6 +6,12 @@
 /// free (`dart:io` only) so the helpers stay standalone `dart_binary` targets.
 import 'dart:io';
 
+typedef _Launch = ({
+  List<String> arguments,
+  Map<String, String> environment,
+  String program,
+});
+
 /// Names tried on PATH, most preferred first. `python` is a fallback for
 /// machines where only that name exists (notably Windows); `python3` stays
 /// first so a Python 2 `python` elsewhere on PATH never shadows it.
@@ -27,12 +33,12 @@ List<String> _candidates(String dir, String name) {
 /// a bare name handed to the shell), mirroring the `HostTool` lookup the
 /// dev tool uses for `adb` and friends: absence is reported, not guessed.
 String? findHostPython() {
-  final path = Platform.environment['PATH'] ?? '';
+  final String path = Platform.environment['PATH'] ?? '';
   final separator = Platform.isWindows ? ';' : ':';
-  for (final name in _pythonNames) {
-    for (final dir in path.split(separator)) {
+  for (final String name in _pythonNames) {
+    for (final String dir in path.split(separator)) {
       if (dir.isEmpty) continue;
-      for (final candidate in _candidates(dir, name)) {
+      for (final String candidate in _candidates(dir, name)) {
         if (FileSystemEntity.isFileSync(candidate)) return candidate;
       }
     }
@@ -42,7 +48,7 @@ String? findHostPython() {
 
 /// Diagnostic for a missing interpreter, naming what to install.
 String missingPythonMessage({required String purpose}) {
-  final names = _pythonNames.join(' or ');
+  final String names = _pythonNames.join(' or ');
   return 'Could not find $names on PATH, which is needed for $purpose.\n'
       'Install Python 3 (https://www.python.org/downloads/) and pymobiledevice3:\n'
       '  python3 -m pip install pymobiledevice3';
@@ -135,7 +141,7 @@ Map<String, String> guardedPythonEnvironment([
 ]) {
   final env = Map<String, String>.from(Platform.environment);
   if (overrides != null) env.addAll(overrides);
-  for (final name in _droppedPythonVariables.keys) {
+  for (final String name in _droppedPythonVariables.keys) {
     env.remove(name);
   }
   env['PYTHONSAFEPATH'] = '1';
@@ -147,7 +153,7 @@ Map<String, String> guardedPythonEnvironment([
 bool isRoot() {
   if (Platform.isWindows) return false;
   try {
-    final result = Process.runSync('id', ['-u']);
+    final ProcessResult result = Process.runSync('id', ['-u']);
     return result.exitCode == 0 && (result.stdout as String).trim() == '0';
   } on ProcessException {
     return false;
@@ -172,7 +178,7 @@ guardedPythonLaunch(
   required bool interactive,
   Map<String, String>? environment,
 }) {
-  final guarded = guardPythonProgram(program);
+  final String guarded = guardPythonProgram(program);
   return (
     arguments: [
       if (interactive) '-c' else '-',
@@ -199,13 +205,13 @@ Future<int> runPythonProgram(
   String? workingDirectory,
   Map<String, String>? environment,
 }) async {
-  final launch = guardedPythonLaunch(
+  final _Launch launch = guardedPythonLaunch(
     program,
     args,
     interactive: false,
     environment: environment,
   );
-  final process = await Process.start(
+  final Process process = await Process.start(
     python,
     launch.arguments,
     workingDirectory: workingDirectory,
@@ -222,7 +228,7 @@ Future<int> runPythonProgram(
       stderrBytes.addAll(chunk);
     }).asFuture<void>(),
   ]);
-  final exitCode = await process.exitCode;
+  final int exitCode = await process.exitCode;
   if (exitCode != 0) {
     final stderrText = String.fromCharCodes(stderrBytes);
     if (stderrText.contains('ModuleNotFoundError') &&
@@ -247,13 +253,13 @@ Future<int> runPythonProgramInteractive(
   String? workingDirectory,
   Map<String, String>? environment,
 }) async {
-  final launch = guardedPythonLaunch(
+  final _Launch launch = guardedPythonLaunch(
     program,
     args,
     interactive: true,
     environment: environment,
   );
-  final process = await Process.start(
+  final Process process = await Process.start(
     python,
     launch.arguments,
     mode: ProcessStartMode.inheritStdio,

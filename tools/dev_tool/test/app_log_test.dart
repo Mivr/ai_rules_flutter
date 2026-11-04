@@ -148,7 +148,7 @@ void main() {
       s.add('a');
       s.add('b');
 
-      final page = s.read(0);
+      final LogPage page = s.read(0);
       expect(page.lines.map((l) => l.text), ['a', 'b']);
       expect(page.nextCursor, 2);
       expect(page.missed, 0);
@@ -160,7 +160,7 @@ void main() {
         s.add('line$i');
       }
 
-      final page = s.read(2);
+      final LogPage page = s.read(2);
       expect(page.lines.map((l) => l.text), ['line2', 'line3']);
       expect(page.nextCursor, 4);
     });
@@ -170,10 +170,10 @@ void main() {
       s.add('a');
       s.add('b');
 
-      final first = s.read(0);
+      final LogPage first = s.read(0);
       s.add('c');
       s.add('d');
-      final second = s.read(first.nextCursor);
+      final LogPage second = s.read(first.nextCursor);
 
       expect(first.lines.map((l) => l.text), ['a', 'b']);
       expect(second.lines.map((l) => l.text), ['c', 'd']);
@@ -184,7 +184,7 @@ void main() {
       final s = AppLogStream();
       s.add('a');
 
-      final page = s.read(s.nextCursor);
+      final LogPage page = s.read(s.nextCursor);
       expect(page.lines, isEmpty);
       expect(page.nextCursor, 1);
       expect(page.missed, 0);
@@ -194,14 +194,14 @@ void main() {
       final s = AppLogStream();
       s.add('a');
 
-      final page = s.read(99);
+      final LogPage page = s.read(99);
       expect(page.lines, isEmpty);
       expect(page.nextCursor, 1);
     });
 
     test('read(0) on an empty stream is empty', () {
       final s = AppLogStream();
-      final page = s.read(0);
+      final LogPage page = s.read(0);
       expect(page.lines, isEmpty);
       expect(page.nextCursor, 0);
       expect(page.missed, 0);
@@ -215,7 +215,7 @@ void main() {
         s.add('line$i');
       }
 
-      final page = s.read(-3);
+      final LogPage page = s.read(-3);
       expect(page.lines.map((l) => l.text), ['line7', 'line8', 'line9']);
       expect(page.nextCursor, 10);
       expect(page.missed, 0);
@@ -229,7 +229,7 @@ void main() {
         s.add('b');
         s.add('c');
 
-        final page = s.read(-10);
+        final LogPage page = s.read(-10);
         expect(page.lines.map((l) => l.text), ['a', 'b', 'c']);
         expect(page.nextCursor, 3);
         expect(page.missed, 0);
@@ -238,7 +238,7 @@ void main() {
 
     test('read(-n) on an empty stream is empty', () {
       final s = AppLogStream();
-      final page = s.read(-50);
+      final LogPage page = s.read(-50);
       expect(page.lines, isEmpty);
       expect(page.nextCursor, 0);
     });
@@ -249,7 +249,7 @@ void main() {
         s.add('line$i');
       }
 
-      final page = s.read(-2);
+      final LogPage page = s.read(-2);
       expect(page.lines.map((l) => l.text), ['line8', 'line9']);
       expect(page.missed, 0);
       // ...even though the stream as a whole has dropped lines.
@@ -273,7 +273,7 @@ void main() {
       }
 
       // Lines 0-2 were evicted; asking from 0 should surface the gap.
-      final page = s.read(0);
+      final LogPage page = s.read(0);
       expect(page.lines.map((l) => l.text), ['line3', 'line4', 'line5']);
       expect(page.missed, 3);
       expect(page.nextCursor, 6);
@@ -286,7 +286,7 @@ void main() {
       }
 
       // Cursor 2 is one line behind the oldest retained (3).
-      final page = s.read(2);
+      final LogPage page = s.read(2);
       expect(page.missed, 1);
       expect(page.lines.map((l) => l.text), ['line3', 'line4', 'line5']);
     });
@@ -308,7 +308,7 @@ void main() {
         s.add('line$i');
       }
 
-      final page = s.read(0, limit: 4);
+      final LogPage page = s.read(0, limit: 4);
       expect(page.lines.map((l) => l.text), [
         'line0',
         'line1',
@@ -317,7 +317,7 @@ void main() {
       ]);
       expect(page.nextCursor, 4);
 
-      final next = s.read(page.nextCursor, limit: 4);
+      final LogPage next = s.read(page.nextCursor, limit: 4);
       expect(next.lines.map((l) => l.text), [
         'line4',
         'line5',
@@ -334,7 +334,7 @@ void main() {
 
       // Ask for the last 6 but cap at 2: the cap must not hand back the
       // oldest of the tail window and call it "the tail".
-      final page = s.read(-6, limit: 2);
+      final LogPage page = s.read(-6, limit: 2);
       expect(page.lines.map((l) => l.text), ['line8', 'line9']);
       expect(page.nextCursor, 10);
     });
@@ -345,7 +345,7 @@ void main() {
         s.add('line$i');
       }
 
-      final page = s.read(0, limit: 1000000);
+      final LogPage page = s.read(0, limit: 1000000);
       expect(page.lines, hasLength(10));
     });
   });
@@ -420,7 +420,7 @@ void main() {
       p.emitStderr('boom\n');
       await pumpEventQueue();
 
-      final line = s.read(0).lines.single;
+      final AppLogLine line = s.read(0).lines.single;
       expect(line.text, 'boom');
       expect(line.isError, isTrue);
     });
@@ -493,7 +493,7 @@ void main() {
     test('reports done once the process output ends', () async {
       final p = FakeProcess();
       final s = AppLogStream();
-      final pump = pumpProcessLines(p, s);
+      final AppLogPump pump = pumpProcessLines(p, s);
       var done = false;
       unawaited(pump.done.then((_) => done = true));
 
@@ -533,7 +533,7 @@ void main() {
     test('is not done while only one of the two channels has ended', () async {
       final p = FakeProcess();
       final s = AppLogStream();
-      final pump = pumpProcessLines(p, s);
+      final AppLogPump pump = pumpProcessLines(p, s);
       var done = false;
       unawaited(pump.done.then((_) => done = true));
 
@@ -552,7 +552,7 @@ void main() {
       () async {
         final p = FakeProcess();
         final s = AppLogStream();
-        final pump = pumpProcessLines(p, s);
+        final AppLogPump pump = pumpProcessLines(p, s);
         s.closeWhen([pump.done]);
 
         await pump.dispose();
@@ -565,7 +565,7 @@ void main() {
     test('dispose stops forwarding', () async {
       final p = FakeProcess();
       final s = AppLogStream();
-      final pump = pumpProcessLines(p, s);
+      final AppLogPump pump = pumpProcessLines(p, s);
 
       p.emitStdout('before');
       await pumpEventQueue();

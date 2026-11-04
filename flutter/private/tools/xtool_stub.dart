@@ -13,10 +13,10 @@ import 'xtool_hash.dart' show sha256Bytes;
 import 'zip_writer.dart' show setUint64LE;
 
 int _packMachOVersion(String version) {
-  final parts = version.split('.');
-  final major = parts.isNotEmpty ? (int.tryParse(parts[0]) ?? 0) : 0;
-  final minor = parts.length > 1 ? (int.tryParse(parts[1]) ?? 0) : 0;
-  final patch = parts.length > 2 ? (int.tryParse(parts[2]) ?? 0) : 0;
+  final List<String> parts = version.split('.');
+  final int major = parts.isNotEmpty ? (int.tryParse(parts[0]) ?? 0) : 0;
+  final int minor = parts.length > 1 ? (int.tryParse(parts[1]) ?? 0) : 0;
+  final int patch = parts.length > 2 ? (int.tryParse(parts[2]) ?? 0) : 0;
   return ((major & 0xffff) << 16) | ((minor & 0xff) << 8) | (patch & 0xff);
 }
 
@@ -38,7 +38,7 @@ Uint8List _encodeMachOSegment64Command(Segment64Spec spec) {
   final bd = ByteData.sublistView(bytes);
   bd.setUint32(0, 0x19, Endian.little); // LC_SEGMENT_64
   bd.setUint32(4, 72, Endian.little);
-  final nameBytes = ascii.encode(spec.segname);
+  final Uint8List nameBytes = ascii.encode(spec.segname);
   bytes.setRange(
     8,
     8 + (nameBytes.length > 16 ? 16 : nameBytes.length),
@@ -90,10 +90,10 @@ Uint8List _encodeMachOUuidCommand(Uint8List uuid16) {
 }
 
 Uint8List _encodeMachOLoadDylibCommand(String installName) {
-  final nameBytes = utf8.encode(installName);
+  final Uint8List nameBytes = utf8.encode(installName);
   const headerSize = 24;
-  final unpadded = headerSize + nameBytes.length + 1;
-  final cmdSize = (unpadded + 7) & ~7;
+  final int unpadded = headerSize + nameBytes.length + 1;
+  final int cmdSize = (unpadded + 7) & ~7;
   final bytes = Uint8List(cmdSize);
   final bd = ByteData.sublistView(bytes);
   bd.setUint32(0, 0x0c, Endian.little); // LC_LOAD_DYLIB
@@ -141,7 +141,7 @@ List<Uint8List> _stubLoadCommands(
   int pageSize,
   int linkeditFileSize,
 ) {
-  final platform = spec.platform;
+  final String platform = spec.platform;
   return [
     _encodeMachOBuildVersionCommand(
       platform: _machOPlatformConstant(platform),
@@ -202,7 +202,7 @@ int _writeStubCommands(Uint8List out, List<Uint8List> loadCommands) {
   var offset = 32;
   var uuidDataOffset = -1;
   for (final cmd in loadCommands) {
-    final cmdId = ByteData.sublistView(cmd).getUint32(0, Endian.little);
+    final int cmdId = ByteData.sublistView(cmd).getUint32(0, Endian.little);
     if (cmdId == 0x1b) {
       uuidDataOffset = offset + 8;
     }
@@ -214,7 +214,7 @@ int _writeStubCommands(Uint8List out, List<Uint8List> loadCommands) {
 
 void _stampStubUuid(Uint8List out, int uuidDataOffset) {
   if (uuidDataOffset < 0) return;
-  final digest = sha256Bytes(out);
+  final Uint8List digest = sha256Bytes(out);
   final uuid = Uint8List.fromList(digest.sublist(0, 16));
   uuid[6] = (uuid[6] & 0x0f) | 0x50;
   uuid[8] = (uuid[8] & 0x3f) | 0x80;
@@ -261,24 +261,25 @@ class StubRunnerSpec {
 /// `LC_BUILD_VERSION`, `__TEXT` / `__LINKEDIT` segments, `LC_SYMTAB`,
 /// `LC_DYSYMTAB`, `LC_UUID`, `LC_RPATH`, and `LC_LOAD_DYLIB` commands.
 Uint8List generateStubExecutableMachO(StubRunnerSpec spec) {
-  final archParams = _stubArchParams(spec.arch);
-  final pageSize = archParams.pageSize;
+  final ({int cpuSubtype, int cpuType, int pageSize}) archParams =
+      _stubArchParams(spec.arch);
+  final int pageSize = archParams.pageSize;
   const linkeditFileSize = 8;
-  final versionPacked = _packMachOVersion(spec.minimumOsVersion);
+  final int versionPacked = _packMachOVersion(spec.minimumOsVersion);
 
-  final loadCommands = _stubLoadCommands(
+  final List<Uint8List> loadCommands = _stubLoadCommands(
     spec,
     versionPacked,
     pageSize,
     linkeditFileSize,
   );
-  final sizeofcmds = loadCommands.fold<int>(0, (s, c) => s + c.length);
+  final int sizeofcmds = loadCommands.fold<int>(0, (s, c) => s + c.length);
   final metadataText = spec.metadataEntries.isEmpty
       ? ''
       : '${spec.metadataEntries.join('\n')}\n';
-  final metadataBytes = utf8.encode(metadataText);
+  final Uint8List metadataBytes = utf8.encode(metadataText);
 
-  final totalSize = pageSize + linkeditFileSize;
+  final int totalSize = pageSize + linkeditFileSize;
   final out = Uint8List(totalSize);
   final bd = ByteData.sublistView(out);
   bd.setUint32(0, 0xfeedfacf, Endian.little); // MH_MAGIC_64
@@ -290,11 +291,11 @@ Uint8List generateStubExecutableMachO(StubRunnerSpec spec) {
   bd.setUint32(24, 0x00200001, Endian.little); // MH_NOUNDEFS | MH_PIE
   bd.setUint32(28, 0, Endian.little); // reserved
 
-  final uuidDataOffset = _writeStubCommands(out, loadCommands);
+  final int uuidDataOffset = _writeStubCommands(out, loadCommands);
 
   // Leave 64 bytes of zero padding after load commands before writing metadata
   // inside __TEXT so any subsequent load-command patching has room.
-  final metaStart = 32 + sizeofcmds + 64;
+  final int metaStart = 32 + sizeofcmds + 64;
   if (metadataBytes.isNotEmpty &&
       metaStart + metadataBytes.length <= pageSize) {
     out.setRange(metaStart, metaStart + metadataBytes.length, metadataBytes);

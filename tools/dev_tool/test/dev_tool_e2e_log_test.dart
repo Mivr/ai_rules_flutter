@@ -22,8 +22,8 @@ final _recordShape = RegExp(
 
 /// Splits one `<stamp> <tag> <text>` record.
 ({DateTime stamp, String tag, String text}) _parseRecord(String line) {
-  final first = line.indexOf(' ');
-  final second = line.indexOf(' ', first + 1);
+  final int first = line.indexOf(' ');
+  final int second = line.indexOf(' ', first + 1);
   return (
     stamp: DateTime.parse(line.substring(0, first)),
     tag: line.substring(first + 1, second),
@@ -61,8 +61,8 @@ List<File> _logFiles(Directory dir) => dir
 /// last value. Harness lists and log files both fill in asynchronously behind
 /// the child, so every assertion below waits its turn instead of racing them.
 Future<T> _poll<T>(Future<T> Function() read, bool Function(T) done) async {
-  final deadline = DateTime.now().add(const Duration(seconds: 15));
-  var value = await read();
+  final DateTime deadline = DateTime.now().add(const Duration(seconds: 15));
+  T value = await read();
   while (!done(value)) {
     if (DateTime.now().isAfter(deadline)) return value;
     await Future<void>.delayed(const Duration(milliseconds: 50));
@@ -94,7 +94,7 @@ void main() {
   });
 
   test('one process gives one file with start, every line and exit', () async {
-    final tool = await _spawnChild(
+    final DevToolProcess tool = await _spawnChild(
       await _writeChild(logDir, 'case_one', '''
   stdout.writeln('out-1');
   stderr.writeln('err-1');
@@ -114,19 +114,21 @@ void main() {
       await _poll(() async => tool.events.length, (n) => n >= 1);
       await tool.dispose();
 
-      final files = _logFiles(logDir);
+      final List<File> files = _logFiles(logDir);
       expect(files, hasLength(1));
       expect(files.single.path, contains('${tool.process.pid}'));
-      final raw = files.single.readAsLinesSync();
+      final List<String> raw = files.single.readAsLinesSync();
       for (final line in raw) {
         expect(line, matches(_recordShape));
       }
-      final records = raw.map(_parseRecord).toList();
+      final List<({DateTime stamp, String tag, String text})> records = raw
+          .map(_parseRecord)
+          .toList();
       expect(records.first.tag, 'start');
       expect(records.first.text, contains('pid=${tool.process.pid}'));
       expect(records.last.tag, 'exit');
       expect(records.last.text, 'code=0');
-      final stdoutTexts = [
+      final List<String> stdoutTexts = [
         for (final record in records)
           if (record.tag == 'stdout') record.text,
       ];
@@ -156,7 +158,7 @@ void main() {
   });
 
   test('timestamps are taken when the harness receives each line', () async {
-    final tool = await _spawnChild(
+    final DevToolProcess tool = await _spawnChild(
       await _writeChild(logDir, 'case_stamps', '''
   stdout.writeln('tick-one');
   await Future<void>.delayed(const Duration(seconds: 1));
@@ -171,15 +173,16 @@ void main() {
       );
       await tool.dispose();
 
-      final files = _logFiles(logDir);
+      final List<File> files = _logFiles(logDir);
       expect(files, hasLength(1));
-      final records = files.single
+      final List<({DateTime stamp, String tag, String text})> records = files
+          .single
           .readAsLinesSync()
           .map(_parseRecord)
           .where((record) => record.tag == 'stdout')
           .toList();
       expect(records, hasLength(2));
-      final gap = records[1].stamp.difference(records[0].stamp);
+      final Duration gap = records[1].stamp.difference(records[0].stamp);
       // About the second the child slept: far above same-instant writes, far
       // below any scheduling stall.
       expect(gap.inMilliseconds, greaterThanOrEqualTo(500));
@@ -190,7 +193,7 @@ void main() {
   });
 
   test('a line is on disk while its process is still running', () async {
-    final tool = await _spawnChild(
+    final DevToolProcess tool = await _spawnChild(
       await _writeChild(logDir, 'case_write_through', '''
   stdout.writeln('early-line');
   await Future<void>.delayed(const Duration(seconds: 30));
@@ -202,7 +205,7 @@ void main() {
         () async => tool.nonProtocolStdoutLines.contains('early-line'),
         (seen) => seen,
       );
-      final files = _logFiles(logDir);
+      final List<File> files = _logFiles(logDir);
       expect(files, hasLength(1));
       expect(
         files.single.readAsLinesSync().any(
@@ -212,7 +215,7 @@ void main() {
         reason: 'the line the harness read must already be on disk',
       );
       // And the child that printed it must still be running.
-      final exited = await Future.any([
+      final bool exited = await Future.any([
         tool.process.exitCode.then((_) => true),
         Future<void>.delayed(const Duration(seconds: 2)).then((_) => false),
       ]);
@@ -227,10 +230,10 @@ void main() {
   });
 
   test('two processes give two files', () async {
-    final first = await _spawnChild(
+    final DevToolProcess first = await _spawnChild(
       await _writeChild(logDir, 'case_two_a', "  stdout.writeln('alpha');\n"),
     );
-    final second = await _spawnChild(
+    final DevToolProcess second = await _spawnChild(
       await _writeChild(logDir, 'case_two_b', "  stdout.writeln('beta');\n"),
     );
     try {
@@ -247,10 +250,10 @@ void main() {
       await first.dispose();
       await second.dispose();
 
-      final files = _logFiles(logDir);
+      final List<File> files = _logFiles(logDir);
       expect(files, hasLength(2));
       expect(files[0].path, isNot(files[1].path));
-      final starts = {
+      final Set<String> starts = {
         for (final file in files)
           _parseRecord(file.readAsLinesSync().first).text,
       };
@@ -268,7 +271,7 @@ void main() {
     'an empty directory writes nothing and changes nothing observed',
     () async {
       DevToolE2eLogRecorder.testOnlyLogDirectory = '';
-      final tool = await _spawnChild(
+      final DevToolProcess tool = await _spawnChild(
         await _writeChild(logDir, 'case_unset', '''
   stdout.writeln('plain-line');
   stderr.writeln('err-line');

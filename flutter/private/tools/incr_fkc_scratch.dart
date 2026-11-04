@@ -54,7 +54,7 @@ class ScratchLock {
 
   /// Releases the lock. Never throws.
   Future<void> close() async {
-    final handle = _handle;
+    final RandomAccessFile? handle = _handle;
     if (handle == null) return;
     try {
       await handle.close();

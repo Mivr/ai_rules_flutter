@@ -23,7 +23,7 @@ void main() {
     final line = '$exe ${args.join(' ')}';
     commands.add(line);
     sideEffect?.call(args);
-    for (final entry in answers.entries) {
+    for (final MapEntry<String, ProcessResult> entry in answers.entries) {
       if (line.contains(entry.key)) return entry.value;
     }
     return ProcessResult(1, 0, '', '');
@@ -44,7 +44,7 @@ void main() {
     );
     final appDirectory = Directory('${tmp.path}/container/tmp')
       ..createSync(recursive: true);
-    final path = await delivery.deliver(
+    final String path = await delivery.deliver(
       localFile: patch().path,
       appDirectory: appDirectory.path,
       name: 'patch1.libmul.dylib',
@@ -59,7 +59,7 @@ void main() {
       delivery.libraryLoadPath('libmul.dylib'),
       '@executable_path/Frameworks/mul.framework/mul',
     );
-    final path = await delivery.deliver(
+    final String path = await delivery.deliver(
       localFile: patch().path,
       appDirectory: tmp.path,
       name: 'patch1.libmul.dylib',
@@ -106,7 +106,7 @@ void main() {
         );
         const appDirectory =
             '/private/var/mobile/Containers/Data/Application/1A2B/tmp/hot';
-        final path = await delivery.deliver(
+        final String path = await delivery.deliver(
           localFile: patch().path,
           appDirectory: appDirectory,
           name: 'patch1.libmul.dylib',
@@ -182,7 +182,7 @@ void main() {
     });
 
     test('pushes, copies in as the app, and cleans up', () async {
-      final path = await android().deliver(
+      final String path = await android().deliver(
         localFile: '/out/libmul_patch.so',
         appDirectory: '/data/user/0/com.example.app/code_cache/hot',
         name: 'patch1.libmul.so',

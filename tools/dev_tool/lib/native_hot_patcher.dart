@@ -52,6 +52,20 @@ import 'package:vm_service/vm_service.dart' show RPCError;
 
 export 'native_patch_outcome.dart';
 
+typedef _Plan = ({
+  Map<_Patchable, Map<NativePatchTarget, PatchBuilderAnswer>> plans,
+  Map<String, List<String>> restart,
+  List<String> failed,
+  NativePatchOutcome? refused,
+});
+
+typedef _Application = ({
+  Map<String, List<String>> functions,
+  Set<String> reverted,
+  Map<String, String> failures,
+  Set<String> applied,
+});
+
 /// The aspect that collects every `hot_patch` target a launch target bundles.
 const hotPatchAspect =
     '@rules_flutter//flutter:native_hot_patch.bzl%'
@@ -180,7 +194,7 @@ class NativeHotPatcher {
     );
     await patcher.rebaseline();
     if (patcher._libraries.isEmpty) return null;
-    final undeliverable = [
+    final List<String> undeliverable = [
       for (final target in inputs.targets())
         if (target.delivery == null) target.appId,
     ];
@@ -203,14 +217,14 @@ class NativeHotPatcher {
     // patcher patches nothing more.
     _live.clear();
     _libraries = const [];
-    final built = await build();
+    final BazelAspectOutputs built = await build();
     if (!built.success) {
       throw DevToolException(
         'Building the native hot patch inputs failed, so native edits in this '
         'run need a hot restart.\n${built.stderr}',
       );
     }
-    final manifestFiles = [
+    final List<String> manifestFiles = [
       for (final f in built.files)
         if (f.endsWith(hotPatchManifestSuffix)) f,
     ];
@@ -218,22 +232,25 @@ class NativeHotPatcher {
       _libraries = const [];
       return;
     }
-    final executionRoot = built.executionRoot;
+    final String? executionRoot = built.executionRoot;
     if (executionRoot == null) {
       throw DevToolException(
         'The native hot patch build named no built file to locate its '
         'execution root by, so its manifests cannot be resolved.',
       );
     }
-    final manifests = [
+    final List<NativeHotPatchManifest> manifests = [
       for (final path in manifestFiles)
         NativeHotPatchManifest.parse(path, await File(path).readAsString()),
     ];
-    final running = await _runningManifests(manifests, executionRoot);
+    final List<NativeHotPatchManifest> running = await _runningManifests(
+      manifests,
+      executionRoot,
+    );
 
     final libraries = <_Patchable>[];
     for (final manifest in running) {
-      final name = p.basename(manifest.library);
+      final String name = p.basename(manifest.library);
       final state = Directory(
         p.join(_scratch.path, 'state', '$name.${libraries.length}'),
       );
@@ -271,7 +288,8 @@ class NativeHotPatcher {
     List<NativeHotPatchManifest> manifests,
     String executionRoot,
   ) async {
-    final bundled = (await nativeLibsFingerprint(appFile)).keys.toList();
+    final List<String> bundled = (await nativeLibsFingerprint(appFile)).keys
+        .toList();
     final byName = <String, List<NativeHotPatchManifest>>{};
     for (final m in manifests) {
       byName.putIfAbsent(p.basename(m.library), () => []).add(m);
@@ -279,8 +297,8 @@ class NativeHotPatcher {
 
     final running = <NativeHotPatchManifest>[];
     for (final MapEntry(key: name, value: candidates) in byName.entries) {
-      final framework = iosFrameworkName(name);
-      final members = [
+      final String framework = iosFrameworkName(name);
+      final List<String> members = [
         for (final member in bundled)
           if (p.basename(member) == name ||
               member.endsWith('$framework.framework/$framework'))
@@ -294,7 +312,9 @@ class NativeHotPatcher {
       }
       final bundledIds = <String>{};
       for (final member in members) {
-        final id = nativeImageIdentity(await readBundledFile(appFile, member));
+        final String? id = nativeImageIdentity(
+          await readBundledFile(appFile, member),
+        );
         if (id == null) {
           throw DevToolException(
             '$member in $appFile carries no linker identity (a Mach-O LC_UUID '
@@ -308,8 +328,8 @@ class NativeHotPatcher {
       final matched = <NativeHotPatchManifest>[];
       final seen = <String, String?>{};
       for (final candidate in candidates) {
-        final path = p.join(executionRoot, candidate.library);
-        final id = nativeImageIdentity(await File(path).readAsBytes());
+        final String path = p.join(executionRoot, candidate.library);
+        final String? id = nativeImageIdentity(await File(path).readAsBytes());
         seen[candidate.library] = id;
         if (id != null && bundledIds.contains(id)) matched.add(candidate);
       }
@@ -335,10 +355,10 @@ class NativeHotPatcher {
   /// The libraries whose sources moved since the last patch.
   Future<List<_Patchable>> _movedLibraries(Set<String> movedLibraries) async {
     final moved = <_Patchable>[];
-    for (final library in _libraries) {
+    for (final _Patchable library in _libraries) {
       // A source that appears or disappears is a move by itself: its content
       // is never read, and the build below runs and reports its outcome.
-      final movedSources = await findMovedFiles(
+      final List<String> movedSources = await findMovedFiles(
         paths: [
           for (final source in library.tool.manifest.sources)
             p.join(workspace, source),
@@ -359,15 +379,7 @@ class NativeHotPatcher {
   /// A patch file, or null to go back to the launched code. [refused] carries
   /// the verdict when an address cannot even be computed, which stops the
   /// patch before anything is built for any app.
-  Future<
-    ({
-      Map<_Patchable, Map<NativePatchTarget, PatchBuilderAnswer>> plans,
-      Map<String, List<String>> restart,
-      List<String> failed,
-      NativePatchOutcome? refused,
-    })
-  >
-  _planLoads(
+  Future<_Plan> _planLoads(
     List<_Patchable> moved,
     List<NativePatchTarget> apps,
   ) async {
@@ -375,9 +387,10 @@ class NativeHotPatcher {
     final restart = <String, List<String>>{};
     final failed = <String>[];
     for (final library in moved) {
-      final perApp = plans[library] = {};
+      final Map<NativePatchTarget, PatchBuilderAnswer> perApp = plans[library] =
+          {};
       for (final app in apps) {
-        final delivery = app.delivery!;
+        final NativePatchDelivery delivery = app.delivery!;
         final int address;
         try {
           address = await _applyAddress(app, delivery, library);
@@ -397,7 +410,7 @@ class NativeHotPatcher {
         );
         if (out.existsSync()) out.deleteSync(recursive: true);
         out.createSync(recursive: true);
-        final result = await library.tool.patch(
+        final PatchBuilderAnswer result = await library.tool.patch(
           stateDirectory: library.stateDirectory,
           applyAddress: address,
           outputDirectory: out.path,
@@ -416,15 +429,7 @@ class NativeHotPatcher {
   }
 
   /// Load every planned patch or revert, and say what changed where.
-  Future<
-    ({
-      Map<String, List<String>> functions,
-      Set<String> reverted,
-      Map<String, String> failures,
-      Set<String> applied,
-    })
-  >
-  _applyPlans(
+  Future<_Application> _applyPlans(
     Map<_Patchable, Map<NativePatchTarget, PatchBuilderAnswer>> plans,
   ) async {
     final functions = <String, List<String>>{};
@@ -433,8 +438,8 @@ class NativeHotPatcher {
     final applied = <String>{};
     for (final MapEntry(key: library, value: perApp) in plans.entries) {
       for (final MapEntry(key: app, value: result) in perApp.entries) {
-        final live = _live.putIfAbsent(app.appId, () => {});
-        final name = library.libraryFileName;
+        final Set<String> live = _live.putIfAbsent(app.appId, () => {});
+        final String name = library.libraryFileName;
         try {
           switch (result) {
             case PatchBuilt(:final file, functions: final replaced):
@@ -468,28 +473,28 @@ class NativeHotPatcher {
   Future<NativePatchOutcome> patchIfMoved({
     Set<String> movedLibraries = const {},
   }) async {
-    final moved = await _movedLibraries(movedLibraries);
+    final List<_Patchable> moved = await _movedLibraries(movedLibraries);
     if (moved.isEmpty) return const NativePatchNotNeeded();
 
     // Taken before the build: a source saved while bazel reads it is not in
     // what bazel builds, and recording it as delivered would lose that edit.
-    final snapshotsBefore = {
+    final Map<_Patchable, Map<String, FileSnapshot>> snapshotsBefore = {
       for (final library in moved)
         library: await _snapshots(library.tool.manifest.sources),
     };
 
-    final built = await build();
+    final BazelAspectOutputs built = await build();
     if (!built.success) {
       return NativePatchBuildFailed(
         'Building the native patch failed.\n${built.stderr}',
       );
     }
 
-    final apps = targets().toList();
+    final List<NativePatchTarget> apps = targets().toList();
     // Checked at arming too. Here as well because the apps are read afresh: a
     // run that gained one no patch can reach must not have its edit counted as
     // delivered because nothing was asked of it.
-    final undeliverable = [
+    final List<String> undeliverable = [
       for (final app in apps)
         if (app.delivery == null) app.appId,
     ];
@@ -502,8 +507,8 @@ class NativeHotPatcher {
         applied: const [],
       );
     }
-    final plan = await _planLoads(moved, apps);
-    final refused = plan.refused;
+    final _Plan plan = await _planLoads(moved, apps);
+    final NativePatchOutcome? refused = plan.refused;
     if (refused != null) return refused;
     if (plan.restart.isNotEmpty) return NativePatchNeedsRestart(plan.restart);
     if (plan.failed.isNotEmpty) {
@@ -513,7 +518,7 @@ class NativeHotPatcher {
     // Cleared before the loads, as before: a concurrent reader mid-patch
     // sees no changed apps rather than the previous patch's.
     _lastChanged = const [];
-    final application = await _applyPlans(plan.plans);
+    final _Application application = await _applyPlans(plan.plans);
     if (application.failures.isNotEmpty) {
       return NativePatchLoadFailed(
         failures: application.failures,
@@ -548,7 +553,7 @@ class NativeHotPatcher {
   /// builds again. A Dart reload ends in a reassemble that does this, so this is
   /// for a reload that had no Dart to send.
   Future<void> reassembleChanged() async {
-    for (final app in _lastChanged) {
+    for (final NativePatchTarget app in _lastChanged) {
       try {
         await app.callExtension('ext.flutter.reassemble', const {});
       } on RPCError catch (e) {
@@ -568,13 +573,14 @@ class NativeHotPatcher {
     NativePatchDelivery delivery,
     _Patchable library,
   ) async {
-    final loadPath = delivery.libraryLoadPath(library.libraryFileName);
-    final answer = await _call(app, 'ext.rules_flutter.nativeSymbolAddress', {
-      'library': loadPath,
-      'symbol': hotPatchApplySymbol,
-    });
-    final address = answer['address'];
-    final parsed = address is String && address.startsWith('0x')
+    final String loadPath = delivery.libraryLoadPath(library.libraryFileName);
+    final Map<String, dynamic> answer = await _call(
+      app,
+      'ext.rules_flutter.nativeSymbolAddress',
+      {'library': loadPath, 'symbol': hotPatchApplySymbol},
+    );
+    final dynamic address = answer['address'];
+    final int? parsed = address is String && address.startsWith('0x')
         ? int.tryParse(address.substring(2), radix: 16)
         : null;
     if (parsed == null) {
@@ -591,22 +597,22 @@ class NativeHotPatcher {
     _Patchable library,
     String patchFile,
   ) async {
-    final delivery = app.delivery!;
-    final directory = await _call(
+    final NativePatchDelivery delivery = app.delivery!;
+    final Map<String, dynamic> directory = await _call(
       app,
       'ext.rules_flutter.nativePatchDirectory',
       const {},
     );
-    final appDirectory = directory['path'];
+    final dynamic appDirectory = directory['path'];
     if (appDirectory is! String) {
       throw DevToolException(
         '${app.appId} answered nativePatchDirectory with '
         '${jsonEncode(directory)}, which names no directory.',
       );
     }
-    final count = _delivered[library.libraryFileName] =
+    final int count = _delivered[library.libraryFileName] =
         (_delivered[library.libraryFileName] ?? 0) + 1;
-    final devicePath = await delivery.deliver(
+    final String devicePath = await delivery.deliver(
       localFile: patchFile,
       appDirectory: appDirectory,
       name: 'patch$count.${library.libraryFileName}',
@@ -617,10 +623,11 @@ class NativeHotPatcher {
     });
   }
 
-  Future<void> _revert(NativePatchTarget app, _Patchable library) =>
-      _call(app, 'ext.rules_flutter.applyNativePatch', {
-        'library': app.delivery!.libraryLoadPath(library.libraryFileName),
-      });
+  Future<void> _revert(NativePatchTarget app, _Patchable library) => _call(
+    app,
+    'ext.rules_flutter.applyNativePatch',
+    {'library': app.delivery!.libraryLoadPath(library.libraryFileName)},
+  );
 
   /// An extension call, with the agent's refusal as a [DevToolException] in its
   /// own words.
@@ -632,9 +639,7 @@ class NativeHotPatcher {
     try {
       return await app.callExtension(method, args) ?? const {};
     } on RPCError catch (e) {
-      throw DevToolException(
-        '${app.appId}: ${e.details ?? e.message}',
-      );
+      throw DevToolException('${app.appId}: ${e.details ?? e.message}');
     }
   }
 
@@ -648,7 +653,7 @@ class NativeHotPatcher {
     final existing = <String>[];
     final snapshots = <String, FileSnapshot>{};
     for (final source in sources) {
-      final path = p.join(workspace, source);
+      final String path = p.join(workspace, source);
       if (await File(path).exists()) {
         existing.add(path);
       } else {

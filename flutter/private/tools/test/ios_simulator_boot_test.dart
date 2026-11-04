@@ -43,7 +43,7 @@ const _listTypes = {'devices', 'devicetypes', 'runtimes', 'pairs'};
 /// Whether a raw device entry counts as available: the read `simctl`'s own
 /// `available` search term performs.
 bool _entryAvailable(Map<String, dynamic> entry) {
-  final flag = entry['isAvailable'];
+  final dynamic flag = entry['isAvailable'];
   return flag == true || (flag is String && flag.toUpperCase() == 'YES');
 }
 
@@ -54,7 +54,7 @@ bool _deviceMatches(Map<String, dynamic> entry, List<String> terms) {
     if (term.toLowerCase() == 'available') {
       if (!_entryAvailable(entry)) return false;
     } else {
-      final name = entry['name'];
+      final dynamic name = entry['name'];
       if (name is! String || !name.toLowerCase().contains(term.toLowerCase())) {
         return false;
       }
@@ -105,17 +105,20 @@ class FakeSpawner implements CommandSpawner {
   /// term (`available` keeps available entries, anything else is a
   /// case-insensitive substring of the name). No type means the full listing.
   CannedResult? _listResponse(List<String> args) {
-    final devices = listDevices;
+    final Map<String, List<Map<String, dynamic>>>? devices = listDevices;
     if (devices == null) return null;
     if (args.length < 2 || args[0] != 'simctl' || args[1] != 'list') {
       return null;
     }
-    final positionals = args.skip(2).where((a) => !a.startsWith('-')).toList();
+    final List<String> positionals = args
+        .skip(2)
+        .where((a) => !a.startsWith('-'))
+        .toList();
     var type = '';
     if (positionals.isNotEmpty && _listTypes.contains(positionals.first)) {
       type = positionals.first;
     }
-    final terms = positionals.sublist(type.isEmpty ? 0 : 1);
+    final List<String> terms = positionals.sublist(type.isEmpty ? 0 : 1);
     return CannedResult(
       stdoutText: json.encode({
         if (type.isEmpty || type == 'devices')
@@ -142,7 +145,7 @@ class FakeSpawner implements CommandSpawner {
     if (!hasXcrun) {
       throw ProcessException(executable, args, 'No such file or directory', 2);
     }
-    final canned = results[key] ?? _listResponse(args);
+    final CannedResult? canned = results[key] ?? _listResponse(args);
     if (canned == null) fail('unexpected child: $key');
     Future<int> exitCode;
     if (canned.hang) {
@@ -183,7 +186,7 @@ Future<({List<String> log, String udid})> bootWith(
   Duration bootstatusTimeout = const Duration(seconds: 10),
 }) async {
   final log = <String>[];
-  final udid = await bootAndReport(
+  final String udid = await bootAndReport(
     BootOptions(
       spawner: spawner,
       bootstatusTimeout: bootstatusTimeout,
@@ -246,7 +249,7 @@ void main() {
 
   group('simulator selection (whole path)', () {
     test('the list call is the unfiltered full listing', () async {
-      final spawner = listingSpawner({
+      final FakeSpawner spawner = listingSpawner({
         ios265: [
           device('iPhone 17', 'udid-0'),
         ],
@@ -258,7 +261,7 @@ void main() {
     });
 
     test('takes the newest available iOS runtime, numerically', () async {
-      final spawner = listingSpawner({
+      final FakeSpawner spawner = listingSpawner({
         'com.apple.CoreSimulator.SimRuntime.iOS-17-2': [
           device('iPhone 15', 'old'),
         ],
@@ -269,13 +272,13 @@ void main() {
           device('iPhone 17 Pro', 'new'),
         ],
       }, extra: bootStubs('new'));
-      final outcome = await bootWith(spawner);
+      final ({List<String> log, String udid}) outcome = await bootWith(spawner);
       // 26.10 is newer than 26.5: a string compare would order them wrong.
       expect(outcome.udid, 'new');
     });
 
     test('ignores watchOS, tvOS and visionOS runtimes, however new', () async {
-      final spawner = listingSpawner({
+      final FakeSpawner spawner = listingSpawner({
         ios265: [
           device('iPhone 17', 'phone'),
         ],
@@ -289,14 +292,14 @@ void main() {
           device('Apple Vision Pro', 'vision'),
         ],
       }, extra: bootStubs('phone'));
-      final outcome = await bootWith(spawner);
+      final ({List<String> log, String udid}) outcome = await bootWith(spawner);
       expect(outcome.udid, 'phone');
     });
 
     test(
       'skips a newest runtime the runtimes array marks unavailable',
       () async {
-        final spawner = listingSpawner(
+        final FakeSpawner spawner = listingSpawner(
           {
             ios265: [
               device('iPhone 17', 'mid'),
@@ -313,7 +316,9 @@ void main() {
           // the run as an unexpected child.
           extra: bootStubs('mid'),
         );
-        final outcome = await bootWith(spawner);
+        final ({List<String> log, String udid}) outcome = await bootWith(
+          spawner,
+        );
         expect(outcome.udid, 'mid');
         expect(
           spawner.startedCall('xcrun simctl boot new'),
@@ -324,7 +329,7 @@ void main() {
     );
 
     test('fails when every iOS runtime is unavailable', () async {
-      final spawner = listingSpawner(
+      final FakeSpawner spawner = listingSpawner(
         {
           ios265: [
             device('iPhone 17', 'mid'),
@@ -356,18 +361,18 @@ void main() {
     });
 
     test('prefers an already-booted iPhone wherever it is listed', () async {
-      final spawner = listingSpawner({
+      final FakeSpawner spawner = listingSpawner({
         ios265: [
           device('iPhone 17', 'first'),
           device('iPhone 17 Pro', 'second', state: 'Booted'),
         ],
       }, extra: bootStubs('second', skipBoot: true));
-      final outcome = await bootWith(spawner);
+      final ({List<String> log, String udid}) outcome = await bootWith(spawner);
       expect(outcome.udid, 'second');
     });
 
     test('otherwise takes the first shutdown iPhone in listed order', () async {
-      final spawner = listingSpawner({
+      final FakeSpawner spawner = listingSpawner({
         ios265: [
           device('iPad mini', 'pad', state: 'Booted'),
           device('iPhone 17', 'first'),
@@ -375,23 +380,23 @@ void main() {
         ],
       }, extra: bootStubs('first'));
       // The booted iPad is not an iPhone; the first shutdown iPhone wins.
-      final outcome = await bootWith(spawner);
+      final ({List<String> log, String udid}) outcome = await bootWith(spawner);
       expect(outcome.udid, 'first');
     });
 
     test('ignores unavailable devices', () async {
-      final spawner = listingSpawner({
+      final FakeSpawner spawner = listingSpawner({
         ios265: [
           device('iPhone 17', 'gone', available: false),
           device('iPhone 17 Pro', 'here'),
         ],
       }, extra: bootStubs('here'));
-      final outcome = await bootWith(spawner);
+      final ({List<String> log, String udid}) outcome = await bootWith(spawner);
       expect(outcome.udid, 'here');
     });
 
     test('fails when the listing names no available iOS runtime', () async {
-      final spawner = listingSpawner(const {});
+      final FakeSpawner spawner = listingSpawner(const {});
       await expectLater(
         bootWith(spawner),
         throwsA(
@@ -405,7 +410,7 @@ void main() {
     });
 
     test('fails without creating a device when no iPhone qualifies', () async {
-      final spawner = listingSpawner({
+      final FakeSpawner spawner = listingSpawner({
         ios265: [
           device('iPad Pro', 'pad'),
           device('iPhone 17', 'gone', available: false),
@@ -456,7 +461,7 @@ void main() {
 
   group('bootSimulator', () {
     test('boots a shutdown phone, waits, and reports its udid last', () async {
-      final spawner = listingSpawner(
+      final FakeSpawner spawner = listingSpawner(
         {
           ios265: [
             device('iPhone 17', 'udid-1'),
@@ -467,7 +472,7 @@ void main() {
           'xcrun simctl bootstatus udid-1 -b': CannedResult(),
         },
       );
-      final (:log, :udid) = await bootWith(spawner);
+      final (:List<String> log, :String udid) = await bootWith(spawner);
 
       expect(udid, 'udid-1');
       expect(log.last, 'booted udid-1');
@@ -481,7 +486,7 @@ void main() {
     });
 
     test('skips boot for an already-booted phone but still waits', () async {
-      final spawner = listingSpawner(
+      final FakeSpawner spawner = listingSpawner(
         {
           ios265: [
             device('iPhone 17', 'udid-2', state: 'Booted'),
@@ -491,7 +496,7 @@ void main() {
           'xcrun simctl bootstatus udid-2 -b': CannedResult(),
         },
       );
-      final (:log, :udid) = await bootWith(spawner);
+      final (:List<String> log, :String udid) = await bootWith(spawner);
 
       expect(udid, 'udid-2');
       expect(log.last, 'booted udid-2');
@@ -533,7 +538,7 @@ void main() {
     });
 
     test('a failed boot names the call and its exit', () async {
-      final spawner = listingSpawner(
+      final FakeSpawner spawner = listingSpawner(
         {
           ios265: [
             device('iPhone 17', 'udid-3'),
@@ -559,7 +564,7 @@ void main() {
     });
 
     test('a failed bootstatus fails the run', () async {
-      final spawner = listingSpawner(
+      final FakeSpawner spawner = listingSpawner(
         {
           ios265: [
             device('iPhone 17', 'udid-4'),
@@ -586,7 +591,7 @@ void main() {
     });
 
     test('a hung bootstatus is killed and fails naming the call', () async {
-      final spawner = listingSpawner(
+      final FakeSpawner spawner = listingSpawner(
         {
           ios265: [
             device('iPhone 17', 'udid-5'),
@@ -617,7 +622,7 @@ void main() {
     });
 
     test('every failure reason is one line', () async {
-      final spawner = listingSpawner(
+      final FakeSpawner spawner = listingSpawner(
         {
           ios265: [
             device('iPhone 17', 'udid-6'),
@@ -630,7 +635,7 @@ void main() {
           ),
         },
       );
-      final failure = await bootWith(spawner).then<BootFailure>(
+      final BootFailure failure = await bootWith(spawner).then<BootFailure>(
         (_) => fail('expected a BootFailure'),
         onError: (Object e) => e as BootFailure,
       );
@@ -641,14 +646,14 @@ void main() {
       test(
         'a slow list answers on retry and boots, logging the retry',
         () async {
-          final inner = listingSpawner({
+          final FakeSpawner inner = listingSpawner({
             ios265: [device('iPhone 17', 'udid-r')],
           }, extra: bootStubs('udid-r'));
           final spawner = SlowFirstCall(listKey(), inner);
           final log = <String>[];
           var ticks = 0;
           final epoch = DateTime(2026, 1, 1);
-          final udid = await bootAndReport(
+          final String udid = await bootAndReport(
             BootOptions(
               spawner: spawner,
               bootstatusTimeout: const Duration(seconds: 10),
@@ -669,7 +674,9 @@ void main() {
             log.where((line) => line.contains('retrying as attempt 2')),
             hasLength(1),
           );
-          final retry = log.firstWhere((line) => line.contains('retrying'));
+          final String retry = log.firstWhere(
+            (line) => line.contains('retrying'),
+          );
           expect(
             retry,
             '`xcrun simctl list -j` timed out after 150ms '
@@ -685,7 +692,7 @@ void main() {
         final log = <String>[];
         var ticks = 0;
         final epoch = DateTime(2026, 1, 1);
-        final failure =
+        final BootFailure failure =
             await bootAndReport(
               BootOptions(
                 spawner: spawner,
@@ -717,14 +724,14 @@ void main() {
       });
 
       test('a slow boot answers on retry', () async {
-        final inner = listingSpawner({
+        final FakeSpawner inner = listingSpawner({
           ios265: [device('iPhone 17', 'udid-b')],
         }, extra: bootStubs('udid-b'));
         final spawner = SlowFirstCall('xcrun simctl boot udid-b', inner);
         final log = <String>[];
         var ticks = 0;
         final epoch = DateTime(2026, 1, 1);
-        final udid = await bootAndReport(
+        final String udid = await bootAndReport(
           BootOptions(
             spawner: spawner,
             bootstatusTimeout: const Duration(seconds: 10),
@@ -751,7 +758,7 @@ void main() {
         () async {
           // The killed first attempt was still working: the retry finds the
           // device Booting and hands over to bootstatus instead of failing.
-          final inner = listingSpawner(
+          final FakeSpawner inner = listingSpawner(
             {
               ios265: [device('iPhone 17', 'udid-o')],
             },
@@ -767,7 +774,7 @@ void main() {
           final log = <String>[];
           var ticks = 0;
           final epoch = DateTime(2026, 1, 1);
-          final udid = await bootAndReport(
+          final String udid = await bootAndReport(
             BootOptions(
               spawner: spawner,
               bootstatusTimeout: const Duration(seconds: 10),
@@ -788,7 +795,7 @@ void main() {
             contains('xcrun simctl bootstatus udid-o -b'),
             reason: 'the boot counts, so bootstatus takes over the wait',
           );
-          final done = log.firstWhere(
+          final String done = log.firstWhere(
             (line) => line.contains('already booting'),
           );
           expect(done, contains('xcrun simctl boot udid-o'));
@@ -798,7 +805,7 @@ void main() {
 
       test('a first-attempt boot refusal fails at once', () async {
         // Not a retry: nothing was killed, so the refusal stands as-is.
-        final spawner = listingSpawner(
+        final FakeSpawner spawner = listingSpawner(
           {
             ios265: [device('iPhone 17', 'udid-f')],
           },
@@ -836,7 +843,7 @@ void main() {
       });
 
       test('another refusal on retry still fails at once', () async {
-        final inner = listingSpawner(
+        final FakeSpawner inner = listingSpawner(
           {
             ios265: [device('iPhone 17', 'udid-x')],
           },

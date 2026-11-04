@@ -33,7 +33,7 @@ Uint8List encodePng(
   required int channels,
   int filter = 0,
 }) {
-  final stride = width * channels;
+  final int stride = width * channels;
   final raw = BytesBuilder();
   var previous = Uint8List(stride);
   for (var row = 0; row < height; row++) {
@@ -42,9 +42,9 @@ Uint8List encodePng(
     );
     final encoded = Uint8List(stride);
     for (var i = 0; i < stride; i++) {
-      final a = i >= channels ? line[i - channels] : 0;
-      final b = previous[i];
-      final c = i >= channels ? previous[i - channels] : 0;
+      final int a = i >= channels ? line[i - channels] : 0;
+      final int b = previous[i];
+      final int c = i >= channels ? previous[i - channels] : 0;
       encoded[i] =
           switch (filter) {
             0 => line[i],
@@ -86,8 +86,8 @@ Uint8List encodePng(
 }
 
 int _paethRef(int a, int b, int c) {
-  final p = a + b - c;
-  final pa = (p - a).abs(), pb = (p - b).abs(), pc = (p - c).abs();
+  final int p = a + b - c;
+  final int pa = (p - a).abs(), pb = (p - b).abs(), pc = (p - c).abs();
   if (pa <= pb && pa <= pc) return a;
   return pb <= pc ? b : c;
 }
@@ -103,7 +103,7 @@ void main() {
     test('a blank phone-sized capture is far over 4 KB', () {
       // A blank 1080x2400 RGBA capture encodes to well over 4 KB, so size
       // alone cannot tell it apart from a rendered frame.
-      final blank = encodePng(
+      final Uint8List blank = encodePng(
         uniform(1080, 2400, [0, 0, 0, 0]),
         width: 1080,
         height: 2400,
@@ -126,7 +126,12 @@ void main() {
         ...uniform(393, 330, [255, 255, 255, 255]),
         ...uniform(393, 330, [16, 32, 48, 255]),
       ];
-      final png = encodePng(drawn, width: 393, height: 660, channels: 4);
+      final Uint8List png = encodePng(
+        drawn,
+        width: 393,
+        height: 660,
+        channels: 4,
+      );
       expect(decodePngForBlankness(png).isUniform, isFalse);
     });
   });
@@ -151,7 +156,7 @@ void main() {
         const key =
             'rules_flutter/tools/dev_tool/test/fixtures/'
             'blank_android_emulator_capture.png';
-        final path = resolveRunfile(key);
+        final String? path = resolveRunfile(key);
         if (path == null) {
           throw StateError(
             'Could not resolve $key from runfiles. This test reads a captured '
@@ -168,7 +173,7 @@ void main() {
       });
 
       test('is seen as blank once the pixels are read', () {
-        final png = decodePngForBlankness(bytes);
+        final DecodedPng png = decodePngForBlankness(bytes);
         expect((png.width, png.height), (1080, 2400));
         expect(png.isUniform, isTrue);
       });
@@ -194,7 +199,7 @@ void main() {
             pixels.addAll([x * 30, y * 30, (x + y) * 15, 255]);
           }
         }
-        final png = encodePng(
+        final Uint8List png = encodePng(
           pixels,
           width: 8,
           height: 8,
@@ -214,7 +219,7 @@ void main() {
       // a blank capture into a passing test, which is the failure this whole
       // file exists to stop.
       for (var filter = 0; filter <= 4; filter++) {
-        final png = encodePng(
+        final Uint8List png = encodePng(
           uniform(32, 32, [7, 7, 7, 255]),
           width: 32,
           height: 32,
@@ -231,13 +236,13 @@ void main() {
 
     test('reads RGB as well as RGBA', () {
       // `scrot` and some CDP captures have no alpha channel.
-      final png = encodePng(
+      final Uint8List png = encodePng(
         uniform(4, 4, [1, 2, 3]),
         width: 4,
         height: 4,
         channels: 3,
       );
-      final decoded = decodePngForBlankness(png);
+      final DecodedPng decoded = decodePngForBlankness(png);
       expect((decoded.width, decoded.height), (4, 4));
       expect(decoded.isUniform, isTrue);
     });
@@ -245,7 +250,7 @@ void main() {
     test('refuses an envelope it does not read, rather than guessing', () {
       // A decoder that waves through what it cannot actually parse gives an
       // answer that looks authoritative and is not.
-      final png = encodePng(
+      final Uint8List png = encodePng(
         uniform(4, 4, [1, 2, 3, 4]),
         width: 4,
         height: 4,
@@ -276,13 +281,13 @@ void main() {
       final pixels = <int>[];
       for (var y = 0; y < height; y++) {
         for (var x = 0; x < width; x++) {
-          final square = y >= 2 && y < 4 && x < 12 && (x ~/ 2).isEven;
+          final bool square = y >= 2 && y < 4 && x < 12 && (x ~/ 2).isEven;
           pixels.addAll(square ? magenta : grey);
         }
       }
       bool isMagenta(int r, int g, int b) => r > 240 && g < 20 && b > 240;
       for (var filter = 0; filter <= 4; filter++) {
-        final png = encodePng(
+        final Uint8List png = encodePng(
           pixels,
           width: width,
           height: height,
@@ -291,7 +296,7 @@ void main() {
         );
         expect(countColourRuns(png, isMagenta), 3, reason: 'filter $filter');
       }
-      final none = encodePng(
+      final Uint8List none = encodePng(
         uniform(width, height, grey),
         width: width,
         height: height,

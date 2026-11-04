@@ -67,7 +67,7 @@ void validateAndroidElf(
       'ERROR: $path is not an ELF binary. Android ($abi) cannot load it.',
     );
   }
-  final machine = bytes[18] | (bytes[19] << 8);
+  final int machine = bytes[18] | (bytes[19] << 8);
   if (machine != wantMachine) {
     throw FormatException(
       'ERROR: $path has ELF machine $machine; $abi requires $wantMachine.',
@@ -99,7 +99,7 @@ Future<void> packageNativeLibsJar({
 
   final zipEntries = <ZipEntry>[];
   for (final spec in entries) {
-    final eq = spec.indexOf('=');
+    final int eq = spec.indexOf('=');
     if (eq <= 0 || eq == spec.length - 1) {
       throw ArgumentError.value(
         spec,
@@ -107,9 +107,9 @@ Future<void> packageNativeLibsJar({
         'expected <jar_entry>=<source_path>',
       );
     }
-    final entryPath = spec.substring(0, eq);
-    final srcPath = spec.substring(eq + 1);
-    final raf = File(srcPath).openSync();
+    final String entryPath = spec.substring(0, eq);
+    final String srcPath = spec.substring(eq + 1);
+    final RandomAccessFile raf = File(srcPath).openSync();
     final Uint8List header;
     try {
       header = raf.readSync(20);
@@ -127,9 +127,9 @@ Future<void> packageNativeLibsJar({
     // honoured; all other permission bits come from a fixed, host-independent
     // value (0644 / 0755), matching xtool_pack.dart. Host umask and source
     // stat.mode beyond the executable bit never leak into the jar.
-    final sourceMode = File(srcPath).statSync().mode;
+    final int sourceMode = File(srcPath).statSync().mode;
     final isExecutable = (sourceMode & 0x49) != 0;
-    final bytes = File(srcPath).readAsBytesSync();
+    final Uint8List bytes = File(srcPath).readAsBytesSync();
     // Stored, never deflated: the APK stores native libraries uncompressed
     // so zipalign can page-align them, and the APK overlay copies them
     // without inflating — which is also what lets libraries over 64 MiB
@@ -145,7 +145,7 @@ Future<void> packageNativeLibsJar({
   }
 
   File(outputPath).parent.createSync(recursive: true);
-  final zipBytes = encodeDeterministicZip(zipEntries);
+  final Uint8List zipBytes = encodeDeterministicZip(zipEntries);
   File(outputPath).writeAsBytesSync(zipBytes, flush: true);
 }
 
@@ -172,17 +172,19 @@ void assembleDebugAssets({
 
 void _copyDirectoryDereferencingLinks(Directory src, Directory dst) {
   dst.createSync(recursive: true);
-  final entities = src.listSync(recursive: false, followLinks: true)
-    ..sort((a, b) => a.path.compareTo(b.path));
+  final List<FileSystemEntity> entities = src.listSync(
+    recursive: false,
+    followLinks: true,
+  )..sort((a, b) => a.path.compareTo(b.path));
   for (final entity in entities) {
-    final name = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
+    final String name = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
     final dstPath = '${dst.path}/$name';
     if (entity is File) {
       entity.copySync(dstPath);
     } else if (entity is Directory) {
       _copyDirectoryDereferencingLinks(entity, Directory(dstPath));
     } else if (entity is Link) {
-      final resolved = entity.resolveSymbolicLinksSync();
+      final String resolved = entity.resolveSymbolicLinksSync();
       if (FileSystemEntity.isDirectorySync(resolved)) {
         _copyDirectoryDereferencingLinks(
           Directory(resolved),
@@ -202,8 +204,8 @@ Future<void> runAndroidBundle(List<String> args) async {
       'Expected subcommand: "native-libs-jar", "empty-jar", "debug-assets", or "apk-overlay".',
     );
   }
-  final subcommand = args.first;
-  final rest = args.sublist(1);
+  final String subcommand = args.first;
+  final List<String> rest = args.sublist(1);
   switch (subcommand) {
     case 'native-libs-jar':
       await _runNativeLibsJar(rest);
@@ -226,7 +228,7 @@ Future<void> _runNativeLibsJar(List<String> args) async {
   final entries = <String>[];
 
   for (var i = 0; i < args.length; i++) {
-    final arg = args[i];
+    final String arg = args[i];
     switch (arg) {
       case '--output':
         if (i + 1 >= args.length) {
@@ -275,7 +277,7 @@ Future<void> _runNativeLibsJar(List<String> args) async {
 void _runEmptyJar(List<String> args) {
   String? output;
   for (var i = 0; i < args.length; i++) {
-    final arg = args[i];
+    final String arg = args[i];
     if (arg == '--output') {
       if (i + 1 >= args.length) {
         throw ArgumentError('Missing value for --output');
@@ -299,7 +301,7 @@ void _runDebugAssets(List<String> args) {
   String? isolateSnapshot;
 
   for (var i = 0; i < args.length; i++) {
-    final arg = args[i];
+    final String arg = args[i];
     if (i + 1 >= args.length) {
       throw ArgumentError('Missing value for $arg');
     }

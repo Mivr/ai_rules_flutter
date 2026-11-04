@@ -1,30 +1,31 @@
+import 'package:args/args.dart';
 import 'package:flutter_bazel_dev_tool/run_command.dart';
 import 'package:test/test.dart';
 
 void main() {
   group('RunCommand.parser', () {
     test('requires --target', () {
-      final results = RunCommand.parser.parse([]);
+      final ArgResults results = RunCommand.parser.parse([]);
       expect(results.wasParsed('target'), isFalse);
     });
 
     test('defaults --hot to true', () {
-      final results = RunCommand.parser.parse(['-t', '//:app']);
+      final ArgResults results = RunCommand.parser.parse(['-t', '//:app']);
       expect(results['hot'], isTrue);
     });
 
     test('defaults --machine to false', () {
-      final results = RunCommand.parser.parse(['-t', '//:app']);
+      final ArgResults results = RunCommand.parser.parse(['-t', '//:app']);
       expect(results['machine'], isFalse);
     });
 
     test('defaults --devtools to true', () {
-      final results = RunCommand.parser.parse(['-t', '//:app']);
+      final ArgResults results = RunCommand.parser.parse(['-t', '//:app']);
       expect(results['devtools'], isTrue);
     });
 
     test('accepts --no-devtools', () {
-      final results = RunCommand.parser.parse([
+      final ArgResults results = RunCommand.parser.parse([
         '-t',
         '//:app',
         '--no-devtools',
@@ -33,7 +34,7 @@ void main() {
     });
 
     test('accepts multiple --device flags', () {
-      final results = RunCommand.parser.parse([
+      final ArgResults results = RunCommand.parser.parse([
         '-t',
         '//:app',
         '-d',
@@ -45,52 +46,68 @@ void main() {
     });
 
     test('defaults --device to empty list', () {
-      final results = RunCommand.parser.parse(['-t', '//:app']);
+      final ArgResults results = RunCommand.parser.parse(['-t', '//:app']);
       expect(results['device'], isEmpty);
     });
 
     test('defaults --verbose to false', () {
-      final results = RunCommand.parser.parse(['-t', '//:app']);
+      final ArgResults results = RunCommand.parser.parse(['-t', '//:app']);
       expect(results['verbose'], isFalse);
     });
 
     test('accepts --verbose', () {
-      final results = RunCommand.parser.parse(['-t', '//:app', '--verbose']);
+      final ArgResults results = RunCommand.parser.parse([
+        '-t',
+        '//:app',
+        '--verbose',
+      ]);
       expect(results['verbose'], isTrue);
     });
 
     test('accepts -v shorthand for verbose', () {
-      final results = RunCommand.parser.parse(['-t', '//:app', '-v']);
+      final ArgResults results = RunCommand.parser.parse([
+        '-t',
+        '//:app',
+        '-v',
+      ]);
       expect(results['verbose'], isTrue);
     });
 
     test('accepts --help flag', () {
-      final results = RunCommand.parser.parse(['--help']);
+      final ArgResults results = RunCommand.parser.parse(['--help']);
       expect(results['help'], isTrue);
     });
 
     test('defaults --watch to true', () {
-      final results = RunCommand.parser.parse(['-t', '//:app']);
+      final ArgResults results = RunCommand.parser.parse(['-t', '//:app']);
       expect(results['watch'], isTrue);
     });
 
     test('accepts --no-watch', () {
-      final results = RunCommand.parser.parse(['-t', '//:app', '--no-watch']);
+      final ArgResults results = RunCommand.parser.parse([
+        '-t',
+        '//:app',
+        '--no-watch',
+      ]);
       expect(results['watch'], isFalse);
     });
 
     test('accepts --watch explicitly', () {
-      final results = RunCommand.parser.parse(['-t', '//:app', '--watch']);
+      final ArgResults results = RunCommand.parser.parse([
+        '-t',
+        '//:app',
+        '--watch',
+      ]);
       expect(results['watch'], isTrue);
     });
 
     test('defaults --http-control-channel to true', () {
-      final results = RunCommand.parser.parse(['-t', '//:app']);
+      final ArgResults results = RunCommand.parser.parse(['-t', '//:app']);
       expect(results['http-control-channel'], isTrue);
     });
 
     test('accepts --no-http-control-channel', () {
-      final results = RunCommand.parser.parse([
+      final ArgResults results = RunCommand.parser.parse([
         '-t',
         '//:app',
         '--no-http-control-channel',
@@ -99,7 +116,7 @@ void main() {
     });
 
     test('accepts repeated --dart-define, values kept whole', () {
-      final results = RunCommand.parser.parse([
+      final ArgResults results = RunCommand.parser.parse([
         '-t',
         '//:app',
         '--dart-define',
@@ -111,7 +128,7 @@ void main() {
     });
 
     test('defaults --dart-define to empty list', () {
-      final results = RunCommand.parser.parse(['-t', '//:app']);
+      final ArgResults results = RunCommand.parser.parse(['-t', '//:app']);
       expect(results['dart-define'], isEmpty);
     });
 
@@ -136,18 +153,18 @@ void main() {
       // A paused app answers no app.* command and renders no frame. Someone
       // who reaches for this flag and then finds screenshots timing out should
       // not have to guess why.
-      final help = RunCommand.parser.usage;
+      final String help = RunCommand.parser.usage;
       expect(help, contains('main()'));
       expect(help, contains('app.*'));
     });
 
     test('defaults --allow-no-vm-service to false', () {
-      final results = RunCommand.parser.parse(['-t', '//:app']);
+      final ArgResults results = RunCommand.parser.parse(['-t', '//:app']);
       expect(results['allow-no-vm-service'], isFalse);
     });
 
     test('accepts --allow-no-vm-service', () {
-      final results = RunCommand.parser.parse([
+      final ArgResults results = RunCommand.parser.parse([
         '-t',
         '//:app',
         '--allow-no-vm-service',
@@ -172,7 +189,8 @@ void main() {
     test('--allow-no-vm-service help covers Chrome as well as native', () {
       // The help text is the contract for a flag whose whole job is telling
       // the user what they are giving up.
-      final help = RunCommand.parser.options['allow-no-vm-service']!.help!;
+      final String help =
+          RunCommand.parser.options['allow-no-vm-service']!.help!;
       expect(help, contains('Chrome'));
       expect(help, contains('DWDS'));
     });
@@ -194,12 +212,14 @@ void main() {
 
   group('categorizeOutputFiles', () {
     test('categorizes .dill as kernel', () {
-      final result = categorizeOutputFiles(['/out/app.dill']);
+      final Map<String, List<String>> result = categorizeOutputFiles([
+        '/out/app.dill',
+      ]);
       expect(result['kernel'], ['/out/app.dill']);
     });
 
     test('categorizes .so and .dylib as native', () {
-      final result = categorizeOutputFiles([
+      final Map<String, List<String>> result = categorizeOutputFiles([
         '/out/libapp.so',
         '/out/app.dylib',
       ]);
@@ -207,27 +227,35 @@ void main() {
     });
 
     test('categorizes .apk as apk', () {
-      final result = categorizeOutputFiles(['/out/app.apk']);
+      final Map<String, List<String>> result = categorizeOutputFiles([
+        '/out/app.apk',
+      ]);
       expect(result['apk'], ['/out/app.apk']);
     });
 
     test('categorizes .ipa as ipa', () {
-      final result = categorizeOutputFiles(['/out/app.ipa']);
+      final Map<String, List<String>> result = categorizeOutputFiles([
+        '/out/app.ipa',
+      ]);
       expect(result['ipa'], ['/out/app.ipa']);
     });
 
     test('categorizes .app as bundle', () {
-      final result = categorizeOutputFiles(['/out/MyApp.app']);
+      final Map<String, List<String>> result = categorizeOutputFiles([
+        '/out/MyApp.app',
+      ]);
       expect(result['bundle'], ['/out/MyApp.app']);
     });
 
     test('categorizes unknown extensions as other', () {
-      final result = categorizeOutputFiles(['/out/file.txt']);
+      final Map<String, List<String>> result = categorizeOutputFiles([
+        '/out/file.txt',
+      ]);
       expect(result['other'], ['/out/file.txt']);
     });
 
     test('handles mixed file types', () {
-      final result = categorizeOutputFiles([
+      final Map<String, List<String>> result = categorizeOutputFiles([
         '/out/MyApp.app',
         '/out/app.dill',
         '/out/libapp.so',
@@ -244,7 +272,7 @@ void main() {
     });
 
     test('returns empty map for empty list', () {
-      final result = categorizeOutputFiles([]);
+      final Map<String, List<String>> result = categorizeOutputFiles([]);
       expect(result, isEmpty);
     });
   });

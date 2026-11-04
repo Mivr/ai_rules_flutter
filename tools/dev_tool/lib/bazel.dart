@@ -7,6 +7,10 @@ import 'package:flutter_bazel_dev_tool/dev_tool_exception.dart';
 import 'package:flutter_bazel_dev_tool/logging.dart';
 import 'package:flutter_bazel_dev_tool/runfiles_helper.dart';
 
+typedef _Built = ({int exitCode, String tail});
+
+typedef _Id = Map<String, Object?>;
+
 final _logger = Logger('dev_tool.bazel');
 
 /// A bazel invocation the caller needed, which bazel itself rejected.
@@ -128,12 +132,12 @@ BazelAspectOutputs aspectOutputsFromBuildEvents(
   required String aspect,
   required String outputGroup,
 }) {
-  final scanned = _scanBuildEvents(
+  final _ScannedEvents scanned = _scanBuildEvents(
     events,
     aspect: aspect,
     outputGroup: outputGroup,
   );
-  final resolved = _resolveNamedSets(scanned.sets, scanned.roots);
+  final _ResolvedSets resolved = _resolveNamedSets(scanned.sets, scanned.roots);
   return BazelAspectOutputs(
     exitCode: 0,
     files: resolved.files,
@@ -156,7 +160,7 @@ _ScannedEvents _scanBuildEvents(
 }) {
   final sets = <String, Map<String, Object?>>{};
   final roots = <String>[];
-  for (final line in LineSplitter.split(events)) {
+  for (final String line in LineSplitter.split(events)) {
     if (line.trim().isEmpty) continue;
     final event = jsonDecode(line) as Map<String, Object?>;
     if (_recordNamedSet(event, sets)) continue;
@@ -170,7 +174,7 @@ bool _recordNamedSet(
   Map<String, Object?> event,
   Map<String, Map<String, Object?>> sets,
 ) {
-  final id = event['id'] as Map<String, Object?>? ?? const {};
+  final _Id id = event['id'] as Map<String, Object?>? ?? const {};
   final namedSet = id['namedSet'] as Map<String, Object?>?;
   if (namedSet == null) return false;
   sets[namedSet['id'] as String] =
@@ -187,21 +191,23 @@ List<String> _outputGroupRoots(
   String aspect,
   String outputGroup,
 ) {
-  final id = event['id'] as Map<String, Object?>? ?? const {};
+  final _Id id = event['id'] as Map<String, Object?>? ?? const {};
   final completed = id['targetCompleted'] as Map<String, Object?>?;
   final completedAspect = completed?['aspect'] as String?;
   if (completedAspect == null ||
       completedAspect.split('%').last != aspect.split('%').last) {
     return const [];
   }
-  final groups =
+  final List<dynamic> groups =
       (event['completed'] as Map<String, Object?>?)?['outputGroup'] as List? ??
       const [];
   final roots = <String>[];
-  for (final group in groups.cast<Map<String, Object?>>()) {
+  for (final _Id group in groups.cast<Map<String, Object?>>()) {
     if (group['name'] != outputGroup) continue;
-    for (final set in (group['fileSets'] as List? ?? const [])) {
-      roots.add((set as Map<String, Object?>)['id'] as String);
+    for (final _Id set
+        in (group['fileSets'] as List? ?? const [])
+            .cast<Map<String, Object?>>()) {
+      roots.add(set['id'] as String);
     }
   }
   return roots;
@@ -225,18 +231,20 @@ _ResolvedSets _resolveNamedSets(
   final seen = <String>{};
   final pending = [...roots];
   while (pending.isNotEmpty) {
-    final setId = pending.removeLast();
+    final String setId = pending.removeLast();
     if (!seen.add(setId)) continue;
-    final set = sets[setId] ?? const {};
-    for (final file in (set['files'] as List? ?? const [])) {
-      final entry = file as Map<String, Object?>;
-      final path = _setFilePath(entry);
+    final _Id set = sets[setId] ?? const {};
+    for (final _Id entry
+        in (set['files'] as List? ?? const []).cast<Map<String, Object?>>()) {
+      final String? path = _setFilePath(entry);
       if (path == null) continue;
       files.add(path);
       executionRoot ??= _executionRootOf(entry, path);
     }
-    for (final nested in (set['fileSets'] as List? ?? const [])) {
-      pending.add((nested as Map<String, Object?>)['id'] as String);
+    for (final _Id nested
+        in (set['fileSets'] as List? ?? const [])
+            .cast<Map<String, Object?>>()) {
+      pending.add(nested['id'] as String);
     }
   }
   return (files: files.toList()..sort(), executionRoot: executionRoot);
@@ -254,9 +262,10 @@ String? _setFilePath(Map<String, Object?> entry) {
 /// The event gives the path under the root (`pathPrefix` + `name`) as well as
 /// the absolute location, and the difference is the root.
 String? _executionRootOf(Map<String, Object?> entry, String path) {
-  final prefix = (entry['pathPrefix'] as List? ?? const []).cast<String>();
+  final List<String> prefix = (entry['pathPrefix'] as List? ?? const [])
+      .cast<String>();
   if (prefix.isEmpty) return null;
-  final relative = [...prefix, entry['name'] as String].join('/');
+  final String relative = [...prefix, entry['name'] as String].join('/');
   if (!path.endsWith('/$relative')) return null;
   return path.substring(0, path.length - relative.length - 1);
 }
@@ -346,7 +355,7 @@ class _BazelCommand {
 
   /// The command's exit status, or [BazelCancelled] if it was stopped.
   Future<int> get exited async {
-    final exitCode = await process.exitCode;
+    final int exitCode = await process.exitCode;
     if (stopped) throw BazelCancelled(args.join(' '));
     return exitCode;
   }
@@ -494,11 +503,15 @@ class Bazel {
     List<String> args, {
     required String workingDirectory,
   }) async {
-    final command = await _start(args, workingDirectory);
+    final _BazelCommand command = await _start(args, workingDirectory);
     // Drained from the moment the process exists: a command whose pipe fills
     // blocks on its next write and never exits.
-    final stdout = command.process.stdout.transform(utf8.decoder).join();
-    final stderr = command.process.stderr.transform(utf8.decoder).join();
+    final Future<String> stdout = command.process.stdout
+        .transform(utf8.decoder)
+        .join();
+    final Future<String> stderr = command.process.stderr
+        .transform(utf8.decoder)
+        .join();
     final int exitCode;
     try {
       exitCode = await command.exited;
@@ -541,7 +554,7 @@ class Bazel {
     String? compilationMode,
     List<String> extraArgs = const [],
   }) async {
-    final args = bazelBuildArgs(
+    final List<String> args = bazelBuildArgs(
       target,
       compilationMode: compilationMode,
       extraArgs: extraArgs,
@@ -558,7 +571,7 @@ class Bazel {
       'workspace': workspace,
     });
 
-    final built = await _streamed(args, workspace);
+    final _Built built = await _streamed(args, workspace);
     if (built.exitCode != 0) {
       return BazelBuildResult(
         exitCode: built.exitCode,
@@ -573,8 +586,11 @@ class Bazel {
       cqueryArgs.addAll(['-c', compilationMode]);
     }
     cqueryArgs.addAll(extraArgs);
-    final cqueryResult = await run(cqueryArgs, workingDirectory: workspace);
-    final outputFiles = _absolutizeCqueryPaths(
+    final ProcessResult cqueryResult = await run(
+      cqueryArgs,
+      workingDirectory: workspace,
+    );
+    final List<String> outputFiles = _absolutizeCqueryPaths(
       cqueryResult.stdout as String,
       workspace,
     );
@@ -603,7 +619,9 @@ class Bazel {
     String? compilationMode,
     List<String> extraArgs = const [],
   }) async {
-    final events = await Directory.systemTemp.createTemp('flutter_bep_');
+    final Directory events = await Directory.systemTemp.createTemp(
+      'flutter_bep_',
+    );
     try {
       final eventFile = '${events.path}/events.json';
       // Not [bazelBuildArgs]: the group replaces the default outputs rather
@@ -611,7 +629,7 @@ class Bazel {
       // files aspect stays off. Either would make this build the launch
       // target's own bundle and the app's kernel — on Android an APK repackage
       // — when all that was asked for is what the aspect collects.
-      final args = [
+      final List<String> args = [
         'build',
         target,
         if (compilationMode != null) ...['-c', compilationMode],
@@ -626,7 +644,7 @@ class Bazel {
         'args': args,
         'workspace': workspace,
       });
-      final built = await _streamed(args, workspace);
+      final _Built built = await _streamed(args, workspace);
       if (built.exitCode != 0) {
         return BazelAspectOutputs(
           exitCode: built.exitCode,
@@ -647,11 +665,8 @@ class Bazel {
 
   /// Run a build to completion with both of bazel's streams relayed as they
   /// arrive, and keep the tail of stderr for a failure to quote.
-  Future<({int exitCode, String tail})> _streamed(
-    List<String> args,
-    String workspace,
-  ) async {
-    final command = await _start(args, workspace);
+  Future<_Built> _streamed(List<String> args, String workspace) async {
+    final _BazelCommand command = await _start(args, workspace);
     // Both of bazel's streams, each labelled, so a JSON consumer can tell them
     // apart.
     final out = SubprocessOutput(source: 'bazel', stream: 'stdout');
@@ -659,7 +674,7 @@ class Bazel {
     // Read to their end rather than cancelled at exit: the exit status and the
     // last of the output arrive separately, and the last lines are the ones
     // that say why a build failed.
-    final streamed = Future.wait([
+    final Future<List<void>> streamed = Future.wait([
       command.process.stdout.transform(utf8.decoder).forEach(out.write),
       command.process.stderr.transform(utf8.decoder).forEach(err.write),
     ]);
@@ -712,15 +727,15 @@ class Bazel {
       args.addAll(['-c', compilationMode]);
     }
     args.addAll(extraArgs);
-    final result = await run(args, workingDirectory: workspace);
+    final ProcessResult result = await run(args, workingDirectory: workspace);
     if (result.exitCode != 0) {
       throw BazelInvocationFailure(
         command: args.join(' '),
         diagnostics: (result.stderr as String).trim(),
       );
     }
-    for (final line in LineSplitter.split(result.stdout as String)) {
-      final t = line.trim();
+    for (final String line in LineSplitter.split(result.stdout as String)) {
+      final String t = line.trim();
       if (t.startsWith('//') || t.startsWith('@')) {
         // cquery --output=label prints "<label> (<config hash>)"; keep the
         // label.
@@ -762,7 +777,7 @@ class Bazel {
       args.addAll(['-c', compilationMode]);
     }
     args.addAll(extraArgs);
-    final result = await run(args, workingDirectory: workspace);
+    final ProcessResult result = await run(args, workingDirectory: workspace);
     if (result.exitCode != 0) {
       throw DevToolException(
         'bazel cquery for the flutter_application inside $target failed:\n'
@@ -793,11 +808,14 @@ class Bazel {
   /// cannot proceed without knowing the workspace, and a silent fallback
   /// such as `?? '.'` would mask the failure.
   Future<String> findWorkspaceRoot() async {
-    final fromEnv = Platform.environment['BUILD_WORKSPACE_DIRECTORY'];
+    final String? fromEnv = Platform.environment['BUILD_WORKSPACE_DIRECTORY'];
     if (fromEnv != null && fromEnv.isNotEmpty) return fromEnv;
 
-    final cwd = Directory.current.path;
-    final result = await run(['info', 'workspace'], workingDirectory: cwd);
+    final String cwd = Directory.current.path;
+    final ProcessResult result = await run([
+      'info',
+      'workspace',
+    ], workingDirectory: cwd);
     if (result.exitCode != 0) {
       throw StateError(
         'Could not determine workspace root: BUILD_WORKSPACE_DIRECTORY is '
@@ -825,12 +843,12 @@ class Bazel {
     // start is either in here or already in [_running]: nothing awaits
     // between [_start]'s check of [_closed] and its registering the start.
     await Future.wait(_starting);
-    final running = List.of(_running);
+    final List<_BazelCommand> running = List.of(_running);
     for (final command in running) {
       // A second close finds these already stopped, and only waits.
       if (command.stopped) continue;
       command.stopped = true;
-      final interrupt = _interrupt;
+      final BazelInterrupt? interrupt = _interrupt;
       if (interrupt == null) continue;
       _logger.info({
         'message': 'bazel_interrupted',
@@ -845,7 +863,7 @@ class Bazel {
   }
 
   Future<void> _awaitFinished(_BazelCommand command) async {
-    final finished = await command.finished
+    final bool finished = await command.finished
         .then((_) => true)
         .timeout(_stopBound, onTimeout: () => false);
     if (finished) return;
@@ -872,17 +890,21 @@ class Bazel {
     if (_closed) throw BazelCancelled(args.join(' '));
     // Registered as running inside the spawn's own continuation, before
     // anything awaiting the spawn resumes — [close] included.
-    final started = _spawn(args, workingDirectory: workingDirectory).then((
-      process,
-    ) {
-      final command = _BazelCommand(args, process);
-      _running.add(command);
-      unawaited(process.exitCode.then((_) => _running.remove(command)));
-      return command;
-    });
+    final Future<_BazelCommand> started =
+        _spawn(args, workingDirectory: workingDirectory).then((
+          process,
+        ) {
+          final command = _BazelCommand(args, process);
+          _running.add(command);
+          unawaited(process.exitCode.then((_) => _running.remove(command)));
+          return command;
+        });
     // [close] waits on the start, not on its outcome: a spawn that throws
     // reaches this command's own caller below, which is where it is reported.
-    final settled = started.then<void>((_) {}, onError: (Object _) {});
+    final Future<void> settled = started.then<void>(
+      (_) {},
+      onError: (Object _) {},
+    );
     _starting.add(settled);
     try {
       return await started;
@@ -899,7 +921,7 @@ Future<Process> _spawnInGroup(
   List<String> args, {
   required String workingDirectory,
 }) {
-  final exec = _processGroupExec ??= _resolveProcessGroupExec();
+  final String exec = _processGroupExec ??= _resolveProcessGroupExec();
   return Process.start(exec, [
     'bazel',
     ...args,
@@ -908,7 +930,7 @@ Future<Process> _spawnInGroup(
 
 String _resolveProcessGroupExec() {
   const key = 'rules_flutter/tools/dev_tool/process_group_exec';
-  final path = resolveRunfile(key);
+  final String? path = resolveRunfile(key);
   if (path == null) {
     // A runfiles tree exists (see [Bazel.new]), so this is not the tool
     // running from source: a declared `data` dependency did not make it in.
@@ -948,8 +970,8 @@ void _interruptGroup(Process process) =>
 /// boundary avoids that whack-a-mole.
 List<String> _absolutizeCqueryPaths(String stdout, String workspace) {
   final result = <String>[];
-  for (final line in LineSplitter.split(stdout)) {
-    final trimmed = line.trim();
+  for (final String line in LineSplitter.split(stdout)) {
+    final String trimmed = line.trim();
     if (trimmed.isEmpty) continue;
     if (trimmed.startsWith('/')) {
       result.add(trimmed);

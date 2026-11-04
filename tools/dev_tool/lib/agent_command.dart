@@ -50,7 +50,7 @@ void setUpAgentCommands(
   Duration dispatchMargin = _dispatchMargin,
   Duration pauseReadBound = _pauseReadBound,
 }) {
-  final bounds = (
+  final AgentDispatchBounds bounds = (
     dispatchMargin: dispatchMargin,
     pauseReadBound: pauseReadBound,
   );
@@ -174,17 +174,17 @@ void registerPressKeyCommand(
   Duration dispatchMargin = _dispatchMargin,
   Duration pauseReadBound = _pauseReadBound,
 }) {
-  final mac = browserHostIsMac ?? Platform.isMacOS;
-  final bounds = (
+  final bool mac = browserHostIsMac ?? Platform.isMacOS;
+  final AgentDispatchBounds bounds = (
     dispatchMargin: dispatchMargin,
     pauseReadBound: pauseReadBound,
   );
   cr.register('app.pressKey', (params) async {
-    final session = findSession(params['appId'] as String?);
+    final DeviceSession? session = findSession(params['appId'] as String?);
     if (session == null) {
       throw CommandFailure.notFound('unknown appId: ${params['appId']}');
     }
-    final spec = params['key'];
+    final dynamic spec = params['key'];
     if (spec is! String) {
       throw CommandFailure.badRequest(
         'app.pressKey needs "key", the key to press, as a string — for '
@@ -225,7 +225,7 @@ void registerPressKeyCommand(
                 findSession,
                 {
                   'appId': session.appId,
-                  if (params['timeoutMs'] case final t?) 'timeoutMs': t,
+                  if (params['timeoutMs'] case final Object t?) 'timeoutMs': t,
                 },
                 'ext.rules_flutter.settle',
                 bounds: bounds,
@@ -282,7 +282,10 @@ Future<Map<String, dynamic>> _pressKeyInBrowser(
       'app.tap on it, or Tab to it.',
     );
   }
-  final (settled, settleDetail) = switch ('${params['settle']}') {
+  final (
+    String settled,
+    String? settleDetail,
+  ) = switch ('${params['settle']}') {
     'false' => ('skipped', 'the caller asked not to wait'),
     _ when !press.pageVisible => (
       'no',
@@ -312,7 +315,7 @@ Future<(String, String?)> _settleAfterKeys(
   Future<Map<String, dynamic>> Function() settle,
 ) async {
   try {
-    final json = await settle();
+    final Map<String, dynamic> json = await settle();
     return json['settled'] == 'yes'
         ? ('yes', null)
         : ('no', json['settleDetail']?.toString());
@@ -331,8 +334,8 @@ Future<Map<String, dynamic>> _pressKeyInFramework(
   Map<String, dynamic> params, {
   required AgentDispatchBounds bounds,
 }) async {
-  final pressed = chord.pressedKey;
-  final result = await _call(
+  final KeyDescription pressed = chord.pressedKey;
+  final Map<String, dynamic> result = await _call(
     findSession,
     {
       'appId': session.appId,
@@ -433,7 +436,7 @@ const _bindingExtension = 'ext.flutter.reassemble';
 /// is passed through to the app untouched — so it is exactly the promise the
 /// app made about this call.
 Duration _dispatchBound(Map<String, dynamic> params, Duration margin) {
-  final asked = int.tryParse('${params['timeoutMs']}');
+  final int? asked = int.tryParse('${params['timeoutMs']}');
   return (asked == null ? _defaultAppDeadline : Duration(milliseconds: asked)) +
       margin;
 }
@@ -446,7 +449,7 @@ Duration _dispatchBound(Map<String, dynamic> params, Duration margin) {
 /// did not answer either says the VM service is the problem, not the app.
 Future<String> _pauseNote(VmServiceClient client, Duration bound) async {
   try {
-    final reason = await client.pausedReason().timeout(bound);
+    final String? reason = await client.pausedReason().timeout(bound);
     return reason == null
         ? 'Its isolate reported no pause, so the app was running and the '
               'handler never returned — a backgrounded app stops producing '
@@ -478,11 +481,11 @@ Future<Map<String, dynamic>> _call(
   Map<String, String> extraArgs = const {},
   bool waitForBinding = true,
 }) async {
-  final session = findSession(params['appId'] as String?);
+  final DeviceSession? session = findSession(params['appId'] as String?);
   if (session == null) {
     throw CommandFailure.notFound('unknown appId: ${params['appId']}');
   }
-  var vm = session.vmClient;
+  VmServiceClient? vm = session.vmClient;
   if (vm == null) {
     // Only web ever gets here. A native session owns its VM service from the
     // moment it exists; a browser's is handed over by DWDS when the page
@@ -496,7 +499,7 @@ Future<Map<String, dynamic>> _call(
   if (vm == null) {
     throw CommandFailure.failed('no VM service for ${session.appId}');
   }
-  final client = vm;
+  final VmServiceClient client = vm;
 
   await _waitForAppReady(
     session,
@@ -526,8 +529,8 @@ Future<Map<String, dynamic>> _call(
         entry.key: entry.value.toString(),
     ...extraArgs,
   };
-  final bound = _dispatchBound(params, bounds.dispatchMargin);
-  final json = await _dispatchCall(
+  final Duration bound = _dispatchBound(params, bounds.dispatchMargin);
+  final Map<String, dynamic>? json = await _dispatchCall(
     client,
     extensionMethod,
     args: args,
@@ -558,7 +561,7 @@ Future<CommandFailure?> _pauseError(
   pauseReadBound,
   onTimeout: () => null,
 )) {
-  final reason? => CommandFailure.failed(
+  final String reason? => CommandFailure.failed(
     '$extensionMethod cannot run: $reason',
   ),
   _ => null,
@@ -622,7 +625,7 @@ Future<void> _waitForExtension(
   String extensionMethod, {
   required bool waitForBinding,
 }) async {
-  for (final rpc in {
+  for (final String rpc in {
     extensionMethod,
     if (waitForBinding) _bindingExtension,
   }) {

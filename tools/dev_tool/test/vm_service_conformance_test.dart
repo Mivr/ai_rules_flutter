@@ -100,10 +100,12 @@ void main() {
   for (final subject in subjects) {
     group(subject.label, () {
       test('refuses an RPC after dispose, synchronously', () async {
-        final connection = subject.connect();
+        final _Connection connection = subject.connect();
         await connection.dispose();
 
-        final refusal = _refusal(connection.service);
+        final ({bool returnedFuture, Object? sync}) refusal = _refusal(
+          connection.service,
+        );
         expect(
           refusal.returnedFuture,
           isFalse,
@@ -122,10 +124,12 @@ void main() {
       });
 
       test('refuses an RPC after the socket hangs up, the same way', () async {
-        final connection = subject.connect();
+        final _Connection connection = subject.connect();
         await connection.hangUp();
 
-        final refusal = _refusal(connection.service);
+        final ({bool returnedFuture, Object? sync}) refusal = _refusal(
+          connection.service,
+        );
         expect(refusal.returnedFuture, isFalse);
         expect((refusal.sync! as RPCError).code, -32000);
       });
@@ -133,7 +137,7 @@ void main() {
       test(
         'completes onDone exactly once, and tolerates a second dispose',
         () async {
-          final connection = subject.connect();
+          final _Connection connection = subject.connect();
           var dones = 0;
           unawaited(connection.service.onDone.then((_) => dones++));
 
@@ -153,7 +157,7 @@ void main() {
       // the state of a live connection.
       for (final ending in ['dispose', 'hang-up']) {
         test('a $ending does not complete onDone in the same turn', () async {
-          final connection = subject.connect();
+          final _Connection connection = subject.connect();
           var done = false;
           unawaited(connection.service.onDone.then((_) => done = true));
 
@@ -184,7 +188,7 @@ void main() {
 
       test('a connection that has not ended answers every RPC', () async {
         // The negative case, so the cases above cannot pass by refusing always.
-        final connection = subject.connect();
+        final _Connection connection = subject.connect();
         var done = false;
         unawaited(connection.service.onDone.then((_) => done = true));
         await pumpEventQueue();

@@ -80,12 +80,12 @@ class NativeHotPatchManifest {
         'reads version 1',
       );
     }
-    final library = fields['library'];
+    final Object? library = fields['library'];
     if (library is! String || library.isEmpty) {
       bad('has no `library` path');
     }
     List<String> strings(String field, {required bool nonEmpty}) {
-      final value = fields[field];
+      final Object? value = fields[field];
       if (value is! List || value.any((v) => v is! String || v.isEmpty)) {
         bad('has a `$field` that is not a list of non-empty strings');
       }
@@ -187,9 +187,11 @@ class NativePatchTool {
         'so native edits in this run need a hot restart: ${e.message}',
       );
     }
-    final answer = _statusLine(result.stdout as String);
+    final Map<String, Object?>? answer = _statusLine(result.stdout as String);
     if (result.exitCode == 0 && answer?['status'] == 'ok') return;
-    final message = answer?['status'] == 'failed' ? answer!['message'] : null;
+    final Object? message = answer?['status'] == 'failed'
+        ? answer!['message']
+        : null;
     throw DevToolException(
       'The hot patch builder for ${manifest.library} could not record the '
       'launched library, so native edits in this run need a hot restart.\n'
@@ -226,8 +228,8 @@ class NativePatchTool {
         '${e.message}',
       );
     }
-    final answer = _statusLine(result.stdout as String);
-    final parsed = answer == null ? null : _parse(answer);
+    final Map<String, Object?>? answer = _statusLine(result.stdout as String);
+    final PatchBuilderAnswer? parsed = answer == null ? null : _parse(answer);
     if (parsed is PatchFailed || result.exitCode == 0 && parsed != null) {
       return parsed!;
     }
@@ -239,7 +241,7 @@ class NativePatchTool {
   }
 
   Future<ProcessResult> _invoke(List<String> arguments) {
-    final [executable, ...prefix] = manifest.command;
+    final [String executable, ...List<String> prefix] = manifest.command;
     return _run(executable, [
       ...prefix,
       ...arguments,
@@ -255,16 +257,16 @@ class NativePatchTool {
       case 'unchanged':
         return const PatchUnchanged();
       case 'patched':
-        final file = json['file'];
-        final functions = strings(json['functions'] ?? const []);
+        final Object? file = json['file'];
+        final List<String>? functions = strings(json['functions'] ?? const []);
         if (file is! String || file.isEmpty || functions == null) return null;
         return PatchBuilt(file: file, functions: functions);
       case 'restart':
-        final reasons = strings(json['reasons']);
+        final List<String>? reasons = strings(json['reasons']);
         if (reasons == null || reasons.isEmpty) return null;
         return PatchNeedsRestart(reasons);
       case 'failed':
-        final message = json['message'];
+        final Object? message = json['message'];
         if (message is! String) return null;
         return PatchFailed(message);
     }
@@ -275,12 +277,12 @@ class NativePatchTool {
   /// JSON object. Anything it printed before is progress, and stderr is
   /// diagnostics — neither is the answer.
   static Map<String, Object?>? _statusLine(String output) {
-    final lines = const LineSplitter()
+    final Iterable<String> lines = const LineSplitter()
         .convert(output)
         .where((l) => l.trim().isNotEmpty);
     if (lines.isEmpty) return null;
     try {
-      final json = jsonDecode(lines.last);
+      final dynamic json = jsonDecode(lines.last);
       return json is Map<String, Object?> ? json : null;
     } on FormatException {
       return null;
@@ -288,8 +290,8 @@ class NativePatchTool {
   }
 
   static String _said(ProcessResult result) {
-    final out = (result.stdout as String).trim();
-    final err = (result.stderr as String).trim();
+    final String out = (result.stdout as String).trim();
+    final String err = (result.stderr as String).trim();
     return [
       if (out.isNotEmpty) 'stdout:\n$out',
       if (err.isNotEmpty) 'stderr:\n$err',

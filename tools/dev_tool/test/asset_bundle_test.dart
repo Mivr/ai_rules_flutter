@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_bazel_dev_tool/hot_reload/asset_bundle.dart';
 import 'package:path/path.dart' as p;
@@ -50,8 +51,8 @@ class _Fixture {
   /// instead of whenever the machine is fast enough.
   void editInPlace(String relativePath, String content) {
     final file = File(p.join(workspace, relativePath));
-    final before = file.statSync();
-    final bytes = utf8.encode(content);
+    final FileStat before = file.statSync();
+    final Uint8List bytes = utf8.encode(content);
     if (bytes.length != before.size) {
       throw ArgumentError(
         'editInPlace needs same-length content: '
@@ -66,7 +67,7 @@ class _Fixture {
   void build() {
     final dir = Directory(p.join(workspace, 'assets'));
     if (!dir.existsSync()) return;
-    for (final entity in dir.listSync(recursive: true)) {
+    for (final FileSystemEntity entity in dir.listSync(recursive: true)) {
       if (entity is! File) continue;
       _write(
         p.join(bundleDir, p.relative(entity.path, from: workspace)),
@@ -357,8 +358,8 @@ void main() {
         // millisecond pushes the second form into the *next* millisecond,
         // where the floored cutoff is genuinely later than the save and the
         // guard correctly declines to fire.
-        final stamp = source.statSync().modified;
-        final cutoff = stamp
+        final DateTime stamp = source.statSync().modified;
+        final DateTime cutoff = stamp
             .subtract(
               Duration(microseconds: stamp.microsecondsSinceEpoch % 1000),
             )
@@ -423,7 +424,7 @@ void main() {
       // Bound by a relative name from inside the directory: a socket path is
       // capped at ~104 bytes, and Bazel's test temp directory alone comes
       // close to that on Linux.
-      final cwd = Directory.current;
+      final Directory cwd = Directory.current;
       final ServerSocket socket;
       Directory.current = p.dirname(unreadable.path);
       try {
@@ -511,7 +512,7 @@ void main() {
       fixture.edit(p.join('assets', 'logo.png'), 'v2');
       fixture.build();
 
-      final changed = tracker.takeBundleChanges(
+      final Set<String> changed = tracker.takeBundleChanges(
         rebuiltBefore: afterFixtureWrites(),
       );
       expect(changed, {'assets/logo.png'});
@@ -554,7 +555,7 @@ void main() {
         fixture.bundle,
         builtBefore: afterFixtureWrites(),
       );
-      final newDirFile = p.join(
+      final String newDirFile = p.join(
         fixture.workspace,
         'assets',
         '3.0x',

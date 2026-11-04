@@ -113,7 +113,7 @@ class MachineProtocol {
   /// registrations into one call, so this is one event per moment the surface
   /// actually moves rather than one per `register`.
   void commandsChanged() {
-    final runner = _commandRunner;
+    final CommandRunner? runner = _commandRunner;
     if (runner == null) return;
     sendEvent('daemon.commandsChanged', {'commands': runner.describe()});
   }
@@ -150,22 +150,23 @@ class MachineProtocol {
     // `daemon.commandsChanged` restates the list above verbatim.
     _commandRunner?.markAnnounced();
 
-    final lines =
+    final Stream<String> lines =
         _inputLines ??
         stdin.transform(utf8.decoder).transform(const LineSplitter());
     _subscription = lines.listen(
       (line) async {
         try {
-          final decoded = json.decode(line);
+          final dynamic decoded = json.decode(line);
           // The Flutter machine protocol wraps commands in [...] arrays.
           final request =
               (decoded is List ? decoded.first : decoded)
                   as Map<String, dynamic>;
           final method = request['method'] as String?;
-          final id = request['id'];
-          final params = (request['params'] as Map<String, dynamic>?) ?? {};
+          final dynamic id = request['id'];
+          final Map<String, dynamic> params =
+              (request['params'] as Map<String, dynamic>?) ?? {};
 
-          final runner = _commandRunner;
+          final CommandRunner? runner = _commandRunner;
           if (method == null) {
             _sendError(id, 'No `method` field: nothing to run.');
           } else if (runner == null) {
@@ -176,7 +177,10 @@ class MachineProtocol {
               // refuses an unregistered method itself, with a message naming
               // what this run *does* offer. Checking here would produce a
               // second, barer message for the same condition.
-              final result = await runner.run(method, params);
+              final Map<String, dynamic> result = await runner.run(
+                method,
+                params,
+              );
               _sendResponse(id, result);
             } on CommandFailure catch (e) {
               // The command's own no. Upstream's shape, so a client that
@@ -341,7 +345,7 @@ class MachineProtocol {
     bool finished = false,
     String? progressId,
   }) {
-    final id = progressId ?? 'progress_${_nextId++}';
+    final String id = progressId ?? 'progress_${_nextId++}';
     sendEvent('app.progress', {
       if (appId != null) 'appId': appId,
       'id': id,
