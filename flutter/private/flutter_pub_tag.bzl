@@ -112,7 +112,10 @@ flutter_pub_tag = tag_class(
                   "build does not target. Every key and listed dependency " +
                   "must name a package in the lock, and each listed " +
                   "dependency must be one the key's own pubspec declares; " +
-                  "anything else fails evaluation or the spoke fetch. Empty " +
+                  "anything else fails evaluation or the spoke fetch. A key " +
+                  "naming a Flutter SDK package (`flutter`, `flutter_test`, " +
+                  "...) fails evaluation, though a listed dependency may " +
+                  "name one. Empty " +
                   "by default and never given a built-in default.",
             default = {},
         ),
@@ -173,14 +176,17 @@ flutter_pub_tag = tag_class(
                   "`{\"permission_handler_apple\": [\"PERMISSION_CAMERA=1\"]}`). `NAME` " +
                   "reaches C-family and Swift sources; `NAME=VALUE` reaches C-family " +
                   "sources only, because Swift conditions carry no value. A key naming no " +
-                  "Apple plugin in the lock fails the extension evaluation.",
+                  "Apple plugin in the lock, or naming a Flutter SDK package, fails " +
+                  "the extension evaluation.",
             default = {},
         ),
         "ios_plugin_deps": attr.string_keyed_label_dict(
             doc = "Flutter plugin name -> label of one target holding every native " +
                   "dependency the plugin's Apple code needs. Replaces reading the " +
                   "plugin's lock entry, podspec or `Package.swift` dependency list; " +
-                  "the plugin's own sources still build. Empty by default.",
+                  "the plugin's own sources still build. A key naming no locked " +
+                  "package, or naming a Flutter SDK package, fails the extension " +
+                  "evaluation. Empty by default.",
             default = {},
         ),
         "ios_pod_deps": attr.string_keyed_label_dict(

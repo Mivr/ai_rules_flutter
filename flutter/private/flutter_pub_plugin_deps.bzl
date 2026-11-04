@@ -7,25 +7,34 @@ targets, because either way the dependency would reach nothing. Every
 helper is pure so unit tests drive them with plain strings and lists.
 """
 
-def ios_plugin_deps_lock_error(plugin_deps, lock_packages):
+def ios_plugin_deps_lock_error(plugin_deps, lock_packages, sdk_packages = ()):
     """Refuses a plugin deps key that names no package in the lock.
 
     Args:
         plugin_deps: The `flutter.pub` tag's plugin-name -> label dictionary.
         lock_packages: The package names the lock resolves.
+        sdk_packages: The locked Flutter SDK package names; a key naming one
+            is refused.
 
     Returns:
         The first error in sorted-key order naming
         `flutter.pub(ios_plugin_deps = ...)` and the offending plugin key,
-        or the empty string when every key is locked.
+        or the empty string when every key is locked and none is an SDK package.
     """
     available = {name: True for name in lock_packages}
+    sdk = {name: True for name in sdk_packages}
     for plugin in sorted(plugin_deps.keys()):
         if plugin not in available:
             return (
                 'flutter.pub(ios_plugin_deps = ...): key "{plugin}" ' +
                 "is not a package in the lock. Name a locked package, or " +
                 "remove the entry."
+            ).format(plugin = plugin)
+        if plugin in sdk:
+            return (
+                'flutter.pub(ios_plugin_deps = ...): key "{plugin}" ' +
+                "is a Flutter SDK package; Flutter SDK packages are not " +
+                "configurable through ios_plugin_deps. Remove the entry."
             ).format(plugin = plugin)
     return ""
 

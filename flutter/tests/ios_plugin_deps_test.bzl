@@ -100,6 +100,28 @@ def _lock_error_test_impl(ctx):
         expected_alpha,
         ios_plugin_deps_lock_error({"zebra": "//:z", "alpha": "//:a"}, ["a"]),
     )
+
+    expected_sdk = (
+        'flutter.pub(ios_plugin_deps = ...): key "integration_test" is a Flutter SDK package; ' +
+        "Flutter SDK packages are not configurable through ios_plugin_deps. Remove the entry."
+    )
+    sdk_lock = ["a", "integration_test"]
+    asserts.equals(
+        env,
+        expected_sdk,
+        ios_plugin_deps_lock_error({"integration_test": "//:x"}, sdk_lock, {"integration_test": True}),
+    )
+    asserts.equals(env, "", ios_plugin_deps_lock_error({"a": "//:a"}, sdk_lock, ["integration_test"]))
+    asserts.equals(
+        env,
+        expected_ghost,
+        ios_plugin_deps_lock_error({"ghost": "//:g"}, sdk_lock, ["integration_test"]),
+    )
+    asserts.equals(
+        env,
+        expected_alpha,
+        ios_plugin_deps_lock_error({"integration_test": "//:x", "alpha": "//:a"}, sdk_lock, ["integration_test"]),
+    )
     return unittest.end(env)
 
 _lock_error_test = unittest.make(_lock_error_test_impl)

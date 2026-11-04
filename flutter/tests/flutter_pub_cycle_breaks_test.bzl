@@ -65,6 +65,27 @@ def _lock_membership_test_impl(ctx):
     asserts.true(env, "dio" in bad_value, bad_value)
     asserts.true(env, "ghost" in bad_value, bad_value)
 
+    sdk_lock = ["dio", "flutter_test", "integration_test"]
+    asserts.equals(
+        env,
+        "flutter.pub(cycle_breaks = ...): key \"integration_test\" is a Flutter SDK package; " +
+        "Flutter SDK packages are not configurable through cycle_breaks. Remove the entry.",
+        cycle_breaks_lock_error({"integration_test": ["flutter_test"]}, sdk_lock, ["flutter_test", "integration_test"]),
+    )
+    asserts.equals(
+        env,
+        "",
+        cycle_breaks_lock_error({"dio": ["flutter_test"]}, ["dio", "flutter_test"], {"flutter_test": True}),
+    )
+    alpha_first = cycle_breaks_lock_error({"integration_test": [], "alpha": []}, sdk_lock, ["integration_test"])
+    asserts.true(env, "key \"alpha\" is not a package in the lock" in alpha_first, alpha_first)
+    driver_first = cycle_breaks_lock_error(
+        {"zebra": [], "flutter_driver": []},
+        ["flutter_driver"],
+        ["flutter_driver"],
+    )
+    asserts.true(env, "key \"flutter_driver\" is a Flutter SDK package" in driver_first, driver_first)
+
     return unittest.end(env)
 
 _drops_only_the_named_edge_test = unittest.make(

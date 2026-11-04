@@ -754,13 +754,13 @@ def _register_pub_hub(module_ctx, pub_tag, selected_info, merged, user_overlay_r
     _check_pub_flutter_floor(lock_content, toolchain_info, pub_tag)
 
     hosted, path_pkgs, sdk_flutter, all_package_names = _classify_lock_packages(hub_name, pub_tag.lock, lock_pkgs)
-    cycle_error = cycle_breaks_lock_error(pub_tag.cycle_breaks, all_package_names)
+    cycle_error = cycle_breaks_lock_error(pub_tag.cycle_breaks, all_package_names, sdk_flutter)
     if cycle_error:
         fail(cycle_error)
-    defines_error = ios_plugin_defines_lock_error(pub_tag.ios_plugin_defines, all_package_names)
+    defines_error = ios_plugin_defines_lock_error(pub_tag.ios_plugin_defines, all_package_names, sdk_flutter)
     if defines_error:
         fail(defines_error)
-    deps_error = ios_plugin_deps_lock_error(pub_tag.ios_plugin_deps, all_package_names)
+    deps_error = ios_plugin_deps_lock_error(pub_tag.ios_plugin_deps, all_package_names, sdk_flutter)
     if deps_error:
         fail(deps_error)
     plan = plan_hub_sccs(
