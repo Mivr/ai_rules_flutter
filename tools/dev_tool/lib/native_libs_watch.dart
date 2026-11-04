@@ -81,7 +81,7 @@ class NativeLibsWatch {
   /// keeps running the old code.
   Map<String, FileSnapshot> _live;
 
-  NativeLibsWatch._(this.contracts, this.sources, this._live);
+  new _(this.contracts, this.sources, this._live);
 
   /// A watch over [contracts], baselined at what those files are on disk now.
   ///

@@ -97,7 +97,7 @@ void main() {
 /// splitting can be asserted without reading the test process's own stderr.
 class _RecordingOutput extends SubprocessOutput {
   final List<String> written;
-  _RecordingOutput(this.written) : super(source: 'test', stream: 'stdout');
+  new(this.written) : super(source: 'test', stream: 'stdout');
 
   @override
   void emitLine(String line) => written.add(line);

@@ -61,7 +61,7 @@ Future<WebSocket> _connectVmServiceWebSocket(Uri httpUri) {
 }
 
 class _VmServiceRpc {
-  _VmServiceRpc(this._ws) {
+  new(this._ws) {
     _sub = _ws.listen(_onMessage);
   }
 

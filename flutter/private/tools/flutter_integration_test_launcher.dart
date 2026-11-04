@@ -26,7 +26,7 @@ const String integrationTokenQueryParam = 'token';
 /// The values travel together so launchers never take a bare port (whose URL
 /// would miss the token) or a bare token (whose server they could not find).
 class HarnessBinding {
-  const HarnessBinding({required this.port, required this.token});
+  const new({required this.port, required this.token});
 
   /// The harness HTTP/WebSocket server's loopback port.
   final int port;

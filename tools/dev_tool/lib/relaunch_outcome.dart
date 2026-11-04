@@ -13,14 +13,14 @@
 library;
 
 sealed class RelaunchOutcome {
-  const RelaunchOutcome();
+  const new();
 }
 
 /// The rebuilt bundle's native libraries match the running process's, so the
 /// process can stay. The caller goes on to the ordinary isolate restart — the
 /// fast path the whole check exists to protect.
 final class RelaunchNotNeeded extends RelaunchOutcome {
-  const RelaunchNotNeeded();
+  const new();
 }
 
 /// The rebuild failed, so there is nothing to compare against and nothing to
@@ -33,7 +33,7 @@ final class RelaunchNotNeeded extends RelaunchOutcome {
 final class RelaunchBuildFailed extends RelaunchOutcome {
   final String reason;
 
-  const RelaunchBuildFailed(this.reason);
+  const new(this.reason);
 }
 
 /// The libraries moved, so every process that had `dlopen`ed the old ones was
@@ -58,7 +58,7 @@ final class Relaunched extends RelaunchOutcome {
   /// the cursor it holds is stale.
   final Map<String, int> launches;
 
-  const Relaunched({
+  const new({
     required this.changedLibs,
     required this.ready,
     required this.launches,
@@ -80,5 +80,5 @@ final class RelaunchFailed extends RelaunchOutcome {
   /// Why each app that failed to come back did not, by appId.
   final Map<String, String> failures;
 
-  const RelaunchFailed({required this.changedLibs, required this.failures});
+  const new({required this.changedLibs, required this.failures});
 }

@@ -85,7 +85,7 @@ Future<void> teardownQuietly(Future<void> Function() step) async {
 
 /// One test's failure, as the harness reports it.
 class TestFailureSummary {
-  TestFailureSummary({
+  new({
     required this.message,
     required this.type,
     required this.stackChain,
@@ -195,7 +195,7 @@ TestFailureSummary? resolveTestFailure({
 /// dispatch; the run loop sends `run` on [outputId], waits out [completer],
 /// then files the outcome from [output] and [started].
 class RunningTest {
-  RunningTest({
+  new({
     required this.outputId,
     required this.inputId,
     required this.completer,
@@ -326,17 +326,17 @@ String summarizeTestResults({
 /// Returned by [testReadiness] so both runners share the skip/offline
 /// prologue of their run loops instead of copying it.
 sealed class TestReadiness {
-  const TestReadiness();
+  const new();
 }
 
 /// The test can run.
 final class TestReady extends TestReadiness {
-  const TestReady();
+  const new();
 }
 
 /// The test is skipped: file it via `recordSkipped` with [reason].
 final class TestSkipped extends TestReadiness {
-  const TestSkipped(this.reason);
+  const new(this.reason);
 
   /// Skip reason from the test's metadata, null when it gave none.
   final String? reason;
@@ -344,7 +344,7 @@ final class TestSkipped extends TestReadiness {
 
 /// The target is already gone: file it as a failure with [message].
 final class TestTargetGone extends TestReadiness {
-  const TestTargetGone(this.message);
+  const new(this.message);
 
   /// Failure message naming the disconnect, filed for the unstarted test.
   final String message;
@@ -383,7 +383,7 @@ TestReadiness testReadiness({
 /// `build*Environment` helpers, so the forwarding those helpers used to
 /// repeat as long alias lists stays in one place.
 class EnvForwarding {
-  const EnvForwarding({this.env, this.tz, this.fontconfigFile});
+  const new({this.env, this.tz, this.fontconfigFile});
 
   /// Declared environment entries, merged over the hermetic base map.
   /// A declared `TZ` entry wins over [tz].

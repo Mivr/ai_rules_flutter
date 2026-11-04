@@ -25,7 +25,7 @@ class FlutterErrorReport {
   /// consumer must be able to ask a question this class did not anticipate.
   final Map<String, dynamic> data;
 
-  const FlutterErrorReport(this.data);
+  const new(this.data);
 
   /// The framework's own rendering. Convenient for a terminal, useless to code.
   String? get renderedText => _string('renderedErrorText');

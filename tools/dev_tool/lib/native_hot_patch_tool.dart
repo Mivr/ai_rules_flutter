@@ -46,7 +46,7 @@ class NativeHotPatchManifest {
   /// root.
   final List<String> command;
 
-  const NativeHotPatchManifest({
+  const new({
     required this.path,
     required this.library,
     required this.sources,
@@ -104,12 +104,12 @@ class NativeHotPatchManifest {
 
 /// What a patch builder said about one library.
 sealed class PatchBuilderAnswer {
-  const PatchBuilderAnswer();
+  const new();
 }
 
 /// Nothing in the library's code differs from what the process launched with.
 final class PatchUnchanged extends PatchBuilderAnswer {
-  const PatchUnchanged();
+  const new();
 }
 
 /// A patch was built, and [file] is it.
@@ -121,7 +121,7 @@ final class PatchBuilt extends PatchBuilderAnswer {
   /// interpreted.
   final List<String> functions;
 
-  const PatchBuilt({required this.file, required this.functions});
+  const new({required this.file, required this.functions});
 }
 
 /// The edit cannot be delivered into the running process.
@@ -130,7 +130,7 @@ final class PatchNeedsRestart extends PatchBuilderAnswer {
   /// the user verbatim.
   final List<String> reasons;
 
-  const PatchNeedsRestart(this.reasons);
+  const new(this.reasons);
 }
 
 /// The builder could not build a patch: a compile error, or the builder itself
@@ -138,7 +138,7 @@ final class PatchNeedsRestart extends PatchBuilderAnswer {
 final class PatchFailed extends PatchBuilderAnswer {
   final String message;
 
-  const PatchFailed(this.message);
+  const new(this.message);
 }
 
 /// Runs a process to completion from [workingDirectory].
@@ -163,7 +163,7 @@ class NativePatchTool {
 
   final PatchToolRunner _run;
 
-  NativePatchTool({
+  new({
     required this.manifest,
     required this.executionRoot,
     PatchToolRunner? run,

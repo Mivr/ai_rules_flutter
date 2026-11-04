@@ -21,7 +21,7 @@ class FrameworkZipEntry {
   final bool isExecutable;
   final bool isSymlink;
 
-  const FrameworkZipEntry({
+  const new({
     required this.path,
     required this.data,
     this.isExecutable = false,

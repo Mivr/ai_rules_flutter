@@ -38,7 +38,7 @@ class _Harness {
 
   final CommandRunner runner;
 
-  _Harness._({
+  new _({
     required this.tmp,
     required this.workspace,
     required this.resolver,

@@ -12,7 +12,7 @@ import '../flutter_integration_test_runner.dart' as runner;
 import '../test_support.dart' as support;
 
 class _FakePlatformLauncher implements runner.PlatformLauncher {
-  _FakePlatformLauncher({required this.onStart});
+  new({required this.onStart});
 
   final Future<Process> Function(runner.HarnessBinding binding) onStart;
   bool disposed = false;

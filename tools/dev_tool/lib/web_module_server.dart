@@ -317,7 +317,7 @@ class _InterceptedPort implements Exception {
   /// What the server saw when it asked for itself.
   final String observed;
 
-  const _InterceptedPort(this.port, this.address, this.observed);
+  const new(this.port, this.address, this.observed);
 
   /// Why this run cannot be served, after [draws] of them.
   String explain(WebServerOptions options, int draws) =>
@@ -562,7 +562,7 @@ class StaticWebServer {
   /// The page's base path, read by [start]. See [basePathOf].
   String _basePath = '';
 
-  StaticWebServer({required this.rootPath, required this.options});
+  new({required this.rootPath, required this.options});
 
   /// The underlying HTTP server, once started.
   ///
@@ -711,7 +711,7 @@ class WebModuleServer implements AssetReader {
   /// DWDS instance for VM service protocol bridge.
   Dwds? _dwds;
 
-  WebModuleServer({
+  new({
     required this.webToolchain,
     required this.buildOutputDir,
     required this.entrypointFilename,
@@ -1346,7 +1346,7 @@ class _ModuleBatch {
   // warnings would be one line per module in the app.
   final List<String> withoutMetadata = [];
 
-  _ModuleBatch._({
+  new _({
     required this.server,
     required this.dillPath,
     required this.manifestPath,
@@ -1364,7 +1364,7 @@ class _ModuleBatch {
   /// compile did not write what a successful compile promises; serving from
   /// it would 404 the page or silently skip the reload, so each throws a
   /// [DevToolException] naming the artifact and what the run loses with it.
-  factory _ModuleBatch.load(
+  factory load(
     WebModuleServer server,
     String dillPath, {
     required bool full,

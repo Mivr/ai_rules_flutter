@@ -417,7 +417,7 @@ int _indexOfBytes(
 /// Launches the built Flutter web bundle in the pinned `chrome-headless-shell`
 /// and serves the bundle over localhost HTTP.
 class WebPlatformLauncher implements PlatformLauncher {
-  WebPlatformLauncher({
+  new({
     required this.webDir,
     required this.browserBinary,
     required this.baseTempDir,
@@ -522,7 +522,7 @@ class WebPlatformLauncher implements PlatformLauncher {
 /// `Xvfb` virtual display using the pinned GTK3 and Mesa software OpenGL/EGL
 /// runtime libraries.
 class LinuxPlatformLauncher implements PlatformLauncher {
-  LinuxPlatformLauncher({
+  new({
     required this.bundleDir,
     required this.binaryName,
     required this.xvfbBinary,
@@ -768,7 +768,7 @@ class LinuxPlatformLauncher implements PlatformLauncher {
 /// [runIntegrationSuite], so the values that travel together stay in one
 /// object instead of a long parameter list.
 class IntegrationSuiteRun {
-  const IntegrationSuiteRun({
+  const new({
     required this.launcher,
     required this.testPath,
     required this.selection,
@@ -832,7 +832,7 @@ Future<int> runIntegrationSuite(
 }
 
 class _IntegrationHarness {
-  _IntegrationHarness({
+  new({
     required HttpServer server,
     required PlatformLauncher launcher,
     required Duration dialBackBound,
@@ -1324,21 +1324,21 @@ class _IntegrationHarness {
 }
 
 sealed class _DialBack {
-  const _DialBack();
+  const new();
 }
 
 final class _BootstrapConnected extends _DialBack {
-  const _BootstrapConnected(this.socket);
+  const new(this.socket);
   final WebSocket socket;
 }
 
 final class _TargetExited extends _DialBack {
-  const _TargetExited(this.exitCode);
+  const new(this.exitCode);
   final int exitCode;
 }
 
 final class _DialBackTimedOut extends _DialBack {
-  const _DialBackTimedOut();
+  const new();
 }
 
 /// Whether an integration run must be reported as a failure, given its counts.

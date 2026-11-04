@@ -8,13 +8,13 @@
 library;
 
 sealed class NativePatchOutcome {
-  const NativePatchOutcome();
+  const new();
 }
 
 /// Nothing a patch builder watches moved, or the app bundles nothing a patch
 /// builder serves. Nothing to say.
 final class NativePatchNotNeeded extends NativePatchOutcome {
-  const NativePatchNotNeeded();
+  const new();
 }
 
 /// The running app now runs the code on disk for [functions]' libraries — new
@@ -27,7 +27,7 @@ final class NativePatched extends NativePatchOutcome {
   /// Libraries whose calls went back to their launched code.
   final List<String> reverted;
 
-  const NativePatched({this.functions = const {}, this.reverted = const []});
+  const new({this.functions = const {}, this.reverted = const []});
 }
 
 /// A library's edit cannot be delivered into the running process. The reload is
@@ -36,7 +36,7 @@ final class NativePatchNeedsRestart extends NativePatchOutcome {
   /// Per library file name, the builder's sentences saying why.
   final Map<String, List<String>> reasons;
 
-  const NativePatchNeedsRestart(this.reasons);
+  const new(this.reasons);
 }
 
 /// No patch could be built: the build broke, or the builder did. The reload is
@@ -45,7 +45,7 @@ final class NativePatchNeedsRestart extends NativePatchOutcome {
 final class NativePatchBuildFailed extends NativePatchOutcome {
   final String message;
 
-  const NativePatchBuildFailed(this.message);
+  const new(this.message);
 }
 
 /// A patch was built and did not load in every app. The reload is withheld.
@@ -59,5 +59,5 @@ final class NativePatchLoadFailed extends NativePatchOutcome {
   /// The appIds that did load it.
   final List<String> applied;
 
-  const NativePatchLoadFailed({required this.failures, required this.applied});
+  const new({required this.failures, required this.applied});
 }

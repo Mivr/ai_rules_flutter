@@ -34,7 +34,7 @@ import 'macho_ranges.dart'
 
 /// A decoded 16-byte `nlist_64` symbol-table entry.
 class _NlistEntry {
-  _NlistEntry({
+  new({
     required this.index,
     required this.strx,
     required this.nType,
@@ -70,7 +70,7 @@ class _NlistEntry {
 
 /// The compacted Mach-O file and its updated load commands.
 class StrippedSymbols {
-  StrippedSymbols(this.bytes, this.commands);
+  new(this.bytes, this.commands);
 
   /// The file bytes with the compacted symbol and string tables.
   final Uint8List bytes;
@@ -118,7 +118,7 @@ StrippedSymbols stripLocalSymbols(
 
 /// The `LC_SYMTAB` table contents: decoded entries plus string table bounds.
 class _SymtabTable {
-  _SymtabTable({
+  new({
     required this.entries,
     required this.symoff,
     required this.nsyms,
@@ -198,12 +198,12 @@ _NlistEntry _readNlistEntry(
 /// out. Defined externals keep their relative order and come first, then the
 /// undefined imports; locals and stab entries are gone.
 class _KeptSymbols {
-  _KeptSymbols(this.defined, this.undefined);
+  new(this.defined, this.undefined);
 
   /// Splits [entries] into the survivors: defined externals first (keeping
   /// their relative order), then undefined imports. Locals and stabs are
   /// gone.
-  factory _KeptSymbols.of(List<_NlistEntry> entries) {
+  factory of(List<_NlistEntry> entries) {
     final defined = <_NlistEntry>[];
     final undefined = <_NlistEntry>[];
     for (final entry in entries) {
@@ -245,7 +245,7 @@ class _KeptSymbols {
 
 /// A rebuilt string table: its bytes plus each kept symbol's new offset.
 class _KeptStrings {
-  _KeptStrings(this.bytes, this.offsets);
+  new(this.bytes, this.offsets);
 
   final Uint8List bytes;
   final List<int> offsets;
@@ -285,7 +285,7 @@ Uint8List _buildKeptSymtab(List<_NlistEntry> ordered, List<int> strOffsets) {
 
 /// The remapped `LC_DYSYMTAB`: its new command bytes and indirect table.
 class _RemappedDysymtab {
-  _RemappedDysymtab({
+  new({
     required this.commandBytes,
     required this.indirectBytes,
     required this.indirectOffset,
@@ -409,7 +409,7 @@ LoadCommand? _findLinkeditSegment(List<LoadCommand> commands) {
 /// places `LC_CODE_SIGNATURE` at a 16-byte-aligned file offset, zero-padding
 /// the gap before it inside `__LINKEDIT`.
 class _LinkeditPayload {
-  _LinkeditPayload({
+  new({
     required this.oldOffset,
     required this.oldSize,
     required this.bytes,
@@ -660,7 +660,7 @@ int _layoutLinkeditPayloads(
 /// symbols decided and its compacted tables already built. The emitters below
 /// work from these fields, so no table offset travels as a parameter.
 class _StripPlan {
-  _StripPlan({
+  new({
     required this.input,
     required this.commands,
     required this.table,

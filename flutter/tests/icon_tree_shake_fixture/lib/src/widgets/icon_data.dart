@@ -1,5 +1,5 @@
 class IconData {
-  const IconData(
+  const new(
     this.codePoint, {
     this.fontFamily,
     this.fontPackage,
@@ -17,7 +17,7 @@ class IconData {
 }
 
 class _StaticIconProvider {
-  const _StaticIconProvider();
+  const new();
 }
 
 const Object staticIconProvider = _StaticIconProvider();

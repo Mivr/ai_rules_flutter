@@ -126,7 +126,7 @@ Future<void> main(List<String> args) async {
 /// A workspace with a manifest, clean sources, and the files the compiler
 /// reports reading, used as a worker's cwd.
 class ScratchHarness {
-  ScratchHarness(this.dir);
+  new(this.dir);
 
   final Directory dir;
   String get cwd => dir.path;
@@ -225,7 +225,7 @@ String _workerBinary() {
 /// A separate process holding a scratch lock the way a live worker does.
 /// Only touches its own process: start it, and SIGKILL it when done.
 class LockHolder {
-  LockHolder._(this.process);
+  new _(this.process);
 
   final Process process;
 
@@ -351,7 +351,7 @@ Future<bool> _waitGone(String path, Duration limit) async {
 
 /// One driven worker process: the built binary on the persistent protocol.
 class DrivenWorker {
-  DrivenWorker._(this.process, this._lines);
+  new _(this.process, this._lines);
 
   final Process process;
   final StreamIterator<String> _lines;

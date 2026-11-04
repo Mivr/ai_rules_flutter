@@ -103,7 +103,7 @@ class WebPipelineAssembler {
   /// what the app is already showing.
   final DateTime builtBefore;
 
-  WebPipelineAssembler({
+  new({
     required this.plan,
     required this.host,
     required this.pipeline,
@@ -224,7 +224,7 @@ class _WebConfig {
   final String webOutputDir;
   final String packageConfig;
 
-  const _WebConfig({
+  const new({
     required this.devConfigPath,
     required this.devConfig,
     required this.webToolchain,
@@ -242,7 +242,7 @@ class _BrowserWiring {
   final WebDevice webDevice;
   VmServiceLogForwarder? logForwarder;
 
-  _BrowserWiring({
+  new({
     required this.moduleServer,
     required this.dwdsReload,
     required this.webDevice,
@@ -1021,7 +1021,7 @@ class WasmPipelineAssembler {
   final ReloadPipeline pipeline;
   final Logger logger;
 
-  WasmPipelineAssembler({
+  new({
     required this.cdpPort,
     required this.appUrl,
     required this.target,

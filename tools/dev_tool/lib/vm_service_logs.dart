@@ -40,7 +40,7 @@ String? decodeVmServiceLogEvent(Event event) {
 class VmServiceLogForwarder {
   final List<StreamSubscription<Event>> _subscriptions;
 
-  VmServiceLogForwarder(this._subscriptions);
+  new(this._subscriptions);
 
   Future<void> dispose() async {
     await Future.wait(_subscriptions.map((s) => s.cancel()));

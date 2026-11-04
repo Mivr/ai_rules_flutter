@@ -46,7 +46,7 @@ class BundleConfig {
   final String? tempDirPath;
   final Map<String, String>? environment;
 
-  const BundleConfig({
+  const new({
     required this.platform,
     required this.appName,
     required this.bundleId,
@@ -437,7 +437,7 @@ class _BundleAssembly {
   bool get shouldSign =>
       config.zsignPath != null && config.zsignPath!.isNotEmpty;
 
-  _BundleAssembly(this.config, this.tempDir, this.effectiveDefines);
+  new(this.config, this.tempDir, this.effectiveDefines);
 
   void run() {
     _createLayout();

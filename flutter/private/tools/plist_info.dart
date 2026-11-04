@@ -19,7 +19,7 @@ class _PlistMerger {
   final merged = <String, String>{};
   final order = <String>[];
 
-  _PlistMerger(this.variables);
+  new(this.variables);
 
   void setEntry(String key, String rawValue, {bool overwriteNonEmpty = true}) {
     final substituted = substitutePlistVariables(rawValue.trim(), variables);
@@ -180,7 +180,7 @@ void _addMacosPlistDefaults(
 /// The inputs for merging an `Info.plist`: XML sources, bundle identity,
 /// and platform defaults. Grouped so the plist entry point stays small.
 class InfoPlistRequest {
-  const InfoPlistRequest({
+  const new({
     required this.plistXmls,
     required this.platform,
     required this.appName,

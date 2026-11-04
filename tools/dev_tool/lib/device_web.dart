@@ -116,7 +116,7 @@ class ChromeSession {
   /// settled fact (see [resolveCdpPageTarget]).
   final String pageWebSocketDebuggerUrl;
 
-  ChromeSession._({
+  new _({
     required this.process,
     required this.userDataDir,
     required this.cdpPort,
@@ -371,7 +371,7 @@ class WebDevice extends Device {
   /// library docs.
   CdpConsoleClient? _consoleClient;
 
-  WebDevice({ProcessStarter? startProcess})
+  new({ProcessStarter? startProcess})
     : _startProcess = startProcess ?? Process.start;
 
   @override
@@ -931,7 +931,7 @@ class CdpPageConnection {
   /// long-lived connection waits on to learn it lost the session.
   Future<void> get done => _done.future;
 
-  CdpPageConnection._(this._ws) {
+  new _(this._ws) {
     _ws.listen(
       (data) {
         final msg = json.decode(data as String) as Map<String, dynamic>;
@@ -1018,7 +1018,7 @@ class BrowserKeyPress {
   /// keys changed does not repaint until it is shown.
   final bool pageVisible;
 
-  const BrowserKeyPress({
+  const new({
     required this.sent,
     required this.focus,
     required this.focusIsEditable,

@@ -19,7 +19,7 @@ import 'package:flutter_bazel_dev_tool/dev_tool_exception.dart';
 /// run at all" — [resolveWebMode] returns `WebMode?`, and a `switch` over it
 /// is exhaustive over all four states.
 sealed class WebMode {
-  const WebMode();
+  const new();
 }
 
 /// The DDC dev loop: the module server fronts the browser, DWDS provides the
@@ -27,7 +27,7 @@ sealed class WebMode {
 /// web shape with a VM service, and therefore the only one with DevTools,
 /// agent control, and an app console sourced from the VM.
 final class DdcWebMode extends WebMode {
-  const DdcWebMode();
+  const new();
 }
 
 /// The WASM dev loop, which is not a dev loop: `dart2wasm` has no incremental
@@ -35,14 +35,14 @@ final class DdcWebMode extends WebMode {
 /// page reload, and hot reload does not exist at all. The bundle is served
 /// statically; the app console arrives over CDP.
 final class WasmWebMode extends WebMode {
-  const WasmWebMode();
+  const new();
 }
 
 /// A built bundle served statically: no VM service, no reload of any kind.
 /// What `--profile` and `--no-hot` resolve to on a browser. The app console
 /// arrives over CDP; a screenshot is CDP's `Page.captureScreenshot`.
 final class StaticWebMode extends WebMode {
-  const StaticWebMode();
+  const new();
 }
 
 /// The one derivation of a run's [WebMode] from its flags. `null` for a

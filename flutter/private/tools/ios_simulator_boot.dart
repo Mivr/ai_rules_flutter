@@ -55,7 +55,7 @@ class RetryBounds {
   /// How long all attempts together may take before the call fails.
   final Duration overall;
 
-  const RetryBounds({required this.first, required this.overall});
+  const new({required this.first, required this.overall});
 }
 
 /// Bounds for `simctl list -j`: a minute for the first attempt (simulators
@@ -96,7 +96,7 @@ class SimulatorDevice {
   /// Whether the listing marks it available.
   final bool available;
 
-  const SimulatorDevice({
+  const new({
     required this.name,
     required this.udid,
     required this.state,
@@ -112,7 +112,7 @@ class SimulatorRuntime {
   /// The numeric version components, e.g. `[26, 5]`.
   final List<int> version;
 
-  const SimulatorRuntime({required this.key, required this.version});
+  const new({required this.key, required this.version});
 
   /// `iOS 26.5`, for the progress line.
   String get label => 'iOS ${version.join('.')}';
@@ -126,7 +126,7 @@ class SimulatorChoice {
   /// The runtime it was picked from.
   final SimulatorRuntime runtime;
 
-  const SimulatorChoice({required this.device, required this.runtime});
+  const new({required this.device, required this.runtime});
 
   /// Whether the device was already booted when picked.
   bool get wasBooted => device.state == 'Booted';
@@ -157,7 +157,7 @@ class BootOptions {
   /// tests pass a fake clock for deterministic bounds.
   final DateTime Function() now;
 
-  const BootOptions({
+  const new({
     required this.spawner,
     required this.bootstatusTimeout,
     required this.log,
@@ -173,7 +173,7 @@ class BootFailure implements Exception {
   /// The one line the script prints on stderr for this failure.
   final String reason;
 
-  const BootFailure(this.reason);
+  const new(this.reason);
 
   @override
   String toString() => reason;
@@ -321,7 +321,7 @@ class CommandResult {
   /// Everything it wrote to stderr.
   final String stderrText;
 
-  const CommandResult({
+  const new({
     required this.exitCode,
     required this.stdoutText,
     required this.stderrText,
@@ -342,7 +342,7 @@ class SpawnedCommand {
   /// Stops the child; called when its deadline expires.
   final void Function() kill;
 
-  const SpawnedCommand({
+  const new({
     required this.exitCode,
     required this.stdoutText,
     required this.stderrText,

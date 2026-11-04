@@ -285,7 +285,7 @@ allocateAndroidEmulatorPorts() async {
 /// KVM, installs the built integration test APK, forwards the harness WebSocket
 /// port via `adb reverse`, and launches `FlutterActivity`.
 class AndroidPlatformLauncher implements PlatformLauncher {
-  AndroidPlatformLauncher({
+  new({
     required this.apkPath,
     required this.packageName,
     required this.emulatorBinary,

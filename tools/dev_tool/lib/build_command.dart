@@ -49,7 +49,7 @@ class BuildCommand {
 
   final ArgResults _results;
 
-  BuildCommand(this._results);
+  new(this._results);
 
   Future<void> execute() async {
     final bazel = Bazel();

@@ -96,7 +96,7 @@ class AttachCommand {
 
   final ArgResults _results;
 
-  AttachCommand(this._results);
+  new(this._results);
 
   Future<void> execute() async {
     final debugUrls = _results['debug-url'] as List<String>;
@@ -605,7 +605,7 @@ Future<void> serveAttachedSession(
 /// A pseudo-device for attach mode — doesn't launch or stop anything.
 class _AttachedPseudoDevice extends Device {
   final String _name;
-  _AttachedPseudoDevice(this._name);
+  new(this._name);
 
   @override
   String get name => _name;
@@ -635,7 +635,7 @@ class _AttachedPseudoDevice extends Device {
 
 /// The app attach found, standing in for one this tool launched.
 class _AttachedAppInstance extends AppInstance {
-  _AttachedAppInstance(Uri vmServiceUri, Future<void> gone)
+  new(Uri vmServiceUri, Future<void> gone)
     : super(process: _ExternalAppProcess(gone), vmServiceUri: vmServiceUri);
 }
 
@@ -658,7 +658,7 @@ class _AttachedAppInstance extends AppInstance {
 /// failure.
 class _ExternalAppProcess implements Process {
   final Future<void> _gone;
-  _ExternalAppProcess(this._gone);
+  new(this._gone);
 
   @override
   Stream<List<int>> get stdout => const Stream.empty();

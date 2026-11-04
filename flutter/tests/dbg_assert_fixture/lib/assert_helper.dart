@@ -9,8 +9,7 @@ void triggerLibraryAssert() {
 
 /// Class with a `const` constructor assertion compiled into `.flutter.koutline`.
 class CheckedConst {
-  const CheckedConst({required this.valid})
-    : assert(valid, 'constructor assert fired');
+  const new({required this.valid}) : assert(valid, 'constructor assert fired');
 
   final bool valid;
 }

@@ -24,7 +24,7 @@ class ToolchainPaths {
   final String platformDill;
   final String patchedSdkRoot;
 
-  ToolchainPaths({
+  new({
     required this.dart,
     required this.dartaotruntime,
     required this.frontendServer,
@@ -219,7 +219,7 @@ class WebToolchainPaths {
   final String stackTraceMapperJs;
   final String dartSdkRoot;
 
-  WebToolchainPaths({
+  new({
     required this.ddcOutlineDill,
     required this.librariesSpec,
     required this.dartSdkJs,
@@ -418,7 +418,7 @@ class DevConfig {
   /// loop.
   final bool nativeNullAssertions;
 
-  DevConfig({
+  new({
     required this.engineRevision,
     required this.flutterVersion,
     required this.dartSdkRoot,
@@ -482,7 +482,7 @@ class DevConfig {
   /// Parse from the JSON content of a `_dev_config.json` file. The native
   /// (`flutter_application`) config carries the hot-reload multi-root fields;
   /// the web (`flutter_web_bundle`) config omits them, so they default empty.
-  factory DevConfig.fromJson(Map<String, dynamic> json) {
+  factory fromJson(Map<String, dynamic> json) {
     List<String> strList(String key) =>
         ((json[key] as List?) ?? const []).cast<String>();
     return DevConfig(

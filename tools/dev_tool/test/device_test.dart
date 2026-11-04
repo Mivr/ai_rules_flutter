@@ -5926,7 +5926,7 @@ Filesystem       1K-blocks    Used Available Use% Mounted on
 /// `client.dispose()` — peer-dependent awaits in a third-party package this
 /// repo does not control.
 class _HangingModuleServer extends WebModuleServer {
-  _HangingModuleServer()
+  new()
     : super(
         webToolchain: WebToolchainPaths(
           ddcOutlineDill: '/nonexistent',
@@ -5951,7 +5951,7 @@ class _HangingModuleServer extends WebModuleServer {
 class _ToolsDevice extends Device {
   final List<HostTool> _tools;
 
-  _ToolsDevice(this._tools);
+  new(this._tools);
 
   @override
   Future<List<HostTool>> requiredHostTools() async => _tools;

@@ -67,7 +67,7 @@ class ShutdownSignalHandler {
   /// this and stops waiting.
   bool _shuttingDown = false;
 
-  ShutdownSignalHandler({
+  new({
     required Future<void> Function() onShutdown,
     required void Function(int code) exitProcess,
     Logger? logger,

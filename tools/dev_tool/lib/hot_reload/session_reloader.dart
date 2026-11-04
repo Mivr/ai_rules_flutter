@@ -71,7 +71,7 @@ class SessionReloader {
   /// compiler, so each can be in this state on its own.
   String? baselineFailure;
 
-  SessionReloader({
+  new({
     required this.id,
     required this.compiler,
     required this.applied,

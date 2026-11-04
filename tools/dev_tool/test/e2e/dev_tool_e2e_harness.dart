@@ -23,7 +23,7 @@ export '../test_lifetime.dart' show spawnBoundToTest;
 class HttpControlInfo {
   final Uri uri;
   final String token;
-  HttpControlInfo({required this.uri, required this.token});
+  new({required this.uri, required this.token});
 }
 
 /// How far a request to the HTTP control channel got before it stopped.
@@ -53,7 +53,7 @@ class _ControlReply {
   /// nowhere to carry.
   final Map<String, String> headers;
 
-  _ControlReply(this.statusCode, this.bytes, {this.headers = const {}});
+  new(this.statusCode, this.bytes, {this.headers = const {}});
 
   /// The body as text. Decoded leniently because this is what failures are
   /// reported with: a truncated or binary body must not throw a
@@ -181,7 +181,7 @@ class DevToolProcess {
   /// observe; see `dev_tool_e2e_log_recorder.dart`.
   late final DevToolE2eLogRecorder? _processLog;
 
-  DevToolProcess(this.process) {
+  new(this.process) {
     _processLog = DevToolE2eLogRecorder.maybeStart(process.pid);
     unawaited(
       process.exitCode.then((code) {
@@ -1340,7 +1340,7 @@ class BoundedRun {
   final String stdout;
   final String stderr;
 
-  BoundedRun({
+  new({
     required this.exitCode,
     required this.stdout,
     required this.stderr,
@@ -1463,7 +1463,7 @@ class AdbEntry {
   /// message, because the half it keeps (`no`) reads like a state of its own.
   final String state;
 
-  AdbEntry(this.serial, this.state);
+  new(this.serial, this.state);
 
   /// The only state in which a device can be run against. `unauthorized`,
   /// `offline`, `recovery`, `sideload` and the `no permissions …` family all
@@ -1491,7 +1491,7 @@ class AdbEntry {
 /// green run: a whole platform's worth of e2e coverage can stop running and
 /// nothing says so.
 sealed class AndroidDeviceProbe {
-  const AndroidDeviceProbe();
+  const new();
 
   /// Ask [environment]'s host which device an Android e2e run should use.
   ///
@@ -1637,20 +1637,20 @@ final class AndroidDeviceFound extends AndroidDeviceProbe {
   /// actually used.
   final String adb;
 
-  const AndroidDeviceFound(this.serial, this.adb);
+  const new(this.serial, this.adb);
 }
 
 /// `adb` ran, was understood, and listed nothing. The legitimate skip.
 final class NoAndroidDevice extends AndroidDeviceProbe {
   final String reason;
-  const NoAndroidDevice(this.reason);
+  const new(this.reason);
 }
 
 /// `adb` could not be run, failed, could not be understood, or listed only
 /// devices nothing can run on. A tooling failure, never a skip.
 final class AndroidProbeFailed extends AndroidDeviceProbe {
   final String reason;
-  const AndroidProbeFailed(this.reason);
+  const new(this.reason);
 }
 
 /// A screenshot decoded far enough to say whether anything was drawn.
@@ -1677,7 +1677,7 @@ class DecodedPng {
   /// have to build a set of two million entries.
   final Set<int> distinctPixels;
 
-  DecodedPng._(this.width, this.height, this.distinctPixels);
+  new _(this.width, this.height, this.distinctPixels);
 
   /// Whether anything was drawn: more than one distinct pixel value.
   ///

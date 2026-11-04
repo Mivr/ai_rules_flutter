@@ -121,7 +121,7 @@ abstract class VmDiscoveryTimer {
 /// The system timer behind [SystemVmDiscoveryClock.startTimer].
 class _SystemVmDiscoveryTimer implements VmDiscoveryTimer {
   /// The system timer behind [SystemVmDiscoveryClock.startTimer].
-  _SystemVmDiscoveryTimer(this._timer);
+  new(this._timer);
 
   final Timer _timer;
 
@@ -132,7 +132,7 @@ class _SystemVmDiscoveryTimer implements VmDiscoveryTimer {
 /// The production clock: wall time and real delays.
 class SystemVmDiscoveryClock implements VmDiscoveryClock {
   /// The production clock: wall time and real delays.
-  const SystemVmDiscoveryClock();
+  const new();
 
   @override
   DateTime now() => DateTime.now();
@@ -178,7 +178,7 @@ class VmDiscoveryConfig {
   final VmDiscoveryClock clock;
 
   /// The values one VM-service wait tunes together.
-  const VmDiscoveryConfig({
+  const new({
     this.bound = defaultVmServiceDiscoveryBound,
     this.boundOption = vmServiceTimeoutOption,
     this.progressInterval = const Duration(seconds: 10),
@@ -320,7 +320,7 @@ Future<VmServiceDiscovery> waitForVmServiceUri({
 
 /// One wait's three ways to wake up.
 sealed class _DiscoveryOutcome {
-  const _DiscoveryOutcome();
+  const new();
 }
 
 /// The log stream announced a URI, or ended with [uri] null.
@@ -329,7 +329,7 @@ class _LogOutcome extends _DiscoveryOutcome {
   final Uri? uri;
 
   /// The log stream announced a URI, or ended with [uri] null.
-  const _LogOutcome(this.uri);
+  const new(this.uri);
 }
 
 /// The app exited with [code], null when the platform reported none.
@@ -338,19 +338,19 @@ class _ExitOutcome extends _DiscoveryOutcome {
   final int? code;
 
   /// The app exited with [code], null when the platform reported none.
-  const _ExitOutcome(this.code);
+  const new(this.code);
 }
 
 /// A clock sleep fired: a progress point or the bound.
 class _TickOutcome extends _DiscoveryOutcome {
   /// A clock sleep fired: a progress point or the bound.
-  const _TickOutcome();
+  const new();
 }
 
 /// The run is ending (or the app is being stopped) while discovery waits.
 class _AbandonedOutcome extends _DiscoveryOutcome {
   /// The run is ending (or the app is being stopped) while discovery waits.
-  const _AbandonedOutcome();
+  const new();
 }
 
 /// Discovery's wait was abandoned because the run is shutting down.
@@ -362,7 +362,7 @@ class _AbandonedOutcome extends _DiscoveryOutcome {
 /// shutdown the launch reports the cancellation, it does not diagnose the app.
 class VmDiscoveryCancelled extends StateError {
   /// Discovery's wait was abandoned because the run is shutting down.
-  VmDiscoveryCancelled(String deviceName)
+  new(String deviceName)
     : super(
         'The launch on $deviceName was cancelled because the run is shutting '
         'down or the app was stopped while discovery was still waiting for '
@@ -418,7 +418,7 @@ class _VmServiceWait {
   final Future<void>? abandoned;
 
   /// The state one [waitForVmServiceUri] call loops on.
-  _VmServiceWait({
+  new({
     required this.logs,
     required this.deviceName,
     required this.appExit,

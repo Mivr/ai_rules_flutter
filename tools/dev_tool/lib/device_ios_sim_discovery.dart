@@ -100,7 +100,7 @@ typedef SimStreamAnnouncement = ({int? pid, Uri uri, String message});
 /// arrives are held, then judged — never dropped, never taken blind.
 class SimDiscoveryFeed {
   /// Reads `log stream --style json` lines for one launch.
-  SimDiscoveryFeed({required this.out, required this.log});
+  new({required this.out, required this.log});
 
   /// Where this launch's announcement goes.
   final AppLogStream out;
@@ -293,8 +293,7 @@ class SimDiscoverySource {
   /// [pid] completes. [pump] ends with the process, and [dispose] ends it
   /// with discovery — either way [lines] keeps what was judged this
   /// launch's, for the discovery wait to read.
-  SimDiscoverySource(Process process, {required Logger logger})
-    : process = process {
+  new(Process process, {required Logger logger}) : process = process {
     final feed = SimDiscoveryFeed(out: lines, log: logger);
     pump = pumpProcessLines(
       process,

@@ -28,7 +28,7 @@ typedef VmServiceConnector = Future<VmService> Function(String wsUri);
 /// Collapsing the two makes the compiler discard code the VM is already
 /// running, leaving its accepted baseline describing a program no app has.
 sealed class ApplyVerdict {
-  const ApplyVerdict();
+  const new();
 }
 
 /// The VM took the code, and the app reported no error.
@@ -41,7 +41,7 @@ sealed class ApplyVerdict {
 /// layer above records exactly that.
 class VerdictApplied extends ApplyVerdict {
   final String? notShown;
-  const VerdictApplied({this.notShown});
+  const new({this.notShown});
 }
 
 /// Nothing landed: the VM rejected the kernel, the upload failed, or the
@@ -59,7 +59,7 @@ class VerdictApplied extends ApplyVerdict {
 /// that carried none.
 class VerdictRefused extends ApplyVerdict {
   final String reason;
-  const VerdictRefused(this.reason);
+  const new(this.reason);
 }
 
 /// The code is live, and what came next failed.
@@ -72,7 +72,7 @@ class VerdictRefused extends ApplyVerdict {
 /// [error] is the app's own report when it sent one, kept whole.
 class VerdictAppErrored extends ApplyVerdict {
   final FlutterErrorReport error;
-  const VerdictAppErrored(this.error);
+  const new(this.error);
 }
 
 /// What [VmServiceClient.waitUntilPausedAtStart] managed to observe.
@@ -106,7 +106,7 @@ class ServiceExtensionUnavailable implements Exception {
   /// How long the app was given to register it.
   final Duration waited;
 
-  ServiceExtensionUnavailable(this.method, this.waited);
+  new(this.method, this.waited);
 
   @override
   String toString() =>
@@ -176,7 +176,7 @@ class _ApplyWatch {
 
   final FlutterErrorReport Function(Event event) decodeError;
 
-  _ApplyWatch(this.decodeError);
+  new(this.decodeError);
 
   void settle() {
     if (!settled.isCompleted) settled.complete();
@@ -436,7 +436,7 @@ class VmServiceClient {
   /// connection worked, and by a teardown this end chose.
   int _flaps = 0;
 
-  VmServiceClient({
+  new({
     VmServiceConnector? connector,
     this.connectTimeout = const Duration(seconds: 30),
     this.disconnectTimeout = const Duration(seconds: 5),

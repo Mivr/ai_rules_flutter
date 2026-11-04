@@ -17,7 +17,7 @@ class WarmTarget {
   /// Target label within the workspace.
   final String target;
 
-  const WarmTarget({required this.workspace, required this.target});
+  const new({required this.workspace, required this.target});
 
   @override
   bool operator ==(Object other) =>
@@ -49,7 +49,7 @@ class WarmFailure implements Exception {
   /// The reason explaining the failure.
   final String reason;
 
-  const WarmFailure(this.reason);
+  const new(this.reason);
 
   @override
   bool operator ==(Object other) =>
@@ -79,7 +79,7 @@ class WarmChild {
   /// Terminates the process.
   final void Function() kill;
 
-  const WarmChild({
+  const new({
     required this.exitCode,
     required this.stdoutText,
     required this.stderrText,
@@ -113,7 +113,7 @@ class WarmOptions {
   /// Callback for logging progress messages.
   final void Function(String line) log;
 
-  const WarmOptions({
+  const new({
     required this.bazel,
     required this.repoRoot,
     required this.environment,

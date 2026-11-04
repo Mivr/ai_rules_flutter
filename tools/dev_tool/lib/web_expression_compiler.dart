@@ -26,7 +26,7 @@ import 'package:flutter_bazel_dev_tool/frontend_server.dart';
 class FrontendServerExpressionCompiler implements ExpressionCompiler {
   final FrontendServer _server;
 
-  FrontendServerExpressionCompiler(this._server);
+  new(this._server);
 
   @override
   Future<ExpressionCompilationResult> compileExpressionToJs(

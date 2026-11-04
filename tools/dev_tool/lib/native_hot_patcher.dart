@@ -85,7 +85,7 @@ class _Patchable {
   /// and every delivered patch.
   Map<String, FileSnapshot> sourceSnapshots;
 
-  _Patchable({
+  new({
     required this.tool,
     required this.stateDirectory,
     required this.sourceSnapshots,
@@ -139,7 +139,7 @@ class NativeHotPatcher {
   /// delivery has a file name its loader has never opened.
   final Map<String, int> _delivered = {};
 
-  NativeHotPatcher._({
+  new _({
     required this.workspace,
     required this.build,
     required this.appFile,

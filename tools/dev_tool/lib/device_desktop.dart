@@ -33,7 +33,7 @@ class MacOSDevice extends Device {
   /// Starts `osascript` for [_bringToFront], when a test supplies one.
   final ProcessStarter? _injectedActivationStart;
 
-  MacOSDevice({
+  new({
     ProcessRunSync? runProcess,
     ProcessStarter? startProcess,
     ProcessStarter? startScreenshotProcess,
@@ -326,7 +326,7 @@ class LinuxDevice extends Device {
   final ProcessRunSync _runProcess;
   final ProcessStarter? _injectedStart;
 
-  LinuxDevice({
+  new({
     ProcessRunSync? runProcess,
     ProcessStarter? startProcess,
   }) : _runProcess = runProcess ?? Process.run,
@@ -431,7 +431,7 @@ class WindowsDevice extends Device {
   /// capture too.
   final ProcessStarter? _injectedScreenshotStart;
 
-  WindowsDevice({
+  new({
     ProcessStarter? startProcess,
     ProcessStarter? startScreenshotProcess,
     Directory Function()? makeStagingDir,

@@ -36,7 +36,7 @@ class _Connection {
   /// End it the way the *socket* ends it: the peer hangs up, nobody asked.
   final Future<void> Function() hangUp;
 
-  _Connection(this.service, {required this.dispose, required this.hangUp});
+  new(this.service, {required this.dispose, required this.hangUp});
 }
 
 /// How one implementation is built, so the assertions below can be written once.
@@ -44,7 +44,7 @@ class _Subject {
   final String label;
   final _Connection Function() connect;
 
-  _Subject(this.label, this.connect);
+  new(this.label, this.connect);
 }
 
 /// Issue an RPC and report how it refused: synchronously, or by a future.

@@ -85,7 +85,7 @@ class ZlibRawTree {
   int maxCode = -1;
 
   /// Creates a tree with room for [size] codes, all zeroed.
-  ZlibRawTree(int size)
+  new(int size)
     : freq = List<int>.filled(size, 0),
       len = List<int>.filled(size, 0),
       code = List<int>.filled(size, 0),
@@ -200,7 +200,7 @@ class ZlibRawState {
   final List<int> depth = List<int>.filled(573, 0);
 
   /// Creates compressor state for [input].
-  ZlibRawState(this.input) : availIn = input.length;
+  new(this.input) : availIn = input.length;
 }
 
 /// Updates the running hash with one input byte (`UPDATE_HASH`).

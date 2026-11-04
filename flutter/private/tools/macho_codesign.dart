@@ -47,7 +47,7 @@ Uint8List resignEmbeddedSignature(Uint8List bytes) {
 /// One `CS_SuperBlob` index entry: the blob's [type], its [offset] relative
 /// to the SuperBlob start, and its [length] in bytes.
 class _BlobEntry {
-  _BlobEntry({required this.type, required this.offset, required this.length});
+  new({required this.type, required this.offset, required this.length});
 
   final int type;
   final int offset;
@@ -58,7 +58,7 @@ class _BlobEntry {
 /// segment commands located. Methods below work from these fields so no
 /// offset travels as a long parameter list.
 class _ResignPlan {
-  _ResignPlan({
+  new({
     required this.bytes,
     required this.commands,
     required this.codeSigIndex,
@@ -318,7 +318,7 @@ Uint8List _assembleSuperBlob(List<Uint8List> blobs, List<int> types) {
 /// One reassembled SuperBlob entry: its index [type], its [bytes], and, for
 /// `CS_CodeDirectory` entries, the hash [pageSize] [_fillCodeHashes] needs.
 class _RebuiltBlob {
-  _RebuiltBlob({
+  new({
     required this.type,
     required this.bytes,
     required this.pageSize,
@@ -495,7 +495,7 @@ Uint8List _shiftedNote(
 /// header carries no offsets out: any string or vector at or past the hash
 /// array fails the read instead of being moved.
 class _ParsedCodeDirectory {
-  _ParsedCodeDirectory({
+  new({
     required this.version,
     required this.oldLimit,
     required this.pageShift,

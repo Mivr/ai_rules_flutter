@@ -11,7 +11,7 @@ import 'dart:convert';
 
 /// A `bazel_dep` declaration from a `MODULE.bazel`.
 class Dependency {
-  Dependency(this.name, this.version, this.dev);
+  new(this.name, this.version, this.dev);
 
   /// The module name.
   final String name;
@@ -26,7 +26,7 @@ class Dependency {
 
 /// One entry of `dependency_floors.json`.
 class Floor {
-  Floor(this.floor, this.current, this.resolved, this.liftedBy, this.symbol);
+  new(this.floor, this.current, this.resolved, this.liftedBy, this.symbol);
 
   /// The minimum version this repository supports.
   final String floor;

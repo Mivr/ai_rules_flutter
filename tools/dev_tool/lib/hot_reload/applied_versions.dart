@@ -8,13 +8,13 @@ import 'package:flutter_bazel_dev_tool/hot_reload/workspace.dart';
 class AppliedVersions {
   final Map<String, Version> _applied = {};
 
-  AppliedVersions();
+  new();
 
   /// A copy of [other]'s record at this moment.
   ///
   /// How per-app state is seeded from a shared baseline: each app starts out
   /// knowing exactly what the baseline knew, and diverges from there.
-  AppliedVersions.from(AppliedVersions other) {
+  new from(AppliedVersions other) {
     _applied.addAll(other._applied);
   }
 

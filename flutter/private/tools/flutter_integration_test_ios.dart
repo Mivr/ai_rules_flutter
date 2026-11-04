@@ -78,7 +78,7 @@ IosPlatformLauncher iosLauncherFromEnv(
 /// `verify_ios_simulator_test.dart` budgets (180 s, 60 s, 60 s); the listing
 /// and boot bounds reuse the boot module's defaults.
 class IosLauncherBounds {
-  const IosLauncherBounds({
+  const new({
     this.listBounds = defaultListBounds,
     this.bootBounds = defaultBootBounds,
     this.bootstatusTimeout = const Duration(seconds: 600),
@@ -243,7 +243,7 @@ String _firstOutputLine(String output) {
 /// can carry it. Every failure throws (never skips) with
 /// a one-line reason naming iOS.
 class IosPlatformLauncher implements PlatformLauncher {
-  IosPlatformLauncher({
+  new({
     required this.appPath,
     required this.bundleId,
     required this.baseTempDir,

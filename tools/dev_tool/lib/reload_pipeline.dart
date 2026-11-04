@@ -246,7 +246,7 @@ class ReloadPipeline {
   /// whole of an assembly rather than on a clock.
   Completer<void>? _assemblyBarrier;
 
-  ReloadPipeline({
+  new({
     required this.host,
     this.readyTimeout = const Duration(seconds: 90),
   });

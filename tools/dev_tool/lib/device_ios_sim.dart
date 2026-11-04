@@ -36,7 +36,7 @@ class IOSSimulatorDevice extends Device {
   /// the run.
   String? _launchedBundleId;
 
-  IOSSimulatorDevice({
+  new({
     required String udid,
     String? bundleId,
     ProcessRunSync? runProcess,
@@ -47,7 +47,7 @@ class IOSSimulatorDevice extends Device {
        _startProcess = startProcess ?? Process.start;
 
   /// Create a device targeting the first booted simulator.
-  factory IOSSimulatorDevice.booted({
+  factory booted({
     ProcessRunSync? runProcess,
     ProcessStarter? startProcess,
   }) {
@@ -405,7 +405,7 @@ class IOSSimulatorDevice extends Device {
 class _IOSSimulatorDeviceBooted extends IOSSimulatorDevice {
   String? _resolvedUdid;
 
-  _IOSSimulatorDeviceBooted({
+  new({
     required ProcessRunSync runProcess,
     required ProcessStarter startProcess,
   }) : super(

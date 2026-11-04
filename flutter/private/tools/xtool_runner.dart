@@ -121,7 +121,7 @@ class RunnerCompileConfig {
   final List<String> sdkDylibs;
   final String outputPath;
 
-  const RunnerCompileConfig({
+  const new({
     required this.platform,
     this.arch = 'arm64',
     required this.appName,

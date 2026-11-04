@@ -87,7 +87,7 @@ class MachineProtocol {
   int _nextId = 0;
   StreamSubscription<String>? _subscription;
 
-  MachineProtocol({
+  new({
     required this.enabled,
     CommandRunner? commandRunner,
     IOSink? output,

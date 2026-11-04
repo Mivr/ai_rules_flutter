@@ -64,7 +64,7 @@ class NativeLaunch {
   /// The artifact the app was launched from.
   final String appFile;
 
-  const NativeLaunch({required this.appFile});
+  const new({required this.appFile});
 }
 
 class NativePipelineAssembler {
@@ -107,7 +107,7 @@ class NativePipelineAssembler {
   /// Null when the app was not launched by this command (attach).
   final NativeLaunch? launch;
 
-  NativePipelineAssembler({
+  new({
     required this.workspace,
     required this.toolchain,
     required this.target,
@@ -1138,7 +1138,7 @@ class NativePipelineAssembler {
 class _SessionPatchTarget implements NativePatchTarget {
   final DeviceSession session;
 
-  _SessionPatchTarget(this.session);
+  new(this.session);
 
   @override
   String get appId => session.appId;

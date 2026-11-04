@@ -32,7 +32,7 @@ class PatchFailure implements Exception {
   /// Fetch-facing failure detail, naming what to update.
   final String message;
 
-  const PatchFailure(this.message);
+  const new(this.message);
 
   @override
   String toString() => 'dartdev patch failed: $message';

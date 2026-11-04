@@ -37,7 +37,7 @@ void main(List<String> args) {
 /// A `@Tags(...)` annotation holding something `test_core`'s `parseMetadata`
 /// would not accept, with the 1-based line of the offending construct.
 final class TagsParseException implements Exception {
-  TagsParseException(this.line, this.message);
+  new(this.line, this.message);
 
   final int line;
   final String message;

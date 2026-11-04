@@ -14,13 +14,13 @@
 library;
 
 sealed class NativeLibsVerdict {
-  const NativeLibsVerdict();
+  const new();
 }
 
 /// The running process has the libraries on disk. The ordinary path, and the one
 /// every app with no native libraries at all takes.
 final class NativeLibsCurrent extends NativeLibsVerdict {
-  const NativeLibsCurrent();
+  const new();
 }
 
 /// The libraries' code moved and their declared contracts did not, so the
@@ -35,7 +35,7 @@ final class NativeCodeStale extends NativeLibsVerdict {
   /// The libraries whose bytes moved, so the reply can name them.
   final List<String> libs;
 
-  const NativeCodeStale(this.libs);
+  const new(this.libs);
 }
 
 /// A declared contract moved: the bindings are not ones the running process's
@@ -53,7 +53,7 @@ final class NativeBindingsMoved extends NativeLibsVerdict {
   /// diffs to see what about their interface changed.
   final List<String> contracts;
 
-  const NativeBindingsMoved({required this.libs, required this.contracts});
+  const new({required this.libs, required this.contracts});
 }
 
 /// A library's code moved and no contract is declared for it, so nothing says
@@ -67,5 +67,5 @@ final class NativeBindingsMoved extends NativeLibsVerdict {
 final class NativeLibsUnverifiable extends NativeLibsVerdict {
   final List<String> libs;
 
-  const NativeLibsUnverifiable(this.libs);
+  const new(this.libs);
 }

@@ -339,7 +339,7 @@ class RunPlan {
   /// one a stopped run can stop. See [Bazel].
   final Bazel bazel;
 
-  RunPlan._({
+  new _({
     required this.target,
     required this.extraArgs,
     required this.userBuildArgs,
@@ -370,7 +370,7 @@ class RunPlan {
   /// devices), while everything else takes the quietest value — no web, no
   /// route, no pause, no trace. Flag-level coverage stays in the resolve
   /// tests; the toolchain paths are empty because these tests never build.
-  factory RunPlan.forTest({
+  factory forTest({
     required String target,
     required List<Device> devices,
     required Logger logger,

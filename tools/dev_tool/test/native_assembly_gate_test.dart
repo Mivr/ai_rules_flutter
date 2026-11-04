@@ -34,7 +34,7 @@ class _ImpatientDevice extends MacOSDevice {
 class _CannedDevice extends Device {
   final AppInstance _instance;
 
-  _CannedDevice(this._instance);
+  new(this._instance);
 
   @override
   String get name => 'Canned';

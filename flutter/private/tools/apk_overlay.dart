@@ -104,7 +104,7 @@ class _PayloadEntry {
   final Uint8List data;
   final int? crc;
 
-  _PayloadEntry(this.path, this.data, {this.crc});
+  new(this.path, this.data, {this.crc});
 }
 
 /// Reads the central directory of [bytes], returning the record name set

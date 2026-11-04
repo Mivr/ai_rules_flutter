@@ -258,7 +258,7 @@ class _DelayedExitProcess implements Process {
   final Future<int> exitCodeFuture;
   final void Function() onKill;
 
-  _DelayedExitProcess({required this.exitCodeFuture, required this.onKill});
+  new({required this.exitCodeFuture, required this.onKill});
 
   @override
   Future<int> get exitCode => exitCodeFuture;

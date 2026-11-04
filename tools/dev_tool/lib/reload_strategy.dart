@@ -57,7 +57,7 @@ const String _clientGoneMessage =
 /// success is worse than reporting a failure: the user is told their edit is
 /// live when nothing received it.
 sealed class StrategyOutcome {
-  const StrategyOutcome();
+  const new();
 
   /// Whether the edit is actually running now.
   bool get isSuccess => this is StrategyApplied;
@@ -70,7 +70,7 @@ sealed class StrategyOutcome {
 final class StrategyApplied extends StrategyOutcome {
   final int deviceCount;
 
-  const StrategyApplied(this.deviceCount);
+  const new(this.deviceCount);
 
   @override
   String get message => 'applied to $deviceCount device(s)';
@@ -85,7 +85,7 @@ final class StrategyUnsupported extends StrategyOutcome {
   @override
   final String message;
 
-  const StrategyUnsupported(this.message);
+  const new(this.message);
 }
 
 /// The apply threw, so the strategy never formed a verdict at all.
@@ -110,7 +110,7 @@ final class StrategyThrew extends StrategyOutcome {
   /// running app.
   final Object error;
 
-  const StrategyThrew(this.error);
+  const new(this.error);
 
   @override
   String get message => 'the reload strategy threw ($error)';
@@ -141,14 +141,14 @@ final class StrategyRejected extends StrategyOutcome {
   /// own type rather than an `ApplyFailed`.
   final List<String> timedOut;
 
-  const StrategyRejected(this.message)
+  const new(this.message)
     : refused = const [],
       applied = const [],
       timedOut = const [];
 
   /// The per-device failure, which composes its own sentence from the lists
   /// rather than being handed one.
-  StrategyRejected.devices({
+  new devices({
     required this.refused,
     required this.applied,
     this.timedOut = const [],
@@ -224,7 +224,7 @@ class VmServiceReloadStrategy implements ReloadStrategy {
   /// arrives. Only wall-clock time notices.
   final Duration rpcTimeout;
 
-  VmServiceReloadStrategy({this.rpcTimeout = const Duration(seconds: 30)});
+  new({this.rpcTimeout = const Duration(seconds: 30)});
 
   /// The sessions that can actually be reloaded.
   ///
@@ -416,7 +416,7 @@ class DwdsReloadStrategy implements ReloadStrategy {
 
   StreamSubscription<vm.Event>? _serviceSub;
 
-  DwdsReloadStrategy({
+  new({
     required this.moduleServer,
     required this.loadFirstProgram,
     this.restartTimeout = const Duration(seconds: 60),
@@ -785,7 +785,7 @@ class WasmReloadStrategy implements ReloadStrategy {
   /// Callback to rebuild via bazel. Returns true on success.
   final Future<bool> Function() rebuild;
 
-  WasmReloadStrategy({
+  new({
     required this.cdpPort,
     required this.rebuild,
     this.appUrl,

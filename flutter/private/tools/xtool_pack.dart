@@ -127,7 +127,7 @@ String _substituteLabelGroups(String template, Map<String, String> values) {
 /// label-matching rules, and the output path. Grouped so the resolver entry
 /// point stays small.
 class BundleVersionRequest {
-  const BundleVersionRequest({
+  const new({
     required this.buildVersion,
     this.shortVersionString = '',
     this.buildLabelPattern = '',

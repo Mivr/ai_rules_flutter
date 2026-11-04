@@ -112,7 +112,7 @@ class SubprocessOutput {
   final Logger _logger = Logger('dev_tool.subprocess');
   String _partial = '';
 
-  SubprocessOutput({
+  new({
     required this.source,
     required this.stream,
     this.textPrefix = '',

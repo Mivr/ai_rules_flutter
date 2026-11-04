@@ -61,7 +61,7 @@ bool isAllowedNonMacho(
 
 /// Cursor over CLI flag words with take/peek helpers for `--flag value` pairs.
 class FlagCursor {
-  FlagCursor(this.args);
+  new(this.args);
 
   /// The flag words being scanned.
   final List<String> args;

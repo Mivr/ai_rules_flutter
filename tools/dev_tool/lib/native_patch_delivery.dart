@@ -25,7 +25,7 @@ typedef DeliveryProcessRunner = Future<ProcessResult> Function(
 
 /// How a native hot patch reaches one kind of device.
 abstract class NativePatchDelivery {
-  const NativePatchDelivery();
+  const new();
 
   /// The path the app opens [libraryFileName] by — the name of a bundled native
   /// library as its build wrote it (`libbridge.dylib`, `libbridge.so`).
@@ -51,7 +51,7 @@ abstract class NativePatchDelivery {
 class NativePatchDeliveryException implements Exception {
   final String message;
 
-  const NativePatchDeliveryException(this.message);
+  const new(this.message);
 
   @override
   String toString() => message;
@@ -77,7 +77,7 @@ Future<ProcessResult> _require(
 /// A macOS app: the dev tool and the app share a filesystem, and the app's
 /// container is a directory this user can write to.
 class MacOSPatchDelivery extends NativePatchDelivery {
-  const MacOSPatchDelivery();
+  const new();
 
   /// `native_deps` land in `Contents/Frameworks`, which is what the app's rpath
   /// names; `@executable_path` is resolved by dyld itself, so this holds
@@ -123,8 +123,7 @@ String _iosLoadPath(String libraryFileName) {
 class IOSSimulatorPatchDelivery extends NativePatchDelivery {
   final DeliveryProcessRunner _run;
 
-  const IOSSimulatorPatchDelivery({required DeliveryProcessRunner run})
-    : _run = run;
+  const new({required DeliveryProcessRunner run}) : _run = run;
 
   @override
   String libraryLoadPath(String libraryFileName) =>
@@ -163,7 +162,7 @@ class IOSDevicePatchDelivery extends NativePatchDelivery {
 
   String? _identity;
 
-  IOSDevicePatchDelivery({
+  new({
     required this.udid,
     required this.bundleId,
     required this.appPath,
@@ -277,7 +276,7 @@ class AndroidPatchDelivery extends NativePatchDelivery {
   final String adb;
   final DeliveryProcessRunner _run;
 
-  const AndroidPatchDelivery({
+  const new({
     required this.packageName,
     required this.adb,
     required this.adbPrefix,

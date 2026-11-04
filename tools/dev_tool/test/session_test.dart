@@ -1509,7 +1509,7 @@ class _FakeDirectoryWatcher implements DirectoryWatcher {
   final StreamController<WatchEvent> _events =
       StreamController<WatchEvent>.broadcast();
 
-  _FakeDirectoryWatcher(this.path);
+  new(this.path);
 
   void emit(WatchEvent event) => _events.add(event);
 
@@ -1577,7 +1577,7 @@ class _RecordingReloadStrategy implements ReloadStrategy {
 class _ThrowingReloadStrategy implements ReloadStrategy {
   final Object error;
 
-  _ThrowingReloadStrategy(this.error);
+  new(this.error);
 
   @override
   Future<StrategyOutcome> applyReload(
@@ -1604,7 +1604,7 @@ class _TrackingDevice extends Device {
   final String _name;
   final void Function() onStop;
 
-  _TrackingDevice(this._name, {required this.onStop});
+  new(this._name, {required this.onStop});
 
   @override
   String get name => _name;

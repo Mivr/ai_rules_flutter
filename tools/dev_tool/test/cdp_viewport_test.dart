@@ -13,7 +13,7 @@ import 'package:test/test.dart';
 /// ignores the override altogether, the way a browser that did not take it
 /// would.
 class _FakeChrome {
-  _FakeChrome._(
+  new _(
     this._server, {
     required this.honoursOverride,
     required this.unsettledReads,

@@ -305,7 +305,7 @@ _applyZip64ExtraField(
 /// and 64-bit sizes it never needs still read); the raw reader is strict
 /// (it refuses anything below the ZIP32 limits it cannot represent).
 class _CentralParseOptions {
-  const _CentralParseOptions({
+  const new({
     required this.checkBounds,
     required this.flagsOverride,
     required this.strictZip64,
@@ -578,7 +578,7 @@ class ZipRawEntry {
   final Uint8List rawData;
   final bool isDirectory;
 
-  const ZipRawEntry({
+  const new({
     required this.path,
     required this.method,
     required this.crc,

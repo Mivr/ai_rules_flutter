@@ -140,7 +140,7 @@ class KnownDevice {
   /// What it is, for a sentence: "the iOS simulator 'iPhone 18 Pro' (Booted)".
   final String description;
 
-  const KnownDevice(this.ids, this.kind, this.description);
+  const new(this.ids, this.kind, this.description);
 }
 
 /// What the lookups found, and which of them could not answer.
@@ -153,7 +153,7 @@ class _Lookup {
   /// The lookups that are missing, failed or timed out, in the same order.
   final List<String> unanswered;
 
-  const _Lookup(this.devices, this.answered, this.unanswered);
+  const new(this.devices, this.answered, this.unanswered);
 }
 
 Future<ProcessResult> _boundedRun(String executable, List<String> arguments) =>

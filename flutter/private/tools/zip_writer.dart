@@ -91,7 +91,7 @@ class ZipEntry {
   /// page-align them, and the APK overlay copies them without inflating.
   final bool storeOnly;
 
-  const ZipEntry({
+  const new({
     required this.path,
     required this.data,
     this.compressedData,

@@ -14,7 +14,7 @@ class _FakeCdpEndpoint {
   final _connections = <Completer<WebSocket>>[];
   final _accepted = <WebSocket>[];
 
-  _FakeCdpEndpoint._(this._server) {
+  new _(this._server) {
     var next = 0;
     _server.listen((request) async {
       final socket = await WebSocketTransformer.upgrade(request);

@@ -120,7 +120,7 @@ class EditableWorkspace {
   /// Absolute path to the copy. Everything the test does happens here.
   final String root;
 
-  EditableWorkspace._(this.name, this.root);
+  new _(this.name, this.root);
 
   /// A file inside the copy, addressed the way the source workspace would.
   File file(String relative) => File(p.join(root, relative));

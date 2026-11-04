@@ -28,7 +28,7 @@ class BazelInvocationFailure implements Exception {
   /// The tail of bazel's own output. Empty only if bazel printed nothing.
   final String diagnostics;
 
-  const BazelInvocationFailure({
+  const new({
     required this.command,
     required this.diagnostics,
   });
@@ -50,7 +50,7 @@ class BazelCancelled implements Exception {
   /// The bazel command, as the user would have typed it: `build //:app`.
   final String command;
 
-  const BazelCancelled(this.command);
+  const new(this.command);
 
   @override
   String toString() => 'bazel $command was stopped: the run is shutting down.';
@@ -65,7 +65,7 @@ class BazelBuildResult {
   /// own output, on success the stderr of the cquery that listed the outputs.
   final String stderr;
 
-  BazelBuildResult({
+  new({
     required this.exitCode,
     required this.outputFiles,
     required this.stderr,
@@ -104,7 +104,7 @@ class BazelAspectOutputs {
   /// The tail of the build's output when it failed.
   final String stderr;
 
-  const BazelAspectOutputs({
+  const new({
     required this.exitCode,
     required this.files,
     required this.executionRoot,
@@ -266,7 +266,7 @@ class _TailedOutput extends SubprocessOutput {
 
   final List<String> lines = [];
 
-  _TailedOutput({required super.source, required super.stream});
+  new({required super.source, required super.stream});
 
   @override
   void emitLine(String line) {
@@ -342,7 +342,7 @@ class _BazelCommand {
 
   final Completer<void> _read = Completer<void>();
 
-  _BazelCommand(this.args, this.process);
+  new(this.args, this.process);
 
   /// The command's exit status, or [BazelCancelled] if it was stopped.
   Future<int> get exited async {
@@ -441,7 +441,7 @@ class Bazel {
   ///
   /// A runfiles tree without the helper in it is neither: that is a build that
   /// dropped a declared `data` dependency, and the first command fails loudly.
-  factory Bazel() {
+  factory() {
     if (Platform.isWindows) {
       return Bazel.uninterruptible(
         spawn: _spawnDirectly,
@@ -460,7 +460,7 @@ class Bazel {
   }
 
   /// Bazel commands started by [spawn] and stopped by [interrupt].
-  Bazel.using({
+  new using({
     required BazelSpawn spawn,
     required BazelInterrupt interrupt,
     Duration stopBound = _defaultStopBound,
@@ -475,7 +475,7 @@ class Bazel {
   /// [close] still waits for them: something else may stop them (a console
   /// Ctrl-C reaches every process on the console), and the output base is
   /// released only when they exit.
-  Bazel.uninterruptible({
+  new uninterruptible({
     required BazelSpawn spawn,
     required String because,
     Duration stopBound = _defaultStopBound,
