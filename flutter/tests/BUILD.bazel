@@ -18,6 +18,7 @@ load(":compile_api_test.bzl", "compile_api_test_suite")
 load(":cpp_client_wrapper_test.bzl", "cpp_client_wrapper_test_suite")
 load(":custom_kernel_defines_test.bzl", "custom_kernel_defines_test_suite")
 load(":define_flagfiles_test.bzl", "define_flagfiles_test_suite")
+load(":dev_incremental_serialization_test.bzl", "dev_incremental_serialization_test_suite")
 load(":flutter_apple_xcframework_import_test.bzl", "flutter_apple_xcframework_import_test_suite")
 load(":flutter_application_test.bzl", "flutter_application_test_suite")
 load(":flutter_info_test.bzl", "flutter_info_test_suite")
@@ -337,6 +338,8 @@ cpp_client_wrapper_test_suite(name = "cpp_client_wrapper_test")
 custom_kernel_defines_test_suite(name = "custom_kernel_defines_test")
 
 define_flagfiles_test_suite(name = "define_flagfiles_test")
+
+dev_incremental_serialization_test_suite(name = "dev_incremental_serialization_test")
 
 asset_bundle_test_suite(name = "asset_bundle_test")
 

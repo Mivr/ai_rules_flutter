@@ -348,6 +348,74 @@ void main() {
     });
   });
 
+  group('dev incremental serialization', () {
+    const flags = [
+      'vm',
+      'fe.snapshot',
+      '--output-dill',
+      'full.dill',
+      'package:app/main.dart',
+    ];
+
+    test('the default spawn argv pins --no-incremental-serialization', () {
+      expect(frontendServerSpawnArgs(flags.sublist(0, 4), 'inc.dill'), [
+        'fe.snapshot',
+        '--incremental',
+        '--no-incremental-serialization',
+        '--output-incremental-dill',
+        'inc.dill',
+        '--output-dill',
+        'full.dill',
+        '--print-incremental-dependencies',
+      ]);
+    });
+
+    test('the marker drops the flag and never reaches frontend_server', () {
+      final List<String> args = frontendServerSpawnArgs(
+        flags.sublist(0, 4),
+        'inc.dill',
+        devIncremental: true,
+      );
+      expect(args, isNot(contains('--no-incremental-serialization')));
+      expect(args, isNot(contains(devIncrementalSerializationMarker)));
+      expect(args, contains('--incremental'));
+    });
+
+    test('splitWorkerArgv consumes and strips the marker', () {
+      final ({String manifestPath, List<String> command, bool devIncremental})
+      split = splitWorkerArgv([
+        devIncrementalSerializationMarker,
+        '--declared-inputs',
+        'm',
+        '--',
+        'vm',
+        'entry.dart',
+      ]);
+      expect(split.devIncremental, isTrue);
+      expect(split.command, ['vm', 'entry.dart']);
+      expect(
+        splitWorkerArgv(['--declared-inputs', 'm', '--', 'vm']).devIncremental,
+        isFalse,
+      );
+    });
+
+    test('the configuration key ignores the marker', () {
+      final ({String manifestPath, List<String> command, bool devIncremental})
+      marked = splitWorkerArgv([
+        devIncrementalSerializationMarker,
+        '--declared-inputs',
+        'm',
+        '--',
+        ...flags,
+        devIncrementalSerializationMarker,
+      ]);
+      expect(
+        configurationKey(marked.command, sha256Hex),
+        configurationKey(flags, sha256Hex),
+      );
+    });
+  });
+
   group('configurationKey', () {
     List<String> fs(String out) => [
       'vm',
@@ -547,7 +615,7 @@ void main() {
       // same phase order, so multi-request tests stage cold, warm and error
       // phases in order.
       final shared = Queue.of(scriptOf());
-      return (fs, full, inc, cwd) async {
+      return (fs, full, inc, cwd, {devIncremental = false}) async {
         final s = FakeSession(
           fullDill: full,
           dillBytes: utf8.encode('dill-bytes'),
@@ -574,6 +642,29 @@ void main() {
       Directory.current = savedCwd.path;
       await worker.closeAll();
     });
+
+    test(
+      'the marker reaches the session factory as a mode, not argv',
+      () async {
+        final modes = <bool>[];
+        final SessionFactory inner = factoryFor(() => [h.ok(), h.ok()]);
+        worker = IncrWorker(
+          cwd: h.cwd,
+          tempParent: h.cwd,
+          sessions: (fs, full, inc, cwd, {devIncremental = false}) {
+            modes.add(devIncremental);
+            expect(fs, isNot(contains(devIncrementalSerializationMarker)));
+            return inner(fs, full, inc, cwd, devIncremental: devIncremental);
+          },
+        );
+        final IncrResult result = await worker.handleRequest([
+          devIncrementalSerializationMarker,
+          ...h.argv,
+        ], h.inputs);
+        expect(result.exitCode, 0, reason: result.output);
+        expect(modes, [true]);
+      },
+    );
 
     test('cold: compile, accept, then reset plus an empty recompile', () async {
       worker = IncrWorker(
@@ -861,7 +952,7 @@ void main() {
       worker = IncrWorker(
         cwd: h.cwd,
         tempParent: h.cwd,
-        sessions: (fs, full, inc, cwd) async {
+        sessions: (fs, full, inc, cwd, {devIncremental = false}) async {
           final s = FakeSession(
             fullDill: full,
             dillBytes: utf8.encode('dill'),
@@ -892,7 +983,7 @@ void main() {
       worker = IncrWorker(
         cwd: h.cwd,
         tempParent: h.cwd,
-        sessions: (fs, full, inc, cwd) async {
+        sessions: (fs, full, inc, cwd, {devIncremental = false}) async {
           final s = FakeSession(
             fullDill: full,
             dillBytes: utf8.encode('dill'),
@@ -951,7 +1042,7 @@ void main() {
         worker = IncrWorker(
           cwd: h.cwd,
           tempParent: h.cwd,
-          sessions: (fs, full, inc, cwd) async {
+          sessions: (fs, full, inc, cwd, {devIncremental = false}) async {
             final s = FakeSession(
               fullDill: full,
               dillBytes: utf8.encode('dill'),
@@ -982,7 +1073,7 @@ void main() {
       () async {
         worker = IncrWorker(
           cwd: h.cwd,
-          sessions: (fs, full, inc, cwd) async {
+          sessions: (fs, full, inc, cwd, {devIncremental = false}) async {
             final s = FakeSession(
               fullDill: full,
               dillBytes: utf8.encode('dill'),
@@ -1017,7 +1108,7 @@ void main() {
       worker = IncrWorker(
         cwd: h.cwd,
         tempParent: h.cwd,
-        sessions: (fs, full, inc, cwd) async {
+        sessions: (fs, full, inc, cwd, {devIncremental = false}) async {
           final s = FakeSession(
             fullDill: full,
             dillBytes: utf8.encode('dill'),
@@ -1049,7 +1140,7 @@ void main() {
         cwd: h.cwd,
         tempParent: h.cwd,
         maxServers: 1,
-        sessions: (fs, full, inc, cwd) async {
+        sessions: (fs, full, inc, cwd, {devIncremental = false}) async {
           final s = FakeSession(
             fullDill: full,
             dillBytes: utf8.encode('dill'),
@@ -1086,11 +1177,12 @@ void main() {
     late Directory savedCwd;
 
     SessionFactory oneScript(List<CompileResult> Function() scriptOf) {
-      return (fs, full, inc, cwd) async => FakeSession(
-        fullDill: full,
-        dillBytes: utf8.encode('dill-bytes'),
-        script: scriptOf(),
-      );
+      return (fs, full, inc, cwd, {devIncremental = false}) async =>
+          FakeSession(
+            fullDill: full,
+            dillBytes: utf8.encode('dill-bytes'),
+            script: scriptOf(),
+          );
     }
 
     setUp(() {

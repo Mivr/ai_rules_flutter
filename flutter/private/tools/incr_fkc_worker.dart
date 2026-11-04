@@ -45,6 +45,7 @@ typedef RequestParts = ({
   String outputRel,
   String entry,
   KernelInputsManifest manifest,
+  bool devIncremental,
 });
 
 /// The directive guard with its result cached by content digest.
@@ -92,12 +93,16 @@ class IncrServerState {
     required this.roots,
     required this.fullDill,
     required this.incrementalDill,
+    this.devIncremental = false,
   });
 
   CompilerSession session;
   List<String> roots;
   String fullDill;
   String incrementalDill;
+
+  /// Whether the server keeps incremental serialization (dev only).
+  final bool devIncremental;
 
   /// The content hashes of the last accepted request (null marks missing).
   Map<String, String?> contentHashes = {};
@@ -115,15 +120,23 @@ typedef SessionFactory = Future<CompilerSession> Function(
   List<String> fs,
   String fullDill,
   String incrementalDill,
-  String cwd,
-);
+  String cwd, {
+  bool devIncremental,
+});
 
 Future<CompilerSession> _startRealSession(
   List<String> fs,
   String fullDill,
   String incrementalDill,
-  String cwd,
-) => FrontendServerSession.start(fs, fullDill, incrementalDill, cwd: cwd);
+  String cwd, {
+  bool devIncremental = false,
+}) => FrontendServerSession.start(
+  fs,
+  fullDill,
+  incrementalDill,
+  cwd: cwd,
+  devIncremental: devIncremental,
+);
 
 /// Installs SIGTERM/SIGINT cleanup for [worker]: the signal closes the worker
 /// (stopping its servers and deleting its temp directory) before the process
@@ -299,7 +312,7 @@ class IncrWorker {
 
   Future<IncrServerState> _startFresh(
     String key,
-    List<String> fs,
+    RequestParts parts,
     List<String> roots,
   ) async {
     final old = _servers.remove(key);
@@ -314,12 +327,19 @@ class IncrWorker {
     final sep = Platform.pathSeparator;
     final full = '${wdir.path}${sep}full.dill';
     final inc = '${wdir.path}${sep}inc.dill';
-    final session = await _sessions(fs, full, inc, cwd);
+    final session = await _sessions(
+      parts.fs,
+      full,
+      inc,
+      cwd,
+      devIncremental: parts.devIncremental,
+    );
     final state = IncrServerState(
       session: session,
       roots: roots,
       fullDill: full,
       incrementalDill: inc,
+      devIncremental: parts.devIncremental,
     );
     _servers[key] = state;
     _touch(key);
@@ -395,6 +415,7 @@ class IncrWorker {
       state,
       hashes.changed,
       parts.manifest.sources.toSet(),
+      devIncremental: parts.devIncremental,
     );
     // The guard and the read check take their allowances only from the
     // manifest: argv `--filesystem-root` values never widen what either
@@ -468,6 +489,7 @@ class IncrWorker {
       outputRel: fs[outI + 1],
       entry: fs.last,
       manifest: manifest,
+      devIncremental: split.devIncremental,
     );
   }
 
@@ -493,9 +515,13 @@ class IncrWorker {
   ({bool cold, List<String> uris}) _planCompile(
     IncrServerState? state,
     List<String> changed,
-    Set<String> sources,
-  ) {
-    if (state == null || !state.session.alive) {
+    Set<String> sources, {
+    required bool devIncremental,
+  }) {
+    // A warm server started in the other serialization mode is restarted.
+    if (state == null ||
+        !state.session.alive ||
+        state.devIncremental != devIncremental) {
       return (cold: true, uris: const []);
     }
     final classified = classifyChanged(changed, state.roots, sources);
@@ -530,7 +556,7 @@ class IncrWorker {
     List<String> roots,
     GuardCache guard,
   ) async {
-    final state = await _startFresh(key, parts.fs, roots);
+    final state = await _startFresh(key, parts, roots);
     state.guard = guard;
     final r = await state.session.compile(parts.entry);
     foldDepLines(state.currentReads, r.depLines);

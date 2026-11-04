@@ -210,6 +210,14 @@ def _is_incr_worker(ctx, aot, target, from_dill, import_dill, recorded_uses):
         from_dill == None and import_dill == None and recorded_uses == None
     )
 
+def _is_dev_incremental(ctx, incr_worker):
+    """Whether this worker compile keeps `frontend_server`'s incremental serialization.
+
+    Only together with the worker route: the setting has no effect on a compile
+    that runs through `kernel_filter`.
+    """
+    return incr_worker and ctx.attr._dev_incremental_serialization[BuildSettingInfo].value
+
 def _apply_incr_worker(ctx, run_kwargs, args, manifest, direct_inputs, dartaotruntime, frontend_server):
     """Routes the compile through `incr_fkc_worker` instead of `kernel_filter`.
 
@@ -267,8 +275,10 @@ def _run_kernel_action(ctx, run):
             `_kernel_action_inputs`), `env` (the sandboxed environment),
             `dartaotruntime`, `kernel_filter_tool` and `frontend_server` (the
             executables), `resource_set` (host-resource constraints, or None to
-            keep byte-identical actions) and `incr_worker` (whether to route
-            through the persistent worker instead).
+            keep byte-identical actions), `incr_worker` (whether to route
+            through the persistent worker instead) and `dev_incremental`
+            (whether that worker keeps incremental serialization: dev only,
+            kept off remote caches and executors).
 
     With the incremental flag on a debug JIT compile, the action runs through
     the persistent worker instead.
@@ -290,6 +300,13 @@ def _run_kernel_action(ctx, run):
         run_kwargs["resource_set"] = run.resource_set
     if run.incr_worker:
         _apply_incr_worker(ctx, run_kwargs, run.args, run.manifest, run.direct_inputs, run.dartaotruntime, run.frontend_server)
+        if run.dev_incremental:
+            # A dev dill differs from a one-shot compile: keep it off shared
+            # caches and remote executors.
+            run_kwargs["execution_requirements"] = run_kwargs["execution_requirements"] | {
+                "no-remote-cache": "1",
+                "no-remote-exec": "1",
+            }
     ctx.actions.run(**run_kwargs)
 
 # Private tool labels a downstream rule merges into its own `attrs` to call
@@ -307,6 +324,10 @@ FLUTTER_KERNEL_COMPILE_ATTRS = {
     "_incremental_kernel": attr.label(
         default = Label("//flutter:incremental_kernel"),
         doc = "Opt-in incremental kernel worker flag (a BuildSettingInfo).",
+    ),
+    "_dev_incremental_serialization": attr.label(
+        default = Label("//flutter:dev_incremental_serialization"),
+        doc = "Opt-in dev-only incremental serialization flag (a BuildSettingInfo).",
     ),
     "_incr_worker_tool": attr.label(
         default = Label("//flutter/private/tools:incr_fkc_worker"),
@@ -654,9 +675,12 @@ def flutter_kernel_compile_action(ctx, tools, sources, outputs, options, dills, 
     # a nested args object would stringify instead of flattening.
     manifest = ctx.actions.declare_file(outputs.output.basename + ".flutter_inputs")
     args = ctx.actions.args()
+    dev_incremental = _is_dev_incremental(ctx, incr_worker)
     if incr_worker:
         args.use_param_file("@%s", use_always = True)
         args.set_param_file_format("multiline")
+        if dev_incremental:
+            args.add("--dev-incremental-serialization")
         args.add("--declared-inputs", manifest)
     args.add("--")
     args.add(tools.dartaotruntime)
@@ -723,4 +747,5 @@ def flutter_kernel_compile_action(ctx, tools, sources, outputs, options, dills, 
         frontend_server = tools.frontend_server,
         resource_set = resource_set,
         incr_worker = incr_worker,
+        dev_incremental = dev_incremental,
     ))

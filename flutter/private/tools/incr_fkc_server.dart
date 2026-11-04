@@ -22,12 +22,43 @@ const incrAppSchemeRoot = 'org-dartlang-app:///';
 /// The flag making the server write one component instead of one per package.
 const noIncrementalSerialization = '--no-incremental-serialization';
 
+/// The argv marker the rule adds when `//flutter:dev_incremental_serialization`
+/// is on. The worker consumes it; `frontend_server` never sees it.
+const devIncrementalSerializationMarker = '--dev-incremental-serialization';
+
 /// The outcome of one `compile` or `recompile` command.
 typedef CompileResult = ({
   int errors,
   List<String> diagnostics,
   List<String> depLines,
 });
+
+/// The `frontend_server` arguments (after the executable) for [flags], whose
+/// first element is the executable and whose output is already redirected.
+///
+/// The server runs with `--incremental` and, unless [devIncremental],
+/// `--no-incremental-serialization`; the dev mode keeps the server's
+/// incremental serialization, so its dill is not byte-identical to a one-shot
+/// compile.
+List<String> frontendServerSpawnArgs(
+  List<String> flags,
+  String incrementalDill, {
+  bool devIncremental = false,
+}) {
+  final int insertAt = incrementalFlagIndex(flags);
+  return [
+    ...flags.sublist(1, insertAt + 1),
+    '--incremental',
+    if (!devIncremental) noIncrementalSerialization,
+    '--output-incremental-dill',
+    incrementalDill,
+    ...flags.sublist(insertAt + 1),
+    // The worker verifies the compiler's read set against the
+    // declared-inputs manifest; the report cannot be left off. Appended
+    // after the caller's flags so it wins `package:args`' last occurrence.
+    '--print-incremental-dependencies',
+  ];
+}
 
 /// One warm `frontend_server`: `compile` once, then deltas.
 ///
@@ -63,11 +94,17 @@ List<String> stripWorkerArgv0(List<String> argv) {
   return argv;
 }
 
-/// Splits [argv] around `--`: the manifest flag and path before it, the
-/// compiler command after it. Throws [FormatException] when malformed.
-({String manifestPath, List<String> command}) splitWorkerArgv(
-  List<String> argv,
-) {
+/// Splits [argvWithMarker] around `--`: the manifest flag and path before it,
+/// the compiler command after it, consuming the dev-serialization marker. Throws [FormatException] when malformed.
+({String manifestPath, List<String> command, bool devIncremental})
+splitWorkerArgv(List<String> argvWithMarker) {
+  final bool devIncremental = argvWithMarker.contains(
+    devIncrementalSerializationMarker,
+  );
+  final List<String> argv = [
+    for (final a in argvWithMarker)
+      if (a != devIncrementalSerializationMarker) a,
+  ];
   final i = argv.indexOf('--declared-inputs');
   if (i < 0 || i + 1 >= argv.length) {
     throw const FormatException(
@@ -87,7 +124,11 @@ List<String> stripWorkerArgv0(List<String> argv) {
       'incr_fkc_worker: unexpected argument ${argv[k]}.',
     );
   }
-  return (manifestPath: manifestPath, command: argv.sublist(j + 1));
+  return (
+    manifestPath: manifestPath,
+    command: argv.sublist(j + 1),
+    devIncremental: devIncremental,
+  );
 }
 
 /// Expands the outer Bazel parameter-file entries in [argv], then every
@@ -311,6 +352,7 @@ class FrontendServerSession implements CompilerSession {
     String fullDill,
     String incrementalDill, {
     required String cwd,
+    bool devIncremental = false,
   }) async {
     final flags = [...fs.sublist(0, fs.length - 1)];
     final entry = fs.last;
@@ -328,19 +370,11 @@ class FrontendServerSession implements CompilerSession {
       }
     }
     flags[outI + 1] = fullDill;
-    final insertAt = incrementalFlagIndex(flags);
-    final spawnArgs = [
-      ...flags.sublist(1, insertAt + 1),
-      '--incremental',
-      noIncrementalSerialization,
-      '--output-incremental-dill',
+    final spawnArgs = frontendServerSpawnArgs(
+      flags,
       incrementalDill,
-      ...flags.sublist(insertAt + 1),
-      // The worker verifies the compiler's read set against the
-      // declared-inputs manifest; the report cannot be left off. Appended
-      // after the caller's flags so it wins `package:args`' last occurrence.
-      '--print-incremental-dependencies',
-    ];
+      devIncremental: devIncremental,
+    );
     final roots = <String>[];
     for (var k = 0; k < flags.length - 1; k++) {
       if (flags[k] == '--filesystem-root') roots.add(flags[k + 1]);

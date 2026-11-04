@@ -172,6 +172,19 @@ bool_flag(
     visibility = ["//visibility:public"],
 )
 
+# Development only: lets the incremental kernel worker keep `frontend_server`'s
+# incremental serialization, so a warm edit does not rewrite the full dill from
+# scratch. The resulting dill is NOT byte-identical to a one-shot compile. Do
+# not use it in CI or remote-cache configurations: the compiles that use it
+# carry `no-remote-cache` and `no-remote-exec`. Only has an effect together
+# with `//flutter:incremental_kernel`, on the compiles that flag routes
+# through the worker. Off by default; with it off every action is unchanged.
+bool_flag(
+    name = "dev_incremental_serialization",
+    build_setting_default = False,
+    visibility = ["//visibility:public"],
+)
+
 # Apps that use Material widgets list this in their flutter_application(
 # deps = [...]) to bundle MaterialIcons-Regular.otf into flutter_assets/.
 # Backed by the active flutter toolchain — the file ships with every
