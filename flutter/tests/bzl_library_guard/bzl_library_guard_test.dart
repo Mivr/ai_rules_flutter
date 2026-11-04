@@ -422,7 +422,7 @@ String _resolveWorkspaceRoot() {
 }
 
 Set<String> _readBazelIgnorePrefixes(String repoRoot) {
-  final prefixes = <String>{'e2e', 'flutter/tests'};
+  final prefixes = <String>{'e2e', 'flutter/tests', 'tests/rules_testing'};
   final ignoreFile = File('$repoRoot/.bazelignore');
   if (!ignoreFile.existsSync()) return prefixes;
   for (final String raw in ignoreFile.readAsLinesSync()) {
