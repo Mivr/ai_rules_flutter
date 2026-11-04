@@ -5,8 +5,12 @@ load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_test")
 # the e2e-coverage job.
 dart_binary(
     name = "check_e2e_coverage",
-    srcs = ["coverage.dart"],
+    srcs = [
+        "coverage.dart",
+        "specs.dart",
+    ],
     main = "check_e2e_coverage.dart",
+    deps = ["//tools/e2e_runner:lib"],
 )
 
 dart_test(
@@ -15,4 +19,15 @@ dart_test(
     srcs = ["coverage.dart"],
     main = "test/coverage_test.dart",
     deps = ["@dev_tool_deps//:test"],
+)
+
+dart_test(
+    name = "specs_test",
+    size = "small",
+    srcs = ["specs.dart"],
+    main = "test/specs_test.dart",
+    deps = [
+        "//tools/e2e_runner:lib",
+        "@dev_tool_deps//:test",
+    ],
 )

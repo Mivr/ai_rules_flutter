@@ -1,4 +1,5 @@
-/// Fails when an e2e module is in no CI workflow without a recorded reason.
+/// Fails when an e2e module is in no CI workflow without a recorded reason,
+/// or when a checked-in `e2e.yaml` does not parse (`loadE2eSpec`).
 ///
 /// Run from the repo root with no arguments (CI runs it as a job step):
 /// `bazel run //tools/check_e2e_coverage`.
@@ -19,6 +20,7 @@ library;
 import 'dart:io';
 
 import 'coverage.dart';
+import 'specs.dart';
 
 void main() {
   // Locate the repo root. BUILD_WORKSPACE_DIRECTORY is set by `bazel run`.
@@ -37,11 +39,14 @@ void main() {
   final Set<String> covered = findCoveredModules(
     Directory('$rootPath/.github/workflows'),
   );
-  final List<String> errors = checkCoverage(
-    modules: modules,
-    covered: covered,
-    reasons: uncoveredReasons,
-  );
+  final List<String> errors = [
+    ...checkCoverage(
+      modules: modules,
+      covered: covered,
+      reasons: uncoveredReasons,
+    ),
+    ...checkSpecs(Directory('$rootPath/e2e')),
+  ];
   if (errors.isNotEmpty) {
     for (final error in errors) {
       stderr.writeln('error: $error');
