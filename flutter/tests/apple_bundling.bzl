@@ -175,6 +175,7 @@ def _fake_application_impl(ctx):
         if FlutterApplePluginInfo not in lib:
             fail("fake_application: apple_libs entry %s must provide FlutterApplePluginInfo" % lib.label)
         platform_name = lib[FlutterApplePluginInfo].platform
+        fw_infos = getattr(lib[FlutterApplePluginInfo], "framework_infos", None)
         apple_plugin_libs.append(struct(
             platform = platform_name,
             label = lib.label,
@@ -183,6 +184,7 @@ def _fake_application_impl(ctx):
             files = lib[DefaultInfo].files,
             sdk_frameworks = tuple(lib[FlutterApplePluginInfo].sdk_frameworks),
             sdk_dylibs = tuple(lib[FlutterApplePluginInfo].sdk_dylibs),
+            framework_infos = fw_infos if fw_infos != None else depset(),
             package = ctx.attr.plugin_name or lib.label.name,
         ))
 
